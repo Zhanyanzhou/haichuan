@@ -69,13 +69,13 @@ export class SettingsService {
     const { page = 1, pageSize = 50 } = params;
     const [list, total] = await Promise.all([
       this.prisma.operationLog.findMany({
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+        skip: (+page - 1) * +pageSize,
+        take: +pageSize,
         orderBy: { createdAt: 'desc' },
         include: { user: { select: { username: true, realName: true } } },
       }),
       this.prisma.operationLog.count(),
     ]);
-    return { list, total, page, pageSize };
+    return { list, total, page: +page, pageSize: +pageSize };
   }
 }

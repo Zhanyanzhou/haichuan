@@ -21,12 +21,12 @@ export class SelectionInquiryService {
         where,
         include: { items: true },
         orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+        skip: (+page - 1) * +pageSize,
+        take: +pageSize,
       }),
       prismaAny.selectionInquiry.count({ where }),
     ]);
-    return { list, total, page, pageSize };
+    return { list, total, page: +page, pageSize: +pageSize };
   }
 
   async findOne(id: number) {

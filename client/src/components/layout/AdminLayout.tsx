@@ -18,23 +18,22 @@ const adminMenus = [
   { type: 'group' as const, label: '工作台', children: [
     { key: '/admin/dashboard', icon: <DashboardOutlined />, label: '工作台' },
   ]},
-  { type: 'group' as const, label: '珠宝内容', children: [
-    { key: '/admin/products', icon: <ShoppingOutlined />, label: '珠宝作品' },
+  { type: 'group' as const, label: '商品中心', children: [
+    { key: '/admin/products', icon: <ShoppingOutlined />, label: '商品管理' },
     { key: '/admin/categories', icon: <AppstoreOutlined />, label: '分类与属性' },
-    { key: '/admin/media', icon: <PictureOutlined />, label: '素材库' },
+    { key: '/admin/media', icon: <PictureOutlined />, label: '商品素材' },
   ]},
-  { type: 'group' as const, label: '网站内容', children: [
+  { type: 'group' as const, label: '内容中心', children: [
     { key: '/admin/homepage', icon: <HomeOutlined />, label: '页面构建器' },
-    { key: '/admin/site-content', icon: <SettingOutlined />, label: '全站信息' },
+    { key: '/admin/site-content', icon: <SettingOutlined />, label: '网站设置' },
   ]},
-  { type: 'group' as const, label: '客户线索', children: [
-    { key: '/admin/inquiries', icon: <OrderedListOutlined />, label: '预约咨询' },
-    { key: '/admin/selection-inquiry', icon: <FileTextOutlined />, label: '选款咨询' },
+  { type: 'group' as const, label: '客户中心', children: [
+    { key: '/admin/inquiries', icon: <OrderedListOutlined />, label: '客户线索' },
   ]},
   { type: 'group' as const, label: '系统管理', children: [
     { key: '/admin/users', icon: <TeamOutlined />, label: '管理员与权限' },
     { key: '/admin/audit-logs', icon: <OrderedListOutlined />, label: '操作日志' },
-    { key: '/admin/settings', icon: <SettingOutlined />, label: '系统设置' },
+    { key: '/admin/settings', icon: <SettingOutlined />, label: '系统维护' },
   ]},
 ];
 

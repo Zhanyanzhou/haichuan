@@ -20,11 +20,12 @@ export class ProductsService {
       ];
     }
 
+    const _page = +page, _pageSize = +pageSize;
     const [list, total] = await Promise.all([
       this.prisma.product.findMany({
         where,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+        skip: (_page - 1) * _pageSize,
+        take: _pageSize,
         orderBy: { createdAt: 'desc' },
         include: {
           category: { select: { id: true, name: true } },
@@ -34,7 +35,7 @@ export class ProductsService {
       this.prisma.product.count({ where }),
     ]);
 
-    return { list, total, page, pageSize };
+    return { list, total, page: _page, pageSize: _pageSize };
   }
 
   async findById(id: number) {

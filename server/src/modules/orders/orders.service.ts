@@ -29,18 +29,19 @@ export class OrdersService {
       ];
     }
 
+    const _page = +page, _pageSize = +pageSize;
     const [list, total] = await Promise.all([
       this.prisma.order.findMany({
         where,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+        skip: (_page - 1) * _pageSize,
+        take: _pageSize,
         include: { items: { include: { product: { select: { id: true, name: true, code: true } } } } },
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.order.count({ where }),
     ]);
 
-    return { list, total, page, pageSize };
+    return { list, total, page: _page, pageSize: _pageSize };
   }
 
   async findById(id: number) {
