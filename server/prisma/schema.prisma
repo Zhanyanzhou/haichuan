@@ -700,3 +700,24 @@ model LeadFollowUp {
   @@index([leadType, leadId])
   @@map("lead_follow_ups")
 }
+
+// ========== 统一行为事件采集 ==========
+
+model AnalyticsEvent {
+  id          Int      @id @default(autoincrement())
+  eventName   String   @db.VarChar(50)
+  occurredAt  DateTime @default(now()) @map("occurred_at")
+  pagePath    String?  @db.VarChar(300) @map("page_path")
+  productId   Int?     @map("product_id")
+  searchTerm  String?  @db.VarChar(200) @map("search_term")
+  source      String?  @db.VarChar(50)
+  deviceType  String?  @db.VarChar(20) @map("device_type")
+  sessionId   String?  @db.VarChar(100) @map("session_id")
+  customerId  Int?     @map("customer_id")
+  metadata    Json?
+
+  @@index([eventName])
+  @@index([occurredAt])
+  @@index([sessionId])
+  @@map("analytics_events")
+}

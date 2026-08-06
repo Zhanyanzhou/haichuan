@@ -1,0 +1,66 @@
+import { useState, useEffect } from 'react';
+import { Table, Select, Card, Space, Tag, Button } from 'antd';
+import api from '@/services/api';
+import { unwrapResponse } from '@/utils/unwrap';
+import AdminPageHeader from '@/components/common/AdminPageHeader';
+
+const EVENT_LABELS: Record<string, string> = {
+  page_view: '页面浏览', product_view: '商品查看', search: '搜索',
+  filter: '筛选', add_to_selection: '加入选款', remove_from_selection: '移除选款',
+  submit_selection: '提交选款', submit_inquiry: '提交咨询', cta_click: 'CTA点击',
+};
+
+export default function AnalyticsView() {
+  const [list, setList] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [eventName, setEventName] = useState('');
+  const [hours, setHours] = useState(24);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/analytics/events', { params: { eventName: eventName || undefined, hours, pageSize: 100 } });
+      const data = unwrapResponse<any>(res);
+      setList(data.list ?? []); setTotal(data.total ?? 0);
+    } catch { /* */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { fetch(); }, [eventName, hours]);
+
+  const columns = [
+    { title: '时间', dataIndex: 'occurredAt', width: 160, render: (v: string) => v ? new Date(v).toLocaleString('zh-CN') : '-' },
+    { title: '事件', dataIndex: 'eventName', width: 110, render: (n: string) => <Tag>{EVENT_LABELS[n] || n}</Tag> },
+    { title: '页面', dataIndex: 'pagePath', width: 160, ellipsis: true },
+    { title: '商品ID', dataIndex: 'productId', width: 70, render: (v: number) => v || '-' },
+    { title: '搜索词', dataIndex: 'searchTerm', width: 120, render: (v: string) => v || '-' },
+    { title: '来源', dataIndex: 'source', width: 70 },
+    { title: '设备', dataIndex: 'deviceType', width: 70 },
+    { title: '会话', dataIndex: 'sessionId', width: 100, ellipsis: true },
+  ];
+
+  return (
+    <div>
+      <AdminPageHeader title="行为事件" subtitle="开发验证 — 真实事件采集数据" />
+      <Card style={{ marginBottom: 16 }}>
+        <Space>
+          <Select placeholder="事件类型" value={eventName || undefined} onChange={v => setEventName(v || '')} allowClear style={{ width: 150 }}>
+            {Object.entries(EVENT_LABELS).map(([k, v]) => <Select.Option key={k} value={k}>{v}</Select.Option>)}
+          </Select>
+          <Select value={hours} onChange={setHours} style={{ width: 120 }}>
+            <Select.Option value={1}>最近1小时</Select.Option>
+            <Select.Option value={6}>最近6小时</Select.Option>
+            <Select.Option value={24}>最近24小时</Select.Option>
+            <Select.Option value={72}>最近3天</Select.Option>
+          </Select>
+          <Button onClick={fetch} type="primary" style={{ background: '#B69052', borderColor: '#B69052' }}>刷新</Button>
+        </Space>
+      </Card>
+      <Table columns={columns} dataSource={list} rowKey="id" loading={loading}
+        pagination={{ pageSize: 100, total, showTotal: (t: number) => `共 ${t} 条` }}
+        scroll={{ x: 900 }} size="small"
+      />
+    </div>
+  );
+}
