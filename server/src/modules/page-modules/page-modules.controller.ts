@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PageModulesService } from './page-modules.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -67,8 +67,32 @@ export class PageModulesController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put('publish')
-  @ApiOperation({ summary: '发布全部草稿' })
-  publish(@Body('pageKey') pageKey: string) {
-    return this.service.publish(pageKey || 'home');
+  @ApiOperation({ summary: '发布全部草稿（含版本快照）' })
+  publish(@Body('pageKey') pageKey: string, @Body('userId') userId?: number) {
+    return this.service.publish(pageKey || 'home', userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Get('types')
+  @ApiOperation({ summary: '获取可用模块类型列表' })
+  getModuleTypes() {
+    return this.service.getAvailableModules();
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Get(':id/versions')
+  @ApiOperation({ summary: '获取模块版本历史' })
+  getVersions(@Param('id') id: string) {
+    return this.service.getVersions(+id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Put(':id/restore')
+  @ApiOperation({ summary: '恢复模块到指定版本' })
+  restoreVersion(@Param('id') id: string, @Body('version') version: number) {
+    return this.service.restoreVersion(+id, +version);
   }
 }
