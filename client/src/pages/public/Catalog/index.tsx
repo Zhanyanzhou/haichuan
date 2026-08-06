@@ -454,8 +454,8 @@ function ProductCard({ product, onQuickView }: { product: CatalogProduct; onQuic
           alt={product.name || product.sku} 
           loading="lazy" className="catalog-img"
           style={{
-            width: '78%', height: '78%',
-            objectFit: 'contain',
+            width: '100%', height: '100%',
+            objectFit: 'cover',
             transition: 'transform 0.6s cubic-bezier(0.22,1,0.36,1)',
           }}
           onMouseEnter={e => { (e.currentTarget as HTMLImageElement).style.transform = 'scale(1.03)'; }}
@@ -465,7 +465,7 @@ function ProductCard({ product, onQuickView }: { product: CatalogProduct; onQuic
       </div>
 
       {/* 信息区：名称 → 材质 → 价格 → 选款 */}
-      <div style={{ padding: '14px 0 20px', textAlign: 'left' }}>
+      <div style={{ padding: '14px 0 20px', textAlign: 'center' }}>
         <h3 style={{
           fontSize: 13, fontWeight: 400, color: T.txt,
           margin: '0 0 5px', lineHeight: 1.4,
@@ -508,6 +508,9 @@ function ProductCard({ product, onQuickView }: { product: CatalogProduct; onQuic
 
 /* ══════════════════════════════════════
    组件：产品矩阵（横竖分割线网格）
+   — 横线：cell border-bottom，同一行自然连续
+   — 竖线：cell border-right，最后列不画
+   — gap=0 确保边框相接无断点
    ══════════════════════════════════════ */
 function ProductGrid({ products, page, onQuickView }: {
   products: CatalogProduct[]; page: number; onQuickView: (p: CatalogProduct) => void;
@@ -520,24 +523,39 @@ function ProductGrid({ products, page, onQuickView }: {
       <style>{`
         .catalog-matrix {
           display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          background: ${T.line};
-          gap: 1px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 0;
+          width: 100%;
         }
-        .catalog-matrix > * {
+        @media (min-width: 1280px) {
+          .catalog-matrix { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+        .catalog-cell {
           background: ${T.bg};
+          width: 100%;
+          height: 100%;
+          box-sizing: border-box;
+          border-bottom: 1px solid ${T.line};
+          border-right: 1px solid ${T.line};
+          padding: clamp(16px, 3vw, 28px);
         }
-        @media (min-width: 768px) { .catalog-matrix { grid-template-columns: repeat(2, 1fr); } }
-        @media (min-width: 1280px) { .catalog-matrix { grid-template-columns: repeat(3, 1fr); } }
+        /* 2列：第2列无右边线 */
+        .catalog-cell:nth-child(2n) { border-right: none; }
+        @media (min-width: 1280px) {
+          /* 3列：覆盖2列规则，改为第3列无右边线 */
+          .catalog-cell:nth-child(2n) { border-right: 1px solid ${T.line}; }
+          .catalog-cell:nth-child(3n) { border-right: none; }
+        }
+        /* 最低行无下边线（由底部线div接管） */
       `}</style>
-      <div className="catalog-matrix" style={{ maxWidth: 1560, margin: '0 auto' }}>
+      <div className="catalog-matrix" style={{ maxWidth: '1560px', margin: '0 auto' }}>
         {items.map(p => (
-          <div key={p.id} style={{ padding: 'clamp(16px,3vw,28px)' }}>
+          <div key={p.id} className="catalog-cell">
             <ProductCard product={p} onQuickView={onQuickView} />
           </div>
         ))}
       </div>
-      <div style={{ maxWidth: 1560, margin: '0 auto', height: 1, background: T.line }} />
+      <div style={{ maxWidth: '1560px', margin: '0 auto', height: '1px', background: T.line }} />
     </>
   );
 }
