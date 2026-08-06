@@ -414,66 +414,130 @@ function FG({ title, options, selected, onToggle }: {
 }
 
 /* ══════════════════════════════════════
+   组件：产品卡片
+   ══════════════════════════════════════ */
+function ProductCard({ product, index, onQuickView }: { product: CatalogProduct; index: number; onQuickView: (p: CatalogProduct) => void }) {
+  const toggle = useSelectionStore(s => s.toggle);
+  const sel = useSelectionStore(s => s.isSelected)(product.id);
+  
+  // 格式化价格
+  const priceText = product.price && product.price > 0 
+    ? `¥${product.price.toLocaleString()}` 
+    : '咨询价格';
+  
+  // 副信息：仅保留有意义的字段
+  const subInfo = [
+    product.categoryName,
+    product.material,
+    product.weight && product.weight !== '0g' ? product.weight : null,
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 12 }} 
+      animate={{ opacity: 1, y: 0 }} 
+      transition={{ duration: 0.45, delay: index * 0.04 }}
+    >
+      {/* 图片展示区 */}
+      <div 
+        onClick={() => onQuickView(product)}
+        style={{
+          aspectRatio: '1/1',
+          background: T.imgBg,
+          overflow: 'hidden',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        }}
+      >
+        <img 
+          src={product.images[0] || ''} 
+          alt={product.name || product.sku} 
+          loading="lazy"
+          style={{
+            width: '75%',
+            height: '75%',
+            objectFit: 'contain',
+            transition: 'transform 500ms cubic-bezier(0.22,1,0.36,1)',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLImageElement).style.transform = 'scale(1.03)'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLImageElement).style.transform = 'scale(1)'; }}
+          onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+        />
+      </div>
+
+      {/* 信息区 */}
+      <div style={{ marginTop: 14, textAlign: 'left' }}>
+        <h3 style={{
+          fontSize: 14, fontWeight: 500, color: T.txt,
+          margin: '0 0 6px', lineHeight: 1.35,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {product.name || product.sku}
+        </h3>
+
+        {subInfo && (
+          <p style={{
+            fontSize: 12, color: T.sec, margin: '0 0 6px', lineHeight: 1.5,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {subInfo}
+          </p>
+        )}
+
+        <p style={{
+          fontSize: 13, fontWeight: 500, color: T.txt,
+          margin: '0 0 12px', lineHeight: 1.4,
+        }}>
+          {priceText}
+        </p>
+
+        <button 
+          onClick={(e) => { e.stopPropagation(); toggle(product.id); }}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            minHeight: 32, padding: 0,
+            background: 'none', border: 0, cursor: 'pointer',
+            fontSize: 12, letterSpacing: '0.03em',
+            color: sel ? T.txt : T.sec,
+            transition: 'color 200ms',
+          }}
+        >
+          {sel ? '✓ 已选' : '+ 选款'}
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+/* ══════════════════════════════════════
    组件：产品网格
    ══════════════════════════════════════ */
 function ProductGrid({ products, page, onQuickView }: {
   products: CatalogProduct[]; page: number; onQuickView: (p: CatalogProduct) => void;
 }) {
-  const toggle = useSelectionStore(s => s.toggle);
-  const isSel = useSelectionStore(s => s.isSelected);
   const start = (page - 1) * PAGE_SIZE;
   const items = products.slice(start, start + PAGE_SIZE);
 
   return (
-    <div style={{ maxWidth: 1560, marginInline: 'auto', paddingInline: 'clamp(48px,5vw,80px)', paddingBlock: 'clamp(36px,4vh,48px)' }}>
+    <div style={{ maxWidth: 1560, marginInline: 'auto', paddingInline: 'clamp(48px,5vw,80px)', paddingBlock: 'clamp(40px,5vh,56px)' }}>
       <div className="catalog-grid" style={{
-        display: 'grid', gridTemplateColumns: 'repeat(2,1fr)',
-        columnGap: 'clamp(20px,2.5vw,34px)',
-        rowGap: 'clamp(44px,6vh,64px)',
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(2, 1fr)',
+        columnGap: 32,
+        rowGap: 56,
       }}>
-        {items.map(p => {
-          const sel = isSel(p.id);
-          return (
-            <motion.div key={p.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
-              {/* 图片 */}
-              <div onClick={() => onQuickView(p)} style={{
-                aspectRatio: '1/1', background: T.imgBg, overflow: 'hidden', cursor: 'pointer',
-                border: sel ? `1px solid ${T.txt}` : '1px solid transparent',
-              }}>
-                <img src={p.images[0]} alt={p.sku} loading="lazy"
-                  style={{ width: '100%', height: '100%', objectFit: 'contain',
-                    transition: 'transform 500ms cubic-bezier(0.22,1,0.36,1)' }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLImageElement).style.transform = 'scale(1.02)'; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLImageElement).style.transform = 'scale(1)'; }}
-                />
-              </div>
-              {/* 信息 */}
-              <div style={{ marginTop: 12 }}>
-                <p style={{ fontSize: 'clamp(12px,1.3vw,14px)', fontWeight: 500, letterSpacing: '0.04em', color: T.txt, margin: '0 0 4px' }}>
-                  {p.sku}
-                </p>
-                {p.name && <p style={{ fontSize: 13, color: T.txt, margin: '0 0 4px', lineHeight: 1.4 }}>{p.name}</p>}
-                <p style={{ fontSize: 12, color: T.sec, margin: '0 0 3px', lineHeight: 1.6 }}>
-                  {p.categoryName || ''}
-                </p>
-                <p style={{ fontSize: 12, color: T.sec, margin: '0 0 10px', lineHeight: 1.6 }}>
-                  {[p.material, p.craft, p.weight].filter(Boolean).join(' · ')}
-                </p>
-                <button onClick={(e) => { e.stopPropagation(); toggle(p.id); }}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: 36, padding: 0,
-                    background: 'none', border: 0, cursor: 'pointer',
-                    fontSize: 12, letterSpacing: '0.04em', color: sel ? T.txt : T.sec }}>
-                  {sel ? '✓ 已选' : '+ 选款'}
-                </button>
-              </div>
-            </motion.div>
-          );
-        })}
+        {items.map((p, i) => (
+          <ProductCard key={p.id} product={p} index={i} onQuickView={onQuickView} />
+        ))}
       </div>
 
       <style>{`
-        @media (min-width: 960px) { .catalog-grid { grid-template-columns: repeat(3,1fr) !important; } }
-        @media (min-width: 1280px) { .catalog-grid { grid-template-columns: repeat(4,1fr) !important; } }
+        @media (min-width: 768px) { .catalog-grid { grid-template-columns: repeat(3, 1fr) !important; } }
+        @media (min-width: 1080px) { .catalog-grid { grid-template-columns: repeat(4, 1fr) !important; } }
+        @media (max-width: 480px) { .catalog-grid { column-gap: 16px; row-gap: 36px; } }
       `}</style>
     </div>
   );
