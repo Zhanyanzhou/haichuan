@@ -77,8 +77,9 @@ model Category {
 
 model Product {
   id             Int           @id @default(autoincrement())
-  code           String        @unique @db.VarChar(50) // 产品编码，自动生成
+  code           String        @unique @db.VarChar(50) // 产品编码/货号
   name           String        @db.VarChar(200)
+  shortDescription String?     @map("short_description") @db.VarChar(500) // 简介
   description    String?       @db.Text
   categoryId     Int           @map("category_id")
   materialType   MaterialType  @default(GOLD_999) @map("material_type")
@@ -89,9 +90,11 @@ model Product {
   priceMax       Decimal?      @default(0) @map("price_max") @db.Decimal(10, 2)
   weight         Decimal?      @default(0) @db.Decimal(8, 2) // 总重量(g)
   size           String?       @db.VarChar(100) // 尺寸规格
-  gemInfo        Json?         @map("gem_info") // 宝石信息JSON（4C等多维度）
-  craftTechnique Json?         @map("craft_technique") // 工艺技法JSON数组
+  gemInfo        Json?         @map("gem_info") // 宝石信息JSON
+  craftTechnique Json?         @map("craft_technique") // 工艺技法JSON
   status         ProductStatus @default(DRAFT)
+  salesMode      SalesMode     @default(DISPLAY_ONLY) @map("sales_mode")
+  sortOrder      Int           @default(0) @map("sort_order")
   isHot          Boolean       @default(false) @map("is_hot")
   isNew          Boolean       @default(false) @map("is_new")
   isRecommended  Boolean       @default(false) @map("is_recommended")
@@ -100,7 +103,7 @@ model Product {
   viewCount      Int           @default(0) @map("view_count")
   salesCount     Int           @default(0) @map("sales_count")
   publishedAt    DateTime?     @map("published_at")
-  deletedAt      DateTime?     @map("deleted_at") // 软删除（后续通过 Prisma 中间件过滤）
+  deletedAt      DateTime?     @map("deleted_at")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
@@ -138,11 +141,18 @@ enum MaterialType {
 }
 
 enum ProductStatus {
-  DRAFT // 草稿
-  PENDING // 待审核
-  APPROVED // 审核通过(已上架)
-  REJECTED // 驳回
-  OFF_SHELF // 已下架
+  DRAFT     // 草稿
+  PUBLISHED // 已发布(上架)
+  OFFLINE   // 已下架
+  ARCHIVED  // 已归档
+}
+
+enum SalesMode {
+  DISPLAY_ONLY    // 仅展示
+  SELECTION       // 选款模式
+  APPOINTMENT     // 预约模式
+  DIRECT_PURCHASE // 直接购买(暂未开放)
+  CUSTOM_INQUIRY  // 定制咨询
 }
 
 // ========== 产品图片（三视图） ==========

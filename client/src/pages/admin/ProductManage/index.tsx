@@ -13,10 +13,17 @@ const { TextArea } = Input;
 
 const statusMap: Record<string, { c: string; t: string }> = {
   DRAFT: { c: 'default', t: '草稿' },
-  PENDING: { c: 'processing', t: '待审核' },
-  APPROVED: { c: 'success', t: '已上架' },
-  REJECTED: { c: 'error', t: '已驳回' },
-  OFF_SHELF: { c: 'warning', t: '已下架' },
+  PUBLISHED: { c: 'success', t: '已发布' },
+  OFFLINE: { c: 'warning', t: '已下架' },
+  ARCHIVED: { c: '#999', t: '已归档' },
+};
+
+const salesModeMap: Record<string, string> = {
+  DISPLAY_ONLY: '仅展示',
+  SELECTION: '选款',
+  APPOINTMENT: '预约',
+  DIRECT_PURCHASE: '直购',
+  CUSTOM_INQUIRY: '定制咨询',
 };
 
 const materials = ['GOLD_999', 'GOLD_9999', 'AU750', 'PT950', 'S925', 'DIAMOND', 'JADE', 'PEARL', 'COLOR_GEM'];
@@ -77,8 +84,9 @@ export default function ProductManage() {
     form.resetFields();
     form.setFieldsValue({
       status: 'DRAFT', materialType: 'GOLD_999', goldWeight: 0,
-      price: 0, craftFee: 0, weight: 0,
-      isHot: false, isNew: false, isRecommended: false, isLimited: false, isCustom: false,
+      price: 0, craftFee: 0, weight: 0, sortOrder: 0,
+      salesMode: 'DISPLAY_ONLY',
+      isHot: false, isRecommended: false,
     });
     setModalOpen(true);
   };

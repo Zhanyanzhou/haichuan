@@ -6,13 +6,14 @@ export class ProductsService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(params: any) {
-    const { page = 1, pageSize = 20, categoryId, status, keyword, materialType, isHot, isNew } = params;
-    const where: any = {};
+    const { page = 1, pageSize = 20, categoryId, status, keyword, materialType, salesMode, isHot, isRecommended, sortBy } = params;
+    const where: any = { deletedAt: null };
     if (categoryId) where.categoryId = +categoryId;
     if (status) where.status = status;
     if (materialType) where.materialType = materialType;
+    if (salesMode) where.salesMode = salesMode;
     if (isHot !== undefined) where.isHot = isHot === 'true';
-    if (isNew !== undefined) where.isNew = isNew === 'true';
+    if (isRecommended !== undefined) where.isRecommended = isRecommended === 'true';
     if (keyword) {
       where.OR = [
         { name: { contains: keyword } },
@@ -21,21 +22,42 @@ export class ProductsService {
     }
 
     const _page = +page, _pageSize = +pageSize;
+    const orderBy: any = sortBy === 'sortOrder' ? { sortOrder: 'asc' } : { updatedAt: 'desc' };
     const [list, total] = await Promise.all([
       this.prisma.product.findMany({
         where,
         skip: (_page - 1) * _pageSize,
         take: _pageSize,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         include: {
           category: { select: { id: true, name: true } },
-          images: { orderBy: { sortOrder: 'asc' }, take: 3 },
+          images: { orderBy: { sortOrder: 'asc' }, take: 1 },
         },
       }),
       this.prisma.product.count({ where }),
     ]);
 
-    return { list, total, page: _page, pageSize: _pageSize };
+    const enrichedList = list.map((p: any) => ({
+      ...p,
+      completeness: this.calcCompleteness(p),
+      hasPrimaryImage: p.images?.length > 0,
+      imageCount: p.images?.length ?? 0,
+    }));
+
+    return { list: enrichedList, total, page: _page, pageSize: _pageSize };
+  }
+
+  calcCompleteness(product: any): { isComplete: boolean; missingFields: string[]; score: number } {
+    const missing: string[] = [];
+    if (!product.name) missing.push('name');
+    if (!product.code) missing.push('code');
+    if (!product.categoryId) missing.push('categoryId');
+    if (!product.images || product.images.length === 0) missing.push('primaryImage');
+    if (!product.salesMode) missing.push('salesMode');
+    if (!product.materialType) missing.push('materialType');
+    const total = 6;
+    const score = Math.round(((total - missing.length) / total) * 100);
+    return { isComplete: missing.length === 0, missingFields: missing, score };
   }
 
   async findById(id: number) {
@@ -58,11 +80,18 @@ export class ProductsService {
   async update(id: number, data: any) {
     return this.prisma.product.update({ where: { id }, data });
   }
-
+  async checkCompleteness(id: number) {
+    const product = await this.prisma.product.findUnique({
+      where: { id },
+      include: { images: true },
+    });
+    if (!product) throw new Error('Product not found');
+    return this.calcCompleteness(product);
+  }
   async delete(id: number) {
     return this.prisma.product.update({
       where: { id },
-      data: { status: 'OFF_SHELF' },
+      data: { status: 'OFFLINE' },
     });
   }
 

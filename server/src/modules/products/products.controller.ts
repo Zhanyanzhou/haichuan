@@ -48,6 +48,24 @@ export class ProductsController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
+  @Put(':id/status')
+  @ApiOperation({ summary: '更新产品状态' })
+  updateStatus(@Param('id') id: string, @Body('status') status: string) {
+    const data: any = { status };
+    if (status === 'PUBLISHED') data.publishedAt = new Date();
+    return this.productsService.update(+id, data);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Get(':id/completeness')
+  @ApiOperation({ summary: '检查产品完整性' })
+  checkCompleteness(@Param('id') id: string) {
+    return this.productsService.checkCompleteness(+id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Delete(':id')
   @ApiOperation({ summary: '下架产品（软删除）' })
   delete(@Param('id') id: string) {
