@@ -19,10 +19,12 @@ const lines = csv.trim().split('\n').slice(1); // 跳过 header
 console.log(`找到 ${lines.length} 个款号\n`);
 
 for (const line of lines) {
-  const parts = line.split(',');
-  const code = parts[0];
-  const coverUrl = parts[2].replace(/"/g, '');
-  const allImagesStr = parts.slice(3).join(',').replace(/"/g, '');
+  const parts = line.match(/([^,]+),"([^"]+)",(\d+),"([^"]+)","(.+)"/);
+  if (!parts) continue;
+  const code = parts[1];
+  const productName = parts[2];
+  const coverUrl = parts[4];
+  const allImagesStr = parts[5];
 
   // 解析 AllImages: URL|类型;URL|类型;...
   const imageEntries = allImagesStr.split(';').filter(Boolean).map(entry => {
@@ -30,24 +32,35 @@ for (const line of lines) {
     return { url: url.trim(), type: (type || 'DETAIL').trim() };
   });
 
-  process.stdout.write(`${code} (${imageEntries.length}图) ... `);
+  process.stdout.write(`${productName} [${code}] (${imageEntries.length}图) ... `);
 
   try {
-    // 1. 创建商品
-    const createBody = JSON.stringify({
-      name: code,
-      code: code,
-      categoryId: 1,  // 吊坠
-      materialType: 'GOLD_999',
-      status: 'PUBLISHED',
-      salesMode: 'SELECTION',
-      sortOrder: 0,
-    });
-    const createRes = await fetch(`${API}/products`, { method: 'POST', headers: auth, body: createBody });
-    const product = (await createRes.json()).data;
-    const productId = product.id;
+    // 1. 创建商品（同款号自动加后缀避免冲突）
+    let uniqueCode = code;
+    let productData = null;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const createBody = JSON.stringify({
+        name: productName,
+        code: uniqueCode,
+        categoryId: 1,
+        materialType: 'GOLD_999',
+        status: 'PUBLISHED',
+        salesMode: 'SELECTION',
+        sortOrder: 0,
+      });
+      const createRes = await fetch(`${API}/products`, { method: 'POST', headers: auth, body: createBody });
+      if (createRes.status === 409) {
+        uniqueCode = `${code}-${attempt + 1}`;
+        continue;
+      }
+      const json = await createRes.json();
+      productData = json.data;
+      break;
+    }
+    if (!productData) { console.log('FAIL (dup code exhausted)'); continue; }
+    const productId = productData.id;
 
-    // 2. 关联图片（正面优先，再其他）
+    // 2. 关联图片（正面优先）
     const frontImages = imageEntries.filter(e => e.type === 'FRONT');
     const otherImages = imageEntries.filter(e => e.type !== 'FRONT');
     const sorted = [...frontImages, ...otherImages];
