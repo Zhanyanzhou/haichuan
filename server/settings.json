@@ -1,0 +1,19 @@
+{
+  "siteName": "海川珠宝",
+  "siteDescription": "高端珠宝产品管理平台",
+  "logo": "/favicon.svg",
+  "seoTitle": "海川珠宝 - 高端珠宝臻品平台",
+  "seoDescription": "4000+款高端珠宝臻品，融合传统工艺与现代科技",
+  "seoKeywords": "珠宝,首饰,黄金,钻石,手镯,吊坠,戒指,耳饰",
+  "contactPhone": "",
+  "contactEmail": "",
+  "contactAddress": "",
+  "paymentMethods": [
+    "transfer"
+  ],
+  "logisticsCompanies": [
+    "顺丰速运",
+    "京东物流",
+    "EMS"
+  ]
+}

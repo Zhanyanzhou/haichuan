@@ -1,0 +1,12 @@
+{
+    "prisma.pinToPrisma6": true,
+
+    // 关掉从 GitHub 下载 JSON Schema（国内网络问题）
+    "json.schemaDownload.enable": false,
+
+    // cSpell 拼写检查：只对英文文档开启，不影响代码
+    "cSpell.enabled": false,
+
+    // Todo Tree：指定 ripgrep 路径
+    "todo-tree.general.ripgrep": "C:\\Users\\Administrator\\AppData\\Local\\Programs\\Microsoft VS Code\\e4c7e7b1d6\\resources\\app\\extensions\\copilot\\node_modules\\@github\\copilot\\sdk\\ripgrep\\bin\\win32-x64\\rg.exe"
+}

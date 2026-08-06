@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # ===== 数据库 =====
+  mysql:
+    image: mysql:8.0
+    container_name: jewelry-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: jewelry_root_2024
+      MYSQL_DATABASE: jewelry_db
+      MYSQL_USER: jewelry_user
+      MYSQL_PASSWORD: jewelry_pass_2024
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./server/prisma/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - jewelry-network
+
+  # ===== 缓存 =====
+  redis:
+    image: redis:7-alpine
+    container_name: jewelry-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - jewelry-network
+
+  # ===== 后端 NestJS 服务 =====
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: jewelry-server
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: mysql://jewelry_user:jewelry_pass_2024@mysql:3306/jewelry_db
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-your-production-jwt-secret}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://haichuanjewelry.com}
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - jewelry-network
+
+  # ===== 前端 Nginx 服务 =====
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: jewelry-client
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - jewelry-network
+
+volumes:
+  mysql_data:
+  redis_data:
+  uploads_data:
+
+networks:
+  jewelry-network:
+    driver: bridge
