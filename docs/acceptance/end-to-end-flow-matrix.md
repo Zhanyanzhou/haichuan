@@ -2,21 +2,24 @@
 
 > 按业务链路追踪起点到终点
 
-## 商品发布链
+## 商品发布链 (HC-PRODUCT-CONTRACT-FIX-11A 更新)
 
 | 步骤 | 状态 | 证据 |
 |---|---|---|
-| 后台新增商品 | ❌ | POST /api/products → 400 |
-| 保存草稿 | ❌ | 依赖创建 |
-| 刷新存在 | ❌ | |
-| 发布 | ✅ | PUT /status → PUBLISHED (SQL产品可行) |
+| 后台新增商品 | ✅ | POST /api/products → 201 |
+| 保存草稿 | ✅ | 数据库写入, 刷新保留 |
+| 刷新存在 | ✅ | 列表中出现, 刷新后保留 |
+| 编辑商品 | ✅ | PUT /api/products/:id → 200 |
+| 编辑后刷新保留 | ✅ | 修改持久化 |
+| 后端重启后保留 | ✅ | MySQL 持久化 |
+| 发布 | ✅ | PUT /status → PUBLISHED |
 | 公共API读取 | ✅ | GET /api/products → 200 |
-| 前台列表出现 | ⚠️ | ProductList 仍用静态 |
+| 前台列表出现 | ⚠️ | ProductList 仍用静态 (待 HC-PRODUCT-FRONT-CLOSE-11B) |
 | 搜索可找到 | ✅ | keyword=HC-QA 可搜到 |
 | 详情可打开 | ✅ | /products/:id 可用 |
-| 下架 | ✅ | PUT /status → OFFLINE |
+| 下架 | ✅ | PUT /status → OFFLINE / DELETE |
 | 前台不再展示 | ❌ | 未验证 (前台列表静态) |
-| **阻断位置**: 第1步 (创建商品API 400) |
+| **后台写入闭环**: 已完成 ✅ |
 
 ## 页面发布链
 

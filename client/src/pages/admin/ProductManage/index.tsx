@@ -103,6 +103,9 @@ export default function ProductManage() {
       craftFee: p.craftFee,
       status: p.status,
       description: p.description,
+      shortDescription: p.shortDescription,
+      salesMode: p.salesMode,
+      sortOrder: p.sortOrder,
       weight: p.weight,
       size: p.size,
       isHot: p.isHot,
@@ -125,6 +128,9 @@ export default function ProductManage() {
       craftFee: values.craftFee ?? 0,
       status: values.status,
       description: values.description || '',
+      shortDescription: values.shortDescription || '',
+      salesMode: values.salesMode || 'DISPLAY_ONLY',
+      sortOrder: values.sortOrder ?? 0,
       weight: values.weight ?? 0,
       size: values.size || '',
       isHot: values.isHot ?? false,
@@ -137,7 +143,8 @@ export default function ProductManage() {
       if (editing) {
         await productApi.update(editing.id, payload);
       } else {
-        await productApi.create({ ...payload, code: generateCode(), viewCount: 0, salesCount: 0, images: [] });
+        // 创建时不传 images/viewCount/salesCount 等系统字段
+        await productApi.create({ ...payload, code: generateCode() });
       }
       message.success(editing ? '已更新' : '已创建');
       setModalOpen(false);
@@ -300,6 +307,19 @@ export default function ProductManage() {
           <Form.Item name="description" label="产品描述">
             <TextArea rows={3} placeholder="产品描述..." />
           </Form.Item>
+          <div className="grid grid-cols-2 gap-4">
+            <Form.Item name="shortDescription" label="简介">
+              <Input placeholder="简短的宣传语，用于列表和卡片展示" maxLength={500} />
+            </Form.Item>
+            <Form.Item name="salesMode" label="销售模式">
+              <Select options={[
+                { value: 'DISPLAY_ONLY', label: '仅展示' },
+                { value: 'SELECTION', label: '选款' },
+                { value: 'APPOINTMENT', label: '预约' },
+                { value: 'CUSTOM_INQUIRY', label: '定制咨询' },
+              ]} />
+            </Form.Item>
+          </div>
           <div className="grid grid-cols-3 gap-4">
             <Form.Item name="materialType" label="材质">
               <Select options={materials.map((m) => ({ value: m, label: getMaterialLabel(m) }))} />
@@ -310,10 +330,9 @@ export default function ProductManage() {
             <Form.Item name="status" label="状态">
               <Select options={[
                 { value: 'DRAFT', label: '草稿' },
-                { value: 'PENDING', label: '待审核' },
-                { value: 'APPROVED', label: '已上架' },
-                { value: 'REJECTED', label: '已驳回' },
-                { value: 'OFF_SHELF', label: '已下架' },
+                { value: 'PUBLISHED', label: '已发布' },
+                { value: 'OFFLINE', label: '已下架' },
+                { value: 'ARCHIVED', label: '已归档' },
               ]} />
             </Form.Item>
           </div>
@@ -324,14 +343,19 @@ export default function ProductManage() {
             <Form.Item name="size" label="尺寸规格">
               <Input placeholder="如：直径2.5cm / 圈号14" />
             </Form.Item>
-            <Form.Item name="craftFee" label="工费(¥)">
-              <InputNumber min={0} className="w-full" />
+            <Form.Item name="sortOrder" label="排序">
+              <InputNumber min={0} className="w-full" placeholder="数字越小越靠前" />
             </Form.Item>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Form.Item name="price" label="售价(¥)" rules={[{ required: true }]}>
-              <InputNumber min={0} className="w-full" />
-            </Form.Item>
+            <div className="space-y-4">
+              <Form.Item name="price" label="售价(¥)" rules={[{ required: true }]}>
+                <InputNumber min={0} className="w-full" />
+              </Form.Item>
+              <Form.Item name="craftFee" label="工费(¥)">
+                <InputNumber min={0} className="w-full" />
+              </Form.Item>
+            </div>
             <div className="space-y-3 pt-1">
               <div className="grid grid-cols-3 gap-2">
                 <Form.Item name="isHot" label="热卖" valuePropName="checked"><Switch /></Form.Item>

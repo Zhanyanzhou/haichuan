@@ -13,7 +13,7 @@
 |---|---|---|---|---|---|---|
 | HC-PROGRAM-00 | — | — | — | — | 架构文档已生成 | 已完成 |
 | HC-PLATFORM-01 | — | ⚠️ 部分400 | ✅ 页面可用 | — | ⚠️ pageSize修复后API可用 | 部分完成 |
-| HC-PRODUCT-02 | ✅ 模型完整 | ✅ 读API | ⚠️ 列表可用,创建400 | ❌ 静态为主 | ❌ 创建链路断 | 部分完成 |
+| HC-PRODUCT-02 | ✅ 模型完整 | ✅ 读写API | ✅ 列表/创建/编辑可用 | ❌ 静态为主 | ⚠️ 后台写入闭环完成 | 部分完成 |
 | HC-CMS-03 | ✅ PageModuleVersion | ✅ 8类型+版本API | ⚠️ 仅入口可用 | ✅ published API | ❌ 编辑/预览未闭环 | 仅基础设施 |
 | HC-CRM-04 | ✅ LeadFollowUp | ✅ 聚合API | ⚠️ 页面框架 | ❌ 0条提交 | ❌ 无真实提交链路 | 仅基础设施 |
 | HC-FRONTEND-05 | — | ⚠️ 读API正常 | — | ⚠️ 选款/搜索接API | ❌ 选款提交流程未闭环 | 部分完成 |
@@ -33,9 +33,15 @@
 - page_modules: 查询失败 (表存在)
 - payments: 0条, refunds: 0条
 
-### API 证据
+### API 证据 (HC-PRODUCT-CONTRACT-FIX-11A 后更新)
 - GET /api/products: 200 ✅ — 可分页搜索
-- POST /api/products: 400 ❌ — ValidationPipe whitelist 问题
+- POST /api/products: 201 ✅ — 已修复 (DTO + 显式字段映射)
+- PUT /api/products/:id: 200 ✅ — 编辑可用
+- DELETE /api/products/:id: 200 ✅ — 软删除(→OFFLINE)
+- GET /api/products/:id: 200 ✅ — 详情
+- 401: ✅ 未登录拒绝
+- 409: ✅ 重复货号拒绝
+- 400: ✅ 非法枚举/分类不存在拒绝
 - GET /api/page-modules/types: 200 ✅ — 返回8种类型
 - GET /api/page-modules/published: 200 ✅ — 返回0条
 - GET /api/leads: 200 ✅ (需认证)

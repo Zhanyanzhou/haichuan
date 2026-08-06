@@ -10,11 +10,13 @@
 | Category 模型 | ✅ | 4条分类 |
 | 商品列表API (GET) | ✅ | 200, 可分页/搜索 |
 | 商品详情API (GET) | ✅ | 200 |
-| 商品创建API (POST) | ❌ | 400 (whitelist) |
+| 商品创建API (POST) | ✅ | 201, HC-PRODUCT-CONTRACT-FIX-11A 修复 |
+| 商品更新API (PUT) | ✅ | 200, DTO + 显式字段映射 |
 | 商品状态流转API | ✅ | DRAFT→PUBLISHED→OFFLINE 验证通过 |
 | 完整性检查API | ✅ | 返回 score + missingFields |
-| 后台商品列表页 | ⚠️ | 页面可用, 状态枚举已更新 |
-| 后台商品编辑 | ⚠️ | 编辑弹窗可用, 新字段未完全适配 |
+| 后台商品列表页 | ✅ | 页面可用, 状态枚举已更新 |
+| 后台商品编辑 | ✅ | 编辑弹窗可用, salesMode/shortDescription/sortOrder 已适配 |
+| 后台商品新增 | ✅ | 创建→数据库写入→列表出现→刷新保留→编辑→重启保留 |
 | 商品图片上传 | ⚠️ | 有 API, 有页面元素 |
 | 前台商品列表 | ⚠️ | ProductList 仍用 collections.ts |
 | 前台商品详情 | ✅ | productApi.getById |
