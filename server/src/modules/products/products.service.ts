@@ -215,7 +215,7 @@ export class ProductsService {
   async delete(id: number) {
     return this.prisma.product.update({
       where: { id },
-      data: { status: 'OFFLINE' },
+      data: { deletedAt: new Date(), status: 'OFFLINE' },
     });
   }
 

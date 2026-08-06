@@ -253,10 +253,39 @@ const MODULE_MAP: Record<string, React.ComponentType<{ module: PageModule; editM
   doublePoster: DoublePosterSection,
 };
 
+/** 编辑器包装帧 — 仅在 editMode 下给模块加 data-module-id + 发送 postMessage */
+function EditorModuleFrame({ module, children }: { module: PageModule; children: React.ReactNode }) {
+  const handleMouseEnter = () => {
+    window.parent.postMessage({ type: 'MODULE_HOVERED', moduleId: module.id }, '*');
+  };
+  const handleMouseLeave = () => {
+    window.parent.postMessage({ type: 'MODULE_HOVERED', moduleId: null }, '*');
+  };
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    window.parent.postMessage({ type: 'MODULE_SELECTED', moduleId: module.id }, '*');
+  };
+
+  return (
+    <section
+      data-module-id={module.id}
+      data-module-type={module.moduleType}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onClick={handleClick}
+      style={{ position: 'relative', cursor: 'pointer' }}
+    >
+      {children}
+    </section>
+  );
+}
+
 function renderModule(m: PageModule, editMode = false) {
   const Comp = MODULE_MAP[m.moduleType];
   if (!Comp) return null;
-  return <Comp key={m.id} module={m} editMode={editMode} />;
+  const inner = <Comp key={m.id} module={m} editMode={editMode} />;
+  if (!editMode) return inner;
+  return <EditorModuleFrame key={m.id} module={m}>{inner}</EditorModuleFrame>;
 }
 
 /* ═══════ 硬编码 fallback 渲染 ═══════ */
@@ -305,8 +334,26 @@ export default function Home() {
 
 /* ═══════ 预览页（后台 iframe 用，读取草稿模块） ═══════ */
 export function HomePreview() {
-  const { modules, loading } = useAdminModules('home');
+  const { modules, loading, refresh } = useAdminModules('home');
   const { slots } = useDraftSlots('home');
+
+  // 通知父页面预览已就绪
+  useEffect(() => {
+    if (!loading && window.parent !== window) {
+      window.parent.postMessage({ type: 'CANVAS_READY' }, '*');
+    }
+  }, [loading]);
+
+  // 监听父页面发来的模块修改消息
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (!e.data || e.data.type !== 'PATCH_MODULE') return;
+      // 收到修改后刷新数据
+      refresh();
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [refresh]);
 
   if (loading) {
     return (
@@ -322,6 +369,10 @@ export function HomePreview() {
     <SlotCtx.Provider value={slots}>
     <main style={{ background: LG }}>
       <style>{fadeUpStyle}</style>
+      <style>{`
+        [data-module-id] { transition: outline 0.15s; }
+        [data-module-id]:hover { outline: 1px dashed #B8944E; outline-offset: -1px; }
+      `}</style>
       {hasModules
         ? modules.filter(m => m.isVisible).map(m => renderModule(m, true))
         : <FallbackHome />

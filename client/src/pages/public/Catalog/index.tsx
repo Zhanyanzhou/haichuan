@@ -429,12 +429,26 @@ function ProductCard({ product, onQuickView }: { product: CatalogProduct; onQuic
   const sel = useSelectionStore(s => s.isSelected)(product.id);
   const [imgIdx, setImgIdx] = useState(0);
   
-  // 所有可用图片（fallback 到 listingImage）
+  // 所有可用图片
   const allImages: string[] = (product.images && product.images.length > 0) 
     ? product.images.filter(Boolean) 
     : [getListingImage(product as any)];
   const currentImg = allImages[imgIdx] || allImages[0] || '';
   const hasMultiple = allImages.length > 1;
+  
+  // 鼠标左右半区切换图片
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (allImages.length < 2) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const half = rect.width / 2;
+    if (x < half && allImages.length >= 2) {
+      setImgIdx(1);
+    } else if (x >= half && allImages.length >= 3) {
+      setImgIdx(2);
+    }
+  };
+  const handleMouseLeave = () => { setImgIdx(0); };
   
   const priceText = product.price && product.price > 0 
     ? `¥${product.price.toLocaleString()}` 
@@ -447,6 +461,8 @@ function ProductCard({ product, onQuickView }: { product: CatalogProduct; onQuic
       {/* 图片区：1:1 */}
       <div 
         onClick={() => onQuickView(product)}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
         style={{
           aspectRatio: '1/1',
           background: T.imgBg,
@@ -471,31 +487,27 @@ function ProductCard({ product, onQuickView }: { product: CatalogProduct; onQuic
           onMouseLeave={e => { (e.currentTarget as HTMLImageElement).style.transform = 'scale(1)'; }}
           onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
         />
-        {/* 图片切换指示器 */}
-        {hasMultiple && (
-          <div style={{
-            position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)',
-            display: 'flex', gap: 5, padding: '3px 10px',
-            background: 'rgba(41,36,31,0.25)', borderRadius: 10,
-          }}>
-            {allImages.map((_, i) => (
+        {/* 图片切换指示器 — 极简细线（全部商品默认显示） */}
+        <div style={{
+          position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)',
+          display: 'flex', gap: 4,
+        }}>
+          {allImages.map((_, i) => (
               <button
                 key={i}
                 onClick={e => { e.stopPropagation(); setImgIdx(i); }}
                 style={{
-                  width: i === imgIdx ? 14 : 6,
-                  height: 6,
-                  borderRadius: 3,
+                  width: i === imgIdx ? 20 : 8,
+                  height: 2,
                   border: 'none',
                   padding: 0,
                   cursor: 'pointer',
-                  background: i === imgIdx ? '#fff' : 'rgba(255,255,255,0.5)',
-                  transition: 'all 0.2s',
+                  background: i === imgIdx ? 'rgba(41,36,31,0.55)' : 'rgba(41,36,31,0.18)',
+                  transition: 'all 0.25s',
                 }}
               />
             ))}
           </div>
-        )}
       </div>
 
       {/* 信息区：名称 → 材质 → 价格 → 选款 */}
@@ -562,6 +574,8 @@ function ProductGrid({ products, page, onQuickView }: {
           row-gap: 1px;
           background: ${T.line};
           width: 100%;
+          border-left: 1px solid ${T.line};
+          border-right: 1px solid ${T.line};
         }
         @media (min-width: 1280px) {
           .catalog-matrix { grid-template-columns: repeat(3, minmax(0, 1fr)); }
