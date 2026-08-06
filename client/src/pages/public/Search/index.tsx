@@ -6,6 +6,7 @@ import {
   MATERIALS, type CatalogProduct,
 } from '@/data/catalogData';
 import { useProductData, type RealCategory } from '@/hooks/useProductData';
+import { getListingImage } from '@/utils/productImage';
 
 const T = { bg: '#FFFFFF', txt: '#29241F', sec: 'rgba(41,36,31,0.58)', light: 'rgba(41,36,31,0.38)', line: '#E8E7E3', imgBg: '#FAF9F7' };
 const PX = 'clamp(32px,5vw,80px)';
@@ -142,7 +143,7 @@ function ProductCard({ product }: { product: CatalogProduct }) {
       <Link to={`/catalog?category=${product.primaryCategoryId}&query=${product.sku}`}
         style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
         <div style={{ aspectRatio: '4/5', background: T.imgBg, overflow: 'hidden', marginBottom: 14 }}>
-          <img src={product.images[0]} alt={`${product.name} ${product.sku}`} loading="lazy"
+          <img src={getListingImage(product.images as any)} alt={`${product.name} ${product.sku}`} loading="lazy"
             style={{ width: '100%', height: '100%', objectFit: 'contain',
               transition: 'transform 600ms cubic-bezier(0.22,1,0.36,1)' }}
             onMouseEnter={e => { (e.target as HTMLImageElement).style.transform = 'scale(1.02)'; }}

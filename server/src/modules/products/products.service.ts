@@ -222,8 +222,12 @@ export class ProductsService {
     });
   }
 
-  async updateImage(imageId: number, data: { type?: string; sortOrder?: number }) {
+  async updateImage(imageId: number, data: { type?: string; sortOrder?: number; role?: string }) {
     return this.prisma.productImage.update({ where: { id: imageId }, data: data as any });
+  }
+
+  async setImageRole(imageId: number, role: string) {
+    return this.prisma.productImage.update({ where: { id: imageId }, data: { role: role as any } });
   }
 
   async deleteImage(imageId: number) {

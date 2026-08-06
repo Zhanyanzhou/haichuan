@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Delete, Param, Query, Body, UseGuards, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
+import { UploadService } from '../upload/upload.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { CreateProductDto, UpdateProductDto } from './dto';
@@ -8,7 +9,10 @@ import { CreateProductDto, UpdateProductDto } from './dto';
 @ApiTags('产品管理')
 @Controller('products')
 export class ProductsController {
-  constructor(private productsService: ProductsService) {}
+  constructor(
+    private productsService: ProductsService,
+    private uploadService: UploadService,
+  ) {}
 
   @Public()
   @Get()
@@ -105,5 +109,36 @@ export class ProductsController {
   @ApiOperation({ summary: '设为封面图' })
   setCoverImage(@Param('id') id: string, @Param('imageId') imageId: string) {
     return this.productsService.setCoverImage(+id, +imageId);
+  }
+
+  /* ═══ 图片裁切 ═══ */
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post(':id/images/crop')
+  @ApiOperation({ summary: '裁切生成列表图（1:1）' })
+  async cropListingImage(
+    @Param('id') id: string,
+    @Body() body: { sourceImageId: number; left: number; top: number; width: number; height: number; outputSize?: number },
+  ) {
+    // 1. 查找源图片
+    const product = await this.productsService.findById(+id);
+    const sourceImg = product?.images?.find((img: any) => img.id === body.sourceImageId);
+    if (!sourceImg) throw new NotFoundException('源图片不存在');
+
+    // 2. 裁切
+    const sourcePath = sourceImg.url.replace(/^\/uploads\//, '');
+    const result = await this.uploadService.cropImage(sourcePath, {
+      left: body.left, top: body.top, width: body.width, height: body.height,
+    }, body.outputSize || 600);
+
+    // 3. 创建 LISTING 图片记录 + 设置角色
+    const listingImage = await this.productsService.addImage(+id, {
+      url: result.url,
+      type: 'FRONT' as any,
+      sortOrder: 0,
+    });
+    await this.productsService.setImageRole(listingImage.id, 'LISTING');
+
+    return { id: listingImage.id, url: result.url };
   }
 }

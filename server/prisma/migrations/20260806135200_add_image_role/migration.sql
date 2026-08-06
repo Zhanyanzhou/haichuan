@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE `product_images` ADD COLUMN `role` ENUM('ORIGINAL', 'PRIMARY', 'LISTING', 'THUMBNAIL') NULL;
