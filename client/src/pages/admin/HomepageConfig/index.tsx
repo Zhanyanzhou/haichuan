@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button, Input, InputNumber, message, Popconfirm, Select, Slider, Spin, Tabs, Upload } from 'antd';
 import type { UploadProps } from 'antd';
 import {
   PlusOutlined, DeleteOutlined, CopyOutlined, EyeOutlined, EyeInvisibleOutlined,
   ArrowUpOutlined, ArrowDownOutlined, PictureOutlined, ReloadOutlined, SendOutlined,
 } from '@ant-design/icons';
+import { usePageBuilderStore } from '@/store/pageBuilderStore';
 import { pageModulesApi, uploadApi } from '@/services/api';
 import { useAdminModules } from '@/hooks/usePageModules';
 import { unwrapResponse } from '@/utils/unwrap';
@@ -231,6 +232,26 @@ export default function HomepageConfig() {
 
   const selected = modules.find(m => m.id === selectedId) || null;
   const iframeWidth = DEVICES[device];
+  const storeSelect = usePageBuilderStore(s => s.selectModule);
+  const storeHover = usePageBuilderStore(s => s.hoverModule);
+
+  // postMessage 监听：iframe 中的模块 hover/click 事件
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (!e.data || typeof e.data.type !== 'string') return;
+      if (e.data.type === 'MODULE_HOVERED') {
+        storeHover(e.data.moduleId);
+      } else if (e.data.type === 'MODULE_SELECTED') {
+        const id = e.data.moduleId;
+        storeSelect(id);
+        setSelectedId(id);
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [storeSelect, storeHover]);
+
+  const iframeWidth = DEVICES[device];
 
   const addModule = async (type: string) => {
     const defaultContent = type === 'hero' ? {
@@ -316,11 +337,11 @@ export default function HomepageConfig() {
         </div>
         <div style={{ flex: 1, overflow: 'auto', background: '#E8E4DD', display: 'flex', justifyContent: 'center', padding: 10 }}>
           <div style={{ width: iframeWidth, height: '100%', minHeight: 600, boxShadow: '0 4px 24px rgba(0,0,0,0.1)', background: '#fff' }}>
-            <iframe key={previewKey} src="/" style={{ width: '100%', height: '100%', border: 'none' }} title="预览" />
+            <iframe key={previewKey} src="/preview/home" style={{ width: '100%', height: '100%', border: 'none' }} title="预览" />
           </div>
         </div>
         <div style={{ width: 300, flexShrink: 0, background: '#fff', borderLeft: '1px solid #E8E7E3', overflow: 'auto', padding: 14 }}>
-          {selected ? <EditPanel module={selected} onSave={refresh} onClose={() => setSelectedId(null)} /> : <div style={{ textAlign: 'center', paddingTop: 60, color: '#8A7F72', fontSize: 12 }}>点击左侧模块编辑</div>}
+          {selected ? <EditPanel module={selected} onSave={() => { refresh(); setPreviewKey(k => k + 1); }} onClose={() => setSelectedId(null)} /> : <div style={{ textAlign: 'center', paddingTop: 60, color: '#8A7F72', fontSize: 12 }}>点击左侧模块编辑</div>}
         </div>
       </div>
     </div>

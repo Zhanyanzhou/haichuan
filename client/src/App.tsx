@@ -9,6 +9,7 @@ import ProgressBar from '@/components/common/ProgressBar';
 
 // Lazy load pages
 const Home = lazy(() => import('@/pages/public/Home'));
+const HomePreview = lazy(() => import('@/pages/public/Home').then(m => ({ default: m.HomePreview })));
 const ProductList = lazy(() => import('@/pages/public/ProductList'));
 const ProductDetail = lazy(() => import('@/pages/public/ProductDetail'));
 const Cart = lazy(() => import('@/pages/public/Cart'));
@@ -64,6 +65,7 @@ function App() {
           <Route path="customer" element={<CustomerCenter />} />
           <Route path="about" element={<About />} />
           <Route path="contact" element={<Contact />} />
+          <Route path="preview/home" element={<HomePreview />} />
         </Route>
 
         {/* Admin Routes — 需要登录 */}

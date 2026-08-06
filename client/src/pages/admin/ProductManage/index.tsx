@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, Table, Tag, Input, Select, Modal, Form, InputNumber, message, Popconfirm, Space, Upload, Button, Dropdown, Tooltip, Skeleton, Result } from 'antd';
+import { Card, Table, Tag, Input, Select, Modal, Form, InputNumber, message, Popconfirm, Space, Upload, Button, Dropdown, Tooltip, Switch, Result, Segmented } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { MenuProps } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, PictureOutlined, ArrowUpOutlined, ArrowDownOutlined, StarOutlined, StarFilled, EyeOutlined, MoreOutlined, ReloadOutlined, ClearOutlined, SendOutlined, StopOutlined } from '@ant-design/icons';
@@ -14,10 +14,10 @@ import { unwrapResponse } from '@/utils/unwrap';
 const { TextArea } = Input;
 
 const statusMeta: Record<ProductStatus, { color: string; label: string }> = {
-  DRAFT:     { color: '#8A7F72', label: '草稿' },
-  PUBLISHED: { color: '#52C41A', label: '已发布' },
-  OFFLINE:   { color: '#FAAD14', label: '已下架' },
-  ARCHIVED:  { color: '#D9D9D9', label: '已归档' },
+  DRAFT:     { color: '#8C8C8C', label: '草稿' },
+  PUBLISHED: { color: '#6BBF6B', label: '已发布' },
+  OFFLINE:   { color: '#C8A87C', label: '已下架' },
+  ARCHIVED:  { color: '#BFBFBF', label: '已归档' },
 };
 
 const allStatuses: ProductStatus[] = ['DRAFT', 'PUBLISHED', 'OFFLINE', 'ARCHIVED'];
@@ -34,7 +34,7 @@ function formatZeroField(v: number | null | undefined, defaultValue: number): st
   return String(v);
 }
 
-/** 价格显示：0代表未设置 */
+/** 价格显示：0是数据库默认值，代表未配置 */
 function formatPrice(v: number | null | undefined): string {
   if (v == null || v === 0) return '咨询价格';
   return `¥${v.toLocaleString()}`;
@@ -285,83 +285,95 @@ export default function ProductManage() {
   // ═══ 表格列定义 ═══
   const columns: ColumnsType<Product> = [
     {
-      title: '商品', key: 'info', width: 260, fixed: 'left',
+      title: '商品', key: 'info', width: 380, fixed: 'left',
       render: (_: any, r: Product) => (
         <div className="flex items-center gap-3">
-          {r.images?.[0]?.url ? (
-            <img src={getThumbnailImage(r as any)} alt="" className="w-12 h-12 object-cover border border-brand-line flex-shrink-0"
-              onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" fill="%23F5F2ED"><rect width="120" height="120"/><text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" fill="%23B8944E" font-size="24">◆</text></svg>'; }} />
-          ) : (
-            <div className="w-12 h-12 bg-brand-bg flex items-center justify-center text-brand-muted text-lg border border-brand-line flex-shrink-0">◆</div>
-          )}
+          <div className="w-12 h-12 bg-[#F5F5F5] flex-shrink-0 flex items-center justify-center overflow-hidden" style={{ borderRadius: 4 }}>
+            {r.images?.[0]?.url ? (
+              <img src={getThumbnailImage(r as any)} alt="" className="w-full h-full object-cover"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).parentElement!.innerHTML = '<span style=color:#B8944E;font-size:18px>◆</span>'; }} />
+            ) : (
+              <span style={{ color: '#D9D9D9', fontSize: 18 }}>◆</span>
+            )}
+          </div>
           <div className="min-w-0">
-            <p className="font-medium text-brand-text text-sm truncate">{r.name}</p>
-            <code className="text-[11px] text-brand-gold">{r.code}</code>
+            <p className="text-sm text-gray-900 leading-snug line-clamp-2">{r.name}</p>
+            <code className="text-xs text-gray-400">{r.code}</code>
           </div>
         </div>
       ),
     },
     {
-      title: '分类 / 材质', key: 'catMat', width: 150,
+      title: '分类 / 材质', key: 'catMat', width: 200,
       render: (_: any, r: Product) => (
-        <div className="text-xs space-y-0.5">
-          <div className="text-brand-text">{r.category?.name || '-'}</div>
-          <div className="text-brand-muted">{getMaterialLabel(r.materialType)}</div>
+        <div className="text-sm space-y-0.5">
+          <div className="text-gray-700">{r.category?.name || '-'}</div>
+          <div className="text-gray-400 text-xs">{getMaterialLabel(r.materialType)}</div>
         </div>
       ),
     },
     {
-      title: '商品数据', key: 'data', width: 150,
+      title: '价格方式', key: 'priceMode', width: 160,
       render: (_: any, r: Product) => {
-        const weightStr = formatZeroField(r.goldWeight, 0);
-        const craftStr = formatZeroField(r.craftFee, 0);
-        const priceStr = formatPrice(r.price);
+        if (r.price === 0) return <span className="text-gray-400 text-sm">未配置</span>;
+        return <span className="text-gray-800 text-sm">¥{r.price.toLocaleString()}</span>;
+      },
+    },
+    {
+      title: '状态', dataIndex: 'status', width: 120,
+      render: (v: ProductStatus) => {
+        const m = statusMeta[v] || { color: '#BFBFBF', label: v };
         return (
-          <div className="text-xs space-y-0.5">
-            <div>金重: {weightStr === '未填写' ? <span className="text-brand-muted">{weightStr}</span> : `${weightStr}g`}</div>
-            <div>工费: {craftStr === '未填写' ? <span className="text-brand-muted">{craftStr}</span> : `¥${Number(r.craftFee).toLocaleString()}`}</div>
-            <div className={r.price === 0 ? 'text-brand-muted' : 'text-brand-gold font-medium'}>售价: {priceStr}</div>
-          </div>
+          <span style={{
+            display: 'inline-block', padding: '2px 10px', borderRadius: 4,
+            fontSize: 12, lineHeight: '20px',
+            backgroundColor: m.color + '18', color: m.color, border: `1px solid ${m.color}40`,
+          }}>
+            {m.label}
+          </span>
         );
       },
     },
     {
-      title: '状态', dataIndex: 'status', width: 100,
-      render: (v: ProductStatus) => {
-        const m = statusMeta[v] || { color: '#D9D9D9', label: v };
-        return <Tag color={m.color}>{m.label}</Tag>;
-      },
-    },
-    {
-      title: '更新', key: 'updated', width: 100,
+      title: '更新时间', key: 'updated', width: 130,
       render: (_: any, r: any) => {
-        if (!r.updatedAt) return '-';
-        return <span className="text-xs text-brand-muted">{new Date(r.updatedAt).toLocaleDateString('zh-CN')}</span>;
+        if (!r.updatedAt) return <span className="text-gray-300 text-xs">-</span>;
+        return <span className="text-gray-400 text-xs">{new Date(r.updatedAt).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>;
       },
     },
     {
-      title: '操作', key: 'ops', width: 160, fixed: 'right',
+      title: '操作', key: 'ops', width: 200, fixed: 'right',
       render: (_: any, r: Product) => {
-        const items: MenuProps['items'] = [];
-        // 只在有权限时显示删除
-        items.push({ key: 'delete', icon: <DeleteOutlined />, danger: true, label: '删除' });
+        const menuItems: MenuProps['items'] = [];
+        if (r.status === 'DRAFT' || r.status === 'OFFLINE') {
+          menuItems.push({ key: 'publish', icon: <SendOutlined />, label: '发布' });
+        } else if (r.status === 'PUBLISHED') {
+          menuItems.push({ key: 'unpublish', icon: <StopOutlined />, label: '下架' });
+        }
+        menuItems.push({ type: 'divider' });
+        menuItems.push({ key: 'delete', icon: <DeleteOutlined />, danger: true, label: '删除' });
 
         return (
-          <Space size={4}>
-            <Tooltip title="编辑"><button className="text-xs px-2 py-1 text-brand-text hover:text-brand-gold hover:bg-brand-bg rounded transition-colors" onClick={() => openEdit(r)}><EditOutlined /></button></Tooltip>
-            <Tooltip title="前台预览">
-              <a href={`/products/${r.id}`} target="_blank" rel="noopener noreferrer"
-                className="text-xs px-2 py-1 text-brand-muted hover:text-brand-gold hover:bg-brand-bg rounded transition-colors inline-block">
-                <EyeOutlined />
-              </a>
-            </Tooltip>
-            {r.status === 'DRAFT' || r.status === 'OFFLINE' ? (
-              <Tooltip title="发布"><button className="text-xs px-2 py-1 text-green-600 hover:text-green-700 hover:bg-green-50 rounded transition-colors" onClick={() => handlePublish(r.id)}><SendOutlined /></button></Tooltip>
-            ) : r.status === 'PUBLISHED' ? (
-              <Tooltip title="下架"><button className="text-xs px-2 py-1 text-orange-500 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors" onClick={() => handleUnpublish(r.id)}><StopOutlined /></button></Tooltip>
-            ) : null}
-            <Dropdown menu={{ items, onClick: ({ key }) => { if (key === 'delete') Modal.confirm({ title: `确认删除「${r.name}」？`, content: '删除后可在回收站恢复（软删除）。', okText: '确认删除', okType: 'danger', cancelText: '取消', onOk: () => handleDelete(r.id, r.name) }); } }} trigger={['click']}>
-              <button className="text-xs px-1 py-1 text-brand-muted hover:text-brand-text rounded transition-colors"><MoreOutlined /></button>
+          <Space size={8}>
+            <Button type="link" size="small" onClick={() => openEdit(r)} style={{ padding: 0, height: 24 }}>编辑</Button>
+            <Button type="link" size="small" href={`/products/${r.id}`} target="_blank" style={{ padding: 0, height: 24, color: '#8C8C8C' }}>预览</Button>
+            <Dropdown
+              menu={{
+                items: menuItems,
+                onClick: ({ key }) => {
+                  if (key === 'publish') handlePublish(r.id);
+                  else if (key === 'unpublish') handleUnpublish(r.id);
+                  else if (key === 'delete') Modal.confirm({
+                    title: `确认删除「${r.name}」？`,
+                    content: '删除后为软删除，可在数据库中恢复。',
+                    okText: '删除', okType: 'danger', cancelText: '取消',
+                    onOk: () => handleDelete(r.id, r.name),
+                  });
+                },
+              }}
+              trigger={['click']}
+            >
+              <Button type="link" size="small" icon={<MoreOutlined />} style={{ padding: 0, height: 24, color: '#8C8C8C' }} />
             </Dropdown>
           </Space>
         );
@@ -370,46 +382,49 @@ export default function ProductManage() {
   ];
 
   // ═══ 渲染 ═══
+  const hasFilters = !!(statusFilter || categoryFilter || materialFilter || keyword);
+  const segmentedOptions = [
+    { label: `全部 ${statusCounts.all ?? total}`, value: 'all' },
+    ...allStatuses.filter(s => statusCounts[s] !== undefined).map(s => ({
+      label: `${statusMeta[s].label} ${statusCounts[s] ?? 0}`,
+      value: s,
+    })),
+  ];
+
   return (
-    <div className="space-y-4">
-      {/* ── 第一行：标题 ── */}
-      <div className="flex items-center justify-between">
+    <div style={{ padding: '24px 28px', maxWidth: 1600 }}>
+      {/* ── 头部 ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
-          <h1 className="text-xl font-semibold text-brand-text">商品管理</h1>
-          <p className="text-xs text-brand-muted mt-0.5">{total} 款商品</p>
+          <h1 style={{ fontSize: 20, fontWeight: 600, color: '#1F1F1F', margin: 0 }}>商品管理</h1>
+          <p style={{ fontSize: 13, color: '#8C8C8C', margin: '4px 0 0' }}>管理商品资料、发布状态与前台展示</p>
         </div>
         <ScifiButton variant="gold" onClick={openCreate}><PlusOutlined /> 新增商品</ScifiButton>
       </div>
 
-      {/* ── 第二行：状态统计 ── */}
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => setStatusFilter(undefined)}
-          className={`px-3 py-1 text-xs rounded-full border transition-colors ${!statusFilter ? 'bg-brand-gold/10 border-brand-gold text-brand-gold font-medium' : 'border-brand-line text-brand-muted hover:border-brand-gold/50'}`}
-        >
-          全部 {statusCounts.all ?? total}
-        </button>
-        {allStatuses.filter(s => statusMeta[s]).map(s => (
-          <button key={s}
-            onClick={() => setStatusFilter(statusFilter === s ? undefined : s)}
-            className={`px-3 py-1 text-xs rounded-full border transition-colors ${statusFilter === s ? 'font-medium' : 'border-brand-line text-brand-muted hover:border-brand-gold/50'}`}
-            style={statusFilter === s ? { backgroundColor: statusMeta[s].color + '18', borderColor: statusMeta[s].color, color: statusMeta[s].color } : {}}
-          >
-            {statusMeta[s].label} {statusCounts[s] ?? '-'}
-          </button>
-        ))}
+      {/* ── 状态切换 ── */}
+      <div style={{ marginBottom: 16 }}>
+        <Segmented
+          size="middle"
+          options={segmentedOptions}
+          value={statusFilter || 'all'}
+          onChange={(val) => {
+            const v = val as string;
+            setStatusFilter(v === 'all' ? undefined : v as ProductStatus);
+          }}
+          style={{ backgroundColor: '#F5F5F5' }}
+        />
       </div>
 
-      {/* ── 第三行：搜索 + 筛选 ── */}
-      <div className="flex flex-wrap items-center gap-3">
+      {/* ── 搜索筛选栏 ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         <Input.Search
           placeholder="搜索商品名称或编号"
           value={keyword}
           onChange={(e) => handleKeywordChange(e.target.value)}
-          onSearch={() => fetchProducts(1)}
-          className="w-52"
+          onSearch={() => { setPage(1); fetchProducts(1); }}
           allowClear
-          size="middle"
+          style={{ width: 280 }}
         />
         <Select
           placeholder="分类"
@@ -419,8 +434,7 @@ export default function ProductManage() {
           showSearch
           optionFilterProp="label"
           options={categoryOptions}
-          className="w-36"
-          size="middle"
+          style={{ width: 160 }}
         />
         <Select
           placeholder="材质"
@@ -428,32 +442,26 @@ export default function ProductManage() {
           onChange={(v) => setMaterialFilter(v)}
           allowClear
           options={materials.map(m => ({ value: m, label: getMaterialLabel(m) }))}
-          className="w-28"
-          size="middle"
+          style={{ width: 140 }}
         />
-        {(statusFilter || categoryFilter || materialFilter || keyword) && (
-          <button onClick={handleClearFilters} className="text-xs text-brand-muted hover:text-brand-gold transition-colors">
-            <ClearOutlined /> 清除筛选
-          </button>
+        {hasFilters && (
+          <Button size="middle" onClick={handleClearFilters} icon={<ClearOutlined />}>重置</Button>
         )}
         {error && (
-          <button onClick={() => fetchProducts()} className="text-xs text-red-500 hover:text-red-600">
-            <ReloadOutlined /> 重试
-          </button>
+          <Button size="middle" onClick={() => fetchProducts()} icon={<ReloadOutlined />}>重试</Button>
         )}
       </div>
 
-      {/* ── 错误提示 ── */}
+      {/* ── 错误 ── */}
       {error && !loading && (
-        <Result
-          status="error" title="加载失败" subTitle={error}
+        <Result status="error" title="加载失败" subTitle={error}
           extra={<Button onClick={() => fetchProducts()} icon={<ReloadOutlined />}>重试</Button>}
         />
       )}
 
       {/* ── 表格 ── */}
       {!error && (
-        <Card className="!bg-white !border-brand-line" bodyStyle={{ padding: 0 }}>
+        <Card style={{ border: '1px solid #F0F0F0', borderRadius: 8, boxShadow: 'none' }} bodyStyle={{ padding: 0 }}>
           <Table
             dataSource={products}
             rowKey="id"
@@ -465,17 +473,17 @@ export default function ProductManage() {
               total,
               showSizeChanger: true,
               pageSizeOptions: ['10', '20', '50'],
-              showTotal: (t) => `${t} 款`,
+              showTotal: (t) => `共 ${t} 件商品`,
               size: 'default',
               onChange: (p, ps) => { setPage(p); setPageSize(ps); fetchProducts(p); },
+              style: { margin: '0 16px' },
             }}
             size="middle"
-            scroll={{ x: 920 }}
+            scroll={{ x: 1190 }}
             locale={{
-              emptyText: keyword || statusFilter || categoryFilter || materialFilter
-                ? '没有符合当前筛选条件的商品'
-                : '暂无商品，点击上方"新增商品"开始添加',
+              emptyText: hasFilters ? '没有符合当前筛选条件的商品' : '暂无商品，点击"新增商品"开始添加',
             }}
+            style={{ border: 'none' }}
           />
         </Card>
       )}
