@@ -150,7 +150,7 @@ export class GoldPriceService {
   private async adjustProductPrices(goldPrice: number) {
     const products = await this.prisma.product.findMany({
       where: {
-        status: { in: ['APPROVED', 'DRAFT', 'PENDING'] },
+        status: { in: ['PUBLISHED', 'DRAFT'] },
         goldWeight: { gt: 0 },
       },
       select: { id: true, goldWeight: true, craftFee: true, price: true },

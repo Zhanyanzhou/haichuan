@@ -11,7 +11,7 @@ export class StatisticsService {
       this.prisma.order.count({ where: { createdAt: { gte: new Date(new Date().setHours(0,0,0,0)) } } }),
       this.prisma.order.aggregate({ where: { createdAt: { gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) }, status: { in: ['SHIPPED','COMPLETED'] } }, _sum: { finalAmount: true } }),
       this.prisma.user.count({ where: { status: 'ACTIVE' } }),
-      this.prisma.product.count({ where: { status: 'PENDING' } }),
+      this.prisma.product.count({ where: { status: 'DRAFT' } }),
       this.prisma.order.count({ where: { status: 'PENDING_SHIP' } }),
       this.prisma.inventory.count({ where: { quantity: { lte: 0 } as any } }),
     ]);
@@ -29,7 +29,7 @@ export class StatisticsService {
 
   async getHotProducts(limit = 10) {
     return this.prisma.product.findMany({
-      where: { status: 'APPROVED' },
+      where: { status: 'PUBLISHED' },
       orderBy: { viewCount: 'desc' },
       take: limit,
       select: { id: true, name: true, code: true, price: true, viewCount: true, salesCount: true, materialType: true },
