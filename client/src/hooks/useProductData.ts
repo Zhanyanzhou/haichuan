@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { productApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
-import { catalogProducts, type CatalogProduct } from '@/data/catalogData';
+import { type CatalogProduct } from '@/data/catalogData';
 
 /** API enum → 中文材质 */
 const matLabel = (mt: string) => (
@@ -58,13 +58,13 @@ export function useProductData() {
     return () => { cancelled = true; };
   }, []);
 
-  /** 合并：API 优先，按 sku 去重 */
+  /** API 数据优先，不再回退到静态数据 */
   const products = useMemo(() => {
-    if (!apiProducts) return catalogProducts;
-    const apiSkus = new Set(apiProducts.map(p => p.sku));
-    const staticOnly = catalogProducts.filter(p => !apiSkus.has(p.sku));
-    return [...apiProducts, ...staticOnly];
-  }, [apiProducts]);
+    if (loading) return [];
+    if (error) return [];
+    if (!apiProducts) return [];
+    return apiProducts;
+  }, [apiProducts, loading, error]);
 
   return { products, loading, error };
 }
