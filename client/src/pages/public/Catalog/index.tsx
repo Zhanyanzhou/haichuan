@@ -427,6 +427,14 @@ function FG({ title, options, selected, onToggle }: {
 function ProductCard({ product, onQuickView }: { product: CatalogProduct; onQuickView: (p: CatalogProduct) => void }) {
   const toggle = useSelectionStore(s => s.toggle);
   const sel = useSelectionStore(s => s.isSelected)(product.id);
+  const [imgIdx, setImgIdx] = useState(0);
+  
+  // 所有可用图片（fallback 到 listingImage）
+  const allImages: string[] = (product.images && product.images.length > 0) 
+    ? product.images.filter(Boolean) 
+    : [getListingImage(product as any)];
+  const currentImg = allImages[imgIdx] || allImages[0] || '';
+  const hasMultiple = allImages.length > 1;
   
   const priceText = product.price && product.price > 0 
     ? `¥${product.price.toLocaleString()}` 
@@ -436,7 +444,7 @@ function ProductCard({ product, onQuickView }: { product: CatalogProduct; onQuic
 
   return (
     <div style={{ background: T.bg }}>
-      {/* 图片区：1:1，干净无框 */}
+      {/* 图片区：1:1 */}
       <div 
         onClick={() => onQuickView(product)}
         style={{
@@ -447,10 +455,11 @@ function ProductCard({ product, onQuickView }: { product: CatalogProduct; onQuic
           alignItems: 'center',
           justifyContent: 'center',
           overflow: 'hidden',
+          position: 'relative',
         }}
       >
         <img 
-          src={getListingImage(product as any) || ''} 
+          src={currentImg} 
           alt={product.name || product.sku} 
           loading="lazy" className="catalog-img"
           style={{
@@ -462,6 +471,31 @@ function ProductCard({ product, onQuickView }: { product: CatalogProduct; onQuic
           onMouseLeave={e => { (e.currentTarget as HTMLImageElement).style.transform = 'scale(1)'; }}
           onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
         />
+        {/* 图片切换指示器 */}
+        {hasMultiple && (
+          <div style={{
+            position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)',
+            display: 'flex', gap: 5, padding: '3px 10px',
+            background: 'rgba(41,36,31,0.25)', borderRadius: 10,
+          }}>
+            {allImages.map((_, i) => (
+              <button
+                key={i}
+                onClick={e => { e.stopPropagation(); setImgIdx(i); }}
+                style={{
+                  width: i === imgIdx ? 14 : 6,
+                  height: 6,
+                  borderRadius: 3,
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                  background: i === imgIdx ? '#fff' : 'rgba(255,255,255,0.5)',
+                  transition: 'all 0.2s',
+                }}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 信息区：名称 → 材质 → 价格 → 选款 */}

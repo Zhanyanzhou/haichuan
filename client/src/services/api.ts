@@ -113,6 +113,10 @@ export const productApi = {
     api.delete(`/products/${productId}/images/${imageId}`),
   setCoverImage: (productId: number, imageId: number) =>
     api.put(`/products/${productId}/images/${imageId}/cover`),
+  /* 状态操作 */
+  publish: (id: number) => api.put(`/products/${id}/status`, { status: 'PUBLISHED' }),
+  unpublish: (id: number) => api.put(`/products/${id}/status`, { status: 'OFFLINE' }),
+  updateStatus: (id: number, status: string) => api.put(`/products/${id}/status`, { status }),
 };
 
 // ===== Categories API =====

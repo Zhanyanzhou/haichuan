@@ -74,7 +74,7 @@ export interface Product {
 }
 
 export type MaterialType = 'GOLD_999' | 'GOLD_9999' | 'AU750' | 'PT950' | 'S925' | 'DIAMOND' | 'JADE' | 'PEARL' | 'COLOR_GEM' | 'OTHER';
-export type ProductStatus = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'OFF_SHELF';
+export type ProductStatus = 'DRAFT' | 'PUBLISHED' | 'OFFLINE' | 'ARCHIVED';
 
 export interface GemInfo {
   type?: string;
