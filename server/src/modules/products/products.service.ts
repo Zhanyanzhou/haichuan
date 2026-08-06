@@ -106,7 +106,9 @@ export class ProductsService {
         orderBy,
         include: {
           category: { select: { id: true, name: true } },
-          images: { orderBy: { sortOrder: 'asc' }, take: 1 },
+          images: { orderBy: { sortOrder: 'asc' }, take: 5 },
+          primaryImage: true,
+          listingImage: true,
         },
       }),
       this.prisma.product.count({ where }),
@@ -141,6 +143,8 @@ export class ProductsService {
       include: {
         category: true,
         images: { orderBy: { sortOrder: 'asc' } },
+        primaryImage: true,
+        listingImage: true,
         skus: { where: { isActive: true } },
         certificates: true,
         tags: true,
@@ -216,26 +220,77 @@ export class ProductsService {
   }
 
   /* ═══ 图片管理 ═══ */
-  async addImage(productId: number, data: { url: string; type?: string; sortOrder?: number }) {
+  async addImage(productId: number, data: { url: string; type?: string; sortOrder?: number; sourceImageId?: number; cropData?: any; width?: number; height?: number; mimeType?: string; fileSize?: number }) {
     return this.prisma.productImage.create({
-      data: { productId, url: data.url, type: (data.type || 'SIDE') as any, sortOrder: data.sortOrder ?? 0, isVideo: false },
+      data: {
+        productId,
+        url: data.url,
+        type: (data.type || 'SIDE') as any,
+        sortOrder: data.sortOrder ?? 0,
+        isVideo: false,
+        sourceImageId: data.sourceImageId ?? null,
+        cropData: data.cropData ?? undefined,
+        width: data.width ?? null,
+        height: data.height ?? null,
+        mimeType: data.mimeType ?? null,
+        fileSize: data.fileSize ?? null,
+      },
     });
   }
 
-  async updateImage(imageId: number, data: { type?: string; sortOrder?: number; role?: string }) {
+  async updateImage(imageId: number, data: { type?: string; sortOrder?: number }) {
     return this.prisma.productImage.update({ where: { id: imageId }, data: data as any });
-  }
-
-  async setImageRole(imageId: number, role: string) {
-    return this.prisma.productImage.update({ where: { id: imageId }, data: { role: role as any } });
   }
 
   async deleteImage(imageId: number) {
     return this.prisma.productImage.delete({ where: { id: imageId } });
   }
 
-  async setCoverImage(productId: number, imageId: number) {
-    await this.prisma.productImage.updateMany({ where: { productId, type: 'FRONT' }, data: { type: 'SIDE' as any } });
-    return this.prisma.productImage.update({ where: { id: imageId }, data: { type: 'FRONT' as any } });
+  /** 设置详情主图 */
+  async setPrimaryImage(productId: number, imageId: number) {
+    // 验证图片属于该商品
+    const img = await this.prisma.productImage.findFirst({ where: { id: imageId, productId } });
+    if (!img) throw new BadRequestException('图片不属于该商品');
+    
+    const product = await this.prisma.product.update({
+      where: { id: productId },
+      data: { primaryImageId: imageId },
+    });
+    
+    // 如果尚未设置列表图，同步设置
+    if (!product.listingImageId) {
+      await this.prisma.product.update({
+        where: { id: productId },
+        data: { listingImageId: imageId },
+      });
+    }
+    
+    return { primaryImageId: imageId, listingImageId: product.listingImageId || imageId };
+  }
+
+  /** 直接设置列表图（不裁切） */
+  async setListingImage(productId: number, imageId: number) {
+    const img = await this.prisma.productImage.findFirst({ where: { id: imageId, productId } });
+    if (!img) throw new BadRequestException('图片不属于该商品');
+    
+    await this.prisma.product.update({
+      where: { id: productId },
+      data: { listingImageId: imageId },
+    });
+    
+    return { listingImageId: imageId };
+  }
+
+  /** 恢复列表图为详情主图 */
+  async resetListingToPrimary(productId: number) {
+    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (!product) throw new NotFoundException('商品不存在');
+    
+    await this.prisma.product.update({
+      where: { id: productId },
+      data: { listingImageId: product.primaryImageId },
+    });
+    
+    return { listingImageId: product.primaryImageId };
   }
 }

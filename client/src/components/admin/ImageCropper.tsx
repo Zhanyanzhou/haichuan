@@ -1,7 +1,7 @@
 /**
- * 商品图片裁切组件
+ * 商品列表图裁切组件（HC-PRODUCT-LISTING-IMAGE-MVP-17）
  * — 使用 react-easy-crop 实现 1:1 固定比例裁切
- * — 用于从原图生成 LISTING 图
+ * — 发送归一化坐标（0-1）到 POST /products/:id/images/:sourceImageId/crop-listing
  */
 
 import { useState, useCallback } from 'react';
@@ -23,42 +23,49 @@ export default function ImageCropper({
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [saving, setSaving] = useState(false);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+  const [croppedAreaNorm, setCroppedAreaNorm] = useState<Area | null>(null);
 
-  const onCropComplete = useCallback((_croppedArea: Area, croppedAreaPixels: Area) => {
-    setCroppedAreaPixels(croppedAreaPixels);
+  const onCropComplete = useCallback((croppedArea: Area, _croppedAreaPixels: Area) => {
+    // react-easy-crop: croppedArea 返回百分比值 (0-100)，转为归一化 (0-1)
+    setCroppedAreaNorm({
+      x: croppedArea.x / 100,
+      y: croppedArea.y / 100,
+      width: croppedArea.width / 100,
+      height: croppedArea.height / 100,
+    });
   }, []);
 
   const handleSave = async () => {
-    if (!croppedAreaPixels) {
+    if (!croppedAreaNorm) {
       message.warning('请先调整裁切区域');
       return;
     }
     setSaving(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`/api/products/${productId}/images/crop`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+      const res = await fetch(
+        `/api/products/${productId}/images/${sourceImageId}/crop-listing`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            x: croppedAreaNorm.x,
+            y: croppedAreaNorm.y,
+            width: croppedAreaNorm.width,
+            height: croppedAreaNorm.height,
+          }),
         },
-        body: JSON.stringify({
-          sourceImageId,
-          left: croppedAreaPixels.x,
-          top: croppedAreaPixels.y,
-          width: croppedAreaPixels.width,
-          height: croppedAreaPixels.height,
-          outputSize: 600,
-        }),
-      });
+      );
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.message || '裁切失败');
       }
       const data = await res.json();
       const result = data?.data || data;
-      message.success('列表图已生成');
+      message.success('列表图已生成（1200×1200 WebP）');
       onSaved(result.url);
     } catch (e: any) {
       message.error(e?.message || '裁切保存失败');

@@ -7,7 +7,7 @@ const sharp = require('sharp');
 
 @Injectable()
 export class UploadService {
-  private readonly uploadDir = join(process.cwd(), 'uploads');
+  private readonly uploadDir = join(process.cwd(), '..', 'uploads');
   private readonly allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
   private readonly maxSize = 10 * 1024 * 1024; // 10MB
 
@@ -89,39 +89,46 @@ export class UploadService {
 
   /**
    * 裁切并保存图片（用于生成 LISTING 图）
-   * @param sourcePath 原始文件路径（相对于 uploads 目录，如 2026/08/06/xxx.png）
-   * @param crop 裁切区域 { left, top, width, height } 基于原图坐标
-   * @param outputSize 输出正方形边长（默认 600px）
+   * @param sourcePath 原始文件路径（相对于 uploads 目录）
+   * @param crop 裁切区域（像素坐标）
+   * @param outputSize 输出正方形边长（默认 1200px）
+   * @param format 输出格式（默认 webp）
    */
   async cropImage(
     sourcePath: string,
     crop: { left: number; top: number; width: number; height: number },
-    outputSize: number = 600,
+    outputSize: number = 1200,
+    format: 'webp' | 'jpeg' = 'webp',
   ): Promise<{ url: string }> {
     const fullSourcePath = join(this.uploadDir, sourcePath);
     if (!existsSync(fullSourcePath)) {
       throw new BadRequestException('原始图片不存在');
     }
 
-    const dateDir = this.getDateDir();
-    if (!existsSync(dateDir)) {
-      mkdirSync(dateDir, { recursive: true });
+    // 派生图存入 products/derived/ 子目录
+    const derivedDir = join(this.uploadDir, 'products', 'derived');
+    if (!existsSync(derivedDir)) {
+      mkdirSync(derivedDir, { recursive: true });
     }
 
-    const filename = `${randomUUID()}.jpg`;
-    const outputPath = join(dateDir, filename);
+    const filename = `${randomUUID()}.${format === 'webp' ? 'webp' : 'jpg'}`;
+    const outputPath = join(derivedDir, filename);
 
     try {
-      await sharp(fullSourcePath)
+      const pipeline = sharp(fullSourcePath)
         .extract({ left: Math.round(crop.left), top: Math.round(crop.top), width: Math.round(crop.width), height: Math.round(crop.height) })
-        .resize(outputSize, outputSize, { fit: 'cover' })
-        .jpeg({ quality: 90 })
-        .toFile(outputPath);
+        .resize(outputSize, outputSize, { fit: 'cover' });
+
+      if (format === 'webp') {
+        await pipeline.webp({ quality: 85 }).toFile(outputPath);
+      } else {
+        await pipeline.jpeg({ quality: 90 }).toFile(outputPath);
+      }
     } catch (err: any) {
       throw new BadRequestException(`图片裁切失败: ${err.message}`);
     }
 
-    const relativePath = join(dayjs().format('YYYY/MM/DD'), filename).replace(/\\/g, '/');
+    const relativePath = join('products', 'derived', filename).replace(/\\/g, '/');
     return { url: `/uploads/${relativePath}` };
   }
 }

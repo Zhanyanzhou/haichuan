@@ -63,6 +63,10 @@ export interface Product {
   viewCount: number;
   salesCount: number;
   images: ProductImage[];
+  primaryImage?: ProductImage | null;
+  listingImage?: ProductImage | null;
+  primaryImageId?: number | null;
+  listingImageId?: number | null;
   skus?: ProductSKU[];
   certificates?: Certificate[];
   tags?: ProductTag[];
@@ -86,9 +90,14 @@ export interface ProductImage {
   productId: number;
   url: string;
   type: 'FRONT' | 'SIDE' | 'TOP' | 'DETAIL' | 'WEARING';
-  role?: 'ORIGINAL' | 'PRIMARY' | 'LISTING' | 'THUMBNAIL' | null;
   sortOrder: number;
   isVideo: boolean;
+  sourceImageId?: number | null;
+  cropData?: { x: number; y: number; width: number; height: number } | null;
+  width?: number | null;
+  height?: number | null;
+  mimeType?: string | null;
+  fileSize?: number | null;
 }
 
 export interface ProductSKU {

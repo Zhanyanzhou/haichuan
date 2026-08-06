@@ -10,8 +10,9 @@ import { join } from 'path';
   imports: [
     MulterModule.register({ storage: memoryStorage() }),
     ServeStaticModule.forRoot({
-      rootPath: join(process.cwd(), 'uploads'),
+      rootPath: join(process.cwd(), '..', 'uploads'),
       serveRoot: '/uploads',
+      serveStaticOptions: { index: false },
     }),
   ],
   controllers: [UploadController],

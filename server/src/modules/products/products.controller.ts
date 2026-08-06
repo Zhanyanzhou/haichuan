@@ -5,6 +5,9 @@ import { UploadService } from '../upload/upload.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { CreateProductDto, UpdateProductDto } from './dto';
+import { join } from 'path';
+import { statSync } from 'fs';
+const sharp = require('sharp');
 
 @ApiTags('产品管理')
 @Controller('products')
@@ -103,42 +106,93 @@ export class ProductsController {
     return this.productsService.deleteImage(+imageId);
   }
 
+  /* ═══ 主图/列表图管理 ═══ */
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @Put(':id/images/:imageId/cover')
-  @ApiOperation({ summary: '设为封面图' })
-  setCoverImage(@Param('id') id: string, @Param('imageId') imageId: string) {
-    return this.productsService.setCoverImage(+id, +imageId);
+  @Put(':id/images/primary')
+  @ApiOperation({ summary: '设置详情主图' })
+  setPrimaryImage(@Param('id') id: string, @Body() body: { imageId: number }) {
+    return this.productsService.setPrimaryImage(+id, body.imageId);
   }
 
-  /* ═══ 图片裁切 ═══ */
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @Post(':id/images/crop')
-  @ApiOperation({ summary: '裁切生成列表图（1:1）' })
+  @Put(':id/images/listing')
+  @ApiOperation({ summary: '直接设置列表图（不裁切）' })
+  setListingImage(@Param('id') id: string, @Body() body: { imageId: number }) {
+    return this.productsService.setListingImage(+id, body.imageId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Put(':id/images/listing/reset')
+  @ApiOperation({ summary: '恢复列表图为详情主图' })
+  resetListingToPrimary(@Param('id') id: string) {
+    return this.productsService.resetListingToPrimary(+id);
+  }
+
+  /* ═══ 列表图裁切 ═══ */
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post(':id/images/:sourceImageId/crop-listing')
+  @ApiOperation({ summary: '裁切生成1200×1200 WebP列表图' })
   async cropListingImage(
     @Param('id') id: string,
-    @Body() body: { sourceImageId: number; left: number; top: number; width: number; height: number; outputSize?: number },
+    @Param('sourceImageId') sourceImageId: string,
+    @Body() body: { x: number; y: number; width: number; height: number },
   ) {
-    // 1. 查找源图片
     const product = await this.productsService.findById(+id);
-    const sourceImg = product?.images?.find((img: any) => img.id === body.sourceImageId);
-    if (!sourceImg) throw new NotFoundException('源图片不存在');
+    if (!product) throw new NotFoundException('商品不存在');
 
-    // 2. 裁切
+    const sourceImg = product.images?.find((img: any) => img.id === +sourceImageId);
+    if (!sourceImg) throw new NotFoundException('源图片不属于该商品');
+
+    // 裁切：归一化坐标 → 实际像素 → sharp 处理
     const sourcePath = sourceImg.url.replace(/^\/uploads\//, '');
-    const result = await this.uploadService.cropImage(sourcePath, {
-      left: body.left, top: body.top, width: body.width, height: body.height,
-    }, body.outputSize || 600);
+    const fullPath = join(this.uploadService['uploadDir'], sourcePath);
+    
+    // 读取原图尺寸
+    const metadata = await sharp(fullPath).metadata();
+    const imgW = metadata.width || 1;
+    const imgH = metadata.height || 1;
 
-    // 3. 创建 LISTING 图片记录 + 设置角色
-    const listingImage = await this.productsService.addImage(+id, {
+    // 归一化矩形转实际像素（正方形裁切）
+    const cropPx = {
+      left: Math.round(body.x * imgW),
+      top: Math.round(body.y * imgH),
+      width: Math.round(body.width * imgW),
+      height: Math.round(body.height * imgH),
+    };
+
+    // 验证裁切范围
+    if (cropPx.left < 0 || cropPx.top < 0 ||
+        cropPx.left + cropPx.width > imgW || cropPx.top + cropPx.height > imgH) {
+      throw new BadRequestException('裁切区域超出图片范围');
+    }
+
+    // 生成 1200×1200 WebP
+    const result = await this.uploadService.cropImage(
+      sourcePath, cropPx, 1200, 'webp',
+    );
+
+    // 创建派生图记录
+    const fileStat = statSync(join(this.uploadService['uploadDir'], result.url.replace(/^\/uploads\//, '')));
+    
+    const derived = await this.productsService.addImage(+id, {
       url: result.url,
       type: 'FRONT' as any,
       sortOrder: 0,
+      sourceImageId: +sourceImageId,
+      cropData: { x: body.x, y: body.y, width: body.width, height: body.height },
+      width: 1200,
+      height: 1200,
+      mimeType: 'image/webp',
+      fileSize: fileStat.size,
     });
-    await this.productsService.setImageRole(listingImage.id, 'LISTING');
 
-    return { id: listingImage.id, url: result.url };
+    // 切换 listingImageId
+    await this.productsService.setListingImage(+id, derived.id);
+
+    return { id: derived.id, url: result.url, listingImageId: derived.id };
   }
 }

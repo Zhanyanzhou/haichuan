@@ -110,6 +110,10 @@ model Product {
 
   category     Category       @relation(fields: [categoryId], references: [id])
   images       ProductImage[]
+  primaryImageId Int?       @map("primary_image_id")
+  listingImageId Int?       @map("listing_image_id")
+  primaryImage  ProductImage?  @relation("PrimaryImage", fields: [primaryImageId], references: [id], onDelete: SetNull)
+  listingImage  ProductImage?  @relation("ListingImage", fields: [listingImageId], references: [id], onDelete: SetNull)
   skus         ProductSKU[]
   tags         ProductTag[]
   certificates Certificate[]
@@ -159,16 +163,25 @@ enum SalesMode {
 // ========== 产品图片（三视图） ==========
 
 model ProductImage {
-  id        Int       @id @default(autoincrement())
-  productId Int       @map("product_id")
-  url       String    @db.VarChar(500)
-  type      ImageType @default(FRONT) // 正面/侧面/顶部/视频
-  role      ImageRole?
-  sortOrder Int       @default(0) @map("sort_order")
-  isVideo   Boolean   @default(false) @map("is_video")
-  createdAt DateTime  @default(now()) @map("created_at")
+  id            Int       @id @default(autoincrement())
+  productId     Int       @map("product_id")
+  url           String    @db.VarChar(500)
+  type          ImageType @default(FRONT) // 正面/侧面/顶部/视频
+  sortOrder     Int       @default(0) @map("sort_order")
+  isVideo       Boolean   @default(false) @map("is_video")
+  sourceImageId Int?      @map("source_image_id")
+  cropData      Json?     @map("crop_data")
+  width         Int?
+  height        Int?
+  mimeType      String?   @map("mime_type") @db.VarChar(50)
+  fileSize      Int?      @map("file_size")
+  createdAt     DateTime  @default(now()) @map("created_at")
 
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product      Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sourceImage  ProductImage? @relation("SourceImage", fields: [sourceImageId], references: [id], onDelete: SetNull)
+  derivedImages ProductImage[] @relation("SourceImage")
+  primaryOf    Product[]     @relation("PrimaryImage")
+  listingOf    Product[]     @relation("ListingImage")
 
   @@map("product_images")
 }
@@ -179,13 +192,6 @@ enum ImageType {
   TOP
   DETAIL
   WEARING
-}
-
-enum ImageRole {
-  ORIGINAL
-  PRIMARY
-  LISTING
-  THUMBNAIL
 }
 
 // ========== 产品SKU ==========
