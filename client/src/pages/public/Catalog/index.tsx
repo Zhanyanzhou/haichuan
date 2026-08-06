@@ -546,7 +546,6 @@ function ProductGrid({ products, page, onQuickView }: {
           .catalog-cell:nth-child(2n) { border-right: 1px solid ${T.line}; }
           .catalog-cell:nth-child(3n) { border-right: none; }
         }
-        /* 最低行无下边线（由底部线div接管） */
       `}</style>
       <div className="catalog-matrix" style={{ maxWidth: '1560px', margin: '0 auto' }}>
         {items.map(p => (
@@ -555,7 +554,8 @@ function ProductGrid({ products, page, onQuickView }: {
           </div>
         ))}
       </div>
-      <div style={{ maxWidth: '1560px', margin: '0 auto', height: '1px', background: T.line }} />
+      {/* 底部全宽横线：独立 div，width:100% 确保铺满整行 */}
+      <div style={{ width: '100%', maxWidth: '1560px', margin: '0 auto', height: '1px', background: T.line }} />
     </>
   );
 }
