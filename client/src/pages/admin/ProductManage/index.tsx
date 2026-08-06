@@ -220,7 +220,7 @@ export default function ProductManage() {
       render: (_: any, r: Product) => (
         <div className="flex items-center gap-3">
           {r.images?.[0]?.url ? (
-            <img src={getThumbnailImage(r.images)} alt="" className="w-10 h-10 object-cover border border-brand-line" />
+            <img src={getThumbnailImage(r as any)} alt="" className="w-10 h-10 object-cover border border-brand-line" />
           ) : (
             <div className="w-10 h-10 bg-brand-bg flex items-center justify-center text-brand-gold/30 text-lg border border-brand-line">◆</div>
           )}

@@ -450,7 +450,7 @@ function ProductCard({ product, onQuickView }: { product: CatalogProduct; onQuic
         }}
       >
         <img 
-          src={getListingImage(product.images as any) || ''} 
+          src={getListingImage(product as any) || ''} 
           alt={product.name || product.sku} 
           loading="lazy" className="catalog-img"
           style={{
@@ -527,8 +527,8 @@ function ProductGrid({ products, page, onQuickView }: {
         .catalog-matrix > * {
           background: ${T.bg};
         }
-        @media (min-width: 768px) { .catalog-matrix { grid-template-columns: repeat(3, 1fr); } }
-        @media (min-width: 1080px) { .catalog-matrix { grid-template-columns: repeat(4, 1fr); } }
+        @media (min-width: 768px) { .catalog-matrix { grid-template-columns: repeat(2, 1fr); } }
+        @media (min-width: 1280px) { .catalog-matrix { grid-template-columns: repeat(3, 1fr); } }
       `}</style>
       <div className="catalog-matrix" style={{ maxWidth: 1560, margin: '0 auto' }}>
         {items.map(p => (
@@ -559,7 +559,7 @@ function QuickView({ product, onClose }: { product: CatalogProduct | null; onClo
         <button onClick={onClose} style={{ position: 'absolute', top: 20, right: 24,
           background: 'none', border: 0, cursor: 'pointer', fontSize: 22, color: T.sec, lineHeight: 1, minWidth: 44, minHeight: 44 }}>✕</button>
         <div style={{ aspectRatio: '1/1', background: T.imgBg, overflow: 'hidden', marginBottom: 28 }}>
-          <img src={getListingImage(product.images as any)} alt={product.sku} loading="lazy"
+          <img src={getListingImage(product as any)} alt={product.sku} loading="lazy"
             style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             onError={e => { const t = e.currentTarget; if (!t.src.endsWith('/placeholder.svg')) t.src = '/images/products/placeholder.svg'; }} />
         </div>

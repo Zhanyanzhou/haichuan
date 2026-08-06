@@ -143,7 +143,7 @@ function ProductCard({ product }: { product: CatalogProduct }) {
       <Link to={`/catalog?category=${product.primaryCategoryId}&query=${product.sku}`}
         style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
         <div style={{ aspectRatio: '4/5', background: T.imgBg, overflow: 'hidden', marginBottom: 14 }}>
-          <img src={getListingImage(product.images as any)} alt={`${product.name} ${product.sku}`} loading="lazy"
+          <img src={getListingImage(product as any)} alt={`${product.name} ${product.sku}`} loading="lazy"
             style={{ width: '100%', height: '100%', objectFit: 'contain',
               transition: 'transform 600ms cubic-bezier(0.22,1,0.36,1)' }}
             onMouseEnter={e => { (e.target as HTMLImageElement).style.transform = 'scale(1.02)'; }}

@@ -77,8 +77,8 @@ export default function ProductDetail() {
           {/* Left: Images */}
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1 }}>
             <div className="aspect-[4/5] bg-brand-bg flex items-center justify-center sticky top-24 border border-brand-line">
-              {getPrimaryImage(product.images) ? (
-                <img src={getPrimaryImage(product.images)} alt={product.name} className="w-full h-full object-cover" />
+              {getPrimaryImage(product as any) ? (
+                <img src={getPrimaryImage(product as any)} alt={product.name} className="w-full h-full object-cover" />
               ) : (
                 <span className="text-7xl text-brand-gold/20">◆</span>
               )}
