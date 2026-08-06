@@ -51,7 +51,12 @@ export default function ProductDetail() {
   }, [id]);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Spin size="large" /></div>;
-  if (!product) return <div className="min-h-screen flex items-center justify-center"><p className="text-brand-muted">产品未找到</p></div>;
+  if (!product) return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4">
+      <p className="text-brand-muted text-lg">该珠宝作品当前暂不可浏览</p>
+      <Link to="/products" className="text-brand-gold hover:underline text-sm">返回珠宝作品列表</Link>
+    </div>
+  );
 
   const displayPrice = selectedSku?.price || product.price || 0;
 

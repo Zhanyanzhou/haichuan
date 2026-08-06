@@ -1,11 +1,11 @@
 ﻿import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Spin } from 'antd';
 import { useSelectionStore } from '@/store/selectionStore';
 import {
-  catalogProducts, primaryCategories, secondaryCategories, getSecondaryByPrimary,
-  MATERIALS, CRAFTS, WEIGHT_RANGES, SIZES, type CatalogProduct, type SecondaryCategory,
+  MATERIALS, type CatalogProduct,
 } from '@/data/catalogData';
-import { useProductData } from '@/hooks/useProductData';
+import { useProductData, type RealCategory } from '@/hooks/useProductData';
 
 /* ══════════════════════════════════════
    设计令牌
@@ -22,11 +22,32 @@ const T = {
 
 const HEADER_H = 84;
 const PAGE_SIZE = 32;
-const MAX_VISIBLE_L2 = 9;
 const SKU_RE = /^[A-Z]{2,3}-[A-Z]{2,3}-\d{3,4}$/i;
 
-const catName = (id: string) => primaryCategories.find(c => c.id === id)?.name || '';
-const subName = (id: string) => secondaryCategories.find(c => c.id === id)?.name || '';
+/** 从真实分类树查找名称 */
+function catNameById(tree: RealCategory[], id: number): string {
+  for (const c of tree) {
+    if (c.id === id) return c.name;
+    if (c.children?.length) {
+      const found = catNameById(c.children, id);
+      if (found) return found;
+    }
+  }
+  return '';
+}
+
+/** 获取一级分类的二级子分类 */
+function getRealSubs(tree: RealCategory[], parentId: number): RealCategory[] {
+  for (const c of tree) {
+    if (c.id === parentId) return c.children || [];
+  }
+  return [];
+}
+
+/** 从真实分类树获取一级分类列表 */
+function getPrimaryCats(tree: RealCategory[]): RealCategory[] {
+  return tree.filter(c => c.level === 1).sort((a, b) => a.id - b.id);
+}
 
 /* ══════════════════════════════════════
    URL 状态管理
@@ -103,14 +124,12 @@ function useFiltered(p: URLParams, products: CatalogProduct[]) {
         list = list.filter(x =>
           x.sku.toLowerCase().includes(ql) ||
           (x.name && x.name.includes(ql)) ||
-          catName(x.primaryCategoryId).includes(ql) ||
-          subName(x.secondaryCategoryId).includes(ql) ||
+          (x.categoryName && x.categoryName.includes(ql)) ||
           x.material.includes(ql)
         );
       }
     }
     if (p.materials.length) list = list.filter(x => p.materials.includes(x.material));
-    if (p.crafts.length) list = list.filter(x => p.crafts.includes(x.craft));
     return list;
   }, [p]);
 }
@@ -125,9 +144,11 @@ function useSorted(list: CatalogProduct[], sort: string) {
 }
 
 /* ══════════════════════════════════════
-   组件：一级类目
+   组件：一级类目（真实分类）
    ══════════════════════════════════════ */
-function PrimaryNav({ active, onChange }: { active: string; onChange: (id: string) => void }) {
+function PrimaryNav({ active, onChange, categories }: { active: string; onChange: (id: string) => void; categories: RealCategory[] }) {
+  const primaryCats = getPrimaryCats(categories);
+  if (!primaryCats.length) return null;
   return (
     <nav style={{ borderBottom: `1px solid ${T.line}` }}>
       <div style={{
@@ -138,10 +159,11 @@ function PrimaryNav({ active, onChange }: { active: string; onChange: (id: strin
         gap: 'clamp(48px,6vw,104px)',
         overflowX: 'auto', scrollbarWidth: 'none',
       }}>
-        {primaryCategories.map(c => {
-          const isA = active === c.id;
+        {primaryCats.map(c => {
+          const cid = String(c.id);
+          const isA = active === cid;
           return (
-            <button key={c.id} onClick={() => onChange(isA ? '' : c.id)}
+            <button key={c.id} onClick={() => onChange(isA ? '' : cid)}
               style={{
                 position: 'relative', background: 'none', border: 0, cursor: 'pointer',
                 fontSize: 'clamp(16px,1.8vw,19px)', fontWeight: 400,
@@ -161,17 +183,13 @@ function PrimaryNav({ active, onChange }: { active: string; onChange: (id: strin
 }
 
 /* ══════════════════════════════════════
-   组件：二级类目 + 更多分类
+   组件：二级类目（真实子分类）
    ══════════════════════════════════════ */
-function SecondaryNav({ parentId, active, onChange }: {
-  parentId: string; active: string; onChange: (id: string) => void;
+function SecondaryNav({ parentId, active, onChange, categories }: {
+  parentId: string; active: string; onChange: (id: string) => void; categories: RealCategory[];
 }) {
-  const subs = getSecondaryByPrimary(parentId);
+  const subs = getRealSubs(categories, Number(parentId));
   if (!subs.length) return null;
-
-  const visible = subs.slice(0, MAX_VISIBLE_L2);
-  const hasMore = subs.length > MAX_VISIBLE_L2;
-  const [moreOpen, setMoreOpen] = useState(false);
 
   return (
     <div style={{ borderBottom: `1px solid ${T.line}` }}>
@@ -183,40 +201,14 @@ function SecondaryNav({ parentId, active, onChange }: {
         overflowX: 'auto', scrollbarWidth: 'none',
       }}>
         <L2Btn active={!active} onClick={() => onChange('')}>
-          全部{catName(parentId)}
+          全部
         </L2Btn>
-        {visible.map(s => (
-          <L2Btn key={s.id} active={active === s.id} onClick={() => onChange(s.id)}>
+        {subs.map(s => (
+          <L2Btn key={s.id} active={active === String(s.id)} onClick={() => onChange(String(s.id))}>
             {s.name}
           </L2Btn>
         ))}
-        {hasMore && (
-          <button onClick={() => setMoreOpen(o => !o)}
-            style={{
-              paddingInline: 12, height: 52, display: 'inline-flex', alignItems: 'center', gap: 4,
-              background: 'none', border: 0, cursor: 'pointer',
-              fontSize: 13, letterSpacing: '0.04em', color: T.sec, whiteSpace: 'nowrap',
-            }}>
-            更多分类
-            <svg width={10} height={10} viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth={1.2}
-              style={{ transform: moreOpen ? 'rotate(180deg)' : 'none', transition: 'transform 200ms' }}>
-              <polyline points="2,3.5 5,6.5 8,3.5"/>
-            </svg>
-          </button>
-        )}
       </div>
-
-      <AnimatePresence>
-        {moreOpen && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25 }}
-            style={{ overflow: 'hidden', borderTop: `1px solid ${T.line}` }}>
-            <div style={{ maxWidth: 1560, marginInline: 'auto', paddingInline: 'clamp(48px,5vw,80px)', paddingBlock: 'clamp(20px,3vh,28px)' }}>
-              <MorePanel subs={subs} active={active} onChange={id => { onChange(id); setMoreOpen(false); }} />
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
@@ -236,51 +228,19 @@ function L2Btn({ active, onClick, children }: { active: boolean; onClick: () => 
   );
 }
 
-function MorePanel({ subs, active, onChange }: {
-  subs: SecondaryCategory[]; active: string; onChange: (id: string) => void;
-}) {
-  const groups = new Map<string, SecondaryCategory[]>();
-  subs.forEach(s => {
-    const g = s.displayGroup || '其他';
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g)!.push(s);
-  });
-
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px,1fr))', gap: 'clamp(16px,2vw,24px)' }}>
-      {Array.from(groups.entries()).map(([group, items]) => (
-        <div key={group}>
-          <p style={{ fontSize: 10, letterSpacing: '0.12em', color: T.light, margin: '0 0 10px' }}>{group}</p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
-            {items.map(s => (
-              <button key={s.id} onClick={() => onChange(s.id)}
-                style={{ background: 'none', border: 0, cursor: 'pointer', fontSize: 13,
-                  color: active === s.id ? T.txt : T.sec, padding: '4px 0', lineHeight: 1.6 }}>
-                {s.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /* ══════════════════════════════════════
-   组件：结果工具栏
+   组件：结果工具栏（简化：仅材质筛选 + 排序）
    ══════════════════════════════════════ */
-function Toolbar({ category, subcategory, total, materials, crafts, weights, sort, selCount,
-  onToggleMaterial, onToggleCraft, onToggleWeight, onSort, onOpenMore }: {
+function Toolbar({ category, subcategory, total, materials, sort, selCount,
+  onToggleMaterial, onSort, categories }: {
   category: string; subcategory: string; total: number;
-  materials: string[]; crafts: string[]; weights: string[];
-  sort: string; selCount: number;
+  materials: string[]; sort: string; selCount: number;
   onToggleMaterial: (m: string) => void;
-  onToggleCraft: (c: string) => void;
-  onToggleWeight: (w: string) => void;
   onSort: (s: string) => void;
-  onOpenMore: () => void;
+  categories: RealCategory[];
 }) {
-  const path = category ? (subcategory ? `${catName(category)} / ${subName(subcategory)}` : catName(category)) : '全部款式';
+  const parentName = catNameById(categories, Number(category));
+  const path = category ? parentName : '全部款式';
   const [openDD, setOpenDD] = useState<string | null>(null);
 
   const ddBtn: React.CSSProperties = {
@@ -307,11 +267,6 @@ function Toolbar({ category, subcategory, total, materials, crafts, weights, sor
           <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <DD target="material" label="材质" count={selHint(materials)} open={openDD} setOpen={setOpenDD}
               options={MATERIALS} selected={materials} onToggle={onToggleMaterial} />
-            <DD target="craft" label="工艺" count={selHint(crafts)} open={openDD} setOpen={setOpenDD}
-              options={CRAFTS} selected={crafts} onToggle={onToggleCraft} />
-            <DD target="weight" label="重量" count={selHint(weights)} open={openDD} setOpen={setOpenDD}
-              options={WEIGHT_RANGES} selected={weights} onToggle={onToggleWeight} />
-            <button onClick={onOpenMore} style={ddBtn}>更多筛选</button>
             <select value={sort} onChange={e => onSort(e.target.value)}
               style={{ ...ddBtn, border: 'none', outline: 'none', cursor: 'pointer', WebkitAppearance: 'none', appearance: 'none' }}>
               <option value="recommended">推荐</option>
@@ -609,12 +564,12 @@ function PBtn({ children, active, disabled, onClick }: {
 }
 
 /* ══════════════════════════════════════
-   组件：选款托盘
+   组件：选款托盘（使用 API 产品）
    ══════════════════════════════════════ */
-function SelectionTray() {
+function SelectionTray({ products }: { products: CatalogProduct[] }) {
   const ids = useSelectionStore(s => s.selectedIds);
   if (!ids.size) return null;
-  const thumbs = catalogProducts.filter(p => ids.has(p.id)).slice(0, 4);
+  const thumbs = products.filter(p => ids.has(p.id)).slice(0, 4);
   return (
     <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 80,
       display: 'flex', alignItems: 'center', gap: 14, paddingInline: 20, height: 48,
@@ -635,11 +590,12 @@ function SelectionTray() {
 /* ══════════════════════════════════════
    组件：吸顶工具栏
    ══════════════════════════════════════ */
-function StickyBar({ category, subcategory, total, sort, selCount, onSort, onOpenMore }: {
-  category: string; subcategory: string; total: number; sort: string; selCount: number;
-  onSort: (s: string) => void; onOpenMore: () => void;
+function StickyBar({ category, total, sort, selCount, onSort, categories }: {
+  category: string; total: number; sort: string; selCount: number;
+  onSort: (s: string) => void; categories: RealCategory[];
 }) {
-  const path = category ? (subcategory ? `${catName(category)} / ${subName(subcategory)}` : catName(category)) : '全部款式';
+  const parentName = catNameById(categories, Number(category));
+  const path = category ? parentName : '全部款式';
   return (
     <div style={{ position: 'fixed', top: HEADER_H, left: 0, right: 0, zIndex: 40,
       background: 'rgba(255,255,255,0.95)', borderBottom: `1px solid ${T.line}` }}>
@@ -707,13 +663,11 @@ export default function Catalog() {
         <Toolbar category={params.category} subcategory={params.subcategory} total={sorted.length}
           materials={params.materials} crafts={params.crafts} weights={params.weights} sort={params.sort} selCount={selCount}
           onToggleMaterial={m => toggleArray('material', params.materials, m)}
-          onToggleCraft={c => toggleArray('craft', params.crafts, c)}
-          onToggleWeight={w => toggleArray('weight', params.weights, w)}
-          onSort={s => update('sort', s)} onOpenMore={() => setFilterOpen(true)} />
+          onSort={s => update('sort', s)} categories={categories} />
       </div>
       {stickyVisible && (
-        <StickyBar category={params.category} subcategory={params.subcategory} total={sorted.length}
-          sort={params.sort} selCount={selCount} onSort={s => update('sort', s)} onOpenMore={() => setFilterOpen(true)} />
+        <StickyBar category={params.category} total={sorted.length}
+          sort={params.sort} selCount={selCount} onSort={s => update('sort', s)} categories={categories} />
       )}
       <ActiveFilters materials={params.materials} crafts={params.crafts} weights={params.weights} sizes={params.sizes}
         onClearMat={m => update('material', params.materials.filter(x => x !== m))}

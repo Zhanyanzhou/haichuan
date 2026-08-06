@@ -1,13 +1,11 @@
 import { useState, useMemo, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { useSearchHistory } from '@/hooks/useSearchHistory';
 import {
-  primaryCategories, secondaryCategories,
-  MATERIALS, CRAFTS, SCENES,
-  type CatalogProduct,
+  MATERIALS, type CatalogProduct,
 } from '@/data/catalogData';
-import { useProductData } from '@/hooks/useProductData';
+import { useProductData, type RealCategory } from '@/hooks/useProductData';
 
 const T = { bg: '#FFFFFF', txt: '#29241F', sec: 'rgba(41,36,31,0.58)', light: 'rgba(41,36,31,0.38)', line: '#E8E7E3', imgBg: '#FAF9F7' };
 const PX = 'clamp(32px,5vw,80px)';
@@ -16,7 +14,7 @@ const HOT = ['戒指', '吊坠', '平安扣', '古法金', '婚嫁', '日常佩�
 
 /* ═══════ 类型 ═══════ */
 interface Filters {
-  category: string; series: string; material: string; craft: string; scene: string;
+  category: string; material: string;
 }
 
 /* ═══════ 搜索+筛选 ═══════ */
@@ -28,53 +26,43 @@ function useResults(query: string, filters: Filters, products: CatalogProduct[])
       list = list.filter(p =>
         p.sku.toLowerCase().includes(q) ||
         (p.name && p.name.includes(q)) ||
-        p.material.includes(q) || p.craft.includes(q) || p.scene.includes(q) || p.series.includes(q) ||
-        primaryCategories.find(c => c.id === p.primaryCategoryId)?.name.includes(q) ||
-        secondaryCategories.find(c => c.id === p.secondaryCategoryId)?.name.includes(q)
+        p.material.includes(q) ||
+        (p.categoryName && p.categoryName.includes(q))
       );
     }
     if (filters.category) list = list.filter(p => p.primaryCategoryId === filters.category);
-    if (filters.series) list = list.filter(p => p.series === filters.series);
     if (filters.material) list = list.filter(p => p.material === filters.material);
-    if (filters.craft) list = list.filter(p => p.craft === filters.craft);
-    if (filters.scene) list = list.filter(p => p.scene === filters.scene);
     return list;
   }, [query, filters]);
 }
 
-function filterCount(f: Filters) { return [f.category, f.series, f.material, f.craft, f.scene].filter(Boolean).length; }
-
-/* ═══════ 系列选项（从真实数据提取） ═══════ */
-function useSeriesOptions(products: CatalogProduct[]) {
-  return useMemo(() => {
-    const set = new Set<string>();
-    products.forEach(p => { if (p.series) set.add(p.series); });
-    return Array.from(set);
-  }, []);
-}
+function filterCount(f: Filters) { return [f.category, f.material].filter(Boolean).length; }
 
 /* ═══════ 搜索建议 ═══════ */
-function getSuggestions(q: string, products: CatalogProduct[]): { type: string; text: string }[] {
+function getSuggestions(q: string, products: CatalogProduct[], categories: RealCategory[]): { type: string; text: string }[] {
   if (!q.trim()) return [];
   const results: { type: string; text: string }[] = [];
   const seen = new Set<string>();
   const add = (type: string, text: string) => { if (!seen.has(text)) { seen.add(text); results.push({ type, text }); } };
-  primaryCategories.filter(c => c.name.includes(q)).forEach(c => add('品类', c.name));
-  secondaryCategories.filter(c => c.name.includes(q)).slice(0, 3).forEach(c => add('分类', c.name));
-  const seriesSet = new Set(products.filter(p => p.series && p.series.includes(q)).map(p => p.series));
-  seriesSet.forEach(s => add('系列', s));
+  const walk = (nodes: RealCategory[]) => {
+    for (const n of nodes) {
+      if (n.name.includes(q)) add('品类', n.name);
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(categories);
   products.filter(p => p.sku.toLowerCase().includes(q.toLowerCase())).slice(0, 2).forEach(p => add('货号', p.sku));
   MATERIALS.filter(m => m.includes(q)).forEach(m => add('材质', m));
-  CRAFTS.filter(c => c.includes(q)).forEach(c => add('工艺', c));
   return results.slice(0, 8);
 }
 
-/* ═══════ 筛选面板 ═══════ */
-function FilterDrawer({ filters, seriesOptions, onFilter, onClear, onClose, count }: {
-  filters: Filters; seriesOptions: string[];
-  onFilter: (key: keyof Filters, v: string) => void; onClear: () => void; onClose: () => void; count: number;
+/* ═══════ 筛选面板（简化：仅品类+材质） ═══════ */
+function FilterDrawer({ filters, onFilter, onClear, onClose, count, categories }: {
+  filters: Filters; onFilter: (key: keyof Filters, v: string) => void;
+  onClear: () => void; onClose: () => void; count: number; categories: RealCategory[];
 }) {
   const toggle = (key: keyof Filters, v: string) => onFilter(key, filters[key] === v ? '' : v);
+  const primaryCats = categories.filter(c => c.level === 1);
   return (
     <>
       <div style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(0,0,0,0.12)' }} onClick={onClose} />
@@ -86,16 +74,10 @@ function FilterDrawer({ filters, seriesOptions, onFilter, onClear, onClose, coun
           <button onClick={onClose} style={{ background: 'none', border: 0, cursor: 'pointer', fontSize: 20, color: T.sec, minWidth: 44, minHeight: 44 }}>✕</button>
         </div>
         <div style={{ flex: 1 }}>
-          <FGroup title="品类" options={primaryCategories.map(c => c.name)} selected={filters.category ? primaryCategories.find(c => c.id === filters.category)?.name || '' : ''}
-            onToggle={v => onFilter('category', primaryCategories.find(c => c.name === v)?.id || '')} />
-          <FGroup title="系列" options={seriesOptions} selected={filters.series}
-            onToggle={v => toggle('series', v)} />
-          <FGroup title="材质" options={MATERIALS} selected={filters.material}
-            onToggle={v => toggle('material', v)} />
-          <FGroup title="工艺" options={CRAFTS} selected={filters.craft}
-            onToggle={v => toggle('craft', v)} />
-          <FGroup title="适用场景" options={SCENES} selected={filters.scene}
-            onToggle={v => toggle('scene', v)} />
+          <FGroup title="品类" options={primaryCats.map(c => ({ id: String(c.id), name: c.name }))}
+            selected={filters.category} onToggle={v => toggle('category', v)} />
+          <FGroup title="材质" options={MATERIALS.map(m => ({ id: m, name: m }))}
+            selected={filters.material} onToggle={v => toggle('material', v)} />
         </div>
         <div style={{ display: 'flex', gap: 12, paddingTop: 20, borderTop: `1px solid ${T.line}` }}>
           <button onClick={onClear} style={{ flex: 1, height: 40, border: `1px solid ${T.line}`, background: 'transparent', cursor: 'pointer', fontSize: 12, color: T.sec }}>重置</button>
@@ -107,7 +89,7 @@ function FilterDrawer({ filters, seriesOptions, onFilter, onClear, onClose, coun
 }
 
 function FGroup({ title, options, selected, onToggle }: {
-  title: string; options: string[]; selected: string; onToggle: (v: string) => void;
+  title: string; options: { id: string; name: string }[]; selected: string; onToggle: (v: string) => void;
 }) {
   if (!options.length) return null;
   return (
@@ -115,10 +97,10 @@ function FGroup({ title, options, selected, onToggle }: {
       <p style={{ fontSize: 11, letterSpacing: '0.08em', color: T.light, marginBottom: 12 }}>{title}</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px' }}>
         {options.map(o => (
-          <label key={o} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: selected === o ? T.txt : T.sec, paddingBlock: 2 }}>
-            <input type="checkbox" checked={selected === o} onChange={() => onToggle(o)}
+          <label key={o.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: selected === o.id ? T.txt : T.sec, paddingBlock: 2 }}>
+            <input type="checkbox" checked={selected === o.id} onChange={() => onToggle(o.id)}
               style={{ width: 13, height: 13, accentColor: T.txt, cursor: 'pointer' }} />
-            {o}
+            {o.name}
           </label>
         ))}
       </div>
@@ -127,13 +109,17 @@ function FGroup({ title, options, selected, onToggle }: {
 }
 
 /* ═══════ 筛选标签 ═══════ */
-function FilterTags({ filters, onClearAll }: { filters: Filters; onClearAll: () => void }) {
+function FilterTags({ filters, onClearAll, categories }: { filters: Filters; onClearAll: () => void; categories: RealCategory[] }) {
   const tags: { key: keyof Filters; label: string }[] = [];
-  if (filters.category) tags.push({ key: 'category', label: primaryCategories.find(c => c.id === filters.category)?.name || '' });
-  if (filters.series) tags.push({ key: 'series', label: filters.series });
+  const findCat = (nodes: RealCategory[], id: number): string => {
+    for (const n of nodes) {
+      if (n.id === id) return n.name;
+      if (n.children) { const f = findCat(n.children, id); if (f) return f; }
+    }
+    return '';
+  };
+  if (filters.category) tags.push({ key: 'category', label: findCat(categories, Number(filters.category)) || String(filters.category) });
   if (filters.material) tags.push({ key: 'material', label: filters.material });
-  if (filters.craft) tags.push({ key: 'craft', label: filters.craft });
-  if (filters.scene) tags.push({ key: 'scene', label: filters.scene });
   if (!tags.length) return null;
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 12 }}>
@@ -178,19 +164,17 @@ function ProductCard({ product }: { product: CatalogProduct }) {
 /* ═══════ 主页面 ═══════ */
 export default function Search() {
   const [query, setQuery] = useState('');
-  const [filters, setFilters] = useState<Filters>({ category: '', series: '', material: '', craft: '', scene: '' });
+  const [filters, setFilters] = useState<Filters>({ category: '', material: '' });
   const [sort, setSort] = useState('recommended');
   const [focused, setFocused] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const { history, addToHistory, removeOne, clearAll: clearHistory } = useSearchHistory();
 
-  /* ═══ 统一产品数据（共享 Hook） ═══ */
-  const { products: allProducts, loading: apiLoading, error: apiError } = useProductData();
+  const { products: allProducts, loading: apiLoading, error: apiError, categories } = useProductData();
 
-  const seriesOptions = useSeriesOptions(allProducts);
   const results = useResults(query, filters, allProducts);
-  const suggestions = useMemo(() => getSuggestions(query, allProducts), [query, allProducts]);
+  const suggestions = useMemo(() => getSuggestions(query, allProducts, categories), [query, allProducts, categories]);
   const hasQuery = query.trim().length > 0;
   const hasFilters = filterCount(filters) > 0;
   const showHistory = focused && !hasQuery && history.length > 0;
@@ -212,7 +196,7 @@ export default function Search() {
     inputRef.current?.blur();
   }, [addToHistory]);
 
-  const clearFilters = useCallback(() => setFilters({ category: '', series: '', material: '', craft: '', scene: '' }), []);
+  const clearFilters = useCallback(() => setFilters({ category: '', material: '' }), []);
   const clearAll = useCallback(() => { setQuery(''); clearFilters(); }, [clearFilters]);
   const selectSuggestion = useCallback((s: string) => { setQuery(s); addToHistory(s); setFocused(false); inputRef.current?.blur(); }, [addToHistory]);
 
@@ -353,7 +337,7 @@ export default function Search() {
             </div>
 
             {/* 筛选标签 */}
-            <FilterTags filters={filters} onClearAll={clearFilters} />
+            <FilterTags filters={filters} onClearAll={clearFilters} categories={categories} />
 
             {/* 结果/空状态 */}
             {sorted.length === 0 ? (
@@ -404,9 +388,9 @@ export default function Search() {
 
       {/* ═══════ 筛选抽屉 ═══════ */}
       {filterOpen && (
-        <FilterDrawer filters={filters} seriesOptions={seriesOptions}
+        <FilterDrawer filters={filters}
           onFilter={(k, v) => setFilters(prev => ({ ...prev, [k]: v }))}
-          onClear={clearFilters} onClose={() => setFilterOpen(false)} count={sorted.length} />
+          onClear={clearFilters} onClose={() => setFilterOpen(false)} count={sorted.length} categories={categories} />
       )}
 
       <style>{`
