@@ -28,7 +28,7 @@ const adminMenus = [
     { key: '/admin/site-content', icon: <SettingOutlined />, label: '网站设置' },
   ]},
   { type: 'group' as const, label: '客户中心', children: [
-    { key: '/admin/inquiries', icon: <OrderedListOutlined />, label: '客户线索' },
+    { key: '/admin/leads', icon: <OrderedListOutlined />, label: '客户线索' },
   ]},
   { type: 'group' as const, label: '系统管理', children: [
     { key: '/admin/users', icon: <TeamOutlined />, label: '管理员与权限' },
