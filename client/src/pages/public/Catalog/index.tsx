@@ -229,55 +229,62 @@ function L2Btn({ active, onClick, children }: { active: boolean; onClick: () => 
 }
 
 /* ══════════════════════════════════════
-   组件：结果工具栏（简化：仅材质筛选 + 排序）
+   组件：工具栏（极简风格）
    ══════════════════════════════════════ */
-function Toolbar({ category, subcategory, total, materials, sort, selCount,
+function Toolbar({ category, total, materials, sort, selCount,
   onToggleMaterial, onSort, categories }: {
-  category: string; subcategory: string; total: number;
+  category: string; total: number;
   materials: string[]; sort: string; selCount: number;
   onToggleMaterial: (m: string) => void;
   onSort: (s: string) => void;
   categories: RealCategory[];
 }) {
   const parentName = catNameById(categories, Number(category));
-  const path = category ? parentName : '全部款式';
+  const path = category ? parentName : '全部作品';
   const [openDD, setOpenDD] = useState<string | null>(null);
-
-  const ddBtn: React.CSSProperties = {
-    position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 3,
-    minHeight: 44, paddingInline: 10,
-    background: 'none', border: 0, cursor: 'pointer',
-    fontSize: 13, letterSpacing: '0.04em', color: T.sec, whiteSpace: 'nowrap',
-  };
-
-  const selHint = (arr: string[]) => arr.length > 0 ? ` ${arr.length}` : '';
 
   return (
     <>
-      <div className="results-toolbar" style={{ borderBottom: `1px solid ${T.line}`, borderTop: `1px solid ${T.line}` }}>
+      <div style={{ borderBottom: `1px solid ${T.line}` }}>
         <div style={{
-          maxWidth: 1560, marginInline: 'auto', paddingInline: 'clamp(48px,5vw,80px)',
-          minHeight: 64, display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) auto',
-          alignItems: 'center', gap: 24,
+          maxWidth: 1560, marginInline: 'auto',
+          paddingInline: 'clamp(16px,3vw,28px)',
+          height: 52, display: 'flex', alignItems: 'center', gap: 20,
+          fontSize: 12, color: T.sec,
         }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 14, color: T.txt }}>{path}</span>
-            <span style={{ fontSize: 13, color: T.sec }}>共 {total} 款</span>
+          <span style={{ color: T.txt, fontSize: 13 }}>{path}</span>
+          <span style={{ color: T.light }}>{total} 件作品</span>
+          <div style={{ flex: 1 }} />
+          <div style={{ position: 'relative' }}>
+            <button onClick={() => setOpenDD(openDD === 'material' ? null : 'material')}
+              style={{ background: 'none', border: 0, cursor: 'pointer', fontSize: 12, color: T.sec, padding: '4px 8px' }}>
+              材质{materials.length > 0 ? ` ${materials.length}` : ''}
+            </button>
+            {openDD === 'material' && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 10 }} onClick={() => setOpenDD(null)} />
+                <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 20, minWidth: 180,
+                  background: T.bg, border: `1px solid ${T.line}`, padding: '14px 16px' }}>
+                  {MATERIALS.map(o => (
+                    <label key={o} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12, color: T.txt, paddingBlock: 3 }}>
+                      <input type="checkbox" checked={materials.includes(o)} onChange={() => onToggleMaterial(o)}
+                        style={{ width: 13, height: 13, accentColor: T.txt }} />
+                      {o}
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <DD target="material" label="材质" count={selHint(materials)} open={openDD} setOpen={setOpenDD}
-              options={MATERIALS} selected={materials} onToggle={onToggleMaterial} />
-            <select value={sort} onChange={e => onSort(e.target.value)}
-              style={{ ...ddBtn, border: 'none', outline: 'none', cursor: 'pointer', WebkitAppearance: 'none', appearance: 'none' }}>
-              <option value="recommended">推荐</option>
-              <option value="newest">最新</option>
-              <option value="sku">货号</option>
-            </select>
-            {selCount > 0 && <span style={{ fontSize: 12, color: T.sec, marginLeft: 8 }}>已选 {selCount} 款</span>}
-          </div>
+          <select value={sort} onChange={e => onSort(e.target.value)}
+            style={{ background: 'none', border: 0, fontSize: 12, color: T.sec, cursor: 'pointer', outline: 'none' }}>
+            <option value="recommended">推荐</option>
+            <option value="newest">最新</option>
+            <option value="sku">货号</option>
+          </select>
+          {selCount > 0 && <span style={{ color: T.txt }}>已选 {selCount}</span>}
         </div>
       </div>
-      {openDD && <div style={{ position: 'fixed', inset: 0, zIndex: 10 }} onClick={() => setOpenDD(null)} />}
     </>
   );
 }
@@ -414,53 +421,41 @@ function FG({ title, options, selected, onToggle }: {
 }
 
 /* ══════════════════════════════════════
-   组件：产品卡片
+   组件：产品卡片（梵克雅宝矩阵风格）
    ══════════════════════════════════════ */
-function ProductCard({ product, index, onQuickView }: { product: CatalogProduct; index: number; onQuickView: (p: CatalogProduct) => void }) {
+function ProductCard({ product, onQuickView }: { product: CatalogProduct; onQuickView: (p: CatalogProduct) => void }) {
   const toggle = useSelectionStore(s => s.toggle);
   const sel = useSelectionStore(s => s.isSelected)(product.id);
   
-  // 格式化价格
   const priceText = product.price && product.price > 0 
     ? `¥${product.price.toLocaleString()}` 
     : '咨询价格';
   
-  // 副信息：仅保留有意义的字段
-  const subInfo = [
-    product.categoryName,
-    product.material,
-    product.weight && product.weight !== '0g' ? product.weight : null,
-  ].filter(Boolean).join(' · ');
+  const subInfo = [product.categoryName, product.material].filter(Boolean).join(' · ');
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 12 }} 
-      animate={{ opacity: 1, y: 0 }} 
-      transition={{ duration: 0.45, delay: index * 0.04 }}
-    >
-      {/* 图片展示区 */}
+    <div style={{ background: T.bg }}>
+      {/* 图片区：1:1，干净无框 */}
       <div 
         onClick={() => onQuickView(product)}
         style={{
           aspectRatio: '1/1',
           background: T.imgBg,
-          overflow: 'hidden',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+          overflow: 'hidden',
         }}
       >
         <img 
           src={product.images[0] || ''} 
           alt={product.name || product.sku} 
-          loading="lazy"
+          loading="lazy" className="catalog-img"
           style={{
-            width: '75%',
-            height: '75%',
+            width: '78%', height: '78%',
             objectFit: 'contain',
-            transition: 'transform 500ms cubic-bezier(0.22,1,0.36,1)',
+            transition: 'transform 0.6s cubic-bezier(0.22,1,0.36,1)',
           }}
           onMouseEnter={e => { (e.currentTarget as HTMLImageElement).style.transform = 'scale(1.03)'; }}
           onMouseLeave={e => { (e.currentTarget as HTMLImageElement).style.transform = 'scale(1)'; }}
@@ -468,52 +463,50 @@ function ProductCard({ product, index, onQuickView }: { product: CatalogProduct;
         />
       </div>
 
-      {/* 信息区 */}
-      <div style={{ marginTop: 14, textAlign: 'left' }}>
+      {/* 信息区：名称 → 材质 → 价格 → 选款 */}
+      <div style={{ padding: '14px 0 20px', textAlign: 'left' }}>
         <h3 style={{
-          fontSize: 14, fontWeight: 500, color: T.txt,
-          margin: '0 0 6px', lineHeight: 1.35,
+          fontSize: 13, fontWeight: 400, color: T.txt,
+          margin: '0 0 5px', lineHeight: 1.4,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {product.name || product.sku}
         </h3>
-
-        {subInfo && (
-          <p style={{
-            fontSize: 12, color: T.sec, margin: '0 0 6px', lineHeight: 1.5,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {subInfo}
-          </p>
-        )}
-
         <p style={{
-          fontSize: 13, fontWeight: 500, color: T.txt,
-          margin: '0 0 12px', lineHeight: 1.4,
+          fontSize: 11, color: T.light, margin: '0 0 8px', lineHeight: 1.5,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {subInfo}
+        </p>
+        <p style={{
+          fontSize: 12, fontWeight: 400, color: T.txt,
+          margin: '0 0 10px', lineHeight: 1.4,
         }}>
           {priceText}
         </p>
-
         <button 
           onClick={(e) => { e.stopPropagation(); toggle(product.id); }}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 4,
-            minHeight: 32, padding: 0,
-            background: 'none', border: 0, cursor: 'pointer',
-            fontSize: 12, letterSpacing: '0.03em',
-            color: sel ? T.txt : T.sec,
-            transition: 'color 200ms',
+            height: 28, padding: '0 12px',
+            background: 'none',
+            border: `1px solid ${T.line}`,
+            cursor: 'pointer',
+            fontSize: 11, letterSpacing: '0.03em',
+            color: sel ? '#fff' : T.sec,
+            backgroundColor: sel ? T.txt : 'transparent',
+            transition: 'all 0.2s',
           }}
         >
           {sel ? '✓ 已选' : '+ 选款'}
         </button>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
 /* ══════════════════════════════════════
-   组件：产品网格
+   组件：产品矩阵（横竖分割线网格）
    ══════════════════════════════════════ */
 function ProductGrid({ products, page, onQuickView }: {
   products: CatalogProduct[]; page: number; onQuickView: (p: CatalogProduct) => void;
@@ -522,24 +515,29 @@ function ProductGrid({ products, page, onQuickView }: {
   const items = products.slice(start, start + PAGE_SIZE);
 
   return (
-    <div style={{ maxWidth: 1560, marginInline: 'auto', paddingInline: 'clamp(48px,5vw,80px)', paddingBlock: 'clamp(40px,5vh,56px)' }}>
-      <div className="catalog-grid" style={{
-        display: 'grid', 
-        gridTemplateColumns: 'repeat(2, 1fr)',
-        columnGap: 32,
-        rowGap: 56,
-      }}>
-        {items.map((p, i) => (
-          <ProductCard key={p.id} product={p} index={i} onQuickView={onQuickView} />
+    <>
+      <style>{`
+        .catalog-matrix {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          background: ${T.line};
+          gap: 1px;
+        }
+        .catalog-matrix > * {
+          background: ${T.bg};
+        }
+        @media (min-width: 768px) { .catalog-matrix { grid-template-columns: repeat(3, 1fr); } }
+        @media (min-width: 1080px) { .catalog-matrix { grid-template-columns: repeat(4, 1fr); } }
+      `}</style>
+      <div className="catalog-matrix" style={{ maxWidth: 1560, margin: '0 auto' }}>
+        {items.map(p => (
+          <div key={p.id} style={{ padding: 'clamp(16px,3vw,28px)' }}>
+            <ProductCard product={p} onQuickView={onQuickView} />
+          </div>
         ))}
       </div>
-
-      <style>{`
-        @media (min-width: 768px) { .catalog-grid { grid-template-columns: repeat(3, 1fr) !important; } }
-        @media (min-width: 1080px) { .catalog-grid { grid-template-columns: repeat(4, 1fr) !important; } }
-        @media (max-width: 480px) { .catalog-grid { column-gap: 16px; row-gap: 36px; } }
-      `}</style>
-    </div>
+      <div style={{ maxWidth: 1560, margin: '0 auto', height: 1, background: T.line }} />
+    </>
   );
 }
 
@@ -722,7 +720,7 @@ export default function Catalog() {
         <SecondaryNav parentId={params.category} active={params.subcategory} onChange={s => update('subcategory', s)} categories={categories} />
       )}
       <div ref={sentinelRef}>
-        <Toolbar category={params.category} subcategory={params.subcategory} total={sorted.length}
+        <Toolbar category={params.category} total={sorted.length}
           materials={params.materials} sort={params.sort} selCount={selCount}
           onToggleMaterial={m => toggleArray('material', params.materials, m)}
           onSort={s => update('sort', s)} categories={categories} />

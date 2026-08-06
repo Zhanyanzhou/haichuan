@@ -40,16 +40,34 @@ function getProductCode(filename) {
   return match ? match[0].toUpperCase() : 'UNKNOWN';
 }
 
-// 按款号分组
+// 提取变体名：去掉款号、正/侧/背面/主图后缀、扩展名
+function getVariantKey(filename) {
+  const withoutExt = filename.replace(/\.[^.]+$/, '');
+  const cleaned = withoutExt.replace(/(正面|侧面|背面|主图|细节|顶部|佩戴|模特|上手)$/, '');
+  return cleaned;
+}
+
+// 去掉款号前缀得到展示名称
+function getDisplayName(variantKey, productCode) {
+  let name = variantKey;
+  if (name.toUpperCase().startsWith(productCode)) {
+    name = name.substring(productCode.length);
+  }
+  return name || productCode;
+}
+
+// 按变体分组（相同款号+描述 = 同一商品，不同正/侧/背面 = 同一商品的图片）
 const groups = {};
 for (const f of allFiles) {
   const code = getProductCode(f);
-  if (!groups[code]) groups[code] = [];
-  groups[code].push(f);
+  const variantKey = getVariantKey(f);
+  const key = code + '::' + variantKey;
+  if (!groups[key]) groups[key] = { code, variantKey, files: [] };
+  groups[key].files.push(f);
 }
 
-const codes = Object.keys(groups).sort();
-console.log(`找到 ${allFiles.length} 张图片，${codes.length} 个款号\n`);
+const keys = Object.keys(groups).sort();
+console.log(`找到 ${allFiles.length} 张图片，${keys.length} 个变体\n`);
 
 // 判断图片类型
 function getImageType(filename) {
@@ -63,9 +81,10 @@ function getImageType(filename) {
 // 3. 逐款上传
 const allResults = [];
 
-for (const code of codes) {
-  const images = groups[code];
-  console.log(`--- 款号: ${code} (${images.length}张) ---`);
+for (const key of keys) {
+  const { code, variantKey, files: images } = groups[key];
+  const displayName = getDisplayName(variantKey, code);
+  console.log(`--- ${displayName} [${code}] (${images.length}张) ---`);
 
   const productUrls = [];
   for (const img of images) {
@@ -97,6 +116,7 @@ for (const code of codes) {
     const allImages = productUrls.map(p => `${p.url}|${p.type}`).join(';');
     allResults.push({
       ProductCode: code,
+      ProductName: displayName,
       ImageCount: productUrls.length,
       CoverImage: cover.url,
       AllImages: allImages,
@@ -107,12 +127,12 @@ for (const code of codes) {
 
 // 4. 输出
 console.log('========== 上传完成 ==========');
-console.table(allResults.map(r => ({ 款号: r.ProductCode, 图片数: r.ImageCount, 封面: r.CoverImage })));
+console.table(allResults.map(r => ({ 名称: r.ProductName, 货号: r.ProductCode, 图片: r.ImageCount })));
 
 // 保存 CSV
-const csvHeader = 'ProductCode,ImageCount,CoverImage,AllImages\n';
+const csvHeader = 'ProductCode,ProductName,ImageCount,CoverImage,AllImages\n';
 const csvRows = allResults.map(r =>
-  `${r.ProductCode},${r.ImageCount},"${r.CoverImage}","${r.AllImages}"`
+  `${r.ProductCode},"${r.ProductName}",${r.ImageCount},"${r.CoverImage}","${r.AllImages}"`
 ).join('\n');
 writeFileSync('upload-products.csv', csvHeader + csvRows, 'utf8');
 console.log('完整映射已保存到 upload-products.csv');
