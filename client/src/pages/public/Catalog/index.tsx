@@ -624,7 +624,7 @@ export default function Catalog() {
   const selCount = useSelectionStore(s => s.selectedIds.size);
 
 /* ═══ API 产品数据（共享 Hook） ═══ */
-  const { products: mergedProducts, loading: apiLoading, error: apiError } = useProductData();
+  const { products: mergedProducts, loading: apiLoading, error: apiError, categories } = useProductData();
 
   const filtered = useFiltered(params, mergedProducts);
   const sorted = useSorted(filtered, params.sort);
@@ -655,13 +655,13 @@ export default function Catalog() {
 
   return (
     <main style={{ background: T.bg, minHeight: '100vh', paddingBottom: 160, overflowX: 'hidden' }}>
-      <PrimaryNav active={params.category} onChange={c => update('category', c)} />
+      <PrimaryNav active={params.category} onChange={c => update('category', c)} categories={categories} />
       {params.category && (
-        <SecondaryNav parentId={params.category} active={params.subcategory} onChange={s => update('subcategory', s)} />
+        <SecondaryNav parentId={params.category} active={params.subcategory} onChange={s => update('subcategory', s)} categories={categories} />
       )}
       <div ref={sentinelRef}>
         <Toolbar category={params.category} subcategory={params.subcategory} total={sorted.length}
-          materials={params.materials} crafts={params.crafts} weights={params.weights} sort={params.sort} selCount={selCount}
+          materials={params.materials} sort={params.sort} selCount={selCount}
           onToggleMaterial={m => toggleArray('material', params.materials, m)}
           onSort={s => update('sort', s)} categories={categories} />
       </div>
