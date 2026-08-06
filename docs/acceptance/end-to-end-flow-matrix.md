@@ -14,11 +14,11 @@
 | 后端重启后保留 | ✅ | MySQL 持久化 |
 | 发布 | ✅ | PUT /status → PUBLISHED |
 | 公共API读取 | ✅ | GET /api/products → 200 |
-| 前台列表出现 | ⚠️ | ProductList 仍用静态 (待 HC-PRODUCT-FRONT-CLOSE-11B) |
+| 前台列表出现 | ✅ | ProductList 已接入真实 API (HC-11B) |
 | 搜索可找到 | ✅ | keyword=HC-QA 可搜到 |
 | 详情可打开 | ✅ | /products/:id 可用 |
 | 下架 | ✅ | PUT /status → OFFLINE / DELETE |
-| 前台不再展示 | ❌ | 未验证 (前台列表静态) |
+| 前台不再展示 | ✅ | status=PUBLISHED 过滤, 下架后消失 (HC-11B) |
 | **后台写入闭环**: 已完成 ✅ |
 
 ## 页面发布链

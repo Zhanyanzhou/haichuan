@@ -18,7 +18,7 @@
 
 | # | 问题 | 影响阶段 | 证据 |
 |---|---|---|---|
-| P1-1 | 商品列表页(ProductList)仍用 collections.ts 静态数据 | FRONTEND-05 | 前台商品展示非真实数据 |
+| P1-1 | ~~商品列表页(ProductList)仍用 collections.ts 静态数据~~ ✅ 已修复 (HC-PRODUCT-FRONT-CLOSE-11B) | FRONTEND-05 | 前台商品展示非真实数据 |
 | P1-2 | 页面构建器前端模块编辑仅支持 hero/doublePoster | CMS-03 | 8种模块类型后端已就绪, 前端未实现 |
 | P1-3 | 选款提交流程无 API 对接 (Zustand only) | CRM-04 | 选款数据不入库 |
 | P1-4 | 行为事件采集未接入前端页面 | ANALYTICS-06 | analytics_events=0 |
