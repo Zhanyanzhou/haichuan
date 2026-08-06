@@ -10,10 +10,10 @@ export class InquiriesService {
     const where: any = {};
     if (status) where.status = status;
     const [list, total] = await Promise.all([
-      this.prisma.inquiry.findMany({ where, skip: (page - 1) * pageSize, take: pageSize, orderBy: { createdAt: 'desc' }, include: { product: { select: { name: true } }, assignee: { select: { realName: true } } } }),
+      this.prisma.inquiry.findMany({ where, skip: (+page - 1) * +pageSize, take: +pageSize, orderBy: { createdAt: 'desc' }, include: { product: { select: { name: true } }, assignee: { select: { realName: true } } } }),
       this.prisma.inquiry.count({ where }),
     ]);
-    return { list, total, page, pageSize };
+    return { list, total, page: +page, pageSize: +pageSize };
   }
 
   async create(data: any) {

@@ -13,8 +13,8 @@ export class InventoryService {
     const [list, total] = await Promise.all([
       this.prisma.inventory.findMany({
         where,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+        skip: (+page - 1) * +pageSize,
+        take: +pageSize,
         include: {
           sku: {
             select: { skuCode: true, material: true, product: { select: { id: true, name: true, code: true } } },
@@ -26,7 +26,7 @@ export class InventoryService {
       this.prisma.inventory.count({ where }),
     ]);
 
-    return { list, total, page, pageSize };
+    return { list, total, page: +page, pageSize: +pageSize };
   }
 
   async findById(id: number) {

@@ -252,8 +252,8 @@ ${this.classifyOutputSchema}`;
     const [list, total] = await Promise.all([
       this.prisma.aIClassifyRecord.findMany({
         where,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+        skip: (+page - 1) * +pageSize,
+        take: +pageSize,
         orderBy: { createdAt: 'desc' },
         include: {
           operator: { select: { id: true, username: true, realName: true } },
@@ -262,7 +262,7 @@ ${this.classifyOutputSchema}`;
       this.prisma.aIClassifyRecord.count({ where }),
     ]);
 
-    return { list, total, page, pageSize };
+    return { list, total, page: +page, pageSize: +pageSize };
   }
 
   /**
