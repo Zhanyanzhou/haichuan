@@ -368,6 +368,8 @@ model Order {
   updatedAt        DateTime    @updatedAt @map("updated_at")
 
   items    OrderItem[]
+  payments Payment[]
+  refunds  Refund[]
   user     User?       @relation(fields: [userId], references: [id])
   couponId Int?        @map("coupon_id")
 
@@ -388,19 +390,85 @@ enum OrderStatus {
 }
 
 model OrderItem {
-  id        Int     @id @default(autoincrement())
-  orderId   Int     @map("order_id")
-  skuId     Int     @map("sku_id")
-  productId Int     @map("product_id")
-  quantity  Int     @default(1)
-  unitPrice Decimal @map("unit_price") @db.Decimal(10, 2)
-  subtotal  Decimal @db.Decimal(10, 2)
+  id            Int     @id @default(autoincrement())
+  orderId       Int     @map("order_id")
+  skuId         Int     @map("sku_id")
+  productId     Int     @map("product_id")
+  quantity      Int     @default(1)
+  unitPrice     Decimal @map("unit_price") @db.Decimal(10, 2)
+  subtotal      Decimal @db.Decimal(10, 2)
+  // 成交快照 — 商品后续修改不影响历史订单
+  productNameSnapshot   String? @map("product_name_snapshot") @db.VarChar(200)
+  productImageSnapshot  String? @map("product_image_snapshot") @db.VarChar(500)
+  productCodeSnapshot   String? @map("product_code_snapshot") @db.VarChar(50)
+  skuSnapshot           String? @map("sku_snapshot") @db.VarChar(200)
+  actualWeight          Decimal? @map("actual_weight") @db.Decimal(8, 2)
+  certNumber            String? @map("cert_number") @db.VarChar(100)
 
   order   Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
   sku     ProductSKU @relation(fields: [skuId], references: [id])
   product Product    @relation(fields: [productId], references: [id])
 
   @@map("order_items")
+}
+
+// ========== 支付管理 ==========
+
+model Payment {
+  id            Int           @id @default(autoincrement())
+  orderId       Int           @map("order_id")
+  paymentNo     String        @unique @map("payment_no") @db.VarChar(50)
+  amount        Decimal       @db.Decimal(12, 2)
+  method        String        @db.VarChar(30)  // wechat | alipay | bank_transfer | store
+  status        PaymentStatus @default(PENDING)
+  type          String        @default("FULL") @db.VarChar(20) // DEPOSIT | BALANCE | FULL
+  gatewayTradeNo String?      @map("gateway_trade_no") @db.VarChar(100)
+  gatewayNotify  Json?        @map("gateway_notify")
+  paidAt        DateTime?     @map("paid_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  refunds Refund[]
+
+  @@index([orderId])
+  @@index([paymentNo])
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  PARTIAL_REFUND
+}
+
+// ========== 退款管理 ==========
+
+model Refund {
+  id          Int           @id @default(autoincrement())
+  orderId     Int           @map("order_id")
+  paymentId   Int?          @map("payment_id")
+  refundNo    String        @unique @map("refund_no") @db.VarChar(50)
+  amount      Decimal       @db.Decimal(12, 2)
+  reason      String?       @db.VarChar(500)
+  status      RefundStatus  @default(PENDING)
+  gatewayRefundNo String?   @map("gateway_refund_no") @db.VarChar(100)
+  processedAt DateTime?     @map("processed_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  payment Payment? @relation(fields: [paymentId], references: [id])
+
+  @@index([orderId])
+  @@map("refunds")
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  REJECTED
 }
 
 // ========== 购物车 ==========
