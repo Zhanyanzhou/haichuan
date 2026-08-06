@@ -35,14 +35,8 @@ function mapApiProduct(p: any, catMap: Map<number, string>): CatalogProduct {
     scene: p.salesMode || '',
     images: (p.images || []).map((img: any) => img.url || ''),
     categoryName: catMap.get(p.categoryId) || '',
+    price: Number(p.price) || 0,
   };
-}
-
-// 扩展 CatalogProduct 以携带 categoryName
-declare module '@/data/catalogData' {
-  interface CatalogProduct {
-    categoryName?: string;
-  }
 }
 
 /**

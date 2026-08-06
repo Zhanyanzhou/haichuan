@@ -92,6 +92,8 @@ export interface CatalogProduct {
   series: string;
   scene: string;
   images: string[];
+  categoryName?: string;
+  price?: number;
 }
 
 /** 按货号获取产品图片路径（兜底） */
