@@ -20,6 +20,7 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { SelectionInquiryModule } from './modules/selection-inquiry/selection-inquiry.module';
 import { LeadsModule } from './modules/leads/leads.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { HomepageModule } from './modules/homepage/homepage.module';
 import { ContentSlotsModule } from './modules/content-slots/content-slots.module';
 import { PageModulesModule } from './modules/page-modules/page-modules.module';
@@ -57,6 +58,7 @@ import { KimiModule } from './common/kimi/kimi.module';
     SettingsModule,
     SelectionInquiryModule,
     LeadsModule,
+    AnalyticsModule,
   ],
   providers: [
     // 全局启用 ThrottlerGuard
