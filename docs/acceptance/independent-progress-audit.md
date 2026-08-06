@@ -76,7 +76,7 @@
 | 客户前台页面 | 当前数据源 | 是否真实 API | 是否存在静态回退 | 判定 |
 |---|---|---|---|---|
 | 首页 (/) | `usePublishedModules('home')` + `usePublishedSlots` | ✅ 真实 API | ❌ 无回退 | ✅ |
-| 商品列表 (/products) | `collections.ts` — **静态数据** | ❌ 静态 | ❌ 无 API 调用 | ❌ |
+| 商品列表 (/products) | `productApi.getList({status:'PUBLISHED'})` — **真实API** ✅ | ✅ 真实 | ❌ 无 (HC-11B 修复) |
 | 商品详情 (/products/:id) | `productApi.getById(id)` | ✅ 真实 API | ❌ | ✅ |
 | 选款中心 (/catalog) | `useProductData()` → `productApi.getList` | ✅ 真实 API | ❌ (HC-FRONTEND-05 已移除) | ✅ |
 | 搜索 (/search) | `useProductData()` → `productApi.getList` | ✅ 真实 API | ❌ | ✅ |
