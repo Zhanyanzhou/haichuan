@@ -131,7 +131,7 @@ function useFiltered(p: URLParams, products: CatalogProduct[]) {
     }
     if (p.materials.length) list = list.filter(x => p.materials.includes(x.material));
     return list;
-  }, [p]);
+  }, [p, products]);
 }
 
 function useSorted(list: CatalogProduct[], sort: string) {
@@ -454,7 +454,7 @@ function ProductGrid({ products, page, onQuickView }: {
                 </p>
                 {p.name && <p style={{ fontSize: 13, color: T.txt, margin: '0 0 4px', lineHeight: 1.4 }}>{p.name}</p>}
                 <p style={{ fontSize: 12, color: T.sec, margin: '0 0 3px', lineHeight: 1.6 }}>
-                  {catName(p.primaryCategoryId)}{p.secondaryCategoryId ? ` · ${subName(p.secondaryCategoryId)}` : ''}
+                  {p.categoryName || ''}
                 </p>
                 <p style={{ fontSize: 12, color: T.sec, margin: '0 0 10px', lineHeight: 1.6 }}>
                   {[p.material, p.craft, p.weight].filter(Boolean).join(' · ')}
@@ -503,8 +503,7 @@ function QuickView({ product, onClose }: { product: CatalogProduct | null; onClo
         <h2 style={{ fontSize: 18, fontWeight: 400, color: T.txt, margin: '0 0 4px' }}>{product.sku}</h2>
         {product.name && <p style={{ fontSize: 16, color: T.txt, margin: '0 0 16px', lineHeight: 1.5 }}>{product.name}</p>}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 20px', marginBottom: 24 }}>
-          <Info label="品类" value={catName(product.primaryCategoryId)} />
-          <Info label="分类" value={subName(product.secondaryCategoryId)} />
+          <Info label="品类" value={product.categoryName || ''} />
           {product.material && <Info label="材质" value={product.material} />}
           {product.craft && <Info label="工艺" value={product.craft} />}
           {product.weight && <Info label="重量" value={product.weight} />}
@@ -604,7 +603,6 @@ function StickyBar({ category, total, sort, selCount, onSort, categories }: {
         <span style={{ fontSize: 12, color: T.txt }}>{path}</span>
         <span style={{ fontSize: 11, color: T.sec }}>{total} 款</span>
         <div style={{ flex: 1 }} />
-        <button onClick={onOpenMore} style={{ background: 'none', border: 0, cursor: 'pointer', fontSize: 12, color: T.sec, minHeight: 44, paddingInline: 8 }}>筛选</button>
         <select value={sort} onChange={e => onSort(e.target.value)} style={{ background: 'transparent', border: 0, outline: 'none', fontSize: 12, color: T.sec, cursor: 'pointer', WebkitAppearance: 'none', appearance: 'none' }}>
           <option value="recommended">推荐</option><option value="newest">最新</option><option value="sku">货号</option>
         </select>

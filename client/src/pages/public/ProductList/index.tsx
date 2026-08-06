@@ -103,10 +103,12 @@ export default function ProductList() {
     setLoading(true);
     setError(false);
     try {
-      const res = await productApi.getList({ status: 'PUBLISHED', pageSize: 50 });
+      const res = await productApi.getList({ status: 'PUBLISHED', pageSize: 200 });
       const data = unwrapResponse<any>(res);
       const list: any[] = data?.list || data || [];
-      setProducts(list.map(mapProduct));
+      // 只展示有简介的精品（排除纯选款货号）
+      const curated = list.filter((p: any) => p.shortDescription);
+      setProducts(curated.map(mapProduct));
     } catch {
       setError(true);
       setProducts(null);
