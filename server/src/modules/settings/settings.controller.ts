@@ -21,4 +21,14 @@ export class SettingsController {
 
   @ApiOperation({ summary: '获取系统日志' })
   @Get('logs') getLogs(@Query() query: any) { return this.settingsService.getLogs(query); }
+
+  @ApiOperation({ summary: '获取功能开关' })
+  @Get('flags') getFlags() {
+    return {
+      commerceEnabled: false,
+      cartEnabled: false,
+      paymentEnabled: false,
+      analyticsDashboardEnabled: false,
+    };
+  }
 }
