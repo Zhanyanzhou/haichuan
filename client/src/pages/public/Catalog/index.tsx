@@ -524,7 +524,9 @@ function ProductGrid({ products, page, onQuickView }: {
         .catalog-matrix {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 0;
+          column-gap: 0;
+          row-gap: 1px;
+          background: ${T.line};
           width: 100%;
         }
         @media (min-width: 1280px) {
@@ -535,7 +537,6 @@ function ProductGrid({ products, page, onQuickView }: {
           width: 100%;
           height: 100%;
           box-sizing: border-box;
-          border-bottom: 1px solid ${T.line};
           border-right: 1px solid ${T.line};
           padding: clamp(16px, 3vw, 28px);
         }
