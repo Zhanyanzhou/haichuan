@@ -1,0 +1,232 @@
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { inquiriesApi } from '@/services/api';
+
+const T = { bg: '#FFFFFF', txt: '#29241F', sec: 'rgba(41,36,31,0.58)', light: 'rgba(41,36,31,0.38)', line: '#E8E7E3', gold: '#B8944E', warmBg: '#FAF9F7' };
+const MW = 1120;
+const PX = 'clamp(24px,5vw,64px)';
+
+const CONSULT_TYPES = ['选款建议', '高级定制', '旧款改造', '尺寸调整', '售后保养', '到店咨询', '其他'];
+const CONTACT_METHODS = ['电话', '短信'];
+const TIME_OPTIONS = ['上午 (9:00-12:00)', '下午 (14:00-18:00)', '晚上 (18:00-20:00)'];
+const BUDGET_OPTIONS = ['', '1万以下', '1-5万', '5-10万', '10-30万', '30万以上', '暂不透露'];
+
+const SERVICES = [
+  { title: '选款建议', desc: '根据佩戴需求、场景、预算和审美偏好，提供一对一珠宝作品建议。' },
+  { title: '高级定制', desc: '围绕设计灵感、材质、宝石、尺寸和工艺，进行一对一深入沟通。' },
+  { title: '旧款改造与售后', desc: '咨询旧款重制、尺寸调整、日常保养和专业维修服务。' },
+];
+
+const CONTACT_INFO = [
+  { label: '服务热线', value: '400-888-8888', href: 'tel:400-888-8888' },
+  { label: '电子邮箱', value: 'contact@haichuan.com' },
+  { label: '总部地址', value: '深圳市罗湖区水贝珠宝产业园A座18楼' },
+  { label: '服务时间', value: '周一至周日 09:00 - 18:00' },
+];
+
+const FAQS = [
+  { q: '提交预约后多久会与我联系？', a: '我们将在收到预约后尽快与您联系，通常不超过一个工作日。' },
+  { q: '是否支持到店咨询？', a: '支持。您可以在预约时选择"到店咨询"，我们将为您安排专属顾问接待。' },
+  { q: '是否可以线上沟通？', a: '可以。请选择您方便的联系方式，我们的顾问会通过电话或短信与您沟通。' },
+  { q: '是否支持旧款改造？', a: '支持。我们提供旧款重制、尺寸调整、翻新保养等服务，请在需求中描述具体情况。' },
+];
+
+const inputS: React.CSSProperties = { width: '100%', height: 44, paddingInline: 12, border: `1px solid ${T.line}`, fontSize: 14, color: T.txt, background: T.bg, outline: 'none', boxSizing: 'border-box' };
+const selS: React.CSSProperties = { ...inputS, cursor: 'pointer', appearance: 'none', WebkitAppearance: 'none' };
+const lblS: React.CSSProperties = { fontSize: 12, color: T.sec, marginBottom: 4, display: 'block' };
+
+export default function Contact() {
+  const [form, setForm] = useState({ name: '', phone: '', consultationType: '', preferredContact: '电话', preferredTime: '', budgetRange: '', message: '', privacyConsent: false });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+
+  const set = (key: string, value: any) => {
+    setForm(f => ({ ...f, [key]: value }));
+    if (errors[key]) setErrors(e => { const n = { ...e }; delete n[key]; return n; });
+  };
+
+  const validate = () => {
+    const e: Record<string, string> = {};
+    if (!form.name.trim()) e.name = '请输入姓名';
+    if (!/^1[3-9]\d{9}$/.test(form.phone.trim())) e.phone = '请输入正确的手机号码';
+    if (!form.consultationType) e.consultationType = '请选择咨询类型';
+    if (!form.preferredTime) e.preferredTime = '请选择方便联系的时间';
+    if (!form.message.trim() || form.message.trim().length < 10) e.message = '请至少输入10个字描述您的需求';
+    if (!form.privacyConsent) e.privacyConsent = '请阅读并同意隐私说明';
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const handleSubmit = async () => {
+    if (!validate()) return;
+    setSubmitting(true);
+    setSubmitError('');
+    try {
+      await inquiriesApi.submit({
+        name: form.name.trim(), phone: form.phone.trim(),
+        consultationType: form.consultationType, preferredContact: form.preferredContact,
+        preferredTime: form.preferredTime, budgetRange: form.budgetRange || undefined,
+        message: form.message.trim(), privacyConsent: true,
+      });
+      setSubmitted(true);
+    } catch (err: any) {
+      setSubmitError(err?.message || '提交失败，请稍后再试');
+    } finally { setSubmitting(false); }
+  };
+
+  if (submitted) {
+    return (
+      <div style={{ background: T.warmBg, minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', maxWidth: 480, padding: '40px 24px' }}>
+          <div style={{ width: 56, height: 56, borderRadius: '50%', background: T.gold, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, marginBottom: 24 }}>✓</div>
+          <h2 style={{ fontSize: 24, fontWeight: 400, color: T.txt, marginBottom: 12 }}>预约已提交</h2>
+          <p style={{ fontSize: 14, color: T.sec, marginBottom: 32, lineHeight: 1.6 }}>私人顾问将根据您提供的联系方式与您联系，请保持手机畅通。</p>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+            <Link to="/" style={{ padding: '10px 28px', border: `1px solid ${T.line}`, fontSize: 13, color: T.txt, textDecoration: 'none' }}>返回首页</Link>
+            <Link to="/catalog" style={{ padding: '10px 28px', border: `1px solid ${T.line}`, fontSize: 13, color: T.txt, textDecoration: 'none' }}>浏览珠宝作品</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: T.bg }}>
+      {/* ═══ 标题区（紧凑） ═══ */}
+      <section style={{ padding: 'clamp(32px,5vh,56px) 0 clamp(20px,3vh,32px)', borderBottom: `1px solid ${T.line}` }}>
+        <div style={{ maxWidth: MW, marginInline: 'auto', paddingInline: PX }}>
+          <p style={{ fontSize: 10, letterSpacing: '0.16em', color: T.light, marginBottom: 6, textTransform: 'uppercase' }}>PRIVATE CONSULTATION</p>
+          <h1 style={{ fontSize: 'clamp(22px,2.8vw,32px)', fontWeight: 400, color: T.txt, margin: '0 0 8px', letterSpacing: '0.04em' }}>预约私人顾问</h1>
+          <p style={{ fontSize: 14, color: T.sec, margin: 0, maxWidth: 480 }}>无论是选款、定制还是旧款改造，我们将根据您的需求提供一对一建议。</p>
+        </div>
+      </section>
+
+      {/* ═══ 主体：左40% 右60% ═══ */}
+      <section style={{ paddingBlock: 'clamp(36px,5vh,64px)' }}>
+        <div className="contact-grid" style={{ maxWidth: MW, marginInline: 'auto', paddingInline: PX, display: 'grid', gridTemplateColumns: 'minmax(0,2fr) minmax(0,3fr)', gap: 'clamp(32px,5vw,64px)' }}>
+          {/* 左侧 */}
+          <div>
+            <div style={{ marginBottom: 36 }}>
+              <p style={{ fontSize: 11, letterSpacing: '0.12em', color: T.light, marginBottom: 20 }}>我们的服务</p>
+              {SERVICES.map((s, i) => (
+                <div key={i} style={{ marginBottom: i < SERVICES.length - 1 ? 24 : 0 }}>
+                  <p style={{ fontSize: 15, fontWeight: 400, color: T.txt, margin: '0 0 4px' }}>
+                    <span style={{ color: T.gold, marginRight: 8, fontWeight: 300 }}>0{i + 1}</span>{s.title}
+                  </p>
+                  <p style={{ fontSize: 12, color: T.sec, margin: 0, lineHeight: 1.6 }}>{s.desc}</p>
+                </div>
+              ))}
+            </div>
+            <div style={{ borderTop: `1px solid ${T.line}`, marginBottom: 28 }} />
+            <div style={{ marginBottom: 28 }}>
+              <p style={{ fontSize: 11, letterSpacing: '0.12em', color: T.light, marginBottom: 14 }}>联系方式</p>
+              {CONTACT_INFO.map((c, i) => (
+                <div key={i} style={{ marginBottom: 10, fontSize: 13 }}>
+                  <span style={{ color: T.light, marginRight: 8 }}>{c.label}</span>
+                  {c.href ? <a href={c.href} style={{ color: T.txt, textDecoration: 'none' }}>{c.value}</a> : <span style={{ color: T.txt }}>{c.value}</span>}
+                </div>
+              ))}
+            </div>
+            <div style={{ borderTop: `1px solid ${T.line}`, paddingTop: 20 }}>
+              <p style={{ fontSize: 11, letterSpacing: '0.12em', color: T.light, marginBottom: 10 }}>预约流程</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: T.sec, flexWrap: 'wrap' }}>
+                <span>提交预约</span><span style={{ color: T.light }}>→</span>
+                <span>顾问联系</span><span style={{ color: T.light }}>→</span>
+                <span>确认需求</span>
+              </div>
+              <p style={{ fontSize: 11, color: T.light, marginTop: 8 }}>我们将在一个工作日内与您联系。</p>
+            </div>
+          </div>
+
+          {/* 右侧：表单 */}
+          <div>
+            <div style={{ background: T.warmBg, padding: 'clamp(24px,4vw,40px)', border: `1px solid ${T.line}` }}>
+              <div className="contact-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                <div><label style={lblS}>姓名 <span style={{ color: T.gold }}>*</span></label>
+                  <input style={{ ...inputS, borderColor: errors.name ? '#c0392b' : T.line }} value={form.name} onChange={e => set('name', e.target.value)} placeholder="您的姓名" />
+                  {errors.name && <p style={{ fontSize: 11, color: '#c0392b', margin: '2px 0 0' }}>{errors.name}</p>}
+                </div>
+                <div><label style={lblS}>手机号码 <span style={{ color: T.gold }}>*</span></label>
+                  <input style={{ ...inputS, borderColor: errors.phone ? '#c0392b' : T.line }} value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="11位手机号" maxLength={11} type="tel" />
+                  {errors.phone && <p style={{ fontSize: 11, color: '#c0392b', margin: '2px 0 0' }}>{errors.phone}</p>}
+                </div>
+              </div>
+              <div className="contact-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                <div><label style={lblS}>咨询类型 <span style={{ color: T.gold }}>*</span></label>
+                  <select style={{ ...selS, borderColor: errors.consultationType ? '#c0392b' : T.line }} value={form.consultationType} onChange={e => set('consultationType', e.target.value)}>
+                    <option value="" disabled>请选择</option>
+                    {CONSULT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  {errors.consultationType && <p style={{ fontSize: 11, color: '#c0392b', margin: '2px 0 0' }}>{errors.consultationType}</p>}
+                </div>
+                <div><label style={lblS}>希望的联系方式</label>
+                  <select style={selS} value={form.preferredContact} onChange={e => set('preferredContact', e.target.value)}>
+                    {CONTACT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="contact-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                <div><label style={lblS}>方便联系的时间 <span style={{ color: T.gold }}>*</span></label>
+                  <select style={{ ...selS, borderColor: errors.preferredTime ? '#c0392b' : T.line }} value={form.preferredTime} onChange={e => set('preferredTime', e.target.value)}>
+                    <option value="" disabled>请选择</option>
+                    {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  {errors.preferredTime && <p style={{ fontSize: 11, color: '#c0392b', margin: '2px 0 0' }}>{errors.preferredTime}</p>}
+                </div>
+                <div><label style={lblS}>预算范围（选填）</label>
+                  <select style={selS} value={form.budgetRange} onChange={e => set('budgetRange', e.target.value)}>
+                    {BUDGET_OPTIONS.map(b => <option key={b} value={b}>{b || '请选择（选填）'}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <label style={lblS}>需求描述 <span style={{ color: T.gold }}>*</span></label>
+                <textarea style={{ ...inputS, height: 100, paddingBlock: 10, resize: 'vertical', borderColor: errors.message ? '#c0392b' : T.line }}
+                  value={form.message} onChange={e => set('message', e.target.value)}
+                  placeholder="请描述您的具体需求，例如：佩戴场合、偏好的材质和风格、特殊要求等…" />
+                {errors.message && <p style={{ fontSize: 11, color: '#c0392b', margin: '2px 0 0' }}>{errors.message}</p>}
+              </div>
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', fontSize: 12, color: errors.privacyConsent ? '#c0392b' : T.sec }}>
+                  <input type="checkbox" checked={form.privacyConsent} onChange={e => set('privacyConsent', e.target.checked)} style={{ marginTop: 2, accentColor: T.gold }} />
+                  <span>我已阅读并同意<a href="#" style={{ color: T.txt, textDecoration: 'underline' }}>隐私说明</a>，提交的姓名、电话和需求仅用于预约联系与服务处理。</span>
+                </label>
+              </div>
+              {submitError && <p style={{ fontSize: 12, color: '#c0392b', marginBottom: 12 }}>{submitError}</p>}
+              <button onClick={handleSubmit} disabled={submitting}
+                style={{ width: '100%', height: 46, border: 'none', cursor: submitting ? 'not-allowed' : 'pointer', background: submitting ? T.sec : T.gold, color: '#fff', fontSize: 14, letterSpacing: '0.08em', opacity: submitting ? 0.7 : 1 }}>
+                {submitting ? '正在提交…' : '提交预约'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ═══ FAQ ═══ */}
+      <section style={{ padding: 'clamp(28px,4vh,48px) 0 clamp(48px,7vh,80px)', borderTop: `1px solid ${T.line}` }}>
+        <div style={{ maxWidth: MW, marginInline: 'auto', paddingInline: PX }}>
+          <p style={{ fontSize: 11, letterSpacing: '0.12em', color: T.light, marginBottom: 20 }}>常见问题</p>
+          <div style={{ display: 'grid', gap: 16 }}>
+            {FAQS.map((faq, i) => (
+              <div key={i} style={{ paddingBottom: i < FAQS.length - 1 ? 16 : 0, borderBottom: i < FAQS.length - 1 ? `1px solid ${T.line}` : 'none' }}>
+                <p style={{ fontSize: 14, fontWeight: 400, color: T.txt, margin: '0 0 4px' }}>{faq.q}</p>
+                <p style={{ fontSize: 13, color: T.sec, margin: 0, lineHeight: 1.6 }}>{faq.a}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <style>{`
+        @media (max-width: 767px) {
+          .contact-grid { grid-template-columns: 1fr !important; }
+          .contact-grid > div:first-child { order: 2; }
+          .contact-grid > div:last-child { order: 1; }
+          .contact-row { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
+    </div>
+  );
+}

@@ -1,0 +1,78 @@
+import { useState, useEffect } from 'react';
+import { Card, Table, Button, Tag, Space, Select, Modal, InputNumber, message } from 'antd';
+import { ExportOutlined } from '@ant-design/icons';
+import { inventoryApi } from '@/services/api';
+import { unwrapResponse } from '@/utils/unwrap';
+
+const sm: Record<string, { c: string; t: string }> = { normal: { c: 'green', t: '正常' }, low: { c: 'gold', t: '偏低' }, out: { c: 'red', t: '缺货' } };
+
+export default function Inventory() {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState('all');
+  const [adjustModal, setAdjustModal] = useState<{ open: boolean; record: any }>({ open: false, record: null });
+  const [adjustQty, setAdjustQty] = useState(0);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await inventoryApi.getList({ pageSize: 50 });
+      const data = unwrapResponse(res);
+      setItems(data?.list || []);
+    } catch { setItems([]); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const filtered = filter === 'all' ? items : items.filter(i => i.status === filter);
+
+  const handleAdjust = async () => {
+    if (!adjustModal.record) return;
+    try {
+      await inventoryApi.update(adjustModal.record.id, { quantity: adjustQty });
+      message.success('库存已调整');
+      setAdjustModal({ open: false, record: null });
+      load();
+    } catch (e: any) { message.error(e?.message || '调整失败'); }
+  };
+
+  const stats = [
+    { t: '库存总数', v: items.length },
+    { t: '正常', v: items.filter(i => i.status === 'normal').length },
+    { t: '偏低', v: items.filter(i => i.status === 'low').length },
+    { t: '缺货', v: items.filter(i => i.status === 'out').length },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between"><div><h1 className="text-2xl font-display font-semibold text-brand-text">库存管理</h1><p className="text-sm text-brand-muted mt-1">多仓库 · 安全预警</p></div>
+        <Space><Select value={filter} onChange={setFilter} className="w-32"><Select.Option value="all">全部</Select.Option><Select.Option value="normal">正常</Select.Option><Select.Option value="low">偏低</Select.Option><Select.Option value="out">缺货</Select.Option></Select><Button icon={<ExportOutlined />}>导出</Button></Space></div>
+      <div className="grid grid-cols-4 gap-4">
+        {stats.map(s => (
+          <div key={s.t} className="bg-white border border-brand-line p-4"><p className="text-xs text-brand-muted">{s.t}</p><p className="text-xl font-sans font-bold text-brand-text mt-1">{s.v}</p></div>
+        ))}
+      </div>
+      <Card className="!bg-white !border-brand-line">
+        <Table dataSource={filtered} rowKey="id" loading={loading} pagination={false} size="middle"
+          columns={[
+            { title: 'SKU', dataIndex: 'skuCode', render: (v: string) => <code className="text-xs text-brand-gold">{v}</code> },
+            { title: '产品', dataIndex: 'productName' },
+            { title: '仓库', dataIndex: 'warehouse', render: (v: string) => <Tag>{v}</Tag> },
+            { title: '库存', dataIndex: 'quantity', render: (v: number, r: any) => <span className={`font-sans font-bold ${r.status === 'out' ? 'text-red-400' : r.status === 'low' ? 'text-brand-gold' : 'text-brand-text'}`}>{v}</span> },
+            { title: '状态', dataIndex: 'status', render: (v: string) => { const s = sm[v]; return <Tag color={s?.c}>{s?.t}</Tag>; } },
+            { title: '操作', render: (_: any, r: any) => <Button size="small" type="primary" onClick={() => { setAdjustQty(r.quantity); setAdjustModal({ open: true, record: r }); }}>调整</Button> },
+          ]} />
+      </Card>
+
+      <Modal title="调整库存" open={adjustModal.open} onCancel={() => setAdjustModal({ open: false, record: null })} onOk={handleAdjust}
+        okText="确认" cancelText="取消" okButtonProps={{ style: { background: '#B8944E', borderColor: '#B8944E' } }}>
+        <div className="py-4">
+          <p className="text-sm text-brand-muted mb-2">产品：{adjustModal.record?.productName}</p>
+          <p className="text-sm text-brand-muted mb-3">SKU：{adjustModal.record?.skuCode}</p>
+          <InputNumber min={0} value={adjustQty} onChange={(v) => setAdjustQty(v || 0)} className="w-full" size="large" />
+        </div>
+      </Modal>
+    </div>
+  );
+}
