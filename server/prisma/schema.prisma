@@ -30,6 +30,7 @@ model User {
   notifications     Notification[]
   Order             Order[]
   selectionInquiries SelectionInquiry[] @relation("Handler")
+  leadFollowUps     LeadFollowUp[]      @relation("Creator")
 
   @@map("users")
 }
@@ -436,11 +437,14 @@ model Inquiry {
   budgetRange       String?       @map("budget_range") @db.VarChar(30)
   message           String        @db.Text
   privacyConsent    Boolean       @default(false) @map("privacy_consent")
-  status            InquiryStatus @default(PENDING)
+  status            String        @default("PENDING") @db.VarChar(20)
   assignedTo        Int?          @map("assigned_to")
   reply             String?       @db.Text
+  internalNote      String?       @map("internal_note") @db.Text
+  nextFollowUpAt    DateTime?     @map("next_follow_up_at")
   repliedAt         DateTime?     @map("replied_at")
   createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
 
   product  Product? @relation(fields: [productId], references: [id])
   assignee User?    @relation("AssignedTo", fields: [assignedTo], references: [id])
@@ -650,8 +654,10 @@ model SelectionInquiry {
   wechat       String?           @db.VarChar(50)
   message      String?           @db.Text
   status       String            @default("PENDING") @db.VarChar(20)
+  internalNote String?           @map("internal_note") @db.Text
   handledBy    Int?              @map("handled_by")
   handledAt    DateTime?         @map("handled_at")
+  nextFollowUpAt DateTime?       @map("next_follow_up_at")
   createdAt    DateTime          @default(now()) @map("created_at")
   updatedAt    DateTime          @updatedAt @map("updated_at")
 
@@ -675,4 +681,22 @@ model SelectionInquiryItem {
   product Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@map("selection_inquiry_items")
+}
+
+// ========== 统一线索跟进记录 ==========
+
+model LeadFollowUp {
+  id             Int      @id @default(autoincrement())
+  leadType       String   @db.VarChar(30)   // "inquiry" | "selection_inquiry"
+  leadId         Int      @map("lead_id")
+  content        String   @db.Text
+  contactMethod  String?  @map("contact_method") @db.VarChar(30) // phone | wechat | email | store | other
+  nextFollowUpAt DateTime? @map("next_follow_up_at")
+  createdBy      Int?     @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  creator User? @relation("Creator", fields: [createdBy], references: [id])
+
+  @@index([leadType, leadId])
+  @@map("lead_follow_ups")
 }

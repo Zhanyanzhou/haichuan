@@ -36,6 +36,7 @@ const MediaLibrary = lazy(() => import('@/pages/admin/MediaLibrary'));
 const AuditLogs = lazy(() => import('@/pages/admin/AuditLogs'));
 const SiteContent = lazy(() => import('@/pages/admin/SiteContent'));
 const SelectionInquiry = lazy(() => import('@/pages/admin/SelectionInquiry'));
+const LeadManage = lazy(() => import('@/pages/admin/LeadManage'));
 
 const Loading = () => (
   <div className="flex items-center justify-center min-h-screen bg-brand-bg">
@@ -86,6 +87,7 @@ function App() {
           <Route path="audit-logs" element={<AuditLogs />} />
           <Route path="site-content" element={<SiteContent />} />
           <Route path="selection-inquiry" element={<SelectionInquiry />} />
+          <Route path="leads" element={<LeadManage />} />
         </Route>
 
         {/* Login */}
