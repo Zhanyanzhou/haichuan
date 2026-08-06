@@ -1,5 +1,80 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { CreateProductDto, UpdateProductDto } from './dto';
+import { Prisma } from '@prisma/client';
+
+/** 从 DTO 提取 Prisma create 数据，过滤关系字段和系统字段 */
+function mapCreateDto(dto: CreateProductDto): Prisma.ProductCreateInput {
+  const {
+    code, name, categoryId,
+    shortDescription, description,
+    materialType, goldWeight, craftFee,
+    price, priceMin, priceMax, weight, size,
+    gemInfo, craftTechnique,
+    status, salesMode, sortOrder,
+    isHot, isNew, isRecommended, isLimited, isCustom,
+  } = dto;
+
+  return {
+    code,
+    name,
+    category: { connect: { id: categoryId } },
+    shortDescription: shortDescription ?? null,
+    description: description ?? null,
+    materialType: materialType ?? 'GOLD_999',
+    goldWeight: goldWeight ?? 0,
+    craftFee: craftFee ?? 0,
+    price: price ?? 0,
+    priceMin: priceMin ?? 0,
+    priceMax: priceMax ?? 0,
+    weight: weight ?? 0,
+    size: size ?? null,
+    gemInfo: gemInfo ?? undefined,
+    craftTechnique: craftTechnique ?? undefined,
+    status: status ?? 'DRAFT',
+    salesMode: salesMode ?? 'DISPLAY_ONLY',
+    sortOrder: sortOrder ?? 0,
+    isHot: isHot ?? false,
+    isNew: isNew ?? false,
+    isRecommended: isRecommended ?? false,
+    isLimited: isLimited ?? false,
+    isCustom: isCustom ?? false,
+    viewCount: 0,
+    salesCount: 0,
+  };
+}
+
+/** 从 DTO 提取 Prisma update 数据，仅包含前端传入的字段 */
+function mapUpdateDto(dto: UpdateProductDto): Prisma.ProductUpdateInput {
+  const data: Prisma.ProductUpdateInput = {};
+
+  if (dto.name !== undefined) data.name = dto.name;
+  if (dto.categoryId !== undefined) {
+    data.category = { connect: { id: dto.categoryId } };
+  }
+  if (dto.shortDescription !== undefined) data.shortDescription = dto.shortDescription;
+  if (dto.description !== undefined) data.description = dto.description;
+  if (dto.materialType !== undefined) data.materialType = dto.materialType;
+  if (dto.goldWeight !== undefined) data.goldWeight = dto.goldWeight;
+  if (dto.craftFee !== undefined) data.craftFee = dto.craftFee;
+  if (dto.price !== undefined) data.price = dto.price;
+  if (dto.priceMin !== undefined) data.priceMin = dto.priceMin;
+  if (dto.priceMax !== undefined) data.priceMax = dto.priceMax;
+  if (dto.weight !== undefined) data.weight = dto.weight;
+  if (dto.size !== undefined) data.size = dto.size;
+  if (dto.gemInfo !== undefined) data.gemInfo = dto.gemInfo;
+  if (dto.craftTechnique !== undefined) data.craftTechnique = dto.craftTechnique;
+  if (dto.status !== undefined) data.status = dto.status;
+  if (dto.salesMode !== undefined) data.salesMode = dto.salesMode;
+  if (dto.sortOrder !== undefined) data.sortOrder = dto.sortOrder;
+  if (dto.isHot !== undefined) data.isHot = dto.isHot;
+  if (dto.isNew !== undefined) data.isNew = dto.isNew;
+  if (dto.isRecommended !== undefined) data.isRecommended = dto.isRecommended;
+  if (dto.isLimited !== undefined) data.isLimited = dto.isLimited;
+  if (dto.isCustom !== undefined) data.isCustom = dto.isCustom;
+
+  return data;
+}
 
 @Injectable()
 export class ProductsService {
@@ -73,12 +148,57 @@ export class ProductsService {
     });
   }
 
-  async create(data: any) {
-    return this.prisma.product.create({ data });
+  async create(dto: CreateProductDto) {
+    // 检查分类是否存在
+    const category = await this.prisma.category.findUnique({ where: { id: dto.categoryId } });
+    if (!category) {
+      throw new BadRequestException('所选商品分类不存在，请重新选择');
+    }
+
+    const data = mapCreateDto(dto);
+
+    try {
+      return await this.prisma.product.create({ data });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new ConflictException('该商品货号已存在，请更换货号');
+        }
+      }
+      throw error;
+    }
   }
 
-  async update(id: number, data: any) {
-    return this.prisma.product.update({ where: { id }, data });
+  async update(id: number, dto: UpdateProductDto) {
+    // 检查商品是否存在
+    const existing = await this.prisma.product.findUnique({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException('商品不存在');
+    }
+
+    // 检查分类是否存在
+    if (dto.categoryId !== undefined) {
+      const category = await this.prisma.category.findUnique({ where: { id: dto.categoryId } });
+      if (!category) {
+        throw new BadRequestException('所选商品分类不存在，请重新选择');
+      }
+    }
+
+    const data = mapUpdateDto(dto);
+
+    try {
+      return await this.prisma.product.update({ where: { id }, data });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new ConflictException('该商品货号已存在，请更换货号');
+        }
+        if (error.code === 'P2025') {
+          throw new NotFoundException('商品不存在');
+        }
+      }
+      throw error;
+    }
   }
   async checkCompleteness(id: number) {
     const product = await this.prisma.product.findUnique({

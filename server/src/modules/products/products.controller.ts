@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Put, Delete, Param, Query, Body, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Query, Body, UseGuards, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
+import { CreateProductDto, UpdateProductDto } from './dto';
 
 @ApiTags('产品管理')
 @Controller('products')
@@ -31,19 +32,16 @@ export class ProductsController {
   @ApiBearerAuth()
   @Post()
   @ApiOperation({ summary: '新增产品' })
-  create(@Body() body: Record<string, unknown>) {
-    if (!body.name) {
-      throw new BadRequestException('产品名称不能为空');
-    }
-    return this.productsService.create(body);
+  async create(@Body() dto: CreateProductDto) {
+    return this.productsService.create(dto);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put(':id')
   @ApiOperation({ summary: '编辑产品' })
-  update(@Param('id') id: string, @Body() body: Record<string, unknown>) {
-    return this.productsService.update(+id, body);
+  async update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
+    return this.productsService.update(+id, dto);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -51,6 +49,10 @@ export class ProductsController {
   @Put(':id/status')
   @ApiOperation({ summary: '更新产品状态' })
   updateStatus(@Param('id') id: string, @Body('status') status: string) {
+    const validStatuses = ['DRAFT', 'PUBLISHED', 'OFFLINE', 'ARCHIVED'];
+    if (!validStatuses.includes(status)) {
+      throw new BadRequestException('商品状态不正确，请重新选择');
+    }
     const data: any = { status };
     if (status === 'PUBLISHED') data.publishedAt = new Date();
     return this.productsService.update(+id, data);

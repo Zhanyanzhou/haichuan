@@ -8,7 +8,7 @@
 
 | # | 问题 | 影响阶段 | 证据 |
 |---|---|---|---|
-| P0-1 | POST /api/products → 400 (ValidationPipe whitelist) | PRODUCT-02 | 创建商品不可用 |
+| P0-1 | ~~POST /api/products → 400 (ValidationPipe whitelist)~~ ✅ 已修复 (HC-PRODUCT-CONTRACT-FIX-11A) | PRODUCT-02 | 创建商品不可用 |
 | P0-2 | 无客户前台选款提交流程 | CRM-04, FRONTEND-05 | 选款咨询链路全断 |
 | P0-3 | 无支付网关对接 | TRANSACTION-09 | 不具备真实支付能力 |
 
