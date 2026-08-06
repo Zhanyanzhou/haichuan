@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Tabs, Spin, message } from 'antd';
 import { HeartOutlined, ShoppingCartOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { getMaterialLabel } from '@/utils/material';
+import { getPrimaryImage, getThumbnailList } from '@/utils/productImage';
 import { productApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import type { Product, ProductSKU } from '@/types';
@@ -76,14 +77,14 @@ export default function ProductDetail() {
           {/* Left: Images */}
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1 }}>
             <div className="aspect-[4/5] bg-brand-bg flex items-center justify-center sticky top-24 border border-brand-line">
-              {product.images?.[mainImage]?.url ? (
-                <img src={product.images[mainImage].url} alt={product.name} className="w-full h-full object-cover" />
+              {getPrimaryImage(product.images) ? (
+                <img src={getPrimaryImage(product.images)} alt={product.name} className="w-full h-full object-cover" />
               ) : (
                 <span className="text-7xl text-brand-gold/20">◆</span>
               )}
             </div>
             <div className="flex gap-3 mt-4">
-              {product.images?.map((img, i) => (
+              {getThumbnailList(product.images).map((img, i) => (
                 <div key={img.id} onClick={() => setMainImage(i)}
                   className={`w-16 h-16 bg-brand-bg flex items-center justify-center cursor-pointer border transition-colors overflow-hidden ${i === mainImage ? 'border-brand-gold' : 'border-transparent hover:border-brand-gold'}`}>
                   {img.url ? <img src={img.url} alt="" className="w-full h-full object-cover" /> : <span className="text-xs text-brand-muted">图{i + 1}</span>}

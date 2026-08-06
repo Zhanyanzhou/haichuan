@@ -163,6 +163,7 @@ model ProductImage {
   productId Int       @map("product_id")
   url       String    @db.VarChar(500)
   type      ImageType @default(FRONT) // 正面/侧面/顶部/视频
+  role      ImageRole?
   sortOrder Int       @default(0) @map("sort_order")
   isVideo   Boolean   @default(false) @map("is_video")
   createdAt DateTime  @default(now()) @map("created_at")
@@ -178,6 +179,13 @@ enum ImageType {
   TOP
   DETAIL
   WEARING
+}
+
+enum ImageRole {
+  ORIGINAL
+  PRIMARY
+  LISTING
+  THUMBNAIL
 }
 
 // ========== 产品SKU ==========

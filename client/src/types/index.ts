@@ -86,6 +86,7 @@ export interface ProductImage {
   productId: number;
   url: string;
   type: 'FRONT' | 'SIDE' | 'TOP' | 'DETAIL' | 'WEARING';
+  role?: 'ORIGINAL' | 'PRIMARY' | 'LISTING' | 'THUMBNAIL' | null;
   sortOrder: number;
   isVideo: boolean;
 }
