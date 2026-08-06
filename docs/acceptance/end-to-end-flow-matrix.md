@@ -2,24 +2,25 @@
 
 > 按业务链路追踪起点到终点
 
-## 商品发布链 (HC-PRODUCT-CONTRACT-FIX-11A 更新)
+## 商品发布链 (HC-PRODUCT-SEARCH-DETAIL-CLOSE-11C 更新)
 
 | 步骤 | 状态 | 证据 |
 |---|---|---|
 | 后台新增商品 | ✅ | POST /api/products → 201 |
 | 保存草稿 | ✅ | 数据库写入, 刷新保留 |
-| 刷新存在 | ✅ | 列表中出现, 刷新后保留 |
-| 编辑商品 | ✅ | PUT /api/products/:id → 200 |
-| 编辑后刷新保留 | ✅ | 修改持久化 |
-| 后端重启后保留 | ✅ | MySQL 持久化 |
-| 发布 | ✅ | PUT /status → PUBLISHED |
-| 公共API读取 | ✅ | GET /api/products → 200 |
-| 前台列表出现 | ✅ | ProductList 已接入真实 API (HC-11B) |
-| 搜索可找到 | ✅ | keyword=HC-QA 可搜到 |
-| 详情可打开 | ✅ | /products/:id 可用 |
-| 下架 | ✅ | PUT /status → OFFLINE / DELETE |
-| 前台不再展示 | ✅ | status=PUBLISHED 过滤, 下架后消失 (HC-11B) |
-| **后台写入闭环**: 已完成 ✅ |
+| 草稿不显示 | ✅ | status=PUBLISHED 过滤 |
+| 后台发布商品 | ✅ | PUT /status → PUBLISHED |
+| 商品目录出现 | ✅ | Catalog 使用真实 API + 真实分类 |
+| 按商品名称搜索可找到 | ✅ | Search 客户端筛选 API 数据 |
+| 按货号搜索可找到 | ✅ | SKU 匹配 |
+| 分类筛选可找到 | ✅ | 真实分类 ID 匹配 |
+| 材质筛选可找到 | ✅ | 中文材质标签匹配 |
+| 商品详情可打开 | ✅ | productApi.getById |
+| 后台修改→前台同步 | ✅ | API 实时读取 |
+| 下架后目录/搜索/详情隐藏 | ✅ | status=PUBLISHED 过滤 |
+| 后台仍可查看 | ✅ | 软删除保留 |
+| 后端重启行为不变 | ✅ | MySQL 持久化 |
+| **完整闭环**: ✅ 通过 |
 
 ## 页面发布链
 
