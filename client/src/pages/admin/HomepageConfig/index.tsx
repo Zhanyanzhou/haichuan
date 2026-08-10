@@ -1591,6 +1591,17 @@ export default function HomepageConfig() {
     }
   }, []);
 
+  // 未保存改动时拦截关闭/刷新，避免误丢
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hasUnsavedChanges]);
+
   useEffect(() => {
     if (!hasUnsavedChanges || saving || publishing) return;
     const timer = window.setTimeout(() => {

@@ -1317,6 +1317,18 @@ export default function Home() {
     void refreshDocument(false);
   });
 
+  // 标签页重新可见时主动对齐版本，弥补断网/合盖期间错过的发布事件
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshDocument(false);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [refreshDocument]);
+
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
 

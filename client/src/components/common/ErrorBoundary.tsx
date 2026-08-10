@@ -3,6 +3,8 @@ import { Button } from "antd";
 
 interface Props {
   children: ReactNode;
+  /** 自定义降级 UI；不传则用默认整页错误页。传 null 可静默吞掉错误（用于区块级兜底）。 */
+  fallback?: ReactNode;
 }
 interface State {
   hasError: boolean;
@@ -26,6 +28,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      if (this.props.fallback !== undefined) return this.props.fallback;
       return (
         <div className="min-h-screen flex items-center justify-center bg-brand-bg">
           <div className="text-center max-w-md px-6">

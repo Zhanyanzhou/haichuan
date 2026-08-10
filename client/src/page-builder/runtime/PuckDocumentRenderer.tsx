@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import CarouselBlock from "@/components/blocks/CarouselBlock";
 import CardGridBlock from "@/components/blocks/CardGridBlock";
 import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
@@ -262,11 +263,21 @@ export default function PuckDocumentRenderer({ data }: { data: PuckDocument }) {
           Array.isArray(blocks) ? blocks : [],
         )
       : [];
+  // 区块级兜底：单个 block 运行时抛错只跳过该区块，避免整页白屏
+  const render = (block: PuckBlock, index: number) => {
+    const node = renderBlock(block, index);
+    if (node === null) return null;
+    return (
+      <ErrorBoundary key={`eb-${index}`} fallback={null}>
+        {node}
+      </ErrorBoundary>
+    );
+  };
   return (
     <>
-      {data.content.map(renderBlock)}
+      {data.content.map(render)}
       {zoneBlocks.map((block, index) =>
-        renderBlock(block, data.content!.length + index),
+        render(block, data.content!.length + index),
       )}
     </>
   );
