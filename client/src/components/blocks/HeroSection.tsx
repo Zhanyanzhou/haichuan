@@ -44,10 +44,10 @@ export default function HeroSection({ module, editMode }: Props) {
         </div>
       )}
       <picture>
-        <source media="(max-width:767px)" srcSet={mobileImg} />
+        <source media="(max-width: 1023px) and (orientation: portrait)" srcSet={mobileImg} />
         <img
           src={desktopImg} alt={c?.altText || title}
-          fetchpriority="high" decoding="sync"
+          decoding="sync"
           width={1024} height={1536}
           className="absolute inset-0 w-full h-full object-cover"
           style={{ objectPosition: `${focusX}% ${focusY + 5}%` }}
