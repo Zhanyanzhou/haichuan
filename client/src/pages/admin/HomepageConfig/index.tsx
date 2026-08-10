@@ -647,6 +647,39 @@ function EditorToolbar({
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const currentViewport = viewports.current;
   const initializedViewport = useRef(false);
+  const [undoStack, setUndoStack] = useState<any[]>([]);
+  const [redoStack, setRedoStack] = useState<any[]>([]);
+  const lastDataRef = useRef<any>(appData);
+
+  /* ── Undo/Redo ── */
+  const pushUndo = useCallback((nextData: any) => {
+    const prev = lastDataRef.current;
+    if (prev && JSON.stringify(prev) !== JSON.stringify(nextData)) {
+      setUndoStack((s) => [...s.slice(-49), JSON.parse(JSON.stringify(prev))]);
+      setRedoStack([]);
+    }
+    lastDataRef.current = JSON.parse(JSON.stringify(nextData));
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const prev = undoStack[undoStack.length - 1];
+    const currentSnap = JSON.parse(JSON.stringify(appData));
+    setRedoStack((s) => [...s, currentSnap]);
+    dispatch({ type: "setData", data: prev });
+    setUndoStack((s) => s.slice(0, -1));
+    lastDataRef.current = prev;
+  }, [undoStack, appData, dispatch]);
+
+  const handleRedo = useCallback(() => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    const currentSnap = JSON.parse(JSON.stringify(appData));
+    setUndoStack((s) => [...s, currentSnap]);
+    dispatch({ type: "setData", data: next });
+    setRedoStack((s) => s.slice(0, -1));
+    lastDataRef.current = next;
+  }, [redoStack, appData, dispatch]);
   const saveStatusText =
     autoSaveState === "saving"
       ? "正在自动保存"
@@ -659,8 +692,9 @@ function EditorToolbar({
             : "草稿编辑中";
 
   useEffect(() => {
+    pushUndo(appData);
     onDataChange(appData);
-  }, [appData, onDataChange]);
+  }, [appData]);
 
   const setViewport = (preset: ViewportPreset) => {
     const uiPatch: Partial<UiState> = {
@@ -710,14 +744,16 @@ function EditorToolbar({
         <Button
           size="small"
           icon={<UndoOutlined />}
-          disabled
-          title="撤销（即将支持）"
+          disabled={undoStack.length === 0}
+          onClick={handleUndo}
+          title={`撤销 (${undoStack.length})`}
         />
         <Button
           size="small"
           icon={<RedoOutlined />}
-          disabled
-          title="重做（即将支持）"
+          disabled={redoStack.length === 0}
+          onClick={handleRedo}
+          title={`重做 (${redoStack.length})`}
         />
         <span className="text-gray-300" style={{ margin: "0 4px" }}>|</span>
         <Button
