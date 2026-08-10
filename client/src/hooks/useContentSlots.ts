@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { contentSlotsApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import type { ContentSlot, PublishedSlots } from '@/types/contentSlot';
@@ -35,7 +35,7 @@ export function useDraftSlots(pageKey = 'home') {
   const [slots, setSlots] = useState<PublishedSlots>({});
   const [loading, setLoading] = useState(true);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const res = await contentSlotsApi.getAdminAll(pageKey);
@@ -48,9 +48,9 @@ export function useDraftSlots(pageKey = 'home') {
     } finally {
       setLoading(false);
     }
-  };
+  }, [pageKey]);
 
-  useEffect(() => { refresh(); }, [pageKey]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
   return { slots, loading, refresh };
 }
@@ -60,7 +60,7 @@ export function useAdminSlots(pageKey = 'home') {
   const [slots, setSlots] = useState<ContentSlot[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const res = await contentSlotsApi.getAdminAll(pageKey);
@@ -70,9 +70,9 @@ export function useAdminSlots(pageKey = 'home') {
     } finally {
       setLoading(false);
     }
-  };
+  }, [pageKey]);
 
-  useEffect(() => { refresh(); }, [pageKey]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
   return { slots, loading, refresh };
 }

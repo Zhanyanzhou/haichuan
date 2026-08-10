@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../common/prisma/prisma.service';
+import { Injectable } from "@nestjs/common";
+import { PrismaService } from "../../common/prisma/prisma.service";
 
 const MAX_METADATA_BYTES = 2048;
 
@@ -28,25 +28,35 @@ export class AnalyticsService {
     }
 
     // fire-and-forget: 不阻塞调用方
-    (this.prisma as any).analyticsEvent.create({
-      data: {
-        eventName: event.eventName,
-        pagePath: event.pagePath || null,
-        productId: event.productId || null,
-        searchTerm: event.searchTerm || null,
-        source: event.source || null,
-        deviceType: event.deviceType || null,
-        sessionId: event.sessionId || null,
-        customerId: event.customerId || null,
-        metadata: safeMeta || undefined,
-        occurredAt: new Date(),
-      },
-    }).catch(() => { /* 采集失败静默，不影响业务 */ });
+    this.prisma.analyticsEvent
+      .create({
+        data: {
+          eventName: event.eventName,
+          pagePath: event.pagePath || null,
+          productId: event.productId || null,
+          searchTerm: event.searchTerm || null,
+          source: event.source || null,
+          deviceType: event.deviceType || null,
+          sessionId: event.sessionId || null,
+          customerId: event.customerId || null,
+          metadata: safeMeta as any,
+          occurredAt: new Date(),
+        },
+      })
+      .catch(() => {
+        /* 采集失败静默 */
+      });
   }
 
-  async getEvents(params: { eventName?: string; page?: number; pageSize?: number; hours?: number }) {
+  async getEvents(params: {
+    eventName?: string;
+    page?: number;
+    pageSize?: number;
+    hours?: number;
+  }) {
     const { eventName, page = 1, pageSize = 50, hours = 24 } = params;
-    const _p = +page, _ps = +pageSize;
+    const _p = +page,
+      _ps = +pageSize;
     const where: any = {};
     if (eventName) where.eventName = eventName;
     if (hours > 0) {
@@ -54,13 +64,13 @@ export class AnalyticsService {
     }
 
     const [list, total] = await Promise.all([
-      (this.prisma as any).analyticsEvent.findMany({
+      this.prisma.analyticsEvent.findMany({
         where,
-        orderBy: { occurredAt: 'desc' },
+        orderBy: { occurredAt: "desc" },
         skip: (_p - 1) * _ps,
         take: _ps,
       }),
-      (this.prisma as any).analyticsEvent.count({ where }),
+      this.prisma.analyticsEvent.count({ where }),
     ]);
 
     return { list, total, page: _p, pageSize: _ps };

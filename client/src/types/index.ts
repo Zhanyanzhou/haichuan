@@ -33,6 +33,8 @@ export interface Category {
   icon?: string;
   coverImage?: string;
   sortOrder: number;
+  isActive?: boolean;
+  _count?: { children: number; products: number };
   children?: Category[];
 }
 
@@ -42,6 +44,7 @@ export interface Product {
   code: string;
   name: string;
   description?: string;
+  shortDescription?: string;
   categoryId: number;
   category?: Category;
   materialType: MaterialType;
@@ -52,6 +55,8 @@ export interface Product {
   priceMax?: number;
   weight?: number;
   size?: string;
+  salesMode?: 'DISPLAY_ONLY' | 'SELECTION' | 'APPOINTMENT' | 'DIRECT_PURCHASE' | 'CUSTOM_INQUIRY';
+  sortOrder?: number;
   gemInfo?: GemInfo;
   craftTechnique?: string[];
   status: ProductStatus;

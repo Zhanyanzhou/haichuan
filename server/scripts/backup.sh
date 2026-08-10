@@ -12,7 +12,7 @@ set -e
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-3306}"
 DB_USER="${DB_USER:-jewelry_user}"
-DB_PASS="${DB_PASS:-REDACTED_DB_PASSWORD}"
+: "${DB_PASS:?DB_PASS must be set}"
 DB_NAME="${DB_NAME:-jewelry_db}"
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 RETENTION_DAYS=7

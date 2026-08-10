@@ -1,22 +1,42 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../common/prisma/prisma.service';
+import { Injectable } from "@nestjs/common";
+import { PrismaService } from "../../common/prisma/prisma.service";
 
-const LEAD_STATUSES = ['PENDING', 'CONTACTED', 'FOLLOWING', 'COMPLETED', 'INVALID'];
+const LEAD_STATUSES = [
+  "PENDING",
+  "CONTACTED",
+  "FOLLOWING",
+  "COMPLETED",
+  "INVALID",
+];
 
 @Injectable()
 export class LeadsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(params: { page?: number; pageSize?: number; status?: string; type?: string; keyword?: string }) {
+  async findAll(params: {
+    page?: number;
+    pageSize?: number;
+    status?: string;
+    type?: string;
+    keyword?: string;
+  }) {
     const { page = 1, pageSize = 20, status, type, keyword } = params;
-    const _page = +page, _pageSize = +pageSize;
+    const _page = +page,
+      _pageSize = +pageSize;
 
     // 聚合两种线索来源
-    const inquiries = type && type !== 'inquiry' ? [] : await this.fetchInquiries({ status, keyword });
-    const selections = type && type !== 'selection' ? [] : await this.fetchSelectionInquiries({ status, keyword });
+    const inquiries =
+      type && type !== "inquiry"
+        ? []
+        : await this.fetchInquiries({ status, keyword });
+    const selections =
+      type && type !== "selection"
+        ? []
+        : await this.fetchSelectionInquiries({ status, keyword });
 
-    const all = [...inquiries, ...selections].sort((a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    const all = [...inquiries, ...selections].sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
 
     const total = all.length;
@@ -34,15 +54,18 @@ export class LeadsService {
         { customerPhone: { contains: filters.keyword } },
       ];
     }
-    const list = await (this.prisma as any).inquiry.findMany({
+    const list = await this.prisma.inquiry.findMany({
       where,
-      include: { product: { select: { id: true, name: true } }, assignee: { select: { id: true, realName: true } } },
-      orderBy: { createdAt: 'desc' },
+      include: {
+        product: { select: { id: true, name: true } },
+        assignee: { select: { id: true, realName: true } },
+      },
+      orderBy: { createdAt: "desc" },
     });
     return list.map((r: any) => ({
       id: r.id,
-      leadType: 'inquiry' as const,
-      leadTypeLabel: '预约咨询',
+      leadType: "inquiry" as const,
+      leadTypeLabel: "预约咨询",
       customerName: r.customerName,
       phone: r.customerPhone,
       email: r.customerEmail,
@@ -59,7 +82,10 @@ export class LeadsService {
     }));
   }
 
-  private async fetchSelectionInquiries(filters: { status?: string; keyword?: string }) {
+  private async fetchSelectionInquiries(filters: {
+    status?: string;
+    keyword?: string;
+  }) {
     const where: any = {};
     if (filters.status) where.status = filters.status;
     if (filters.keyword) {
@@ -68,15 +94,18 @@ export class LeadsService {
         { phone: { contains: filters.keyword } },
       ];
     }
-    const list = await (this.prisma as any).selectionInquiry.findMany({
+    const list = await this.prisma.selectionInquiry.findMany({
       where,
-      include: { items: true, handler: { select: { id: true, realName: true } } },
-      orderBy: { createdAt: 'desc' },
+      include: {
+        items: true,
+        handler: { select: { id: true, realName: true } },
+      },
+      orderBy: { createdAt: "desc" },
     });
     return list.map((r: any) => ({
       id: r.id,
-      leadType: 'selection' as const,
-      leadTypeLabel: '选款咨询',
+      leadType: "selection" as const,
+      leadTypeLabel: "选款咨询",
       customerName: r.customerName,
       phone: r.phone,
       email: r.email,
@@ -95,8 +124,8 @@ export class LeadsService {
   }
 
   async getLeadDetail(leadType: string, leadId: number) {
-    if (leadType === 'inquiry') {
-      const r = await (this.prisma as any).inquiry.findUnique({
+    if (leadType === "inquiry") {
+      const r = await this.prisma.inquiry.findUnique({
         where: { id: leadId },
         include: {
           product: { select: { id: true, name: true, code: true } },
@@ -107,14 +136,14 @@ export class LeadsService {
       const followUps = await this.getFollowUps(leadType, leadId);
       return {
         ...r,
-        leadType: 'inquiry',
-        leadTypeLabel: '预约咨询',
+        leadType: "inquiry",
+        leadTypeLabel: "预约咨询",
         phone: r.customerPhone,
         followUps,
       };
     }
-    if (leadType === 'selection') {
-      const r = await (this.prisma as any).selectionInquiry.findUnique({
+    if (leadType === "selection") {
+      const r = await this.prisma.selectionInquiry.findUnique({
         where: { id: leadId },
         include: {
           items: true,
@@ -123,40 +152,75 @@ export class LeadsService {
       });
       if (!r) return null;
       const followUps = await this.getFollowUps(leadType, leadId);
-      return { ...r, leadType: 'selection', leadTypeLabel: '选款咨询', followUps };
+      return {
+        ...r,
+        leadType: "selection",
+        leadTypeLabel: "选款咨询",
+        followUps,
+      };
     }
     return null;
   }
 
-  async updateLead(leadType: string, leadId: number, data: { status?: string; internalNote?: string; assignedTo?: number; nextFollowUpAt?: string }) {
-    const table = leadType === 'inquiry' ? 'inquiry' : 'selectionInquiry';
-    const idField = leadType === 'inquiry' ? 'assignedTo' : 'handledBy';
+  async updateLead(
+    leadType: string,
+    leadId: number,
+    data: {
+      status?: string;
+      internalNote?: string;
+      assignedTo?: number;
+      nextFollowUpAt?: string;
+    },
+  ) {
+    const idField = leadType === "inquiry" ? "assignedTo" : "handledBy";
     const payload: any = {};
     if (data.status) payload.status = data.status;
-    if (data.internalNote !== undefined) payload.internalNote = data.internalNote;
+    if (data.internalNote !== undefined)
+      payload.internalNote = data.internalNote;
     if (data.assignedTo !== undefined) payload[idField] = data.assignedTo;
-    if (data.nextFollowUpAt !== undefined) payload.nextFollowUpAt = data.nextFollowUpAt ? new Date(data.nextFollowUpAt) : null;
+    if (data.nextFollowUpAt !== undefined)
+      payload.nextFollowUpAt = data.nextFollowUpAt
+        ? new Date(data.nextFollowUpAt)
+        : null;
 
-    return (this.prisma as any)[table].update({ where: { id: leadId }, data: payload });
+    if (leadType === "inquiry") {
+      return this.prisma.inquiry.update({
+        where: { id: leadId },
+        data: payload,
+      });
+    }
+    return this.prisma.selectionInquiry.update({
+      where: { id: leadId },
+      data: payload,
+    });
   }
 
-  async addFollowUp(data: { leadType: string; leadId: number; content: string; contactMethod?: string; nextFollowUpAt?: string; createdBy?: number }) {
-    return (this.prisma as any).leadFollowUp.create({
+  async addFollowUp(data: {
+    leadType: string;
+    leadId: number;
+    content: string;
+    contactMethod?: string;
+    nextFollowUpAt?: string;
+    createdBy?: number;
+  }) {
+    return this.prisma.leadFollowUp.create({
       data: {
         leadType: data.leadType,
         leadId: data.leadId,
         content: data.content,
         contactMethod: data.contactMethod || null,
-        nextFollowUpAt: data.nextFollowUpAt ? new Date(data.nextFollowUpAt) : null,
+        nextFollowUpAt: data.nextFollowUpAt
+          ? new Date(data.nextFollowUpAt)
+          : null,
         createdBy: data.createdBy || null,
       },
     });
   }
 
   async getFollowUps(leadType: string, leadId: number) {
-    return (this.prisma as any).leadFollowUp.findMany({
+    return this.prisma.leadFollowUp.findMany({
       where: { leadType, leadId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       include: { creator: { select: { id: true, realName: true } } },
     });
   }

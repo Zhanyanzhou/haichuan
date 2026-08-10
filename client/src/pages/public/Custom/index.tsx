@@ -279,7 +279,6 @@ export default function Custom() {
                 variants={fadeIn}
                 style={{
                   display: 'flex',
-                  flexDirection: 'row',
                   alignItems: 'center',
                   gap: 'clamp(32px, 6vw, 80px)',
                   marginBottom: i < processSteps.length - 1 ? 'clamp(48px, 6vw, 80px)' : 0,

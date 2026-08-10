@@ -20,7 +20,7 @@ export class NotificationsController {
   @Get('count') getUnreadCount(@CurrentUser() user: any) { return this.notificationsService.getUnreadCount(user.id); }
 
   @ApiOperation({ summary: '标记单条通知为已读' })
-  @Put(':id/read') markAsRead(@Param('id') id: string) { return this.notificationsService.markAsRead(+id); }
+  @Put(':id/read') markAsRead(@Param('id') id: string, @CurrentUser() user: any) { return this.notificationsService.markAsRead(+id, user.id); }
 
   @ApiOperation({ summary: '标记全部通知为已读' })
   @Put('read-all') markAllAsRead(@CurrentUser() user: any) { return this.notificationsService.markAllAsRead(user.id); }

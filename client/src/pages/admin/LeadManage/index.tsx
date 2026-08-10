@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Table, Tag, Select, Input, Button, Drawer, Descriptions, Space, Card, Timeline, message } from 'antd';
 import { SearchOutlined, EyeOutlined, PhoneOutlined, MailOutlined } from '@ant-design/icons';
 import api from '@/services/api';
@@ -17,6 +18,7 @@ const STATUS_MAP: Record<string, { color: string; label: string }> = {
 const LEAD_TYPES = { inquiry: '预约咨询', selection: '选款咨询' } as const;
 
 export default function LeadManage() {
+  const [searchParams] = useSearchParams();
   const [list, setList] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -29,6 +31,12 @@ export default function LeadManage() {
   const [detail, setDetail] = useState<any>(null);
   const [noteText, setNoteText] = useState('');
   const [saving, setSaving] = useState(false);
+  const requestedStatus = searchParams.get('status') || '';
+
+  useEffect(() => {
+    setStatus(Object.prototype.hasOwnProperty.call(STATUS_MAP, requestedStatus) ? requestedStatus : '');
+    setPage(1);
+  }, [requestedStatus]);
 
   const pageSize = 15;
 

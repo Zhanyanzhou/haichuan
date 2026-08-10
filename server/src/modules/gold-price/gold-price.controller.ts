@@ -4,8 +4,12 @@ import { GoldPriceService } from './gold-price.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('金价管理')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('SUPER_ADMIN', 'ADMIN')
 @Controller('gold-price')
 export class GoldPriceController {
   constructor(private goldPriceService: GoldPriceService) {}
@@ -17,6 +21,7 @@ export class GoldPriceController {
     return this.goldPriceService.getLatest();
   }
 
+  @Public()
   @Get('history')
   @ApiOperation({ summary: '获取金价历史' })
   getHistory(@Query() query: any) {

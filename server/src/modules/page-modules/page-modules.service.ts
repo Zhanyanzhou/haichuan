@@ -1,163 +1,632 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../common/prisma/prisma.service';
+import { BadRequestException, Injectable, MessageEvent } from "@nestjs/common";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { EventEmitter } from "events";
+import { fromEvent, interval, map, merge, Observable, startWith } from "rxjs";
 
 // 模块类型定义与默认值
-const MODULE_SCHEMAS: Record<string, { defaults: any; requiredFields: string[] }> = {
+const MODULE_SCHEMAS: Record<
+  string,
+  { defaults: any; requiredFields: string[] }
+> = {
   hero: {
-    requiredFields: ['desktopImage'],
-    defaults: { desktopImage: '', mobileImage: '', tagline: '', title: '', subtitle: '', buttonText: '', buttonLink: '', alignment: 'center', overlay: false, height: 'screen' },
+    requiredFields: ["desktopImage"],
+    defaults: {
+      desktopImage: "",
+      mobileImage: "",
+      tagline: "",
+      title: "",
+      subtitle: "",
+      buttonText: "",
+      buttonLink: "",
+      alignment: "center",
+      overlay: false,
+      height: "screen",
+    },
+  },
+  doublePoster: {
+    requiredFields: ["mainImage"],
+    defaults: {
+      mainImage: "",
+      detailImage: "",
+      number: "",
+      label: "",
+      title: "",
+      subtitle: "",
+      description: "",
+      linkUrl: "",
+    },
   },
   imageText: {
-    requiredFields: ['image', 'title'],
-    defaults: { image: '', title: '', description: '', imagePosition: 'left', buttonText: '', buttonLink: '' },
+    requiredFields: ["image", "title"],
+    defaults: {
+      image: "",
+      title: "",
+      description: "",
+      imagePosition: "left",
+      buttonText: "",
+      buttonLink: "",
+    },
   },
   richText: {
-    requiredFields: ['content'],
-    defaults: { content: '', title: '', maxWidth: '800px' },
+    requiredFields: ["content"],
+    defaults: { content: "", title: "", maxWidth: "800px" },
   },
   gallery: {
     requiredFields: [],
-    defaults: { title: '', images: [], columns: 3, gap: 16 },
+    defaults: { title: "", images: [], columns: 3, gap: 16 },
   },
   serviceCards: {
     requiredFields: [],
-    defaults: { title: '', subtitle: '', cards: [], columns: 3 },
+    defaults: { title: "", subtitle: "", cards: [], columns: 3 },
   },
   productRecommendation: {
-    requiredFields: ['productIds'],
-    defaults: { title: '', productSource: 'manual', productIds: [], displayCount: 6, columns: 3, showPrice: false, buttonType: 'view', viewAllLink: '' },
+    requiredFields: ["productIds"],
+    defaults: {
+      title: "",
+      productSource: "manual",
+      productIds: [],
+      displayCount: 6,
+      columns: 3,
+      showPrice: false,
+      buttonType: "view",
+      viewAllLink: "",
+    },
   },
   cta: {
-    requiredFields: ['title'],
-    defaults: { title: '', subtitle: '', buttonText: '', buttonLink: '', bgImage: '', style: 'primary' },
+    requiredFields: ["title"],
+    defaults: {
+      title: "",
+      subtitle: "",
+      buttonText: "",
+      buttonLink: "",
+      bgImage: "",
+      style: "primary",
+    },
   },
   faq: {
     requiredFields: [],
-    defaults: { title: '', items: [] },
+    defaults: { title: "", items: [] },
   },
 };
 
+const PUCK_COMPONENT_LABELS = [
+  "首屏主视觉",
+  "单图海报",
+  "双图海报",
+  "图文混排",
+  "全屏出血图",
+  "文字横幅",
+  "产品展示行",
+  "分类卡片",
+  "卡片网格",
+  "分割面板",
+  "轮播图",
+  "视频区块",
+  "热区图",
+] as const;
+
+const PUCK_COMPONENT_SET = new Set<string>(PUCK_COMPONENT_LABELS);
+
+const PUCK_REQUIRED_IMAGE_FIELDS: Record<string, string[]> = {
+  首屏主视觉: ["desktopImage"],
+  单图海报: ["desktopImage"],
+  双图海报: ["mainImage"],
+  图文混排: ["image"],
+  全屏出血图: ["image"],
+  分割面板: ["image"],
+  热区图: ["image"],
+};
+
+const PUCK_IMAGE_FIELDS = [
+  "desktopImage",
+  "mobileImage",
+  "mainImage",
+  "detailImage",
+  "image",
+  "posterUrl",
+  "url",
+];
+
+const PUCK_LINK_FIELDS = ["linkUrl", "link"];
+
 @Injectable()
 export class PageModulesService {
+  private readonly publicEvents = new EventEmitter();
+
   constructor(private prisma: PrismaService) {}
+
+  publicChangeStream(): Observable<MessageEvent> {
+    const publishEvents = fromEvent(this.publicEvents, "page-published").pipe(
+      map((data) => ({ data }) as MessageEvent),
+    );
+    const heartbeatEvents = interval(25000).pipe(
+      map(
+        () =>
+          ({
+            data: { type: "heartbeat", changedAt: new Date().toISOString() },
+          }) as MessageEvent,
+      ),
+    );
+
+    return merge(publishEvents, heartbeatEvents).pipe(
+      startWith({ data: { type: "ready" } } as MessageEvent),
+    );
+  }
 
   getModuleSchema(moduleType: string) {
     return MODULE_SCHEMAS[moduleType] || null;
   }
 
   getAvailableModules() {
-    return Object.keys(MODULE_SCHEMAS).map(type => ({
+    return Object.keys(MODULE_SCHEMAS).map((type) => ({
       type,
-      label: ({ hero: '首屏主视觉', imageText: '图文模块', richText: '富文本', gallery: '图库', serviceCards: '服务卡片', productRecommendation: '商品推荐', cta: '行动号召', faq: '常见问题' } as any)[type] || type,
+      label:
+        (
+          {
+            hero: "首屏主视觉",
+            imageText: "图文模块",
+            richText: "富文本",
+            gallery: "图库",
+            serviceCards: "服务卡片",
+            productRecommendation: "商品推荐",
+            cta: "行动号召",
+            faq: "常见问题",
+          } as any
+        )[type] || type,
       defaults: MODULE_SCHEMAS[type].defaults,
     }));
   }
 
   async getPublished(pageKey: string) {
-    return (this.prisma as any).pageModule.findMany({
-      where: { pageKey, status: 'PUBLISHED', isVisible: true },
-      orderBy: { sortOrder: 'asc' },
+    return this.prisma.pageModule.findMany({
+      where: { pageKey, status: "PUBLISHED", isVisible: true },
+      orderBy: { sortOrder: "asc" },
     });
   }
 
   async getAdminAll(pageKey: string) {
-    return (this.prisma as any).pageModule.findMany({
+    return this.prisma.pageModule.findMany({
       where: { pageKey },
-      orderBy: { sortOrder: 'asc' },
+      orderBy: { sortOrder: "asc" },
     });
   }
 
   async saveDraft(data: {
-    id?: number; pageKey: string; moduleType: string; sortOrder: number;
-    isVisible?: boolean; content?: any; layoutConfig?: any; styleConfig?: any; updatedBy?: number;
+    id?: number;
+    pageKey: string;
+    moduleType: string;
+    sortOrder: number;
+    isVisible?: boolean;
+    content?: any;
+    layoutConfig?: any;
+    styleConfig?: any;
+    updatedBy?: number;
   }) {
     const { id, ...rest } = data;
-    const payload = { ...rest, status: 'DRAFT' };
+    const payload = { ...rest, status: "DRAFT" };
     if (id) {
-      return (this.prisma as any).pageModule.update({ where: { id }, data: payload });
+      return this.prisma.pageModule.update({
+        where: { id },
+        data: payload as any,
+      });
     }
-    return (this.prisma as any).pageModule.create({ data: payload });
+    return this.prisma.pageModule.create({ data: payload as any });
   }
 
   async reorder(items: { id: number; sortOrder: number }[]) {
-    const ops = items.map(i =>
-      (this.prisma as any).pageModule.update({ where: { id: i.id }, data: { sortOrder: i.sortOrder } })
+    const ops = items.map((i) =>
+      this.prisma.pageModule.update({
+        where: { id: i.id },
+        data: { sortOrder: i.sortOrder },
+      }),
     );
-    return (this.prisma as any).$transaction(ops);
+    return this.prisma.$transaction(ops);
   }
 
   async toggleVisibility(id: number, isVisible: boolean) {
-    return (this.prisma as any).pageModule.update({ where: { id }, data: { isVisible } });
+    return this.prisma.pageModule.update({
+      where: { id },
+      data: { isVisible },
+    });
   }
 
   async duplicate(id: number) {
-    const src = await (this.prisma as any).pageModule.findUnique({ where: { id } });
-    if (!src) throw new Error('Module not found');
+    const src = await this.prisma.pageModule.findUnique({
+      where: { id },
+    });
+    if (!src) throw new Error("Module not found");
     const { id: _id, createdAt, updatedAt, ...data } = src;
-    return (this.prisma as any).pageModule.create({
-      data: { ...data, status: 'DRAFT', sortOrder: data.sortOrder + 1 },
+    return this.prisma.pageModule.create({
+      data: { ...data, status: "DRAFT", sortOrder: data.sortOrder + 1 } as any,
     });
   }
 
   async remove(id: number) {
-    return (this.prisma as any).pageModule.delete({ where: { id } });
+    return this.prisma.pageModule.delete({ where: { id } });
   }
 
   async publish(pageKey: string, userId?: number) {
-    const drafts = await (this.prisma as any).pageModule.findMany({
-      where: { pageKey, status: 'DRAFT' },
+    const published = await this.prisma.$transaction(async (tx) => {
+      const drafts = await tx.pageModule.findMany({
+      where: { pageKey, status: "DRAFT" },
     });
 
     for (const draft of drafts) {
       // 保存版本历史
-      await (this.prisma as any).pageModuleVersion.create({
+      await tx.pageModuleVersion.create({
         data: {
           moduleId: draft.id,
           pageKey: draft.pageKey,
           moduleType: draft.moduleType,
-          content: draft.content,
-          layoutConfig: draft.layoutConfig,
-          styleConfig: draft.styleConfig,
+          content: draft.content as any,
+          layoutConfig: draft.layoutConfig as any,
+          styleConfig: draft.styleConfig as any,
           version: draft.version,
           savedBy: userId,
         },
       });
       // 发布: 快照草稿内容 + 递增版本号
-      await (this.prisma as any).pageModule.update({
+      await tx.pageModule.update({
         where: { id: draft.id },
         data: {
-          status: 'PUBLISHED',
-          publishedContent: draft.content,
+          status: "PUBLISHED",
+          publishedContent: draft.content as any,
           version: draft.version + 1,
           updatedBy: userId,
         },
       });
-    }
+      }
 
-    return this.getPublished(pageKey);
+      return tx.pageModule.findMany({
+        where: { pageKey, status: "PUBLISHED", isVisible: true },
+        orderBy: { sortOrder: "asc" },
+      });
+    });
+
+    this.notifyPublicChange(pageKey, "page-modules-published");
+    return published;
   }
 
   async getVersions(moduleId: number) {
-    return (this.prisma as any).pageModuleVersion.findMany({
+    return this.prisma.pageModuleVersion.findMany({
       where: { moduleId },
-      orderBy: { version: 'desc' },
+      orderBy: { version: "desc" },
       take: 20,
     });
   }
 
   async restoreVersion(moduleId: number, version: number) {
-    const v = await (this.prisma as any).pageModuleVersion.findFirst({
+    const v = await this.prisma.pageModuleVersion.findFirst({
       where: { moduleId, version },
     });
-    if (!v) throw new Error('Version not found');
-    return (this.prisma as any).pageModule.update({
+    if (!v) throw new Error("Version not found");
+    return this.prisma.pageModule.update({
       where: { id: moduleId },
       data: {
-        content: v.content,
-        layoutConfig: v.layoutConfig,
-        styleConfig: v.styleConfig,
-        status: 'DRAFT',
+        content: v.content as any,
+        layoutConfig: v.layoutConfig as any,
+        styleConfig: v.styleConfig as any,
+        status: "DRAFT",
       },
+    });
+  }
+
+  // ========== PageDocument（Puck 页面级 CRUD）==========
+
+  async getPageDocument(pageKey: string) {
+    return this.prisma.pageDocument.findUnique({ where: { pageKey } });
+  }
+
+  /**
+   * 前台只能读取最后一次已发布的快照。编辑草稿会覆盖 PageDocument，
+   * 因此不能直接把草稿文档暴露给公共接口。
+   */
+  async getPublishedPageDocument(pageKey: string) {
+    const document = await this.prisma.pageDocument.findUnique({
+      where: { pageKey },
+    });
+    if (!document) return null;
+
+    const revision = await this.prisma.pageDocumentRevision.findFirst({
+      where: { documentId: document.id, status: "published" },
+      orderBy: { version: "desc" },
+    });
+    if (!revision) return null;
+
+    return {
+      ...document,
+      puckData: revision.puckData,
+      metadata: revision.metadata,
+      status: "PUBLISHED",
+      publishedAt: revision.publishedAt,
+      publishedBy: revision.publishedBy,
+      version: revision.version,
+    };
+  }
+
+  async savePageDocument(
+    pageKey: string,
+    puckData: any,
+    metadata?: any,
+    editorVersion?: string,
+  ) {
+    const existing = await this.prisma.pageDocument.findUnique({
+      where: { pageKey },
+    });
+    if (existing) {
+      return this.prisma.pageDocument.update({
+        where: { pageKey },
+        data: {
+          puckData,
+          metadata: metadata || {},
+          editorVersion,
+          status: "DRAFT",
+        },
+      });
+    }
+    return this.prisma.pageDocument.create({
+      data: {
+        pageKey,
+        puckData,
+        metadata: metadata || {},
+        editorVersion,
+        schemaVersion: 1,
+      },
+    });
+  }
+
+  async publishPageDocument(pageKey: string, userId?: number) {
+    const result = await this.prisma.$transaction(async (tx) => {
+      const doc = await tx.pageDocument.findUnique({
+      where: { pageKey },
+    });
+    if (!doc) throw new Error("Page document not found");
+    await this.validatePuckDataForPublish(tx, doc.puckData);
+
+    // Save revision
+    const lastRev = await tx.pageDocumentRevision.findFirst({
+      where: { documentId: doc.id },
+      orderBy: { version: "desc" },
+    });
+    const nextVersion = (lastRev?.version || 0) + 1;
+    const publishedAt = new Date();
+
+    await tx.pageDocumentRevision.create({
+      data: {
+        documentId: doc.id,
+        version: nextVersion,
+        puckData: doc.puckData as any,
+        metadata: doc.metadata as any,
+        status: "published",
+        publishedBy: userId,
+        publishedAt,
+      },
+    });
+
+    const published = await tx.pageDocument.update({
+      where: { pageKey },
+      data: {
+        status: "PUBLISHED",
+        publishedAt,
+        publishedBy: userId,
+      },
+    });
+      return { published, nextVersion };
+    });
+
+    this.notifyPublicChange(
+      pageKey,
+      "page-document-published",
+      result.nextVersion,
+    );
+    return result.published;
+  }
+
+  private async validatePuckDataForPublish(tx: any, puckData: any) {
+    const errors: string[] = [];
+    const productIds = new Set<number>();
+
+    if (!puckData || typeof puckData !== "object") {
+      throw new BadRequestException("页面发布校验失败：页面数据为空或格式不正确");
+    }
+
+    if (!Array.isArray(puckData.content)) {
+      errors.push("页面内容 content 必须是数组");
+    }
+
+    const validateBlock = (block: any, path: string) => {
+      if (!block || typeof block !== "object") {
+        errors.push(`${path}：区块格式不正确`);
+        return;
+      }
+
+      const type = typeof block.type === "string" ? block.type : "";
+      const label = type || path;
+      const props = block.props;
+
+      if (!type || !PUCK_COMPONENT_SET.has(type)) {
+        errors.push(`${path}：未知区块类型「${type || "空"}」`);
+        return;
+      }
+
+      if (!props || typeof props !== "object") {
+        errors.push(`${label}：配置 props 不能为空`);
+        return;
+      }
+
+      if (!this.isNonEmptyString(props.id)) {
+        errors.push(`${label}：区块 ID 不能为空`);
+      }
+
+      for (const field of PUCK_REQUIRED_IMAGE_FIELDS[type] || []) {
+        if (!this.isNonEmptyString(props[field])) {
+          errors.push(`${label}：${field} 图片不能为空`);
+        }
+      }
+
+      for (const field of PUCK_IMAGE_FIELDS) {
+        const value = props[field];
+        if (this.isNonEmptyString(value) && !this.isSafeAssetUrl(value)) {
+          errors.push(`${label}：${field} 图片地址不合法`);
+        }
+      }
+
+      if (this.isNonEmptyString(props.videoUrl) && !this.isSafeAssetUrl(props.videoUrl)) {
+        errors.push(`${label}：videoUrl 视频地址不合法`);
+      }
+
+      for (const field of PUCK_LINK_FIELDS) {
+        const value = props[field];
+        if (this.isNonEmptyString(value) && !this.isSafeLink(value)) {
+          errors.push(`${label}：${field} 链接不合法`);
+        }
+      }
+
+      if (type === "视频区块" && !this.isNonEmptyString(props.videoUrl)) {
+        errors.push(`${label}：videoUrl 视频地址不能为空`);
+      }
+
+      if (type === "产品展示行") {
+        if (!Array.isArray(props.productIds)) {
+          errors.push(`${label}：productIds 必须是商品 ID 数组`);
+        } else {
+          for (const id of props.productIds) {
+            const numericId = Number(id);
+            if (!Number.isInteger(numericId) || numericId <= 0) {
+              errors.push(`${label}：商品 ID「${id}」格式不正确`);
+            } else {
+              productIds.add(numericId);
+            }
+          }
+        }
+      }
+
+      if (type === "轮播图") {
+        if (!Array.isArray(props.images) || props.images.length === 0) {
+          errors.push(`${label}：轮播图至少需要 1 张图片`);
+        } else {
+          props.images.forEach((item: any, index: number) => {
+            if (!this.isNonEmptyString(item?.url) || !this.isSafeAssetUrl(item.url)) {
+              errors.push(`${label}：第 ${index + 1} 张轮播图片地址不合法`);
+            }
+            if (this.isNonEmptyString(item?.link) && !this.isSafeLink(item.link)) {
+              errors.push(`${label}：第 ${index + 1} 张轮播链接不合法`);
+            }
+          });
+        }
+      }
+
+      if (type === "热区图" && Array.isArray(props.hotspots)) {
+        props.hotspots.forEach((item: any, index: number) => {
+          if (this.isNonEmptyString(item?.link) && !this.isSafeLink(item.link)) {
+            errors.push(`${label}：第 ${index + 1} 个热区链接不合法`);
+          }
+        });
+      }
+    };
+
+    if (Array.isArray(puckData.content)) {
+      puckData.content.forEach((block: any, index: number) => {
+        validateBlock(block, `第 ${index + 1} 个区块`);
+      });
+    }
+
+    if (puckData.zones && typeof puckData.zones === "object") {
+      Object.entries(puckData.zones).forEach(([zoneKey, zoneBlocks]) => {
+        if (!Array.isArray(zoneBlocks)) {
+          errors.push(`插槽 ${zoneKey}：内容必须是数组`);
+          return;
+        }
+        zoneBlocks.forEach((block: any, index: number) => {
+          validateBlock(block, `插槽 ${zoneKey} 第 ${index + 1} 个区块`);
+        });
+      });
+    }
+
+    if (productIds.size > 0) {
+      const products = await tx.product.findMany({
+        where: { id: { in: [...productIds] }, deletedAt: null },
+        select: { id: true },
+      });
+      const existingIds = new Set(products.map((item: { id: number }) => item.id));
+      for (const id of productIds) {
+        if (!existingIds.has(id)) {
+          errors.push(`产品展示行：商品 ID ${id} 不存在或已删除`);
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      const visibleErrors = errors.slice(0, 8).join("；");
+      const suffix = errors.length > 8 ? `；另有 ${errors.length - 8} 个问题` : "";
+      throw new BadRequestException(`页面发布校验失败：${visibleErrors}${suffix}`);
+    }
+  }
+
+  private isNonEmptyString(value: unknown): value is string {
+    return typeof value === "string" && value.trim().length > 0;
+  }
+
+  private isSafeAssetUrl(value: string): boolean {
+    const url = value.trim();
+    if (url.startsWith("/")) return true;
+    return /^https?:\/\//i.test(url);
+  }
+
+  private isSafeLink(value: string): boolean {
+    const url = value.trim();
+    if (url.startsWith("/") || url.startsWith("#")) return true;
+    return /^https?:\/\//i.test(url);
+  }
+
+  async getPageDocumentRevisions(pageKey: string) {
+    const doc = await this.prisma.pageDocument.findUnique({
+      where: { pageKey },
+    });
+    if (!doc) return [];
+    return this.prisma.pageDocumentRevision.findMany({
+      where: { documentId: doc.id },
+      orderBy: { version: "desc" },
+      take: 20,
+    });
+  }
+
+  async restorePageDocumentRevision(pageKey: string, version: number) {
+    if (!Number.isInteger(version) || version <= 0) {
+      throw new BadRequestException("版本号不正确");
+    }
+
+    const doc = await this.prisma.pageDocument.findUnique({
+      where: { pageKey },
+    });
+    if (!doc) throw new BadRequestException("页面草稿不存在");
+
+    const revision = await this.prisma.pageDocumentRevision.findFirst({
+      where: { documentId: doc.id, version },
+    });
+    if (!revision) throw new BadRequestException("指定版本不存在");
+
+    return this.prisma.pageDocument.update({
+      where: { pageKey },
+      data: {
+        puckData: revision.puckData as any,
+        metadata: revision.metadata as any,
+        status: "DRAFT",
+        editorVersion: doc.editorVersion,
+      },
+    });
+  }
+
+  private notifyPublicChange(
+    pageKey: string,
+    type: "page-document-published" | "page-modules-published",
+    version?: number,
+  ): void {
+    this.publicEvents.emit("page-published", {
+      type,
+      pageKey,
+      version,
+      changedAt: new Date().toISOString(),
     });
   }
 }

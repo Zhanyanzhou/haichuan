@@ -11,6 +11,10 @@ import { randomUUID } from 'crypto';
 import * as dayjs from 'dayjs';
 import { UploadService } from './upload.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Public } from '../../common/decorators/public.decorator';
+import { CustomerAuthGuard } from '../customers/customer-auth.guard';
 
 const videoStorage = diskStorage({
   destination: (_req, _file, callback) => {
@@ -21,7 +25,20 @@ const videoStorage = diskStorage({
   filename: (_req, file, callback) => callback(null, `${randomUUID()}${extname(file.originalname).toLowerCase()}`),
 });
 
+const imageMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const imageUploadOptions = {
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req: any, file: Express.Multer.File, callback: (error: Error | null, acceptFile: boolean) => void) => {
+    if (!imageMimeTypes.includes(file.mimetype)) {
+      return callback(new BadRequestException('仅支持 JPEG、PNG、WebP 或 GIF 图片'), false);
+    }
+    callback(null, true);
+  },
+};
+
 @ApiTags('文件上传')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('SUPER_ADMIN', 'ADMIN', 'EDITOR')
 @Controller('upload')
 export class UploadController {
   constructor(private uploadService: UploadService) {}
@@ -30,8 +47,16 @@ export class UploadController {
   @ApiOperation({ summary: '上传单张图片' })
   @UseGuards(JwtAuthGuard)
   @Post('image')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', imageUploadOptions))
   async uploadImage(@UploadedFile() file: Express.Multer.File) {
+    return this.uploadService.uploadFile(file);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Post('payment-proof')
+  @UseInterceptors(FileInterceptor('file', imageUploadOptions))
+  async uploadPaymentProof(@UploadedFile() file: Express.Multer.File) {
     return this.uploadService.uploadFile(file);
   }
 
@@ -57,7 +82,7 @@ export class UploadController {
   @ApiOperation({ summary: '批量上传图片（最多20张）' })
   @UseGuards(JwtAuthGuard)
   @Post('images')
-  @UseInterceptors(FilesInterceptor('files', 20))
+  @UseInterceptors(FilesInterceptor('files', 20, imageUploadOptions))
   async uploadImages(@UploadedFiles() files: Express.Multer.File[]) {
     return this.uploadService.uploadMultiple(files);
   }
@@ -66,7 +91,7 @@ export class UploadController {
   @ApiOperation({ summary: '上传商品图片（支持分类标记）' })
   @UseGuards(JwtAuthGuard)
   @Post('product-images')
-  @UseInterceptors(FilesInterceptor('files', 20))
+  @UseInterceptors(FilesInterceptor('files', 20, imageUploadOptions))
   async uploadProductImages(
     @UploadedFiles() files: Express.Multer.File[],
     @Body('types') types: string,

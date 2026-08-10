@@ -17,11 +17,13 @@ export class InquiriesService {
   }
 
   async create(data: any) {
+    const customer = data.customer;
     return this.prisma.inquiry.create({
       data: {
-        customerName: data.customerName || data.name,
-        customerPhone: data.customerPhone || data.phone,
-        customerEmail: data.customerEmail || data.email,
+        customerId: customer?.id || null,
+        customerName: customer?.name || data.customerName || data.name,
+        customerPhone: customer?.phone || data.customerPhone || data.phone,
+        customerEmail: customer?.email || data.customerEmail || data.email,
         consultationType: data.consultationType,
         preferredContact: data.preferredContact,
         preferredTime: data.preferredTime,

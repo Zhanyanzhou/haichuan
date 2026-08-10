@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
@@ -28,13 +28,7 @@ export class GoldPriceService {
       };
     }
 
-    return {
-      price: this.currentPrice,
-      source: 'AUTO',
-      recordDate: new Date(),
-      change: 0,
-      changePercent: '0.00',
-    };
+    throw new ServiceUnavailableException('暂无经过验证的金价数据');
   }
 
   /**
@@ -109,38 +103,10 @@ export class GoldPriceService {
   }
 
   /**
-   * Simulate fetching gold price from external API
+   * 自动金价源尚未接入前禁止写入模拟报价，避免影响商品售价。
    */
   private async fetchAndUpdateGoldPrice(source: string) {
-    this.logger.log(`Fetching gold price from API (${source})...`);
-
-    // Mock API response - simulate gold price fluctuation ±3 yuan
-    const fluctuation = parseFloat((Math.random() * 6 - 3).toFixed(2));
-    const newPrice = parseFloat((this.currentPrice + fluctuation).toFixed(2));
-
-    const changePercent = ((newPrice - this.currentPrice) / this.currentPrice) * 100;
-    const threshold = 2; // 2% threshold for triggering price adjustment
-
-    // Save price record
-    await this.prisma.goldPrice.create({
-      data: {
-        price: newPrice,
-        source: 'AUTO',
-        recordDate: new Date(),
-        remark: `自动获取 (${source})`,
-      },
-    });
-
-    // Check if price adjustment threshold is met
-    if (Math.abs(changePercent) >= threshold) {
-      this.logger.log(`Gold price changed by ${changePercent.toFixed(2)}%, triggering price adjustment...`);
-      await this.adjustProductPrices(newPrice);
-    } else {
-      this.logger.log(`Gold price changed by ${changePercent.toFixed(2)}%, below ${threshold}% threshold. No adjustment needed.`);
-    }
-
-    this.previousPrice = this.currentPrice;
-    this.currentPrice = newPrice;
+    this.logger.warn(`已跳过 ${source} 金价任务：尚未配置可信行情源`);
   }
 
   /**

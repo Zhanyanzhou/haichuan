@@ -1,137 +1,536 @@
-import { useState, useEffect } from 'react';
-import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
-import { Layout, Menu, Button, Dropdown, Badge, Avatar, Drawer } from 'antd';
+/**
+ * AdminLayout v7 — 单栏分层侧边栏
+ *
+ * ┌──────────────────────────────────────────────────────┐
+ * │  ◈ HAI CHUAN                         预览  🔔  ● AC │  ← Header 48px
+ * ├────────────┬─────────────────────────────────────────┤
+ * │  侧边栏    │  📍 面包屑                             │
+ * │  240px     ├─────────────────────────────────────────┤
+ * │            │                                         │
+ * │  7 分区    │              内容区                     │
+ * │  12 域     │              <Outlet />                 │
+ * │            │                                         │
+ * │            │                                         │
+ * │  👤 用户   │                                         │
+ * └────────────┴─────────────────────────────────────────┘
+ */
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { Outlet, useNavigate, useLocation, Link } from "react-router-dom";
+import { Button, Dropdown, Avatar, Drawer } from "antd";
 import {
-  DashboardOutlined, ShoppingOutlined, AppstoreOutlined, PictureOutlined,
-  DollarOutlined, OrderedListOutlined, TeamOutlined,
-  SettingOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-  BellOutlined, LogoutOutlined, UserOutlined, HomeOutlined,
-  FileTextOutlined,
-} from '@ant-design/icons';
-import Logo from '@/components/common/Logo';
-import { useAuthStore } from '@/store/authStore';
-import { useAppStore } from '@/store/appStore';
+  StarOutlined,
+  TransactionOutlined,
+  ShoppingOutlined,
+  NotificationOutlined,
+  SendOutlined,
+  CustomerServiceOutlined,
+  ShopOutlined,
+  UsergroupAddOutlined,
+  AccountBookOutlined,
+  InsuranceOutlined,
+  BarChartOutlined,
+  SettingOutlined,
+  HomeOutlined,
+  ReloadOutlined,
+  UserOutlined,
+  LogoutOutlined,
+  MenuOutlined,
+  RightOutlined,
+  PushpinOutlined,
+  PushpinFilled,
+} from "@ant-design/icons";
+import { useAuthStore } from "@/store/authStore";
+import {
+  navigationConfig,
+  navSections,
+  findByRoute,
+  getDefaultRoute,
+} from "@/config/navigationConfig";
+import type { NavDomain } from "@/config/navigationConfig";
+import {
+  getCommonNavItems,
+  recordCommonNavVisit,
+  toggleCommonNavPin,
+  type CommonNavItem,
+} from "@/utils/adminCommonNav";
+import { hasPermission } from "@/store/permissionStore";
 
-const { Header, Sider, Content } = Layout;
+/* ═══════ 图标映射 ═══════ */
+const domainIcons: Record<string, React.ReactNode> = {
+  home: <HomeOutlined />,
+  star: <StarOutlined />,
+  transaction: <TransactionOutlined />,
+  shopping: <ShoppingOutlined />,
+  notification: <NotificationOutlined />,
+  send: <SendOutlined />,
+  "customer-service": <CustomerServiceOutlined />,
+  shop: <ShopOutlined />,
+  "usergroup-add": <UsergroupAddOutlined />,
+  "account-book": <AccountBookOutlined />,
+  insurance: <InsuranceOutlined />,
+  "bar-chart": <BarChartOutlined />,
+  setting: <SettingOutlined />,
+};
 
-const adminMenus = [
-  { type: 'group' as const, label: '工作台', children: [
-    { key: '/admin/dashboard', icon: <DashboardOutlined />, label: '工作台' },
-  ]},
-  { type: 'group' as const, label: '商品中心', children: [
-    { key: '/admin/products', icon: <ShoppingOutlined />, label: '商品管理' },
-    { key: '/admin/categories', icon: <AppstoreOutlined />, label: '分类与属性' },
-    { key: '/admin/media', icon: <PictureOutlined />, label: '商品素材' },
-  ]},
-  { type: 'group' as const, label: '内容中心', children: [
-    { key: '/admin/homepage', icon: <HomeOutlined />, label: '页面构建器' },
-    { key: '/admin/site-content', icon: <SettingOutlined />, label: '网站设置' },
-  ]},
-  { type: 'group' as const, label: '客户中心', children: [
-    { key: '/admin/leads', icon: <OrderedListOutlined />, label: '客户线索' },
-  ]},
-  { type: 'group' as const, label: '系统管理', children: [
-    { key: '/admin/users', icon: <TeamOutlined />, label: '管理员与权限' },
-    { key: '/admin/audit-logs', icon: <OrderedListOutlined />, label: '操作日志' },
-    { key: '/admin/settings', icon: <SettingOutlined />, label: '系统维护' },
-  ]},
-];
+/* ═══════ 按分区聚合域 ═══════ */
+function canAccessAdminRoute(role: string | undefined, route: string) {
+  if (route.startsWith("/admin/editor/")) {
+    return Boolean(role && hasPermission(role, "content.update"));
+  }
+  if (route.startsWith("/admin/site-content") || route.startsWith("/admin/media")) {
+    return Boolean(role && hasPermission(role, "content.read"));
+  }
+  return true;
+}
 
+function useNavSections(role: string | undefined) {
+  return useMemo(() => {
+    return navSections.map((sec) => ({
+      ...sec,
+      domains: navigationConfig
+        .filter((d) => d.section === sec.key)
+        .map((domain) => ({
+          ...domain,
+          groups: domain.groups
+            .map((group) => ({
+              ...group,
+              items: group.items.filter((item) =>
+                canAccessAdminRoute(role, item.route),
+              ),
+            }))
+            .filter((group) => group.items.length > 0),
+        }))
+        .filter((domain) =>
+          domain.directRoute
+            ? canAccessAdminRoute(role, domain.directRoute)
+            : domain.groups.length > 0,
+        )
+        .sort((a, b) => a.order - b.order),
+    }));
+  }, [role]);
+}
+
+/* ═══════ 面包屑推导 ═══════ */
+function useBreadcrumb() {
+  const location = useLocation();
+  return useMemo(() => {
+    const ctx = findByRoute(location.pathname);
+    if (!ctx) return null;
+    const { domain, group, item } = ctx;
+    const parts: { label: string }[] = [];
+    const sec = navSections.find((s) => s.key === domain.section);
+    if (sec && sec.key !== "overview") parts.push({ label: sec.label });
+    parts.push({ label: domain.label });
+    if (item && group && (
+      item.label !== group.label &&
+      item.label !== domain.label
+    )) {
+      parts.push({ label: item.label });
+    }
+    return parts;
+  }, [location.pathname]);
+}
+
+/* ═══════ 域名渲染 ═══════ */
+function SidebarDomainItem({
+  domain,
+  isActive,
+  isExpanded,
+  allItems,
+  location,
+  onDomainClick,
+  onToggle,
+  onItemClick,
+  onTogglePin,
+}: {
+  domain: NavDomain;
+  isActive: boolean;
+  isExpanded: boolean;
+  allItems: CommonNavItem[];
+  location: ReturnType<typeof useLocation>;
+  onDomainClick: (d: NavDomain) => void;
+  onToggle: (key: string) => void;
+  onItemClick: (route: string) => void;
+  onTogglePin: (route: string) => void;
+}) {
+  const hasChildren = allItems.length > 0;
+  const pinnedItemCount = allItems.filter((item) => item.pinned).length;
+
+  return (
+    <div className="admin-sidebar__domain">
+      <div
+        className={`admin-sidebar__domain-row${isActive ? " is-active" : ""}${domain.immersive ? " is-workspace" : ""}${domain.disabled ? " is-disabled" : ""}`}
+      >
+        <button
+          type="button"
+          className="admin-sidebar__domain-label"
+          onClick={() => onDomainClick(domain)}
+          disabled={domain.disabled}
+          title={domain.disabled ? "功能建设中" : domain.label}
+        >
+          <span className="admin-sidebar__domain-content">
+            <span className="admin-sidebar__domain-icon">
+              {domainIcons[domain.icon]}
+            </span>
+            <span className="admin-sidebar__domain-text">{domain.label}</span>
+          </span>
+        </button>
+        {hasChildren && (
+          <button
+            type="button"
+            className={`admin-sidebar__chevron${isExpanded ? " is-open" : ""}`}
+            onClick={() => onToggle(domain.key)}
+            aria-label={`${isExpanded ? "收起" : "展开"}${domain.label}`}
+            aria-expanded={isExpanded}
+          >
+            <RightOutlined />
+          </button>
+        )}
+      </div>
+
+      {isExpanded && allItems.length > 0 && (
+        <div className="admin-sidebar__subnav" aria-label={`${domain.label}功能菜单`}>
+          {allItems.map((item) => {
+          const [itemPath, itemQuery = ""] = item.route.split("?");
+          const hasQueryMatch = allItems.some((candidate) => {
+            const [candidatePath, candidateQuery = ""] = candidate.route.split("?");
+            return Boolean(candidateQuery) && candidatePath === location.pathname && `?${candidateQuery}` === location.search;
+          });
+          const pathMatches =
+            location.pathname === itemPath ||
+            (itemPath !== "/admin" && location.pathname.startsWith(`${itemPath}/`));
+          const isItemActive = pathMatches && (
+            itemQuery ? `?${itemQuery}` === location.search : !hasQueryMatch
+          );
+          const canPin = item.pinned || pinnedItemCount < 2;
+          return (
+            <div className="admin-sidebar__item-row" key={item.key}>
+              <button
+                type="button"
+                className={`admin-sidebar__item${isItemActive ? " is-active" : ""}`}
+                onClick={() => onItemClick(item.route)}
+                title={item.label}
+              >
+                {item.label}
+              </button>
+              {domain.key === "common" && (
+                <button
+                  type="button"
+                  className={`admin-sidebar__item-pin${item.pinned ? " is-pinned" : ""}`}
+                  onClick={() => onTogglePin(item.route)}
+                  aria-label={`${item.pinned ? "取消固定" : "固定"}${item.label}`}
+                  aria-pressed={item.pinned}
+                  title={canPin ? (item.pinned ? "取消固定" : "固定到常用") : "最多固定 2 项"}
+                  disabled={!canPin}
+                >
+                  {item.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+                </button>
+              )}
+            </div>
+          );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════ 组件 ═══════ */
 export default function AdminLayout() {
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [expandedDomains, setExpandedDomains] = useState<Set<string>>(
+    new Set(),
+  );
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout, isLoggedIn } = useAuthStore();
-  const { goldPrice, goldPriceChange } = useAppStore();
+  const commonUserId = user?.id;
+  const [commonItems, setCommonItems] = useState<CommonNavItem[]>(() =>
+    getCommonNavItems(commonUserId),
+  );
+  const sections = useNavSections(user?.role);
+  const breadcrumb = useBreadcrumb();
+  const isEditorWorkspace = location.pathname.startsWith("/admin/editor/");
 
+  // 从路由反向推导当前导航上下文
+  const navCtx = useMemo(
+    () => findByRoute(location.pathname),
+    [location.pathname],
+  );
+  // 直接进入业务页面时，同步展开其所属一级类目。
   useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    if (!navCtx || navCtx.domain.directRoute) return;
+    setExpandedDomains(new Set([navCtx.domain.key]));
+  }, [navCtx]);
+
+  // 响应式检测
+  useEffect(() => {
+    const h = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
   }, []);
 
-  useEffect(() => { if (!isLoggedIn) navigate('/admin/login'); }, [isLoggedIn]);
+  // 未登录跳转
+  useEffect(() => {
+    if (!isLoggedIn) navigate("/admin/login");
+  }, [isLoggedIn, navigate]);
 
-  const handleLogout = () => { logout(); navigate('/admin/login'); };
+  useEffect(() => {
+    setCommonItems(getCommonNavItems(commonUserId));
+  }, [commonUserId]);
 
-  const handleMenuClick = (key: string) => {
-    navigate(key);
-    if (isMobile) setMobileDrawerOpen(false);
-  };
+  useEffect(() => {
+    recordCommonNavVisit(location.pathname, commonUserId);
+  }, [location.pathname, commonUserId]);
 
+  /* ── 交互 ── */
+  const toggleDomain = useCallback((domainKey: string) => {
+    setExpandedDomains((prev) => {
+      return prev.has(domainKey) ? new Set() : new Set([domainKey]);
+    });
+  }, []);
+
+  const handleDomainClick = useCallback(
+    (domain: NavDomain) => {
+      if (domain.disabled) return;
+
+      // “常用”是快捷入口集合，只展开，不替用户跳转到其中的第一项。
+      if (domain.key === "common") {
+        toggleDomain(domain.key);
+        return;
+      }
+
+      if (domain.directRoute) {
+        setExpandedDomains(new Set());
+        navigate(domain.directRoute);
+        if (isMobile) setMobileOpen(false);
+        return;
+      }
+
+      const defaultRoute = getDefaultRoute(domain);
+      // 一级按钮负责进入该业务域默认页；右侧箭头才负责展开/收起。
+      if (defaultRoute && navCtx?.domain.key !== domain.key) {
+        setExpandedDomains(new Set([domain.key]));
+        navigate(defaultRoute);
+        if (isMobile) setMobileOpen(false);
+        return;
+      }
+
+      if (defaultRoute) {
+        toggleDomain(domain.key);
+        return;
+      }
+
+      if (isMobile) setMobileOpen(false);
+    },
+    [isMobile, navCtx?.domain.key, navigate, toggleDomain],
+  );
+
+  const handleItemClick = useCallback(
+    (route: string) => {
+      navigate(route);
+      if (isMobile) setMobileOpen(false);
+    },
+    [navigate, isMobile],
+  );
+
+  const handleToggleCommonPin = useCallback((route: string) => {
+    toggleCommonNavPin(route, commonUserId);
+    setCommonItems(getCommonNavItems(commonUserId));
+  }, [commonUserId]);
+
+  /* ── 用户菜单 ── */
   const userMenuItems = [
-    { key: 'profile', icon: <UserOutlined />, label: '个人资料' },
-    { key: 'divider', type: 'divider' as const },
-    { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
+    { key: "profile", icon: <UserOutlined />, label: "个人资料" },
+    { type: "divider" as const },
+    {
+      key: "logout",
+      icon: <LogoutOutlined />,
+      label: "退出登录",
+      danger: true,
+    },
   ];
 
-  const sidebarContent = (
-    <div className="flex flex-col h-full">
-      {/* 品牌区 — 精简 */}
-      <div className="flex items-center gap-2.5 h-[72px] px-4 border-b" style={{ borderColor: '#E7E6E2' }}>
-        <Logo size={28} iconOnly={collapsed && !isMobile} fontSize={collapsed && !isMobile ? '0px' : '1rem'} />
-      </div>
+  /* ── 侧边栏渲染 ── */
+  const renderSidebar = () => (
+    <div className="admin-sidebar">
+      {/* 导航区 */}
+      <nav className="admin-sidebar__nav">
+        {sections.map((section) => {
+          const visibleDomains = section.domains;
+          if (visibleDomains.length === 0) return null;
 
-      {/* 导航菜单 */}
-      <div className="flex-1 overflow-y-auto py-2 px-2">
-        <Menu mode="inline" selectedKeys={[location.pathname]} items={adminMenus}
-          onClick={({ key }) => handleMenuClick(key)}
-          style={{ background: 'transparent', borderRight: 'none' }} />
-      </div>
+          return (
+            <div
+              key={section.key}
+              className={`admin-sidebar__section admin-sidebar__section--${section.key}`}
+            >
+              {visibleDomains.map((domain) => {
+                const isActive = navCtx?.domain.key === domain.key;
+                const isExpanded = expandedDomains.has(domain.key);
+                const allItems = domain.key === "common"
+                  ? commonItems.filter((item) =>
+                    canAccessAdminRoute(user?.role, item.route),
+                  )
+                  : domain.groups.flatMap((g) =>
+                    g.items
+                      .filter((i) => !i.featureFlag && !i.disabled)
+                      .map((i) => ({ ...i, pinned: false })),
+                  );
 
-      {/* 底部分组标题不再显示金价卡片 */}
+                return (
+                  <SidebarDomainItem
+                    key={domain.key}
+                    domain={domain}
+                    isActive={isActive}
+                    isExpanded={isExpanded}
+                    allItems={allItems}
+                    location={location}
+                    onDomainClick={handleDomainClick}
+                    onToggle={toggleDomain}
+                    onItemClick={handleItemClick}
+                    onTogglePin={handleToggleCommonPin}
+                  />
+                );
+              })}
+            </div>
+          );
+        })}
+      </nav>
+
+      {/* 底部用户区 */}
+      <div className="admin-sidebar__footer">
+        <Dropdown
+          menu={{
+            items: userMenuItems,
+            onClick: ({ key }) => {
+              if (key === "logout") {
+                logout();
+                navigate("/admin/login");
+              }
+            },
+          }}
+          placement="topRight"
+        >
+          <div className="admin-sidebar__user">
+            <Avatar
+              size={28}
+              icon={<UserOutlined />}
+              style={{
+                backgroundColor: "var(--adm-gold-soft)",
+                color: "var(--adm-gold)",
+                flexShrink: 0,
+              }}
+            />
+            <span className="admin-sidebar__user-name">
+              {user?.realName || "管理员"}
+            </span>
+          </div>
+        </Dropdown>
+      </div>
     </div>
   );
 
   return (
-    <Layout className="min-h-screen" style={{ background: '#F7F7F5' }}>
-      {/* 侧边栏 */}
-      {isMobile ? (
-        <Drawer
-          placement="left"
-          open={mobileDrawerOpen}
-          onClose={() => setMobileDrawerOpen(false)}
-          width={240}
-          styles={{ body: { padding: 0, background: '#FCFCFB' }, header: { display: 'none' } }}
-        >
-          {sidebarContent}
-        </Drawer>
-      ) : (
-        <Sider trigger={null} collapsible collapsed={collapsed} width={232} collapsedWidth={72}
-          style={{ background: '#FCFCFB', borderRight: '1px solid #E7E6E2' }}>
-          {sidebarContent}
-        </Sider>
-      )}
+    <div className="admin-shell-v7">
+      {/* ═══ Header ═══ */}
+      <header className="admin-header">
+        <div className="admin-header__left">
+          {isMobile && (
+            <Button
+              type="text"
+              icon={<MenuOutlined />}
+              onClick={() => setMobileOpen(true)}
+              className="admin-header__menu-btn"
+            />
+          )}
+        </div>
 
-      {/* 主区域 */}
-      <Layout>
-        {/* 顶栏 */}
-        <Header style={{ background: '#FFFFFF', borderBottom: '1px solid #E7E6E2', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 72 }}>
-          <Button
-            type="text"
-            icon={isMobile ? <MenuUnfoldOutlined /> : (collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />)}
-            onClick={() => isMobile ? setMobileDrawerOpen(true) : setCollapsed(!collapsed)}
-            style={{ color: '#66645F' }}
-          />
-          <div className="flex items-center gap-5">
-            <Link to="/" target="_blank" style={{ color: '#66645F', fontSize: 13 }} className="hover:text-[#9F7941] transition-colors"><HomeOutlined className="mr-1" />预览网站</Link>
-            <Badge count={3} size="small"><BellOutlined style={{ color: '#66645F', cursor: 'pointer' }} /></Badge>
-            <Dropdown menu={{ items: userMenuItems, onClick: ({ key }) => { if (key === 'logout') handleLogout(); } }}>
-              <div className="flex items-center gap-2 cursor-pointer px-2">
-                <Avatar size={28} icon={<UserOutlined />} style={{ backgroundColor: '#F3EFE7', color: '#B69052' }} />
-                <span style={{ color: '#252522', fontSize: 13 }}>{user?.realName || '管理员'}</span>
-              </div>
-            </Dropdown>
-          </div>
-        </Header>
+        <div className="admin-header__right">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="admin-header__icon-btn"
+            aria-label="刷新"
+            title="刷新"
+          >
+            <ReloadOutlined />
+          </button>
+          <Link to="/" target="_blank" className="admin-header__link">
+            预览网站
+          </Link>
+          <Dropdown
+            menu={{
+              items: userMenuItems,
+              onClick: ({ key }) => {
+                if (key === "logout") {
+                  logout();
+                  navigate("/admin/login");
+                }
+              },
+            }}
+          >
+            <div className="admin-header__avatar">
+              <Avatar
+                size={28}
+                icon={<UserOutlined />}
+                style={{
+                  backgroundColor: "var(--adm-gold-soft)",
+                  color: "var(--adm-gold)",
+                }}
+              />
+            </div>
+          </Dropdown>
+        </div>
+      </header>
+
+      {/* ═══ Body ═══ */}
+      <div className="admin-body">
+        {/* 桌面端侧边栏 */}
+        {!isMobile && renderSidebar()}
+
+        {/* 移动端抽屉 */}
+        {isMobile && (
+          <Drawer
+            placement="left"
+            open={mobileOpen}
+            onClose={() => setMobileOpen(false)}
+            width={260}
+            styles={{ body: { padding: 0 }, header: { display: "none" } }}
+          >
+            {renderSidebar()}
+          </Drawer>
+        )}
 
         {/* 内容区 */}
-        <Content style={{ margin: 32, minHeight: 'calc(100vh - 136px)' }}>
-          <Outlet />
-        </Content>
-      </Layout>
-    </Layout>
+        <div className="admin-content">
+          {/* 面包屑 */}
+          {!isEditorWorkspace && breadcrumb && breadcrumb.length > 0 && (
+            <div className="admin-breadcrumb">
+              {breadcrumb.map((part, i) => (
+                <span key={part.label}>
+                  {i > 0 && <span className="admin-breadcrumb__sep">/</span>}
+                  <span
+                    className={
+                      i === breadcrumb.length - 1
+                        ? "admin-breadcrumb__current"
+                        : "admin-breadcrumb__link"
+                    }
+                  >
+                    {part.label}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* 页面内容 */}
+          <main className={`admin-main${isEditorWorkspace ? " admin-main--workspace" : ""}`}>
+            <Outlet />
+          </main>
+        </div>
+      </div>
+    </div>
   );
 }

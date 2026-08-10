@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { productApi, categoryApi } from '@/services/api';
+import { productApi, categoryApi, publicProductStreamUrl } from '@/services/api';
+import { USE_MOCK } from '@/services/mockData';
 import { unwrapResponse } from '@/utils/unwrap';
 import { type CatalogProduct } from '@/data/catalogData';
 
@@ -20,21 +21,31 @@ export interface RealCategory {
 }
 
 /** 转换 API 产品 → CatalogProduct（使用真实 categoryId） */
-function mapApiProduct(p: any, catMap: Map<number, string>): CatalogProduct {
+function mapApiProduct(p: any, categoryById: Map<number, RealCategory>): CatalogProduct {
+  const lineage: RealCategory[] = [];
+  let current = categoryById.get(p.categoryId);
+  while (current) {
+    lineage.unshift(current);
+    current = current.parentId ? categoryById.get(current.parentId) : undefined;
+  }
+
+  const primaryCategory = lineage[0];
+  const secondaryCategory = lineage[1];
+
   return {
     id: p.id,
     sku: p.code || '',
     name: p.name || '',
-    primaryCategoryId: String(p.categoryId || ''),
-    secondaryCategoryId: '',
+    primaryCategoryId: String(primaryCategory?.id || p.categoryId || ''),
+    secondaryCategoryId: String(secondaryCategory?.id || p.categoryId || ''),
     material: matLabel(p.materialType),
-    craft: typeof p.craftTechnique === 'string' ? p.craftTechnique : '',
+    craft: Array.isArray(p.craftTechnique) ? p.craftTechnique.join('、') : (p.craftTechnique || ''),
     weight: p.goldWeight ? `${p.goldWeight}g` : (p.weight ? `${p.weight}g` : ''),
     size: p.size || '',
     series: '',
     scene: p.salesMode || '',
     images: (p.images || []).map((img: any) => img.url || ''),
-    categoryName: catMap.get(p.categoryId) || '',
+    categoryName: categoryById.get(p.categoryId)?.name || '',
     price: Number(p.price) || 0,
   };
 }
@@ -49,6 +60,7 @@ export function useProductData() {
   const [categories, setCategories] = useState<RealCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,24 +69,24 @@ export function useProductData() {
       setError(false);
       try {
         const [prodRes, catRes] = await Promise.all([
-          productApi.getList({ status: 'PUBLISHED', pageSize: 200 }),
+          productApi.getPublicList({ pageSize: 2000 }),
           categoryApi.getTree(),
         ]);
         const data = unwrapResponse<any>(prodRes);
         const list: any[] = data?.list || data || [];
 
         // 构建分类映射: categoryId → name
-        const catMap = new Map<number, string>();
+        const categoryById = new Map<number, RealCategory>();
         const cats = unwrapResponse<any[]>(catRes) || [];
         const walkCats = (nodes: any[]) => {
           for (const n of nodes) {
-            if (n.id) catMap.set(n.id, n.name);
+            if (n.id) categoryById.set(n.id, n);
             if (n.children) walkCats(n.children);
           }
         };
         walkCats(Array.isArray(cats) ? cats : []);
 
-        const mapped = list.map((p: any) => mapApiProduct(p, catMap));
+        const mapped = list.map((p: any) => mapApiProduct(p, categoryById));
         if (!cancelled) {
           setApiProducts(mapped);
           setCategories(Array.isArray(cats) ? cats : []);
@@ -86,6 +98,13 @@ export function useProductData() {
       }
     })();
     return () => { cancelled = true; };
+  }, [revision]);
+
+  useEffect(() => {
+    if (USE_MOCK) return;
+    const stream = new EventSource(publicProductStreamUrl);
+    stream.onmessage = () => setRevision((value) => value + 1);
+    return () => stream.close();
   }, []);
 
   const products = useMemo(() => {

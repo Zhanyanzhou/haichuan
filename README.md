@@ -1,6 +1,6 @@
-# Jewelry Hub - 珠宝产品管理平台
+# 海川珠宝 — 高端珠宝臻品平台
 
-> 高级科幻风格全栈珠宝管理网站 | React + NestJS + MySQL
+> 高端珠宝品牌展示与管理平台 | React + NestJS + MySQL
 
 ## 🚀 快速开始
 
@@ -48,7 +48,7 @@ npm run dev
 ### 默认账号
 
 - 用户名: `admin`
-- 密码: `admin123`
+- 密码: 初始化时通过 `BOOTSTRAP_ADMIN_PASSWORD` 环境变量提供
 - 角色: 超级管理员
 
 ## 📁 项目结构
@@ -65,7 +65,7 @@ jewelry-platform/
 │   │   └── types/       # TypeScript 类型
 ├── server/          # NestJS 后端
 │   ├── src/
-│   │   ├── modules/     # 业务模块 (15个)
+│   │   ├── modules/     # 业务模块 (21个，详见 docs/MODULES.md)
 │   │   ├── common/      # 公共 (守卫/拦截器/装饰器)
 │   │   └── queue/       # 消息队列
 │   └── prisma/          # 数据库模型 & 种子
@@ -77,7 +77,7 @@ jewelry-platform/
 | 层级   | 技术                                                       |
 | ------ | ---------------------------------------------------------- |
 | 前端   | React 18 + TypeScript + Vite + Ant Design 5 + Tailwind CSS |
-| 动效   | Framer Motion + Three.js + GSAP                            |
+| 动效   | Framer Motion                                              |
 | 后端   | NestJS 10 + Prisma 5 + Passport JWT                        |
 | 数据库 | MySQL 8.0 + Redis 7                                        |
 | AI     | 阿里云视觉智能 API                                         |
@@ -99,15 +99,17 @@ jewelry-platform/
 ### 后台
 
 - ✅ 仪表盘
-- ⬜ 产品管理 (CRUD + 20+字段)
-- ✅ 分类管理 (四级树结构)
-- ⬜ AI 智能分类
-- ⬜ 金价联动系统
-- ⬜ 库存管理
-- ⬜ 订单管理
-- ⬜ 用户权限管理
-- ⬜ 审核发布流程
-- ⬜ 营销活动 & 优惠券
-- ⬜ 客服工作台
-- ⬜ 数据统计分析
-- ⬜ 消息通知系统
+- ✅ 商品管理
+- ✅ 分类管理（四级树结构）
+- ✅ AI 智能分类
+- ✅ 金价管理
+- ✅ 库存管理
+- ✅ 订单管理
+- ✅ 用户权限管理（5 角色 RBAC）
+- ✅ 首页可视化配置（页面构建器）
+- ✅ 营销活动 & 优惠券
+- ✅ 客服工作台（咨询/选款/线索）
+- ✅ 数据统计分析
+- ✅ 消息通知系统
+
+> 完整功能清单见 `docs/CURRENT_STATE.md`

@@ -1,15 +1,20 @@
-import { Controller, Get, Post, Put, Delete, Param, Query, Body, UseGuards, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Query, Body, UseGuards, BadRequestException, NotFoundException, ConflictException, MessageEvent, Sse } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
 import { UploadService } from '../upload/upload.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { CreateProductDto, UpdateProductDto } from './dto';
 import { join } from 'path';
 import { statSync } from 'fs';
+import { Observable } from 'rxjs';
 const sharp = require('sharp');
 
 @ApiTags('产品管理')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('SUPER_ADMIN', 'ADMIN', 'EDITOR')
 @Controller('products')
 export class ProductsController {
   constructor(
@@ -17,8 +22,8 @@ export class ProductsController {
     private uploadService: UploadService,
   ) {}
 
-  @Public()
   @Get()
+  @ApiBearerAuth()
   @ApiOperation({ summary: '获取产品列表', description: '支持分类/材质/状态/关键词筛选和分页' })
   @ApiQuery({ name: 'page', required: false, description: '页码' })
   @ApiQuery({ name: 'pageSize', required: false, description: '每页数量' })
@@ -29,7 +34,29 @@ export class ProductsController {
   }
 
   @Public()
+  @Get('public')
+  @ApiOperation({ summary: '获取前台可展示商品' })
+  findPublic(@Query() query: Record<string, unknown>) {
+    return this.productsService.findPublic(query);
+  }
+
+  @Public()
+  @Sse('public/stream')
+  publicChangeStream(): Observable<MessageEvent> {
+    return this.productsService.publicChangeStream();
+  }
+
+  @Public()
+  @Get('public/:id')
+  @ApiOperation({ summary: '获取前台可展示商品详情' })
+  async findPublicById(@Param('id') id: string) {
+    const product = await this.productsService.findPublicById(+id);
+    if (!product) throw new NotFoundException('商品当前不可浏览');
+    return product;
+  }
+
   @Get(':id')
+  @ApiBearerAuth()
   @ApiOperation({ summary: '获取产品详情' })
   findById(@Param('id') id: string) {
     return this.productsService.findById(+id);

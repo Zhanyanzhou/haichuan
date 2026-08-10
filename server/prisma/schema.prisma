@@ -24,13 +24,13 @@ model User {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  operationLogs     OperationLog[]
-  aiClassifyRecords AIClassifyRecord[] @relation("Operator")
-  inquiries         Inquiry[]          @relation("AssignedTo")
-  notifications     Notification[]
-  Order             Order[]
+  operationLogs      OperationLog[]
+  aiClassifyRecords  AIClassifyRecord[] @relation("Operator")
+  inquiries          Inquiry[]          @relation("AssignedTo")
+  notifications      Notification[]
+  Order              Order[]
   selectionInquiries SelectionInquiry[] @relation("Handler")
-  leadFollowUps     LeadFollowUp[]      @relation("Creator")
+  leadFollowUps      LeadFollowUp[]     @relation("Creator")
 
   @@map("users")
 }
@@ -77,50 +77,50 @@ model Category {
 // ========== 产品管理（核心） ==========
 
 model Product {
-  id             Int           @id @default(autoincrement())
-  code           String        @unique @db.VarChar(50) // 产品编码/货号
-  name           String        @db.VarChar(200)
-  shortDescription String?     @map("short_description") @db.VarChar(500) // 简介
-  description    String?       @db.Text
-  categoryId     Int           @map("category_id")
-  materialType   MaterialType  @default(GOLD_999) @map("material_type")
-  goldWeight     Decimal?      @default(0) @map("gold_weight") @db.Decimal(8, 2) // 金重(g)
-  craftFee       Decimal?      @default(0) @map("craft_fee") @db.Decimal(10, 2) // 工费
-  price          Decimal?      @default(0) @db.Decimal(10, 2) // 当前售价
-  priceMin       Decimal?      @default(0) @map("price_min") @db.Decimal(10, 2)
-  priceMax       Decimal?      @default(0) @map("price_max") @db.Decimal(10, 2)
-  weight         Decimal?      @default(0) @db.Decimal(8, 2) // 总重量(g)
-  size           String?       @db.VarChar(100) // 尺寸规格
-  gemInfo        Json?         @map("gem_info") // 宝石信息JSON
-  craftTechnique Json?         @map("craft_technique") // 工艺技法JSON
-  status         ProductStatus @default(DRAFT)
-  salesMode      SalesMode     @default(DISPLAY_ONLY) @map("sales_mode")
-  sortOrder      Int           @default(0) @map("sort_order")
-  isHot          Boolean       @default(false) @map("is_hot")
-  isNew          Boolean       @default(false) @map("is_new")
-  isRecommended  Boolean       @default(false) @map("is_recommended")
-  isLimited      Boolean       @default(false) @map("is_limited")
-  isCustom       Boolean       @default(false) @map("is_custom")
-  viewCount      Int           @default(0) @map("view_count")
-  salesCount     Int           @default(0) @map("sales_count")
-  publishedAt    DateTime?     @map("published_at")
-  deletedAt      DateTime?     @map("deleted_at")
-  createdAt      DateTime      @default(now()) @map("created_at")
-  updatedAt      DateTime      @updatedAt @map("updated_at")
+  id               Int           @id @default(autoincrement())
+  code             String        @unique @db.VarChar(50) // 产品编码/货号
+  name             String        @db.VarChar(200)
+  shortDescription String?       @map("short_description") @db.VarChar(500) // 简介
+  description      String?       @db.Text
+  categoryId       Int           @map("category_id")
+  materialType     MaterialType  @default(GOLD_999) @map("material_type")
+  goldWeight       Decimal?      @default(0) @map("gold_weight") @db.Decimal(8, 2) // 金重(g)
+  craftFee         Decimal?      @default(0) @map("craft_fee") @db.Decimal(10, 2) // 工费
+  price            Decimal?      @default(0) @db.Decimal(10, 2) // 当前售价
+  priceMin         Decimal?      @default(0) @map("price_min") @db.Decimal(10, 2)
+  priceMax         Decimal?      @default(0) @map("price_max") @db.Decimal(10, 2)
+  weight           Decimal?      @default(0) @db.Decimal(8, 2) // 总重量(g)
+  size             String?       @db.VarChar(100) // 尺寸规格
+  gemInfo          Json?         @map("gem_info") // 宝石信息JSON
+  craftTechnique   Json?         @map("craft_technique") // 工艺技法JSON
+  status           ProductStatus @default(DRAFT)
+  salesMode        SalesMode     @default(DISPLAY_ONLY) @map("sales_mode")
+  sortOrder        Int           @default(0) @map("sort_order")
+  isHot            Boolean       @default(false) @map("is_hot")
+  isNew            Boolean       @default(false) @map("is_new")
+  isRecommended    Boolean       @default(false) @map("is_recommended")
+  isLimited        Boolean       @default(false) @map("is_limited")
+  isCustom         Boolean       @default(false) @map("is_custom")
+  viewCount        Int           @default(0) @map("view_count")
+  salesCount       Int           @default(0) @map("sales_count")
+  publishedAt      DateTime?     @map("published_at")
+  deletedAt        DateTime?     @map("deleted_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
 
-  category     Category       @relation(fields: [categoryId], references: [id])
-  images       ProductImage[]
-  primaryImageId Int?       @map("primary_image_id")
-  listingImageId Int?       @map("listing_image_id")
-  primaryImage  ProductImage?  @relation("PrimaryImage", fields: [primaryImageId], references: [id], onDelete: SetNull)
-  listingImage  ProductImage?  @relation("ListingImage", fields: [listingImageId], references: [id], onDelete: SetNull)
-  skus         ProductSKU[]
-  tags         ProductTag[]
-  certificates Certificate[]
-  seriesItems  SeriesItem[]
-  inquiries    Inquiry[]
-  orderItems   OrderItem[]
-  cartItems    Cart[]
+  category              Category               @relation(fields: [categoryId], references: [id])
+  images                ProductImage[]
+  primaryImageId        Int?                   @map("primary_image_id")
+  listingImageId        Int?                   @map("listing_image_id")
+  primaryImage          ProductImage?          @relation("PrimaryImage", fields: [primaryImageId], references: [id], onDelete: SetNull)
+  listingImage          ProductImage?          @relation("ListingImage", fields: [listingImageId], references: [id], onDelete: SetNull)
+  skus                  ProductSKU[]
+  tags                  ProductTag[]
+  certificates          Certificate[]
+  seriesItems           SeriesItem[]
+  inquiries             Inquiry[]
+  orderItems            OrderItem[]
+  cartItems             Cart[]
   selectionInquiryItems SelectionInquiryItem[]
 
   @@index([categoryId])
@@ -146,18 +146,18 @@ enum MaterialType {
 }
 
 enum ProductStatus {
-  DRAFT     // 草稿
+  DRAFT // 草稿
   PUBLISHED // 已发布(上架)
-  OFFLINE   // 已下架
-  ARCHIVED  // 已归档
+  OFFLINE // 已下架
+  ARCHIVED // 已归档
 }
 
 enum SalesMode {
-  DISPLAY_ONLY    // 仅展示
-  SELECTION       // 选款模式
-  APPOINTMENT     // 预约模式
+  DISPLAY_ONLY // 仅展示
+  SELECTION // 选款模式
+  APPOINTMENT // 预约模式
   DIRECT_PURCHASE // 直接购买(暂未开放)
-  CUSTOM_INQUIRY  // 定制咨询
+  CUSTOM_INQUIRY // 定制咨询
 }
 
 // ========== 产品图片（三视图） ==========
@@ -177,11 +177,11 @@ model ProductImage {
   fileSize      Int?      @map("file_size")
   createdAt     DateTime  @default(now()) @map("created_at")
 
-  product      Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
-  sourceImage  ProductImage? @relation("SourceImage", fields: [sourceImageId], references: [id], onDelete: SetNull)
+  product       Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sourceImage   ProductImage?  @relation("SourceImage", fields: [sourceImageId], references: [id], onDelete: SetNull)
   derivedImages ProductImage[] @relation("SourceImage")
-  primaryOf    Product[]     @relation("PrimaryImage")
-  listingOf    Product[]     @relation("ListingImage")
+  primaryOf     Product[]      @relation("PrimaryImage")
+  listingOf     Product[]      @relation("ListingImage")
 
   @@map("product_images")
 }
@@ -213,6 +213,7 @@ model ProductSKU {
   inventories Inventory[]
   orderItems  OrderItem[]
   cartItems   Cart[]
+  reservations InventoryReservation[]
 
   @@map("product_skus")
 }
@@ -353,6 +354,7 @@ model Inventory {
 
   sku       ProductSKU @relation(fields: [skuId], references: [id], onDelete: Cascade)
   warehouse Warehouse  @relation(fields: [warehouseId], references: [id])
+  reservations InventoryReservation[]
 
   @@unique([skuId, warehouseId])
   @@map("inventories")
@@ -365,6 +367,7 @@ model Order {
   orderNo          String      @unique @map("order_no") @db.VarChar(30)
   userId           Int?        @map("user_id") // 关联注册用户（可选，兼容游客下单）
   customerName     String      @map("customer_name") @db.VarChar(50)
+  customerId       Int?        @map("customer_id")
   customerPhone    String      @map("customer_phone") @db.VarChar(20)
   customerEmail    String?     @map("customer_email") @db.VarChar(100)
   address          String      @db.VarChar(500)
@@ -378,13 +381,20 @@ model Order {
   logisticsNo      String?     @map("logistics_no") @db.VarChar(100)
   internalNote     String?     @map("internal_note") @db.Text
   lockedGoldPrice  Decimal?    @map("locked_gold_price") @db.Decimal(10, 2)
+  reservedAt       DateTime?   @map("reserved_at")
+  paymentConfirmedAt DateTime? @map("payment_confirmed_at")
+  shippedAt        DateTime?   @map("shipped_at")
+  completedAt      DateTime?   @map("completed_at")
+  cancelledAt      DateTime?   @map("cancelled_at")
   createdAt        DateTime    @default(now()) @map("created_at")
   updatedAt        DateTime    @updatedAt @map("updated_at")
 
   items    OrderItem[]
   payments Payment[]
   refunds  Refund[]
+  reservations InventoryReservation[]
   user     User?       @relation(fields: [userId], references: [id])
+  customer Customer?   @relation(fields: [customerId], references: [id])
   couponId Int?        @map("coupon_id")
 
   @@index([orderNo])
@@ -392,7 +402,47 @@ model Order {
   @@index([customerPhone])
   @@index([customerPhone, createdAt]) // 复合索引：按手机+时间查订单
   @@index([userId, createdAt]) // 复合索引：按用户+时间查订单
+  @@index([customerId, createdAt])
   @@map("orders")
+}
+
+model Customer {
+  id          Int               @id @default(autoincrement())
+  phone       String            @unique @db.VarChar(20)
+  name        String?           @db.VarChar(50)
+  email       String?           @db.VarChar(100)
+  passwordHash String?          @map("password_hash") @db.VarChar(255)
+  status      Status            @default(ACTIVE)
+  lastOrderAt DateTime?         @map("last_order_at")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  addresses CustomerAddress[]
+  orders    Order[]
+  inquiries Inquiry[]
+  selectionInquiries SelectionInquiry[]
+
+  @@map("customers")
+}
+
+model CustomerAddress {
+  id             Int      @id @default(autoincrement())
+  customerId     Int      @map("customer_id")
+  recipientName  String   @map("recipient_name") @db.VarChar(50)
+  recipientPhone String   @map("recipient_phone") @db.VarChar(20)
+  province       String?  @db.VarChar(50)
+  city           String?  @db.VarChar(50)
+  district       String?  @db.VarChar(50)
+  detail         String   @db.VarChar(300)
+  postalCode     String?  @map("postal_code") @db.VarChar(20)
+  isDefault      Boolean  @default(false) @map("is_default")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("customer_addresses")
 }
 
 enum OrderStatus {
@@ -404,20 +454,20 @@ enum OrderStatus {
 }
 
 model OrderItem {
-  id            Int     @id @default(autoincrement())
-  orderId       Int     @map("order_id")
-  skuId         Int     @map("sku_id")
-  productId     Int     @map("product_id")
-  quantity      Int     @default(1)
-  unitPrice     Decimal @map("unit_price") @db.Decimal(10, 2)
-  subtotal      Decimal @db.Decimal(10, 2)
+  id                   Int      @id @default(autoincrement())
+  orderId              Int      @map("order_id")
+  skuId                Int      @map("sku_id")
+  productId            Int      @map("product_id")
+  quantity             Int      @default(1)
+  unitPrice            Decimal  @map("unit_price") @db.Decimal(10, 2)
+  subtotal             Decimal  @db.Decimal(10, 2)
   // 成交快照 — 商品后续修改不影响历史订单
-  productNameSnapshot   String? @map("product_name_snapshot") @db.VarChar(200)
-  productImageSnapshot  String? @map("product_image_snapshot") @db.VarChar(500)
-  productCodeSnapshot   String? @map("product_code_snapshot") @db.VarChar(50)
-  skuSnapshot           String? @map("sku_snapshot") @db.VarChar(200)
-  actualWeight          Decimal? @map("actual_weight") @db.Decimal(8, 2)
-  certNumber            String? @map("cert_number") @db.VarChar(100)
+  productNameSnapshot  String?  @map("product_name_snapshot") @db.VarChar(200)
+  productImageSnapshot String?  @map("product_image_snapshot") @db.VarChar(500)
+  productCodeSnapshot  String?  @map("product_code_snapshot") @db.VarChar(50)
+  skuSnapshot          String?  @map("sku_snapshot") @db.VarChar(200)
+  actualWeight         Decimal? @map("actual_weight") @db.Decimal(8, 2)
+  certNumber           String?  @map("cert_number") @db.VarChar(100)
 
   order   Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
   sku     ProductSKU @relation(fields: [skuId], references: [id])
@@ -426,20 +476,47 @@ model OrderItem {
   @@map("order_items")
 }
 
+// 库存预占明细：记录订单锁定的具体仓位，供支付确认、取消和超时释放使用。
+model InventoryReservation {
+  id          Int       @id @default(autoincrement())
+  orderId     Int       @map("order_id")
+  inventoryId Int?      @map("inventory_id")
+  skuId       Int       @map("sku_id")
+  quantity    Int
+  expiresAt   DateTime  @map("expires_at")
+  releasedAt  DateTime? @map("released_at")
+  consumedAt  DateTime? @map("consumed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inventory Inventory?  @relation(fields: [inventoryId], references: [id], onDelete: Restrict)
+  sku       ProductSKU  @relation(fields: [skuId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([inventoryId])
+  @@index([skuId])
+  @@index([expiresAt])
+  @@map("inventory_reservations")
+}
+
 // ========== 支付管理 ==========
 
 model Payment {
-  id            Int           @id @default(autoincrement())
-  orderId       Int           @map("order_id")
-  paymentNo     String        @unique @map("payment_no") @db.VarChar(50)
-  amount        Decimal       @db.Decimal(12, 2)
-  method        String        @db.VarChar(30)  // wechat | alipay | bank_transfer | store
-  status        PaymentStatus @default(PENDING)
-  type          String        @default("FULL") @db.VarChar(20) // DEPOSIT | BALANCE | FULL
-  gatewayTradeNo String?      @map("gateway_trade_no") @db.VarChar(100)
-  gatewayNotify  Json?        @map("gateway_notify")
-  paidAt        DateTime?     @map("paid_at")
-  createdAt     DateTime      @default(now()) @map("created_at")
+  id             Int           @id @default(autoincrement())
+  orderId        Int           @map("order_id")
+  paymentNo      String        @unique @map("payment_no") @db.VarChar(50)
+  amount         Decimal       @db.Decimal(12, 2)
+  method         String        @db.VarChar(30) // wechat | alipay | bank_transfer | store
+  status         PaymentStatus @default(PENDING)
+  type           String        @default("FULL") @db.VarChar(20) // DEPOSIT | BALANCE | FULL
+  gatewayTradeNo String?       @map("gateway_trade_no") @db.VarChar(100)
+  gatewayNotify  Json?         @map("gateway_notify")
+  proofUrl       String?       @map("proof_url") @db.VarChar(500)
+  reviewedBy     Int?          @map("reviewed_by")
+  reviewedAt     DateTime?     @map("reviewed_at")
+  reviewNote     String?       @map("review_note") @db.VarChar(500)
+  paidAt         DateTime?     @map("paid_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
 
   order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   refunds Refund[]
@@ -460,16 +537,16 @@ enum PaymentStatus {
 // ========== 退款管理 ==========
 
 model Refund {
-  id          Int           @id @default(autoincrement())
-  orderId     Int           @map("order_id")
-  paymentId   Int?          @map("payment_id")
-  refundNo    String        @unique @map("refund_no") @db.VarChar(50)
-  amount      Decimal       @db.Decimal(12, 2)
-  reason      String?       @db.VarChar(500)
-  status      RefundStatus  @default(PENDING)
-  gatewayRefundNo String?   @map("gateway_refund_no") @db.VarChar(100)
-  processedAt DateTime?     @map("processed_at")
-  createdAt   DateTime      @default(now()) @map("created_at")
+  id              Int          @id @default(autoincrement())
+  orderId         Int          @map("order_id")
+  paymentId       Int?         @map("payment_id")
+  refundNo        String       @unique @map("refund_no") @db.VarChar(50)
+  amount          Decimal      @db.Decimal(12, 2)
+  reason          String?      @db.VarChar(500)
+  status          RefundStatus @default(PENDING)
+  gatewayRefundNo String?      @map("gateway_refund_no") @db.VarChar(100)
+  processedAt     DateTime?    @map("processed_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
 
   order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   payment Payment? @relation(fields: [paymentId], references: [id])
@@ -508,30 +585,33 @@ model Cart {
 // ========== 询价/咨询 ==========
 
 model Inquiry {
-  id                Int           @id @default(autoincrement())
-  productId         Int?          @map("product_id")
-  customerName      String        @map("customer_name") @db.VarChar(50)
-  customerPhone     String        @map("customer_phone") @db.VarChar(20)
-  customerEmail     String?       @map("customer_email") @db.VarChar(100)
-  consultationType  String?       @map("consultation_type") @db.VarChar(30)
-  preferredContact  String?       @map("preferred_contact") @db.VarChar(20)
-  preferredTime     String?       @map("preferred_time") @db.VarChar(20)
-  budgetRange       String?       @map("budget_range") @db.VarChar(30)
-  message           String        @db.Text
-  privacyConsent    Boolean       @default(false) @map("privacy_consent")
-  status            String        @default("PENDING") @db.VarChar(20)
-  assignedTo        Int?          @map("assigned_to")
-  reply             String?       @db.Text
-  internalNote      String?       @map("internal_note") @db.Text
-  nextFollowUpAt    DateTime?     @map("next_follow_up_at")
-  repliedAt         DateTime?     @map("replied_at")
-  createdAt         DateTime      @default(now()) @map("created_at")
-  updatedAt         DateTime      @updatedAt @map("updated_at")
+  id               Int       @id @default(autoincrement())
+  productId        Int?      @map("product_id")
+  customerId       Int?      @map("customer_id")
+  customerName     String    @map("customer_name") @db.VarChar(50)
+  customerPhone    String    @map("customer_phone") @db.VarChar(20)
+  customerEmail    String?   @map("customer_email") @db.VarChar(100)
+  consultationType String?   @map("consultation_type") @db.VarChar(30)
+  preferredContact String?   @map("preferred_contact") @db.VarChar(20)
+  preferredTime    String?   @map("preferred_time") @db.VarChar(20)
+  budgetRange      String?   @map("budget_range") @db.VarChar(30)
+  message          String    @db.Text
+  privacyConsent   Boolean   @default(false) @map("privacy_consent")
+  status           String    @default("PENDING") @db.VarChar(20)
+  assignedTo       Int?      @map("assigned_to")
+  reply            String?   @db.Text
+  internalNote     String?   @map("internal_note") @db.Text
+  nextFollowUpAt   DateTime? @map("next_follow_up_at")
+  repliedAt        DateTime? @map("replied_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   product  Product? @relation(fields: [productId], references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   assignee User?    @relation("AssignedTo", fields: [assignedTo], references: [id])
 
   @@index([status])
+  @@index([customerId, createdAt])
   @@map("inquiries")
 }
 
@@ -687,20 +767,20 @@ model ContentSlot {
 // ========== 页面模块构建器 ==========
 
 model PageModule {
-  id           Int      @id @default(autoincrement())
-  pageKey      String   @db.VarChar(50)           // "home" | "about" | "custom" | ...
-  moduleType   String   @db.VarChar(30)           // hero | imageText | richText | gallery | serviceCards | productRecommendation | cta | faq
-  sortOrder    Int      @default(0) @map("sort_order")
-  isVisible    Boolean  @default(true) @map("is_visible")
-  status       String   @default("DRAFT") @db.VarChar(20) // DRAFT | PUBLISHED
-  content      Json                                  // 草稿内容: { desktopImage, mobileImage, title, subtitle, ... }
-  publishedContent Json? @map("published_content")   // 已发布快照
-  layoutConfig Json     @map("layout_config")       // { template, ratio, textPosition, ... }
-  styleConfig  Json     @map("style_config")        // { focusX, focusY, bgColor, spacing, ... }
-  version      Int      @default(1)                 // 版本号
-  updatedBy    Int?     @map("updated_by")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id               Int      @id @default(autoincrement())
+  pageKey          String   @db.VarChar(50) // "home" | "about" | "custom" | ...
+  moduleType       String   @db.VarChar(30) // hero | imageText | richText | gallery | serviceCards | productRecommendation | cta | faq
+  sortOrder        Int      @default(0) @map("sort_order")
+  isVisible        Boolean  @default(true) @map("is_visible")
+  status           String   @default("DRAFT") @db.VarChar(20) // DRAFT | PUBLISHED
+  content          Json // 草稿内容: { desktopImage, mobileImage, title, subtitle, ... }
+  publishedContent Json?    @map("published_content") // 已发布快照
+  layoutConfig     Json     @map("layout_config") // { template, ratio, textPosition, ... }
+  styleConfig      Json     @map("style_config") // { focusX, focusY, bgColor, spacing, ... }
+  version          Int      @default(1) // 版本号
+  updatedBy        Int?     @map("updated_by")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   @@index([pageKey])
   @@index([status])
@@ -710,54 +790,114 @@ model PageModule {
 // ========== 页面模块版本历史 ==========
 
 model PageModuleVersion {
-  id          Int      @id @default(autoincrement())
-  moduleId    Int      @map("module_id")
-  pageKey     String   @db.VarChar(50)
-  moduleType  String   @db.VarChar(30)
-  content     Json
-  layoutConfig Json    @map("layout_config")
-  styleConfig Json     @map("style_config")
-  version     Int
-  savedBy     Int?     @map("saved_by")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id           Int      @id @default(autoincrement())
+  moduleId     Int      @map("module_id")
+  pageKey      String   @db.VarChar(50)
+  moduleType   String   @db.VarChar(30)
+  content      Json
+  layoutConfig Json     @map("layout_config")
+  styleConfig  Json     @map("style_config")
+  version      Int
+  savedBy      Int?     @map("saved_by")
+  createdAt    DateTime @default(now()) @map("created_at")
 
   @@index([moduleId])
   @@index([moduleId, version])
   @@map("page_module_versions")
 }
 
+// ========== 页面文档（Puck 页面级 JSON 存储）==========
+
+model PageDocument {
+  id              Int       @id @default(autoincrement())
+  pageKey         String    @unique @db.VarChar(50)
+  schemaVersion   Int       @default(1) // 我们自己控制的数据版本
+  editorType      String    @default("puck") @db.VarChar(30)
+  editorVersion   String?   @db.VarChar(30) // 生成时的 Puck 版本
+  templateId      String?   @map("template_id") @db.VarChar(50)
+  templateVersion Int?      @map("template_version")
+  puckData        Json // Puck { content, root, zones }
+  metadata        Json      @default("{}") // { title, seoDescription, slug, ... }
+  status          String    @default("DRAFT") @db.VarChar(20) // DRAFT | PUBLISHED
+  publishedAt     DateTime? @map("published_at")
+  publishedBy     Int?      @map("published_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("page_documents")
+}
+
+// ========== 页面文档版本历史 ==========
+
+model PageDocumentRevision {
+  id          Int       @id @default(autoincrement())
+  documentId  Int       @map("document_id")
+  version     Int
+  puckData    Json
+  metadata    Json      @default("{}")
+  status      String    @default("published") @db.VarChar(20)
+  publishedBy Int?      @map("published_by")
+  publishedAt DateTime? @map("published_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([documentId])
+  @@map("page_document_revisions")
+}
+
+// ========== 页面模板 ==========
+
+model PageTemplate {
+  id                String   @id @db.VarChar(50) // "jewelry-home-v1"
+  name              String   @db.VarChar(100)
+  pageType          String   @default("custom") @db.VarChar(30)
+  defaultPuckData   Json // 模板默认 Puck 数据
+  allowedBlockTypes Json     @default("[]") // ["hero", "imageText", ...]
+  lockedComponents  Json     @default("[]") // ["hero-locked"]
+  permissions       Json     @default("{}") // 模板级权限
+  version           Int      @default(1)
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("page_templates")
+}
+
 // ========== 选款咨询 ==========
 
 model SelectionInquiry {
-  id           Int               @id @default(autoincrement())
-  customerName String            @map("customer_name") @db.VarChar(50)
-  phone        String?           @db.VarChar(20)
-  email        String?           @db.VarChar(100)
-  wechat       String?           @db.VarChar(50)
-  message      String?           @db.Text
-  status       String            @default("PENDING") @db.VarChar(20)
-  internalNote String?           @map("internal_note") @db.Text
-  handledBy    Int?              @map("handled_by")
-  handledAt    DateTime?         @map("handled_at")
-  nextFollowUpAt DateTime?       @map("next_follow_up_at")
-  createdAt    DateTime          @default(now()) @map("created_at")
-  updatedAt    DateTime          @updatedAt @map("updated_at")
+  id             Int       @id @default(autoincrement())
+  customerId     Int?      @map("customer_id")
+  customerName   String    @map("customer_name") @db.VarChar(50)
+  phone          String?   @db.VarChar(20)
+  email          String?   @db.VarChar(100)
+  wechat         String?   @db.VarChar(50)
+  message        String?   @db.Text
+  status         String    @default("PENDING") @db.VarChar(20)
+  internalNote   String?   @map("internal_note") @db.Text
+  handledBy      Int?      @map("handled_by")
+  handledAt      DateTime? @map("handled_at")
+  nextFollowUpAt DateTime? @map("next_follow_up_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  items        SelectionInquiryItem[]
-  handler      User?              @relation("Handler", fields: [handledBy], references: [id])
+  items   SelectionInquiryItem[]
+  customer Customer?              @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  handler User?                  @relation("Handler", fields: [handledBy], references: [id])
 
   @@index([status])
+  @@index([customerId, createdAt])
   @@map("selection_inquiries")
 }
 
 model SelectionInquiryItem {
-  id                  Int              @id @default(autoincrement())
-  selectionInquiryId  Int              @map("selection_inquiry_id")
-  productId           Int?             @map("product_id")
-  productNameSnapshot String           @map("product_name_snapshot") @db.VarChar(200)
-  productSkuSnapshot  String?          @map("product_sku_snapshot") @db.VarChar(100)
-  productImageSnapshot String?         @map("product_image_snapshot") @db.VarChar(500)
-  createdAt           DateTime         @default(now()) @map("created_at")
+  id                   Int      @id @default(autoincrement())
+  selectionInquiryId   Int      @map("selection_inquiry_id")
+  productId            Int?     @map("product_id")
+  productNameSnapshot  String   @map("product_name_snapshot") @db.VarChar(200)
+  productSkuSnapshot   String?  @map("product_sku_snapshot") @db.VarChar(100)
+  productImageSnapshot String?  @map("product_image_snapshot") @db.VarChar(500)
+  createdAt            DateTime @default(now()) @map("created_at")
 
   inquiry SelectionInquiry @relation(fields: [selectionInquiryId], references: [id], onDelete: Cascade)
   product Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
@@ -768,14 +908,14 @@ model SelectionInquiryItem {
 // ========== 统一线索跟进记录 ==========
 
 model LeadFollowUp {
-  id             Int      @id @default(autoincrement())
-  leadType       String   @db.VarChar(30)   // "inquiry" | "selection_inquiry"
-  leadId         Int      @map("lead_id")
-  content        String   @db.Text
-  contactMethod  String?  @map("contact_method") @db.VarChar(30) // phone | wechat | email | store | other
+  id             Int       @id @default(autoincrement())
+  leadType       String    @db.VarChar(30) // "inquiry" | "selection_inquiry"
+  leadId         Int       @map("lead_id")
+  content        String    @db.Text
+  contactMethod  String?   @map("contact_method") @db.VarChar(30) // phone | wechat | email | store | other
   nextFollowUpAt DateTime? @map("next_follow_up_at")
-  createdBy      Int?     @map("created_by")
-  createdAt      DateTime @default(now()) @map("created_at")
+  createdBy      Int?      @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
   creator User? @relation("Creator", fields: [createdBy], references: [id])
 
@@ -786,17 +926,17 @@ model LeadFollowUp {
 // ========== 统一行为事件采集 ==========
 
 model AnalyticsEvent {
-  id          Int      @id @default(autoincrement())
-  eventName   String   @db.VarChar(50)
-  occurredAt  DateTime @default(now()) @map("occurred_at")
-  pagePath    String?  @db.VarChar(300) @map("page_path")
-  productId   Int?     @map("product_id")
-  searchTerm  String?  @db.VarChar(200) @map("search_term")
-  source      String?  @db.VarChar(50)
-  deviceType  String?  @db.VarChar(20) @map("device_type")
-  sessionId   String?  @db.VarChar(100) @map("session_id")
-  customerId  Int?     @map("customer_id")
-  metadata    Json?
+  id         Int      @id @default(autoincrement())
+  eventName  String   @db.VarChar(50)
+  occurredAt DateTime @default(now()) @map("occurred_at")
+  pagePath   String?  @map("page_path") @db.VarChar(300)
+  productId  Int?     @map("product_id")
+  searchTerm String?  @map("search_term") @db.VarChar(200)
+  source     String?  @db.VarChar(50)
+  deviceType String?  @map("device_type") @db.VarChar(20)
+  sessionId  String?  @map("session_id") @db.VarChar(100)
+  customerId Int?     @map("customer_id")
+  metadata   Json?
 
   @@index([eventName])
   @@index([occurredAt])

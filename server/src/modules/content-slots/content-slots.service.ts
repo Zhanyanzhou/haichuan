@@ -7,7 +7,7 @@ export class ContentSlotsService {
 
   /** 前台：获取已发布插槽 */
   async getPublished(pageKey: string) {
-    const rows = await (this.prisma as any).contentSlot.findMany({
+    const rows = await this.prisma.contentSlot.findMany({
       where: { pageKey, status: 'PUBLISHED', isVisible: true },
       orderBy: { sortOrder: 'asc' },
     });
@@ -16,7 +16,7 @@ export class ContentSlotsService {
 
   /** 后台：获取全部插槽（含草稿） */
   async getAdminAll(pageKey: string) {
-    const rows = await (this.prisma as any).contentSlot.findMany({
+    const rows = await this.prisma.contentSlot.findMany({
       where: { pageKey },
       orderBy: { sortOrder: 'asc' },
     });
@@ -29,7 +29,7 @@ export class ContentSlotsService {
     desktopAsset?: string; mobileAsset?: string; title?: string; subtitle?: string;
     linkUrl?: string; altText?: string; isVisible?: boolean; updatedBy?: number;
   }) {
-    return (this.prisma as any).contentSlot.upsert({
+    return this.prisma.contentSlot.upsert({
       where: { slotKey: data.slotKey },
       update: { ...data, status: 'DRAFT' },
       create: { ...data, status: 'DRAFT' },
@@ -38,7 +38,7 @@ export class ContentSlotsService {
 
   /** 发布单个插槽 */
   async publish(slotKey: string) {
-    return (this.prisma as any).contentSlot.update({
+    return this.prisma.contentSlot.update({
       where: { slotKey },
       data: { status: 'PUBLISHED' },
     });
@@ -46,7 +46,7 @@ export class ContentSlotsService {
 
   /** 一键发布某页面全部草稿 */
   async publishAll(pageKey: string) {
-    return (this.prisma as any).contentSlot.updateMany({
+    return this.prisma.contentSlot.updateMany({
       where: { pageKey, status: 'DRAFT' },
       data: { status: 'PUBLISHED' },
     });
@@ -54,7 +54,7 @@ export class ContentSlotsService {
 
   /** 取消发布（回退到默认内容） */
   async unpublish(slotKey: string) {
-    return (this.prisma as any).contentSlot.update({
+    return this.prisma.contentSlot.update({
       where: { slotKey },
       data: { status: 'DRAFT' },
     });
@@ -62,6 +62,6 @@ export class ContentSlotsService {
 
   /** 删除插槽记录 */
   async delete(slotKey: string) {
-    return (this.prisma as any).contentSlot.delete({ where: { slotKey } });
+    return this.prisma.contentSlot.delete({ where: { slotKey } });
   }
 }
