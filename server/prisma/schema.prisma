@@ -800,7 +800,7 @@ model PageDocumentRevision {
   publishedAt DateTime? @map("published_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  @@index([documentId])
+  @@index([documentId, version])
   @@map("page_document_revisions")
 }
 

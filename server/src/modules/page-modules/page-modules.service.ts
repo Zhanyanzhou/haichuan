@@ -162,6 +162,14 @@ export class PageModulesService {
         },
       });
 
+      // 仅保留最新 50 条发布历史，避免 revisions 表无上限增长
+      const keepVersion = nextVersion - 49;
+      if (keepVersion > 1) {
+        await tx.pageDocumentRevision.deleteMany({
+          where: { documentId: doc.id, version: { lt: keepVersion } },
+        });
+      }
+
       const published = await tx.pageDocument.update({
         where: { pageKey },
         data: {
