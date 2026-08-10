@@ -3,7 +3,9 @@
  */
 
 import SinglePosterSection from "@/components/blocks/SinglePosterSection";
-import type { PageModule } from "@/types/pageModule";
+import { IMAGE_SPECS } from "../config/imageSpecs";
+import { convertPuckProps } from "../utils/puckPropsToModule";
+import MediaPickerField from "../fields/MediaPickerField";
 
 export interface SinglePosterPuckProps {
   number: string;
@@ -19,33 +21,9 @@ export interface SinglePosterPuckProps {
   locked?: boolean;
 }
 
-function toPageModule(props: SinglePosterPuckProps): PageModule {
-  return {
-    id: 0,
-    pageKey: "home",
-    moduleType: "singlePoster",
-    sortOrder: 0,
-    isVisible: true,
-    status: "PUBLISHED",
-    content: {
-      number: props.number,
-      label: props.label,
-      title: props.title,
-      subtitle: props.subtitle,
-      desktopImage: props.desktopImage,
-      mobileImage: props.mobileImage,
-      linkUrl: props.linkUrl,
-    },
-    layoutConfig: { template: props.template || "leftTextRightImage" },
-    styleConfig: { focusX: props.focusX ?? 50, focusY: props.focusY ?? 50 },
-    createdAt: "",
-    updatedAt: "",
-  };
-}
-
 export const singlePosterPuckConfig = {
   render: (props: SinglePosterPuckProps) => (
-    <SinglePosterSection module={toPageModule(props)} />
+    <SinglePosterSection module={convertPuckProps("单图海报", props as any)!} />
   ),
   defaultProps: {
     number: "01",
@@ -65,8 +43,26 @@ export const singlePosterPuckConfig = {
     label: { type: "text" as const, label: "标签" },
     title: { type: "text" as const, label: "标题" },
     subtitle: { type: "text" as const, label: "副标题" },
-    desktopImage: { type: "text" as const, label: "图片 URL" },
-    mobileImage: { type: "text" as const, label: "手机端图片 URL（建议填写）" },
+    desktopImage: {
+      type: "custom" as const,
+      label: "桌面端图片",
+      render: ({
+        value, onChange, readOnly,
+      }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
+        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+          spec={IMAGE_SPECS.singlePoster.image} placeholder="上传单海报桌面图" />
+      ),
+    },
+    mobileImage: {
+      type: "custom" as const,
+      label: "手机端图片",
+      render: ({
+        value, onChange, readOnly,
+      }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
+        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+          spec={IMAGE_SPECS.singlePoster.image} placeholder="上传手机端海报图（可选）" />
+      ),
+    },
     linkUrl: { type: "text" as const, label: "链接" },
     template: {
       type: "radio" as const,

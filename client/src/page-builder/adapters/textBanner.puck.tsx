@@ -3,6 +3,7 @@
  */
 
 import TextBannerBlock from "@/components/blocks/TextBannerBlock";
+import { convertPuckProps } from "../utils/puckPropsToModule";
 
 export interface TextBannerPuckProps {
   eyebrow: string;
@@ -17,27 +18,9 @@ export interface TextBannerPuckProps {
   locked?: boolean;
 }
 
-function toModule(props: TextBannerPuckProps) {
-  return {
-    content: {
-      eyebrow: props.eyebrow,
-      title: props.title,
-      body: props.body,
-      buttonText: props.buttonText,
-      linkUrl: props.linkUrl,
-    },
-    layoutConfig: { template: props.template || "center" },
-    styleConfig: {
-      bgColor: props.bgColor || "#FBF9F6",
-      textColor: props.textColor || "#2C2C2C",
-      spacing: props.spacing || "normal",
-    },
-  };
-}
-
 export const textBannerPuckConfig = {
   render: (props: TextBannerPuckProps) => (
-    <TextBannerBlock module={toModule(props) as any} />
+    <TextBannerBlock module={convertPuckProps("文字横幅", props as any) as any} />
   ),
   defaultProps: {
     eyebrow: "",

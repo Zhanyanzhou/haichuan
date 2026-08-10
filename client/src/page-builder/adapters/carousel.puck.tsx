@@ -1,5 +1,7 @@
 /** carousel.puck.ts — CarouselBlock 的 Puck 适配器 */
 import CarouselBlock from "@/components/blocks/CarouselBlock";
+import { IMAGE_SPECS } from "../config/imageSpecs";
+import { convertPuckProps } from "../utils/puckPropsToModule";
 
 export interface CarouselPuckProps {
   images: { url: string; mobileUrl?: string; link?: string; alt?: string }[];
@@ -12,27 +14,10 @@ export interface CarouselPuckProps {
   locked?: boolean;
 }
 
-function toModule(props: CarouselPuckProps) {
-  return {
-    content: {
-      images: props.images || [],
-      autoPlay: props.autoPlay,
-      interval: props.interval || 4000,
-      showDots: props.showDots,
-      showArrows: props.showArrows,
-    },
-    layoutConfig: {
-      height: props.height || 500,
-      mobileHeight: props.mobileHeight || 640,
-    },
-    styleConfig: {},
-  };
-}
-
 export const carouselPuckConfig = {
   label: "轮播图海报",
   render: (props: CarouselPuckProps) => (
-    <CarouselBlock module={toModule(props) as any} />
+    <CarouselBlock module={convertPuckProps("轮播图", props as any) as any} />
   ),
   defaultProps: {
     images: [
@@ -67,7 +52,7 @@ export const carouselPuckConfig = {
       getItemSummary: (item: any) => item.alt || item.url || "图片",
       arrayFields: {
         mobileUrl: { type: "text" as const, label: "手机端图片 URL（必填）" },
-        url: { type: "text" as const, label: "图片 URL" },
+        url: { type: "text" as const, label: IMAGE_SPECS.carousel.image.label },
         link: { type: "text" as const, label: "跳转链接（可选）" },
         alt: { type: "text" as const, label: "替代文本" },
       },
@@ -102,7 +87,17 @@ export const carouselPuckConfig = {
         { label: "隐藏", value: false },
       ],
     },
-    height: { type: "number" as const, label: "电脑端高度(px)", min: 200, max: 800 },
-    mobileHeight: { type: "number" as const, label: "手机端高度(px)", min: 320, max: 1200 },
+    height: {
+      type: "number" as const,
+      label: "电脑端高度(px)",
+      min: 200,
+      max: 800,
+    },
+    mobileHeight: {
+      type: "number" as const,
+      label: "手机端高度(px)",
+      min: 320,
+      max: 1200,
+    },
   },
 };

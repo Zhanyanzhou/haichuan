@@ -15,9 +15,9 @@ import VideoBlock from "@/components/blocks/VideoBlock";
 import { productApi, publicProductStreamUrl } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
 import type { Product } from "@/types";
-import type { PageModule } from "@/types/pageModule";
 import { getListingImage } from "@/utils/productImage";
 import { unwrapResponse } from "@/utils/unwrap";
+import { convertPuckProps } from "@/page-builder/utils/puckPropsToModule";
 
 type PuckBlock = {
   type?: string;
@@ -203,43 +203,11 @@ function ResolvedProductRowBlock({
     );
   }
 
-  return (
-    <ProductRowBlock
-      module={baseModule(
-        "productRow",
-        {
-          title: props.title,
-          subtitle: props.subtitle,
-          products: products.map(toProductRowItem),
-          productIds,
-          layout: props.layout,
-        },
-        {},
-        { bgColor: props.bgColor || "#FCFCFB" },
-      )}
-    />
-  );
-}
+  const module = convertPuckProps("产品展示行", props);
+  if (!module) return null;
+  (module as any).content.products = products.map(toProductRowItem);
 
-function baseModule(
-  moduleType: string,
-  content: Record<string, any>,
-  layoutConfig: Record<string, any> = {},
-  styleConfig: Record<string, any> = {},
-): PageModule {
-  return {
-    id: 0,
-    pageKey: "home",
-    moduleType,
-    sortOrder: 0,
-    isVisible: true,
-    status: "PUBLISHED",
-    content,
-    layoutConfig: layoutConfig as PageModule["layoutConfig"],
-    styleConfig: styleConfig as PageModule["styleConfig"],
-    createdAt: "",
-    updatedAt: "",
-  };
+  return <ProductRowBlock module={module} />;
 }
 
 function renderBlock(block: PuckBlock, index: number) {
@@ -248,241 +216,38 @@ function renderBlock(block: PuckBlock, index: number) {
 
   if (props.isVisible === false) return null;
 
+  if (block.type === "产品展示行") {
+    return <ResolvedProductRowBlock key={key} props={props} />;
+  }
+
+  const module = convertPuckProps(block.type || "", props);
+  if (!module) return null;
+
   switch (block.type) {
     case "首屏主视觉":
-      return (
-        <HeroSection
-          key={key}
-          module={baseModule(
-            "hero",
-            {
-              desktopImage: props.desktopImage,
-              mobileImage: props.mobileImage,
-              title: props.title,
-              subtitle: props.subtitle,
-              actionText: props.actionText,
-              linkUrl: props.linkUrl,
-              altText: props.altText,
-            },
-            { template: props.alignment || "overlay" },
-            { focusX: props.focusX ?? 50, focusY: props.focusY ?? 50 },
-          )}
-        />
-      );
+      return <HeroSection key={key} module={module} />;
     case "单图海报":
-      return (
-        <SinglePosterSection
-          key={key}
-          module={baseModule(
-            "singlePoster",
-            {
-              number: props.number,
-              label: props.label,
-              title: props.title,
-              subtitle: props.subtitle,
-              desktopImage: props.desktopImage,
-              mobileImage: props.mobileImage,
-              linkUrl: props.linkUrl,
-            },
-            { template: props.template || "leftTextRightImage" },
-            { focusX: props.focusX ?? 50, focusY: props.focusY ?? 50 },
-          )}
-        />
-      );
+      return <SinglePosterSection key={key} module={module} />;
     case "双图海报":
-      return (
-        <DoublePosterSection
-          key={key}
-          module={baseModule(
-            "doublePoster",
-            {
-              number: props.number,
-              label: props.label,
-              title: props.title,
-              description: props.description,
-              mainImage: props.mainImage,
-              detailImage: props.detailImage,
-              linkUrl: props.linkUrl,
-            },
-            { template: "leftBigRightSmall" },
-            {
-              mainFocusX: props.mainFocusX ?? 50,
-              mainFocusY: props.mainFocusY ?? 50,
-              detailFocusX: props.detailFocusX ?? 50,
-              detailFocusY: props.detailFocusY ?? 50,
-            },
-          )}
-        />
-      );
+      return <DoublePosterSection key={key} module={module} />;
     case "图文混排":
-      return (
-        <ImageTextBlock
-          key={key}
-          module={baseModule(
-            "imageText",
-            {
-              label: props.label,
-              title: props.title,
-              body: props.body,
-              image: props.image,
-              imagePosition: props.imagePosition,
-              buttonText: props.buttonText,
-              linkUrl: props.linkUrl,
-            },
-            { template: props.template || "textLeftImageRight" },
-            { spacing: props.spacing || "normal" },
-          )}
-        />
-      );
+      return <ImageTextBlock key={key} module={module} />;
     case "全屏出血图":
-      return (
-        <FullBleedBlock
-          key={key}
-          module={baseModule(
-            "fullBleed",
-            {
-              image: props.image,
-              mobileImage: props.mobileImage,
-              title: props.title,
-              subtitle: props.subtitle,
-              buttonText: props.buttonText,
-              linkUrl: props.linkUrl,
-            },
-            { template: props.template || "textCenter" },
-            { bgColor: props.overlay || "rgba(15,13,12,0.2)" },
-          )}
-        />
-      );
+      return <FullBleedBlock key={key} module={module} />;
     case "文字横幅":
-      return (
-        <TextBannerBlock
-          key={key}
-          module={baseModule(
-            "textBanner",
-            {
-              eyebrow: props.eyebrow,
-              title: props.title,
-              body: props.body,
-              buttonText: props.buttonText,
-              linkUrl: props.linkUrl,
-            },
-            { template: props.template || "center" },
-            {
-              bgColor: props.bgColor || "#FBF9F6",
-              textColor: props.textColor || "#2C2C2C",
-              spacing: props.spacing || "normal",
-            },
-          )}
-        />
-      );
-    case "产品展示行":
-      return <ResolvedProductRowBlock key={key} props={props} />;
+      return <TextBannerBlock key={key} module={module} />;
     case "分类卡片":
-      return (
-        <CategoryCardsBlock
-          key={key}
-          module={baseModule(
-            "categoryCards",
-            {
-              title: props.title,
-              categoryId: props.categoryId,
-              categories: props.categories || [],
-              layout: props.layout,
-            },
-            {},
-            { bgColor: props.bgColor || "#FBF9F6" },
-          )}
-        />
-      );
+      return <CategoryCardsBlock key={key} module={module} />;
     case "卡片网格":
-      return (
-        <CardGridBlock
-          key={key}
-          module={baseModule(
-            "cardGrid",
-            {
-              title: props.title,
-              subtitle: props.subtitle,
-              cards: props.cards || [],
-              layout: props.layout,
-            },
-            {},
-            { bgColor: props.bgColor || "#FCFCFB" },
-          )}
-        />
-      );
+      return <CardGridBlock key={key} module={module} />;
     case "分割面板":
-      return (
-        <SplitPanelBlock
-          key={key}
-          module={baseModule(
-            "splitPanel",
-            {
-              image: props.image,
-              title: props.title,
-              subtitle: props.subtitle,
-              body: props.body,
-              buttonText: props.buttonText,
-              linkUrl: props.linkUrl,
-            },
-            {
-              template: props.template || "imageLeft",
-              split: props.split || "50-50",
-            },
-            {
-              bgColor: props.bgColor || "#FCFCFB",
-              textColor: props.textBg || "#fff",
-            },
-          )}
-        />
-      );
+      return <SplitPanelBlock key={key} module={module} />;
     case "轮播图":
-      return (
-        <CarouselBlock
-          key={key}
-          module={baseModule(
-            "carousel",
-            {
-              images: props.images || [],
-              autoPlay: props.autoPlay,
-              interval: props.interval || 4000,
-              showDots: props.showDots,
-              showArrows: props.showArrows,
-            },
-            { height: props.height || 500, mobileHeight: props.mobileHeight || 640 },
-          )}
-        />
-      );
+      return <CarouselBlock key={key} module={module} />;
     case "视频区块":
-      return (
-        <VideoBlock
-          key={key}
-          module={baseModule(
-            "video",
-            {
-              videoUrl: props.videoUrl,
-              posterUrl: props.posterUrl,
-              autoPlay: props.autoPlay,
-              loop: props.loop,
-              muted: props.muted,
-              showControls: props.showControls,
-              aspectRatio: props.aspectRatio || "16:9",
-            },
-            { maxHeight: props.maxHeight || 720 },
-          )}
-        />
-      );
+      return <VideoBlock key={key} module={module} />;
     case "热区图":
-      return (
-        <HotspotBlock
-          key={key}
-          module={baseModule("hotspot", {
-            image: props.image,
-            mobileImage: props.mobileImage,
-            hotspots: props.hotspots || [],
-          })}
-        />
-      );
+      return <HotspotBlock key={key} module={module} />;
     default:
       return null;
   }

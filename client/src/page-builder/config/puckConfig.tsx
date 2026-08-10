@@ -4,6 +4,7 @@
  */
 
 import type { Config } from "@puckeditor/core";
+import { getCategoryComponents } from "./blockMeta";
 import { heroPuckConfig } from "../adapters/hero.puck";
 import type { HeroPuckProps } from "../adapters/hero.puck";
 import { singlePosterPuckConfig } from "../adapters/singlePoster.puck";
@@ -30,6 +31,8 @@ import { videoPuckConfig } from "../adapters/video.puck";
 import type { VideoPuckProps } from "../adapters/video.puck";
 import { hotspotPuckConfig } from "../adapters/hotspot.puck";
 import type { HotspotPuckProps } from "../adapters/hotspot.puck";
+import { siteConfigPuckConfig } from "../adapters/siteConfig.puck";
+import type { SiteConfigPuckProps } from "../adapters/siteConfig.puck";
 
 type MyComponents = {
   首屏主视觉: HeroPuckProps;
@@ -45,6 +48,7 @@ type MyComponents = {
   轮播图: CarouselPuckProps;
   视频区块: VideoPuckProps;
   热区图: HotspotPuckProps;
+  网站全局设置: SiteConfigPuckProps;
 };
 
 /** 注册全部 Block — 中文 Key 即 Puck 侧栏显示名称 */
@@ -63,30 +67,9 @@ export const puckConfig: Config<MyComponents> = {
     轮播图: carouselPuckConfig,
     视频区块: videoPuckConfig,
     热区图: hotspotPuckConfig,
+    网站全局设置: siteConfigPuckConfig,
   },
   /** 与区块模板库保持一致：按页面经营目标分类，而非技术组件类型。 */
-  categories: {
-    "首屏与氛围": {
-      defaultExpanded: true,
-      components: [
-        "首屏主视觉",
-        "全屏出血图",
-        "轮播图",
-        "视频区块",
-      ],
-    },
-    "品牌叙事": {
-      defaultExpanded: false,
-      components: ["单图海报", "双图海报", "图文混排", "分割面板"],
-    },
-    "商品导购": {
-      defaultExpanded: false,
-      components: ["产品展示行", "分类卡片", "卡片网格"],
-    },
-    "活动与转化": {
-      defaultExpanded: false,
-      components: ["文字横幅", "热区图"],
-    },
-  },
+  categories: getCategoryComponents() as any,
   root: { render: ({ children }) => <div>{children}</div>, fields: {} },
 };

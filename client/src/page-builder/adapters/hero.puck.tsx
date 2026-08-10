@@ -5,7 +5,9 @@
  */
 
 import HeroSection from "@/components/blocks/HeroSection";
-import type { PageModule } from "@/types/pageModule";
+import { IMAGE_SPECS } from "../config/imageSpecs";
+import { convertPuckProps } from "../utils/puckPropsToModule";
+import MediaPickerField from "../fields/MediaPickerField";
 
 /** Puck 扁平 props（编辑器使用） */
 export interface HeroPuckProps {
@@ -23,39 +25,9 @@ export interface HeroPuckProps {
   locked?: boolean;
 }
 
-/** 将 Puck 扁平 props 转为 PageModule（HeroSection 原生接口） */
-function toPageModule(props: HeroPuckProps): PageModule {
-  return {
-    id: 0, // Puck 管理 id，不是数据库 id
-    pageKey: "home",
-    moduleType: "hero",
-    sortOrder: 0,
-    isVisible: true,
-    status: "PUBLISHED",
-    content: {
-      desktopImage: props.desktopImage,
-      mobileImage: props.mobileImage,
-      title: props.title,
-      subtitle: props.subtitle,
-      actionText: props.actionText,
-      linkUrl: props.linkUrl,
-      altText: props.altText,
-    },
-    layoutConfig: {
-      template: props.alignment || "overlay",
-    },
-    styleConfig: {
-      focusX: props.focusX ?? 50,
-      focusY: props.focusY ?? 50,
-    },
-    createdAt: "",
-    updatedAt: "",
-  };
-}
-
 export const heroPuckConfig = {
   render: (props: HeroPuckProps) => (
-    <HeroSection module={toPageModule(props)} />
+    <HeroSection module={convertPuckProps("首屏主视觉", props as any)!} />
   ),
 
   defaultProps: {
@@ -73,8 +45,49 @@ export const heroPuckConfig = {
   } satisfies HeroPuckProps,
 
   fields: {
-    desktopImage: { type: "text" as const, label: "桌面端图片 URL" },
-    mobileImage: { type: "text" as const, label: "移动端图片 URL" },
+    desktopImage: {
+      type: "custom" as const,
+      label: "桌面端主视觉",
+      render: ({
+        value,
+        onChange,
+        readOnly,
+      }: {
+        value?: string;
+        onChange: (v: string) => void;
+        readOnly?: boolean;
+      }) => (
+        <MediaPickerField
+          value={value}
+          onChange={onChange}
+          readOnly={readOnly}
+          spec={IMAGE_SPECS.hero.desktop}
+          required
+          placeholder="上传桌面端主视觉图"
+        />
+      ),
+    },
+    mobileImage: {
+      type: "custom" as const,
+      label: "手机端主视觉",
+      render: ({
+        value,
+        onChange,
+        readOnly,
+      }: {
+        value?: string;
+        onChange: (v: string) => void;
+        readOnly?: boolean;
+      }) => (
+        <MediaPickerField
+          value={value}
+          onChange={onChange}
+          readOnly={readOnly}
+          spec={IMAGE_SPECS.hero.mobile}
+          placeholder="上传手机端主视觉图"
+        />
+      ),
+    },
     title: { type: "text" as const, label: "标题" },
     subtitle: { type: "text" as const, label: "副标题" },
     actionText: { type: "text" as const, label: "按钮文字" },

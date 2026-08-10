@@ -1,5 +1,8 @@
 /** hotspot.puck.ts — HotspotBlock 的 Puck 适配器 */
 import HotspotBlock from "@/components/blocks/HotspotBlock";
+import { IMAGE_SPECS } from "../config/imageSpecs";
+import { convertPuckProps } from "../utils/puckPropsToModule";
+import MediaPickerField from "../fields/MediaPickerField";
 
 interface HotspotItem {
   x: number;
@@ -17,22 +20,10 @@ export interface HotspotPuckProps {
   locked?: boolean;
 }
 
-function toModule(props: HotspotPuckProps) {
-  return {
-    content: {
-      image: props.image,
-      mobileImage: props.mobileImage,
-      hotspots: props.hotspots || [],
-    },
-    layoutConfig: {},
-    styleConfig: {},
-  };
-}
-
 export const hotspotPuckConfig = {
   label: "热区图",
   render: (props: HotspotPuckProps) => (
-    <HotspotBlock module={toModule(props) as any} />
+    <HotspotBlock module={convertPuckProps("热区图", props as any) as any} />
   ),
   defaultProps: {
     image: "",
@@ -41,8 +32,26 @@ export const hotspotPuckConfig = {
     locked: false,
   } satisfies HotspotPuckProps,
   fields: {
-    image: { type: "text" as const, label: "背景图 URL" },
-    mobileImage: { type: "text" as const, label: "移动端图 URL（可选）" },
+    image: {
+      type: "custom" as const,
+      label: "桌面端热区图",
+      render: ({
+        value, onChange, readOnly,
+      }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
+        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+          spec={IMAGE_SPECS.hotspot.desktop} placeholder="上传桌面端热区图" />
+      ),
+    },
+    mobileImage: {
+      type: "custom" as const,
+      label: "手机端热区图",
+      render: ({
+        value, onChange, readOnly,
+      }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
+        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+          spec={IMAGE_SPECS.hotspot.mobile} placeholder="上传手机端热区图" />
+      ),
+    },
     hotspots: {
       type: "array" as const,
       label: "热区列表",

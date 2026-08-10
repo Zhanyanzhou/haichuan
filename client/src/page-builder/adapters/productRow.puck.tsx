@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ProductRowBlock from "@/components/blocks/ProductRowBlock";
 import { fetchProductsByIds, type ProductRow } from "../data-sources/productSource";
+import { convertPuckProps } from "../utils/puckPropsToModule";
 import ProductIdsField from "../fields/ProductIdsField";
 
 export interface ProductRowPuckProps {
@@ -13,6 +14,11 @@ export interface ProductRowPuckProps {
   productIds: number[];
   layout: string;
   bgColor: string;
+  imageRatio: string;
+  showPrice: boolean;
+  showButton: boolean;
+  buttonText: string;
+  titleSize: string;
   locked?: boolean;
 }
 
@@ -40,6 +46,11 @@ function toModule(props: ProductRowPuckProps, products: ReturnType<typeof toCard
       products,
       layout: props.layout,
       productIds: props.productIds,
+      imageRatio: props.imageRatio || "3:4",
+      showPrice: props.showPrice ?? true,
+      showButton: props.showButton ?? false,
+      buttonText: props.buttonText || "查看详情",
+      titleSize: props.titleSize || "medium",
     },
     styleConfig: { bgColor: props.bgColor || "#FCFCFB" },
   };
@@ -99,7 +110,7 @@ function ProductRowPreview(props: ProductRowPuckProps) {
     );
   }
 
-  return <ProductRowBlock module={toModule(props, toCards(products)) as any} editMode />;
+  return <ProductRowBlock module={convertPuckProps("产品展示行", { ...props, productIds }) as any || toModule(props, toCards(products)) as any} editMode />;
 }
 
 export const productRowPuckConfig = {
@@ -110,6 +121,11 @@ export const productRowPuckConfig = {
     productIds: [],
     layout: "grid-3",
     bgColor: "#FCFCFB",
+    imageRatio: "3:4",
+    showPrice: true,
+    showButton: false,
+    buttonText: "查看详情",
+    titleSize: "medium",
     locked: false,
   } satisfies ProductRowPuckProps,
   fields: {
@@ -139,6 +155,42 @@ export const productRowPuckConfig = {
         { label: "4 列", value: "grid-4" },
       ],
     },
+    imageRatio: {
+      type: "radio" as const,
+      label: "图片比例",
+      options: [
+        { label: "3:4 竖版", value: "3:4" },
+        { label: "1:1 正方形", value: "1:1" },
+        { label: "4:3 横版", value: "4:3" },
+        { label: "16:9 宽屏", value: "16:9" },
+      ],
+    },
+    titleSize: {
+      type: "radio" as const,
+      label: "标题大小",
+      options: [
+        { label: "小", value: "small" },
+        { label: "中", value: "medium" },
+        { label: "大", value: "large" },
+      ],
+    },
+    showPrice: {
+      type: "radio" as const,
+      label: "显示价格",
+      options: [
+        { label: "显示", value: true },
+        { label: "隐藏", value: false },
+      ],
+    },
+    showButton: {
+      type: "radio" as const,
+      label: "显示按钮",
+      options: [
+        { label: "显示", value: true },
+        { label: "隐藏", value: false },
+      ],
+    },
+    buttonText: { type: "text" as const, label: "按钮文字" },
     bgColor: { type: "text" as const, label: "背景色" },
   },
   resolvePermissions: (data: any) => {

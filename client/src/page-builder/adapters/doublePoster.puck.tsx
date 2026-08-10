@@ -3,7 +3,9 @@
  */
 
 import DoublePosterSection from "@/components/blocks/DoublePosterSection";
-import type { PageModule } from "@/types/pageModule";
+import { IMAGE_SPECS } from "../config/imageSpecs";
+import { convertPuckProps } from "../utils/puckPropsToModule";
+import MediaPickerField from "../fields/MediaPickerField";
 
 export interface DoublePosterPuckProps {
   number: string;
@@ -20,38 +22,9 @@ export interface DoublePosterPuckProps {
   locked?: boolean;
 }
 
-function toPageModule(props: DoublePosterPuckProps): PageModule {
-  return {
-    id: 0,
-    pageKey: "home",
-    moduleType: "doublePoster",
-    sortOrder: 0,
-    isVisible: true,
-    status: "PUBLISHED",
-    content: {
-      number: props.number,
-      label: props.label,
-      title: props.title,
-      description: props.description,
-      mainImage: props.mainImage,
-      detailImage: props.detailImage,
-      linkUrl: props.linkUrl,
-    },
-    layoutConfig: { template: "leftBigRightSmall" },
-    styleConfig: {
-      mainFocusX: props.mainFocusX ?? 50,
-      mainFocusY: props.mainFocusY ?? 50,
-      detailFocusX: props.detailFocusX ?? 50,
-      detailFocusY: props.detailFocusY ?? 50,
-    },
-    createdAt: "",
-    updatedAt: "",
-  };
-}
-
 export const doublePosterPuckConfig = {
   render: (props: DoublePosterPuckProps) => (
-    <DoublePosterSection module={toPageModule(props)} />
+    <DoublePosterSection module={convertPuckProps("双图海报", props as any)!} />
   ),
   defaultProps: {
     number: "02",
@@ -72,8 +45,26 @@ export const doublePosterPuckConfig = {
     label: { type: "text" as const, label: "标签" },
     title: { type: "text" as const, label: "标题" },
     description: { type: "textarea" as const, label: "描述" },
-    mainImage: { type: "text" as const, label: "主图 URL" },
-    detailImage: { type: "text" as const, label: "细节图 URL" },
+    mainImage: {
+      type: "custom" as const,
+      label: "主海报",
+      render: ({
+        value, onChange, readOnly,
+      }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
+        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+          spec={IMAGE_SPECS.doublePoster.main} placeholder="上传主海报图片" />
+      ),
+    },
+    detailImage: {
+      type: "custom" as const,
+      label: "细节图",
+      render: ({
+        value, onChange, readOnly,
+      }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
+        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+          spec={IMAGE_SPECS.doublePoster.detail} placeholder="上传细节海报图片" />
+      ),
+    },
     linkUrl: { type: "text" as const, label: "链接" },
     mainFocusX: {
       type: "number" as const,

@@ -3,6 +3,7 @@
  */
 
 import CardGridBlock from "@/components/blocks/CardGridBlock";
+import { convertPuckProps } from "../utils/puckPropsToModule";
 
 export interface CardItem {
   icon?: string;
@@ -19,21 +20,9 @@ export interface CardGridPuckProps {
   locked?: boolean;
 }
 
-function toModule(props: CardGridPuckProps) {
-  return {
-    content: {
-      title: props.title,
-      subtitle: props.subtitle,
-      cards: props.cards,
-      layout: props.layout,
-    },
-    styleConfig: { bgColor: props.bgColor || "#FCFCFB" },
-  };
-}
-
 export const cardGridPuckConfig = {
   render: (props: CardGridPuckProps) => (
-    <CardGridBlock module={toModule(props) as any} />
+    <CardGridBlock module={convertPuckProps("卡片网格", props as any) as any} />
   ),
   defaultProps: {
     title: "品牌价值",

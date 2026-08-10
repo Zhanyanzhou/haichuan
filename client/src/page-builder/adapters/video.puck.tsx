@@ -1,5 +1,8 @@
 /** video.puck.ts — VideoBlock 的 Puck 适配器 */
 import VideoBlock from "@/components/blocks/VideoBlock";
+import { IMAGE_SPECS } from "../config/imageSpecs";
+import { convertPuckProps } from "../utils/puckPropsToModule";
+import MediaPickerField from "../fields/MediaPickerField";
 
 export interface VideoPuckProps {
   videoUrl: string;
@@ -13,26 +16,10 @@ export interface VideoPuckProps {
   locked?: boolean;
 }
 
-function toModule(props: VideoPuckProps) {
-  return {
-    content: {
-      videoUrl: props.videoUrl,
-      posterUrl: props.posterUrl,
-      autoPlay: props.autoPlay,
-      loop: props.loop,
-      muted: props.muted,
-      showControls: props.showControls,
-      aspectRatio: props.aspectRatio || "16:9",
-    },
-    layoutConfig: { maxHeight: props.maxHeight || 720 },
-    styleConfig: {},
-  };
-}
-
 export const videoPuckConfig = {
   label: "单视频",
   render: (props: VideoPuckProps) => (
-    <VideoBlock module={toModule(props) as any} />
+    <VideoBlock module={convertPuckProps("视频区块", props as any) as any} />
   ),
   defaultProps: {
     videoUrl: "",
@@ -47,7 +34,16 @@ export const videoPuckConfig = {
   } satisfies VideoPuckProps,
   fields: {
     videoUrl: { type: "text" as const, label: "视频 URL" },
-    posterUrl: { type: "text" as const, label: "封面图 URL" },
+    posterUrl: {
+      type: "custom" as const,
+      label: "封面图",
+      render: ({
+        value, onChange, readOnly,
+      }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
+        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+          spec={IMAGE_SPECS.video.poster} placeholder="上传视频封面图" />
+      ),
+    },
     autoPlay: {
       type: "radio" as const,
       label: "自动播放",

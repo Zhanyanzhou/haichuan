@@ -3,6 +3,9 @@
  */
 
 import ImageTextBlock from "@/components/blocks/ImageTextBlock";
+import { IMAGE_SPECS } from "../config/imageSpecs";
+import { convertPuckProps } from "../utils/puckPropsToModule";
+import MediaPickerField from "../fields/MediaPickerField";
 
 export interface ImageTextPuckProps {
   label: string;
@@ -17,26 +20,9 @@ export interface ImageTextPuckProps {
   locked?: boolean;
 }
 
-/** ImageTextBlock 接受 { module: { content, layoutConfig, styleConfig } } */
-function toModule(props: ImageTextPuckProps) {
-  return {
-    content: {
-      label: props.label,
-      title: props.title,
-      body: props.body,
-      image: props.image,
-      imagePosition: props.imagePosition,
-      buttonText: props.buttonText,
-      linkUrl: props.linkUrl,
-    },
-    layoutConfig: { template: props.template || "textLeftImageRight" },
-    styleConfig: { spacing: props.spacing || "normal" },
-  };
-}
-
 export const imageTextPuckConfig = {
   render: (props: ImageTextPuckProps) => (
-    <ImageTextBlock module={toModule(props) as any} />
+    <ImageTextBlock module={convertPuckProps("图文混排", props as any) as any} />
   ),
   defaultProps: {
     label: "",
@@ -54,7 +40,16 @@ export const imageTextPuckConfig = {
     label: { type: "text" as const, label: "标签" },
     title: { type: "text" as const, label: "标题" },
     body: { type: "textarea" as const, label: "正文" },
-    image: { type: "text" as const, label: "图片 URL" },
+    image: {
+      type: "custom" as const,
+      label: "配图",
+      render: ({
+        value, onChange, readOnly,
+      }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
+        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+          spec={IMAGE_SPECS.imageText.image} placeholder="上传图文配图" />
+      ),
+    },
     imagePosition: {
       type: "radio" as const,
       label: "图片位置",

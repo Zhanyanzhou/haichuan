@@ -28,10 +28,19 @@ import {
   SearchOutlined,
   SendOutlined,
   TabletOutlined,
+  UndoOutlined,
+  RedoOutlined,
 } from "@ant-design/icons";
 import { Puck, createUsePuck, type UiState } from "@puckeditor/core";
 import "@puckeditor/core/puck.css";
 import { puckConfig } from "@/page-builder/config/puckConfig";
+import {
+  BLOCK_META,
+  BLOCK_FILTERS,
+  BLOCK_PREVIEW_KIND,
+  TEMPLATE_MEDIA_HINT,
+  type BlockMeta,
+} from "@/page-builder/config/blockMeta";
 import {
   jewelryHomeTemplate,
   pageTemplates,
@@ -53,21 +62,6 @@ type ViewportPreset = {
 function formatViewportSize(preset: ViewportPreset) {
   return `${preset.width} × ${preset.height}`;
 }
-
-type BlockCategory =
-  | "首屏与氛围"
-  | "品牌叙事"
-  | "商品导购"
-  | "活动与转化";
-
-type TemplateMeta = {
-  category: BlockCategory;
-  description: string;
-  tags: string[];
-  badge?: string;
-  limit?: number;
-  recommended?: boolean;
-};
 
 type AutoSaveState = "idle" | "saving" | "saved" | "error";
 
@@ -99,82 +93,6 @@ const VIEWPORT_PRESETS: ViewportPreset[] = [
   { label: "移动端", icon: <MobileOutlined />, width: 390, height: 844 },
 ];
 
-const TEMPLATE_META: Record<string, TemplateMeta> = {
-  首屏主视觉: {
-    category: "首屏与氛围",
-    badge: "核心模板",
-    description: "用于首页第一屏，快速建立品牌印象。",
-    tags: ["推荐", "品牌首页"],
-    limit: 1,
-    recommended: true,
-  },
-  单图海报: {
-    category: "品牌叙事",
-    description: "用一张主视觉讲述品牌、系列或材质故事。",
-    tags: ["品牌", "上新"],
-    recommended: true,
-  },
-  双图海报: {
-    category: "品牌叙事",
-    description: "并置两组内容，适合系列与工艺对照表达。",
-    tags: ["系列", "内容表达"],
-  },
-  图文混排: {
-    category: "品牌叙事",
-    description: "适合呈现设计理念、材质与品牌故事。",
-    tags: ["品牌故事", "工艺"],
-  },
-  全屏出血图: {
-    category: "首屏与氛围",
-    description: "以大幅视觉强化页面节奏和高级感。",
-    tags: ["强视觉", "品牌感"],
-  },
-  产品展示行: {
-    category: "商品导购",
-    badge: "推荐",
-    description: "突出一组主推商品，引导继续浏览。",
-    tags: ["主推", "高转化"],
-    recommended: true,
-  },
-  分类卡片: {
-    category: "商品导购",
-    description: "让访客按系列或品类快速进入选购。",
-    tags: ["分类", "快速入口"],
-  },
-  卡片网格: {
-    category: "商品导购",
-    description: "以规则网格呈现卖点、服务或商品集合。",
-    tags: ["系列集合", "导购"],
-  },
-  文字横幅: {
-    category: "活动与转化",
-    description: "承接上新、活动利益点和咨询行动。",
-    tags: ["上新", "活动"],
-  },
-  轮播图: {
-    category: "首屏与氛围",
-    badge: "提升点击率",
-    description: "适合同时展示多个系列、新品或活动。",
-    tags: ["多活动", "移动端"],
-    recommended: true,
-  },
-  视频区块: {
-    category: "首屏与氛围",
-    description: "用动态内容呈现工艺细节和品牌质感。",
-    tags: ["工艺", "高质感"],
-  },
-  分割面板: {
-    category: "品牌叙事",
-    description: "以分区内容形成有节奏的系列叙事。",
-    tags: ["系列", "内容节奏"],
-  },
-  热区图: {
-    category: "活动与转化",
-    description: "将活动视觉转为多个可点击的导购入口。",
-    tags: ["专题", "点击转化"],
-  },
-};
-
 const ROOT_ZONE = "root:default-zone";
 
 let blockIdSequence = 0;
@@ -190,42 +108,6 @@ function createBlockContent(type: string) {
     },
   };
 }
-
-const BLOCK_FILTERS = [
-  "全部",
-  "推荐",
-  "最近使用",
-  "我的收藏",
-  "首屏与氛围",
-  "品牌叙事",
-  "商品导购",
-  "活动与转化",
-] as const;
-
-const BLOCK_PREVIEW_KIND: Record<string, string> = {
-  首屏主视觉: "hero",
-  单图海报: "single-poster",
-  双图海报: "double-poster",
-  图文混排: "image-text",
-  全屏出血图: "full-bleed",
-  产品展示行: "product-row",
-  分类卡片: "category-cards",
-  卡片网格: "card-grid",
-  文字横幅: "text-banner",
-  轮播图: "carousel",
-  视频区块: "video",
-  分割面板: "split-panel",
-  热区图: "hotspot",
-};
-
-const TEMPLATE_MEDIA_HINT: Record<string, string> = {
-  "首屏主视觉": "桌面横图 + 手机竖图",
-  "单图海报": "建议准备双端海报",
-  "双图海报": "主图与细节图",
-  "全屏出血图": "桌面横图 + 手机竖图",
-  "轮播图": "每张图配手机版本",
-  "热区图": "确认热区坐标",
-};
 
 const MEDIA_FIELD_LABELS = [
   ["desktopImage", "桌面端图片"],
@@ -296,7 +178,7 @@ function TemplateCard({
   onPointerDragEnd,
 }: {
   name: string;
-  meta: TemplateMeta;
+  meta: BlockMeta;
   favorite: boolean;
   onToggleFavorite: () => void;
   onAdded: () => void;
@@ -486,7 +368,7 @@ function TemplateLibrary({
 
   const entries = useMemo(
     () =>
-      Object.entries(TEMPLATE_META).filter(([name, meta]) => {
+      Object.entries(BLOCK_META).filter(([name, meta]) => {
         const matchCategory =
           category === "全部" ||
           (category === "推荐" && meta.recommended) ||
@@ -561,7 +443,7 @@ function TemplateLibrary({
           <span>{libraryType === "blocks" ? "区块模板" : "页面模板"}</span>
           <small>
             {libraryType === "blocks"
-              ? `显示 ${entries.length} / 共 ${Object.keys(TEMPLATE_META).length} 个`
+              ? `显示 ${entries.length} / 共 ${Object.keys(BLOCK_META).length} 个`
               : `显示 ${pageEntries.length} / 共 ${pageTemplates.length} 个`}
           </small>
         </div>
@@ -718,6 +600,19 @@ function EditorToolbar({
       </div>
 
       <div className="homepage-editor__toolbar-actions">
+        <Button
+          size="small"
+          icon={<UndoOutlined />}
+          disabled
+          title="撤销（即将支持）"
+        />
+        <Button
+          size="small"
+          icon={<RedoOutlined />}
+          disabled
+          title="重做（即将支持）"
+        />
+        <span className="text-gray-300" style={{ margin: "0 4px" }}>|</span>
         <Button
           size="small"
           icon={<EyeOutlined />}
@@ -1054,7 +949,7 @@ function EditorBody() {
   };
 
   const insertTemplate = useCallback((templateName: string, insertionIndex: number) => {
-    const meta = TEMPLATE_META[templateName];
+    const meta = BLOCK_META[templateName];
     if (!meta) return;
     const usedCount = appData.content.filter(
       (item: { type: string }) => item.type === templateName,

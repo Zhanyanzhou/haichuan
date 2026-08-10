@@ -20,10 +20,7 @@ export interface ProductRow {
   category: string;
 }
 
-function formatPrice(value: unknown) {
-  const price = Number(value || 0);
-  return price > 0 ? `¥${price.toLocaleString("zh-CN")}` : "询价";
-}
+import { formatPrice } from "@/utils/format";
 
 function toProductRow(product: Product): ProductRow {
   return {
@@ -31,7 +28,7 @@ function toProductRow(product: Product): ProductRow {
     code: product.code || "",
     name: product.name || "",
     price: Number(product.price) || 0,
-    priceLabel: formatPrice(product.price),
+    priceLabel: formatPrice(product.price, "询价"),
     image: getListingImage(product),
     category: product.category?.name || "",
   };

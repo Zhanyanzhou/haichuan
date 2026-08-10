@@ -3,6 +3,7 @@
  */
 
 import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
+import { convertPuckProps } from "../utils/puckPropsToModule";
 
 export interface CategoryCardsPuckProps {
   title: string;
@@ -12,21 +13,9 @@ export interface CategoryCardsPuckProps {
   locked?: boolean;
 }
 
-function toModule(props: CategoryCardsPuckProps) {
-  return {
-    content: {
-      title: props.title,
-      categoryId: props.categoryId,
-      categories: [],
-      layout: props.layout,
-    },
-    styleConfig: { bgColor: props.bgColor || "#FBF9F6" },
-  };
-}
-
 export const categoryCardsPuckConfig = {
   render: (props: CategoryCardsPuckProps) => (
-    <CategoryCardsBlock module={toModule(props) as any} />
+    <CategoryCardsBlock module={convertPuckProps("分类卡片", props as any) as any} />
   ),
   defaultProps: {
     title: "探索分类",

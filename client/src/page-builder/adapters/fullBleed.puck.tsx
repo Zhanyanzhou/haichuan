@@ -3,6 +3,9 @@
  */
 
 import FullBleedBlock from "@/components/blocks/FullBleedBlock";
+import { IMAGE_SPECS } from "../config/imageSpecs";
+import { convertPuckProps } from "../utils/puckPropsToModule";
+import MediaPickerField from "../fields/MediaPickerField";
 
 export interface FullBleedPuckProps {
   image: string;
@@ -16,24 +19,9 @@ export interface FullBleedPuckProps {
   locked?: boolean;
 }
 
-function toModule(props: FullBleedPuckProps) {
-  return {
-    content: {
-      image: props.image,
-      mobileImage: props.mobileImage,
-      title: props.title,
-      subtitle: props.subtitle,
-      buttonText: props.buttonText,
-      linkUrl: props.linkUrl,
-    },
-    layoutConfig: { template: props.template || "textCenter" },
-    styleConfig: { bgColor: props.overlay || "rgba(15,13,12,0.2)" },
-  };
-}
-
 export const fullBleedPuckConfig = {
   render: (props: FullBleedPuckProps) => (
-    <FullBleedBlock module={toModule(props) as any} />
+    <FullBleedBlock module={convertPuckProps("全屏出血图", props as any) as any} />
   ),
   defaultProps: {
     image: "",
@@ -47,8 +35,26 @@ export const fullBleedPuckConfig = {
     locked: false,
   } satisfies FullBleedPuckProps,
   fields: {
-    image: { type: "text" as const, label: "背景图 URL" },
-    mobileImage: { type: "text" as const, label: "移动端图 URL" },
+    image: {
+      type: "custom" as const,
+      label: "桌面端图片",
+      render: ({
+        value, onChange, readOnly,
+      }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
+        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+          spec={IMAGE_SPECS.fullBleed.desktop} placeholder="上传通栏桌面大图" />
+      ),
+    },
+    mobileImage: {
+      type: "custom" as const,
+      label: "手机端图片",
+      render: ({
+        value, onChange, readOnly,
+      }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
+        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+          spec={IMAGE_SPECS.fullBleed.mobile} placeholder="上传通栏手机端图（可选）" />
+      ),
+    },
     title: { type: "text" as const, label: "标题" },
     subtitle: { type: "text" as const, label: "副标题" },
     buttonText: { type: "text" as const, label: "按钮文字" },
