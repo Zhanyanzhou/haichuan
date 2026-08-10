@@ -5,6 +5,7 @@ import {
   Param,
   Body,
   Query,
+  Req,
   UseGuards,
   MessageEvent,
   Sse,
@@ -71,11 +72,8 @@ export class PageModulesController {
   @ApiBearerAuth()
   @Put("document/publish")
   @ApiOperation({ summary: "发布页面文档" })
-  publishDocument(
-    @Body("pageKey") pageKey: string,
-    @Body("userId") userId?: number,
-  ) {
-    return this.service.publishPageDocument(pageKey || "home", userId);
+  publishDocument(@Body("pageKey") pageKey: string, @Req() req: any) {
+    return this.service.publishPageDocument(pageKey || "home", req.user?.id);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

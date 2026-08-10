@@ -12,7 +12,6 @@ import {
   mockGoldPriceHistory,
   filterProducts,
   paginate,
-  mockHomepageConfig,
 } from "./mockData";
 
 const api = axios.create({
@@ -976,66 +975,6 @@ export const uploadApi = {
       headers: { "Content-Type": "multipart/form-data" },
       timeout: 120000,
     });
-  },
-};
-
-// ===== Homepage API =====
-export const homepageApi = {
-  getConfig: async () => {
-    if (USE_MOCK) {
-      await mockDelay(300);
-      return mockRes(mockHomepageConfig.filter((section) => section.isEnabled));
-    }
-    return api.get("/homepage/config");
-  },
-  getAdminConfig: async () => {
-    if (USE_MOCK) {
-      await mockDelay(300);
-      return mockRes([...mockHomepageConfig]);
-    }
-    return api.get("/homepage/admin/config");
-  },
-  updateConfig: async (sections: any[]) => {
-    if (USE_MOCK) {
-      await mockDelay(500);
-      // Update local mock data — deep clone to avoid mutating original
-      const cloned = JSON.parse(JSON.stringify(mockHomepageConfig));
-      sections.forEach((s, index) => {
-        const idx = cloned.findIndex((m: any) => m.id === s.id);
-        if (idx >= 0) Object.assign(cloned[idx], s, { sortOrder: index + 1 });
-        else
-          cloned.push({ ...s, id: Date.now() + index, sortOrder: index + 1 });
-      });
-      // Replace array contents
-      mockHomepageConfig.length = 0;
-      mockHomepageConfig.push(...cloned);
-      return mockRes([...mockHomepageConfig]);
-    }
-    return api.put("/homepage/config", { sections });
-  },
-  createSection: async (data: any) => {
-    if (USE_MOCK) {
-      await mockDelay(300);
-      const newSection = { ...data, id: Date.now() };
-      const cloned = JSON.parse(JSON.stringify(mockHomepageConfig));
-      cloned.push(newSection);
-      mockHomepageConfig.length = 0;
-      mockHomepageConfig.push(...cloned);
-      return mockRes(newSection);
-    }
-    return api.post("/homepage/section", data);
-  },
-  deleteSection: async (id: number) => {
-    if (USE_MOCK) {
-      await mockDelay(300);
-      const cloned = JSON.parse(JSON.stringify(mockHomepageConfig));
-      const idx = cloned.findIndex((m: any) => m.id === id);
-      if (idx >= 0) cloned.splice(idx, 1);
-      mockHomepageConfig.length = 0;
-      mockHomepageConfig.push(...cloned);
-      return mockRes({ success: true });
-    }
-    return api.delete(`/homepage/section/${id}`);
   },
 };
 
