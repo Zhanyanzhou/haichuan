@@ -84,6 +84,9 @@ type PageDocumentRevision = {
 };
 
 const AUTO_SAVE_DELAY = 3500;
+// 自动保存失败后的重试上限与退避封顶（指数退避：8s→16s→…，封顶 60s）
+const MAX_AUTO_RETRY = 5;
+const AUTO_SAVE_MAX_BACKOFF = 60000;
 
 function formatEditorTime(value?: string | Date | null) {
   if (!value) return "";
@@ -1433,6 +1436,7 @@ export default function HomepageConfig() {
   const [editorKey, setEditorKey] = useState(0);
   const [initialLoading, setInitialLoading] = useState(true);
   const latestData = useRef<any>(data);
+  const autoSaveRetryRef = useRef(0);
   const dataSignatureRef = useRef("");
   const [metadata, setMetadata] = useState<Record<string, any>>({});
   const latestMetadata = useRef<Record<string, any>>({});
@@ -1548,6 +1552,7 @@ export default function HomepageConfig() {
     const changed = JSON.stringify(nextData) !== dataSignatureRef.current;
     setHasUnsavedChanges(changed);
     if (changed) {
+      autoSaveRetryRef.current = 0;
       setAutoSaveState((current) => current === "saving" ? current : "idle");
     }
   }, []);
@@ -1578,13 +1583,17 @@ export default function HomepageConfig() {
         setHasUnsavedChanges(false);
         setAutoSaveState("saved");
       }
+      autoSaveRetryRef.current = 0;
       if (!options.silent) {
         message.success("首页草稿已保存");
       }
     } catch (error) {
+      autoSaveRetryRef.current += 1;
       setAutoSaveState("error");
-      if (!options.silent) {
-        message.error(error instanceof Error ? error.message : "保存失败，请稍后重试");
+      if (autoSaveRetryRef.current >= MAX_AUTO_RETRY) {
+        message.error("自动保存多次失败，请检查网络后手动保存");
+      } else if (!options.silent) {
+        message.error(error instanceof Error ? error.message : "保存失败，正在重试");
       }
     } finally {
       setSaving(false);
@@ -1604,9 +1613,15 @@ export default function HomepageConfig() {
 
   useEffect(() => {
     if (!hasUnsavedChanges || saving || publishing) return;
+    // 失败重试：指数退避（8s→16s→… 封顶 60s）；超上限停止自动重试，交还用户手动保存
+    if (autoSaveRetryRef.current >= MAX_AUTO_RETRY) return;
+    const retry = autoSaveRetryRef.current;
+    const delay = autoSaveState === "error"
+      ? Math.min(8000 * 2 ** (retry - 1), AUTO_SAVE_MAX_BACKOFF)
+      : AUTO_SAVE_DELAY;
     const timer = window.setTimeout(() => {
       void saveDraft(latestData.current, { silent: true });
-    }, autoSaveState === "error" ? 8000 : AUTO_SAVE_DELAY);
+    }, delay);
     return () => window.clearTimeout(timer);
   }, [autoSaveState, hasUnsavedChanges, publishing, saveDraft, saving]);
 
