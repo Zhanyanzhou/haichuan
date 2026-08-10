@@ -1,10 +1,14 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
+import { OptionalCustomerAuthGuard } from '../customers/optional-customer-auth.guard';
 import { CartService } from './cart.service';
 import { CartController } from './cart.controller';
 
 @Module({
+  // AuthModule 提供 JwtService，供 OptionalCustomerAuthGuard 解析客户令牌
+  imports: [AuthModule],
   controllers: [CartController],
-  providers: [CartService],
+  providers: [CartService, OptionalCustomerAuthGuard],
   exports: [CartService],
 })
 export class CartModule {}

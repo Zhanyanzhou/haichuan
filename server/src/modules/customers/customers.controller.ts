@@ -3,6 +3,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { OrdersService } from '../orders/orders.service';
 import { CustomerAuthGuard } from './customer-auth.guard';
 import { CustomersService } from './customers.service';
+import { Throttle } from '@nestjs/throttler';
 
 @Controller('customers')
 export class CustomersController {
@@ -12,24 +13,28 @@ export class CustomersController {
   ) {}
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('checkout')
   checkout(@Body() body: any) {
     return this.customersService.checkout(body);
   }
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('order-access')
   orderAccess(@Body() body: { phone: string; orderNo: string }) {
     return this.customersService.accessByOrder(body.phone, body.orderNo);
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('register')
   register(@Body() body: { phone: string; password: string; name?: string; email?: string }) {
     return this.customersService.register(body);
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login')
   login(@Body() body: { phone: string; password: string }) {
     return this.customersService.login(body);

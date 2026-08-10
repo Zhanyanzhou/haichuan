@@ -3,9 +3,13 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ContentSlotsService } from './content-slots.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('内容插槽')
 @Controller('content-slots')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('SUPER_ADMIN', 'ADMIN', 'EDITOR')
 export class ContentSlotsController {
   constructor(private service: ContentSlotsService) {}
 
@@ -16,7 +20,6 @@ export class ContentSlotsController {
     return this.service.getPublished(pageKey || 'home');
   }
 
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Get('admin')
   @ApiOperation({ summary: '获取全部插槽（后台，含草稿）' })
@@ -24,7 +27,6 @@ export class ContentSlotsController {
     return this.service.getAdminAll(pageKey || 'home');
   }
 
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put('draft')
   @ApiOperation({ summary: '保存草稿' })
@@ -32,7 +34,6 @@ export class ContentSlotsController {
     return this.service.saveDraft(body);
   }
 
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put(':slotKey/publish')
   @ApiOperation({ summary: '发布单个插槽' })
@@ -40,7 +41,6 @@ export class ContentSlotsController {
     return this.service.publish(slotKey);
   }
 
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put('publish-all')
   @ApiOperation({ summary: '一键发布全部草稿' })
@@ -48,7 +48,6 @@ export class ContentSlotsController {
     return this.service.publishAll(pageKey || 'home');
   }
 
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put(':slotKey/unpublish')
   @ApiOperation({ summary: '取消发布' })
@@ -56,7 +55,6 @@ export class ContentSlotsController {
     return this.service.unpublish(slotKey);
   }
 
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Delete(':slotKey')
   @ApiOperation({ summary: '删除插槽记录' })

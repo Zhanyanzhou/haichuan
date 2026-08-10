@@ -2,10 +2,13 @@ import { Controller, Get, Put, Post, Param, Query, Body, UseGuards } from '@nest
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { LeadsService } from './leads.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('统一线索管理')
 @Controller('leads')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE')
 @ApiBearerAuth()
 export class LeadsController {
   constructor(private service: LeadsService) {}

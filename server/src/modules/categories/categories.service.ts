@@ -159,7 +159,15 @@ export class CategoriesService {
   async delete(id: number) {
     const category = await this.prisma.category.findUnique({
       where: { id },
-      include: { _count: { select: { children: true, products: true } } },
+      include: {
+        _count: {
+          select: {
+            // 仅统计未软删除的子分类与商品，否则全是已删除商品时分类无法停用
+            children: { where: { deletedAt: null } },
+            products: { where: { deletedAt: null } },
+          },
+        },
+      },
     });
     if (!category) throw new NotFoundException('类目不存在');
     if (![2, 3].includes(category.level)) {

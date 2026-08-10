@@ -18,6 +18,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
+    // 拒绝客户令牌：客户与管理员共用 JWT_SECRET，必须按 type 区分，
+    // 否则 Customer.id 与 User.id 主键重叠时会被当成员工身份接受（垂直越权）
+    if (payload.type === 'customer') {
+      throw new UnauthorizedException('令牌类型无效');
+    }
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
     });

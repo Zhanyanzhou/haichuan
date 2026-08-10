@@ -114,44 +114,59 @@ export class GoldPriceService {
    * Formula: product_price = gold_weight × gold_price × coefficient + craft_fee
    */
   private async adjustProductPrices(goldPrice: number) {
-    const products = await this.prisma.product.findMany({
-      where: {
-        status: { in: ['PUBLISHED', 'DRAFT'] },
-        goldWeight: { gt: 0 },
-      },
-      select: { id: true, goldWeight: true, craftFee: true, price: true },
+    const coefficient = 1.05; // 默认加价系数
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const products = await tx.product.findMany({
+        where: {
+          status: { in: ['PUBLISHED', 'DRAFT'] },
+          goldWeight: { gt: 0 },
+        },
+        select: { id: true, goldWeight: true, craftFee: true, price: true },
+      });
+
+      let adjustedCount = 0;
+      for (const product of products) {
+        const craftFee = Number(product.craftFee || 0);
+        const newPrice = Math.round((Number(product.goldWeight) * goldPrice * coefficient + craftFee) / 10) * 10;
+
+        if (Math.abs(newPrice - Number(product.price)) > 1) {
+          await tx.product.update({
+            where: { id: product.id },
+            data: { price: newPrice },
+          });
+
+          await tx.priceHistory.create({
+            data: {
+              productId: product.id,
+              oldPrice: product.price || 0,
+              newPrice,
+              goldPrice,
+              operatorId: 0, // 系统
+              reason: `金价变动 ¥${goldPrice}/克，自动调价`,
+            },
+          });
+
+          // 同步该商品下有金重的 SKU 价格：下单读 sku.price，否则仍是旧价导致实付金额错误
+          const skus = await tx.productSKU.findMany({
+            where: { productId: product.id, goldWeight: { gt: 0 } },
+            select: { id: true, goldWeight: true, price: true },
+          });
+          for (const sku of skus) {
+            const skuPrice = Math.round((Number(sku.goldWeight) * goldPrice * coefficient + craftFee) / 10) * 10;
+            if (Math.abs(skuPrice - Number(sku.price)) > 1) {
+              await tx.productSKU.update({ where: { id: sku.id }, data: { price: skuPrice } });
+            }
+          }
+
+          adjustedCount++;
+        }
+      }
+
+      return { totalProducts: products.length, adjustedCount };
     });
 
-    let adjustedCount = 0;
-    const coefficient = 1.05; // Default markup coefficient
-
-    for (const product of products) {
-      const newPrice = Number(product.goldWeight) * goldPrice * coefficient + Number(product.craftFee || 0);
-      const roundedPrice = Math.round(newPrice / 10) * 10; // Round to nearest 10
-
-      if (Math.abs(roundedPrice - Number(product.price)) > 1) {
-        await this.prisma.product.update({
-          where: { id: product.id },
-          data: { price: roundedPrice },
-        });
-
-        // Record price history
-        await this.prisma.priceHistory.create({
-          data: {
-            productId: product.id,
-            oldPrice: product.price || 0,
-            newPrice: roundedPrice,
-            goldPrice,
-            operatorId: 0, // System
-            reason: `金价变动 ¥${goldPrice}/克，自动调价`,
-          },
-        });
-
-        adjustedCount++;
-      }
-    }
-
-    this.logger.log(`Price adjustment complete: ${adjustedCount}/${products.length} products updated`);
-    return { totalProducts: products.length, adjustedCount };
+    this.logger.log(`Price adjustment complete: ${result.adjustedCount}/${result.totalProducts} products updated`);
+    return result;
   }
 }

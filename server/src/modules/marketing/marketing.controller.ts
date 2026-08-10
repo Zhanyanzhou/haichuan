@@ -2,11 +2,14 @@ import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nes
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { MarketingService } from './marketing.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('营销管理')
 @ApiBearerAuth()
 @Controller('marketing')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('SUPER_ADMIN', 'ADMIN')
 export class MarketingController {
   constructor(private marketingService: MarketingService) {}
 

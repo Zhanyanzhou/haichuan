@@ -1,15 +1,19 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
+type Owner = { userId?: number; sessionId?: string };
+
 @Injectable()
 export class CartService {
   constructor(private prisma: PrismaService) {}
 
-  private requireSessionId(sessionId?: string): string {
-    if (!sessionId || sessionId.length > 100) {
-      throw new BadRequestException('缺少有效的会话标识');
+  /** 解析购物车归属：登录客户优先，否则使用会话标识 */
+  private resolveOwner(owner: Owner) {
+    if (owner.userId) return { userId: owner.userId };
+    if (owner.sessionId && owner.sessionId.length > 0 && owner.sessionId.length <= 100) {
+      return { sessionId: owner.sessionId };
     }
-    return sessionId;
+    throw new BadRequestException('缺少有效的会话标识');
   }
 
   private requireQuantity(quantity: number): number {
@@ -19,13 +23,9 @@ export class CartService {
     return quantity;
   }
 
-  async getCart(userId?: number, sessionId?: string) {
-    const where: any = {};
-    if (userId) where.userId = userId;
-    else if (sessionId) where.sessionId = sessionId;
-    else throw new BadRequestException('缺少用户标识');
-
-    const items = await this.prisma.cart.findMany({
+  async getCart(owner: Owner) {
+    const where = this.resolveOwner(owner);
+    return this.prisma.cart.findMany({
       where,
       include: {
         product: { select: { id: true, name: true, code: true, materialType: true, goldWeight: true, price: true, images: { take: 1 } } },
@@ -33,12 +33,10 @@ export class CartService {
       },
       orderBy: { createdAt: 'desc' },
     });
-
-    return items;
   }
 
-  async addItem(data: { userId?: number; sessionId?: string; productId: number; skuId: number; quantity: number }) {
-    const sessionId = data.userId ? data.sessionId : this.requireSessionId(data.sessionId);
+  async addItem(data: Owner & { productId: number; skuId: number; quantity: number }) {
+    const owner = this.resolveOwner(data);
     const quantity = this.requireQuantity(Number(data.quantity));
     const sku = await this.prisma.productSKU.findFirst({
       where: { id: data.skuId, productId: data.productId, isActive: true, product: { status: 'PUBLISHED', deletedAt: null } },
@@ -46,12 +44,8 @@ export class CartService {
     });
     if (!sku) throw new NotFoundException('商品规格不存在或当前不可购买');
 
-    // Check if already in cart
     const existing = await this.prisma.cart.findFirst({
-      where: {
-        ...(data.userId ? { userId: data.userId } : { sessionId }),
-        skuId: data.skuId,
-      },
+      where: { ...owner, skuId: data.skuId },
     });
 
     if (existing) {
@@ -63,12 +57,12 @@ export class CartService {
       });
     }
 
-    return this.prisma.cart.create({ data: { ...data, sessionId, quantity } });
+    return this.prisma.cart.create({ data: { ...owner, productId: data.productId, skuId: data.skuId, quantity } });
   }
 
-  async updateQuantity(id: number, quantity: number, sessionId?: string) {
-    const ownerSessionId = this.requireSessionId(sessionId);
-    const item = await this.prisma.cart.findFirst({ where: { id, sessionId: ownerSessionId } });
+  async updateQuantity(id: number, quantity: number, owner: Owner) {
+    const where = this.resolveOwner(owner);
+    const item = await this.prisma.cart.findFirst({ where: { id, ...where } });
     if (!item) throw new NotFoundException('购物车商品不存在');
     if (quantity <= 0) {
       return this.prisma.cart.delete({ where: { id: item.id } });
@@ -76,18 +70,15 @@ export class CartService {
     return this.prisma.cart.update({ where: { id: item.id }, data: { quantity: this.requireQuantity(Number(quantity)) } });
   }
 
-  async removeItem(id: number, sessionId?: string) {
-    const ownerSessionId = this.requireSessionId(sessionId);
-    const item = await this.prisma.cart.findFirst({ where: { id, sessionId: ownerSessionId } });
+  async removeItem(id: number, owner: Owner) {
+    const where = this.resolveOwner(owner);
+    const item = await this.prisma.cart.findFirst({ where: { id, ...where } });
     if (!item) throw new NotFoundException('购物车商品不存在');
     return this.prisma.cart.delete({ where: { id: item.id } });
   }
 
-  async clearCart(userId?: number, sessionId?: string) {
-    const where: any = {};
-    if (userId) where.userId = userId;
-    else where.sessionId = this.requireSessionId(sessionId);
-
+  async clearCart(owner: Owner) {
+    const where = this.resolveOwner(owner);
     return this.prisma.cart.deleteMany({ where });
   }
 }

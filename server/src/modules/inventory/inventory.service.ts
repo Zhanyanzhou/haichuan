@@ -37,25 +37,46 @@ export class InventoryService {
   }
 
   async updateStock(id: number, data: { type: 'in' | 'out' | 'adjust'; quantity: number; remark?: string }) {
+    if (!Number.isInteger(data.quantity) || data.quantity < 0) {
+      throw new BadRequestException('数量必须为非负整数');
+    }
+
     const inv = await this.prisma.inventory.findUnique({ where: { id } });
     if (!inv) throw new NotFoundException('库存记录不存在');
 
-    let newQuantity = inv.quantity;
-    if (data.type === 'in') newQuantity += data.quantity;
-    else if (data.type === 'out') {
-      if (inv.quantity < data.quantity) throw new BadRequestException('库存不足');
-      newQuantity -= data.quantity;
-    } else if (data.type === 'adjust') newQuantity = data.quantity;
+    if (data.type === 'in') {
+      return this.prisma.inventory.update({
+        where: { id },
+        data: { quantity: { increment: data.quantity } },
+      });
+    }
 
+    if (data.type === 'out') {
+      // 原子条件更新：where quantity >= 出库量，防止并发超卖
+      const result = await this.prisma.inventory.updateMany({
+        where: { id, quantity: { gte: data.quantity } },
+        data: { quantity: { decrement: data.quantity } },
+      });
+      if (result.count === 0) throw new BadRequestException('库存不足');
+      return this.prisma.inventory.findUniqueOrThrow({ where: { id } });
+    }
+
+    // adjust：直接设置为指定值（入口已校验非负）
     return this.prisma.inventory.update({
       where: { id },
-      data: { quantity: newQuantity },
+      data: { quantity: data.quantity },
     });
   }
 
   async getLowStockAlerts() {
+    // Prisma 不支持列间比较，先用 raw SQL 取触达安全库存阈值的 id，再回表带关联
+    const rows = await this.prisma.$queryRaw<{ id: number }[]>`
+      SELECT id FROM inventories WHERE quantity <= safety_stock
+    `;
+    const ids = rows.map((r) => r.id);
+    if (ids.length === 0) return [];
     return this.prisma.inventory.findMany({
-      where: { quantity: { lte: 0 } as any },
+      where: { id: { in: ids } },
       include: {
         sku: { select: { skuCode: true, product: { select: { name: true } } } },
         warehouse: { select: { name: true } },
@@ -64,16 +85,18 @@ export class InventoryService {
   }
 
   async getSummary() {
-    const [totalQuantity, warehouses, lowStockCount] = await Promise.all([
+    const [totalQuantity, warehouses, lowStockRows] = await Promise.all([
       this.prisma.inventory.aggregate({ _sum: { quantity: true } }),
       this.prisma.warehouse.count({ where: { isActive: true } }),
-      this.prisma.inventory.count({ where: { quantity: { lte: 0 } as any } }),
+      this.prisma.$queryRaw<{ count: bigint }[]>`
+        SELECT COUNT(*) AS count FROM inventories WHERE quantity <= safety_stock
+      `,
     ]);
 
     return {
       totalQuantity: totalQuantity._sum.quantity || 0,
       warehouseCount: warehouses,
-      lowStockCount,
+      lowStockCount: Number(lowStockRows[0]?.count ?? 0),
     };
   }
 }

@@ -13,12 +13,15 @@ import { SelectionInquiryService } from "./selection-inquiry.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { Public } from "../../common/decorators/public.decorator";
 import { OptionalCustomerAuthGuard } from "../customers/optional-customer-auth.guard";
+import { Roles } from "../../common/decorators/roles.decorator";
+import { RolesGuard } from "../../common/guards/roles.guard";
 
 @Controller("selection-inquiries")
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles("SUPER_ADMIN", "ADMIN", "CUSTOMER_SERVICE")
 export class SelectionInquiryController {
   constructor(private readonly service: SelectionInquiryService) {}
 
-  @UseGuards(JwtAuthGuard)
   @Get()
   findAll(@Query() q: any) {
     const page = q.page ? +q.page : 1;
@@ -54,13 +57,11 @@ export class SelectionInquiryController {
     return this.service.create({ ...body, customer: request.customer });
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get(":id")
   findOne(@Param("id") id: number) {
     return this.service.findOne(+id);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Put(":id")
   update(
     @Param("id") id: number,
