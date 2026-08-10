@@ -101,6 +101,7 @@ model Product {
   isRecommended    Boolean       @default(false) @map("is_recommended")
   isLimited        Boolean       @default(false) @map("is_limited")
   isCustom         Boolean       @default(false) @map("is_custom")
+  multiDiscount    Boolean       @default(false) @map("multi_discount")
   viewCount        Int           @default(0) @map("view_count")
   salesCount       Int           @default(0) @map("sales_count")
   publishedAt      DateTime?     @map("published_at")
@@ -762,48 +763,6 @@ model ContentSlot {
   @@index([pageKey])
   @@index([status])
   @@map("content_slots")
-}
-
-// ========== 页面模块构建器 ==========
-
-model PageModule {
-  id               Int      @id @default(autoincrement())
-  pageKey          String   @db.VarChar(50) // "home" | "about" | "custom" | ...
-  moduleType       String   @db.VarChar(30) // hero | imageText | richText | gallery | serviceCards | productRecommendation | cta | faq
-  sortOrder        Int      @default(0) @map("sort_order")
-  isVisible        Boolean  @default(true) @map("is_visible")
-  status           String   @default("DRAFT") @db.VarChar(20) // DRAFT | PUBLISHED
-  content          Json // 草稿内容: { desktopImage, mobileImage, title, subtitle, ... }
-  publishedContent Json?    @map("published_content") // 已发布快照
-  layoutConfig     Json     @map("layout_config") // { template, ratio, textPosition, ... }
-  styleConfig      Json     @map("style_config") // { focusX, focusY, bgColor, spacing, ... }
-  version          Int      @default(1) // 版本号
-  updatedBy        Int?     @map("updated_by")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-
-  @@index([pageKey])
-  @@index([status])
-  @@map("page_modules")
-}
-
-// ========== 页面模块版本历史 ==========
-
-model PageModuleVersion {
-  id           Int      @id @default(autoincrement())
-  moduleId     Int      @map("module_id")
-  pageKey      String   @db.VarChar(50)
-  moduleType   String   @db.VarChar(30)
-  content      Json
-  layoutConfig Json     @map("layout_config")
-  styleConfig  Json     @map("style_config")
-  version      Int
-  savedBy      Int?     @map("saved_by")
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  @@index([moduleId])
-  @@index([moduleId, version])
-  @@map("page_module_versions")
 }
 
 // ========== 页面文档（Puck 页面级 JSON 存储）==========
