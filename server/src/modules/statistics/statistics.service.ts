@@ -47,7 +47,7 @@ export class StatisticsService {
       this.prisma.user.count({ where: { status: "ACTIVE" } }),
       this.prisma.product.count({ where: { status: "DRAFT" } }),
       this.prisma.order.count({ where: { status: "PENDING_SHIP" } }),
-      this.prisma.inventory.count({ where: { quantity: { lte: 0 } as any } }),
+      this.prisma.inventory.count({ where: { quantity: { lte: 0 } } }),
       this.prisma.analyticsEvent.count({
         where: { eventName: "page_view", occurredAt: { gte: todayStart } },
       }),
@@ -94,16 +94,27 @@ export class StatisticsService {
   }
 
   async getOrderTrend(days = 7) {
+    const now = new Date();
+    const start = new Date(now);
+    start.setDate(start.getDate() - (days - 1));
+    start.setHours(0, 0, 0, 0);
+
+    // 单次聚合查询替代 N 次循环 count；DATE_FORMAT 与 JS 本地日期同处一个时区
+    const rows = await this.prisma.$queryRaw<{ date: string; count: bigint }[]>`
+      SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS date, COUNT(*) AS count
+      FROM orders
+      WHERE created_at >= ${start}
+      GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')
+    `;
+    const map = new Map<string, number>();
+    for (const r of rows) map.set(r.date, Number(r.count));
+
     const results: { date: string; count: number }[] = [];
     for (let i = days - 1; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const start = new Date(date.setHours(0, 0, 0, 0));
-      const end = new Date(date.setHours(23, 59, 59, 999));
-      const count = await this.prisma.order.count({
-        where: { createdAt: { gte: start, lte: end } },
-      });
-      results.push({ date: start.toISOString().slice(0, 10), count });
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      results.push({ date: key, count: map.get(key) ?? 0 });
     }
     return results;
   }

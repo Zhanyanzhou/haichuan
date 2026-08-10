@@ -60,15 +60,6 @@ export class OrdersService {
     return quantities;
   }
 
-  private async getAvailableStock(skuId: number, fallbackStock: number): Promise<number> {
-    const inventory = await this.prisma.inventory.aggregate({
-      where: { skuId },
-      _sum: { quantity: true },
-      _count: { id: true },
-    });
-    return inventory._count.id > 0 ? inventory._sum.quantity || 0 : fallbackStock;
-  }
-
   private getReservationExpiry(now = new Date()) {
     return new Date(now.getTime() + OFFLINE_PAYMENT_RESERVATION_MS);
   }
@@ -284,6 +275,15 @@ export class OrdersService {
     });
     if (skus.length !== quantities.size) throw new BadRequestException('订单中包含不可购买的商品规格');
 
+    // 一次性聚合所有 SKU 的可用库存，替代循环内 N 次 aggregate（避免 N+1）
+    const stockRows = await this.prisma.inventory.groupBy({
+      by: ["skuId"],
+      where: { skuId: { in: skus.map((s) => s.id) } },
+      _sum: { quantity: true },
+    });
+    const stockMap = new Map<number, number>();
+    for (const r of stockRows) stockMap.set(r.skuId, r._sum.quantity ?? 0);
+
     let totalAmount = 0;
     const orderItems: Prisma.OrderItemUncheckedCreateWithoutOrderInput[] = [];
     for (const sku of skus) {
@@ -292,7 +292,8 @@ export class OrdersService {
       if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
         throw new BadRequestException(`商品 ${sku.skuCode} 尚未设置有效售价`);
       }
-      const availableStock = await this.getAvailableStock(sku.id, sku.stock);
+      // 无库存记录时回退到 SKU 静态库存（与原 getAvailableStock 逻辑一致）
+      const availableStock = stockMap.has(sku.id) ? stockMap.get(sku.id)! : sku.stock;
       if (availableStock < quantity) {
         throw new BadRequestException(`商品 ${sku.skuCode} 库存不足`);
       }

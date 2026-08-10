@@ -257,7 +257,7 @@ export class ProductsController {
 
     const derived = await this.productsService.addImage(+id, {
       url: result.url,
-      type: "FRONT" as any,
+      type: "FRONT",
       sortOrder: 0,
       sourceImageId: +sourceImageId,
       cropData: {

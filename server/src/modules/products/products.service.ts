@@ -412,12 +412,12 @@ export class ProductsService {
     // 全部图片与主图字段的更新放进同一事务，避免中途失败造成 sortOrder 错乱
     const result = await this.prisma.$transaction(async (tx) => {
       await tx.productImage.updateMany({
-        where: { productId, type: "FRONT" as any },
-        data: { type: "SIDE" as any },
+        where: { productId, type: "FRONT" },
+        data: { type: "SIDE" },
       });
       await tx.productImage.update({
         where: { id: imageId },
-        data: { type: "FRONT" as any, sortOrder: 0 },
+        data: { type: "FRONT", sortOrder: 0 },
       });
       const others = await tx.productImage.findMany({
         where: { productId, id: { not: imageId } },

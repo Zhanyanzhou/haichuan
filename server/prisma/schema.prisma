@@ -404,6 +404,8 @@ model Order {
   @@index([customerPhone, createdAt]) // 复合索引：按手机+时间查订单
   @@index([userId, createdAt]) // 复合索引：按用户+时间查订单
   @@index([customerId, createdAt])
+  @@index([createdAt]) // dashboard 今日订单计数 / orderTrend 按日聚合
+  @@index([status, createdAt]) // 营收聚合：status in (...) + createdAt range
   @@map("orders")
 }
 
@@ -613,6 +615,7 @@ model Inquiry {
 
   @@index([status])
   @@index([customerId, createdAt])
+  @@index([createdAt]) // dashboard 今日询价计数
   @@map("inquiries")
 }
 
@@ -846,6 +849,7 @@ model SelectionInquiry {
 
   @@index([status])
   @@index([customerId, createdAt])
+  @@index([createdAt]) // dashboard 今日选款咨询计数
   @@map("selection_inquiries")
 }
 
@@ -897,7 +901,7 @@ model AnalyticsEvent {
   customerId Int?     @map("customer_id")
   metadata   Json?
 
-  @@index([eventName])
+  @@index([eventName, occurredAt]) // dashboard page_view 复合查询（最左前缀覆盖纯 eventName）
   @@index([occurredAt])
   @@index([sessionId])
   @@map("analytics_events")
