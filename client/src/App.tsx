@@ -75,7 +75,15 @@ function App() {
             <Route path="preview/home" element={<HomePreview />} />
           </Route>
 
-          <Route element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>            <Route index element={<Navigate to="/admin/dashboard" replace />} />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute>
+                <AdminLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Navigate to="/admin/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="products" element={<ProductManage />} />
             <Route path="products/new" element={<ProductEditor />} />
@@ -87,7 +95,10 @@ function App() {
             <Route path="orders" element={<OrderManage />} />
             <Route path="users" element={<UserManage />} />
             <Route path="settings" element={<Settings />} />
-            <Route path="homepage" element={<Navigate to="/admin/editor/home" replace />} />
+            <Route
+              path="homepage"
+              element={<Navigate to="/admin/editor/home" replace />}
+            />
             <Route
               path="editor/:pageKey"
               element={

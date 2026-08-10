@@ -25,6 +25,7 @@ import {
   LayoutOutlined,
   MobileOutlined,
   RollbackOutlined,
+  SaveOutlined,
   SearchOutlined,
   SendOutlined,
   TabletOutlined,
@@ -49,6 +50,7 @@ import {
 import { pageDocumentApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import MediaRequirementPanel from "@/page-builder/fields/MediaRequirementPanel";
+import { blockTemplateStore, type BlockTemplate } from "@/page-builder/templates/blockTemplateStore";
 
 const useHomepagePuck = createUsePuck<typeof puckConfig>();
 
@@ -312,9 +314,11 @@ function TemplateCard({
 function TemplateLibrary({
   onTemplatePointerDragMove,
   onTemplatePointerDragEnd,
+  onSaveAsTemplate,
 }: {
   onTemplatePointerDragMove: (name: string, clientX: number, clientY: number) => void;
   onTemplatePointerDragEnd: (name: string, clientX: number, clientY: number) => boolean;
+  onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
 }) {
   const appData = useHomepagePuck((state) => state.appState.data);
   const dispatch = useHomepagePuck((state) => state.dispatch);
@@ -339,6 +343,9 @@ function TemplateLibrary({
       return [];
     }
   });
+  const [myTemplates, setMyTemplates] = useState<BlockTemplate[]>(() =>
+    blockTemplateStore.getAll(),
+  );
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -365,6 +372,50 @@ function TemplateLibrary({
         : [...current, name],
     );
   }, []);
+
+  const refreshMyTemplates = useCallback(() => {
+    setMyTemplates(blockTemplateStore.getAll());
+  }, []);
+
+  const saveBlockAsTemplate = useCallback((blockType: string, blockProps: Record<string, any>) => {
+    Modal.confirm({
+      title: "保存区块为模板",
+      content: (
+        <div style={{ marginTop: 8 }}>
+          <p style={{ margin: "0 0 8px", color: "#6B6259", fontSize: 12 }}>
+            将当前「{blockType}」的配置保存为可复用的模板。
+          </p>
+          <label style={{ fontSize: 12, color: "#4A4239" }}>
+            模板名称
+            <input
+              id="block-template-name-input"
+              type="text"
+              defaultValue={`我的${blockType}`}
+              style={{
+                display: "block",
+                width: "100%",
+                marginTop: 4,
+                padding: "6px 10px",
+                border: "1px solid #DED8CE",
+                borderRadius: 3,
+                fontSize: 13,
+                boxSizing: "border-box",
+              }}
+            />
+          </label>
+        </div>
+      ),
+      okText: "保存为模板",
+      cancelText: "取消",
+      onOk: () => {
+        const input = document.getElementById("block-template-name-input") as HTMLInputElement | null;
+        const name = input?.value?.trim() || `我的${blockType}`;
+        blockTemplateStore.save(name, blockType, blockProps);
+        refreshMyTemplates();
+        message.success(`「${name}」已保存为模板，在「我的模板」中查看`);
+      },
+    });
+  }, [refreshMyTemplates]);
 
   const entries = useMemo(
     () =>
@@ -480,22 +531,78 @@ function TemplateLibrary({
       </div>
 
       <div className="homepage-editor__template-scroll">
-        {libraryType === "blocks" && (entries.length > 0 ? (
-          entries.map(([name, meta]) => (
-            <TemplateCard
-              key={name}
-              name={name}
-              meta={meta}
-              favorite={favoriteNames.includes(name)}
-              onToggleFavorite={() => toggleFavorite(name)}
-              onAdded={() => recordRecent(name)}
-              onPointerDragMove={onTemplatePointerDragMove}
-              onPointerDragEnd={onTemplatePointerDragEnd}
-            />
-          ))
-        ) : (
-          <div className="homepage-editor__library-empty">没有找到匹配的区块模板</div>
-        ))}
+        {libraryType === "blocks" && (entries.length > 0 || category === "我的模板") ? (
+          category === "我的模板" ? (
+            myTemplates.length > 0 ? (
+              myTemplates.map((tpl) => (
+                <article className="homepage-editor__template-card" key={tpl.id}>
+                  <button
+                    type="button"
+                    className="homepage-editor__template-card-main"
+                    onClick={() => {
+                      const newBlock = {
+                        type: tpl.type,
+                        props: {
+                          ...JSON.parse(JSON.stringify(tpl.props)),
+                          id: `homepage-block-${Date.now()}-${blockIdSequence++}`,
+                          locked: false,
+                        },
+                      };
+                      const updated = {
+                        ...appData,
+                        content: [...(appData.content ?? []), newBlock],
+                      };
+                      dispatch({ type: "setData", data: updated });
+                      recordRecent(tpl.type);
+                      message.success(`已添加“${tpl.name}”`);
+                    }}
+                  >
+                    <span className="homepage-editor__template-preview-wrap">
+                      <BlockTemplateVisual name={tpl.type} />
+                      <span className="homepage-editor__template-badge" style={{ background: "#6C5CE7" }}>我的</span>
+                      <span className="homepage-editor__template-add">点击添加</span>
+                    </span>
+                    <span className="homepage-editor__template-name">{tpl.name}</span>
+                    <span className="homepage-editor__template-description">
+                      {tpl.type} · {new Date(tpl.createdAt).toLocaleDateString("zh-CN")}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="homepage-editor__template-favorite"
+                    onClick={() => {
+                      blockTemplateStore.remove(tpl.id);
+                      refreshMyTemplates();
+                    }}
+                    title="删除此模板"
+                  >
+                    <DeleteOutlined />
+                  </button>
+                </article>
+              ))
+            ) : (
+              <div className="homepage-editor__library-empty">
+                还没有保存过区块模板。<br />
+                在右侧图层中选中区块，点击「另存为模板」即可。
+              </div>
+            )
+          ) : entries.length > 0 ? (
+            entries.map(([name, meta]) => (
+              <TemplateCard
+                key={name}
+                name={name}
+                meta={meta}
+                favorite={favoriteNames.includes(name)}
+                onToggleFavorite={() => toggleFavorite(name)}
+                onAdded={() => recordRecent(name)}
+                onPointerDragMove={onTemplatePointerDragMove}
+                onPointerDragEnd={onTemplatePointerDragEnd}
+              />
+            ))
+          ) : (
+            <div className="homepage-editor__library-empty">没有找到匹配的区块模板</div>
+          )
+        ) : null}
         {libraryType === "pages" && (pageEntries.length > 0 ? (
           pageEntries.map((template) => (
             <article className="homepage-editor__page-template-card" key={template.id}>
@@ -636,7 +743,11 @@ function EditorToolbar({
   );
 }
 
-function LayerRail() {
+function LayerRail({
+  onSaveAsTemplate,
+}: {
+  onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
+}) {
   const appData = useHomepagePuck((state) => state.appState.data);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
@@ -731,6 +842,7 @@ function LayerRail() {
                 </button>
                 <span className="homepage-editor__layer-actions" aria-label={`${item.type} 操作`}>
                   <button type="button" onClick={() => toggleLayerVisibility(index)} aria-label={item.props?.isVisible === false ? "显示模块" : "隐藏模块"} title={item.props?.isVisible === false ? "显示模块" : "隐藏模块"}>{item.props?.isVisible === false ? <EyeInvisibleOutlined /> : <EyeOutlined />}</button>
+                  <button type="button" onClick={() => onSaveAsTemplate(item.type, item.props)} title="另存为我的模板"><SaveOutlined /></button>
                   <button type="button" onClick={() => removeLayer(index)} disabled={item.props?.locked} aria-label="删除模块" title={item.props?.locked ? "模块已锁定" : "删除"}><DeleteOutlined /></button>
                 </span>
               </div>
@@ -854,7 +966,11 @@ function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
   );
 }
 
-function EditorBody() {
+function EditorBody({
+  onSaveAsTemplate,
+}: {
+  onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
+}) {
   const appData = useHomepagePuck((state) => state.appState.data);
   const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
   const dispatch = useHomepagePuck((state) => state.dispatch);
@@ -1023,6 +1139,7 @@ function EditorBody() {
       <TemplateLibrary
         onTemplatePointerDragMove={handleTemplatePointerDragMove}
         onTemplatePointerDragEnd={handleTemplatePointerDragEnd}
+        onSaveAsTemplate={onSaveAsTemplate}
       />
 
       <section ref={stageRef} className="homepage-editor__stage" aria-label="店铺首页画布">
@@ -1072,7 +1189,7 @@ function EditorBody() {
       </section>
 
       <aside className="homepage-editor__right-workspace">
-        <LayerRail />
+        <LayerRail onSaveAsTemplate={onSaveAsTemplate} />
         <InspectorPanel />
       </aside>
     </main>
@@ -1154,6 +1271,54 @@ export default function HomepageConfig() {
   const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
   const [editorKey, setEditorKey] = useState(0);
   const latestData = useRef<any>(data);
+
+  const [myTemplates, setMyTemplates] = useState<BlockTemplate[]>(() =>
+    blockTemplateStore.getAll(),
+  );
+
+  const refreshMyTemplates = useCallback(() => {
+    setMyTemplates(blockTemplateStore.getAll());
+  }, []);
+
+  const saveBlockAsTemplate = useCallback((blockType: string, blockProps: Record<string, any>) => {
+    Modal.confirm({
+      title: "保存区块为模板",
+      content: (
+        <div style={{ marginTop: 8 }}>
+          <p style={{ margin: "0 0 8px", color: "#6B6259", fontSize: 12 }}>
+            将当前「{blockType}」的配置保存为可复用的模板。
+          </p>
+          <label style={{ fontSize: 12, color: "#4A4239" }}>
+            模板名称
+            <input
+              id="block-template-name-input"
+              type="text"
+              defaultValue={`我的${blockType}`}
+              style={{
+                display: "block",
+                width: "100%",
+                marginTop: 4,
+                padding: "6px 10px",
+                border: "1px solid #DED8CE",
+                borderRadius: 3,
+                fontSize: 13,
+                boxSizing: "border-box",
+              }}
+            />
+          </label>
+        </div>
+      ),
+      okText: "保存为模板",
+      cancelText: "取消",
+      onOk: () => {
+        const input = document.getElementById("block-template-name-input") as HTMLInputElement | null;
+        const name = input?.value?.trim() || `我的${blockType}`;
+        blockTemplateStore.save(name, blockType, blockProps);
+        refreshMyTemplates();
+        message.success(`「${name}」已保存为模板，在「我的模板」中查看`);
+      },
+    });
+  }, [refreshMyTemplates]);
   const editorConfig = useMemo(() => ({
     ...puckConfig,
     components: Object.fromEntries(
@@ -2428,7 +2593,7 @@ export default function HomepageConfig() {
           onPublish={publishHome}
           onDataChange={trackEditorData}
         />
-        <EditorBody />
+        <EditorBody onSaveAsTemplate={saveBlockAsTemplate} />
       </Puck>
     </div>
   );
