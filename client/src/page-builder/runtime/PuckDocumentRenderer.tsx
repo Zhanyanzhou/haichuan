@@ -108,6 +108,29 @@ function ProductRowState({
   );
 }
 
+// 模块级单例：多个产品行共享同一条商品变更 SSE，引用计数管理生命周期
+type ProductStreamHandle = { stream: EventSource; listeners: Set<() => void> };
+let productStreamHandle: ProductStreamHandle | null = null;
+function subscribeProductStream(onTick: () => void): () => void {
+  if (!productStreamHandle) {
+    const stream = new EventSource(publicProductStreamUrl);
+    const listeners = new Set<() => void>();
+    stream.onmessage = () => {
+      productStreamHandle?.listeners.forEach((cb) => cb());
+    };
+    productStreamHandle = { stream, listeners };
+  }
+  productStreamHandle.listeners.add(onTick);
+  return () => {
+    if (!productStreamHandle) return;
+    productStreamHandle.listeners.delete(onTick);
+    if (productStreamHandle.listeners.size === 0) {
+      productStreamHandle.stream.close();
+      productStreamHandle = null;
+    }
+  };
+}
+
 function ResolvedProductRowBlock({
   props,
 }: {
@@ -168,9 +191,7 @@ function ResolvedProductRowBlock({
 
   useEffect(() => {
     if (USE_MOCK || productIds.length === 0) return;
-    const stream = new EventSource(publicProductStreamUrl);
-    stream.onmessage = () => setRevision((value) => value + 1);
-    return () => stream.close();
+    return subscribeProductStream(() => setRevision((value) => value + 1));
   }, [productIds.length]);
 
   if (productIds.length === 0) return null;

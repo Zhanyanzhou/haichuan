@@ -47,7 +47,11 @@ const PUCK_LINK_FIELDS = ["linkUrl", "link"];
 export class PageModulesService {
   private readonly publicEvents = new EventEmitter();
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) {
+    // 每条 SSE 连接都会订阅发布事件，连接数随并发前台用户增长；
+    // 关闭默认上限避免误报 EventEmitter 内存泄漏告警
+    this.publicEvents.setMaxListeners(0);
+  }
 
   publicChangeStream(): Observable<MessageEvent> {
     const publishEvents = fromEvent(this.publicEvents, "page-published").pipe(
