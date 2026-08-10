@@ -50,10 +50,7 @@ const categoryIcons: Record<string, string> = {
 };
 
 function flattenTree(nodes: CategoryTreeNode[]): Category[] {
-  return nodes.flatMap((node) => [
-    node,
-    ...flattenTree(node.children || []),
-  ]);
+  return nodes.flatMap((node) => [node, ...flattenTree(node.children || [])]);
 }
 
 function CategoryImageUpload({
@@ -65,7 +62,8 @@ function CategoryImageUpload({
       const result = await uploadApi.uploadImage(file);
       onChange?.(unwrapResponse<{ url: string }>(result).url);
       message.success("图标上传成功");
-    } catch {
+    } catch (err) {
+      console.error("图标上传失败:", err);
       message.error("图标上传失败，请重试");
     }
     return false;
@@ -80,7 +78,11 @@ function CategoryImageUpload({
           style={{ width: 44, height: 44, borderRadius: 6, objectFit: "cover" }}
         />
       ) : null}
-      <Upload accept="image/*" showUploadList={false} beforeUpload={beforeUpload as any}>
+      <Upload
+        accept="image/*"
+        showUploadList={false}
+        beforeUpload={beforeUpload as any}
+      >
         <ScifiButton variant="outline" size="sm">
           <PictureOutlined /> {value ? "更换图标" : "上传图标"}
         </ScifiButton>
@@ -98,7 +100,9 @@ export default function CategoryManage() {
   const [saving, setSaving] = useState(false);
   const [movingId, setMovingId] = useState<number | null>(null);
   const [keyword, setKeyword] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "active" | "inactive"
+  >("all");
   const [form] = Form.useForm();
 
   const refresh = async () => {
@@ -107,7 +111,8 @@ export default function CategoryManage() {
     try {
       const response = await categoryApi.getManageTree();
       setCategories(flattenTree(unwrapResponse<CategoryTreeNode[]>(response)));
-    } catch {
+    } catch (err) {
+      console.error("分类树加载失败:", err);
       setCategories([]);
       setLoadError(true);
     } finally {
@@ -123,22 +128,34 @@ export default function CategoryManage() {
     () => categories.filter((category) => category.level === 1),
     [categories],
   );
-  const secondaryCount = categories.filter((category) => category.level === 2).length;
-  const getSecondaryCategories = (parentId: number) => categories
-    .filter((category) => category.level === 2 && category.parentId === parentId)
-    .filter((category) => {
-      const query = keyword.trim().toLowerCase();
-      const matchesKeyword = !query
-        || category.name.toLowerCase().includes(query)
-        || category.slug.toLowerCase().includes(query);
-      const matchesStatus = statusFilter === "all"
-        || (statusFilter === "active" && category.isActive !== false)
-        || (statusFilter === "inactive" && category.isActive === false);
-      return matchesKeyword && matchesStatus;
-    })
-    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, "zh-CN"));
+  const secondaryCount = categories.filter(
+    (category) => category.level === 2,
+  ).length;
+  const getSecondaryCategories = (parentId: number) =>
+    categories
+      .filter(
+        (category) => category.level === 2 && category.parentId === parentId,
+      )
+      .filter((category) => {
+        const query = keyword.trim().toLowerCase();
+        const matchesKeyword =
+          !query ||
+          category.name.toLowerCase().includes(query) ||
+          category.slug.toLowerCase().includes(query);
+        const matchesStatus =
+          statusFilter === "all" ||
+          (statusFilter === "active" && category.isActive !== false) ||
+          (statusFilter === "inactive" && category.isActive === false);
+        return matchesKeyword && matchesStatus;
+      })
+      .sort(
+        (a, b) =>
+          a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, "zh-CN"),
+      );
   const visiblePrimaryCategories = primaryCategories.filter(
-    (category) => (!keyword && statusFilter === "all") || getSecondaryCategories(category.id).length > 0,
+    (category) =>
+      (!keyword && statusFilter === "all") ||
+      getSecondaryCategories(category.id).length > 0,
   );
 
   const openCreate = (parentId: number) => {
@@ -167,6 +184,7 @@ export default function CategoryManage() {
       setModalOpen(false);
       await refresh();
     } catch (error: any) {
+      console.error("保存分类失败:", error);
       message.error(error?.message || "保存失败，请稍后重试");
     } finally {
       setSaving(false);
@@ -179,6 +197,7 @@ export default function CategoryManage() {
       message.success(isActive ? "二级类目已启用" : "二级类目已停用");
       await refresh();
     } catch (error: any) {
+      console.error("停用/启用分类失败:", error);
       message.error(error?.message || "停用失败，请稍后重试");
     }
   };
@@ -186,18 +205,35 @@ export default function CategoryManage() {
   const moveSecondary = async (category: Category, direction: -1 | 1) => {
     const siblings = categories
       .filter((item) => item.level === 2 && item.parentId === category.parentId)
-      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, "zh-CN"));
+      .sort(
+        (a, b) =>
+          a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, "zh-CN"),
+      );
     const currentIndex = siblings.findIndex((item) => item.id === category.id);
     const targetIndex = currentIndex + direction;
-    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= siblings.length) return;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= siblings.length) {
+      console.warn(
+        "moveSecondary: 索引越界，跳过排序操作",
+        { categoryId: category.id, currentIndex, targetIndex, siblingsCount: siblings.length },
+      );
+      return;
+    }
 
     const reordered = [...siblings];
-    [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
+    [reordered[currentIndex], reordered[targetIndex]] = [
+      reordered[targetIndex],
+      reordered[currentIndex],
+    ];
     setMovingId(category.id);
     try {
-      await Promise.all(reordered.map((item, index) => categoryApi.update(item.id, { sortOrder: index + 1 })));
+      await Promise.all(
+        reordered.map((item, index) =>
+          categoryApi.update(item.id, { sortOrder: index + 1 }),
+        ),
+      );
       await refresh();
     } catch (error: any) {
+      console.error("排序更新失败:", error);
       message.error(error?.message || "排序更新失败，请稍后重试");
     } finally {
       setMovingId(null);
@@ -205,17 +241,24 @@ export default function CategoryManage() {
   };
 
   if (loading) {
-    return <div style={{ padding: 56, textAlign: "center" }}><Spin tip="正在加载分类…" /></div>;
+    return (
+      <div style={{ padding: 56, textAlign: "center" }}>
+        <Spin tip="正在加载分类…" />
+      </div>
+    );
   }
 
   return (
     <div style={{ padding: "24px 28px", maxWidth: 1400 }}>
       <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 600, color: "#1F1F1F", margin: 0 }}>
+        <h1
+          style={{ fontSize: 20, fontWeight: 600, color: "#1F1F1F", margin: 0 }}
+        >
           分类管理
         </h1>
         <p style={{ fontSize: 13, color: "#8C8C8C", margin: "4px 0 0" }}>
-          一级类目已固定，共 {primaryCategories.length} 个；可按归属维护 {secondaryCount} 个二级类目。
+          一级类目已固定，共 {primaryCategories.length} 个；可按归属维护{" "}
+          {secondaryCount} 个二级类目。
         </p>
       </div>
 
@@ -228,7 +271,9 @@ export default function CategoryManage() {
         style={{ marginBottom: 16 }}
       />
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+      <div
+        style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}
+      >
         <Input.Search
           allowClear
           value={keyword}
@@ -250,13 +295,23 @@ export default function CategoryManage() {
 
       {loadError ? (
         <Empty description="分类加载失败">
-          <ScifiButton variant="outline" onClick={() => void refresh()}>重新加载</ScifiButton>
+          <ScifiButton variant="outline" onClick={() => void refresh()}>
+            重新加载
+          </ScifiButton>
         </Empty>
       ) : primaryCategories.length === 0 ? (
         <Empty description="暂无一级类目，无法维护二级类目" />
       ) : visiblePrimaryCategories.length === 0 ? (
         <Empty description="没有匹配的二级类目">
-          <ScifiButton variant="outline" onClick={() => { setKeyword(""); setStatusFilter("all"); }}>清除筛选</ScifiButton>
+          <ScifiButton
+            variant="outline"
+            onClick={() => {
+              setKeyword("");
+              setStatusFilter("all");
+            }}
+          >
+            清除筛选
+          </ScifiButton>
         </Empty>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -265,83 +320,193 @@ export default function CategoryManage() {
             return (
               <section
                 key={primary.id}
-                style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, overflow: "hidden" }}
+                style={{
+                  background: "#fff",
+                  border: "1px solid #f0f0f0",
+                  borderRadius: 10,
+                  overflow: "hidden",
+                }}
               >
                 <div
-                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", background: "#FAF8F5", borderBottom: "1px solid #f0f0f0" }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "16px 20px",
+                    background: "#FAF8F5",
+                    borderBottom: "1px solid #f0f0f0",
+                  }}
                 >
-                  <span style={{ fontSize: 30 }}>{primary.icon || categoryIcons[primary.name] || "📁"}</span>
+                  <span style={{ fontSize: 30 }}>
+                    {primary.icon || categoryIcons[primary.name] || "📁"}
+                  </span>
                   <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <strong style={{ color: "#2C2C2C" }}>{primary.name}</strong>
-                      <Tag icon={<LockOutlined />} color="default" style={{ margin: 0 }}>一级类目 · 已固定</Tag>
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
+                    >
+                      <strong style={{ color: "#2C2C2C" }}>
+                        {primary.name}
+                      </strong>
+                      <Tag
+                        icon={<LockOutlined />}
+                        color="default"
+                        style={{ margin: 0 }}
+                      >
+                        一级类目 · 已固定
+                      </Tag>
                     </div>
-                    <div style={{ fontSize: 12, color: "#8c8c8c", marginTop: 3 }}>
+                    <div
+                      style={{ fontSize: 12, color: "#8c8c8c", marginTop: 3 }}
+                    >
                       {primary.slug} · {secondaryCategories.length} 个二级类目
                     </div>
                   </div>
-                  <ScifiButton variant="gold" size="sm" onClick={() => openCreate(primary.id)}>
+                  <ScifiButton
+                    variant="gold"
+                    size="sm"
+                    onClick={() => openCreate(primary.id)}
+                  >
                     <PlusOutlined /> 新增二级类目
                   </ScifiButton>
                 </div>
 
                 {secondaryCategories.length === 0 ? (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无二级类目" style={{ margin: "18px 0" }} />
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description="暂无二级类目"
+                    style={{ margin: "18px 0" }}
+                  />
                 ) : (
                   <div style={{ padding: "8px 20px 16px" }}>
                     {secondaryCategories.map((secondary, index) => {
-                      const lowerLevelCount = secondary._count?.children
-                        ?? categories.filter((category) => category.parentId === secondary.id).length;
+                      const lowerLevelCount =
+                        secondary._count?.children ??
+                        categories.filter(
+                          (category) => category.parentId === secondary.id,
+                        ).length;
                       const productCount = secondary._count?.products ?? 0;
                       const enabled = secondary.isActive !== false;
-                      const hasDependencies = lowerLevelCount > 0 || productCount > 0;
+                      const hasDependencies =
+                        lowerLevelCount > 0 || productCount > 0;
                       return (
                         <div
                           key={secondary.id}
-                          style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: "1px solid #f5f5f5" }}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 12,
+                            padding: "12px 0",
+                            borderBottom: "1px solid #f5f5f5",
+                          }}
                         >
-                          <span style={{ fontSize: 20 }}>{secondary.icon || categoryIcons[secondary.name] || "📁"}</span>
+                          <span style={{ fontSize: 20 }}>
+                            {secondary.icon ||
+                              categoryIcons[secondary.name] ||
+                              "📁"}
+                          </span>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ color: "#2C2C2C", fontWeight: 500 }}>{secondary.name}</div>
-                            <div style={{ color: "#8c8c8c", fontSize: 12, marginTop: 2 }}>
+                            <div style={{ color: "#2C2C2C", fontWeight: 500 }}>
+                              {secondary.name}
+                            </div>
+                            <div
+                              style={{
+                                color: "#8c8c8c",
+                                fontSize: 12,
+                                marginTop: 2,
+                              }}
+                            >
                               {secondary.slug} · 排序 {secondary.sortOrder}
-                              {productCount > 0 ? ` · 关联 ${productCount} 件商品` : ""}
-                              {lowerLevelCount > 0 ? ` · 关联 ${lowerLevelCount} 个下级分类` : ""}
+                              {productCount > 0
+                                ? ` · 关联 ${productCount} 件商品`
+                                : ""}
+                              {lowerLevelCount > 0
+                                ? ` · 关联 ${lowerLevelCount} 个下级分类`
+                                : ""}
                             </div>
                           </div>
-                          <Tag color={enabled ? "green" : "default"} style={{ margin: 0 }}>{enabled ? "启用" : "已停用"}</Tag>
+                          <Tag
+                            color={enabled ? "green" : "default"}
+                            style={{ margin: 0 }}
+                          >
+                            {enabled ? "启用" : "已停用"}
+                          </Tag>
                           <Space size={4}>
                             <Tooltip title="上移">
-                              <ScifiButton variant="outline" size="sm" disabled={index === 0 || movingId === secondary.id} onClick={() => void moveSecondary(secondary, -1)}>
+                              <ScifiButton
+                                variant="outline"
+                                size="sm"
+                                disabled={
+                                  index === 0 || movingId === secondary.id
+                                }
+                                onClick={() =>
+                                  void moveSecondary(secondary, -1)
+                                }
+                              >
                                 <ArrowUpOutlined />
                               </ScifiButton>
                             </Tooltip>
                             <Tooltip title="下移">
-                              <ScifiButton variant="outline" size="sm" disabled={index === secondaryCategories.length - 1 || movingId === secondary.id} onClick={() => void moveSecondary(secondary, 1)}>
+                              <ScifiButton
+                                variant="outline"
+                                size="sm"
+                                disabled={
+                                  index === secondaryCategories.length - 1 ||
+                                  movingId === secondary.id
+                                }
+                                onClick={() => void moveSecondary(secondary, 1)}
+                              >
                                 <ArrowDownOutlined />
                               </ScifiButton>
                             </Tooltip>
-                            <ScifiButton variant="outline" size="sm" onClick={() => openEdit(secondary)}>
+                            <ScifiButton
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openEdit(secondary)}
+                            >
                               <EditOutlined /> 编辑
                             </ScifiButton>
                             {enabled ? (
                               hasDependencies ? (
                                 <Tooltip title="请先处理关联的商品或下级分类">
-                                  <span><ScifiButton variant="outline" size="sm" disabled>有关联</ScifiButton></span>
+                                  <span>
+                                    <ScifiButton
+                                      variant="outline"
+                                      size="sm"
+                                      disabled
+                                    >
+                                      有关联
+                                    </ScifiButton>
+                                  </span>
                                 </Tooltip>
-                              ) : <Popconfirm
-                                title="停用二级类目"
-                                description="停用后该类目将不会返回给前台分类导航。"
-                                okText="确认停用"
-                                cancelText="取消"
-                                onConfirm={() => void handleSetActive(secondary, false)}
-                              >
-                                <ScifiButton variant="outline" size="sm" className="!border-red-200 !text-red-600">
-                                  <DeleteOutlined /> 停用
-                                </ScifiButton>
-                              </Popconfirm>
+                              ) : (
+                                <Popconfirm
+                                  title="停用二级类目"
+                                  description="停用后该类目将不会返回给前台分类导航。"
+                                  okText="确认停用"
+                                  cancelText="取消"
+                                  onConfirm={() =>
+                                    void handleSetActive(secondary, false)
+                                  }
+                                >
+                                  <ScifiButton
+                                    variant="outline"
+                                    size="sm"
+                                    className="!border-red-200 !text-red-600"
+                                  >
+                                    <DeleteOutlined /> 停用
+                                  </ScifiButton>
+                                </Popconfirm>
+                              )
                             ) : (
-                              <ScifiButton variant="outline" size="sm" onClick={() => void handleSetActive(secondary, true)}>启用</ScifiButton>
+                              <ScifiButton
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  void handleSetActive(secondary, true)
+                                }
+                              >
+                                启用
+                              </ScifiButton>
                             )}
                           </Space>
                         </div>
@@ -365,10 +530,14 @@ export default function CategoryManage() {
         cancelText="取消"
         confirmLoading={saving}
         width={560}
-        okButtonProps={{ style: { background: "#B8944E", borderColor: "#B8944E" } }}
+        okButtonProps={{
+          style: { background: "#B8944E", borderColor: "#B8944E" },
+        }}
       >
         <Form form={form} layout="vertical" style={{ marginTop: 20 }}>
-          {editing && ((editing._count?.children ?? 0) > 0 || (editing._count?.products ?? 0) > 0) ? (
+          {editing &&
+          ((editing._count?.children ?? 0) > 0 ||
+            (editing._count?.products ?? 0) > 0) ? (
             <Alert
               type="warning"
               showIcon
@@ -377,17 +546,43 @@ export default function CategoryManage() {
               style={{ marginBottom: 16 }}
             />
           ) : null}
-          <Form.Item name="parentId" label="归属一级类目" rules={[{ required: true, message: "请选择一级类目" }]}>
-            <Select options={primaryCategories.map((category) => ({ value: category.id, label: category.name }))} />
+          <Form.Item
+            name="parentId"
+            label="归属一级类目"
+            rules={[{ required: true, message: "请选择一级类目" }]}
+          >
+            <Select
+              options={primaryCategories.map((category) => ({
+                value: category.id,
+                label: category.name,
+              }))}
+            />
           </Form.Item>
           <div className="grid grid-cols-2 gap-4">
-            <Form.Item name="name" label="二级类目名称" rules={[{ required: true, whitespace: true, message: "请填写二级类目名称" }]}>
+            <Form.Item
+              name="name"
+              label="二级类目名称"
+              rules={[
+                {
+                  required: true,
+                  whitespace: true,
+                  message: "请填写二级类目名称",
+                },
+              ]}
+            >
               <Input placeholder="例如：平安扣" />
             </Form.Item>
-            <Form.Item name="slug" label="Slug" rules={[
-              { required: true, whitespace: true, message: "请填写 Slug" },
-              { pattern: /^[a-z0-9]+(?:-[a-z0-9]+)*$/, message: "仅支持小写字母、数字和连字符" },
-            ]}>
+            <Form.Item
+              name="slug"
+              label="Slug"
+              rules={[
+                { required: true, whitespace: true, message: "请填写 Slug" },
+                {
+                  pattern: /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+                  message: "仅支持小写字母、数字和连字符",
+                },
+              ]}
+            >
               <Input placeholder="例如：pingan-kou" />
             </Form.Item>
           </div>

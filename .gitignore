@@ -21,3 +21,8 @@ server/migration-output/
 .github/workflows/
 client/dist-verify/
 client/dist-verify-inventory-reservation/
+
+# 调试产物与本地备份,不进仓库
+screenshot-*.png
+/test-results/
+/*.sql

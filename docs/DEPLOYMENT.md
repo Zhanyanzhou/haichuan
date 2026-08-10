@@ -24,11 +24,11 @@ VPS (Ubuntu 22.04)
 
 ### 推荐配置（测试环境）
 
-| 提供商 | 型号 | CPU | 内存 | 月费 |
-|--------|------|-----|------|------|
-| Hetzner | CX22 | 2 vCPU | 4 GB | ~€4 |
-| DigitalOcean | Basic Droplet | 2 vCPU | 4 GB | $24 |
-| Vultr | High Frequency | 2 vCPU | 4 GB | $24 |
+| 提供商       | 型号           | CPU    | 内存 | 月费 |
+| ------------ | -------------- | ------ | ---- | ---- |
+| Hetzner      | CX22           | 2 vCPU | 4 GB | ~€4  |
+| DigitalOcean | Basic Droplet  | 2 vCPU | 4 GB | $24  |
+| Vultr        | High Frequency | 2 vCPU | 4 GB | $24  |
 
 **推荐 Hetzner CX22**，性价比最高，德国/芬兰机房对中国延迟约 200ms（测试够用）。
 

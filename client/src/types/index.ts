@@ -65,6 +65,7 @@ export interface Product {
   isRecommended: boolean;
   isLimited: boolean;
   isCustom: boolean;
+  multiDiscount?: boolean;
   viewCount: number;
   salesCount: number;
   images: ProductImage[];

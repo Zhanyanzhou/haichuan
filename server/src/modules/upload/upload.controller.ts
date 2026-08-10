@@ -4,7 +4,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { diskStorage } from 'multer';
+import { diskStorage, memoryStorage } from 'multer';
 import { extname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { randomUUID } from 'crypto';
@@ -27,6 +27,7 @@ const videoStorage = diskStorage({
 
 const imageMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const imageUploadOptions = {
+  storage: memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req: any, file: Express.Multer.File, callback: (error: Error | null, acceptFile: boolean) => void) => {
     if (!imageMimeTypes.includes(file.mimetype)) {

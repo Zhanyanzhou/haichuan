@@ -1,4 +1,6 @@
 node_modules
 dist
+dist-verify
+dist-verify-inventory-reservation
 .env
 .env.*
