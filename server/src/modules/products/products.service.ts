@@ -102,6 +102,10 @@ function mapUpdateDto(dto: UpdateProductDto): Prisma.ProductUpdateInput {
   if (dto.isLimited !== undefined) data.isLimited = dto.isLimited;
   if (dto.isCustom !== undefined) data.isCustom = dto.isCustom;
   if (dto.multiDiscount !== undefined) data.multiDiscount = dto.multiDiscount;
+  if (dto.publishedAt !== undefined) {
+    data.publishedAt =
+      dto.publishedAt === null ? null : new Date(dto.publishedAt as any);
+  }
 
   return data;
 }
@@ -382,12 +386,20 @@ export class ProductsService {
   }
 
   async updateImage(
+    productId: number,
     imageId: number,
     data: { type?: string; sortOrder?: number },
   ) {
+    const img = await this.prisma.productImage.findFirst({
+      where: { id: imageId, productId },
+    });
+    if (!img) throw new BadRequestException("图片不属于该商品");
+    const updateData: any = {};
+    if (data.type !== undefined) updateData.type = data.type as any;
+    if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
     const image = await this.prisma.productImage.update({
       where: { id: imageId },
-      data: data as any,
+      data: updateData,
     });
     this.notifyPublicChange(image.productId);
     return image;
@@ -666,6 +678,12 @@ export class ProductsService {
   }
 
   async updateTags(productId: number, tags: string[]) {
+    // 校验单条标签长度（schema tagName VarChar(50)，超长会触发 Prisma 500）
+    for (const tag of tags) {
+      if (typeof tag !== 'string' || tag.trim().length === 0 || tag.length > 50) {
+        throw new BadRequestException('每个标签长度需在 1-50 字符之间');
+      }
+    }
     // 删除 + 重建放入同一事务，避免重建失败导致标签全部丢失
     await this.prisma.$transaction(async (tx) => {
       await tx.productTag.deleteMany({ where: { productId } });

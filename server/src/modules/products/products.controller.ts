@@ -119,13 +119,21 @@ export class ProductsController {
   @ApiBearerAuth()
   @Put(":id/status")
   @ApiOperation({ summary: "更新产品状态" })
-  updateStatus(@Param("id") id: string, @Body("status") status: string) {
+  async updateStatus(@Param("id") id: string, @Body("status") status: string) {
     const validStatuses = ["DRAFT", "PUBLISHED", "OFFLINE", "ARCHIVED"];
     if (!validStatuses.includes(status)) {
       throw new BadRequestException("商品状态不正确，请重新选择");
     }
     const data: any = { status };
-    if (status === "PUBLISHED") data.publishedAt = new Date();
+    if (status === "PUBLISHED") {
+      // 发布前校验：必须有大于 0 的价格，避免 0 元商品上架到前台
+      const product = await this.productsService.findById(+id);
+      if (!product) throw new NotFoundException("商品不存在");
+      if (!product.price || Number(product.price) <= 0) {
+        throw new BadRequestException("发布前请填写大于 0 的价格");
+      }
+      data.publishedAt = new Date();
+    }
     return this.productsService.update(+id, data);
   }
 
@@ -146,6 +154,8 @@ export class ProductsController {
   }
 
   /* ═══ 产品图片管理 ═══ */
+  /* 注意:静态路由(primary/listing/reset)必须在 :imageId 通配之前定义，
+     否则 Express 按顺序匹配时 /images/primary 会被 :imageId 捕获，误命中 updateImage。 */
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post(":id/images")
@@ -154,23 +164,7 @@ export class ProductsController {
     return this.productsService.addImage(+id, body);
   }
 
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @Put(":id/images/:imageId")
-  @ApiOperation({ summary: "更新图片信息（类型/排序）" })
-  updateImage(@Param("imageId") imageId: string, @Body() body: any) {
-    return this.productsService.updateImage(+imageId, body);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @Delete(":id/images/:imageId")
-  @ApiOperation({ summary: "删除产品图片" })
-  deleteImage(@Param("imageId") imageId: string) {
-    return this.productsService.deleteImage(+imageId);
-  }
-
-  /* ═══ 主图/列表图管理 ═══ */
+  /* ═══ 主图/列表图管理（静态路径，优先匹配） ═══ */
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put(":id/images/primary")
@@ -193,6 +187,26 @@ export class ProductsController {
   @ApiOperation({ summary: "恢复列表图为详情主图" })
   resetListingToPrimary(@Param("id") id: string) {
     return this.productsService.resetListingToPrimary(+id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Put(":id/images/:imageId")
+  @ApiOperation({ summary: "更新图片信息（类型/排序）" })
+  updateImage(
+    @Param("id") id: string,
+    @Param("imageId") imageId: string,
+    @Body() body: any,
+  ) {
+    return this.productsService.updateImage(+id, +imageId, body);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Delete(":id/images/:imageId")
+  @ApiOperation({ summary: "删除产品图片" })
+  deleteImage(@Param("imageId") imageId: string) {
+    return this.productsService.deleteImage(+imageId);
   }
 
   /* ═══ 列表图裁切 ═══ */
