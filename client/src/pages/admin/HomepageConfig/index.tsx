@@ -1632,8 +1632,54 @@ export default function HomepageConfig() {
     });
   }, []);
 
-  const publishHome = (nextData: unknown) => {
+  const publishHome = async (nextData: unknown) => {
+    if (publishing) return;
     const editableData = nextData ?? latestData.current;
+
+    // 发布前预检：单一数据源 = 后端校验器，前端只负责展示问题列表
+    setPublishing(true);
+    let validation: { valid: boolean; errors: string[] } | null = null;
+    try {
+      const response = await pageDocumentApi.validate(
+        HOME_PAGE_KEY,
+        editableData,
+      );
+      validation = unwrapResponse<{ valid: boolean; errors: string[] }>(
+        response,
+      );
+    } catch (error) {
+      message.error(
+        error instanceof Error ? error.message : "发布前校验失败，请稍后重试",
+      );
+      setPublishing(false);
+      return;
+    }
+    setPublishing(false);
+
+    if (validation && !validation.valid && validation.errors?.length) {
+      Modal.error({
+        title: `发布前需修复 ${validation.errors.length} 个问题`,
+        content: (
+          <ul
+            style={{
+              paddingLeft: 20,
+              margin: 0,
+              maxHeight: 320,
+              overflowY: "auto",
+            }}
+          >
+            {validation.errors.map((err, idx) => (
+              <li key={idx} style={{ fontSize: 13, lineHeight: 1.8 }}>
+                {err}
+              </li>
+            ))}
+          </ul>
+        ),
+        okText: "去修复",
+      });
+      return;
+    }
+
     const blocks = (editableData as { content?: Array<{ type?: string; props?: Record<string, unknown> }> })?.content ?? [];
     const incompleteHero = blocks.find((block) =>
       block.type === "首屏主视觉" && (!block.props?.desktopImage || !block.props?.mobileImage),

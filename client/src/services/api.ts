@@ -1167,6 +1167,13 @@ export const pageDocumentApi = {
     }
     return api.put("/page-modules/document/publish", { pageKey, userId });
   },
+  validate: async (pageKey = "home", puckData?: any) => {
+    if (USE_MOCK) {
+      await mockDelay(100);
+      return mockRes({ valid: true, errors: [] });
+    }
+    return api.post("/page-modules/document/validate", { pageKey, puckData });
+  },
   getRevisions: async (pageKey = "home") => {
     if (USE_MOCK) {
       await mockDelay(120);

@@ -135,7 +135,12 @@ export class PageModulesService {
         where: { pageKey },
       });
       if (!doc) throw new Error("Page document not found");
-      await this.validatePuckDataForPublish(tx, doc.puckData);
+      const errors = await this.collectPuckDataErrors(tx, doc.puckData);
+      if (errors.length > 0) {
+        const visibleErrors = errors.slice(0, 8).join("；");
+        const suffix = errors.length > 8 ? `；另有 ${errors.length - 8} 个问题` : "";
+        throw new BadRequestException(`页面发布校验失败：${visibleErrors}${suffix}`);
+      }
 
       // Save revision
       const lastRev = await tx.pageDocumentRevision.findFirst({
@@ -176,12 +181,25 @@ export class PageModulesService {
     return result.published;
   }
 
-  private async validatePuckDataForPublish(tx: any, puckData: any) {
+  async validatePageDocument(pageKey: string, puckDataOverride?: any) {
+    let puckData = puckDataOverride;
+    if (puckData === undefined) {
+      const doc = await this.prisma.pageDocument.findUnique({
+        where: { pageKey },
+      });
+      if (!doc) return { valid: false, errors: ["页面草稿不存在"] };
+      puckData = doc.puckData;
+    }
+    const errors = await this.collectPuckDataErrors(this.prisma, puckData);
+    return { valid: errors.length === 0, errors };
+  }
+
+  private async collectPuckDataErrors(db: any, puckData: any): Promise<string[]> {
     const errors: string[] = [];
     const productIds = new Set<number>();
 
     if (!puckData || typeof puckData !== "object") {
-      throw new BadRequestException("页面发布校验失败：页面数据为空或格式不正确");
+      return ["页面数据为空或格式不正确"];
     }
 
     if (!Array.isArray(puckData.content)) {
@@ -298,7 +316,7 @@ export class PageModulesService {
     }
 
     if (productIds.size > 0) {
-      const products = await tx.product.findMany({
+      const products = await db.product.findMany({
         where: { id: { in: [...productIds] }, deletedAt: null },
         select: { id: true },
       });
@@ -310,11 +328,7 @@ export class PageModulesService {
       }
     }
 
-    if (errors.length > 0) {
-      const visibleErrors = errors.slice(0, 8).join("；");
-      const suffix = errors.length > 8 ? `；另有 ${errors.length - 8} 个问题` : "";
-      throw new BadRequestException(`页面发布校验失败：${visibleErrors}${suffix}`);
-    }
+    return errors;
   }
 
   private isNonEmptyString(value: unknown): value is string {

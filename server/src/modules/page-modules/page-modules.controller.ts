@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Put,
   Param,
   Body,
@@ -74,6 +75,17 @@ export class PageModulesController {
   @ApiOperation({ summary: "发布页面文档" })
   publishDocument(@Body("pageKey") pageKey: string, @Req() req: any) {
     return this.service.publishPageDocument(pageKey || "home", req.user?.id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Post("document/validate")
+  @ApiOperation({ summary: "预检页面文档是否可发布（发布前校验）" })
+  validateDocument(@Body() body: { pageKey?: string; puckData?: any }) {
+    return this.service.validatePageDocument(
+      body?.pageKey || "home",
+      body?.puckData,
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
