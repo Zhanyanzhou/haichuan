@@ -283,7 +283,8 @@ export class ProductsService {
       missing.push("primaryImage");
     if (!product.salesMode) missing.push("salesMode");
     if (!product.materialType) missing.push("materialType");
-    const total = 6;
+    if (!product.price || Number(product.price) <= 0) missing.push("price");
+    const total = 7;
     const score = Math.round(((total - missing.length) / total) * 100);
     return { isComplete: missing.length === 0, missingFields: missing, score };
   }
