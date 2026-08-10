@@ -55,6 +55,9 @@ import MediaRequirementPanel from "@/page-builder/fields/MediaRequirementPanel";
 import MediaPickerField from "@/page-builder/fields/MediaPickerField";
 import { blockTemplateStore, type BlockTemplate } from "@/page-builder/templates/blockTemplateStore";
 
+/** 当前装修系统只服务首页；未来扩展多页面时改为从路由参数取 pageKey。 */
+const HOME_PAGE_KEY = "home";
+
 const useHomepagePuck = createUsePuck<typeof puckConfig>();
 
 type ViewportPreset = {
@@ -1488,7 +1491,7 @@ export default function HomepageConfig() {
     (async () => {
       let serverData = jewelryHomeTemplate.puckData;
       try {
-        const response = await pageDocumentApi.getAdmin("home");
+        const response = await pageDocumentApi.getAdmin(HOME_PAGE_KEY);
         const document = unwrapResponse<any>(response);
         if (document?.puckData) {
           serverData = document.puckData;
@@ -1530,7 +1533,7 @@ export default function HomepageConfig() {
     setAutoSaveState("saving");
     try {
       await pageDocumentApi.save({
-        pageKey: "home",
+        pageKey: HOME_PAGE_KEY,
         puckData: editableData,
         metadata: latestMetadata.current,
         editorVersion: "0.22.4",
@@ -1571,7 +1574,7 @@ export default function HomepageConfig() {
   const loadRevisions = useCallback(async () => {
     setRevisionsLoading(true);
     try {
-      const response = await pageDocumentApi.getRevisions("home");
+      const response = await pageDocumentApi.getRevisions(HOME_PAGE_KEY);
       setRevisions(unwrapResponse<PageDocumentRevision[]>(response) || []);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "版本列表加载失败");
@@ -1605,7 +1608,7 @@ export default function HomepageConfig() {
       onOk: async () => {
         setRestoringVersion(revision.version);
         try {
-          const response = await pageDocumentApi.restoreRevision("home", revision.version);
+          const response = await pageDocumentApi.restoreRevision(HOME_PAGE_KEY, revision.version);
           const document = unwrapResponse<any>(response);
           if (document?.puckData) {
             setData(document.puckData);
@@ -1646,12 +1649,12 @@ export default function HomepageConfig() {
         setPublishing(true);
         try {
           await pageDocumentApi.save({
-            pageKey: "home",
+            pageKey: HOME_PAGE_KEY,
             puckData: editableData,
             metadata: latestMetadata.current,
             editorVersion: "0.22.4",
           });
-          await pageDocumentApi.publish("home");
+          await pageDocumentApi.publish(HOME_PAGE_KEY);
           setData(editableData);
           latestData.current = editableData;
           setHasUnsavedChanges(false);

@@ -373,7 +373,7 @@ export class PageModulesService {
 
   private notifyPublicChange(
     pageKey: string,
-    type: "page-document-published" | "page-modules-published",
+    type: "page-document-published",
     version?: number,
   ): void {
     this.publicEvents.emit("page-published", {

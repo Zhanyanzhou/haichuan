@@ -5,7 +5,6 @@ import { USE_MOCK } from "@/services/mockData";
 export type PagePublishEvent = {
   type:
     | "page-document-published"
-    | "page-modules-published"
     | "ready"
     | "heartbeat"
     | "unknown";

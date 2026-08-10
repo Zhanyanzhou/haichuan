@@ -24,7 +24,7 @@ import { Observable } from "rxjs";
 export class PageModulesController {
   constructor(private service: PageModulesService) {}
 
-  // ========== PageDocument（Puck 页面�?API�?=========
+  // ========== Puck 页面文档（PageDocument）API ==========
 
   @Public()
   @Get("document/published")

@@ -26,6 +26,7 @@ type PuckBlock = {
 
 type PuckDocument = {
   content?: PuckBlock[];
+  zones?: Record<string, PuckBlock[]>;
 };
 
 function formatProductPrice(product: Product) {
@@ -255,5 +256,18 @@ function renderBlock(block: PuckBlock, index: number) {
 
 export default function PuckDocumentRenderer({ data }: { data: PuckDocument }) {
   if (!Array.isArray(data?.content)) return null;
-  return <>{data.content.map(renderBlock)}</>;
+  const zoneBlocks =
+    data?.zones && typeof data.zones === "object"
+      ? Object.entries(data.zones).flatMap(([, blocks]) =>
+          Array.isArray(blocks) ? blocks : [],
+        )
+      : [];
+  return (
+    <>
+      {data.content.map(renderBlock)}
+      {zoneBlocks.map((block, index) =>
+        renderBlock(block, data.content!.length + index),
+      )}
+    </>
+  );
 }
