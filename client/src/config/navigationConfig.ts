@@ -25,13 +25,13 @@ export interface NavGroup {
 
 /** 侧边栏功能分区 */
 export type NavSection =
-  | "overview"    // 今日概览
-  | "ops"         // 日常运营
-  | "customers"   // 客户服务
-  | "store"       // 店铺装修
-  | "growth"      // 营销增长
-  | "assets"      // 数据资产
-  | "system";     // 系统
+  | "overview" // 今日概览
+  | "ops" // 日常运营
+  | "customers" // 客户服务
+  | "store" // 店铺装修
+  | "growth" // 营销增长
+  | "assets" // 数据资产
+  | "system"; // 系统
 
 export interface NavSectionMeta {
   key: NavSection;
@@ -41,13 +41,13 @@ export interface NavSectionMeta {
 
 /** 侧边栏 7 大功能分区（按运营场景分层） */
 export const navSections: NavSectionMeta[] = [
-  { key: "overview",  label: "总览", order: 1 },
-  { key: "ops",       label: "核心经营", order: 2 },
+  { key: "overview", label: "总览", order: 1 },
+  { key: "ops", label: "核心经营", order: 2 },
   { key: "customers", label: "客户关系", order: 3 },
-  { key: "store",     label: "店铺体验", order: 4 },
-  { key: "growth",    label: "营销增长", order: 5 },
-  { key: "assets",    label: "经营支撑", order: 6 },
-  { key: "system",    label: "系统", order: 7 },
+  { key: "store", label: "店铺体验", order: 4 },
+  { key: "growth", label: "营销增长", order: 5 },
+  { key: "assets", label: "经营支撑", order: 6 },
+  { key: "system", label: "系统", order: 7 },
 ];
 
 export interface NavDomain {
@@ -98,10 +98,22 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: true,
         items: [
-          { key: "quick-products", label: "商品管理", route: "/admin/products" },
+          {
+            key: "quick-products",
+            label: "商品管理",
+            route: "/admin/products",
+          },
           { key: "quick-orders", label: "订单中心", route: "/admin/orders" },
-          { key: "quick-inquiries", label: "预约咨询", route: "/admin/inquiries" },
-          { key: "quick-homepage", label: "首页装修", route: "/admin/editor/home" },
+          {
+            key: "quick-inquiries",
+            label: "预约咨询",
+            route: "/admin/inquiries",
+          },
+          {
+            key: "quick-homepage",
+            label: "店铺装修",
+            route: "/admin/editor/home",
+          },
         ],
       },
     ],
@@ -121,8 +133,16 @@ export const navigationConfig: NavDomain[] = [
         defaultOpen: true,
         items: [
           { key: "orders-list", label: "订单中心", route: "/admin/orders" },
-          { key: "orders-pending-ship", label: "待发货", route: "/admin/orders?status=PENDING_SHIP" },
-          { key: "orders-shipped", label: "已发货", route: "/admin/orders?status=SHIPPED" },
+          {
+            key: "orders-pending-ship",
+            label: "待发货",
+            route: "/admin/orders?status=PENDING_SHIP",
+          },
+          {
+            key: "orders-shipped",
+            label: "已发货",
+            route: "/admin/orders?status=SHIPPED",
+          },
         ],
       },
     ],
@@ -142,7 +162,11 @@ export const navigationConfig: NavDomain[] = [
         defaultOpen: true,
         items: [
           { key: "products", label: "商品库", route: "/admin/products" },
-          { key: "categories", label: "类目与属性", route: "/admin/categories" },
+          {
+            key: "categories",
+            label: "类目与属性",
+            route: "/admin/categories",
+          },
         ],
       },
       {
@@ -151,7 +175,11 @@ export const navigationConfig: NavDomain[] = [
         collapsible: true,
         defaultOpen: false,
         items: [
-          { key: "inventory-page", label: "库存管理", route: "/admin/inventory" },
+          {
+            key: "inventory-page",
+            label: "库存管理",
+            route: "/admin/inventory",
+          },
         ],
       },
       {
@@ -169,7 +197,11 @@ export const navigationConfig: NavDomain[] = [
         collapsible: true,
         defaultOpen: false,
         items: [
-          { key: "ai-classify", label: "智能分类", route: "/admin/ai-classify" },
+          {
+            key: "ai-classify",
+            label: "智能分类",
+            route: "/admin/ai-classify",
+          },
         ],
       },
     ],
@@ -188,7 +220,11 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: true,
         items: [
-          { key: "campaigns-list", label: "活动中心", route: "/admin/marketing?tab=promotions" },
+          {
+            key: "campaigns-list",
+            label: "活动中心",
+            route: "/admin/marketing?tab=promotions",
+          },
         ],
       },
       {
@@ -197,7 +233,11 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: false,
         items: [
-          { key: "coupons-list", label: "优惠券", route: "/admin/marketing?tab=coupons" },
+          {
+            key: "coupons-list",
+            label: "优惠券",
+            route: "/admin/marketing?tab=coupons",
+          },
         ],
       },
     ],
@@ -217,7 +257,12 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: true,
         items: [
-          { key: "channels-list", label: "渠道管理", route: "/admin/promotion", disabled: true },
+          {
+            key: "channels-list",
+            label: "渠道管理",
+            route: "/admin/promotion",
+            disabled: true,
+          },
         ],
       },
       {
@@ -226,7 +271,12 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: false,
         items: [
-          { key: "promo-plans-list", label: "推广计划", route: "/admin/promotion", disabled: true },
+          {
+            key: "promo-plans-list",
+            label: "推广计划",
+            route: "/admin/promotion",
+            disabled: true,
+          },
         ],
       },
     ],
@@ -246,9 +296,21 @@ export const navigationConfig: NavDomain[] = [
         defaultOpen: true,
         items: [
           { key: "inquiry-list", label: "预约咨询", route: "/admin/inquiries" },
-          { key: "inquiry-pending", label: "待处理预约", route: "/admin/inquiries?status=PENDING" },
-          { key: "selection-list", label: "选款咨询", route: "/admin/selection-inquiry" },
-          { key: "selection-pending", label: "待处理选款", route: "/admin/selection-inquiry?status=PENDING" },
+          {
+            key: "inquiry-pending",
+            label: "待处理预约",
+            route: "/admin/inquiries?status=PENDING",
+          },
+          {
+            key: "selection-list",
+            label: "选款咨询",
+            route: "/admin/selection-inquiry",
+          },
+          {
+            key: "selection-pending",
+            label: "待处理选款",
+            route: "/admin/selection-inquiry?status=PENDING",
+          },
         ],
       },
     ],
@@ -267,7 +329,11 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: true,
         items: [
-          { key: "homepage-editor", label: "首页装修", route: "/admin/editor/home" },
+          {
+            key: "homepage-editor",
+            label: "店铺装修",
+            route: "/admin/editor/home",
+          },
         ],
       },
       {
@@ -276,7 +342,11 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: true,
         items: [
-          { key: "site-content", label: "店铺资料", route: "/admin/site-content" },
+          {
+            key: "site-content",
+            label: "店铺资料",
+            route: "/admin/site-content",
+          },
         ],
       },
       {
@@ -284,9 +354,7 @@ export const navigationConfig: NavDomain[] = [
         label: "素材资产",
         collapsible: false,
         defaultOpen: false,
-        items: [
-          { key: "media-lib", label: "页面素材", route: "/admin/media" },
-        ],
+        items: [{ key: "media-lib", label: "页面素材", route: "/admin/media" }],
       },
     ],
   },
@@ -305,8 +373,16 @@ export const navigationConfig: NavDomain[] = [
         defaultOpen: true,
         items: [
           { key: "customer-leads", label: "客户线索", route: "/admin/leads" },
-          { key: "customer-leads-pending", label: "待处理线索", route: "/admin/leads?status=PENDING" },
-          { key: "customer-leads-following", label: "跟进中", route: "/admin/leads?status=FOLLOWING" },
+          {
+            key: "customer-leads-pending",
+            label: "待处理线索",
+            route: "/admin/leads?status=PENDING",
+          },
+          {
+            key: "customer-leads-following",
+            label: "跟进中",
+            route: "/admin/leads?status=FOLLOWING",
+          },
         ],
       },
     ],
@@ -326,7 +402,12 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: true,
         items: [
-          { key: "finance-overview-page", label: "财务概览", route: "/admin/finance", disabled: true },
+          {
+            key: "finance-overview-page",
+            label: "财务概览",
+            route: "/admin/finance",
+            disabled: true,
+          },
         ],
       },
     ],
@@ -346,7 +427,12 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: true,
         items: [
-          { key: "fintech-overview-page", label: "金融服务", route: "/admin/fintech", disabled: true },
+          {
+            key: "fintech-overview-page",
+            label: "金融服务",
+            route: "/admin/fintech",
+            disabled: true,
+          },
         ],
       },
     ],
@@ -365,7 +451,11 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: true,
         items: [
-          { key: "traffic-analytics-view", label: "访问分析", route: "/admin/analytics" },
+          {
+            key: "traffic-analytics-view",
+            label: "访问分析",
+            route: "/admin/analytics",
+          },
         ],
       },
     ],
@@ -383,9 +473,7 @@ export const navigationConfig: NavDomain[] = [
         label: "用户与权限",
         collapsible: false,
         defaultOpen: true,
-        items: [
-          { key: "user-list", label: "用户管理", route: "/admin/users" },
-        ],
+        items: [{ key: "user-list", label: "用户管理", route: "/admin/users" }],
       },
       {
         key: "audit",
@@ -402,7 +490,11 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: false,
         items: [
-          { key: "sys-settings-page", label: "系统设置", route: "/admin/settings" },
+          {
+            key: "sys-settings-page",
+            label: "系统设置",
+            route: "/admin/settings",
+          },
         ],
       },
     ],
@@ -426,8 +518,7 @@ export function findByRoute(pathname: string): NavContext | null {
         const matchesRoute =
           itemPath === pathname ||
           (itemPath !== "/admin" && pathname.startsWith(`${itemPath}/`));
-        if (!itemPath || item.disabled || !matchesRoute)
-          continue;
+        if (!itemPath || item.disabled || !matchesRoute) continue;
         if (domain.key === "common") {
           commonMatch ??= { domain, group, item };
         } else {

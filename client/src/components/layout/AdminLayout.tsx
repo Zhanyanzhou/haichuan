@@ -38,6 +38,9 @@ import {
   RightOutlined,
   PushpinOutlined,
   PushpinFilled,
+  GlobalOutlined,
+  SearchOutlined,
+  AppstoreOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "@/store/authStore";
 import {
@@ -448,6 +451,15 @@ export default function AdminLayout() {
         </div>
 
         <div className="admin-header__right">
+          <Link to="/" target="_blank" className="admin-header__icon-btn" title="访问前台首页" aria-label="访问前台首页">
+            <GlobalOutlined />
+          </Link>
+          <Link to="/search" target="_blank" className="admin-header__icon-btn" title="搜索商品" aria-label="搜索商品">
+            <SearchOutlined />
+          </Link>
+          <Link to="/catalog" target="_blank" className="admin-header__icon-btn" title="选款中心" aria-label="选款中心">
+            <AppstoreOutlined />
+          </Link>
           <button
             type="button"
             onClick={() => window.location.reload()}
