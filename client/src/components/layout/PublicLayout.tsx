@@ -2,6 +2,18 @@ import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { usePageMetaStore } from "@/store/pageMetaStore";
+
+/** 幂等写入/更新 <meta> 标签（按 name 或 property 选择）。 */
+function upsertMeta(attr: "name" | "property", key: string, content: string) {
+  let el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`);
+  if (!el) {
+    el = document.createElement("meta");
+    el.setAttribute(attr, key);
+    document.head.appendChild(el);
+  }
+  el.setAttribute("content", content);
+}
 
 const primaryLinks = [
   { label: "关于海川", description: "认识海川珠宝与东方工艺", href: "/about" },
@@ -114,33 +126,32 @@ export default function PublicLayout() {
     };
   }, []);
 
+  const pageMeta = usePageMetaStore((s) => s.meta);
+
   useEffect(() => {
-    const title = siteSettings?.seoTitle || siteSettings?.siteName;
-    if (title) document.title = title;
-
+    const siteName = siteSettings?.siteName || "海川珠宝";
+    // 页面级 SEO 优先于站点级（装修页面可覆盖默认标题/描述）
+    const title = pageMeta.title || siteSettings?.seoTitle || siteSettings?.siteName;
     const description =
-      siteSettings?.seoDescription || siteSettings?.siteDescription;
-    if (description) {
-      let meta = document.querySelector('meta[name="description"]');
-      if (!meta) {
-        meta = document.createElement("meta");
-        meta.setAttribute("name", "description");
-        document.head.appendChild(meta);
-      }
-      meta.setAttribute("content", description);
-    }
-
+      pageMeta.description || siteSettings?.seoDescription || siteSettings?.siteDescription;
     const keywords = siteSettings?.seoKeywords;
-    if (keywords) {
-      let metaKw = document.querySelector('meta[name="keywords"]');
-      if (!metaKw) {
-        metaKw = document.createElement("meta");
-        metaKw.setAttribute("name", "keywords");
-        document.head.appendChild(metaKw);
-      }
-      metaKw.setAttribute("content", keywords);
-    }
-  }, [siteSettings]);
+    const image = pageMeta.image;
+
+    if (title) document.title = title;
+    if (description) upsertMeta("name", "description", description);
+    if (keywords) upsertMeta("name", "keywords", keywords);
+
+    // 社交分享卡片（微信 / 微博 / Twitter / Facebook）—— 珠宝营销分享命脉
+    upsertMeta("property", "og:type", "website");
+    upsertMeta("property", "og:site_name", siteName);
+    upsertMeta("property", "og:title", title || siteName);
+    if (description) upsertMeta("property", "og:description", description);
+    if (image) upsertMeta("property", "og:image", image);
+    upsertMeta("name", "twitter:card", image ? "summary_large_image" : "summary");
+    if (title) upsertMeta("name", "twitter:title", title);
+    if (description) upsertMeta("name", "twitter:description", description);
+    if (image) upsertMeta("name", "twitter:image", image);
+  }, [siteSettings, pageMeta]);
 
   const siteName = siteSettings?.siteName || "海川珠宝";
   const contactPhone = siteSettings?.contactPhone || "400-888-8888";

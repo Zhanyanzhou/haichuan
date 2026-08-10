@@ -14,6 +14,7 @@ import { usePagePublishStream } from "@/hooks/usePagePublishStream";
 import PuckDocumentRenderer from "@/page-builder/runtime/PuckDocumentRenderer";
 import { pageDocumentApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { usePageMetaStore } from "@/store/pageMetaStore";
 import { trackPageView } from "@/hooks/useAnalytics";
 import type { PublishedSlots } from "@/types/contentSlot";
 import type { PageModule } from "@/types/pageModule";
@@ -1405,6 +1406,23 @@ export default function Home() {
     void refreshDocument(false);
     void refreshModules(false);
   });
+
+  const setPageMeta = usePageMetaStore((s) => s.setMeta);
+  const clearPageMeta = usePageMetaStore((s) => s.clear);
+
+  useEffect(() => {
+    const meta = document?.metadata;
+    if (meta && (meta.seoTitle || meta.seoDescription || meta.ogImage)) {
+      setPageMeta({
+        title: meta.seoTitle || undefined,
+        description: meta.seoDescription || undefined,
+        image: meta.ogImage || undefined,
+      });
+    } else {
+      clearPageMeta();
+    }
+    return () => clearPageMeta();
+  }, [document, setPageMeta, clearPageMeta]);
 
   if (loading || documentLoading) {
     return <main style={{ background: LG, minHeight: "100vh" }} />;

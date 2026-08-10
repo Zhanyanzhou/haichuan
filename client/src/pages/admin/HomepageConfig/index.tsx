@@ -29,6 +29,7 @@ import {
   SaveOutlined,
   SearchOutlined,
   SendOutlined,
+  SettingOutlined,
   TabletOutlined,
   UndoOutlined,
   RedoOutlined,
@@ -635,6 +636,7 @@ function EditorToolbar({
   autoSaveState,
   onPublish,
   onOpenRevisions,
+  onOpenPageSettings,
   onDataChange,
 }: {
   lastSaved: string | null;
@@ -643,6 +645,7 @@ function EditorToolbar({
   autoSaveState: AutoSaveState;
   onPublish: (data: unknown) => void;
   onOpenRevisions: () => void;
+  onOpenPageSettings: () => void;
   onDataChange: (data: unknown) => void;
 }) {
   const appData = useHomepagePuck((state) => state.appState.data);
@@ -774,6 +777,14 @@ function EditorToolbar({
           title="查看历史发布版本并回滚到草稿"
         >
           版本
+        </Button>
+        <Button
+          size="small"
+          icon={<SettingOutlined />}
+          onClick={onOpenPageSettings}
+          title="页面 SEO 标题与描述（影响搜索与社交分享）"
+        >
+          页面设置
         </Button>
         <Button
           size="small"
@@ -1305,6 +1316,70 @@ function RevisionDrawer({
   );
 }
 
+function PageSettingsDrawer({
+  open,
+  metadata,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  metadata: Record<string, any>;
+  onClose: () => void;
+  onSave: (next: { seoTitle?: string; seoDescription?: string }) => void;
+}) {
+  const [seoTitle, setSeoTitle] = useState("");
+  const [seoDescription, setSeoDescription] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setSeoTitle(metadata?.seoTitle || "");
+      setSeoDescription(metadata?.seoDescription || "");
+    }
+  }, [open, metadata]);
+
+  return (
+    <Drawer
+      title="页面 SEO 设置"
+      placement="right"
+      width={420}
+      open={open}
+      onClose={onClose}
+      extra={
+        <Button
+          type="primary"
+          size="small"
+          onClick={() => onSave({ seoTitle: seoTitle.trim(), seoDescription: seoDescription.trim() })}
+        >
+          保存
+        </Button>
+      }
+    >
+      <div className="homepage-editor__page-settings">
+        <p className="homepage-editor__page-settings-hint">
+          设置首页的搜索标题与描述，影响搜索引擎收录与微信 / 微博等社交分享卡片。留空则沿用「店铺资料」里的站点级默认值。
+        </p>
+        <label className="homepage-editor__page-settings-label">页面标题（建议 ≤ 30 字）</label>
+        <Input
+          value={seoTitle}
+          onChange={(e) => setSeoTitle(e.target.value)}
+          placeholder="例：海川珠宝 · 足金匠心系列官方旗舰店"
+          maxLength={60}
+          showCount
+        />
+        <label className="homepage-editor__page-settings-label">页面描述（建议 ≤ 80 字）</label>
+        <Input.TextArea
+          value={seoDescription}
+          onChange={(e) => setSeoDescription(e.target.value)}
+          placeholder="例：海川珠宝精选足金、K金、钻石作品，提供在线选款与一对一顾问定制服务。"
+          maxLength={160}
+          showCount
+          autoSize={{ minRows: 3, maxRows: 6 }}
+        />
+      </div>
+    </Drawer>
+  );
+}
+
 export default function HomepageConfig() {
   const [data, setData] = useState<any>(jewelryHomeTemplate.puckData);
   const [saving, setSaving] = useState(false);
@@ -1318,6 +1393,9 @@ export default function HomepageConfig() {
   const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
   const [editorKey, setEditorKey] = useState(0);
   const latestData = useRef<any>(data);
+  const [metadata, setMetadata] = useState<Record<string, any>>({});
+  const latestMetadata = useRef<Record<string, any>>({});
+  const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
 
   const [myTemplates, setMyTemplates] = useState<BlockTemplate[]>(() =>
     blockTemplateStore.getAll(),
@@ -1386,6 +1464,10 @@ export default function HomepageConfig() {
   }, [data]);
 
   useEffect(() => {
+    latestMetadata.current = metadata;
+  }, [metadata]);
+
+  useEffect(() => {
     (async () => {
       let serverData = jewelryHomeTemplate.puckData;
       try {
@@ -1395,6 +1477,9 @@ export default function HomepageConfig() {
           serverData = document.puckData;
           setData(serverData);
           latestData.current = serverData;
+          const serverMetadata = document.metadata || {};
+          setMetadata(serverMetadata);
+          latestMetadata.current = serverMetadata;
           setEditorKey((current) => current + 1);
           if (document.updatedAt) {
             setLastSaved(formatEditorTime(document.updatedAt));
@@ -1430,6 +1515,7 @@ export default function HomepageConfig() {
       await pageDocumentApi.save({
         pageKey: "home",
         puckData: editableData,
+        metadata: latestMetadata.current,
         editorVersion: "0.22.4",
       });
       const hasNewerLocalChanges =
@@ -1482,6 +1568,17 @@ export default function HomepageConfig() {
     void loadRevisions();
   }, [loadRevisions]);
 
+  const savePageSettings = useCallback(
+    (next: { seoTitle?: string; seoDescription?: string }) => {
+      const merged = { ...latestMetadata.current, ...next };
+      setMetadata(merged);
+      latestMetadata.current = merged;
+      setPageSettingsOpen(false);
+      void saveDraft(latestData.current, { silent: true });
+    },
+    [saveDraft],
+  );
+
   const restoreRevision = useCallback((revision: PageDocumentRevision) => {
     Modal.confirm({
       title: `恢复版本 ${revision.version}？`,
@@ -1496,6 +1593,9 @@ export default function HomepageConfig() {
           if (document?.puckData) {
             setData(document.puckData);
             latestData.current = document.puckData;
+            const restoredMetadata = document.metadata || {};
+            setMetadata(restoredMetadata);
+            latestMetadata.current = restoredMetadata;
             setHasUnsavedChanges(false);
             setAutoSaveState("saved");
             setLastSaved(formatEditorTime(document.updatedAt || new Date()));
@@ -1531,6 +1631,7 @@ export default function HomepageConfig() {
           await pageDocumentApi.save({
             pageKey: "home",
             puckData: editableData,
+            metadata: latestMetadata.current,
             editorVersion: "0.22.4",
           });
           await pageDocumentApi.publish("home");
@@ -1663,6 +1764,27 @@ export default function HomepageConfig() {
           color: #8E877C;
           text-align: center;
           line-height: 1.7;
+        }
+        .homepage-editor__page-settings {
+          display: grid;
+          gap: 4px;
+        }
+        .homepage-editor__page-settings-hint {
+          margin: 0 0 12px;
+          padding: 10px 12px;
+          border-radius: 6px;
+          background: #F6F1E8;
+          color: #8D8375;
+          font-size: 12px;
+          line-height: 1.7;
+        }
+        .homepage-editor__page-settings-label {
+          display: block;
+          margin-top: 10px;
+          margin-bottom: 2px;
+          color: #2B2721;
+          font-size: 13px;
+          font-weight: 500;
         }
         .homepage-editor__revision-list {
           display: grid;
@@ -2617,6 +2739,13 @@ export default function HomepageConfig() {
         onRestore={restoreRevision}
       />
 
+      <PageSettingsDrawer
+        open={pageSettingsOpen}
+        metadata={metadata}
+        onClose={() => setPageSettingsOpen(false)}
+        onSave={savePageSettings}
+      />
+
       <Puck
         key={editorKey}
         config={editorConfig}
@@ -2639,6 +2768,7 @@ export default function HomepageConfig() {
           autoSaveState={autoSaveState}
           onPublish={publishHome}
           onOpenRevisions={openRevisions}
+          onOpenPageSettings={() => setPageSettingsOpen(true)}
           onDataChange={trackEditorData}
         />
         <EditorBody onSaveAsTemplate={saveBlockAsTemplate} />
