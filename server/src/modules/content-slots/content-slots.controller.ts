@@ -1,6 +1,7 @@
 import { Controller, Get, Put, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ContentSlotsService } from './content-slots.service';
+import { SaveSlotDto } from './dto/save-slot.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -30,8 +31,8 @@ export class ContentSlotsController {
   @ApiBearerAuth()
   @Put('draft')
   @ApiOperation({ summary: '保存草稿' })
-  saveDraft(@Body() body: any) {
-    return this.service.saveDraft(body);
+  saveDraft(@Body() dto: SaveSlotDto) {
+    return this.service.saveDraft(dto);
   }
 
   @ApiBearerAuth()

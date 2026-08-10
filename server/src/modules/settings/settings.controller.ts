@@ -1,6 +1,7 @@
 import { Controller, Get, Put, Query, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
+import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -36,7 +37,7 @@ export class SettingsController {
   @Get() getSettings() { return this.settingsService.getSettings(); }
 
   @ApiOperation({ summary: '更新系统设置' })
-  @Put() updateSettings(@Body() body: any) { return this.settingsService.updateSettings(body); }
+  @Put() updateSettings(@Body() dto: UpdateSettingsDto) { return this.settingsService.updateSettings(dto); }
 
   @ApiOperation({ summary: '获取备份状态' })
   @Get('backup') getBackupStatus() { return this.settingsService.getBackupStatus(); }

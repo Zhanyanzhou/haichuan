@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Delete, Param, Query, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
+import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -29,14 +30,14 @@ export class UsersController {
   @Post()
   @Roles('SUPER_ADMIN')
   @ApiOperation({ summary: '新增用户' })
-  create(@Body() body: any) {
-    return this.usersService.create(body);
+  create(@Body() dto: CreateUserDto) {
+    return this.usersService.create(dto);
   }
 
   @Put(':id')
   @Roles('SUPER_ADMIN', 'ADMIN')
-  update(@Param('id') id: string, @Body() body: any) {
-    return this.usersService.update(+id, body);
+  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
+    return this.usersService.update(+id, dto);
   }
 
   @Delete(':id')
