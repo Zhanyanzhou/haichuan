@@ -9,7 +9,6 @@ import React, {
 import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import { usePublishedSlots } from "@/hooks/useContentSlots";
-import { usePublishedModules } from "@/hooks/usePageModules";
 import { usePagePublishStream } from "@/hooks/usePagePublishStream";
 import PuckDocumentRenderer from "@/page-builder/runtime/PuckDocumentRenderer";
 import { pageDocumentApi } from "@/services/api";
@@ -17,20 +16,6 @@ import { unwrapResponse } from "@/utils/unwrap";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { trackPageView } from "@/hooks/useAnalytics";
 import type { PublishedSlots } from "@/types/contentSlot";
-import type { PageModule } from "@/types/pageModule";
-import SinglePosterSection from "@/components/blocks/SinglePosterSection";
-import DoublePosterSection from "@/components/blocks/DoublePosterSection";
-import HeroSection from "@/components/blocks/HeroSection";
-import ImageTextBlock from "@/components/blocks/ImageTextBlock";
-import ProductRowBlock from "@/components/blocks/ProductRowBlock";
-import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
-import FullBleedBlock from "@/components/blocks/FullBleedBlock";
-import CardGridBlock from "@/components/blocks/CardGridBlock";
-import SplitPanelBlock from "@/components/blocks/SplitPanelBlock";
-import TextBannerBlock from "@/components/blocks/TextBannerBlock";
-import CarouselBlock from "@/components/blocks/CarouselBlock";
-import VideoBlock from "@/components/blocks/VideoBlock";
-import HotspotBlock from "@/components/blocks/HotspotBlock";
 
 const LG = "#F7F3EC";
 const SF = "#FFFFFF";
@@ -1282,75 +1267,6 @@ function FallbackHome() {
   );
 }
 
-const MODULE_MAP: Record<
-  string,
-  React.ComponentType<{ module: PageModule; editMode?: boolean }>
-> = {
-  hero: HeroSection,
-  singlePoster: SinglePosterSection,
-  doublePoster: DoublePosterSection,
-  imageText: ImageTextBlock,
-  productRow: ProductRowBlock,
-  categoryCards: CategoryCardsBlock,
-  fullBleed: FullBleedBlock,
-  cardGrid: CardGridBlock,
-  splitPanel: SplitPanelBlock,
-  textBanner: TextBannerBlock,
-  carousel: CarouselBlock,
-  video: VideoBlock,
-  hotspot: HotspotBlock,
-};
-
-function EditorModuleFrame({
-  module,
-  children,
-}: {
-  module: PageModule;
-  children: React.ReactNode;
-}) {
-  const handleMouseEnter = () => {
-    window.parent.postMessage(
-      { type: "MODULE_HOVERED", moduleId: module.id },
-      "*",
-    );
-  };
-  const handleMouseLeave = () => {
-    window.parent.postMessage({ type: "MODULE_HOVERED", moduleId: null }, "*");
-  };
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    window.parent.postMessage(
-      { type: "MODULE_SELECTED", moduleId: module.id },
-      "*",
-    );
-  };
-
-  return (
-    <section
-      data-module-id={module.id}
-      data-module-type={module.moduleType}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      onClick={handleClick}
-      style={{ position: "relative", cursor: "pointer" }}
-    >
-      {children}
-    </section>
-  );
-}
-
-function renderModule(m: PageModule, editMode = false) {
-  const Comp = MODULE_MAP[m.moduleType];
-  if (!Comp) return null;
-  const inner = <Comp key={m.id} module={m} editMode={editMode} />;
-  if (!editMode) return inner;
-  return (
-    <EditorModuleFrame key={m.id} module={m}>
-      {inner}
-    </EditorModuleFrame>
-  );
-}
-
 function usePublishedPageDocument(pageKey = "home") {
   const [document, setDocument] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -1386,11 +1302,6 @@ function usePublishedPageDocument(pageKey = "home") {
 }
 
 export default function Home() {
-  const {
-    modules,
-    loading,
-    refresh: refreshModules,
-  } = usePublishedModules("home");
   const { slots } = usePublishedSlots("home");
   const {
     document,
@@ -1404,7 +1315,6 @@ export default function Home() {
 
   usePagePublishStream("home", () => {
     void refreshDocument(false);
-    void refreshModules(false);
   });
 
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
@@ -1424,19 +1334,15 @@ export default function Home() {
     return () => clearPageMeta();
   }, [document, setPageMeta, clearPageMeta]);
 
-  if (loading || documentLoading) {
+  if (documentLoading) {
     return <main style={{ background: LG, minHeight: "100vh" }} />;
   }
-
-  const hasPublished = modules.length > 0;
 
   return (
     <SlotCtx.Provider value={slots}>
       <main style={{ background: LG }}>
         {document?.puckData ? (
           <PuckDocumentRenderer data={document.puckData} />
-        ) : hasPublished ? (
-          modules.map((m) => renderModule(m))
         ) : (
           <FallbackHome />
         )}

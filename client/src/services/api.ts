@@ -141,34 +141,53 @@ export const productApi = {
       await mockDelay();
       const idSet = params?.ids
         ? new Set(
-          String(params.ids)
-            .split(",")
-            .map((id) => Number(id.trim()))
-            .filter((id) => Number.isInteger(id) && id > 0),
-        )
+            String(params.ids)
+              .split(",")
+              .map((id) => Number(id.trim()))
+              .filter((id) => Number.isInteger(id) && id > 0),
+          )
         : null;
-      const filtered = filterProducts(getMockProducts(), params)
-        .filter((product) => !idSet || idSet.has(product.id));
+      const filtered = filterProducts(getMockProducts(), params).filter(
+        (product) => !idSet || idSet.has(product.id),
+      );
       return mockRes(
         paginate(filtered, params.page || 1, params.pageSize || 20),
       );
     }
     return api.get("/products", { params });
   },
+  getCounts: async () => {
+    if (USE_MOCK) {
+      await mockDelay();
+      const products = getMockProducts();
+      const counts: Record<string, number> = { all: products.length };
+      ["PUBLISHED", "OFFLINE", "DRAFT", "ARCHIVED"].forEach((status) => {
+        counts[status] = products.filter(
+          (p: any) => p.status === status,
+        ).length;
+      });
+      return mockRes(counts);
+    }
+    return api.get("/products/counts");
+  },
   getPublicList: async (params: any = {}) => {
     if (USE_MOCK) {
       await mockDelay();
       const idSet = params.ids
         ? new Set(
-          String(params.ids)
-            .split(",")
-            .map((id) => Number(id.trim()))
-            .filter((id) => Number.isInteger(id) && id > 0),
-        )
+            String(params.ids)
+              .split(",")
+              .map((id) => Number(id.trim()))
+              .filter((id) => Number.isInteger(id) && id > 0),
+          )
         : null;
-      const filtered = filterProducts(getMockProducts(), { ...params, status: "PUBLISHED" })
-        .filter((product) => !idSet || idSet.has(product.id));
-      return mockRes(paginate(filtered, params.page || 1, params.pageSize || 20));
+      const filtered = filterProducts(getMockProducts(), {
+        ...params,
+        status: "PUBLISHED",
+      }).filter((product) => !idSet || idSet.has(product.id));
+      return mockRes(
+        paginate(filtered, params.page || 1, params.pageSize || 20),
+      );
     }
     return api.get("/products/public", { params });
   },
@@ -184,7 +203,9 @@ export const productApi = {
   getPublicById: async (id: number) => {
     if (USE_MOCK) {
       await mockDelay();
-      const product = getMockProducts().find((item) => item.id === id && item.status === "PUBLISHED");
+      const product = getMockProducts().find(
+        (item) => item.id === id && item.status === "PUBLISHED",
+      );
       if (!product) throw new Error("商品当前不可浏览");
       return mockRes(product);
     }
@@ -195,7 +216,7 @@ export const productApi = {
       await mockDelay(200);
       const products = getMockProducts();
       const id = Math.max(0, ...products.map((product) => product.id)) + 1;
-      const product = {
+      const product: Record<string, unknown> = {
         id,
         ...data,
         status: data.status || "DRAFT",
@@ -239,7 +260,7 @@ export const productApi = {
   /* 图片管理 */
   addImage: async (
     productId: number,
-    data: { url: string; type?: string; sortOrder?: number },
+    data: { url: string; type?: string; sortOrder?: number; isVideo?: boolean },
   ) => {
     if (USE_MOCK) {
       await mockDelay(200);
@@ -253,7 +274,7 @@ export const productApi = {
         url: data.url,
         type: data.type || "FRONT",
         sortOrder: data.sortOrder ?? product.images.length + 1,
-        isVideo: false,
+        isVideo: data.isVideo ?? false,
       };
       product.images.push(image);
       persistMockProducts();
@@ -311,9 +332,8 @@ export const productApi = {
       persistMockProducts();
       return mockRes(image);
     }
-    // 后端将详情主图和列表封面拆分为两个明确接口；“设为主图”需同步两者。
-    await api.put(`/products/${productId}/images/primary`, { imageId });
-    return api.put(`/products/${productId}/images/listing`, { imageId });
+    // 后端 setPrimaryImage 已自动同步 listingImageId，无需重复调用
+    return api.put(`/products/${productId}/images/primary`, { imageId });
   },
   /* 状态操作 */
   publish: async (id: number) => {
@@ -346,6 +366,120 @@ export const productApi = {
       return mockRes(product);
     }
     return api.put(`/products/${id}/status`, { status });
+  },
+  /* 标签管理 */
+  getTags: async (productId: number) => {
+    if (USE_MOCK) {
+      await mockDelay();
+      const product = getMockProducts().find((item) => item.id === productId);
+      return mockRes(product?.tags || []);
+    }
+    return api.get(`/products/${productId}/tags`);
+  },
+  updateTags: async (productId: number, tags: string[]) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      const product = getMockProducts().find((item) => item.id === productId) as any;
+      if (!product) throw new Error("商品不存在");
+      product.tags = tags.map((tagName, i) => ({
+        id: Date.now() + i,
+        productId,
+        tagName,
+      }));
+      persistMockProducts();
+      return mockRes(product.tags);
+    }
+    return api.put(`/products/${productId}/tags`, { tags });
+  },
+  /* 证书管理 */
+  addCertificate: async (
+    productId: number,
+    data: { certType: string; certNumber: string; certImage?: string; expireDate?: string },
+  ) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      const product = getMockProducts().find((item) => item.id === productId) as any;
+      if (!product) throw new Error("商品不存在");
+      const cert = { id: Date.now(), productId, ...data };
+      if (!product.certificates) product.certificates = [];
+      product.certificates.push(cert);
+      persistMockProducts();
+      return mockRes(cert);
+    }
+    return api.post(`/products/${productId}/certificates`, data);
+  },
+  updateCertificate: async (
+    productId: number,
+    certId: number,
+    data: { certType?: string; certNumber?: string; certImage?: string; expireDate?: string },
+  ) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      const product = getMockProducts().find((item) => item.id === productId) as any;
+      const cert = product?.certificates?.find((c: any) => c.id === certId);
+      if (!cert) throw new Error("证书不存在");
+      Object.assign(cert, data);
+      persistMockProducts();
+      return mockRes(cert);
+    }
+    return api.put(`/products/${productId}/certificates/${certId}`, data);
+  },
+  deleteCertificate: async (productId: number, certId: number) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      const product = getMockProducts().find((item) => item.id === productId) as any;
+      if (!product) throw new Error("商品不存在");
+      product.certificates = (product.certificates || []).filter((c: any) => c.id !== certId);
+      persistMockProducts();
+      return mockRes({ success: true });
+    }
+    return api.delete(`/products/${productId}/certificates/${certId}`);
+  },
+  /* SKU 管理 */
+  getSkus: async (productId: number) => {
+    if (USE_MOCK) {
+      await mockDelay();
+      const product = getMockProducts().find((item) => item.id === productId);
+      return mockRes(product?.skus || []);
+    }
+    return api.get(`/products/${productId}/skus`);
+  },
+  createSku: async (productId: number, data: any) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      const product = getMockProducts().find((item) => item.id === productId) as any;
+      if (!product) throw new Error("商品不存在");
+      const sku = { id: Date.now(), productId, isActive: true, ...data };
+      if (!product.skus) product.skus = [];
+      product.skus.push(sku);
+      persistMockProducts();
+      return mockRes(sku);
+    }
+    return api.post(`/products/${productId}/skus`, data);
+  },
+  updateSku: async (productId: number, skuId: number, data: any) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      const product = getMockProducts().find((item) => item.id === productId) as any;
+      const sku = product?.skus?.find((s: any) => s.id === skuId);
+      if (!sku) throw new Error("SKU不存在");
+      Object.assign(sku, data);
+      persistMockProducts();
+      return mockRes(sku);
+    }
+    return api.put(`/products/${productId}/skus/${skuId}`, data);
+  },
+  deleteSku: async (productId: number, skuId: number) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      const product = getMockProducts().find((item) => item.id === productId) as any;
+      if (!product) throw new Error("商品不存在");
+      const sku = product.skus?.find((s: any) => s.id === skuId);
+      if (sku) sku.isActive = false;
+      persistMockProducts();
+      return mockRes({ success: true });
+    }
+    return api.delete(`/products/${productId}/skus/${skuId}`);
   },
 };
 
@@ -443,12 +577,18 @@ export const orderApi = {
     }
     return api.put(`/orders/${id}/status`, data);
   },
-  ship: (id: number, data: { logisticsCompany: string; logisticsNo: string; internalNote?: string }) =>
-    api.put(`/orders/${id}/ship`, data),
+  ship: (
+    id: number,
+    data: {
+      logisticsCompany: string;
+      logisticsNo: string;
+      internalNote?: string;
+    },
+  ) => api.put(`/orders/${id}/ship`, data),
 };
 
 const customerAuthHeaders = () => {
-  const token = localStorage.getItem('customerToken');
+  const token = localStorage.getItem("customerToken");
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
@@ -471,40 +611,73 @@ export const cartApi = {
     api.post("/cart", data, { headers: cartHeaders() }),
   updateQuantity: (id: number, quantity: number) =>
     api.put(`/cart/${id}`, { quantity }, { headers: cartHeaders() }),
-  remove: (id: number) =>
-    api.delete(`/cart/${id}`, { headers: cartHeaders() }),
+  remove: (id: number) => api.delete(`/cart/${id}`, { headers: cartHeaders() }),
   clear: () => api.delete("/cart", { headers: cartHeaders() }),
 };
 
 export const customerApi = {
-  register: (data: { phone: string; password: string; name: string; email?: string }) => api.post('/customers/register', data),
-  login: (data: { phone: string; password: string }) => api.post('/customers/login', data),
-  checkout: (data: any) => api.post('/customers/checkout', data),
-  accessByOrder: (data: { phone: string; orderNo: string }) => api.post('/customers/order-access', data),
-  getProfile: () => api.get('/customers/me', { headers: customerAuthHeaders() }),
-  updateProfile: (data: { name?: string; email?: string }) => api.put('/customers/me', data, { headers: customerAuthHeaders() }),
-  getOrders: () => api.get('/customers/me/orders', { headers: customerAuthHeaders() }),
-  getSelectionInquiries: () => api.get('/customers/me/selection-inquiries', { headers: customerAuthHeaders() }),
-  getInquiries: () => api.get('/customers/me/inquiries', { headers: customerAuthHeaders() }),
-  getAddresses: () => api.get('/customers/me/addresses', { headers: customerAuthHeaders() }),
-  createAddress: (data: any) => api.post('/customers/me/addresses', data, { headers: customerAuthHeaders() }),
-  updateAddress: (id: number, data: any) => api.put(`/customers/me/addresses/${id}`, data, { headers: customerAuthHeaders() }),
-  deleteAddress: (id: number) => api.delete(`/customers/me/addresses/${id}`, { headers: customerAuthHeaders() }),
-  submitPaymentProof: (orderId: number, proofUrl: string) => api.post(`/customers/me/orders/${orderId}/payment-proof`, { proofUrl }, { headers: customerAuthHeaders() }),
+  register: (data: {
+    phone: string;
+    password: string;
+    name: string;
+    email?: string;
+  }) => api.post("/customers/register", data),
+  login: (data: { phone: string; password: string }) =>
+    api.post("/customers/login", data),
+  checkout: (data: any) => api.post("/customers/checkout", data),
+  accessByOrder: (data: { phone: string; orderNo: string }) =>
+    api.post("/customers/order-access", data),
+  getProfile: () =>
+    api.get("/customers/me", { headers: customerAuthHeaders() }),
+  updateProfile: (data: { name?: string; email?: string }) =>
+    api.put("/customers/me", data, { headers: customerAuthHeaders() }),
+  getOrders: () =>
+    api.get("/customers/me/orders", { headers: customerAuthHeaders() }),
+  getSelectionInquiries: () =>
+    api.get("/customers/me/selection-inquiries", {
+      headers: customerAuthHeaders(),
+    }),
+  getInquiries: () =>
+    api.get("/customers/me/inquiries", { headers: customerAuthHeaders() }),
+  getAddresses: () =>
+    api.get("/customers/me/addresses", { headers: customerAuthHeaders() }),
+  createAddress: (data: any) =>
+    api.post("/customers/me/addresses", data, {
+      headers: customerAuthHeaders(),
+    }),
+  updateAddress: (id: number, data: any) =>
+    api.put(`/customers/me/addresses/${id}`, data, {
+      headers: customerAuthHeaders(),
+    }),
+  deleteAddress: (id: number) =>
+    api.delete(`/customers/me/addresses/${id}`, {
+      headers: customerAuthHeaders(),
+    }),
+  submitPaymentProof: (orderId: number, proofUrl: string) =>
+    api.post(
+      `/customers/me/orders/${orderId}/payment-proof`,
+      { proofUrl },
+      { headers: customerAuthHeaders() },
+    ),
   uploadPaymentProof: (file: File) => {
     const formData = new FormData();
-    formData.append('file', file);
-    return api.post('/upload/payment-proof', formData, {
-      headers: { ...customerAuthHeaders(), 'Content-Type': 'multipart/form-data' },
+    formData.append("file", file);
+    return api.post("/upload/payment-proof", formData, {
+      headers: {
+        ...customerAuthHeaders(),
+        "Content-Type": "multipart/form-data",
+      },
     });
   },
 };
 
 export const paymentApi = {
-  getList: (params: any) => api.get('/payments', { params }),
+  getList: (params: any) => api.get("/payments", { params }),
   getById: (id: number) => api.get(`/payments/${id}`),
-  approve: (id: number, reviewNote?: string) => api.put(`/payments/${id}/approve`, { reviewNote }),
-  reject: (id: number, reviewNote?: string) => api.put(`/payments/${id}/reject`, { reviewNote }),
+  approve: (id: number, reviewNote?: string) =>
+    api.put(`/payments/${id}/approve`, { reviewNote }),
+  reject: (id: number, reviewNote?: string) =>
+    api.put(`/payments/${id}/reject`, { reviewNote }),
 };
 
 // ===== Dashboard Statistics API =====
@@ -705,7 +878,8 @@ export const selectionInquiryApi = {
       productSkuSnapshot?: string;
       productImageSnapshot?: string;
     }>;
-  }) => api.post("/selection-inquiries", data, { headers: customerAuthHeaders() }),
+  }) =>
+    api.post("/selection-inquiries", data, { headers: customerAuthHeaders() }),
 };
 
 // ===== Inquiries API =====
@@ -757,12 +931,16 @@ export const inquiriesApi = {
         createdAt: new Date().toISOString(),
       });
     }
-    return api.post("/inquiries", {
-      ...data,
-      customerName: data.name,
-      customerPhone: data.phone,
-      customerEmail: data.email,
-    }, { headers: customerAuthHeaders() });
+    return api.post(
+      "/inquiries",
+      {
+        ...data,
+        customerName: data.name,
+        customerPhone: data.phone,
+        customerEmail: data.email,
+      },
+      { headers: customerAuthHeaders() },
+    );
   },
 };
 
@@ -785,7 +963,7 @@ export const uploadApi = {
   },
   uploadVideo: async (file: File) => {
     if (USE_MOCK) {
-      await mockDelay(500);
+      await mockDelay(800);
       return mockRes({
         url: URL.createObjectURL(file),
         filename: file.name,
@@ -882,183 +1060,6 @@ export const contentSlotsApi = {
   },
 };
 
-// ===== Page Modules Mock Store =====
-const _mockPageModules: Record<string, any[]> = {};
-
-function _getMockModules(pageKey: string) {
-  if (!_mockPageModules[pageKey]) {
-    // 初始化默认模块：Hero + 双海报
-    _mockPageModules[pageKey] = [
-      {
-        id: 1001,
-        pageKey,
-        moduleType: "hero",
-        sortOrder: 1,
-        isVisible: true,
-        status: "PUBLISHED",
-        content: {
-          title: "东方之形，\n自有光华。",
-          subtitle: "CAMPAIGN / 01",
-          description: "",
-          desktopImage: "/images/editorial/hero-ingot-lock-v1.png",
-          mobileImage: "/images/editorial/hero-ingot-lock-mobile-v1.png",
-          actionText: "EXPLORE THE COLLECTION",
-          linkUrl: "/products",
-          altText: "海川珠宝 Hero",
-        },
-        layoutConfig: {
-          template: "overlay",
-          textPosition: "overlay",
-          desktopColumns: "12",
-        },
-        styleConfig: {
-          focusX: 50,
-          focusY: 50,
-          textColor: "#fff",
-          spacing: "normal",
-          animation: "fadeUp",
-        },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      {
-        id: 1002,
-        pageKey,
-        moduleType: "doublePoster",
-        sortOrder: 2,
-        isVisible: true,
-        status: "PUBLISHED",
-        content: {
-          mainImage: "/images/editorial/poster-begonia-parrots-v1.png",
-          detailImage: "/images/editorial/poster-floral-lock-v1.png",
-          title: "金环有序",
-          subtitle: "02 / FORM",
-          description: "线条、比例与轮廓的共同表达。",
-          linkUrl: "/products?categoryId=17",
-          number: "02",
-          label: "FORM",
-        },
-        layoutConfig: { template: "leftBigRightSmall", desktopColumns: "8-4" },
-        styleConfig: {
-          mainFocusX: 50,
-          mainFocusY: 50,
-          detailFocusX: 50,
-          detailFocusY: 50,
-          spacing: "normal",
-          animation: "fadeUp",
-        },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-    ];
-  }
-  return _mockPageModules[pageKey];
-}
-
-export const pageModulesApi = {
-  getPublished: async (pageKey = "home") => {
-    if (USE_MOCK) {
-      await mockDelay();
-      const all = _getMockModules(pageKey);
-      return mockRes(all.filter((m: any) => m.status === "PUBLISHED"));
-    }
-    return api.get("/page-modules/published", { params: { pageKey } });
-  },
-  getAdminAll: async (pageKey = "home") => {
-    if (USE_MOCK) {
-      await mockDelay();
-      return mockRes(_getMockModules(pageKey));
-    }
-    return api.get("/page-modules/admin", { params: { pageKey } });
-  },
-  saveDraft: async (data: any) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      const modules = _getMockModules(data.pageKey || "home");
-      const idx = modules.findIndex((m: any) => m.id === data.id);
-      const now = new Date().toISOString();
-      const module = {
-        ...data,
-        status: "DRAFT" as const,
-        updatedAt: now,
-      };
-      if (idx >= 0) {
-        // 更新已有模块
-        modules[idx] = { ...modules[idx], ...module };
-      } else {
-        // 新增模块
-        module.id = Date.now();
-        module.createdAt = now;
-        module.sortOrder = data.sortOrder ?? modules.length + 1;
-        modules.push(module);
-      }
-      return mockRes(module);
-    }
-    return api.put("/page-modules/draft", data);
-  },
-  reorder: async (items: { id: number; sortOrder: number }[]) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      const modules = _getMockModules("home");
-      for (const item of items) {
-        const m = modules.find((x: any) => x.id === item.id);
-        if (m) m.sortOrder = item.sortOrder;
-      }
-      modules.sort((a: any, b: any) => a.sortOrder - b.sortOrder);
-      return mockRes({ success: true });
-    }
-    return api.put("/page-modules/reorder", { items });
-  },
-  toggleVisibility: async (id: number, isVisible: boolean) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      const modules = _getMockModules("home");
-      const m = modules.find((x: any) => x.id === id);
-      if (m) m.isVisible = isVisible;
-      return mockRes(m);
-    }
-    return api.put(`/page-modules/${id}/toggle`, { isVisible });
-  },
-  duplicate: async (id: number) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      const modules = _getMockModules("home");
-      const src = modules.find((x: any) => x.id === id);
-      if (!src) throw new Error("模块不存在");
-      const copy = JSON.parse(JSON.stringify(src));
-      copy.id = Date.now();
-      copy.status = "DRAFT";
-      copy.sortOrder = modules.length + 1;
-      copy.createdAt = new Date().toISOString();
-      copy.updatedAt = new Date().toISOString();
-      modules.push(copy);
-      return mockRes(copy);
-    }
-    return api.post(`/page-modules/${id}/duplicate`);
-  },
-  remove: async (id: number) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      const modules = _getMockModules("home");
-      const idx = modules.findIndex((x: any) => x.id === id);
-      if (idx >= 0) modules.splice(idx, 1);
-      return mockRes({ success: true });
-    }
-    return api.delete(`/page-modules/${id}`);
-  },
-  publish: async (pageKey = "home") => {
-    if (USE_MOCK) {
-      await mockDelay(300);
-      const modules = _getMockModules(pageKey);
-      for (const m of modules) {
-        if (m.status === "DRAFT") m.status = "PUBLISHED";
-      }
-      return mockRes({ success: true });
-    }
-    return api.put("/page-modules/publish", { pageKey });
-  },
-};
-
 // ===== Puck PageDocument API =====
 type MockPageDocument = {
   id: number;
@@ -1124,7 +1125,9 @@ function nextMockDocumentVersion(pageKey: string) {
   const versions = [
     store.drafts[pageKey]?.version || 0,
     store.published[pageKey]?.version || 0,
-    ...(store.revisions[pageKey] || []).map((revision) => revision.version || 0),
+    ...(store.revisions[pageKey] || []).map(
+      (revision) => revision.version || 0,
+    ),
   ];
   return Math.max(0, ...versions) + 1;
 }
@@ -1181,7 +1184,8 @@ export const pageDocumentApi = {
     if (USE_MOCK) {
       await mockDelay(160);
       const store = loadMockPageDocuments();
-      const previous = store.drafts[data.pageKey] || store.published[data.pageKey];
+      const previous =
+        store.drafts[data.pageKey] || store.published[data.pageKey];
       const now = new Date().toISOString();
       const document: MockPageDocument = {
         ...(previous || createMockPageDocument(data)),
@@ -1250,7 +1254,9 @@ export const pageDocumentApi = {
       persistMockPageDocuments();
       return mockRes(cloneMockDocument(restored));
     }
-    return api.put(`/page-modules/document/revisions/${version}/restore`, { pageKey });
+    return api.put(`/page-modules/document/revisions/${version}/restore`, {
+      pageKey,
+    });
   },
 };
 

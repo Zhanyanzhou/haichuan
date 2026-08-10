@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { PlusOutlined, ReloadOutlined, RightOutlined } from "@ant-design/icons";
 import {
   inquiriesApi,
-  pageModulesApi,
   statisticsApi,
 } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -63,7 +62,6 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [orderTrend, setOrderTrend] = useState<TrendPoint[]>([]);
   const [recentInquiries, setRecentInquiries] = useState<InquiryRecord[]>([]);
-  const [draftPages, setDraftPages] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
@@ -72,22 +70,19 @@ export default function Dashboard() {
     setLoadError(false);
 
     try {
-      const [statsResponse, trendResponse, inquiriesResponse, pagesResponse] = await Promise.all([
+      const [statsResponse, trendResponse, inquiriesResponse] = await Promise.all([
         statisticsApi.getDashboard(),
         statisticsApi.getOrderTrend(7),
         inquiriesApi.getList({ page: 1, pageSize: 5, status: "PENDING" }),
-        pageModulesApi.getAdminAll("home"),
       ]);
 
       const statsData = unwrapResponse<DashboardStats>(statsResponse);
       const trendData = unwrapResponse<TrendPoint[]>(trendResponse) ?? [];
       const inquiriesData = unwrapResponse<{ list?: InquiryRecord[]; items?: InquiryRecord[] }>(inquiriesResponse);
-      const pagesData = unwrapResponse<Array<{ status?: string }>>(pagesResponse) ?? [];
 
       setStats(statsData);
       setOrderTrend(trendData);
       setRecentInquiries(inquiriesData?.list ?? inquiriesData?.items ?? []);
-      setDraftPages(pagesData.filter((page) => page.status === "DRAFT").length);
     } catch {
       setLoadError(true);
     } finally {
@@ -137,13 +132,7 @@ export default function Dashboard() {
       count: stats?.pendingReview,
       route: "/admin/products",
     },
-    {
-      label: "待发布页面",
-      detail: "首页内容草稿待检查",
-      count: draftPages,
-      route: "/admin/editor/home",
-    },
-  ], [draftPages, stats]);
+  ], [stats]);
 
   const pendingItemTotal = workItems.reduce((total, item) => total + (Number(item.count) || 0), 0);
   const trendMaximum = Math.max(...orderTrend.map((item) => item.count), 1);
