@@ -289,7 +289,7 @@ export default function PuckDocumentRenderer({ data }: { data: PuckDocument }) {
     const node = renderBlock(block, index);
     if (node === null) return null;
     return (
-      <ErrorBoundary key={`eb-${index}`} fallback={null}>
+      <ErrorBoundary key={`eb-${block.props?.id || index}`} fallback={null}>
         {node}
       </ErrorBoundary>
     );

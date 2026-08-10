@@ -1271,6 +1271,7 @@ function usePublishedPageDocument(pageKey = "home") {
   const [document, setDocument] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const mountedRef = useRef(true);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1281,14 +1282,22 @@ function usePublishedPageDocument(pageKey = "home") {
 
   const refresh = useCallback(
     async (showLoading = false) => {
+      const requestId = ++requestIdRef.current;
       if (showLoading) setLoading(true);
       try {
         const response = await pageDocumentApi.getPublished(pageKey);
-        if (mountedRef.current) setDocument(unwrapResponse<any>(response));
+        // 仅采纳最新一次请求的结果，避免并发刷新时旧响应覆盖新数据
+        if (mountedRef.current && requestIdRef.current === requestId) {
+          setDocument(unwrapResponse<any>(response));
+        }
       } catch {
-        if (mountedRef.current) setDocument(null);
+        if (mountedRef.current && requestIdRef.current === requestId) {
+          setDocument(null);
+        }
       } finally {
-        if (mountedRef.current) setLoading(false);
+        if (mountedRef.current && requestIdRef.current === requestId) {
+          setLoading(false);
+        }
       }
     },
     [pageKey],
