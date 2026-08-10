@@ -1,5 +1,6 @@
 import { Controller, Post, Get, Body, Query, UseGuards } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
+import { TrackEventDto } from './dto/track-event.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -13,7 +14,7 @@ export class AnalyticsController {
 
   @Public()
   @Post('track')
-  async track(@Body() body: any) {
+  async track(@Body() body: TrackEventDto) {
     await this.service.track(body);
     return { ok: true };
   }

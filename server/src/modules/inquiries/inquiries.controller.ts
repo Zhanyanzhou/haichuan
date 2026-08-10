@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Param, Query, Body, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { InquiriesService } from './inquiries.service';
+import { CreateInquiryDto } from './dto/create-inquiry.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { OptionalCustomerAuthGuard } from '../customers/optional-customer-auth.guard';
@@ -19,7 +20,7 @@ export class InquiriesController {
   @Get() findAll(@Query() q: any) { return this.inquiriesService.findAll(q); }
 
   @ApiOperation({ summary: '提交咨询（公开接口）' })
-  @Public() @UseGuards(OptionalCustomerAuthGuard) @Post() create(@Req() request: any, @Body() b: any) { return this.inquiriesService.create({ ...b, customer: request.customer }); }
+  @Public() @UseGuards(OptionalCustomerAuthGuard) @Post() create(@Req() request: any, @Body() dto: CreateInquiryDto) { return this.inquiriesService.create({ ...dto, customer: request.customer }); }
 
   @ApiBearerAuth()
   @ApiOperation({ summary: '分配咨询处理人' })
