@@ -393,6 +393,12 @@ export default function ProductEditor() {
     );
     // 关键：validateFields 只返回命名字段，必须用 getFieldsValue 获取全部表单值
     const values = form.getFieldsValue();
+    // 发布前预校验价格（配合后端 price>0 拦截，避免填完一堆信息提交后才收 400）
+    if (!asDraft && values.status === "PUBLISHED" && !(Number(values.price) > 0)) {
+      form.setFields([{ name: "price", errors: ["发布前请填写大于 0 的价格"] }]);
+      message.warning("发布前请填写大于 0 的价格");
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
