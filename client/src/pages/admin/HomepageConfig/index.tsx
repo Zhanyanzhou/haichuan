@@ -22,6 +22,7 @@ import {
   ExclamationCircleOutlined,
   HeartFilled,
   HeartOutlined,
+  HistoryOutlined,
   LayoutOutlined,
   MobileOutlined,
   RollbackOutlined,
@@ -633,6 +634,7 @@ function EditorToolbar({
   hasUnsavedChanges,
   autoSaveState,
   onPublish,
+  onOpenRevisions,
   onDataChange,
 }: {
   lastSaved: string | null;
@@ -640,6 +642,7 @@ function EditorToolbar({
   hasUnsavedChanges: boolean;
   autoSaveState: AutoSaveState;
   onPublish: (data: unknown) => void;
+  onOpenRevisions: () => void;
   onDataChange: (data: unknown) => void;
 }) {
   const appData = useHomepagePuck((state) => state.appState.data);
@@ -760,9 +763,17 @@ function EditorToolbar({
           size="small"
           icon={<EyeOutlined />}
           onClick={() => window.open("/preview/home", "_blank")}
-          title="在新窗口查看前台效果"
+          title="在新窗口查看前台效果（实时读取后台草稿）"
         >
           预览
+        </Button>
+        <Button
+          size="small"
+          icon={<HistoryOutlined />}
+          onClick={onOpenRevisions}
+          title="查看历史发布版本并回滚到草稿"
+        >
+          版本
         </Button>
         <Button
           size="small"
@@ -2627,6 +2638,7 @@ export default function HomepageConfig() {
           hasUnsavedChanges={hasUnsavedChanges}
           autoSaveState={autoSaveState}
           onPublish={publishHome}
+          onOpenRevisions={openRevisions}
           onDataChange={trackEditorData}
         />
         <EditorBody onSaveAsTemplate={saveBlockAsTemplate} />

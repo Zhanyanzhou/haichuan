@@ -8,8 +8,8 @@ import React, {
 } from "react";
 import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
-import { usePublishedSlots, useDraftSlots } from "@/hooks/useContentSlots";
-import { usePublishedModules, useAdminModules } from "@/hooks/usePageModules";
+import { usePublishedSlots } from "@/hooks/useContentSlots";
+import { usePublishedModules } from "@/hooks/usePageModules";
 import { usePagePublishStream } from "@/hooks/usePagePublishStream";
 import PuckDocumentRenderer from "@/page-builder/runtime/PuckDocumentRenderer";
 import { pageDocumentApi } from "@/services/api";
@@ -1427,51 +1427,55 @@ export default function Home() {
   );
 }
 
-export function HomePreview() {
-  const { modules, loading, refresh } = useAdminModules("home");
-  const { slots } = useDraftSlots("home");
-  const [editorMode, setEditorMode] = useState(true);
+
+function useDraftPageDocument(pageKey = "home") {
+  const [document, setDocument] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    if (!loading && window.parent !== window) {
-      window.parent.postMessage({ type: "CANVAS_READY" }, "*");
-    }
-  }, [loading]);
-
-  useEffect(() => {
-    const handler = (e: MessageEvent) => {
-      if (!e.data) return;
-      if (e.data.type === "PATCH_MODULE") {
-        refresh();
-      } else if (e.data.type === "SET_EDITOR_MODE") {
-        setEditorMode(e.data.mode === "edit");
-      }
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
     };
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
+  }, []);
+
+  const refresh = useCallback(
+    async (showLoading = false) => {
+      if (showLoading) setLoading(true);
+      try {
+        const response = await pageDocumentApi.getAdmin(pageKey);
+        if (mountedRef.current) setDocument(unwrapResponse<any>(response));
+      } catch {
+        if (mountedRef.current) setDocument(null);
+      } finally {
+        if (mountedRef.current) setLoading(false);
+      }
+    },
+    [pageKey],
+  );
+
+  useEffect(() => {
+    void refresh(true);
   }, [refresh]);
+
+  return { document, loading, refresh };
+}
+
+export function HomePreview() {
+  const { document, loading } = useDraftPageDocument("home");
 
   if (loading) {
     return <main style={{ background: LG, minHeight: "100vh" }} />;
   }
 
-  const hasModules = modules.length > 0;
-
   return (
-    <SlotCtx.Provider value={slots}>
-      <main style={{ background: LG }}>
-        <style>{`
-          [data-module-id] { transition: outline 0.15s; }
-          [data-module-id]:hover { outline: 1px dashed #B8944E; outline-offset: -1px; }
-        `}</style>
-        {hasModules ? (
-          modules
-            .filter((m) => m.isVisible)
-            .map((m) => renderModule(m, editorMode))
-        ) : (
-          <FallbackHome />
-        )}
-      </main>
-    </SlotCtx.Provider>
+    <main style={{ background: LG }}>
+      {document?.puckData ? (
+        <PuckDocumentRenderer data={document.puckData} />
+      ) : (
+        <FallbackHome />
+      )}
+    </main>
   );
 }

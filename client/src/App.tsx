@@ -72,7 +72,14 @@ function App() {
             <Route path="customer" element={<CustomerCenter />} />
             <Route path="about" element={<About />} />
             <Route path="contact" element={<Contact />} />
-            <Route path="preview/home" element={<HomePreview />} />
+            <Route
+              path="preview/home"
+              element={
+                <ProtectedRoute roles={["SUPER_ADMIN", "ADMIN", "EDITOR"]}>
+                  <HomePreview />
+                </ProtectedRoute>
+              }
+            />
           </Route>
 
           <Route path="/admin" element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
