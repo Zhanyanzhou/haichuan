@@ -231,6 +231,8 @@ export class OrdersService {
   async findForCustomer(customerId: number) {
     return this.prisma.order.findMany({
       where: { customerId },
+      // 个人订单列表安全上限，防止极端账户全量加载；正常用户远不到此数
+      take: 100,
       include: {
         items: {
           include: {

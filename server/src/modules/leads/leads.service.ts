@@ -23,29 +23,48 @@ export class LeadsService {
     const { page = 1, pageSize = 20, status, type, keyword } = params;
     const _page = +page,
       _pageSize = +pageSize;
+    // 每源只取到当前页所需条数，避免两表全量加载进内存
+    const take = _page * _pageSize;
 
-    // 聚合两种线索来源
-    const inquiries =
-      type && type !== "inquiry"
-        ? []
-        : await this.fetchInquiries({ status, keyword });
-    const selections =
-      type && type !== "selection"
-        ? []
-        : await this.fetchSelectionInquiries({ status, keyword });
+    const wantInquiries = !type || type === "inquiry";
+    const wantSelections = !type || type === "selection";
+
+    const [inquiries, selections, inquiryCount, selectionCount] =
+      await Promise.all([
+        wantInquiries
+          ? this.fetchInquiries({ status, keyword }, take)
+          : Promise.resolve([]),
+        wantSelections
+          ? this.fetchSelectionInquiries({ status, keyword }, take)
+          : Promise.resolve([]),
+        wantInquiries
+          ? this.prisma.inquiry.count({
+              where: this.inquiryWhere({ status, keyword }),
+            })
+          : Promise.resolve(0),
+        wantSelections
+          ? this.prisma.selectionInquiry.count({
+              where: this.selectionWhere({ status, keyword }),
+            })
+          : Promise.resolve(0),
+      ]);
 
     const all = [...inquiries, ...selections].sort(
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
 
-    const total = all.length;
     const list = all.slice((_page - 1) * _pageSize, _page * _pageSize);
 
-    return { list, total, page: _page, pageSize: _pageSize };
+    return {
+      list,
+      total: inquiryCount + selectionCount,
+      page: _page,
+      pageSize: _pageSize,
+    };
   }
 
-  private async fetchInquiries(filters: { status?: string; keyword?: string }) {
+  private inquiryWhere(filters: { status?: string; keyword?: string }) {
     const where: any = {};
     if (filters.status) where.status = filters.status;
     if (filters.keyword) {
@@ -54,8 +73,28 @@ export class LeadsService {
         { customerPhone: { contains: filters.keyword } },
       ];
     }
+    return where;
+  }
+
+  private selectionWhere(filters: { status?: string; keyword?: string }) {
+    const where: any = {};
+    if (filters.status) where.status = filters.status;
+    if (filters.keyword) {
+      where.OR = [
+        { customerName: { contains: filters.keyword } },
+        { phone: { contains: filters.keyword } },
+      ];
+    }
+    return where;
+  }
+
+  private async fetchInquiries(
+    filters: { status?: string; keyword?: string },
+    take?: number,
+  ) {
     const list = await this.prisma.inquiry.findMany({
-      where,
+      where: this.inquiryWhere(filters),
+      take,
       include: {
         product: { select: { id: true, name: true } },
         assignee: { select: { id: true, realName: true } },
@@ -82,20 +121,13 @@ export class LeadsService {
     }));
   }
 
-  private async fetchSelectionInquiries(filters: {
-    status?: string;
-    keyword?: string;
-  }) {
-    const where: any = {};
-    if (filters.status) where.status = filters.status;
-    if (filters.keyword) {
-      where.OR = [
-        { customerName: { contains: filters.keyword } },
-        { phone: { contains: filters.keyword } },
-      ];
-    }
+  private async fetchSelectionInquiries(
+    filters: { status?: string; keyword?: string },
+    take?: number,
+  ) {
     const list = await this.prisma.selectionInquiry.findMany({
-      where,
+      where: this.selectionWhere(filters),
+      take,
       include: {
         items: true,
         handler: { select: { id: true, realName: true } },
