@@ -660,6 +660,8 @@ function EditorToolbar({
   const [undoStack, setUndoStack] = useState<any[]>([]);
   const [redoStack, setRedoStack] = useState<any[]>([]);
   const lastDataRef = useRef<any>(appData);
+  const undoTimerRef = useRef<number | null>(null);
+  const pendingUndoRef = useRef<any>(null);
 
   /* ── Undo/Redo ── */
   const pushUndo = useCallback((nextData: any) => {
@@ -702,9 +704,26 @@ function EditorToolbar({
             : "草稿编辑中";
 
   useEffect(() => {
-    pushUndo(appData);
     onDataChange(appData);
-  }, [appData]);
+    // 历史入栈节流：连续编辑（如拖拽每帧）合并为一次快照，避免栈被瞬态中间态塞满
+    pendingUndoRef.current = appData;
+    if (undoTimerRef.current !== null) return;
+    undoTimerRef.current = window.setTimeout(() => {
+      undoTimerRef.current = null;
+      if (pendingUndoRef.current !== null) {
+        pushUndo(pendingUndoRef.current);
+      }
+    }, 400);
+  }, [appData, onDataChange, pushUndo]);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current !== null) {
+        window.clearTimeout(undoTimerRef.current);
+        undoTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const setViewport = (preset: ViewportPreset) => {
     const uiPatch: Partial<UiState> = {
@@ -1412,7 +1431,9 @@ export default function HomepageConfig() {
   const [revisions, setRevisions] = useState<PageDocumentRevision[]>([]);
   const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
   const [editorKey, setEditorKey] = useState(0);
+  const [initialLoading, setInitialLoading] = useState(true);
   const latestData = useRef<any>(data);
+  const dataSignatureRef = useRef("");
   const [metadata, setMetadata] = useState<Record<string, any>>({});
   const latestMetadata = useRef<Record<string, any>>({});
   const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
@@ -1488,15 +1509,17 @@ export default function HomepageConfig() {
   }, [metadata]);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       let serverData = jewelryHomeTemplate.puckData;
       try {
         const response = await pageDocumentApi.getAdmin(HOME_PAGE_KEY);
         const document = unwrapResponse<any>(response);
-        if (document?.puckData) {
+        if (!cancelled && document?.puckData) {
           serverData = document.puckData;
           setData(serverData);
           latestData.current = serverData;
+          dataSignatureRef.current = JSON.stringify(serverData);
           const serverMetadata = document.metadata || {};
           setMetadata(serverMetadata);
           latestMetadata.current = serverMetadata;
@@ -1507,22 +1530,27 @@ export default function HomepageConfig() {
         }
       } catch {
         // 无草稿时使用内置首页模板。
+      } finally {
+        if (!cancelled) setInitialLoading(false);
       }
-
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const trackEditorData = useCallback(
-    (nextData: unknown) => {
-      latestData.current = nextData;
-      const changed = JSON.stringify(nextData) !== JSON.stringify(data);
-      setHasUnsavedChanges(changed);
-      if (changed) {
-        setAutoSaveState((current) => current === "saving" ? current : "idle");
-      }
-    },
-    [data],
-  );
+  useEffect(() => {
+    dataSignatureRef.current = JSON.stringify(data);
+  }, [data]);
+
+  const trackEditorData = useCallback((nextData: unknown) => {
+    latestData.current = nextData;
+    const changed = JSON.stringify(nextData) !== dataSignatureRef.current;
+    setHasUnsavedChanges(changed);
+    if (changed) {
+      setAutoSaveState((current) => current === "saving" ? current : "idle");
+    }
+  }, []);
 
   const saveDraft = useCallback(async (
     nextData: unknown,
@@ -2812,33 +2840,47 @@ export default function HomepageConfig() {
         onSave={savePageSettings}
       />
 
-      <Puck
-        key={editorKey}
-        config={editorConfig}
-        data={data}
-        viewports={VIEWPORT_PRESETS}
-        iframe={{ enabled: true, waitForStyles: true, syncHostStyles: true }}
-        onPublish={(nextData) => {
-          setData(nextData);
-          latestData.current = nextData;
-        }}
-        overrides={{
-          header: () => <span style={{ display: "none" }} />,
-          headerActions: () => <span style={{ display: "none" }} />,
-        }}
-      >
-        <EditorToolbar
-          lastSaved={lastSaved}
-          publishing={publishing}
-          hasUnsavedChanges={hasUnsavedChanges}
-          autoSaveState={autoSaveState}
-          onPublish={publishHome}
-          onOpenRevisions={openRevisions}
-          onOpenPageSettings={() => setPageSettingsOpen(true)}
-          onDataChange={trackEditorData}
-        />
-        <EditorBody onSaveAsTemplate={saveBlockAsTemplate} />
-      </Puck>
+      {initialLoading ? (
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Spin size="large" />
+        </div>
+      ) : (
+        <Puck
+          key={editorKey}
+          config={editorConfig}
+          data={data}
+          viewports={VIEWPORT_PRESETS}
+          iframe={{ enabled: true, waitForStyles: true, syncHostStyles: true }}
+          onPublish={(nextData) => {
+            setData(nextData);
+            latestData.current = nextData;
+          }}
+          overrides={{
+            header: () => <span style={{ display: "none" }} />,
+            headerActions: () => <span style={{ display: "none" }} />,
+          }}
+        >
+          <EditorToolbar
+            lastSaved={lastSaved}
+            publishing={publishing}
+            hasUnsavedChanges={hasUnsavedChanges}
+            autoSaveState={autoSaveState}
+            onPublish={publishHome}
+            onOpenRevisions={openRevisions}
+            onOpenPageSettings={() => setPageSettingsOpen(true)}
+            onDataChange={trackEditorData}
+          />
+          <EditorBody onSaveAsTemplate={saveBlockAsTemplate} />
+        </Puck>
+      )}
     </div>
   );
 }
