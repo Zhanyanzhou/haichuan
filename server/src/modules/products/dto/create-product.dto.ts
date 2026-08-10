@@ -121,4 +121,9 @@ export class CreateProductDto {
   @Type(() => Boolean)
   @IsBoolean({ message: '定制标记必须是布尔值' })
   isCustom?: boolean;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean({ message: '多件优惠标记必须是布尔值' })
+  multiDiscount?: boolean;
 }

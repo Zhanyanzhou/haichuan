@@ -473,10 +473,10 @@ export const productApi = {
       await mockDelay(200);
       const product = getMockProducts().find((item) => item.id === productId) as any;
       if (!product) throw new Error("商品不存在");
-      const sku = product.skus?.find((s: any) => s.id === skuId);
-      if (sku) sku.isActive = false;
+      // 与真实后端一致：彻底删除而非停用
+      product.skus = (product.skus || []).filter((s: any) => s.id !== skuId);
       persistMockProducts();
-      return mockRes({ success: true });
+      return mockRes({ id: skuId });
     }
     return api.delete(`/products/${productId}/skus/${skuId}`);
   },

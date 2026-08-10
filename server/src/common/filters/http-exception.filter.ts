@@ -55,10 +55,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
           break;
       }
     }
-    // Prisma 校验异常
+    // Prisma 校验异常 — 透传真实消息便于调试
     else if (exception instanceof Prisma.PrismaClientValidationError) {
       status = HttpStatus.BAD_REQUEST;
-      message = '请求参数格式错误';
+      message = isProduction ? '请求参数格式错误' : `参数校验失败: ${exception.message}`;
+      this.logger.error('Prisma 校验异常', exception.stack);
     }
     // Prisma 连接异常
     else if (exception instanceof Prisma.PrismaClientInitializationError) {
@@ -80,7 +81,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.status(status).json({
       code: status,
       data: null,
-      message: Array.isArray(message) ? message[0] : message,
+      // class-validator 的 message 是数组（每个违规字段一条），合并展示
+      message: Array.isArray(message) ? message.join("；") : message,
       timestamp: new Date().toISOString(),
       path: request.url,
     });
