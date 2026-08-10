@@ -1,6 +1,6 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import OpenAI from 'openai';
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import OpenAI from "openai";
 
 /**
  * Kimi (月之暗面 Moonshot AI) 通用服务
@@ -9,18 +9,18 @@ import OpenAI from 'openai';
 @Injectable()
 export class KimiService implements OnModuleInit {
   private readonly logger = new Logger(KimiService.name);
-  private client: OpenAI;
-  private model: string;
+  private client!: OpenAI;
+  private model!: string;
 
   constructor(private configService: ConfigService) {}
 
   onModuleInit() {
-    const apiKey = this.configService.get<string>('KIMI_API_KEY');
-    const baseURL = this.configService.get<string>('KIMI_BASE_URL');
-    this.model = this.configService.get<string>('KIMI_MODEL', 'moonshot-v1-8k');
+    const apiKey = this.configService.get<string>("KIMI_API_KEY");
+    const baseURL = this.configService.get<string>("KIMI_BASE_URL");
+    this.model = this.configService.get<string>("KIMI_MODEL", "moonshot-v1-8k");
 
-    if (!apiKey || apiKey === 'sk-your-kimi-api-key-here') {
-      this.logger.warn('KIMI_API_KEY 未配置或为默认值，Kimi 服务将不可用');
+    if (!apiKey || apiKey === "sk-your-kimi-api-key-here") {
+      this.logger.warn("KIMI_API_KEY 未配置或为默认值，Kimi 服务将不可用");
       return;
     }
 
@@ -61,15 +61,17 @@ export class KimiService implements OnModuleInit {
         messages,
         temperature: options?.temperature ?? 0.7,
         max_tokens: options?.maxTokens ?? 2000,
-        response_format: options?.jsonMode ? { type: 'json_object' } : undefined,
+        response_format: options?.jsonMode
+          ? { type: "json_object" }
+          : undefined,
       });
 
       return {
-        content: response.choices[0]?.message?.content || '',
+        content: response.choices[0]?.message?.content || "",
         usage: response.usage,
       };
-    } catch (error) {
-      this.logger.error('Kimi API 调用失败', error);
+    } catch (error: any) {
+      this.logger.error("Kimi API 调用失败", error);
       throw new Error(`Kimi API 调用失败: ${error.message}`);
     }
   }
@@ -93,17 +95,17 @@ export class KimiService implements OnModuleInit {
 
     try {
       const response = await this.client.chat.completions.create({
-        model: 'moonshot-v1-8k-vision-preview',
+        model: this.model,
         messages: [
           {
-            role: 'user',
+            role: "user",
             content: [
               {
-                type: 'image_url',
+                type: "image_url",
                 image_url: { url: imageUrl },
               },
               {
-                type: 'text',
+                type: "text",
                 text: prompt,
               },
             ],
@@ -114,11 +116,11 @@ export class KimiService implements OnModuleInit {
       });
 
       return {
-        content: response.choices[0]?.message?.content || '',
+        content: response.choices[0]?.message?.content || "",
         usage: response.usage,
       };
-    } catch (error) {
-      this.logger.error('Kimi 图片识别失败', error);
+    } catch (error: any) {
+      this.logger.error("Kimi 图片识别失败", error);
       throw new Error(`Kimi 图片识别失败: ${error.message}`);
     }
   }
@@ -143,24 +145,26 @@ export class KimiService implements OnModuleInit {
     try {
       // 尝试解析 JSON，处理可能的 markdown 代码块包装
       let jsonStr = result.content.trim();
-      if (jsonStr.startsWith('```json')) {
+      if (jsonStr.startsWith("```json")) {
         jsonStr = jsonStr.slice(7);
-      } else if (jsonStr.startsWith('```')) {
+      } else if (jsonStr.startsWith("```")) {
         jsonStr = jsonStr.slice(3);
       }
-      if (jsonStr.endsWith('```')) {
+      if (jsonStr.endsWith("```")) {
         jsonStr = jsonStr.slice(0, -3);
       }
       return JSON.parse(jsonStr.trim()) as T;
     } catch (error) {
-      this.logger.error('Kimi JSON 解析失败', result.content);
-      throw new Error(`Kimi 返回的内容无法解析为 JSON: ${result.content.substring(0, 200)}`);
+      this.logger.error("Kimi JSON 解析失败", result.content);
+      throw new Error(
+        `Kimi 返回的内容无法解析为 JSON: ${result.content.substring(0, 200)}`,
+      );
     }
   }
 
   private ensureAvailable(): void {
     if (!this.client) {
-      throw new Error('Kimi 服务未初始化，请检查 KIMI_API_KEY 环境变量配置');
+      throw new Error("Kimi 服务未初始化，请检查 KIMI_API_KEY 环境变量配置");
     }
   }
 }

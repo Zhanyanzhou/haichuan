@@ -6,14 +6,14 @@ export class HomepageService {
   constructor(private prisma: PrismaService) {}
 
   async getConfig() {
-    return (this.prisma as any).homeSection.findMany({
+    return this.prisma.homeSection.findMany({
       where: { isEnabled: true },
       orderBy: { sortOrder: 'asc' },
     });
   }
 
   async getAdminConfig() {
-    return (this.prisma as any).homeSection.findMany({
+    return this.prisma.homeSection.findMany({
       orderBy: { sortOrder: 'asc' },
     });
   }
@@ -22,21 +22,21 @@ export class HomepageService {
     const operations = sections.map((section, index) => {
       const { id, ...data } = section;
       const normalized = { ...data, sortOrder: index + 1 };
-      return (this.prisma as any).homeSection.upsert({
+      return this.prisma.homeSection.upsert({
         where: { id: id || 0 },
         update: normalized,
         create: normalized,
       });
     });
-    const results = await (this.prisma as any).$transaction(operations);
+    const results = await this.prisma.$transaction(operations);
     return results.sort((a: any, b: any) => a.sortOrder - b.sortOrder);
   }
 
   async deleteSection(id: number) {
-    return (this.prisma as any).homeSection.delete({ where: { id } });
+    return this.prisma.homeSection.delete({ where: { id } });
   }
 
   async createSection(data: any) {
-    return (this.prisma as any).homeSection.create({ data });
+    return this.prisma.homeSection.create({ data });
   }
 }

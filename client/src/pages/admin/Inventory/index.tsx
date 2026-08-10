@@ -37,6 +37,18 @@ export default function Inventory() {
     } catch (e: any) { message.error(e?.message || '调整失败'); }
   };
 
+  const handleExport = () => {
+    const csv = ['SKU,产品,仓库,库存,状态']
+      .concat(filtered.map(i => `${i.skuCode},${i.productName},${i.warehouse},${i.quantity},${sm[i.status]?.t || i.status}`))
+      .join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `库存报表_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+    message.success('导出成功');
+  };
+
   const stats = [
     { t: '库存总数', v: items.length },
     { t: '正常', v: items.filter(i => i.status === 'normal').length },
@@ -47,7 +59,7 @@ export default function Inventory() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between"><div><h1 className="text-2xl font-display font-semibold text-brand-text">库存管理</h1><p className="text-sm text-brand-muted mt-1">多仓库 · 安全预警</p></div>
-        <Space><Select value={filter} onChange={setFilter} className="w-32"><Select.Option value="all">全部</Select.Option><Select.Option value="normal">正常</Select.Option><Select.Option value="low">偏低</Select.Option><Select.Option value="out">缺货</Select.Option></Select><Button icon={<ExportOutlined />}>导出</Button></Space></div>
+        <Space><Select value={filter} onChange={setFilter} className="w-32"><Select.Option value="all">全部</Select.Option><Select.Option value="normal">正常</Select.Option><Select.Option value="low">偏低</Select.Option><Select.Option value="out">缺货</Select.Option></Select><Button icon={<ExportOutlined />} onClick={handleExport}>导出</Button></Space></div>
       <div className="grid grid-cols-4 gap-4">
         {stats.map(s => (
           <div key={s.t} className="bg-white border border-brand-line p-4"><p className="text-xs text-brand-muted">{s.t}</p><p className="text-xl font-sans font-bold text-brand-text mt-1">{s.v}</p></div>

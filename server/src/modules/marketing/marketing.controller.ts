@@ -30,4 +30,7 @@ export class MarketingController {
 
   @ApiOperation({ summary: '创建优惠券' })
   @Post('coupons') createCoupon(@Body() b: any) { return this.marketingService.createCoupon(b); }
+
+  @ApiOperation({ summary: '更新优惠券' })
+  @Put('coupons/:id') updateCoupon(@Param('id') id: string, @Body() b: any) { return this.marketingService.updateCoupon(+id, b); }
 }

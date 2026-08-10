@@ -13,7 +13,7 @@ export type PermissionKey =
   | 'logs.read'
   | 'system.read' | 'system.manage';
 
-export type RoleKey = 'SUPER_ADMIN' | 'PRODUCT_OPERATOR' | 'CONTENT_OPERATOR' | 'LEAD_ADVISOR' | 'READ_ONLY';
+export type RoleKey = 'SUPER_ADMIN' | 'ADMIN' | 'EDITOR' | 'CUSTOMER_SERVICE' | 'WAREHOUSE';
 
 const ROLE_PERMISSIONS: Record<RoleKey, PermissionKey[]> = {
   SUPER_ADMIN: [
@@ -25,30 +25,30 @@ const ROLE_PERMISSIONS: Record<RoleKey, PermissionKey[]> = {
     'logs.read',
     'system.read', 'system.manage',
   ],
-  PRODUCT_OPERATOR: [
+  ADMIN: [
     'dashboard.read',
     'products.read', 'products.create', 'products.update', 'products.publish',
-    'content.read',
-    'leads.read',
+    'content.read', 'content.update', 'content.publish',
+    'leads.read', 'leads.update',
+    'admins.read',
+    'logs.read',
+    'system.read',
   ],
-  CONTENT_OPERATOR: [
+  EDITOR: [
     'dashboard.read',
-    'products.read',
+    'products.read', 'products.create', 'products.update', 'products.publish',
     'content.read', 'content.update', 'content.publish',
     'leads.read',
   ],
-  LEAD_ADVISOR: [
+  CUSTOMER_SERVICE: [
     'dashboard.read',
     'products.read',
     'content.read',
     'leads.read', 'leads.update',
   ],
-  READ_ONLY: [
+  WAREHOUSE: [
     'dashboard.read',
     'products.read',
-    'content.read',
-    'leads.read',
-    'logs.read',
   ],
 };
 

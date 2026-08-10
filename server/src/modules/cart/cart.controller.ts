@@ -25,15 +25,15 @@ export class CartController {
   @Public()
   @Put(':id')
   @ApiOperation({ summary: '更新购物车商品数量' })
-  updateQuantity(@Param('id') id: string, @Body('quantity') quantity: number) {
-    return this.cartService.updateQuantity(+id, quantity);
+  updateQuantity(@Param('id') id: string, @Body('quantity') quantity: number, @Headers('x-session-id') sessionId?: string) {
+    return this.cartService.updateQuantity(+id, quantity, sessionId);
   }
 
   @Public()
   @Delete(':id')
   @ApiOperation({ summary: '从购物车移除商品' })
-  removeItem(@Param('id') id: string) {
-    return this.cartService.removeItem(+id);
+  removeItem(@Param('id') id: string, @Headers('x-session-id') sessionId?: string) {
+    return this.cartService.removeItem(+id, sessionId);
   }
 
   @Public()

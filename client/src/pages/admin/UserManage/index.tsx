@@ -17,6 +17,9 @@ export default function UserManage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [form] = Form.useForm();
+  const [resetPwdOpen, setResetPwdOpen] = useState(false);
+  const [resetPwdUser, setResetPwdUser] = useState<User | null>(null);
+  const [resetPwdForm] = Form.useForm();
 
   const load = async () => {
     setLoading(true);
@@ -67,6 +70,18 @@ export default function UserManage() {
     } catch (e: any) { message.error(e?.message || '删除失败'); }
   };
 
+  const handleResetPwd = async () => {
+    const values = await resetPwdForm.validateFields();
+    if (!resetPwdUser) return;
+    try {
+      await userApi.update(resetPwdUser.id, { password: values.newPassword });
+      message.success('密码已重置');
+      setResetPwdOpen(false);
+      setResetPwdUser(null);
+      resetPwdForm.resetFields();
+    } catch (e: any) { message.error(e?.message || '重置失败'); }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between"><div><h1 className="text-2xl font-display font-semibold text-brand-text">用户管理</h1><p className="text-sm text-brand-muted mt-1">RBAC 五角色权限</p></div>
@@ -86,7 +101,7 @@ export default function UserManage() {
             { title: '操作', render: (_: any, r: User) => (
               <Space>
                 <Button size="small" icon={<EditOutlined />} type="text" onClick={() => openEdit(r)}>编辑</Button>
-                <Button size="small" icon={<LockOutlined />} type="text">重置密码</Button>
+                <Button size="small" icon={<LockOutlined />} type="text" onClick={() => { setResetPwdUser(r); resetPwdForm.resetFields(); setResetPwdOpen(true); }}>重置密码</Button>
                 <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.id)}>
                   <Button size="small" icon={<DeleteOutlined />} type="text" danger>删除</Button>
                 </Popconfirm>
@@ -112,6 +127,13 @@ export default function UserManage() {
             </Form.Item>
           </div>
           {!editing && <Form.Item name="password" label="密码"><Input.Password placeholder="登录密码" /></Form.Item>}
+        </Form>
+      </Modal>
+      <Modal title={`重置密码 — ${resetPwdUser?.realName || ''}`} open={resetPwdOpen} onOk={handleResetPwd} onCancel={() => { setResetPwdOpen(false); setResetPwdUser(null); }} okText="确认重置">
+        <Form form={resetPwdForm} layout="vertical">
+          <Form.Item name="newPassword" label="新密码" rules={[{ required: true, message: '请输入新密码' }, { min: 6, message: '至少6位' }]}>
+            <Input.Password placeholder="输入新密码" />
+          </Form.Item>
         </Form>
       </Modal>
     </div>

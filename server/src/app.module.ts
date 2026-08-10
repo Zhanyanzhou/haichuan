@@ -11,6 +11,8 @@ import { UploadModule } from './modules/upload/upload.module';
 import { GoldPriceModule } from './modules/gold-price/gold-price.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { CustomersModule } from './modules/customers/customers.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { CartModule } from './modules/cart/cart.module';
 import { InquiriesModule } from './modules/inquiries/inquiries.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -46,6 +48,8 @@ import { KimiModule } from './common/kimi/kimi.module';
     GoldPriceModule,
     InventoryModule,
     OrdersModule,
+    CustomersModule,
+    PaymentsModule,
     CartModule,
     InquiriesModule,
     NotificationsModule,

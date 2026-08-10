@@ -2,6 +2,7 @@ import { Button, Result } from 'antd';
 
 interface Props {
   message?: string;
+  description?: string;
   onRetry?: () => void;
 }
 
@@ -16,21 +17,23 @@ export function AdminLoadingState() {
   );
 }
 
-export function AdminEmptyState({ message = '暂无数据' }: Props) {
+export function AdminEmptyState({ message, description }: Props) {
+  const text = description ?? message ?? '暂无数据';
   return (
     <Result
       style={{ padding: '40px 0' }}
-      subTitle={<span style={{ color: '#96928A' }}>{message}</span>}
+      subTitle={<span style={{ color: '#96928A' }}>{text}</span>}
     />
   );
 }
 
-export function AdminErrorState({ message = '加载失败', onRetry }: Props) {
+export function AdminErrorState({ message, description, onRetry }: Props) {
+  const text = description ?? message ?? '加载失败';
   return (
     <Result
       status="error"
       title="加载失败"
-      subTitle={<span style={{ color: '#96928A' }}>{message}</span>}
+      subTitle={<span style={{ color: '#96928A' }}>{text}</span>}
       extra={onRetry && <Button onClick={onRetry} style={{ borderColor: '#E7E6E2', color: '#66645F' }}>重新加载</Button>}
     />
   );

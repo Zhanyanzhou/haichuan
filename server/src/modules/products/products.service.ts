@@ -2,6 +2,10 @@ import { Injectable, BadRequestException, NotFoundException, ConflictException }
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateProductDto, UpdateProductDto } from './dto';
 import { Prisma } from '@prisma/client';
+import { EventEmitter } from 'events';
+import { fromEvent, map, Observable, startWith } from 'rxjs';
+import { MessageEvent } from '@nestjs/common';
+import { ProductMediaService } from './product-media.service';
 
 /** 从 DTO 提取 Prisma create 数据，过滤关系字段和系统字段 */
 function mapCreateDto(dto: CreateProductDto): Prisma.ProductCreateInput {
@@ -78,11 +82,23 @@ function mapUpdateDto(dto: UpdateProductDto): Prisma.ProductUpdateInput {
 
 @Injectable()
 export class ProductsService {
-  constructor(private prisma: PrismaService) {}
+  private readonly publicEvents = new EventEmitter();
+
+  constructor(
+    private prisma: PrismaService,
+    private productMedia: ProductMediaService,
+  ) {}
 
   async findAll(params: any) {
-    const { page = 1, pageSize = 20, categoryId, status, keyword, materialType, salesMode, isHot, isRecommended, sortBy } = params;
+    const { page = 1, pageSize = 20, categoryId, status, keyword, materialType, salesMode, isHot, isRecommended, sortBy, ids } = params;
     const where: any = { deletedAt: null };
+    if (ids) {
+      const idList = String(ids)
+        .split(',')
+        .map((id) => Number(id.trim()))
+        .filter((id) => Number.isInteger(id) && id > 0);
+      if (idList.length > 0) where.id = { in: idList };
+    }
     if (categoryId) where.categoryId = +categoryId;
     if (status) where.status = status;
     if (materialType) where.materialType = materialType;
@@ -124,6 +140,39 @@ export class ProductsService {
     return { list: enrichedList, total, page: _page, pageSize: _pageSize };
   }
 
+  async findPublic(params: any) {
+    const all = await this.findAll({ ...params, status: 'PUBLISHED', page: 1, pageSize: 5000 });
+    const visible = all.list
+      .map((product: any) => this.withAvailableImages(product))
+      .filter((product: any) => product.images.length > 0);
+
+    const page = Math.max(1, Number(params.page) || 1);
+    const pageSize = Math.min(2000, Math.max(1, Number(params.pageSize) || 20));
+    const start = (page - 1) * pageSize;
+
+    return {
+      list: visible.slice(start, start + pageSize),
+      total: visible.length,
+      page,
+      pageSize,
+    };
+  }
+
+  async findPublicById(id: number) {
+    const product = await this.findById(id);
+    if (!product || product.status !== 'PUBLISHED' || product.deletedAt) return null;
+
+    const visible = this.withAvailableImages(product);
+    return visible.images.length > 0 ? visible : null;
+  }
+
+  publicChangeStream(): Observable<MessageEvent> {
+    return fromEvent(this.publicEvents, 'products-changed').pipe(
+      map((data) => ({ data }) as MessageEvent),
+      startWith({ data: { type: 'ready' } } as MessageEvent),
+    );
+  }
+
   calcCompleteness(product: any): { isComplete: boolean; missingFields: string[]; score: number } {
     const missing: string[] = [];
     if (!product.name) missing.push('name');
@@ -162,7 +211,9 @@ export class ProductsService {
     const data = mapCreateDto(dto);
 
     try {
-      return await this.prisma.product.create({ data });
+      const product = await this.prisma.product.create({ data });
+      this.notifyPublicChange(product.id);
+      return product;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
@@ -191,7 +242,9 @@ export class ProductsService {
     const data = mapUpdateDto(dto);
 
     try {
-      return await this.prisma.product.update({ where: { id }, data });
+      const product = await this.prisma.product.update({ where: { id }, data });
+      this.notifyPublicChange(product.id);
+      return product;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
@@ -213,15 +266,17 @@ export class ProductsService {
     return this.calcCompleteness(product);
   }
   async delete(id: number) {
-    return this.prisma.product.update({
+    const product = await this.prisma.product.update({
       where: { id },
       data: { deletedAt: new Date(), status: 'OFFLINE' },
     });
+    this.notifyPublicChange(product.id);
+    return product;
   }
 
   /* ═══ 图片管理 ═══ */
   async addImage(productId: number, data: { url: string; type?: string; sortOrder?: number; sourceImageId?: number; cropData?: any; width?: number; height?: number; mimeType?: string; fileSize?: number }) {
-    return this.prisma.productImage.create({
+    const image = await this.prisma.productImage.create({
       data: {
         productId,
         url: data.url,
@@ -236,14 +291,20 @@ export class ProductsService {
         fileSize: data.fileSize ?? null,
       },
     });
+    this.notifyPublicChange(productId);
+    return image;
   }
 
   async updateImage(imageId: number, data: { type?: string; sortOrder?: number }) {
-    return this.prisma.productImage.update({ where: { id: imageId }, data: data as any });
+    const image = await this.prisma.productImage.update({ where: { id: imageId }, data: data as any });
+    this.notifyPublicChange(image.productId);
+    return image;
   }
 
   async deleteImage(imageId: number) {
-    return this.prisma.productImage.delete({ where: { id: imageId } });
+    const image = await this.prisma.productImage.delete({ where: { id: imageId } });
+    this.notifyPublicChange(image.productId);
+    return image;
   }
 
   /** 设置详情主图 */
@@ -265,6 +326,7 @@ export class ProductsService {
       });
     }
     
+    this.notifyPublicChange(productId);
     return { primaryImageId: imageId, listingImageId: product.listingImageId || imageId };
   }
 
@@ -278,6 +340,7 @@ export class ProductsService {
       data: { listingImageId: imageId },
     });
     
+    this.notifyPublicChange(productId);
     return { listingImageId: imageId };
   }
 
@@ -291,6 +354,28 @@ export class ProductsService {
       data: { listingImageId: product.primaryImageId },
     });
     
+    this.notifyPublicChange(productId);
     return { listingImageId: product.primaryImageId };
+  }
+
+  private withAvailableImages(product: any) {
+    const images = (product.images || []).filter((image: any) => this.productMedia.isAvailable(image.url));
+    const findAvailableImage = (image: any) => image && images.find((item: any) => item.id === image.id) ? image : null;
+
+    return {
+      ...product,
+      images,
+      primaryImage: findAvailableImage(product.primaryImage),
+      listingImage: findAvailableImage(product.listingImage),
+    };
+  }
+
+  private notifyPublicChange(productId?: number): void {
+    this.productMedia.invalidate();
+    this.publicEvents.emit('products-changed', {
+      type: 'products-changed',
+      productId,
+      changedAt: new Date().toISOString(),
+    });
   }
 }

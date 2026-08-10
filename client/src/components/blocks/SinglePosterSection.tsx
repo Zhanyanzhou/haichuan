@@ -34,6 +34,7 @@ export default function SinglePosterSection({ module, editMode }: Props) {
   const s = module?.styleConfig;
 
   const desktopImg = c?.desktopImage || defaults.image;
+  const mobileImg = c?.mobileImage || desktopImg;
   const number = c?.number || defaults.number;
   const label = c?.label || defaults.label;
   const title = c?.title || defaults.title;
@@ -71,14 +72,18 @@ export default function SinglePosterSection({ module, editMode }: Props) {
         </div>
         <div className="col-span-12 md:col-span-9 mt-8 md:mt-0">
           <div className="overflow-hidden" style={{
-            width: 'clamp(600px,82vw,1460px)', height: 'clamp(480px,76vh,860px)',
+            // 宽度不再在窄屏强制保留 600px，避免图片被父容器裁掉。
+            width: 'min(100%, clamp(600px,82vw,1460px))', height: 'min(76svh, 140vw)', minHeight: '480px', maxHeight: '860px',
             marginLeft: 'auto', marginRight: '0',
             opacity: rm || visible ? 1 : 0,
             transform: rm || visible ? 'scale(1)' : 'scale(1.015) translateY(14px)',
             transition: 'opacity 0.95s ease, transform 0.95s ease',
           }}>
-            <img src={desktopImg} alt={title} className="w-full h-full object-cover" loading="lazy" decoding="async"
-              style={{ objectPosition: `${focusX}% ${focusY}%` }} />
+            <picture className="block w-full h-full">
+              <source media="(max-width: 1023px) and (orientation: portrait)" srcSet={mobileImg} />
+              <img src={desktopImg} alt={title} className="w-full h-full object-cover" loading="lazy" decoding="async"
+                style={{ objectPosition: `${focusX}% ${focusY}%` }} />
+            </picture>
           </div>
         </div>
       </div>

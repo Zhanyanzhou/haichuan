@@ -1,14 +1,20 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { extname, join, relative } from 'path';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join, resolve, sep } from 'path';
+import { existsSync, mkdirSync } from 'fs';
+import { writeFile } from 'fs/promises';
 import { randomUUID } from 'crypto';
 import * as dayjs from 'dayjs';
 const sharp = require('sharp');
 
 @Injectable()
 export class UploadService {
-  private readonly uploadDir = join(process.cwd(), '..', 'uploads');
-  private readonly allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  private readonly uploadDir = join(process.cwd(), 'uploads');
+  private readonly allowedTypes = new Map([
+    ['image/jpeg', { format: 'jpeg', extension: '.jpg' }],
+    ['image/png', { format: 'png', extension: '.png' }],
+    ['image/webp', { format: 'webp', extension: '.webp' }],
+    ['image/gif', { format: 'gif', extension: '.gif' }],
+  ]);
   private readonly maxSize = 10 * 1024 * 1024; // 10MB
 
   constructor() {
@@ -29,7 +35,8 @@ export class UploadService {
   async uploadFile(file: Express.Multer.File): Promise<{ url: string; filename: string; size: number }> {
     if (!file) throw new BadRequestException('未选择文件');
 
-    if (!this.allowedTypes.includes(file.mimetype)) {
+    const expectedType = this.allowedTypes.get(file.mimetype);
+    if (!expectedType) {
       throw new BadRequestException(`不支持的文件类型: ${file.mimetype}`);
     }
 
@@ -42,9 +49,19 @@ export class UploadService {
       mkdirSync(dateDir, { recursive: true });
     }
 
-    const filename = `${randomUUID()}${extname(file.originalname)}`;
+    let metadata: { format?: string };
+    try {
+      metadata = await sharp(file.buffer).metadata();
+    } catch {
+      throw new BadRequestException('文件内容不是有效图片');
+    }
+    if (metadata.format !== expectedType.format) {
+      throw new BadRequestException('文件内容与声明的图片类型不一致');
+    }
+
+    const filename = `${randomUUID()}${expectedType.extension}`;
     const filepath = join(dateDir, filename);
-    writeFileSync(filepath, file.buffer);
+    await writeFile(filepath, file.buffer);
 
     const relativePath = join(dayjs().format('YYYY/MM/DD'), filename).replace(/\\/g, '/');
     const url = `/uploads/${relativePath}`;
@@ -70,7 +87,10 @@ export class UploadService {
     if (file.size > 100 * 1024 * 1024) {
       throw new BadRequestException('视频大小不能超过 100MB');
     }
-    const relativePath = relative(this.uploadDir, file.path).replace(/\\/g, '/');
+    const relativePath = file.path.slice(this.uploadDir.length).replace(/^[\\/]+/, '').replace(/\\/g, '/');
+    if (!relativePath || relativePath.startsWith('..')) {
+      throw new BadRequestException('视频存储路径无效');
+    }
     return { url: `/uploads/${relativePath}`, filename: file.filename, size: file.size };
   }
 
@@ -100,7 +120,11 @@ export class UploadService {
     outputSize: number = 1200,
     format: 'webp' | 'jpeg' = 'webp',
   ): Promise<{ url: string }> {
-    const fullSourcePath = join(this.uploadDir, sourcePath);
+    const uploadRoot = resolve(this.uploadDir);
+    const fullSourcePath = resolve(uploadRoot, sourcePath);
+    if (fullSourcePath !== uploadRoot && !fullSourcePath.startsWith(`${uploadRoot}${sep}`)) {
+      throw new BadRequestException('图片路径无效');
+    }
     if (!existsSync(fullSourcePath)) {
       throw new BadRequestException('原始图片不存在');
     }

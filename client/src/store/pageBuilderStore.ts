@@ -21,6 +21,8 @@ interface PageBuilderState {
   lastSavedAt: string | null;
   saveError: string | null;
   publishError: string | null;
+  history: PageModule[][];
+  historyIndex: number;
 
   // actions
   setPageKey: (key: string) => void;
@@ -41,6 +43,9 @@ interface PageBuilderState {
   setSaveError: (e: string | null) => void;
   setPublishError: (e: string | null) => void;
   setLastSavedAt: (t: string | null) => void;
+  undo: () => void;
+  redo: () => void;
+  pushHistory: () => void;
   resetStore: () => void;
 }
 
@@ -57,49 +62,94 @@ const initialState = {
   lastSavedAt: null as string | null,
   saveError: null as string | null,
   publishError: null as string | null,
+  history: [] as PageModule[][],
+  historyIndex: -1,
 };
+
+const MAX_HISTORY = 50;
 
 export const usePageBuilderStore = create<PageBuilderState>((set, get) => ({
   ...initialState,
 
+  pushHistory: () => {
+    const { modules, history, historyIndex } = get();
+    const snapshot = JSON.parse(JSON.stringify(modules));
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push(snapshot);
+    if (newHistory.length > MAX_HISTORY) newHistory.shift();
+    set({ history: newHistory, historyIndex: newHistory.length - 1 });
+  },
+
+  undo: () => {
+    const { history, historyIndex } = get();
+    if (historyIndex <= 0) return;
+    const newIdx = historyIndex - 1;
+    set({ modules: JSON.parse(JSON.stringify(history[newIdx])), historyIndex: newIdx, isDirty: true });
+  },
+
+  redo: () => {
+    const { history, historyIndex } = get();
+    if (historyIndex >= history.length - 1) return;
+    const newIdx = historyIndex + 1;
+    set({ modules: JSON.parse(JSON.stringify(history[newIdx])), historyIndex: newIdx, isDirty: true });
+  },
+
   setPageKey: (key) => set({ pageKey: key }),
-  setModules: (modules) => set({ modules }),
+  setModules: (modules) => {
+    const snapshot = JSON.parse(JSON.stringify(modules));
+    set({ modules, history: [snapshot], historyIndex: 0, isDirty: false });
+  },
 
   selectModule: (id) => set({ selectedModuleId: id }),
 
   hoverModule: (id) => set({ hoveredModuleId: id }),
 
-  patchModule: (id, patch) => set(state => ({
-    modules: state.modules.map(m => m.id === id ? { ...m, ...patch } : m),
-    isDirty: true,
-  })),
+  patchModule: (id, patch) => {
+    get().pushHistory();
+    set(state => ({
+      modules: state.modules.map(m => m.id === id ? { ...m, ...patch } : m),
+      isDirty: true,
+    }));
+  },
 
-  addModule: (module) => set(state => ({
-    modules: [...state.modules, module],
-    selectedModuleId: module.id,
-    isDirty: true,
-  })),
+  addModule: (module) => {
+    get().pushHistory();
+    set(state => ({
+      modules: [...state.modules, module],
+      selectedModuleId: module.id,
+      isDirty: true,
+    }));
+  },
 
-  removeModule: (id) => set(state => ({
-    modules: state.modules.filter(m => m.id !== id),
-    selectedModuleId: state.selectedModuleId === id ? null : state.selectedModuleId,
-    isDirty: true,
-  })),
+  removeModule: (id) => {
+    get().pushHistory();
+    set(state => ({
+      modules: state.modules.filter(m => m.id !== id),
+      selectedModuleId: state.selectedModuleId === id ? null : state.selectedModuleId,
+      isDirty: true,
+    }));
+  },
 
-  moveModule: (id, direction) => set(state => {
-    const idx = state.modules.findIndex(m => m.id === id);
-    if (idx < 0) return state;
-    const newIdx = direction === 'up' ? idx - 1 : idx + 1;
-    if (newIdx < 0 || newIdx >= state.modules.length) return state;
-    const arr = [...state.modules];
-    [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
-    return { modules: arr, isDirty: true };
-  }),
+  moveModule: (id, direction) => {
+    get().pushHistory();
+    set(state => {
+      const idx = state.modules.findIndex(m => m.id === id);
+      if (idx < 0) return state;
+      const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (newIdx < 0 || newIdx >= state.modules.length) return state;
+      const arr = [...state.modules];
+      [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
+      return { modules: arr, isDirty: true };
+    });
+  },
 
-  toggleModuleVisible: (id) => set(state => ({
-    modules: state.modules.map(m => m.id === id ? { ...m, isVisible: !m.isVisible } : m),
-    isDirty: true,
-  })),
+  toggleModuleVisible: (id) => {
+    get().pushHistory();
+    set(state => ({
+      modules: state.modules.map(m => m.id === id ? { ...m, isVisible: !m.isVisible } : m),
+      isDirty: true,
+    }));
+  },
 
   setViewport: (vp) => set({ viewport: vp }),
   setEditorMode: (mode) => set({ editorMode: mode }),

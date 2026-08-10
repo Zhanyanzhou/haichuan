@@ -1,12 +1,37 @@
 {
-    "prisma.pinToPrisma6": true,
+  "prisma.pinToPrisma6": true,
 
-    // 关掉从 GitHub 下载 JSON Schema（国内网络问题）
-    "json.schemaDownload.enable": false,
+  // 关掉从 GitHub 下载 JSON Schema（国内网络问题）
+  "json.schemaDownload.enable": false,
 
-    // cSpell 拼写检查：只对英文文档开启，不影响代码
-    "cSpell.enabled": false,
+  // cSpell 拼写检查：只对英文文档开启，不影响代码
+  "cSpell.enabled": false,
 
-    // Todo Tree：指定 ripgrep 路径
-    "todo-tree.general.ripgrep": "C:\\Users\\Administrator\\AppData\\Local\\Programs\\Microsoft VS Code\\e4c7e7b1d6\\resources\\app\\extensions\\copilot\\node_modules\\@github\\copilot\\sdk\\ripgrep\\bin\\win32-x64\\rg.exe"
+  // Todo Tree：指定 ripgrep 路径
+  "todo-tree.general.ripgrep": "C:\\Users\\Administrator\\AppData\\Local\\Programs\\Microsoft VS Code\\e4c7e7b1d6\\resources\\app\\extensions\\copilot\\node_modules\\@github\\copilot\\sdk\\ripgrep\\bin\\win32-x64\\rg.exe",
+
+  // === 格式化 ===
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "[typescript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[typescriptreact]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[json]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[prisma]": { "editor.defaultFormatter": "Prisma.prisma" },
+
+  // === Tailwind ===
+  "tailwindCSS.experimental.classRegex": [
+    ["cva\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"]
+  ],
+
+  // === 文件排除 ===
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/.turbo": true
+  },
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/uploads/**": true
+  }
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Card, Tabs, Table, Image, Button, Tag, message, Popconfirm } from 'antd';
+import { useNavigate } from 'react-router-dom';
+import { Card, Tabs, Table, Image, Button, Tag, message, Popconfirm, Empty, Space } from 'antd';
 import { PictureOutlined, FileImageOutlined, DeleteOutlined, LinkOutlined } from '@ant-design/icons';
 import { productApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
@@ -9,10 +10,11 @@ import { AdminLoadingState, AdminEmptyState, AdminErrorState } from '@/component
 import type { PaginatedResult } from '@/types';
 
 export default function MediaLibrary() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [images, setImages] = useState<any[]>([]);
-  const [tab, setTab] = useState('products');
+  const [tab, setTab] = useState('pages');
 
   const load = async () => {
     setLoading(true); setError('');
@@ -30,7 +32,9 @@ export default function MediaLibrary() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (tab === 'products') load();
+  }, [tab]);
 
   const handleDelete = async (img: any) => {
     try {
@@ -54,20 +58,34 @@ export default function MediaLibrary() {
 
   return (
     <div>
-      <AdminPageHeader title="素材库" subtitle="管理产品图片和页面素材" />
+      <AdminPageHeader title="页面素材" subtitle="为首页装修准备图片与视频；商品图片请在商品模块维护" />
       <Card style={{ borderRadius: 10, border: '1px solid #E7E6E2', boxShadow: '0 6px 20px rgba(40,36,30,0.035)' }}>
         <Tabs activeKey={tab} onChange={setTab} items={[
           {
-            key: 'products', label: <span><PictureOutlined /> 产品图片</span>,
+            key: 'pages', label: <span><FileImageOutlined /> 页面素材</span>,
+            children: (
+              <div style={{ minHeight: 320, display: 'grid', placeItems: 'center' }}>
+                <Empty
+                  image={<FileImageOutlined style={{ fontSize: 46, color: '#B69052' }} />}
+                  description={<span>页面素材将直接在首页装修中上传和引用</span>}
+                >
+                  <Space>
+                    <Button type="primary" onClick={() => navigate('/admin/editor/home')} style={{ background: '#B69052', borderColor: '#B69052' }}>
+                      进入首页装修
+                    </Button>
+                    <Button onClick={() => setTab('products')}>管理商品图片</Button>
+                  </Space>
+                </Empty>
+              </div>
+            ),
+          },
+          {
+            key: 'products', label: <span><PictureOutlined /> 商品图片</span>,
             children: loading ? <AdminLoadingState /> :
               error ? <AdminErrorState message={error} onRetry={load} /> :
                 images.length === 0 ? <AdminEmptyState message="暂无产品图片" /> :
                   <Table dataSource={images} rowKey="id" columns={columns} size="middle"
                     pagination={{ pageSize: 20, showTotal: t => `共 ${t} 张` }} />,
-          },
-          {
-            key: 'pages', label: <span><FileImageOutlined /> 页面素材</span>,
-            children: <AdminEmptyState message="页面素材功能即将上线" />,
           },
         ]} />
       </Card>

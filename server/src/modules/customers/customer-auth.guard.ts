@@ -1,0 +1,36 @@
+import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../../common/prisma/prisma.service';
+
+@Injectable()
+export class CustomerAuthGuard implements CanActivate {
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest();
+    const authorization = request.headers.authorization;
+    const token = typeof authorization === 'string' && authorization.startsWith('Bearer ')
+      ? authorization.slice(7)
+      : null;
+    if (!token) throw new UnauthorizedException('请先验证订单访问身份');
+
+    try {
+      const payload = await this.jwtService.verifyAsync<{ sub: number; type?: string }>(token);
+      if (payload.type !== 'customer' || !Number.isInteger(payload.sub)) {
+        throw new UnauthorizedException('客户访问令牌无效');
+      }
+      const customer = await this.prisma.customer.findUnique({ where: { id: payload.sub } });
+      if (!customer || customer.status === 'DISABLED') {
+        throw new UnauthorizedException('客户访问身份无效');
+      }
+      request.customer = customer;
+      return true;
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error;
+      throw new UnauthorizedException('客户访问令牌已失效');
+    }
+  }
+}

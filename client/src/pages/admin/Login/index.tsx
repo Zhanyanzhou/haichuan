@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Form, Input, Button, Checkbox } from 'antd';
+import { Form, Input, Checkbox } from 'antd';
+import type { InputRef } from 'antd';
 import { UserOutlined, LockOutlined, EyeInvisibleOutlined, EyeOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
 import { authApi } from '@/services/api';
@@ -32,6 +33,9 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [remember, setRemember] = useState(false);
+  const [credentials, setCredentials] = useState({ username: '', password: '' });
+  const usernameInputRef = useRef<InputRef>(null);
+  const passwordInputRef = useRef<InputRef>(null);
   const navigate = useNavigate();
   const setAuth = useAuthStore((s) => s.setAuth);
 
@@ -41,6 +45,7 @@ export default function Login() {
     if (saved) {
       setRemember(true);
       form.setFieldsValue({ username: saved });
+      setCredentials((current) => ({ ...current, username: saved }));
     }
   }, [form]);
 
@@ -73,7 +78,7 @@ export default function Login() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-5"
+      className="min-h-screen flex items-center justify-center px-5 overflow-y-auto py-8"
       style={{ background: `radial-gradient(ellipse at 50% 40%, ${TOKENS.bgLight} 0%, ${TOKENS.bg} 60%, #EBE6DF 100%)` }}
     >
       {/* 卡片 */}
@@ -116,12 +121,16 @@ export default function Login() {
             style={{ marginBottom: 20 }}
           >
             <Input
+              ref={usernameInputRef}
+              id="admin-login-username"
               prefix={<UserOutlined style={{ color: TOKENS.placeholder }} />}
               placeholder="输入用户名"
               autoFocus
               onChange={(e) => {
                 // 实时过滤：只保留英文和数字
-                e.target.value = e.target.value.replace(/[^a-zA-Z0-9]/g, '');
+                const username = e.target.value.replace(/[^a-zA-Z0-9]/g, '');
+                e.target.value = username;
+                setCredentials((current) => ({ ...current, username }));
               }}
               style={{
                 height: 56,
@@ -143,8 +152,13 @@ export default function Login() {
             style={{ marginBottom: 24 }}
           >
             <Input.Password
+              ref={passwordInputRef}
+              id="admin-login-password"
               prefix={<LockOutlined style={{ color: TOKENS.placeholder }} />}
               placeholder="输入密码"
+              onChange={(e) => {
+                setCredentials((current) => ({ ...current, password: e.target.value }));
+              }}
               iconRender={(visible) =>
                 visible ? (
                   <EyeOutlined style={{ color: TOKENS.muted }} aria-label="隐藏密码" />
@@ -186,12 +200,22 @@ export default function Login() {
           )}
 
           {/* 登录按钮 */}
-          <Button
-            type="primary"
-            htmlType="submit"
-            loading={loading}
-            block
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => {
+              const usernameElement = document.getElementById('admin-login-username') as HTMLInputElement | null;
+              const passwordElement = document.getElementById('admin-login-password') as HTMLInputElement | null;
+              const username = usernameElement?.value.trim() || credentials.username;
+              const password = passwordElement?.value || credentials.password;
+              if (!username || !password) {
+                setError('请输入用户名和密码');
+                return;
+              }
+              void onFinish({ username, password });
+            }}
             style={{
+              width: '100%',
               height: 54,
               borderRadius: 8,
               background: TOKENS.accent,
@@ -215,7 +239,7 @@ export default function Login() {
             }}
           >
             {loading ? '登录中…' : '登录'}
-          </Button>
+          </button>
         </Form>
 
         {/* ═══ 安全提示 ═══ */}

@@ -1,605 +1,581 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, Table, Tag, Input, Select, Modal, Form, InputNumber, message, Popconfirm, Space, Upload, Button, Dropdown, Tooltip, Switch, Result, Segmented } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
-import type { MenuProps } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, PictureOutlined, ArrowUpOutlined, ArrowDownOutlined, StarOutlined, StarFilled, EyeOutlined, MoreOutlined, ReloadOutlined, ClearOutlined, SendOutlined, StopOutlined } from '@ant-design/icons';
-import { productApi, categoryApi, uploadApi } from '@/services/api';
-import { getMaterialLabel } from '@/utils/material';
-import { getThumbnailImage } from '@/utils/productImage';
-import { productPlaceholder } from '@/utils/placeholder';
-import type { Product, Category, ProductStatus } from '@/types';
-import ScifiButton from '@/components/ui/ScifiButton';
-import { unwrapResponse } from '@/utils/unwrap';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Key } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Dropdown,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Pagination,
+  Popconfirm,
+  Radio,
+  Result,
+  Select,
+  Space,
+  Switch,
+  Table,
+  Tabs,
+  Tag,
+  Tooltip,
+  Upload,
+  message,
+} from "antd";
+import {
+  DeleteOutlined,
+  DownOutlined,
+  EditOutlined,
+  PictureOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  UploadOutlined,
+} from "@ant-design/icons";
+import { categoryApi, productApi, uploadApi } from "@/services/api";
+import { getMaterialLabel } from "@/utils/material";
+import { getThumbnailImage } from "@/utils/productImage";
+import { productPlaceholder } from "@/utils/placeholder";
+import { USE_MOCK } from "@/services/mockData";
+import type { Category, Product, ProductStatus } from "@/types";
+import ScifiButton from "@/components/ui/ScifiButton";
+import { unwrapResponse } from "@/utils/unwrap";
 
 const { TextArea } = Input;
 
-const statusMeta: Record<ProductStatus, { color: string; label: string }> = {
-  DRAFT:     { color: '#8C8C8C', label: '草稿' },
-  PUBLISHED: { color: '#6BBF6B', label: '已发布' },
-  OFFLINE:   { color: '#C8A87C', label: '已下架' },
-  ARCHIVED:  { color: '#BFBFBF', label: '已归档' },
+const statusMeta: Record<ProductStatus, { label: string; color: string }> = {
+  DRAFT: { label: "草稿", color: "default" },
+  PUBLISHED: { label: "出售中", color: "green" },
+  OFFLINE: { label: "仓库中", color: "gold" },
+  ARCHIVED: { label: "回收站", color: "default" },
 };
 
-const allStatuses: ProductStatus[] = ['DRAFT', 'PUBLISHED', 'OFFLINE', 'ARCHIVED'];
+const statuses: ProductStatus[] = ["PUBLISHED", "OFFLINE", "DRAFT", "ARCHIVED"];
+const materials = ["GOLD_999", "GOLD_9999", "AU750", "PT950", "S925", "DIAMOND", "JADE", "PEARL", "COLOR_GEM"];
 
-const materials = ['GOLD_999', 'GOLD_9999', 'AU750', 'PT950', 'S925', 'DIAMOND', 'JADE', 'PEARL', 'COLOR_GEM'];
-
-function generateCode(): string {
-  return 'HC-' + Date.now().toString(36).toUpperCase().slice(-6);
+function makeCode() {
+  return `HC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
 }
 
-/** 0值显示：数据库默认值显示为"未填写"，真实0正常显示 */
-function formatZeroField(v: number | null | undefined, defaultValue: number): string {
-  if (v == null || v === defaultValue) return '未填写';
-  return String(v);
+function formatPrice(price?: number) {
+  return price && price > 0 ? `¥ ${Number(price).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}` : "待定价";
 }
 
-/** 价格显示：0是数据库默认值，代表未配置 */
-function formatPrice(v: number | null | undefined): string {
-  if (v == null || v === 0) return '咨询价格';
-  return `¥${v.toLocaleString()}`;
+function formatDate(value?: string) {
+  if (!value) return "—";
+  return new Date(value).toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-");
+}
+
+function getStatusMeta(status: string | undefined) {
+  if (status === "APPROVED") return statusMeta.PUBLISHED;
+  return statusMeta[status as ProductStatus] || { label: status || "未知状态", color: "default" };
+}
+
+function isPublished(status: string | undefined) {
+  return status === "PUBLISHED" || status === "APPROVED";
+}
+
+function apiStatus(status: ProductStatus) {
+  if (!USE_MOCK) return status;
+  if (status === "PUBLISHED") return "APPROVED";
+  if (status === "DRAFT") return "PENDING";
+  return status;
 }
 
 export default function ProductManage() {
+  const navigate = useNavigate();
   const [products, setProducts] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-
-  // 筛选状态
-  const [keyword, setKeyword] = useState('');
-  const [statusFilter, setStatusFilter] = useState<ProductStatus | undefined>();
-  const [categoryFilter, setCategoryFilter] = useState<number | undefined>();
-  const [materialFilter, setMaterialFilter] = useState<string | undefined>();
-
-  // 防抖搜索
+  const [activeStatus, setActiveStatus] = useState<ProductStatus | undefined>();
+  const [titleKeyword, setTitleKeyword] = useState("");
+  const [codeKeyword, setCodeKeyword] = useState("");
+  const [categoryId, setCategoryId] = useState<number | undefined>();
+  const [categoryOptions, setCategoryOptions] = useState<{ value: number; label: string }[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Key[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const searchTimer = useRef<ReturnType<typeof setTimeout>>();
 
-  // 模态框
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<Product | null>(null);
   const [form] = Form.useForm();
-  const [categoryOptions, setCategoryOptions] = useState<{ value: number; label: string }[]>([]);
-
-  // 图片管理
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editing, setEditing] = useState<Product | null>(null);
+  const [editorTab, setEditorTab] = useState("description");
+  const [saving, setSaving] = useState(false);
   const [productImages, setProductImages] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
 
-  // 状态统计
-  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+  const keyword = titleKeyword || codeKeyword;
+  const hasFilters = Boolean(titleKeyword || codeKeyword || categoryId || activeStatus);
 
-  // 页面初始加载
-  useEffect(() => { loadCategories(); fetchProducts(); }, []);
-
-  // 筛选变化时重新加载
-  useEffect(() => {
-    setPage(1);
-    fetchProducts(1);
-  }, [statusFilter, categoryFilter, materialFilter]);
-
-  // 关键字防抖
-  const handleKeywordChange = (val: string) => {
-    setKeyword(val);
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => { setPage(1); fetchProducts(1); }, 400);
-  };
-
-  const loadCategories = async () => {
+  const loadCategories = useCallback(async () => {
     try {
-      const res = await categoryApi.getTree();
-      const data = unwrapResponse<Category[]>(res);
-      const opts: { value: number; label: string }[] = [];
-      const walk = (nodes: any[], prefix = '') => {
-        for (const n of nodes) {
-          const label = prefix ? `${prefix} > ${n.name}` : n.name;
-          opts.push({ value: n.id, label });
-          if (n.children?.length) walk(n.children, label);
-        }
+      const response = await categoryApi.getTree();
+      const options: { value: number; label: string }[] = [];
+      const walk = (nodes: Category[], parentLabel = "") => {
+        nodes.forEach((node) => {
+          const label = parentLabel ? `${parentLabel} / ${node.name}` : node.name;
+          options.push({ value: node.id, label });
+          if (node.children?.length) walk(node.children, label);
+        });
       };
-      walk(Array.isArray(data) ? data : []);
-      setCategoryOptions(opts);
-    } catch { /* fallback */ }
-  };
+      walk(unwrapResponse<Category[]>(response) || []);
+      setCategoryOptions(options);
+    } catch {
+      setCategoryOptions([]);
+    }
+  }, []);
 
-  /** 统计各状态数量（无筛选条件下获取） */
-  const fetchStatusCounts = async () => {
+  const loadCounts = useCallback(async () => {
     try {
-      const res = await productApi.getList({ page: 1, pageSize: 1 });
-      const data = unwrapResponse<{ list: Product[]; total: number }>(res);
-      const allTotal = data?.total ?? 0;
-      // 为每种状态单独请求总数（后端 count 支持 status 筛选）
-      const counts: Record<string, number> = { all: allTotal };
-      for (const s of allStatuses) {
-        try {
-          const sRes = await productApi.getList({ page: 1, pageSize: 1, status: s });
-          const sData = unwrapResponse<{ total: number }>(sRes);
-          counts[s] = sData?.total ?? 0;
-        } catch { counts[s] = 0; }
-      }
-      setStatusCounts(counts);
-    } catch { /* 统计失败不影响主流程 */ }
-  };
+      const responses = await Promise.all([
+        productApi.getList({ page: 1, pageSize: 1 }),
+        ...statuses.map((status) => productApi.getList({ page: 1, pageSize: 1, status: apiStatus(status) })),
+      ]);
+      const next: Record<string, number> = { all: unwrapResponse<any>(responses[0])?.total ?? 0 };
+      statuses.forEach((status, index) => {
+        next[status] = unwrapResponse<any>(responses[index + 1])?.total ?? 0;
+      });
+      setCounts(next);
+    } catch {
+      setCounts({});
+    }
+  }, []);
 
-  const fetchProducts = useCallback(async (targetPage?: number) => {
-    const pg = targetPage ?? page;
+  const loadProducts = useCallback(async (targetPage = page) => {
     setLoading(true);
     setError(null);
     try {
-      const params: any = { page: pg, pageSize };
+      const params: Record<string, unknown> = { page: targetPage, pageSize };
+      if (activeStatus) params.status = apiStatus(activeStatus);
+      if (categoryId) params.categoryId = categoryId;
       if (keyword) params.keyword = keyword;
-      if (statusFilter) params.status = statusFilter;
-      if (categoryFilter) params.categoryId = categoryFilter;
-      if (materialFilter) params.materialType = materialFilter;
-
-      const res = await productApi.getList(params);
-      const data = unwrapResponse<{ list: Product[]; total: number }>(res);
+      const response = await productApi.getList(params);
+      const data = unwrapResponse<{ list: Product[]; total: number }>(response);
       setProducts(data?.list || []);
       setTotal(data?.total || 0);
-      // 无筛选时更新统计
-      if (!statusFilter && !categoryFilter && !materialFilter && !keyword) {
-        fetchStatusCounts();
-      }
-    } catch (e: any) {
-      const msg = e?.message || '请检查后端服务是否启动';
-      setError(msg);
+    } catch (requestError: any) {
+      setError(requestError?.message || "商品数据加载失败，请检查服务后重试。");
       setProducts([]);
       setTotal(0);
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, keyword, statusFilter, categoryFilter, materialFilter]);
+  }, [activeStatus, categoryId, keyword, page, pageSize]);
 
-  const handleClearFilters = () => {
-    setKeyword('');
-    setStatusFilter(undefined);
-    setCategoryFilter(undefined);
-    setMaterialFilter(undefined);
+  useEffect(() => {
+    void loadCategories();
+    void loadCounts();
+  }, [loadCategories, loadCounts]);
+
+  useEffect(() => {
+    void loadProducts();
+  }, [loadProducts]);
+
+  const resetFilters = () => {
+    setTitleKeyword("");
+    setCodeKeyword("");
+    setCategoryId(undefined);
+    setActiveStatus(undefined);
+    setPage(1);
   };
 
-  const handlePublish = async (id: number) => {
-    try {
-      await productApi.publish(id);
-      message.success('已发布');
-      fetchProducts();
-    } catch (e: any) { message.error(e?.message || '发布失败'); }
+  const search = () => {
+    setPage(1);
+    void loadProducts(1);
   };
 
-  const handleUnpublish = async (id: number) => {
-    try {
-      await productApi.unpublish(id);
-      message.success('已下架');
-      fetchProducts();
-    } catch (e: any) { message.error(e?.message || '下架失败'); }
+  const debounceSearch = (nextValue: string, setter: (value: string) => void) => {
+    setter(nextValue);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setPage(1);
+    }, 450);
   };
 
-  const handleDelete = async (id: number, name: string) => {
+  const changeStatus = async (id: number, status: ProductStatus) => {
     try {
-      await productApi.delete(id);
-      message.success(`已删除: ${name}`);
-      if (products.length === 1 && page > 1) {
-        setPage(page - 1);
-        fetchProducts(page - 1);
-      } else {
-        fetchProducts();
-      }
-    } catch (e: any) {
-      message.error(e?.message || '删除失败');
+      await productApi.updateStatus(id, status);
+      message.success(status === "PUBLISHED" ? "商品已上架" : status === "OFFLINE" ? "商品已移入仓库" : "商品状态已更新");
+      await Promise.all([loadProducts(), loadCounts()]);
+    } catch (requestError: any) {
+      message.error(requestError?.message || "状态更新失败");
+    }
+  };
+
+  const deleteProduct = async (product: Product) => {
+    try {
+      await productApi.delete(product.id);
+      message.success(`已将「${product.name}」移入回收站`);
+      setSelectedIds((ids) => ids.filter((id) => id !== product.id));
+      await Promise.all([loadProducts(products.length === 1 && page > 1 ? page - 1 : page), loadCounts()]);
+    } catch (requestError: any) {
+      message.error(requestError?.message || "删除失败");
+    }
+  };
+
+  const changeSelectedStatus = async (status: ProductStatus) => {
+    if (!selectedIds.length) return;
+    try {
+      await Promise.all(selectedIds.map((id) => productApi.updateStatus(Number(id), status)));
+      message.success(`已处理 ${selectedIds.length} 件商品`);
+      setSelectedIds([]);
+      await Promise.all([loadProducts(), loadCounts()]);
+    } catch (requestError: any) {
+      message.error(requestError?.message || "批量操作失败，请稍后重试");
+    }
+  };
+
+  const loadImages = async (productId: number) => {
+    try {
+      const response = await productApi.getById(productId);
+      setProductImages(unwrapResponse<Product>(response)?.images || []);
+    } catch {
+      setProductImages([]);
     }
   };
 
   const openCreate = () => {
+    navigate("/admin/products/new");
+    return;
     setEditing(null);
+    setEditorTab("description");
+    setProductImages([]);
     form.resetFields();
     form.setFieldsValue({
-      status: 'DRAFT', materialType: 'GOLD_999', goldWeight: 0,
-      price: 0, craftFee: 0, weight: 0, sortOrder: 0,
-      salesMode: 'DISPLAY_ONLY', isHot: false, isRecommended: false,
+      code: makeCode(),
+      materialType: "GOLD_999",
+      goldWeight: 0,
+      weight: 0,
+      price: 0,
+      craftFee: 0,
+      sortOrder: 0,
+      salesMode: "DISPLAY_ONLY",
+      status: "DRAFT",
+      shippingTime: "48小时内发货",
+      isHot: false,
+      isNew: false,
+      isRecommended: false,
+      isLimited: false,
+      isCustom: false,
     });
-    setModalOpen(true);
+    setEditorOpen(true);
   };
 
-  const openEdit = (p: Product) => {
-    setEditing(p);
-    setProductImages(p.images || []);
+  const openEdit = (product: Product) => {
+    navigate(`/admin/products/${product.id}/edit`);
+    return;
+    setEditing(product);
+    setEditorTab("description");
+    setProductImages(product.images || []);
+    form.resetFields();
     form.setFieldsValue({
-      name: p.name, categoryId: p.categoryId, materialType: p.materialType,
-      goldWeight: p.goldWeight, price: p.price, craftFee: p.craftFee,
-      status: p.status, description: p.description, shortDescription: p.shortDescription,
-      salesMode: p.salesMode, sortOrder: p.sortOrder, weight: p.weight, size: p.size,
-      isHot: p.isHot, isNew: p.isNew, isRecommended: p.isRecommended,
-      isLimited: p.isLimited, isCustom: p.isCustom,
+      code: product.code,
+      name: product.name,
+      categoryId: product.categoryId,
+      materialType: product.materialType,
+      goldWeight: product.goldWeight,
+      weight: product.weight,
+      price: product.price,
+      craftFee: product.craftFee,
+      sortOrder: product.sortOrder || 0,
+      size: product.size,
+      description: product.description,
+      shortDescription: product.shortDescription,
+      salesMode: product.salesMode || "DISPLAY_ONLY",
+      status: product.status,
+      isHot: product.isHot,
+      isNew: product.isNew,
+      isRecommended: product.isRecommended,
+      isLimited: product.isLimited,
+      isCustom: product.isCustom,
+      shippingTime: "48小时内发货",
+      logisticsEnabled: true,
     });
-    setModalOpen(true);
+    setEditorOpen(true);
+    void loadImages(product.id);
   };
 
-  const handleSave = async () => {
-    const values = await form.validateFields();
-    const payload = {
-      name: values.name, categoryId: values.categoryId, materialType: values.materialType,
-      goldWeight: values.goldWeight ?? 0, price: values.price ?? 0,
-      craftFee: values.craftFee ?? 0, status: values.status,
-      description: values.description || '', shortDescription: values.shortDescription || '',
-      salesMode: values.salesMode || 'DISPLAY_ONLY', sortOrder: values.sortOrder ?? 0,
-      weight: values.weight ?? 0, size: values.size || '',
-      isHot: values.isHot ?? false, isNew: values.isNew ?? false,
-      isRecommended: values.isRecommended ?? false, isLimited: values.isLimited ?? false,
-      isCustom: values.isCustom ?? false,
-    };
+  const saveProduct = async () => {
+    const values = await form.validateFields(["name", "code", "categoryId"]);
+    setSaving(true);
     try {
-      if (editing) { await productApi.update(editing.id, payload); }
-      else { await productApi.create({ ...payload, code: generateCode() }); }
-      message.success(editing ? '已更新' : '已创建');
-      setModalOpen(false);
-      fetchProducts();
-    } catch (e: any) { message.error(e?.message || '保存失败'); }
+      const payload = {
+        name: values.name,
+        categoryId: values.categoryId,
+        materialType: values.materialType,
+        shortDescription: values.shortDescription || "",
+        description: values.description || "",
+        goldWeight: values.goldWeight ?? 0,
+        weight: values.weight ?? 0,
+        size: values.size || "",
+        price: values.price ?? 0,
+        craftFee: values.craftFee ?? 0,
+        sortOrder: values.sortOrder ?? 0,
+        salesMode: values.salesMode || "DISPLAY_ONLY",
+        status: values.status || "DRAFT",
+        isHot: values.isHot ?? false,
+        isNew: values.isNew ?? false,
+        isRecommended: values.isRecommended ?? false,
+        isLimited: values.isLimited ?? false,
+        isCustom: values.isCustom ?? false,
+      };
+      if (editing) {
+        await productApi.update(editing.id, payload);
+        message.success("商品已更新");
+      } else {
+        const response = await productApi.create({ ...payload, code: values.code });
+        const created = unwrapResponse<Product>(response);
+        setEditing(created);
+        if (created?.id) await loadImages(created.id);
+        message.success("商品已创建，现在可以上传商品图片");
+      }
+      await Promise.all([loadProducts(), loadCounts()]);
+    } catch (requestError: any) {
+      message.error(requestError?.message || "保存失败，请检查必填信息");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  // 图片管理函数
-  const loadImages = async (productId: number) => {
-    try {
-      const res = await productApi.getById(productId);
-      const p = unwrapResponse<Product>(res);
-      setProductImages(p?.images || []);
-    } catch { setProductImages([]); }
-  };
-
-  const handleUpload = async (file: File) => {
-    if (!editing?.id) { message.warning('请先保存产品后再上传图片'); return Upload.LIST_IGNORE; }
+  const uploadImage = async (file: File) => {
+    if (!editing?.id) {
+      message.warning("请先保存基础信息后再上传图片");
+      return Upload.LIST_IGNORE;
+    }
     setUploading(true);
     try {
-      const upRes = await uploadApi.uploadImage(file);
-      const upData = unwrapResponse<{ url: string }>(upRes);
-      await productApi.addImage(editing.id, { url: upData.url, sortOrder: productImages.length });
-      message.success('图片已上传');
+      const uploaded = unwrapResponse<{ url: string }>(await uploadApi.uploadImage(file));
+      await productApi.addImage(editing.id, { url: uploaded.url, sortOrder: productImages.length });
       await loadImages(editing.id);
-    } catch { message.error('上传失败'); }
-    finally { setUploading(false); }
+      message.success("图片已上传");
+    } catch {
+      message.error("图片上传失败");
+    } finally {
+      setUploading(false);
+    }
     return Upload.LIST_IGNORE;
   };
 
-  const handleSetCover = async (imageId: number) => {
+  const setCover = async (imageId: number) => {
     if (!editing?.id) return;
-    try { await productApi.setCoverImage(editing.id, imageId); await loadImages(editing.id); message.success('已设为封面'); }
-    catch { message.error('设置封面失败'); }
+    await productApi.setCoverImage(editing.id, imageId);
+    await loadImages(editing.id);
   };
 
-  const handleMoveImage = async (imageId: number, dir: 1 | -1) => {
-    const idx = productImages.findIndex((i: any) => i.id === imageId);
-    if (idx < 0 || idx + dir < 0 || idx + dir >= productImages.length) return;
-    const a = productImages[idx], b = productImages[idx + dir];
-    try {
-      await productApi.updateImage(editing!.id, a.id, { sortOrder: b.sortOrder });
-      await productApi.updateImage(editing!.id, b.id, { sortOrder: a.sortOrder });
-      await loadImages(editing!.id);
-    } catch { message.error('排序失败'); }
-  };
-
-  const handleDeleteImage = async (imageId: number) => {
+  const removeImage = async (imageId: number) => {
     if (!editing?.id) return;
-    try { await productApi.deleteImage(editing.id, imageId); await loadImages(editing.id); message.success('已删除'); }
-    catch { message.error('删除失败'); }
+    await productApi.deleteImage(editing.id, imageId);
+    await loadImages(editing.id);
   };
 
-  // ═══ 表格列定义 ═══
-  const columns: ColumnsType<Product> = [
+  const columns = useMemo(() => [
     {
-      title: '商品', key: 'info', width: 380, fixed: 'left',
-      render: (_: any, r: Product) => (
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-[#F5F5F5] flex-shrink-0 flex items-center justify-center overflow-hidden" style={{ borderRadius: 4 }}>
-            {r.images?.[0]?.url ? (
-              <img src={getThumbnailImage(r as any)} alt="" className="w-full h-full object-cover"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).parentElement!.innerHTML = '<span style=color:#B8944E;font-size:18px>◆</span>'; }} />
-            ) : (
-              <span style={{ color: '#D9D9D9', fontSize: 18 }}>◆</span>
-            )}
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm text-gray-900 leading-snug line-clamp-2">{r.name}</p>
-            <code className="text-xs text-gray-400">{r.code}</code>
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: '分类 / 材质', key: 'catMat', width: 200,
-      render: (_: any, r: Product) => (
-        <div className="text-sm space-y-0.5">
-          <div className="text-gray-700">{r.category?.name || '-'}</div>
-          <div className="text-gray-400 text-xs">{getMaterialLabel(r.materialType)}</div>
-        </div>
-      ),
-    },
-    {
-      title: '价格方式', key: 'priceMode', width: 160,
-      render: (_: any, r: Product) => {
-        if (r.price === 0) return <span className="text-gray-400 text-sm">未配置</span>;
-        return <span className="text-gray-800 text-sm">¥{r.price.toLocaleString()}</span>;
-      },
-    },
-    {
-      title: '状态', dataIndex: 'status', width: 120,
-      render: (v: ProductStatus) => {
-        const m = statusMeta[v] || { color: '#BFBFBF', label: v };
+      title: "商品名称",
+      key: "product",
+      width: 380,
+      render: (_: unknown, product: Product) => {
+        const image = getThumbnailImage(product as any);
         return (
-          <span style={{
-            display: 'inline-block', padding: '2px 10px', borderRadius: 4,
-            fontSize: 12, lineHeight: '20px',
-            backgroundColor: m.color + '18', color: m.color, border: `1px solid ${m.color}40`,
-          }}>
-            {m.label}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <img
+              src={image || productPlaceholder(product.id, product.name)}
+              alt=""
+              style={{ width: 58, height: 58, borderRadius: 4, objectFit: "cover", background: "#f5f5f5" }}
+              onError={(event) => { event.currentTarget.src = productPlaceholder(product.id, product.name); }}
+            />
+            <div style={{ minWidth: 0 }}>
+              <button type="button" onClick={() => openEdit(product)} style={{ border: 0, padding: 0, background: "transparent", color: "#262626", fontWeight: 500, textAlign: "left", cursor: "pointer" }}>
+                {product.name}
+              </button>
+              <div style={{ marginTop: 5, color: "#8c8c8c", fontSize: 12 }}>货号：{product.code}</div>
+              <div style={{ marginTop: 3, color: "#8c8c8c", fontSize: 12 }}>{product.category?.name || "未分类"} · {getMaterialLabel(product.materialType)}</div>
+            </div>
+          </div>
         );
       },
     },
+    { title: "价格", key: "price", width: 135, render: (_: unknown, product: Product) => <span style={{ color: product.price ? "#c2410c" : "#8c8c8c" }}>{formatPrice(product.price)}</span> },
+    { title: "库存", key: "stock", width: 100, render: () => "—" },
+    { title: "累计销量", key: "sales", width: 120, render: (_: unknown, product: Product) => product.salesCount || 0 },
+    { title: "浏览量", key: "views", width: 105, render: (_: unknown, product: Product) => product.viewCount || 0 },
+    { title: "创建时间", key: "created", width: 175, render: (_: unknown, product: Product) => formatDate(product.createdAt) },
+    { title: "状态", key: "status", width: 105, render: (_: unknown, product: Product) => { const meta = getStatusMeta(product.status); return <Tag color={meta.color}>{meta.label}</Tag>; } },
     {
-      title: '更新时间', key: 'updated', width: 130,
-      render: (_: any, r: any) => {
-        if (!r.updatedAt) return <span className="text-gray-300 text-xs">-</span>;
-        return <span className="text-gray-400 text-xs">{new Date(r.updatedAt).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>;
-      },
+      title: "操作",
+      key: "actions",
+      fixed: "right" as const,
+      width: 170,
+      render: (_: unknown, product: Product) => (
+        <Space size={10} wrap>
+          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openEdit(product)}>编辑商品</Button>
+          {!isPublished(product.status) && product.status !== "ARCHIVED" ? (
+            <Button type="link" size="small" style={{ padding: 0 }} onClick={() => void changeStatus(product.id, "PUBLISHED")}>上架</Button>
+          ) : isPublished(product.status) ? (
+            <Button type="link" size="small" style={{ padding: 0 }} onClick={() => void changeStatus(product.id, "OFFLINE")}>下架</Button>
+          ) : null}
+          <Dropdown menu={{ items: [{ key: "archive", label: <span onClick={() => void changeStatus(product.id, "ARCHIVED")}>移入回收站</span> }, { key: "delete", danger: true, label: <span onClick={() => void deleteProduct(product)}>删除</span> }] }}>
+            <Button type="link" size="small" style={{ padding: 0 }}>更多 <DownOutlined /></Button>
+          </Dropdown>
+        </Space>
+      ),
     },
-    {
-      title: '操作', key: 'ops', width: 200, fixed: 'right',
-      render: (_: any, r: Product) => {
-        const menuItems: MenuProps['items'] = [];
-        if (r.status === 'DRAFT' || r.status === 'OFFLINE') {
-          menuItems.push({ key: 'publish', icon: <SendOutlined />, label: '发布' });
-        } else if (r.status === 'PUBLISHED') {
-          menuItems.push({ key: 'unpublish', icon: <StopOutlined />, label: '下架' });
-        }
-        menuItems.push({ type: 'divider' });
-        menuItems.push({ key: 'delete', icon: <DeleteOutlined />, danger: true, label: '删除' });
+  ], [openEdit, products, page]);
 
-        return (
-          <Space size={8}>
-            <Button type="link" size="small" onClick={() => openEdit(r)} style={{ padding: 0, height: 24 }}>编辑</Button>
-            <Button type="link" size="small" href={`/products/${r.id}`} target="_blank" style={{ padding: 0, height: 24, color: '#8C8C8C' }}>预览</Button>
-            <Dropdown
-              menu={{
-                items: menuItems,
-                onClick: ({ key }) => {
-                  if (key === 'publish') handlePublish(r.id);
-                  else if (key === 'unpublish') handleUnpublish(r.id);
-                  else if (key === 'delete') Modal.confirm({
-                    title: `确认删除「${r.name}」？`,
-                    content: '删除后为软删除，可在数据库中恢复。',
-                    okText: '删除', okType: 'danger', cancelText: '取消',
-                    onOk: () => handleDelete(r.id, r.name),
-                  });
-                },
-              }}
-              trigger={['click']}
-            >
-              <Button type="link" size="small" icon={<MoreOutlined />} style={{ padding: 0, height: 24, color: '#8C8C8C' }} />
-            </Dropdown>
-          </Space>
-        );
-      },
-    },
-  ];
-
-  // ═══ 渲染 ═══
-  const hasFilters = !!(statusFilter || categoryFilter || materialFilter || keyword);
-  const segmentedOptions = [
-    { label: `全部 ${statusCounts.all ?? total}`, value: 'all' },
-    ...allStatuses.filter(s => statusCounts[s] !== undefined).map(s => ({
-      label: `${statusMeta[s].label} ${statusCounts[s] ?? 0}`,
-      value: s,
-    })),
+  const tabs = [
+    { key: "all", label: `全部 (${counts.all ?? total})` },
+    ...statuses.map((status) => ({ key: status, label: `${statusMeta[status].label} (${counts[status] ?? 0})` })),
   ];
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1600 }}>
-      {/* ── 头部 ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 600, color: '#1F1F1F', margin: 0 }}>商品管理</h1>
-          <p style={{ fontSize: 13, color: '#8C8C8C', margin: '4px 0 0' }}>管理商品资料、发布状态与前台展示</p>
+    <div style={{ padding: "18px 26px 48px", maxWidth: 1800 }}>
+      <div style={{ display: "flex", gap: 28, height: 45, alignItems: "flex-start", borderBottom: "1px solid #e8e8e8", marginBottom: 20 }}>
+        {tabs.map((tab) => {
+          const selected = (activeStatus || "all") === tab.key;
+          return <button key={tab.key} type="button" onClick={() => { setActiveStatus(tab.key === "all" ? undefined : tab.key as ProductStatus); setPage(1); }} style={{ height: 45, padding: "0 2px", border: 0, borderBottom: selected ? "2px solid #1677ff" : "2px solid transparent", background: "transparent", color: selected ? "#1677ff" : "#595959", cursor: "pointer", fontSize: 14 }}>{tab.label}</button>;
+        })}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(180px, 1fr) minmax(160px, 1fr) minmax(180px, 1fr) auto auto", gap: 10, alignItems: "center", marginBottom: 18 }}>
+        <Input placeholder="商品标题" value={titleKeyword} allowClear onChange={(event) => debounceSearch(event.target.value, setTitleKeyword)} onPressEnter={search} />
+        <Input placeholder="商品ID、货号" value={codeKeyword} allowClear onChange={(event) => debounceSearch(event.target.value, setCodeKeyword)} onPressEnter={search} />
+        <Input placeholder="商家编码" disabled />
+        <Select placeholder="店铺分类" value={categoryId} onChange={(value) => { setCategoryId(value); setPage(1); }} allowClear showSearch optionFilterProp="label" options={categoryOptions} />
+        <Button type="primary" onClick={search}>搜索</Button>
+        <Button onClick={resetFilters}>重置</Button>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
+        <Space wrap>
+          <ScifiButton variant="gold" onClick={openCreate}><PlusOutlined /> 新增商品</ScifiButton>
+          <Button icon={<PictureOutlined />} disabled={!selectedIds.length}>商品装修</Button>
+          <Button disabled={!selectedIds.length}>SKU 管理</Button>
+          <Button disabled={!selectedIds.length} onClick={() => void changeSelectedStatus("OFFLINE")}>批量下架</Button>
+          <Dropdown menu={{ items: [{ key: "published", label: "批量上架", onClick: () => void changeSelectedStatus("PUBLISHED") }, { key: "archived", label: "移入回收站", danger: true, onClick: () => void changeSelectedStatus("ARCHIVED") }] }}>
+            <Button disabled={!selectedIds.length}>更多批量操作 <DownOutlined /></Button>
+          </Dropdown>
+          {selectedIds.length > 0 && <span style={{ color: "#595959", fontSize: 13 }}>已选 {selectedIds.length} 件</span>}
+        </Space>
+        <span style={{ color: "#595959", fontSize: 13 }}>共 {total} 件商品</span>
+      </div>
+
+      {error ? (
+        <Result status="error" title="商品加载失败" subTitle={error} extra={<Button icon={<ReloadOutlined />} onClick={() => void loadProducts()}>重新加载</Button>} />
+      ) : (
+        <Table
+          rowKey="id"
+          loading={loading}
+          dataSource={products}
+          columns={columns}
+          pagination={false}
+          scroll={{ x: 1300 }}
+          rowSelection={{ selectedRowKeys: selectedIds, onChange: setSelectedIds }}
+          locale={{ emptyText: hasFilters ? "没有符合当前筛选条件的商品" : "暂无商品，点击“新增商品”开始添加" }}
+          style={{ background: "#fff" }}
+        />
+      )}
+
+      {!error && total > 0 && (
+        <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 18 }}>
+          <Pagination current={page} pageSize={pageSize} total={total} showSizeChanger showQuickJumper showTotal={(value) => `共 ${value} 件商品`} onChange={(nextPage, nextSize) => { setPage(nextPage); setPageSize(nextSize); }} />
         </div>
-        <ScifiButton variant="gold" onClick={openCreate}><PlusOutlined /> 新增商品</ScifiButton>
-      </div>
-
-      {/* ── 状态切换 ── */}
-      <div style={{ marginBottom: 16 }}>
-        <Segmented
-          size="middle"
-          options={segmentedOptions}
-          value={statusFilter || 'all'}
-          onChange={(val) => {
-            const v = val as string;
-            setStatusFilter(v === 'all' ? undefined : v as ProductStatus);
-          }}
-          style={{ backgroundColor: '#F5F5F5' }}
-        />
-      </div>
-
-      {/* ── 搜索筛选栏 ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <Input.Search
-          placeholder="搜索商品名称或编号"
-          value={keyword}
-          onChange={(e) => handleKeywordChange(e.target.value)}
-          onSearch={() => { setPage(1); fetchProducts(1); }}
-          allowClear
-          style={{ width: 280 }}
-        />
-        <Select
-          placeholder="分类"
-          value={categoryFilter}
-          onChange={(v) => setCategoryFilter(v)}
-          allowClear
-          showSearch
-          optionFilterProp="label"
-          options={categoryOptions}
-          style={{ width: 160 }}
-        />
-        <Select
-          placeholder="材质"
-          value={materialFilter}
-          onChange={(v) => setMaterialFilter(v)}
-          allowClear
-          options={materials.map(m => ({ value: m, label: getMaterialLabel(m) }))}
-          style={{ width: 140 }}
-        />
-        {hasFilters && (
-          <Button size="middle" onClick={handleClearFilters} icon={<ClearOutlined />}>重置</Button>
-        )}
-        {error && (
-          <Button size="middle" onClick={() => fetchProducts()} icon={<ReloadOutlined />}>重试</Button>
-        )}
-      </div>
-
-      {/* ── 错误 ── */}
-      {error && !loading && (
-        <Result status="error" title="加载失败" subTitle={error}
-          extra={<Button onClick={() => fetchProducts()} icon={<ReloadOutlined />}>重试</Button>}
-        />
       )}
 
-      {/* ── 表格 ── */}
-      {!error && (
-        <Card style={{ border: '1px solid #F0F0F0', borderRadius: 8, boxShadow: 'none' }} bodyStyle={{ padding: 0 }}>
-          <Table
-            dataSource={products}
-            rowKey="id"
-            loading={loading}
-            columns={columns}
-            pagination={{
-              current: page,
-              pageSize,
-              total,
-              showSizeChanger: true,
-              pageSizeOptions: ['10', '20', '50'],
-              showTotal: (t) => `共 ${t} 件商品`,
-              size: 'default',
-              onChange: (p, ps) => { setPage(p); setPageSize(ps); fetchProducts(p); },
-              style: { margin: '0 16px' },
-            }}
-            size="middle"
-            scroll={{ x: 1190 }}
-            locale={{
-              emptyText: hasFilters ? '没有符合当前筛选条件的商品' : '暂无商品，点击"新增商品"开始添加',
-            }}
-            style={{ border: 'none' }}
-          />
-        </Card>
-      )}
-
-      {/* ═══ 新增/编辑弹窗 ═══ */}
       <Modal
-        title={editing ? '编辑商品' : '新增商品'}
-        open={modalOpen}
-        onCancel={() => setModalOpen(false)}
-        onOk={handleSave}
-        width={720}
-        okText="保存"
-        cancelText="取消"
-        okButtonProps={{ style: { background: '#B8944E', borderColor: '#B8944E' } }}
+        open={editorOpen}
+        onCancel={() => setEditorOpen(false)}
+        footer={null}
+        width={1120}
+        centered
+        styles={{ body: { maxHeight: "78vh", overflowY: "auto", padding: 0 } }}
+        title={editing ? `编辑商品 · ${editing.name}` : "新增商品"}
       >
-        <Form form={form} layout="vertical" className="mt-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Form.Item name="name" label="商品名称" rules={[{ required: true }]}>
-              <Input placeholder="例如：星云 · 雕花平安扣" />
-            </Form.Item>
-            <Form.Item name="categoryId" label="分类" rules={[{ required: true, message: '请选择分类' }]}>
-              <Select placeholder="选择商品分类" showSearch optionFilterProp="label" options={categoryOptions} />
-            </Form.Item>
-          </div>
-          <Form.Item name="description" label="商品描述">
-            <TextArea rows={3} placeholder="商品描述..." />
-          </Form.Item>
-          <div className="grid grid-cols-2 gap-4">
-            <Form.Item name="shortDescription" label="简介">
-              <Input placeholder="简短的宣传语" maxLength={500} />
-            </Form.Item>
-            <Form.Item name="salesMode" label="销售模式">
-              <Select options={[
-                { value: 'DISPLAY_ONLY', label: '仅展示' },
-                { value: 'SELECTION', label: '选款' },
-                { value: 'APPOINTMENT', label: '预约' },
-                { value: 'CUSTOM_INQUIRY', label: '定制咨询' },
-              ]} />
-            </Form.Item>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <Form.Item name="materialType" label="材质">
-              <Select options={materials.map((m) => ({ value: m, label: getMaterialLabel(m) }))} />
-            </Form.Item>
-            <Form.Item name="goldWeight" label="金重(g)">
-              <InputNumber min={0} step={0.01} className="w-full" />
-            </Form.Item>
-            <Form.Item name="status" label="状态">
-              <Select options={allStatuses.map(s => ({ value: s, label: statusMeta[s]?.label || s }))} />
-            </Form.Item>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <Form.Item name="weight" label="总重量(g)">
-              <InputNumber min={0} step={0.01} className="w-full" />
-            </Form.Item>
-            <Form.Item name="size" label="尺寸规格">
-              <Input placeholder="如：直径2.5cm" />
-            </Form.Item>
-            <Form.Item name="sortOrder" label="排序">
-              <InputNumber min={0} className="w-full" placeholder="数字越小越靠前" />
-            </Form.Item>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-4">
-              <Form.Item name="price" label="售价(¥)">
-                <InputNumber min={0} className="w-full" />
-              </Form.Item>
-              <Form.Item name="craftFee" label="工费(¥)">
-                <InputNumber min={0} className="w-full" />
-              </Form.Item>
-            </div>
-            <div className="space-y-3 pt-1">
-              <div className="grid grid-cols-3 gap-2">
-                <Form.Item name="isHot" label="热卖" valuePropName="checked"><Switch /></Form.Item>
-                <Form.Item name="isNew" label="新品" valuePropName="checked"><Switch /></Form.Item>
-                <Form.Item name="isRecommended" label="推荐" valuePropName="checked"><Switch /></Form.Item>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Form.Item name="isLimited" label="限量" valuePropName="checked"><Switch /></Form.Item>
-                <Form.Item name="isCustom" label="定制" valuePropName="checked"><Switch /></Form.Item>
-              </div>
-            </div>
-          </div>
-
-          {/* ═══ 产品图片管理 ═══ */}
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #E8E7E3' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <span style={{ fontSize: 14, fontWeight: 500 }}>产品图片</span>
-              <Upload accept="image/*" showUploadList={false} beforeUpload={handleUpload as any}>
-                <Button icon={<PictureOutlined />} loading={uploading} disabled={!editing?.id} size="small">
-                  {editing?.id ? '上传图片' : '请先保存产品'}
-                </Button>
-              </Upload>
-            </div>
-            {productImages.length === 0 ? (
-              <p style={{ fontSize: 12, color: '#8A7F72' }}>当前产品尚未上传图片</p>
-            ) : (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {[...productImages].sort((a: any, b: any) => a.sortOrder - b.sortOrder).map((img: any, idx: number) => (
-                  <div key={img.id} style={{ width: 88, border: img.type === 'FRONT' ? '2px solid #B8944E' : '1px solid #E8E7E3', borderRadius: 2, overflow: 'hidden', position: 'relative' }}>
-                    <img src={img.url} alt="" style={{ width: '100%', aspectRatio: '1', objectFit: 'contain', background: '#FAF9F7' }} />
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 1, padding: 2, background: '#fff', borderTop: '1px solid #E8E7E3' }}>
-                      <Button size="small" type="text" icon={img.type === 'FRONT' ? <StarFilled style={{ color: '#B8944E' }} /> : <StarOutlined />}
-                        onClick={() => handleSetCover(img.id)} title="设为封面" />
-                      <Button size="small" type="text" icon={<ArrowUpOutlined />} disabled={idx === 0}
-                        onClick={() => handleMoveImage(img.id, -1)} />
-                      <Button size="small" type="text" icon={<ArrowDownOutlined />} disabled={idx === productImages.length - 1}
-                        onClick={() => handleMoveImage(img.id, 1)} />
-                      <Popconfirm title="确认删除？" onConfirm={() => handleDeleteImage(img.id)}>
-                        <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-                      </Popconfirm>
+        <Form form={form} layout="vertical" style={{ padding: "0 26px 24px" }}>
+          <Tabs activeKey={editorTab} onChange={setEditorTab} items={[
+            { key: "description", label: "图文描述", children: (
+              <div style={{ padding: "14px 0" }}>
+                <h3 style={{ margin: "0 0 18px", fontSize: 16 }}>商品图文</h3>
+                <Alert type="info" showIcon message="主图建议使用 1:1 图片，第一张图片会作为商品封面。" style={{ marginBottom: 18 }} />
+                <Upload accept="image/*" showUploadList={false} beforeUpload={uploadImage as any} disabled={!editing?.id}>
+                  <Button icon={<UploadOutlined />} loading={uploading}>上传商品图片</Button>
+                </Upload>
+                {!editing?.id && <div style={{ color: "#8c8c8c", fontSize: 12, marginTop: 8 }}>请先完成基础信息并保存，系统生成商品后即可上传图片。</div>}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(128px, 1fr))", gap: 12, marginTop: 18 }}>
+                  {productImages.map((image) => (
+                    <div key={image.id} style={{ border: image.type === "FRONT" ? "2px solid #1677ff" : "1px solid #e8e8e8", borderRadius: 6, overflow: "hidden" }}>
+                      <img src={image.url} alt="商品图片" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+                      <div style={{ padding: 7, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                        <Button size="small" type="link" onClick={() => void setCover(image.id)}>{image.type === "FRONT" ? "主图" : "设为主图"}</Button>
+                        <Popconfirm title="确定删除此图片？" onConfirm={() => void removeImage(image.id)}><Button size="small" type="link" danger>删除</Button></Popconfirm>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+                {editing?.id && productImages.length === 0 && <div style={{ padding: "36px 0", textAlign: "center", color: "#8c8c8c" }}>尚未上传商品图片</div>}
+                <Form.Item name="description" label="商品详情描述" style={{ marginTop: 24 }}>
+                  <TextArea rows={6} placeholder="介绍商品的工艺、材质、寓意和佩戴建议" maxLength={5000} showCount />
+                </Form.Item>
               </div>
-            )}
+            ) },
+            { key: "basic", label: "基础信息", children: (
+              <div style={{ padding: "14px 0" }}>
+                <h3 style={{ margin: "0 0 18px", fontSize: 16 }}>基础信息</h3>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+                  <Form.Item name="name" label="商品标题" rules={[{ required: true, whitespace: true, message: "请输入商品标题" }]}><Input maxLength={200} showCount placeholder="例如：足金古法平安扣吊坠" /></Form.Item>
+                  <Form.Item name="code" label="商家编码 / 货号" rules={[{ required: true, whitespace: true, message: "请输入货号" }]}><Input disabled={Boolean(editing)} maxLength={50} /></Form.Item>
+                  <Form.Item name="categoryId" label="商品类目" rules={[{ required: true, message: "请选择商品类目" }]}><Select showSearch optionFilterProp="label" options={categoryOptions} placeholder="选择三级商品类目" /></Form.Item>
+                  <Form.Item name="materialType" label="材质"><Select options={materials.map((material) => ({ value: material, label: getMaterialLabel(material) }))} /></Form.Item>
+                  <Form.Item name="shortDescription" label="导购标题 / 一句话卖点"><Input maxLength={500} showCount placeholder="例如：古法鎏金，寓意平安圆满" /></Form.Item>
+                  <Form.Item name="size" label="尺寸规格"><Input placeholder="例如：直径 23mm / 圈口 14" /></Form.Item>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0 16px" }}>
+                  <Form.Item name="goldWeight" label="金重（g）"><InputNumber min={0} step={0.01} style={{ width: "100%" }} /></Form.Item>
+                  <Form.Item name="weight" label="总重量（g）"><InputNumber min={0} step={0.01} style={{ width: "100%" }} /></Form.Item>
+                  <Form.Item name="sortOrder" label="排序权重"><InputNumber min={0} style={{ width: "100%" }} /></Form.Item>
+                </div>
+              </div>
+            ) },
+            { key: "sales", label: "销售信息", children: (
+              <div style={{ padding: "14px 0" }}>
+                <h3 style={{ margin: "0 0 18px", fontSize: 16 }}>销售信息</h3>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0 16px" }}>
+                  <Form.Item name="price" label="一口价（元）"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item>
+                  <Form.Item name="craftFee" label="工费（元）"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item>
+                  <Form.Item name="status" label="上架状态"><Select options={statuses.map((status) => ({ value: status, label: statusMeta[status].label }))} /></Form.Item>
+                </div>
+                <Form.Item name="salesMode" label="销售方式"><Radio.Group options={[{ value: "DISPLAY_ONLY", label: "仅展示" }, { value: "SELECTION", label: "选款咨询" }, { value: "APPOINTMENT", label: "预约到店" }, { value: "CUSTOM_INQUIRY", label: "定制咨询" }]} /></Form.Item>
+                <div style={{ padding: "16px", background: "#fafafa", borderRadius: 6 }}>
+                  <div style={{ fontWeight: 500, marginBottom: 12 }}>商品标签</div>
+                  <Space size="large" wrap>
+                    <Form.Item name="isHot" valuePropName="checked" noStyle><Checkbox>热卖</Checkbox></Form.Item>
+                    <Form.Item name="isNew" valuePropName="checked" noStyle><Checkbox>新品</Checkbox></Form.Item>
+                    <Form.Item name="isRecommended" valuePropName="checked" noStyle><Checkbox>推荐</Checkbox></Form.Item>
+                    <Form.Item name="isLimited" valuePropName="checked" noStyle><Checkbox>限量</Checkbox></Form.Item>
+                    <Form.Item name="isCustom" valuePropName="checked" noStyle><Checkbox>支持定制</Checkbox></Form.Item>
+                  </Space>
+                </div>
+              </div>
+            ) },
+            { key: "logistics", label: "物流服务", children: (
+              <div style={{ padding: "14px 0" }}>
+                <h3 style={{ margin: "0 0 18px", fontSize: 16 }}>物流服务</h3>
+                <Alert type="info" showIcon message="物流规则当前由店铺统一配置；本页展示商品适用规则，不会新增数据库字段。" style={{ marginBottom: 20 }} />
+                <Form.Item name="shippingTime" label="发货时效"><Radio.Group options={["24小时内发货", "48小时内发货", "72小时内发货"].map((value) => ({ value, label: value }))} /></Form.Item>
+                <Form.Item name="logisticsEnabled" label="提取方式" valuePropName="checked"><Switch checkedChildren="使用物流配送" unCheckedChildren="到店自提" /></Form.Item>
+                <div style={{ padding: 16, background: "#fafafa", border: "1px solid #f0f0f0", borderRadius: 6, color: "#595959", lineHeight: 1.8 }}>
+                  <div><strong>运费模板：</strong>使用店铺默认模板</div>
+                  <div><strong>售后服务：</strong>珠宝类商品支持到店验货与售后咨询</div>
+                  <div><strong>区域限售：</strong>跟随店铺统一配送范围</div>
+                </div>
+              </div>
+            ) },
+          ]} />
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, borderTop: "1px solid #f0f0f0", paddingTop: 18 }}>
+            <Button onClick={() => setEditorOpen(false)}>取消</Button>
+            <Button type="primary" loading={saving} onClick={() => void saveProduct()}>保存商品信息</Button>
           </div>
         </Form>
       </Modal>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, Table, Tag, Button, Drawer, Select, Input, message, Space } from 'antd';
 import { EyeOutlined, PhoneOutlined, MailOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { inquiriesApi } from '@/services/api';
@@ -18,6 +19,7 @@ const TYPE_MAP: Record<string, string> = {
 };
 
 export default function InquiryManage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [list, setList] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
@@ -27,6 +29,12 @@ export default function InquiryManage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [saving, setSaving] = useState(false);
+  const requestedStatus = searchParams.get('status') || '';
+
+  useEffect(() => {
+    setStatusFilter(Object.prototype.hasOwnProperty.call(STATUS_MAP, requestedStatus) ? requestedStatus : '');
+    setPage(1);
+  }, [requestedStatus]);
 
   const load = async (p = page, status = statusFilter) => {
     setLoading(true);
@@ -39,7 +47,7 @@ export default function InquiryManage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(1, statusFilter); }, [statusFilter]);
 
   const handleReply = async () => {
     if (!replyText.trim()) return;
@@ -82,7 +90,9 @@ export default function InquiryManage() {
         <div className="mb-4 flex gap-2">
           {['', 'PENDING', 'PROCESSING', 'REPLIED', 'CLOSED'].map(s => (
             <Button key={s} size="small" type={statusFilter === s ? 'primary' : 'default'}
-              onClick={() => { setStatusFilter(s); setPage(1); load(1, s); }}
+            onClick={() => {
+              setSearchParams(s ? { status: s } : {});
+            }}
               style={statusFilter === s ? {} : { borderColor: '#E7E6E2', color: '#66645F' }}>
               {s === '' ? '全部' : STATUS_MAP[s]?.label || s}
             </Button>

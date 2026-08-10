@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -7,7 +7,11 @@ async function main() {
   console.log('🌱 开始初始化数据...');
 
   // Create admin user
-  const adminPassword = await bcrypt.hash('admin123', 10);
+  const bootstrapAdminPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+  if (!bootstrapAdminPassword) {
+    throw new Error('BOOTSTRAP_ADMIN_PASSWORD 环境变量未设置');
+  }
+  const adminPassword = await bcrypt.hash(bootstrapAdminPassword, 10);
   const admin = await prisma.user.upsert({
     where: { username: 'admin' },
     update: {},
@@ -21,7 +25,7 @@ async function main() {
       status: 'ACTIVE',
     },
   });
-  console.log('✅ 管理员账号: admin / admin123');
+  console.log('✅ 管理员账号已初始化，请使用运行时提供的密码登录');
 
   // Create default categories
   const mainCategories = [
@@ -140,11 +144,12 @@ async function main() {
   ];
 
   for (const wh of warehouses) {
-    await prisma.warehouse.upsert({
-      where: { name: wh.name },
-      update: wh,
-      create: wh,
-    });
+    const existing = await prisma.warehouse.findFirst({ where: { name: wh.name } });
+    if (existing) {
+      await prisma.warehouse.update({ where: { id: existing.id }, data: wh });
+    } else {
+      await prisma.warehouse.create({ data: wh });
+    }
   }
   console.log('✅ 仓库数据初始化完成');
 
@@ -156,14 +161,14 @@ async function main() {
   const gourd = await prisma.category.findUnique({ where: { slug: 'gourd' } });
 
   // Create sample products
-  const sampleProducts = [
+  const sampleProducts: Prisma.ProductUncheckedCreateInput[] = [
     {
       code: 'HC-ZD-001', name: '星云系列 · 足金平安扣吊坠',
       description: '精选足金999材质，匠心雕刻星云纹理，平安扣造型圆润饱满，寓意平安吉祥。',
       categoryId: pinganKou!.id,
       materialType: 'GOLD_999', goldWeight: 8.88, craftFee: 380, price: 5280,
       weight: 9.20, size: '直径2.5cm',
-      status: 'APPROVED', isHot: true, isNew: false, isRecommended: true, isLimited: false, isCustom: false,
+      status: 'PUBLISHED', isHot: true, isNew: false, isRecommended: true, isLimited: false, isCustom: false,
       viewCount: 3280, salesCount: 156,
     },
     {
@@ -172,7 +177,7 @@ async function main() {
       categoryId: diamondRing!.id,
       materialType: 'DIAMOND', goldWeight: 5.20, craftFee: 580, price: 8999,
       weight: 5.80, size: '圈号14',
-      status: 'APPROVED', isHot: true, isNew: true, isRecommended: false, isLimited: false, isCustom: false,
+      status: 'PUBLISHED', isHot: true, isNew: true, isRecommended: false, isLimited: false, isCustom: false,
       viewCount: 4560, salesCount: 89,
     },
     {
@@ -181,7 +186,7 @@ async function main() {
       categoryId: heritage!.id,
       materialType: 'GOLD_9999', goldWeight: 28.50, craftFee: 1200, price: 16800,
       weight: 30.20, size: '内径5.8cm',
-      status: 'APPROVED', isHot: false, isNew: false, isRecommended: true, isLimited: true, isCustom: false,
+      status: 'PUBLISHED', isHot: false, isNew: false, isRecommended: true, isLimited: true, isCustom: false,
       viewCount: 2100, salesCount: 32,
     },
     {
@@ -190,7 +195,7 @@ async function main() {
       categoryId: dangle!.id,
       materialType: 'PT950', goldWeight: 3.60, craftFee: 680, price: 12600,
       weight: 4.10, size: '长度4.5cm',
-      status: 'APPROVED', isHot: true, isNew: false, isRecommended: false, isLimited: false, isCustom: true,
+      status: 'PUBLISHED', isHot: true, isNew: false, isRecommended: false, isLimited: false, isCustom: true,
       viewCount: 1890, salesCount: 45,
     },
     {
@@ -199,7 +204,7 @@ async function main() {
       categoryId: gourd!.id,
       materialType: 'GOLD_999', goldWeight: 6.20, craftFee: 280, price: 3980,
       weight: 6.50, size: '2.0cm×1.2cm',
-      status: 'APPROVED', isHot: false, isNew: true, isRecommended: true, isLimited: false, isCustom: false,
+      status: 'PUBLISHED', isHot: false, isNew: true, isRecommended: true, isLimited: false, isCustom: false,
       viewCount: 1560, salesCount: 78,
     },
   ];

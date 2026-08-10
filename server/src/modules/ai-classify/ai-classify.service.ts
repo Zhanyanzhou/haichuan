@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { KimiService } from '../../common/kimi/kimi.service';
+import { Injectable, Logger } from "@nestjs/common";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { KimiService } from "../../common/kimi/kimi.service";
 
 @Injectable()
 export class AiClassifyService {
@@ -40,21 +40,21 @@ export class AiClassifyService {
       select: { id: true, name: true, level: true },
     });
 
-    const categoryNames = categories.map((c) => c.name).join('、');
+    const categoryNames = categories.map((c) => c.name).join("、");
 
     // 尝试使用 Kimi 真实 API
     if (this.kimiService.isAvailable()) {
       try {
         return await this.realClassify(imageUrl, categories, categoryNames);
-      } catch (error) {
+      } catch (error: any) {
         this.logger.warn(`Kimi API 调用失败: ${error.message}`);
         throw error;
       }
     }
 
     // Kimi 未配置，不静默回退 mock
-    this.logger.warn('AI 分类服务不可用：Kimi API Key 未配置');
-    throw new Error('AI 分类服务未配置，请先设置 KIMI_API_KEY 环境变量');
+    this.logger.warn("AI 分类服务不可用：Kimi API Key 未配置");
+    throw new Error("AI 分类服务未配置，请先设置 KIMI_API_KEY 环境变量");
   }
 
   /**
@@ -76,7 +76,7 @@ export class AiClassifyService {
 
 ${this.classifyOutputSchema}`;
 
-    this.logger.log('正在调用 Kimi Vision API 进行图片分类...');
+    this.logger.log("正在调用 Kimi Vision API 进行图片分类...");
     const result = await this.kimiService.analyzeImage(imageUrl, prompt, {
       temperature: 0.1,
       maxTokens: 1000,
@@ -94,9 +94,9 @@ ${this.classifyOutputSchema}`;
     };
 
     // 确定状态
-    let status = 'pending_review';
-    if (finalResult.confidence >= 90) status = 'auto_confirmed';
-    else if (finalResult.confidence >= 70) status = 'pending_confirm';
+    let status = "pending_review";
+    if (finalResult.confidence >= 90) status = "auto_confirmed";
+    else if (finalResult.confidence >= 70) status = "pending_confirm";
 
     // 保存记录
     await this.prisma.aIClassifyRecord.create({
@@ -130,16 +130,17 @@ ${this.classifyOutputSchema}`;
     try {
       // 清理可能的 markdown 代码块包装
       let jsonStr = rawContent.trim();
-      if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
-      else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
-      if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
+      if (jsonStr.startsWith("```json")) jsonStr = jsonStr.slice(7);
+      else if (jsonStr.startsWith("```")) jsonStr = jsonStr.slice(3);
+      if (jsonStr.endsWith("```")) jsonStr = jsonStr.slice(0, -3);
 
       const parsed = JSON.parse(jsonStr.trim());
 
       // 匹配分类名称到数据库分类
       const matchCategory = (name: string) => {
         const found = categories.find(
-          (c) => c.name === name || c.name.includes(name) || name.includes(c.name),
+          (c) =>
+            c.name === name || c.name.includes(name) || name.includes(c.name),
         );
         return found ? { categoryId: found.id, name: found.name } : null;
       };
@@ -149,28 +150,35 @@ ${this.classifyOutputSchema}`;
         const matched = matchCategory(p.name);
         return {
           categoryId: matched?.categoryId || 0,
-          name: matched?.name || p.name || '未知',
+          name: matched?.name || p.name || "未知",
           confidence: p.confidence || 0,
         };
       });
 
       return {
         predictedCategoryId: top?.categoryId || null,
-        predictedCategoryName: top?.name || parsed.predictedCategoryName || '未知',
+        predictedCategoryName:
+          top?.name || parsed.predictedCategoryName || "未知",
         confidence: parsed.confidence || 0,
-        allPredictions: allPredictions.length > 0 ? allPredictions : [
-          {
-            categoryId: top?.categoryId || 0,
-            name: top?.name || parsed.predictedCategoryName || '未知',
-            confidence: parsed.confidence || 0,
-          },
-        ],
+        allPredictions:
+          allPredictions.length > 0
+            ? allPredictions
+            : [
+                {
+                  categoryId: top?.categoryId || 0,
+                  name: top?.name || parsed.predictedCategoryName || "未知",
+                  confidence: parsed.confidence || 0,
+                },
+              ],
       };
     } catch (error) {
-      this.logger.error('解析 Kimi 返回结果失败，使用原始文本作为分类名', error);
+      this.logger.error(
+        "解析 Kimi 返回结果失败，使用原始文本作为分类名",
+        error,
+      );
       return {
         predictedCategoryId: null,
-        predictedCategoryName: rawContent.substring(0, 50) || '未能识别',
+        predictedCategoryName: rawContent.substring(0, 50) || "未能识别",
         confidence: 0,
         allPredictions: [],
       };
@@ -203,14 +211,16 @@ ${this.classifyOutputSchema}`;
       .sort((a, b) => b.confidence - a.confidence);
 
     if (predictions.length > 0) {
-      predictions[0].confidence = parseFloat((Math.random() * 15 + 85).toFixed(1));
+      predictions[0].confidence = parseFloat(
+        (Math.random() * 15 + 85).toFixed(1),
+      );
     }
 
     const topPrediction = predictions[0];
     const confidence = topPrediction?.confidence || 0;
-    let status = 'pending_review';
-    if (confidence >= 90) status = 'auto_confirmed';
-    else if (confidence >= 70) status = 'pending_confirm';
+    let status = "pending_review";
+    if (confidence >= 90) status = "auto_confirmed";
+    else if (confidence >= 70) status = "pending_confirm";
 
     await this.prisma.aIClassifyRecord.create({
       data: {
@@ -223,7 +233,7 @@ ${this.classifyOutputSchema}`;
 
     return {
       predictedCategoryId: topPrediction?.categoryId || null,
-      predictedCategoryName: topPrediction?.name || '未知',
+      predictedCategoryName: topPrediction?.name || "未知",
       confidence,
       allPredictions: predictions.slice(0, 3),
     };
@@ -244,17 +254,21 @@ ${this.classifyOutputSchema}`;
   /**
    * Get classification records
    */
-  async getRecords(params: { page?: number; pageSize?: number; status?: string }) {
+  async getRecords(params: {
+    page?: number;
+    pageSize?: number;
+    status?: string;
+  }) {
     const { page = 1, pageSize = 20, status } = params;
     const where: any = {};
-    if (status && status !== 'all') where.status = status;
+    if (status && status !== "all") where.status = status;
 
     const [list, total] = await Promise.all([
       this.prisma.aIClassifyRecord.findMany({
         where,
         skip: (+page - 1) * +pageSize,
         take: +pageSize,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         include: {
           operator: { select: { id: true, username: true, realName: true } },
         },
@@ -268,13 +282,16 @@ ${this.classifyOutputSchema}`;
   /**
    * Confirm or correct classification
    */
-  async confirmClassification(id: number, data: { confirmedCategoryId: number; operatorId: number }) {
+  async confirmClassification(
+    id: number,
+    data: { confirmedCategoryId: number; operatorId: number },
+  ) {
     const record = await this.prisma.aIClassifyRecord.update({
       where: { id },
       data: {
         confirmedCategoryId: data.confirmedCategoryId,
         operatorId: data.operatorId,
-        status: 'confirmed',
+        status: "confirmed",
       },
     });
 
@@ -295,13 +312,15 @@ ${this.classifyOutputSchema}`;
   async getAccuracyReport() {
     const [total, autoConfirmed, confirmed] = await Promise.all([
       this.prisma.aIClassifyRecord.count(),
-      this.prisma.aIClassifyRecord.count({ where: { status: 'auto_confirmed' } }),
-      this.prisma.aIClassifyRecord.count({ where: { status: 'confirmed' } }),
+      this.prisma.aIClassifyRecord.count({
+        where: { status: "auto_confirmed" },
+      }),
+      this.prisma.aIClassifyRecord.count({ where: { status: "confirmed" } }),
     ]);
 
     const correctPredictions = await this.prisma.aIClassifyRecord.count({
       where: {
-        status: 'confirmed',
+        status: "confirmed",
         predictedCategoryId: { not: null },
       },
     });
@@ -309,8 +328,12 @@ ${this.classifyOutputSchema}`;
     return {
       total,
       autoConfirmed,
-      autoConfirmRate: total > 0 ? ((autoConfirmed / total) * 100).toFixed(1) : '0',
-      accuracy: confirmed > 0 ? ((correctPredictions / confirmed) * 100).toFixed(1) : 'N/A',
+      autoConfirmRate:
+        total > 0 ? ((autoConfirmed / total) * 100).toFixed(1) : "0",
+      accuracy:
+        confirmed > 0
+          ? ((correctPredictions / confirmed) * 100).toFixed(1)
+          : "N/A",
       todayCount: total, // Simplified
     };
   }

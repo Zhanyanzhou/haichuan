@@ -10,14 +10,12 @@ interface LogoProps {
 }
 
 export default function Logo({ size = 48, iconOnly = false, dark = false, fontSize = '2rem' }: LogoProps) {
-  const gold = '#B8944E';
-  const textColor = dark ? '#2C2C2C' : '#2C2C2C';
   const logoImgSize = iconOnly ? size : size + 4;
+  const toneClass = dark ? ' is-dark' : '';
 
   return (
     <span
-      className="inline-flex items-center gap-3 select-none"
-      style={{ fontFamily: '"Cormorant Garamond", "Noto Serif SC", serif' }}
+      className={`brand-lockup inline-flex items-center gap-3 select-none${toneClass}`}
     >
       {/* Logo 图片 */}
       <img
@@ -25,7 +23,7 @@ export default function Logo({ size = 48, iconOnly = false, dark = false, fontSi
         alt="海川珠宝"
         width={logoImgSize}
         height={logoImgSize}
-        className="object-contain"
+        className="brand-lockup__mark object-contain"
         style={{ maxHeight: logoImgSize }}
         onError={(e) => {
           const el = e.currentTarget;
@@ -37,17 +35,14 @@ export default function Logo({ size = 48, iconOnly = false, dark = false, fontSi
 
       {/* 品牌名 */}
       {!iconOnly && (
-        <span className="flex flex-col leading-tight">
+        <span className="brand-lockup__text flex flex-col leading-tight">
           <span
-            className="tracking-[.1em] font-medium"
-            style={{ fontSize, color: textColor }}
+            className="brand-lockup__name"
+            style={{ fontSize }}
           >
             海川珠宝
           </span>
-          <span
-            className="text-[11px] tracking-[.28em] uppercase"
-            style={{ color: gold, marginTop: '1px' }}
-          >
+          <span className="brand-lockup__sub">
             HAICHUAN JEWELRY
           </span>
         </span>

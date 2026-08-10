@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Form, Input, Button, message, Spin, Divider } from 'antd';
+import { Alert, Card, Form, Input, Button, message, Spin, Divider } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
 import { settingsApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
@@ -17,13 +17,16 @@ export default function SiteContent() {
         const res = await settingsApi.getSettings();
         const data = unwrapResponse<any>(res);
         form.setFieldsValue(data);
-      } catch {} finally { setLoading(false); }
+      } catch {
+        // Keep the form empty when remote settings are unavailable.
+      } finally { setLoading(false); }
     })();
   }, [form]);
 
   const onFinish = async (values: any) => {
     setSaving(true);
     try {
+      // 只保存本站特有的字段，不覆盖 Settings 页面的 siteName/logo
       await settingsApi.updateSettings(values);
       message.success('保存成功');
     } catch { message.error('保存失败'); }
@@ -34,7 +37,13 @@ export default function SiteContent() {
 
   return (
     <div>
-      <AdminPageHeader title="全站信息" subtitle="管理客户可见的网站公共内容" />
+      <AdminPageHeader title="店铺资料与品牌设置" subtitle="管理客户可见的店铺信息与全站默认 SEO" />
+      <Alert
+        type="info"
+        showIcon
+        message="这些资料会用于网站页眉、页脚、联系入口及浏览器默认搜索信息。"
+        style={{ maxWidth: 680, marginBottom: 20 }}
+      />
       <Form form={form} onFinish={onFinish} layout="vertical" style={{ maxWidth: 680 }}>
         <Card title="品牌基础信息" style={{ borderRadius: 10, border: '1px solid #E7E6E2', boxShadow: '0 6px 20px rgba(40,36,30,0.035)', marginBottom: 20 }}>
           <Form.Item name="siteName" label="网站名称"><Input placeholder="海川珠宝" /></Form.Item>

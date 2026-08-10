@@ -1,0 +1,39 @@
+import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../../common/prisma/prisma.service';
+
+/**
+ * 公开接口可匿名访问；携带客户令牌时，验证后把客户资料挂到请求中。
+ */
+@Injectable()
+export class OptionalCustomerAuthGuard implements CanActivate {
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest();
+    const authorization = request.headers.authorization;
+    const token = typeof authorization === 'string' && authorization.startsWith('Bearer ')
+      ? authorization.slice(7)
+      : null;
+    if (!token) return true;
+
+    try {
+      const payload = await this.jwtService.verifyAsync<{ sub: number; type?: string }>(token);
+      if (payload.type !== 'customer' || !Number.isInteger(payload.sub)) {
+        throw new UnauthorizedException('客户登录状态无效');
+      }
+      const customer = await this.prisma.customer.findUnique({ where: { id: payload.sub } });
+      if (!customer || customer.status === 'DISABLED') {
+        throw new UnauthorizedException('客户登录状态无效');
+      }
+      request.customer = customer;
+      return true;
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error;
+      throw new UnauthorizedException('客户登录已失效，请重新登录');
+    }
+  }
+}

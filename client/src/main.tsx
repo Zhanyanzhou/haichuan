@@ -6,6 +6,7 @@ import zhCN from 'antd/locale/zh_CN';
 import App from './App';
 import antdTheme from './styles/antdTheme';
 import './styles/globals.css';
+import './styles/adminLuxury.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
