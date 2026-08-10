@@ -6,7 +6,6 @@ import AdminLayout from "@/components/layout/AdminLayout";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import ProtectedRoute from "@/components/common/ProtectedRoute";
 import ProgressBar from "@/components/common/ProgressBar";
-
 // Lazy load pages
 const Home = lazy(() => import("@/pages/public/Home"));
 const HomePreview = lazy(() =>
@@ -35,7 +34,6 @@ const Inventory = lazy(() => import("@/pages/admin/Inventory"));
 const OrderManage = lazy(() => import("@/pages/admin/OrderManage"));
 const UserManage = lazy(() => import("@/pages/admin/UserManage"));
 const Settings = lazy(() => import("@/pages/admin/Settings"));
-const WangpuEditor = lazy(() => import("@/pages/admin/WangpuEditor"));
 const EditorWorkbench = lazy(() => import("@/pages/admin/EditorWorkbench"));
 
 const InquiryManage = lazy(() => import("@/pages/admin/InquiryManage"));
@@ -77,24 +75,7 @@ function App() {
             <Route path="preview/home" element={<HomePreview />} />
           </Route>
 
-          {/* Wangpu 编辑器 — 保留过渡 */}
-          <Route
-            path="/admin/wangpu"
-            element={
-              <ProtectedRoute>
-                <WangpuEditor />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin"
-            element={
-              <ProtectedRoute>
-                <AdminLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Navigate to="/admin/dashboard" replace />} />
+          <Route element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>            <Route index element={<Navigate to="/admin/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="products" element={<ProductManage />} />
             <Route path="products/new" element={<ProductEditor />} />
