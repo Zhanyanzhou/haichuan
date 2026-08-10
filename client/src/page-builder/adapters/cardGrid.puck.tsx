@@ -4,6 +4,7 @@
 
 import CardGridBlock from "@/components/blocks/CardGridBlock";
 import { convertPuckProps } from "../utils/puckPropsToModule";
+import { colorPuckField } from "../fields/ColorField";
 
 export interface CardItem {
   icon?: string;
@@ -57,7 +58,7 @@ export const cardGridPuckConfig = {
         { label: "4 列", value: "grid-4" },
       ],
     },
-    bgColor: { type: "text" as const, label: "背景色" },
+    bgColor: colorPuckField("背景色"),
   },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };

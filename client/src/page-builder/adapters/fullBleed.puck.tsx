@@ -6,6 +6,7 @@ import FullBleedBlock from "@/components/blocks/FullBleedBlock";
 import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import MediaPickerField from "../fields/MediaPickerField";
+import { colorPuckField } from "../fields/ColorField";
 
 export interface FullBleedPuckProps {
   image: string;
@@ -69,7 +70,7 @@ export const fullBleedPuckConfig = {
         { label: "左下", value: "textBottomLeft" },
       ],
     },
-    overlay: { type: "text" as const, label: "遮罩颜色" },
+    overlay: colorPuckField("遮罩颜色"),
   },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };

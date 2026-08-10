@@ -2,6 +2,7 @@
 import CarouselBlock from "@/components/blocks/CarouselBlock";
 import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
+import MediaPickerField from "../fields/MediaPickerField";
 
 export interface CarouselPuckProps {
   images: { url: string; mobileUrl?: string; link?: string; alt?: string }[];
@@ -51,8 +52,27 @@ export const carouselPuckConfig = {
       label: "轮播图片",
       getItemSummary: (item: any) => item.alt || item.url || "图片",
       arrayFields: {
-        mobileUrl: { type: "text" as const, label: "手机端图片 URL（必填）" },
-        url: { type: "text" as const, label: IMAGE_SPECS.carousel.image.label },
+        url: {
+          type: "custom" as const,
+          label: IMAGE_SPECS.carousel.image.label,
+          render: ({
+            value, onChange, readOnly,
+          }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
+            <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+              spec={IMAGE_SPECS.carousel.image} placeholder="上传轮播大图" />
+          ),
+        },
+        mobileUrl: {
+          type: "custom" as const,
+          label: "手机端图片（可选）",
+          render: ({
+            value, onChange, readOnly,
+          }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
+            <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+              spec={{ width: 750, height: 1000, ratio: "3:4", label: "手机端轮播图（建议 750×1000，3:4）" }}
+              placeholder="上传手机端图片（可选）" />
+          ),
+        },
         link: { type: "text" as const, label: "跳转链接（可选）" },
         alt: { type: "text" as const, label: "替代文本" },
       },

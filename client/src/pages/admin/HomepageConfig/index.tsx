@@ -52,6 +52,7 @@ import {
 import { pageDocumentApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import MediaRequirementPanel from "@/page-builder/fields/MediaRequirementPanel";
+import MediaPickerField from "@/page-builder/fields/MediaPickerField";
 import { blockTemplateStore, type BlockTemplate } from "@/page-builder/templates/blockTemplateStore";
 
 const useHomepagePuck = createUsePuck<typeof puckConfig>();
@@ -1325,15 +1326,17 @@ function PageSettingsDrawer({
   open: boolean;
   metadata: Record<string, any>;
   onClose: () => void;
-  onSave: (next: { seoTitle?: string; seoDescription?: string }) => void;
+  onSave: (next: { seoTitle?: string; seoDescription?: string; ogImage?: string }) => void;
 }) {
   const [seoTitle, setSeoTitle] = useState("");
   const [seoDescription, setSeoDescription] = useState("");
+  const [ogImage, setOgImage] = useState("");
 
   useEffect(() => {
     if (open) {
       setSeoTitle(metadata?.seoTitle || "");
       setSeoDescription(metadata?.seoDescription || "");
+      setOgImage(metadata?.ogImage || "");
     }
   }, [open, metadata]);
 
@@ -1348,7 +1351,11 @@ function PageSettingsDrawer({
         <Button
           type="primary"
           size="small"
-          onClick={() => onSave({ seoTitle: seoTitle.trim(), seoDescription: seoDescription.trim() })}
+          onClick={() => onSave({
+            seoTitle: seoTitle.trim(),
+            seoDescription: seoDescription.trim(),
+            ogImage: ogImage.trim(),
+          })}
         >
           保存
         </Button>
@@ -1375,6 +1382,16 @@ function PageSettingsDrawer({
           showCount
           autoSize={{ minRows: 3, maxRows: 6 }}
         />
+        <label className="homepage-editor__page-settings-label">社交分享图（og:image）</label>
+        <MediaPickerField
+          value={ogImage}
+          onChange={setOgImage}
+          spec={{ width: 1200, height: 630, ratio: "1.91:1", label: "社交分享图（推荐 1200×630，1.91:1）" }}
+          placeholder="上传分享卡片封面"
+        />
+        <p className="homepage-editor__page-settings-hint" style={{ marginTop: 6 }}>
+          分享到微信 / 微博 / Twitter 等平台时显示的封面图，建议 1200×630。留空则使用页面中的第一张图片。
+        </p>
       </div>
     </Drawer>
   );
@@ -1569,7 +1586,7 @@ export default function HomepageConfig() {
   }, [loadRevisions]);
 
   const savePageSettings = useCallback(
-    (next: { seoTitle?: string; seoDescription?: string }) => {
+    (next: { seoTitle?: string; seoDescription?: string; ogImage?: string }) => {
       const merged = { ...latestMetadata.current, ...next };
       setMetadata(merged);
       latestMetadata.current = merged;

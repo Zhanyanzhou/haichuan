@@ -6,6 +6,7 @@ import SplitPanelBlock from "@/components/blocks/SplitPanelBlock";
 import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import MediaPickerField from "../fields/MediaPickerField";
+import { colorPuckField } from "../fields/ColorField";
 
 export interface SplitPanelPuckProps {
   image: string;
@@ -71,8 +72,8 @@ export const splitPanelPuckConfig = {
         { label: "40:60", value: "40-60" },
       ],
     },
-    bgColor: { type: "text" as const, label: "背景色" },
-    textBg: { type: "text" as const, label: "文字区背景" },
+    bgColor: colorPuckField("背景色"),
+    textBg: colorPuckField("文字区背景"),
   },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };

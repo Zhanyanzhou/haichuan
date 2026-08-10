@@ -7,6 +7,7 @@ import ProductRowBlock from "@/components/blocks/ProductRowBlock";
 import { fetchProductsByIds, type ProductRow } from "../data-sources/productSource";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import ProductIdsField from "../fields/ProductIdsField";
+import { colorPuckField } from "../fields/ColorField";
 
 export interface ProductRowPuckProps {
   title: string;
@@ -191,7 +192,7 @@ export const productRowPuckConfig = {
       ],
     },
     buttonText: { type: "text" as const, label: "按钮文字" },
-    bgColor: { type: "text" as const, label: "背景色" },
+    bgColor: colorPuckField("背景色"),
   },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };

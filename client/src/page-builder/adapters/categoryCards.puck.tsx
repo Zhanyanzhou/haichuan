@@ -4,6 +4,7 @@
 
 import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
 import { convertPuckProps } from "../utils/puckPropsToModule";
+import { colorPuckField } from "../fields/ColorField";
 
 export interface CategoryCardsPuckProps {
   title: string;
@@ -36,7 +37,7 @@ export const categoryCardsPuckConfig = {
         { label: "4 列", value: "grid-4" },
       ],
     },
-    bgColor: { type: "text" as const, label: "背景色" },
+    bgColor: colorPuckField("背景色"),
   },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };

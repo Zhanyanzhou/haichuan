@@ -4,6 +4,7 @@
 
 import TextBannerBlock from "@/components/blocks/TextBannerBlock";
 import { convertPuckProps } from "../utils/puckPropsToModule";
+import { colorPuckField } from "../fields/ColorField";
 
 export interface TextBannerPuckProps {
   eyebrow: string;
@@ -48,8 +49,8 @@ export const textBannerPuckConfig = {
         { label: "左对齐", value: "left" },
       ],
     },
-    bgColor: { type: "text" as const, label: "背景色" },
-    textColor: { type: "text" as const, label: "文字色" },
+    bgColor: colorPuckField("背景色"),
+    textColor: colorPuckField("文字色"),
     spacing: {
       type: "radio" as const,
       label: "间距",
