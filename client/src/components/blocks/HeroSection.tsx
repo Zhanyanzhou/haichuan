@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useReducedMotion } from 'framer-motion';
 import { homeCampaign } from '@/data/homeCampaign';
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import type { PageModule } from '@/types/pageModule';
 
 const LT = '#F1ECE3';
@@ -18,6 +19,18 @@ export default function HeroSection({ module, editMode }: Props) {
   const defaults = homeCampaign.heroFilm;
   const c = module?.content;
   const s = module?.styleConfig;
+
+  // 画布内未上传图片时显示占位，避免误展示老兜底图
+  if (editMode && !c?.desktopImage) {
+    return (
+      <BlockEmptyPlaceholder
+        icon="🖼️"
+        hint="首屏主视觉"
+        spec="建议 1920×1080 (16:9)"
+        height="100svh"
+      />
+    );
+  }
 
   const desktopImg = c?.desktopImage || defaults.poster;
   const mobileImg = c?.mobileImage || defaults.mobilePoster || defaults.poster;

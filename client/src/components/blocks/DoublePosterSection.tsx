@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useReducedMotion } from 'framer-motion';
 import { homeCampaign } from '@/data/homeCampaign';
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import type { PageModule } from '@/types/pageModule';
 
 const SF = '#F8F6F1';
@@ -30,6 +31,18 @@ export default function DoublePosterSection({ module, editMode }: Props) {
   const defaults = homeCampaign.editorialPair;
   const c = module?.content;
   const s = module?.styleConfig;
+
+  // 画布内主图或细节图任一未上传时显示占位，避免误展示老兜底图
+  if (editMode && (!(c?.mainImage || c?.desktopImage) || !(c?.detailImage || c?.mobileImage))) {
+    return (
+      <BlockEmptyPlaceholder
+        icon="🖼️"
+        hint="双图海报"
+        spec="主图 960×720 (4:3) · 细节 640×800 (4:5)"
+        height="80svh"
+      />
+    );
+  }
 
   const mainImg = c?.mainImage || c?.desktopImage || defaults.mainImage;
   const detailImg = c?.detailImage || c?.mobileImage || defaults.detailImage;

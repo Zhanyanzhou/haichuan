@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useReducedMotion } from 'framer-motion';
 import { homeCampaign } from '@/data/homeCampaign';
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import type { PageModule } from '@/types/pageModule';
 
 const LG = '#F3F0E9';
@@ -32,6 +33,18 @@ export default function SinglePosterSection({ module, editMode }: Props) {
   const c = module?.content;
   const l = module?.layoutConfig;
   const s = module?.styleConfig;
+
+  // 画布内未上传图片时显示占位，避免误展示老兜底图
+  if (editMode && !c?.desktopImage) {
+    return (
+      <BlockEmptyPlaceholder
+        icon="🖼️"
+        hint="单图海报"
+        spec="建议 1200×800 (3:2)"
+        height="60svh"
+      />
+    );
+  }
 
   const desktopImg = c?.desktopImage || defaults.image;
   const mobileImg = c?.mobileImage || desktopImg;
