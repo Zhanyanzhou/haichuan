@@ -35,7 +35,7 @@ npm run dev
 
 | 端口 | 服务           |
 | ---- | -------------- |
-| 5173 | Vite 前端      |
+| 5174 | Vite 前端      |
 | 3000 | NestJS 后端    |
 | 3306 | MySQL (Docker) |
 | 6379 | Redis (Docker) |
@@ -45,7 +45,7 @@ npm run dev
 | 命令                     | 说明                   |
 | ------------------------ | ---------------------- |
 | `npm run dev`            | 同时启动前后端         |
-| `npm run dev:client`     | 仅前端                 |
+| `npm.cmd run dev:client` | 仅前端                 |
 | `npm run dev:server`     | 仅后端                 |
 | `npm run build`          | 生产构建               |
 | `npx prisma migrate dev` | 数据库迁移             |
@@ -64,3 +64,9 @@ npm run dev
 ## Mock 模式
 
 `client/src/services/api.ts` 中 `USE_MOCK = true` 可绕过真实 API。适用于后端未启动时的前端开发。
+
+## 端口与启动说明
+
+- 当前 Windows 环境的前端默认端口为 `5174`，访问地址为 `http://localhost:5174`。
+- PowerShell 若阻止 `npm.ps1`，请使用 `npm.cmd run dev` 或 `npm.cmd run dev:client`。
+- 后端默认使用 `3000`；若该端口已被现有后端服务占用，可在启动前同时设置 `PORT` 与 `VITE_API_PROXY_TARGET`，例如 PowerShell 中：`$env:PORT='3001'; $env:VITE_API_PROXY_TARGET='http://localhost:3001'; npm.cmd run dev`。

@@ -40,8 +40,8 @@ npm run dev
 
 ### 访问地址
 
-- 前台首页: http://localhost:5173
-- 后台管理: http://localhost:5173/admin/login
+- 前台首页: http://localhost:5174
+- 后台管理: http://localhost:5174/admin/login
 - API 接口: http://localhost:3000/api
 - 数据库管理: http://localhost:5555 (Prisma Studio)
 

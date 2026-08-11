@@ -63,6 +63,8 @@ async function bootstrap() {
   app.useGlobalInterceptors(new TransformInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());
 
+  const port = Number(process.env.PORT) || 3000;
+
   // Swagger API 文档（仅开发环境暴露）
   if (process.env.NODE_ENV !== "production") {
     const config = new DocumentBuilder()
@@ -73,10 +75,10 @@ async function bootstrap() {
       .build();
     const document = SwaggerModule.createDocument(app, config);
     SwaggerModule.setup("api/docs", app, document);
-    logger.log("📚 Swagger docs: http://localhost:3000/api/docs");
+    logger.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
   }
 
-  await app.listen(3000);
-  logger.log("🚀 Jewelry Server running on http://localhost:3000");
+  await app.listen(port);
+  logger.log(`🚀 Jewelry Server running on http://localhost:${port}`);
 }
 bootstrap();
