@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> Claude Code 专属适配入口。公共规则见 `AGENTS.md`。
+> Claude Code 专属适配入口。公共规则以 `AGENTS.md`、`docs/PROJECT_GUARDRAILS.md` 和 `docs/AI_COLLABORATION_STANDARD.md` 为准；本文件不重复项目规则。
 > VS Code Copilot 专属适配见 `.github/copilot-instructions.md`。
 > 项目知识文档见 `docs/` 目录。
 
@@ -8,8 +8,10 @@
 
 ## 基础
 
-- 遵守 `AGENTS.md` 全部安全与开发规则
+- 依次遵守 `AGENTS.md`、`docs/PROJECT_GUARDRAILS.md`、`docs/AI_COLLABORATION_STANDARD.md`
 - 不确定时先询问，不猜测
+- 当前相关代码、类型、配置和工作区变更优先于可能过期的项目事实文档；发现冲突时报告，不得自行裁决
+- 不访问项目目录外文件；不得预授权或执行 Git 写入、项目外路径读取、环境/密钥操作
 
 ## 按任务读取 docs
 
