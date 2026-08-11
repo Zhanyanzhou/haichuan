@@ -1,4 +1,6 @@
 import {
+  cloneElement,
+  isValidElement,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -1496,9 +1498,16 @@ export default function HomepageConfig() {
         type,
         {
           ...(component as any),
-          render: (props: Record<string, any>) => props.isVisible === false ? (
-            <div className="homepage-editor__hidden-block">此模块已隐藏，不会发布到前台</div>
-          ) : (component as any).render(props),
+          render: (props: Record<string, any>) => {
+            if (props.isVisible === false) {
+              return <div className="homepage-editor__hidden-block">此模块已隐藏，不会发布到前台</div>;
+            }
+            const rendered = (component as any).render(props);
+            // 画布内统一注入 editMode，让 block 区分编辑预览与前台发布
+            return isValidElement(rendered)
+              ? cloneElement(rendered, { editMode: true } as any)
+              : rendered;
+          },
         },
       ]),
     ),
