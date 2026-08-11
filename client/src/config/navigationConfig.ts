@@ -161,7 +161,7 @@ export const navigationConfig: NavDomain[] = [
         collapsible: true,
         defaultOpen: true,
         items: [
-          { key: "products", label: "商品库", route: "/admin/products" },
+          { key: "products", label: "商品管理", route: "/admin/products" },
           {
             key: "categories",
             label: "类目与属性",

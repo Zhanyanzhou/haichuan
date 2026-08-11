@@ -113,27 +113,6 @@ function useNavSections(role: string | undefined) {
   }, [role]);
 }
 
-/* ═══════ 面包屑推导 ═══════ */
-function useBreadcrumb() {
-  const location = useLocation();
-  return useMemo(() => {
-    const ctx = findByRoute(location.pathname);
-    if (!ctx) return null;
-    const { domain, group, item } = ctx;
-    const parts: { label: string }[] = [];
-    const sec = navSections.find((s) => s.key === domain.section);
-    if (sec && sec.key !== "overview") parts.push({ label: sec.label });
-    parts.push({ label: domain.label });
-    if (item && group && (
-      item.label !== group.label &&
-      item.label !== domain.label
-    )) {
-      parts.push({ label: item.label });
-    }
-    return parts;
-  }, [location.pathname]);
-}
-
 /* ═══════ 域名渲染 ═══════ */
 function SidebarDomainItem({
   domain,
@@ -253,7 +232,6 @@ export default function AdminLayout() {
     getCommonNavItems(commonUserId),
   );
   const sections = useNavSections(user?.role);
-  const breadcrumb = useBreadcrumb();
   const isEditorWorkspace = location.pathname.startsWith("/admin/editor/");
 
   // 从路由反向推导当前导航上下文
@@ -517,26 +495,6 @@ export default function AdminLayout() {
 
         {/* 内容区 */}
         <div className="admin-content">
-          {/* 面包屑 */}
-          {!isEditorWorkspace && breadcrumb && breadcrumb.length > 0 && (
-            <div className="admin-breadcrumb">
-              {breadcrumb.map((part, i) => (
-                <span key={part.label}>
-                  {i > 0 && <span className="admin-breadcrumb__sep">/</span>}
-                  <span
-                    className={
-                      i === breadcrumb.length - 1
-                        ? "admin-breadcrumb__current"
-                        : "admin-breadcrumb__link"
-                    }
-                  >
-                    {part.label}
-                  </span>
-                </span>
-              ))}
-            </div>
-          )}
-
           {/* 页面内容 */}
           <main className={`admin-main${isEditorWorkspace ? " admin-main--workspace" : ""}`}>
             <Outlet />
