@@ -74,7 +74,7 @@ export const jewelryHomeTemplate: TemplateDefinition = {
           id: "featured-products",
           title: "精选臻品",
           subtitle: "匠心之作，为你甄选",
-          productIds: [1, 2, 3, 4],
+          productIds: [],
           layout: "grid-4",
           bgColor: "#FCFCFB",
           locked: false,
@@ -88,17 +88,17 @@ export const jewelryHomeTemplate: TemplateDefinition = {
           subtitle: "每一件作品，都承载着对品质的执着",
           cards: [
             {
-              icon: "/images/设计.png",
+              icon: "",
               title: "匠心设计",
               body: "从纹样到比例，每件作品均由资深工匠手工绘制与打磨",
             },
             {
-              icon: "/images/錾刻.png",
+              icon: "",
               title: "真材实料",
               body: "精选足金原料，所有材质均附国家权威检测证书",
             },
             {
-              icon: "/images/抛光.png",
+              icon: "",
               title: "终身保养",
               body: "购买即享终身免费清洗保养服务，让作品历久弥新",
             },
