@@ -30,6 +30,62 @@ type PuckDocument = {
   zones?: Record<string, PuckBlock[]>;
 };
 
+const LOCAL_UPLOAD_PREFIX = "/uploads/";
+const BLOCK_ASSET_FIELDS = [
+  "desktopImage",
+  "mobileImage",
+  "mainImage",
+  "detailImage",
+  "image",
+  "posterUrl",
+  "url",
+  "videoUrl",
+];
+
+function getLocalUploadUrls(props: Record<string, any>): string[] {
+  const urls = new Set<string>();
+  const collect = (value: unknown) => {
+    if (typeof value === "string" && value.startsWith(LOCAL_UPLOAD_PREFIX)) {
+      urls.add(value);
+    }
+  };
+
+  BLOCK_ASSET_FIELDS.forEach((field) => collect(props[field]));
+  if (Array.isArray(props.images)) {
+    props.images.forEach((item: any) => {
+      collect(item?.url);
+      collect(item?.mobileUrl);
+    });
+  }
+
+  return [...urls];
+}
+
+function MissingMediaState({ type }: { type?: string }) {
+  return (
+    <section
+      role="status"
+      style={{
+        minHeight: 260,
+        display: "grid",
+        placeItems: "center",
+        padding: "48px 24px",
+        background: "#F3F0E9",
+        border: "1px dashed #B8944E",
+        color: "#7D6440",
+        textAlign: "center",
+      }}
+    >
+      <div>
+        <p style={{ margin: "0 0 8px", fontSize: 15 }}>图片暂时不可用</p>
+        <p style={{ margin: 0, fontSize: 13, color: "#9A9288" }}>
+          请在店铺装修中重新上传{type ? `「${type}」` : "该区块"}的图片后再发布。
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function formatProductPrice(product: Product) {
   const price = Number(product.price || product.priceMin || 0);
   if (!price) return "";
@@ -276,6 +332,38 @@ function renderBlock(block: PuckBlock, index: number) {
   }
 }
 
+function GuardedBlock({ block, index }: { block: PuckBlock; index: number }) {
+  const props = block.props || {};
+  const urls = getLocalUploadUrls(props);
+  const urlsKey = urls.join("\n");
+  const [hasMissingAsset, setHasMissingAsset] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!urls.length) {
+      setHasMissingAsset(false);
+      return;
+    }
+
+    void Promise.all(
+      urls.map((url) =>
+        fetch(url, { method: "HEAD" })
+          .then((response) => response.ok)
+          .catch(() => false),
+      ),
+    ).then((available) => {
+      if (!cancelled) setHasMissingAsset(available.some((value) => !value));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [urlsKey]);
+
+  if (hasMissingAsset) return <MissingMediaState type={block.type} />;
+  return renderBlock(block, index);
+}
+
 export default function PuckDocumentRenderer({ data }: { data: PuckDocument }) {
   if (!Array.isArray(data?.content)) return null;
   const zoneBlocks =
@@ -286,11 +374,9 @@ export default function PuckDocumentRenderer({ data }: { data: PuckDocument }) {
       : [];
   // 区块级兜底：单个 block 运行时抛错只跳过该区块，避免整页白屏
   const render = (block: PuckBlock, index: number) => {
-    const node = renderBlock(block, index);
-    if (node === null) return null;
     return (
       <ErrorBoundary key={`eb-${block.props?.id || index}`} fallback={null}>
-        {node}
+        <GuardedBlock block={block} index={index} />
       </ErrorBoundary>
     );
   };

@@ -42,19 +42,19 @@ export const splitPanelPuckConfig = {
   fields: {
     image: {
       type: "custom" as const,
-      label: "配图",
+      label: "图片分栏 · 配图",
       render: ({
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+        <MediaPickerField fieldKey="image" device="shared" value={value} onChange={onChange} readOnly={readOnly}
           spec={IMAGE_SPECS.splitPanel.image} placeholder="上传分栏配图" />
       ),
     },
-    title: { type: "text" as const, label: "标题" },
-    subtitle: { type: "text" as const, label: "副标题" },
-    body: { type: "textarea" as const, label: "正文" },
-    buttonText: { type: "text" as const, label: "按钮文字" },
-    linkUrl: { type: "text" as const, label: "按钮链接" },
+    title: { type: "text" as const, label: "文字分栏 · 主标题" },
+    subtitle: { type: "text" as const, label: "文字分栏 · 副标题" },
+    body: { type: "textarea" as const, label: "文字分栏 · 正文" },
+    buttonText: { type: "text" as const, label: "文字分栏 · 按钮文字" },
+    linkUrl: { type: "text" as const, label: "按钮跳转链接" },
     template: {
       type: "radio" as const,
       label: "图片位置",

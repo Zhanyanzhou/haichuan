@@ -11,6 +11,9 @@ const Home = lazy(() => import("@/pages/public/Home"));
 const HomePreview = lazy(() =>
   import("@/pages/public/Home").then((m) => ({ default: m.HomePreview })),
 );
+const PagePreview = lazy(() =>
+  import("@/pages/public/Home").then((m) => ({ default: m.PagePreview })),
+);
 const ProductList = lazy(() => import("@/pages/public/ProductList"));
 const ProductDetail = lazy(() => import("@/pages/public/ProductDetail"));
 const Cart = lazy(() => import("@/pages/public/Cart"));
@@ -77,6 +80,14 @@ function App() {
               element={
                 <ProtectedRoute roles={["SUPER_ADMIN", "ADMIN", "EDITOR"]}>
                   <HomePreview />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="preview/:pageKey"
+              element={
+                <ProtectedRoute roles={["SUPER_ADMIN", "ADMIN", "EDITOR"]}>
+                  <PagePreview />
                 </ProtectedRoute>
               }
             />

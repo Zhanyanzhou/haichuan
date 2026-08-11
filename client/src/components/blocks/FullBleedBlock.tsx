@@ -24,7 +24,10 @@ export default function FullBleedBlock({
   const template = layoutConfig.template || "textCenter";
   const overlay = styleConfig.bgColor || "rgba(15,13,12,0.2)";
 
-  if (!image) {
+  const desktopImg = image || mobileImage;
+  const mobileImg = mobileImage || image;
+
+  if (!desktopImg) {
     if (!editMode) return null;
     return (
       <BlockEmptyPlaceholder
@@ -61,19 +64,23 @@ export default function FullBleedBlock({
       style={{
         position: "relative",
         width: "100%",
-        minHeight: template === "textBottomLeft" ? "90svh" : "100svh",
+        minHeight: editMode
+          ? template === "textBottomLeft"
+            ? "var(--homepage-editor-bleed-height, 810px)"
+            : "var(--homepage-editor-viewport-height, 900px)"
+          : template === "textBottomLeft" ? "90svh" : "100svh",
         overflow: "hidden",
-        background: "#0F0D0C",
+        // 图片解码前使用品牌暖色，避免刷新时出现整屏黑块。
+        background: "#E7DDCE",
       }}
     >
-      <picture>
-        {mobileImage && (
-          <source media="(max-width: 1023px) and (orientation: portrait)" srcSet={mobileImage} />
-        )}
+      <picture data-editor-field="image mobileImage">
+        <source media="(max-width: 1023px) and (orientation: portrait)" srcSet={mobileImg} />
         <img
-          src={image}
+          src={desktopImg}
           alt=""
           loading="lazy"
+          decoding="async"
           style={{
             position: "absolute",
             inset: 0,
@@ -92,13 +99,15 @@ export default function FullBleedBlock({
           display: "flex",
           alignItems: textY,
           justifyContent: textX,
-          padding: `${template === "textBottomLeft" ? "0 0 clamp(38px,7vh,80px)" : "0"} ${padRight} 0 ${padLeft}`,
+          padding: `${template === "textBottomLeft"
+            ? editMode ? "0 0 var(--homepage-editor-bleed-bottom-padding, 63px)" : "0 0 clamp(38px,7vh,80px)"
+            : "0"} ${padRight} 0 ${padLeft}`,
           textAlign: textAlign as any,
         }}
       >
         <div style={{ maxWidth: 520 }}>
           {title && (
-            <h2
+            <h2 data-editor-field="title"
               style={{
                 fontSize: "clamp(32px,4.5vw,56px)",
                 lineHeight: 1.1,
@@ -111,7 +120,7 @@ export default function FullBleedBlock({
             </h2>
           )}
           {subtitle && (
-            <p
+            <p data-editor-field="subtitle"
               style={{
                 fontSize: 14,
                 color: "rgba(255,255,255,0.7)",
@@ -124,7 +133,7 @@ export default function FullBleedBlock({
             </p>
           )}
           {buttonText && linkUrl && (
-            <Link
+            <Link data-editor-field="buttonText linkUrl"
               to={linkUrl}
               style={{
                 display: "inline-block",

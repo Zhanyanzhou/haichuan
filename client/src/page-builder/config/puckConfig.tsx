@@ -33,6 +33,8 @@ import { hotspotPuckConfig } from "../adapters/hotspot.puck";
 import type { HotspotPuckProps } from "../adapters/hotspot.puck";
 import { siteConfigPuckConfig } from "../adapters/siteConfig.puck";
 import type { SiteConfigPuckProps } from "../adapters/siteConfig.puck";
+import { businessRegionPuckConfig } from "../adapters/businessRegion.puck";
+import type { BusinessRegionPuckProps } from "../adapters/businessRegion.puck";
 
 type MyComponents = {
   首屏主视觉: HeroPuckProps;
@@ -49,6 +51,7 @@ type MyComponents = {
   视频区块: VideoPuckProps;
   热区图: HotspotPuckProps;
   网站全局设置: SiteConfigPuckProps;
+  业务功能区: BusinessRegionPuckProps;
 };
 
 /** 注册全部 Block — 中文 Key 即 Puck 侧栏显示名称 */
@@ -68,6 +71,7 @@ export const puckConfig: Config<MyComponents> = {
     视频区块: videoPuckConfig,
     热区图: hotspotPuckConfig,
     网站全局设置: siteConfigPuckConfig,
+    业务功能区: businessRegionPuckConfig,
   },
   /** 与区块模板库保持一致：按页面经营目标分类，而非技术组件类型。 */
   categories: getCategoryComponents() as any,

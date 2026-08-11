@@ -38,7 +38,7 @@ export const hotspotPuckConfig = {
       render: ({
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+        <MediaPickerField fieldKey="image" device="desktop" value={value} onChange={onChange} readOnly={readOnly}
           spec={IMAGE_SPECS.hotspot.desktop} placeholder="上传桌面端热区图" />
       ),
     },
@@ -48,7 +48,7 @@ export const hotspotPuckConfig = {
       render: ({
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+        <MediaPickerField fieldKey="mobileImage" device="mobile" value={value} onChange={onChange} readOnly={readOnly}
           spec={IMAGE_SPECS.hotspot.mobile} placeholder="上传手机端热区图" />
       ),
     },

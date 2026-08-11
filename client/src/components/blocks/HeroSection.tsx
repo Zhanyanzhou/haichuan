@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useReducedMotion } from 'framer-motion';
 import { homeCampaign } from '@/data/homeCampaign';
@@ -14,26 +14,34 @@ interface Props { module?: PageModule; editMode?: boolean; }
  */
 export default function HeroSection({ module, editMode }: Props) {
   const rm = useReducedMotion();
-  const [vf, setVf] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
 
   const defaults = homeCampaign.heroFilm;
   const c = module?.content;
   const s = module?.styleConfig;
 
-  // 画布内未上传图片时显示占位，避免误展示老兜底图
-  if (editMode && !c?.desktopImage) {
+  useEffect(() => {
+    setImageLoaded(false);
+    setImageFailed(false);
+  }, [c?.desktopImage, c?.mobileImage]);
+
+  // 已配置的装修区块没有素材时，不能回退到活动默认图，避免前台或画布闪出陌生图片。
+  if (!c?.desktopImage && !c?.mobileImage) {
+    if (!editMode) return null;
     return (
       <BlockEmptyPlaceholder
         icon="🖼️"
         hint="首屏主视觉"
-        spec="建议 1920×1080 (16:9)"
-        height="100svh"
+        spec="请上传桌面端主视觉图 · 建议 1920×1080 (16:9)"
+        height="var(--homepage-editor-viewport-height, 900px)"
       />
     );
   }
 
-  const desktopImg = c?.desktopImage || defaults.poster;
-  const mobileImg = c?.mobileImage || defaults.mobilePoster || defaults.poster;
+  // 未上传某一端时复用另一端已配置图片，不再引入活动素材兜底。
+  const desktopImg = c.desktopImage || c.mobileImage;
+  const mobileImg = c.mobileImage || c.desktopImage;
   const title = c?.title || defaults.title;
   const subtitle = c?.subtitle || defaults.eyebrow;
   const actionText = c?.actionText || defaults.action;
@@ -45,7 +53,10 @@ export default function HeroSection({ module, editMode }: Props) {
     <section
       className="relative w-full overflow-hidden"
       style={{
-        height: '100svh', minHeight: '680px', background: '#0F0D0C',
+        height: editMode ? 'var(--homepage-editor-viewport-height, 900px)' : '100svh',
+        minHeight: editMode ? undefined : '680px',
+        // 使用品牌暖色作为加载底，不让首屏图片加载期间闪黑。
+        background: '#E7DDCE',
         outline: editMode ? '2px solid rgba(184,148,78,0.6)' : undefined,
         outlineOffset: -2,
         position: 'relative' as const,
@@ -56,14 +67,24 @@ export default function HeroSection({ module, editMode }: Props) {
           可编辑 · Hero
         </div>
       )}
-      <picture>
+      <picture data-editor-field="desktopImage mobileImage">
         <source media="(max-width: 1023px) and (orientation: portrait)" srcSet={mobileImg} />
         <img
           src={desktopImg} alt={c?.altText || title}
-          decoding="sync"
+          loading="eager"
+          decoding="async"
+          onLoad={() => setImageLoaded(true)}
+          onError={() => {
+            setImageFailed(true);
+            setImageLoaded(true);
+          }}
           width={1024} height={1536}
           className="absolute inset-0 w-full h-full object-cover"
-          style={{ objectPosition: `${focusX}% ${focusY + 5}%` }}
+          style={{
+            objectPosition: `${focusX}% ${focusY + 5}%`,
+            opacity: imageLoaded && !imageFailed ? 1 : 0,
+            transition: rm ? "none" : "opacity 240ms ease-out",
+          }}
         />
       </picture>
       <div className="absolute inset-0 pointer-events-none"
@@ -76,16 +97,16 @@ export default function HeroSection({ module, editMode }: Props) {
 
       {/* 左下文案 */}
       <div className="absolute bottom-[clamp(38px,7vh,76px)] left-[clamp(28px,4.2vw,72px)] z-10" style={{ maxWidth: '520px' }}>
-        <p className="text-[10px] md:text-[11px] tracking-[.2em] uppercase mb-4 font-sans"
+        <p data-editor-field="subtitle" className="text-[10px] md:text-[11px] tracking-[.2em] uppercase mb-4 font-sans"
           style={{ color: 'rgba(255,255,255,0.6)', fontFamily: 'Inter,system-ui,sans-serif', opacity: rm ? 1 : 0, transform: rm ? 'none' : 'translateY(12px)', animation: rm ? 'none' : 'fadeUp 0.7s 0.18s cubic-bezier(0.22,1,0.36,1) forwards' }}>
           {subtitle}
         </p>
-        <h1 className="text-[clamp(40px,5vw,68px)] leading-[1.1] tracking-[.02em] mb-6 whitespace-pre-line"
+        <h1 data-editor-field="title" className="text-[clamp(40px,5vw,68px)] leading-[1.1] tracking-[.02em] mb-6 whitespace-pre-line"
           style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: LT, opacity: rm ? 1 : 0, transform: rm ? 'none' : 'translateY(12px)', animation: rm ? 'none' : 'fadeUp 0.7s 0.28s cubic-bezier(0.22,1,0.36,1) forwards' }}>
           {title}
         </h1>
         {actionText && linkUrl && (
-          <Link to={linkUrl} className="inline-flex items-center gap-2 text-[10px] md:text-[11px] tracking-[.14em] uppercase transition-opacity duration-300 hover:opacity-60"
+          <Link data-editor-field="actionText linkUrl" to={linkUrl} className="inline-flex items-center gap-2 text-[10px] md:text-[11px] tracking-[.14em] uppercase transition-opacity duration-300 hover:opacity-60"
             style={{ color: 'rgba(255,255,255,0.7)', fontFamily: 'Inter,system-ui,sans-serif', opacity: rm ? 1 : 0, transform: rm ? 'none' : 'translateY(12px)', animation: rm ? 'none' : 'fadeUp 0.7s 0.38s cubic-bezier(0.22,1,0.36,1) forwards' }}>
             {actionText} <span>→</span>
           </Link>

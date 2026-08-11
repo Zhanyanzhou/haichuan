@@ -59,7 +59,7 @@ export default function TextBannerBlock({
         }}
       >
         {eyebrow && (
-          <p
+          <p data-editor-field="eyebrow"
             style={{
               fontSize: 10,
               letterSpacing: "0.28em",
@@ -73,7 +73,7 @@ export default function TextBannerBlock({
           </p>
         )}
         {title && (
-          <h2
+          <h2 data-editor-field="title"
             style={{
               fontSize: "clamp(28px,3.5vw,48px)",
               lineHeight: 1.15,
@@ -89,7 +89,7 @@ export default function TextBannerBlock({
           </h2>
         )}
         {body && (
-          <p
+          <p data-editor-field="body"
             style={{
               fontSize: 15,
               color: textColor === "#fff" ? "rgba(255,255,255,0.7)" : "#8A7F72",
@@ -104,7 +104,7 @@ export default function TextBannerBlock({
           </p>
         )}
         {buttonText && linkUrl && (
-          <Link
+          <Link data-editor-field="buttonText linkUrl"
             to={linkUrl}
             style={{
               display: "inline-block",

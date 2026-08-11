@@ -38,28 +38,28 @@ export const fullBleedPuckConfig = {
   fields: {
     image: {
       type: "custom" as const,
-      label: "桌面端图片",
+      label: "全屏主视觉",
       render: ({
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+        <MediaPickerField fieldKey="image" device="desktop" value={value} onChange={onChange} readOnly={readOnly}
           spec={IMAGE_SPECS.fullBleed.desktop} placeholder="上传通栏桌面大图" />
       ),
     },
     mobileImage: {
       type: "custom" as const,
-      label: "手机端图片",
+      label: "移动端适配图（可选）",
       render: ({
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+        <MediaPickerField fieldKey="mobileImage" device="mobile" value={value} onChange={onChange} readOnly={readOnly}
           spec={IMAGE_SPECS.fullBleed.mobile} placeholder="上传通栏手机端图（可选）" />
       ),
     },
-    title: { type: "text" as const, label: "标题" },
-    subtitle: { type: "text" as const, label: "副标题" },
-    buttonText: { type: "text" as const, label: "按钮文字" },
-    linkUrl: { type: "text" as const, label: "按钮链接" },
+    title: { type: "text" as const, label: "主视觉叠加文案 · 标题" },
+    subtitle: { type: "text" as const, label: "主视觉叠加文案 · 副标题" },
+    buttonText: { type: "text" as const, label: "主视觉叠加文案 · 按钮文字" },
+    linkUrl: { type: "text" as const, label: "按钮跳转链接" },
     template: {
       type: "radio" as const,
       label: "文字位置",

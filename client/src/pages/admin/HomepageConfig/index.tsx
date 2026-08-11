@@ -37,6 +37,7 @@ import {
   RedoOutlined,
 } from "@ant-design/icons";
 import { Puck, createUsePuck, type UiState } from "@puckeditor/core";
+import { useNavigate } from "react-router-dom";
 import "@puckeditor/core/puck.css";
 import { puckConfig } from "@/page-builder/config/puckConfig";
 import {
@@ -46,19 +47,22 @@ import {
   TEMPLATE_MEDIA_HINT,
   type BlockMeta,
 } from "@/page-builder/config/blockMeta";
-import {
-  jewelryHomeTemplate,
-  pageTemplates,
-  type TemplateDefinition,
-} from "@/page-builder/templates/templates";
+import { pageTemplates, type TemplateDefinition } from "@/page-builder/templates/templates";
 import { pageDocumentApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import MediaRequirementPanel from "@/page-builder/fields/MediaRequirementPanel";
-import MediaPickerField from "@/page-builder/fields/MediaPickerField";
+import MediaPickerField, { type MediaSpec } from "@/page-builder/fields/MediaPickerField";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { blockTemplateStore, type BlockTemplate } from "@/page-builder/templates/blockTemplateStore";
-
-/** 当前装修系统只服务首页；未来扩展多页面时改为从路由参数取 pageKey。 */
-const HOME_PAGE_KEY = "home";
+import StorefrontNavigation from "@/components/layout/StorefrontNavigation";
+import {
+  createEditorPageDefault,
+  ensureEditorPageStructure,
+  editorPages,
+  getEditorPage,
+  getEditorPageByPath,
+  type EditorPageKey,
+} from "@/page-builder/config/editorPages";
 
 const useHomepagePuck = createUsePuck<typeof puckConfig>();
 
@@ -107,6 +111,37 @@ const VIEWPORT_PRESETS: ViewportPreset[] = [
 ];
 
 const ROOT_ZONE = "root:default-zone";
+const CANVAS_FOCUS_MESSAGE = "homepage-editor:focus-block";
+const CANVAS_HEIGHT_MESSAGE = "homepage-editor:canvas-height";
+const CANVAS_NAVIGATION_MESSAGE = "homepage-editor:navigation-preview";
+const CANVAS_NAVIGATION_STATE_MESSAGE = "homepage-editor:navigation-state";
+const CANVAS_PAGE_NAVIGATION_MESSAGE = "homepage-editor:page-navigation";
+
+type CanvasFocusMessage = {
+  type: typeof CANVAS_FOCUS_MESSAGE;
+  blockId: string;
+  field?: string;
+};
+
+type CanvasHeightMessage = {
+  type: typeof CANVAS_HEIGHT_MESSAGE;
+  height: number;
+};
+
+type CanvasNavigationMessage = {
+  type: typeof CANVAS_NAVIGATION_MESSAGE;
+  open: boolean;
+};
+
+type CanvasNavigationStateMessage = {
+  type: typeof CANVAS_NAVIGATION_STATE_MESSAGE;
+  open: boolean;
+};
+
+type CanvasPageNavigationMessage = {
+  type: typeof CANVAS_PAGE_NAVIGATION_MESSAGE;
+  path: string;
+};
 
 let blockIdSequence = 0;
 
@@ -130,6 +165,609 @@ const MEDIA_FIELD_LABELS = [
   ["detailImage", "细节图片"],
   ["posterUrl", "视频封面"],
 ] as const;
+
+type InspectorGuideItem = {
+  field: string;
+  label: string;
+  placement: string;
+  kind: "media" | "text";
+  device?: "desktop" | "mobile" | "shared";
+};
+
+type InspectorMediaItem = {
+  field: string;
+  label: string;
+  placement: string;
+  device: "desktop" | "mobile" | "shared";
+  required: boolean;
+  spec: MediaSpec;
+  placeholder: string;
+  carouselIndex?: number;
+  previewAspectRatio?: string;
+  previewFocus?: { x: number; y: number };
+};
+
+const CAROUSEL_MOBILE_SPEC: MediaSpec = {
+  width: 750,
+  height: 1000,
+  ratio: "3:4",
+  label: "手机端轮播图（建议 750×1000，3:4）",
+};
+
+type InspectorDevice = "desktop" | "mobile";
+
+function createCropPreview(aspectRatio: string, focusX = 50, focusY = 50) {
+  return {
+    previewAspectRatio: aspectRatio,
+    previewFocus: { x: focusX, y: focusY },
+  };
+}
+
+/**
+ * Puck 画布运行在 iframe 中，宿主页面不能直接操作其 DOM。
+ * 通过 postMessage 把“图层/字段定位”交给画布内的锚点处理，避免图层已选中、画布仍停在首屏。
+ */
+function focusCanvasBlock(blockId?: string, field?: string) {
+  if (!blockId) return;
+  window.requestAnimationFrame(() => {
+    const frame = document.querySelector<HTMLIFrameElement>(
+      ".homepage-editor__preview-frame iframe",
+    );
+    frame?.contentWindow?.postMessage(
+      { type: CANVAS_FOCUS_MESSAGE, blockId, field } satisfies CanvasFocusMessage,
+      "*",
+    );
+  });
+}
+
+function setCanvasNavigationPreview(open: boolean) {
+  window.requestAnimationFrame(() => {
+    const frame = document.querySelector<HTMLIFrameElement>(
+      ".homepage-editor__preview-frame iframe",
+    );
+    frame?.contentWindow?.postMessage(
+      { type: CANVAS_NAVIGATION_MESSAGE, open } satisfies CanvasNavigationMessage,
+      "*",
+    );
+  });
+}
+
+function EditorCanvasFooter() {
+  return (
+    <footer
+      aria-label="全局页脚预览"
+      style={{
+        padding: "44px clamp(24px, 5vw, 72px)",
+        background: "#24211E",
+        color: "rgba(255,255,255,.78)",
+      }}
+    >
+      <div style={{ maxWidth: 1280, margin: "0 auto", display: "flex", justifyContent: "space-between", gap: 24, flexWrap: "wrap" }}>
+        <div>
+          <p style={{ margin: 0, color: "#D4B77A", fontSize: 11, letterSpacing: ".2em" }}>HAICHUAN JEWELRY</p>
+          <p style={{ margin: "10px 0 0", fontSize: 13 }}>全局页脚 · 联系方式与导航由店铺资料统一管理</p>
+        </div>
+        <p style={{ margin: 0, alignSelf: "end", color: "rgba(255,255,255,.46)", fontSize: 11 }}>此区同步应用于所有前台页面</p>
+      </div>
+    </footer>
+  );
+}
+
+function EditorCanvasShell({ children, isHome }: { children: ReactNode; isHome: boolean }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
+  const previewViewportHeight = currentViewport.height === "auto" ? 900 : currentViewport.height;
+
+  useEffect(() => {
+    const root = rootRef.current;
+    const frameWindow = root?.ownerDocument.defaultView;
+    if (!frameWindow || frameWindow === window) return;
+
+    const handleNavigationPreview = (event: MessageEvent<CanvasNavigationMessage>) => {
+      if (event.source !== frameWindow.parent || event.data?.type !== CANVAS_NAVIGATION_MESSAGE) return;
+      setMenuOpen(event.data.open);
+    };
+    frameWindow.addEventListener("message", handleNavigationPreview);
+    return () => frameWindow.removeEventListener("message", handleNavigationPreview);
+  }, []);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    const frameWindow = root?.ownerDocument.defaultView;
+    if (!frameWindow || frameWindow === window) return;
+    frameWindow.parent.postMessage(
+      { type: CANVAS_NAVIGATION_STATE_MESSAGE, open: menuOpen } satisfies CanvasNavigationStateMessage,
+      "*",
+    );
+  }, [menuOpen]);
+
+  return (
+    <div
+      ref={rootRef}
+      className="homepage-editor__storefront-frame"
+      style={{ "--homepage-editor-preview-height": `${previewViewportHeight}px` } as any}
+    >
+      <StorefrontNavigation
+        isHome={isHome}
+        preview
+        menuOpen={menuOpen}
+        onMenuOpenChange={setMenuOpen}
+        onPreviewNavigate={(path) => {
+          const frameWindow = rootRef.current?.ownerDocument.defaultView;
+          frameWindow?.parent.postMessage(
+            { type: CANVAS_PAGE_NAVIGATION_MESSAGE, path } satisfies CanvasPageNavigationMessage,
+            "*",
+          );
+        }}
+      />
+      {children}
+      <EditorCanvasFooter />
+    </div>
+  );
+}
+
+function CanvasBlockAnchor({
+  blockId,
+  blockType,
+  children,
+}: {
+  blockId?: string;
+  blockType: string;
+  children: ReactNode;
+}) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const clearFocusTimer = useRef<number | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
+  const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
+  const dispatch = useHomepagePuck((state) => state.dispatch);
+  const editorViewportHeight = currentViewport.height === "auto" ? 900 : currentViewport.height;
+
+  useEffect(() => {
+    const anchor = anchorRef.current;
+    // Puck 通过 Portal 将节点渲染进 iframe，但 React effect 仍在宿主页面执行。
+    // 因此必须从节点所属 document 取得 iframe window，而不是直接使用全局 window。
+    const frameWindow = anchor?.ownerDocument.defaultView;
+    if (!blockId || !anchor || !frameWindow || frameWindow === window) return;
+
+    const handleFocusMessage = (event: MessageEvent<CanvasFocusMessage>) => {
+      if (event.source !== frameWindow.parent) return;
+      const detail = event.data;
+      if (detail?.type !== CANVAS_FOCUS_MESSAGE || detail.blockId !== blockId) return;
+
+      const fieldTarget = detail.field
+        ? anchor.querySelector<HTMLElement>(`[data-editor-field~="${detail.field}"]`)
+        : null;
+      (fieldTarget || anchor).scrollIntoView({ block: "center", behavior: "smooth" });
+      setIsFocused(true);
+      if (clearFocusTimer.current) frameWindow.clearTimeout(clearFocusTimer.current);
+      clearFocusTimer.current = frameWindow.setTimeout(() => setIsFocused(false), 1800);
+    };
+
+    frameWindow.addEventListener("message", handleFocusMessage);
+    return () => {
+      frameWindow.removeEventListener("message", handleFocusMessage);
+      if (clearFocusTimer.current) frameWindow.clearTimeout(clearFocusTimer.current);
+    };
+  }, [blockId]);
+
+  useEffect(() => {
+    const anchor = anchorRef.current;
+    const frameWindow = anchor?.ownerDocument.defaultView;
+    if (!anchor || !frameWindow || frameWindow === window) return;
+
+    // iframe 被内容撑高后，svh/vh 会随 iframe 高度变化，进而使模块再次变高。
+    // 使用编辑器当前设备预设，而不是 iframe 的实时高度，保证切换设备后比例仍准确且整页高度稳定。
+    const viewportHeight = Math.max(1, Math.round(editorViewportHeight));
+    anchor.style.setProperty("--homepage-editor-viewport-height", `${viewportHeight}px`);
+    anchor.style.setProperty("--homepage-editor-single-height", `${Math.round(viewportHeight * 1.1)}px`);
+    anchor.style.setProperty("--homepage-editor-single-image-height", `${Math.min(860, Math.round(viewportHeight * 0.76))}px`);
+    anchor.style.setProperty("--homepage-editor-single-copy-offset", `${Math.round(viewportHeight * 0.22)}px`);
+    anchor.style.setProperty("--homepage-editor-double-height", `${Math.round(viewportHeight * 1.18)}px`);
+    anchor.style.setProperty("--homepage-editor-double-main-height", `${Math.min(900, Math.max(560, Math.round(viewportHeight * 0.8)))}px`);
+    anchor.style.setProperty("--homepage-editor-double-detail-height", `${Math.min(520, Math.max(320, Math.round(viewportHeight * 0.48)))}px`);
+    anchor.style.setProperty("--homepage-editor-bleed-height", `${Math.round(viewportHeight * 0.9)}px`);
+    anchor.style.setProperty("--homepage-editor-bleed-bottom-padding", `${Math.min(80, Math.max(38, Math.round(viewportHeight * 0.07)))}px`);
+  }, [editorViewportHeight]);
+
+  useEffect(() => {
+    const anchor = anchorRef.current;
+    const frameWindow = anchor?.ownerDocument.defaultView;
+    if (!anchor || !frameWindow || frameWindow === window) return;
+
+    const reportCanvasHeight = () => {
+      const documentHeight = Math.ceil(Math.max(
+        anchor.ownerDocument.documentElement.scrollHeight,
+        anchor.ownerDocument.body?.scrollHeight || 0,
+      ));
+      if (documentHeight <= 0) return;
+      frameWindow.parent.postMessage(
+        { type: CANVAS_HEIGHT_MESSAGE, height: documentHeight } satisfies CanvasHeightMessage,
+        "*",
+      );
+    };
+
+    // 锚点位于 Puck 的 iframe document，使用其自身的 ResizeObserver 才能稳定监听尺寸变化。
+    const observer = new frameWindow.ResizeObserver(reportCanvasHeight);
+    observer.observe(anchor);
+    reportCanvasHeight();
+    const delayedReport = frameWindow.setTimeout(reportCanvasHeight, 80);
+    return () => {
+      observer.disconnect();
+      frameWindow.clearTimeout(delayedReport);
+    };
+  }, []);
+
+  const requestCanvasSelection = () => {
+    const anchor = anchorRef.current;
+    const frameWindow = anchor?.ownerDocument.defaultView;
+    const puckBlock = anchor?.closest<HTMLElement>("[data-puck-component]");
+    if (!blockId || !frameWindow || !puckBlock) return;
+
+    setIsFocused(true);
+    if (clearFocusTimer.current) frameWindow.clearTimeout(clearFocusTimer.current);
+    clearFocusTimer.current = frameWindow.setTimeout(() => setIsFocused(false), 1800);
+
+    const blockIndex = Array.from(
+      puckBlock.ownerDocument.querySelectorAll<HTMLElement>("[data-puck-component]"),
+    ).indexOf(puckBlock);
+    window.setTimeout(() => {
+      if (blockIndex < 0) return;
+      dispatch({
+        type: "setUi",
+        ui: { itemSelector: { index: blockIndex, zone: ROOT_ZONE } },
+      });
+    }, 60);
+  };
+
+  return (
+    <div
+      ref={anchorRef}
+      data-editor-block-id={blockId}
+      data-editor-block-type={blockType}
+      style={{
+        position: "relative",
+        ...(isFocused ? {
+          zIndex: 2,
+          outline: "3px solid #B8944E",
+          outlineOffset: "-3px",
+          boxShadow: "0 0 0 7px rgba(184, 148, 78, .20)",
+        } : {}),
+      }}
+    >
+      <div
+        data-editor-select-overlay={blockType}
+        aria-hidden="true"
+        onPointerDownCapture={requestCanvasSelection}
+        onClick={(event) => {
+          event.preventDefault();
+          requestCanvasSelection();
+        }}
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 20,
+          width: "100%",
+          height: "100%",
+          padding: 0,
+          border: 0,
+          background: "transparent",
+          cursor: "pointer",
+        }}
+      />
+      {children}
+    </div>
+  );
+}
+
+/** 保持 Puck 编辑器实例常驻，仅在页面切换时替换内部画布数据。 */
+function CanvasPageDataSynchronizer({ data, pageKey }: { data: any; pageKey: EditorPageKey }) {
+  const dispatch = useHomepagePuck((state) => state.dispatch);
+  const appliedSignatureRef = useRef<string | null>(null);
+  const dataSignature = useMemo(() => JSON.stringify(data), [data]);
+
+  useEffect(() => {
+    const signature = `${pageKey}:${dataSignature}`;
+    if (appliedSignatureRef.current === signature) return;
+    appliedSignatureRef.current = signature;
+    dispatch({ type: "setData", data });
+    dispatch({ type: "setUi", ui: { itemSelector: null } });
+  }, [data, dataSignature, dispatch, pageKey]);
+
+  return null;
+}
+
+function getInspectorDevice(viewport: { width: number | "100%" }): InspectorDevice {
+  return viewport.width === 390 ? "mobile" : "desktop";
+}
+
+function getFieldDevice(type: string, field: string): "desktop" | "mobile" | "shared" {
+  if (field === "mobileImage" || field === "mobileUrl") return "mobile";
+  if (
+    (type === "首屏主视觉" || type === "单图海报")
+    && field === "desktopImage"
+  ) return "desktop";
+  if (type === "全屏出血图" && field === "image") return "desktop";
+  if (type === "轮播图" && field === "url") return "desktop";
+  return "shared";
+}
+
+function getInspectorGuideItems(type: string, props: Record<string, any>): InspectorGuideItem[] {
+  const guideItems = TEMPLATE_STRUCTURE_GUIDES[type] || MEDIA_FIELD_LABELS
+    .filter(([field]) => field in props)
+    .map(([field, label]) => ({
+      field,
+      label,
+      placement: "此模板的图片区域",
+      kind: "media" as const,
+    }));
+  return guideItems.map((item) => ({
+    ...item,
+    device: item.kind === "media" ? getFieldDevice(type, item.field) : "shared",
+  }));
+}
+
+/**
+ * 右侧素材卡片与画布字段一一对应。这里不复用桌面/移动端字段表达模板角色：
+ * 双图海报只有主海报、细节海报两个固定角色；其余响应式模块才区分设备。
+ */
+function getInspectorMediaItems(type: string, props: Record<string, any> = {}): InspectorMediaItem[] {
+  switch (type) {
+    case "首屏主视觉":
+      return [
+        { field: "desktopImage", label: "桌面端主视觉", placement: "桌面端首屏背景", device: "desktop", required: true, spec: IMAGE_SPECS.hero.desktop, placeholder: "拖拽或点击上传桌面端主视觉", ...createCropPreview("16 / 9", props.focusX, props.focusY) },
+        { field: "mobileImage", label: "移动端主视觉", placement: "移动端首屏背景", device: "mobile", required: false, spec: IMAGE_SPECS.hero.mobile, placeholder: "拖拽或点击上传移动端主视觉", ...createCropPreview("9 / 16", props.focusX, props.focusY) },
+      ];
+    case "单图海报":
+      return [
+        { field: "desktopImage", label: "桌面端海报", placement: "桌面端海报主视觉区", device: "desktop", required: true, spec: IMAGE_SPECS.singlePoster.image, placeholder: "拖拽或点击上传桌面端海报", ...createCropPreview("4 / 3", props.focusX, props.focusY) },
+        { field: "mobileImage", label: "移动端海报", placement: "移动端海报主视觉区", device: "mobile", required: false, spec: IMAGE_SPECS.singlePoster.image, placeholder: "拖拽或点击上传移动端海报", ...createCropPreview("3 / 4", props.focusX, props.focusY) },
+      ];
+    case "双图海报":
+      return [
+        { field: "mainImage", label: "主海报", placement: "画布左侧的大图", device: "shared", required: true, spec: IMAGE_SPECS.doublePoster.main, placeholder: "拖拽或点击上传主海报", ...createCropPreview("4 / 3", props.mainFocusX, props.mainFocusY) },
+        { field: "detailImage", label: "细节海报", placement: "画布右侧的竖图", device: "shared", required: true, spec: IMAGE_SPECS.doublePoster.detail, placeholder: "拖拽或点击上传细节海报", ...createCropPreview("4 / 5", props.detailFocusX, props.detailFocusY) },
+      ];
+    case "图文混排":
+      return [{ field: "image", label: "图文配图", placement: "图文区域的图片侧", device: "shared", required: true, spec: IMAGE_SPECS.imageText.image, placeholder: "拖拽或点击上传图文配图", ...createCropPreview("4 / 3", props.focusX, props.focusY) }];
+    case "全屏出血图":
+      return [
+        { field: "image", label: "桌面端背景图", placement: "桌面端全屏背景", device: "desktop", required: true, spec: IMAGE_SPECS.fullBleed.desktop, placeholder: "拖拽或点击上传桌面端背景图", ...createCropPreview("12 / 5", props.focusX, props.focusY) },
+        { field: "mobileImage", label: "移动端背景图", placement: "移动端全屏背景", device: "mobile", required: false, spec: IMAGE_SPECS.fullBleed.mobile, placeholder: "拖拽或点击上传移动端背景图", ...createCropPreview("5 / 6", props.focusX, props.focusY) },
+      ];
+    case "分割面板":
+      return [{ field: "image", label: "分栏配图", placement: "图片分栏", device: "shared", required: true, spec: IMAGE_SPECS.splitPanel.image, placeholder: "拖拽或点击上传分栏配图", ...createCropPreview("3 / 4", props.focusX, props.focusY) }];
+    case "热区图":
+      return [
+        { field: "image", label: "桌面端热区图", placement: "桌面端热区底图", device: "desktop", required: true, spec: IMAGE_SPECS.hotspot.desktop, placeholder: "拖拽或点击上传桌面端热区图", ...createCropPreview("16 / 9", props.focusX, props.focusY) },
+        { field: "mobileImage", label: "移动端热区图", placement: "移动端热区底图", device: "mobile", required: false, spec: IMAGE_SPECS.hotspot.mobile, placeholder: "拖拽或点击上传移动端热区图", ...createCropPreview("3 / 4", props.focusX, props.focusY) },
+      ];
+    case "视频区块":
+      return [{ field: "posterUrl", label: "视频封面", placement: "视频未播放时的封面", device: "shared", required: false, spec: IMAGE_SPECS.video.poster, placeholder: "拖拽或点击上传视频封面", ...createCropPreview("16 / 9") }];
+    case "轮播图": {
+      const images = Array.isArray(props.images) ? props.images : [];
+      return images.flatMap((_: Record<string, any>, index: number) => [
+        {
+          field: `images.${index}.url`,
+          label: `第 ${index + 1} 张桌面图`,
+          placement: "桌面端轮播画面",
+          device: "desktop" as const,
+          required: true,
+          spec: IMAGE_SPECS.carousel.image,
+          placeholder: `拖拽或点击上传第 ${index + 1} 张桌面图`,
+          carouselIndex: index,
+          ...createCropPreview("1920 / 900"),
+        },
+        {
+          field: `images.${index}.mobileUrl`,
+          label: `第 ${index + 1} 张移动图`,
+          placement: "移动端轮播画面",
+          device: "mobile" as const,
+          required: false,
+          spec: CAROUSEL_MOBILE_SPEC,
+          placeholder: `拖拽或点击上传第 ${index + 1} 张移动图`,
+          carouselIndex: index,
+          ...createCropPreview("3 / 4"),
+        },
+      ]);
+    }
+    default:
+      return [];
+  }
+}
+
+function getInspectorMediaValue(props: Record<string, any>, field: string): string | undefined {
+  const carouselField = field.match(/^images\.(\d+)\.(url|mobileUrl)$/);
+  if (carouselField) {
+    const images = Array.isArray(props.images) ? props.images : [];
+    return images[Number(carouselField[1])]?.[carouselField[2]];
+  }
+  return props[field] as string | undefined;
+}
+
+const TEMPLATE_STRUCTURE_GUIDES: Record<string, InspectorGuideItem[]> = {
+  "首屏主视觉": [
+    { field: "desktopImage", label: "桌面端主视觉", placement: "桌面端首屏背景", kind: "media" },
+    { field: "mobileImage", label: "移动端主视觉", placement: "移动端首屏背景", kind: "media" },
+    { field: "subtitle", label: "副标题", placement: "左下角文案的第一行", kind: "text" },
+    { field: "title", label: "标题", placement: "左下角主标题", kind: "text" },
+    { field: "actionText", label: "按钮文字", placement: "主标题下方的行动按钮", kind: "text" },
+    { field: "linkUrl", label: "按钮链接", placement: "行动按钮的跳转地址", kind: "text" },
+  ],
+  "双图海报": [
+    { field: "mainImage", label: "主海报", placement: "画布左侧的大图", kind: "media" },
+    { field: "detailImage", label: "细节海报", placement: "画布右侧的竖图", kind: "media" },
+    { field: "number", label: "编号", placement: "细节图下方的第一行", kind: "text" },
+    { field: "label", label: "标签", placement: "编号右侧", kind: "text" },
+    { field: "title", label: "标题", placement: "细节图下方的主标题", kind: "text" },
+    { field: "description", label: "介绍", placement: "细节图下方的说明文字", kind: "text" },
+  ],
+  "单图海报": [
+    { field: "desktopImage", label: "海报主图", placement: "模板的主视觉区域", kind: "media" },
+    { field: "mobileImage", label: "移动端适配图", placement: "移动端的海报主视觉区域", kind: "media" },
+    { field: "number", label: "编号", placement: "海报文案区的第一行", kind: "text" },
+    { field: "label", label: "标签", placement: "编号旁", kind: "text" },
+    { field: "title", label: "标题", placement: "海报文案区的主标题", kind: "text" },
+    { field: "subtitle", label: "副标题", placement: "主标题下方", kind: "text" },
+  ],
+  "图文混排": [
+    { field: "image", label: "图文配图", placement: "图文区域的图片侧", kind: "media" },
+    { field: "label", label: "标签", placement: "文案区域顶部", kind: "text" },
+    { field: "title", label: "标题", placement: "文案区域主标题", kind: "text" },
+    { field: "body", label: "正文", placement: "主标题下方", kind: "text" },
+  ],
+  "分割面板": [
+    { field: "image", label: "分栏配图", placement: "图片分栏", kind: "media" },
+    { field: "title", label: "标题", placement: "文字分栏主标题", kind: "text" },
+    { field: "subtitle", label: "副标题", placement: "主标题下方", kind: "text" },
+    { field: "body", label: "正文", placement: "文字分栏说明", kind: "text" },
+  ],
+  "文字横幅": [
+    { field: "eyebrow", label: "眉题", placement: "横幅文案顶部", kind: "text" },
+    { field: "title", label: "标题", placement: "横幅中央主标题", kind: "text" },
+    { field: "body", label: "正文", placement: "标题下方", kind: "text" },
+  ],
+};
+
+function focusInspectorField(field: string, blockId?: string) {
+  window.requestAnimationFrame(() => {
+    const target = document.querySelector<HTMLElement>(
+      `[name="${field}"], [id*="${field}"], [data-media-field="${field}"]`,
+    );
+    target?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const focusable = target?.matches("input, textarea, select, button")
+      ? target
+      : target?.querySelector<HTMLElement>("button, input, textarea, select") || target;
+    focusable?.focus();
+
+    focusCanvasBlock(blockId, field);
+  });
+}
+
+function TemplateStructureGuide({
+  type,
+  props,
+  blockId,
+  device,
+  onMediaChange,
+  onCarouselItemChange,
+  onAddCarouselItem,
+  onMoveCarouselItem,
+  onRemoveCarouselItem,
+}: {
+  type: string;
+  props: Record<string, any>;
+  blockId?: string;
+  device: InspectorDevice;
+  onMediaChange: (field: string, value: string) => void;
+  onCarouselItemChange: (index: number, field: "link" | "alt", value: string) => void;
+  onAddCarouselItem: () => void;
+  onMoveCarouselItem: (index: number, direction: -1 | 1) => void;
+  onRemoveCarouselItem: (index: number) => void;
+}) {
+  const items = getInspectorGuideItems(type, props);
+  const configuredMediaItems = getInspectorMediaItems(type, props);
+  const carouselItems = Array.isArray(props.images) ? props.images : [];
+  if (!items?.length && !configuredMediaItems.length && type !== "轮播图") return null;
+
+  const mediaItems = configuredMediaItems.filter(
+    (item) => item.device === "shared" || item.device === device,
+  );
+  const textItems = items.filter((item) => item.kind === "text");
+
+  return (
+    <section className="homepage-editor__structure-guide" aria-label={`${type}编辑位置说明`}>
+      {mediaItems.length > 0 && (
+        <div className="homepage-editor__structure-group">
+          <span className="homepage-editor__structure-title">图片素材</span>
+          <div className="homepage-editor__structure-media-grid">
+            {mediaItems.map((item) => (
+              <article key={item.field} className="homepage-editor__structure-media">
+                <div className="homepage-editor__structure-media-heading">
+                  <span>
+                    <strong>{item.label}</strong>
+                    {item.required && <em>必填</em>}
+                  </span>
+                  <small>{item.placement}</small>
+                </div>
+                <MediaPickerField
+                  fieldKey={item.field}
+                  device={item.device}
+                  value={getInspectorMediaValue(props, item.field)}
+                  onChange={(value) => onMediaChange(item.field, value)}
+                  spec={item.spec}
+                  required={item.required}
+                  placeholder={item.placeholder}
+                  previewAspectRatio={item.previewAspectRatio}
+                  previewFocus={item.previewFocus}
+                />
+                {item.carouselIndex !== undefined && (
+                  <div className="homepage-editor__carousel-item-settings">
+                    <label>
+                      替代文本
+                      <Input
+                        size="small"
+                        value={carouselItems[item.carouselIndex]?.alt || ""}
+                        onChange={(event) => onCarouselItemChange(item.carouselIndex!, "alt", event.target.value)}
+                        placeholder="说明这张图片"
+                      />
+                    </label>
+                    <label>
+                      点击跳转
+                      <Input
+                        size="small"
+                        value={carouselItems[item.carouselIndex]?.link || ""}
+                        onChange={(event) => onCarouselItemChange(item.carouselIndex!, "link", event.target.value)}
+                        placeholder="可选，例如 /products"
+                      />
+                    </label>
+                    <div className="homepage-editor__carousel-item-actions">
+                      <button type="button" disabled={item.carouselIndex === 0} onClick={() => onMoveCarouselItem(item.carouselIndex!, -1)}>上移</button>
+                      <button type="button" disabled={item.carouselIndex === carouselItems.length - 1} onClick={() => onMoveCarouselItem(item.carouselIndex!, 1)}>下移</button>
+                      <button type="button" disabled={carouselItems.length <= 1} onClick={() => onRemoveCarouselItem(item.carouselIndex!)}>删除此轮播项</button>
+                    </div>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {type === "轮播图" && (
+        <div className="homepage-editor__carousel-add">
+          <span>每个轮播项分别维护桌面图与移动图；移动图为空时，移动端复用桌面图。</span>
+          <button type="button" onClick={onAddCarouselItem}>新增轮播项</button>
+        </div>
+      )}
+
+      {textItems.length > 0 && (
+        <div className="homepage-editor__structure-group">
+          <span className="homepage-editor__structure-title">文案位置</span>
+          <div className="homepage-editor__structure-copy-list">
+            {textItems.map((item) => (
+              <button
+                key={item.field}
+                type="button"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  focusInspectorField(item.field, blockId);
+                }}
+              >
+                <strong>{item.label}</strong>
+                <span>{item.placement}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
 
 /**
  * 模板卡片不使用真实商品素材，而用“布局微缩图”展示该区块插入后的结构。
@@ -639,6 +1277,7 @@ function TemplateLibrary({
 }
 
 function EditorToolbar({
+  pageKey,
   lastSaved,
   publishing,
   hasUnsavedChanges,
@@ -647,7 +1286,10 @@ function EditorToolbar({
   onOpenRevisions,
   onOpenPageSettings,
   onDataChange,
+  onPreview,
+  onPageChange,
 }: {
+  pageKey: EditorPageKey;
   lastSaved: string | null;
   publishing: boolean;
   hasUnsavedChanges: boolean;
@@ -656,6 +1298,8 @@ function EditorToolbar({
   onOpenRevisions: () => void;
   onOpenPageSettings: () => void;
   onDataChange: (data: unknown) => void;
+  onPreview: (data: unknown, previewWindow: Window | null) => void;
+  onPageChange: (pageKey: EditorPageKey) => void;
 }) {
   const appData = useHomepagePuck((state) => state.appState.data);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
@@ -751,7 +1395,12 @@ function EditorToolbar({
       <div className="homepage-editor__toolbar-context">
         <strong>海川珠宝</strong>
         <span className="homepage-editor__toolbar-divider" />
-        <span>当前页面：店铺首页</span>
+        <label className="homepage-editor__page-picker">
+          <span>当前编辑</span>
+          <select value={pageKey} onChange={(event) => onPageChange(event.target.value as EditorPageKey)}>
+            {editorPages.map((page) => <option key={page.key} value={page.key}>{page.label}</option>)}
+          </select>
+        </label>
         <span className={`homepage-editor__save-status is-${autoSaveState}`}>
           <i />
           {saveStatusText}
@@ -793,8 +1442,8 @@ function EditorToolbar({
         <Button
           size="small"
           icon={<EyeOutlined />}
-          onClick={() => window.open("/preview/home", "_blank")}
-          title="在新窗口查看前台效果（实时读取后台草稿）"
+          onClick={() => onPreview(appData, window.open("about:blank", "_blank"))}
+          title="先保存当前草稿，再在新窗口查看未发布效果"
         >
           预览
         </Button>
@@ -831,8 +1480,12 @@ function EditorToolbar({
 
 function LayerRail({
   onSaveAsTemplate,
+  navigationPreviewOpen,
+  onToggleNavigationPreview,
 }: {
   onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
+  navigationPreviewOpen: boolean;
+  onToggleNavigationPreview: () => void;
 }) {
   const appData = useHomepagePuck((state) => state.appState.data);
   const dispatch = useHomepagePuck((state) => state.dispatch);
@@ -844,10 +1497,15 @@ function LayerRail({
 
   const selectLayer = (index: number) => {
     dispatch({ type: "setUi", ui: { itemSelector: { index, zone: ROOT_ZONE } } });
+    focusCanvasBlock(content[index]?.props?.id);
   };
 
   const reorderLayer = (from: number, to: number) => {
     if (from === to || from < 0 || to < 0 || from >= content.length || to >= content.length) return;
+    if (content[from]?.props?.locked || content[to]?.props?.locked) {
+      message.info("固定业务区不能调整顺序");
+      return;
+    }
     const nextContent = [...content];
     const [moved] = nextContent.splice(from, 1);
     nextContent.splice(to, 0, moved);
@@ -893,6 +1551,14 @@ function LayerRail({
         <small>{appData.content.length} 个模块</small>
       </div>
       <div className="homepage-editor__layer-scroll">
+        <div className="homepage-editor__layer-frame">
+          <span>页面框架</span>
+          <button type="button" onClick={onToggleNavigationPreview} aria-pressed={navigationPreviewOpen}>
+            <LayoutOutlined />
+            <span>全局页头、菜单与页脚</span>
+            <small>{navigationPreviewOpen ? "菜单已展开" : "菜单已收起"}</small>
+          </button>
+        </div>
         {content.map(
           (item, index) => {
             const active = item.props?.id === selectedId;
@@ -900,8 +1566,9 @@ function LayerRail({
               <div
                 key={item.props?.id ?? `${item.type}-${index}`}
                 className={`homepage-editor__layer-item${active ? " is-active" : ""}${draggingIndex === index ? " is-dragging" : ""}${dropIndex === index ? " is-drop-target" : ""}`}
-                draggable
+                draggable={!item.props?.locked}
                 onDragStart={(event) => {
+                  if (item.props?.locked) return;
                   event.dataTransfer.effectAllowed = "move";
                   setDraggingIndex(index);
                 }}
@@ -927,8 +1594,8 @@ function LayerRail({
                   <span>{item.type}</span>
                 </button>
                 <span className="homepage-editor__layer-actions" aria-label={`${item.type} 操作`}>
-                  <button type="button" onClick={() => toggleLayerVisibility(index)} aria-label={item.props?.isVisible === false ? "显示模块" : "隐藏模块"} title={item.props?.isVisible === false ? "显示模块" : "隐藏模块"}>{item.props?.isVisible === false ? <EyeInvisibleOutlined /> : <EyeOutlined />}</button>
-                  <button type="button" onClick={() => onSaveAsTemplate(item.type, item.props)} title="另存为我的模板"><SaveOutlined /></button>
+                  <button type="button" onClick={() => toggleLayerVisibility(index)} disabled={item.props?.locked} aria-label={item.props?.isVisible === false ? "显示模块" : "隐藏模块"} title={item.props?.locked ? "固定业务区不能隐藏" : item.props?.isVisible === false ? "显示模块" : "隐藏模块"}>{item.props?.isVisible === false ? <EyeInvisibleOutlined /> : <EyeOutlined />}</button>
+                  <button type="button" onClick={() => onSaveAsTemplate(item.type, item.props)} disabled={item.props?.locked} title={item.props?.locked ? "固定业务区不能另存为模板" : "另存为我的模板"}><SaveOutlined /></button>
                   <button type="button" onClick={() => removeLayer(index)} disabled={item.props?.locked} aria-label="删除模块" title={item.props?.locked ? "模块已锁定" : "删除"}><DeleteOutlined /></button>
                 </span>
               </div>
@@ -945,32 +1612,59 @@ function LayerRail({
   );
 }
 
-function MediaSourceStatus({ props }: { props: Record<string, any> }) {
-  const sources: Array<{ key: string; label: string; url?: string }> = MEDIA_FIELD_LABELS
-    .filter(([key]) => key in props)
-    .map(([key, label]) => ({ key, label, url: props[key] as string | undefined }));
-  const carouselItems = Array.isArray(props.images) ? props.images : [];
-  if (carouselItems.length) {
-    sources.push({ key: "images", label: `轮播桌面图（${carouselItems.filter((item: any) => item?.url).length}/${carouselItems.length}）`, url: carouselItems[0]?.url });
-    sources.push({ key: "images", label: `轮播手机图（${carouselItems.filter((item: any) => item?.mobileUrl).length}/${carouselItems.length}）`, url: carouselItems[0]?.mobileUrl });
-  }
-  if (!sources.length) return null;
+function MediaSourceStatus({
+  type,
+  props,
+  device,
+  blockId,
+}: {
+  type: string;
+  props: Record<string, any>;
+  device: InspectorDevice;
+  blockId?: string;
+}) {
+  const allSources = getInspectorMediaItems(type, props)
+    .map((item) => ({
+      key: item.field,
+      label: item.label,
+      device: item.device,
+      required: item.required,
+      url: getInspectorMediaValue(props, item.field),
+    }));
+  if (!allSources.length) return null;
 
-  const missing = sources.filter((source) => !source.url).length;
-  const missingSource = sources.find((source) => !source.url);
-  const focusMissingField = () => {
-    if (!missingSource) return;
-    const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[name="${missingSource.key}"]`);
-    field?.scrollIntoView({ block: "center", behavior: "smooth" });
-    field?.focus();
-  };
+  // 发布规则以全量必填素材为准，不能因用户当前停留在移动端就掩盖桌面端缺图。
+  const missing = allSources.filter((source) => source.required && !source.url).length;
+  const missingSource = allSources.find((source) => source.required && !source.url);
+  const mobileFallbackCount = device === "mobile"
+    ? type === "轮播图"
+      ? (Array.isArray(props.images) ? props.images.filter((item: any) => !item?.mobileUrl && item?.url).length : 0)
+      : !props.mobileImage && Boolean(props.desktopImage || props.image) ? 1 : 0
+    : 0;
+
+  if (!missing || !missingSource) {
+    if (!mobileFallbackCount) return null;
+    return (
+      <section className="homepage-editor__media-status is-fallback" aria-label="移动端素材兜底说明">
+        <CheckCircleOutlined />
+        <div>
+          <strong>移动端将复用桌面图{mobileFallbackCount > 1 ? `（${mobileFallbackCount} 张）` : ""}</strong>
+          <span>可以继续发布；建议补充竖版图片，以避免裁切影响文案与主体。</span>
+        </div>
+      </section>
+    );
+  }
+
+  const messageText = "仅此素材待上传，已配置的区域仍会正常显示。";
   return (
     <section className="homepage-editor__media-status" aria-label="素材配置状态">
-      {missing ? <ExclamationCircleOutlined /> : <CheckCircleOutlined />}
+      <ExclamationCircleOutlined />
       <div>
-        <strong>{missing ? `${missing} 项素材待配置` : "素材已配置"}</strong>
-        <span>{missing ? "当前预览正在使用默认图" : `${sources.length} 项素材已就绪`}</span>
-        {missingSource && <button type="button" onClick={focusMissingField}>补齐{missingSource.label}</button>}
+        <strong>待配置：{missingSource.label}{missing > 1 ? ` 等 ${missing} 项` : ""}</strong>
+        <span>{missingSource.device !== "shared" && missingSource.device !== device ? `请先切换到${missingSource.device === "desktop" ? "桌面端" : "移动端"}补齐；${messageText}` : messageText}</span>
+        {missingSource.device === "shared" || missingSource.device === device ? (
+          <button type="button" onClick={() => focusInspectorField(missingSource.key, blockId)}>去上传{missingSource.label}</button>
+        ) : null}
       </div>
     </section>
   );
@@ -978,7 +1672,9 @@ function MediaSourceStatus({ props }: { props: Record<string, any> }) {
 
 function InspectorPanel() {
   const dispatch = useHomepagePuck((state) => state.dispatch);
+  const appData = useHomepagePuck((state) => state.appState.data);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
+  const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
 
   if (!selectedItem) {
     return null;
@@ -987,8 +1683,92 @@ function InspectorPanel() {
   const closePanel = () =>
     dispatch({ type: "setUi", ui: { itemSelector: null } });
 
+  const device = getInspectorDevice(currentViewport);
+  const updateMedia = (field: string, value: string) => {
+    const selectedId = selectedItem.props?.id;
+    const content = appData.content as Array<{ type: string; props: Record<string, any> }>;
+    const index = content.findIndex((item) => item.props?.id === selectedId);
+    if (index < 0) return;
+
+    const nextContent = [...content];
+    const carouselField = field.match(/^images\.(\d+)\.(url|mobileUrl)$/);
+    const nextProps = { ...nextContent[index].props };
+    if (carouselField) {
+      const imageIndex = Number(carouselField[1]);
+      const imageField = carouselField[2] as "url" | "mobileUrl";
+      const images = Array.isArray(nextProps.images) ? [...nextProps.images] : [];
+      if (!images[imageIndex]) return;
+      images[imageIndex] = { ...images[imageIndex], [imageField]: value };
+      nextProps.images = images;
+    } else {
+      nextProps[field] = value;
+    }
+    nextContent[index] = {
+      ...nextContent[index],
+      props: nextProps,
+    };
+    dispatch({ type: "setData", data: { ...appData, content: nextContent } });
+  };
+
+  const updateCarouselImages = (updater: (images: Array<Record<string, any>>) => Array<Record<string, any>>) => {
+    const selectedId = selectedItem.props?.id;
+    const content = appData.content as Array<{ type: string; props: Record<string, any> }>;
+    const index = content.findIndex((item) => item.props?.id === selectedId);
+    if (index < 0) return;
+    const nextContent = [...content];
+    const currentProps = nextContent[index].props as Record<string, any>;
+    const images = Array.isArray(currentProps.images) ? currentProps.images : [];
+    nextContent[index] = {
+      ...nextContent[index],
+      props: { ...currentProps, images: updater(images) },
+    };
+    dispatch({ type: "setData", data: { ...appData, content: nextContent } });
+  };
+
+  const updateCarouselItem = (itemIndex: number, field: "link" | "alt", value: string) => {
+    updateCarouselImages((images) => images.map((item, index) => (
+      index === itemIndex ? { ...item, [field]: value } : item
+    )));
+  };
+
+  const addCarouselItem = () => {
+    updateCarouselImages((images) => [
+      ...images,
+      { url: "", mobileUrl: "", link: "", alt: `轮播图 ${images.length + 1}` },
+    ]);
+  };
+
+  const moveCarouselItem = (itemIndex: number, direction: -1 | 1) => {
+    updateCarouselImages((images) => {
+      const targetIndex = itemIndex + direction;
+      if (targetIndex < 0 || targetIndex >= images.length) return images;
+      const next = [...images];
+      [next[itemIndex], next[targetIndex]] = [next[targetIndex], next[itemIndex]];
+      return next;
+    });
+  };
+
+  const removeCarouselItem = (itemIndex: number) => {
+    const selectedProps = selectedItem.props as Record<string, any>;
+    const images = Array.isArray(selectedProps.images) ? selectedProps.images : [];
+    if (images.length <= 1) return;
+    Modal.confirm({
+      title: "删除此轮播项？",
+      content: "删除后该轮播图及其桌面/移动素材都会从当前草稿移除。",
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: () => updateCarouselImages((current) => current.filter((_, index) => index !== itemIndex)),
+    });
+  };
+
   return (
-    <section className="homepage-editor__properties" aria-label="模块属性">
+    <section
+      className="homepage-editor__properties"
+      data-active-device={device}
+      data-module-type={selectedItem.type}
+      aria-label="模块属性"
+    >
       <div className="homepage-editor__properties-heading">
         <div>
           <span>模块设置</span>
@@ -1005,7 +1785,18 @@ function InspectorPanel() {
       </div>
 
       <div className="homepage-editor__properties-scroll">
-        <MediaSourceStatus props={selectedItem.props || {}} />
+        <MediaSourceStatus type={selectedItem.type} props={selectedItem.props || {}} device={device} blockId={selectedItem.props?.id} />
+        <TemplateStructureGuide
+          type={selectedItem.type}
+          props={selectedItem.props || {}}
+          blockId={selectedItem.props?.id}
+          device={device}
+          onMediaChange={updateMedia}
+          onCarouselItemChange={updateCarouselItem}
+          onAddCarouselItem={addCarouselItem}
+          onMoveCarouselItem={moveCarouselItem}
+          onRemoveCarouselItem={removeCarouselItem}
+        />
         <div className="homepage-editor__properties-section">内容与样式</div>
         <Puck.Fields />
         <details className="homepage-editor__media-details">
@@ -1026,7 +1817,28 @@ function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
   const viewportHeight = currentViewport.height === "auto" ? 900 : currentViewport.height;
   const isDevicePreview = viewportWidth !== 1440;
   const previewWidth = `${viewportWidth}px`;
-  const previewHeight = `${viewportHeight}px`;
+  const [contentHeight, setContentHeight] = useState(viewportHeight);
+  const previewHeight = `${Math.max(viewportHeight, contentHeight)}px`;
+
+  useEffect(() => {
+    setContentHeight(viewportHeight);
+  }, [viewportHeight]);
+
+  useEffect(() => {
+    const handleCanvasHeight = (event: MessageEvent<CanvasHeightMessage>) => {
+      const detail = event.data;
+      // Puck 重建预览 iframe 时 WindowProxy 会变化，不能依赖对象全等判断。
+      // 仍然校验来源站点与编辑器专用消息类型，避免接收跨站消息。
+      if (
+        event.origin !== window.location.origin
+        || detail?.type !== CANVAS_HEIGHT_MESSAGE
+      ) return;
+      if (!Number.isFinite(detail.height) || detail.height < viewportHeight || detail.height > 50000) return;
+      setContentHeight((current) => Math.abs(current - detail.height) < 2 ? current : detail.height);
+    };
+    window.addEventListener("message", handleCanvasHeight);
+    return () => window.removeEventListener("message", handleCanvasHeight);
+  }, [frameRef, viewportHeight]);
 
   return (
     <div
@@ -1054,8 +1866,10 @@ function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
 
 function EditorBody({
   onSaveAsTemplate,
+  pageLabel,
 }: {
   onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
+  pageLabel: string;
 }) {
   const appData = useHomepagePuck((state) => state.appState.data);
   const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
@@ -1066,6 +1880,7 @@ function EditorBody({
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [canvasZoom, setCanvasZoom] = useState(1);
   const [canvasHeight, setCanvasHeight] = useState(0);
+  const [navigationPreviewOpen, setNavigationPreviewOpen] = useState(false);
   // 默认完整展示画布；仅在用户主动缩放时退出自适应模式。
   const [isFitView, setIsFitView] = useState(true);
   const stageRef = useRef<HTMLElement>(null);
@@ -1073,6 +1888,31 @@ function EditorBody({
   const previewFrameRef = useRef<HTMLDivElement>(null);
   const viewportWidth = currentViewport.width === "100%" ? 1440 : currentViewport.width;
   const canvasBaseWidth = viewportWidth;
+
+  useEffect(() => {
+    const handleNavigationState = (event: MessageEvent<CanvasNavigationStateMessage>) => {
+      if (
+        event.origin !== window.location.origin
+        || event.data?.type !== CANVAS_NAVIGATION_STATE_MESSAGE
+      ) return;
+      setNavigationPreviewOpen(event.data.open);
+    };
+    window.addEventListener("message", handleNavigationState);
+    return () => window.removeEventListener("message", handleNavigationState);
+  }, []);
+
+  const toggleNavigationPreview = useCallback(() => {
+    const next = !navigationPreviewOpen;
+    if (next && stageRef.current) {
+      stageRef.current.scrollTop = 0;
+      // Puck 在切换设备后可能会异步定位当前选中区块；菜单展开必须以首屏为基准。
+      window.setTimeout(() => {
+        stageRef.current?.scrollTo({ top: 0, behavior: "auto" });
+      }, 120);
+    }
+    setNavigationPreviewOpen(next);
+    setCanvasNavigationPreview(next);
+  }, [navigationPreviewOpen]);
 
   const getDropIndex = useCallback((clientY: number) => {
     const total = appData.content.length;
@@ -1111,16 +1951,13 @@ function EditorBody({
     const contentHeight = frame.offsetHeight;
     if (contentHeight <= 0) return;
 
+    // 装修页画布按宽度适配，长页面在工作区内纵向滚动。
+    // 若同时按高度适配，多区块页面会被压成缩略图，且容易制造“画布缺失”的错觉。
     const nextZoom = isFitView
       ? Math.min(
         1,
-        Math.max(
-            0.35,
-          Math.min(
-            (stage.clientWidth - 72) / canvasBaseWidth,
-            (stage.clientHeight - 128) / contentHeight,
-          ),
-        ),
+        // 工作区左右各 42px 内边距，按完整 84px 预留避免纵向滚动条出现时产生横向溢出。
+        Math.max(0.1, (stage.clientWidth - 84) / canvasBaseWidth),
       )
       : canvasZoom;
 
@@ -1228,7 +2065,7 @@ function EditorBody({
         onSaveAsTemplate={onSaveAsTemplate}
       />
 
-      <section ref={stageRef} className="homepage-editor__stage" aria-label="店铺首页画布">
+      <section ref={stageRef} className="homepage-editor__stage" aria-label={`${pageLabel}画布`}>
         <div className="homepage-editor__stage-label">
           <span>选中画布模块即可编辑</span>
         </div>
@@ -1275,7 +2112,11 @@ function EditorBody({
       </section>
 
       <aside className="homepage-editor__right-workspace">
-        <LayerRail onSaveAsTemplate={onSaveAsTemplate} />
+        <LayerRail
+          onSaveAsTemplate={onSaveAsTemplate}
+          navigationPreviewOpen={navigationPreviewOpen}
+          onToggleNavigationPreview={toggleNavigationPreview}
+        />
         <InspectorPanel />
       </aside>
     </main>
@@ -1424,8 +2265,9 @@ function PageSettingsDrawer({
   );
 }
 
-export default function HomepageConfig() {
-  const [data, setData] = useState<any>(jewelryHomeTemplate.puckData);
+export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorPageKey }) {
+  const navigate = useNavigate();
+  const [data, setData] = useState<any>(() => createEditorPageDefault(pageKey));
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
@@ -1435,9 +2277,10 @@ export default function HomepageConfig() {
   const [revisionsLoading, setRevisionsLoading] = useState(false);
   const [revisions, setRevisions] = useState<PageDocumentRevision[]>([]);
   const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
-  const [editorKey, setEditorKey] = useState(0);
   const [initialLoading, setInitialLoading] = useState(true);
+  const hasInitializedEditorRef = useRef(false);
   const latestData = useRef<any>(data);
+  const pageSessionCacheRef = useRef<Record<string, { data: any; metadata: Record<string, any>; lastSaved: string | null }>>({});
   const autoSaveRetryRef = useRef(0);
   const dataSignatureRef = useRef("");
   const [metadata, setMetadata] = useState<Record<string, any>>({});
@@ -1493,6 +2336,10 @@ export default function HomepageConfig() {
   }, [refreshMyTemplates]);
   const editorConfig = useMemo(() => ({
     ...puckConfig,
+    root: {
+      ...puckConfig.root,
+      render: ({ children }: { children: ReactNode }) => <EditorCanvasShell isHome={pageKey === "home"}>{children}</EditorCanvasShell>,
+    },
     components: Object.fromEntries(
       Object.entries(puckConfig.components).map(([type, component]) => [
         type,
@@ -1504,14 +2351,19 @@ export default function HomepageConfig() {
             }
             const rendered = (component as any).render(props);
             // 画布内统一注入 editMode，让 block 区分编辑预览与前台发布
-            return isValidElement(rendered)
+            const editableBlock = isValidElement(rendered)
               ? cloneElement(rendered, { editMode: true } as any)
               : rendered;
+            return (
+              <CanvasBlockAnchor blockId={props.id} blockType={type}>
+                {editableBlock}
+              </CanvasBlockAnchor>
+            );
           },
         },
       ]),
     ),
-  }) as typeof puckConfig, []);
+  }) as unknown as typeof puckConfig, [pageKey]);
 
   useEffect(() => {
     latestData.current = data;
@@ -1524,33 +2376,70 @@ export default function HomepageConfig() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      let serverData = jewelryHomeTemplate.puckData;
+      let serverData = createEditorPageDefault(pageKey);
+      const cachedPage = pageSessionCacheRef.current[pageKey];
+      if (!cancelled) {
+        // 首次进入才展示整页加载态；切换页面时只替换画布数据，保持编辑器外壳稳定。
+        if (!hasInitializedEditorRef.current) setInitialLoading(true);
+        // 已访问页面直接恢复会话，避免默认模板闪现和重复全量更新。
+        if (cachedPage) {
+          serverData = cachedPage.data;
+          setData(cachedPage.data);
+          latestData.current = cachedPage.data;
+          dataSignatureRef.current = JSON.stringify(cachedPage.data);
+          setMetadata(cachedPage.metadata);
+          latestMetadata.current = cachedPage.metadata;
+          setLastSaved(cachedPage.lastSaved);
+        } else if (!hasInitializedEditorRef.current) {
+          setData(serverData);
+          latestData.current = serverData;
+          dataSignatureRef.current = JSON.stringify(serverData);
+          setMetadata({});
+          latestMetadata.current = {};
+          setLastSaved(null);
+        }
+        setHasUnsavedChanges(false);
+        setAutoSaveState("idle");
+      }
       try {
-        const response = await pageDocumentApi.getAdmin(HOME_PAGE_KEY);
+        const response = await pageDocumentApi.getAdmin(pageKey);
         const document = unwrapResponse<any>(response);
         if (!cancelled && document?.puckData) {
-          serverData = document.puckData;
+          serverData = ensureEditorPageStructure(pageKey, document.puckData);
           setData(serverData);
           latestData.current = serverData;
           dataSignatureRef.current = JSON.stringify(serverData);
           const serverMetadata = document.metadata || {};
           setMetadata(serverMetadata);
           latestMetadata.current = serverMetadata;
-          setEditorKey((current) => current + 1);
           if (document.updatedAt) {
             setLastSaved(formatEditorTime(document.updatedAt));
           }
+          pageSessionCacheRef.current[pageKey] = {
+            data: serverData,
+            metadata: serverMetadata,
+            lastSaved: document.updatedAt ? formatEditorTime(document.updatedAt) : null,
+          };
+        } else if (!cachedPage) {
+          // 新页面没有服务端草稿时，仅此处一次性落入该页面的正确默认结构。
+          setData(serverData);
+          latestData.current = serverData;
+          dataSignatureRef.current = JSON.stringify(serverData);
+          pageSessionCacheRef.current[pageKey] = { data: serverData, metadata: {}, lastSaved: null };
         }
       } catch {
         // 无草稿时使用内置首页模板。
       } finally {
-        if (!cancelled) setInitialLoading(false);
+        if (!cancelled) {
+          hasInitializedEditorRef.current = true;
+          setInitialLoading(false);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pageKey]);
 
   useEffect(() => {
     dataSignatureRef.current = JSON.stringify(data);
@@ -1569,13 +2458,13 @@ export default function HomepageConfig() {
   const saveDraft = useCallback(async (
     nextData: unknown,
     options: { silent?: boolean } = {},
-  ) => {
+  ): Promise<boolean> => {
     const editableData = nextData ?? latestData.current;
     setSaving(true);
     setAutoSaveState("saving");
     try {
       await pageDocumentApi.save({
-        pageKey: HOME_PAGE_KEY,
+        pageKey,
         puckData: editableData,
         metadata: latestMetadata.current,
         editorVersion: "0.22.4",
@@ -1596,6 +2485,7 @@ export default function HomepageConfig() {
       if (!options.silent) {
         message.success("首页草稿已保存");
       }
+      return true;
     } catch (error) {
       autoSaveRetryRef.current += 1;
       setAutoSaveState("error");
@@ -1604,10 +2494,47 @@ export default function HomepageConfig() {
       } else if (!options.silent) {
         message.error(error instanceof Error ? error.message : "保存失败，正在重试");
       }
+      return false;
     } finally {
       setSaving(false);
     }
-  }, []);
+  }, [pageKey]);
+
+  const switchEditorPage = useCallback(async (path: string) => {
+    const targetPage = getEditorPageByPath(path);
+    if (!targetPage || targetPage.key === pageKey) return;
+    if (hasUnsavedChanges) {
+      const saved = await saveDraft(latestData.current, { silent: true });
+      if (!saved) {
+        message.error("当前页面草稿保存失败，已停止切换以避免内容丢失");
+        return;
+      }
+    }
+    navigate(`/admin/editor/${targetPage.key}`);
+  }, [hasUnsavedChanges, navigate, pageKey, saveDraft]);
+
+  useEffect(() => {
+    const handleCanvasPageNavigation = (event: MessageEvent<CanvasPageNavigationMessage>) => {
+      if (event.data?.type !== CANVAS_PAGE_NAVIGATION_MESSAGE || typeof event.data.path !== "string") return;
+      void switchEditorPage(event.data.path);
+    };
+    window.addEventListener("message", handleCanvasPageNavigation);
+    return () => window.removeEventListener("message", handleCanvasPageNavigation);
+  }, [switchEditorPage]);
+
+  const previewDraft = useCallback(async (nextData: unknown, previewWindow: Window | null) => {
+    const saved = await saveDraft(nextData, { silent: true });
+    if (!saved) {
+      previewWindow?.close();
+      message.error("草稿保存失败，未打开预览，请检查网络后重试");
+      return;
+    }
+    if (previewWindow) {
+      previewWindow.location.replace(`/preview/${pageKey}`);
+      return;
+    }
+    message.info("浏览器阻止了新窗口，请允许弹窗后重试预览");
+  }, [pageKey, saveDraft]);
 
   // 未保存改动时拦截关闭/刷新，避免误丢
   useEffect(() => {
@@ -1637,14 +2564,14 @@ export default function HomepageConfig() {
   const loadRevisions = useCallback(async () => {
     setRevisionsLoading(true);
     try {
-      const response = await pageDocumentApi.getRevisions(HOME_PAGE_KEY);
+      const response = await pageDocumentApi.getRevisions(pageKey);
       setRevisions(unwrapResponse<PageDocumentRevision[]>(response) || []);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "版本列表加载失败");
     } finally {
       setRevisionsLoading(false);
     }
-  }, []);
+  }, [pageKey]);
 
   const openRevisions = useCallback(() => {
     setRevisionsOpen(true);
@@ -1671,7 +2598,7 @@ export default function HomepageConfig() {
       onOk: async () => {
         setRestoringVersion(revision.version);
         try {
-          const response = await pageDocumentApi.restoreRevision(HOME_PAGE_KEY, revision.version);
+          const response = await pageDocumentApi.restoreRevision(pageKey, revision.version);
           const document = unwrapResponse<any>(response);
           if (document?.puckData) {
             setData(document.puckData);
@@ -1682,7 +2609,6 @@ export default function HomepageConfig() {
             setHasUnsavedChanges(false);
             setAutoSaveState("saved");
             setLastSaved(formatEditorTime(document.updatedAt || new Date()));
-            setEditorKey((current) => current + 1);
           }
           message.success(`已恢复版本 ${revision.version} 到草稿`);
           setRevisionsOpen(false);
@@ -1693,7 +2619,7 @@ export default function HomepageConfig() {
         }
       },
     });
-  }, []);
+  }, [pageKey]);
 
   const publishHome = async (nextData: unknown) => {
     if (publishing) return;
@@ -1704,7 +2630,7 @@ export default function HomepageConfig() {
     let validation: { valid: boolean; errors: string[] } | null = null;
     try {
       const response = await pageDocumentApi.validate(
-        HOME_PAGE_KEY,
+        pageKey,
         editableData,
       );
       validation = unwrapResponse<{ valid: boolean; errors: string[] }>(
@@ -1744,13 +2670,15 @@ export default function HomepageConfig() {
     }
 
     const blocks = (editableData as { content?: Array<{ type?: string; props?: Record<string, unknown> }> })?.content ?? [];
-    const incompleteHero = blocks.find((block) =>
-      block.type === "首屏主视觉" && (!block.props?.desktopImage || !block.props?.mobileImage),
+    const usesMobileFallback = blocks.some((block) =>
+      (block.type === "首屏主视觉" || block.type === "单图海报" || block.type === "全屏出血图" || block.type === "热区图")
+      && Boolean(block.props?.desktopImage || block.props?.image)
+      && !block.props?.mobileImage,
     );
     Modal.confirm({
       title: "确认发布首页？",
-      content: incompleteHero
-        ? "首屏主视觉缺少电脑端或手机端图片，发布后会使用默认图。请确认这是你的预期。"
+      content: usesMobileFallback
+        ? "部分模块未上传移动端图片，移动端会复用对应桌面图，可能产生裁切。你仍可发布。"
         : "发布后，当前店铺首页将立即更新为本次编辑内容。",
       okText: "确认发布",
       cancelText: "继续检查",
@@ -1758,19 +2686,19 @@ export default function HomepageConfig() {
         setPublishing(true);
         try {
           await pageDocumentApi.save({
-            pageKey: HOME_PAGE_KEY,
+            pageKey,
             puckData: editableData,
             metadata: latestMetadata.current,
             editorVersion: "0.22.4",
           });
-          await pageDocumentApi.publish(HOME_PAGE_KEY);
+          await pageDocumentApi.publish(pageKey);
           setData(editableData);
           latestData.current = editableData;
           setHasUnsavedChanges(false);
           setAutoSaveState("saved");
           setLastSaved(formatEditorTime(new Date()));
           void loadRevisions();
-          message.success("店铺首页已发布");
+          message.success("店铺首页已发布，前台页面将立即读取最新版本");
         } catch (error) {
           message.error(error instanceof Error ? error.message : "发布失败，请稍后重试");
         } finally {
@@ -1839,6 +2767,9 @@ export default function HomepageConfig() {
         }
         .homepage-editor__toolbar-context strong { color: #27231E; font-size: 14px; }
         .homepage-editor__toolbar-divider { width: 1px; height: 14px; background: #DED8CE; }
+        .homepage-editor__page-picker { display: inline-flex; align-items: center; gap: 6px; color: #756B5F; font-size: 12px; }
+        .homepage-editor__page-picker select { min-width: 116px; height: 28px; padding: 0 26px 0 8px; color: #3E3529; border: 1px solid #DED8CE; border-radius: 4px; background: #FFFDFC; font-size: 12px; cursor: pointer; }
+        .homepage-editor__page-picker select:focus-visible { outline: 2px solid rgba(184, 148, 78, .72); outline-offset: 2px; }
         .homepage-editor__save-status { display: inline-flex; align-items: center; gap: 5px; color: #7E9A74; }
         .homepage-editor__save-status.is-saving { color: #9A7A30; }
         .homepage-editor__save-status.is-error { color: #B14D45; }
@@ -2360,6 +3291,20 @@ export default function HomepageConfig() {
         .homepage-editor__canvas-controls output { min-width: 42px; border-right: 1px solid #EEE9E1; border-left: 1px solid #EEE9E1; color: #8C8275; }
         .homepage-editor__canvas-document { position: relative; min-width: 1px; min-height: 1px; margin: 0 auto; }
         .homepage-editor__canvas-scale { position: absolute; top: 0; left: 0; transform-origin: top left; }
+        .homepage-editor__storefront-frame .storefront-navigation--preview .site-header,
+        .homepage-editor__storefront-frame .storefront-navigation--preview .site-header__left-group {
+          position: absolute;
+        }
+        .homepage-editor__storefront-frame .storefront-navigation--preview .brand-menu {
+          position: absolute;
+          right: 0;
+          bottom: auto;
+          height: var(--homepage-editor-preview-height, 900px);
+        }
+        .homepage-editor__storefront-frame .storefront-navigation--preview .brand-menu__inner {
+          min-height: 100%;
+          box-sizing: border-box;
+        }
         .homepage-editor__canvas-document.is-dragging { outline: 1px dashed rgba(184, 148, 78, .72); outline-offset: 8px; }
         .homepage-editor__drop-scrim {
           position: absolute;
@@ -2521,6 +3466,14 @@ export default function HomepageConfig() {
         }
         .homepage-editor__layer-heading span { display: block; color: #2C2721; font-size: 14px; font-weight: 600; }
         .homepage-editor__layer-heading small { display: block; margin-top: 4px; color: #A0978A; font-size: 11px; }
+        .homepage-editor__layer-frame { display: grid; gap: 7px; margin: 0 0 10px; padding: 10px; border: 1px solid #ECE3D6; border-radius: 5px; background: #FCFBF8; }
+        .homepage-editor__layer-frame > span { color: #8A7861; font-size: 10px; font-weight: 600; letter-spacing: .08em; }
+        .homepage-editor__layer-frame button { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 7px; width: 100%; padding: 7px 8px; border: 1px solid #E8DED0; border-radius: 4px; color: #5E5040; background: #FFFFFF; cursor: pointer; text-align: left; }
+        .homepage-editor__layer-frame button:hover,
+        .homepage-editor__layer-frame button[aria-pressed="true"] { border-color: #C5A461; color: #76531B; background: #FCF8EF; }
+        .homepage-editor__layer-frame button .anticon { color: #A38351; }
+        .homepage-editor__layer-frame button span { min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+        .homepage-editor__layer-frame button small { grid-column: 2; color: #9B9082; font-size: 10px; }
         .homepage-editor__layer-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 10px 28px; }
         .homepage-editor__layer-item {
           width: 100%;
@@ -2640,6 +3593,116 @@ export default function HomepageConfig() {
           text-underline-offset: 3px;
         }
         .homepage-editor__media-status button:hover { color: #634313; }
+        .homepage-editor__properties[data-active-device="desktop"] [class*="PuckFields-field"]:has(.homepage-editor__media-picker[data-media-device="mobile"]),
+        .homepage-editor__properties[data-active-device="mobile"] [class*="PuckFields-field"]:has(.homepage-editor__media-picker[data-media-device="desktop"]) {
+          display: none;
+        }
+        .homepage-editor__properties[data-active-device="desktop"] [class*="PuckFields-field"]:has([data-editor-device="mobile"]),
+        .homepage-editor__properties[data-active-device="mobile"] [class*="PuckFields-field"]:has([data-editor-device="desktop"]) {
+          display: none;
+        }
+        .homepage-editor__properties:is(
+          [data-module-type="首屏主视觉"],
+          [data-module-type="单图海报"],
+          [data-module-type="双图海报"],
+          [data-module-type="图文混排"],
+          [data-module-type="全屏出血图"],
+          [data-module-type="分割面板"],
+          [data-module-type="轮播图"],
+          [data-module-type="热区图"],
+          [data-module-type="视频区块"]
+        ) [class*="PuckFields-field"]:has(.homepage-editor__media-picker) {
+          display: none;
+        }
+        .homepage-editor__properties[data-module-type="轮播图"] form[class*="PuckFields"] > [class*="PuckFields-field"]:first-child {
+          display: none;
+        }
+        .homepage-editor__media-preview-img {
+          min-height: 168px;
+          display: grid;
+          place-items: center;
+          overflow: hidden;
+          background: #F5F2ED;
+        }
+        .homepage-editor__media-preview-img.is-crop-preview {
+          min-height: 0;
+        }
+        .homepage-editor__media-preview-note {
+          margin: 6px 0 0;
+          color: #8E867C;
+          font-size: 11px;
+          line-height: 1.45;
+        }
+        .homepage-editor__structure-guide {
+          display: grid;
+          gap: 14px;
+          margin: 16px 0 20px;
+          padding: 14px;
+          border: 1px solid #E8E0D4;
+          border-radius: 5px;
+          background: #FCFAF5;
+        }
+        .homepage-editor__structure-group { display: grid; gap: 8px; }
+        .homepage-editor__structure-title {
+          color: #7A5E2D;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: .06em;
+        }
+        .homepage-editor__structure-media-grid { display: grid; gap: 8px; }
+        .homepage-editor__structure-media {
+          min-width: 0;
+          display: grid;
+          gap: 8px;
+          padding: 10px;
+          border: 1px solid #E5D9C5;
+          border-radius: 4px;
+          color: #8E8170;
+          background: #FFFFFF;
+          text-align: left;
+        }
+        .homepage-editor__structure-media-heading { display: grid; gap: 3px; }
+        .homepage-editor__structure-media-heading > span { display: flex; align-items: center; gap: 6px; }
+        .homepage-editor__structure-media strong { color: #4A4136; font-size: 12px; }
+        .homepage-editor__structure-media small { color: #8E867C; font-size: 11px; line-height: 1.35; }
+        .homepage-editor__structure-media em { color: #B15645; font-size: 10px; font-style: normal; }
+        .homepage-editor__structure-media .homepage-editor__media-picker { margin: 0; }
+        .homepage-editor__carousel-item-settings { display: grid; gap: 8px; padding-top: 2px; }
+        .homepage-editor__carousel-item-settings label { display: grid; gap: 4px; color: #746B60; font-size: 11px; }
+        .homepage-editor__carousel-item-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+        .homepage-editor__carousel-item-actions button,
+        .homepage-editor__carousel-add button {
+          padding: 4px 7px;
+          border: 1px solid #DDD3C4;
+          border-radius: 3px;
+          color: #72582B;
+          background: #FFFFFF;
+          cursor: pointer;
+          font-size: 11px;
+        }
+        .homepage-editor__carousel-item-actions button:last-child { color: #A94E42; }
+        .homepage-editor__carousel-item-actions button:disabled { cursor: not-allowed; opacity: .42; }
+        .homepage-editor__carousel-add { display: grid; gap: 8px; color: #887D70; font-size: 11px; line-height: 1.45; }
+        .homepage-editor__carousel-add button { justify-self: start; border-color: #B8944E; color: #76592B; }
+        .homepage-editor__device-number-field { display: grid; gap: 5px; color: #746B60; font-size: 12px; }
+        .homepage-editor__device-number-field input { width: 100%; height: 30px; box-sizing: border-box; padding: 0 8px; }
+        .homepage-editor__structure-copy-list { display: grid; gap: 2px; }
+        .homepage-editor__structure-copy-list button {
+          display: grid;
+          grid-template-columns: 84px minmax(0, 1fr);
+          gap: 8px;
+          padding: 6px 4px;
+          border: 0;
+          border-radius: 3px;
+          color: #665B4E;
+          background: transparent;
+          cursor: pointer;
+          text-align: left;
+        }
+        .homepage-editor__structure-copy-list button:hover,
+        .homepage-editor__structure-copy-list button:focus-visible { background: #F3EBDD; outline: none; }
+        .homepage-editor__structure-copy-list strong { color: #4A4136; font-size: 11px; }
+        .homepage-editor__structure-copy-list span { color: #8E867C; font-size: 11px; line-height: 1.35; }
         .homepage-editor__media-details { margin: 24px 0 0; border-top: 1px solid #EEEAE4; }
         .homepage-editor__media-details summary {
           display: flex;
@@ -2838,20 +3901,28 @@ export default function HomepageConfig() {
         .homepage-editor select:focus-visible { outline: 2px solid rgba(184, 148, 78, .72); outline-offset: 2px; }
         @media (max-width: 1500px) {
           .homepage-editor__body { grid-template-columns: 248px minmax(0, 1fr) auto; }
+          .homepage-editor__body.is-inspecting { grid-template-columns: minmax(260px, 1fr) minmax(520px, 564px); }
+          .homepage-editor__body.is-inspecting .homepage-editor__library { display: none; }
           .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
-            position: absolute;
-            z-index: 8;
-            top: 0;
-            right: 0;
-            bottom: 0;
-            width: min(564px, calc(100vw - 220px));
-            box-shadow: -12px 0 30px rgba(33, 27, 19, .16);
+            position: static;
+            width: auto;
+            grid-template-columns: 184px minmax(336px, 1fr);
+            box-shadow: none;
           }
           .homepage-editor__toolbar { grid-template-columns: minmax(180px, 1fr) auto minmax(220px, 1fr); gap: 10px; padding: 0 16px; }
         }
+        @media (max-width: 1120px) {
+          .homepage-editor__body.is-inspecting { grid-template-columns: minmax(220px, 1fr) minmax(420px, 520px); }
+          .homepage-editor__body.is-inspecting .homepage-editor__library { display: none; }
+          .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
+            width: auto;
+            grid-template-columns: 160px minmax(260px, 1fr);
+          }
+        }
         @media (max-width: 980px) {
           .homepage-editor__body { grid-template-columns: 220px minmax(0, 1fr) 204px; }
-          .homepage-editor__body.is-inspecting .homepage-editor__right-workspace { width: min(564px, calc(100vw - 56px)); }
+          .homepage-editor__body.is-inspecting { grid-template-columns: minmax(180px, 1fr) minmax(360px, 420px); }
+          .homepage-editor__body.is-inspecting .homepage-editor__right-workspace { width: auto; grid-template-columns: 142px minmax(218px, 1fr); }
           .homepage-editor__toolbar-context > span:not(.homepage-editor__save-status),
           .homepage-editor__toolbar-divider { display: none; }
           .homepage-editor__toolbar-actions .ant-btn > span:not(.anticon) { display: none; }
@@ -2889,7 +3960,7 @@ export default function HomepageConfig() {
         </div>
       ) : (
         <Puck
-          key={editorKey}
+          key="homepage-editor-canvas"
           config={editorConfig}
           data={data}
           viewports={VIEWPORT_PRESETS}
@@ -2903,7 +3974,9 @@ export default function HomepageConfig() {
             headerActions: () => <span style={{ display: "none" }} />,
           }}
         >
+          <CanvasPageDataSynchronizer data={data} pageKey={pageKey} />
           <EditorToolbar
+            pageKey={pageKey}
             lastSaved={lastSaved}
             publishing={publishing}
             hasUnsavedChanges={hasUnsavedChanges}
@@ -2912,8 +3985,10 @@ export default function HomepageConfig() {
             onOpenRevisions={openRevisions}
             onOpenPageSettings={() => setPageSettingsOpen(true)}
             onDataChange={trackEditorData}
+            onPreview={previewDraft}
+            onPageChange={(nextPageKey) => void switchEditorPage(getEditorPage(nextPageKey).publicPath)}
           />
-          <EditorBody onSaveAsTemplate={saveBlockAsTemplate} />
+          <EditorBody onSaveAsTemplate={saveBlockAsTemplate} pageLabel={getEditorPage(pageKey).label} />
         </Puck>
       )}
     </div>

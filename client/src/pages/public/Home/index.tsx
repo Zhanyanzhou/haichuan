@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import { usePublishedSlots } from "@/hooks/useContentSlots";
 import { usePagePublishStream } from "@/hooks/usePagePublishStream";
@@ -57,17 +57,20 @@ export { LG, SF, DK, TX, MU, LT, LM, PAD, SlotCtx, useInView };
 
 const productFocus = [
   {
-    image: "/images/products/ATP103_FRONT_ATP103平安扣涡旋鱼鳞纹卷云纹浮雕线刻弧面外凸立体中央圆孔内外圈组合吊坠正面.png",
+    image:
+      "/images/products/ATP103_FRONT_ATP103平安扣涡旋鱼鳞纹卷云纹浮雕线刻弧面外凸立体中央圆孔内外圈组合吊坠正面.png",
     title: "涡旋鱼鳞纹平安扣",
     meta: "足金 / 浮雕线刻",
   },
   {
-    image: "/images/products/ATP1048_FRONT_ATP1048元宝形长命锁牌吉祥文字如意云纹圆珠浮雕吊坠正面.png",
+    image:
+      "/images/products/ATP1048_FRONT_ATP1048元宝形长命锁牌吉祥文字如意云纹圆珠浮雕吊坠正面.png",
     title: "如意云纹长命锁",
     meta: "足金 / 圆珠浮雕",
   },
   {
-    image: "/images/products/ATP1055_FRONT_ATP1055圆牌福字蝙蝠祥云珐琅卷草纹吊坠正面.png",
+    image:
+      "/images/products/ATP1055_FRONT_ATP1055圆牌福字蝙蝠祥云珐琅卷草纹吊坠正面.png",
     title: "福字祥云圆牌",
     meta: "足金 / 珐琅卷草纹",
   },
@@ -75,17 +78,20 @@ const productFocus = [
 
 const productRail = [
   {
-    image: "/images/products/ATP1079_FRONT_ATP1079平安扣龙凤呈祥祥云纹浮雕立体弧面外凸中央圆孔对向环列内外圈组合吊坠正面.png",
+    image:
+      "/images/products/ATP1079_FRONT_ATP1079平安扣龙凤呈祥祥云纹浮雕立体弧面外凸中央圆孔对向环列内外圈组合吊坠正面.png",
     title: "龙凤呈祥平安扣",
     meta: "浮雕 / 祥云纹",
   },
   {
-    image: "/images/products/ATP1270_FRONT_ATP1270圆牌六蝠莲花纹珐琅花丝镂空吊坠正面.png",
+    image:
+      "/images/products/ATP1270_FRONT_ATP1270圆牌六蝠莲花纹珐琅花丝镂空吊坠正面.png",
     title: "六蝠莲花圆牌",
     meta: "珐琅 / 花丝镂空",
   },
   {
-    image: "/images/products/ATP1469_FRONT_ATP1469圆牌奔马祥云纹扬蹄飘动鬃尾转动内芯浮雕磨砂内圈环形圆石群镶同心环吊坠正面.png",
+    image:
+      "/images/products/ATP1469_FRONT_ATP1469圆牌奔马祥云纹扬蹄飘动鬃尾转动内芯浮雕磨砂内圈环形圆石群镶同心环吊坠正面.png",
     title: "奔马祥云转芯圆牌",
     meta: "转动内芯 / 磨砂",
   },
@@ -100,19 +106,22 @@ const occasionCards = [
   {
     title: "新生贺礼",
     desc: "以长命锁与福袋寄寓平安喜乐。",
-    image: "/images/products/ATP1049_FRONT_ATP1049元宝形长命锁牌招财猫莲花钱袋吉语纹浮雕吊坠正面.png",
+    image:
+      "/images/products/ATP1049_FRONT_ATP1049元宝形长命锁牌招财猫莲花钱袋吉语纹浮雕吊坠正面.png",
     href: "/products",
   },
   {
     title: "日常佩戴",
     desc: "选择轮廓轻盈、纹样耐看的黄金作品。",
-    image: "/images/products/ATP1780_FRONT_ATP1780转动葫芦镂空卷草花纹麻花边O型扣头吊坠正面.png",
+    image:
+      "/images/products/ATP1780_FRONT_ATP1780转动葫芦镂空卷草花纹麻花边O型扣头吊坠正面.png",
     href: "/products",
   },
   {
     title: "纪念时刻",
     desc: "用圆牌、平安扣承载更长久的祝福。",
-    image: "/images/products/ATP1442_FRONT_ATP1442圆牌福禄葫芦纹六字真言珐琅吊坠正面.png",
+    image:
+      "/images/products/ATP1442_FRONT_ATP1442圆牌福禄葫芦纹六字真言珐琅吊坠正面.png",
     href: "/catalog",
   },
 ];
@@ -137,7 +146,8 @@ const craftSteps = [
 
 const storyBands = [
   {
-    image: "/images/products/ATP1079_FRONT_ATP1079平安扣双龙戏珠祥云纹浮雕立体弧面外凸中央圆孔对向环列内外圈组合吊坠正面.png",
+    image:
+      "/images/products/ATP1079_FRONT_ATP1079平安扣双龙戏珠祥云纹浮雕立体弧面外凸中央圆孔对向环列内外圈组合吊坠正面.png",
     title: "标志性纹样",
     desc: "以龙纹、云纹与金工线条形成海川珠宝的东方秩序感。",
     action: "回溯灵感",
@@ -155,7 +165,8 @@ const storyBands = [
     productScene: false,
   },
   {
-    image: "/images/products/ATP1442_FRONT_ATP1442圆牌福禄葫芦纹六字真言珐琅吊坠正面.png",
+    image:
+      "/images/products/ATP1442_FRONT_ATP1442圆牌福禄葫芦纹六字真言珐琅吊坠正面.png",
     title: "重要时刻的赠礼",
     desc: "在生日、婚礼与纪念日之间，找寻一件能够长久相伴的作品。",
     action: "寻礼之旅",
@@ -168,32 +179,38 @@ const storyBands = [
 const categories = [
   {
     name: "吊坠",
-    image: "/images/products/ATP103_FRONT_ATP103平安扣涡旋鱼鳞纹卷云纹浮雕线刻弧面外凸立体中央圆孔内外圈组合吊坠正面.png",
+    image:
+      "/images/products/ATP103_FRONT_ATP103平安扣涡旋鱼鳞纹卷云纹浮雕线刻弧面外凸立体中央圆孔内外圈组合吊坠正面.png",
     href: "/products",
   },
   {
     name: "长命锁",
-    image: "/images/products/ATP1048_FRONT_ATP1048元宝形长命锁牌吉祥文字如意云纹圆珠浮雕吊坠正面.png",
+    image:
+      "/images/products/ATP1048_FRONT_ATP1048元宝形长命锁牌吉祥文字如意云纹圆珠浮雕吊坠正面.png",
     href: "/products",
   },
   {
     name: "圆牌",
-    image: "/images/products/ATP1055_FRONT_ATP1055圆牌福字蝙蝠祥云珐琅卷草纹吊坠正面.png",
+    image:
+      "/images/products/ATP1055_FRONT_ATP1055圆牌福字蝙蝠祥云珐琅卷草纹吊坠正面.png",
     href: "/products",
   },
   {
     name: "平安扣",
-    image: "/images/products/ATP1068_FRONT_ATP1068平安扣六字真言莲瓣浮雕磨砂吊坠正面.png",
+    image:
+      "/images/products/ATP1068_FRONT_ATP1068平安扣六字真言莲瓣浮雕磨砂吊坠正面.png",
     href: "/products",
   },
   {
     name: "珐琅作品",
-    image: "/images/products/ATP1104_FRONT_ATP1104海棠形牌双鹦鹉相依花枝花卉叶片纹珐琅镂空浮雕乳钉纹边内外框组合吊坠正面.png",
+    image:
+      "/images/products/ATP1104_FRONT_ATP1104海棠形牌双鹦鹉相依花枝花卉叶片纹珐琅镂空浮雕乳钉纹边内外框组合吊坠正面.png",
     href: "/products",
   },
   {
     name: "定制金饰",
-    image: "/images/products/ATP111_FRONT_ATP111圆牌八瓣宝相花纹圆石群镶花丝镂空吊坠正面.png",
+    image:
+      "/images/products/ATP111_FRONT_ATP111圆牌八瓣宝相花纹圆石群镶花丝镂空吊坠正面.png",
     href: "/custom",
   },
 ];
@@ -1108,7 +1125,12 @@ function StoryBand({ item }: { item: (typeof storyBands)[number] }) {
           <img src={item.image} alt="" loading="lazy" />
         </div>
       ) : (
-        <img src={item.image} alt="" className="vca-band__image" loading="lazy" />
+        <img
+          src={item.image}
+          alt=""
+          className="vca-band__image"
+          loading="lazy"
+        />
       )}
       <div className="vca-band__shade" />
       <div className="vca-band__copy">
@@ -1171,7 +1193,11 @@ function CraftProcess() {
       <div className="vca-craft__grid">
         {craftSteps.map((item) => (
           <article key={item.title} className="vca-craft-card">
-            <img src={item.image} alt={`海川珠宝${item.title}工艺`} loading="lazy" />
+            <img
+              src={item.image}
+              alt={`海川珠宝${item.title}工艺`}
+              loading="lazy"
+            />
             <div>
               <h3>{item.title}</h3>
               <p>{item.desc}</p>
@@ -1268,8 +1294,9 @@ function FallbackHome() {
 }
 
 function usePublishedPageDocument(pageKey = "home") {
-  const [document, setDocument] = useState<any>(null);
+  const [pageDocument, setPageDocument] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
 
@@ -1288,11 +1315,13 @@ function usePublishedPageDocument(pageKey = "home") {
         const response = await pageDocumentApi.getPublished(pageKey);
         // 仅采纳最新一次请求的结果，避免并发刷新时旧响应覆盖新数据
         if (mountedRef.current && requestIdRef.current === requestId) {
-          setDocument(unwrapResponse<any>(response));
+          setPageDocument(unwrapResponse<any>(response));
+          setLoadFailed(false);
         }
       } catch {
         if (mountedRef.current && requestIdRef.current === requestId) {
-          setDocument(null);
+          setPageDocument(null);
+          setLoadFailed(true);
         }
       } finally {
         if (mountedRef.current && requestIdRef.current === requestId) {
@@ -1307,14 +1336,34 @@ function usePublishedPageDocument(pageKey = "home") {
     void refresh(true);
   }, [refresh]);
 
-  return { document, loading, refresh };
+  return { pageDocument, loading, loadFailed, refresh };
+}
+
+function HomeDocumentLoading() {
+  return (
+    <main aria-busy="true" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center" }}>
+      <span style={{ color: "#8C785C", fontSize: 12, letterSpacing: ".16em" }}>正在载入首页</span>
+    </main>
+  );
+}
+
+function HomeDocumentError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <main role="status" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center", textAlign: "center", padding: 24 }}>
+      <div>
+        <p style={{ color: "#4A4137", margin: "0 0 10px" }}>首页内容暂时无法载入</p>
+        <button type="button" onClick={onRetry} style={{ border: "1px solid #B8944E", background: "transparent", color: "#785E31", padding: "8px 16px", cursor: "pointer" }}>重新载入</button>
+      </div>
+    </main>
+  );
 }
 
 export default function Home() {
   const { slots } = usePublishedSlots("home");
   const {
-    document,
+    pageDocument,
     loading: documentLoading,
+    loadFailed: documentLoadFailed,
     refresh: refreshDocument,
   } = usePublishedPageDocument("home");
 
@@ -1342,7 +1391,7 @@ export default function Home() {
   const clearPageMeta = usePageMetaStore((s) => s.clear);
 
   useEffect(() => {
-    const meta = document?.metadata;
+    const meta = pageDocument?.metadata;
     if (meta && (meta.seoTitle || meta.seoDescription || meta.ogImage)) {
       setPageMeta({
         title: meta.seoTitle || undefined,
@@ -1353,17 +1402,21 @@ export default function Home() {
       clearPageMeta();
     }
     return () => clearPageMeta();
-  }, [document, setPageMeta, clearPageMeta]);
+  }, [pageDocument, setPageMeta, clearPageMeta]);
 
   if (documentLoading) {
-    return <main style={{ background: LG, minHeight: "100vh" }} />;
+    return <HomeDocumentLoading />;
+  }
+
+  if (documentLoadFailed) {
+    return <HomeDocumentError onRetry={() => void refreshDocument(true)} />;
   }
 
   return (
     <SlotCtx.Provider value={slots}>
       <main style={{ background: LG }}>
-        {document?.puckData ? (
-          <PuckDocumentRenderer data={document.puckData} />
+        {pageDocument?.puckData ? (
+          <PuckDocumentRenderer data={pageDocument.puckData} />
         ) : (
           <FallbackHome />
         )}
@@ -1372,9 +1425,8 @@ export default function Home() {
   );
 }
 
-
 function useDraftPageDocument(pageKey = "home") {
-  const [document, setDocument] = useState<any>(null);
+  const [pageDocument, setPageDocument] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const mountedRef = useRef(true);
 
@@ -1390,9 +1442,9 @@ function useDraftPageDocument(pageKey = "home") {
       if (showLoading) setLoading(true);
       try {
         const response = await pageDocumentApi.getAdmin(pageKey);
-        if (mountedRef.current) setDocument(unwrapResponse<any>(response));
+        if (mountedRef.current) setPageDocument(unwrapResponse<any>(response));
       } catch {
-        if (mountedRef.current) setDocument(null);
+        if (mountedRef.current) setPageDocument(null);
       } finally {
         if (mountedRef.current) setLoading(false);
       }
@@ -1404,11 +1456,17 @@ function useDraftPageDocument(pageKey = "home") {
     void refresh(true);
   }, [refresh]);
 
-  return { document, loading, refresh };
+  return { pageDocument, loading, refresh };
 }
 
 export function HomePreview() {
-  const { document, loading } = useDraftPageDocument("home");
+  return <PagePreview pageKey="home" />;
+}
+
+export function PagePreview({ pageKey: pageKeyProp }: { pageKey?: string }) {
+  const { pageKey: routePageKey } = useParams();
+  const pageKey = pageKeyProp || routePageKey || "home";
+  const { pageDocument, loading } = useDraftPageDocument(pageKey);
 
   if (loading) {
     return <main style={{ background: LG, minHeight: "100vh" }} />;
@@ -1416,8 +1474,8 @@ export function HomePreview() {
 
   return (
     <main style={{ background: LG }}>
-      {document?.puckData ? (
-        <PuckDocumentRenderer data={document.puckData} />
+      {pageDocument?.puckData ? (
+        <PuckDocumentRenderer data={pageDocument.puckData} />
       ) : (
         <FallbackHome />
       )}

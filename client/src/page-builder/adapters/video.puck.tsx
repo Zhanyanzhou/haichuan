@@ -40,7 +40,7 @@ export const videoPuckConfig = {
       render: ({
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+        <MediaPickerField fieldKey="posterUrl" device="shared" value={value} onChange={onChange} readOnly={readOnly}
           spec={IMAGE_SPECS.video.poster} placeholder="上传视频封面图" />
       ),
     },

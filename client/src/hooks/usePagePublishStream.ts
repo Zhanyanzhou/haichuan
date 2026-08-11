@@ -14,7 +14,7 @@ export type PagePublishEvent = {
 };
 
 export function usePagePublishStream(
-  pageKey: string,
+  pageKey: string | undefined,
   onPublished: (event: PagePublishEvent) => void,
 ) {
   const callbackRef = useRef(onPublished);
@@ -24,6 +24,7 @@ export function usePagePublishStream(
   }, [onPublished]);
 
   useEffect(() => {
+    if (!pageKey) return;
     if (USE_MOCK) return;
     if (typeof EventSource === "undefined") return;
 

@@ -37,16 +37,16 @@ export const imageTextPuckConfig = {
     locked: false,
   } satisfies ImageTextPuckProps,
   fields: {
-    label: { type: "text" as const, label: "标签" },
-    title: { type: "text" as const, label: "标题" },
-    body: { type: "textarea" as const, label: "正文" },
+    label: { type: "text" as const, label: "文字区顶部 · 标签" },
+    title: { type: "text" as const, label: "文字区 · 主标题" },
+    body: { type: "textarea" as const, label: "文字区 · 正文" },
     image: {
       type: "custom" as const,
-      label: "配图",
+      label: "图片侧 · 配图",
       render: ({
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+        <MediaPickerField fieldKey="image" device="shared" value={value} onChange={onChange} readOnly={readOnly}
           spec={IMAGE_SPECS.imageText.image} placeholder="上传图文配图" />
       ),
     },
@@ -58,8 +58,8 @@ export const imageTextPuckConfig = {
         { label: "右侧", value: "right" },
       ],
     },
-    buttonText: { type: "text" as const, label: "按钮文字" },
-    linkUrl: { type: "text" as const, label: "按钮链接" },
+    buttonText: { type: "text" as const, label: "文字区底部 · 按钮文字" },
+    linkUrl: { type: "text" as const, label: "按钮跳转链接" },
     template: {
       type: "radio" as const,
       label: "布局",

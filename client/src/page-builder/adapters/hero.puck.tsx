@@ -27,7 +27,7 @@ export interface HeroPuckProps {
 
 export const heroPuckConfig = {
   render: (props: HeroPuckProps) => (
-    <HeroSection module={convertPuckProps("首屏主视觉", props as any)!} />
+    <HeroSection module={convertPuckProps("首屏主视觉", props as any)!} editMode />
   ),
 
   defaultProps: {
@@ -58,6 +58,8 @@ export const heroPuckConfig = {
         readOnly?: boolean;
       }) => (
         <MediaPickerField
+          fieldKey="desktopImage"
+          device="desktop"
           value={value}
           onChange={onChange}
           readOnly={readOnly}
@@ -80,6 +82,8 @@ export const heroPuckConfig = {
         readOnly?: boolean;
       }) => (
         <MediaPickerField
+          fieldKey="mobileImage"
+          device="mobile"
           value={value}
           onChange={onChange}
           readOnly={readOnly}

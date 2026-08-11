@@ -35,19 +35,19 @@ export default function SinglePosterSection({ module, editMode }: Props) {
   const s = module?.styleConfig;
 
   // 画布内未上传图片时显示占位，避免误展示老兜底图
-  if (editMode && !c?.desktopImage) {
+  if (editMode && !c?.desktopImage && !c?.mobileImage) {
     return (
       <BlockEmptyPlaceholder
         icon="🖼️"
         hint="单图海报"
         spec="建议 1200×800 (3:2)"
-        height="60svh"
+        height={editMode ? "var(--homepage-editor-single-image-height, 684px)" : "60svh"}
       />
     );
   }
 
-  const desktopImg = c?.desktopImage || defaults.image;
-  const mobileImg = c?.mobileImage || desktopImg;
+  const desktopImg = c?.desktopImage || c?.mobileImage || defaults.image;
+  const mobileImg = c?.mobileImage || c?.desktopImage || defaults.image;
   const number = c?.number || defaults.number;
   const label = c?.label || defaults.label;
   const title = c?.title || defaults.title;
@@ -61,7 +61,8 @@ export default function SinglePosterSection({ module, editMode }: Props) {
       ref={ref}
       className="overflow-hidden"
       style={{
-        minHeight: '110svh', padding: '120px 0 140px',
+        minHeight: editMode ? 'var(--homepage-editor-single-height, 990px)' : '110svh',
+        padding: '120px 0 140px',
         background: s?.bgColor || LG,
         outline: editMode ? '2px solid rgba(184,148,78,0.6)' : undefined,
         outlineOffset: -2,
@@ -74,25 +75,30 @@ export default function SinglePosterSection({ module, editMode }: Props) {
         </div>
       )}
       <div className="grid grid-cols-12 gap-x-6 max-w-[1600px] mx-auto" style={{ padding: `0 ${PAD}` }}>
-        <div className="col-span-12 md:col-span-3 self-center md:self-auto md:pt-[22vh]">
-          <p className="text-[10px] tracking-[.2em] uppercase mb-2 font-sans" style={{ color: MU }}>{number} / {label}</p>
-          <h2 className="text-[clamp(26px,2.8vw,40px)] leading-[1.12] tracking-[.02em] mb-1"
+        <div
+          className="col-span-12 md:col-span-3 self-center md:self-auto md:pt-[22vh]"
+          style={editMode ? { paddingTop: 'var(--homepage-editor-single-copy-offset, 198px)' } : undefined}
+        >
+          <p data-editor-field="number label" className="text-[10px] tracking-[.2em] uppercase mb-2 font-sans" style={{ color: MU }}>{number} / {label}</p>
+          <h2 data-editor-field="title" className="text-[clamp(26px,2.8vw,40px)] leading-[1.12] tracking-[.02em] mb-1"
             style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: TX }}>{title}</h2>
-          {subtitle && <p className="text-sm mb-5" style={{ color: MU }}>{subtitle}</p>}
-          <Link to={linkUrl} className="inline-flex items-center gap-2 text-[10px] tracking-[.14em] uppercase transition-opacity hover:opacity-55 font-sans" style={{ color: TX }}>
+          {subtitle && <p data-editor-field="subtitle" className="text-sm mb-5" style={{ color: MU }}>{subtitle}</p>}
+          <Link data-editor-field="linkUrl" to={linkUrl} className="inline-flex items-center gap-2 text-[10px] tracking-[.14em] uppercase transition-opacity hover:opacity-55 font-sans" style={{ color: TX }}>
             VIEW SERIES <span>→</span>
           </Link>
         </div>
         <div className="col-span-12 md:col-span-9 mt-8 md:mt-0">
           <div className="overflow-hidden" style={{
             // 宽度不再在窄屏强制保留 600px，避免图片被父容器裁掉。
-            width: 'min(100%, clamp(600px,82vw,1460px))', height: 'min(76svh, 140vw)', minHeight: '480px', maxHeight: '860px',
+            width: 'min(100%, clamp(600px,82vw,1460px))',
+            height: editMode ? 'var(--homepage-editor-single-image-height, 684px)' : 'min(76svh, 140vw)',
+            minHeight: '480px', maxHeight: '860px',
             marginLeft: 'auto', marginRight: '0',
             opacity: rm || visible ? 1 : 0,
             transform: rm || visible ? 'scale(1)' : 'scale(1.015) translateY(14px)',
             transition: 'opacity 0.95s ease, transform 0.95s ease',
           }}>
-            <picture className="block w-full h-full">
+            <picture data-editor-field="desktopImage mobileImage" className="block w-full h-full">
               <source media="(max-width: 1023px) and (orientation: portrait)" srcSet={mobileImg} />
               <img src={desktopImg} alt={title} className="w-full h-full object-cover" loading="lazy" decoding="async"
                 style={{ objectPosition: `${focusX}% ${focusY}%` }} />

@@ -126,7 +126,10 @@ export default function HotspotBlock({
     };
   }, [dragState, getRelativePos, validHotspots, onHotspotsChange]);
 
-  if (!image) {
+  const desktopImg = image || mobileImage;
+  const mobileImg = mobileImage || image;
+
+  if (!desktopImg) {
     return editMode ? (
       <section
         style={{
@@ -151,13 +154,11 @@ export default function HotspotBlock({
         background: "#F5F2ED",
       }}
     >
-      <picture>
-        {mobileImage && (
-          <source media="(max-width:767px)" srcSet={mobileImage} />
-        )}
+      <picture data-editor-field="image mobileImage">
+        <source media="(max-width:767px)" srcSet={mobileImg} />
         <img
           ref={imgRef}
-          src={image}
+          src={desktopImg}
           alt=""
           style={{ width: "100%", display: "block", userSelect: "none" }}
           draggable={false}

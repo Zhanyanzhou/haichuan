@@ -9,10 +9,9 @@
  */
 
 import { useState, useRef, useEffect, type ChangeEvent } from "react";
-import { Upload, Button, Input, message, Spin, Popover } from "antd";
+import { Upload, Button, Input, message } from "antd";
 import {
-  PictureOutlined,
-  UploadOutlined,
+  InboxOutlined,
   LinkOutlined,
   DeleteOutlined,
   CheckCircleOutlined,
@@ -30,6 +29,10 @@ export interface MediaSpec {
 }
 
 interface MediaPickerFieldProps {
+  /** 用于属性面板导览定位当前上传卡片 */
+  fieldKey?: string;
+  /** 当前素材所属终端；用于在属性面板按设备过滤字段 */
+  device?: "desktop" | "mobile" | "shared";
   value?: string;
   onChange?: (value: string) => void;
   readOnly?: boolean;
@@ -39,6 +42,13 @@ interface MediaPickerFieldProps {
   required?: boolean;
   /** 占位提示 */
   placeholder?: string;
+  /**
+   * 右侧素材卡按模板实际容器比例模拟裁切；不传时仍展示完整原图。
+   * 值采用 CSS aspect-ratio 语法，例如 "16 / 9"。
+   */
+  previewAspectRatio?: string;
+  /** 与画布相同的图片焦点坐标（百分比） */
+  previewFocus?: { x: number; y: number };
 }
 
 /** 图片加载状态检测，返回实际尺寸 */
@@ -100,20 +110,17 @@ function sizeMatchStatus(
   return "risk";
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB"];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 2);
-  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-}
-
 export default function MediaPickerField({
+  fieldKey,
+  device = "shared",
   value,
   onChange,
   readOnly,
   spec,
   required,
   placeholder,
+  previewAspectRatio,
+  previewFocus,
 }: MediaPickerFieldProps) {
   const [mode, setMode] = useState<"upload" | "url" | "preview">(
     value ? "preview" : "upload",
@@ -126,6 +133,9 @@ export default function MediaPickerField({
 
   const hasValue = Boolean(value && value.trim().length > 0);
   const isEmpty = !hasValue;
+  const hasCropPreview = Boolean(previewAspectRatio);
+  const focusX = Math.min(100, Math.max(0, previewFocus?.x ?? 50));
+  const focusY = Math.min(100, Math.max(0, previewFocus?.y ?? 50));
 
   /* ── 上传 ── */
   const handleUpload = async (file: File) => {
@@ -197,7 +207,12 @@ export default function MediaPickerField({
   };
 
   return (
-    <div className="homepage-editor__media-picker">
+    <div
+      className="homepage-editor__media-picker"
+      data-media-field={fieldKey}
+      data-media-device={device}
+      tabIndex={fieldKey ? -1 : undefined}
+    >
       {/* ═══ 推荐尺寸提示 ═══ */}
       {spec && (
         <div className="homepage-editor__media-spec-hint">
@@ -219,16 +234,30 @@ export default function MediaPickerField({
       {/* ═══ 预览模式 ═══ */}
       {mode === "preview" && hasValue && (
         <div className="homepage-editor__media-preview">
-          <div className="homepage-editor__media-preview-img">
+          <div
+            className={`homepage-editor__media-preview-img${hasCropPreview ? " is-crop-preview" : ""}`}
+            style={hasCropPreview ? { aspectRatio: previewAspectRatio } : undefined}
+          >
             <img
               src={value}
               alt="预览"
-              style={{ objectFit: "cover", width: "100%", height: "100%" }}
+              style={{
+                objectFit: hasCropPreview ? "cover" : "contain",
+                objectPosition: `${focusX}% ${focusY}%`,
+                width: "100%",
+                height: "100%",
+                background: "#F5F2ED",
+              }}
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = "none";
               }}
             />
           </div>
+          <p className="homepage-editor__media-preview-note">
+            {hasCropPreview
+              ? `画布裁切预览 · 焦点 ${Math.round(focusX)}% × ${Math.round(focusY)}%`
+              : "原图缩略；实际画布会按当前设备与焦点位置裁切显示。"}
+          </p>
           <div className="homepage-editor__media-preview-actions">
             {!readOnly && (
               <>
@@ -261,32 +290,30 @@ export default function MediaPickerField({
 
       {/* ═══ 上传模式 ═══ */}
       {(mode === "upload" || (mode === "preview" && !hasValue)) && (
-        <Upload
+        <Upload.Dragger
           accept="image/*"
           showUploadList={false}
           beforeUpload={(file) => {
-            handleUpload(file);
+            void handleUpload(file);
             return false;
           }}
           disabled={readOnly || uploading}
+          style={{
+            minHeight: 116,
+            padding: "16px 12px",
+            border: "1px dashed #CDB981",
+            borderRadius: 5,
+            background: "#FCFAF5",
+          }}
         >
-          <Button
-            icon={<UploadOutlined />}
-            loading={uploading}
-            disabled={readOnly}
-            block
-            size="middle"
-            style={{
-              height: 48,
-              border: "1px dashed #DED8CE",
-              borderRadius: 4,
-              color: "#8E867C",
-              background: "#FAFAF8",
-            }}
-          >
-            {uploading ? "上传中…" : placeholder || "点击上传图片"}
-          </Button>
-        </Upload>
+          <InboxOutlined style={{ color: "#B8944E", fontSize: 22 }} />
+          <div style={{ marginTop: 8, color: "#4A4239", fontSize: 13 }}>
+            {uploading ? "图片上传中…" : placeholder || "拖入图片或点击上传"}
+          </div>
+          <div style={{ marginTop: 4, color: "#91877A", fontSize: 11 }}>
+            支持拖拽、点击上传；仅图片，单张不超过 10MB
+          </div>
+        </Upload.Dragger>
       )}
 
       {/* ═══ URL 输入模式 ═══ */}

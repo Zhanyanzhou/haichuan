@@ -44,7 +44,7 @@ export default function SplitPanelBlock({
   }
 
   const imageCol = (
-    <div
+    <div data-editor-field="image"
       className="homepage-split-panel__image"
       style={{
         flex: `0 0 ${imageOnLeft ? leftPct : rightPct}%`,
@@ -82,7 +82,7 @@ export default function SplitPanelBlock({
     >
       <div style={{ maxWidth: 440 }}>
         {subtitle && (
-          <p
+          <p data-editor-field="subtitle"
             style={{
               fontSize: 10,
               letterSpacing: "0.25em",
@@ -96,7 +96,7 @@ export default function SplitPanelBlock({
           </p>
         )}
         {title && (
-          <h2
+          <h2 data-editor-field="title"
             style={{
               fontSize: "clamp(24px,2.8vw,40px)",
               fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
@@ -109,7 +109,7 @@ export default function SplitPanelBlock({
           </h2>
         )}
         {body && (
-          <p
+          <p data-editor-field="body"
             style={{
               fontSize: 14,
               color: "#8A7F72",
@@ -121,7 +121,7 @@ export default function SplitPanelBlock({
           </p>
         )}
         {buttonText && linkUrl && (
-          <Link
+          <Link data-editor-field="buttonText linkUrl"
             to={linkUrl}
             style={{
               display: "inline-block",

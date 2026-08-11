@@ -108,16 +108,44 @@ export const carouselPuckConfig = {
       ],
     },
     height: {
-      type: "number" as const,
+      type: "custom" as const,
       label: "电脑端高度(px)",
-      min: 200,
-      max: 800,
+      render: ({ value, onChange, readOnly }: { value?: number; onChange: (value: number) => void; readOnly?: boolean }) => (
+        <div data-editor-device="desktop">
+          <label className="homepage-editor__device-number-field">
+            <span>电脑端高度（px）</span>
+            <input
+              type="number"
+              min={200}
+              max={800}
+              value={value ?? 500}
+              disabled={readOnly}
+              aria-label="电脑端高度（像素）"
+              onChange={(event) => onChange(Number(event.target.value) || 200)}
+            />
+          </label>
+        </div>
+      ),
     },
     mobileHeight: {
-      type: "number" as const,
+      type: "custom" as const,
       label: "手机端高度(px)",
-      min: 320,
-      max: 1200,
+      render: ({ value, onChange, readOnly }: { value?: number; onChange: (value: number) => void; readOnly?: boolean }) => (
+        <div data-editor-device="mobile">
+          <label className="homepage-editor__device-number-field">
+            <span>手机端高度（px）</span>
+            <input
+              type="number"
+              min={320}
+              max={1200}
+              value={value ?? 640}
+              disabled={readOnly}
+              aria-label="手机端高度（像素）"
+              onChange={(event) => onChange(Number(event.target.value) || 320)}
+            />
+          </label>
+        </div>
+      ),
     },
   },
 };

@@ -41,30 +41,30 @@ export const doublePosterPuckConfig = {
     locked: false,
   } satisfies DoublePosterPuckProps,
   fields: {
-    number: { type: "text" as const, label: "编号" },
-    label: { type: "text" as const, label: "标签" },
-    title: { type: "text" as const, label: "标题" },
-    description: { type: "textarea" as const, label: "描述" },
     mainImage: {
       type: "custom" as const,
-      label: "主海报",
+      label: "主海报 · 画布左侧大图",
       render: ({
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
-          spec={IMAGE_SPECS.doublePoster.main} placeholder="上传主海报图片" />
+        <MediaPickerField fieldKey="mainImage" device="shared" value={value} onChange={onChange} readOnly={readOnly}
+          spec={IMAGE_SPECS.doublePoster.main} required placeholder="拖入或上传主海报图片" />
       ),
     },
     detailImage: {
       type: "custom" as const,
-      label: "细节图",
+      label: "细节海报 · 画布右侧竖图",
       render: ({
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
-          spec={IMAGE_SPECS.doublePoster.detail} placeholder="上传细节海报图片" />
+        <MediaPickerField fieldKey="detailImage" device="shared" value={value} onChange={onChange} readOnly={readOnly}
+          spec={IMAGE_SPECS.doublePoster.detail} required placeholder="拖入或上传细节海报图片" />
       ),
     },
+    number: { type: "text" as const, label: "细节图下方 · 编号" },
+    label: { type: "text" as const, label: "细节图下方 · 标签" },
+    title: { type: "text" as const, label: "细节图下方 · 主标题" },
+    description: { type: "textarea" as const, label: "细节图下方 · 介绍文字" },
     linkUrl: { type: "text" as const, label: "链接" },
     mainFocusX: {
       type: "number" as const,

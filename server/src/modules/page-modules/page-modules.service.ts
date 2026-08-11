@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, MessageEvent } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { EventEmitter } from "events";
+import { existsSync } from "fs";
+import { relative, resolve, sep } from "path";
 import { fromEvent, interval, map, merge, Observable, startWith } from "rxjs";
 
 const PUCK_COMPONENT_LABELS = [
@@ -24,7 +26,7 @@ const PUCK_COMPONENT_SET = new Set<string>(PUCK_COMPONENT_LABELS);
 const PUCK_REQUIRED_IMAGE_FIELDS: Record<string, string[]> = {
   首屏主视觉: ["desktopImage"],
   单图海报: ["desktopImage"],
-  双图海报: ["mainImage"],
+  双图海报: ["mainImage", "detailImage"],
   图文混排: ["image"],
   全屏出血图: ["image"],
   分割面板: ["image"],
@@ -46,6 +48,7 @@ const PUCK_LINK_FIELDS = ["linkUrl", "link"];
 @Injectable()
 export class PageModulesService {
   private readonly publicEvents = new EventEmitter();
+  private readonly uploadsRoot = resolve(process.cwd(), "uploads");
 
   constructor(private prisma: PrismaService) {
     // 每条 SSE 连接都会订阅发布事件，连接数随并发前台用户增长；
@@ -209,6 +212,7 @@ export class PageModulesService {
   private async collectPuckDataErrors(db: any, puckData: any): Promise<string[]> {
     const errors: string[] = [];
     const productIds = new Set<number>();
+    const missingUploadUrls = new Set<string>();
 
     if (!puckData || typeof puckData !== "object") {
       return ["页面数据为空或格式不正确"];
@@ -252,11 +256,15 @@ export class PageModulesService {
         const value = props[field];
         if (this.isNonEmptyString(value) && !this.isSafeAssetUrl(value)) {
           errors.push(`${label}：${field} 图片地址不合法`);
+        } else if (this.isNonEmptyString(value)) {
+          this.collectMissingUploadError(value, `${label}：${field}`, missingUploadUrls, errors);
         }
       }
 
       if (this.isNonEmptyString(props.videoUrl) && !this.isSafeAssetUrl(props.videoUrl)) {
         errors.push(`${label}：videoUrl 视频地址不合法`);
+      } else if (this.isNonEmptyString(props.videoUrl)) {
+        this.collectMissingUploadError(props.videoUrl, `${label}：videoUrl`, missingUploadUrls, errors);
       }
 
       for (const field of PUCK_LINK_FIELDS) {
@@ -292,6 +300,11 @@ export class PageModulesService {
           props.images.forEach((item: any, index: number) => {
             if (!this.isNonEmptyString(item?.url) || !this.isSafeAssetUrl(item.url)) {
               errors.push(`${label}：第 ${index + 1} 张轮播图片地址不合法`);
+            } else {
+              this.collectMissingUploadError(item.url, `${label}：第 ${index + 1} 张轮播图`, missingUploadUrls, errors);
+            }
+            if (this.isNonEmptyString(item?.mobileUrl) && this.isSafeAssetUrl(item.mobileUrl)) {
+              this.collectMissingUploadError(item.mobileUrl, `${label}：第 ${index + 1} 张轮播图移动端图片`, missingUploadUrls, errors);
             }
             if (this.isNonEmptyString(item?.link) && !this.isSafeLink(item.link)) {
               errors.push(`${label}：第 ${index + 1} 张轮播链接不合法`);
@@ -357,6 +370,30 @@ export class PageModulesService {
     const url = value.trim();
     if (url.startsWith("/") || url.startsWith("#")) return true;
     return /^https?:\/\//i.test(url);
+  }
+
+  /** 仅校验本地上传资源；外部 URL 由其源站负责可用性。 */
+  private collectMissingUploadError(
+    url: string,
+    label: string,
+    checkedUrls: Set<string>,
+    errors: string[],
+  ): void {
+    if (!url.startsWith("/uploads/") || checkedUrls.has(url)) return;
+    checkedUrls.add(url);
+
+    const requestedPath = url.slice("/uploads/".length);
+    const targetPath = resolve(this.uploadsRoot, requestedPath);
+    const relativePath = relative(this.uploadsRoot, targetPath);
+    const isWithinUploads =
+      relativePath !== ".." &&
+      !relativePath.startsWith(`..${sep}`) &&
+      !relativePath.startsWith("../") &&
+      !relativePath.startsWith("..\\");
+
+    if (!isWithinUploads || !existsSync(targetPath)) {
+      errors.push(`${label} 上传图片文件不存在，请重新上传后再发布`);
+    }
   }
 
   async getPageDocumentRevisions(pageKey: string) {

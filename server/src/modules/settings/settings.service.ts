@@ -8,7 +8,7 @@ const SETTINGS_FILE = path.resolve(__dirname, '..', '..', '..', 'settings.json')
 const DEFAULT_SETTINGS = {
   siteName: '海川珠宝',
   siteDescription: '高端珠宝产品管理平台',
-  logo: '/favicon.svg',
+  logo: '',
   seoTitle: '海川珠宝 - 高端珠宝臻品平台',
   seoDescription: '4000+款高端珠宝臻品，融合传统工艺与现代科技',
   seoKeywords: '珠宝,首饰,黄金,钻石,手镯,吊坠,戒指,耳饰',
@@ -18,6 +18,16 @@ const DEFAULT_SETTINGS = {
   paymentMethods: ['transfer'],
   logisticsCompanies: ['顺丰速运', '京东物流', 'EMS'],
 };
+
+const LEGACY_PLACEHOLDER_LOGOS = new Set(['/favicon.svg', '/images/brand-logo.svg']);
+
+function normalizeSettings(settings: any) {
+  const logo = typeof settings?.logo === 'string' ? settings.logo.trim() : '';
+  return {
+    ...settings,
+    logo: LEGACY_PLACEHOLDER_LOGOS.has(logo.toLowerCase()) ? '' : logo,
+  };
+}
 
 @Injectable()
 export class SettingsService {
@@ -29,12 +39,12 @@ export class SettingsService {
     try {
       if (fs.existsSync(SETTINGS_FILE)) {
         const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+        return normalizeSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) });
       }
     } catch (e) {
       this.logger.warn(`读取设置文件失败，使用默认设置`);
     }
-    return { ...DEFAULT_SETTINGS };
+    return normalizeSettings({ ...DEFAULT_SETTINGS });
   }
 
   private saveToFile(data: any): void {

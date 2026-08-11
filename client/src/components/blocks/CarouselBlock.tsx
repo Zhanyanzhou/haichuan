@@ -50,6 +50,14 @@ export default function CarouselBlock({
     return () => clearInterval(timer);
   }, [autoPlay, interval, next, validImages.length]);
 
+  // 删除当前轮播项后及时收敛索引，避免访问已不存在的图片导致画布崩溃。
+  useEffect(() => {
+    setCurrent((value) => {
+      if (validImages.length === 0) return 0;
+      return Math.min(value, validImages.length - 1);
+    });
+  }, [validImages.length]);
+
   if (validImages.length === 0) {
     if (!editMode) return null;
     return (
@@ -64,7 +72,7 @@ export default function CarouselBlock({
 
   const img = validImages[current];
   const imageContent = (
-    <picture>
+    <picture data-editor-field="images">
       {img.mobileUrl && <source media="(max-width: 1023px) and (orientation: portrait)" srcSet={img.mobileUrl} />}
       <img
         src={img.url}
@@ -87,7 +95,7 @@ export default function CarouselBlock({
         "--homepage-carousel-height": `${height}px`,
         "--homepage-carousel-mobile-height": `${mobileHeight}px`,
         overflow: "hidden",
-        background: "#0F0D0C",
+        background: "#E7DDCE",
       } as CSSProperties}
     >
       <style>{`
@@ -105,6 +113,8 @@ export default function CarouselBlock({
       {showArrows && validImages.length > 1 && (
         <>
           <button
+            type="button"
+            aria-label="上一张轮播图"
             onClick={prev}
             style={{
               position: "absolute",
@@ -127,6 +137,8 @@ export default function CarouselBlock({
             ‹
           </button>
           <button
+            type="button"
+            aria-label="下一张轮播图"
             onClick={next}
             style={{
               position: "absolute",
@@ -166,6 +178,8 @@ export default function CarouselBlock({
               key={i}
               onClick={() => setCurrent(i)}
               type="button"
+              aria-label={`切换到第 ${i + 1} 张轮播图`}
+              aria-current={i === current ? "true" : undefined}
               style={{
                 width: i === current ? 20 : 8,
                 height: 8,

@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { usePageMetaStore } from "@/store/pageMetaStore";
+import { getEditorPageByPath } from "@/page-builder/config/editorPages";
+import PublishedPageDecoration from "@/page-builder/runtime/PublishedPageDecoration";
+import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
 
 /** 幂等写入/更新 <meta> 标签（按 name 或 property 选择）。 */
 function upsertMeta(attr: "name" | "property", key: string, content: string) {
@@ -15,13 +18,13 @@ function upsertMeta(attr: "name" | "property", key: string, content: string) {
   el.setAttribute("content", content);
 }
 
-const primaryLinks = [
-  { label: "关于海川", description: "认识海川珠宝与东方工艺", href: "/about" },
-  { label: "珠宝作品", description: "浏览黄金珠宝作品", href: "/products" },
-  { label: "选款中心", description: "按品类与货号快速选款", href: "/catalog" },
-  { label: "珠宝定制", description: "了解专属定制流程", href: "/custom" },
-  { label: "预约咨询", description: "一对一顾问服务", href: "/contact" },
-];
+function syncMeta(attr: "name" | "property", key: string, content?: string) {
+  if (content) {
+    upsertMeta(attr, key, content);
+    return;
+  }
+  document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`)?.remove();
+}
 
 /* ═══════ 内联图标 ═══════ */
 const MenuIcon = () => (
@@ -107,7 +110,11 @@ const AccountIcon = () => (
 export default function PublicLayout() {
   const location = useLocation();
   const isHome = location.pathname === "/";
+  const decorationPage = isHome
+    ? undefined
+    : getEditorPageByPath(location.pathname);
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuToggleRef = useRef<HTMLButtonElement>(null);
   const [scrolled, setScrolled] = useState(false);
   const [siteSettings, setSiteSettings] = useState<any>(null);
 
@@ -137,27 +144,27 @@ export default function PublicLayout() {
     const keywords = siteSettings?.seoKeywords;
     const image = pageMeta.image;
 
-    if (title) document.title = title;
-    if (description) upsertMeta("name", "description", description);
-    if (keywords) upsertMeta("name", "keywords", keywords);
+    document.title = title || siteName;
+    syncMeta("name", "description", description);
+    syncMeta("name", "keywords", keywords);
 
     // 社交分享卡片（微信 / 微博 / Twitter / Facebook）—— 珠宝营销分享命脉
     upsertMeta("property", "og:type", "website");
     upsertMeta("property", "og:site_name", siteName);
     upsertMeta("property", "og:title", title || siteName);
-    if (description) upsertMeta("property", "og:description", description);
-    if (image) upsertMeta("property", "og:image", image);
+    syncMeta("property", "og:description", description);
+    syncMeta("property", "og:image", image);
     upsertMeta("name", "twitter:card", image ? "summary_large_image" : "summary");
-    if (title) upsertMeta("name", "twitter:title", title);
-    if (description) upsertMeta("name", "twitter:description", description);
-    if (image) upsertMeta("name", "twitter:image", image);
+    syncMeta("name", "twitter:title", title || siteName);
+    syncMeta("name", "twitter:description", description);
+    syncMeta("name", "twitter:image", image);
   }, [siteSettings, pageMeta]);
 
   const siteName = siteSettings?.siteName || "海川珠宝";
-  const contactPhone = siteSettings?.contactPhone || "400-888-8888";
-  const contactEmail = siteSettings?.contactEmail || "contact@haichuan.com";
-  const contactAddress =
-    siteSettings?.contactAddress || "深圳市罗湖区珠宝产业园";
+  const contactPhone = siteSettings?.contactPhone?.trim() || "";
+  const contactEmail = siteSettings?.contactEmail?.trim() || "";
+  const contactAddress = siteSettings?.contactAddress?.trim() || "";
+  const logoUrl = resolveSiteLogo(siteSettings?.logo);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
@@ -173,17 +180,10 @@ export default function PublicLayout() {
 
   useEffect(() => {
     document.documentElement.classList.toggle("home-route", isHome);
-    document.body.classList.toggle("nav-locked", menuOpen);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuOpen(false);
-    };
-    if (menuOpen) window.addEventListener("keydown", onKey);
     return () => {
       document.documentElement.classList.remove("home-route");
-      document.body.classList.remove("nav-locked");
-      window.removeEventListener("keydown", onKey);
     };
-  }, [isHome, menuOpen]);
+  }, [isHome]);
 
   const isTransparent = isHome && !scrolled && !menuOpen;
   const headerBg = isTransparent ? "transparent" : "rgba(255,255,255,0.92)";
@@ -210,20 +210,13 @@ export default function PublicLayout() {
             className="site-header__brand"
             aria-label={`${siteName}首页`}
           >
-            {siteSettings?.logo ? (
+            {logoUrl && (
               <img
-                src={siteSettings.logo}
-                alt={siteName}
+                src={logoUrl}
+                alt=""
+                aria-hidden="true"
                 className="site-header__logo"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = "none";
-                }}
-              />
-            ) : (
-              <img
-                src="/images/brand-logo.svg"
-                alt={siteName}
-                className="site-header__logo"
+                decoding="async"
                 onError={(e) => {
                   (e.currentTarget as HTMLImageElement).style.display = "none";
                 }}
@@ -277,6 +270,7 @@ export default function PublicLayout() {
       {/* ═══════ 左侧组合：菜单 + 搜索 ═══════ */}
       <div className="site-header__left-group">
         <button
+          ref={menuToggleRef}
           type="button"
           className="site-menu-toggle"
           onClick={() => setMenuOpen((o) => !o)}
@@ -310,85 +304,23 @@ export default function PublicLayout() {
       </div>
 
       {/* ═══════ 菜单面板 ═══════ */}
-      <div
-        id="brand-menu"
-        className={`brand-menu${menuOpen ? " is-open" : ""}`}
-        aria-hidden={!menuOpen}
-        onClick={() => setMenuOpen(false)}
-      >
-        <div className="brand-menu__inner" onClick={(e) => e.stopPropagation()}>
-          <nav className="brand-menu__primary" aria-label="品牌菜单">
-            {primaryLinks.map((item) => (
-              <Link
-                key={item.href}
-                to={item.href}
-                tabIndex={menuOpen ? 0 : -1}
-                onClick={() => setMenuOpen(false)}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-          <div className="brand-menu__footer">
-            <div className="brand-menu__contact">
-              <Link
-                to="/search"
-                tabIndex={menuOpen ? 0 : -1}
-                onClick={() => setMenuOpen(false)}
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                >
-                  <circle cx="6.5" cy="6.5" r="5" />
-                  <line x1="10" y1="10" x2="15" y2="15" />
-                </svg>
-                货号搜索
-              </Link>
-              <a href={`tel:${contactPhone}`} tabIndex={menuOpen ? 0 : -1}>
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M14.5 11.5v2a1.33 1.33 0 01-1.45 1.33A11.8 11.8 0 011.5 3.45 1.33 1.33 0 012.83 2h2a1.33 1.33 0 011.33 1.15c.08.63.23 1.24.43 1.82a1.33 1.33 0 01-.3 1.4L5.13 7.54a10.67 10.67 0 004 4l1.17-1.17a1.33 1.33 0 011.4-.3c.58.2 1.19.35 1.82.43a1.33 1.33 0 011.15 1.33z" />
-                </svg>
-                {contactPhone}
-              </a>
-              <span>
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M8 1.5a5.5 5.5 0 00-5.5 5.5c0 4.13 5.5 9.5 5.5 9.5s5.5-5.37 5.5-9.5A5.5 5.5 0 008 1.5z" />
-                  <circle cx="8" cy="7" r="2" />
-                </svg>
-                {contactAddress}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <StorefrontMenuDrawer
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        contactPhone={contactPhone}
+        contactAddress={contactAddress}
+        menuId="brand-menu"
+        returnFocusRef={menuToggleRef}
+      />
 
       {/* ═══════ Main ═══════ */}
       <main className={isHome ? "editorial-main" : "site-main"}>
-        <Outlet />
+        <PublishedPageDecoration
+          pageKey={decorationPage?.key}
+          pageLabel={decorationPage?.label}
+        >
+          <Outlet />
+        </PublishedPageDecoration>
       </main>
 
       {/* ═══════ Footer ═══════ */}
@@ -415,12 +347,19 @@ export default function PublicLayout() {
             {/* 第三列：服务入口 */}
             <div>
               <p className="site-footer__col-title">联系</p>
-              <a href={`tel:${contactPhone}`} className="site-footer__link">
-                ☎ {contactPhone}
-              </a>
-              <a href={`mailto:${contactEmail}`} className="site-footer__link">
-                ✉ {contactEmail}
-              </a>
+              {contactPhone && (
+                <a href={`tel:${contactPhone}`} className="site-footer__link">
+                  ☎ {contactPhone}
+                </a>
+              )}
+              {contactEmail && (
+                <a href={`mailto:${contactEmail}`} className="site-footer__link">
+                  ✉ {contactEmail}
+                </a>
+              )}
+              {!contactPhone && !contactEmail && (
+                <span className="site-footer__link">联系方式待完善</span>
+              )}
             </div>
           </div>
           <p className="site-footer__copyright">

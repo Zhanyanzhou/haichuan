@@ -39,27 +39,27 @@ export const singlePosterPuckConfig = {
     locked: false,
   } satisfies SinglePosterPuckProps,
   fields: {
-    number: { type: "text" as const, label: "编号" },
-    label: { type: "text" as const, label: "标签" },
-    title: { type: "text" as const, label: "标题" },
-    subtitle: { type: "text" as const, label: "副标题" },
+    number: { type: "text" as const, label: "海报文案区 · 编号" },
+    label: { type: "text" as const, label: "海报文案区 · 标签" },
+    title: { type: "text" as const, label: "海报文案区 · 主标题" },
+    subtitle: { type: "text" as const, label: "海报文案区 · 副标题" },
     desktopImage: {
       type: "custom" as const,
-      label: "桌面端图片",
+      label: "海报主图",
       render: ({
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+        <MediaPickerField fieldKey="desktopImage" device="desktop" value={value} onChange={onChange} readOnly={readOnly}
           spec={IMAGE_SPECS.singlePoster.image} placeholder="上传单海报桌面图" />
       ),
     },
     mobileImage: {
       type: "custom" as const,
-      label: "手机端图片",
+      label: "移动端适配图（可选）",
       render: ({
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
+        <MediaPickerField fieldKey="mobileImage" device="mobile" value={value} onChange={onChange} readOnly={readOnly}
           spec={IMAGE_SPECS.singlePoster.image} placeholder="上传手机端海报图（可选）" />
       ),
     },

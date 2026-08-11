@@ -36,11 +36,11 @@ export const textBannerPuckConfig = {
     locked: false,
   } satisfies TextBannerPuckProps,
   fields: {
-    eyebrow: { type: "text" as const, label: "眉题" },
-    title: { type: "text" as const, label: "标题" },
-    body: { type: "textarea" as const, label: "正文" },
-    buttonText: { type: "text" as const, label: "按钮文字" },
-    linkUrl: { type: "text" as const, label: "按钮链接" },
+    eyebrow: { type: "text" as const, label: "横幅顶部 · 眉题" },
+    title: { type: "text" as const, label: "横幅中央 · 主标题" },
+    body: { type: "textarea" as const, label: "横幅中央 · 正文" },
+    buttonText: { type: "text" as const, label: "横幅底部 · 按钮文字" },
+    linkUrl: { type: "text" as const, label: "按钮跳转链接" },
     template: {
       type: "radio" as const,
       label: "对齐",
