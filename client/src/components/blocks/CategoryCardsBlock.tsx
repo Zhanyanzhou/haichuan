@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 
 interface CategoryCardsBlockProps {
   module: {
@@ -24,15 +25,15 @@ export default function CategoryCardsBlock({
   const cols = layout === "grid-2" ? 2 : layout === "grid-4" ? 4 : 3;
 
   if (!categories.length) {
-    return editMode ? (
-      <section
-        style={{ padding: "80px 0", background: bg, textAlign: "center" }}
-      >
-        <p style={{ color: "#B8944E", fontSize: 13 }}>
-          📂 分类导航卡片 — 请在右侧配置分类数据
-        </p>
-      </section>
-    ) : null;
+    if (!editMode) return null;
+    return (
+      <BlockEmptyPlaceholder
+        icon="📂"
+        hint="分类导航卡片"
+        spec="请在右侧配置分类数据"
+        bg={bg}
+      />
+    );
   }
 
   return (

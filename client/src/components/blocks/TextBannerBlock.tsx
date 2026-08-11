@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 
 interface TextBannerBlockProps {
   module: {
@@ -32,7 +33,17 @@ export default function TextBannerBlock({
     spacious: "140px 0",
   };
 
-  if (!title && !body && !editMode) return null;
+  if (!title && !body) {
+    if (!editMode) return null;
+    return (
+      <BlockEmptyPlaceholder
+        icon="📝"
+        hint="文字横幅"
+        spec="请输入标题或描述"
+        bg={bg}
+      />
+    );
+  }
 
   return (
     <section

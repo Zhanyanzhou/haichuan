@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 
 interface SplitPanelBlockProps {
   module: {
@@ -31,15 +32,15 @@ export default function SplitPanelBlock({
   const imageOnLeft = template === "imageLeft";
 
   if (!image) {
-    return editMode ? (
-      <section
-        style={{ padding: "80px 0", background: bg, textAlign: "center" }}
-      >
-        <p style={{ color: "#B8944E", fontSize: 13 }}>
-          ◧ 左右分割面板 — 请上传图片
-        </p>
-      </section>
-    ) : null;
+    if (!editMode) return null;
+    return (
+      <BlockEmptyPlaceholder
+        icon="◧"
+        hint="左右分割面板"
+        spec="请上传图片 · 建议 960×720"
+        bg={bg}
+      />
+    );
   }
 
   const imageCol = (

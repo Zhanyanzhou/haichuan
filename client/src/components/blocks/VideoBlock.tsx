@@ -1,3 +1,5 @@
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+
 interface VideoBlockProps {
   module: {
     content: Record<string, any>;
@@ -26,19 +28,14 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
   const maxHeight = layoutConfig.maxHeight || 720;
 
   if (!videoUrl) {
-    return editMode ? (
-      <section
-        style={{
-          padding: "80px 0",
-          background: "#F0EDE6",
-          textAlign: "center",
-          color: "#B8944E",
-          fontSize: 14,
-        }}
-      >
-        🎬 视频模块 — 请设置视频 URL
-      </section>
-    ) : null;
+    if (!editMode) return null;
+    return (
+      <BlockEmptyPlaceholder
+        icon="🎬"
+        hint="视频模块"
+        spec="请在右侧设置视频 URL"
+      />
+    );
   }
 
   const ratioMap: Record<string, string> = {

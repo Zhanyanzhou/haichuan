@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 
 interface FullBleedBlockProps {
   module: {
@@ -24,19 +25,14 @@ export default function FullBleedBlock({
   const overlay = styleConfig.bgColor || "rgba(15,13,12,0.2)";
 
   if (!image) {
-    return editMode ? (
-      <section
-        style={{
-          padding: "120px 0",
-          background: "#F0EDE6",
-          textAlign: "center",
-        }}
-      >
-        <p style={{ color: "#B8944E", fontSize: 13 }}>
-          🖼️ 全屏出血图 — 请上传背景图片
-        </p>
-      </section>
-    ) : null;
+    if (!editMode) return null;
+    return (
+      <BlockEmptyPlaceholder
+        icon="🖼️"
+        hint="全屏出血图"
+        spec="建议 1920×1080 (16:9)"
+      />
+    );
   }
 
   const textX =

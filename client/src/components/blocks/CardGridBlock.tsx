@@ -1,3 +1,5 @@
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+
 interface CardGridBlockProps {
   module: {
     content: Record<string, any>;
@@ -22,15 +24,15 @@ export default function CardGridBlock({
   const cols = layout === "grid-2" ? 2 : layout === "grid-4" ? 4 : 3;
 
   if (!cards.length) {
-    return editMode ? (
-      <section
-        style={{ padding: "80px 0", background: bg, textAlign: "center" }}
-      >
-        <p style={{ color: "#B8944E", fontSize: 13 }}>
-          🃏 卡片网格 — 请在右侧配置卡片数据
-        </p>
-      </section>
-    ) : null;
+    if (!editMode) return null;
+    return (
+      <BlockEmptyPlaceholder
+        icon="🃏"
+        hint="卡片网格"
+        spec="请在右侧配置卡片数据"
+        bg={bg}
+      />
+    );
   }
 
   return (

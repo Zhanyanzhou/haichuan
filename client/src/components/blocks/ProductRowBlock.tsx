@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 
 interface ProductRowBlockProps {
   module: {
@@ -66,15 +67,15 @@ export default function ProductRowBlock({
         : "clamp(24px, 2.8vw, 38px)";
 
   if (!products.length) {
-    return editMode ? (
-      <section
-        style={{ padding: "80px 0", background: bg, textAlign: "center" }}
-      >
-        <p style={{ color: "#B8944E", fontSize: 13 }}>
-          🛍️ 产品展示行 — 请在右侧配置产品数据和商品 ID
-        </p>
-      </section>
-    ) : null;
+    if (!editMode) return null;
+    return (
+      <BlockEmptyPlaceholder
+        icon="🛍️"
+        hint="产品展示行"
+        spec="请在右侧配置产品或商品 ID"
+        bg={bg}
+      />
+    );
   }
 
   return (

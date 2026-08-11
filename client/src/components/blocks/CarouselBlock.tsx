@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 
 interface CarouselBlockProps {
   module: {
@@ -50,21 +51,15 @@ export default function CarouselBlock({
   }, [autoPlay, interval, next, validImages.length]);
 
   if (validImages.length === 0) {
-    return editMode ? (
-      <section
-        style={{
-          height,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#F0EDE6",
-          color: "#B8944E",
-          fontSize: 14,
-        }}
-      >
-        🖼️ 轮播图 — 请添加图片
-      </section>
-    ) : null;
+    if (!editMode) return null;
+    return (
+      <BlockEmptyPlaceholder
+        icon="🖼️"
+        hint="轮播图"
+        spec="请添加轮播图片 · 建议 1920×600"
+        height={height}
+      />
+    );
   }
 
   const img = validImages[current];
