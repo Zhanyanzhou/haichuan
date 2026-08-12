@@ -26,3 +26,14 @@ client/dist-verify-inventory-reservation/
 screenshot-*.png
 /test-results/
 /*.sql
+
+# AI 工具本地状态（Claude Code session / 指向 .agents 的符号链接）
+.claude/
+
+# 设计 QA 产物与根级 QA 截图（非部署所需）
+artifacts/
+/design-qa-*.png
+
+# 商品导入脚本本地暂存数据（未被代码引用）
+/_names.json
+/_skuInfo.json
