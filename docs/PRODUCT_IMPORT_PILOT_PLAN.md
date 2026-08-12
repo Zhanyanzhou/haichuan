@@ -57,7 +57,7 @@ function getImageType(filename) {
   return 'DETAIL';
 }
 ```
-**关于 `BACK` 未在枚举**：后端 `addImage`/`updateImage` 用 `as any` 透传不校验（`products.service.ts:409`），`BACK` 字符串**可入库**。这是"预写"——待 D-5 Schema 迁移加枚举后自动正确，零回填成本。试导入脚本须在日志标注"使用了未枚举值 BACK，待 D-5 迁移"。
+**关于 `BACK` 未在枚举（2026-08-12 已核实，修正此前判断）**：后端 `addImage`/`updateImage` 的 `as any` **只绕过 TS 编译期检查，Prisma 运行时仍校验 enum**——`ImageType` 无 `BACK`，直接写入会抛 `PrismaClientValidationError`；旧版 `create-products.mjs` 的静默 `catch` 还会丢图且计数造假。**因此 `create-products.mjs` 已改为：把 `BACK` 映射为 `DETAIL` 写入（sortOrder 区分），CSV 的 `type=BACK` 保留真实意图供 D-5 迁移后批量回填**。**结论：保留背面语义必须做 D-5 Schema 迁移，无法靠临时承载绕过。**
 
 ### 改点 3：`create-products.mjs`（:56）— 默认 DRAFT
 

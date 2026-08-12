@@ -61,7 +61,7 @@ node create-products.mjs upload-products.csv
 ### 步骤 ⑤ 观察重点（跑的时候留意）
 - **ATP1079**：应分成 **2 个商品**（双龙戏珠、龙凤呈祥各 1 个）—— 这正是 D-6 多实物案例，试导入就是要暴露它给业务定。
 - **ATP3023**：应合并为 **1 个商品**（三张图角度段虽都写 `_BACK_`，但去角度后聚合，type 按末尾中文打成 FRONT/BACK/SIDE）。
-- **背面图**：CSV 里 `AllImages` 的 `|BACK` 条目数 = 背面图识别数。
+- **背面图**：CSV 里 `AllImages` 的 `|BACK` 条目数 = 背面图识别数。注意：`BACK` 因 Prisma enum 限制无法直接入库，`create-products.mjs` 会把 `BACK` 映射为 `DETAIL` 写入（并打印 `⚠ N 张背面图暂存为 DETAIL`）；CSV 的 `BACK` 保留意图，正式回填需 D-5 Schema 迁移。
 - **状态**：所有商品应为 `DRAFT`（不是 PUBLISHED）。
 - **商品名**：`getDisplayName` 从文件名截取，留意是否有残缺名。
 

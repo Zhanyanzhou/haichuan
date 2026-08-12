@@ -81,7 +81,7 @@ D-13/D-14/D-15（可延后）
 
 ## D-5 图片角度方案（背面图 BACK）
 
-**代码事实**：`ImageType` 枚举 = `FRONT/SIDE/TOP/DETAIL/WEARING`，**无 `BACK`**；实际图片文件命名大量 `*_BACK_*`（背面）；`batch-upload.mjs` 无"背面"分支 → BACK 落 `DETAIL`；`batch-upload-images.ts` 更把所有图硬编码 `FRONT`；`type` 还被 `setPrimaryImage` 当主图标记用（语义双关）。
+**代码事实**：`ImageType` 枚举 = `FRONT/SIDE/TOP/DETAIL/WEARING`，**无 `BACK`**；实际图片文件命名大量 `*_BACK_*`（背面）；`batch-upload.mjs` 无"背面"分支 → BACK 落 `DETAIL`；`batch-upload-images.ts` 更把所有图硬编码 `FRONT`；`type` 还被 `setPrimaryImage` 当主图标记用（语义双关）。**2026-08-12 核实补充**：`as any` 只绕过 TS 检查，**Prisma 运行时拒绝写入非枚举值**——`BACK` 无法靠透传"预写"，必须做 Schema 迁移才能正式启用；迁移前导入脚本只能把 `BACK` 映射为 `DETAIL` 临时承载。**这意味着"保留背面语义"必须做本项决策（迁移），无法靠临时方案绕过。**
 
 **选项**：
 - [ ] **A. 新增 `BACK` 枚举值**（需 Schema 迁移 + `getImageType` 加"背面→BACK"分支 + 前端展示适配）：保留正反面视角语义。

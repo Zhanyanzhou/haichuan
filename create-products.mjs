@@ -79,17 +79,26 @@ for (const line of lines) {
     const sorted = [...frontImages, ...otherImages];
 
     let added = 0;
+    let backMapped = 0;
+    let failed = 0;
     for (let i = 0; i < sorted.length; i++) {
       const img = sorted[i];
+      // 止血：BACK 不在 ImageType 枚举，Prisma 运行时拒绝写入（as any 只绕过 TS 检查）。
+      // 试导入阶段映射为 DETAIL 写入；CSV 的 type=BACK 保留真实意图，待 D-5 迁移后回填。
+      const writeType = img.type === 'BACK' ? 'DETAIL' : img.type;
+      if (img.type === 'BACK') backMapped++;
       try {
-        await fetch(`${API}/products/${productId}/images`, {
+        const res = await fetch(`${API}/products/${productId}/images`, {
           method: 'POST', headers: auth,
-          body: JSON.stringify({ url: img.url, type: img.type, sortOrder: i }),
+          body: JSON.stringify({ url: img.url, type: writeType, sortOrder: i }),
         });
-        added++;
-      } catch { /* skip failed image */ }
+        if (res.ok) added++;
+        else { failed++; console.log(`  图片关联失败 ${res.status}: ${img.file || img.url}`); }
+      } catch (e) { failed++; console.log(`  图片关联异常: ${e.message}`); }
     }
-    console.log(`OK (id=${productId}, ${added}图)`);
+    if (backMapped > 0) console.log(`  ⚠ ${backMapped} 张背面图暂存为 DETAIL（BACK 待 D-5 迁移回填）`);
+    const failInfo = failed ? `, ${failed}失败` : '';
+    console.log(`OK (id=${productId}, ${added}图${failInfo})`);
   } catch (e) {
     console.log(`FAIL: ${e.message}`);
   }

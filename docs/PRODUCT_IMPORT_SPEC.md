@@ -112,7 +112,7 @@ ATP103,ATP103_BACK_ATP103平安扣背面.png,BACK,2
 ### 4.2 图片 `type` 枚举（6 值，**D-5 后含 BACK**）
 `FRONT`（正面）/ `BACK`（背面，**D-5 新增，待 Schema 迁移**）/ `SIDE`（侧面）/ `TOP`（顶部）/ `DETAIL`（细节）/ `WEARING`（佩戴）
 
-> ⚠️ 在 D-5 Schema 迁移完成前，`BACK` 值会因后端 `addImage`/`updateImage` 用 `as any` 透传而**写入但无枚举保护**；迁移前可用 `DETAIL` + `sortOrder` 临时承载，迁移后回填 `BACK`。
+> ⚠️ **2026-08-12 核实**：`as any` 只绕过 TS 检查，**Prisma 运行时拒绝写入非枚举值**——`BACK` **无法靠透传预写**。迁移前导入脚本必须把 `BACK` 映射为 `DETAIL`（sortOrder 区分）临时承载；CSV 记录 `type=BACK` 保留意图，迁移后批量回填。**正式启用 `BACK` 必须做 D-5 Schema 迁移，无法用临时方案绕过。**
 
 ### 4.3 `gemInfo` JSON 形状（D-8：空 = `null`）
 ```json
