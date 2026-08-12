@@ -44,7 +44,7 @@ export class StatisticsService {
         },
         _sum: { finalAmount: true },
       }),
-      this.prisma.user.count({ where: { status: "ACTIVE" } }),
+      this.prisma.customer.count({ where: { status: "ACTIVE" } }),
       this.prisma.product.count({ where: { status: "DRAFT" } }),
       this.prisma.order.count({ where: { status: "PENDING_SHIP" } }),
       this.prisma.inventory.count({ where: { quantity: { lte: 0 } } }),

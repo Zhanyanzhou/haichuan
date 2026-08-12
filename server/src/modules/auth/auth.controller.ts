@@ -14,6 +14,7 @@ import { JwtAuthGuard } from "./jwt-auth.guard";
 import { Public } from "../../common/decorators/public.decorator";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RegisterDto } from "./dto/register.dto";
 
 @ApiTags("认证")
 @Controller("auth")
@@ -21,8 +22,9 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Public()
-  @UseGuards(AuthGuard("local"))
-  @UseGuards(ThrottlerGuard)
+  // ThrottlerGuard 必须在 AuthGuard 之前:登录失败时让限流先计数,
+  // 避免 AuthGuard('local') 抛 401 短路掉限流,导致暴力破解计数器永不增长
+  @UseGuards(ThrottlerGuard, AuthGuard("local"))
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post("login")
   @ApiOperation({ summary: "用户登录" })
@@ -43,16 +45,8 @@ export class AuthController {
   @Roles("SUPER_ADMIN", "ADMIN")
   @Post("register")
   @ApiOperation({ summary: "用户注册" })
-  async register(
-    @Body()
-    body: {
-      username: string;
-      password: string;
-      realName?: string;
-      phone?: string;
-    },
-  ) {
-    return this.authService.register(body);
+  async register(@Body() dto: RegisterDto) {
+    return this.authService.register(dto);
   }
 
   @UseGuards(JwtAuthGuard)

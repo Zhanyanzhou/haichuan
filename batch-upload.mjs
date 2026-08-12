@@ -9,12 +9,21 @@ import { execSync } from 'child_process';
 const API = 'http://localhost:3000/api';
 const folder = process.argv[2] || './to-upload';
 
+// 管理员账号从环境变量读取，避免在源码中保存真实凭证。
+// 提供方式：shell 设置 ADMIN_USERNAME / ADMIN_PASSWORD，或 Node 20.6+ 用 `node --env-file=.env batch-upload.mjs`。
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
+  console.error('缺少环境变量 ADMIN_USERNAME / ADMIN_PASSWORD');
+  process.exit(1);
+}
+
 // 1. 登录
 console.log('登陆中...');
 const loginRes = await fetch(`${API}/auth/login`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ username: 'haichuan', password: 'haichuan' }),
+  body: JSON.stringify({ username: ADMIN_USERNAME, password: ADMIN_PASSWORD }),
 });
 const loginData = await loginRes.json();
 const token = loginData.data.accessToken;
@@ -43,7 +52,9 @@ function getProductCode(filename) {
 // 提取变体名：去掉款号、正/侧/背面/主图后缀、扩展名
 function getVariantKey(filename) {
   const withoutExt = filename.replace(/\.[^.]+$/, '');
-  const cleaned = withoutExt.replace(/(正面|侧面|背面|主图|细节|顶部|佩戴|模特|上手)$/, '');
+  // 止血：去掉中间英文角度段（_FRONT_/_BACK_/_SIDE_ 等），避免同款正/背/侧被拆成多商品
+  const noAngle = withoutExt.replace(/[_-]?(FRONT|BACK|SIDE|TOP|DETAIL|WEARING)[_-]?/gi, '_');
+  const cleaned = noAngle.replace(/(正面|侧面|背面|主图|细节|顶部|佩戴|模特|上手)$/, '');
   return cleaned;
 }
 
@@ -72,6 +83,8 @@ console.log(`找到 ${allFiles.length} 张图片，${keys.length} 个变体\n`);
 // 判断图片类型
 function getImageType(filename) {
   if (filename.includes('正面')) return 'FRONT';
+  // 止血：识别背面（schema 无 BACK 枚举，靠后端 addImage/updateImage 的 as any 透传预写，待 D-5 迁移）
+  if (filename.includes('背面') || /_BACK_/i.test(filename)) return 'BACK';
   if (filename.includes('侧面')) return 'SIDE';
   if (filename.includes('佩戴') || filename.includes('模特') || filename.includes('上手')) return 'WEARING';
   if (filename.includes('顶部')) return 'TOP';

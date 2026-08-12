@@ -6,6 +6,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { ManualGoldPriceDto } from './dto/manual-gold-price.dto';
 
 @ApiTags('金价管理')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -33,13 +34,13 @@ export class GoldPriceController {
   @Post('manual')
   @ApiOperation({ summary: '手动录入金价' })
   async updateManually(
-    @Body() body: { price: number; remark?: string },
+    @Body() dto: ManualGoldPriceDto,
     @CurrentUser() user: any,
   ) {
     return this.goldPriceService.updateManually({
-      price: body.price,
+      price: dto.price,
       operatorId: user.id,
-      remark: body.remark,
+      remark: dto.remark,
     });
   }
 }

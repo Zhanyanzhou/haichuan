@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Param, Query, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { InventoryService } from './inventory.service';
+import { UpdateStockDto } from './dto/update-stock.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -38,7 +39,7 @@ export class InventoryController {
   }
 
   @Put(':id')
-  updateStock(@Param('id') id: string, @Body() body: any) {
-    return this.inventoryService.updateStock(+id, body);
+  updateStock(@Param('id') id: string, @Body() dto: UpdateStockDto) {
+    return this.inventoryService.updateStock(+id, dto);
   }
 }

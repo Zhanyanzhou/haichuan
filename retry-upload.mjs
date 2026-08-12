@@ -7,9 +7,18 @@ const API = 'http://localhost:3000/api';
 const folder = process.argv[2];
 const codes = (process.argv[3] || '').split(',');
 
+// 管理员账号从环境变量读取，避免在源码中保存真实凭证。
+// 提供方式：shell 设置 ADMIN_USERNAME / ADMIN_PASSWORD，或 Node 20.6+ 用 `node --env-file=.env retry-upload.mjs`。
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
+  console.error('缺少环境变量 ADMIN_USERNAME / ADMIN_PASSWORD');
+  process.exit(1);
+}
+
 const loginRes = await fetch(`${API}/auth/login`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ username: 'haichuan', password: 'haichuan' }),
+  body: JSON.stringify({ username: ADMIN_USERNAME, password: ADMIN_PASSWORD }),
 });
 const token = (await loginRes.json()).data.accessToken;
 console.log('登陆成功\n');

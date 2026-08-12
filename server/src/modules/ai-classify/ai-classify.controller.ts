@@ -1,14 +1,35 @@
-import { Controller, Post, Get, Put, Param, Query, Body, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Put,
+  Param,
+  Query,
+  Body,
+  UseGuards,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AiClassifyService } from './ai-classify.service';
 import { KimiService } from '../../common/kimi/kimi.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import {
+  ClassifyImageDto,
+  ClassifyBatchDto,
+  ChatDto,
+  GenerateDescriptionDto,
+} from './dto/ai-classify.dto';
 
 @ApiTags('AI智能分类')
 @ApiBearerAuth()
 @Controller('ai-classify')
-@UseGuards(JwtAuthGuard)
+// AI 接口调用 Kimi 计费且接受外部 prompt/URL,收紧到管理员,防刷配额与滥用
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('SUPER_ADMIN', 'ADMIN')
 export class AiClassifyController {
   constructor(
     private aiClassifyService: AiClassifyService,
@@ -19,14 +40,16 @@ export class AiClassifyController {
 
   @Post('single')
   @ApiOperation({ summary: '单张图片AI分类' })
-  async classifySingle(@Body('imageUrl') imageUrl: string) {
-    return this.aiClassifyService.classifyImage(imageUrl);
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async classifySingle(@Body() dto: ClassifyImageDto) {
+    return this.aiClassifyService.classifyImage(dto.imageUrl);
   }
 
   @Post('batch')
   @ApiOperation({ summary: '批量图片AI分类' })
-  async classifyBatch(@Body('imageUrls') imageUrls: string[]) {
-    return this.aiClassifyService.batchClassify(imageUrls);
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async classifyBatch(@Body() dto: ClassifyBatchDto) {
+    return this.aiClassifyService.batchClassify(dto.imageUrls);
   }
 
   @Get('records')
@@ -58,18 +81,16 @@ export class AiClassifyController {
    * 通用 AI 对话 - 可用于产品文案生成、客户咨询、数据分析等
    */
   @Post('chat')
-  async chat(
-    @Body('message') message: string,
-    @Body('systemPrompt') systemPrompt?: string,
-  ) {
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async chat(@Body() dto: ChatDto) {
     if (!this.kimiService.isAvailable()) {
-      throw new Error('AI 服务未配置，请先设置 KIMI_API_KEY 环境变量');
+      throw new ServiceUnavailableException('AI 服务未配置，请先设置 KIMI_API_KEY 环境变量');
     }
     const messages: any[] = [];
-    if (systemPrompt) {
-      messages.push({ role: 'system', content: systemPrompt });
+    if (dto.systemPrompt) {
+      messages.push({ role: 'system', content: dto.systemPrompt });
     }
-    messages.push({ role: 'user', content: message });
+    messages.push({ role: 'user', content: dto.message });
 
     return this.kimiService.chat(messages);
   }
@@ -78,9 +99,10 @@ export class AiClassifyController {
    * AI 生成产品描述文案
    */
   @Post('generate-description')
-  async generateDescription(@Body() body: { productName: string; category: string; material: string; style?: string }) {
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async generateDescription(@Body() dto: GenerateDescriptionDto) {
     if (!this.kimiService.isAvailable()) {
-      throw new Error('AI 服务未配置，请先设置 KIMI_API_KEY 环境变量');
+      throw new ServiceUnavailableException('AI 服务未配置，请先设置 KIMI_API_KEY 环境变量');
     }
     const messages: any[] = [
       {
@@ -89,7 +111,7 @@ export class AiClassifyController {
       },
       {
         role: 'user',
-        content: `请为一款名为"${body.productName}"的${body.category}撰写一段产品描述文案（150字左右）。材质：${body.material}。${body.style ? `风格：${body.style}。` : ''}请包含：设计灵感、材质特点、适合场合。`,
+        content: `请为一款名为"${dto.productName}"的${dto.category}撰写一段产品描述文案（150字左右）。材质：${dto.material}。${dto.style ? `风格：${dto.style}。` : ''}请包含：设计灵感、材质特点、适合场合。`,
       },
     ];
     return this.kimiService.chat(messages, { temperature: 0.8, maxTokens: 600 });

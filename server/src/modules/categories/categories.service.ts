@@ -3,7 +3,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 
 @Injectable()
 export class CategoriesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async findAll() {
     return this.prisma.category.findMany({
@@ -71,13 +71,14 @@ export class CategoriesService {
     return parent;
   }
 
-  private categoryData(data: any, level: 2 | 3) {
+  private categoryData(data: any, level: 1 | 2 | 3) {
     const name = data.name === undefined ? undefined : String(data.name).trim();
     const slug = data.slug === undefined ? undefined : String(data.slug).trim();
     const sortOrder = data.sortOrder === undefined ? undefined : Number(data.sortOrder);
+    const label = ['一级', '二级', '三级'][level - 1];
 
     if (name !== undefined && !name) {
-      throw new BadRequestException(`${level === 2 ? '二级' : '三级'}类目名称不能为空`);
+      throw new BadRequestException(`${label}类目名称不能为空`);
     }
     if (slug !== undefined && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
       throw new BadRequestException('Slug 仅支持小写字母、数字和连字符');
@@ -108,6 +109,28 @@ export class CategoriesService {
   }
 
   async create(data: any) {
+    const hasParent = data.parentId !== undefined && data.parentId !== null && data.parentId !== '';
+
+    // 创建一级类目（parentId 为空）
+    if (!hasParent) {
+      const level = 1 as const;
+      const categoryData = this.categoryData(data, level);
+      if (!categoryData.name || !categoryData.slug) {
+        throw new BadRequestException('请填写一级类目名称和 Slug');
+      }
+      await this.ensureSlugAvailable(categoryData.slug);
+      return this.prisma.category.create({
+        data: {
+          ...categoryData,
+          name: categoryData.name!,
+          slug: categoryData.slug!,
+          level: 1,
+          parentId: null,
+        },
+      });
+    }
+
+    // 创建二/三级类目
     const parentId = Number(data.parentId);
     const parent = await this.prisma.category.findUnique({ where: { id: parentId } });
     if (!parent || ![1, 2].includes(parent.level)) {
@@ -133,20 +156,27 @@ export class CategoriesService {
   async update(id: number, data: any) {
     const category = await this.prisma.category.findUnique({ where: { id } });
     if (!category) throw new NotFoundException('类目不存在');
-    if (![2, 3].includes(category.level)) {
-      throw new BadRequestException('一级类目为固定类目，不支持编辑');
-    }
     if (data.level !== undefined && Number(data.level) !== category.level) {
       throw new BadRequestException('不支持调整类目层级');
     }
+    // 一级类目不支持调整归属（本轮不做跨级迁移）
+    if (
+      category.level === 1 &&
+      data.parentId !== undefined &&
+      data.parentId !== null &&
+      data.parentId !== ''
+    ) {
+      throw new BadRequestException('一级类目不支持调整归属');
+    }
 
-    const level = category.level as 2 | 3;
+    const level = category.level as 1 | 2 | 3;
     const categoryData = this.categoryData(data, level);
     await this.ensureSlugAvailable(categoryData.slug, id);
 
-    const parent = data.parentId === undefined
-      ? undefined
-      : await this.getParentCategory(data.parentId, (level - 1) as 1 | 2);
+    const parent =
+      category.level === 1 || data.parentId === undefined
+        ? undefined
+        : await this.getParentCategory(data.parentId, (level - 1) as 1 | 2);
     return this.prisma.category.update({
       where: { id },
       data: {
@@ -170,12 +200,38 @@ export class CategoriesService {
       },
     });
     if (!category) throw new NotFoundException('类目不存在');
-    if (![2, 3].includes(category.level)) {
-      throw new BadRequestException('一级类目为固定类目，不支持删除');
-    }
     if (category._count.children > 0 || category._count.products > 0) {
       throw new BadRequestException('该类目仍关联下级分类或商品，不能停用');
     }
     return this.prisma.category.update({ where: { id }, data: { isActive: false } });
+  }
+
+  /** 批量调整分类排序（仅同级 sortOrder，事务保证原子性）。 */
+  async reorder(items: { id: number; sortOrder: number }[]) {
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new BadRequestException('排序数据不能为空');
+    }
+    const seen = new Set<number>();
+    for (const it of items) {
+      if (!Number.isInteger(it.id) || it.id <= 0) {
+        throw new BadRequestException('分类 ID 不合法');
+      }
+      if (!Number.isInteger(it.sortOrder) || it.sortOrder < 0) {
+        throw new BadRequestException('排序值必须为非负整数');
+      }
+      if (seen.has(it.id)) {
+        throw new BadRequestException('排序数据存在重复分类');
+      }
+      seen.add(it.id);
+    }
+    await this.prisma.$transaction(
+      items.map((it) =>
+        this.prisma.category.update({
+          where: { id: it.id },
+          data: { sortOrder: it.sortOrder },
+        }),
+      ),
+    );
+    return { success: true, updated: items.length };
   }
 }

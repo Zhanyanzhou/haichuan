@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
@@ -96,14 +96,36 @@ export class UsersService {
     });
   }
 
-  async update(id: number, data: {
-    realName?: string;
-    phone?: string;
-    email?: string;
-    role?: string;
-    status?: string;
-    password?: string;
-  }) {
+  async update(
+    id: number,
+    data: {
+      realName?: string;
+      phone?: string;
+      email?: string;
+      role?: string;
+      status?: string;
+      password?: string;
+    },
+    currentUser: { id: number; role?: string },
+  ) {
+    const target = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true },
+    });
+    if (!target) throw new NotFoundException('用户不存在');
+
+    const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+    // 非超管不得操作超管账号(防 ADMIN 改超管密码/状态)
+    if (!isSuperAdmin && target.role === 'SUPER_ADMIN') {
+      throw new ForbiddenException('无权操作超级管理员账号');
+    }
+    // 敏感字段(角色/状态/密码)仅超管可改
+    const touchedSensitive =
+      data.role !== undefined || data.status !== undefined || data.password !== undefined;
+    if (touchedSensitive && !isSuperAdmin) {
+      throw new ForbiddenException('仅超级管理员可修改角色、状态或密码');
+    }
+
     const updateData: any = { ...data };
     if (data.password) {
       updateData.password = await bcrypt.hash(data.password, 10);

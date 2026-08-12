@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Key } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button,
   Dropdown,
@@ -57,6 +57,7 @@ function formatDate(value?: string) {
 
 export default function ProductManage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -67,7 +68,12 @@ export default function ProductManage() {
   const [titleKeyword, setTitleKeyword] = useState("");
   const [codeKeyword, setCodeKeyword] = useState("");
   const [merchantCodeKeyword, setMerchantCodeKeyword] = useState("");
-  const [categoryId, setCategoryId] = useState<number | undefined>();
+  // 支持来自分类管理「查看商品列表」的跳转：挂载时从 URL 读取 categoryId 预筛一次。
+  // 用 lazy initializer 直接作为初始值，避免额外 effect 进入 loadProducts 依赖链造成 double 请求 / 429 风险。
+  const [categoryId, setCategoryId] = useState<number | undefined>(() => {
+    const cid = searchParams.get("categoryId");
+    return cid && /^\d+$/.test(cid) ? Number(cid) : undefined;
+  });
   const [categoryOptions, setCategoryOptions] = useState<
     { value: number; label: string }[]
   >([]);
@@ -85,10 +91,16 @@ export default function ProductManage() {
   );
 
   const keyword = titleKeyword || codeKeyword || merchantCodeKeyword;
-  const productIdSearch = codeKeyword
-    .split(/[，,\s]+/)
-    .map((id) => id.trim())
-    .filter(Boolean);
+  // 必须用 useMemo 稳定引用：productIdSearch 被放进 loadProducts 的 useCallback 依赖，
+  // 若每渲染都重建数组，会让 loadProducts 引用每次都变，触发数据获取 useEffect 无限循环（撞 60次/分限流 → 429 风暴）。
+  const productIdSearch = useMemo(
+    () =>
+      codeKeyword
+        .split(/[，,\s]+/)
+        .map((id) => id.trim())
+        .filter(Boolean),
+    [codeKeyword],
+  );
   const isProductIdSearch =
     productIdSearch.length > 0 && productIdSearch.every((id) => /^\d+$/.test(id));
   const hasFilters = Boolean(
@@ -211,9 +223,16 @@ export default function ProductManage() {
     return () => clearTimeout(timer);
   }, [keyword]);
 
+  // latest-ref：effect 只在真实筛选/分页条件变化时触发，不依赖 loadProducts 引用。
+  // 否则 useCallback 依赖里任何派生值（productIdSearch / isProductIdSearch 等）抖动
+  // → effect 重跑 → 请求 → setState → 重建 loadProducts → effect 再重跑，
+  // 撞 60 次/分限流形成 429 死循环。
+  const loadProductsRef = useRef(loadProducts);
+  loadProductsRef.current = loadProducts;
   useEffect(() => {
-    void loadProducts();
-  }, [loadProducts]);
+    void loadProductsRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize, sortBy, activeStatus, categoryId, debouncedKeyword]);
 
   const resetFilters = () => {
     setTitleKeyword("");

@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CategoriesService } from './categories.service';
+import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -41,6 +42,15 @@ export class CategoriesController {
   @ApiOperation({ summary: '新增分类' })
   create(@Body() body: any) {
     return this.categoriesService.create(body);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles('SUPER_ADMIN', 'ADMIN', 'EDITOR')
+  @Post('reorder')
+  @ApiOperation({ summary: '批量调整分类排序' })
+  reorder(@Body() dto: ReorderCategoriesDto) {
+    return this.categoriesService.reorder(dto.items);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

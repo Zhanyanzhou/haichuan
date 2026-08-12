@@ -38,6 +38,24 @@ export interface Category {
   children?: Category[];
 }
 
+/** 新增/编辑分类时的输入字段。 */
+export interface CategoryInput {
+  name?: string;
+  slug?: string;
+  parentId?: number | null;
+  sortOrder?: number;
+  isActive?: boolean;
+  icon?: string;
+  coverImage?: string;
+  level?: number;
+}
+
+/** 批量排序的单条项（仅同级 sortOrder 调整）。 */
+export interface CategorySortItem {
+  id: number;
+  sortOrder: number;
+}
+
 // ===== Product =====
 export interface Product {
   id: number;

@@ -17,7 +17,13 @@ import { join } from 'path';
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'uploads'),
       serveRoot: '/uploads',
-      serveStaticOptions: { index: false },
+      serveStaticOptions: {
+        index: false,
+        // 禁止浏览器嗅探真实类型,避免非媒体文件被当作 HTML/脚本执行(纵深防御)
+        setHeaders: (res) => {
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+        },
+      },
     }),
   ],
   controllers: [UploadController],

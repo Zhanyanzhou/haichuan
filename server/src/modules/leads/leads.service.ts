@@ -20,9 +20,10 @@ export class LeadsService {
     type?: string;
     keyword?: string;
   }) {
-    const { page = 1, pageSize = 20, status, type, keyword } = params;
-    const _page = +page,
-      _pageSize = +pageSize;
+    const { status, type, keyword } = params;
+    // 分页参数加下/上限,避免 page/pageSize 过大导致两表深分页 OOM
+    const _page = Math.min(Math.max(Number(params.page) || 1, 1), 100);
+    const _pageSize = Math.min(Math.max(Number(params.pageSize) || 20, 1), 100);
     // 每源只取到当前页所需条数，避免两表全量加载进内存
     const take = _page * _pageSize;
 

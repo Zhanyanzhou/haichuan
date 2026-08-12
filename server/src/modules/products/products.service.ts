@@ -333,6 +333,13 @@ export class ProductsService {
   }
 
   async update(id: number, dto: UpdateProductDto) {
+    // 排除已软删除商品,避免改动或重新上架已删除记录
+    const existing = await this.prisma.product.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true },
+    });
+    if (!existing) throw new NotFoundException('商品不存在或已删除');
+
     // 检查分类是否存在
     if (dto.categoryId !== undefined) {
       const category = await this.prisma.category.findUnique({
@@ -362,11 +369,11 @@ export class ProductsService {
     }
   }
   async checkCompleteness(id: number) {
-    const product = await this.prisma.product.findUnique({
-      where: { id },
+    const product = await this.prisma.product.findFirst({
+      where: { id, deletedAt: null },
       include: { images: true },
     });
-    if (!product) throw new Error("Product not found");
+    if (!product) throw new NotFoundException("商品不存在或已删除");
     return this.calcCompleteness(product);
   }
   async delete(id: number) {

@@ -1,6 +1,7 @@
 import axios from "axios";
 import { message } from "antd";
-import type { ApiResponse } from "@/types";
+import type { ApiResponse, CategoryInput, CategorySortItem } from "@/types";
+import { useAuthStore } from "@/store/authStore";
 import {
   USE_MOCK,
   mockDelay,
@@ -45,8 +46,8 @@ api.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
+      // 同步清空 Zustand 持久化状态(含 jewelry-auth),避免与 localStorage.token 不同步造成登录态僵尸残留
+      useAuthStore.getState().logout();
       if (
         window.location.pathname.startsWith("/admin") &&
         !window.location.pathname.includes("/admin/login")
@@ -505,14 +506,14 @@ export const categoryApi = {
     }
     return api.get("/categories/admin/tree");
   },
-  create: async (data: any) => {
+  create: async (data: CategoryInput) => {
     if (USE_MOCK) {
       await mockDelay(200);
       return mockRes({ id: Date.now(), ...data });
     }
     return api.post("/categories", data);
   },
-  update: async (id: number, data: any) => {
+  update: async (id: number, data: CategoryInput) => {
     if (USE_MOCK) {
       await mockDelay(200);
       return mockRes({ id, ...data });
@@ -525,6 +526,13 @@ export const categoryApi = {
       return mockRes({ success: true });
     }
     return api.delete(`/categories/${id}`);
+  },
+  reorder: async (items: CategorySortItem[]) => {
+    if (USE_MOCK) {
+      await mockDelay(150);
+      return mockRes({ success: true, updated: items.length });
+    }
+    return api.post("/categories/reorder", { items });
   },
 };
 

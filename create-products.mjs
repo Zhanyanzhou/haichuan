@@ -1,13 +1,25 @@
 // 批量创建商品 + 关联图片
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
+
+// 批次记录：本次创建的 productId，写入 pilot-imported-ids.json，用于回滚（pilot-rollback.mjs）
+const importedIds = [];
 
 const API = 'http://localhost:3000/api';
 const csvFile = process.argv[2] || 'upload-products.csv';
 
+// 管理员账号从环境变量读取，避免在源码中保存真实凭证。
+// 提供方式：shell 设置 ADMIN_USERNAME / ADMIN_PASSWORD，或 Node 20.6+ 用 `node --env-file=.env create-products.mjs`。
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
+  console.error('缺少环境变量 ADMIN_USERNAME / ADMIN_PASSWORD');
+  process.exit(1);
+}
+
 // 登录
 const loginRes = await fetch(`${API}/auth/login`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ username: 'haichuan', password: 'haichuan' }),
+  body: JSON.stringify({ username: ADMIN_USERNAME, password: ADMIN_PASSWORD }),
 });
 const token = (await loginRes.json()).data.accessToken;
 const auth = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -42,9 +54,9 @@ for (const line of lines) {
       const createBody = JSON.stringify({
         name: productName,
         code: uniqueCode,
-        categoryId: 1,
+        categoryId: Number(process.env.CATEGORY_ID) || 1,
         materialType: 'GOLD_999',
-        status: 'PUBLISHED',
+        status: 'DRAFT',
         salesMode: 'SELECTION',
         sortOrder: 0,
       });
@@ -59,6 +71,7 @@ for (const line of lines) {
     }
     if (!productData) { console.log('FAIL (dup code exhausted)'); continue; }
     const productId = productData.id;
+    importedIds.push(productId);
 
     // 2. 关联图片（正面优先）
     const frontImages = imageEntries.filter(e => e.type === 'FRONT');
@@ -82,4 +95,5 @@ for (const line of lines) {
   }
 }
 
-console.log('\n完成！刷新选款中心即可看到。');
+writeFileSync('pilot-imported-ids.json', JSON.stringify(importedIds, null, 2));
+console.log(`\n完成！本次创建 ${importedIds.length} 个商品，productId 已写入 pilot-imported-ids.json（可用 pilot-rollback.mjs 回滚）。`);

@@ -37,3 +37,9 @@ artifacts/
 # 商品导入脚本本地暂存数据（未被代码引用）
 /_names.json
 /_skuInfo.json
+
+# 商品导入试点上传数据（运行时商品图，勿入库）
+/to-upload-pilot/
+
+# 指向 .agents/skills 的符号链接（target 已入库，链接本身不重复入库）
+/.github/skills/

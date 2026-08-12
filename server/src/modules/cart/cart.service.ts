@@ -49,12 +49,15 @@ export class CartService {
     });
 
     if (existing) {
-      const nextQuantity = existing.quantity + quantity;
-      this.requireQuantity(nextQuantity);
-      return this.prisma.cart.update({
-        where: { id: existing.id },
-        data: { quantity: nextQuantity },
+      // 原子条件更新:仅当 increment 后不超过 99 才执行,避免并发读-写覆盖与超限
+      const result = await this.prisma.cart.updateMany({
+        where: { id: existing.id, quantity: { lte: 99 - quantity } },
+        data: { quantity: { increment: quantity } },
       });
+      if (result.count === 0) {
+        throw new BadRequestException("商品数量不能超过 99");
+      }
+      return this.prisma.cart.findUniqueOrThrow({ where: { id: existing.id } });
     }
 
     return this.prisma.cart.create({ data: { ...owner, productId: data.productId, skuId: data.skuId, quantity } });

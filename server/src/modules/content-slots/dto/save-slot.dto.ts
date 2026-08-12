@@ -5,6 +5,7 @@ import {
   MaxLength,
   IsBoolean,
   IsInt,
+  Matches,
 } from 'class-validator';
 
 export class SaveSlotDto {
@@ -16,7 +17,13 @@ export class SaveSlotDto {
   @IsOptional() @IsString() @MaxLength(500) mobileAsset?: string;
   @IsOptional() @IsString() @MaxLength(300) title?: string;
   @IsOptional() @IsString() @MaxLength(500) subtitle?: string;
-  @IsOptional() @IsString() @MaxLength(500) linkUrl?: string;
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  @Matches(/^\s*(?!javascript:|vbscript:|data:)/i, {
+    message: '链接不允许 javascript:/vbscript:/data: 等不安全协议',
+  })
+  linkUrl?: string;
   @IsOptional() @IsString() @MaxLength(200) altText?: string;
   @IsOptional() @IsBoolean() isVisible?: boolean;
   @IsOptional() @IsInt() updatedBy?: number;

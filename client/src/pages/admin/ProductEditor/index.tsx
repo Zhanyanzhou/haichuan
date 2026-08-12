@@ -20,9 +20,9 @@ import {
   Result,
 } from "antd";
 import {
-  ArrowLeftOutlined,
   DeleteOutlined,
   DownOutlined,
+  LeftOutlined,
   PictureOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -34,6 +34,7 @@ import type { Category, Product, ProductImage, ProductStatus, Certificate, Produ
 import { unwrapResponse } from "@/utils/unwrap";
 import ScifiButton from "@/components/ui/ScifiButton";
 import { formatPrice } from "@/utils/format";
+import "./ProductEditor.css";
 
 const { TextArea } = Input;
 
@@ -49,39 +50,22 @@ const statusMeta: Record<ProductStatus, { label: string; color: string }> = {
   ARCHIVED: { label: "回收站", color: "default" },
 };
 
-function generateCode() {
-  return `HC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
-}
-
 /* ═══════════════════════════════════════════════
    共享子组件
    ═══════════════════════════════════════════════ */
 
 function SectionTitle({ title, hint }: { title: string; hint?: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, marginBottom: 20 }}>
-      <h2 style={{
-        margin: 0, fontSize: 16, fontWeight: 600, color: "#1a1a1a",
-        letterSpacing: "0.02em",
-        fontFamily: `"Cormorant Garamond", "Noto Serif SC", serif`,
-        borderLeft: "3px solid #b8944e", paddingLeft: 12,
-      }}>
-        {title}
-      </h2>
-      {hint && <span style={{ color: "#96918a", fontSize: 12 }}>{hint}</span>}
+    <div className="product-editor__section-title">
+      <h2>{title}</h2>
+      {hint && <span>{hint}</span>}
     </div>
   );
 }
 
 function SubSectionHeader({ title }: { title: string }) {
   return (
-    <div style={{
-      borderLeft: "3px solid #b8944e", paddingLeft: 10,
-      fontSize: 13, fontWeight: 600, color: "#5e5a54",
-      marginBottom: 14, marginTop: 22,
-    }}>
-      {title}
-    </div>
+    <div className="product-editor__subsection-title">{title}</div>
   );
 }
 
@@ -122,6 +106,8 @@ function UploadCell({
   onUpload,
   onSetCover,
   onRemove,
+  onMoveLeft,
+  onMoveRight,
   disabled,
   uploading,
   multiple,
@@ -131,41 +117,22 @@ function UploadCell({
   onUpload: (file: File) => Promise<boolean>;
   onSetCover?: () => void;
   onRemove?: () => void;
+  onMoveLeft?: () => void;
+  onMoveRight?: () => void;
   disabled?: boolean;
   uploading?: boolean;
   multiple?: boolean;
 }) {
   return (
-    <div style={{ width: 96 }}>
+    <div className="product-editor__upload-cell">
       <Upload accept="image/*" showUploadList={false} beforeUpload={onUpload as any} disabled={disabled || uploading} multiple={multiple}>
-        <div
-          style={{
-            position: "relative",
-            aspectRatio: "1 / 1",
-            border: image ? "1px solid #d9d9d9" : "1px dashed #cfd6df",
-            borderRadius: 6, overflow: "hidden",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            background: "#fff",
-            cursor: disabled || uploading ? "not-allowed" : "pointer",
-            transition: "border-color 0.2s, box-shadow 0.2s",
-          }}
-          onMouseEnter={(e) => {
-            if (!disabled && !uploading) {
-              (e.currentTarget as HTMLElement).style.borderColor = "#b8944e";
-              (e.currentTarget as HTMLElement).style.boxShadow = "0 0 0 2px rgba(184,148,78,0.15)";
-            }
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.borderColor = image ? "#d9d9d9" : "#cfd6df";
-            (e.currentTarget as HTMLElement).style.boxShadow = "none";
-          }}
-        >
+        <div className={`product-editor__upload-tile${image ? " is-filled" : ""}${disabled || uploading ? " is-disabled" : ""}`}>
           {image ? (
             <img src={image.url} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           ) : (
-            <Space direction="vertical" size={3} align="center" style={{ color: "#8c8c8c", fontSize: 12 }}>
-              <PictureOutlined style={{ fontSize: 18 }} />
-              <span>上传</span>
+            <Space direction="vertical" size={5} align="center">
+              <PictureOutlined />
+              <span>上传图片</span>
             </Space>
           )}
           {uploading && (
@@ -180,16 +147,28 @@ function UploadCell({
         </div>
       </Upload>
       {image && (
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, fontSize: 12 }}>
-          {onSetCover ? (
-            <Button type="link" size="small" style={{ padding: 0 }} onClick={onSetCover}>设为主图</Button>
-          ) : (
-            <span style={{ color: "#b8944e" }}>封面</span>
-          )}
-          {onRemove && (
-            <Popconfirm title="确定删除？" onConfirm={onRemove}>
-              <Button type="link" size="small" danger style={{ padding: 0 }} icon={<DeleteOutlined />} />
-            </Popconfirm>
+        <div style={{ marginTop: 5, fontSize: 12 }}>
+          <div style={{ textAlign: "center", marginBottom: 2 }}>
+            {onSetCover ? (
+              <Button type="link" size="small" style={{ padding: 0, height: 20, fontSize: 12 }} onClick={onSetCover}>设为主图</Button>
+            ) : (
+              <span style={{ color: "#b8944e" }}>封面</span>
+            )}
+          </div>
+          {(onMoveLeft || onMoveRight || onRemove) && (
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              {onMoveLeft && (
+                <Button type="text" size="small" icon={<LeftOutlined />} style={{ padding: "0 4px", height: 20 }} onClick={onMoveLeft} disabled={disabled} title="左移" />
+              )}
+              {onMoveRight && (
+                <Button type="text" size="small" icon={<RightOutlined />} style={{ padding: "0 4px", height: 20 }} onClick={onMoveRight} disabled={disabled} title="右移" />
+              )}
+              {onRemove && (
+                <Popconfirm title="确定删除？" onConfirm={onRemove}>
+                  <Button type="text" size="small" danger icon={<DeleteOutlined />} style={{ padding: "0 4px", height: 20 }} title="删除" />
+                </Popconfirm>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -226,13 +205,14 @@ export default function ProductEditor() {
   const [certExpanded, setCertExpanded] = useState(false);
 
   const certDebounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const redirectedRef = useRef(false);
 
   /* 导航联动 */
   const [activeSection, setActiveSection] = useState("media");
   const navItems = [
-    { hash: "media", label: "商品素材" },
+    { hash: "media", label: "图文描述" },
     { hash: "basic", label: "基本信息" },
-    { hash: "pricing", label: "价格规格" },
+    { hash: "pricing", label: "销售信息" },
     { hash: "publish", label: "上架设置" },
   ];
 
@@ -360,17 +340,14 @@ export default function ProductEditor() {
     void loadCategories();
     if (editingId) {
       void loadProduct(editingId);
-    } else {
-      form.setFieldsValue({
-        name: "", code: generateCode(), materialType: "GOLD_999",
-        shortDescription: "", description: "", size: "",
-        goldWeight: 0, weight: 0, price: 0, craftFee: 0, sortOrder: 0,
-        salesMode: "DISPLAY_ONLY", status: "DRAFT",
-        isHot: false, isNew: false, isRecommended: false, isLimited: false, isCustom: false,
-        multiDiscount: false, craftTechnique: [],
-      });
+    } else if (!redirectedRef.current) {
+      // 正常入口（列表「新增商品」）已在 ProductManage.openCreate 创建草稿并跳到 /edit/{id}，
+      // 不会进入此分支。仅命中直接访问/书签 /new：重定向到列表，避免落入 disabled 的空表单状态。
+      redirectedRef.current = true;
+      message.info("请从商品列表点击「新增商品」");
+      navigate("/admin/products", { replace: true });
     }
-  }, [editingId, form, loadCategories, loadProduct]);
+  }, [editingId, form, loadCategories, loadProduct, navigate]);
 
   const refreshImages = async (productId: number) => {
     try {
@@ -421,15 +398,22 @@ export default function ProductEditor() {
       };
       if (editingId) {
         await productApi.update(editingId, payload);
+        let tagsFailed = false;
         try {
           await productApi.updateTags(editingId, tags);
         } catch (tagError: any) {
+          tagsFailed = true;
           console.error("标签保存失败:", tagError);
-          message.error("商品资料已保存，但标签保存失败，请在「上架设置」重新设置后再次保存");
         }
         await loadProduct(editingId);
-        message.success(asDraft ? "草稿已保存" : "商品基础资料已保存");
-        setIsDirty(false);
+        if (tagsFailed) {
+          // 商品资料已存（不回滚），但标签未存：保持 dirty 提示重试，不弹 success 以免误判已全存
+          message.warning("商品资料已保存，但标签保存失败（单条≤50字），请重新保存");
+          setIsDirty(true);
+        } else {
+          message.success(asDraft ? "草稿已保存" : "商品基础资料已保存");
+          setIsDirty(false);
+        }
       } else {
         const result = await productApi.create({ ...payload, code: values.code });
         const created = unwrapResponse<Product>(result);
@@ -458,6 +442,14 @@ export default function ProductEditor() {
       message.warning("请先填写必填信息并保存商品，即可上传图片");
       return false;
     }
+    // 图片大小校验（视频大小已在 beforeUpload 校验）
+    if (!isVideo) {
+      const limitMB = 5;
+      if (file.size / 1024 / 1024 > limitMB) {
+        message.error(`图片不能超过 ${limitMB}MB`);
+        return false;
+      }
+    }
     const key = slotKey || `${file.name}-${file.size}`;
     setUploading(prev => new Set(prev).add(key));
     try {
@@ -474,6 +466,25 @@ export default function ProductEditor() {
       setUploading(prev => { const next = new Set(prev); next.delete(key); return next; });
     }
     return false;
+  };
+
+  // 交换两张主图的 sortOrder（用于调序）；后端 updateImage 白名单含 sortOrder
+  const swapImageOrder = async (a: ProductImage, b: ProductImage) => {
+    if (!editingId) { message.warning("请等待编辑器初始化完成"); return; }
+    if (a.sortOrder === b.sortOrder) return;
+    const swapKey = `swap-${a.id}-${b.id}`;
+    setUploading(prev => new Set(prev).add(swapKey));
+    try {
+      await productApi.updateImage(editingId, a.id, { sortOrder: b.sortOrder });
+      await productApi.updateImage(editingId, b.id, { sortOrder: a.sortOrder });
+      await refreshImages(editingId);
+      message.success("顺序已更新");
+    } catch (error: any) {
+      console.error("调整顺序失败:", error);
+      message.error(error?.message || "调整顺序失败");
+    } finally {
+      setUploading(prev => { const next = new Set(prev); next.delete(swapKey); return next; });
+    }
   };
 
   const setCover = async (imageId: number) => {
@@ -538,8 +549,10 @@ export default function ProductEditor() {
       if (!editingId) { console.warn("updateCertDebounced: editingId 未就绪"); return; }
       try { await productApi.updateCertificate(editingId, certId, { [field]: value }); }
       catch (error: any) {
+        // 失败时从后端重新拉取，覆盖本地乐观更新，保证 UI 与后端一致（用户看到的=实际存的）
+        await refreshCertificates();
         console.error("更新证书失败:", error);
-        message.error(error?.message || "更新证书失败");
+        message.error(error?.message || "证书更新失败，已还原为已保存内容");
       }
     }, 300));
   };
@@ -667,56 +680,21 @@ export default function ProductEditor() {
       extra={<Button onClick={() => editingId && void loadProduct(editingId)}>重新加载</Button>} />
   );
 
-  /* ═══ 公共样式 ═══ */
-
-  const sectionStyle: React.CSSProperties = {
-    background: "#fff", border: "1px solid #ebe8e3", borderRadius: 8,
-    padding: "24px 28px", scrollMarginTop: 80, transition: "box-shadow 0.2s",
-  };
-
   /* ═══════════════════════════════════════════════
      Render
      ═══════════════════════════════════════════════ */
 
   return (
-    <div style={{ minHeight: "100%", background: "#faf9f6", paddingBottom: 40 }}>
+    <div className="product-editor">
       {/* ────── Header ────── */}
-      <header style={{ position: "sticky", top: 0, zIndex: 10, background: "#fff", borderBottom: "1px solid #ebe8e3" }}>
-        <div style={{ maxWidth: 960, margin: "0 auto", padding: "0 24px", height: 56, display: "flex", alignItems: "center", gap: 20 }}>
-          <Space size={10} style={{ flexShrink: 0 }}>
-            {isDirty ? (
-              <Popconfirm title="有未保存的修改，确定离开？" onConfirm={() => navigate("/admin/products")}>
-                <Button type="text" icon={<ArrowLeftOutlined />} />
-              </Popconfirm>
-            ) : (
-              <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate("/admin/products")} />
-            )}
-            <strong style={{
-              fontFamily: `"Cormorant Garamond", serif`, fontSize: 17, fontWeight: 600,
-              letterSpacing: "0.03em", color: "#1a1a1a", whiteSpace: "nowrap",
-            }}>
-              {isCreating ? "新增商品" : product?.name || "编辑商品"}
-            </strong>
-            {product && (
-              <Tag color={statusMeta[product.status]?.color} style={{ marginLeft: 4 }}>
-                {statusMeta[product.status]?.label}
-              </Tag>
-            )}
-          </Space>
-
-          <nav style={{ flex: 1, display: "flex", gap: 0, height: 56, alignItems: "stretch", justifyContent: "center" }}>
+      <header className="product-editor__header">
+        <div className="product-editor__header-inner">
+          <nav className="product-editor__tabs">
             {navItems.map((item) => {
               const isActive = activeSection === item.hash;
               return (
                 <a key={item.hash} href={`#${item.hash}`} onClick={goTo(item.hash)}
-                  style={{
-                    display: "flex", alignItems: "center", padding: "0 14px", fontSize: 13,
-                    fontWeight: isActive ? 600 : 400, color: isActive ? "#b8944e" : "#8c8c8c",
-                    textDecoration: "none", borderBottom: `2px solid ${isActive ? "#b8944e" : "transparent"}`,
-                    transition: "color 0.2s, border-color 0.2s",
-                  }}
-                  onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.color = "#1a1a1a"; }}
-                  onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.color = "#8c8c8c"; }}
+                  className={`product-editor__tab${isActive ? " is-active" : ""}`}
                 >
                   {item.label}
                 </a>
@@ -724,88 +702,119 @@ export default function ProductEditor() {
             })}
           </nav>
 
-          <Space style={{ flexShrink: 0 }}>
+          <Space className="product-editor__header-actions">
             {editingId && <Button href={`/products/${editingId}`} target="_blank" size="small">预览</Button>}
-            <Button loading={saving} onClick={() => void save(true)} size="small">草稿</Button>
-            <Button type="primary" loading={saving} onClick={() => void save()} size="small">提交</Button>
           </Space>
         </div>
       </header>
 
       {/* ────── 表单主体 ────── */}
-      <div style={{ maxWidth: 960, margin: "0 auto", padding: "20px 24px" }}>
-        <Form form={form} layout="vertical" onValuesChange={() => setIsDirty(true)}>
+      <main className="product-editor__workspace">
+        <Form className="product-editor__form" form={form} layout="vertical" onValuesChange={() => setIsDirty(true)}>
 
           {/* ════════════════════════════════════════
              #media — 商品素材
              ════════════════════════════════════════ */}
-          <section id="media" style={sectionStyle}>
-            <SectionTitle title="商品素材" hint="首张为封面，最多 5 张主图" />
+          <section id="media" className="product-editor__card">
+            <SectionTitle title="图文描述" hint="首张为封面，最多 5 张主图" />
 
-            <SubSectionHeader title="主图" />
-            <div style={{ color: "#8c8c8c", fontSize: 12, marginBottom: 12 }}>
-              比例为 1:1，建议尺寸 1440×1440 及以上；首张自动作为商品封面。
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 96px)", gap: 12 }}>
-              {Array.from({ length: 5 }, (_, i) => {
-                const img = mainImages[i];
-                // 封面判断：优先使用服务端的 primaryImageId，兼容 mock 的 type==="FRONT"
-                const isPrimary = img && (
-                  img.id === product?.primaryImageId ||
-                  img.type === "FRONT"
-                );
-                return (
-                  <UploadCell
-                    key={img?.id || i}
-                    image={img}
-                    label={`主图 ${i + 1}`}
-                    disabled={!editingId || uploading.size > 0}
-                    uploading={uploading.has(`slot-${i}`)}
-                    multiple
-                    onUpload={(file) => uploadImage(file, isPrimary || i === 0 ? "FRONT" : "SIDE", false, `slot-${i}`)}
-                    onSetCover={isPrimary ? undefined : img ? () => void setCover(img.id) : undefined}
-                    onRemove={img ? () => void removeImage(img.id) : undefined}
-                  />
-                );
-              })}
-            </div>
-
-            <SubSectionHeader title="视频（选填）" />
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <Upload
-                accept="video/mp4,video/webm"
-                showUploadList={false}
-                beforeUpload={(file) => uploadImage(file, "SIDE", true, "video")}
-                disabled={!editingId || uploading.size > 0}
-              >
-                <Button icon={<PlayCircleOutlined />} disabled={!editingId || uploading.size > 0}>
-                  上传视频
-                </Button>
-              </Upload>
-              {videoImages.map((v) => (
-                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <video src={v.url} controls preload="metadata"
-                    style={{ width: 200, height: 112, borderRadius: 6, objectFit: "cover" }} />
-                  <Popconfirm title="确定删除此视频？" onConfirm={() => removeImage(v.id)}>
-                    <Button type="link" danger size="small" icon={<DeleteOutlined />} />
-                  </Popconfirm>
+            <SubSectionHeader title="基础素材" />
+            <div className="product-editor__field-row">
+              <div className="product-editor__field-label">1:1 主图 <em>*</em></div>
+              <div className="product-editor__field-content">
+                <div className="product-editor__field-tip">比例为 1:1，建议尺寸 1440×1440 及以上；首张自动作为商品封面。</div>
+                <div className="product-editor__image-grid">
+                  {Array.from({ length: 5 }, (_, i) => {
+                    const img = mainImages[i];
+                    // 封面判断：优先使用服务端的 primaryImageId，兼容 mock 的 type==="FRONT"
+                    const isPrimary = img && (
+                      img.id === product?.primaryImageId ||
+                      img.type === "FRONT"
+                    );
+                    return (
+                      <UploadCell
+                        key={img?.id || i}
+                        image={img}
+                        label={`主图 ${i + 1}`}
+                        disabled={!editingId || uploading.size > 0}
+                        uploading={uploading.has(`slot-${i}`)}
+                        multiple
+                        onUpload={(file) => uploadImage(file, isPrimary || i === 0 ? "FRONT" : "SIDE", false, `slot-${i}`)}
+                        onSetCover={isPrimary ? undefined : img ? () => void setCover(img.id) : undefined}
+                        onMoveLeft={img && i > 0 ? () => void swapImageOrder(img, mainImages[i - 1]!) : undefined}
+                        onMoveRight={img && i < mainImages.length - 1 ? () => void swapImageOrder(img, mainImages[i + 1]!) : undefined}
+                        onRemove={img ? () => void removeImage(img.id) : undefined}
+                      />
+                    );
+                  })}
                 </div>
-              ))}
+              </div>
             </div>
 
-            <SubSectionHeader title="导购文案" />
-            <Form.Item name="shortDescription" label="导购标题" extra="一句话卖点，最多 30 字" style={{ maxWidth: 480 }}>
-              <Input maxLength={30} showCount placeholder="例如：古法錾刻足金如意锁" />
-            </Form.Item>
-            <Form.Item name="description" label="商品描述" style={{ marginBottom: 0 }}>
-              <TextArea rows={5} maxLength={5000} showCount placeholder="介绍工艺、材质、寓意和佩戴建议" />
-            </Form.Item>
+            <div className="product-editor__field-row">
+              <div className="product-editor__field-label">商品视频 <span>（选填）</span></div>
+              <div className="product-editor__field-content">
+                <div className="product-editor__field-tip">支持 MP4、WebM 格式，最多上传 3 个视频，单个文件不超过 100MB。</div>
+                <div className="product-editor__video-list">
+                  <Upload
+                    accept="video/mp4,video/webm"
+                    showUploadList={false}
+                    beforeUpload={(file) => {
+                      // 数量 + 大小校验：避免大视频在 120s 超时失败、或视频无限堆积
+                      if (videoImages.length >= 3) {
+                        message.warning("最多上传 3 个视频，请先删除不需要的");
+                        return Upload.LIST_IGNORE;
+                      }
+                      const limitMB = 100;
+                      const sizeMB = file.size / 1024 / 1024;
+                      if (sizeMB > limitMB) {
+                        message.error(`视频不能超过 ${limitMB}MB（当前 ${sizeMB.toFixed(1)}MB），请压缩后再上传`);
+                        return Upload.LIST_IGNORE;
+                      }
+                      return uploadImage(file, "SIDE", true, "video");
+                    }}
+                    disabled={!editingId || uploading.size > 0}
+                  >
+                    <Button icon={<PlayCircleOutlined />} disabled={!editingId || uploading.size > 0}>
+                      上传视频
+                    </Button>
+                  </Upload>
+                  {videoImages.map((v) => (
+                    <div key={v.id} className="product-editor__video-item">
+                      <video src={v.url} controls preload="metadata" />
+                      <Popconfirm title="确定删除此视频？" onConfirm={() => removeImage(v.id)}>
+                        <Button type="link" danger size="small" icon={<DeleteOutlined />}>删除</Button>
+                      </Popconfirm>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <SubSectionHeader title="导购素材" />
+            <div className="product-editor__field-row">
+              <div className="product-editor__field-label">导购标题</div>
+              <div className="product-editor__field-content product-editor__field-content--narrow">
+                <Form.Item name="shortDescription" noStyle>
+                  <Input maxLength={30} showCount placeholder="例如：古法錾刻足金如意锁" />
+                </Form.Item>
+                <div className="product-editor__field-tip">一句话卖点，最多 30 字。</div>
+              </div>
+            </div>
+            <div className="product-editor__field-row product-editor__field-row--last">
+              <div className="product-editor__field-label">商品描述</div>
+              <div className="product-editor__field-content">
+                <Form.Item name="description" noStyle>
+                  <TextArea rows={5} maxLength={5000} showCount placeholder="介绍工艺、材质、寓意和佩戴建议" />
+                </Form.Item>
+              </div>
+            </div>
           </section>
 
           {/* ════════════════════════════════════════
              #basic — 基本信息
              ════════════════════════════════════════ */}
-          <section id="basic" style={{ ...sectionStyle, marginTop: 24 }}>
+          <section id="basic" className="product-editor__card">
             <SectionTitle title="基本信息" />
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 20px" }}>
@@ -891,7 +900,7 @@ export default function ProductEditor() {
           {/* ════════════════════════════════════════
              #pricing — 价格与规格
              ════════════════════════════════════════ */}
-          <section id="pricing" style={{ ...sectionStyle, marginTop: 24 }}>
+          <section id="pricing" className="product-editor__card">
             <SectionTitle title="价格与规格" />
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 20px", marginBottom: 6 }}>
@@ -951,7 +960,7 @@ export default function ProductEditor() {
           {/* ════════════════════════════════════════
              #publish — 上架设置
              ════════════════════════════════════════ */}
-          <section id="publish" style={{ ...sectionStyle, marginTop: 24 }}>
+          <section id="publish" className="product-editor__card">
             <SectionTitle title="上架设置" />
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 20px" }}>
@@ -1084,7 +1093,18 @@ export default function ProductEditor() {
           </Modal>
 
         </Form>
-      </div>
+      </main>
+      <footer className="product-editor__footer">
+        <div className="product-editor__footer-inner">
+          <Button loading={saving} onClick={() => void save(true)}>保存草稿</Button>
+          <Button type="primary" loading={saving} onClick={() => void save()}>
+            提交商品信息
+          </Button>
+          <span className={`product-editor__save-state${isDirty ? " is-dirty" : ""}`}>
+            {isDirty ? "有未保存的修改" : "已保存"}
+          </span>
+        </div>
+      </footer>
     </div>
   );
 }

@@ -14,21 +14,29 @@ export class GoldPriceService {
    * Get latest gold price
    */
   async getLatest() {
-    const latest = await this.prisma.goldPrice.findFirst({
+    // 取最近两条金价记录计算涨跌,避免依赖进程内存变量(重启/多实例下会失真)
+    const [latest, previous] = await this.prisma.goldPrice.findMany({
       orderBy: { recordDate: 'desc' },
+      take: 2,
     });
 
-    if (latest) {
-      return {
-        price: Number(latest.price),
-        source: latest.source,
-        recordDate: latest.recordDate,
-        change: this.currentPrice - this.previousPrice,
-        changePercent: ((this.currentPrice - this.previousPrice) / this.previousPrice * 100).toFixed(2),
-      };
+    if (!latest) {
+      throw new ServiceUnavailableException('暂无经过验证的金价数据');
     }
 
-    throw new ServiceUnavailableException('暂无经过验证的金价数据');
+    const price = Number(latest.price);
+    const prevPrice = previous ? Number(previous.price) : price;
+    const change = Number((price - prevPrice).toFixed(2));
+    const changePercent =
+      prevPrice !== 0 ? (((price - prevPrice) / prevPrice) * 100).toFixed(2) : '0.00';
+
+    return {
+      price,
+      source: latest.source,
+      recordDate: latest.recordDate,
+      change,
+      changePercent,
+    };
   }
 
   /**

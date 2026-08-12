@@ -15,6 +15,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { CustomerAuthGuard } from '../customers/customer-auth.guard';
+import { Throttle } from '@nestjs/throttler';
 
 const videoStorage = diskStorage({
   destination: (_req, _file, callback) => {
@@ -55,6 +56,8 @@ export class UploadController {
 
   @Public()
   @UseGuards(CustomerAuthGuard)
+  // 公开上传接口收紧行为限流(全局 60/min 偏宽),降低并发 10MB 内存存储的 DoS 风险
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('payment-proof')
   @UseInterceptors(FileInterceptor('file', imageUploadOptions))
   async uploadPaymentProof(@UploadedFile() file: Express.Multer.File) {
@@ -69,6 +72,12 @@ export class UploadController {
     storage: videoStorage,
     limits: { fileSize: 100 * 1024 * 1024 },
     fileFilter: (_req, file, callback) => {
+      // 扩展名白名单:防止把 .html/.svg 等改名后仅靠声明 mimetype 绕过,
+      // 进而被静态服务按扩展名当 HTML 渲染,造成存储型 XSS
+      const ext = extname(file.originalname).toLowerCase();
+      if (!['.mp4', '.webm'].includes(ext)) {
+        return callback(new BadRequestException('仅支持 MP4 或 WebM 视频文件'), false);
+      }
       if (!['video/mp4', 'video/webm'].includes(file.mimetype)) {
         return callback(new BadRequestException('仅支持 MP4 或 WebM 视频'), false);
       }
