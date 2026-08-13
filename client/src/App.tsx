@@ -4,6 +4,7 @@ import { Spin } from "antd";
 import PublicLayout from "@/components/layout/PublicLayout";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { RequestErrorNotice } from "@/components/common/RequestErrorNotice";
 import ProtectedRoute from "@/components/common/ProtectedRoute";
 import ProgressBar from "@/components/common/ProgressBar";
 // Lazy load pages
@@ -60,6 +61,7 @@ function App() {
   return (
     <ErrorBoundary>
       <ProgressBar />
+      <RequestErrorNotice />
       <Suspense fallback={<Loading />}>
         <Routes>
           {/* Public Routes — 首页和其他页面统一使用 PublicLayout */}

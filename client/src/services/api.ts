@@ -1,5 +1,5 @@
 import axios from "axios";
-import { message } from "antd";
+import { notifyRequestError } from "@/services/requestErrorEvents";
 import type { ApiResponse, CategoryInput, CategorySortItem } from "@/types";
 import { useAuthStore } from "@/store/authStore";
 import {
@@ -39,7 +39,7 @@ api.interceptors.response.use(
     const data = response.data as ApiResponse<unknown>;
     // 兼容后端 TransformInterceptor 格式
     if (data && typeof data.code === "number" && data.code !== 200) {
-      message.error(data.message || "请求失败");
+      notifyRequestError(data.message || "请求失败");
       return Promise.reject(new Error(data.message || "Request failed"));
     }
     return response;
@@ -55,11 +55,11 @@ api.interceptors.response.use(
         window.location.href = "/admin/login";
       }
     } else if (error.response?.status === 403) {
-      message.error("没有权限执行此操作");
+      notifyRequestError("没有权限执行此操作");
     } else if (error.response?.status === 429) {
-      message.error("操作过于频繁，请稍后再试");
+      notifyRequestError("操作过于频繁，请稍后再试");
     } else if (error.response?.status && error.response.status >= 500) {
-      message.error("服务器繁忙，请稍后再试");
+      notifyRequestError("服务器繁忙，请稍后再试");
     }
     const msg = error.response?.data?.message || error.message || "网络错误";
     return Promise.reject(new Error(msg));
