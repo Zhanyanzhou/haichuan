@@ -7,6 +7,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { OptionalCustomerAuthGuard } from '../customers/optional-customer-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('咨询管理')
 @Controller('inquiries')
@@ -20,6 +21,8 @@ export class InquiriesController {
   @Get() findAll(@Query() q: any) { return this.inquiriesService.findAll(q); }
 
   @ApiOperation({ summary: '提交咨询（公开接口）' })
+  // P0-6：公开写端点收紧限流（5/min），依赖 trust proxy 生效后按真实客户端 IP 计数
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Public() @UseGuards(OptionalCustomerAuthGuard) @Post() create(@Req() request: any, @Body() dto: CreateInquiryDto) { return this.inquiriesService.create({ ...dto, customer: request.customer }); }
 
   @ApiBearerAuth()

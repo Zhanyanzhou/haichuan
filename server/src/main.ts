@@ -12,6 +12,11 @@ async function bootstrap() {
 
   app.setGlobalPrefix("api");
 
+  // 信任单层 nginx 反向代理：让 req.ip / ThrottlerGuard 拿到真实客户端 IP。
+  // express trust proxy=1 取 X-Forwarded-For 最右一项 = nginx 的 $remote_addr（真实客户端，不可被请求头伪造）；
+  // 否则所有请求 IP 退化为 nginx 容器内网 IP，全站共享一个限流桶（连 /auth/login 5/min 都会全站共享）。
+  (app.getHttpAdapter().getInstance() as { set: (k: string, v: unknown) => void }).set("trust proxy", 1);
+
   // 安全头
   app.use(helmet({ contentSecurityPolicy: false }));
 
@@ -29,10 +34,11 @@ async function bootstrap() {
     next();
   });
 
-  // CORS：开发环境宽松，生产环境限制 origin
+  // CORS：开发环境宽松，生产环境只接受显式配置的正式来源。
+  // 不使用代码内置域名作为回退值，避免在域名变更或未确认时静默开放错误站点。
   const corsOrigin =
     process.env.NODE_ENV === "production"
-      ? (process.env.CORS_ORIGIN || "https://haichuanjewelry.com").split(",")
+      ? getProductionCorsOrigins()
       : [
           "http://localhost:5173",
           "http://localhost:5174",
@@ -82,3 +88,35 @@ async function bootstrap() {
   logger.log(`🚀 Jewelry Server running on http://localhost:${port}`);
 }
 bootstrap();
+
+function getProductionCorsOrigins(): string[] {
+  const configuredOrigins = process.env.CORS_ORIGIN;
+  if (!configuredOrigins?.trim()) {
+    throw new Error(
+      "CORS_ORIGIN 在生产环境为必填项；请配置已确认的正式前端来源。",
+    );
+  }
+
+  const origins = configuredOrigins.split(",").map((origin) => origin.trim());
+  if (origins.some((origin) => !origin)) {
+    throw new Error("CORS_ORIGIN 不能包含空白来源。");
+  }
+
+  for (const origin of origins) {
+    try {
+      const url = new URL(origin);
+      if (
+        !["http:", "https:"].includes(url.protocol) ||
+        url.origin !== origin
+      ) {
+        throw new Error();
+      }
+    } catch {
+      throw new Error(
+        "CORS_ORIGIN 必须为一个或多个以逗号分隔的 HTTP(S) 来源（不含路径、查询参数或尾随斜杠）。",
+      );
+    }
+  }
+
+  return origins;
+}

@@ -66,8 +66,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
       status = HttpStatus.SERVICE_UNAVAILABLE;
       message = '数据库连接失败，请稍后重试';
     }
+    // ServeStaticModule 使用的 Express NotFoundError 不是 Nest HttpException，
+    // 但会携带 status/statusCode。保留 4xx，避免缺失静态文件被误记为 500。
     else if (exception instanceof Error) {
-      message = isProduction ? '服务器内部错误' : exception.message;
+      const candidate = exception as Error & { status?: unknown; statusCode?: unknown };
+      const externalStatus = candidate.status ?? candidate.statusCode;
+      if (typeof externalStatus === 'number' && externalStatus >= 400 && externalStatus < 500) {
+        status = externalStatus;
+        message = status === HttpStatus.NOT_FOUND ? '请求的资源不存在' : '请求不合法';
+      } else {
+        message = isProduction ? '服务器内部错误' : exception.message;
+      }
     }
 
     // 服务端错误记录日志
