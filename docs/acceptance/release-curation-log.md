@@ -12,6 +12,8 @@
 | `b21cacb` | `fix(public): 移除未确认公开元数据并改善错误可访问性`。文件：`client/index.html`、`client/public/robots.txt`、`client/public/sitemap.xml`、`client/src/components/common/ErrorBoundary.tsx`、`client/src/pages/public/About/index.tsx`。移除未确认域名、电话与不存在的分享图；公开错误恢复按钮具备原生按钮语义与可见焦点；补充固定的品牌页元信息。 | 每次精确路径暂存后均执行 `git diff --cached --check`、`--name-only`、`--stat` 和完整暂存差异复核。未包含 Puck、交易、数据库、依赖、脚本或未跟踪候选。 | 当前完整工作区：`npm run typecheck`、`npm run lint`、`npm run test:selection-inquiry`、`npm run test:contracts`、`npm run build` 均退出成功；`git diff --check` 通过。运行时烟测报告记录公开路由及联系页隐私必填提示的桌面/移动复验；未将其视为真实 API 成功路径验收。 |
 | `1790823` | `fix(api): 加强公开接口的安全降级与限流`。文件：`server/src/main.ts`、`server/src/modules/inquiries/inquiries.controller.ts`、`server/src/common/filters/http-exception.filter.ts`、`server/src/common/interceptors/transform.interceptor.ts`。生产环境要求显式 CORS 来源；公开咨询写接口限流；静态资源 4xx 保持正确状态；二进制/已结束响应不再被 JSON 包装。 | 同上。提交前完整检查显示仅上述 4 个文件暂存，无任何无关路径。 | 同上。生产 CORS 实际值未读取、未输出，仍须由运维在部署窗口按正式来源配置；本次未部署。 |
 
+上述两个功能提交以及本日志的初始提交 `c61687a` 已通过常规 fast-forward 推送至 `origin/codex/release-curation-20260814`；本次未使用强制推送或改写历史。
+
 ## 已排除的批次与原因
 
 | 主题 | 当前范围摘要 | 不提交原因与可行动下一步 |
