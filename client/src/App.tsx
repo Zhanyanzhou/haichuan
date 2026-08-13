@@ -23,6 +23,7 @@ const CustomerCenter = lazy(() => import("@/pages/public/CustomerCenter"));
 const PaymentReview = lazy(() => import("@/pages/admin/PaymentReview"));
 const About = lazy(() => import("@/pages/public/About"));
 const Contact = lazy(() => import("@/pages/public/Contact"));
+const Privacy = lazy(() => import("@/pages/public/Privacy"));
 const Catalog = lazy(() => import("@/pages/public/Catalog"));
 const Custom = lazy(() => import("@/pages/public/Custom"));
 const Search = lazy(() => import("@/pages/public/Search"));
@@ -77,6 +78,7 @@ function App() {
             <Route path="customer" element={<CustomerCenter />} />
             <Route path="about" element={<About />} />
             <Route path="contact" element={<Contact />} />
+            <Route path="privacy" element={<Privacy />} />
             <Route
               path="preview/home"
               element={

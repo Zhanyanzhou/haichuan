@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { inquiriesApi, settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackPageView, trackSubmitInquiry } from "@/hooks/useAnalytics";
+import { usePageMetaStore } from "@/store/pageMetaStore";
 
 const T = {
   bg: "#FFFFFF",
@@ -43,35 +44,35 @@ const BUDGET_OPTIONS = [
 
 const SERVICES = [
   {
-    title: "选款建议",
-    desc: "根据佩戴需求、场景、预算和审美偏好，提供一对一珠宝作品建议。",
+    title: "选款需求咨询",
+    desc: "您可说明佩戴场景、预算和审美偏好，具体建议与安排以实际沟通为准。",
   },
   {
-    title: "高级定制",
-    desc: "围绕设计灵感、材质、宝石、尺寸和工艺，进行一对一深入沟通。",
+    title: "定制需求咨询",
+    desc: "可提交设计灵感、材质、宝石、尺寸和工艺等需求，是否可提供相关服务以实际沟通为准。",
   },
   {
-    title: "旧款改造与售后",
-    desc: "咨询旧款重制、尺寸调整、日常保养和专业维修服务。",
+    title: "旧款相关咨询",
+    desc: "可说明旧款、尺寸或保养相关情况，是否可提供服务及具体安排以实际沟通为准。",
   },
 ];
 
 const FAQS = [
   {
-    q: "提交预约后多久会与我联系？",
-    a: "我们将在收到预约后尽快与您联系，通常不超过一个工作日。",
+    q: "提交咨询需求后多久会与我联系？",
+    a: "我们会尽快与您联系，具体联系时间与安排以实际沟通为准。",
   },
   {
     q: "是否支持到店咨询？",
-    a: '支持。您可以在预约时选择"到店咨询"，我们将为您安排专属顾问接待。',
+    a: '您可在需求中说明希望到店咨询，是否可提供接待、时间与地点以实际沟通为准。',
   },
   {
     q: "是否可以线上沟通？",
-    a: "可以。请选择您方便的联系方式，我们的顾问会通过电话或短信与您沟通。",
+    a: "您可选择方便的联系方式；具体沟通方式与时间将结合实际情况确认。",
   },
   {
-    q: "是否支持旧款改造？",
-    a: "支持。我们提供旧款重制、尺寸调整、翻新保养等服务，请在需求中描述具体情况。",
+    q: "能咨询旧款相关事项吗？",
+    a: "可以提交旧款相关需求；是否可进行重制、尺寸调整、翻新、保养或维修，以实际沟通与评估结果为准。",
   },
 ];
 
@@ -99,25 +100,49 @@ const lblS: React.CSSProperties = {
   display: "block",
 };
 
+type SettingsStatus = "loading" | "loaded" | "error";
+
 function useSiteSettings() {
   const [settings, setSettings] = useState<any>(null);
+  const [status, setStatus] = useState<SettingsStatus>("loading");
   useEffect(() => {
+    let cancelled = false;
     settingsApi
       .getPublicSettings()
-      .then((res) => setSettings(unwrapResponse<any>(res)))
-      .catch(() => {});
+      .then((res) => {
+        if (cancelled) return;
+        setSettings(unwrapResponse<any>(res));
+        setStatus("loaded");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setStatus("error");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
-  return settings;
+  return { settings, status };
 }
 
 export default function Contact() {
-  const siteSettings = useSiteSettings();
-  const contactPhone = siteSettings?.contactPhone || "400-888-8888";
-  const contactEmail = siteSettings?.contactEmail || "contact@haichuan.com";
-  const contactAddress =
-    siteSettings?.contactAddress || "深圳市罗湖区水贝珠宝产业园A座18楼";
-  const businessHours =
-    siteSettings?.businessHours || "周一至周日 09:00 - 18:00";
+  const setPageMeta = usePageMetaStore((s) => s.setMeta);
+  const clearPageMeta = usePageMetaStore((s) => s.clear);
+  // SEO：联系页独立标题与描述
+  useEffect(() => {
+    setPageMeta({
+      title: "提交咨询需求 | 海川珠宝",
+      description:
+        "珠宝咨询需求提交页面。可提交选款、定制或旧款相关需求，具体服务与安排以实际沟通为准。",
+    });
+    return () => clearPageMeta();
+  }, [setPageMeta, clearPageMeta]);
+  const { settings: siteSettings, status: settingsStatus } = useSiteSettings();
+  // SiteSettings 是联系信息唯一真实来源；空值不显示，不使用假电话/邮箱/地址兜底。
+  const contactPhone = siteSettings?.contactPhone?.trim() || "";
+  const contactEmail = siteSettings?.contactEmail?.trim() || "";
+  const contactAddress = siteSettings?.contactAddress?.trim() || "";
+  const businessHours = siteSettings?.businessHours?.trim() || "";
 
   const CONTACT_INFO = [
     {
@@ -125,10 +150,14 @@ export default function Contact() {
       value: contactPhone,
       href: contactPhone ? `tel:${contactPhone}` : undefined,
     },
-    { label: "电子邮箱", value: contactEmail },
+    {
+      label: "电子邮箱",
+      value: contactEmail,
+      href: contactEmail ? `mailto:${contactEmail}` : undefined,
+    },
     { label: "总部地址", value: contactAddress },
     { label: "服务时间", value: businessHours },
-  ];
+  ].filter((c) => c.value); // 只显示有真实值的条目
 
   const savedCustomer = (() => {
     try {
@@ -242,7 +271,7 @@ export default function Contact() {
               marginBottom: 12,
             }}
           >
-            预约已提交
+            需求已提交
           </h2>
           <p
             style={{
@@ -252,7 +281,7 @@ export default function Contact() {
               lineHeight: 1.6,
             }}
           >
-            私人顾问将根据您提供的联系方式与您联系，请保持手机畅通。
+            我们会尽快根据您提供的联系方式与您联系，具体安排以实际沟通为准。
           </p>
           <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
             <Link
@@ -304,7 +333,7 @@ export default function Contact() {
               textTransform: "uppercase",
             }}
           >
-            PRIVATE CONSULTATION
+            CONSULTATION REQUEST
           </p>
           <h1
             style={{
@@ -315,10 +344,10 @@ export default function Contact() {
               letterSpacing: "0.04em",
             }}
           >
-            预约私人顾问
+            提交咨询需求
           </h1>
           <p style={{ fontSize: 14, color: T.sec, margin: 0, maxWidth: 480 }}>
-            无论是选款、定制还是旧款改造，我们将根据您的需求提供一对一建议。
+            您可提交选款、定制或旧款相关需求；具体服务内容与安排以实际沟通为准。
           </p>
         </div>
       </section>
@@ -396,23 +425,57 @@ export default function Contact() {
               >
                 联系方式
               </p>
-              {CONTACT_INFO.map((c, i) => (
-                <div key={i} style={{ marginBottom: 10, fontSize: 13 }}>
-                  <span style={{ color: T.light, marginRight: 8 }}>
-                    {c.label}
-                  </span>
-                  {c.href ? (
-                    <a
-                      href={c.href}
-                      style={{ color: T.txt, textDecoration: "none" }}
-                    >
-                      {c.value}
-                    </a>
-                  ) : (
-                    <span style={{ color: T.txt }}>{c.value}</span>
-                  )}
-                </div>
-              ))}
+              {settingsStatus === "loading" && (
+                <p
+                  aria-live="polite"
+                  style={{ fontSize: 12, color: T.light, margin: 0 }}
+                >
+                  正在加载联系方式…
+                </p>
+              )}
+              {settingsStatus === "error" && (
+                <p
+                  role="alert"
+                  style={{
+                    fontSize: 12,
+                    color: T.sec,
+                    margin: 0,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  联系信息暂时无法加载，您仍可通过右侧表单提交需求。
+                </p>
+              )}
+              {settingsStatus === "loaded" && CONTACT_INFO.length === 0 && (
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: T.sec,
+                    margin: 0,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  公开联系方式正在完善，您仍可通过右侧表单提交需求。
+                </p>
+              )}
+              {settingsStatus === "loaded" &&
+                CONTACT_INFO.map((c, i) => (
+                  <div key={c.label} style={{ marginBottom: 10, fontSize: 13 }}>
+                    <span style={{ color: T.light, marginRight: 8 }}>
+                      {c.label}
+                    </span>
+                    {c.href ? (
+                      <a
+                        href={c.href}
+                        style={{ color: T.txt, textDecoration: "none" }}
+                      >
+                        {c.value}
+                      </a>
+                    ) : (
+                      <span style={{ color: T.txt }}>{c.value}</span>
+                    )}
+                  </div>
+                ))}
             </div>
             <div style={{ borderTop: `1px solid ${T.line}`, paddingTop: 20 }}>
               <p
@@ -423,7 +486,7 @@ export default function Contact() {
                   marginBottom: 10,
                 }}
               >
-                预约流程
+                咨询流程
               </p>
               <div
                 style={{
@@ -435,14 +498,14 @@ export default function Contact() {
                   flexWrap: "wrap",
                 }}
               >
-                <span>提交预约</span>
+                <span>提交需求</span>
                 <span style={{ color: T.light }}>→</span>
-                <span>顾问联系</span>
+                <span>沟通确认</span>
                 <span style={{ color: T.light }}>→</span>
-                <span>确认需求</span>
+                <span>具体安排</span>
               </div>
               <p style={{ fontSize: 11, color: T.light, marginTop: 8 }}>
-                我们将在一个工作日内与您联系。
+                我们会尽快与您联系，具体时间与安排以实际沟通为准。
               </p>
             </div>
           </div>
@@ -466,10 +529,11 @@ export default function Contact() {
                 }}
               >
                 <div>
-                  <label style={lblS}>
+                  <label style={lblS} htmlFor="cf-name">
                     姓名 <span style={{ color: T.gold }}>*</span>
                   </label>
                   <input
+                    id="cf-name"
                     style={{
                       ...inputS,
                       borderColor: errors.name ? "#c0392b" : T.line,
@@ -491,10 +555,11 @@ export default function Contact() {
                   )}
                 </div>
                 <div>
-                  <label style={lblS}>
+                  <label style={lblS} htmlFor="cf-phone">
                     手机号码 <span style={{ color: T.gold }}>*</span>
                   </label>
                   <input
+                    id="cf-phone"
                     style={{
                       ...inputS,
                       borderColor: errors.phone ? "#c0392b" : T.line,
@@ -528,10 +593,11 @@ export default function Contact() {
                 }}
               >
                 <div>
-                  <label style={lblS}>
+                  <label style={lblS} htmlFor="cf-type">
                     咨询类型 <span style={{ color: T.gold }}>*</span>
                   </label>
                   <select
+                    id="cf-type"
                     style={{
                       ...selS,
                       borderColor: errors.consultationType ? "#c0392b" : T.line,
@@ -561,8 +627,9 @@ export default function Contact() {
                   )}
                 </div>
                 <div>
-                  <label style={lblS}>希望的联系方式</label>
+                  <label style={lblS} htmlFor="cf-contact">希望的联系方式</label>
                   <select
+                    id="cf-contact"
                     style={selS}
                     value={form.preferredContact}
                     onChange={(e) => set("preferredContact", e.target.value)}
@@ -585,10 +652,11 @@ export default function Contact() {
                 }}
               >
                 <div>
-                  <label style={lblS}>
+                  <label style={lblS} htmlFor="cf-time">
                     方便联系的时间 <span style={{ color: T.gold }}>*</span>
                   </label>
                   <select
+                    id="cf-time"
                     style={{
                       ...selS,
                       borderColor: errors.preferredTime ? "#c0392b" : T.line,
@@ -618,8 +686,9 @@ export default function Contact() {
                   )}
                 </div>
                 <div>
-                  <label style={lblS}>预算范围（选填）</label>
+                  <label style={lblS} htmlFor="cf-budget">预算范围（选填）</label>
                   <select
+                    id="cf-budget"
                     style={selS}
                     value={form.budgetRange}
                     onChange={(e) => set("budgetRange", e.target.value)}
@@ -633,10 +702,11 @@ export default function Contact() {
                 </div>
               </div>
               <div style={{ marginBottom: 14 }}>
-                <label style={lblS}>
+                <label style={lblS} htmlFor="cf-message">
                   需求描述 <span style={{ color: T.gold }}>*</span>
                 </label>
                 <textarea
+                  id="cf-message"
                   style={{
                     ...inputS,
                     height: 100,
@@ -675,19 +745,37 @@ export default function Contact() {
                     type="checkbox"
                     checked={form.privacyConsent}
                     onChange={(e) => set("privacyConsent", e.target.checked)}
+                    aria-invalid={errors.privacyConsent ? true : undefined}
+                    aria-describedby={
+                      errors.privacyConsent ? "cf-privacy-consent-error" : undefined
+                    }
                     style={{ marginTop: 2, accentColor: T.gold }}
                   />
                   <span>
                     我已阅读并同意
-                    <a
-                      href="#"
+                    <Link
+                      to="/privacy"
+                      onClick={(e) => e.stopPropagation()}
                       style={{ color: T.txt, textDecoration: "underline" }}
                     >
                       隐私说明
-                    </a>
+                    </Link>
                     ，提交的姓名、电话和需求仅用于预约联系与服务处理。
                   </span>
                 </label>
+                {errors.privacyConsent && (
+                  <p
+                    id="cf-privacy-consent-error"
+                    role="alert"
+                    style={{
+                      fontSize: 11,
+                      color: "#c0392b",
+                      margin: "4px 0 0",
+                    }}
+                  >
+                    {errors.privacyConsent}
+                  </p>
+                )}
               </div>
               {submitError && (
                 <p style={{ fontSize: 12, color: "#c0392b", marginBottom: 12 }}>
@@ -695,6 +783,7 @@ export default function Contact() {
                 </p>
               )}
               <button
+                type="button"
                 onClick={handleSubmit}
                 disabled={submitting}
                 style={{
@@ -709,7 +798,7 @@ export default function Contact() {
                   opacity: submitting ? 0.7 : 1,
                 }}
               >
-                {submitting ? "正在提交…" : "提交预约"}
+                {submitting ? "正在提交…" : "提交需求"}
               </button>
             </div>
           </div>

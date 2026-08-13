@@ -664,6 +664,18 @@ model OperationLog {
   @@map("operation_logs")
 }
 
+// 使用单条 JSON 文档保存低频全站配置，避免容器文件系统重建后丢失设置。
+model SiteSetting {
+  key       String   @id @db.VarChar(50)
+  value     Json
+  version   Int      @default(1)
+  updatedBy Int?     @map("updated_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("site_settings")
+}
+
 // ========== AI识别记录 ==========
 
 model AIClassifyRecord {

@@ -185,6 +185,20 @@ export default function PublicLayout() {
     };
   }, [isHome]);
 
+  // SEO：前台公开页确保可索引（与 AdminLayout 的 noindex 互补，防御性）
+  useEffect(() => {
+    const tag = document.head.querySelector<HTMLMetaElement>('meta[name="robots"]');
+    if (tag) {
+      tag.setAttribute("content", "index, follow");
+      return;
+    }
+
+    const robots = document.createElement("meta");
+    robots.setAttribute("name", "robots");
+    robots.setAttribute("content", "index, follow");
+    document.head.appendChild(robots);
+  }, [location.pathname]);
+
   const isTransparent = isHome && !scrolled && !menuOpen;
   const headerBg = isTransparent ? "transparent" : "rgba(255,255,255,0.92)";
   const headerBorder = isTransparent ? "transparent" : "rgba(41,36,31,0.06)";
@@ -360,10 +374,19 @@ export default function PublicLayout() {
               {!contactPhone && !contactEmail && (
                 <span className="site-footer__link">联系方式待完善</span>
               )}
+              <Link to="/privacy" className="site-footer__link">
+                隐私说明
+              </Link>
             </div>
           </div>
           <p className="site-footer__copyright">
             © {new Date().getFullYear()} {siteName}
+            <Link
+              to="/privacy"
+              className="site-footer__copyright-link"
+            >
+              隐私说明
+            </Link>
           </p>
         </footer>
       )}

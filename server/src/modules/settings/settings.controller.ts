@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('系统设置')
 @ApiBearerAuth()
@@ -18,8 +19,8 @@ export class SettingsController {
   @Public()
   @ApiOperation({ summary: '获取前台可见的店铺资料' })
   @Get('public')
-  getPublicSettings() {
-    const settings = this.settingsService.getSettings();
+  async getPublicSettings() {
+    const settings = await this.settingsService.getSettings();
     return {
       siteName: settings.siteName,
       logo: settings.logo,
@@ -37,7 +38,9 @@ export class SettingsController {
   @Get() getSettings() { return this.settingsService.getSettings(); }
 
   @ApiOperation({ summary: '更新系统设置' })
-  @Put() updateSettings(@Body() dto: UpdateSettingsDto) { return this.settingsService.updateSettings(dto); }
+  @Put() updateSettings(@Body() dto: UpdateSettingsDto, @CurrentUser() user: { id: number }) {
+    return this.settingsService.updateSettings(dto, user.id);
+  }
 
   @ApiOperation({ summary: '获取备份状态' })
   @Get('backup') getBackupStatus() { return this.settingsService.getBackupStatus(); }

@@ -821,13 +821,16 @@ export const settingsApi = {
   getPublicSettings: async () => {
     if (USE_MOCK) {
       await mockDelay(200);
+      // 联系信息以后台 SiteSettings 为唯一真实来源；mock 默认返回空，不编造电话/邮箱/地址。
+      // 测试需要具体值时在测试内拦截此接口注入。
       return mockRes({
         siteName: "海川珠宝",
         seoTitle: "海川珠宝 - 高端珠宝臻品平台",
         seoDescription: "高端珠宝臻品与一对一选款服务",
-        contactPhone: "400-888-8888",
-        contactEmail: "contact@haichuan.com",
-        contactAddress: "深圳市罗湖区珠宝产业园",
+        contactPhone: "",
+        contactEmail: "",
+        contactAddress: "",
+        businessHours: "",
       });
     }
     return api.get("/settings/public");

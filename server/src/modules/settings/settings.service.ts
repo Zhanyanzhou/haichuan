@@ -2,8 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 
 const SETTINGS_FILE = path.resolve(__dirname, '..', '..', '..', 'settings.json');
+const SETTINGS_KEY = 'site';
 
 const DEFAULT_SETTINGS = {
   siteName: '海川珠宝',
@@ -35,43 +37,59 @@ export class SettingsService {
 
   constructor(private prisma: PrismaService) {}
 
-  private loadFromFile(): any {
+  /**
+   * 只在首次初始化时读取旧 JSON 文件，随后所有读写均以数据库为准。
+   * Docker 镜像和重建容器不再依赖该文件，保留读取逻辑用于本地旧配置平滑迁移。
+   */
+  private loadLegacyFile(): Prisma.InputJsonObject {
     try {
       if (fs.existsSync(SETTINGS_FILE)) {
         const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-        return normalizeSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) });
+        return normalizeSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) }) as Prisma.InputJsonObject;
       }
     } catch (e) {
       this.logger.warn(`读取设置文件失败，使用默认设置`);
     }
-    return normalizeSettings({ ...DEFAULT_SETTINGS });
+    return normalizeSettings({ ...DEFAULT_SETTINGS }) as Prisma.InputJsonObject;
   }
 
-  private saveToFile(data: any): void {
-    try {
-      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (e) {
-      this.logger.error(`保存设置文件失败`);
-    }
+  async getSettings(): Promise<Record<string, unknown>> {
+    const stored = await this.prisma.siteSetting.findUnique({
+      where: { key: SETTINGS_KEY },
+    });
+    if (stored) return normalizeSettings(stored.value) as Record<string, unknown>;
+
+    const value = this.loadLegacyFile();
+    const created = await this.prisma.siteSetting.upsert({
+      where: { key: SETTINGS_KEY },
+      create: { key: SETTINGS_KEY, value },
+      update: {},
+    });
+    return normalizeSettings(created.value) as Record<string, unknown>;
   }
 
-  getSettings() {
-    return this.loadFromFile();
-  }
-
-  updateSettings(data: any) {
-    const current = this.loadFromFile();
-    const updated = { ...current, ...data };
-    this.saveToFile(updated);
-    return updated;
+  async updateSettings(data: object, userId?: number) {
+    const current = await this.getSettings();
+    const updated = { ...current, ...data } as Prisma.InputJsonObject;
+    const saved = await this.prisma.siteSetting.upsert({
+      where: { key: SETTINGS_KEY },
+      create: { key: SETTINGS_KEY, value: updated, updatedBy: userId },
+      update: {
+        value: updated,
+        updatedBy: userId,
+        version: { increment: 1 },
+      },
+    });
+    return normalizeSettings(saved.value) as Record<string, unknown>;
   }
 
   async getBackupStatus() {
     return {
-      lastBackup: new Date().toISOString(),
-      autoBackup: true,
-      backupSchedule: '每日凌晨 3:00',
-      totalBackups: 30,
+      lastBackup: null,
+      autoBackup: false,
+      backupSchedule: null,
+      totalBackups: 0,
+      message: '当前未接入可验证的自动备份任务，请配置数据库备份后再启用自动备份状态。',
     };
   }
 
