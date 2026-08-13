@@ -7,6 +7,14 @@
 
 ## 已提交批次
 
+### 2026-08-14 后续整理
+
+| 提交 | 主题与文件 | 验证证据 | 推送状态 |
+| --- | --- | --- | --- |
+| `2c7b007` | `fix(client): 展示全局请求失败提示`。文件：`client/src/App.tsx`、`client/src/services/api.ts`、`client/src/services/requestErrorEvents.ts`、`client/src/components/common/RequestErrorNotice.tsx`。以浏览器原生事件替换 Ant Design 静态消息调用，集中展示 403、429、5xx 与业务失败提示，并提供 `role="alert"` 与自动消失行为。 | 精确暂存后已复核缓存差异并通过 `git diff --cached --check`；`npm run typecheck`、`npm run lint`、`npm run build` 均通过；Playwright 全量：55 通过、7 个因未配置真实 API 或客户令牌而跳过。 | 待本日志提交后一并常规推送至 `origin/codex/release-curation-20260814`。 |
+
+后续静态审查：Puck 相关改动横跨 39 个文件，约 7,847 行新增、3,013 行删除，并与 `server/src/modules/page-modules`、`server/src/app.module.ts` 和包含多业务域的 `server/prisma/schema.prisma` 相互依赖；选款咨询也依赖同一 Schema。为避免形成无法在干净提交基线构建的半成品，未继续暂存。Schema 还同时包含交易、合作商家、公开目录和页面文档结构，不能安全归为单一 migration 提交；本次未执行任何 Prisma、migration、seed 或数据库连接命令。密码重置、管理员检查、补偿迁移脚本、CSV、Docker override、VS Code 配置、预览图片仍排除，且未读取敏感脚本实现。
+
 | 提交 | 主题与文件 | 暂存复核 | 验证证据 |
 | --- | --- | --- | --- |
 | `b21cacb` | `fix(public): 移除未确认公开元数据并改善错误可访问性`。文件：`client/index.html`、`client/public/robots.txt`、`client/public/sitemap.xml`、`client/src/components/common/ErrorBoundary.tsx`、`client/src/pages/public/About/index.tsx`。移除未确认域名、电话与不存在的分享图；公开错误恢复按钮具备原生按钮语义与可见焦点；补充固定的品牌页元信息。 | 每次精确路径暂存后均执行 `git diff --cached --check`、`--name-only`、`--stat` 和完整暂存差异复核。未包含 Puck、交易、数据库、依赖、脚本或未跟踪候选。 | 当前完整工作区：`npm run typecheck`、`npm run lint`、`npm run test:selection-inquiry`、`npm run test:contracts`、`npm run build` 均退出成功；`git diff --check` 通过。运行时烟测报告记录公开路由及联系页隐私必填提示的桌面/移动复验；未将其视为真实 API 成功路径验收。 |
