@@ -12,8 +12,11 @@
 | 提交 | 主题与文件 | 验证证据 | 推送状态 |
 | --- | --- | --- | --- |
 | `2c7b007` | `fix(client): 展示全局请求失败提示`。文件：`client/src/App.tsx`、`client/src/services/api.ts`、`client/src/services/requestErrorEvents.ts`、`client/src/components/common/RequestErrorNotice.tsx`。以浏览器原生事件替换 Ant Design 静态消息调用，集中展示 403、429、5xx 与业务失败提示，并提供 `role="alert"` 与自动消失行为。 | 精确暂存后已复核缓存差异并通过 `git diff --cached --check`；`npm run typecheck`、`npm run lint`、`npm run build` 均通过；Playwright 全量：55 通过、7 个因未配置真实 API 或客户令牌而跳过。 | 待本日志提交后一并常规推送至 `origin/codex/release-curation-20260814`。 |
+| `ec04ef3` | `feat(settings): 持久化公开联系信息与隐私入口`。文件：公开 `SiteSetting` Schema 与 `20260813090000_add_site_settings` SQL 源码、设置服务和公开接口、`/privacy` 页面与路由、页脚隐私入口、联系页空值/加载/错误降级及隐私同意可访问性。联系信息只取实际设置，移除了伪造电话、邮箱和地址兜底。 | 缓存精确复核后 `git diff --cached --check` 通过；`npm run typecheck`、`npm run lint`、`npm run test:selection-inquiry`（20 项）、`npm run test:contracts`（26 种区块）、`npm run build` 均通过；联系/隐私 Playwright：18 通过、1 个 mock 模式场景按配置跳过。 | 待本日志提交后一并常规推送至 `origin/codex/release-curation-20260814`。 |
 
 后续静态审查：Puck 相关改动横跨 39 个文件，约 7,847 行新增、3,013 行删除，并与 `server/src/modules/page-modules`、`server/src/app.module.ts` 和包含多业务域的 `server/prisma/schema.prisma` 相互依赖；选款咨询也依赖同一 Schema。为避免形成无法在干净提交基线构建的半成品，未继续暂存。Schema 还同时包含交易、合作商家、公开目录和页面文档结构，不能安全归为单一 migration 提交；本次未执行任何 Prisma、migration、seed 或数据库连接命令。密码重置、管理员检查、补偿迁移脚本、CSV、Docker override、VS Code 配置、预览图片仍排除，且未读取敏感脚本实现。
+
+`ec04ef3` 所含 SQL 仅作为版本化源码提交，未执行。部署或启动包含此服务端变更的环境前，必须由数据库负责人审核表结构影响、完成备份与演练，并在隔离环境验证后决定是否执行该 migration；在 migration 未执行的环境中，不应发布该服务端设置持久化代码。
 
 | 提交 | 主题与文件 | 暂存复核 | 验证证据 |
 | --- | --- | --- | --- |
