@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
 Disallow: /admin/
-Sitemap: https://haichuanjewelry.com/sitemap.xml
+# 上线前待正式域名确认后，填写可验证的绝对 Sitemap 地址。
+# 当前不声明 Sitemap，以避免搜索引擎爬取未确认的站点地址。

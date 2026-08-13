@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
+import { usePageMetaStore } from '@/store/pageMetaStore';
 
 /* ═══════ 设计常量 ═══════ */
 const DARK = '#24211E';
@@ -21,6 +22,16 @@ const designChapters = [
 ];
 
 export default function About() {
+  const setPageMeta = usePageMetaStore((s) => s.setMeta);
+  const clearPageMeta = usePageMetaStore((s) => s.clear);
+  useEffect(() => {
+    setPageMeta({
+      title: '品牌故事 | 海川珠宝',
+      description: '海川珠宝的品牌理念、设计哲学与东方工艺传承。',
+    });
+    return () => clearPageMeta();
+  }, [setPageMeta, clearPageMeta]);
+
   const [activeDesign, setActiveDesign] = useState(0);
   const designRefs = useRef<(HTMLElement | null)[]>([]);
 

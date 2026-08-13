@@ -1,5 +1,4 @@
 import { Component, type ReactNode } from "react";
-import { Button } from "antd";
 
 interface Props {
   children: ReactNode;
@@ -42,16 +41,16 @@ export class ErrorBoundary extends Component<Props, State> {
             <p className="text-sm text-brand-muted mb-6">
               {this.state.error?.message || "发生了未知错误，请尝试刷新页面"}
             </p>
-            <Button
-              type="primary"
+            <button
+              type="button"
               onClick={() => {
                 this.setState({ hasError: false });
                 window.location.reload();
               }}
-              style={{ background: "#B8944E", borderColor: "#B8944E" }}
+              className="rounded bg-[#B8944E] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#a6803f] focus:outline-none focus:ring-2 focus:ring-[#B8944E] focus:ring-offset-2"
             >
               刷新页面
-            </Button>
+            </button>
           </div>
         </div>
       );
