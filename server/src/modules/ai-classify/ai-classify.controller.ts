@@ -22,6 +22,7 @@ import {
   ClassifyBatchDto,
   ChatDto,
   GenerateDescriptionDto,
+  ConfirmClassifyDto,
 } from './dto/ai-classify.dto';
 
 @ApiTags('AI智能分类')
@@ -42,6 +43,11 @@ export class AiClassifyController {
   @ApiOperation({ summary: '单张图片AI分类' })
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async classifySingle(@Body() dto: ClassifyImageDto) {
+    if (!this.kimiService.isAvailable()) {
+      throw new ServiceUnavailableException(
+        'AI 服务未配置，请先设置 KIMI_API_KEY 环境变量',
+      );
+    }
     return this.aiClassifyService.classifyImage(dto.imageUrl);
   }
 
@@ -49,6 +55,11 @@ export class AiClassifyController {
   @ApiOperation({ summary: '批量图片AI分类' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async classifyBatch(@Body() dto: ClassifyBatchDto) {
+    if (!this.kimiService.isAvailable()) {
+      throw new ServiceUnavailableException(
+        'AI 服务未配置，请先设置 KIMI_API_KEY 环境变量',
+      );
+    }
     return this.aiClassifyService.batchClassify(dto.imageUrls);
   }
 
@@ -61,11 +72,12 @@ export class AiClassifyController {
   @Put('confirm/:id')
   async confirm(
     @Param('id') id: string,
-    @Body('confirmedCategoryId') confirmedCategoryId: number,
+    @Body() dto: ConfirmClassifyDto,
     @CurrentUser() user: any,
   ) {
     return this.aiClassifyService.confirmClassification(+id, {
-      confirmedCategoryId,
+      status: dto.status,
+      confirmedCategoryId: dto.confirmedCategoryId,
       operatorId: user.id,
     });
   }

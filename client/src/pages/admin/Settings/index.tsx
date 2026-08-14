@@ -23,7 +23,6 @@ export default function Settings() {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(true);
   const [backingUp, setBackingUp] = useState(false);
-  const [autoBackup, setAutoBackup] = useState(true);
 
   useEffect(() => {
     const load = async () => {
@@ -54,7 +53,14 @@ export default function Settings() {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      message.success('备份已生成并下载');
+      // 按服务端真实状态反馈：当前备份任务未接入（返回占位状态），不假报成功
+      const body = await res.json().catch(() => null);
+      const payload = unwrapResponse(body) ?? body;
+      if (payload?.lastBackup) {
+        message.info(`最近备份：${payload.lastBackup}`);
+      } else {
+        message.warning(payload?.message || '备份功能未接入，请使用数据库侧备份方案');
+      }
     } catch {
       message.error('备份失败，请检查后端服务');
     } finally {
@@ -113,9 +119,9 @@ export default function Settings() {
               <div className="flex items-center justify-between p-4 bg-brand-bg">
                 <div>
                   <p className="font-medium text-brand-text">自动备份</p>
-                  <p className="text-xs text-brand-muted">每日凌晨3:00 {autoBackup ? '(已开启)' : '(已关闭)'}</p>
+                  <p className="text-xs text-brand-muted">未接入：服务端暂无自动备份任务</p>
                 </div>
-                <Switch checked={autoBackup} onChange={setAutoBackup} />
+                <Switch checked={false} disabled />
               </div>
             </div>
           ),

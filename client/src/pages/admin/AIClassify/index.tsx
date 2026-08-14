@@ -9,6 +9,7 @@ const { Dragger } = Upload;
 
 const sm: Record<string, { c: string; t: string }> = {
   auto_confirmed: { c: 'green', t: '已自动确认' }, pending_confirm: { c: 'gold', t: '待确认' }, pending_review: { c: 'orange', t: '待人工审核' },
+  confirmed: { c: 'green', t: '已确认' }, rejected: { c: 'red', t: '已驳回' },
 };
 
 export default function AIClassify() {
@@ -32,12 +33,11 @@ export default function AIClassify() {
     setUploading(true);
     try {
       const file = options.file as RcFile;
-      // First upload the image
-      await uploadApi.uploadImage(file);
-      // Then call AI classify
-      const formData = new FormData();
-      formData.append('file', file);
-      await aiClassifyApi.classify(formData);
+      // 先上传取回图片地址，再按 JSON 契约发起识别（服务端 ClassifyImageDto 要求 imageUrl）
+      const uploadRes = await uploadApi.uploadImage(file);
+      const url = unwrapResponse<{ url: string }>(uploadRes)?.url;
+      if (!url) throw new Error('图片上传失败：未获取到图片地址');
+      await aiClassifyApi.classify({ imageUrl: url });
       message.success('识别完成');
       loadRecords();
     } catch (e: any) {
@@ -47,9 +47,12 @@ export default function AIClassify() {
     }
   };
 
-  const handleConfirm = async (id: number) => {
+  const handleConfirm = async (record: any) => {
     try {
-      await aiClassifyApi.confirm(id, { status: 'confirmed' });
+      await aiClassifyApi.confirm(record.id, {
+        status: 'confirmed',
+        confirmedCategoryId: record.predictedCategoryId,
+      });
       message.success('已确认');
       loadRecords();
     } catch (e: any) { message.error(e?.message || '确认失败'); }
@@ -94,7 +97,7 @@ export default function AIClassify() {
             { title: '置信度', dataIndex: 'confidence', width: 100, render: (v: number) => <span className={`font-sans font-bold ${v > 90 ? 'text-green-500' : v > 70 ? 'text-brand-gold' : 'text-red-400'}`}>{v}%</span> },
             { title: '状态', dataIndex: 'status', width: 120, render: (v: string) => { const s = sm[v]; return <Tag color={s?.c}>{s?.t}</Tag>; } },
             { title: '时间', dataIndex: 'createdAt', width: 150 },
-            { title: '操作', width: 140, render: (_: any, r: any) => r.status === 'pending_confirm' ? <Space><Button size="small" type="primary" onClick={() => handleConfirm(r.id)}>确认</Button><Button size="small" onClick={() => handleReject(r.id)}>驳回</Button></Space> : null },
+            { title: '操作', width: 140, render: (_: any, r: any) => r.status === 'pending_confirm' ? <Space><Button size="small" type="primary" onClick={() => handleConfirm(r)}>确认</Button><Button size="small" onClick={() => handleReject(r.id)}>驳回</Button></Space> : null },
           ]} />
       </Card>
     </div>

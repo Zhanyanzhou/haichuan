@@ -284,12 +284,37 @@ ${this.classifyOutputSchema}`;
    */
   async confirmClassification(
     id: number,
-    data: { confirmedCategoryId: number; operatorId: number },
+    data: {
+      status: "confirmed" | "rejected";
+      confirmedCategoryId?: number;
+      operatorId: number;
+    },
   ) {
+    // 驳回：仅落驳回状态，不写人工确认分类
+    if (data.status === "rejected") {
+      return this.prisma.aIClassifyRecord.update({
+        where: { id },
+        data: {
+          status: "rejected",
+          operatorId: data.operatorId,
+        },
+      });
+    }
+
+    // 确认：未显式传人工分类时沿用预测分类，保证 confirmedCategoryId 有值
+    const confirmedCategoryId =
+      data.confirmedCategoryId ??
+      (
+        await this.prisma.aIClassifyRecord.findUnique({
+          where: { id },
+          select: { predictedCategoryId: true },
+        })
+      )?.predictedCategoryId;
+
     const record = await this.prisma.aIClassifyRecord.update({
       where: { id },
       data: {
-        confirmedCategoryId: data.confirmedCategoryId,
+        confirmedCategoryId,
         operatorId: data.operatorId,
         status: "confirmed",
       },
@@ -297,9 +322,12 @@ ${this.classifyOutputSchema}`;
 
     // Feedback loop: if the confirmed category differs from prediction,
     // this data could be used to retrain the model in production
-    if (record.predictedCategoryId !== data.confirmedCategoryId) {
+    if (
+      record.predictedCategoryId != null &&
+      record.predictedCategoryId !== confirmedCategoryId
+    ) {
       this.logger.log(
-        `Classification corrected: ${record.predictedCategoryId} → ${data.confirmedCategoryId}. Feedback recorded.`,
+        `Classification corrected: ${record.predictedCategoryId} → ${confirmedCategoryId}. Feedback recorded.`,
       );
     }
 

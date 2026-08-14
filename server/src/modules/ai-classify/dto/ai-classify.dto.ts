@@ -5,6 +5,8 @@ import {
   MaxLength,
   IsArray,
   ArrayMaxSize,
+  IsIn,
+  IsInt,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -43,4 +45,22 @@ export class GenerateDescriptionDto {
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(50) category!: string;
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(50) material!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(50) style?: string;
+}
+
+export class ConfirmClassifyDto {
+  @ApiProperty({
+    description: '处理结果：确认或驳回',
+    enum: ['confirmed', 'rejected'],
+  })
+  @IsIn(['confirmed', 'rejected'], {
+    message: 'status 必须是 confirmed 或 rejected',
+  })
+  status!: 'confirmed' | 'rejected';
+
+  @ApiPropertyOptional({
+    description: '人工确认的分类 ID（确认时可省略，缺省沿用预测分类）',
+  })
+  @IsOptional()
+  @IsInt()
+  confirmedCategoryId?: number;
 }
