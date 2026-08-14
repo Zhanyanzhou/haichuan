@@ -20,18 +20,6 @@ export class InventoryController {
     return this.inventoryService.findAll(query);
   }
 
-  @Get('alerts')
-  @ApiOperation({ summary: '获取低库存预警' })
-  getAlerts() {
-    return this.inventoryService.getLowStockAlerts();
-  }
-
-  @Get('summary')
-  @ApiOperation({ summary: '获取库存汇总' })
-  getSummary() {
-    return this.inventoryService.getSummary();
-  }
-
   @Get(':id')
   @ApiOperation({ summary: '获取库存详情' })
   findById(@Param('id') id: string) {

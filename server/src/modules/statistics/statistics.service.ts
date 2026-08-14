@@ -112,27 +112,6 @@ export class StatisticsService {
     };
   }
 
-  async getHotProducts(limit = 10) {
-    return this.prisma.product.findMany({
-      where: { status: "PUBLISHED" },
-      orderBy: { viewCount: "desc" },
-      take: limit,
-      select: {
-        id: true,
-        name: true,
-        code: true,
-        price: true,
-        viewCount: true,
-        salesCount: true,
-        materialType: true,
-      },
-    });
-  }
-
-  async getOrderTrend(days = 7) {
-    return this.getTrend(days, "orders");
-  }
-
   /**
    * 经营趋势：按日聚合指定指标，返回近 N 日序列(含 0 值日期，保证连续)。
    * 访客(UV)因仅能基于 session 去重、缺少独立访客埋点，暂不纳入。

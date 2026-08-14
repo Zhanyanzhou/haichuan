@@ -62,12 +62,4 @@ export class TradeEventsService {
       );
     }
   }
-
-  /** 查询某订单的完整事件时间线（按时间正序） */
-  async findTimeline(orderId: number) {
-    return this.prisma.tradeEvent.findMany({
-      where: { orderId },
-      orderBy: { createdAt: 'asc' },
-    });
-  }
 }

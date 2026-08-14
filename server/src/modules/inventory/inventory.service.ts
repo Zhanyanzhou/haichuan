@@ -68,38 +68,6 @@ export class InventoryService {
     });
   }
 
-  async getLowStockAlerts() {
-    // Prisma 不支持列间比较，先用 raw SQL 取触达安全库存阈值的 id，再回表带关联
-    const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-      SELECT id FROM inventories WHERE quantity <= safety_stock
-    `;
-    const ids = rows.map((r) => r.id);
-    if (ids.length === 0) return [];
-    return this.prisma.inventory.findMany({
-      where: { id: { in: ids } },
-      include: {
-        sku: { select: { skuCode: true, product: { select: { name: true } } } },
-        warehouse: { select: { name: true } },
-      },
-    });
-  }
-
-  async getSummary() {
-    const [totalQuantity, warehouses, lowStockRows] = await Promise.all([
-      this.prisma.inventory.aggregate({ _sum: { quantity: true } }),
-      this.prisma.warehouse.count({ where: { isActive: true } }),
-      this.prisma.$queryRaw<{ count: bigint }[]>`
-        SELECT COUNT(*) AS count FROM inventories WHERE quantity <= safety_stock
-      `,
-    ]);
-
-    return {
-      totalQuantity: totalQuantity._sum.quantity || 0,
-      warehouseCount: warehouses,
-      lowStockCount: Number(lowStockRows[0]?.count ?? 0),
-    };
-  }
-
   /** 聚合某商品全部 SKU 的可用库存总量(经 Inventory，统一库存真相源) */
   async getTotalByProduct(productId: number) {
     const result = await this.prisma.inventory.aggregate({

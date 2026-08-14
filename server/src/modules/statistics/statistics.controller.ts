@@ -16,12 +16,6 @@ export class StatisticsController {
   @ApiOperation({ summary: '获取仪表盘统计数据' })
   @Get('dashboard') getDashboard() { return this.statisticsService.getDashboard(); }
 
-  @ApiOperation({ summary: '获取热门商品排行' })
-  @Get('hot-products') getHotProducts(@Query('limit') limit?: string) { return this.statisticsService.getHotProducts(limit ? +limit : 10); }
-
-  @ApiOperation({ summary: '获取订单趋势数据' })
-  @Get('order-trend') getOrderTrend(@Query('days') days?: string) { return this.statisticsService.getOrderTrend(days ? +days : 7); }
-
   @ApiOperation({ summary: '获取经营趋势(按指标按日聚合): orders/revenue/inquiries/pageViews' })
   @Get('trend')
   getTrend(

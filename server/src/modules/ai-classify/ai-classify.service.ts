@@ -186,60 +186,6 @@ ${this.classifyOutputSchema}`;
   }
 
   /**
-   * Mock 分类 - 当 Kimi API 不可用时的回退方案
-   */
-  private async mockClassify(
-    imageUrl: string,
-    categories: { id: number; name: string; level: number }[],
-  ): Promise<{
-    predictedCategoryId: number | null;
-    predictedCategoryName: string;
-    confidence: number;
-    allPredictions: { categoryId: number; name: string; confidence: number }[];
-  }> {
-    this.logger.log(`使用 mock 模式分类图片: ${imageUrl}`);
-    await this.delay(500);
-
-    const predictions = categories
-      .filter(() => Math.random() > 0.3)
-      .slice(0, 5)
-      .map((cat) => ({
-        categoryId: cat.id,
-        name: cat.name,
-        confidence: parseFloat((Math.random() * 60 + 30).toFixed(1)),
-      }))
-      .sort((a, b) => b.confidence - a.confidence);
-
-    if (predictions.length > 0) {
-      predictions[0].confidence = parseFloat(
-        (Math.random() * 15 + 85).toFixed(1),
-      );
-    }
-
-    const topPrediction = predictions[0];
-    const confidence = topPrediction?.confidence || 0;
-    let status = "pending_review";
-    if (confidence >= 90) status = "auto_confirmed";
-    else if (confidence >= 70) status = "pending_confirm";
-
-    await this.prisma.aIClassifyRecord.create({
-      data: {
-        imageUrl,
-        predictedCategoryId: topPrediction?.categoryId || null,
-        confidence,
-        status,
-      },
-    });
-
-    return {
-      predictedCategoryId: topPrediction?.categoryId || null,
-      predictedCategoryName: topPrediction?.name || "未知",
-      confidence,
-      allPredictions: predictions.slice(0, 3),
-    };
-  }
-
-  /**
    * Batch classify multiple images
    */
   async batchClassify(imageUrls: string[]): Promise<any[]> {
@@ -362,9 +308,5 @@ ${this.classifyOutputSchema}`;
       accuracy: confirmed > 0 ? ((correctPredictions / confirmed) * 100).toFixed(1) : "N/A",
       todayCount,
     };
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

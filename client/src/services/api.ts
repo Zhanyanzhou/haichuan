@@ -939,8 +939,6 @@ export type TrendMetric = "orders" | "revenue" | "inquiries" | "pageViews";
 
 export const statisticsApi = {
   getDashboard: () => api.get("/statistics/dashboard"),
-  getOrderTrend: (days = 7) =>
-    api.get("/statistics/order-trend", { params: { days } }),
   getTrend: (days = 7, metric: TrendMetric = "orders") =>
     api.get("/statistics/trend", { params: { days, metric } }),
 };

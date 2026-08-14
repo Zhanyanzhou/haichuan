@@ -6,8 +6,6 @@ import { ProductsService } from '../products/products.service';
 @Injectable()
 export class GoldPriceService {
   private readonly logger = new Logger(GoldPriceService.name);
-  private currentPrice = 485.60; // Default gold price
-  private previousPrice = 483.30;
 
   constructor(
     private prisma: PrismaService,
@@ -68,9 +66,6 @@ export class GoldPriceService {
    * Manually update gold price
    */
   async updateManually(data: { price: number; operatorId: number; remark?: string }) {
-    this.previousPrice = this.currentPrice;
-    this.currentPrice = data.price;
-
     const record = await this.prisma.goldPrice.create({
       data: {
         price: data.price,
@@ -91,13 +86,6 @@ export class GoldPriceService {
       source: record.source,
       recordDate: record.recordDate,
     };
-  }
-
-  /**
-   * Get current gold price value
-   */
-  getCurrentPrice(): number {
-    return this.currentPrice;
   }
 
   /**
