@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Modal, Upload, message } from "antd";
+import { Modal, Upload, message, Form, Input, Button } from "antd";
 import { customerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useCommerceEnabled } from "@/store/featureFlags";
@@ -71,22 +71,35 @@ export default function MyAccountDashboard({
   onRefresh,
 }: AccountDashboardProps) {
   const name = profile?.name || "海川贵宾";
-  const primaryAddress = addresses[0];
   const commerceEnabled = useCommerceEnabled();
 
   // P1-29：付款凭证上传（电商闭环 —— 线下转账订单需顾客补凭证，否则卡死 PENDING_PAYMENT）
   const [proofOrderId, setProofOrderId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
 
+  // 个人资料编辑
+  const [profileEditOpen, setProfileEditOpen] = useState(false);
+  const [profileForm] = Form.useForm();
+  const [savingProfile, setSavingProfile] = useState(false);
+  // 地址管理
+  const [addressOpen, setAddressOpen] = useState(false);
+  const [addressForm] = Form.useForm();
+  const [savingAddress, setSavingAddress] = useState(false);
+  const [editingAddressId, setEditingAddressId] = useState<number | null>(null);
+
   const hasPendingProof = (orderId: number) =>
-    orders.find((x) => x.id === orderId)?.payments?.some((p) => p.status === "PENDING" && p.hasProof);
+    orders
+      .find((x) => x.id === orderId)
+      ?.payments?.some((p) => p.status === "PENDING" && p.hasProof);
 
   const handleUploadProof = async (file: File) => {
     if (proofOrderId == null) return;
     setUploading(true);
     try {
       const upRes = await customerApi.uploadPaymentProof(file);
-      const proofKey = unwrapResponse<{ storageKey?: string }>(upRes)?.storageKey;
+      const proofKey = unwrapResponse<{ storageKey?: string }>(
+        upRes,
+      )?.storageKey;
       if (!proofKey) throw new Error("凭证上传失败");
       await customerApi.submitPaymentProof(proofOrderId, proofKey);
       message.success("付款凭证已提交，等待审核");
@@ -99,80 +112,395 @@ export default function MyAccountDashboard({
     }
   };
 
+  const openProfileEdit = () => {
+    profileForm.setFieldsValue({ name: profile?.name, email: profile?.email });
+    setProfileEditOpen(true);
+  };
+
+  const saveProfile = async () => {
+    const values = await profileForm.validateFields();
+    setSavingProfile(true);
+    try {
+      await customerApi.updateProfile({ name: values.name, email: values.email });
+      message.success("资料已更新");
+      setProfileEditOpen(false);
+      onRefresh?.();
+    } catch (e: any) {
+      message.error(e?.message || "保存失败");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const openAddressCreate = () => {
+    setEditingAddressId(null);
+    addressForm.resetFields();
+    setAddressOpen(true);
+  };
+
+  const openAddressEdit = (addr: any) => {
+    setEditingAddressId(addr.id);
+    addressForm.setFieldsValue(addr);
+    setAddressOpen(true);
+  };
+
+  const saveAddress = async () => {
+    const values = await addressForm.validateFields();
+    setSavingAddress(true);
+    try {
+      if (editingAddressId) {
+        await customerApi.updateAddress(editingAddressId, values);
+      } else {
+        await customerApi.createAddress(values);
+      }
+      message.success(editingAddressId ? "地址已更新" : "地址已添加");
+      setAddressOpen(false);
+      onRefresh?.();
+    } catch (e: any) {
+      message.error(e?.message || "保存失败");
+    } finally {
+      setSavingAddress(false);
+    }
+  };
+
+  const removeAddress = async (id: number) => {
+    try {
+      await customerApi.deleteAddress(id);
+      message.success("地址已删除");
+      onRefresh?.();
+    } catch (e: any) {
+      message.error(e?.message || "删除失败");
+    }
+  };
+
   return (
     <>
-    <main className="my-account">
-      <style>{styles}</style>
-      <section className="my-account__intro">
-        <div>
-          <p className="my-account__eyebrow">HAICHUAN PRIVATE CLIENT</p>
-          <h1>我的账号</h1>
-          <p className="my-account__greeting">您好，{name}。您的作品、咨询与服务记录都在这里。</p>
-        </div>
-        <button type="button" className="my-account__sign-out" onClick={onSignOut}>退出登录</button>
-      </section>
-
-      <nav className="my-account__shortcuts" aria-label="账号快捷服务">
-        <a href="#my-selections"><span>01</span>我的选款</a>
-        <a href="#my-appointments"><span>02</span>我的预约</a>
-        <a href="#my-orders"><span>03</span>我的订单</a>
-        <a href="#my-profile"><span>04</span>个人资料</a>
-      </nav>
-
-      <section className="my-account__summary" aria-label="服务概览">
-        <div><strong>{String(selectionInquiries.length).padStart(2, "0")}</strong><span>选款咨询</span></div>
-        <div><strong>{String(inquiries.length).padStart(2, "0")}</strong><span>预约咨询</span></div>
-        <div><strong>{String(orders.length).padStart(2, "0")}</strong><span>历史订单</span></div>
-        <Link to="/catalog" className="my-account__summary-action">继续选款 <b>→</b></Link>
-      </section>
-
-      <div className="my-account__grid">
-        <section id="my-selections" className="my-account__panel">
-          <div className="my-account__panel-head"><div><p>PRIVATE SELECTION</p><h2>我的选款</h2></div><Link to="/catalog">进入选款中心 →</Link></div>
-          {selectionInquiries.length ? <div className="my-account__records">{selectionInquiries.slice(0, 3).map((record) => <article key={record.id}><div><small>{new Date(record.createdAt).toLocaleDateString("zh-CN")}</small><h3>{record.items?.[0]?.productNameSnapshot || "选款咨询"}</h3></div><em>{inquiryStatus[record.status] || record.status}</em></article>)}</div> : <Empty>暂未提交选款咨询。<Link to="/catalog">去挑选心仪作品 →</Link></Empty>}
-        </section>
-
-        <section id="my-appointments" className="my-account__panel">
-          <div className="my-account__panel-head"><div><p>PERSONAL SERVICE</p><h2>我的预约</h2></div><Link to="/contact">预约咨询 →</Link></div>
-          {inquiries.length ? <div className="my-account__records">{inquiries.slice(0, 3).map((record) => <article key={record.id}><div><small>{new Date(record.createdAt).toLocaleDateString("zh-CN")}</small><h3>{record.product?.name || record.consultationType || "预约咨询"}</h3></div><em>{inquiryStatus[record.status] || record.status}</em></article>)}</div> : <Empty>还没有预约记录。<Link to="/contact">预约专属顾问 →</Link></Empty>}
-        </section>
-
-        <section id="my-orders" className="my-account__panel my-account__panel--wide">
-          <div className="my-account__panel-head"><div><p>ORDER ARCHIVE</p><h2>我的订单</h2></div></div>
-          {orders.length ? <div className="my-account__records">{orders.slice(0, 4).map((order) => <article key={order.id}><div><small>{order.orderNo} · {new Date(order.createdAt).toLocaleDateString("zh-CN")}</small><h3>{order.items?.[0]?.product?.name || "珠宝作品"}</h3></div><div className="my-account__order-meta"><em>{orderStatus[order.status] || order.status}</em><strong>¥{Number(order.finalAmount).toLocaleString("zh-CN")}</strong>{order.status === "PENDING_PAYMENT" && (commerceEnabled ? (hasPendingProof(order.id) ? <span style={{ fontSize: 11, color: "#b8944e" }}>凭证已提交·待审核</span> : <button type="button" className="my-account__summary-action" style={{ padding: "6px 12px", fontSize: 12, minHeight: 0 }} onClick={() => setProofOrderId(order.id)} disabled={uploading}>上传付款凭证</button>) : <span style={{ fontSize: 11, color: "#766f66" }}>线上付款暂未开放·顾问将联系您</span>)}</div></article>)}</div> : <Empty>暂未有订单记录。<Link to="/catalog">浏览珠宝作品 →</Link></Empty>}
-        </section>
-
-        <section className="my-account__panel my-account__panel--collection">
-          <p>PRIVATE COLLECTION</p><h2>我的收藏</h2><span>把心仪的作品留在这里，方便下次继续挑选。</span><Link to="/catalog" className="my-account__button">浏览作品</Link>
-        </section>
-
-        <section id="my-profile" className="my-account__panel my-account__panel--profile">
-          <div className="my-account__panel-head"><div><p>ACCOUNT PROFILE</p><h2>个人资料</h2></div></div>
-          <dl><div><dt>称呼</dt><dd>{name}</dd></div><div><dt>手机号</dt><dd>{profile?.phone || "—"}</dd></div><div><dt>邮箱</dt><dd>{profile?.email || "暂未填写"}</dd></div></dl>
-          <div className="my-account__address"><p>常用收货地址</p>{primaryAddress ? <span>{primaryAddress.recipientName} · {primaryAddress.recipientPhone}<br />{[primaryAddress.province, primaryAddress.city, primaryAddress.district, primaryAddress.detail].filter(Boolean).join("")}</span> : <span>暂未保存收货地址</span>}</div>
-        </section>
-      </div>
-    </main>
-      {commerceEnabled && <Modal
-        open={proofOrderId !== null}
-        title="上传付款凭证"
-        onCancel={() => setProofOrderId(null)}
-        footer={null}
-        destroyOnClose
-      >
-        <p style={{ color: "#766f66", fontSize: 13, marginBottom: 16 }}>请上传转账截图或凭证图片（JPG/PNG/WebP，≤10MB）。审核通过后订单进入发货流程。</p>
-        <Upload
-          accept="image/jpeg,image/png,image/webp,image/gif"
-          maxCount={1}
-          showUploadList={false}
-          beforeUpload={(file) => { void handleUploadProof(file); return false; }}
-          disabled={uploading}
-        >
-          <button type="button" className="my-account__button" disabled={uploading} style={{ padding: "10px 16px", background: "#b8944e", color: "#fff", border: 0, cursor: "pointer" }}>
-            {uploading ? "上传中..." : "选择图片并上传"}
+      <main className="my-account">
+        <style>{styles}</style>
+        <section className="my-account__intro">
+          <div>
+            <p className="my-account__eyebrow">HAICHUAN PRIVATE CLIENT</p>
+            <h1>我的账号</h1>
+            <p className="my-account__greeting">
+              您好，{name}。您的作品、咨询与服务记录都在这里。
+            </p>
+          </div>
+          <button
+            type="button"
+            className="my-account__sign-out"
+            onClick={onSignOut}
+          >
+            退出登录
           </button>
-        </Upload>
-      </Modal>}
+        </section>
+
+        <nav className="my-account__shortcuts" aria-label="账号快捷服务">
+          <a href="#my-selections">
+            <span>01</span>我的选款
+          </a>
+          <a href="#my-appointments">
+            <span>02</span>我的预约
+          </a>
+          <a href="#my-orders">
+            <span>03</span>我的订单
+          </a>
+          <a href="#my-profile">
+            <span>04</span>个人资料
+          </a>
+        </nav>
+
+        <section className="my-account__summary" aria-label="服务概览">
+          <div>
+            <strong>
+              {String(selectionInquiries.length).padStart(2, "0")}
+            </strong>
+            <span>选款咨询</span>
+          </div>
+          <div>
+            <strong>{String(inquiries.length).padStart(2, "0")}</strong>
+            <span>预约咨询</span>
+          </div>
+          <div>
+            <strong>{String(orders.length).padStart(2, "0")}</strong>
+            <span>历史订单</span>
+          </div>
+          <Link to="/catalog" className="my-account__summary-action">
+            继续选款 <b>→</b>
+          </Link>
+        </section>
+
+        <div className="my-account__grid">
+          <section id="my-selections" className="my-account__panel">
+            <div className="my-account__panel-head">
+              <div>
+                <p>PRIVATE SELECTION</p>
+                <h2>我的选款</h2>
+              </div>
+              <Link to="/catalog">进入选款中心 →</Link>
+            </div>
+            {selectionInquiries.length ? (
+              <div className="my-account__records">
+                {selectionInquiries.slice(0, 3).map((record) => (
+                  <article key={record.id}>
+                    <div>
+                      <small>
+                        {new Date(record.createdAt).toLocaleDateString("zh-CN")}
+                      </small>
+                      <h3>
+                        {record.items?.[0]?.productNameSnapshot || "选款咨询"}
+                      </h3>
+                    </div>
+                    <em>{inquiryStatus[record.status] || record.status}</em>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <Empty>
+                暂未提交选款咨询。<Link to="/catalog">去挑选心仪作品 →</Link>
+              </Empty>
+            )}
+          </section>
+
+          <section id="my-appointments" className="my-account__panel">
+            <div className="my-account__panel-head">
+              <div>
+                <p>PERSONAL SERVICE</p>
+                <h2>我的预约</h2>
+              </div>
+              <Link to="/contact">预约咨询 →</Link>
+            </div>
+            {inquiries.length ? (
+              <div className="my-account__records">
+                {inquiries.slice(0, 3).map((record) => (
+                  <article key={record.id}>
+                    <div>
+                      <small>
+                        {new Date(record.createdAt).toLocaleDateString("zh-CN")}
+                      </small>
+                      <h3>
+                        {record.product?.name ||
+                          record.consultationType ||
+                          "预约咨询"}
+                      </h3>
+                    </div>
+                    <em>{inquiryStatus[record.status] || record.status}</em>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <Empty>
+                还没有预约记录。<Link to="/contact">预约专属顾问 →</Link>
+              </Empty>
+            )}
+          </section>
+
+          <section
+            id="my-orders"
+            className="my-account__panel my-account__panel--wide"
+          >
+            <div className="my-account__panel-head">
+              <div>
+                <p>ORDER ARCHIVE</p>
+                <h2>我的订单</h2>
+              </div>
+            </div>
+            {orders.length ? (
+              <div className="my-account__records">
+                {orders.slice(0, 4).map((order) => (
+                  <article key={order.id}>
+                    <div>
+                      <small>
+                        {order.orderNo} ·{" "}
+                        {new Date(order.createdAt).toLocaleDateString("zh-CN")}
+                      </small>
+                      <h3>{order.items?.[0]?.product?.name || "珠宝作品"}</h3>
+                    </div>
+                    <div className="my-account__order-meta">
+                      <em>{orderStatus[order.status] || order.status}</em>
+                      <strong>
+                        ¥{Number(order.finalAmount).toLocaleString("zh-CN")}
+                      </strong>
+                      {order.status === "PENDING_PAYMENT" &&
+                        (commerceEnabled ? (
+                          hasPendingProof(order.id) ? (
+                            <span style={{ fontSize: 11, color: "#b8944e" }}>
+                              凭证已提交·待审核
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="my-account__summary-action"
+                              style={{
+                                padding: "6px 12px",
+                                fontSize: 12,
+                                minHeight: 0,
+                              }}
+                              onClick={() => setProofOrderId(order.id)}
+                              disabled={uploading}
+                            >
+                              上传付款凭证
+                            </button>
+                          )
+                        ) : (
+                          <span style={{ fontSize: 11, color: "#766f66" }}>
+                            线上付款暂未开放·顾问将联系您
+                          </span>
+                        ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <Empty>
+                暂未有订单记录。<Link to="/catalog">浏览珠宝作品 →</Link>
+              </Empty>
+            )}
+          </section>
+
+          <section
+            id="my-profile"
+            className="my-account__panel my-account__panel--profile"
+          >
+            <div className="my-account__panel-head">
+              <div>
+                <p>ACCOUNT PROFILE</p>
+                <h2>个人资料</h2>
+              </div>
+            </div>
+            <dl>
+              <div>
+                <dt>称呼</dt>
+                <dd>{name}</dd>
+              </div>
+              <div>
+                <dt>手机号</dt>
+                <dd>{profile?.phone || "—"}</dd>
+              </div>
+              <div>
+                <dt>邮箱</dt>
+                <dd>{profile?.email || "暂未填写"}</dd>
+              </div>
+            </dl>
+            <div style={{ marginBottom: 12 }}>
+              <Button size="small" onClick={openProfileEdit} style={{ marginRight: 8 }}>编辑资料</Button>
+              <Button size="small" onClick={openAddressCreate}>新增地址</Button>
+            </div>
+            <div className="my-account__address">
+              <p>收货地址</p>
+              {addresses.length > 0 ? (
+                addresses.map((addr) => (
+                  <div key={addr.id} style={{ marginBottom: 10 }}>
+                    <span>
+                      {addr.recipientName} · {addr.recipientPhone}
+                      <br />
+                      {[
+                        addr.province,
+                        addr.city,
+                        addr.district,
+                        addr.detail,
+                      ]
+                        .filter(Boolean)
+                        .join("")}
+                    </span>
+                    <div>
+                      <Button size="small" type="link" onClick={() => openAddressEdit(addr)}>编辑</Button>
+                      <Button size="small" type="link" danger onClick={() => removeAddress(addr.id)}>删除</Button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <span>暂未保存收货地址</span>
+              )}
+            </div>
+          </section>
+        </div>
+      </main>
+      {commerceEnabled && (
+        <Modal
+          open={proofOrderId !== null}
+          title="上传付款凭证"
+          onCancel={() => setProofOrderId(null)}
+          footer={null}
+          destroyOnClose
+        >
+          <p style={{ color: "#766f66", fontSize: 13, marginBottom: 16 }}>
+            请上传转账截图或凭证图片（JPG/PNG/WebP，≤10MB）。审核通过后订单进入发货流程。
+          </p>
+          <Upload
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            maxCount={1}
+            showUploadList={false}
+            beforeUpload={(file) => {
+              void handleUploadProof(file);
+              return false;
+            }}
+            disabled={uploading}
+          >
+            <button
+              type="button"
+              className="my-account__button"
+              disabled={uploading}
+              style={{
+                padding: "10px 16px",
+                background: "#b8944e",
+                color: "#fff",
+                border: 0,
+                cursor: "pointer",
+              }}
+            >
+              {uploading ? "上传中..." : "选择图片并上传"}
+            </button>
+          </Upload>
+        </Modal>
+      )}
+
+      {/* 个人资料编辑 */}
+      <Modal
+        open={profileEditOpen}
+        title="编辑个人资料"
+        onCancel={() => setProfileEditOpen(false)}
+        onOk={saveProfile}
+        confirmLoading={savingProfile}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Form form={profileForm} layout="vertical">
+          <Form.Item name="name" label="称呼" rules={[{ required: true, message: "请填写称呼" }]}>
+            <Input placeholder="您的称呼" />
+          </Form.Item>
+          <Form.Item name="email" label="邮箱">
+            <Input placeholder="name@example.com" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 地址新增/编辑 */}
+      <Modal
+        open={addressOpen}
+        title={editingAddressId ? "编辑地址" : "新增地址"}
+        onCancel={() => setAddressOpen(false)}
+        onOk={saveAddress}
+        confirmLoading={savingAddress}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Form form={addressForm} layout="vertical">
+          <div className="grid grid-cols-2 gap-4" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 16 }}>
+            <Form.Item name="recipientName" label="收件人" rules={[{ required: true, message: "请填写收件人" }]}>
+              <Input />
+            </Form.Item>
+            <Form.Item name="recipientPhone" label="联系电话" rules={[{ required: true, message: "请填写联系电话" }]}>
+              <Input />
+            </Form.Item>
+          </div>
+          <Form.Item name="province" label="省"><Input /></Form.Item>
+          <Form.Item name="city" label="市"><Input /></Form.Item>
+          <Form.Item name="district" label="区/县"><Input /></Form.Item>
+          <Form.Item name="detail" label="详细地址" rules={[{ required: true, message: "请填写详细地址" }]}>
+            <Input.TextArea rows={2} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </>
   );
 }
