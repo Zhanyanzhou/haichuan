@@ -67,6 +67,7 @@ import {
   IMAGE_TEXT_CONTRACT,
   PRODUCT_ROW_CONTRACT,
   RESPONSIVE_CANVAS,
+  isMobileCanvasWidth,
   SINGLE_POSTER_CONTRACT,
   evaluateHotspotContract,
   evaluateHeroContract,
@@ -102,10 +103,11 @@ type ViewportPreset = {
   icon: ReactNode;
   width: number | "100%";
   height: number | "auto";
+  displayWidth?: number;
 };
 
 function formatViewportSize(preset: ViewportPreset) {
-  return `${preset.width} × ${preset.height}`;
+  return `${preset.displayWidth ?? preset.width} × ${preset.height}`;
 }
 
 type AutoSaveState = "idle" | "saving" | "saved" | "error";
@@ -543,9 +545,7 @@ function CanvasPageDataSynchronizer({ data, pageKey }: { data: any; pageKey: Edi
 }
 
 function getInspectorDevice(viewport: { width: number | "100%" }): InspectorDevice {
-  return typeof viewport.width === "number" && viewport.width <= RESPONSIVE_CANVAS.mobileMaxWidth
-    ? "mobile"
-    : "desktop";
+  return isMobileCanvasWidth(viewport.width) ? "mobile" : "desktop";
 }
 
 function getFieldDevice(type: string, field: string): "desktop" | "mobile" | "shared" {

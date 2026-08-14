@@ -24,8 +24,12 @@ export type ModuleDensity = "compact" | "normal" | "spacious";
  */
 export const RESPONSIVE_CANVAS = {
   desktop: { width: 1440, height: 900 },
-  tablet: { width: 768, height: 1024 },
+  // Puck iframe 有 2px 边框；外层 770px 才能得到真实的 768px CSS 画布宽度。
+  tablet: { width: 770, height: 1024, displayWidth: 768 },
   mobile: { width: 390, height: 844 },
+  tabletMinWidth: 768,
+  tabletMaxWidth: 1023,
+  tabletMediaQuery: "(min-width: 768px) and (max-width: 1023px)",
   mobileMaxWidth: 767,
   mobileMediaQuery: "(max-width: 767px)",
 } as const;
@@ -273,6 +277,8 @@ export const SINGLE_POSTER_CONTRACT = {
     maxWidth: 1280,
     desktopColumns: "5fr 7fr",
     desktopImageLeftColumns: "7fr 5fr",
+    tabletColumns: "1fr 1.1fr",
+    tabletImageLeftColumns: "1.1fr 1fr",
     desktopMediaAspectRatio: "3 / 2",
     mobileMediaAspectRatio: "3 / 4",
     mobileBreakpoint: 767,
