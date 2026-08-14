@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import { IMAGE_TEXT_CONTRACT } from "@/page-builder/config/blockContracts";
+import { IMAGE_TEXT_CONTRACT, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { SecureImage } from "@/components/common/SecureImage";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 
@@ -114,6 +114,9 @@ export default function ImageTextBlock({ module, editMode }: ImageTextBlockProps
           overflow: hidden;
           aspect-ratio: ${IMAGE_TEXT_CONTRACT.canvas.desktopMediaAspectRatio};
           background: #F7F8FB;
+        }
+        @media ${RESPONSIVE_CANVAS.tabletMediaQuery} {
+          .homepage-image-text__copy { padding: 44px 32px !important; }
         }
         @media (max-width: ${IMAGE_TEXT_CONTRACT.canvas.mobileBreakpoint}px) {
           .homepage-image-text { grid-template-columns: minmax(0, 1fr) !important; }

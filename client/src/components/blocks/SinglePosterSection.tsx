@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { homeCampaign } from '@/data/homeCampaign';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import { SINGLE_POSTER_CONTRACT } from '@/page-builder/config/blockContracts';
+import { RESPONSIVE_CANVAS, SINGLE_POSTER_CONTRACT } from '@/page-builder/config/blockContracts';
 import type { PageModule } from '@/types/pageModule';
 
 const LG = '#F3F0E9';
@@ -98,6 +98,14 @@ export default function SinglePosterSection({ module, editMode }: Props) {
           overflow: hidden;
           aspect-ratio: ${SINGLE_POSTER_CONTRACT.canvas.desktopMediaAspectRatio};
           background: #F7F8FB;
+        }
+        @media ${RESPONSIVE_CANVAS.tabletMediaQuery} {
+          .homepage-single-poster { padding-block: 56px !important; }
+          .homepage-single-poster__inner {
+            grid-template-columns: ${isImageLeft ? SINGLE_POSTER_CONTRACT.canvas.tabletImageLeftColumns : SINGLE_POSTER_CONTRACT.canvas.tabletColumns};
+            gap: 32px;
+            padding-inline: 24px;
+          }
         }
         @media (max-width: ${SINGLE_POSTER_CONTRACT.canvas.mobileBreakpoint}px) {
           .homepage-single-poster { padding-block: 40px !important; }

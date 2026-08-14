@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { SecureImage } from "@/components/common/SecureImage";
-import { CATEGORY_CARDS_CONTRACT, getCategoryCardsMediaAspectRatio } from "@/page-builder/config/blockContracts";
+import { CATEGORY_CARDS_CONTRACT, getCategoryCardsMediaAspectRatio, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { isSafeInternalPath } from "@/page-builder/utils/linkTarget";
 
 interface CategoryCardsBlockProps {
@@ -173,6 +173,9 @@ export default function CategoryCardsBlock({
         </div>
       </div>
       <style>{`
+        @media ${RESPONSIVE_CANVAS.tabletMediaQuery} {
+          .homepage-category-cards__grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 20px !important; }
+        }
         @media (max-width: 767px) {
           .homepage-category-cards__grid { grid-template-columns: minmax(0, 1fr) !important; }
         }
