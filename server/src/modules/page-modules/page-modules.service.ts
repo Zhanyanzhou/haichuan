@@ -46,7 +46,6 @@ const PUCK_REQUIRED_IMAGE_FIELDS: Record<string, string[]> = {
   首屏主视觉: ["desktopImage"],
   单图海报: ["desktopImage"],
   双图海报: ["mainImage", "detailImage"],
-  图文混排: ["image"],
   全屏出血图: ["image"],
   分割面板: ["image"],
   热区图: ["image"],
@@ -64,6 +63,54 @@ const PUCK_IMAGE_FIELDS = [
 ];
 
 const PUCK_LINK_FIELDS = ["linkUrl", "link", "mapUrl"];
+
+/**
+ * 发布校验：单页可见组件总数上限。
+ * 防止超长页面拖垮前台渲染与首屏性能；与编辑器无强耦合，仅发布时兜底。
+ */
+const MAX_VISIBLE_BLOCKS = 60;
+
+/**
+ * 发布校验：关键字段文本长度上限（字段名 → 最大字符数）。
+ * 取值宽松以覆盖合理运营数据，超出视为异常输入（如把整篇文章误填进标题）。
+ * 适用于所有组件的同名字段，无需按组件类型分支；前端发布预检调用同一接口，规则天然一致。
+ */
+const PUCK_TEXT_FIELD_LIMITS: Record<string, number> = {
+  title: 100,
+  subtitle: 200,
+  summary: 200,
+  description: 2000,
+  body: 2000,
+  text: 2000,
+  content: 2000,
+  buttonText: 30,
+  actionText: 30,
+  primaryText: 30,
+  secondaryText: 30,
+  altText: 120,
+  mainAltText: 120,
+  detailAltText: 120,
+  imageAlt: 120,
+  label: 60,
+  eyebrow: 60,
+  number: 12,
+  phone: 30,
+};
+
+/**
+ * 发布校验：页面 SEO/OG 字段长度上限（字段名 → 最大字符数）。
+ * 与搜索引擎/社交分享的常见展示宽度对齐，宽松取值。
+ */
+const PUCK_SEO_LIMITS: Record<string, number> = {
+  seoTitle: 120,
+  seoDescription: 320,
+};
+
+/**
+ * 发布校验：占位文案关键词。
+ * 默认模板与新增模块内置了“待确认 / 待配置”等占位文案，运营未替换时不得发布到前台。
+ */
+const PLACEHOLDER_MARKERS = ["待确认", "待配置", "请填写"];
 
 @Injectable()
 export class PageModulesService {
@@ -140,7 +187,9 @@ export class PageModulesService {
     if (existing) {
       const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
       if (expected && existing.updatedAt.getTime() !== expected.getTime()) {
-        throw new ConflictException("该页面已被其他编辑者更新，请重新加载后再保存");
+        throw new ConflictException(
+          "该页面已被其他编辑者更新，请重新加载后再保存",
+        );
       }
 
       // 通过 updatedAt 做乐观锁，避免两个浏览器的自动保存发生乱序覆盖。
@@ -154,7 +203,9 @@ export class PageModulesService {
         },
       });
       if (updated.count !== 1) {
-        throw new ConflictException("该页面刚刚被其他编辑者更新，请重新加载后再保存");
+        throw new ConflictException(
+          "该页面刚刚被其他编辑者更新，请重新加载后再保存",
+        );
       }
       return this.prisma.pageDocument.findUnique({ where: { pageKey } });
     }
@@ -185,13 +236,19 @@ export class PageModulesService {
       if (!doc) throw new Error("Page document not found");
       const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
       if (expected && doc.updatedAt.getTime() !== expected.getTime()) {
-        throw new ConflictException("该页面已被其他编辑者更新，请重新加载后再发布");
+        throw new ConflictException(
+          "该页面已被其他编辑者更新，请重新加载后再发布",
+        );
       }
       const errors = await this.collectPuckDataErrors(tx, doc.puckData);
+      errors.push(...this.collectMetadataErrors(doc.metadata));
       if (errors.length > 0) {
         const visibleErrors = errors.slice(0, 8).join("；");
-        const suffix = errors.length > 8 ? `；另有 ${errors.length - 8} 个问题` : "";
-        throw new BadRequestException(`页面发布校验失败：${visibleErrors}${suffix}`);
+        const suffix =
+          errors.length > 8 ? `；另有 ${errors.length - 8} 个问题` : "";
+        throw new BadRequestException(
+          `页面发布校验失败：${visibleErrors}${suffix}`,
+        );
       }
 
       // Save revision
@@ -241,20 +298,30 @@ export class PageModulesService {
     return result.published;
   }
 
-  async validatePageDocument(pageKey: string, puckDataOverride?: any) {
+  async validatePageDocument(
+    pageKey: string,
+    puckDataOverride?: any,
+    metadataOverride?: any,
+  ) {
     let puckData = puckDataOverride;
-    if (puckData === undefined) {
+    let metadata = metadataOverride;
+    if (puckData === undefined || metadata === undefined) {
       const doc = await this.prisma.pageDocument.findUnique({
         where: { pageKey },
       });
       if (!doc) return { valid: false, errors: ["页面草稿不存在"] };
-      puckData = doc.puckData;
+      if (puckData === undefined) puckData = doc.puckData;
+      if (metadata === undefined) metadata = doc.metadata;
     }
     const errors = await this.collectPuckDataErrors(this.prisma, puckData);
+    errors.push(...this.collectMetadataErrors(metadata));
     return { valid: errors.length === 0, errors };
   }
 
-  private async collectPuckDataErrors(db: any, puckData: any): Promise<string[]> {
+  private async collectPuckDataErrors(
+    db: any,
+    puckData: any,
+  ): Promise<string[]> {
     const errors: string[] = [];
     const productIds = new Set<number>();
     const missingUploadUrls = new Set<string>();
@@ -300,6 +367,16 @@ export class PageModulesService {
       // 编辑器说明区不会进入前台；隐藏区块也不应因未完成内容阻断其他模块发布。
       if (EDITOR_ONLY_COMPONENTS.has(type) || props.isVisible === false) return;
 
+      // 文本长度兜底：防止异常超长输入（如整篇文章误填入标题）发布到前台
+      for (const [field, limit] of Object.entries(PUCK_TEXT_FIELD_LIMITS)) {
+        const textValue = props[field];
+        if (typeof textValue === "string" && textValue.length > limit) {
+          errors.push(
+            `${label}：${field} 文本过长（${textValue.length}/${limit} 字）`,
+          );
+        }
+      }
+
       for (const field of PUCK_REQUIRED_IMAGE_FIELDS[type] || []) {
         if (!this.isNonEmptyString(props[field])) {
           errors.push(`${label}：${field} 图片不能为空`);
@@ -312,7 +389,12 @@ export class PageModulesService {
           errors.push(`${assetLabel} 地址不合法`);
           return;
         }
-        this.collectMissingUploadError(value, assetLabel, missingUploadUrls, errors);
+        this.collectMissingUploadError(
+          value,
+          assetLabel,
+          missingUploadUrls,
+          errors,
+        );
       };
 
       for (const field of PUCK_IMAGE_FIELDS) {
@@ -330,6 +412,43 @@ export class PageModulesService {
 
       if (type === "视频区块" && !this.isNonEmptyString(props.videoUrl)) {
         errors.push(`${label}：videoUrl 视频地址不能为空`);
+      }
+
+      // 图文混排的“纯文字”布局无需配图；其余布局必须提供图片。
+      if (
+        type === "图文混排" &&
+        props.template !== "textOnly" &&
+        !this.isNonEmptyString(props.image)
+      ) {
+        errors.push(`${label}：image 图片不能为空`);
+      }
+
+      const rejectPlaceholderText = (value: unknown, fieldLabel: string) => {
+        if (typeof value !== "string") return;
+        const trimmed = value.trim();
+        if (!trimmed) return;
+        if (PLACEHOLDER_MARKERS.some((marker) => trimmed.includes(marker))) {
+          errors.push(
+            `${label}：${fieldLabel}“${trimmed}”仍是占位内容，请填写正式文案`,
+          );
+        }
+      };
+
+      // 卡片类模块（品牌亮点/服务保障）与限时活动内置“待确认”占位文案，拦截未替换的占位发布到前台。
+      if (type === "卡片网格" || type === "服务承诺") {
+        const cards = Array.isArray(props.cards) ? props.cards : [];
+        cards.forEach((card: any, index: number) => {
+          rejectPlaceholderText(card?.title, `第 ${index + 1} 张卡片标题`);
+          rejectPlaceholderText(card?.body, `第 ${index + 1} 张卡片说明`);
+        });
+      }
+      if (type === "限时活动") {
+        rejectPlaceholderText(props.title, "活动标题");
+        rejectPlaceholderText(props.body, "活动说明");
+        const benefits = Array.isArray(props.benefits) ? props.benefits : [];
+        benefits.forEach((benefit: any, index: number) => {
+          rejectPlaceholderText(benefit?.value, `第 ${index + 1} 项权益`);
+        });
       }
 
       if (type === "产品展示行") {
@@ -371,7 +490,10 @@ export class PageModulesService {
         }
       }
 
-      if (type === "限时活动" && !Number.isFinite(new Date(props.targetDate).getTime())) {
+      if (
+        type === "限时活动" &&
+        !Number.isFinite(new Date(props.targetDate).getTime())
+      ) {
         errors.push(`${label}：结束时间必须是有效的 ISO 日期时间`);
       }
 
@@ -385,8 +507,14 @@ export class PageModulesService {
             } else {
               validateAsset(item.url, `${label}：第 ${index + 1} 张轮播图片`);
             }
-            validateAsset(item?.mobileUrl, `${label}：第 ${index + 1} 张轮播图移动端图片`);
-            if (this.isNonEmptyString(item?.link) && !this.isSafeLink(item.link)) {
+            validateAsset(
+              item?.mobileUrl,
+              `${label}：第 ${index + 1} 张轮播图移动端图片`,
+            );
+            if (
+              this.isNonEmptyString(item?.link) &&
+              !this.isSafeLink(item.link)
+            ) {
               errors.push(`${label}：第 ${index + 1} 张轮播链接不合法`);
             }
           });
@@ -401,7 +529,10 @@ export class PageModulesService {
         if (!Array.isArray(items)) return;
         items.forEach((item, index) => {
           fields.forEach((field) => {
-            validateAsset(item?.[field], `${label}：第 ${index + 1} 个${itemLabel}${field}`);
+            validateAsset(
+              item?.[field],
+              `${label}：第 ${index + 1} 个${itemLabel}${field}`,
+            );
           });
         });
       };
@@ -413,7 +544,10 @@ export class PageModulesService {
 
       if (type === "热区图" && Array.isArray(props.hotspots)) {
         props.hotspots.forEach((item: any, index: number) => {
-          if (this.isNonEmptyString(item?.link) && !this.isSafeLink(item.link)) {
+          if (
+            this.isNonEmptyString(item?.link) &&
+            !this.isSafeLink(item.link)
+          ) {
             errors.push(`${label}：第 ${index + 1} 个热区链接不合法`);
           }
         });
@@ -449,6 +583,10 @@ export class PageModulesService {
 
     if (visibleContentCount + visibleZoneCount === 0) {
       errors.push("页面至少需要 1 个可见的前台内容模块");
+    } else if (visibleContentCount + visibleZoneCount > MAX_VISIBLE_BLOCKS) {
+      errors.push(
+        `页面可见模块过多（${visibleContentCount + visibleZoneCount}/${MAX_VISIBLE_BLOCKS}），请精简后再发布`,
+      );
     }
 
     if (Array.isArray(puckData.content)) {
@@ -480,7 +618,9 @@ export class PageModulesService {
         },
         select: { id: true },
       });
-      const publicProductIds = new Set(products.map((item: { id: number }) => item.id));
+      const publicProductIds = new Set(
+        products.map((item: { id: number }) => item.id),
+      );
       for (const id of productIds) {
         if (!publicProductIds.has(id)) {
           errors.push(
@@ -497,6 +637,32 @@ export class PageModulesService {
     return typeof value === "string" && value.trim().length > 0;
   }
 
+  /**
+   * 校验页面 SEO/OG 元数据（存于 doc.metadata，不在 puckData 内）。
+   * 与 collectPuckDataErrors 并列，作为发布校验单一源的一部分；
+   * 前端预检与后端发布兜底都调用，规则一致。
+   */
+  private collectMetadataErrors(metadata: unknown): string[] {
+    const errors: string[] = [];
+    if (!metadata || typeof metadata !== "object") return errors;
+    const m = metadata as Record<string, unknown>;
+    for (const [field, limit] of Object.entries(PUCK_SEO_LIMITS)) {
+      const value = m[field];
+      if (typeof value === "string" && value.length > limit) {
+        errors.push(`页面设置：${field} 过长（${value.length}/${limit} 字）`);
+      }
+    }
+    const ogImage = m.ogImage;
+    if (
+      typeof ogImage === "string" &&
+      ogImage.trim() &&
+      !this.isSafeAssetUrl(ogImage)
+    ) {
+      errors.push("页面设置：ogImage 分享图地址不合法");
+    }
+    return errors;
+  }
+
   private isSafeAssetUrl(value: string): boolean {
     const url = value.trim();
     if (url.startsWith("/") && !url.startsWith("//")) return true;
@@ -505,7 +671,8 @@ export class PageModulesService {
 
   private isSafeLink(value: string): boolean {
     const url = value.trim();
-    if ((url.startsWith("/") && !url.startsWith("//")) || url.startsWith("#")) return true;
+    if ((url.startsWith("/") && !url.startsWith("//")) || url.startsWith("#"))
+      return true;
     return /^https?:\/\//i.test(url);
   }
 

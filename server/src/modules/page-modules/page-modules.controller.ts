@@ -90,10 +90,11 @@ export class PageModulesController {
   @ApiBearerAuth()
   @Post("document/validate")
   @ApiOperation({ summary: "预检页面文档是否可发布（发布前校验）" })
-  validateDocument(@Body() body: { pageKey?: string; puckData?: any }) {
+  validateDocument(@Body() body: { pageKey?: string; puckData?: any; metadata?: any }) {
     return this.service.validatePageDocument(
       body?.pageKey || "home",
       body?.puckData,
+      body?.metadata,
     );
   }
 

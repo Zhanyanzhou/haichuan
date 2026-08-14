@@ -1391,12 +1391,12 @@ export const pageDocumentApi = {
       expectedUpdatedAt,
     });
   },
-  validate: async (pageKey = "home", puckData?: any) => {
+  validate: async (pageKey = "home", puckData?: any, metadata?: any) => {
     if (USE_MOCK) {
       await mockDelay(100);
       return mockRes({ valid: true, errors: [] });
     }
-    return api.post("/page-modules/document/validate", { pageKey, puckData });
+    return api.post("/page-modules/document/validate", { pageKey, puckData, metadata });
   },
   getRevisions: async (pageKey = "home") => {
     if (USE_MOCK) {

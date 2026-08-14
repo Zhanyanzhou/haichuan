@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import { getCarouselAspectRatio, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
+import {
+  getCarouselAspectRatio,
+  RESPONSIVE_CANVAS,
+} from "@/page-builder/config/blockContracts";
 
 interface CarouselBlockProps {
   module: {
@@ -27,8 +30,14 @@ export default function CarouselBlock({
   const interval = content.interval || 4000;
   const showDots = content.showDots !== false;
   const showArrows = content.showArrows !== false;
-  const desktopRatio = getCarouselAspectRatio("desktop", layoutConfig.desktopRatio);
-  const mobileRatio = getCarouselAspectRatio("mobile", layoutConfig.mobileRatio);
+  const desktopRatio = getCarouselAspectRatio(
+    "desktop",
+    layoutConfig.desktopRatio,
+  );
+  const mobileRatio = getCarouselAspectRatio(
+    "mobile",
+    layoutConfig.mobileRatio,
+  );
 
   const [current, setCurrent] = useState(0);
   const validImages = (Array.isArray(images) ? images : []).filter(
@@ -46,10 +55,11 @@ export default function CarouselBlock({
   }, [validImages.length]);
 
   useEffect(() => {
-    if (!autoPlay || validImages.length <= 1) return;
+    // 编辑预览中不自动轮播：避免周期性切换大图拖慢画布滚动，也避免干扰编辑定位。
+    if (editMode || !autoPlay || validImages.length <= 1) return;
     const timer = setInterval(next, interval);
     return () => clearInterval(timer);
-  }, [autoPlay, interval, next, validImages.length]);
+  }, [editMode, autoPlay, interval, next, validImages.length]);
 
   // 删除当前轮播项后及时收敛索引，避免访问已不存在的图片导致画布崩溃。
   useEffect(() => {
@@ -74,7 +84,12 @@ export default function CarouselBlock({
   const img = validImages[current];
   const imageContent = (
     <picture data-editor-field="images">
-      {img.mobileUrl && <source media={RESPONSIVE_CANVAS.mobileMediaQuery} srcSet={img.mobileUrl} />}
+      {img.mobileUrl && (
+        <source
+          media={RESPONSIVE_CANVAS.mobileMediaQuery}
+          srcSet={img.mobileUrl}
+        />
+      )}
       <img
         src={img.url}
         alt={img.alt || ""}
@@ -91,13 +106,15 @@ export default function CarouselBlock({
   return (
     <section
       className="homepage-carousel"
-      style={{
-        position: "relative",
-        "--homepage-carousel-ratio": desktopRatio,
-        "--homepage-carousel-mobile-ratio": mobileRatio,
-        overflow: "hidden",
-        background: "#E7DDCE",
-      } as CSSProperties}
+      style={
+        {
+          position: "relative",
+          "--homepage-carousel-ratio": desktopRatio,
+          "--homepage-carousel-mobile-ratio": mobileRatio,
+          overflow: "hidden",
+          background: "#E7DDCE",
+        } as CSSProperties
+      }
     >
       <style>{`
         .homepage-carousel { aspect-ratio: var(--homepage-carousel-ratio); }
@@ -106,11 +123,7 @@ export default function CarouselBlock({
         }
         .homepage-carousel picture { display: block; width: 100%; height: 100%; }
       `}</style>
-      {img.link ? (
-        <Link to={img.link}>{imageContent}</Link>
-      ) : (
-        imageContent
-      )}
+      {img.link ? <Link to={img.link}>{imageContent}</Link> : imageContent}
       {showArrows && validImages.length > 1 && (
         <>
           <button
