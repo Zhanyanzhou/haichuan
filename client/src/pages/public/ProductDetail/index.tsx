@@ -12,11 +12,20 @@ import { getPrimaryImage, getThumbnailList } from "@/utils/productImage";
 import { SecureImage } from "@/components/common/SecureImage";
 import Lightbox from "yet-another-react-lightbox";
 import "yet-another-react-lightbox/styles.css";
-import { cartApi, productApi, publicProductStreamUrl, goldPriceApi } from "@/services/api";
+import {
+  cartApi,
+  productApi,
+  publicProductStreamUrl,
+  goldPriceApi,
+} from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
 import { unwrapResponse } from "@/utils/unwrap";
 import type { Product, ProductSKU } from "@/types";
-import { trackAddToCart, trackPageView, trackProductView } from "@/hooks/useAnalytics";
+import {
+  trackAddToCart,
+  trackPageView,
+  trackProductView,
+} from "@/hooks/useAnalytics";
 import {
   isCommerceAllowed,
   salesModeRoute,
@@ -43,7 +52,9 @@ function GuestDetailGate({ productId }: { productId?: string }) {
         <div className="flex flex-col gap-3 items-center">
           <Link
             to="/customer"
-            state={{ returnTo: productId ? `/products/${productId}` : "/products" }}
+            state={{
+              returnTo: productId ? `/products/${productId}` : "/products",
+            }}
             className="btn btn-primary w-full"
           >
             登录 / 注册
@@ -72,7 +83,9 @@ export default function ProductDetail() {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [revision, setRevision] = useState(0);
   const [addingToCart, setAddingToCart] = useState(false);
-  const [goldPrice, setGoldPrice] = useState<{ price?: number | string } | null>(null);
+  const [goldPrice, setGoldPrice] = useState<{
+    price?: number | string;
+  } | null>(null);
   const commerceEnabled = useCommerceEnabled();
   const isSignedIn = Boolean(
     typeof window !== "undefined" && localStorage.getItem("customerToken"),
@@ -86,7 +99,8 @@ export default function ProductDetail() {
         const res = await productApi.getPublicById(Number(id));
         const data = unwrapResponse<Product>(res);
         setProduct(data);
-        if (data?.skus?.length) setSelectedSku(data.skus.find((s) => s.isActive) ?? null);
+        if (data?.skus?.length)
+          setSelectedSku(data.skus.find((s) => s.isActive) ?? null);
       } catch {
         setProduct(null);
       } finally {
@@ -110,9 +124,8 @@ export default function ProductDetail() {
   }, [product, setPageMeta, clearPageMeta]);
 
   // P1-35：带自动重连的 SSE（断线指数退避重连，避免实时刷新静默失效）
-  useReconnectingEventSource(
-    USE_MOCK ? null : publicProductStreamUrl,
-    () => setRevision((value) => value + 1),
+  useReconnectingEventSource(USE_MOCK ? null : publicProductStreamUrl, () =>
+    setRevision((value) => value + 1),
   );
 
   // 只有直接购买商品需要金价参考；咨询类作品不触发无用请求，也不暴露价格组成。
@@ -163,12 +176,17 @@ export default function ProductDetail() {
   // P1-33：缩略图与主图共享同一数据源，mainImage 驱动主图切换
   // （原主图恒渲染 getPrimaryImage，点击缩略图只改高亮、主图不变）
   const thumbnails = getThumbnailList(product.images);
-  const mainImageUrl = (thumbnails[mainImage] as any)?.mediaUrl || thumbnails[mainImage]?.url || getPrimaryImage(product as any);
+  const mainImageUrl =
+    (thumbnails[mainImage] as any)?.mediaUrl ||
+    thumbnails[mainImage]?.url ||
+    getPrimaryImage(product as any);
   const activePrices = activeSkus
     .map((s) => Number(s.price) || 0)
     .filter((p) => p > 0);
   const startingPrice =
-    activePrices.length > 0 ? Math.min(...activePrices) : Number(product.price) || 0;
+    activePrices.length > 0
+      ? Math.min(...activePrices)
+      : Number(product.price) || 0;
   const displayPrice = selectedSku ? Number(selectedSku.price) : startingPrice;
   const commerceOk = isCommerceAllowed(product.salesMode, commerceEnabled);
   const displayGoldWeight = selectedSku?.goldWeight ?? product.goldWeight;
@@ -251,7 +269,7 @@ export default function ProductDetail() {
                   onClick={() => setMainImage(i)}
                   className={`w-16 h-16 bg-brand-bg flex items-center justify-center cursor-pointer border transition-colors overflow-hidden ${i === mainImage ? "border-brand-gold" : "border-transparent hover:border-brand-gold"}`}
                 >
-                  {((img as any).mediaUrl || img.url) ? (
+                  {(img as any).mediaUrl || img.url ? (
                     <SecureImage
                       src={(img as any).mediaUrl || img.url}
                       alt=""
@@ -297,7 +315,9 @@ export default function ProductDetail() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-brand-muted">金价参考</span>
                   <span className="font-sans font-medium">
-                    {goldPrice?.price ? `¥${Number(goldPrice.price).toFixed(2)}` : "—"}{" "}
+                    {goldPrice?.price
+                      ? `¥${Number(goldPrice.price).toFixed(2)}`
+                      : "—"}{" "}
                     <span className="text-xs text-brand-gold">/克</span>
                   </span>
                 </div>
@@ -337,7 +357,8 @@ export default function ProductDetail() {
                       onClick={() => setSelectedSku(sku)}
                       className={`px-5 py-2.5 text-sm border transition-colors font-sans ${selectedSku?.id === sku.id ? "border-brand-gold text-brand-gold" : "border-brand-line hover:border-brand-gold"}`}
                     >
-                      {getMaterialLabel(sku.material)} · {sku.goldWeight ? `${sku.goldWeight}g` : "—"}
+                      {getMaterialLabel(sku.material)} ·{" "}
+                      {sku.goldWeight ? `${sku.goldWeight}g` : "—"}
                       {commerceOk && Number(sku.price) > 0
                         ? ` · ¥${Number(sku.price).toLocaleString()}`
                         : ""}
@@ -359,7 +380,12 @@ export default function ProductDetail() {
                   >
                     −
                   </button>
-                  <span className="px-4 py-2.5 text-sm font-sans" aria-live="polite">{qty}</span>
+                  <span
+                    className="px-4 py-2.5 text-sm font-sans"
+                    aria-live="polite"
+                  >
+                    {qty}
+                  </span>
                   <button
                     type="button"
                     aria-label="增加数量"
@@ -376,7 +402,8 @@ export default function ProductDetail() {
                   onClick={handleAddToCart}
                   disabled={addingToCart || !selectedSku}
                 >
-                  <ShoppingCartOutlined /> {addingToCart ? "加入中..." : "加入购物车"}
+                  <ShoppingCartOutlined />{" "}
+                  {addingToCart ? "加入中..." : "加入购物车"}
                 </button>
               ) : product.salesMode === "DISPLAY_ONLY" ? (
                 <div className="flex-1 text-center text-brand-muted text-sm py-3 border border-brand-line">

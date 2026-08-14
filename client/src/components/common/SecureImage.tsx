@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 
 interface SecureImageProps {
   /** 受控媒体端点相对路径；也兼容 http/data/其他 URL */
@@ -10,16 +10,19 @@ interface SecureImageProps {
   /** 失败时显示的占位图（可选） */
   fallback?: string;
   /** 是否用员工令牌而非客户令牌（后台场景） */
-  tokenKind?: 'auto' | 'customer' | 'staff';
+  tokenKind?: "auto" | "customer" | "staff";
 }
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api").replace(
+  /\/$/,
+  "",
+);
 
-function pickToken(kind: SecureImageProps['tokenKind']): string | null {
-  if (kind === 'staff') return localStorage.getItem('token');
-  if (kind === 'customer') return localStorage.getItem('customerToken');
+function pickToken(kind: SecureImageProps["tokenKind"]): string | null {
+  if (kind === "staff") return localStorage.getItem("token");
+  if (kind === "customer") return localStorage.getItem("customerToken");
   // auto：客户页优先客户令牌，后台页回退员工令牌
-  return localStorage.getItem('customerToken') || localStorage.getItem('token');
+  return localStorage.getItem("customerToken") || localStorage.getItem("token");
 }
 
 /**
@@ -30,14 +33,16 @@ function pickToken(kind: SecureImageProps['tokenKind']): string | null {
  */
 export function SecureImage({
   src,
-  alt = '',
+  alt = "",
   className,
   style,
   fallback,
-  tokenKind = 'auto',
+  tokenKind = "auto",
 }: SecureImageProps) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [status, setStatus] = useState<'loading' | 'error' | 'ready'>('loading');
+  const [status, setStatus] = useState<"loading" | "error" | "ready">(
+    "loading",
+  );
   const revokeRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -45,21 +50,21 @@ export function SecureImage({
 
     // 非受控媒体端点（http/data/相对静态资源）：直接用 src
     const isPublicProductMedia =
-      typeof src === 'string' &&
-      src.startsWith('/products/public/') &&
-      src.includes('/media/');
+      typeof src === "string" &&
+      src.startsWith("/products/public/") &&
+      src.includes("/media/");
     const isControlledMedia =
-      typeof src === 'string' &&
+      typeof src === "string" &&
       (isPublicProductMedia ||
-        (src.startsWith('/products/catalog/') && src.includes('/media/')) ||
+        (src.startsWith("/products/catalog/") && src.includes("/media/")) ||
         /^\/(payments|upload\/payment-proofs)\/\d+(\/proof)?$/.test(src));
     if (!isControlledMedia) {
       setBlobUrl(src || null);
-      setStatus(src ? 'ready' : 'error');
+      setStatus(src ? "ready" : "error");
       return;
     }
 
-    setStatus('loading');
+    setStatus("loading");
     // 公开商品媒体不发送任何令牌，避免把客户身份无意义地带到可缓存资源请求。
     const token = isPublicProductMedia ? null : pickToken(tokenKind);
     const fullUrl = `${API_BASE}${src}`;
@@ -73,11 +78,11 @@ export function SecureImage({
         const url = URL.createObjectURL(blob);
         revokeRef.current = url;
         setBlobUrl(url);
-        setStatus('ready');
+        setStatus("ready");
       })
       .catch(() => {
         if (cancelled) return;
-        setStatus('error');
+        setStatus("error");
       });
 
     return () => {
@@ -90,27 +95,54 @@ export function SecureImage({
   }, [src, tokenKind]);
 
   const placeholderStyle: CSSProperties = {
-    background: '#f3f4f6',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#9ca3af',
+    background: "#f3f4f6",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#9ca3af",
     fontSize: 12,
-    textAlign: 'center',
+    textAlign: "center",
     padding: 8,
     ...style,
   };
 
-  if (status === 'loading') {
-    return <div className={className} style={{ ...placeholderStyle }}>加载中…</div>;
+  if (status === "loading") {
+    return (
+      <div className={className} style={{ ...placeholderStyle }}>
+        加载中…
+      </div>
+    );
   }
 
-  if (status === 'error' || !blobUrl) {
+  if (status === "error" || !blobUrl) {
     if (fallback) {
-      return <img src={fallback} alt={alt} className={className} style={style} />;
+      return (
+        <img src={fallback} alt={alt} className={className} style={style} />
+      );
     }
-    return <div className={className} style={{ ...placeholderStyle }}>图片暂不可用</div>;
+    return (
+      <div className={className} style={{ ...placeholderStyle }}>
+        图片暂不可用
+      </div>
+    );
   }
 
-  return <img src={blobUrl} alt={alt} className={className} style={style} loading="lazy" />;
+  return (
+    <img
+      src={blobUrl}
+      alt={alt}
+      className={className}
+      style={
+        {
+          userSelect: "none",
+          WebkitUserDrag: "none",
+          WebkitTouchCallout: "none",
+          ...style,
+        } as CSSProperties
+      }
+      loading="lazy"
+      draggable={false}
+      onContextMenu={(event) => event.preventDefault()}
+    />
+  );
 }

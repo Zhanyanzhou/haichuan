@@ -297,36 +297,36 @@ export class ProductsService {
               select: { id: true, inventories: { select: { quantity: true } } },
             },
           },
-      }),
-      this.prisma.product.count({ where }),
-    ]);
+        }),
+        this.prisma.product.count({ where }),
+      ]);
 
-    const enrichedList = list.map((p: any) => ({
-      ...p,
-      // 后台媒体也统一走受控媒体端点（迁移后旧 /uploads 文件删除，url 不再可用）
-      images: (p.images || []).map((img: any) => ({
-        ...img,
-        mediaUrl: `/products/catalog/${p.id}/media/${img.id}`,
-      })),
-      completeness: this.calcCompleteness(p),
-      hasPrimaryImage: p.images?.length > 0,
-      imageCount: p.images?.length ?? 0,
-      totalStock:
-        p.skus?.reduce(
-          (sum: number, sku: any) =>
-            sum +
-            (sku.inventories?.reduce(
-              (s: number, inv: any) => s + (inv.quantity || 0),
-              0,
-            ) ?? 0),
-          0,
-        ) ?? 0,
-    }));
+      const enrichedList = list.map((p: any) => ({
+        ...p,
+        // 后台媒体也统一走受控媒体端点（迁移后旧 /uploads 文件删除，url 不再可用）
+        images: (p.images || []).map((img: any) => ({
+          ...img,
+          mediaUrl: `/products/catalog/${p.id}/media/${img.id}`,
+        })),
+        completeness: this.calcCompleteness(p),
+        hasPrimaryImage: p.images?.length > 0,
+        imageCount: p.images?.length ?? 0,
+        totalStock:
+          p.skus?.reduce(
+            (sum: number, sku: any) =>
+              sum +
+              (sku.inventories?.reduce(
+                (s: number, inv: any) => s + (inv.quantity || 0),
+                0,
+              ) ?? 0),
+            0,
+          ) ?? 0,
+      }));
 
-    return { list: enrichedList, total, page: _page, pageSize: _pageSize };
+      return { list: enrichedList, total, page: _page, pageSize: _pageSize };
     } catch (error: any) {
       // 记录完整查询上下文，便于定位 Prisma 校验异常
-      console.error('[findAll] Prisma 查询失败', {
+      console.error("[findAll] Prisma 查询失败", {
         message: error?.message,
         where: JSON.stringify(where),
         skip: (_page - 1) * _pageSize,
@@ -386,9 +386,13 @@ export class ProductsService {
     }
 
     const categoryId = Number(params.categoryId);
-    if (Number.isInteger(categoryId) && categoryId > 0) where.categoryId = categoryId;
+    if (Number.isInteger(categoryId) && categoryId > 0)
+      where.categoryId = categoryId;
 
-    const keyword = typeof params.keyword === "string" ? params.keyword.trim().slice(0, 100) : "";
+    const keyword =
+      typeof params.keyword === "string"
+        ? params.keyword.trim().slice(0, 100)
+        : "";
     if (keyword) {
       where.OR = [
         { name: { contains: keyword } },
@@ -396,19 +400,28 @@ export class ProductsService {
       ];
     }
 
-    if (typeof params.materialType === "string" && CUSTOMER_MATERIAL_TYPES.has(params.materialType)) {
+    if (
+      typeof params.materialType === "string" &&
+      CUSTOMER_MATERIAL_TYPES.has(params.materialType)
+    ) {
       where.materialType = params.materialType as any;
     }
-    if (typeof params.salesMode === "string" && CUSTOMER_SALES_MODES.has(params.salesMode)) {
+    if (
+      typeof params.salesMode === "string" &&
+      CUSTOMER_SALES_MODES.has(params.salesMode)
+    ) {
       where.salesMode = params.salesMode as any;
     }
-    if (params.isHot === "true" || params.isHot === "false") where.isHot = params.isHot === "true";
+    if (params.isHot === "true" || params.isHot === "false")
+      where.isHot = params.isHot === "true";
     if (params.isRecommended === "true" || params.isRecommended === "false") {
       where.isRecommended = params.isRecommended === "true";
     }
 
     const orderBy: Prisma.ProductOrderByWithRelationInput =
-      params.sortBy === "sortOrder" ? { sortOrder: "asc" } : { updatedAt: "desc" };
+      params.sortBy === "sortOrder"
+        ? { sortOrder: "asc" }
+        : { updatedAt: "desc" };
     const [list, total] = await Promise.all([
       this.prisma.product.findMany({
         where,
@@ -421,14 +434,20 @@ export class ProductsService {
     ]);
 
     return {
-      list: list.map((product) => this.toCustomerFacingProduct(product, mediaScope)),
+      list: list.map((product) =>
+        this.toCustomerFacingProduct(product, mediaScope),
+      ),
       total,
       page,
       pageSize,
     };
   }
 
-  private toBoundedPositiveInt(value: unknown, fallback: number, maximum: number): number {
+  private toBoundedPositiveInt(
+    value: unknown,
+    fallback: number,
+    maximum: number,
+  ): number {
     const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
     return Math.min(parsed, maximum);
@@ -486,8 +505,12 @@ export class ProductsService {
           attributeName: v.attribute?.name,
         })),
       images: mapImageList(product.images),
-      primaryImage: product.primaryImage ? mapImage(product.primaryImage) : null,
-      listingImage: product.listingImage ? mapImage(product.listingImage) : null,
+      primaryImage: product.primaryImage
+        ? mapImage(product.primaryImage)
+        : null,
+      listingImage: product.listingImage
+        ? mapImage(product.listingImage)
+        : null,
     };
 
     if (Object.prototype.hasOwnProperty.call(product, "description")) {
@@ -508,8 +531,17 @@ export class ProductsService {
   }
 
   /** 公开媒体：必须同时满足商品、图片归属以及 PUBLIC + PUBLISHED 条件。 */
-  async servePublicMedia(productId: number, imageId: number, response: any): Promise<void> {
-    if (!Number.isInteger(productId) || productId <= 0 || !Number.isInteger(imageId) || imageId <= 0) {
+  async servePublicMedia(
+    productId: number,
+    imageId: number,
+    response: any,
+  ): Promise<void> {
+    if (
+      !Number.isInteger(productId) ||
+      productId <= 0 ||
+      !Number.isInteger(imageId) ||
+      imageId <= 0
+    ) {
       throw new NotFoundException("媒体不存在");
     }
     const image = await this.prisma.productImage.findFirst({
@@ -527,7 +559,10 @@ export class ProductsService {
 
     const { buffer, mimeType } = this.productMedia.readProductImage(image);
     response.setHeader("Content-Type", mimeType);
-    response.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=86400");
+    response.setHeader(
+      "Cache-Control",
+      "public, max-age=300, stale-while-revalidate=86400",
+    );
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.end(buffer);
   }
@@ -546,7 +581,9 @@ export class ProductsService {
     const image = await this.prisma.productImage.findFirst({
       where: { id: imageId, productId },
       include: {
-        product: { select: { id: true, status: true, visibility: true, deletedAt: true } },
+        product: {
+          select: { id: true, status: true, visibility: true, deletedAt: true },
+        },
       },
     });
     if (!image || !image.product) {
@@ -577,13 +614,17 @@ export class ProductsService {
     }
 
     // 读取字节（优先私有 storageKey，回退旧公开路径）
-    const { buffer, mimeType, isVideo } = this.productMedia.readProductImage(image);
+    const { buffer, mimeType, isVideo } =
+      this.productMedia.readProductImage(image);
 
     let outBuffer: Buffer = buffer;
     let outMime = mimeType;
     if (needsWatermark && !isVideo) {
       const label = this.productMedia.maskPhone(request.customer.phone);
-      const watermarked = await this.productMedia.applyPartnerWatermark(buffer, label);
+      const watermarked = await this.productMedia.applyPartnerWatermark(
+        buffer,
+        label,
+      );
       outBuffer = watermarked.buffer;
       outMime = watermarked.mimeType;
     }
@@ -600,10 +641,14 @@ export class ProductsService {
     const baseWhere = { deletedAt: null };
     const results = await Promise.all([
       this.prisma.product.count({ where: baseWhere }),
-      this.prisma.product.count({ where: { ...baseWhere, status: "PUBLISHED" } }),
+      this.prisma.product.count({
+        where: { ...baseWhere, status: "PUBLISHED" },
+      }),
       this.prisma.product.count({ where: { ...baseWhere, status: "OFFLINE" } }),
       this.prisma.product.count({ where: { ...baseWhere, status: "DRAFT" } }),
-      this.prisma.product.count({ where: { ...baseWhere, status: "ARCHIVED" } }),
+      this.prisma.product.count({
+        where: { ...baseWhere, status: "ARCHIVED" },
+      }),
     ]);
     return {
       all: results[0],
@@ -645,7 +690,11 @@ export class ProductsService {
     });
     if (!product) return null;
     // 记录有效浏览（30 分钟去重 + viewCount 原子 +1）
-    await this.productAccess.recordDetailView(customer.id, id, "product_detail");
+    await this.productAccess.recordDetailView(
+      customer.id,
+      id,
+      "product_detail",
+    );
     return this.toCustomerFacingProduct(product, "catalog");
   }
 
@@ -774,14 +823,19 @@ export class ProductsService {
     if (!product) return null;
     // 后台/详情媒体统一走受控媒体端点（迁移后旧 /uploads 文件删除，url 不再可用）
     const withMedia = (img: any) =>
-      img ? { ...img, mediaUrl: `/products/catalog/${product.id}/media/${img.id}` } : img;
+      img
+        ? {
+            ...img,
+            mediaUrl: `/products/catalog/${product.id}/media/${img.id}`,
+          }
+        : img;
     return {
       ...product,
       tags: (product.tags || []).map((t: any) => ({
         id: t.id,
         productId: t.productId,
         tagId: t.tagId,
-        tagName: t.tag?.name || '',
+        tagName: t.tag?.name || "",
       })),
       images: (product.images || []).map(withMedia),
       primaryImage: withMedia(product.primaryImage),
@@ -818,7 +872,12 @@ export class ProductsService {
         // P1-1 闭环：默认 SKU 建立 Inventory 记录（Inventory 为单一库存来源，否则该商品无法下单）
         const warehouseId = await this.ensureDefaultWarehouseId(tx);
         await tx.inventory.create({
-          data: { skuId: defaultSku.id, warehouseId, quantity: 0, safetyStock: 5 },
+          data: {
+            skuId: defaultSku.id,
+            warehouseId,
+            quantity: 0,
+            safetyStock: 5,
+          },
         });
         return created;
       });
@@ -850,12 +909,10 @@ export class ProductsService {
     });
     if (!product) throw new NotFoundException("商品不存在或已删除");
     const errors: string[] = [];
-    if (!product.price || Number(product.price) <= 0)
-      errors.push("价格大于 0");
+    if (!product.price || Number(product.price) <= 0) errors.push("价格大于 0");
     if (!product.primaryImageId && product.images.length === 0)
       errors.push("至少一张商品图片");
-    if (product.skus.length === 0)
-      errors.push("至少一个有价的有效规格 (SKU)");
+    if (product.skus.length === 0) errors.push("至少一个有价的有效规格 (SKU)");
     if (errors.length > 0) {
       throw new BadRequestException(`发布前请补全: ${errors.join("、")}`);
     }
@@ -884,7 +941,7 @@ export class ProductsService {
       where: { id, deletedAt: null },
       select: { id: true },
     });
-    if (!existing) throw new NotFoundException('商品不存在或已删除');
+    if (!existing) throw new NotFoundException("商品不存在或已删除");
 
     // 检查分类是否存在
     if (dto.categoryId !== undefined) {
@@ -955,7 +1012,13 @@ export class ProductsService {
   /* ═══ 图片管理 ═══ */
   // ImageType 枚举（schema 定义：FRONT/SIDE/TOP/DETAIL/WEARING，无 BACK）。
   // 注：是否新增 BACK 属【待产品决策】（PRODUCT_DATA_CONTRACT 13.5），未确认前不扩展。
-  private readonly IMAGE_TYPES = new Set(["FRONT", "SIDE", "TOP", "DETAIL", "WEARING"]);
+  private readonly IMAGE_TYPES = new Set([
+    "FRONT",
+    "SIDE",
+    "TOP",
+    "DETAIL",
+    "WEARING",
+  ]);
   private normalizeImageType(type: string | undefined): string {
     if (!type) return "FRONT"; // 默认与 schema 一致（旧代码默认 SIDE 与 schema 冲突，已统一为 FRONT）
     const upper = String(type).toUpperCase();
@@ -982,7 +1045,8 @@ export class ProductsService {
     // /products/catalog/:id/media/:imageId —— 统一作为订单/选款等历史快照的来源值，
     // 避免用 catalog:// 等占位符污染快照导致后台缩略图失效。
     const storageKey = data.storageKey?.trim() || undefined;
-    const initialUrl = data.url || (storageKey ? `pending://${storageKey}` : "");
+    const initialUrl =
+      data.url || (storageKey ? `pending://${storageKey}` : "");
     if (!initialUrl) throw new BadRequestException("图片地址或存储键不能为空");
     const image = await this.prisma.productImage.create({
       data: {
@@ -1021,7 +1085,8 @@ export class ProductsService {
     });
     if (!img) throw new BadRequestException("图片不属于该商品");
     const updateData: any = {};
-    if (data.type !== undefined) updateData.type = this.normalizeImageType(data.type) as any;
+    if (data.type !== undefined)
+      updateData.type = this.normalizeImageType(data.type) as any;
     if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
     const image = await this.prisma.productImage.update({
       where: { id: imageId },
@@ -1139,7 +1204,12 @@ export class ProductsService {
   /* ═══ 证书管理 ═══ */
   async addCertificate(
     productId: number,
-    dto: { certType: string; certNumber?: string; certImage?: string; expireDate?: string },
+    dto: {
+      certType: string;
+      certNumber?: string;
+      certImage?: string;
+      expireDate?: string;
+    },
   ) {
     const cert = await this.prisma.certificate.create({
       data: {
@@ -1157,10 +1227,17 @@ export class ProductsService {
   async updateCertificate(
     productId: number,
     certId: number,
-    dto: { certType?: string; certNumber?: string; certImage?: string; expireDate?: string },
+    dto: {
+      certType?: string;
+      certNumber?: string;
+      certImage?: string;
+      expireDate?: string;
+    },
   ) {
     // P1-22：校验证书归属于 URL 声明的商品，避免跨商品越权改删
-    const existing = await this.prisma.certificate.findFirst({ where: { id: certId, productId } });
+    const existing = await this.prisma.certificate.findFirst({
+      where: { id: certId, productId },
+    });
     if (!existing) throw new NotFoundException("证书不存在或不属于该商品");
     const data: any = {};
     if (dto.certType !== undefined) data.certType = dto.certType;
@@ -1177,7 +1254,9 @@ export class ProductsService {
   }
 
   async deleteCertificate(productId: number, certId: number) {
-    const cert = await this.prisma.certificate.findFirst({ where: { id: certId, productId } });
+    const cert = await this.prisma.certificate.findFirst({
+      where: { id: certId, productId },
+    });
     if (!cert) throw new NotFoundException("证书不存在或不属于该商品");
     await this.prisma.certificate.delete({ where: { id: certId } });
     this.notifyPublicChange(productId);
@@ -1246,7 +1325,9 @@ export class ProductsService {
     },
   ) {
     // P1-22：校验 SKU 归属于 URL 声明的商品
-    const existing = await this.prisma.productSKU.findFirst({ where: { id: skuId, productId } });
+    const existing = await this.prisma.productSKU.findFirst({
+      where: { id: skuId, productId },
+    });
     if (!existing) throw new NotFoundException("SKU不存在或不属于该商品");
 
     const data: any = {};
@@ -1311,7 +1392,7 @@ export class ProductsService {
     const rows = await this.prisma.productTag.findMany({
       where: { productId },
       include: { tag: true },
-      orderBy: { id: 'asc' },
+      orderBy: { id: "asc" },
     });
     return rows.map((r) => ({
       id: r.id,
@@ -1324,8 +1405,12 @@ export class ProductsService {
   async updateTags(productId: number, tags: string[]) {
     // 校验单条标签长度（schema tag.name VarChar(50)，超长会触发 Prisma 500）
     for (const tag of tags) {
-      if (typeof tag !== 'string' || tag.trim().length === 0 || tag.length > 50) {
-        throw new BadRequestException('每个标签长度需在 1-50 字符之间');
+      if (
+        typeof tag !== "string" ||
+        tag.trim().length === 0 ||
+        tag.length > 50
+      ) {
+        throw new BadRequestException("每个标签长度需在 1-50 字符之间");
       }
     }
     const names = [...new Set(tags.map((t) => t.trim()))];
@@ -1357,7 +1442,7 @@ export class ProductsService {
     return this.prisma.productAttributeValue.findMany({
       where: { productId },
       include: { attributeValue: { include: { attribute: true } } },
-      orderBy: { id: 'asc' },
+      orderBy: { id: "asc" },
     });
   }
 
@@ -1370,16 +1455,21 @@ export class ProductsService {
       ),
     ];
     if (ids.length) {
-      const count = await this.prisma.attributeValue.count({ where: { id: { in: ids } } });
+      const count = await this.prisma.attributeValue.count({
+        where: { id: { in: ids } },
+      });
       if (count !== ids.length) {
-        throw new BadRequestException('包含不存在的属性值');
+        throw new BadRequestException("包含不存在的属性值");
       }
     }
     await this.prisma.$transaction(async (tx) => {
       await tx.productAttributeValue.deleteMany({ where: { productId } });
       if (ids.length) {
         await tx.productAttributeValue.createMany({
-          data: ids.map((attributeValueId) => ({ productId, attributeValueId })),
+          data: ids.map((attributeValueId) => ({
+            productId,
+            attributeValueId,
+          })),
         });
       }
     });
@@ -1400,16 +1490,18 @@ export class ProductsService {
    * 确保存在至少一个 active 仓库并返回其 id（P1-1 闭环：SKU 必须挂在某仓库的 Inventory 才能下单）。
    * seed 已建默认仓库；若被全部停用则自动建"默认主仓库"兜底，避免阻断下单。
    */
-  private async ensureDefaultWarehouseId(tx?: Prisma.TransactionClient): Promise<number> {
+  private async ensureDefaultWarehouseId(
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
     const client = tx ?? this.prisma;
     const existing = await client.warehouse.findFirst({
       where: { isActive: true },
-      orderBy: { id: 'asc' },
+      orderBy: { id: "asc" },
       select: { id: true },
     });
     if (existing) return existing.id;
     const created = await client.warehouse.create({
-      data: { name: '默认主仓库', type: 'STORE', isActive: true },
+      data: { name: "默认主仓库", type: "STORE", isActive: true },
     });
     return created.id;
   }
