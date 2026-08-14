@@ -10,7 +10,7 @@
  * 供图层栏与发布预检展示;真正的硬拦截(Commerce 专属模板上 Brand 页)
  * 由服务端发布校验承担。
  */
-import { BLOCK_META } from "../../config/blockMeta";
+import { BLOCK_META } from "../config/blockMeta";
 import type { DesignMode } from "./masters";
 
 export interface RhythmInputBlock {
@@ -85,11 +85,7 @@ export function analyzePageRhythm(
       hints.push({
         level: "info",
         message: `第 ${indexMap[i - 2] + 1}–${indexMap[i] + 1} 个区块连续属于「${a.category}」,页面节奏趋于单一,建议穿插其他表达。`,
-        blockIndexes: [
-          indexMap[i - 2],
-          indexMap[i - 1],
-          indexMap[i],
-        ],
+        blockIndexes: [indexMap[i - 2], indexMap[i - 1], indexMap[i]],
       });
     }
   }

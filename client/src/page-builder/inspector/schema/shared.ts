@@ -70,9 +70,9 @@ export function bgColorPresetField(): FieldDef {
     label: "配色方案",
     control: "preset",
     hint: "品牌调性预设;需要精确色值时展开高级设置",
-    options: Object.values(TONE_PRESETS).map((preset) => ({
+    options: Object.entries(TONE_PRESETS).map(([key, preset]) => ({
       label: preset.label,
-      value: preset.key,
+      value: key,
       patch: { bgColor: preset.bg },
       isActive: (ctx) => ctx.props.bgColor === preset.bg,
     })),

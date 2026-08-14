@@ -282,7 +282,8 @@ export function evaluateGalleryContract(
 ): ModuleContractStatus {
   const items = Array.isArray(props.items) ? props.items : [];
   const completeItems = items.filter(
-    (item: GalleryContractItem) => typeof item?.image === "string" && item.image.trim(),
+    (item: GalleryContractItem) =>
+      typeof item?.image === "string" && item.image.trim(),
   );
   const enoughItems = items.length >= GALLERY_CONTRACT.content.minItems;
   const checks = [
@@ -294,7 +295,9 @@ export function evaluateGalleryContract(
   const warnings: string[] = [];
   if (!hasText(props.title)) errors.push("请填写画廊标题");
   if (items.length > 0 && items.length < GALLERY_CONTRACT.content.minItems)
-    errors.push(`画廊至少需要 ${GALLERY_CONTRACT.content.minItems} 张图片,建议 3–5 张形成节奏`);
+    errors.push(
+      `画廊至少需要 ${GALLERY_CONTRACT.content.minItems} 张图片,建议 3–5 张形成节奏`,
+    );
   if (items.length > GALLERY_CONTRACT.content.maxItems)
     errors.push(`画廊图片不能超过 ${GALLERY_CONTRACT.content.maxItems} 张`);
   if (items.some((item: GalleryContractItem) => !hasText(item?.image)))
@@ -321,7 +324,7 @@ export const APPOINTMENT_CONTRACT = {
     backgroundAspectRatio: RATIOS["21:6"],
   },
   content: {
-    limits: { title: 24, subtitle: 72, buttonText: 10, altText: 80 },
+    limits: { title: 24, subtitle: 72, buttonText: 10, altText: 80, phone: 30 },
   },
   defaults: { linkUrl: "/contact", tone: "dark" },
 } as const;
@@ -852,11 +855,7 @@ export function evaluateSplitPanelContract(
 ): ModuleContractStatus {
   const resolvedLink = resolveLinkTargetUrl(props);
   const buttonReady = !hasText(props.buttonText) || hasText(resolvedLink);
-  const checks = [
-    hasText(props.image),
-    hasText(props.title),
-    buttonReady,
-  ];
+  const checks = [hasText(props.image), hasText(props.title), buttonReady];
   const errors: string[] = [];
   const warnings: string[] = [];
   if (!hasText(props.image)) errors.push("请上传分栏配图");

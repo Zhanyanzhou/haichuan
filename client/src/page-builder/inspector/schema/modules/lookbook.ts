@@ -5,7 +5,7 @@
 import { createElement } from "react";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { lookbookPuckConfig } from "../../../adapters/lookbook.puck";
-import ProductIdsField from "../../fields/ProductIdsField";
+import ProductIdsField from "../../../fields/ProductIdsField";
 import { altTextField, bgColorPresetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 

@@ -555,7 +555,7 @@ export class ProductsService {
    */
   private async resizeMediaBuffer(
     buffer: Buffer,
-    width: number,
+    width: string | number,
   ): Promise<{ buffer: Buffer; mimeType: string } | null> {
     const allowed = ProductsService.RESIZE_WIDTHS.has(Number(width));
     if (!allowed) return null;

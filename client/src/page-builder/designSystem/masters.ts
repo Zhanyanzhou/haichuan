@@ -155,11 +155,7 @@ export const MASTERS: Record<MasterId, MasterDefinition> = {
       independentMobileImage: false,
       dualFocus: false,
     },
-    rules: [
-      "纯文字,无图",
-      "正文≤80 字,居中或左对齐",
-      "留白明显高于平均区块",
-    ],
+    rules: ["纯文字,无图", "正文≤80 字,居中或左对齐", "留白明显高于平均区块"],
   },
   "hero-piece": {
     id: "hero-piece",
@@ -208,7 +204,7 @@ export const MASTERS: Record<MasterId, MasterDefinition> = {
     flow: "bleed",
     media: {
       desktopRatio: "21:6",
-      mobileRatio: "4:3",
+      mobileRatio: "1:1",
       independentMobileImage: true,
       dualFocus: true,
     },
