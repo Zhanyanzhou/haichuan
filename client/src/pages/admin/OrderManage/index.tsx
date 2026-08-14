@@ -21,9 +21,9 @@ import {
 import { EyeOutlined, ExportOutlined, ReloadOutlined, TruckOutlined } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
-import { orderApi } from "@/services/api";
+import { orderApi, userApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
-import type { Order, OrderItem, OrderStatus, PaginatedResult, TradeEvent } from "@/types";
+import type { Order, OrderItem, OrderStatus, PaginatedResult, TradeEvent, User } from "@/types";
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -168,6 +168,8 @@ export default function OrderManage() {
   const [shippingOrder, setShippingOrder] = useState<Order | null>(null);
   const [shipping, setShipping] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [opModal, setOpModal] = useState<{ type: string; open: boolean }>({ type: "", open: false });
+  const [consultants, setConsultants] = useState<User[]>([]);
   const canShip = useIsAdmin();
 
   const handleStatusFilter = (status: string) => {
@@ -309,6 +311,57 @@ export default function OrderManage() {
     } finally {
       setExporting(false);
     }
+  };
+
+  const loadConsultants = async () => {
+    try {
+      const res = await userApi.getList({ pageSize: 200 });
+      const users = unwrapResponse<PaginatedResult<User>>(res)?.list || [];
+      setConsultants(users.filter((u) => u.role === "SALES_CONSULTANT" || u.role === "ADMIN" || u.role === "SUPER_ADMIN"));
+    } catch {
+      setConsultants([]);
+    }
+  };
+
+  const openOp = (type: string) => {
+    if (type === "consultant" && consultants.length === 0) void loadConsultants();
+    setOpModal({ type, open: true });
+  };
+
+  const submitOp = async (values: any) => {
+    if (!detail) return;
+    try {
+      if (opModal.type === "amount") await orderApi.updateAmount(detail.id, values);
+      else if (opModal.type === "address") await orderApi.updateAddress(detail.id, values.address);
+      else if (opModal.type === "note") await orderApi.updateNote(detail.id, values.internalNote);
+      else if (opModal.type === "consultant") await orderApi.updateConsultant(detail.id, values.salesConsultantId ?? null);
+      else if (opModal.type === "custom-stage") await orderApi.advanceCustomStage(detail.id, values.stage);
+      message.success("操作成功");
+      setOpModal({ type: "", open: false });
+      void openDetail(detail.id);
+      void load();
+    } catch (e: unknown) {
+      message.error(e instanceof Error ? e.message : "操作失败");
+    }
+  };
+
+  const handleReceive = () => {
+    if (!detail) return;
+    Modal.confirm({
+      title: "确认签收？",
+      content: "将订单标记为已签收（发货维度 SHIPPED→RECEIVED）。",
+      okText: "确认签收",
+      onOk: async () => {
+        try {
+          await orderApi.confirmReceive(detail.id);
+          message.success("已签收");
+          void openDetail(detail.id);
+          void load();
+        } catch (e: unknown) {
+          message.error(e instanceof Error ? e.message : "操作失败");
+        }
+      },
+    });
   };
 
   const resetFilters = () => {
@@ -620,6 +673,25 @@ export default function OrderManage() {
               ) : <p className="text-brand-muted text-sm">暂无履约信息</p>}
             </div>
 
+            {/* 订单管理操作（仅管理员） */}
+            {canShip && (
+              <div>
+                <h3 className="font-display text-lg mb-2">订单操作</h3>
+                <Space wrap>
+                  <Button size="small" onClick={() => openOp("amount")}>修改金额</Button>
+                  <Button size="small" onClick={() => openOp("address")}>修改地址</Button>
+                  <Button size="small" onClick={() => openOp("note")}>修改备注</Button>
+                  <Button size="small" onClick={() => openOp("consultant")}>修改顾问</Button>
+                  {detail.orderType === "CUSTOM" && (
+                    <Button size="small" onClick={() => openOp("custom-stage")}>推进定制阶段</Button>
+                  )}
+                  {detail.status === "SHIPPED" && (
+                    <Button size="small" type="primary" onClick={handleReceive}>确认签收</Button>
+                  )}
+                </Space>
+              </div>
+            )}
+
             {/* 交易事件时间线 */}
             <div>
               <h3 className="font-display text-lg mb-2">交易事件时间线</h3>
@@ -668,6 +740,48 @@ export default function OrderManage() {
             </div>
           </Form>
         )}
+      </Modal>
+
+      {/* 订单操作弹窗（金额/地址/备注/顾问/定制阶段） */}
+      <Modal
+        title={opModal.type === "amount" ? "修改金额" : opModal.type === "address" ? "修改地址" : opModal.type === "note" ? "修改备注" : opModal.type === "consultant" ? "修改顾问" : "推进定制阶段"}
+        open={opModal.open}
+        onCancel={() => setOpModal({ type: "", open: false })}
+        footer={null}
+        destroyOnClose
+      >
+        <Form layout="vertical" onFinish={submitOp}>
+          {opModal.type === "amount" && (
+            <>
+              <Form.Item name="discountAmount" label="优惠金额"><InputNumber className="w-full" min={0} /></Form.Item>
+              <Form.Item name="adjustmentAmount" label="订单调整"><InputNumber className="w-full" /></Form.Item>
+              <Form.Item name="finalAmount" label="应收金额"><InputNumber className="w-full" min={0} /></Form.Item>
+              <Form.Item name="reason" label="调整原因"><Input.TextArea rows={2} /></Form.Item>
+            </>
+          )}
+          {opModal.type === "address" && (
+            <Form.Item name="address" label="收货地址" rules={[{ required: true, message: "请填写收货地址" }]}>
+              <Input.TextArea rows={3} />
+            </Form.Item>
+          )}
+          {opModal.type === "note" && (
+            <Form.Item name="internalNote" label="内部备注"><Input.TextArea rows={3} /></Form.Item>
+          )}
+          {opModal.type === "consultant" && (
+            <Form.Item name="salesConsultantId" label="销售顾问">
+              <Select allowClear placeholder="选择销售顾问" options={consultants.map((u) => ({ value: u.id, label: u.realName || u.username }))} />
+            </Form.Item>
+          )}
+          {opModal.type === "custom-stage" && (
+            <Form.Item name="stage" label="定制阶段" rules={[{ required: true, message: "请选择定制阶段" }]}>
+              <Select options={Object.entries(CUSTOM_STAGE_LABEL).map(([k, v]) => ({ value: k, label: v }))} />
+            </Form.Item>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setOpModal({ type: "", open: false })}>取消</Button>
+            <Button type="primary" htmlType="submit">确认</Button>
+          </div>
+        </Form>
       </Modal>
     </div>
   );

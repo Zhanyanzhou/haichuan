@@ -6,8 +6,15 @@ export interface User {
   phone?: string;
   email?: string;
   avatar?: string;
-  role: 'SUPER_ADMIN' | 'ADMIN' | 'EDITOR' | 'CUSTOMER_SERVICE' | 'WAREHOUSE';
-  status: 'ACTIVE' | 'DISABLED';
+  role:
+    | "SUPER_ADMIN"
+    | "ADMIN"
+    | "EDITOR"
+    | "CUSTOMER_SERVICE"
+    | "WAREHOUSE"
+    | "SALES_CONSULTANT"
+    | "FINANCE";
+  status: "ACTIVE" | "DISABLED";
   lastLoginAt?: string;
   createdAt: string;
 }
@@ -74,7 +81,12 @@ export interface Product {
   priceMax?: number;
   weight?: number;
   size?: string;
-  salesMode?: 'DISPLAY_ONLY' | 'SELECTION' | 'APPOINTMENT' | 'DIRECT_PURCHASE' | 'CUSTOM_INQUIRY';
+  salesMode?:
+    | "DISPLAY_ONLY"
+    | "SELECTION"
+    | "APPOINTMENT"
+    | "DIRECT_PURCHASE"
+    | "CUSTOM_INQUIRY";
   sortOrder?: number;
   gemInfo?: GemInfo;
   craftTechnique?: string[];
@@ -98,8 +110,18 @@ export interface Product {
   createdAt: string;
 }
 
-export type MaterialType = 'GOLD_999' | 'GOLD_9999' | 'AU750' | 'PT950' | 'S925' | 'DIAMOND' | 'JADE' | 'PEARL' | 'COLOR_GEM' | 'OTHER';
-export type ProductStatus = 'DRAFT' | 'PUBLISHED' | 'OFFLINE' | 'ARCHIVED';
+export type MaterialType =
+  | "GOLD_999"
+  | "GOLD_9999"
+  | "AU750"
+  | "PT950"
+  | "S925"
+  | "DIAMOND"
+  | "JADE"
+  | "PEARL"
+  | "COLOR_GEM"
+  | "OTHER";
+export type ProductStatus = "DRAFT" | "PUBLISHED" | "OFFLINE" | "ARCHIVED";
 
 export interface GemInfo {
   type?: string;
@@ -114,7 +136,7 @@ export interface ProductImage {
   id: number;
   productId: number;
   url: string;
-  type: 'FRONT' | 'SIDE' | 'TOP' | 'DETAIL' | 'WEARING';
+  type: "FRONT" | "SIDE" | "TOP" | "DETAIL" | "WEARING";
   sortOrder: number;
   isVideo: boolean;
   sourceImageId?: number | null;
@@ -141,7 +163,7 @@ export interface ProductSKU {
 export interface Certificate {
   id: number;
   productId: number;
-  certType: 'NATIONAL' | 'PROVINCIAL' | 'GIA' | 'OTHER';
+  certType: "NATIONAL" | "PROVINCIAL" | "GIA" | "OTHER";
   certNumber: string;
   certImage?: string;
   expireDate?: string;
@@ -199,27 +221,43 @@ export interface Order {
   tradeEvents?: TradeEvent[];
   fulfillments?: Fulfillment[];
   afterSalesCases?: AfterSalesCase[];
-  customer?: { id: number; name?: string; phone: string; email?: string } | null;
+  customer?: {
+    id: number;
+    name?: string;
+    phone: string;
+    email?: string;
+  } | null;
   salesConsultant?: { id: number; realName?: string; username: string } | null;
   quotationSource?: Quotation | null;
 }
 
-export type OrderStatus = 'PENDING_PAYMENT' | 'PENDING_SHIP' | 'SHIPPED' | 'COMPLETED' | 'CANCELLED';
+export type OrderStatus =
+  "PENDING_PAYMENT" | "PENDING_SHIP" | "SHIPPED" | "COMPLETED" | "CANCELLED";
 
 /** 订单类型：现货 / 定制 / 预订 / 线下（不同类型走不同流程） */
-export type OrderType = 'SPOT' | 'CUSTOM' | 'RESERVATION' | 'OFFLINE';
+export type OrderType = "SPOT" | "CUSTOM" | "RESERVATION" | "OFFLINE";
 
 /** 发货维度独立状态（与 OrderStatus 主流程解耦） */
-export type DeliveryStatus = 'NONE' | 'PENDING_SHIP' | 'SHIPPED' | 'RECEIVED' | 'ABNORMAL';
+export type DeliveryStatus =
+  "NONE" | "PENDING_SHIP" | "SHIPPED" | "RECEIVED" | "ABNORMAL";
 
 /** 定制订单专属阶段（仅 orderType=CUSTOM 时使用） */
 export type CustomStage =
-  | 'NEED_CONFIRM' | 'QUOTE_CONFIRM' | 'PENDING_DEPOSIT' | 'DEPOSIT_PAID'
-  | 'DESIGN_CONFIRM' | 'IN_PRODUCTION' | 'QC_PASSED' | 'PENDING_BALANCE'
-  | 'BALANCE_PAID' | 'PENDING_DELIVERY' | 'DELIVERED' | 'COMPLETED';
+  | "NEED_CONFIRM"
+  | "QUOTE_CONFIRM"
+  | "PENDING_DEPOSIT"
+  | "DEPOSIT_PAID"
+  | "DESIGN_CONFIRM"
+  | "IN_PRODUCTION"
+  | "QC_PASSED"
+  | "PENDING_BALANCE"
+  | "BALANCE_PAID"
+  | "PENDING_DELIVERY"
+  | "DELIVERED"
+  | "COMPLETED";
 
 /** 支付状态（前端从 paidAmount/finalAmount 派生） */
-export type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
+export type PaymentStatus = "UNPAID" | "PARTIAL" | "PAID";
 
 export interface OrderItem {
   id: number;
@@ -240,7 +278,13 @@ export interface OrderItem {
 }
 
 // ===== 报价管理（珠宝行业核心能力）=====
-export type QuotationStatus = 'DRAFT' | 'PENDING_CONFIRM' | 'CONFIRMED' | 'EXPIRED' | 'CANCELLED' | 'CONVERTED';
+export type QuotationStatus =
+  | "DRAFT"
+  | "PENDING_CONFIRM"
+  | "CONFIRMED"
+  | "EXPIRED"
+  | "CANCELLED"
+  | "CONVERTED";
 
 export interface QuotationItem {
   id: number;
@@ -309,7 +353,7 @@ export interface ApiResponse<T> {
 export interface GoldPrice {
   id: number;
   price: number;
-  source: 'AUTO' | 'MANUAL';
+  source: "AUTO" | "MANUAL";
   recordDate: string;
   createdAt: string;
 }
@@ -327,7 +371,7 @@ export interface Inventory {
 export interface Warehouse {
   id: number;
   name: string;
-  type: 'SHOWROOM' | 'FACTORY' | 'STORE';
+  type: "SHOWROOM" | "FACTORY" | "STORE";
   address?: string;
 }
 
@@ -355,7 +399,7 @@ export interface Inquiry {
   customerName: string;
   customerPhone: string;
   content: string;
-  status: 'PENDING' | 'REPLIED' | 'CLOSED';
+  status: "PENDING" | "REPLIED" | "CLOSED";
   assignedTo?: number;
   reply?: string;
   createdAt: string;
@@ -367,7 +411,7 @@ export interface Notification {
   userId: number;
   title: string;
   content: string;
-  type: 'SYSTEM' | 'ORDER' | 'INVENTORY' | 'PROMOTION';
+  type: "SYSTEM" | "ORDER" | "INVENTORY" | "PROMOTION";
   isRead: boolean;
   createdAt: string;
 }
@@ -375,7 +419,7 @@ export interface Notification {
 // ===== Homepage Config Block =====
 export interface HomepageBlock {
   id: number;
-  type: 'hero' | 'categories' | 'story' | 'products' | 'craft' | 'contact';
+  type: "hero" | "categories" | "story" | "products" | "craft" | "contact";
   title: string;
   subtitle: string;
   content: string;
@@ -420,12 +464,18 @@ export interface OrderFilterParams {
 export interface TradeEvent {
   id: number;
   orderId: number;
-  entityType: 'ORDER' | 'PAYMENT' | 'REFUND' | 'FULFILLMENT' | 'AFTER_SALES' | 'INVENTORY';
+  entityType:
+    | "ORDER"
+    | "PAYMENT"
+    | "REFUND"
+    | "FULFILLMENT"
+    | "AFTER_SALES"
+    | "INVENTORY";
   entityId: number;
   eventType: string;
   fromStatus?: string | null;
   toStatus?: string | null;
-  operatorType: 'CUSTOMER' | 'ADMIN' | 'SYSTEM';
+  operatorType: "CUSTOMER" | "ADMIN" | "SYSTEM";
   operatorId?: number | null;
   operatorName?: string | null;
   reason?: string | null;
@@ -453,12 +503,12 @@ export interface Fulfillment {
 }
 
 export type FulfillmentStatus =
-  | 'PENDING_PICK'
-  | 'PENDING_CHECK'
-  | 'PENDING_SHIP'
-  | 'SHIPPED'
-  | 'DELIVERED'
-  | 'ABNORMAL';
+  | "PENDING_PICK"
+  | "PENDING_CHECK"
+  | "PENDING_SHIP"
+  | "SHIPPED"
+  | "DELIVERED"
+  | "ABNORMAL";
 
 /** 退款 */
 export interface Refund {
@@ -486,7 +536,8 @@ export interface Refund {
   processor?: { id: number; realName?: string; username: string } | null;
 }
 
-export type RefundStatus = 'PENDING' | 'APPROVED' | 'PROCESSING' | 'COMPLETED' | 'REJECTED' | 'FAILED';
+export type RefundStatus =
+  "PENDING" | "APPROVED" | "PROCESSING" | "COMPLETED" | "REJECTED" | "FAILED";
 
 /** 售后工单 */
 export interface AfterSalesCase {
@@ -512,16 +563,16 @@ export interface AfterSalesCase {
   handler?: { id: number; realName?: string; username: string } | null;
 }
 
-export type AfterSalesType = 'REFUND' | 'EXCHANGE' | 'REPAIR';
+export type AfterSalesType = "REFUND" | "EXCHANGE" | "REPAIR";
 export type AfterSalesStatus =
-  | 'REQUESTED'
-  | 'APPROVED'
-  | 'REJECTED'
-  | 'RETURNING'
-  | 'QC_PASSED'
-  | 'QC_FAILED'
-  | 'COMPLETED'
-  | 'CANCELLED';
+  | "REQUESTED"
+  | "APPROVED"
+  | "REJECTED"
+  | "RETURNING"
+  | "QC_PASSED"
+  | "QC_FAILED"
+  | "COMPLETED"
+  | "CANCELLED";
 
 /** 付款记录（含审核人信息） */
 export interface Payment {
@@ -530,7 +581,7 @@ export interface Payment {
   orderId: number;
   amount: number | string;
   method: string;
-  status: 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED' | 'PARTIAL_REFUND';
+  status: "PENDING" | "PAID" | "FAILED" | "REFUNDED" | "PARTIAL_REFUND";
   type: string;
   proofUrl?: string | null;
   reviewedBy?: number | null;
@@ -541,4 +592,3 @@ export interface Payment {
   order?: Order;
   reviewer?: { id: number; realName?: string; username: string } | null;
 }
-

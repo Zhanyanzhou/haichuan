@@ -12,18 +12,36 @@ export default function Inventory() {
   const [filter, setFilter] = useState('all');
   const [adjustModal, setAdjustModal] = useState<{ open: boolean; record: any }>({ open: false, record: null });
   const [adjustQty, setAdjustQty] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
 
   const load = async () => {
     setLoading(true);
     try {
-      const res = await inventoryApi.getList({ pageSize: 50 });
-      const data = unwrapResponse(res);
-      setItems(data?.list || []);
-    } catch { setItems([]); }
+      const res = await inventoryApi.getList({ page, pageSize });
+      const data = unwrapResponse<{ list: any[]; total: number }>(res);
+      // 服务端返回嵌套 sku/warehouse，mock 返回扁平字段——两侧兼容，并在前端统一计算库存状态
+      const rows = (data?.list || []).map((i: any) => {
+        const quantity = i.quantity ?? 0;
+        const safety = i.safetyStock ?? 0;
+        return {
+          id: i.id,
+          skuCode: i.sku?.skuCode ?? i.skuCode,
+          productName: i.sku?.product?.name ?? i.productName,
+          warehouse: i.warehouse?.name ?? i.warehouse,
+          quantity,
+          safetyStock: safety,
+          status: quantity <= 0 ? 'out' : quantity <= safety ? 'low' : 'normal',
+        };
+      });
+      setItems(rows);
+      setTotal(data?.total || 0);
+    } catch { setItems([]); setTotal(0); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [page, pageSize]);
 
   const filtered = filter === 'all' ? items : items.filter(i => i.status === filter);
 
@@ -50,7 +68,7 @@ export default function Inventory() {
   };
 
   const stats = [
-    { t: '库存总数', v: items.length },
+    { t: '库存总数', v: total },
     { t: '正常', v: items.filter(i => i.status === 'normal').length },
     { t: '偏低', v: items.filter(i => i.status === 'low').length },
     { t: '缺货', v: items.filter(i => i.status === 'out').length },
@@ -66,7 +84,15 @@ export default function Inventory() {
         ))}
       </div>
       <Card className="!bg-white !border-brand-line">
-        <Table dataSource={filtered} rowKey="id" loading={loading} pagination={false} size="middle"
+        <Table dataSource={filtered} rowKey="id" loading={loading} size="middle"
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 条`,
+            onChange: (p, ps) => { setPage(p); setPageSize(ps); },
+          }}
           columns={[
             { title: 'SKU', dataIndex: 'skuCode', render: (v: string) => <code className="text-xs text-brand-gold">{v}</code> },
             { title: '产品', dataIndex: 'productName' },
