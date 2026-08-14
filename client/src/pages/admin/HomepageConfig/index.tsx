@@ -10,7 +10,7 @@ import {
   type RefObject,
   type ReactNode,
 } from "react";
-import { Button, Drawer, Input, Modal, Spin, message } from "antd";
+import { Button, Drawer, Input, Modal, Spin, Upload, message } from "antd";
 import {
   AppstoreOutlined,
   CheckCircleOutlined,
@@ -22,10 +22,8 @@ import {
   EyeOutlined,
   EyeInvisibleOutlined,
   ExclamationCircleOutlined,
-  HeartFilled,
-  HeartOutlined,
   HistoryOutlined,
-  LayoutOutlined,
+  MenuOutlined,
   MobileOutlined,
   RollbackOutlined,
   SaveOutlined,
@@ -35,6 +33,10 @@ import {
   TabletOutlined,
   UndoOutlined,
   RedoOutlined,
+  UpOutlined,
+  DownOutlined,
+  InboxOutlined,
+  SwapOutlined,
 } from "@ant-design/icons";
 import { Puck, createUsePuck, type UiState } from "@puckeditor/core";
 import { useNavigate } from "react-router-dom";
@@ -42,19 +44,47 @@ import "@puckeditor/core/puck.css";
 import { puckConfig } from "@/page-builder/config/puckConfig";
 import {
   BLOCK_META,
-  BLOCK_FILTERS,
   BLOCK_PREVIEW_KIND,
+  BLOCK_CATEGORIES,
   TEMPLATE_MEDIA_HINT,
   type BlockMeta,
 } from "@/page-builder/config/blockMeta";
-import { pageTemplates, type TemplateDefinition } from "@/page-builder/templates/templates";
-import { pageDocumentApi } from "@/services/api";
+import { pageDocumentApi, uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import MediaRequirementPanel from "@/page-builder/fields/MediaRequirementPanel";
 import MediaPickerField, { type MediaSpec } from "@/page-builder/fields/MediaPickerField";
+import ProductIdsField from "@/page-builder/fields/ProductIdsField";
+import ColorField from "@/page-builder/fields/ColorField";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
+import {
+  HOTSPOT_CONTRACT,
+  HERO_CONTRACT,
+  FULL_BLEED_CONTRACT,
+  DOUBLE_POSTER_CONTRACT,
+  FEATURED_PRODUCT_CONTRACT,
+  CATEGORY_CARDS_CONTRACT,
+  APPOINTMENT_CONTRACT,
+  IMAGE_TEXT_CONTRACT,
+  PRODUCT_ROW_CONTRACT,
+  SINGLE_POSTER_CONTRACT,
+  evaluateHotspotContract,
+  evaluateHeroContract,
+  evaluateFullBleedContract,
+  evaluateDoublePosterContract,
+  evaluateFeaturedProductContract,
+  evaluateCategoryCardsContract,
+  evaluateAppointmentContract,
+  evaluateImageTextContract,
+  evaluateProductRowContract,
+  evaluateSinglePosterContract,
+  type ModuleContractStatus,
+} from "@/page-builder/config/blockContracts";
 import { blockTemplateStore, type BlockTemplate } from "@/page-builder/templates/blockTemplateStore";
 import StorefrontNavigation from "@/components/layout/StorefrontNavigation";
+import InspectorSection from "@/page-builder/inspector/InspectorSection";
+import ImageStatus from "@/page-builder/inspector/ImageStatus";
+import FocusPicker from "@/page-builder/inspector/FocusPicker";
+import LinkTargetField from "@/page-builder/inspector/LinkTargetField";
 import {
   createEditorPageDefault,
   ensureEditorPageStructure,
@@ -89,10 +119,22 @@ type PageDocumentRevision = {
   createdAt?: string;
 };
 
-const AUTO_SAVE_DELAY = 3500;
-// 自动保存失败后的重试上限与退避封顶（指数退避：8s→16s→…，封顶 60s）
-const MAX_AUTO_RETRY = 5;
-const AUTO_SAVE_MAX_BACKOFF = 60000;
+type PageSessionCache = {
+  data: any;
+  metadata: Record<string, any>;
+  lastSaved: string | null;
+  updatedAt: string | null;
+};
+
+function cloneModuleProps<T extends Record<string, any>>(props: T): T {
+  return JSON.parse(JSON.stringify(props)) as T;
+}
+
+function getModuleDisplayName(type: string, props?: Record<string, any>) {
+  return typeof props?.moduleName === "string" && props.moduleName.trim()
+    ? props.moduleName.trim()
+    : BLOCK_META[type]?.name ?? type;
+}
 
 function formatEditorTime(value?: string | Date | null) {
   if (!value) return "";
@@ -104,11 +146,33 @@ function formatEditorTime(value?: string | Date | null) {
   });
 }
 
+function getEditorErrorMessage(error: unknown, fallback: string) {
+  const responseMessage = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
+  if (typeof responseMessage === "string" && responseMessage.trim()) return responseMessage;
+  if (Array.isArray(responseMessage)) return responseMessage.filter((item) => typeof item === "string").join("；") || fallback;
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function getEditorHttpStatus(error: unknown) {
+  const status = (error as { response?: { status?: unknown } })?.response?.status;
+  return typeof status === "number" ? status : undefined;
+}
+
 const VIEWPORT_PRESETS: ViewportPreset[] = [
   { label: "桌面端", icon: <DesktopOutlined />, width: 1440, height: 900 },
   { label: "平板端", icon: <TabletOutlined />, width: 768, height: 1024 },
   { label: "移动端", icon: <MobileOutlined />, width: 390, height: 844 },
 ];
+
+// 固定由顶部设备切换器控制预览尺寸，避免 Puck 根据浏览器窗口宽度回写为桌面端。
+const INITIAL_EDITOR_UI: Partial<UiState> = {
+  viewports: {
+    current: { width: 1440, height: 900 },
+    options: [],
+    controlsVisible: false,
+  },
+};
+
 
 const ROOT_ZONE = "root:default-zone";
 const CANVAS_FOCUS_MESSAGE = "homepage-editor:focus-block";
@@ -498,7 +562,7 @@ function getInspectorGuideItems(type: string, props: Record<string, any>): Inspe
     .map(([field, label]) => ({
       field,
       label,
-      placement: "此模板的图片区域",
+      placement: "此模块的图片区域",
       kind: "media" as const,
     }));
   return guideItems.map((item) => ({
@@ -508,7 +572,7 @@ function getInspectorGuideItems(type: string, props: Record<string, any>): Inspe
 }
 
 /**
- * 右侧素材卡片与画布字段一一对应。这里不复用桌面/移动端字段表达模板角色：
+ * 右侧素材卡片与画布字段一一对应。这里不复用桌面/移动端字段表达模块角色：
  * 双图海报只有主海报、细节海报两个固定角色；其余响应式模块才区分设备。
  */
 function getInspectorMediaItems(type: string, props: Record<string, any> = {}): InspectorMediaItem[] {
@@ -521,7 +585,7 @@ function getInspectorMediaItems(type: string, props: Record<string, any> = {}): 
     case "单图海报":
       return [
         { field: "desktopImage", label: "桌面端海报", placement: "桌面端海报主视觉区", device: "desktop", required: true, spec: IMAGE_SPECS.singlePoster.image, placeholder: "拖拽或点击上传桌面端海报", ...createCropPreview("4 / 3", props.focusX, props.focusY) },
-        { field: "mobileImage", label: "移动端海报", placement: "移动端海报主视觉区", device: "mobile", required: false, spec: IMAGE_SPECS.singlePoster.image, placeholder: "拖拽或点击上传移动端海报", ...createCropPreview("3 / 4", props.focusX, props.focusY) },
+        { field: "mobileImage", label: "移动端海报", placement: "移动端海报主视觉区", device: "mobile", required: false, spec: IMAGE_SPECS.singlePoster.mobile, placeholder: "拖拽或点击上传移动端海报", ...createCropPreview("3 / 4", props.focusX, props.focusY) },
       ];
     case "双图海报":
       return [
@@ -603,7 +667,7 @@ const TEMPLATE_STRUCTURE_GUIDES: Record<string, InspectorGuideItem[]> = {
     { field: "description", label: "介绍", placement: "细节图下方的说明文字", kind: "text" },
   ],
   "单图海报": [
-    { field: "desktopImage", label: "海报主图", placement: "模板的主视觉区域", kind: "media" },
+    { field: "desktopImage", label: "海报主图", placement: "模块的主视觉区域", kind: "media" },
     { field: "mobileImage", label: "移动端适配图", placement: "移动端的海报主视觉区域", kind: "media" },
     { field: "number", label: "编号", placement: "海报文案区的第一行", kind: "text" },
     { field: "label", label: "标签", placement: "编号旁", kind: "text" },
@@ -665,21 +729,40 @@ function TemplateStructureGuide({
   onMoveCarouselItem: (index: number, direction: -1 | 1) => void;
   onRemoveCarouselItem: (index: number) => void;
 }) {
-  const items = getInspectorGuideItems(type, props);
   const configuredMediaItems = getInspectorMediaItems(type, props);
   const carouselItems = Array.isArray(props.images) ? props.images : [];
-  if (!items?.length && !configuredMediaItems.length && type !== "轮播图") return null;
+  const isCarousel = type === "轮播图";
+  const [activeCarouselIndex, setActiveCarouselIndex] = useState(0);
+  useEffect(() => {
+    setActiveCarouselIndex(0);
+  }, [props.id]);
+  if (!configuredMediaItems.length && type !== "轮播图") return null;
 
   const mediaItems = configuredMediaItems.filter(
     (item) => item.device === "shared" || item.device === device,
-  );
-  const textItems = items.filter((item) => item.kind === "text");
+  ).filter((item) => !isCarousel || item.carouselIndex === activeCarouselIndex);
 
   return (
     <section className="homepage-editor__structure-guide" aria-label={`${type}编辑位置说明`}>
+      {isCarousel && carouselItems.length > 0 && (
+        <div className="homepage-editor__carousel-tabs" role="tablist" aria-label="轮播项">
+          {carouselItems.map((_: Record<string, any>, index: number) => (
+            <button
+              key={index}
+              type="button"
+              role="tab"
+              aria-selected={activeCarouselIndex === index}
+              className={activeCarouselIndex === index ? "is-active" : ""}
+              onClick={() => setActiveCarouselIndex(index)}
+            >
+              选项 {index + 1}
+            </button>
+          ))}
+          <span>{activeCarouselIndex + 1}/{carouselItems.length}</span>
+        </div>
+      )}
       {mediaItems.length > 0 && (
         <div className="homepage-editor__structure-group">
-          <span className="homepage-editor__structure-title">图片素材</span>
           <div className="homepage-editor__structure-media-grid">
             {mediaItems.map((item) => (
               <article key={item.field} className="homepage-editor__structure-media">
@@ -724,7 +807,16 @@ function TemplateStructureGuide({
                     <div className="homepage-editor__carousel-item-actions">
                       <button type="button" disabled={item.carouselIndex === 0} onClick={() => onMoveCarouselItem(item.carouselIndex!, -1)}>上移</button>
                       <button type="button" disabled={item.carouselIndex === carouselItems.length - 1} onClick={() => onMoveCarouselItem(item.carouselIndex!, 1)}>下移</button>
-                      <button type="button" disabled={carouselItems.length <= 1} onClick={() => onRemoveCarouselItem(item.carouselIndex!)}>删除此轮播项</button>
+                      <button
+                        type="button"
+                        disabled={carouselItems.length <= 1}
+                        onClick={() => {
+                          onRemoveCarouselItem(item.carouselIndex!);
+                          setActiveCarouselIndex((current) => Math.min(current, carouselItems.length - 2));
+                        }}
+                      >
+                        删除此轮播项
+                      </button>
                     </div>
                   </div>
                 )}
@@ -734,105 +826,227 @@ function TemplateStructureGuide({
         </div>
       )}
 
-      {type === "轮播图" && (
+      {isCarousel && (
         <div className="homepage-editor__carousel-add">
           <span>每个轮播项分别维护桌面图与移动图；移动图为空时，移动端复用桌面图。</span>
-          <button type="button" onClick={onAddCarouselItem}>新增轮播项</button>
+          <button type="button" onClick={() => {
+            onAddCarouselItem();
+            setActiveCarouselIndex(carouselItems.length);
+          }}>新增轮播项</button>
         </div>
       )}
 
-      {textItems.length > 0 && (
-        <div className="homepage-editor__structure-group">
-          <span className="homepage-editor__structure-title">文案位置</span>
-          <div className="homepage-editor__structure-copy-list">
-            {textItems.map((item) => (
-              <button
-                key={item.field}
-                type="button"
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  focusInspectorField(item.field, blockId);
-                }}
-              >
-                <strong>{item.label}</strong>
-                <span>{item.placement}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </section>
   );
 }
 
 /**
- * 模板卡片不使用真实商品素材，而用“布局微缩图”展示该区块插入后的结构。
+ * 模块卡片不使用真实商品素材，而用“布局微缩图”展示该区块插入后的结构。
  * 这让用户先理解版式和内容层级，再决定是否添加。
  */
-function BlockTemplateVisual({ name }: { name: string }) {
-  const kind = BLOCK_PREVIEW_KIND[name] ?? "hero";
+const PREVIEW_COLORS = {
+  surface: "#FBFAF7",
+  ink: "#3F372F",
+  muted: "#A89E92",
+  line: "#DED6CA",
+  media: "#E5DDD1",
+  mediaDeep: "#B9A994",
+  accent: "#B8944E",
+  dark: "#342D27",
+  light: "#FFFFFF",
+};
+
+function PreviewText({ x, y, width, lines = 3, inverse = false }: {
+  x: number;
+  y: number;
+  width: number;
+  lines?: number;
+  inverse?: boolean;
+}) {
+  const color = inverse ? "rgba(255,255,255,.92)" : PREVIEW_COLORS.ink;
+  const soft = inverse ? "rgba(255,255,255,.56)" : PREVIEW_COLORS.muted;
   return (
-    <span
-      className={`homepage-editor__template-visual homepage-editor__template-visual--${kind}`}
-      aria-hidden="true"
-    >
-      <span className="homepage-editor__mock-nav" />
-      <span className="homepage-editor__mock-art" />
-      <span className="homepage-editor__mock-copy">
-        <i />
-        <i />
-        <i />
-      </span>
-      <span className="homepage-editor__mock-cards">
-        <i />
-        <i />
-        <i />
-        <i />
-      </span>
-      <span className="homepage-editor__mock-dots"><i /><i /><i /></span>
-      <span className="homepage-editor__mock-play">▶</span>
-      <span className="homepage-editor__mock-hotspot"><i /><i /><i /></span>
-    </span>
+    <g aria-hidden="true">
+      <rect x={x} y={y} width={width} height="9" rx="2" fill={color} />
+      {Array.from({ length: Math.min(2, Math.max(0, lines - 1)) }, (_, index) => (
+        <rect
+          key={index}
+          x={x}
+          y={y + 18 + index * 8}
+          width={width * (index === 1 ? .62 : .84)}
+          height="3"
+          rx="2"
+          fill={soft}
+        />
+      ))}
+    </g>
   );
 }
 
-function PageTemplateVisual({ templateId }: { templateId: string }) {
-  const theme = templateId.includes("product-guide")
-    ? "guide"
-    : templateId.includes("new-launch")
-      ? "launch"
-      : templateId.includes("campaign")
-        ? "campaign"
-        : "brand";
+function PreviewMedia({ x, y, width, height, dark = false, label = "图片" }: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  dark?: boolean;
+  label?: string;
+}) {
+  const base = dark ? "#6C5A4A" : PREVIEW_COLORS.media;
+  const detail = dark ? "#95816C" : PREVIEW_COLORS.mediaDeep;
   return (
-    <span className={`homepage-editor__page-template-visual is-${theme}`} aria-hidden="true">
-      <span className="homepage-editor__page-template-nav" />
-      <span className="homepage-editor__page-template-hero" />
-      <span className="homepage-editor__page-template-story" />
-      <span className="homepage-editor__page-template-products"><i /><i /><i /></span>
-      <span className="homepage-editor__page-template-cta" />
-    </span>
+    <g aria-hidden="true">
+      <rect x={x} y={y} width={width} height={height} rx="4" fill={base} />
+      <rect x={x + 8} y={y + 8} width={Math.max(0, width - 16)} height={Math.max(0, height - 16)} rx="2" fill={detail} opacity=".2" />
+      <path d={`M${x + 10} ${y + height - 10} L${x + width - 10} ${y + 10}`} stroke={dark ? "rgba(255,255,255,.36)" : "rgba(63,55,47,.16)"} strokeWidth="1" />
+    </g>
+  );
+}
+
+function PreviewCard({ x, y, width, height, kind = "product" }: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  kind?: "product" | "article" | "service" | "quote";
+}) {
+  const mediaHeight = kind === "article" ? height * .42 : kind === "service" ? 0 : height * .58;
+  return (
+    <g aria-hidden="true">
+      <rect x={x} y={y} width={width} height={height} rx="4" fill={PREVIEW_COLORS.light} stroke={PREVIEW_COLORS.line} />
+      {kind === "service" ? (
+        <>
+          <circle cx={x + width / 2} cy={y + 19} r="10" fill="#F2E9DA" stroke={PREVIEW_COLORS.accent} />
+          <circle cx={x + width / 2} cy={y + 19} r="3" fill={PREVIEW_COLORS.accent} />
+          <rect x={x + 10} y={y + 39} width={width - 20} height="5" rx="2.5" fill={PREVIEW_COLORS.ink} />
+          <rect x={x + 16} y={y + 50} width={width - 32} height="4" rx="2" fill={PREVIEW_COLORS.muted} />
+        </>
+      ) : kind === "quote" ? (
+        <>
+          <circle cx={x + 19} cy={y + 20} r="9" fill={PREVIEW_COLORS.media} />
+          <rect x={x + 10} y={y + 43} width={width - 20} height="5" rx="2" fill={PREVIEW_COLORS.ink} />
+          <rect x={x + 10} y={y + 54} width={width - 28} height="4" rx="2" fill={PREVIEW_COLORS.muted} />
+          <rect x={x + 10} y={y + height - 14} width={width * .36} height="4" rx="2" fill={PREVIEW_COLORS.accent} />
+        </>
+      ) : (
+        <>
+          <PreviewMedia x={x + 5} y={y + 5} width={width - 10} height={mediaHeight - 5} label={kind === "article" ? "内容" : "商品"} />
+          <rect x={x + 8} y={y + mediaHeight + 8} width={width - 16} height="5" rx="2" fill={PREVIEW_COLORS.ink} />
+          <rect x={x + 8} y={y + mediaHeight + 18} width={width * .48} height="4" rx="2" fill={PREVIEW_COLORS.accent} />
+        </>
+      )}
+    </g>
+  );
+}
+
+/** 不使用具体商品或摄影素材，直接把每种模块的内容框架画成线框缩略图。 */
+function BlockTemplateVisual({ name }: { name: string }) {
+  const kind = BLOCK_PREVIEW_KIND[name] ?? "hero";
+  let content: ReactNode;
+  let background = PREVIEW_COLORS.surface;
+
+  switch (kind) {
+    case "hero":
+      background = PREVIEW_COLORS.dark;
+      content = <><rect x="18" y="20" width="264" height="4" rx="2" fill="rgba(255,255,255,.48)" /><PreviewMedia x={14} y={47} width={272} height={153} dark /><PreviewText x={29} y={144} width={115} lines={3} inverse /><rect x={29} y="183" width="47" height="11" rx="2" fill={PREVIEW_COLORS.accent} /><rect x="111" y="234" width="78" height="139" rx="4" fill="#665649" opacity=".58" /><rect x="121" y="244" width="58" height="103" rx="3" fill="#8D7A66" opacity=".52" /></>;
+      break;
+    case "single-poster":
+      content = <><PreviewText x={21} y={52} width={72} lines={3} /><rect x={21} y="94" width="43" height="11" rx="2" fill="none" stroke={PREVIEW_COLORS.accent} /><PreviewMedia x={110} y={42} width={171} height={114} /><rect x="17" y="192" width="266" height="177" rx="4" fill="#F2EEE7" /><PreviewMedia x={30} y={211} width={140} height={93} /><PreviewText x={190} y={233} width={66} lines={2} /></>;
+      break;
+    case "double-poster":
+      content = <><PreviewText x={18} y={27} width={108} lines={2} /><PreviewMedia x={18} y={83} width={160} height={120} /><PreviewMedia x={197} y={105} width={72} height={90} /><PreviewText x={197} y={219} width={72} lines={3} /><rect x={197} y="260" width="45" height="11" rx="2" fill={PREVIEW_COLORS.accent} /><rect x="18" y="306" width="252" height="1" fill={PREVIEW_COLORS.line} /><PreviewMedia x={18} y={327} width={105} height={79} /><PreviewMedia x={139} y={327} width={63} height={79} /><PreviewText x={218} y={347} width={52} lines={2} /></>;
+      break;
+    case "image-text":
+      content = <><PreviewMedia x={16} y={72} width={132} height={99} /><PreviewText x={168} y={91} width={98} lines={3} /><rect x={168} y="135" width="48" height="11" rx="2" fill="none" stroke={PREVIEW_COLORS.accent} /><rect x="16" y="216" width="268" height="1" fill={PREVIEW_COLORS.line} /><PreviewText x={28} y={254} width={97} lines={3} /><PreviewMedia x={151} y={239} width={121} height={91} /></>;
+      break;
+    case "full-bleed":
+      background = PREVIEW_COLORS.dark;
+      content = <><PreviewMedia x={14} y={54} width={272} height={113} dark /><PreviewText x={34} y={89} width={118} lines={2} inverse /><rect x="34" y="126" width="55" height="2" rx="1" fill="rgba(255,255,255,.72)" /><rect x="187" y="213" width="88" height="106" rx="4" fill="#665649" opacity=".72" /><PreviewText x={198} y={246} width={62} lines={2} inverse /><rect x="198" y="282" width="39" height="2" rx="1" fill="rgba(255,255,255,.72)" /><rect x="26" y="363" width="248" height="1" fill="rgba(255,255,255,.18)" /></>;
+      break;
+    case "product-row":
+      content = <><PreviewText x={22} y={30} width={114} lines={2} />{[0, 1, 2, 3].map((index) => <g key={index}><PreviewMedia x={18 + index * 68} y={108} width={58} height={58} /><rect x={23 + index * 68} y="177" width="47" height="5" rx="2" fill={PREVIEW_COLORS.ink} /><rect x={23 + index * 68} y="188" width="29" height="4" rx="2" fill={PREVIEW_COLORS.accent} /></g>)}<rect x={106} y="220" width="88" height="11" rx="2" fill="none" stroke={PREVIEW_COLORS.accent} /><rect x="18" y="275" width="264" height="1" fill={PREVIEW_COLORS.line} /><PreviewText x={22} y={308} width={114} lines={2} /></>;
+      break;
+    case "category-cards":
+    case "occasion-guide":
+    case "gift-guide":
+      content = <><PreviewText x={74} y={27} width={152} lines={2} />{[[18, 103], [156, 103], [18, 252], [156, 252]].map(([x, y], index) => <g key={index}><PreviewMedia x={x} y={y} width={126} height={126} /><rect x={x + 11} y={y + 98} width="58" height="6" rx="2" fill="rgba(255,255,255,.88)" /></g>)}</>;
+      break;
+    case "card-grid":
+      content = <><PreviewText x={70} y={28} width={160} lines={2} />{[0, 1, 2].map((index) => <PreviewCard key={index} x={18 + index * 92} y={128} width={80} height={156} kind="service" />)}</>;
+      break;
+    case "text-banner":
+      background = PREVIEW_COLORS.dark;
+      content = <><rect x="16" y="159" width="268" height="56" rx="4" fill="#584838" /><PreviewText x={91} y={173} width={118} lines={2} inverse /><rect x="126" y="196" width="48" height="9" rx="2" fill={PREVIEW_COLORS.accent} /><PreviewText x={25} y={263} width={95} lines={2} /><PreviewText x={174} y={263} width={95} lines={2} /></>;
+      break;
+    case "carousel":
+      content = <><PreviewMedia x={12} y={105} width={276} height={130} dark /><PreviewText x={28} y={162} width={104} lines={2} inverse /><path d="M23 176l8 -7v14zM277 176l-8 -7v14z" fill="#FFFFFF" opacity=".9" />{[0, 1, 2, 3].map((index) => <circle key={index} cx={132 + index * 12} cy="220" r="3" fill={index === 0 ? PREVIEW_COLORS.accent : "#FFFFFF"} />)}<PreviewMedia x={18} y={279} width={74} height={35} /><PreviewMedia x={112} y={279} width={74} height={35} /><PreviewMedia x={206} y={279} width={74} height={35} /></>;
+      break;
+    case "video":
+      background = PREVIEW_COLORS.dark;
+      content = <><PreviewMedia x={16} y={105} width={268} height={151} dark /><circle cx="150" cy="180" r="22" fill="rgba(255,255,255,.88)" /><path d="M145 170l17 10-17 10z" fill={PREVIEW_COLORS.dark} /><PreviewText x={65} y={293} width={170} lines={2} /></>;
+      break;
+    case "split-panel":
+      content = <><PreviewMedia x={16} y={91} width={120} height={160} /><rect x="151" y="91" width="133" height="160" rx="4" fill="#F2EEE7" /><PreviewText x={168} y={134} width={96} lines={3} /><rect x={168} y="182" width="50" height="11" rx="2" fill={PREVIEW_COLORS.accent} /><PreviewText x={22} y={298} width={102} lines={2} /><PreviewText x={174} y={298} width={102} lines={2} /></>;
+      break;
+    case "hotspot":
+      content = <><PreviewMedia x={14} y={99} width={272} height={153} dark />{[[80, 142], [202, 170], [132, 215]].map(([x, y], index) => <g key={index}><circle cx={x} cy={y} r="10" fill={PREVIEW_COLORS.light} stroke={PREVIEW_COLORS.accent} strokeWidth="2" /><circle cx={x} cy={y} r="3" fill={PREVIEW_COLORS.accent} /></g>)}<PreviewText x={74} y={294} width={152} lines={2} /></>;
+      break;
+    case "appointment":
+      content = <><PreviewText x={28} y={52} width={119} lines={2} /><PreviewMedia x={176} y={50} width={94} height={71} /><rect x={28} y="133" width="118" height="11" rx="2" fill="#F0E6D5" stroke={PREVIEW_COLORS.accent} /><rect x={28} y="159" width="244" height="29" rx="3" fill={PREVIEW_COLORS.light} stroke={PREVIEW_COLORS.line} /><rect x={28} y="199" width="244" height="29" rx="3" fill={PREVIEW_COLORS.light} stroke={PREVIEW_COLORS.line} /><rect x={28} y="242" width="92" height="18" rx="2" fill={PREVIEW_COLORS.accent} /></>;
+      break;
+    case "certificate":
+      content = <><PreviewText x={72} y={28} width={156} lines={2} />{[0, 1, 2].map((index) => <g key={index}><PreviewCard x={22 + index * 88} y={132} width={78} height={146} kind="service" /><circle cx={61 + index * 88} cy="164" r="16" fill="#F4ECDE" stroke={PREVIEW_COLORS.accent} /></g>)}</>;
+      break;
+    case "custom-process":
+      content = <><PreviewText x={72} y={28} width={156} lines={2} /><path d="M48 205H252" stroke={PREVIEW_COLORS.line} strokeWidth="2" />{[0, 1, 2, 3].map((index) => <g key={index}><circle cx={48 + index * 68} cy="205" r="16" fill={PREVIEW_COLORS.light} stroke={PREVIEW_COLORS.accent} strokeWidth="2" /><text x={43 + index * 68} y="209" fill={PREVIEW_COLORS.accent} fontSize="10">0{index + 1}</text><rect x={21 + index * 68} y="237" width="54" height="5" rx="2" fill={PREVIEW_COLORS.ink} /><rect x={25 + index * 68} y="249" width="46" height="4" rx="2" fill={PREVIEW_COLORS.muted} /></g>)}</>;
+      break;
+    case "service-promise":
+      content = <><PreviewText x={70} y={30} width={160} lines={2} />{[0, 1, 2].map((index) => <PreviewCard key={index} x={18 + index * 92} y={144} width={80} height={118} kind="service" />)}<rect x={96} y={296} width="108" height="16" rx="2" fill="none" stroke={PREVIEW_COLORS.accent} /></>;
+      break;
+    case "store-info":
+      content = <><PreviewMedia x={16} y={94} width={126} height={95} /><PreviewText x={165} y={107} width={103} lines={2} />{[0, 1, 2].map((index) => <g key={index}><circle cx="172" cy={166 + index * 21} r="4" fill={PREVIEW_COLORS.accent} /><rect x="185" y={163 + index * 21} width="74" height="4" rx="2" fill={PREVIEW_COLORS.muted} /></g>)}<rect x={165} y="231" width="68" height="11" rx="2" fill="none" stroke={PREVIEW_COLORS.accent} /><rect x="16" y="280" width="268" height="1" fill={PREVIEW_COLORS.line} /><PreviewText x={22} y={310} width={114} lines={2} /></>;
+      break;
+    case "featured-product":
+      content = <><PreviewMedia x={30} y={91} width={99} height={132} /><PreviewText x={158} y={112} width={104} lines={3} /><rect x={158} y="164" width="63" height="11" rx="2" fill={PREVIEW_COLORS.accent} /><rect x={158} y="185" width="63" height="11" rx="2" fill="none" stroke={PREVIEW_COLORS.accent} /><rect x="18" y="266" width="264" height="1" fill={PREVIEW_COLORS.line} /><PreviewText x={24} y={299} width={116} lines={2} /></>;
+      break;
+    case "lookbook":
+      content = <><PreviewText x={20} y={27} width={132} lines={2} /><PreviewMedia x={20} y={97} width={140} height={105} /><PreviewMedia x={178} y={97} width={70} height={93} /><PreviewMedia x={178} y={212} width={70} height={93} /><rect x="178" y="198" width="59" height="4" rx="2" fill={PREVIEW_COLORS.ink} /><rect x="178" y="313" width="59" height="4" rx="2" fill={PREVIEW_COLORS.ink} /></>;
+      break;
+    case "limited-offer":
+      background = PREVIEW_COLORS.dark;
+      content = <><PreviewText x={25} y={93} width={118} lines={3} inverse />{[0, 1, 2, 3].map((index) => <g key={index}><rect x={160 + index * 29} y="126" width="23" height="31" rx="2" fill="rgba(255,255,255,.14)" /><rect x={164 + index * 29} y="137" width="15" height="5" rx="2" fill="#F3DEAE" /></g>)}<rect x={25} y={239} width="92" height="17" rx="2" fill={PREVIEW_COLORS.accent} /><rect x={25} y={287} width="188" height="18" rx="2" fill="none" stroke="rgba(243,222,174,.72)" /></>;
+      break;
+    case "testimonial":
+      content = <><PreviewText x={72} y={28} width={156} lines={2} />{[0, 1, 2].map((index) => <g key={index}><PreviewMedia x={18 + index * 92} y={122} width={80} height={60} /><PreviewCard x={18 + index * 92} y={192} width={80} height={96} kind="quote" /></g>)}</>;
+      break;
+    default:
+      content = <><PreviewText x={70} y={38} width={160} lines={2} /><PreviewMedia x={18} y={120} width={264} height={170} label="内容区域" /><rect x={104} y={322} width="92" height="16" rx="2" fill="none" stroke={PREVIEW_COLORS.accent} /></>;
+  }
+
+  return (
+    <svg
+      className="homepage-editor__template-preview-img homepage-editor__template-layout-preview"
+      viewBox="0 0 300 400"
+      role="img"
+      aria-label={`${name}的内容框架预览`}
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <rect width="300" height="400" fill={background} />
+      <rect x="8" y="8" width="284" height="384" rx="5" fill="none" stroke={background === PREVIEW_COLORS.dark ? "rgba(255,255,255,.16)" : "#E5DED3"} />
+      {content}
+    </svg>
   );
 }
 
 function TemplateCard({
   name,
   meta,
-  favorite,
-  onToggleFavorite,
-  onAdded,
+  viewMode,
   onPointerDragMove,
   onPointerDragEnd,
 }: {
   name: string;
   meta: BlockMeta;
-  favorite: boolean;
-  onToggleFavorite: () => void;
-  onAdded: () => void;
+  viewMode: "single" | "double";
   onPointerDragMove: (name: string, clientX: number, clientY: number) => void;
   onPointerDragEnd: (name: string, clientX: number, clientY: number) => boolean;
 }) {
@@ -859,10 +1073,8 @@ function TemplateCard({
     if (!pointerStart.current) return;
     pointerStart.current = null;
     if (!didPointerDrag.current) return;
-    if (onPointerDragEnd(name, clientX, clientY)) {
-      onAdded();
-    }
-  }, [name, onAdded, onPointerDragEnd]);
+    onPointerDragEnd(name, clientX, clientY);
+  }, [name, onPointerDragEnd]);
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
@@ -885,14 +1097,14 @@ function TemplateCard({
 
   const explainDrag = () => {
     if (unavailable) {
-      message.info(`“${name}”最多可添加 ${limit} 个`);
+      message.info(`“${meta.name}”最多可添加 ${limit} 个`);
       return;
     }
     message.info("按住模块并拖到画布中的目标位置");
   };
 
   return (
-    <article className={`homepage-editor__template-card${unavailable ? " is-disabled" : ""}`}>
+    <article className={`homepage-editor__template-card${unavailable ? " is-disabled" : ""}${viewMode === "double" ? " is-compact" : ""}`}>
       <button
         type="button"
         className="homepage-editor__template-card-main"
@@ -931,30 +1143,31 @@ function TemplateCard({
           pointerStart.current = { x: event.clientX, y: event.clientY };
           didPointerDrag.current = false;
         }}
-        title={unavailable ? `${name}已达可添加上限` : `拖拽${name}到画布`}
+        title={unavailable ? `${meta.name}已达可添加上限` : `拖拽${meta.name}到画布`}
       >
         <span className="homepage-editor__template-preview-wrap">
-        <BlockTemplateVisual name={name} />
-        {meta.badge && (
-          <span className="homepage-editor__template-badge">{meta.badge}</span>
-        )}
-        <span className="homepage-editor__template-add">拖到画布</span>
+          {meta.previewImage ? (
+            <img
+              className="homepage-editor__template-preview-img"
+              src={meta.previewImage}
+              alt={meta.name}
+              loading="lazy"
+              draggable={false}
+            />
+          ) : (
+            <BlockTemplateVisual name={name} />
+          )}
+          {meta.badge && (
+            <span className="homepage-editor__template-badge">{meta.badge}</span>
+          )}
+          <span className="homepage-editor__template-add">拖到画布</span>
         </span>
-        <span className="homepage-editor__template-name">{name}</span>
+        <span className="homepage-editor__template-name">{meta.name}</span>
         <span className="homepage-editor__template-description">{meta.description}</span>
-      </button>
-      <button
-        type="button"
-        className={`homepage-editor__template-favorite${favorite ? " is-active" : ""}`}
-        onClick={onToggleFavorite}
-        aria-label={`${favorite ? "取消收藏" : "收藏"}${name}`}
-        title={favorite ? "取消收藏" : "收藏"}
-      >
-        {favorite ? <HeartFilled /> : <HeartOutlined />}
       </button>
       <div className="homepage-editor__template-footer">
         <span>已添加 {usedCount} / {limit}</span>
-        <span>{TEMPLATE_MEDIA_HINT[name] ?? meta.tags[0]}</span>
+        {viewMode === "single" && <span>{TEMPLATE_MEDIA_HINT[name] ?? meta.tags[0]}</span>}
       </div>
     </article>
   );
@@ -971,25 +1184,12 @@ function TemplateLibrary({
 }) {
   const appData = useHomepagePuck((state) => state.appState.data);
   const dispatch = useHomepagePuck((state) => state.dispatch);
-  const [libraryType, setLibraryType] = useState<"blocks" | "pages">("blocks");
   const [keyword, setKeyword] = useState("");
-  const [category, setCategory] = useState("全部");
-  const [recentNames, setRecentNames] = useState<string[]>(() => {
+  const [viewMode, setViewMode] = useState<"single" | "double">(() => {
     try {
-      const stored = window.localStorage.getItem("homepage-editor-template-recent");
-      const parsed = stored ? JSON.parse(stored) : [];
-      return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
+      return window.localStorage.getItem("homepage-editor-template-view-mode") === "double" ? "double" : "single";
     } catch {
-      return [];
-    }
-  });
-  const [favoriteNames, setFavoriteNames] = useState<string[]>(() => {
-    try {
-      const stored = window.localStorage.getItem("homepage-editor-template-favorites");
-      const parsed = stored ? JSON.parse(stored) : [];
-      return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
-    } catch {
-      return [];
+      return "single";
     }
   });
   const [myTemplates, setMyTemplates] = useState<BlockTemplate[]>(() =>
@@ -997,49 +1197,28 @@ function TemplateLibrary({
   );
 
   useEffect(() => {
-    window.localStorage.setItem(
-      "homepage-editor-template-favorites",
-      JSON.stringify(favoriteNames),
-    );
-  }, [favoriteNames]);
-
-  useEffect(() => {
-    window.localStorage.setItem(
-      "homepage-editor-template-recent",
-      JSON.stringify(recentNames),
-    );
-  }, [recentNames]);
-
-  const recordRecent = useCallback((name: string) => {
-    setRecentNames((current) => [name, ...current.filter((item) => item !== name)].slice(0, 8));
-  }, []);
-
-  const toggleFavorite = useCallback((name: string) => {
-    setFavoriteNames((current) =>
-      current.includes(name)
-        ? current.filter((item) => item !== name)
-        : [...current, name],
-    );
-  }, []);
+    window.localStorage.setItem("homepage-editor-template-view-mode", viewMode);
+  }, [viewMode]);
 
   const refreshMyTemplates = useCallback(() => {
     setMyTemplates(blockTemplateStore.getAll());
   }, []);
 
   const saveBlockAsTemplate = useCallback((blockType: string, blockProps: Record<string, any>) => {
+    const moduleDisplayName = getModuleDisplayName(blockType);
     Modal.confirm({
-      title: "保存区块为模板",
+      title: "保存为常用方案",
       content: (
         <div style={{ marginTop: 8 }}>
           <p style={{ margin: "0 0 8px", color: "#6B6259", fontSize: 12 }}>
-            将当前「{blockType}」的配置保存为可复用的模板。
+            将当前模块的内容与版式保存为可复用的常用方案。
           </p>
           <label style={{ fontSize: 12, color: "#4A4239" }}>
-            模板名称
+            方案名称
             <input
               id="block-template-name-input"
               type="text"
-              defaultValue={`我的${blockType}`}
+              defaultValue={`我的${moduleDisplayName}`}
               style={{
                 display: "block",
                 width: "100%",
@@ -1054,14 +1233,14 @@ function TemplateLibrary({
           </label>
         </div>
       ),
-      okText: "保存为模板",
+      okText: "保存方案",
       cancelText: "取消",
       onOk: () => {
         const input = document.getElementById("block-template-name-input") as HTMLInputElement | null;
-        const name = input?.value?.trim() || `我的${blockType}`;
+        const name = input?.value?.trim() || `我的${moduleDisplayName}`;
         blockTemplateStore.save(name, blockType, blockProps);
         refreshMyTemplates();
-        message.success(`「${name}」已保存为模板，在「我的模板」中查看`);
+        message.success(`「${name}」已保存为常用方案`);
       },
     });
   }, [refreshMyTemplates]);
@@ -1069,121 +1248,74 @@ function TemplateLibrary({
   const entries = useMemo(
     () =>
       Object.entries(BLOCK_META).filter(([name, meta]) => {
-        const matchCategory =
-          category === "全部" ||
-          (category === "推荐" && meta.recommended) ||
-          (category === "最近使用" && recentNames.includes(name)) ||
-          (category === "我的收藏" && favoriteNames.includes(name)) ||
-          meta.category === category;
-        const matchKeyword = `${name}${meta.description}${meta.tags.join("")}`.includes(keyword.trim());
-        return matchCategory && matchKeyword;
+        const matchKeyword = `${name}${meta.name}${meta.description}${meta.tags.join("")}`.includes(keyword.trim());
+        return matchKeyword;
+      }).sort(([, left], [, right]) => {
+        const categoryOrder = BLOCK_CATEGORIES.indexOf(left.category) - BLOCK_CATEGORIES.indexOf(right.category);
+        return categoryOrder || left.order - right.order;
       }),
-    [category, favoriteNames, keyword, recentNames],
-  );
-
-  const pageEntries = useMemo(
-    () =>
-      pageTemplates.filter((template) =>
-        `${template.name}${template.description}${template.tags?.join("") ?? ""}`.includes(keyword.trim()),
-      ),
     [keyword],
   );
-
-  const makePageData = useCallback((template: TemplateDefinition) => {
-    const data = JSON.parse(JSON.stringify(template.puckData));
-    const idPrefix = `${template.id}-${Date.now()}`;
-    data.content = data.content.map((block: any, index: number) => ({
-      ...block,
-      props: { ...block.props, id: `${idPrefix}-${index}`, locked: false },
-    }));
-    return data;
-  }, []);
-
-  const applyPageTemplate = useCallback((template: TemplateDefinition, mode: "replace" | "append") => {
-    const apply = () => {
-      const templateData = makePageData(template);
-      const nextData = mode === "replace"
-        ? templateData
-        : { ...appData, content: [...appData.content, ...templateData.content] };
-      dispatch({ type: "setData", data: nextData });
-      recordRecent(template.name);
-      message.success(mode === "replace" ? `已应用“${template.name}”` : `已将“${template.name}”追加到页面末尾`);
-    };
-
-    if (mode === "append") {
-      const templateBlockCount = template.puckData.content.length;
-      Modal.confirm({
-        title: `追加“${template.name}”的区块？`,
-        content: `会在当前页面末尾新增 ${templateBlockCount} 个区块，不会修改现有 ${appData.content.length} 个区块。`,
-        okText: `确认追加 ${templateBlockCount} 个区块`,
-        cancelText: "返回检查",
-        onOk: apply,
-      });
-      return;
-    }
-
-    if (mode === "replace" && appData.content.length > 0) {
-      Modal.confirm({
-        title: `替换为“${template.name}”？`,
-        content: "当前画布中的区块将被替换。你可以先保存草稿，或选择“追加区块”保留现有内容。",
-        okText: "替换当前页",
-        cancelText: "取消",
-        onOk: apply,
-      });
-      return;
-    }
-    apply();
-  }, [appData, dispatch, makePageData, recordRecent]);
+  const groupedEntries = useMemo(
+    () => BLOCK_CATEGORIES.map((group) => ({
+      group,
+      entries: entries.filter(([, meta]) => meta.category === group),
+    })).filter((section) => section.entries.length > 0),
+    [entries],
+  );
 
   return (
-    <aside className="homepage-editor__library" aria-label="模板库">
+    <aside className="homepage-editor__library" aria-label="内容模块库">
       <div className="homepage-editor__library-tools">
         <div className="homepage-editor__library-title">
           <AppstoreOutlined />
-          <span>{libraryType === "blocks" ? "区块模板" : "页面模板"}</span>
-          <small>
-            {libraryType === "blocks"
-              ? `显示 ${entries.length} / 共 ${Object.keys(BLOCK_META).length} 个`
-              : `显示 ${pageEntries.length} / 共 ${pageTemplates.length} 个`}
-          </small>
+          <span>内容模块</span>
+          <small>{`显示 ${entries.length} / 共 ${Object.keys(BLOCK_META).length} 个`}</small>
         </div>
-        <div className="homepage-editor__library-mode" role="tablist" aria-label="模板层级">
-          <button type="button" role="tab" aria-selected={libraryType === "blocks"} className={libraryType === "blocks" ? "is-active" : ""} onClick={() => setLibraryType("blocks")}>区块模板</button>
-          <button type="button" role="tab" aria-selected={libraryType === "pages"} className={libraryType === "pages" ? "is-active" : ""} onClick={() => setLibraryType("pages")}><LayoutOutlined /> 页面模板</button>
-        </div>
-        <Input
-          value={keyword}
-          onChange={(event) => setKeyword(event.target.value)}
-          placeholder={libraryType === "blocks" ? "搜索区块模板" : "搜索页面模板"}
-          prefix={<SearchOutlined />}
-          aria-label="搜索模板"
-        />
-        {libraryType === "blocks" && <div className="homepage-editor__library-tabs" role="tablist">
-          {BLOCK_FILTERS.map((item) => (
+        <div className="homepage-editor__library-search-row">
+          <Input
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            placeholder="搜索模块"
+            prefix={<SearchOutlined />}
+            aria-label="搜索模块"
+          />
+          <div className="homepage-editor__view-toggle" role="group" aria-label="视图模式">
             <button
-              key={item}
               type="button"
-              role="tab"
-              aria-selected={category === item}
-              className={category === item ? "is-active" : ""}
-              onClick={() => setCategory(item)}
+              aria-pressed={viewMode === "single"}
+              className={viewMode === "single" ? "is-active" : ""}
+              onClick={() => setViewMode("single")}
+              title="单列查看"
+              aria-label="单列查看"
             >
-              {item}
+              <MenuOutlined />
             </button>
-          ))}
-        </div>}
-        {libraryType === "blocks" && (
-          <div className="homepage-editor__library-drag-tip">
-            <DragOutlined /> 按住模板拖到画板，可指定插入位置
+            <button
+              type="button"
+              aria-pressed={viewMode === "double"}
+              className={viewMode === "double" ? "is-active" : ""}
+              onClick={() => setViewMode("double")}
+              title="双列查看"
+              aria-label="双列查看"
+            >
+              <AppstoreOutlined />
+            </button>
           </div>
-        )}
+        </div>
+        <div className="homepage-editor__library-drag-tip">
+          <DragOutlined /> 拖动模块添加至画布
+        </div>
       </div>
 
-      <div className="homepage-editor__template-scroll">
-        {libraryType === "blocks" && (entries.length > 0 || category === "我的模板") ? (
-          category === "我的模板" ? (
-            myTemplates.length > 0 ? (
-              myTemplates.map((tpl) => (
+      <div className={`homepage-editor__template-scroll${viewMode === "double" ? " is-double" : ""}`}>
+        {(entries.length > 0 || myTemplates.length > 0) ? (
+          <>
+            {myTemplates.length > 0 ? (
+              <section className="homepage-editor__template-group" aria-labelledby="template-group-saved">
+                <h3 id="template-group-saved">常用方案</h3>
+                <div className="homepage-editor__template-group-grid">
+                  {myTemplates.map((tpl) => (
                 <article className="homepage-editor__template-card" key={tpl.id}>
                   <button
                     type="button"
@@ -1202,7 +1334,6 @@ function TemplateLibrary({
                         content: [...(appData.content ?? []), newBlock],
                       };
                       dispatch({ type: "setData", data: updated });
-                      recordRecent(tpl.type);
                       message.success(`已添加“${tpl.name}”`);
                     }}
                   >
@@ -1213,7 +1344,7 @@ function TemplateLibrary({
                     </span>
                     <span className="homepage-editor__template-name">{tpl.name}</span>
                     <span className="homepage-editor__template-description">
-                      {tpl.type} · {new Date(tpl.createdAt).toLocaleDateString("zh-CN")}
+                      {getModuleDisplayName(tpl.type)} · {new Date(tpl.createdAt).toLocaleDateString("zh-CN")}
                     </span>
                   </button>
                   <button
@@ -1223,54 +1354,41 @@ function TemplateLibrary({
                       blockTemplateStore.remove(tpl.id);
                       refreshMyTemplates();
                     }}
-                    title="删除此模板"
+                    title="删除此常用方案"
                   >
                     <DeleteOutlined />
                   </button>
                 </article>
-              ))
-            ) : (
-              <div className="homepage-editor__library-empty">
-                还没有保存过区块模板。<br />
-                在右侧图层中选中区块，点击「另存为模板」即可。
-              </div>
-            )
-          ) : entries.length > 0 ? (
-            entries.map(([name, meta]) => (
-              <TemplateCard
-                key={name}
-                name={name}
-                meta={meta}
-                favorite={favoriteNames.includes(name)}
-                onToggleFavorite={() => toggleFavorite(name)}
-                onAdded={() => recordRecent(name)}
-                onPointerDragMove={onTemplatePointerDragMove}
-                onPointerDragEnd={onTemplatePointerDragEnd}
-              />
-            ))
-          ) : (
-            <div className="homepage-editor__library-empty">没有找到匹配的区块模板</div>
-          )
-        ) : null}
-        {libraryType === "pages" && (pageEntries.length > 0 ? (
-          pageEntries.map((template) => (
-            <article className="homepage-editor__page-template-card" key={template.id}>
-              <PageTemplateVisual templateId={template.id} />
-              <div className="homepage-editor__page-template-content">
-                <span>{template.scenario}</span>
-                <strong>{template.name}</strong>
-                <p>{template.description}</p>
-                <small>{template.tags?.join(" · ")}</small>
-                <div>
-                  <Button size="small" type="primary" onClick={() => applyPageTemplate(template, "replace")}>替换页面</Button>
-                  <Button size="small" onClick={() => applyPageTemplate(template, "append")}>追加 {template.puckData.content.length} 个区块</Button>
+                  ))}
                 </div>
-              </div>
-            </article>
-          ))
+              </section>
+            ) : null}
+            {groupedEntries.map(({ group, entries: groupItems }) => (
+              <section className="homepage-editor__template-group" key={group} aria-labelledby={`template-group-${group}`}>
+                <h3 id={`template-group-${group}`}>{group}</h3>
+                <div className="homepage-editor__template-group-grid">
+                  {groupItems.map(([name, meta]) => (
+                    <TemplateCard
+                      key={name}
+                      name={name}
+                      meta={meta}
+                      viewMode={viewMode}
+                      onPointerDragMove={onTemplatePointerDragMove}
+                      onPointerDragEnd={onTemplatePointerDragEnd}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </>
         ) : (
-          <div className="homepage-editor__library-empty">没有找到匹配的页面模板</div>
-        ))}
+          <div className="homepage-editor__library-empty">
+            <p>暂无匹配模块</p>
+            {keyword ? (
+              <button type="button" className="homepage-editor__library-empty-action" onClick={() => setKeyword("")}>清除搜索</button>
+            ) : null}
+          </div>
+        )}
       </div>
     </aside>
   );
@@ -1294,7 +1412,7 @@ function EditorToolbar({
   publishing: boolean;
   hasUnsavedChanges: boolean;
   autoSaveState: AutoSaveState;
-  onPublish: (data: unknown) => void;
+  onPublish: (data: unknown, locateBlock: (blockIndex: number) => void) => void;
   onOpenRevisions: () => void;
   onOpenPageSettings: () => void;
   onDataChange: (data: unknown) => void;
@@ -1305,7 +1423,6 @@ function EditorToolbar({
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const currentViewport = viewports.current;
-  const initializedViewport = useRef(false);
   const [undoStack, setUndoStack] = useState<any[]>([]);
   const [redoStack, setRedoStack] = useState<any[]>([]);
   const lastDataRef = useRef<any>(appData);
@@ -1343,9 +1460,9 @@ function EditorToolbar({
   }, [redoStack, appData, dispatch]);
   const saveStatusText =
     autoSaveState === "saving"
-      ? "正在自动保存"
+      ? "正在保存草稿"
       : autoSaveState === "error"
-        ? "保存失败，正在重试"
+        ? "保存失败，请重试"
         : hasUnsavedChanges
           ? "有未保存修改"
           : lastSaved
@@ -1374,21 +1491,17 @@ function EditorToolbar({
     };
   }, []);
 
-  const setViewport = (preset: ViewportPreset) => {
-    const uiPatch: Partial<UiState> = {
-      viewports: {
-        ...viewports,
-        current: { width: preset.width, height: preset.height },
+  const setViewport = useCallback((preset: ViewportPreset) => {
+    dispatch({
+      type: "setUi",
+      ui: {
+        viewports: {
+          ...viewports,
+          current: { width: preset.width, height: preset.height },
+        },
       },
-    };
-    dispatch({ type: "setUi", ui: uiPatch });
-  };
-
-  useEffect(() => {
-    if (initializedViewport.current) return;
-    initializedViewport.current = true;
-    setViewport(VIEWPORT_PRESETS[0]);
-  }, []);
+    });
+  }, [dispatch, viewports]);
 
   return (
     <header className="homepage-editor__toolbar">
@@ -1468,7 +1581,14 @@ function EditorToolbar({
           type="primary"
           icon={<SendOutlined />}
           loading={publishing}
-          onClick={() => onPublish(appData)}
+          onClick={() =>
+            onPublish(appData, (blockIndex) => {
+              dispatch({
+                type: "setUi",
+                ui: { itemSelector: { index: blockIndex, zone: ROOT_ZONE } },
+              });
+            })
+          }
           title="发布到前台网站"
         >
           发布
@@ -1520,8 +1640,8 @@ function LayerRail({
       return;
     }
     Modal.confirm({
-      title: `删除“${item.type}”？`,
-      content: "删除后可从模板库重新添加；尚未发布的修改可通过版本记录恢复。",
+      title: `删除“${getModuleDisplayName(item.type, item.props)}”？`,
+      content: "删除后可从模块库重新添加；尚未发布的修改可通过版本记录恢复。",
       okText: "删除模块",
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -1546,17 +1666,10 @@ function LayerRail({
 
   return (
     <section className="homepage-editor__layer-rail" aria-label="页面图层">
-      <div className="homepage-editor__layer-heading">
-        <span>页面图层</span>
-        <small>{appData.content.length} 个模块</small>
-      </div>
       <div className="homepage-editor__layer-scroll">
-        <div className="homepage-editor__layer-frame">
-          <span>页面框架</span>
+        <div className="homepage-editor__layer-frame homepage-editor__layer-global">
           <button type="button" onClick={onToggleNavigationPreview} aria-pressed={navigationPreviewOpen}>
-            <LayoutOutlined />
-            <span>全局页头、菜单与页脚</span>
-            <small>{navigationPreviewOpen ? "菜单已展开" : "菜单已收起"}</small>
+            <span>页面导航栏</span>
           </button>
         </div>
         {content.map(
@@ -1589,22 +1702,16 @@ function LayerRail({
                 }}
               >
                 <button type="button" className="homepage-editor__layer-select" onClick={() => selectLayer(index)}>
-                  <span className="homepage-editor__layer-order">{String(index + 1).padStart(2, "0")}</span>
+                  <span>{getModuleDisplayName(item.type, item.props)}</span>
                   <DragOutlined />
-                  <span>{item.type}</span>
                 </button>
-                <span className="homepage-editor__layer-actions" aria-label={`${item.type} 操作`}>
-                  <button type="button" onClick={() => toggleLayerVisibility(index)} disabled={item.props?.locked} aria-label={item.props?.isVisible === false ? "显示模块" : "隐藏模块"} title={item.props?.locked ? "固定业务区不能隐藏" : item.props?.isVisible === false ? "显示模块" : "隐藏模块"}>{item.props?.isVisible === false ? <EyeInvisibleOutlined /> : <EyeOutlined />}</button>
-                  <button type="button" onClick={() => onSaveAsTemplate(item.type, item.props)} disabled={item.props?.locked} title={item.props?.locked ? "固定业务区不能另存为模板" : "另存为我的模板"}><SaveOutlined /></button>
-                  <button type="button" onClick={() => removeLayer(index)} disabled={item.props?.locked} aria-label="删除模块" title={item.props?.locked ? "模块已锁定" : "删除"}><DeleteOutlined /></button>
-                </span>
               </div>
             );
           },
         )}
         {appData.content.length === 0 && (
           <div className="homepage-editor__layer-empty">
-            从左侧添加模板后，这里会显示页面结构。
+            从左侧添加模块后，这里会显示页面结构。
           </div>
         )}
       </div>
@@ -1670,22 +1777,1455 @@ function MediaSourceStatus({
   );
 }
 
-function InspectorPanel() {
+function InspectorDraftActions({
+  saving,
+  onSave,
+  onCancel,
+}: {
+  saving: boolean;
+  onSave: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  return (
+    <footer className="homepage-editor__properties-actions">
+      <span>修改仅在点击保存后写入草稿</span>
+      <Button size="small" disabled={saving} onClick={onCancel}>取消</Button>
+      <Button
+        size="small"
+        type="primary"
+        icon={<SaveOutlined />}
+        loading={saving}
+        onClick={() => void onSave()}
+      >
+        保存
+      </Button>
+    </footer>
+  );
+}
+
+function ContractStatusBanner({ status }: { status: ModuleContractStatus }) {
+  const tone = status.errors.length > 0 ? "error" : status.warnings.length > 0 ? "warning" : "ready";
+  return (
+    <div className={`homepage-editor__contract-status is-${tone}`} role="status">
+      {tone === "ready" ? <CheckCircleOutlined /> : <ExclamationCircleOutlined />}
+      <div>
+        <strong>内容完成度 {status.completed}/{status.total}</strong>
+        {status.errors.length > 0 ? (
+          <span>发布前需完成：{status.errors.join("；")}</span>
+        ) : status.warnings.length > 0 ? (
+          <span>{status.warnings[0]}</span>
+        ) : (
+          <span>当前模块已达到发布标准</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InspectorHeader({
+  title,
+  device,
+  onClose,
+}: {
+  title: string;
+  device: InspectorDevice;
+  onClose: () => void;
+}) {
+  return (
+    <header className="homepage-editor__inspector-header">
+      <strong className="homepage-editor__inspector-title">{title}</strong>
+      <span className="homepage-editor__inspector-device">{device === "mobile" ? "移动端" : "桌面端"}</span>
+      <button type="button" className="homepage-editor__close-panel" aria-label="收起模块设置" onClick={onClose}>
+        <CloseOutlined />
+      </button>
+    </header>
+  );
+}
+
+function useSelectedModuleEditor() {
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const appData = useHomepagePuck((state) => state.appState.data);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
+  const props = (selectedItem?.props || {}) as Record<string, any>;
+  const content = appData.content as Array<{ type: string; props: Record<string, any> }>;
+  const index = content.findIndex((item) => item.props?.id === props.id);
+  const update = (patch: Record<string, any>) => {
+    if (index < 0) return;
+    const next = [...content];
+    next[index] = { ...next[index], props: { ...next[index].props, ...patch } };
+    dispatch({ type: "setData", data: { ...appData, content: next } });
+  };
+  const close = () => dispatch({ type: "setUi", ui: { itemSelector: null } });
+  return { props, update, close, device: getInspectorDevice(currentViewport) };
+}
+
+function HeroInspector({
+  saving,
+  onSave,
+  onCancel,
+}: {
+  saving: boolean;
+  onSave: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const dispatch = useHomepagePuck((state) => state.dispatch);
+  const appData = useHomepagePuck((state) => state.appState.data);
+  const selectedItem = useHomepagePuck((state) => state.selectedItem);
+  const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
+  const device = getInspectorDevice(currentViewport);
+  const props = (selectedItem?.props || {}) as Record<string, any>;
+  const content = appData.content as Array<{ type: string; props: Record<string, any> }>;
+  const index = content.findIndex((item) => item.props?.id === props.id);
+  const [safeArea, setSafeArea] = useState(false);
+  const [meta, setMeta] = useState<{ width?: number; height?: number; format?: string; size?: number }>({});
+  const [imgNatural, setImgNatural] = useState({ width: 0, height: 0 });
+
+  const update = (patch: Record<string, any>) => {
+    if (index < 0) return;
+    const next = [...content];
+    next[index] = { ...next[index], props: { ...next[index].props, ...patch } };
+    dispatch({ type: "setData", data: { ...appData, content: next } });
+  };
+  const closePanel = () => dispatch({ type: "setUi", ui: { itemSelector: null } });
+
+  const imageField = device === "mobile" ? "mobileImage" : "desktopImage";
+  const configuredImageUrl = props[imageField] || "";
+  const imageUrl = configuredImageUrl || (device === "mobile" ? props.desktopImage || "" : "");
+  const isFallback = device === "mobile" && !configuredImageUrl && Boolean(props.desktopImage);
+  const focusXField = device === "mobile" ? "mobileFocusX" : "desktopFocusX";
+  const focusYField = device === "mobile" ? "mobileFocusY" : "desktopFocusY";
+  const focusX = Math.min(100, Math.max(0, Number(props[focusXField] ?? props.focusX ?? 50)));
+  const focusY = Math.min(100, Math.max(0, Number(props[focusYField] ?? props.focusY ?? 50)));
+  const spec = device === "mobile" ? IMAGE_SPECS.hero.mobile : IMAGE_SPECS.hero.desktop;
+  const aspectRatio = device === "mobile" ? "9 / 16" : "16 / 9";
+  const status = evaluateHeroContract(props);
+
+  useEffect(() => {
+    if (!imageUrl) { setImgNatural({ width: 0, height: 0 }); return; }
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => { if (!cancelled) setImgNatural({ width: img.naturalWidth, height: img.naturalHeight }); };
+    img.src = imageUrl;
+    return () => { cancelled = true; };
+  }, [imageUrl]);
+
+  const finalWidth = meta.width || imgNatural.width;
+  const finalHeight = meta.height || imgNatural.height;
+  const format = meta.format || (imageUrl.match(/\.(webp|avif|jpe?g|png|gif)/i)?.[1] || "").toLowerCase();
+  const size = meta.size;
+  const hasImage = Boolean(imageUrl);
+
+  const handleUpload = async (file: File) => {
+    if (!file.type.startsWith("image/")) { message.error("只能上传图片"); return false; }
+    if (file.size > 10 * 1024 * 1024) { message.error("图片不能超过 10MB"); return false; }
+    try {
+      const result = await uploadApi.uploadImage(file);
+      const data = unwrapResponse<{ url?: string; width?: number; height?: number; format?: string; size?: number }>(result);
+      const url = data?.url || (result as any)?.data?.url;
+      if (url) {
+        update({ [imageField]: url });
+        setMeta({ width: data?.width, height: data?.height, format: data?.format, size: data?.size || file.size });
+        message.success("上传成功");
+      } else { message.error("上传返回结果异常"); }
+    } catch { message.error("上传失败，请重试"); }
+    return false;
+  };
+
+  return (
+    <section className="homepage-editor__inspector" data-active-device={device} aria-label="模块属性">
+      <header className="homepage-editor__inspector-header">
+        <strong className="homepage-editor__inspector-title">{getModuleDisplayName("首屏主视觉", props)}</strong>
+        <span className="homepage-editor__inspector-device">{device === "mobile" ? "移动端" : "桌面端"}</span>
+        <button type="button" className="homepage-editor__close-panel" aria-label="收起模块设置" onClick={closePanel}>
+          <CloseOutlined />
+        </button>
+      </header>
+
+      <div className="homepage-editor__inspector-scroll">
+        <p className="homepage-editor__properties-helper">{HERO_CONTRACT.purpose}</p>
+        <ContractStatusBanner status={status} />
+        <InspectorSection title="模块概况" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>图层名称<span className="homepage-editor__inspector-hint">仅用于页面结构识别</span></label>
+            <Input
+              value={props.moduleName || ""}
+              onChange={(event) => update({ moduleName: event.target.value })}
+              maxLength={24}
+              placeholder="默认使用首屏展示"
+            />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title={device === "mobile" ? "移动端主视觉" : "桌面端主视觉"} resetKey={props.id}>
+          {isFallback ? (
+            <div className="homepage-editor__media-status is-fallback">
+              <ExclamationCircleOutlined />
+              <div><strong>当前复用桌面端主视觉</strong><span>建议上传9:16竖图，并为移动端单独设置焦点。</span></div>
+            </div>
+          ) : null}
+          {hasImage ? (
+            <>
+              <div className="homepage-editor__inspector-image-summary">
+                <img src={imageUrl} alt="当前主视觉图片" />
+                <div>
+                  <strong>{device === "mobile" ? "移动端主视觉" : "桌面端主视觉"}</strong>
+                  <span>已同步到画布</span>
+                  <div className="homepage-editor__inspector-image-actions">
+                    <Upload accept="image/*" showUploadList={false} beforeUpload={handleUpload}>
+                      <Button size="small" type="primary" icon={<SwapOutlined />}>替换</Button>
+                    </Upload>
+                    {configuredImageUrl ? <Button size="small" icon={<DeleteOutlined />} onClick={() => update({ [imageField]: "" })}>移除</Button> : null}
+                  </div>
+                </div>
+              </div>
+              <p className="homepage-editor__inspector-media-spec">推荐比例：{spec.ratio} · 建议 ≥ {spec.width} × {spec.height}</p>
+              <details className="homepage-editor__inspector-details">
+                <summary>调整裁剪与安全区域</summary>
+                <FocusPicker
+                  src={imageUrl}
+                  focusX={focusX}
+                  focusY={focusY}
+                  aspectRatio={aspectRatio}
+                  safeArea={safeArea}
+                  onChange={(x, y) => update({ [focusXField]: x, [focusYField]: y })}
+                />
+                <label className="homepage-editor__inspector-toggle">
+                  <input type="checkbox" checked={safeArea} onChange={(e) => setSafeArea(e.target.checked)} />
+                  <span>显示安全区域</span>
+                </label>
+              </details>
+              <details className="homepage-editor__inspector-details">
+                <summary>图片检查</summary>
+                <ImageStatus width={finalWidth} height={finalHeight} format={format} size={size} spec={spec} />
+              </details>
+            </>
+          ) : (
+            <div className="homepage-editor__inspector-empty">
+              <p>暂无主视觉图片</p>
+              <Upload accept="image/*" showUploadList={false} beforeUpload={handleUpload}>
+                <Button size="small" type="primary" icon={<InboxOutlined />}>上传图片</Button>
+              </Upload>
+              <small>推荐比例：{spec.ratio} · 建议 ≥ {spec.width} × {spec.height}</small>
+            </div>
+          )}
+        </InspectorSection>
+
+        <InspectorSection title="文字内容" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>标题 <em>必填</em><span className="homepage-editor__inspector-count">{(props.title || "").length}/{HERO_CONTRACT.content.limits.title}</span></label>
+            <Input value={props.title || ""} onChange={(e) => update({ title: e.target.value })} maxLength={HERO_CONTRACT.content.limits.title} placeholder="主标题" status={props.title?.trim() ? undefined : "error"} />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>副标题<span className="homepage-editor__inspector-count">{(props.subtitle || "").length}/{HERO_CONTRACT.content.limits.subtitle}</span></label>
+            <Input.TextArea value={props.subtitle || ""} onChange={(e) => update({ subtitle: e.target.value })} maxLength={HERO_CONTRACT.content.limits.subtitle} rows={2} placeholder="副标题（1-2 行）" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>按钮文字<span className="homepage-editor__inspector-count">{(props.actionText || "").length}/{HERO_CONTRACT.content.limits.actionText}</span></label>
+            <Input value={props.actionText || ""} onChange={(e) => update({ actionText: e.target.value })} maxLength={HERO_CONTRACT.content.limits.actionText} placeholder="如：探索新品（留空不显示按钮）" />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="点击跳转" resetKey={props.id}>
+          <LinkTargetField
+            id={props.id}
+            targetType={props.targetType}
+            productId={props.productId}
+            linkUrl={props.linkUrl}
+            onChange={update}
+            label="首屏按钮点击后"
+          />
+        </InspectorSection>
+
+        <InspectorSection title="版式设置" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__inspector-option-group">
+            <div>
+              <strong>文案对齐</strong>
+              <span>即时调整首屏文字位置，不影响图片焦点。</span>
+            </div>
+            <div className="homepage-editor__inspector-segmented" role="group" aria-label="文案对齐">
+              <button
+                type="button"
+                className={props.alignment === "center" ? "is-active" : ""}
+                aria-pressed={props.alignment === "center"}
+                onClick={() => update({ alignment: "center" })}
+              >
+                居中
+              </button>
+              <button
+                type="button"
+                className={props.alignment !== "center" ? "is-active" : ""}
+                aria-pressed={props.alignment !== "center"}
+                onClick={() => update({ alignment: "left" })}
+              >
+                左对齐
+              </button>
+            </div>
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="高级设置" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>图片替代文字<span className="homepage-editor__inspector-hint">用于 SEO / 无障碍，不在页面显示</span></label>
+            <Input value={props.altText || ""} onChange={(e) => update({ altText: e.target.value })} maxLength={HERO_CONTRACT.content.limits.altText} placeholder="描述这张主视觉图" />
+          </div>
+        </InspectorSection>
+      </div>
+      <InspectorDraftActions saving={saving} onSave={onSave} onCancel={onCancel} />
+    </section>
+  );
+}
+
+/**
+ * 图文混排样板检查器：内容、素材、布局与高级设置按业务顺序拆分。
+ * 草稿允许不完整，发布质量问题在顶部即时提示。
+ */
+function ImageTextInspector({
+  saving,
+  onSave,
+  onCancel,
+}: {
+  saving: boolean;
+  onSave: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const dispatch = useHomepagePuck((state) => state.dispatch);
+  const appData = useHomepagePuck((state) => state.appState.data);
+  const selectedItem = useHomepagePuck((state) => state.selectedItem);
+  const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
+  const device = getInspectorDevice(currentViewport);
+  const props = (selectedItem?.props || {}) as Record<string, any>;
+  const content = appData.content as Array<{ type: string; props: Record<string, any> }>;
+  const index = content.findIndex((item) => item.props?.id === props.id);
+  const template = props.template || IMAGE_TEXT_CONTRACT.defaults.template;
+  const needsImage = template !== "textOnly";
+  const focusX = Math.min(100, Math.max(0, Number(props.focusX ?? 50)));
+  const focusY = Math.min(100, Math.max(0, Number(props.focusY ?? 50)));
+  const status = evaluateImageTextContract(props);
+  const statusTone = status.errors.length > 0 ? "error" : status.warnings.length > 0 ? "warning" : "ready";
+
+  const update = (patch: Record<string, any>) => {
+    if (index < 0) return;
+    const next = [...content];
+    next[index] = { ...next[index], props: { ...next[index].props, ...patch } };
+    dispatch({ type: "setData", data: { ...appData, content: next } });
+  };
+  const closePanel = () => dispatch({ type: "setUi", ui: { itemSelector: null } });
+
+  return (
+    <section className="homepage-editor__inspector" data-active-device={device} aria-label="图文混排模块属性">
+      <header className="homepage-editor__inspector-header">
+        <strong className="homepage-editor__inspector-title">{getModuleDisplayName("图文混排", props)}</strong>
+        <span className="homepage-editor__inspector-device">{device === "mobile" ? "移动端" : "桌面端"}</span>
+        <button type="button" className="homepage-editor__close-panel" aria-label="收起模块设置" onClick={closePanel}>
+          <CloseOutlined />
+        </button>
+      </header>
+
+      <div className="homepage-editor__inspector-scroll">
+        <p className="homepage-editor__properties-helper">{IMAGE_TEXT_CONTRACT.purpose}</p>
+        <div className={`homepage-editor__contract-status is-${statusTone}`} role="status">
+          {statusTone === "ready" ? <CheckCircleOutlined /> : <ExclamationCircleOutlined />}
+          <div>
+            <strong>内容完成度 {status.completed}/{status.total}</strong>
+            {status.errors.length > 0 ? (
+              <span>发布前需完成：{status.errors.join("；")}</span>
+            ) : status.warnings.length > 0 ? (
+              <span>{status.warnings[0]}</span>
+            ) : (
+              <span>当前模块已达到发布标准</span>
+            )}
+          </div>
+        </div>
+
+        <InspectorSection title="模块概况" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>图层名称<span className="homepage-editor__inspector-hint">仅用于页面结构识别</span></label>
+            <Input
+              value={props.moduleName || ""}
+              onChange={(event) => update({ moduleName: event.target.value })}
+              maxLength={24}
+              placeholder="默认使用图文介绍"
+            />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="基础内容" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>标签<span className="homepage-editor__inspector-count">{(props.label || "").length}/{IMAGE_TEXT_CONTRACT.content.limits.label}</span></label>
+            <Input value={props.label || ""} onChange={(event) => update({ label: event.target.value })} maxLength={IMAGE_TEXT_CONTRACT.content.limits.label} placeholder="例如 BRAND STORY" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>标题 <em>必填</em><span className="homepage-editor__inspector-count">{(props.title || "").length}/{IMAGE_TEXT_CONTRACT.content.limits.title}</span></label>
+            <Input value={props.title || ""} onChange={(event) => update({ title: event.target.value })} maxLength={IMAGE_TEXT_CONTRACT.content.limits.title} placeholder="品牌故事" status={props.title?.trim() ? undefined : "error"} />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>正文<span className="homepage-editor__inspector-count">{(props.body || "").length}/{IMAGE_TEXT_CONTRACT.content.limits.body}</span></label>
+            <Input.TextArea value={props.body || ""} onChange={(event) => update({ body: event.target.value })} maxLength={IMAGE_TEXT_CONTRACT.content.limits.body} rows={4} placeholder="用 2—4 行说明设计理念、材质或品牌故事" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>按钮文字<span className="homepage-editor__inspector-hint">留空则不显示按钮</span></label>
+            <Input value={props.buttonText || ""} onChange={(event) => update({ buttonText: event.target.value })} maxLength={IMAGE_TEXT_CONTRACT.content.limits.buttonText} placeholder="查看详情" />
+          </div>
+        </InspectorSection>
+
+        {props.buttonText ? (
+          <InspectorSection title="点击跳转" resetKey={props.id}>
+            <LinkTargetField
+              id={props.id}
+              targetType={props.targetType}
+              productId={props.productId}
+              linkUrl={props.linkUrl}
+              onChange={update}
+              label="图文按钮点击后"
+            />
+          </InspectorSection>
+        ) : null}
+
+        {needsImage && (
+          <InspectorSection title="图片素材" resetKey={props.id}>
+            <MediaPickerField
+              fieldKey="image"
+              device="shared"
+              value={props.image || ""}
+              onChange={(image) => update({ image })}
+              required
+              spec={IMAGE_SPECS.imageText.image}
+              placeholder="上传图文配图"
+              previewAspectRatio={IMAGE_TEXT_CONTRACT.canvas.desktopMediaAspectRatio}
+              previewFocus={{ x: focusX, y: focusY }}
+            />
+          </InspectorSection>
+        )}
+
+        <InspectorSection title="布局" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__inspector-option-group">
+            <div>
+              <strong>展示方式</strong>
+              <span>桌面端按标准版式展示；移动端图文自动改为上下排列。</span>
+            </div>
+            <div className="homepage-editor__inspector-segmented is-grid" role="group" aria-label="图文展示方式">
+              {[
+                ["textLeftImageRight", "文左图右"],
+                ["textRightImageLeft", "图左文右"],
+                ["textOnly", "纯文字"],
+                ["imageBackground", "图片背景"],
+              ].map(([value, label]) => (
+                <button key={value} type="button" className={template === value ? "is-active" : ""} aria-pressed={template === value} onClick={() => update({ template: value })}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="homepage-editor__inspector-option-group">
+            <div>
+              <strong>内容留白</strong>
+              <span>只调整文字区域的呼吸感，不破坏图片比例。</span>
+            </div>
+            <div className="homepage-editor__inspector-segmented is-three" role="group" aria-label="内容留白">
+              {[["compact", "紧凑"], ["normal", "标准"], ["spacious", "宽松"]].map(([value, label]) => (
+                <button key={value} type="button" className={(props.spacing || "normal") === value ? "is-active" : ""} aria-pressed={(props.spacing || "normal") === value} onClick={() => update({ spacing: value })}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="homepage-editor__layout-rule">
+            <strong>画布标准</strong>
+            <span>桌面：双栏 1:1，图片 4:3，最大宽度 1280px</span>
+            <span>移动：图片在上、文字在下，图片 3:4</span>
+          </div>
+        </InspectorSection>
+
+        {needsImage && (
+          <InspectorSection title="高级设置" defaultOpen={false} resetKey={props.id}>
+            <div className="homepage-editor__inspector-field">
+              <label>图片替代文字<span className="homepage-editor__inspector-hint">用于无障碍与搜索，不在页面显示</span></label>
+              <Input value={props.imageAlt || ""} onChange={(event) => update({ imageAlt: event.target.value })} maxLength={IMAGE_TEXT_CONTRACT.content.limits.imageAlt} placeholder="描述图片中的人物、珠宝或场景" />
+            </div>
+            {props.image && (
+              <div className="homepage-editor__inspector-field">
+                <label>图片焦点<span className="homepage-editor__inspector-hint">裁切时优先保留的位置</span></label>
+                <FocusPicker
+                  src={props.image}
+                  focusX={focusX}
+                  focusY={focusY}
+                  aspectRatio={IMAGE_TEXT_CONTRACT.canvas.desktopMediaAspectRatio}
+                  onChange={(x, y) => update({ focusX: x, focusY: y })}
+                />
+              </div>
+            )}
+          </InspectorSection>
+        )}
+      </div>
+      <InspectorDraftActions saving={saving} onSave={onSave} onCancel={onCancel} />
+    </section>
+  );
+}
+
+function SinglePosterInspector({ saving, onSave, onCancel }: {
+  saving: boolean;
+  onSave: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { props, update, close, device } = useSelectedModuleEditor();
+  const status = evaluateSinglePosterContract(props);
+  const imageField = device === "mobile" ? "mobileImage" : "desktopImage";
+  const imageSpec = device === "mobile" ? IMAGE_SPECS.singlePoster.mobile : IMAGE_SPECS.singlePoster.image;
+  const aspectRatio = device === "mobile"
+    ? SINGLE_POSTER_CONTRACT.canvas.mobileMediaAspectRatio
+    : SINGLE_POSTER_CONTRACT.canvas.desktopMediaAspectRatio;
+  const focusX = Math.min(100, Math.max(0, Number(props.focusX ?? 50)));
+  const focusY = Math.min(100, Math.max(0, Number(props.focusY ?? 50)));
+
+  return (
+    <section className="homepage-editor__inspector" data-active-device={device} aria-label="单图海报模块属性">
+      <InspectorHeader title={getModuleDisplayName("单图海报", props)} device={device} onClose={close} />
+      <div className="homepage-editor__inspector-scroll">
+        <p className="homepage-editor__properties-helper">{SINGLE_POSTER_CONTRACT.purpose}</p>
+        <ContractStatusBanner status={status} />
+
+        <InspectorSection title="模块概况" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>图层名称<span className="homepage-editor__inspector-hint">仅用于页面结构识别</span></label>
+            <Input value={props.moduleName || ""} onChange={(event) => update({ moduleName: event.target.value })} maxLength={24} placeholder="默认使用单图介绍" />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="基础内容" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>编号<span className="homepage-editor__inspector-count">{(props.number || "").length}/{SINGLE_POSTER_CONTRACT.content.limits.number}</span></label>
+            <Input value={props.number || ""} onChange={(event) => update({ number: event.target.value })} maxLength={SINGLE_POSTER_CONTRACT.content.limits.number} placeholder="01" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>标签<span className="homepage-editor__inspector-count">{(props.label || "").length}/{SINGLE_POSTER_CONTRACT.content.limits.label}</span></label>
+            <Input value={props.label || ""} onChange={(event) => update({ label: event.target.value })} maxLength={SINGLE_POSTER_CONTRACT.content.limits.label} placeholder="SIGNATURE" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>标题 <em>必填</em><span className="homepage-editor__inspector-count">{(props.title || "").length}/{SINGLE_POSTER_CONTRACT.content.limits.title}</span></label>
+            <Input value={props.title || ""} onChange={(event) => update({ title: event.target.value })} maxLength={SINGLE_POSTER_CONTRACT.content.limits.title} status={props.title?.trim() ? undefined : "error"} />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>副标题<span className="homepage-editor__inspector-count">{(props.subtitle || "").length}/{SINGLE_POSTER_CONTRACT.content.limits.subtitle}</span></label>
+            <Input value={props.subtitle || ""} onChange={(event) => update({ subtitle: event.target.value })} maxLength={SINGLE_POSTER_CONTRACT.content.limits.subtitle} placeholder="一句话补充系列卖点" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>点击跳转 <em>必填</em></label>
+            <Input value={props.linkUrl || ""} onChange={(event) => update({ linkUrl: event.target.value })} placeholder="例如 /products" status={props.linkUrl?.trim() ? undefined : "error"} />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title={device === "mobile" ? "移动端海报" : "桌面端海报"} resetKey={props.id}>
+          {device === "mobile" && !props.mobileImage ? (
+            <div className="homepage-editor__media-status is-fallback">
+              <ExclamationCircleOutlined />
+              <div><strong>当前复用桌面端海报</strong><span>建议上传3:4竖图，避免主体被自动裁切。</span></div>
+            </div>
+          ) : null}
+          <MediaPickerField
+            fieldKey={imageField}
+            device={device}
+            value={props[imageField] || ""}
+            onChange={(value) => update({ [imageField]: value })}
+            required={device === "desktop"}
+            spec={imageSpec}
+            placeholder={device === "mobile" ? "上传移动端竖版海报" : "上传桌面端海报"}
+            previewAspectRatio={aspectRatio}
+            previewFocus={{ x: focusX, y: focusY }}
+          />
+        </InspectorSection>
+
+        <InspectorSection title="布局" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__inspector-option-group">
+            <div><strong>桌面端图文顺序</strong><span>移动端始终采用图片在上、文字在下。</span></div>
+            <div className="homepage-editor__inspector-segmented" role="group" aria-label="海报图文顺序">
+              {[["leftTextRightImage", "文左图右"], ["leftImageRightText", "图左文右"]].map(([value, label]) => (
+                <button key={value} type="button" className={(props.template || "leftTextRightImage") === value ? "is-active" : ""} aria-pressed={(props.template || "leftTextRightImage") === value} onClick={() => update({ template: value })}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="homepage-editor__layout-rule"><strong>画布标准</strong><span>桌面：文案1/4、图片3/4，图片固定3:2</span><span>移动：图片3:4，文案置于图片下方</span></div>
+        </InspectorSection>
+
+        {(props.desktopImage || props.mobileImage) && (
+          <InspectorSection title="高级设置" defaultOpen={false} resetKey={props.id}>
+            <div className="homepage-editor__inspector-field">
+              <label>图片焦点<span className="homepage-editor__inspector-hint">双端共用，裁切时优先保留</span></label>
+              <FocusPicker src={props[imageField] || props.desktopImage || props.mobileImage} focusX={focusX} focusY={focusY} aspectRatio={aspectRatio} onChange={(x, y) => update({ focusX: x, focusY: y })} />
+            </div>
+          </InspectorSection>
+        )}
+      </div>
+      <InspectorDraftActions saving={saving} onSave={onSave} onCancel={onCancel} />
+    </section>
+  );
+}
+
+function FullBleedInspector({ saving, onSave, onCancel }: {
+  saving: boolean;
+  onSave: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { props, update, close, device } = useSelectedModuleEditor();
+  const status = evaluateFullBleedContract(props);
+  const imageField = device === "mobile" ? "mobileImage" : "image";
+  const imageSpec = device === "mobile" ? IMAGE_SPECS.fullBleed.mobile : IMAGE_SPECS.fullBleed.desktop;
+  const aspectRatio = device === "mobile" ? "5 / 6" : "12 / 5";
+  const focusXField = device === "mobile" ? "mobileFocusX" : "desktopFocusX";
+  const focusYField = device === "mobile" ? "mobileFocusY" : "desktopFocusY";
+  const focusX = Math.min(100, Math.max(0, Number(props[focusXField] ?? 50)));
+  const focusY = Math.min(100, Math.max(0, Number(props[focusYField] ?? 50)));
+  const previewImage = props[imageField] || props.image || props.mobileImage || "";
+
+  return (
+    <section className="homepage-editor__inspector" data-active-device={device} aria-label="单张海报模块属性">
+      <InspectorHeader title={getModuleDisplayName("全屏出血图", props)} device={device} onClose={close} />
+      <div className="homepage-editor__inspector-scroll">
+        <p className="homepage-editor__properties-helper">{FULL_BLEED_CONTRACT.purpose}</p>
+        <ContractStatusBanner status={status} />
+
+        <InspectorSection title="模块概况" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>图层名称<span className="homepage-editor__inspector-hint">仅用于页面结构识别</span></label>
+            <Input value={props.moduleName || ""} onChange={(event) => update({ moduleName: event.target.value })} maxLength={24} placeholder="默认使用单张海报" />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title={device === "mobile" ? "移动端海报" : "桌面端海报"} resetKey={props.id}>
+          {device === "mobile" && !props.mobileImage && props.image ? (
+            <div className="homepage-editor__media-status is-fallback">
+              <ExclamationCircleOutlined />
+              <div><strong>当前复用桌面端海报</strong><span>建议上传5:6竖图，避免人物或珠宝主体被裁切。</span></div>
+            </div>
+          ) : null}
+          <MediaPickerField
+            fieldKey={imageField}
+            device={device}
+            value={props[imageField] || ""}
+            onChange={(value) => update({ [imageField]: value })}
+            required={device === "desktop"}
+            spec={imageSpec}
+            placeholder={device === "mobile" ? "上传移动端5:6海报" : "上传桌面端12:5海报"}
+            previewAspectRatio={aspectRatio}
+            previewFocus={{ x: focusX, y: focusY }}
+          />
+          {previewImage ? (
+            <div className="homepage-editor__inspector-field">
+              <label>{device === "mobile" ? "移动端视觉焦点" : "桌面端视觉焦点"}<span className="homepage-editor__inspector-hint">两端独立保存</span></label>
+              <FocusPicker
+                src={previewImage}
+                focusX={focusX}
+                focusY={focusY}
+                aspectRatio={aspectRatio}
+                safeArea
+                onChange={(x, y) => update({ [focusXField]: x, [focusYField]: y })}
+              />
+            </div>
+          ) : null}
+          <div className="homepage-editor__layout-rule">
+            <strong>画布标准</strong>
+            <span>桌面：12:5通栏横图，完整宽度展示</span>
+            <span>移动：5:6竖图，独立素材与独立焦点</span>
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="文字内容" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>标题<span className="homepage-editor__inspector-count">{(props.title || "").length}/{FULL_BLEED_CONTRACT.content.limits.title}</span></label>
+            <Input value={props.title || ""} onChange={(event) => update({ title: event.target.value })} maxLength={FULL_BLEED_CONTRACT.content.limits.title} placeholder="可留空，使用纯视觉海报" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>副标题<span className="homepage-editor__inspector-count">{(props.subtitle || "").length}/{FULL_BLEED_CONTRACT.content.limits.subtitle}</span></label>
+            <Input.TextArea value={props.subtitle || ""} onChange={(event) => update({ subtitle: event.target.value })} maxLength={FULL_BLEED_CONTRACT.content.limits.subtitle} rows={2} placeholder="建议1—2行，避免遮挡主体" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>引导文字<span className="homepage-editor__inspector-count">{(props.buttonText || "").length}/{FULL_BLEED_CONTRACT.content.limits.actionText}</span></label>
+            <Input value={props.buttonText || ""} onChange={(event) => update({ buttonText: event.target.value })} maxLength={FULL_BLEED_CONTRACT.content.limits.actionText} placeholder="例如：探索系列；不跳转时不会显示" />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="点击跳转" resetKey={props.id}>
+          <LinkTargetField id={props.id} targetType={props.targetType} productId={props.productId} linkUrl={props.linkUrl} onChange={update} label="整张海报点击后" />
+        </InspectorSection>
+
+        <InspectorSection title="版式设置" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__inspector-option-group">
+            <div><strong>文字位置</strong><span>只提供稳定版式，避免自由拖拽破坏海报构图。</span></div>
+            <div className="homepage-editor__inspector-segmented is-grid" role="group" aria-label="海报文字位置">
+              {[["textCenter", "居中"], ["textLeft", "左侧"], ["textRight", "右侧"], ["textBottomLeft", "左下"]].map(([value, label]) => (
+                <button key={value} type="button" className={(props.template || "textCenter") === value ? "is-active" : ""} aria-pressed={(props.template || "textCenter") === value} onClick={() => update({ template: value })}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="homepage-editor__inspector-option-group">
+            <div><strong>文字遮罩</strong><span>只调节可读性，不改变品牌色与字体。</span></div>
+            <div className="homepage-editor__inspector-segmented is-three" role="group" aria-label="海报文字遮罩">
+              {[["none", "无"], ["soft", "柔和"], ["strong", "加强"]].map(([value, label]) => (
+                <button key={value} type="button" className={(props.overlayPreset || "soft") === value ? "is-active" : ""} aria-pressed={(props.overlayPreset || "soft") === value} onClick={() => update({ overlayPreset: value })}>{label}</button>
+              ))}
+            </div>
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="高级设置" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>图片替代文字<span className="homepage-editor__inspector-hint">用于搜索与无障碍，不在海报上显示</span></label>
+            <Input value={props.altText || ""} onChange={(event) => update({ altText: event.target.value })} maxLength={FULL_BLEED_CONTRACT.content.limits.altText} placeholder="描述海报中的珠宝或场景" />
+          </div>
+        </InspectorSection>
+      </div>
+      <InspectorDraftActions saving={saving} onSave={onSave} onCancel={onCancel} />
+    </section>
+  );
+}
+
+function DoublePosterInspector({ saving, onSave, onCancel }: {
+  saving: boolean;
+  onSave: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { props, update, close, device } = useSelectedModuleEditor();
+  const status = evaluateDoublePosterContract(props);
+  const mainFocusX = Math.min(100, Math.max(0, Number(props.mainFocusX ?? 50)));
+  const mainFocusY = Math.min(100, Math.max(0, Number(props.mainFocusY ?? 50)));
+  const detailFocusX = Math.min(100, Math.max(0, Number(props.detailFocusX ?? 50)));
+  const detailFocusY = Math.min(100, Math.max(0, Number(props.detailFocusY ?? 50)));
+
+  return (
+    <section className="homepage-editor__inspector" data-active-device={device} aria-label="双图展示模块属性">
+      <InspectorHeader title={getModuleDisplayName("双图海报", props)} device={device} onClose={close} />
+      <div className="homepage-editor__inspector-scroll">
+        <p className="homepage-editor__properties-helper">{DOUBLE_POSTER_CONTRACT.purpose}</p>
+        <ContractStatusBanner status={status} />
+
+        <InspectorSection title="模块概况" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>图层名称<span className="homepage-editor__inspector-hint">仅用于页面结构识别</span></label>
+            <Input value={props.moduleName || ""} onChange={(event) => update({ moduleName: event.target.value })} maxLength={24} placeholder="默认使用双图展示" />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="文字内容" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>编号<span className="homepage-editor__inspector-count">{(props.number || "").length}/{DOUBLE_POSTER_CONTRACT.content.limits.number}</span></label>
+            <Input value={props.number || ""} onChange={(event) => update({ number: event.target.value })} maxLength={DOUBLE_POSTER_CONTRACT.content.limits.number} placeholder="02" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>标签<span className="homepage-editor__inspector-count">{(props.label || "").length}/{DOUBLE_POSTER_CONTRACT.content.limits.label}</span></label>
+            <Input value={props.label || ""} onChange={(event) => update({ label: event.target.value })} maxLength={DOUBLE_POSTER_CONTRACT.content.limits.label} placeholder="COLLECTION" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>标题 <em>必填</em><span className="homepage-editor__inspector-count">{(props.title || "").length}/{DOUBLE_POSTER_CONTRACT.content.limits.title}</span></label>
+            <Input value={props.title || ""} onChange={(event) => update({ title: event.target.value })} maxLength={DOUBLE_POSTER_CONTRACT.content.limits.title} status={props.title?.trim() ? undefined : "error"} />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>介绍文字<span className="homepage-editor__inspector-count">{(props.description || "").length}/{DOUBLE_POSTER_CONTRACT.content.limits.description}</span></label>
+            <Input.TextArea value={props.description || ""} onChange={(event) => update({ description: event.target.value })} maxLength={DOUBLE_POSTER_CONTRACT.content.limits.description} rows={3} placeholder="补充系列气质、材质或工艺特点" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>引导文字<span className="homepage-editor__inspector-count">{(props.actionText || "").length}/{DOUBLE_POSTER_CONTRACT.content.limits.actionText}</span></label>
+            <Input value={props.actionText || ""} onChange={(event) => update({ actionText: event.target.value })} maxLength={DOUBLE_POSTER_CONTRACT.content.limits.actionText} placeholder="查看系列" />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="主海报 · 4:3" resetKey={props.id}>
+          <MediaPickerField
+            fieldKey="mainImage"
+            device="shared"
+            value={props.mainImage || ""}
+            onChange={(mainImage) => update({ mainImage })}
+            required
+            spec={IMAGE_SPECS.doublePoster.main}
+            placeholder="上传主海报"
+            previewAspectRatio={DOUBLE_POSTER_CONTRACT.canvas.mainMediaAspectRatio}
+            previewFocus={{ x: mainFocusX, y: mainFocusY }}
+          />
+          {props.mainImage ? (
+            <div className="homepage-editor__inspector-field">
+              <label>主图视觉焦点</label>
+              <FocusPicker src={props.mainImage} focusX={mainFocusX} focusY={mainFocusY} aspectRatio={DOUBLE_POSTER_CONTRACT.canvas.mainMediaAspectRatio} safeArea onChange={(x, y) => update({ mainFocusX: x, mainFocusY: y })} />
+            </div>
+          ) : null}
+        </InspectorSection>
+
+        <InspectorSection title="细节海报 · 4:5" resetKey={props.id}>
+          <MediaPickerField
+            fieldKey="detailImage"
+            device="shared"
+            value={props.detailImage || ""}
+            onChange={(detailImage) => update({ detailImage })}
+            required
+            spec={IMAGE_SPECS.doublePoster.detail}
+            placeholder="上传细节海报"
+            previewAspectRatio={DOUBLE_POSTER_CONTRACT.canvas.detailMediaAspectRatio}
+            previewFocus={{ x: detailFocusX, y: detailFocusY }}
+          />
+          {props.detailImage ? (
+            <div className="homepage-editor__inspector-field">
+              <label>细节图视觉焦点</label>
+              <FocusPicker src={props.detailImage} focusX={detailFocusX} focusY={detailFocusY} aspectRatio={DOUBLE_POSTER_CONTRACT.canvas.detailMediaAspectRatio} safeArea onChange={(x, y) => update({ detailFocusX: x, detailFocusY: y })} />
+            </div>
+          ) : null}
+        </InspectorSection>
+
+        <InspectorSection title="点击跳转" resetKey={props.id}>
+          <LinkTargetField id={props.id} targetType={props.targetType} productId={props.productId} linkUrl={props.linkUrl} onChange={update} label="引导文字点击后" />
+        </InspectorSection>
+
+        <InspectorSection title="版式设置" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__inspector-option-group">
+            <div><strong>桌面端主次关系</strong><span>移动端始终先展示主图，再展示细节图与文字。</span></div>
+            <div className="homepage-editor__inspector-segmented" role="group" aria-label="双图桌面版式">
+              {[["mainLeft", "主图在左"], ["mainRight", "主图在右"]].map(([value, label]) => (
+                <button key={value} type="button" className={(props.layout || "mainLeft") === value ? "is-active" : ""} aria-pressed={(props.layout || "mainLeft") === value} onClick={() => update({ layout: value })}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="homepage-editor__layout-rule"><strong>画布标准</strong><span>主图固定4:3，细节图固定4:5</span><span>桌面8/4栏；移动端上下排列，不使用视口高度撑大模块</span></div>
+        </InspectorSection>
+
+        <InspectorSection title="高级设置" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>主图替代文字<span className="homepage-editor__inspector-hint">用于搜索与无障碍</span></label>
+            <Input value={props.mainAltText || ""} onChange={(event) => update({ mainAltText: event.target.value })} maxLength={DOUBLE_POSTER_CONTRACT.content.limits.altText} placeholder="描述主海报内容" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>细节图替代文字</label>
+            <Input value={props.detailAltText || ""} onChange={(event) => update({ detailAltText: event.target.value })} maxLength={DOUBLE_POSTER_CONTRACT.content.limits.altText} placeholder="描述细节图内容" />
+          </div>
+        </InspectorSection>
+      </div>
+      <InspectorDraftActions saving={saving} onSave={onSave} onCancel={onCancel} />
+    </section>
+  );
+}
+
+function ProductRowFlatSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="homepage-editor__product-row-section" aria-label={title}>
+      <header className="homepage-editor__product-row-section-head">
+        <h3>{title}</h3>
+        {description ? <p>{description}</p> : null}
+      </header>
+      <div className="homepage-editor__product-row-section-body">{children}</div>
+    </section>
+  );
+}
+
+function ProductRowInspector({ saving, onSave, onCancel }: {
+  saving: boolean;
+  onSave: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { props, update, close, device } = useSelectedModuleEditor();
+  const status = evaluateProductRowContract(props);
+  const productIds = Array.isArray(props.productIds) ? props.productIds : [];
+  const displayMode = props.displayMode || "standard";
+  const actionStyle = props.actionStyle || (props.showButton ? "button" : "none");
+
+  const updateProducts = (nextIds: number[]) => {
+    if (nextIds.length > PRODUCT_ROW_CONTRACT.content.maxProducts) {
+      message.warning(`产品展示行最多选择 ${PRODUCT_ROW_CONTRACT.content.maxProducts} 件商品`);
+      return;
+    }
+    update({ productIds: nextIds });
+  };
+
+  return (
+    <section className="homepage-editor__inspector homepage-editor__product-row-inspector" data-active-device={device} aria-label="作品陈列模块属性">
+      <InspectorHeader title={getModuleDisplayName("产品展示行", props)} device={device} onClose={close} />
+      <div className="homepage-editor__inspector-scroll">
+        <p className="homepage-editor__properties-helper">{PRODUCT_ROW_CONTRACT.purpose}</p>
+        <ContractStatusBanner status={status} />
+
+        <ProductRowFlatSection title="模块基础内容">
+          <div className="homepage-editor__inspector-field">
+            <label>模块名称<span className="homepage-editor__inspector-hint">仅用于页面结构识别</span></label>
+            <Input value={props.moduleName || ""} onChange={(event) => update({ moduleName: event.target.value })} maxLength={24} placeholder="默认使用作品陈列" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>模块样式</label>
+          <div className="homepage-editor__product-row-mode-picker" role="group" aria-label="商品展示模式">
+            <button
+              type="button"
+              className={displayMode === "album" ? "is-active" : ""}
+              aria-pressed={displayMode === "album"}
+              onClick={() => update({ displayMode: "album", showPrice: false, actionStyle: "none", showButton: false })}
+            >
+              <span className="homepage-editor__product-row-mode-preview">
+                <img src="/svg/template-lookbook.svg" alt="画册展示版式预览" />
+              </span>
+              <span><strong>画册展示</strong><small>突出图片与作品氛围</small></span>
+            </button>
+            <button
+              type="button"
+              className={displayMode === "standard" ? "is-active" : ""}
+              aria-pressed={displayMode === "standard"}
+              onClick={() => update({ displayMode: "standard", showPrice: true, actionStyle: "text", showButton: false })}
+            >
+              <span className="homepage-editor__product-row-mode-preview">
+                <img src="/svg/template-product-row.svg" alt="标准选款版式预览" />
+              </span>
+              <span><strong>标准选款</strong><small>显示价格与详情入口</small></span>
+            </button>
+          </div>
+          <span className="homepage-editor__product-row-mode-note">选择样式会应用一组推荐配置，下方仍可逐项调整。</span>
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>标题<span className="homepage-editor__inspector-count">{(props.title || "").length}/{PRODUCT_ROW_CONTRACT.content.limits.title}</span></label>
+            <Input value={props.title || ""} onChange={(event) => update({ title: event.target.value })} maxLength={PRODUCT_ROW_CONTRACT.content.limits.title} placeholder="可留空，直接展示商品" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>副标题<span className="homepage-editor__inspector-count">{(props.subtitle || "").length}/{PRODUCT_ROW_CONTRACT.content.limits.subtitle}</span></label>
+            <Input value={props.subtitle || ""} onChange={(event) => update({ subtitle: event.target.value })} maxLength={PRODUCT_ROW_CONTRACT.content.limits.subtitle} placeholder="补充系列、材质或推荐理由" />
+          </div>
+        </ProductRowFlatSection>
+
+        <ProductRowFlatSection
+          title={`选择商品 · ${productIds.length}/${PRODUCT_ROW_CONTRACT.content.maxProducts}`}
+          description={`至少选择 ${PRODUCT_ROW_CONTRACT.content.minProducts} 件；已选顺序就是画布与前台展示顺序。`}
+        >
+          <ProductIdsField value={productIds} onChange={updateProducts} maxProducts={PRODUCT_ROW_CONTRACT.content.maxProducts} />
+        </ProductRowFlatSection>
+
+        <ProductRowFlatSection title="陈列布局" description="桌面端与手机端设置同时显示，不随当前预览设备隐藏。">
+          <div className="homepage-editor__product-row-setting">
+            <div><strong>桌面端列数</strong><span>控制电脑端每行展示的商品数量。</span></div>
+            <div className="homepage-editor__inspector-segmented is-three" role="group" aria-label="桌面端商品列数">
+              {[["grid-2", "2列"], ["grid-3", "3列"], ["grid-4", "4列"]].map(([value, label]) => (
+                <button key={value} type="button" className={(props.layout || "grid-3") === value ? "is-active" : ""} aria-pressed={(props.layout || "grid-3") === value} onClick={() => update({ layout: value })}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="homepage-editor__product-row-setting">
+            <div><strong>手机端列数</strong><span>1列突出细节，2列提高浏览效率。</span></div>
+            <div className="homepage-editor__inspector-segmented" role="group" aria-label="手机端商品列数">
+              {[1, 2].map((value) => (
+                <button key={value} type="button" className={(props.mobileColumns === 1 ? 1 : 2) === value ? "is-active" : ""} aria-pressed={(props.mobileColumns === 1 ? 1 : 2) === value} onClick={() => update({ mobileColumns: value })}>{value}列</button>
+              ))}
+            </div>
+          </div>
+          <div className="homepage-editor__product-row-setting">
+            <div><strong>商品图片比例</strong><span>3:4适合珠宝画册，1:1适合统一商品主图。</span></div>
+            <div className="homepage-editor__inspector-segmented" role="group" aria-label="商品图片比例">
+              {[["3:4", "3:4竖版"], ["1:1", "1:1方图"]].map(([value, label]) => (
+                <button key={value} type="button" className={(props.imageRatio || "3:4") === value ? "is-active" : ""} aria-pressed={(props.imageRatio || "3:4") === value} onClick={() => update({ imageRatio: value })}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="homepage-editor__layout-rule"><strong>当前画布</strong><span>{device === "desktop" ? `电脑端 · ${(props.layout || "grid-3").replace("grid-", "")}列` : `手机端 · ${props.mobileColumns === 1 ? 1 : 2}列`}</span><span>图片比例：{props.imageRatio || "3:4"}</span></div>
+        </ProductRowFlatSection>
+
+        <ProductRowFlatSection title="商品信息">
+          <div className="homepage-editor__product-row-setting">
+            <div><strong>价格</strong><span>价格从商品资料读取，模板内不能修改。</span></div>
+            <div className="homepage-editor__inspector-segmented" role="group" aria-label="是否显示价格">
+              <button type="button" className={props.showPrice !== false ? "is-active" : ""} aria-pressed={props.showPrice !== false} onClick={() => update({ showPrice: true })}>显示价格</button>
+              <button type="button" className={props.showPrice === false ? "is-active" : ""} aria-pressed={props.showPrice === false} onClick={() => update({ showPrice: false })}>隐藏价格</button>
+            </div>
+          </div>
+          <div className="homepage-editor__product-row-setting">
+            <div><strong>操作样式</strong><span>三种样式均进入商品详情，不伪装成立即购买。</span></div>
+            <div className="homepage-editor__inspector-segmented is-three" role="group" aria-label="商品操作样式">
+              {[["none", "整卡点击"], ["text", "文字链接"], ["button", "描边按钮"]].map(([value, label]) => (
+                <button key={value} type="button" className={actionStyle === value ? "is-active" : ""} aria-pressed={actionStyle === value} onClick={() => update({ actionStyle: value, showButton: value === "button", buttonText: value === "button" ? "查看详情" : props.buttonText })}>{label}</button>
+              ))}
+            </div>
+          </div>
+        </ProductRowFlatSection>
+
+        <ProductRowFlatSection title="模块背景">
+          <div className="homepage-editor__product-row-setting">
+            <div><strong>背景预设</strong><span>限定品牌中性色，避免不同模块出现杂乱配色。</span></div>
+            <div className="homepage-editor__inspector-segmented is-three" role="group" aria-label="作品陈列背景">
+              {[["#FCFCFB", "暖白"], ["#F5F2ED", "米白"], ["#F1F1EF", "浅灰"]].map(([value, label]) => (
+                <button key={value} type="button" className={(props.bgColor || "#FCFCFB").toUpperCase() === value ? "is-active" : ""} aria-pressed={(props.bgColor || "#FCFCFB").toUpperCase() === value} onClick={() => update({ bgColor: value })}>{label}</button>
+              ))}
+            </div>
+          </div>
+        </ProductRowFlatSection>
+      </div>
+      <InspectorDraftActions saving={saving} onSave={onSave} onCancel={onCancel} />
+    </section>
+  );
+}
+
+function FeaturedProductInspector({ saving, onSave, onCancel }: {
+  saving: boolean;
+  onSave: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { props, update, close, device } = useSelectedModuleEditor();
+  const status = evaluateFeaturedProductContract(props);
+  const productId = Number(props.productId) || 0;
+
+  return (
+    <section className="homepage-editor__inspector" data-active-device={device} aria-label="单品主推模块属性">
+      <InspectorHeader title={getModuleDisplayName("单品焦点推荐", props)} device={device} onClose={close} />
+      <div className="homepage-editor__inspector-scroll">
+        <p className="homepage-editor__properties-helper">{FEATURED_PRODUCT_CONTRACT.purpose}</p>
+        <ContractStatusBanner status={status} />
+
+        <InspectorSection title="模块概况" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>图层名称<span className="homepage-editor__inspector-hint">仅用于页面结构识别</span></label>
+            <Input value={props.moduleName || ""} onChange={(event) => update({ moduleName: event.target.value })} maxLength={24} placeholder="默认使用单品主推" />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="主推商品 · 1件" resetKey={props.id}>
+          <ProductIdsField
+            value={productId > 0 ? [productId] : []}
+            onChange={(ids) => update({ productId: Number(ids[ids.length - 1]) || 0 })}
+            maxProducts={1}
+          />
+          <p className="homepage-editor__section-note">商品主图、名称和价格读取真实商品数据；画布与发布页保持同步。</p>
+        </InspectorSection>
+
+        <InspectorSection title="内容表达" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>眉题<span className="homepage-editor__inspector-count">{(props.eyebrow || "").length}/{FEATURED_PRODUCT_CONTRACT.content.limits.eyebrow}</span></label>
+            <Input value={props.eyebrow || ""} onChange={(event) => update({ eyebrow: event.target.value })} maxLength={FEATURED_PRODUCT_CONTRACT.content.limits.eyebrow} placeholder="FEATURED PIECE" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>标题 <em>必填</em><span className="homepage-editor__inspector-count">{(props.title || "").length}/{FEATURED_PRODUCT_CONTRACT.content.limits.title}</span></label>
+            <Input value={props.title || ""} onChange={(event) => update({ title: event.target.value })} maxLength={FEATURED_PRODUCT_CONTRACT.content.limits.title} status={props.title?.trim() ? undefined : "error"} />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>作品卖点<span className="homepage-editor__inspector-count">{(props.summary || "").length}/{FEATURED_PRODUCT_CONTRACT.content.limits.summary}</span></label>
+            <Input.TextArea value={props.summary || ""} onChange={(event) => update({ summary: event.target.value })} maxLength={FEATURED_PRODUCT_CONTRACT.content.limits.summary} rows={4} placeholder="说明材质、工艺或设计价值" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>商品入口文字 <em>必填</em></label>
+            <Input value={props.primaryText || ""} onChange={(event) => update({ primaryText: event.target.value })} maxLength={FEATURED_PRODUCT_CONTRACT.content.limits.actionText} placeholder="查看作品" />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="次要行动" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>次要入口文字<span className="homepage-editor__inspector-hint">留空则只保留商品详情主入口</span></label>
+            <Input value={props.secondaryText || ""} onChange={(event) => update({ secondaryText: event.target.value })} maxLength={FEATURED_PRODUCT_CONTRACT.content.limits.actionText} placeholder="预约鉴赏" />
+          </div>
+          {props.secondaryText ? (
+            <div className="homepage-editor__inspector-field">
+              <label htmlFor={`featured-secondary-${props.id}`}>站内页面 <em>必填</em></label>
+              <select id={`featured-secondary-${props.id}`} value={props.secondaryLink || ""} onChange={(event) => update({ secondaryLink: event.target.value })}>
+                <option value="" disabled>请选择页面</option>
+                {editorPages.map((page) => <option key={page.key} value={page.publicPath}>{page.label}</option>)}
+              </select>
+            </div>
+          ) : null}
+        </InspectorSection>
+
+        <InspectorSection title="版式设置" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__inspector-option-group">
+            <div><strong>桌面端图文顺序</strong><span>移动端始终先展示商品图，再展示文字和行动入口。</span></div>
+            <div className="homepage-editor__inspector-segmented" role="group" aria-label="单品主推桌面版式">
+              {[["imageLeft", "商品图在左"], ["imageRight", "商品图在右"]].map(([value, label]) => (
+                <button key={value} type="button" className={(props.layout || "imageLeft") === value ? "is-active" : ""} aria-pressed={(props.layout || "imageLeft") === value} onClick={() => update({ layout: value })}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="homepage-editor__layout-rule"><strong>画布标准</strong><span>商品主图固定3:4，桌面双栏，移动端上下排列</span><span>商品详情始终是主行动，预约只作为次要入口</span></div>
+        </InspectorSection>
+      </div>
+      <InspectorDraftActions saving={saving} onSave={onSave} onCancel={onCancel} />
+    </section>
+  );
+}
+
+function CategoryCardsInspector({ saving, onSave, onCancel }: {
+  saving: boolean;
+  onSave: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { props, update, close, device } = useSelectedModuleEditor();
+  const status = evaluateCategoryCardsContract(props);
+  const cards = Array.isArray(props.categories) ? props.categories : [];
+  const updateCards = (nextCards: Array<Record<string, any>>) => update({ categories: nextCards });
+  const updateCard = (index: number, patch: Record<string, any>) => updateCards(cards.map((card: Record<string, any>, cardIndex: number) => cardIndex === index ? { ...card, ...patch } : card));
+  const moveCard = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= cards.length) return;
+    const next = [...cards];
+    [next[index], next[target]] = [next[target], next[index]];
+    updateCards(next);
+  };
+
+  return (
+    <section className="homepage-editor__inspector" data-active-device={device} aria-label="分类导航模块属性">
+      <InspectorHeader title={getModuleDisplayName("分类卡片", props)} device={device} onClose={close} />
+      <div className="homepage-editor__inspector-scroll">
+        <p className="homepage-editor__properties-helper">{CATEGORY_CARDS_CONTRACT.purpose}</p>
+        <ContractStatusBanner status={status} />
+
+        <InspectorSection title="模块概况" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>图层名称<span className="homepage-editor__inspector-hint">仅用于页面结构识别</span></label>
+            <Input value={props.moduleName || ""} onChange={(event) => update({ moduleName: event.target.value })} maxLength={24} placeholder="默认使用分类导航" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>标题 <em>必填</em><span className="homepage-editor__inspector-count">{(props.title || "").length}/{CATEGORY_CARDS_CONTRACT.content.limits.title}</span></label>
+            <Input value={props.title || ""} onChange={(event) => update({ title: event.target.value })} maxLength={CATEGORY_CARDS_CONTRACT.content.limits.title} status={props.title?.trim() ? undefined : "error"} />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>副标题<span className="homepage-editor__inspector-count">{(props.subtitle || "").length}/{CATEGORY_CARDS_CONTRACT.content.limits.subtitle}</span></label>
+            <Input.TextArea value={props.subtitle || ""} onChange={(event) => update({ subtitle: event.target.value })} maxLength={CATEGORY_CARDS_CONTRACT.content.limits.subtitle} rows={2} />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title={`分类入口 · ${cards.length}/${CATEGORY_CARDS_CONTRACT.content.maxItems}`} resetKey={props.id}>
+          {cards.map((card: Record<string, any>, index: number) => {
+            const focusX = Math.min(100, Math.max(0, Number(card.focusX ?? 50)));
+            const focusY = Math.min(100, Math.max(0, Number(card.focusY ?? 50)));
+            return (
+              <details key={card.id || index} className="homepage-editor__inspector-details" open={index === 0}>
+                <summary>{card.name || `分类 ${index + 1}`}</summary>
+                <div className="homepage-editor__inspector-field">
+                  <label>分类名称 <em>必填</em></label>
+                  <Input value={card.name || ""} onChange={(event) => updateCard(index, { name: event.target.value })} maxLength={CATEGORY_CARDS_CONTRACT.content.limits.name} />
+                </div>
+                <MediaPickerField
+                  fieldKey={`categories.${index}.image`}
+                  device="shared"
+                  value={card.image || ""}
+                  onChange={(image) => updateCard(index, { image })}
+                  required
+                  spec={IMAGE_SPECS.categoryCards.image}
+                  placeholder="上传分类图片"
+                  previewAspectRatio={CATEGORY_CARDS_CONTRACT.canvas.mediaAspectRatio}
+                  previewFocus={{ x: focusX, y: focusY }}
+                />
+                {card.image ? <FocusPicker src={card.image} focusX={focusX} focusY={focusY} aspectRatio={CATEGORY_CARDS_CONTRACT.canvas.mediaAspectRatio} onChange={(x, y) => updateCard(index, { focusX: x, focusY: y })} /> : null}
+                <div className="homepage-editor__inspector-field">
+                  <label>站内路径 <em>必填</em><span className="homepage-editor__inspector-hint">例如 /products?categoryId=12</span></label>
+                  <Input value={card.link || ""} onChange={(event) => updateCard(index, { link: event.target.value })} status={String(card.link || "").startsWith("/") && !String(card.link || "").startsWith("//") ? undefined : "error"} />
+                </div>
+                <div className="homepage-editor__inspector-field">
+                  <label>选择提示</label>
+                  <Input value={card.description || ""} onChange={(event) => updateCard(index, { description: event.target.value })} maxLength={CATEGORY_CARDS_CONTRACT.content.limits.description} placeholder="一句话说明该分类特点" />
+                </div>
+                <div className="homepage-editor__inspector-field">
+                  <label>图片替代文字</label>
+                  <Input value={card.altText || ""} onChange={(event) => updateCard(index, { altText: event.target.value })} maxLength={CATEGORY_CARDS_CONTRACT.content.limits.altText} />
+                </div>
+                <div className="homepage-editor__inspector-inline-actions">
+                  <Button size="small" onClick={() => moveCard(index, -1)} disabled={index === 0}>上移</Button>
+                  <Button size="small" onClick={() => moveCard(index, 1)} disabled={index === cards.length - 1}>下移</Button>
+                  <Button size="small" danger onClick={() => updateCards(cards.filter((_: unknown, cardIndex: number) => cardIndex !== index))}>移除</Button>
+                </div>
+              </details>
+            );
+          })}
+          <Button
+            type="dashed"
+            block
+            disabled={cards.length >= CATEGORY_CARDS_CONTRACT.content.maxItems}
+            onClick={() => updateCards([...cards, { name: "新分类", image: "", link: "/products", description: "", altText: "", focusX: 50, focusY: 50 }])}
+          >添加分类入口</Button>
+        </InspectorSection>
+
+        <InspectorSection title="版式设置" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__inspector-option-group">
+            <div><strong>桌面端列数</strong><span>移动端固定单列，保持图片和文字可读。</span></div>
+            <div className="homepage-editor__inspector-segmented is-three" role="group" aria-label="分类导航列数">
+              {[["grid-2", "2列"], ["grid-3", "3列"], ["grid-4", "4列"]].map(([value, label]) => (
+                <button key={value} type="button" className={(props.layout || "grid-3") === value ? "is-active" : ""} aria-pressed={(props.layout || "grid-3") === value} onClick={() => update({ layout: value })}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="homepage-editor__layout-rule"><strong>画布标准</strong><span>全部卡片固定3:4，桌面2/3/4列，移动端单列</span><span>每张卡片只承担一次分类导航</span></div>
+        </InspectorSection>
+      </div>
+      <InspectorDraftActions saving={saving} onSave={onSave} onCancel={onCancel} />
+    </section>
+  );
+}
+
+function AppointmentInspector({ saving, onSave, onCancel }: {
+  saving: boolean;
+  onSave: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { props, update, close, device } = useSelectedModuleEditor();
+  const status = evaluateAppointmentContract(props);
+  const focusX = Math.min(100, Math.max(0, Number(props.focusX ?? 50)));
+  const focusY = Math.min(100, Math.max(0, Number(props.focusY ?? 50)));
+
+  return (
+    <section className="homepage-editor__inspector" data-active-device={device} aria-label="预约引导模块属性">
+      <InspectorHeader title={getModuleDisplayName("预约入口", props)} device={device} onClose={close} />
+      <div className="homepage-editor__inspector-scroll">
+        <p className="homepage-editor__properties-helper">{APPOINTMENT_CONTRACT.purpose}</p>
+        <ContractStatusBanner status={status} />
+
+        <InspectorSection title="模块概况" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>图层名称<span className="homepage-editor__inspector-hint">仅用于页面结构识别</span></label>
+            <Input value={props.moduleName || ""} onChange={(event) => update({ moduleName: event.target.value })} maxLength={24} placeholder="默认使用预约引导" />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="行动内容" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>标题 <em>必填</em><span className="homepage-editor__inspector-count">{(props.title || "").length}/{APPOINTMENT_CONTRACT.content.limits.title}</span></label>
+            <Input value={props.title || ""} onChange={(event) => update({ title: event.target.value })} maxLength={APPOINTMENT_CONTRACT.content.limits.title} status={props.title?.trim() ? undefined : "error"} />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>服务说明<span className="homepage-editor__inspector-count">{(props.subtitle || "").length}/{APPOINTMENT_CONTRACT.content.limits.subtitle}</span></label>
+            <Input.TextArea value={props.subtitle || ""} onChange={(event) => update({ subtitle: event.target.value })} maxLength={APPOINTMENT_CONTRACT.content.limits.subtitle} rows={3} />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>主按钮文字 <em>必填</em></label>
+            <Input value={props.buttonText || ""} onChange={(event) => update({ buttonText: event.target.value })} maxLength={APPOINTMENT_CONTRACT.content.limits.buttonText} placeholder="立即预约" />
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label htmlFor={`appointment-page-${props.id}`}>预约页面 <em>必填</em></label>
+            <select id={`appointment-page-${props.id}`} value={props.linkUrl || ""} onChange={(event) => update({ linkUrl: event.target.value })}>
+              <option value="" disabled>请选择页面</option>
+              {editorPages.map((page) => <option key={page.key} value={page.publicPath}>{page.label}</option>)}
+            </select>
+          </div>
+          <div className="homepage-editor__inspector-field">
+            <label>咨询电话<span className="homepage-editor__inspector-hint">可选，只作为次要入口</span></label>
+            <Input value={props.phone || ""} onChange={(event) => update({ phone: event.target.value })} placeholder="例如 400-000-0000" />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title="背景视觉" resetKey={props.id}>
+          <MediaPickerField fieldKey="backgroundImage" device="shared" value={props.backgroundImage || ""} onChange={(backgroundImage) => update({ backgroundImage })} spec={IMAGE_SPECS.fullBleed.desktop} placeholder="可选；留空使用纯色背景" previewAspectRatio={APPOINTMENT_CONTRACT.canvas.backgroundAspectRatio} previewFocus={{ x: focusX, y: focusY }} />
+          {props.backgroundImage ? <FocusPicker src={props.backgroundImage} focusX={focusX} focusY={focusY} aspectRatio={APPOINTMENT_CONTRACT.canvas.backgroundAspectRatio} safeArea onChange={(x, y) => update({ focusX: x, focusY: y })} /> : null}
+        </InspectorSection>
+
+        <InspectorSection title="视觉预设" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__inspector-segmented" role="group" aria-label="预约引导视觉预设">
+            {[["dark", "深色典藏"], ["ivory", "象牙留白"]].map(([value, label]) => (
+              <button key={value} type="button" className={(props.tone || "dark") === value ? "is-active" : ""} aria-pressed={(props.tone || "dark") === value} onClick={() => update({ tone: value })}>{label}</button>
+            ))}
+          </div>
+          <div className="homepage-editor__layout-rule"><strong>行动规则</strong><span>预约按钮始终是唯一主行动</span><span>电话为可选次要入口，不增加第三个按钮</span></div>
+        </InspectorSection>
+
+        {props.backgroundImage ? (
+          <InspectorSection title="高级设置" defaultOpen={false} resetKey={props.id}>
+            <div className="homepage-editor__inspector-field">
+              <label>背景图片替代文字</label>
+              <Input value={props.altText || ""} onChange={(event) => update({ altText: event.target.value })} maxLength={APPOINTMENT_CONTRACT.content.limits.altText} />
+            </div>
+          </InspectorSection>
+        ) : null}
+      </div>
+      <InspectorDraftActions saving={saving} onSave={onSave} onCancel={onCancel} />
+    </section>
+  );
+}
+
+function HotspotInspector({ saving, onSave, onCancel }: {
+  saving: boolean;
+  onSave: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { props, update, close, device } = useSelectedModuleEditor();
+  const status = evaluateHotspotContract(props);
+  const imageField = device === "mobile" ? "mobileImage" : "image";
+  const hotspotField = device === "mobile" ? "mobileHotspots" : "hotspots";
+  const imageSpec = device === "mobile" ? IMAGE_SPECS.hotspot.mobile : IMAGE_SPECS.hotspot.desktop;
+  const aspectRatio = device === "mobile" ? HOTSPOT_CONTRACT.canvas.mobileMediaAspectRatio : HOTSPOT_CONTRACT.canvas.desktopMediaAspectRatio;
+  const currentHotspots = Array.isArray(props[hotspotField]) ? props[hotspotField] : [];
+  const desktopHotspots = Array.isArray(props.hotspots) ? props.hotspots : [];
+
+  const updateHotspots = (next: Array<Record<string, any>>) => update({ [hotspotField]: next });
+  const updateHotspot = (itemIndex: number, patch: Record<string, any>) => {
+    updateHotspots(currentHotspots.map((item: Record<string, any>, index: number) => index === itemIndex ? { ...item, ...patch } : item));
+  };
+  const addHotspot = () => {
+    if (currentHotspots.length >= HOTSPOT_CONTRACT.content.maxHotspots) {
+      message.warning(`每个设备最多配置 ${HOTSPOT_CONTRACT.content.maxHotspots} 个热区`);
+      return;
+    }
+    const offset = Math.min(60, 8 + currentHotspots.length * 6);
+    updateHotspots([...currentHotspots, { label: "", x: offset, y: offset, width: 24, height: 18, link: "" }]);
+  };
+  const moveHotspot = (itemIndex: number, direction: -1 | 1) => {
+    const target = itemIndex + direction;
+    if (target < 0 || target >= currentHotspots.length) return;
+    const next = [...currentHotspots];
+    [next[itemIndex], next[target]] = [next[target], next[itemIndex]];
+    updateHotspots(next);
+  };
+
+  return (
+    <section className="homepage-editor__inspector" data-active-device={device} aria-label="热区图模块属性">
+      <InspectorHeader title={getModuleDisplayName("热区图", props)} device={device} onClose={close} />
+      <div className="homepage-editor__inspector-scroll">
+        <p className="homepage-editor__properties-helper">{HOTSPOT_CONTRACT.purpose}</p>
+        <ContractStatusBanner status={status} />
+        <InspectorSection title="模块概况" resetKey={props.id}>
+          <div className="homepage-editor__inspector-field">
+            <label>图层名称<span className="homepage-editor__inspector-hint">仅用于页面结构识别</span></label>
+            <Input value={props.moduleName || ""} onChange={(event) => update({ moduleName: event.target.value })} maxLength={24} placeholder="默认使用可点击图片" />
+          </div>
+        </InspectorSection>
+
+        <InspectorSection title={device === "mobile" ? "移动端底图" : "桌面端底图"} resetKey={props.id}>
+          {device === "mobile" && !props.mobileImage ? <div className="homepage-editor__media-status is-fallback"><ExclamationCircleOutlined /><div><strong>当前复用桌面端底图</strong><span>上传3:4移动图后，请重新校准移动端热区。</span></div></div> : null}
+          <MediaPickerField fieldKey={imageField} device={device} value={props[imageField] || ""} onChange={(value) => update({ [imageField]: value })} required={device === "desktop"} spec={imageSpec} placeholder={device === "mobile" ? "上传移动端热区底图" : "上传桌面端热区底图"} previewAspectRatio={aspectRatio} />
+        </InspectorSection>
+
+        <InspectorSection title={`${device === "mobile" ? "移动端" : "桌面端"}热区 · ${currentHotspots.length}/${HOTSPOT_CONTRACT.content.maxHotspots}`} resetKey={props.id}>
+          {device === "mobile" && currentHotspots.length === 0 && desktopHotspots.length > 0 ? (
+            <button type="button" className="homepage-editor__copy-device-config" onClick={() => update({ mobileHotspots: cloneModuleProps(desktopHotspots) })}>复制桌面端热区后校准</button>
+          ) : null}
+          <p className="homepage-editor__section-note">先在画布确认区域，再为每个热区设置明确的跳转链接。</p>
+          <div className="homepage-editor__hotspot-list">
+            {currentHotspots.map((item: Record<string, any>, itemIndex: number) => (
+              <article key={itemIndex} className="homepage-editor__hotspot-card">
+                <header><strong>热区 {itemIndex + 1}</strong><div><button type="button" disabled={itemIndex === 0} onClick={() => moveHotspot(itemIndex, -1)}>上移</button><button type="button" disabled={itemIndex === currentHotspots.length - 1} onClick={() => moveHotspot(itemIndex, 1)}>下移</button><button type="button" onClick={() => updateHotspots(currentHotspots.filter((_: unknown, index: number) => index !== itemIndex))}>删除</button></div></header>
+                <div className="homepage-editor__inspector-field"><label>标签<span className="homepage-editor__inspector-count">{(item.label || "").length}/{HOTSPOT_CONTRACT.content.limits.label}</span></label><Input size="small" value={item.label || ""} onChange={(event) => updateHotspot(itemIndex, { label: event.target.value })} maxLength={HOTSPOT_CONTRACT.content.limits.label} placeholder="例如 查看系列" /></div>
+                <div className="homepage-editor__inspector-field"><label>跳转链接 <em>必填</em></label><Input size="small" value={item.link || ""} onChange={(event) => updateHotspot(itemIndex, { link: event.target.value })} placeholder="例如 /products/123" status={item.link?.trim() ? undefined : "error"} /></div>
+                <div className="homepage-editor__hotspot-geometry">
+                  {[["x", "左"], ["y", "上"], ["width", "宽"], ["height", "高"]].map(([field, label]) => (
+                    <label key={field}><span>{label}%</span><Input size="small" type="number" min={field === "width" || field === "height" ? 1 : 0} max={100} value={item[field]} onChange={(event) => updateHotspot(itemIndex, { [field]: Number(event.target.value) })} /></label>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+          <button type="button" className="homepage-editor__add-hotspot" disabled={currentHotspots.length >= HOTSPOT_CONTRACT.content.maxHotspots} onClick={addHotspot}>＋ 添加热区</button>
+        </InspectorSection>
+
+        <InspectorSection title="适配规则" defaultOpen={false} resetKey={props.id}>
+          <div className="homepage-editor__layout-rule"><strong>画布标准</strong><span>桌面：底图16:9，独立桌面热区坐标</span><span>移动：底图3:4，独立移动热区坐标</span><span>未配置移动热区时暂时复用桌面坐标，并给出发布提醒</span></div>
+        </InspectorSection>
+      </div>
+      <InspectorDraftActions saving={saving} onSave={onSave} onCancel={onCancel} />
+    </section>
+  );
+}
+
+function InspectorPanel({
+  saving,
+  onSaveDraft,
+}: {
+  saving: boolean;
+  onSaveDraft: (data: unknown) => Promise<boolean>;
+}) {
+  const dispatch = useHomepagePuck((state) => state.dispatch);
+  const appData = useHomepagePuck((state) => state.appState.data);
+  const selectedItem = useHomepagePuck((state) => state.selectedItem);
+  const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
+  const selectedKey = selectedItem?.props?.id || selectedItem?.type || "";
+  const baselinePropsRef = useRef(new Map<string, Record<string, any>>());
+
+  useEffect(() => {
+    if (!selectedItem || !selectedKey || baselinePropsRef.current.has(selectedKey)) return;
+    baselinePropsRef.current.set(selectedKey, cloneModuleProps(selectedItem.props || {}));
+  }, [selectedItem, selectedKey]);
 
   if (!selectedItem) {
-    return null;
+    return (
+      <section className="homepage-editor__properties homepage-editor__properties--empty" aria-label="模块属性">
+        <div className="homepage-editor__properties-heading">
+          <div>
+            <span>模块设置</span>
+            <strong>选择一个模块开始编辑</strong>
+          </div>
+        </div>
+        <div className="homepage-editor__properties-scroll">
+          <div className="homepage-editor__properties-empty-state">
+            <AppstoreOutlined />
+            <strong>从画布或页面图层选择模块</strong>
+            <span>当前页面中的图片、文案和排序都会被保留；选择模块后可在这里编辑。</span>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const selectedId = selectedItem.props?.id;
+  const restoreSelectedModule = () => {
+    const baseline = baselinePropsRef.current.get(selectedKey);
+    const content = appData.content as Array<{ type: string; props: Record<string, any> }>;
+    const index = content.findIndex((item) => item.props?.id === selectedId);
+    if (!baseline || index < 0) return;
+    const nextContent = [...content];
+    nextContent[index] = { ...nextContent[index], props: cloneModuleProps(baseline) };
+    dispatch({ type: "setData", data: { ...appData, content: nextContent } });
+    message.info("已恢复该模块上次保存的内容");
+  };
+
+  const saveCurrentDraft = async () => {
+    const saved = await onSaveDraft(appData);
+    if (!saved) return;
+    const content = appData.content as Array<{ type: string; props: Record<string, any> }>;
+    content.forEach((item) => {
+      const key = item.props?.id || item.type;
+      baselinePropsRef.current.set(key, cloneModuleProps(item.props || {}));
+    });
+  };
+
+  if (selectedItem.type === "首屏主视觉") {
+    return <HeroInspector saving={saving} onSave={saveCurrentDraft} onCancel={restoreSelectedModule} />;
+  }
+
+  if (selectedItem.type === "图文混排") {
+    return <ImageTextInspector saving={saving} onSave={saveCurrentDraft} onCancel={restoreSelectedModule} />;
+  }
+
+  if (selectedItem.type === "单图海报") {
+    return <SinglePosterInspector saving={saving} onSave={saveCurrentDraft} onCancel={restoreSelectedModule} />;
+  }
+
+  if (selectedItem.type === "全屏出血图") {
+    return <FullBleedInspector saving={saving} onSave={saveCurrentDraft} onCancel={restoreSelectedModule} />;
+  }
+
+  if (selectedItem.type === "双图海报") {
+    return <DoublePosterInspector saving={saving} onSave={saveCurrentDraft} onCancel={restoreSelectedModule} />;
+  }
+
+  if (selectedItem.type === "产品展示行") {
+    return <ProductRowInspector saving={saving} onSave={saveCurrentDraft} onCancel={restoreSelectedModule} />;
+  }
+
+  if (selectedItem.type === "单品焦点推荐") {
+    return <FeaturedProductInspector saving={saving} onSave={saveCurrentDraft} onCancel={restoreSelectedModule} />;
+  }
+
+  if (selectedItem.type === "分类卡片") {
+    return <CategoryCardsInspector saving={saving} onSave={saveCurrentDraft} onCancel={restoreSelectedModule} />;
+  }
+
+  if (selectedItem.type === "预约入口") {
+    return <AppointmentInspector saving={saving} onSave={saveCurrentDraft} onCancel={restoreSelectedModule} />;
+  }
+
+  if (selectedItem.type === "热区图") {
+    return <HotspotInspector saving={saving} onSave={saveCurrentDraft} onCancel={restoreSelectedModule} />;
   }
 
   const closePanel = () =>
     dispatch({ type: "setUi", ui: { itemSelector: null } });
 
   const device = getInspectorDevice(currentViewport);
+  const isCarousel = selectedItem.type === "轮播图";
+  const hasCardContent = ["分类卡片", "卡片网格", "资质证书", "定制流程", "真实评价与实拍"].includes(selectedItem.type);
+  const currentMediaItems = getInspectorMediaItems(selectedItem.type, selectedItem.props || {});
+  const hasMediaEditor = currentMediaItems.some(
+    (item) => item.device === "shared" || item.device === device,
+  ) || selectedItem.type === "轮播图";
+  const hasMissingRequiredMedia = currentMediaItems.some(
+    (item) => item.required && !getInspectorMediaValue(selectedItem.props || {}, item.field),
+  );
   const updateMedia = (field: string, value: string) => {
-    const selectedId = selectedItem.props?.id;
     const content = appData.content as Array<{ type: string; props: Record<string, any> }>;
     const index = content.findIndex((item) => item.props?.id === selectedId);
     if (index < 0) return;
@@ -1711,7 +3251,6 @@ function InspectorPanel() {
   };
 
   const updateCarouselImages = (updater: (images: Array<Record<string, any>>) => Array<Record<string, any>>) => {
-    const selectedId = selectedItem.props?.id;
     const content = appData.content as Array<{ type: string; props: Record<string, any> }>;
     const index = content.findIndex((item) => item.props?.id === selectedId);
     if (index < 0) return;
@@ -1762,6 +3301,18 @@ function InspectorPanel() {
     });
   };
 
+  const updateModuleName = (moduleName: string) => {
+    const content = appData.content as Array<{ type: string; props: Record<string, any> }>;
+    const index = content.findIndex((item) => item.props?.id === selectedId);
+    if (index < 0) return;
+    const nextContent = [...content];
+    nextContent[index] = {
+      ...nextContent[index],
+      props: { ...nextContent[index].props, moduleName },
+    };
+    dispatch({ type: "setData", data: { ...appData, content: nextContent } });
+  };
+
   return (
     <section
       className="homepage-editor__properties"
@@ -1771,9 +3322,11 @@ function InspectorPanel() {
     >
       <div className="homepage-editor__properties-heading">
         <div>
-          <span>模块设置</span>
-          <strong>{selectedItem.type}</strong>
+          <strong>{getModuleDisplayName(selectedItem.type, selectedItem.props)}</strong>
         </div>
+        <span className="homepage-editor__properties-device">
+          {device === "mobile" ? "移动端" : "桌面端"}
+        </span>
         <button
           type="button"
           className="homepage-editor__close-panel"
@@ -1785,26 +3338,51 @@ function InspectorPanel() {
       </div>
 
       <div className="homepage-editor__properties-scroll">
-        <MediaSourceStatus type={selectedItem.type} props={selectedItem.props || {}} device={device} blockId={selectedItem.props?.id} />
-        <TemplateStructureGuide
-          type={selectedItem.type}
-          props={selectedItem.props || {}}
-          blockId={selectedItem.props?.id}
-          device={device}
-          onMediaChange={updateMedia}
-          onCarouselItemChange={updateCarouselItem}
-          onAddCarouselItem={addCarouselItem}
-          onMoveCarouselItem={moveCarouselItem}
-          onRemoveCarouselItem={removeCarouselItem}
-        />
-        <div className="homepage-editor__properties-section">内容与样式</div>
-        <Puck.Fields />
-        <details className="homepage-editor__media-details">
-          <summary>图片规格与裁切检查</summary>
+        <p className="homepage-editor__properties-helper">按当前模块的内容顺序填写；画布会即时预览，点击保存后写入草稿。</p>
+        <InspectorSection title="图层名称" defaultOpen resetKey={selectedKey}>
+          <div className="homepage-editor__inspector-field">
+            <label>图层名称<span className="homepage-editor__inspector-hint">仅用于页面结构识别</span></label>
+            <Input
+              value={(selectedItem.props as Record<string, any>)?.moduleName || ""}
+              onChange={(event) => updateModuleName(event.target.value)}
+              maxLength={24}
+              placeholder={`默认使用${getModuleDisplayName(selectedItem.type)}`}
+            />
+          </div>
+        </InspectorSection>
+        {!isCarousel && (
+          <InspectorSection title={hasCardContent ? "卡盘内容配置" : "内容配置、导航文字与商品列表"} defaultOpen resetKey={selectedKey}>
+            <Puck.Fields />
+          </InspectorSection>
+        )}
+        {hasMediaEditor && (
+          <InspectorSection title={isCarousel ? "卡盘内容配置" : "背景海报及推荐比例"} defaultOpen resetKey={selectedKey}>
+            <MediaSourceStatus type={selectedItem.type} props={selectedItem.props || {}} device={device} blockId={selectedItem.props?.id} />
+            <TemplateStructureGuide
+              type={selectedItem.type}
+              props={selectedItem.props || {}}
+              blockId={selectedItem.props?.id}
+              device={device}
+              onMediaChange={updateMedia}
+              onCarouselItemChange={updateCarouselItem}
+              onAddCarouselItem={addCarouselItem}
+              onMoveCarouselItem={moveCarouselItem}
+              onRemoveCarouselItem={removeCarouselItem}
+            />
+          </InspectorSection>
+        )}
+        {isCarousel && (
+          <InspectorSection title="播放与显示" defaultOpen={false} resetKey={selectedKey}>
+            <Puck.Fields />
+          </InspectorSection>
+        )}
+        {hasMediaEditor && (
+          <InspectorSection title="图片检查" defaultOpen={false} resetKey={selectedKey}>
           <MediaRequirementPanel type={selectedItem.type} props={selectedItem.props || {}} />
-        </details>
+          </InspectorSection>
+        )}
       </div>
-
+      <InspectorDraftActions saving={saving} onSave={saveCurrentDraft} onCancel={restoreSelectedModule} />
     </section>
   );
 }
@@ -1856,10 +3434,146 @@ function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
       <Puck.Preview />
       {isEmpty && (
         <div className="homepage-editor__canvas-empty">
-          <strong>从左侧添加第一个模板</strong>
-          <span>点击模板后，它会作为独立模块加入店铺首页。</span>
+          <strong>从左侧添加第一个模块</strong>
+          <span>拖动模块后，它会作为独立内容加入当前页面。</span>
         </div>
       )}
+    </div>
+  );
+}
+
+/** 画布侧边的当前模块快捷操作，与页面结构栏保持互补。 */
+function CanvasBlockActionDock({
+  frameRef,
+  canvasRef,
+}: {
+  frameRef: RefObject<HTMLDivElement>;
+  canvasRef: RefObject<HTMLDivElement>;
+}) {
+  const appData = useHomepagePuck((state) => state.appState.data);
+  const dispatch = useHomepagePuck((state) => state.dispatch);
+  const selectedItem = useHomepagePuck((state) => state.selectedItem);
+  const selectedId = selectedItem?.props?.id;
+  const content = appData.content as Array<{ type: string; props: Record<string, any> }>;
+  const selectedIndex = content.findIndex((item) => item.props?.id === selectedId);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+
+  const updatePosition = useCallback(() => {
+    if (selectedIndex < 0) {
+      setPosition(null);
+      return;
+    }
+    const canvas = canvasRef.current;
+    const iframe = frameRef.current?.querySelector("iframe");
+    const block = iframe?.contentDocument?.querySelectorAll<HTMLElement>("[data-puck-component]")[selectedIndex];
+    if (!canvas || !iframe || !block || iframe.clientWidth <= 0) {
+      setPosition(null);
+      return;
+    }
+    const canvasRect = canvas.getBoundingClientRect();
+    const iframeRect = iframe.getBoundingClientRect();
+    const stageRect = canvas.closest(".homepage-editor__stage")?.getBoundingClientRect();
+    const scale = iframeRect.width / iframe.clientWidth;
+    const nextPosition = {
+      top: iframeRect.top - canvasRect.top + block.offsetTop * scale,
+      left: Math.min(
+        iframeRect.right - canvasRect.left + 12,
+        (stageRect?.right ?? iframeRect.right) - canvasRect.left - 42,
+      ),
+    };
+    setPosition((current) => (
+      current
+      && Math.abs(current.top - nextPosition.top) < 1
+      && Math.abs(current.left - nextPosition.left) < 1
+    ) ? current : nextPosition);
+  }, [canvasRef, frameRef, selectedIndex]);
+
+  useLayoutEffect(() => {
+    updatePosition();
+    const initialFrame = requestAnimationFrame(updatePosition);
+    const settledFrame = requestAnimationFrame(() => requestAnimationFrame(updatePosition));
+    const observer = new ResizeObserver(updatePosition);
+    if (frameRef.current) observer.observe(frameRef.current);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      cancelAnimationFrame(initialFrame);
+      cancelAnimationFrame(settledFrame);
+      observer.disconnect();
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [frameRef, updatePosition]);
+
+  if (selectedIndex < 0 || !position) return null;
+
+  const selectedModule = content[selectedIndex];
+  const isLocked = Boolean(selectedModule.props?.locked);
+  const move = (direction: -1 | 1) => {
+    const targetIndex = selectedIndex + direction;
+    if (
+      isLocked
+      || targetIndex < 0
+      || targetIndex >= content.length
+      || content[targetIndex]?.props?.locked
+    ) return;
+    const nextContent = [...content];
+    [nextContent[selectedIndex], nextContent[targetIndex]] = [nextContent[targetIndex], nextContent[selectedIndex]];
+    dispatch({ type: "setData", data: { ...appData, content: nextContent } });
+    dispatch({ type: "setUi", ui: { itemSelector: { index: targetIndex, zone: ROOT_ZONE } } });
+    focusCanvasBlock(selectedId);
+  };
+  const remove = () => {
+    if (isLocked) {
+      message.info("此模块已锁定，不能删除");
+      return;
+    }
+    Modal.confirm({
+      title: `删除“${getModuleDisplayName(selectedModule.type, selectedModule.props)}”？`,
+      content: "删除后可从模块库重新添加；尚未发布的修改可通过版本记录恢复。",
+      okText: "删除模块",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: () => {
+        dispatch({ type: "setData", data: { ...appData, content: content.filter((_, index) => index !== selectedIndex) } });
+        dispatch({ type: "setUi", ui: { itemSelector: null } });
+      },
+    });
+  };
+
+  return (
+    <div
+      className="homepage-editor__canvas-action-dock"
+      style={{ top: `${position.top}px`, left: `${position.left}px` }}
+      role="group"
+      aria-label={`“${getModuleDisplayName(selectedModule.type, selectedModule.props)}”快捷操作`}
+    >
+      <button
+        type="button"
+        onClick={() => move(-1)}
+        disabled={isLocked || selectedIndex === 0 || content[selectedIndex - 1]?.props?.locked}
+        aria-label="上移模块"
+        title="上移"
+      >
+        <UpOutlined />
+      </button>
+      <button
+        type="button"
+        onClick={() => move(1)}
+        disabled={isLocked || selectedIndex === content.length - 1 || content[selectedIndex + 1]?.props?.locked}
+        aria-label="下移模块"
+        title="下移"
+      >
+        <DownOutlined />
+      </button>
+      <button
+        type="button"
+        className="is-danger"
+        onClick={remove}
+        disabled={isLocked}
+        aria-label="删除模块"
+        title="删除模块"
+      >
+        <DeleteOutlined />
+      </button>
     </div>
   );
 }
@@ -1867,9 +3581,13 @@ function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
 function EditorBody({
   onSaveAsTemplate,
   pageLabel,
+  saving,
+  onSaveDraft,
 }: {
   onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
   pageLabel: string;
+  saving: boolean;
+  onSaveDraft: (data: unknown) => Promise<boolean>;
 }) {
   const appData = useHomepagePuck((state) => state.appState.data);
   const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
@@ -1990,11 +3708,12 @@ function EditorBody({
   const insertTemplate = useCallback((templateName: string, insertionIndex: number) => {
     const meta = BLOCK_META[templateName];
     if (!meta) return;
+    const displayName = meta.name;
     const usedCount = appData.content.filter(
       (item: { type: string }) => item.type === templateName,
     ).length;
     if (usedCount >= (meta.limit ?? 5)) {
-      message.info(`“${templateName}”已达到可添加上限`);
+      message.info(`“${displayName}”已达到可添加上限`);
       clearDragState();
       return;
     }
@@ -2013,7 +3732,7 @@ function EditorBody({
       type: "setUi",
       ui: { itemSelector: { index: insertionIndex, zone: ROOT_ZONE } },
     });
-    message.success(`已插入“${templateName}”，可在右侧继续编辑`);
+    message.success(`已插入“${displayName}”，可在右侧继续编辑`);
     clearDragState();
   }, [appData, clearDragState, dispatch]);
 
@@ -2095,6 +3814,7 @@ function EditorBody({
           >
             <CanvasPreview frameRef={previewFrameRef} />
           </div>
+          <CanvasBlockActionDock frameRef={previewFrameRef} canvasRef={canvasRef} />
           {draggingTemplate && (
             <>
               <div className="homepage-editor__drop-scrim">
@@ -2111,14 +3831,14 @@ function EditorBody({
         </div>
       </section>
 
-      <aside className="homepage-editor__right-workspace">
+      <div className="homepage-editor__right-workspace">
         <LayerRail
           onSaveAsTemplate={onSaveAsTemplate}
           navigationPreviewOpen={navigationPreviewOpen}
           onToggleNavigationPreview={toggleNavigationPreview}
         />
-        <InspectorPanel />
-      </aside>
+        <InspectorPanel saving={saving} onSaveDraft={onSaveDraft} />
+      </div>
     </main>
   );
 }
@@ -2278,14 +3998,22 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
   const [revisions, setRevisions] = useState<PageDocumentRevision[]>([]);
   const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const hasInitializedEditorRef = useRef(false);
+  const activePageKeyRef = useRef(pageKey);
   const latestData = useRef<any>(data);
-  const pageSessionCacheRef = useRef<Record<string, { data: any; metadata: Record<string, any>; lastSaved: string | null }>>({});
+  const pageSessionCacheRef = useRef<Record<string, PageSessionCache>>({});
   const autoSaveRetryRef = useRef(0);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const dataSignatureRef = useRef("");
   const [metadata, setMetadata] = useState<Record<string, any>>({});
   const latestMetadata = useRef<Record<string, any>>({});
   const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    activePageKeyRef.current = pageKey;
+  }, [pageKey]);
 
   const [myTemplates, setMyTemplates] = useState<BlockTemplate[]>(() =>
     blockTemplateStore.getAll(),
@@ -2296,19 +4024,20 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
   }, []);
 
   const saveBlockAsTemplate = useCallback((blockType: string, blockProps: Record<string, any>) => {
+    const moduleDisplayName = getModuleDisplayName(blockType);
     Modal.confirm({
-      title: "保存区块为模板",
+      title: "保存为常用方案",
       content: (
         <div style={{ marginTop: 8 }}>
           <p style={{ margin: "0 0 8px", color: "#6B6259", fontSize: 12 }}>
-            将当前「{blockType}」的配置保存为可复用的模板。
+            将当前模块的内容与版式保存为可复用的常用方案。
           </p>
           <label style={{ fontSize: 12, color: "#4A4239" }}>
-            模板名称
+            方案名称
             <input
               id="block-template-name-input"
               type="text"
-              defaultValue={`我的${blockType}`}
+              defaultValue={`我的${moduleDisplayName}`}
               style={{
                 display: "block",
                 width: "100%",
@@ -2323,14 +4052,14 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
           </label>
         </div>
       ),
-      okText: "保存为模板",
+      okText: "保存方案",
       cancelText: "取消",
       onOk: () => {
         const input = document.getElementById("block-template-name-input") as HTMLInputElement | null;
-        const name = input?.value?.trim() || `我的${blockType}`;
+        const name = input?.value?.trim() || `我的${moduleDisplayName}`;
         blockTemplateStore.save(name, blockType, blockProps);
         refreshMyTemplates();
-        message.success(`「${name}」已保存为模板，在「我的模板」中查看`);
+        message.success(`「${name}」已保存为常用方案`);
       },
     });
   }, [refreshMyTemplates]);
@@ -2345,6 +4074,7 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
         type,
         {
           ...(component as any),
+          label: BLOCK_META[type]?.name ?? (component as any).label ?? type,
           render: (props: Record<string, any>) => {
             if (props.isVisible === false) {
               return <div className="homepage-editor__hidden-block">此模块已隐藏，不会发布到前台</div>;
@@ -2379,6 +4109,7 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
       let serverData = createEditorPageDefault(pageKey);
       const cachedPage = pageSessionCacheRef.current[pageKey];
       if (!cancelled) {
+        setLoadError(null);
         // 首次进入才展示整页加载态；切换页面时只替换画布数据，保持编辑器外壳稳定。
         if (!hasInitializedEditorRef.current) setInitialLoading(true);
         // 已访问页面直接恢复会话，避免默认模板闪现和重复全量更新。
@@ -2419,16 +4150,20 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
             data: serverData,
             metadata: serverMetadata,
             lastSaved: document.updatedAt ? formatEditorTime(document.updatedAt) : null,
+            updatedAt: document.updatedAt || null,
           };
         } else if (!cachedPage) {
           // 新页面没有服务端草稿时，仅此处一次性落入该页面的正确默认结构。
           setData(serverData);
           latestData.current = serverData;
           dataSignatureRef.current = JSON.stringify(serverData);
-          pageSessionCacheRef.current[pageKey] = { data: serverData, metadata: {}, lastSaved: null };
+          pageSessionCacheRef.current[pageKey] = { data: serverData, metadata: {}, lastSaved: null, updatedAt: null };
         }
-      } catch {
-        // 无草稿时使用内置首页模板。
+      } catch (error) {
+        if (!cancelled) {
+          // 接口失败不能伪装成“没有草稿”，否则一次自动保存就可能覆盖已有装修内容。
+          setLoadError(getEditorErrorMessage(error, "店铺装修内容加载失败，请检查网络后重试"));
+        }
       } finally {
         if (!cancelled) {
           hasInitializedEditorRef.current = true;
@@ -2439,7 +4174,7 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
     return () => {
       cancelled = true;
     };
-  }, [pageKey]);
+  }, [loadAttempt, pageKey]);
 
   useEffect(() => {
     dataSignatureRef.current = JSON.stringify(data);
@@ -2459,45 +4194,70 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
     nextData: unknown,
     options: { silent?: boolean } = {},
   ): Promise<boolean> => {
-    const editableData = nextData ?? latestData.current;
-    setSaving(true);
-    setAutoSaveState("saving");
-    try {
-      await pageDocumentApi.save({
-        pageKey,
-        puckData: editableData,
-        metadata: latestMetadata.current,
-        editorVersion: "0.22.4",
-      });
-      const hasNewerLocalChanges =
-        JSON.stringify(latestData.current) !== JSON.stringify(editableData);
-      setLastSaved(formatEditorTime(new Date()));
-      if (hasNewerLocalChanges) {
-        setHasUnsavedChanges(true);
-        setAutoSaveState("idle");
-      } else {
-        setData(editableData);
-        latestData.current = editableData;
-        setHasUnsavedChanges(false);
-        setAutoSaveState("saved");
+    const targetPageKey = pageKey;
+    const requestedData = nextData ?? latestData.current;
+    const requestedMetadata = latestMetadata.current;
+    const save = async (): Promise<boolean> => {
+      const editableData = requestedData ?? latestData.current;
+      const isActivePage = () => targetPageKey === activePageKeyRef.current;
+      if (isActivePage()) {
+        setSaving(true);
+        setAutoSaveState("saving");
       }
-      autoSaveRetryRef.current = 0;
-      if (!options.silent) {
-        message.success("首页草稿已保存");
+      try {
+        const response = await pageDocumentApi.save({
+          pageKey: targetPageKey,
+          puckData: editableData,
+          metadata: requestedMetadata,
+          editorVersion: "0.22.4",
+          expectedUpdatedAt: pageSessionCacheRef.current[targetPageKey]?.updatedAt || undefined,
+        });
+        const savedDocument = unwrapResponse<any>(response);
+        const updatedAt = typeof savedDocument?.updatedAt === "string"
+          ? savedDocument.updatedAt
+          : pageSessionCacheRef.current[targetPageKey]?.updatedAt || new Date().toISOString();
+        const lastSavedAt = formatEditorTime(updatedAt);
+        pageSessionCacheRef.current[targetPageKey] = {
+          data: editableData,
+          metadata: requestedMetadata,
+          lastSaved: lastSavedAt,
+          updatedAt,
+        };
+
+        if (!isActivePage()) return true;
+        const hasNewerLocalChanges = JSON.stringify(latestData.current) !== JSON.stringify(editableData);
+        setLastSaved(lastSavedAt);
+        if (hasNewerLocalChanges) {
+          setHasUnsavedChanges(true);
+          setAutoSaveState("idle");
+        } else {
+          setData(editableData);
+          latestData.current = editableData;
+          setHasUnsavedChanges(false);
+          setAutoSaveState("saved");
+        }
+        autoSaveRetryRef.current = 0;
+        if (!options.silent) message.success("页面草稿已保存");
+        return true;
+      } catch (error) {
+        if (!isActivePage()) return false;
+        const isConflict = getEditorHttpStatus(error) === 409;
+        autoSaveRetryRef.current = 0;
+        setAutoSaveState("error");
+        if (isConflict) {
+          message.error("该页面已被其他编辑者更新，请重新加载后再继续编辑");
+        } else {
+          message.error(getEditorErrorMessage(error, options.silent ? "草稿保存失败" : "保存失败，请重试"));
+        }
+        return false;
+      } finally {
+        if (isActivePage()) setSaving(false);
       }
-      return true;
-    } catch (error) {
-      autoSaveRetryRef.current += 1;
-      setAutoSaveState("error");
-      if (autoSaveRetryRef.current >= MAX_AUTO_RETRY) {
-        message.error("自动保存多次失败，请检查网络后手动保存");
-      } else if (!options.silent) {
-        message.error(error instanceof Error ? error.message : "保存失败，正在重试");
-      }
-      return false;
-    } finally {
-      setSaving(false);
-    }
+    };
+
+    const queuedSave = saveQueueRef.current.then(save, save);
+    saveQueueRef.current = queuedSave.then(() => undefined, () => undefined);
+    return queuedSave;
   }, [pageKey]);
 
   const switchEditorPage = useCallback(async (path: string) => {
@@ -2547,20 +4307,6 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges]);
 
-  useEffect(() => {
-    if (!hasUnsavedChanges || saving || publishing) return;
-    // 失败重试：指数退避（8s→16s→… 封顶 60s）；超上限停止自动重试，交还用户手动保存
-    if (autoSaveRetryRef.current >= MAX_AUTO_RETRY) return;
-    const retry = autoSaveRetryRef.current;
-    const delay = autoSaveState === "error"
-      ? Math.min(8000 * 2 ** (retry - 1), AUTO_SAVE_MAX_BACKOFF)
-      : AUTO_SAVE_DELAY;
-    const timer = window.setTimeout(() => {
-      void saveDraft(latestData.current, { silent: true });
-    }, delay);
-    return () => window.clearTimeout(timer);
-  }, [autoSaveState, hasUnsavedChanges, publishing, saveDraft, saving]);
-
   const loadRevisions = useCallback(async () => {
     setRevisionsLoading(true);
     try {
@@ -2608,7 +4354,15 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
             latestMetadata.current = restoredMetadata;
             setHasUnsavedChanges(false);
             setAutoSaveState("saved");
-            setLastSaved(formatEditorTime(document.updatedAt || new Date()));
+            const restoredUpdatedAt = document.updatedAt || new Date().toISOString();
+            const restoredLastSaved = formatEditorTime(restoredUpdatedAt);
+            setLastSaved(restoredLastSaved);
+            pageSessionCacheRef.current[pageKey] = {
+              data: document.puckData,
+              metadata: restoredMetadata,
+              lastSaved: restoredLastSaved,
+              updatedAt: restoredUpdatedAt,
+            };
           }
           message.success(`已恢复版本 ${revision.version} 到草稿`);
           setRevisionsOpen(false);
@@ -2621,7 +4375,10 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
     });
   }, [pageKey]);
 
-  const publishHome = async (nextData: unknown) => {
+  const publishHome = async (
+    nextData: unknown,
+    locateBlock?: (blockIndex: number) => void,
+  ) => {
     if (publishing) return;
     const editableData = nextData ?? latestData.current;
 
@@ -2646,7 +4403,7 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
     setPublishing(false);
 
     if (validation && !validation.valid && validation.errors?.length) {
-      Modal.error({
+      const validationModal = Modal.error({
         title: `发布前需修复 ${validation.errors.length} 个问题`,
         content: (
           <ul
@@ -2657,11 +4414,28 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
               overflowY: "auto",
             }}
           >
-            {validation.errors.map((err, idx) => (
-              <li key={idx} style={{ fontSize: 13, lineHeight: 1.8 }}>
-                {err}
-              </li>
-            ))}
+            {validation.errors.map((err, idx) => {
+              const blockMatch = err.match(/^第\s*(\d+)\s*个区块/);
+              const blockIndex = blockMatch ? Number(blockMatch[1]) - 1 : null;
+              return (
+                <li key={`${err}-${idx}`} style={{ fontSize: 13, lineHeight: 1.8, marginBottom: 6 }}>
+                  <span>{err}</span>
+                  {blockIndex !== null && blockIndex >= 0 && locateBlock ? (
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ paddingInline: 8 }}
+                      onClick={() => {
+                        validationModal.destroy();
+                        locateBlock(blockIndex);
+                      }}
+                    >
+                      定位此模块
+                    </Button>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         ),
         okText: "去修复",
@@ -2685,13 +4459,20 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
       onOk: async () => {
         setPublishing(true);
         try {
-          await pageDocumentApi.save({
+          const saved = await saveDraft(editableData, { silent: true });
+          if (!saved) return;
+          const publishResponse = await pageDocumentApi.publish(
             pageKey,
-            puckData: editableData,
+            undefined,
+            pageSessionCacheRef.current[pageKey]?.updatedAt || undefined,
+          );
+          const publishedDocument = unwrapResponse<any>(publishResponse);
+          pageSessionCacheRef.current[pageKey] = {
+            data: editableData,
             metadata: latestMetadata.current,
-            editorVersion: "0.22.4",
-          });
-          await pageDocumentApi.publish(pageKey);
+            lastSaved: formatEditorTime(publishedDocument?.updatedAt || new Date()),
+            updatedAt: publishedDocument?.updatedAt || pageSessionCacheRef.current[pageKey]?.updatedAt || null,
+          };
           setData(editableData);
           latestData.current = editableData;
           setHasUnsavedChanges(false);
@@ -2735,6 +4516,20 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
           flex-direction: column;
           overflow: hidden;
         }
+        .homepage-editor__load-error {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          padding: 32px;
+          color: #675B4E;
+          text-align: center;
+        }
+        .homepage-editor__load-error > .anticon { color: #B15645; font-size: 28px; }
+        .homepage-editor__load-error strong { color: #302A23; font-size: 16px; }
+        .homepage-editor__load-error span { max-width: 520px; color: #82776B; font-size: 13px; line-height: 1.7; }
         .homepage-editor > [class*="PuckLayout"] {
           flex: 1;
           min-height: 0;
@@ -2777,6 +4572,7 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
         .homepage-editor__viewport-switcher {
           display: flex;
           align-items: center;
+          flex: 0 0 auto;
           padding: 3px;
           border: 1px solid #ECE7DF;
           border-radius: 6px;
@@ -2793,8 +4589,10 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
           background: transparent;
           font-size: 12px;
           cursor: pointer;
+          white-space: nowrap;
         }
-        .homepage-editor__viewport-switcher button > span { display: grid; gap: 1px; line-height: 1.1; text-align: left; }
+        .homepage-editor__viewport-switcher button > .anticon { display: inline-flex; }
+        .homepage-editor__viewport-switcher button > span:not(.anticon) { display: grid; gap: 1px; line-height: 1.1; text-align: left; white-space: nowrap; }
         .homepage-editor__viewport-switcher button small { color: currentColor; font-size: 9px; opacity: .62; }
         .homepage-editor__viewport-switcher button.is-active {
           color: #78561D;
@@ -2897,16 +4695,16 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
         }
         .homepage-editor__library-tools {
           flex: 0 0 auto;
-          padding: 16px 14px 12px;
+          padding: 12px 12px 10px;
           border-bottom: 1px solid #EEEAE4;
         }
         .homepage-editor__library-title {
           display: flex;
           align-items: center;
           gap: 7px;
-          margin-bottom: 12px;
+          margin-bottom: 8px;
           color: #27231E;
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 600;
         }
         .homepage-editor__library-title .anticon { color: #B8944E; }
@@ -2916,68 +4714,128 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
           font-size: 10px;
           font-weight: 400;
         }
-        .homepage-editor__library-mode {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 3px;
-          margin-bottom: 10px;
-          padding: 3px;
-          border: 1px solid #E8E2D9;
-          border-radius: 5px;
-          background: #F7F5F1;
-        }
-        .homepage-editor__library-mode button {
-          display: inline-flex;
+        .homepage-editor__library-search-row {
+          display: flex;
           align-items: center;
-          justify-content: center;
-          gap: 4px;
-          min-height: 27px;
-          border: 0;
-          border-radius: 3px;
-          color: #81796F;
-          background: transparent;
-          font-size: 11px;
-          cursor: pointer;
+          gap: 6px;
         }
-        .homepage-editor__library-mode button.is-active {
-          color: #644718;
-          background: #FFFFFF;
-          box-shadow: 0 1px 3px rgba(57, 45, 28, .10);
-        }
-        .homepage-editor__library-tools .ant-input-affix-wrapper {
+        .homepage-editor__library-search-row .ant-input-affix-wrapper {
+          flex: 1;
+          min-width: 0;
           border-color: #E6E0D7;
           border-radius: 4px;
           box-shadow: none;
         }
-        .homepage-editor__library-tools .ant-input-affix-wrapper:focus-within {
+        .homepage-editor__library-search-row .ant-input-affix-wrapper:focus-within {
           border-color: #B8944E;
           box-shadow: 0 0 0 2px rgba(184, 148, 78, .10);
         }
-        .homepage-editor__library-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-        .homepage-editor__library-tabs button {
-          padding: 4px 9px;
-          border: 1px solid transparent;
+        .homepage-editor__view-toggle button {
+          flex: 0 0 auto;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 30px;
+          height: 30px;
+          padding: 0;
+          border: 1px solid #E6E0D7;
           border-radius: 4px;
-          color: #7F786F;
-          background: #F7F5F1;
-          font-size: 11px;
+          background: #FFFFFF;
+          color: #8A8077;
+          font-size: 13px;
           cursor: pointer;
         }
-        .homepage-editor__library-tabs button.is-active {
+        .homepage-editor__view-toggle button:hover {
+          color: #644718;
           border-color: #D8C49A;
-          color: #7D5A20;
+        }
+        .homepage-editor__view-toggle button.is-active {
+          color: #644718;
           background: #FBF7EE;
+          border-color: #D8C49A;
+        }
+        .homepage-editor__view-toggle {
+          display: inline-flex;
+          gap: 4px;
+        }
+        .homepage-editor__library-tabs {
+          display: flex;
+          margin-top: 10px;
+          border-bottom: 1px solid #EEEAE4;
+        }
+        .homepage-editor__library-tabs button {
+          position: relative;
+          flex: 1 1 0;
+          min-width: 0;
+          padding: 5px 2px 8px;
+          border: 0;
+          color: #9A9187;
+          background: transparent;
+          font-size: 11px;
+          text-align: center;
+          white-space: nowrap;
+          cursor: pointer;
+        }
+        .homepage-editor__library-tabs button:hover { color: #644718; }
+        .homepage-editor__library-tabs button.is-active {
+          color: #644718;
+          font-weight: 600;
+        }
+        .homepage-editor__library-tabs button.is-active::after {
+          content: "";
+          position: absolute;
+          left: 50%;
+          bottom: 0;
+          width: 18px;
+          height: 2px;
+          border-radius: 999px;
+          background: #B8944E;
+          transform: translateX(-50%);
+        }
+        .homepage-editor__template-scroll.is-double {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          align-content: start;
+          grid-auto-rows: max-content;
+          gap: 10px;
+        }
+        .homepage-editor__template-scroll.is-double .homepage-editor__template-card {
+          margin: 0;
+          padding: 0 0 6px;
+          border-color: #F0EBE3;
+        }
+        .homepage-editor__template-preview-img {
+          display: block;
+          width: 100%;
+          aspect-ratio: 3 / 4;
+          object-fit: cover;
+          background: #F4F5F7;
+        }
+        /* 双列预览统一 3:4（与 SVG viewBox 一致，无裁切）；名称单行省略，保证每张卡片尺寸完全一致 */
+        .homepage-editor__template-scroll.is-double .homepage-editor__template-preview-img {
+          aspect-ratio: 3 / 4;
+        }
+        .homepage-editor__template-scroll.is-double .homepage-editor__template-name {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .homepage-editor__template-card.is-compact .homepage-editor__template-description {
+          display: none;
+        }
+        .homepage-editor__template-card.is-compact .homepage-editor__template-name {
+          font-size: 12px;
         }
         .homepage-editor__library-drag-tip {
           display: flex;
           align-items: center;
           gap: 5px;
-          margin-top: 10px;
-          color: #9A8D7C;
+          margin-top: 8px;
+          color: #ACA398;
           font-size: 10px;
           line-height: 1.3;
         }
-        .homepage-editor__library-drag-tip .anticon { color: #B8944E; }
+        .homepage-editor__library-drag-tip .anticon { color: #C2B8A8; }
         .homepage-editor__template-scroll,
         .homepage-editor__layer-scroll,
         .homepage-editor__properties-scroll,
@@ -2992,6 +4850,20 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
           overflow-y: auto;
           padding: 14px 14px 38px;
           background: #FCFCFB;
+        }
+        .homepage-editor__template-scroll.is-double { display: block; }
+        .homepage-editor__template-group + .homepage-editor__template-group { margin-top: 22px; }
+        .homepage-editor__template-group > h3 {
+          margin: 0 0 10px;
+          color: #756A5F;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: .08em;
+        }
+        .homepage-editor__template-scroll.is-double .homepage-editor__template-group-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
         }
         .homepage-editor__template-scroll::-webkit-scrollbar,
         .homepage-editor__layer-scroll::-webkit-scrollbar,
@@ -3291,6 +5163,48 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
         .homepage-editor__canvas-controls output { min-width: 42px; border-right: 1px solid #EEE9E1; border-left: 1px solid #EEE9E1; color: #8C8275; }
         .homepage-editor__canvas-document { position: relative; min-width: 1px; min-height: 1px; margin: 0 auto; }
         .homepage-editor__canvas-scale { position: absolute; top: 0; left: 0; transform-origin: top left; }
+        .homepage-editor__canvas-action-dock {
+          position: absolute;
+          z-index: 8;
+          display: grid;
+          gap: 2px;
+          width: 38px;
+          padding: 4px;
+          border: 1px solid #E3E8F0;
+          border-radius: 19px;
+          background: rgba(255, 255, 255, .96);
+          box-shadow: 0 6px 18px rgba(46, 60, 88, .12);
+          backdrop-filter: blur(8px);
+        }
+        .homepage-editor__canvas-action-dock button {
+          display: grid;
+          width: 30px;
+          height: 30px;
+          place-items: center;
+          padding: 0;
+          border: 0;
+          border-radius: 50%;
+          color: #4C5B73;
+          background: transparent;
+          cursor: pointer;
+          font-size: 13px;
+          transition: color .16s ease, background .16s ease;
+        }
+        .homepage-editor__canvas-action-dock button:hover:not(:disabled),
+        .homepage-editor__canvas-action-dock button:focus-visible {
+          color: #3048CD;
+          background: #EEF1FF;
+          outline: 0;
+        }
+        .homepage-editor__canvas-action-dock button.is-danger:hover:not(:disabled),
+        .homepage-editor__canvas-action-dock button.is-danger:focus-visible {
+          color: #C83C42;
+          background: #FFF0F0;
+        }
+        .homepage-editor__canvas-action-dock button:disabled {
+          color: #C7CEDA;
+          cursor: not-allowed;
+        }
         .homepage-editor__storefront-frame .storefront-navigation--preview .site-header,
         .homepage-editor__storefront-frame .storefront-navigation--preview .site-header__left-group {
           position: absolute;
@@ -3538,8 +5452,8 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
           box-sizing: border-box;
           display: flex;
           align-items: center;
-          justify-content: space-between;
-          padding: 13px 18px;
+          gap: 8px;
+          padding: 13px 16px;
           border-bottom: 1px solid #EEEAE4;
         }
         .homepage-editor__properties-heading span { display: block; color: #9A9288; font-size: 11px; }
@@ -3555,25 +5469,55 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
           cursor: pointer;
         }
         .homepage-editor__close-panel:hover { color: #6F4E18; background: #F3ECDE; }
+        .homepage-editor__properties-device {
+          margin-left: auto;
+          padding: 3px 8px;
+          border-radius: 999px;
+          color: #8A692D;
+          background: #FBF7EE;
+          font-size: 11px;
+          line-height: 1.3;
+          white-space: nowrap;
+        }
         .homepage-editor__properties-scroll {
           flex: 1;
           min-height: 0;
           overflow-y: auto;
-          padding: 18px 20px 34px;
+          padding: 12px 16px 30px;
+        }
+        .homepage-editor__properties-helper {
+          margin: 0 0 4px;
+          color: #93897D;
+          font-size: 11px;
+          line-height: 1.55;
         }
         .homepage-editor__properties-section {
-          margin-bottom: 14px;
-          color: #4D463E;
+          display: none;
+        }
+        .homepage-editor__properties .homepage-editor__inspector-section {
+          margin: 0;
+          border-top: 1px solid #EEEAE4;
+        }
+        .homepage-editor__properties .homepage-editor__inspector-section:first-of-type {
+          border-top: 0;
+        }
+        .homepage-editor__properties .homepage-editor__inspector-section-head {
+          padding: 12px 0;
           font-size: 13px;
-          font-weight: 600;
+        }
+        .homepage-editor__properties .homepage-editor__inspector-section-body {
+          gap: 12px;
+          padding: 0 0 14px;
         }
         .homepage-editor__media-status {
           display: flex;
           align-items: flex-start;
           gap: 8px;
-          margin: 0 0 16px;
-          padding: 0 0 12px;
-          border-bottom: 1px solid #EEEAE4;
+          margin: 0;
+          padding: 9px 10px;
+          border: 1px solid #EAE3D8;
+          border-radius: 5px;
+          background: #FCFBF8;
         }
         .homepage-editor__media-status > .anticon { margin-top: 2px; color: #5C8C5F; font-size: 14px; }
         .homepage-editor__media-status > .anticon-exclamation-circle { color: #A77727; }
@@ -3635,12 +5579,11 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
         }
         .homepage-editor__structure-guide {
           display: grid;
-          gap: 14px;
-          margin: 16px 0 20px;
-          padding: 14px;
-          border: 1px solid #E8E0D4;
-          border-radius: 5px;
-          background: #FCFAF5;
+          gap: 10px;
+          margin: 0;
+          padding: 0;
+          border: 0;
+          background: transparent;
         }
         .homepage-editor__structure-group { display: grid; gap: 8px; }
         .homepage-editor__structure-title {
@@ -3654,7 +5597,7 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
           min-width: 0;
           display: grid;
           gap: 8px;
-          padding: 10px;
+          padding: 9px;
           border: 1px solid #E5D9C5;
           border-radius: 4px;
           color: #8E8170;
@@ -3703,7 +5646,7 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
         .homepage-editor__structure-copy-list button:focus-visible { background: #F3EBDD; outline: none; }
         .homepage-editor__structure-copy-list strong { color: #4A4136; font-size: 11px; }
         .homepage-editor__structure-copy-list span { color: #8E867C; font-size: 11px; line-height: 1.35; }
-        .homepage-editor__media-details { margin: 24px 0 0; border-top: 1px solid #EEEAE4; }
+        .homepage-editor__media-details { margin: 0; border-top: 1px solid #EEEAE4; }
         .homepage-editor__media-details summary {
           display: flex;
           align-items: center;
@@ -3727,18 +5670,50 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
         }
         .homepage-editor__product-picker {
           display: grid;
-          gap: 10px;
+          gap: 12px;
           min-width: 0;
           color: #3C352C;
           font-size: 12px;
         }
+        .homepage-editor__product-picker-method {
+          display: grid;
+          grid-template-columns: 16px minmax(0, 1fr);
+          align-items: start;
+          gap: 8px;
+          padding: 2px 0;
+        }
+        .homepage-editor__product-picker-method > span {
+          width: 14px;
+          height: 14px;
+          box-sizing: border-box;
+          margin-top: 1px;
+          border: 4px solid #FFFFFF;
+          border-radius: 50%;
+          background: #B8944E;
+          box-shadow: 0 0 0 1px #B8944E;
+        }
+        .homepage-editor__product-picker-method > div {
+          min-width: 0;
+          display: grid;
+          gap: 3px;
+        }
+        .homepage-editor__product-picker-method strong {
+          color: #453D34;
+          font-size: 12px;
+          font-weight: 600;
+        }
+        .homepage-editor__product-picker-method small {
+          color: #958B7E;
+          font-size: 11px;
+          line-height: 1.45;
+        }
         .homepage-editor__product-picker-search input {
           width: 100%;
-          height: 32px;
+          height: 36px;
           box-sizing: border-box;
-          padding: 0 10px;
+          padding: 0 12px;
           border: 1px solid #DED8CE;
-          border-radius: 3px;
+          border-radius: 5px;
           outline: none;
           background: #FFFFFF;
           color: #2C2721;
@@ -3885,6 +5860,151 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
           color: #A24324;
           background: #FFF8F5;
         }
+        /* 作品陈列使用全展开结构：分区只负责建立层级，不提供折叠或收纳入口。 */
+        .homepage-editor__product-row-inspector .homepage-editor__inspector-scroll {
+          padding-top: 6px;
+        }
+        .homepage-editor__product-row-section {
+          padding: 18px 0 20px;
+          border-top: 1px solid #ECE8E2;
+        }
+        .homepage-editor__product-row-section:first-of-type {
+          border-top: 0;
+        }
+        .homepage-editor__product-row-section-head {
+          display: grid;
+          gap: 4px;
+          margin-bottom: 13px;
+        }
+        .homepage-editor__product-row-section-head h3 {
+          margin: 0;
+          color: #2C2721;
+          font-size: 14px;
+          font-weight: 600;
+          line-height: 1.4;
+        }
+        .homepage-editor__product-row-section-head p {
+          margin: 0;
+          color: #93897D;
+          font-size: 11px;
+          line-height: 1.55;
+        }
+        .homepage-editor__product-row-section-body {
+          display: grid;
+          gap: 14px;
+          min-width: 0;
+        }
+        .homepage-editor__product-row-mode-picker {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          align-items: start;
+          gap: 12px;
+        }
+        .homepage-editor__product-row-mode-picker button {
+          min-width: 0;
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding: 6px 6px 10px;
+          border: 1px solid #E3DED6;
+          border-radius: 5px;
+          color: #625A51;
+          background: #FFFFFF;
+          cursor: pointer;
+          text-align: left;
+          transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+        }
+        .homepage-editor__product-row-mode-picker button:hover {
+          border-color: #C8B17A;
+          background: #FCFAF5;
+        }
+        .homepage-editor__product-row-mode-picker button:focus-visible {
+          outline: 2px solid rgba(184, 148, 78, .42);
+          outline-offset: 2px;
+        }
+        .homepage-editor__product-row-mode-picker button.is-active {
+          border-color: #B8944E;
+          color: #76531B;
+          background: #FFFCF6;
+          box-shadow: 0 0 0 2px rgba(184, 148, 78, .10);
+        }
+        .homepage-editor__product-row-mode-preview {
+          width: 100%;
+          aspect-ratio: 4 / 3;
+          display: block;
+          overflow: hidden;
+          border: 1px solid #ECE8E1;
+          border-radius: 3px;
+          background: #F7F6F3;
+        }
+        .homepage-editor__product-row-mode-preview img {
+          width: 100%;
+          height: 100%;
+          display: block;
+          object-fit: cover;
+          object-position: top center;
+        }
+        .homepage-editor__product-row-mode-picker button > span:last-child {
+          width: 100%;
+          min-width: 0;
+          display: grid;
+          gap: 3px;
+          padding-inline: 3px;
+        }
+        .homepage-editor__product-row-mode-picker button strong {
+          color: #3F382F;
+          font-size: 13px;
+          font-weight: 600;
+        }
+        .homepage-editor__product-row-mode-picker button small {
+          color: #978D81;
+          font-size: 11px;
+          line-height: 1.4;
+        }
+        .homepage-editor__product-row-mode-note {
+          display: block;
+          margin-top: 8px;
+          color: #93897D;
+          font-size: 11px;
+          line-height: 1.5;
+        }
+        .homepage-editor__product-row-setting {
+          min-width: 0;
+          display: grid;
+          grid-template-columns: minmax(116px, .8fr) minmax(180px, 1.2fr);
+          align-items: center;
+          gap: 16px;
+          padding: 2px 0;
+        }
+        .homepage-editor__product-row-setting > div:first-child {
+          min-width: 0;
+          display: grid;
+          gap: 3px;
+        }
+        .homepage-editor__product-row-setting strong {
+          color: #4A4136;
+          font-size: 12px;
+          font-weight: 600;
+        }
+        .homepage-editor__product-row-setting span {
+          color: #93897D;
+          font-size: 11px;
+          line-height: 1.45;
+        }
+        .homepage-editor__product-row-inspector .homepage-editor__layout-rule {
+          margin-top: 2px;
+        }
+        .homepage-editor__product-row-inspector .homepage-editor__inspector-segmented button:focus-visible {
+          outline: 2px solid rgba(184, 148, 78, .38);
+          outline-offset: 1px;
+        }
+        @media (max-width: 1500px) {
+          .homepage-editor__product-row-setting {
+            grid-template-columns: 1fr;
+            gap: 8px;
+          }
+        }
         .homepage-editor__properties-actions {
           display: flex;
           justify-content: flex-end;
@@ -3895,6 +6015,12 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
         }
         .homepage-editor__properties-actions .ant-btn { border-radius: 3px; }
         .homepage-editor__properties-actions span { align-self: center; margin-right: auto; color: #8D8375; font-size: 11px; }
+        .homepage-editor__inspector-media-spec {
+          margin: 8px 0 0;
+          color: #8D8375;
+          font-size: 11px;
+          line-height: 1.45;
+        }
         .homepage-editor button:focus-visible,
         .homepage-editor input:focus-visible,
         .homepage-editor textarea:focus-visible,
@@ -3921,12 +6047,856 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
         }
         @media (max-width: 980px) {
           .homepage-editor__body { grid-template-columns: 220px minmax(0, 1fr) 204px; }
-          .homepage-editor__body.is-inspecting { grid-template-columns: minmax(180px, 1fr) minmax(360px, 420px); }
-          .homepage-editor__body.is-inspecting .homepage-editor__right-workspace { width: auto; grid-template-columns: 142px minmax(218px, 1fr); }
+          .homepage-editor__body.is-inspecting { grid-template-columns: minmax(180px, 1fr) minmax(356px, 420px); }
+          .homepage-editor__body.is-inspecting .homepage-editor__right-workspace { width: auto; grid-template-columns: 118px minmax(238px, 1fr); }
+          .homepage-editor__body.is-inspecting .homepage-editor__layer-heading { padding-inline: 10px; }
+          .homepage-editor__body.is-inspecting .homepage-editor__layer-scroll { padding-inline: 7px; }
+          .homepage-editor__body.is-inspecting .homepage-editor__layer-frame { padding: 7px; }
           .homepage-editor__toolbar-context > span:not(.homepage-editor__save-status),
           .homepage-editor__toolbar-divider { display: none; }
           .homepage-editor__toolbar-actions .ant-btn > span:not(.anticon) { display: none; }
           .homepage-editor__toolbar-actions .ant-btn { min-width: 34px; padding-inline: 8px; }
+        }
+
+        /* ═══ 模块设置面板重构（首屏主视觉） ═══ */
+        .homepage-editor__inspector {
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          background: #FFFFFF;
+        }
+        .homepage-editor__inspector-header {
+          position: sticky;
+          top: 0;
+          z-index: 2;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 12px 14px;
+          border-bottom: 1px solid #EEEAE4;
+          background: #FFFFFF;
+        }
+        .homepage-editor__inspector-eyebrow { font-size: 10px; color: #9A9288; letter-spacing: 0.08em; }
+        .homepage-editor__inspector-title { flex: 1; font-size: 14px; font-weight: 600; color: #2C2721; }
+        .homepage-editor__inspector-device {
+          font-size: 11px;
+          color: #B8944E;
+          background: #FBF7EE;
+          padding: 2px 8px;
+          border-radius: 999px;
+        }
+        .homepage-editor__inspector-scroll {
+          flex: 1;
+          min-height: 0;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          scrollbar-width: thin;
+          padding: 4px 14px 24px;
+        }
+        .homepage-editor__inspector-section { margin-bottom: 4px; }
+        .homepage-editor__inspector-section + .homepage-editor__inspector-section { border-top: 1px solid #EEEAE4; }
+        .homepage-editor__inspector-section-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          width: 100%;
+          padding: 10px 0;
+          border: 0;
+          background: transparent;
+          font-size: 14px;
+          font-weight: 600;
+          color: #2C2721;
+          cursor: pointer;
+        }
+        .homepage-editor__inspector-section-icon { color: #9A9288; font-size: 14px; }
+        .homepage-editor__inspector-section-body { display: flex; flex-direction: column; gap: 16px; padding-bottom: 10px; }
+        .homepage-editor__inspector-field { display: flex; flex-direction: column; gap: 6px; }
+        .homepage-editor__inspector-field > label {
+          font-size: 13px;
+          font-weight: 500;
+          color: #4A4239;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .homepage-editor__inspector-count,
+        .homepage-editor__inspector-hint { font-size: 11px; font-weight: 400; color: #9A9288; }
+        .homepage-editor__inspector-field > label em { color: #B15645; font-size: 10px; font-style: normal; font-weight: 500; }
+        .homepage-editor__inspector-warn { font-size: 11px; color: #B15645; }
+        .homepage-editor__inspector-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6B6259; }
+        .homepage-editor__inspector-image-actions { display: flex; gap: 8px; }
+        .homepage-editor__inspector-image-summary {
+          display: grid;
+          grid-template-columns: 76px minmax(0, 1fr);
+          align-items: center;
+          gap: 10px;
+          padding: 8px;
+          border: 1px solid #EAE3D8;
+          border-radius: 6px;
+          background: #FCFBF8;
+        }
+        .homepage-editor__inspector-image-summary img {
+          width: 76px;
+          height: 58px;
+          border-radius: 4px;
+          object-fit: cover;
+          background: #F1EDE6;
+        }
+        .homepage-editor__inspector-image-summary > div { min-width: 0; display: grid; gap: 4px; }
+        .homepage-editor__inspector-image-summary strong { color: #4A4136; font-size: 12px; }
+        .homepage-editor__inspector-image-summary span { color: #93897D; font-size: 11px; }
+        .homepage-editor__inspector-image-summary .homepage-editor__inspector-image-actions { margin-top: 2px; }
+        .homepage-editor__inspector-details { border-top: 1px solid #EEEAE4; }
+        .homepage-editor__inspector-details summary {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          min-height: 38px;
+          color: #766D62;
+          cursor: pointer;
+          font-size: 12px;
+          list-style: none;
+        }
+        .homepage-editor__inspector-details summary::-webkit-details-marker { display: none; }
+        .homepage-editor__inspector-details summary::after { color: #A38B5B; content: "+"; font-size: 16px; font-weight: 300; }
+        .homepage-editor__inspector-details[open] summary::after { content: "−"; }
+        .homepage-editor__inspector-details .homepage-editor__focus-picker,
+        .homepage-editor__inspector-details .homepage-editor__image-status { margin-bottom: 10px; }
+        .homepage-editor__inspector-empty {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
+          padding: 24px 12px;
+          text-align: center;
+          border: 1px dashed #E0D6C4;
+          border-radius: 8px;
+          background: #FCFAF5;
+          color: #8A7F72;
+        }
+        .homepage-editor__inspector-empty small { font-size: 11px; color: #ACA398; }
+        .homepage-editor__inspector-placeholder,
+        .homepage-editor__inspector-device-info { font-size: 12px; color: #8A7F72; line-height: 1.6; margin: 0; }
+        .homepage-editor__inspector-option-group {
+          display: grid;
+          gap: 10px;
+          padding: 10px;
+          border: 1px solid #EAE3D8;
+          border-radius: 6px;
+          background: #FCFBF8;
+        }
+        .homepage-editor__inspector-option-group > div:first-child { display: grid; gap: 3px; }
+        .homepage-editor__inspector-option-group strong { color: #4A4136; font-size: 12px; }
+        .homepage-editor__inspector-option-group span { color: #93897D; font-size: 11px; line-height: 1.45; }
+        .homepage-editor__inspector-segmented {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 5px;
+          padding: 3px;
+          border-radius: 5px;
+          background: #F2EEE7;
+        }
+        .homepage-editor__inspector-segmented.is-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .homepage-editor__inspector-segmented button {
+          min-height: 28px;
+          border: 0;
+          border-radius: 3px;
+          color: #776D60;
+          background: transparent;
+          cursor: pointer;
+          font-size: 12px;
+        }
+        .homepage-editor__inspector-segmented button.is-active {
+          color: #694A17;
+          background: #FFFFFF;
+          box-shadow: 0 1px 2px rgba(78, 58, 29, .14);
+        }
+        .homepage-editor__contract-status {
+          display: grid;
+          grid-template-columns: 18px minmax(0, 1fr);
+          gap: 8px;
+          margin: 10px 0 2px;
+          padding: 10px;
+          border: 1px solid #E7E0D4;
+          border-radius: 6px;
+          color: #786D61;
+          background: #FCFBF8;
+        }
+        .homepage-editor__contract-status > .anticon { margin-top: 2px; font-size: 14px; }
+        .homepage-editor__contract-status > div { min-width: 0; display: grid; gap: 3px; }
+        .homepage-editor__contract-status strong { color: #4A4136; font-size: 12px; }
+        .homepage-editor__contract-status span { font-size: 11px; line-height: 1.5; }
+        .homepage-editor__contract-status.is-ready { border-color: #DCE8DC; color: #648067; background: #F7FBF7; }
+        .homepage-editor__contract-status.is-warning { border-color: #EADFC9; color: #98742E; background: #FFFBF3; }
+        .homepage-editor__contract-status.is-error { border-color: #EBD5CF; color: #A45543; background: #FFF8F6; }
+        .homepage-editor__layout-rule {
+          display: grid;
+          gap: 4px;
+          padding: 10px;
+          border-left: 2px solid #B8944E;
+          color: #8C8277;
+          background: #FBF9F5;
+          font-size: 11px;
+          line-height: 1.45;
+        }
+        .homepage-editor__layout-rule strong { color: #5E5143; font-size: 12px; }
+        .homepage-editor__section-note {
+          margin: 0;
+          color: #8E867C;
+          font-size: 11px;
+          line-height: 1.55;
+        }
+        .homepage-editor__copy-device-config,
+        .homepage-editor__add-hotspot {
+          min-height: 34px;
+          border: 1px solid #D9C9A9;
+          border-radius: 5px;
+          color: #785A25;
+          background: #FFFCF6;
+          cursor: pointer;
+          font-size: 12px;
+        }
+        .homepage-editor__copy-device-config:hover,
+        .homepage-editor__add-hotspot:hover:not(:disabled) { border-color: #B8944E; background: #FBF6EB; }
+        .homepage-editor__add-hotspot:disabled { color: #AAA198; cursor: not-allowed; background: #F6F4F1; }
+        .homepage-editor__hotspot-list { display: grid; gap: 10px; }
+        .homepage-editor__hotspot-card {
+          display: grid;
+          gap: 10px;
+          padding: 10px;
+          border: 1px solid #E7E1D8;
+          border-radius: 6px;
+          background: #FCFBF8;
+        }
+        .homepage-editor__hotspot-card > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .homepage-editor__hotspot-card > header strong { color: #4A4136; font-size: 12px; }
+        .homepage-editor__hotspot-card > header div { display: flex; gap: 3px; }
+        .homepage-editor__hotspot-card > header button {
+          padding: 2px 5px;
+          border: 0;
+          color: #887B6C;
+          background: transparent;
+          cursor: pointer;
+          font-size: 10px;
+        }
+        .homepage-editor__hotspot-card > header button:last-child { color: #AC5A4B; }
+        .homepage-editor__hotspot-card > header button:disabled { color: #C8C2BA; cursor: not-allowed; }
+        .homepage-editor__hotspot-geometry { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+        .homepage-editor__hotspot-geometry label { min-width: 0; display: grid; gap: 4px; color: #8E867C; font-size: 10px; }
+        .homepage-editor__hotspot-geometry input { padding-inline: 5px; text-align: center; }
+
+        /* FocusPicker */
+        .homepage-editor__focus-picker { display: flex; flex-direction: column; gap: 8px; }
+        .homepage-editor__focus-picker-img {
+          position: relative;
+          width: 100%;
+          border-radius: 8px;
+          overflow: hidden;
+          background: #F5F2ED;
+          box-shadow: 0 1px 3px rgba(76, 53, 20, 0.08);
+          touch-action: none;
+        }
+        .homepage-editor__focus-point {
+          position: absolute;
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          border: 2px solid #FFFFFF;
+          background: rgba(184, 148, 78, 0.9);
+          box-shadow: 0 0 0 2px rgba(0,0,0,0.25), 0 2px 6px rgba(0,0,0,0.3);
+          transform: translate(-50%, -50%);
+          pointer-events: none;
+        }
+        .homepage-editor__safe-area {
+          position: absolute;
+          inset: 12%;
+          border: 1px dashed rgba(255,255,255,0.7);
+          border-radius: 4px;
+          pointer-events: none;
+        }
+        .homepage-editor__focus-quick summary { font-size: 11px; color: #8A7F72; cursor: pointer; list-style: none; }
+        .homepage-editor__focus-quick summary::-webkit-details-marker { display: none; }
+        .homepage-editor__focus-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 6px; }
+        .homepage-editor__focus-grid button { aspect-ratio: 1; border: 1px solid #ECE5DA; border-radius: 4px; background: #FCFAF5; cursor: pointer; }
+        .homepage-editor__focus-grid button.is-active { border-color: #B8944E; background: #FBF7EE; }
+
+        /* ImageStatus */
+        .homepage-editor__image-status {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+          padding: 8px 10px;
+          border-radius: 6px;
+          background: #FCFAF5;
+          font-size: 11px;
+        }
+        .homepage-editor__image-status-row { display: flex; align-items: center; gap: 6px; color: #5A5048; }
+        .homepage-editor__image-status-icon { width: 12px; }
+        .homepage-editor__image-status-row.is-ok .homepage-editor__image-status-icon { color: #5C8C5F; }
+        .homepage-editor__image-status-row.is-warn .homepage-editor__image-status-icon { color: #C7822F; }
+        .homepage-editor__image-status-label { color: #9A9288; min-width: 52px; }
+        .homepage-editor__image-status-value { flex: 1; }
+        .homepage-editor__image-status-hint { color: #C7822F; }
+        .homepage-editor__carousel-tabs {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          overflow-x: auto;
+          padding: 0 0 8px;
+          border-bottom: 1px solid #EEEAE4;
+        }
+        .homepage-editor__carousel-tabs button {
+          flex: 0 0 auto;
+          min-height: 28px;
+          padding: 0 9px;
+          border: 0;
+          border-bottom: 2px solid transparent;
+          color: #82786B;
+          background: transparent;
+          cursor: pointer;
+          font-size: 12px;
+        }
+        .homepage-editor__carousel-tabs button.is-active { border-bottom-color: #B8944E; color: #684A1B; font-weight: 600; }
+        .homepage-editor__carousel-tabs > span { margin-left: auto; color: #A0978A; font-size: 11px; white-space: nowrap; }
+
+        /* ── 装修工作台：参考式四栏布局。仅调整编辑器壳层，不触碰页面内容数据。 ── */
+        .homepage-editor__body {
+          grid-template-columns: 260px minmax(420px, 1fr) 244px 514px;
+          background:
+            radial-gradient(circle at 52% 8%, rgba(255, 255, 255, .94), transparent 28rem),
+            linear-gradient(135deg, #F7F8FC 0%, #F1F4FA 100%);
+        }
+        .homepage-editor__right-workspace {
+          display: contents;
+        }
+        .homepage-editor__library {
+          border-right-color: #E3E7EF;
+          background: rgba(255, 255, 255, .94);
+        }
+        .homepage-editor__library-tools {
+          padding: 15px 14px 12px;
+          border-bottom-color: #E8EBF1;
+        }
+        .homepage-editor__library-title {
+          margin-bottom: 11px;
+          letter-spacing: .01em;
+        }
+        .homepage-editor__library-search-row .ant-input-affix-wrapper,
+        .homepage-editor__view-toggle button {
+          border-color: #E0E5EF;
+          background: #FAFBFE;
+        }
+        .homepage-editor__library-tabs {
+          margin-top: 12px;
+          border-bottom-color: #E8EBF1;
+        }
+        .homepage-editor__library-tabs button {
+          padding-bottom: 9px;
+        }
+        .homepage-editor__template-scroll {
+          padding: 14px 12px 36px;
+          background: rgba(250, 251, 254, .72);
+        }
+        .homepage-editor__template-card {
+          border-color: #E5E9F0;
+          border-radius: 8px;
+          box-shadow: 0 1px 2px rgba(34, 48, 73, .025);
+        }
+        .homepage-editor__stage {
+          padding: 46px clamp(26px, 3vw, 62px) 76px;
+          background: transparent;
+        }
+        .homepage-editor__stage-label {
+          top: -29px;
+          margin-top: -30px;
+          border-color: #E1E6EF;
+          color: #7A8493;
+          background: rgba(255, 255, 255, .9);
+          box-shadow: 0 4px 16px rgba(57, 72, 98, .07);
+        }
+        .homepage-editor__canvas-controls {
+          border-color: #E0E5EE;
+          box-shadow: 0 5px 18px rgba(57, 72, 98, .08);
+        }
+        .homepage-editor__canvas-document {
+          padding: 8px;
+          border-radius: 10px;
+          background: rgba(255, 255, 255, .56);
+          box-shadow: 0 12px 34px rgba(43, 60, 87, .06);
+        }
+        .homepage-editor__preview-frame {
+          border: 1px solid #E0E5EE;
+          border-radius: 7px;
+          box-shadow: 0 14px 32px rgba(39, 52, 76, .14);
+        }
+        .homepage-editor__layer-rail {
+          border-right: 1px solid #E3E7EF;
+          background: rgba(255, 255, 255, .96);
+        }
+        .homepage-editor__layer-heading,
+        .homepage-editor__properties-heading {
+          min-height: 72px;
+          padding-top: 18px;
+          padding-bottom: 14px;
+          border-bottom-color: #E8EBF1;
+        }
+        .homepage-editor__layer-scroll {
+          padding: 13px 10px 30px;
+        }
+        .homepage-editor__layer-frame {
+          border-color: #E3E8F0;
+          background: #FAFBFE;
+        }
+        .homepage-editor__layer-item {
+          margin-bottom: 5px;
+          border-radius: 6px;
+        }
+        .homepage-editor__layer-item:hover { background: #F4F6FA; }
+        .homepage-editor__properties,
+        .homepage-editor__inspector {
+          min-width: 0;
+          border-left: 0;
+          background: rgba(255, 255, 255, .98);
+        }
+        .homepage-editor__properties-scroll,
+        .homepage-editor__inspector-scroll {
+          padding: 14px 18px 32px;
+        }
+        .homepage-editor__properties-empty-state {
+          min-height: 280px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 9px;
+          padding: 28px;
+          color: #8B95A6;
+          text-align: center;
+        }
+        .homepage-editor__properties-empty-state > .anticon {
+          margin-bottom: 3px;
+          color: #B8944E;
+          font-size: 34px;
+          opacity: .82;
+        }
+        .homepage-editor__properties-empty-state strong { color: #4B5565; font-size: 13px; }
+        .homepage-editor__properties-empty-state span { max-width: 260px; font-size: 12px; line-height: 1.7; }
+
+        /* 页面图层改为独立模块卡片：与画布内容一一对应，拖拽排序更直观。 */
+        .homepage-editor__layer-rail {
+          background: #FFFFFF;
+        }
+        .homepage-editor__layer-heading {
+          padding: 18px 14px 14px;
+        }
+        .homepage-editor__layer-heading span { font-size: 15px; color: #252B3A; }
+        .homepage-editor__layer-heading small { color: #8B94A5; }
+        .homepage-editor__layer-scroll {
+          padding: 14px 12px 30px;
+          background: #FBFCFF;
+        }
+        .homepage-editor__layer-group-label {
+          display: block;
+          margin: 0 2px 7px;
+          color: #98A2B3;
+          font-size: 10px;
+          font-weight: 600;
+          letter-spacing: .08em;
+        }
+        .homepage-editor__layer-global + .homepage-editor__layer-group-label {
+          margin-top: 3px;
+        }
+        .homepage-editor__layer-frame {
+          display: block;
+          margin-bottom: 14px;
+          padding: 0;
+          border: 0;
+          border-radius: 0;
+          background: transparent;
+          box-shadow: none;
+        }
+        .homepage-editor__layer-frame button {
+          min-height: 54px;
+          padding: 9px 10px;
+          border-color: #E3E8F1;
+          border-radius: 7px;
+          color: #3A4659;
+          background: #FFFFFF;
+          box-shadow: 0 2px 6px rgba(38, 56, 86, .025);
+        }
+        .homepage-editor__layer-frame button .anticon { color: #8694AA; }
+        .homepage-editor__layer-frame button small { color: #8D98AA; }
+        .homepage-editor__layer-frame button:hover,
+        .homepage-editor__layer-frame button[aria-pressed="true"] {
+          border-color: #4D68F7;
+          color: #3F59E4;
+          background: #F4F6FF;
+          box-shadow: 0 0 0 2px rgba(77, 104, 247, .10);
+        }
+        .homepage-editor__layer-item {
+          position: relative;
+          min-height: 46px;
+          margin-bottom: 9px;
+          padding: 0;
+          overflow: visible;
+          border: 1px solid #E3E8F1;
+          border-radius: 7px;
+          color: #39465B;
+          background: #FFFFFF;
+          box-shadow: 0 2px 6px rgba(38, 56, 86, .025);
+          transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+        }
+        .homepage-editor__layer-item:hover {
+          border-color: #BFC9F9;
+          background: #FFFFFF;
+          box-shadow: 0 5px 13px rgba(54, 77, 136, .09);
+          transform: translateY(-1px);
+        }
+        .homepage-editor__layer-item.is-active {
+          border-color: #4D68F7;
+          color: #3048CD;
+          background: #F8F9FF;
+          box-shadow: 0 0 0 2px rgba(77, 104, 247, .11), 0 5px 14px rgba(54, 77, 136, .08);
+        }
+        .homepage-editor__layer-item.is-drop-target {
+          border-color: #4D68F7;
+          background: #F4F6FF;
+          box-shadow: inset 0 3px 0 #4D68F7;
+        }
+        .homepage-editor__layer-select {
+          width: 100%;
+          min-height: 46px;
+          gap: 8px;
+          padding: 0 10px;
+          font-size: 12px;
+        }
+        .homepage-editor__layer-order {
+          min-width: 20px;
+          color: #9AA4B5;
+          font-size: 10px;
+        }
+        .homepage-editor__layer-select > span:last-child {
+          order: 2;
+          min-width: 0;
+          flex: 1;
+          color: #3A4659;
+          font-weight: 500;
+        }
+        .homepage-editor__layer-select > .anticon {
+          order: 3;
+          margin-left: auto;
+          color: #A2ACBC;
+          font-size: 14px;
+          cursor: grab;
+        }
+        .homepage-editor__layer-item.is-active .homepage-editor__layer-select > span:last-child { color: #3048CD; }
+        .homepage-editor__layer-item.is-active .homepage-editor__layer-select > .anticon { color: #4D68F7; }
+        .homepage-editor__layer-actions {
+          position: absolute;
+          z-index: 2;
+          top: calc(100% + 5px);
+          right: 6px;
+          display: none;
+          padding: 3px;
+          border: 1px solid #DEE5F1;
+          border-radius: 6px;
+          background: #FFFFFF;
+          box-shadow: 0 8px 18px rgba(46, 63, 91, .14);
+        }
+        .homepage-editor__layer-item:hover .homepage-editor__layer-actions,
+        .homepage-editor__layer-item.is-active .homepage-editor__layer-actions,
+        .homepage-editor__layer-actions:focus-within { display: inline-flex; }
+        .homepage-editor__layer-actions button {
+          color: #718096;
+        }
+        .homepage-editor__layer-actions button:hover:not(:disabled),
+        .homepage-editor__layer-actions button:focus-visible {
+          color: #3F59E4;
+          background: #EEF1FF;
+        }
+
+        /* 参考图比例：无标题的窄排序列，首张为固定导航栏。 */
+        .homepage-editor__layer-scroll {
+          padding: 24px 46px 32px;
+          background: #FFFFFF;
+        }
+        .homepage-editor__layer-frame {
+          margin: 0 0 11px;
+        }
+        .homepage-editor__layer-frame button {
+          min-height: 37px;
+          display: flex;
+          align-items: center;
+          width: 100%;
+          padding: 0 12px;
+          border-color: #E8EBF2;
+          border-radius: 4px;
+          box-shadow: none;
+        }
+        .homepage-editor__layer-frame button span {
+          font-size: 12px;
+          font-weight: 500;
+        }
+        .homepage-editor__layer-item {
+          min-height: 37px;
+          margin-bottom: 11px;
+          border-color: #E8EBF2;
+          border-radius: 4px;
+          box-shadow: none;
+          transition: border-color .16s ease, background .16s ease;
+        }
+        .homepage-editor__layer-item:hover {
+          box-shadow: none;
+          transform: none;
+        }
+        .homepage-editor__layer-item.is-active {
+          background: #F5F7FF;
+          box-shadow: none;
+        }
+        .homepage-editor__layer-select {
+          min-height: 37px;
+          padding: 0 12px;
+        }
+        .homepage-editor__layer-select > .anticon {
+          font-size: 13px;
+        }
+        .homepage-editor__layer-select > span {
+          min-width: 0;
+          flex: 1 1 auto;
+        }
+        .homepage-editor__layer-select > .anticon {
+          flex: 0 0 auto;
+          margin-left: auto !important;
+        }
+        .homepage-editor__layer-actions { display: none !important; }
+
+        /* 重新设计：让图层列成为可读的页面结构导航，而不是悬空的小卡片堆。 */
+        .homepage-editor__body {
+          grid-template-columns: 260px minmax(420px, 1fr) 200px 558px;
+        }
+        .homepage-editor__layer-rail {
+          border-left: 1px solid #E7EAF0;
+          border-right: 1px solid #E7EAF0;
+          background: #F7F8FB;
+        }
+        .homepage-editor__layer-scroll {
+          padding: 22px 18px 36px;
+          background:
+            linear-gradient(180deg, #FAFBFD 0%, #F6F7FA 100%);
+        }
+        .homepage-editor__layer-frame {
+          margin: 0 0 12px;
+        }
+        .homepage-editor__layer-frame button,
+        .homepage-editor__layer-item {
+          box-sizing: border-box;
+          width: 100%;
+          min-height: 44px;
+          border-radius: 8px;
+        }
+        .homepage-editor__layer-frame button {
+          position: relative;
+          padding: 0 14px 0 17px;
+          border-color: #E6DDCB;
+          color: #5D4C35;
+          background: #FFFEFB;
+          box-shadow: 0 1px 2px rgba(73, 56, 30, .035);
+        }
+        .homepage-editor__layer-frame button::before {
+          position: absolute;
+          top: 12px;
+          bottom: 12px;
+          left: 0;
+          width: 3px;
+          border-radius: 0 3px 3px 0;
+          background: #B8944E;
+          content: "";
+        }
+        .homepage-editor__layer-frame button:hover,
+        .homepage-editor__layer-frame button[aria-pressed="true"] {
+          border-color: #D4C09A;
+          color: #614514;
+          background: #FFFCF6;
+          box-shadow: 0 0 0 2px rgba(184, 148, 78, .10);
+        }
+        .homepage-editor__layer-frame button span {
+          color: inherit;
+          font-weight: 600;
+          letter-spacing: .01em;
+        }
+        .homepage-editor__layer-item {
+          min-height: 44px;
+          margin-bottom: 10px;
+          border-color: #E4E8F0;
+          background: #FFFFFF;
+          box-shadow: 0 1px 2px rgba(40, 51, 70, .025);
+        }
+        .homepage-editor__layer-item:hover {
+          border-color: #C8D1E7;
+          background: #FFFFFF;
+          box-shadow: 0 4px 10px rgba(45, 61, 93, .06);
+        }
+        .homepage-editor__layer-item.is-active {
+          border-color: #4D68F7;
+          background: #F5F7FF;
+          box-shadow: 0 0 0 2px rgba(77, 104, 247, .10);
+        }
+        .homepage-editor__layer-select {
+          position: relative;
+          min-height: 42px;
+          padding: 0 52px 0 15px;
+        }
+        .homepage-editor__layer-select > span {
+          color: #3C485B;
+          font-weight: 500;
+          letter-spacing: .01em;
+        }
+        .homepage-editor__layer-select > .anticon {
+          position: absolute;
+          top: 50%;
+          right: 13px;
+          width: 24px;
+          height: 24px;
+          display: inline-grid;
+          place-items: center;
+          margin: 0 !important;
+          border-radius: 5px;
+          color: #98A4B7;
+          background: transparent;
+          font-size: 14px;
+          transition: color .16s ease, background .16s ease;
+          transform: translateY(-50%);
+        }
+        .homepage-editor__layer-item:hover .homepage-editor__layer-select > .anticon {
+          color: #687792;
+          background: #F2F4F8;
+        }
+        .homepage-editor__layer-item.is-active .homepage-editor__layer-select > span { color: #3048CD; }
+        .homepage-editor__layer-item.is-active .homepage-editor__layer-select > .anticon {
+          color: #4D68F7;
+          background: #EAEEFF;
+        }
+        @media (max-width: 1500px) {
+          .homepage-editor__body,
+          .homepage-editor__body.is-inspecting {
+            grid-template-columns: 240px minmax(360px, 1fr) 200px 474px;
+          }
+          .homepage-editor__body.is-inspecting .homepage-editor__library { display: flex; }
+          .homepage-editor__body.is-inspecting .homepage-editor__right-workspace { display: contents; }
+        }
+        @media (max-width: 1200px) {
+          .homepage-editor__body,
+          .homepage-editor__body.is-inspecting {
+            grid-template-columns: 212px minmax(300px, 1fr) 200px 368px;
+          }
+          .homepage-editor__body.is-inspecting .homepage-editor__layer-scroll { padding-inline: 14px; }
+        }
+        @media (max-width: 980px) {
+          .homepage-editor__body,
+          .homepage-editor__body.is-inspecting {
+            grid-template-columns: 180px minmax(260px, 1fr) 90px minmax(272px, 316px);
+          }
+          .homepage-editor__body.is-inspecting .homepage-editor__right-workspace { display: contents; }
+          .homepage-editor__library-tools { padding-inline: 9px; }
+          .homepage-editor__stage { padding-inline: 18px; }
+          .homepage-editor__layer-scroll,
+          .homepage-editor__body.is-inspecting .homepage-editor__layer-scroll { padding-inline: 8px; }
+          .homepage-editor__layer-select { padding-inline: 9px; }
+          .homepage-editor__layer-select > .anticon { display: none; }
+          .homepage-editor__properties-scroll,
+          .homepage-editor__inspector-scroll { padding-inline: 12px; }
+        }
+
+        /* 右侧控制区：模块列表与设置共用一个工作台，仅以轻量分隔线区分职责。 */
+        .homepage-editor__body,
+        .homepage-editor__body.is-inspecting {
+          grid-template-columns: 260px minmax(420px, 1fr) minmax(0, 758px);
+        }
+        .homepage-editor__right-workspace,
+        .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
+          width: auto;
+          min-width: 0;
+          display: grid;
+          grid-template-columns: 200px minmax(0, 1fr);
+          overflow: hidden;
+          border-left: 1px solid #E7EAF0;
+          background: #FFFFFF;
+          box-shadow: none;
+          transition: none;
+        }
+        .homepage-editor__layer-rail {
+          border-left: 0;
+          border-right-color: #ECEEF2;
+          background: #FFFFFF;
+        }
+        .homepage-editor__layer-scroll {
+          padding: 18px 12px 28px;
+          background: #FFFFFF;
+        }
+        .homepage-editor__layer-frame {
+          margin-bottom: 10px;
+        }
+        .homepage-editor__layer-frame button,
+        .homepage-editor__layer-item {
+          min-height: 42px;
+          margin-bottom: 3px;
+          border-color: transparent;
+          border-radius: 6px;
+          background: transparent;
+          box-shadow: none;
+        }
+        .homepage-editor__layer-frame button {
+          padding-inline: 12px;
+          color: #4D596B;
+        }
+        .homepage-editor__layer-item:hover,
+        .homepage-editor__layer-frame button:hover,
+        .homepage-editor__layer-frame button[aria-pressed="true"] {
+          border-color: transparent;
+          color: #3F59E4;
+          background: #F5F7FC;
+          box-shadow: none;
+          transform: none;
+        }
+        .homepage-editor__layer-item.is-active {
+          border-color: #DCE3FF;
+          color: #3048CD;
+          background: #F3F5FF;
+          box-shadow: inset 3px 0 0 #4D68F7;
+        }
+        .homepage-editor__layer-select {
+          min-height: 42px;
+          padding-inline: 12px 10px;
+        }
+        .homepage-editor__properties,
+        .homepage-editor__inspector {
+          background: #FFFFFF;
+        }
+        .homepage-editor__properties-heading,
+        .homepage-editor__inspector-header {
+          border-bottom-color: #ECEEF2;
+        }
+        @media (max-width: 1500px) {
+          .homepage-editor__body,
+          .homepage-editor__body.is-inspecting {
+            grid-template-columns: 240px minmax(360px, 1fr) minmax(0, 674px);
+          }
+        }
+        @media (max-width: 1200px) {
+          .homepage-editor__body,
+          .homepage-editor__body.is-inspecting {
+            grid-template-columns: 212px minmax(300px, 1fr) minmax(0, 568px);
+          }
+        }
+        @media (max-width: 980px) {
+          .homepage-editor__body,
+          .homepage-editor__body.is-inspecting {
+            grid-template-columns: 180px minmax(260px, 1fr) minmax(0, 362px);
+          }
+          .homepage-editor__right-workspace,
+          .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
+            grid-template-columns: 90px minmax(272px, 1fr);
+          }
         }
       `}</style>
 
@@ -3946,7 +6916,20 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
         onSave={savePageSettings}
       />
 
-      {initialLoading ? (
+      {loadError ? (
+        <div className="homepage-editor__load-error" role="alert">
+          <ExclamationCircleOutlined />
+          <strong>无法打开店铺装修</strong>
+          <span>{loadError}</span>
+          <Button type="primary" onClick={() => {
+            setInitialLoading(true);
+            setLoadError(null);
+            setLoadAttempt((attempt) => attempt + 1);
+          }}>
+            重新加载
+          </Button>
+        </div>
+      ) : initialLoading ? (
         <div
           style={{
             width: "100%",
@@ -3963,6 +6946,7 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
           key="homepage-editor-canvas"
           config={editorConfig}
           data={data}
+          ui={INITIAL_EDITOR_UI}
           viewports={VIEWPORT_PRESETS}
           iframe={{ enabled: true, waitForStyles: true, syncHostStyles: true }}
           onPublish={(nextData) => {
@@ -3976,19 +6960,24 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
         >
           <CanvasPageDataSynchronizer data={data} pageKey={pageKey} />
           <EditorToolbar
-            pageKey={pageKey}
-            lastSaved={lastSaved}
-            publishing={publishing}
-            hasUnsavedChanges={hasUnsavedChanges}
-            autoSaveState={autoSaveState}
-            onPublish={publishHome}
-            onOpenRevisions={openRevisions}
-            onOpenPageSettings={() => setPageSettingsOpen(true)}
-            onDataChange={trackEditorData}
-            onPreview={previewDraft}
+              pageKey={pageKey}
+              lastSaved={lastSaved}
+              publishing={publishing}
+              hasUnsavedChanges={hasUnsavedChanges}
+              autoSaveState={autoSaveState}
+              onPublish={publishHome}
+              onOpenRevisions={openRevisions}
+              onOpenPageSettings={() => setPageSettingsOpen(true)}
+              onDataChange={trackEditorData}
+              onPreview={previewDraft}
             onPageChange={(nextPageKey) => void switchEditorPage(getEditorPage(nextPageKey).publicPath)}
           />
-          <EditorBody onSaveAsTemplate={saveBlockAsTemplate} pageLabel={getEditorPage(pageKey).label} />
+          <EditorBody
+              onSaveAsTemplate={saveBlockAsTemplate}
+              pageLabel={getEditorPage(pageKey).label}
+            saving={saving}
+            onSaveDraft={saveDraft}
+          />
         </Puck>
       )}
     </div>

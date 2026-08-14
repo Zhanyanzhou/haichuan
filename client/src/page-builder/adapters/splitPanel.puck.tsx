@@ -24,7 +24,7 @@ export interface SplitPanelPuckProps {
 
 export const splitPanelPuckConfig = {
   render: (props: SplitPanelPuckProps) => (
-    <SplitPanelBlock module={convertPuckProps("分割面板", props as any) as any} />
+    <SplitPanelBlock module={convertPuckProps("分割面板", props as any) as any} editMode />
   ),
   defaultProps: {
     image: "",
@@ -50,10 +50,10 @@ export const splitPanelPuckConfig = {
           spec={IMAGE_SPECS.splitPanel.image} placeholder="上传分栏配图" />
       ),
     },
-    title: { type: "text" as const, label: "文字分栏 · 主标题" },
-    subtitle: { type: "text" as const, label: "文字分栏 · 副标题" },
-    body: { type: "textarea" as const, label: "文字分栏 · 正文" },
-    buttonText: { type: "text" as const, label: "文字分栏 · 按钮文字" },
+    title: { type: "text" as const, label: "标题" },
+    subtitle: { type: "text" as const, label: "副标题" },
+    body: { type: "textarea" as const, label: "正文" },
+    buttonText: { type: "text" as const, label: "按钮文字" },
     linkUrl: { type: "text" as const, label: "按钮跳转链接" },
     template: {
       type: "radio" as const,

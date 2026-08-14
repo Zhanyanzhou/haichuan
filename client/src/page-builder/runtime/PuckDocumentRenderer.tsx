@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import AppointmentBlock from "@/components/blocks/AppointmentBlock";
+import StoreInfoBlock from "@/components/blocks/StoreInfoBlock";
+import CertificateBlock from "@/components/blocks/CertificateBlock";
+import CustomProcessBlock from "@/components/blocks/CustomProcessBlock";
+import FeaturedProductBlock from "@/components/blocks/FeaturedProductBlock";
+import LookbookBlock from "@/components/blocks/LookbookBlock";
+import LimitedOfferBlock from "@/components/blocks/LimitedOfferBlock";
+import TestimonialBlock from "@/components/blocks/TestimonialBlock";
 import CarouselBlock from "@/components/blocks/CarouselBlock";
 import CardGridBlock from "@/components/blocks/CardGridBlock";
 import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
@@ -40,6 +48,7 @@ const BLOCK_ASSET_FIELDS = [
   "posterUrl",
   "url",
   "videoUrl",
+  "backgroundImage",
 ];
 
 function getLocalUploadUrls(props: Record<string, any>): string[] {
@@ -56,6 +65,18 @@ function getLocalUploadUrls(props: Record<string, any>): string[] {
       collect(item?.url);
       collect(item?.mobileUrl);
     });
+  }
+  if (Array.isArray(props.categories)) {
+    props.categories.forEach((item: any) => collect(item?.image));
+  }
+  if (Array.isArray(props.certificates)) {
+    props.certificates.forEach((item: any) => collect(item?.imageUrl));
+  }
+  if (Array.isArray(props.steps)) {
+    props.steps.forEach((item: any) => collect(item?.image));
+  }
+  if (Array.isArray(props.testimonials)) {
+    props.testimonials.forEach((item: any) => collect(item?.image));
   }
 
   return [...urls];
@@ -87,7 +108,7 @@ function MissingMediaState({ type }: { type?: string }) {
 }
 
 function formatProductPrice(product: Product) {
-  const price = Number(product.price || product.priceMin || 0);
+  const price = Number(product.price || 0);
   if (!price) return "";
   return `¥${price.toLocaleString("zh-CN")}`;
 }
@@ -165,23 +186,47 @@ function ProductRowState({
 }
 
 // 模块级单例：多个产品行共享同一条商品变更 SSE，引用计数管理生命周期
-type ProductStreamHandle = { stream: EventSource; listeners: Set<() => void> };
+// P1-35：onerror 时指数退避重连（与 useReconnectingEventSource 同策略），避免单例流断线后所有产品行静默不刷新
+type ProductStreamHandle = {
+  stream: EventSource | null;
+  listeners: Set<() => void>;
+  retry: number;
+  retryTimer: ReturnType<typeof setTimeout> | null;
+};
 let productStreamHandle: ProductStreamHandle | null = null;
 function subscribeProductStream(onTick: () => void): () => void {
   if (!productStreamHandle) {
-    const stream = new EventSource(publicProductStreamUrl);
-    const listeners = new Set<() => void>();
-    stream.onmessage = () => {
-      productStreamHandle?.listeners.forEach((cb) => cb());
+    const handle: ProductStreamHandle = {
+      stream: null,
+      listeners: new Set(),
+      retry: 0,
+      retryTimer: null,
     };
-    productStreamHandle = { stream, listeners };
+    const open = () => {
+      const stream = new EventSource(publicProductStreamUrl);
+      stream.onmessage = () => {
+        handle.retry = 0;
+        handle.listeners.forEach((cb) => cb());
+      };
+      stream.onerror = () => {
+        stream.close();
+        if (handle.retry >= 10) return;
+        const delay = Math.min(1000 * 2 ** handle.retry, 30000);
+        handle.retry += 1;
+        handle.retryTimer = setTimeout(open, delay);
+      };
+      handle.stream = stream;
+    };
+    productStreamHandle = handle;
+    open();
   }
   productStreamHandle.listeners.add(onTick);
   return () => {
     if (!productStreamHandle) return;
     productStreamHandle.listeners.delete(onTick);
     if (productStreamHandle.listeners.size === 0) {
-      productStreamHandle.stream.close();
+      productStreamHandle.stream?.close();
+      if (productStreamHandle.retryTimer) clearTimeout(productStreamHandle.retryTimer);
       productStreamHandle = null;
     }
   };
@@ -289,6 +334,92 @@ function ResolvedProductRowBlock({
   return <ProductRowBlock module={module} />;
 }
 
+function ResolvedFeaturedProductBlock({ props }: { props: Record<string, any> }) {
+  const productId = Number(props.productId);
+  const hasValidProductId = Number.isInteger(productId) && productId > 0;
+  const [product, setProduct] = useState<Product | null>(null);
+  const [loading, setLoading] = useState(productId > 0);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!Number.isInteger(productId) || productId <= 0) {
+      setProduct(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    void productApi.getPublicList({ ids: String(productId), pageSize: 1 })
+      .then((response) => {
+        const result = unwrapResponse<any>(response);
+        const list: Product[] = result?.list || result || [];
+        if (!cancelled) setProduct(list.find((item) => item.id === productId) || null);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [productId]);
+
+  if (!hasValidProductId) return null;
+  if (loading) return <ProductRowState title={props.title} bgColor={props.bgColor} message="正在加载主推商品" />;
+  if (error) return <ProductRowState title={props.title} bgColor={props.bgColor} message="主推商品加载失败，请稍后重试" />;
+  if (!product) return <ProductRowState title={props.title} bgColor={props.bgColor} message="所选主推商品已下架或暂不可展示" />;
+  const module = convertPuckProps("单品焦点推荐", props);
+  if (!module) return null;
+  (module as any).content.product = toProductRowItem(product);
+  return <FeaturedProductBlock module={module} />;
+}
+
+function ResolvedLookbookBlock({ props }: { props: Record<string, any> }) {
+  const productIds = useMemo(
+    () => Array.isArray(props.productIds)
+      ? props.productIds.map((id: unknown) => Number(id)).filter((id: number) => Number.isInteger(id) && id > 0)
+      : [],
+    [props.productIds],
+  );
+  const idsKey = productIds.join(",");
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(productIds.length > 0);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!idsKey) {
+      setProducts([]);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    void productApi.getPublicList({ ids: idsKey, pageSize: productIds.length, sortBy: "sortOrder" })
+      .then((response) => {
+        const result = unwrapResponse<any>(response);
+        const list: Product[] = result?.list || result || [];
+        const byId = new Map(list.map((item) => [item.id, item]));
+        if (!cancelled) setProducts(productIds.map((id) => byId.get(id)).filter((item): item is Product => Boolean(item)));
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [idsKey, productIds]);
+
+  if (loading) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="正在加载关联商品" />;
+  if (error) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="关联商品暂时加载失败" />;
+  const module = convertPuckProps("佩戴灵感", props);
+  if (!module) return null;
+  (module as any).content.products = products.map(toProductRowItem);
+  return <LookbookBlock module={module} />;
+}
+
 function renderBlock(block: PuckBlock, index: number) {
   const props = block.props || {};
   const key = props.id || `${block.type || "block"}-${index}`;
@@ -297,6 +428,12 @@ function renderBlock(block: PuckBlock, index: number) {
 
   if (block.type === "产品展示行") {
     return <ResolvedProductRowBlock key={key} props={props} />;
+  }
+  if (block.type === "单品焦点推荐") {
+    return <ResolvedFeaturedProductBlock key={key} props={props} />;
+  }
+  if (block.type === "佩戴灵感") {
+    return <ResolvedLookbookBlock key={key} props={props} />;
   }
 
   const module = convertPuckProps(block.type || "", props);
@@ -316,6 +453,8 @@ function renderBlock(block: PuckBlock, index: number) {
     case "文字横幅":
       return <TextBannerBlock key={key} module={module} />;
     case "分类卡片":
+    case "按场景选购":
+    case "礼赠指南":
       return <CategoryCardsBlock key={key} module={module} />;
     case "卡片网格":
       return <CardGridBlock key={key} module={module} />;
@@ -327,19 +466,32 @@ function renderBlock(block: PuckBlock, index: number) {
       return <VideoBlock key={key} module={module} />;
     case "热区图":
       return <HotspotBlock key={key} module={module} />;
+    case "预约入口":
+      return <AppointmentBlock key={key} module={module} />;
+    case "资质证书":
+      return <CertificateBlock key={key} module={module} />;
+    case "定制流程":
+      return <CustomProcessBlock key={key} module={module} />;
+    case "服务承诺":
+      return <CardGridBlock key={key} module={module} />;
+    case "门店信息":
+      return <StoreInfoBlock key={key} module={module} />;
+    case "限时活动":
+      return <LimitedOfferBlock key={key} module={module} />;
+    case "真实评价与实拍":
+      return <TestimonialBlock key={key} module={module} />;
     default:
       return null;
   }
 }
 
 function GuardedBlock({ block, index }: { block: PuckBlock; index: number }) {
-  const props = block.props || {};
-  const urls = getLocalUploadUrls(props);
-  const urlsKey = urls.join("\n");
+  const urlsKey = useMemo(() => getLocalUploadUrls(block.props || {}).join("\n"), [block.props]);
   const [hasMissingAsset, setHasMissingAsset] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    const urls = urlsKey ? urlsKey.split("\n") : [];
     if (!urls.length) {
       setHasMissingAsset(false);
       return;

@@ -89,18 +89,18 @@ export const jewelryHomeTemplate: TemplateDefinition = {
           cards: [
             {
               icon: "",
-              title: "匠心设计",
-              body: "从纹样到比例，每件作品均由资深工匠手工绘制与打磨",
+              title: "工艺信息待确认",
+              body: "请填写经业务确认的设计与工艺介绍。",
             },
             {
               icon: "",
-              title: "真材实料",
-              body: "精选足金原料，所有材质均附国家权威检测证书",
+              title: "材质信息待确认",
+              body: "请填写经业务确认的材质与鉴定说明。",
             },
             {
               icon: "",
-              title: "终身保养",
-              body: "购买即享终身免费清洗保养服务，让作品历久弥新",
+              title: "服务信息待确认",
+              body: "请填写经业务确认的保养与售后说明。",
             },
           ],
           layout: "grid-3",
@@ -234,13 +234,13 @@ export const pageTemplates: TemplateDefinition[] = [
     ["活动", "节日", "高转化"],
     {
       "首屏主视觉": {
-        title: "臻礼季限定礼遇",
-        subtitle: "为重要时刻，挑选一份恰到好处的心意",
-        actionText: "查看活动礼遇",
+        title: "主题活动信息待确认",
+        subtitle: "请在发布前填写已确认的活动内容与适用规则。",
+        actionText: "查看详情",
       },
-      "单图海报": { label: "LIMITED OFFER", title: "限时专属礼遇" },
-      "产品展示行": { title: "活动精选" },
-      "文字横幅": { eyebrow: "LIMITED TIME", title: "立即预约，尊享专属礼遇", buttonText: "立即咨询" },
+      "单图海报": { label: "CAMPAIGN", title: "主题内容待确认" },
+      "产品展示行": { title: "主题推荐" },
+      "文字横幅": { eyebrow: "CAMPAIGN", title: "活动信息待确认", buttonText: "查看详情" },
     },
   ),
 ];

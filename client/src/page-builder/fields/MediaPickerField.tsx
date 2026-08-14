@@ -213,24 +213,6 @@ export default function MediaPickerField({
       data-media-device={device}
       tabIndex={fieldKey ? -1 : undefined}
     >
-      {/* ═══ 推荐尺寸提示 ═══ */}
-      {spec && (
-        <div className="homepage-editor__media-spec-hint">
-          <span>{spec.label}</span>
-          {imgSize.loaded && (
-            <span
-              style={{ color: statusColor[matchStatus || "good"] }}
-              className="homepage-editor__media-match"
-            >
-              {matchStatus === "good" && <CheckCircleOutlined />}
-              {matchStatus === "watch" && <ExclamationCircleOutlined />}
-              {matchStatus === "risk" && <ExclamationCircleOutlined />}
-              {imgSize.width}×{imgSize.height} — {statusLabel[matchStatus || "good"]}
-            </span>
-          )}
-        </div>
-      )}
-
       {/* ═══ 预览模式 ═══ */}
       {mode === "preview" && hasValue && (
         <div className="homepage-editor__media-preview">
@@ -362,6 +344,24 @@ export default function MediaPickerField({
           >
             或粘贴图片链接
           </button>
+        </div>
+      )}
+
+      {/* 推荐比例紧跟图片操作区，便于先选图、再核对素材是否适合当前模板。 */}
+      {spec && (
+        <div className="homepage-editor__media-spec-hint">
+          <span>{spec.label}</span>
+          {imgSize.loaded && (
+            <span
+              style={{ color: statusColor[matchStatus || "good"] }}
+              className="homepage-editor__media-match"
+            >
+              {matchStatus === "good" && <CheckCircleOutlined />}
+              {matchStatus === "watch" && <ExclamationCircleOutlined />}
+              {matchStatus === "risk" && <ExclamationCircleOutlined />}
+              {imgSize.width}×{imgSize.height} — {statusLabel[matchStatus || "good"]}
+            </span>
+          )}
         </div>
       )}
 

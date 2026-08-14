@@ -18,7 +18,7 @@ export interface CarouselPuckProps {
 export const carouselPuckConfig = {
   label: "轮播图海报",
   render: (props: CarouselPuckProps) => (
-    <CarouselBlock module={convertPuckProps("轮播图", props as any) as any} />
+    <CarouselBlock module={convertPuckProps("轮播图", props as any) as any} editMode />
   ),
   defaultProps: {
     images: [

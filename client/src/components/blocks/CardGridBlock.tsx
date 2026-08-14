@@ -78,7 +78,7 @@ export default function CardGridBlock({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: `repeat(${cols}, 1fr)`,
+            gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${cols === 2 ? 340 : cols === 3 ? 230 : 180}px), 1fr))`,
             gap: cols === 2 ? 40 : 24,
           }}
         >

@@ -1,20 +1,35 @@
 import { Link } from 'react-router-dom';
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { IMAGE_TEXT_CONTRACT } from "@/page-builder/config/blockContracts";
+import { SecureImage } from "@/components/common/SecureImage";
+import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 
 interface ImageTextBlockProps {
   module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
   editMode?: boolean;
 }
 
+function ImageTextAction({ editMode, text, targetUrl }: { editMode?: boolean; text?: string; targetUrl: string }) {
+  if (!text || !targetUrl) return null;
+  const style = { display: 'inline-block', marginTop: 24, padding: '10px 36px', border: '1px solid #B8944E', color: '#8E6A35', fontSize: 12, textDecoration: 'none', letterSpacing: '0.12em' } as const;
+  return editMode
+    ? <span data-editor-field="buttonText linkUrl productId" style={style}>{text}</span>
+    : <Link data-editor-field="buttonText linkUrl productId" to={targetUrl} style={style}>{text}</Link>;
+}
+
 /**
  * 图文混排模块 — 支持左文右图 / 左图右文 / 纯文字 / 图片背景
  */
-export default function ImageTextBlock({ module }: ImageTextBlockProps) {
+export default function ImageTextBlock({ module, editMode }: ImageTextBlockProps) {
   const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
   const {
-    label, title, body, image, imagePosition, buttonText, linkUrl,
+    label, title, body, image, imageAlt, buttonText, linkUrl,
   } = content;
   const template = layoutConfig.template || 'textLeftImageRight';
   const spacing = styleConfig.spacing || 'normal';
+  const focusX = Math.min(100, Math.max(0, Number(styleConfig.focusX ?? 50)));
+  const focusY = Math.min(100, Math.max(0, Number(styleConfig.focusY ?? 50)));
+  const targetUrl = resolveLinkTargetUrl({ targetType: content.targetType, productId: content.productId, linkUrl });
 
   const paddingMap: Record<string, string> = { compact: '40px 0', normal: '72px 0', spacious: '100px 0' };
 
@@ -38,12 +53,7 @@ export default function ImageTextBlock({ module }: ImageTextBlockProps) {
               {body}
             </p>
           )}
-          {buttonText && linkUrl && (
-            <Link data-editor-field="buttonText linkUrl" to={linkUrl}
-              style={{ display: 'inline-block', marginTop: 24, padding: '10px 36px', border: '1px solid #B8944E', color: '#B8944E', fontSize: 13, textDecoration: 'none', letterSpacing: '0.15em' }}>
-              {buttonText}
-            </Link>
-          )}
+          <ImageTextAction editMode={editMode} text={buttonText} targetUrl={targetUrl} />
         </div>
       </section>
     );
@@ -51,20 +61,23 @@ export default function ImageTextBlock({ module }: ImageTextBlockProps) {
 
   // 背景图模式
   if (template === 'imageBackground') {
+    if (!image && editMode) {
+      return <BlockEmptyPlaceholder hint="图文背景图" spec="请上传背景配图 · 建议 1600×1200（4:3）" height={500} />;
+    }
+    if (!image) return null;
     return (
-      <section style={{ position: 'relative', minHeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#2C2C2C' }}>
-        {image && (
-          <div data-editor-field="image" style={{ position: 'absolute', inset: 0, backgroundImage: `url(${image})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.5 }} />
-        )}
+      <section className="homepage-image-text-background" style={{ position: 'relative', minHeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#2C2C2C', maxWidth: IMAGE_TEXT_CONTRACT.canvas.maxWidth, margin: '0 auto' }}>
+        <style>{`
+          @media (max-width: ${IMAGE_TEXT_CONTRACT.canvas.mobileBreakpoint}px) {
+            .homepage-image-text-background { min-height: 420px !important; }
+          }
+        `}</style>
+        <SecureImage src={image} alt={imageAlt || title || "图文背景图"} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: `${focusX}% ${focusY}%`, opacity: 0.5 }} />
         <div style={{ position: 'relative', zIndex: 1, padding: 60, textAlign: 'center', maxWidth: 720 }}>
           {label && <p data-editor-field="label" style={{ fontSize: 11, letterSpacing: '0.3em', color: '#B8944E', marginBottom: 12 }}>{label}</p>}
           {title && <h2 data-editor-field="title" style={{ fontSize: 40, fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#fff', marginBottom: 20 }}>{title}</h2>}
           {body && <p data-editor-field="body" style={{ fontSize: 15, color: 'rgba(255,255,255,0.8)', lineHeight: 1.7 }}>{body}</p>}
-          {buttonText && linkUrl && (
-            <Link data-editor-field="buttonText linkUrl" to={linkUrl} style={{ display: 'inline-block', marginTop: 24, padding: '10px 40px', border: '1px solid #B8944E', color: '#B8944E', fontSize: 13, textDecoration: 'none' }}>
-              {buttonText}
-            </Link>
-          )}
+          <ImageTextAction editMode={editMode} text={buttonText} targetUrl={targetUrl} />
         </div>
       </section>
     );
@@ -73,32 +86,44 @@ export default function ImageTextBlock({ module }: ImageTextBlockProps) {
   // 默认：左文右图 / 左图右文
   const isImageLeft = template === 'textRightImageLeft';
   const imageCol = image ? (
-    <div data-editor-field="image" className="homepage-image-text__image" style={{ flex: isImageLeft ? '0 0 55%' : '0 0 45%' }}>
-      <img src={image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+    <div data-editor-field="image" className="homepage-image-text__image">
+      <SecureImage src={image} alt={imageAlt || ""} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: `${focusX}% ${focusY}%`, display: 'block' }} />
+    </div>
+  ) : editMode ? (
+    <div data-editor-field="image" className="homepage-image-text__image">
+      <BlockEmptyPlaceholder hint="图文配图" spec="请上传图片 · 建议 1600×1200（4:3）" height="100%" />
     </div>
   ) : null;
   const textCol = (
-    <div className="homepage-image-text__copy" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 40px' }}>
+    <div className="homepage-image-text__copy" style={{ minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: spacing === 'compact' ? '40px 36px' : spacing === 'spacious' ? '64px 52px' : '52px 44px' }}>
       <div style={{ maxWidth: 440 }}>
         {label && <p data-editor-field="label" style={{ fontSize: 11, letterSpacing: '0.3em', textTransform: 'uppercase', color: '#B8944E', marginBottom: 16 }}>{label}</p>}
         {title && <h2 data-editor-field="title" style={{ fontSize: 32, fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#2C2C2C', marginBottom: 18, lineHeight: 1.25 }}>{title}</h2>}
         {body && <p data-editor-field="body" style={{ fontSize: 14, color: '#8A7F72', lineHeight: 1.8 }}>{body}</p>}
-        {buttonText && linkUrl && (
-          <Link data-editor-field="buttonText linkUrl" to={linkUrl} style={{ display: 'inline-block', marginTop: 20, padding: '8px 32px', border: '1px solid #B8944E', color: '#B8944E', fontSize: 12, textDecoration: 'none', letterSpacing: '0.1em' }}>
-            {buttonText}
-          </Link>
-        )}
+        <ImageTextAction editMode={editMode} text={buttonText} targetUrl={targetUrl} />
       </div>
     </div>
   );
 
   return (
-    <section className="homepage-image-text" style={{ display: 'flex', background: '#fff', maxWidth: 1280, margin: '0 auto', minHeight: 380 }}>
+    <section className={`homepage-image-text${imageCol ? '' : ' is-without-image'}`} style={{ display: 'grid', gridTemplateColumns: IMAGE_TEXT_CONTRACT.canvas.desktopColumns, alignItems: 'stretch', background: '#fff', maxWidth: IMAGE_TEXT_CONTRACT.canvas.maxWidth, margin: '0 auto' }}>
       <style>{`
-        @media (max-width: 767px) {
-          .homepage-image-text { flex-direction: column; min-height: 0 !important; }
-          .homepage-image-text__image { flex: 0 0 auto !important; width: 100%; min-height: 320px; }
-          .homepage-image-text__copy { min-height: 0; padding: 40px 24px !important; }
+        .homepage-image-text.is-without-image { grid-template-columns: minmax(0, 1fr) !important; }
+        .homepage-image-text__image {
+          min-width: 0;
+          overflow: hidden;
+          aspect-ratio: ${IMAGE_TEXT_CONTRACT.canvas.desktopMediaAspectRatio};
+          background: #F7F8FB;
+        }
+        @media (max-width: ${IMAGE_TEXT_CONTRACT.canvas.mobileBreakpoint}px) {
+          .homepage-image-text { grid-template-columns: minmax(0, 1fr) !important; }
+          .homepage-image-text__image {
+            order: 0;
+            width: 100%;
+            min-height: 0;
+            aspect-ratio: ${IMAGE_TEXT_CONTRACT.canvas.mobileMediaAspectRatio};
+          }
+          .homepage-image-text__copy { order: 1; min-height: 0; padding: 40px 24px !important; }
         }
       `}</style>
       {isImageLeft ? <>{imageCol}{textCol}</> : <>{textCol}{imageCol}</>}

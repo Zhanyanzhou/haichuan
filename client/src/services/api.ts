@@ -1130,6 +1130,7 @@ export const pageDocumentApi = {
     puckData: any;
     metadata?: any;
     editorVersion?: string;
+    expectedUpdatedAt?: string;
   }) => {
     if (USE_MOCK) {
       await mockDelay(160);
@@ -1153,7 +1154,11 @@ export const pageDocumentApi = {
     }
     return api.put("/page-modules/document", data);
   },
-  publish: async (pageKey = "home", userId?: number) => {
+  publish: async (
+    pageKey = "home",
+    userId?: number,
+    expectedUpdatedAt?: string,
+  ) => {
     if (USE_MOCK) {
       await mockDelay(180);
       const store = loadMockPageDocuments();
@@ -1176,7 +1181,11 @@ export const pageDocumentApi = {
       persistMockPageDocuments();
       return mockRes(cloneMockDocument(published));
     }
-    return api.put("/page-modules/document/publish", { pageKey, userId });
+    return api.put("/page-modules/document/publish", {
+      pageKey,
+      userId,
+      expectedUpdatedAt,
+    });
   },
   validate: async (pageKey = "home", puckData?: any) => {
     if (USE_MOCK) {

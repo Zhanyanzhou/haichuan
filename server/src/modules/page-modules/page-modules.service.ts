@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, MessageEvent } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  MessageEvent,
+} from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { EventEmitter } from "events";
 import { existsSync } from "fs";
@@ -19,9 +24,23 @@ const PUCK_COMPONENT_LABELS = [
   "轮播图",
   "视频区块",
   "热区图",
+  "网站全局设置",
+  "业务功能区",
+  "预约入口",
+  "资质证书",
+  "定制流程",
+  "服务承诺",
+  "门店信息",
+  "单品焦点推荐",
+  "佩戴灵感",
+  "限时活动",
+  "真实评价与实拍",
+  "按场景选购",
+  "礼赠指南",
 ] as const;
 
 const PUCK_COMPONENT_SET = new Set<string>(PUCK_COMPONENT_LABELS);
+const EDITOR_ONLY_COMPONENTS = new Set(["网站全局设置", "业务功能区"]);
 
 const PUCK_REQUIRED_IMAGE_FIELDS: Record<string, string[]> = {
   首屏主视觉: ["desktopImage"],
@@ -41,9 +60,10 @@ const PUCK_IMAGE_FIELDS = [
   "image",
   "posterUrl",
   "url",
+  "backgroundImage",
 ];
 
-const PUCK_LINK_FIELDS = ["linkUrl", "link"];
+const PUCK_LINK_FIELDS = ["linkUrl", "link", "mapUrl"];
 
 @Injectable()
 export class PageModulesService {
@@ -101,6 +121,8 @@ export class PageModulesService {
       status: "PUBLISHED",
       publishedAt: revision.publishedAt,
       publishedBy: revision.publishedBy,
+      // 公开响应必须只描述发布快照，不能混入后台草稿的更新时间。
+      updatedAt: revision.publishedAt ?? revision.createdAt,
       version: revision.version,
     };
   }
@@ -110,13 +132,20 @@ export class PageModulesService {
     puckData: any,
     metadata?: any,
     editorVersion?: string,
+    expectedUpdatedAt?: string,
   ) {
     const existing = await this.prisma.pageDocument.findUnique({
       where: { pageKey },
     });
     if (existing) {
-      return this.prisma.pageDocument.update({
-        where: { pageKey },
+      const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
+      if (expected && existing.updatedAt.getTime() !== expected.getTime()) {
+        throw new ConflictException("该页面已被其他编辑者更新，请重新加载后再保存");
+      }
+
+      // 通过 updatedAt 做乐观锁，避免两个浏览器的自动保存发生乱序覆盖。
+      const updated = await this.prisma.pageDocument.updateMany({
+        where: { pageKey, updatedAt: existing.updatedAt },
         data: {
           puckData,
           metadata: metadata || {},
@@ -124,6 +153,10 @@ export class PageModulesService {
           status: "DRAFT",
         },
       });
+      if (updated.count !== 1) {
+        throw new ConflictException("该页面刚刚被其他编辑者更新，请重新加载后再保存");
+      }
+      return this.prisma.pageDocument.findUnique({ where: { pageKey } });
     }
     return this.prisma.pageDocument.create({
       data: {
@@ -136,12 +169,24 @@ export class PageModulesService {
     });
   }
 
-  async publishPageDocument(pageKey: string, userId?: number) {
+  async publishPageDocument(
+    pageKey: string,
+    userId?: number,
+    expectedUpdatedAt?: string,
+  ) {
     const result = await this.prisma.$transaction(async (tx) => {
+      // 锁定当前页面文档，串行化同一页面的版本号分配，避免并发发布生成重复版本。
+      await tx.$queryRaw<Array<{ id: number }>>`
+        SELECT id FROM page_documents WHERE pageKey = ${pageKey} FOR UPDATE
+      `;
       const doc = await tx.pageDocument.findUnique({
         where: { pageKey },
       });
       if (!doc) throw new Error("Page document not found");
+      const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
+      if (expected && doc.updatedAt.getTime() !== expected.getTime()) {
+        throw new ConflictException("该页面已被其他编辑者更新，请重新加载后再发布");
+      }
       const errors = await this.collectPuckDataErrors(tx, doc.puckData);
       if (errors.length > 0) {
         const visibleErrors = errors.slice(0, 8).join("；");
@@ -178,7 +223,7 @@ export class PageModulesService {
       }
 
       const published = await tx.pageDocument.update({
-        where: { pageKey },
+        where: { id: doc.id },
         data: {
           status: "PUBLISHED",
           publishedAt,
@@ -229,7 +274,6 @@ export class PageModulesService {
       }
 
       const type = typeof block.type === "string" ? block.type : "";
-      const label = type || path;
       const props = block.props;
 
       if (!type || !PUCK_COMPONENT_SET.has(type)) {
@@ -238,13 +282,23 @@ export class PageModulesService {
       }
 
       if (!props || typeof props !== "object") {
-        errors.push(`${label}：配置 props 不能为空`);
+        errors.push(`${path}「${type}」：配置 props 不能为空`);
         return;
       }
+
+      const displayName = this.isNonEmptyString(props.moduleName)
+        ? props.moduleName.trim()
+        : this.isNonEmptyString(props.title)
+          ? props.title.trim()
+          : type;
+      const label = `${path}「${displayName}」`;
 
       if (!this.isNonEmptyString(props.id)) {
         errors.push(`${label}：区块 ID 不能为空`);
       }
+
+      // 编辑器说明区不会进入前台；隐藏区块也不应因未完成内容阻断其他模块发布。
+      if (EDITOR_ONLY_COMPONENTS.has(type) || props.isVisible === false) return;
 
       for (const field of PUCK_REQUIRED_IMAGE_FIELDS[type] || []) {
         if (!this.isNonEmptyString(props[field])) {
@@ -252,20 +306,20 @@ export class PageModulesService {
         }
       }
 
-      for (const field of PUCK_IMAGE_FIELDS) {
-        const value = props[field];
-        if (this.isNonEmptyString(value) && !this.isSafeAssetUrl(value)) {
-          errors.push(`${label}：${field} 图片地址不合法`);
-        } else if (this.isNonEmptyString(value)) {
-          this.collectMissingUploadError(value, `${label}：${field}`, missingUploadUrls, errors);
+      const validateAsset = (value: unknown, assetLabel: string) => {
+        if (!this.isNonEmptyString(value)) return;
+        if (!this.isSafeAssetUrl(value)) {
+          errors.push(`${assetLabel} 地址不合法`);
+          return;
         }
+        this.collectMissingUploadError(value, assetLabel, missingUploadUrls, errors);
+      };
+
+      for (const field of PUCK_IMAGE_FIELDS) {
+        validateAsset(props[field], `${label}：${field} 图片`);
       }
 
-      if (this.isNonEmptyString(props.videoUrl) && !this.isSafeAssetUrl(props.videoUrl)) {
-        errors.push(`${label}：videoUrl 视频地址不合法`);
-      } else if (this.isNonEmptyString(props.videoUrl)) {
-        this.collectMissingUploadError(props.videoUrl, `${label}：videoUrl`, missingUploadUrls, errors);
-      }
+      validateAsset(props.videoUrl, `${label}：videoUrl 视频`);
 
       for (const field of PUCK_LINK_FIELDS) {
         const value = props[field];
@@ -293,25 +347,69 @@ export class PageModulesService {
         }
       }
 
+      if (type === "单品焦点推荐") {
+        const productId = Number(props.productId);
+        if (!Number.isInteger(productId) || productId <= 0) {
+          errors.push(`${label}：请选择 1 件有效的主推商品`);
+        } else {
+          productIds.add(productId);
+        }
+      }
+
+      if (type === "佩戴灵感") {
+        if (!Array.isArray(props.productIds)) {
+          errors.push(`${label}：productIds 必须是商品 ID 数组`);
+        } else {
+          for (const id of props.productIds) {
+            const numericId = Number(id);
+            if (!Number.isInteger(numericId) || numericId <= 0) {
+              errors.push(`${label}：商品 ID「${id}」格式不正确`);
+            } else {
+              productIds.add(numericId);
+            }
+          }
+        }
+      }
+
+      if (type === "限时活动" && !Number.isFinite(new Date(props.targetDate).getTime())) {
+        errors.push(`${label}：结束时间必须是有效的 ISO 日期时间`);
+      }
+
       if (type === "轮播图") {
         if (!Array.isArray(props.images) || props.images.length === 0) {
           errors.push(`${label}：轮播图至少需要 1 张图片`);
         } else {
           props.images.forEach((item: any, index: number) => {
-            if (!this.isNonEmptyString(item?.url) || !this.isSafeAssetUrl(item.url)) {
-              errors.push(`${label}：第 ${index + 1} 张轮播图片地址不合法`);
+            if (!this.isNonEmptyString(item?.url)) {
+              errors.push(`${label}：第 ${index + 1} 张轮播图片不能为空`);
             } else {
-              this.collectMissingUploadError(item.url, `${label}：第 ${index + 1} 张轮播图`, missingUploadUrls, errors);
+              validateAsset(item.url, `${label}：第 ${index + 1} 张轮播图片`);
             }
-            if (this.isNonEmptyString(item?.mobileUrl) && this.isSafeAssetUrl(item.mobileUrl)) {
-              this.collectMissingUploadError(item.mobileUrl, `${label}：第 ${index + 1} 张轮播图移动端图片`, missingUploadUrls, errors);
-            }
+            validateAsset(item?.mobileUrl, `${label}：第 ${index + 1} 张轮播图移动端图片`);
             if (this.isNonEmptyString(item?.link) && !this.isSafeLink(item.link)) {
               errors.push(`${label}：第 ${index + 1} 张轮播链接不合法`);
             }
           });
         }
       }
+
+      const validateNestedAssets = (
+        items: unknown,
+        itemLabel: string,
+        fields: string[],
+      ) => {
+        if (!Array.isArray(items)) return;
+        items.forEach((item, index) => {
+          fields.forEach((field) => {
+            validateAsset(item?.[field], `${label}：第 ${index + 1} 个${itemLabel}${field}`);
+          });
+        });
+      };
+
+      validateNestedAssets(props.categories, "分类卡片的", ["image"]);
+      validateNestedAssets(props.certificates, "证书的", ["imageUrl"]);
+      validateNestedAssets(props.steps, "定制步骤的", ["image"]);
+      validateNestedAssets(props.testimonials, "评价的", ["image"]);
 
       if (type === "热区图" && Array.isArray(props.hotspots)) {
         props.hotspots.forEach((item: any, index: number) => {
@@ -321,6 +419,37 @@ export class PageModulesService {
         });
       }
     };
+
+    const visibleContentCount = Array.isArray(puckData.content)
+      ? puckData.content.filter(
+          (block: any) =>
+            block &&
+            typeof block === "object" &&
+            block.props?.isVisible !== false &&
+            !EDITOR_ONLY_COMPONENTS.has(block.type),
+        ).length
+      : 0;
+    const visibleZoneCount =
+      puckData.zones && typeof puckData.zones === "object"
+        ? Object.values(puckData.zones).reduce(
+            (count: number, zoneBlocks: unknown) =>
+              count +
+              (Array.isArray(zoneBlocks)
+                ? zoneBlocks.filter(
+                    (block: any) =>
+                      block &&
+                      typeof block === "object" &&
+                      block.props?.isVisible !== false &&
+                      !EDITOR_ONLY_COMPONENTS.has(block.type),
+                  ).length
+                : 0),
+            0,
+          )
+        : 0;
+
+    if (visibleContentCount + visibleZoneCount === 0) {
+      errors.push("页面至少需要 1 个可见的前台内容模块");
+    }
 
     if (Array.isArray(puckData.content)) {
       puckData.content.forEach((block: any, index: number) => {
@@ -342,13 +471,21 @@ export class PageModulesService {
 
     if (productIds.size > 0) {
       const products = await db.product.findMany({
-        where: { id: { in: [...productIds] }, deletedAt: null },
+        // 页面一经发布会被游客直接读取，因此商品可见性必须与公开商品接口保持一致。
+        where: {
+          id: { in: [...productIds] },
+          deletedAt: null,
+          status: "PUBLISHED",
+          visibility: "PUBLIC",
+        },
         select: { id: true },
       });
-      const existingIds = new Set(products.map((item: { id: number }) => item.id));
+      const publicProductIds = new Set(products.map((item: { id: number }) => item.id));
       for (const id of productIds) {
-        if (!existingIds.has(id)) {
-          errors.push(`产品展示行：商品 ID ${id} 不存在或已删除`);
+        if (!publicProductIds.has(id)) {
+          errors.push(
+            `页面引用的商品 ID ${id} 未满足公开发布条件（需已发布、公开可见且未删除）`,
+          );
         }
       }
     }
@@ -362,14 +499,23 @@ export class PageModulesService {
 
   private isSafeAssetUrl(value: string): boolean {
     const url = value.trim();
-    if (url.startsWith("/")) return true;
+    if (url.startsWith("/") && !url.startsWith("//")) return true;
     return /^https?:\/\//i.test(url);
   }
 
   private isSafeLink(value: string): boolean {
     const url = value.trim();
-    if (url.startsWith("/") || url.startsWith("#")) return true;
+    if ((url.startsWith("/") && !url.startsWith("//")) || url.startsWith("#")) return true;
     return /^https?:\/\//i.test(url);
+  }
+
+  private parseExpectedUpdatedAt(value?: string): Date | null {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException("页面版本标识格式不正确");
+    }
+    return date;
   }
 
   /** 仅校验本地上传资源；外部 URL 由其源站负责可用性。 */

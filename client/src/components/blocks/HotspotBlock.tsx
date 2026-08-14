@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
 import { useState, useCallback, useRef, useEffect } from "react";
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { HOTSPOT_CONTRACT } from "@/page-builder/config/blockContracts";
 
 interface HotspotItem {
   x: number; // 左边距百分比
@@ -18,7 +20,7 @@ interface HotspotBlockProps {
   };
   editMode?: boolean;
   /** 编辑模式下，热区变更回调（可选，供 Puck 字段绑定） */
-  onHotspotsChange?: (hotspots: HotspotItem[]) => void;
+  onHotspotsChange?: (hotspots: HotspotItem[], device: "desktop" | "mobile") => void;
 }
 
 /**
@@ -34,10 +36,28 @@ export default function HotspotBlock({
   onHotspotsChange,
 }: HotspotBlockProps) {
   const { content = {} } = module;
-  const { image, mobileImage, hotspots = [] } = content;
-  const validHotspots: HotspotItem[] = (
-    Array.isArray(hotspots) ? hotspots : []
-  ).filter((h: any) => h?.link);
+  const { image, mobileImage, hotspots = [], mobileHotspots = [] } = content;
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia(`(max-width:${HOTSPOT_CONTRACT.canvas.mobileBreakpoint}px)`).matches);
+  useEffect(() => {
+    const media = window.matchMedia(`(max-width:${HOTSPOT_CONTRACT.canvas.mobileBreakpoint}px)`);
+    const syncDevice = () => setIsMobile(media.matches);
+    syncDevice();
+    media.addEventListener("change", syncDevice);
+    return () => media.removeEventListener("change", syncDevice);
+  }, []);
+  const desktopHotspots: HotspotItem[] = Array.isArray(hotspots) ? hotspots : [];
+  const configuredMobileHotspots: HotspotItem[] = Array.isArray(mobileHotspots) ? mobileHotspots : [];
+  const usesDesktopFallback = isMobile && configuredMobileHotspots.length === 0;
+  const rawHotspots = isMobile && !usesDesktopFallback ? configuredMobileHotspots : desktopHotspots;
+  const activeDevice = isMobile && !usesDesktopFallback ? "mobile" : "desktop";
+  const visibleHotspots = rawHotspots
+    .map((item, sourceIndex) => ({ item, sourceIndex }))
+    .filter(({ item }) => (
+      [item?.x, item?.y, item?.width, item?.height].every(Number.isFinite)
+      && item.width > 0
+      && item.height > 0
+      && (editMode || Boolean(item.link))
+    ));
 
   /* ── 编辑模式：选中与拖拽状态 ── */
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -65,19 +85,19 @@ export default function HotspotBlock({
 
   /* ── 拖拽事件 ── */
   const onPointerDown = useCallback(
-    (index: number, handle: "move" | "nw" | "ne" | "sw" | "se", e: React.PointerEvent) => {
+    (sourceIndex: number, handle: "move" | "nw" | "ne" | "sw" | "se", e: React.PointerEvent) => {
       e.stopPropagation();
       e.preventDefault();
-      setSelectedIndex(index);
+      setSelectedIndex(sourceIndex);
       setDragState({
-        index,
+        index: sourceIndex,
         handle,
         startX: e.clientX,
         startY: e.clientY,
-        startHotspot: { ...validHotspots[index] },
+        startHotspot: { ...rawHotspots[sourceIndex] },
       });
     },
-    [validHotspots],
+    [rawHotspots],
   );
 
   useEffect(() => {
@@ -89,7 +109,7 @@ export default function HotspotBlock({
       const dy = yPct - getRelativePos(dragState.startX, dragState.startY).yPct;
       const h = dragState.startHotspot;
 
-      const next = [...validHotspots];
+      const next = [...rawHotspots];
       const current = { ...h };
 
       if (dragState.handle === "move") {
@@ -113,7 +133,7 @@ export default function HotspotBlock({
       }
 
       next[dragState.index] = current;
-      onHotspotsChange?.(next);
+      onHotspotsChange?.(next, activeDevice);
     };
 
     const onUp = () => setDragState(null);
@@ -124,56 +144,68 @@ export default function HotspotBlock({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [dragState, getRelativePos, validHotspots, onHotspotsChange]);
+  }, [activeDevice, dragState, getRelativePos, rawHotspots, onHotspotsChange]);
 
   const desktopImg = image || mobileImage;
   const mobileImg = mobileImage || image;
 
-  if (!desktopImg) {
-    return editMode ? (
-      <section
-        style={{
-          padding: "120px 0",
-          background: "#F0EDE6",
-          textAlign: "center",
-          color: "#B8944E",
-          fontSize: 14,
-        }}
-      >
-        🖱️ 热区图 — 请上传背景图并配置热区
+  if (!desktopImg && editMode) {
+    return (
+      <section className="homepage-hotspot is-empty" style={{ maxWidth: HOTSPOT_CONTRACT.canvas.maxWidth, margin: "0 auto", aspectRatio: HOTSPOT_CONTRACT.canvas.desktopMediaAspectRatio }}>
+        <style>{`
+          @media (max-width:${HOTSPOT_CONTRACT.canvas.mobileBreakpoint}px) {
+            .homepage-hotspot.is-empty { aspect-ratio: ${HOTSPOT_CONTRACT.canvas.mobileMediaAspectRatio} !important; }
+          }
+        `}</style>
+        <BlockEmptyPlaceholder
+          hint="热区图"
+          spec="先上传底图，再添加点击热区 · 桌面建议 3840×2160（16:9）"
+          height="100%"
+        />
       </section>
-    ) : null;
+    );
   }
+
+  if (!desktopImg) return null;
 
   return (
     <section
+      className="homepage-hotspot"
       style={{
         position: "relative",
         width: "100%",
+        maxWidth: HOTSPOT_CONTRACT.canvas.maxWidth,
+        margin: "0 auto",
+        aspectRatio: HOTSPOT_CONTRACT.canvas.desktopMediaAspectRatio,
         overflow: "hidden",
         background: "#F5F2ED",
       }}
     >
-      <picture data-editor-field="image mobileImage">
-        <source media="(max-width:767px)" srcSet={mobileImg} />
+      <style>{`
+        @media (max-width:${HOTSPOT_CONTRACT.canvas.mobileBreakpoint}px) {
+          .homepage-hotspot { aspect-ratio: ${HOTSPOT_CONTRACT.canvas.mobileMediaAspectRatio} !important; }
+        }
+      `}</style>
+      <picture data-editor-field="image mobileImage" style={{ display: "block", width: "100%", height: "100%" }}>
+        <source media={`(max-width:${HOTSPOT_CONTRACT.canvas.mobileBreakpoint}px)`} srcSet={mobileImg} />
         <img
           ref={imgRef}
           src={desktopImg}
-          alt=""
-          style={{ width: "100%", display: "block", userSelect: "none" }}
+          alt="热区导购场景"
+          style={{ width: "100%", height: "100%", display: "block", objectFit: "cover", userSelect: "none" }}
           draggable={false}
         />
       </picture>
 
       {/* 热区叠加层 */}
-      {validHotspots.map((h, i) => (
+      {visibleHotspots.map(({ item: h, sourceIndex }) => (
         <Link
-          key={i}
-          to={editMode ? "#" : h.link}
+          key={sourceIndex}
+          to={editMode ? "#" : h.link || "#"}
           onClick={(e) => {
             if (editMode) {
               e.preventDefault();
-              setSelectedIndex(i);
+              setSelectedIndex(sourceIndex);
             }
           }}
           style={{
@@ -188,17 +220,17 @@ export default function HotspotBlock({
             textDecoration: "none",
             cursor: editMode ? "move" : "pointer",
             outline:
-              editMode && selectedIndex === i
+              editMode && selectedIndex === sourceIndex
                 ? "2px solid #4D68F7"
                 : "1px dashed rgba(184,148,78,0.4)",
             background:
-              editMode && selectedIndex === i
+              editMode && selectedIndex === sourceIndex
                 ? "rgba(77,104,247,0.08)"
                 : "transparent",
             transition: editMode ? "none" : "background 0.2s",
           }}
           onPointerDown={
-            editMode ? (e) => onPointerDown(i, "move", e) : undefined
+            editMode ? (e) => onPointerDown(sourceIndex, "move", e) : undefined
           }
           onMouseEnter={(e) => {
             if (!editMode) e.currentTarget.style.background = "rgba(184,148,78,0.15)";
@@ -225,7 +257,7 @@ export default function HotspotBlock({
           )}
 
           {/* 编辑模式缩放手柄 */}
-          {editMode && selectedIndex === i && (
+          {editMode && selectedIndex === sourceIndex && (
             <>
               {(["nw", "ne", "sw", "se"] as const).map((pos) => {
                 const isN = pos.includes("n");
@@ -233,7 +265,7 @@ export default function HotspotBlock({
                 return (
                   <div
                     key={pos}
-                    onPointerDown={(e) => onPointerDown(i, pos, e)}
+                    onPointerDown={(e) => onPointerDown(sourceIndex, pos, e)}
                     style={{
                       position: "absolute",
                       width: 10,
@@ -256,7 +288,7 @@ export default function HotspotBlock({
       ))}
 
       {/* 编辑模式空状态 */}
-      {editMode && validHotspots.length === 0 && (
+      {editMode && visibleHotspots.length === 0 && (
         <div
           style={{
             position: "absolute",
@@ -276,7 +308,7 @@ export default function HotspotBlock({
               fontSize: 12,
             }}
           >
-            热区已配置，请在右侧「热区列表」中添加坐标
+            尚未添加热区，请在右侧「热区列表」中创建导购入口
           </span>
         </div>
       )}

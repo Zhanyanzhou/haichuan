@@ -3,10 +3,12 @@
  */
 
 import FullBleedBlock from "@/components/blocks/FullBleedBlock";
+import type { LinkTargetType } from "@/page-builder/utils/linkTarget";
 import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import MediaPickerField from "../fields/MediaPickerField";
-import { colorPuckField } from "../fields/ColorField";
+
+export type FullBleedOverlayPreset = "none" | "soft" | "strong";
 
 export interface FullBleedPuckProps {
   image: string;
@@ -15,14 +17,21 @@ export interface FullBleedPuckProps {
   subtitle: string;
   buttonText: string;
   linkUrl: string;
+  targetType: LinkTargetType;
+  productId: number;
   template: string;
-  overlay: string;
+  overlayPreset: FullBleedOverlayPreset;
+  altText: string;
+  desktopFocusX: number;
+  desktopFocusY: number;
+  mobileFocusX: number;
+  mobileFocusY: number;
   locked?: boolean;
 }
 
 export const fullBleedPuckConfig = {
   render: (props: FullBleedPuckProps) => (
-    <FullBleedBlock module={convertPuckProps("全屏出血图", props as any) as any} />
+    <FullBleedBlock module={convertPuckProps("全屏出血图", props as any) as any} editMode />
   ),
   defaultProps: {
     image: "",
@@ -31,8 +40,15 @@ export const fullBleedPuckConfig = {
     subtitle: "",
     buttonText: "",
     linkUrl: "",
+    targetType: "none",
+    productId: 0,
     template: "textCenter",
-    overlay: "rgba(15,13,12,0.2)",
+    overlayPreset: "soft",
+    altText: "",
+    desktopFocusX: 50,
+    desktopFocusY: 50,
+    mobileFocusX: 50,
+    mobileFocusY: 50,
     locked: false,
   } satisfies FullBleedPuckProps,
   fields: {
@@ -56,10 +72,20 @@ export const fullBleedPuckConfig = {
           spec={IMAGE_SPECS.fullBleed.mobile} placeholder="上传通栏手机端图（可选）" />
       ),
     },
-    title: { type: "text" as const, label: "主视觉叠加文案 · 标题" },
-    subtitle: { type: "text" as const, label: "主视觉叠加文案 · 副标题" },
-    buttonText: { type: "text" as const, label: "主视觉叠加文案 · 按钮文字" },
-    linkUrl: { type: "text" as const, label: "按钮跳转链接" },
+    title: { type: "text" as const, label: "标题" },
+    subtitle: { type: "text" as const, label: "副标题" },
+    buttonText: { type: "text" as const, label: "引导文字" },
+    targetType: {
+      type: "radio" as const,
+      label: "点击后跳转",
+      options: [
+        { label: "不跳转", value: "none" },
+        { label: "商品详情", value: "product" },
+        { label: "站内页面", value: "page" },
+      ],
+    },
+    productId: { type: "number" as const, label: "商品 ID" },
+    linkUrl: { type: "text" as const, label: "站内页面" },
     template: {
       type: "radio" as const,
       label: "文字位置",
@@ -70,7 +96,20 @@ export const fullBleedPuckConfig = {
         { label: "左下", value: "textBottomLeft" },
       ],
     },
-    overlay: colorPuckField("遮罩颜色"),
+    overlayPreset: {
+      type: "radio" as const,
+      label: "文字遮罩",
+      options: [
+        { label: "无", value: "none" },
+        { label: "柔和", value: "soft" },
+        { label: "加强", value: "strong" },
+      ],
+    },
+    altText: { type: "text" as const, label: "图片替代文字" },
+    desktopFocusX: { type: "number" as const, label: "桌面焦点 X" },
+    desktopFocusY: { type: "number" as const, label: "桌面焦点 Y" },
+    mobileFocusX: { type: "number" as const, label: "移动焦点 X" },
+    mobileFocusY: { type: "number" as const, label: "移动焦点 Y" },
   },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };

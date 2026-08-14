@@ -23,6 +23,14 @@ import type { SplitPanelPuckProps } from "../adapters/splitPanel.puck";
 import type { CarouselPuckProps } from "../adapters/carousel.puck";
 import type { VideoPuckProps } from "../adapters/video.puck";
 import type { HotspotPuckProps } from "../adapters/hotspot.puck";
+import type { AppointmentPuckProps } from "../adapters/appointment.puck";
+import type { CertificatePuckProps } from "../adapters/certificate.puck";
+import type { CustomProcessPuckProps } from "../adapters/customProcess.puck";
+import type { StoreInfoPuckProps } from "../adapters/storeInfo.puck";
+import type { FeaturedProductPuckProps } from "../adapters/featuredProduct.puck";
+import type { LookbookPuckProps } from "../adapters/lookbook.puck";
+import type { LimitedOfferPuckProps } from "../adapters/limitedOffer.puck";
+import type { TestimonialPuckProps } from "../adapters/testimonial.puck";
 
 /** 所有 Puck props 类型的联合 */
 export type PuckProps =
@@ -38,7 +46,18 @@ export type PuckProps =
   | { type: "分割面板"; props: SplitPanelPuckProps }
   | { type: "轮播图"; props: CarouselPuckProps }
   | { type: "视频区块"; props: VideoPuckProps }
-  | { type: "热区图"; props: HotspotPuckProps };
+  | { type: "热区图"; props: HotspotPuckProps }
+  | { type: "预约入口"; props: AppointmentPuckProps }
+  | { type: "资质证书"; props: CertificatePuckProps }
+  | { type: "定制流程"; props: CustomProcessPuckProps }
+  | { type: "服务承诺"; props: CardGridPuckProps }
+  | { type: "门店信息"; props: StoreInfoPuckProps }
+  | { type: "单品焦点推荐"; props: FeaturedProductPuckProps }
+  | { type: "佩戴灵感"; props: LookbookPuckProps }
+  | { type: "限时活动"; props: LimitedOfferPuckProps }
+  | { type: "真实评价与实拍"; props: TestimonialPuckProps }
+  | { type: "按场景选购"; props: CategoryCardsPuckProps }
+  | { type: "礼赠指南"; props: CategoryCardsPuckProps };
 
 /** 基础模块骨架 */
 function baseModule(
@@ -78,10 +97,19 @@ export function convertPuckProps(
           subtitle: props.subtitle,
           actionText: props.actionText,
           linkUrl: props.linkUrl,
+          targetType: props.targetType,
+          productId: Number(props.productId) || 0,
           altText: props.altText,
         },
         { template: props.alignment || "overlay" },
-        { focusX: props.focusX ?? 50, focusY: props.focusY ?? 50 },
+        {
+          focusX: props.focusX ?? 50,
+          focusY: props.focusY ?? 50,
+          desktopFocusX: props.desktopFocusX ?? props.focusX ?? 50,
+          desktopFocusY: props.desktopFocusY ?? props.focusY ?? 50,
+          mobileFocusX: props.mobileFocusX ?? props.focusX ?? 50,
+          mobileFocusY: props.mobileFocusY ?? props.focusY ?? 50,
+        },
       );
 
     case "单图海报":
@@ -110,9 +138,14 @@ export function convertPuckProps(
           description: props.description,
           mainImage: props.mainImage,
           detailImage: props.detailImage,
+          actionText: props.actionText,
+          targetType: props.targetType,
+          productId: Number(props.productId) || 0,
           linkUrl: props.linkUrl,
+          mainAltText: props.mainAltText,
+          detailAltText: props.detailAltText,
         },
-        { template: "leftBigRightSmall" },
+        { template: props.layout || "mainLeft" },
         {
           mainFocusX: props.mainFocusX ?? 50,
           mainFocusY: props.mainFocusY ?? 50,
@@ -129,12 +162,18 @@ export function convertPuckProps(
           title: props.title,
           body: props.body,
           image: props.image,
-          imagePosition: props.imagePosition,
+          imageAlt: props.imageAlt,
           buttonText: props.buttonText,
           linkUrl: props.linkUrl,
+          targetType: props.targetType,
+          productId: Number(props.productId) || 0,
         },
         { template: props.template || "textLeftImageRight" },
-        { spacing: props.spacing || "normal" },
+        {
+          spacing: props.spacing || "normal",
+          focusX: props.focusX ?? 50,
+          focusY: props.focusY ?? 50,
+        },
       );
 
     case "全屏出血图":
@@ -147,9 +186,19 @@ export function convertPuckProps(
           subtitle: props.subtitle,
           buttonText: props.buttonText,
           linkUrl: props.linkUrl,
+          targetType: props.targetType,
+          productId: Number(props.productId) || 0,
+          altText: props.altText,
         },
         { template: props.template || "textCenter" },
-        { bgColor: props.overlay || "rgba(15,13,12,0.2)" },
+        {
+          bgColor: props.overlay || "rgba(15,13,12,0.2)",
+          overlayPreset: props.overlayPreset || "soft",
+          desktopFocusX: props.desktopFocusX ?? 50,
+          desktopFocusY: props.desktopFocusY ?? 50,
+          mobileFocusX: props.mobileFocusX ?? props.desktopFocusX ?? 50,
+          mobileFocusY: props.mobileFocusY ?? props.desktopFocusY ?? 50,
+        },
       );
 
     case "文字横幅":
@@ -159,6 +208,7 @@ export function convertPuckProps(
           eyebrow: props.eyebrow,
           title: props.title,
           body: props.body,
+          backgroundImage: props.backgroundImage,
           buttonText: props.buttonText,
           linkUrl: props.linkUrl,
         },
@@ -168,6 +218,22 @@ export function convertPuckProps(
           textColor: props.textColor || "#2C2C2C",
           spacing: props.spacing || "normal",
         },
+      );
+
+    case "限时活动":
+      return baseModule(
+        "limitedOffer",
+        {
+          eyebrow: props.eyebrow,
+          title: props.title,
+          body: props.body,
+          targetDate: props.targetDate,
+          benefits: props.benefits || [],
+          buttonText: props.buttonText,
+          linkUrl: props.linkUrl,
+        },
+        {},
+        { bgColor: props.bgColor || "#211D19" },
       );
 
     case "产品展示行":
@@ -180,6 +246,9 @@ export function convertPuckProps(
           products: [],
           productIds: props.productIds || [],
           layout: props.layout,
+          mobileColumns: props.mobileColumns === 1 ? 1 : 2,
+          displayMode: props.displayMode || "standard",
+          actionStyle: props.actionStyle || (props.showButton ? "button" : "none"),
           imageRatio: props.imageRatio || "3:4",
           showPrice: props.showPrice ?? true,
           showButton: props.showButton ?? false,
@@ -190,16 +259,50 @@ export function convertPuckProps(
         { bgColor: props.bgColor || "#FCFCFB" },
       );
 
+    case "单品焦点推荐":
+      return baseModule(
+        "featuredProduct",
+        {
+          eyebrow: props.eyebrow,
+          title: props.title,
+          summary: props.summary,
+          productId: props.productId || 0,
+          product: {},
+          primaryText: props.primaryText || "查看作品",
+          secondaryText: props.secondaryText,
+          secondaryLink: props.secondaryLink,
+        },
+        { template: props.layout || "imageLeft" },
+        { bgColor: props.bgColor || "#F5F2ED" },
+      );
+
+    case "佩戴灵感":
+      return baseModule(
+        "lookbook",
+        {
+          title: props.title,
+          subtitle: props.subtitle,
+          image: props.image,
+          imageAlt: props.imageAlt,
+          productIds: props.productIds || [],
+          products: [],
+        },
+        {},
+        { bgColor: props.bgColor || "#FCFCFB" },
+      );
+
     case "分类卡片":
+    case "按场景选购":
+    case "礼赠指南":
       return baseModule(
         "categoryCards",
         {
           title: props.title,
+          subtitle: props.subtitle,
           categoryId: props.categoryId,
           categories: props.categories || [],
-          layout: props.layout,
         },
-        {},
+        { template: props.layout || "grid-3" },
         { bgColor: props.bgColor || "#FBF9F6" },
       );
 
@@ -214,6 +317,18 @@ export function convertPuckProps(
         },
         {},
         { bgColor: props.bgColor || "#FCFCFB" },
+      );
+
+    case "真实评价与实拍":
+      return baseModule(
+        "testimonial",
+        {
+          title: props.title,
+          subtitle: props.subtitle,
+          testimonials: props.testimonials || [],
+        },
+        {},
+        { bgColor: props.bgColor || "#FBF9F6" },
       );
 
     case "分割面板":
@@ -264,7 +379,80 @@ export function convertPuckProps(
         image: props.image,
         mobileImage: props.mobileImage,
         hotspots: props.hotspots || [],
+        mobileHotspots: props.mobileHotspots || [],
       });
+
+    case "预约入口":
+      return baseModule(
+        "appointment",
+        {
+          backgroundImage: props.backgroundImage,
+          title: props.title,
+          subtitle: props.subtitle,
+          buttonText: props.buttonText,
+          linkUrl: props.linkUrl,
+          phone: props.phone,
+          altText: props.altText,
+        },
+        { template: props.tone || "dark" },
+        {
+          bgColor: props.bgColor || "#1A1714",
+          focusX: props.focusX ?? 50,
+          focusY: props.focusY ?? 50,
+        },
+      );
+
+    case "资质证书":
+      return baseModule(
+        "certificate",
+        {
+          title: props.title,
+          subtitle: props.subtitle,
+          certificates: props.certificates || [],
+        },
+        {},
+        { bgColor: props.bgColor || "#FBF9F6" },
+      );
+
+    case "定制流程":
+      return baseModule(
+        "customProcess",
+        {
+          title: props.title,
+          subtitle: props.subtitle,
+          steps: props.steps || [],
+        },
+        {},
+        { bgColor: props.bgColor || "#FBF9F6" },
+      );
+
+    case "服务承诺":
+      return baseModule(
+        "cardGrid",
+        {
+          title: props.title,
+          subtitle: props.subtitle,
+          cards: props.cards || [],
+          layout: props.layout,
+        },
+        {},
+        { bgColor: props.bgColor || "#FCFCFB" },
+      );
+
+    case "门店信息":
+      return baseModule(
+        "storeInfo",
+        {
+          storeName: props.storeName,
+          address: props.address,
+          hours: props.hours,
+          phone: props.phone,
+          mapUrl: props.mapUrl,
+          image: props.image,
+        },
+        {},
+        { bgColor: props.bgColor || "#FBF9F6" },
+      );
 
     default:
       return null;

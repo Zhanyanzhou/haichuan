@@ -815,7 +815,7 @@ model PageDocumentRevision {
   publishedAt DateTime? @map("published_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  @@index([documentId, version])
+  @@unique([documentId, version])
   @@map("page_document_revisions")
 }
 

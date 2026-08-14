@@ -3,8 +3,10 @@
  */
 
 import TextBannerBlock from "@/components/blocks/TextBannerBlock";
+import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import { colorPuckField } from "../fields/ColorField";
+import MediaPickerField from "../fields/MediaPickerField";
 
 export interface TextBannerPuckProps {
   eyebrow: string;
@@ -12,6 +14,7 @@ export interface TextBannerPuckProps {
   body: string;
   buttonText: string;
   linkUrl: string;
+  backgroundImage?: string;
   template: string;
   bgColor: string;
   textColor: string;
@@ -29,6 +32,7 @@ export const textBannerPuckConfig = {
     body: "",
     buttonText: "",
     linkUrl: "",
+    backgroundImage: "",
     template: "center",
     bgColor: "#FBF9F6",
     textColor: "#2C2C2C",
@@ -36,10 +40,27 @@ export const textBannerPuckConfig = {
     locked: false,
   } satisfies TextBannerPuckProps,
   fields: {
-    eyebrow: { type: "text" as const, label: "横幅顶部 · 眉题" },
-    title: { type: "text" as const, label: "横幅中央 · 主标题" },
-    body: { type: "textarea" as const, label: "横幅中央 · 正文" },
-    buttonText: { type: "text" as const, label: "横幅底部 · 按钮文字" },
+    eyebrow: { type: "text" as const, label: "眉题" },
+    title: { type: "text" as const, label: "标题" },
+    body: { type: "textarea" as const, label: "正文" },
+    backgroundImage: {
+      type: "custom" as const,
+      label: "背景海报（可选）",
+      render: ({
+        value, onChange, readOnly,
+      }: { value?: string; onChange: (value: string) => void; readOnly?: boolean }) => (
+        <MediaPickerField
+          fieldKey="backgroundImage"
+          device="shared"
+          value={value}
+          onChange={onChange}
+          readOnly={readOnly}
+          spec={IMAGE_SPECS.textBanner.bgImage}
+          placeholder="上传横幅背景海报（留空使用纯色）"
+        />
+      ),
+    },
+    buttonText: { type: "text" as const, label: "按钮文字" },
     linkUrl: { type: "text" as const, label: "按钮跳转链接" },
     template: {
       type: "radio" as const,

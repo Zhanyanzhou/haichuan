@@ -1,11 +1,23 @@
 /**
- * ColorField.tsx — Puck 颜色自定义字段
+ * ColorField.tsx — Puck 颜色自定义字段（品牌色板约束）
  *
- * 提供 antd ColorPicker 可视化选色 + 文本输入框（接受任意 CSS 颜色字符串）。
- * 文本框是权威值来源，确保 rgba / 渐变等 Picker 无法表达的形式仍可手动输入；
- * Picker 仅在选色时写入 hex，向后兼容既有数据。
+ * 设计原则：结构化自由——默认给品牌预设色板（锁住调性，防运营改乱），
+ * 下方保留一个「高级」文本框，供 rgba / 渐变等特殊值手动输入。
+ * 去掉了任意取色器（ColorPicker），避免品牌色被随意发挥。
  */
-import { ColorPicker, Input } from "antd";
+import { Input } from "antd";
+
+/** 品牌预设色板（珠宝调性，全站统一） */
+const BRAND_PALETTE: { name: string; value: string }[] = [
+  { name: "墨黑", value: "#1A1714" },
+  { name: "深棕", value: "#3A322A" },
+  { name: "品牌金", value: "#B8944E" },
+  { name: "米白", value: "#FBF9F6" },
+  { name: "暖白", value: "#FCFCFB" },
+  { name: "浅米", value: "#F6F2EC" },
+  { name: "中灰", value: "#9A9187" },
+  { name: "纯白", value: "#FFFFFF" },
+];
 
 interface ColorFieldProps {
   value?: string;
@@ -14,24 +26,59 @@ interface ColorFieldProps {
 }
 
 export default function ColorField({ value, onChange, readOnly }: ColorFieldProps) {
-  // 仅当值像颜色字符串时喂给 Picker，避免渐变等值触发解析告警。
-  const isColorLike = /^(#|rgb|rgba|hsl|hsla)/i.test(value || "");
+  const current = (value || "").toLowerCase();
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <ColorPicker
-        size="small"
-        value={isColorLike ? value : undefined}
-        disabled={readOnly}
-        onChange={(color) => onChange?.(color.toHexString())}
-      />
-      <Input
-        size="small"
-        style={{ flex: 1, minWidth: 0 }}
-        value={value || ""}
-        readOnly={readOnly}
-        onChange={(e) => onChange?.(e.target.value)}
-        placeholder="#FBF9F6 / rgba(0,0,0,.2)"
-      />
+    <div>
+      <div
+        role="radiogroup"
+        aria-label="品牌色板"
+        style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}
+      >
+        {BRAND_PALETTE.map((c) => {
+          const active = current === c.value.toLowerCase();
+          return (
+            <button
+              key={c.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              aria-label={c.name}
+              title={c.name}
+              disabled={readOnly}
+              onClick={() => onChange?.(c.value)}
+              style={{
+                height: 28,
+                padding: 0,
+                borderRadius: 4,
+                cursor: readOnly ? "not-allowed" : "pointer",
+                border: active ? "2px solid #B8944E" : "1px solid #ECE5DA",
+                background: c.value,
+              }}
+            />
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+        <span
+          aria-hidden
+          style={{
+            width: 16,
+            height: 16,
+            borderRadius: 3,
+            border: "1px solid #ECE5DA",
+            background: value || "transparent",
+            flexShrink: 0,
+          }}
+        />
+        <Input
+          size="small"
+          style={{ flex: 1, minWidth: 0 }}
+          value={value || ""}
+          readOnly={readOnly}
+          onChange={(e) => onChange?.(e.target.value)}
+          placeholder="高级：自定义色值 / rgba"
+        />
+      </div>
     </div>
   );
 }

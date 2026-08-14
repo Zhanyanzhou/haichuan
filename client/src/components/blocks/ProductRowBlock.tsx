@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
-import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import type { CSSProperties } from "react";
+import { SecureImage } from "@/components/common/SecureImage";
+import { PRODUCT_ROW_CONTRACT } from "@/page-builder/config/blockContracts";
 
 interface ProductRowBlockProps {
   module: {
@@ -25,6 +27,9 @@ const IMAGE_RATIO_MAP: Record<string, string> = {
  *   title, subtitle,
  *   products: [{image, name, price, link}],
  *   layout: 'grid-2' | 'grid-3' | 'grid-4',
+ *   mobileColumns: 1 | 2,
+ *   displayMode: 'album' | 'standard',
+ *   actionStyle: 'none' | 'text' | 'button',
  *   imageRatio: '3:4' | '1:1' | '4:3' | '16:9',
  *   showPrice: boolean (default true),
  *   showButton: boolean (default false),
@@ -46,6 +51,9 @@ export default function ProductRowBlock({
     subtitle,
     products = [],
     imageRatio = "3:4",
+    mobileColumns = 2,
+    displayMode = "standard",
+    actionStyle: configuredActionStyle,
     showPrice = true,
     showButton = false,
     buttonText = "查看详情",
@@ -55,6 +63,11 @@ export default function ProductRowBlock({
   const bg = styleConfig.bgColor || "#FCFCFB";
   const headingColor = styleConfig.textColor || "#2C2C2C";
   const gap = styleConfig.gap;
+  const actionStyle = displayMode === "album"
+    ? "none"
+    : configuredActionStyle || (showButton ? "button" : "none");
+  const resolvedShowPrice = displayMode === "album" ? false : showPrice;
+  const resolvedMobileColumns = mobileColumns === 1 ? 1 : 2;
 
   const cols = layout === "grid-2" ? 2 : layout === "grid-4" ? 4 : 3;
   const ratio = IMAGE_RATIO_MAP[imageRatio] || "3 / 4";
@@ -66,30 +79,49 @@ export default function ProductRowBlock({
         ? "clamp(20px, 2.2vw, 28px)"
         : "clamp(24px, 2.8vw, 38px)";
 
-  if (!products.length) {
-    if (!editMode) return null;
-    return (
-      <BlockEmptyPlaceholder
-        icon="🛍️"
-        hint="产品展示行"
-        spec="请在右侧配置产品或商品 ID"
-        bg={bg}
-      />
-    );
-  }
+  if (!products.length && !editMode) return null;
+  const displayProducts = products.length > 0
+    ? products
+    : Array.from({ length: cols }, (_, index) => ({ __empty: true, id: `empty-${index}` }));
 
   return (
-    <section style={{ padding: "clamp(60px,8vh,120px) 0", background: bg }}>
+    <section
+      className="homepage-product-row"
+      data-display-mode={displayMode}
+      style={{
+        padding: displayMode === "album" ? "clamp(72px,9vh,128px) 0" : "clamp(60px,8vh,120px) 0",
+        background: bg,
+      }}
+    >
+      <style>{`
+        .homepage-product-row__grid { grid-template-columns: repeat(var(--product-row-columns), minmax(0, 1fr)); }
+        .homepage-product-row__card { min-width: 0; }
+        .homepage-product-row__media img { transition: transform .6s ease; }
+        .homepage-product-row__card:hover .homepage-product-row__media img { transform: scale(1.035); }
+        .homepage-product-row__action { display: inline-flex; align-items: center; min-height: 30px; color: #6B5735; font-size: 12px; letter-spacing: .04em; text-decoration: none; transition: color .2s ease, border-color .2s ease, background .2s ease; }
+        .homepage-product-row__action:hover { color: #9F7941; }
+        .homepage-product-row__action.is-button { padding: 6px 16px; border: 1px solid #B8944E; border-radius: 3px; color: #9F7941; }
+        .homepage-product-row__action.is-button:hover { color: #FFFFFF; background: #B8944E; }
+        @media (max-width: 767px) {
+          .homepage-product-row { padding-block: 48px !important; }
+          .homepage-product-row__grid { grid-template-columns: repeat(var(--product-row-mobile-columns), minmax(0, 1fr)) !important; gap: 24px 12px !important; }
+          .homepage-product-row__heading { margin-bottom: 32px !important; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .homepage-product-row__media img { transition: none; }
+          .homepage-product-row__card:hover .homepage-product-row__media img { transform: none; }
+        }
+      `}</style>
       <div
         style={{
-          maxWidth: 1280,
+          maxWidth: PRODUCT_ROW_CONTRACT.canvas.maxWidth,
           margin: "0 auto",
           padding: "0 clamp(20px,4vw,60px)",
         }}
       >
         {/* ── 标题区 ── */}
         {(title || subtitle) && (
-          <div style={{ textAlign: "center", marginBottom: 48 }}>
+          <div className="homepage-product-row__heading" style={{ textAlign: "center", marginBottom: 48 }}>
             {title && (
               <h2
                 style={{
@@ -121,14 +153,27 @@ export default function ProductRowBlock({
 
         {/* ── 产品网格 ── */}
         <div
+          className="homepage-product-row__grid"
           style={{
             display: "grid",
-            gridTemplateColumns: `repeat(${cols}, 1fr)`,
-            gap: gap != null ? `${gap}px` : cols === 2 ? 32 : 20,
-          }}
+            "--product-row-columns": cols,
+            "--product-row-mobile-columns": resolvedMobileColumns,
+            gap: gap != null ? `${gap}px` : displayMode === "album" ? (cols === 2 ? 40 : 28) : (cols === 2 ? 32 : 20),
+          } as CSSProperties}
         >
-          {products.map((p: any, i: number) => (
-            <div key={i} className="group">
+          {displayProducts.map((p: any, i: number) => p.__empty ? (
+            <div key={p.id} className="homepage-product-row__empty-card" aria-label={`待选择商品 ${i + 1}`}>
+              <div style={{ aspectRatio: ratio, display: "grid", placeItems: "center", marginBottom: 16, border: "1px solid #E8E7E3", background: "#F8F7F4" }}>
+                <div style={{ textAlign: "center", color: "#A49B90" }}>
+                  <strong style={{ display: "block", fontSize: 12, fontWeight: 500 }}>选择商品</strong>
+                  <small style={{ display: "block", marginTop: 4, fontSize: 10 }}>右侧商品列表</small>
+                </div>
+              </div>
+              <div style={{ width: "68%", height: 8, borderRadius: 2, background: "#E9E6E0" }} />
+              <div style={{ width: "42%", height: 7, marginTop: 8, borderRadius: 2, background: "#F0EDE8" }} />
+            </div>
+          ) : (
+            <article key={p.id || p.link || i} className="homepage-product-row__card">
               <Link
                 to={p.link || "/products"}
                 style={{
@@ -139,6 +184,7 @@ export default function ProductRowBlock({
               >
                 {/* 图片 */}
                 <div
+                  className="homepage-product-row__media"
                   style={{
                     overflow: "hidden",
                     marginBottom: 16,
@@ -147,17 +193,14 @@ export default function ProductRowBlock({
                   }}
                 >
                   {p.image ? (
-                    <img
+                    <SecureImage
                       src={p.image}
                       alt={p.name || ""}
-                      loading="lazy"
                       style={{
                         width: "100%",
                         height: "100%",
                         objectFit: "cover",
-                        transition: "transform 0.6s ease",
                       }}
-                      className="group-hover:scale-105"
                     />
                   ) : (
                     <div
@@ -171,7 +214,7 @@ export default function ProductRowBlock({
                         fontSize: 32,
                       }}
                     >
-                      🖼️
+                      暂无图片
                     </div>
                   )}
                 </div>
@@ -190,39 +233,22 @@ export default function ProductRowBlock({
               </Link>
 
               {/* 价格（可单独隐藏） */}
-              {showPrice && p.price && (
-                <p style={{ fontSize: 13, color: "#B8944E", marginBottom: showButton ? 10 : 0 }}>
+              {resolvedShowPrice && p.price && (
+                <p style={{ fontSize: 13, color: "#B8944E", marginBottom: actionStyle !== "none" ? 10 : 0 }}>
                   {p.price}
                 </p>
               )}
 
-              {/* 按钮（可选） */}
-              {showButton && (
+              {/* 操作入口（整张卡片始终可进入详情） */}
+              {actionStyle !== "none" && (
                 <Link
                   to={p.link || "/products"}
-                  style={{
-                    display: "inline-block",
-                    padding: "6px 18px",
-                    border: "1px solid #B8944E",
-                    borderRadius: 3,
-                    color: "#B8944E",
-                    fontSize: 12,
-                    textDecoration: "none",
-                    transition: "background 0.2s, color 0.2s",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "#B8944E";
-                    e.currentTarget.style.color = "#fff";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "transparent";
-                    e.currentTarget.style.color = "#B8944E";
-                  }}
+                  className={`homepage-product-row__action${actionStyle === "button" ? " is-button" : ""}`}
                 >
-                  {buttonText}
+                  {actionStyle === "text" ? "查看作品 →" : buttonText || "查看详情"}
                 </Link>
               )}
-            </div>
+            </article>
           ))}
         </div>
       </div>

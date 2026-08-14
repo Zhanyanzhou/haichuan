@@ -14,6 +14,9 @@ export interface ProductRowPuckProps {
   subtitle: string;
   productIds: number[];
   layout: string;
+  mobileColumns: number;
+  displayMode: string;
+  actionStyle: string;
   bgColor: string;
   imageRatio: string;
   showPrice: boolean;
@@ -32,29 +35,12 @@ function normalizeIds(value: unknown): number[] {
 
 function toCards(products: ProductRow[]) {
   return products.map((product) => ({
+    id: product.id,
     name: product.name,
     image: product.image,
     price: product.priceLabel,
     link: `/products/${product.id}`,
   }));
-}
-
-function toModule(props: ProductRowPuckProps, products: ReturnType<typeof toCards> = []) {
-  return {
-    content: {
-      title: props.title,
-      subtitle: props.subtitle,
-      products,
-      layout: props.layout,
-      productIds: props.productIds,
-      imageRatio: props.imageRatio || "3:4",
-      showPrice: props.showPrice ?? true,
-      showButton: props.showButton ?? false,
-      buttonText: props.buttonText || "查看详情",
-      titleSize: props.titleSize || "medium",
-    },
-    styleConfig: { bgColor: props.bgColor || "#FCFCFB" },
-  };
 }
 
 function ProductRowPreview(props: ProductRowPuckProps) {
@@ -93,7 +79,7 @@ function ProductRowPreview(props: ProductRowPuckProps) {
     return () => {
       cancelled = true;
     };
-  }, [productIds.join(",")]);
+  }, [productIds]);
 
   if (loading) {
     return (
@@ -111,7 +97,15 @@ function ProductRowPreview(props: ProductRowPuckProps) {
     );
   }
 
-  return <ProductRowBlock module={convertPuckProps("产品展示行", { ...props, productIds }) as any || toModule(props, toCards(products)) as any} editMode />;
+  // P1-32：原 `convertPuckProps(...) as any || toModule(...) as any` 因 `as any` 优先级高于 `||`、
+  // 且 convertPuckProps 恒返回 truthy 基础结构，导致右侧 toModule（含已拉取的 products）被短路，
+  // 编辑预览恒显示空占位。改为显式合并：把预览商品注入 module.content.products。
+  const merged = convertPuckProps("产品展示行", { ...props, productIds });
+  if (merged && products.length > 0) {
+    // PageModuleContent 类型未声明 products（产品展示行专用扩展字段），用 as any 赋值
+    merged.content = { ...merged.content, products: toCards(products) } as any;
+  }
+  return <ProductRowBlock module={merged as any} editMode />;
 }
 
 export const productRowPuckConfig = {
@@ -121,6 +115,9 @@ export const productRowPuckConfig = {
     subtitle: "",
     productIds: [],
     layout: "grid-3",
+    mobileColumns: 2,
+    displayMode: "standard",
+    actionStyle: "text",
     bgColor: "#FCFCFB",
     imageRatio: "3:4",
     showPrice: true,
@@ -154,6 +151,31 @@ export const productRowPuckConfig = {
         { label: "2 列", value: "grid-2" },
         { label: "3 列", value: "grid-3" },
         { label: "4 列", value: "grid-4" },
+      ],
+    },
+    mobileColumns: {
+      type: "radio" as const,
+      label: "移动端列数",
+      options: [
+        { label: "1 列", value: 1 },
+        { label: "2 列", value: 2 },
+      ],
+    },
+    displayMode: {
+      type: "radio" as const,
+      label: "展示模式",
+      options: [
+        { label: "画册展示", value: "album" },
+        { label: "标准选款", value: "standard" },
+      ],
+    },
+    actionStyle: {
+      type: "radio" as const,
+      label: "操作样式",
+      options: [
+        { label: "整卡点击", value: "none" },
+        { label: "文字链接", value: "text" },
+        { label: "描边按钮", value: "button" },
       ],
     },
     imageRatio: {

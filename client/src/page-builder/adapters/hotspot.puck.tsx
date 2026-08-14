@@ -17,18 +17,20 @@ export interface HotspotPuckProps {
   image: string;
   mobileImage: string;
   hotspots: HotspotItem[];
+  mobileHotspots: HotspotItem[];
   locked?: boolean;
 }
 
 export const hotspotPuckConfig = {
   label: "热区图",
   render: (props: HotspotPuckProps) => (
-    <HotspotBlock module={convertPuckProps("热区图", props as any) as any} />
+    <HotspotBlock module={convertPuckProps("热区图", props as any) as any} editMode />
   ),
   defaultProps: {
     image: "",
     mobileImage: "",
     hotspots: [],
+    mobileHotspots: [],
     locked: false,
   } satisfies HotspotPuckProps,
   fields: {
@@ -57,6 +59,19 @@ export const hotspotPuckConfig = {
       label: "热区列表",
       getItemSummary: (item: any) =>
         item.label || `热区 (${item.x}%,${item.y}%)`,
+      arrayFields: {
+        label: { type: "text" as const, label: "标签（可选）" },
+        x: { type: "number" as const, label: "左边距(%)", min: 0, max: 100 },
+        y: { type: "number" as const, label: "上边距(%)", min: 0, max: 100 },
+        width: { type: "number" as const, label: "宽度(%)", min: 1, max: 100 },
+        height: { type: "number" as const, label: "高度(%)", min: 1, max: 100 },
+        link: { type: "text" as const, label: "跳转链接" },
+      },
+    } as any,
+    mobileHotspots: {
+      type: "array" as const,
+      label: "移动端热区列表",
+      getItemSummary: (item: any) => item.label || `移动热区 (${item.x}%,${item.y}%)`,
       arrayFields: {
         label: { type: "text" as const, label: "标签（可选）" },
         x: { type: "number" as const, label: "左边距(%)", min: 0, max: 100 },

@@ -1,134 +1,158 @@
 /**
- * 图片尺寸规范 — 各模块类型的推荐图片尺寸
- * 在页面构建器画布中显示，帮助运营上传正确比例的图片
+ * 图片尺寸规范 — 各模块类型的推荐图片尺寸（奢侈品级超高清）
+ *
+ * 桌面端按 4K / 2K 出图，移动端按 iPhone 3x 出图，商品图可放大看细节。
+ * 注意：大像素原图需配套后端按需缩放（srcset / 多尺寸），避免移动端直接加载 4K 拖慢。
  */
 export const IMAGE_SPECS = {
   hero: {
     desktop: {
-      width: 1920,
-      height: 1080,
+      width: 3840,
+      height: 2160,
       ratio: "16:9",
-      label: "桌面端主视觉（建议 1920×1080，16:9）",
+      label: "桌面端主视觉（建议 3840×2160，16:9，4K）",
     },
     mobile: {
-      width: 750,
-      height: 1334,
+      width: 1170,
+      height: 2532,
       ratio: "9:16",
-      label: "移动端主视觉（建议 750×1334，9:16）",
+      label: "移动端主视觉（建议 1170×2532，9:16，iPhone 3x）",
     },
   },
   singlePoster: {
     image: {
-      width: 1200,
-      height: 800,
+      width: 2400,
+      height: 1600,
       ratio: "3:2",
-      label: "单海报（建议 1200×800，3:2）",
+      label: "单海报（建议 2400×1600，3:2）",
+    },
+    mobile: {
+      width: 1500,
+      height: 2000,
+      ratio: "3:4",
+      label: "移动端单海报（建议 1500×2000，3:4）",
     },
   },
   doublePoster: {
     main: {
-      width: 960,
-      height: 720,
+      width: 1920,
+      height: 1440,
       ratio: "4:3",
-      label: "主海报（建议 960×720，4:3）",
+      label: "主海报（建议 1920×1440，4:3）",
     },
     detail: {
-      width: 640,
-      height: 800,
+      width: 1280,
+      height: 1600,
       ratio: "4:5",
-      label: "细节海报（建议 640×800，4:5）",
+      label: "细节海报（建议 1280×1600，4:5）",
     },
   },
   imageText: {
     image: {
-      width: 800,
-      height: 600,
+      width: 1600,
+      height: 1200,
       ratio: "4:3",
-      label: "图文配图（建议 800×600，4:3）",
+      label: "图文配图（建议 1600×1200，4:3）",
     },
   },
   fullBleed: {
     desktop: {
-      width: 1920,
-      height: 800,
+      width: 3840,
+      height: 1600,
       ratio: "2.4:1",
-      label: "通栏桌面图（建议 1920×800，2.4:1）",
+      label: "通栏桌面图（建议 3840×1600，2.4:1，4K）",
     },
     mobile: {
-      width: 750,
-      height: 900,
+      width: 1500,
+      height: 1800,
       ratio: "5:6",
-      label: "通栏移动图（建议 750×900，5:6）",
+      label: "通栏移动图（建议 1500×1800，5:6）",
     },
   },
   splitPanel: {
     image: {
-      width: 600,
-      height: 800,
+      width: 1200,
+      height: 1600,
       ratio: "3:4",
-      label: "分栏配图（建议 600×800，3:4）",
+      label: "分栏配图（建议 1200×1600，3:4）",
     },
   },
   cardGrid: {
     image: {
-      width: 600,
-      height: 600,
+      width: 2000,
+      height: 2000,
       ratio: "1:1",
-      label: "卡片图（建议 600×600，1:1）",
+      label: "卡片图（建议 2000×2000，1:1，可放大）",
     },
   },
   hotspot: {
     desktop: {
-      width: 1920,
-      height: 1080,
+      width: 3840,
+      height: 2160,
       ratio: "16:9",
-      label: "热区桌面图（建议 1920×1080，16:9）",
+      label: "热区桌面图（建议 3840×2160，16:9，4K）",
     },
     mobile: {
-      width: 750,
-      height: 1000,
+      width: 1170,
+      height: 1560,
       ratio: "3:4",
-      label: "热区移动图（建议 750×1000，3:4）",
+      label: "热区移动图（建议 1170×1560，3:4）",
     },
   },
   textBanner: {
     bgImage: {
-      width: 1920,
-      height: 400,
+      width: 3840,
+      height: 800,
       ratio: "4.8:1",
-      label: "横幅背景图（建议 1920×400，4.8:1）",
+      label: "横幅背景图（建议 3840×800，4.8:1）",
     },
   },
   productRow: {
     image: {
-      width: 600,
-      height: 600,
+      width: 2000,
+      height: 2000,
       ratio: "1:1",
-      label: "产品图（建议 600×600，1:1）",
+      label: "产品图（建议 2000×2000，1:1，可放大看细节）",
+    },
+  },
+  featuredProduct: {
+    image: {
+      width: 1600,
+      height: 2133,
+      ratio: "3:4",
+      label: "主推单品图（建议 1600×2133，3:4）",
+    },
+  },
+  lookbook: {
+    image: {
+      width: 2400,
+      height: 1800,
+      ratio: "4:3",
+      label: "佩戴场景图（建议 2400×1800，4:3）",
     },
   },
   categoryCards: {
     image: {
-      width: 600,
-      height: 600,
-      ratio: "1:1",
-      label: "分类图（建议 600×600，1:1）",
+      width: 1600,
+      height: 2133,
+      ratio: "3:4",
+      label: "分类导航图（建议 1600×2133，3:4）",
     },
   },
   carousel: {
     image: {
-      width: 1920,
-      height: 900,
+      width: 3840,
+      height: 1800,
       ratio: "2.13:1",
-      label: "轮播图（建议 1920×900，2.13:1）",
+      label: "轮播图（建议 3840×1800，2.13:1，4K）",
     },
   },
   video: {
     poster: {
-      width: 1920,
-      height: 1080,
+      width: 3840,
+      height: 2160,
       ratio: "16:9",
-      label: "视频封面（建议 1920×1080，16:9）",
+      label: "视频封面（建议 3840×2160，16:9，4K）",
     },
   },
 } as const;

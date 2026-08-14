@@ -23,7 +23,7 @@ export interface SinglePosterPuckProps {
 
 export const singlePosterPuckConfig = {
   render: (props: SinglePosterPuckProps) => (
-    <SinglePosterSection module={convertPuckProps("单图海报", props as any)!} />
+    <SinglePosterSection module={convertPuckProps("单图海报", props as any)!} editMode />
   ),
   defaultProps: {
     number: "01",
@@ -39,10 +39,10 @@ export const singlePosterPuckConfig = {
     locked: false,
   } satisfies SinglePosterPuckProps,
   fields: {
-    number: { type: "text" as const, label: "海报文案区 · 编号" },
-    label: { type: "text" as const, label: "海报文案区 · 标签" },
-    title: { type: "text" as const, label: "海报文案区 · 主标题" },
-    subtitle: { type: "text" as const, label: "海报文案区 · 副标题" },
+    number: { type: "text" as const, label: "编号" },
+    label: { type: "text" as const, label: "标签" },
+    title: { type: "text" as const, label: "标题" },
+    subtitle: { type: "text" as const, label: "副标题" },
     desktopImage: {
       type: "custom" as const,
       label: "海报主图",
@@ -60,7 +60,7 @@ export const singlePosterPuckConfig = {
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
         <MediaPickerField fieldKey="mobileImage" device="mobile" value={value} onChange={onChange} readOnly={readOnly}
-          spec={IMAGE_SPECS.singlePoster.image} placeholder="上传手机端海报图（可选）" />
+          spec={IMAGE_SPECS.singlePoster.mobile} placeholder="上传手机端海报图（可选）" />
       ),
     },
     linkUrl: { type: "text" as const, label: "链接" },

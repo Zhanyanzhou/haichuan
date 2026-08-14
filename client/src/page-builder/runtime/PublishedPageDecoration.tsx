@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { usePagePublishStream } from "@/hooks/usePagePublishStream";
 import { pageDocumentApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
-import PuckDocumentRenderer from "./PuckDocumentRenderer";
+
+// 页面装修器及其编辑器依赖仅在确有已发布内容时加载，避免进入纯展示页首屏。
+const PuckDocumentRenderer = lazy(() => import("./PuckDocumentRenderer"));
+const AntdProvider = lazy(() => import("@/components/common/AntdProvider"));
 
 type PublishedPageDecorationProps = {
   pageKey?: string;
@@ -110,7 +113,21 @@ export default function PublishedPageDecoration({
     <>
       {renderableData?.content?.length ? (
         <section aria-label={`${pageLabel || "页面"}装修内容`}>
-          <PuckDocumentRenderer data={renderableData} />
+          <Suspense
+            fallback={
+              <div
+                aria-busy="true"
+                aria-live="polite"
+                style={{ minHeight: 120, display: "grid", placeItems: "center", color: "#8C785C", fontSize: 12 }}
+              >
+                正在渲染页面内容
+              </div>
+            }
+          >
+            <AntdProvider>
+              <PuckDocumentRenderer data={renderableData} />
+            </AntdProvider>
+          </Suspense>
         </section>
       ) : null}
       {children}
