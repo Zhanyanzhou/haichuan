@@ -3,7 +3,6 @@ import { useParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Tabs, Spin, message } from "antd";
 import {
-  HeartOutlined,
   ShoppingCartOutlined,
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
@@ -417,13 +416,6 @@ export default function ProductDetail() {
                   {salesModeCta(product.salesMode)}
                 </Link>
               )}
-              <button
-                type="button"
-                aria-label="收藏这件作品"
-                className="p-3 border border-brand-line hover:border-brand-gold transition-colors"
-              >
-                <HeartOutlined className="text-brand-muted hover:text-brand-gold transition-colors" />
-              </button>
             </div>
 
             {/* Tabs */}

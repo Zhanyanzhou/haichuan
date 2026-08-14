@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { motion, useInView } from "framer-motion";
 import { Spin, Button } from "antd";
@@ -208,7 +208,13 @@ export default function ProductList() {
   }, [setPageMeta, clearPageMeta]);
 
   // 与选款中心/搜索共用同一数据源与映射逻辑，避免重复拉取与字段漂移
-  const { products, loading, error, reload } = useProductData();
+  const { products: allProducts, loading, error, reload } = useProductData();
+  // 解析 ?categoryId= 并按主分类过滤（首页 storyBands 的 /products?categoryId=6 由此激活）
+  const [searchParams] = useSearchParams();
+  const categoryId = searchParams.get("categoryId");
+  const products = categoryId
+    ? allProducts.filter((p) => p.primaryCategoryId === categoryId)
+    : allProducts;
   // P1-35：客户端逐步加载，避免一次渲染上千张卡片（DOM + IntersectionObserver 爆炸）
   const [visibleCount, setVisibleCount] = useState(24);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -311,7 +317,11 @@ export default function ProductList() {
             </div>
           )}
           {products.length > visibleCount && (
-            <div ref={sentinelRef} style={{ height: 1, width: "100%", marginTop: 40 }} aria-hidden />
+            <div
+              ref={sentinelRef}
+              style={{ height: 1, width: "100%", marginTop: 40 }}
+              aria-hidden
+            />
           )}
 
           {/* ── 选款中心入口 ── */}

@@ -142,7 +142,19 @@ export default function PublicLayout() {
     const description =
       pageMeta.description || siteSettings?.seoDescription || siteSettings?.siteDescription;
     const keywords = siteSettings?.seoKeywords;
-    const image = pageMeta.image;
+    // og:image/twitter:image 相对路径绝对化，避免社交爬虫解析失败
+    let image: string | undefined;
+    if (pageMeta.image) {
+      if (/^https?:\/\//i.test(pageMeta.image)) {
+        image = pageMeta.image;
+      } else {
+        try {
+          image = new URL(pageMeta.image, window.location.origin).href;
+        } catch {
+          image = pageMeta.image;
+        }
+      }
+    }
 
     document.title = title || siteName;
     syncMeta("name", "description", description);

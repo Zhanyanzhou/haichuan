@@ -373,6 +373,7 @@ function Toolbar({
   selCount,
   onToggleMaterial,
   onSort,
+  onOpenFilter,
   categories,
 }: {
   category: string;
@@ -383,6 +384,7 @@ function Toolbar({
   selCount: number;
   onToggleMaterial: (m: string) => void;
   onSort: (s: string) => void;
+  onOpenFilter: () => void;
   categories: RealCategory[];
 }) {
   const parentName = catNameById(categories, Number(category));
@@ -484,6 +486,19 @@ function Toolbar({
             <option value="newest">最新</option>
             <option value="sku">货号</option>
           </select>
+          <button
+            onClick={onOpenFilter}
+            style={{
+              background: "none",
+              border: 0,
+              cursor: "pointer",
+              fontSize: 12,
+              color: T.sec,
+              padding: "4px 8px",
+            }}
+          >
+            更多筛选
+          </button>
           {selCount > 0 && (
             <span style={{ color: T.txt }}>已选 {selCount}</span>
           )}
@@ -1416,12 +1431,17 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
   });
   const account = (() => {
     try {
-      return JSON.parse(localStorage.getItem("customer") || "null") as { name?: string; phone?: string } | null;
+      return JSON.parse(localStorage.getItem("customer") || "null") as {
+        name?: string;
+        phone?: string;
+      } | null;
     } catch {
       return null;
     }
   })();
-  const isSignedIn = Boolean(localStorage.getItem("customerToken") && account?.phone);
+  const isSignedIn = Boolean(
+    localStorage.getItem("customerToken") && account?.phone,
+  );
 
   if (!ids.size) return null;
 
@@ -1649,57 +1669,66 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
             {/* 表单 */}
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {isSignedIn ? (
-                <div style={{ padding: "12px 14px", background: "#f6f3ed", fontSize: 12, color: T.sec, lineHeight: 1.7 }}>
-                  将使用账户资料：{account?.name || "海川贵宾"} · {account?.phone}
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    background: "#f6f3ed",
+                    fontSize: 12,
+                    color: T.sec,
+                    lineHeight: 1.7,
+                  }}
+                >
+                  将使用账户资料：{account?.name || "海川贵宾"} ·{" "}
+                  {account?.phone}
                 </div>
               ) : (
                 <>
-              <div>
-                <label
-                  htmlFor="sel-name"
-                  style={{
-                    fontSize: 12,
-                    color: T.txt,
-                    display: "block",
-                    marginBottom: 4,
-                  }}
-                >
-                  称呼 <span style={{ color: "#c00" }}>*</span>
-                </label>
-                <input
-                  id="sel-name"
-                  value={form.customerName}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, customerName: e.target.value }))
-                  }
-                  placeholder="您的称呼"
-                  style={inputStyle}
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="sel-phone"
-                  style={{
-                    fontSize: 12,
-                    color: T.txt,
-                    display: "block",
-                    marginBottom: 4,
-                  }}
-                >
-                  手机号 <span style={{ color: "#c00" }}>*</span>
-                </label>
-                <input
-                  id="sel-phone"
-                  value={form.phone}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, phone: e.target.value }))
-                  }
-                  placeholder="方便我们联系您"
-                  inputMode="numeric"
-                  maxLength={11}
-                  style={inputStyle}
-                />
-              </div>
+                  <div>
+                    <label
+                      htmlFor="sel-name"
+                      style={{
+                        fontSize: 12,
+                        color: T.txt,
+                        display: "block",
+                        marginBottom: 4,
+                      }}
+                    >
+                      称呼 <span style={{ color: "#c00" }}>*</span>
+                    </label>
+                    <input
+                      id="sel-name"
+                      value={form.customerName}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, customerName: e.target.value }))
+                      }
+                      placeholder="您的称呼"
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="sel-phone"
+                      style={{
+                        fontSize: 12,
+                        color: T.txt,
+                        display: "block",
+                        marginBottom: 4,
+                      }}
+                    >
+                      手机号 <span style={{ color: "#c00" }}>*</span>
+                    </label>
+                    <input
+                      id="sel-phone"
+                      value={form.phone}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, phone: e.target.value }))
+                      }
+                      placeholder="方便我们联系您"
+                      inputMode="numeric"
+                      maxLength={11}
+                      style={inputStyle}
+                    />
+                  </div>
                 </>
               )}
               <div
@@ -2039,6 +2068,7 @@ export default function Catalog() {
           selCount={selCount}
           onToggleMaterial={(m) => toggleArray("material", params.materials, m)}
           onSort={(s) => update("sort", s)}
+          onOpenFilter={() => setFilterOpen(true)}
           categories={categories}
         />
       </div>
