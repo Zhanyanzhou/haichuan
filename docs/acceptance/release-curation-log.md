@@ -30,6 +30,8 @@
 
 `74ca59c` `feat(puck): 完成页面装修器编辑与发布方案`：按已确认的当前实现保存页面装修器完整依赖链（61 个文件）：区块、适配器、字段与检查器、发布渲染、后台配置、服务端页面文档接口、前端并发参数、受控图片展示，以及 `PageDocumentRevision` 版本唯一约束的 migration 源码。`npm run typecheck`、`npm run lint`、`npm run test:contracts`（26 种区块）、`npm run build`、`git diff --check` 与 `git diff --cached --check` 均通过；本次仅提交 migration 源码，未执行数据库命令。已知风险保留：历史版本恢复尚未采用与保存/发布相同的乐观并发控制，应在后续修复批次处理中。
 
+`ac8a3cb` `feat(data): 固化目录与交易领域模型`：按已确认方案提交受控目录、合作商家、交易基础与交易中心共用的 Prisma schema 和三份对应 migration 源码（711 行）。仅版本化源码，不执行 Prisma、migration、seed 或任何数据库连接命令；未包含密码/补偿脚本、未知 CSV、依赖升级或 Docker 覆盖。类型检查与构建证据复用自同一未变更工作树，提交前缓存差异检查通过。
+
 | 提交 | 主题与文件 | 暂存复核 | 验证证据 |
 | --- | --- | --- | --- |
 | `b21cacb` | `fix(public): 移除未确认公开元数据并改善错误可访问性`。文件：`client/index.html`、`client/public/robots.txt`、`client/public/sitemap.xml`、`client/src/components/common/ErrorBoundary.tsx`、`client/src/pages/public/About/index.tsx`。移除未确认域名、电话与不存在的分享图；公开错误恢复按钮具备原生按钮语义与可见焦点；补充固定的品牌页元信息。 | 每次精确路径暂存后均执行 `git diff --cached --check`、`--name-only`、`--stat` 和完整暂存差异复核。未包含 Puck、交易、数据库、依赖、脚本或未跟踪候选。 | 当前完整工作区：`npm run typecheck`、`npm run lint`、`npm run test:selection-inquiry`、`npm run test:contracts`、`npm run build` 均退出成功；`git diff --check` 通过。运行时烟测报告记录公开路由及联系页隐私必填提示的桌面/移动复验；未将其视为真实 API 成功路径验收。 |
