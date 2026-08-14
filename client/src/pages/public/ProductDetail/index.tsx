@@ -10,6 +10,8 @@ import {
 import { getMaterialLabel } from "@/utils/material";
 import { getPrimaryImage, getThumbnailList } from "@/utils/productImage";
 import { SecureImage } from "@/components/common/SecureImage";
+import Lightbox from "yet-another-react-lightbox";
+import "yet-another-react-lightbox/styles.css";
 import { cartApi, productApi, publicProductStreamUrl, goldPriceApi } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -32,6 +34,7 @@ export default function ProductDetail() {
   const [qty, setQty] = useState(1);
   const [selectedSku, setSelectedSku] = useState<ProductSKU | null>(null);
   const [mainImage, setMainImage] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const [revision, setRevision] = useState(0);
   const [addingToCart, setAddingToCart] = useState(false);
   const [goldPrice, setGoldPrice] = useState<{ price?: number | string } | null>(null);
@@ -60,6 +63,8 @@ export default function ProductDetail() {
       setPageMeta({
         title: `${product.name} | 海川珠宝`,
         description: product.shortDescription || undefined,
+        // og:image / twitter:image：分享到微信/微博/小红书时展示作品主图
+        image: getPrimaryImage(product as any) || undefined,
       });
     }
     return () => clearPageMeta();
@@ -172,7 +177,19 @@ export default function ProductDetail() {
             animate={{ opacity: 1 }}
             transition={{ duration: 1 }}
           >
-            <div className="aspect-[4/5] bg-brand-bg flex items-center justify-center sticky top-24 border border-brand-line">
+            <div
+              onClick={() => mainImageUrl && setLightboxOpen(true)}
+              role={mainImageUrl ? "button" : undefined}
+              aria-label={mainImageUrl ? "放大查看作品图" : undefined}
+              tabIndex={mainImageUrl ? 0 : undefined}
+              onKeyDown={(e) => {
+                if (mainImageUrl && (e.key === "Enter" || e.key === " ")) {
+                  e.preventDefault();
+                  setLightboxOpen(true);
+                }
+              }}
+              className={`aspect-[4/5] bg-brand-bg flex items-center justify-center sticky top-24 border border-brand-line ${mainImageUrl ? "cursor-zoom-in" : ""}`}
+            >
               {mainImageUrl ? (
                 <SecureImage
                   src={mainImageUrl}
@@ -202,6 +219,15 @@ export default function ProductDetail() {
                 </div>
               ))}
             </div>
+            <Lightbox
+              open={lightboxOpen}
+              close={() => setLightboxOpen(false)}
+              index={mainImage}
+              slides={thumbnails.map((img) => ({
+                src: (img as any).mediaUrl || img.url,
+                alt: product.name,
+              }))}
+            />
           </motion.div>
 
           {/* Right: Info */}
