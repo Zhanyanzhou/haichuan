@@ -1,9 +1,17 @@
+# 全容器统一日志上限：防止 stdout 日志无限增长吃满磁盘（OR-1）
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   # ===== 数据库 =====
   mysql:
     image: mysql:8.0
     container_name: jewelry-mysql
     restart: unless-stopped
+    logging: *default-logging
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
       MYSQL_DATABASE: jewelry_db
@@ -24,26 +32,8 @@ services:
       - jewelry-network
 
   # ===== 缓存 =====
-  redis:
-    image: redis:7-alpine
-    container_name: jewelry-redis
-    restart: unless-stopped
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-    volumes:
-      - redis_data:/data
-    # P0-3：启用密码认证（密码经 REDIS_PASSWORD 环境变量传入，不硬编码到镜像/配置）
-    # $$ 转义让容器内 sh 展开 $REDIS_PASSWORD，而非被 compose 在解析期内联
-    command: sh -c "redis-server --appendonly yes --requirepass $$REDIS_PASSWORD"
-    expose:
-      - "6379"
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    networks:
-      - jewelry-network
+  # Redis 已移除（OR 批决策）：queue 模块删除后服务端零消费方，常驻容器属死基础设施。
+  # 未来启用缓存/共享限流时再加回（镜像+healthcheck 模板见 git 历史）。
 
   # ===== 后端 NestJS 服务 =====
   server:
@@ -52,17 +42,13 @@ services:
       dockerfile: Dockerfile
     container_name: jewelry-server
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       mysql:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-      # 地址与密码分离，避免强密码中的 @、:、/、# 等 URI 保留字符破坏 REDIS_URL 解析。
-      REDIS_URL: redis://redis:6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
     # P0-3：不对宿主机暴露 3000（仅 nginx 反代 /api 与 /uploads → server:3000，见 nginx.conf）
@@ -88,6 +74,7 @@ services:
       dockerfile: Dockerfile
     container_name: jewelry-client
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       server:
         condition: service_healthy
@@ -101,11 +88,69 @@ services:
     networks:
       - jewelry-network
 
+  # ===== 定时备份（OR-1：数据库 + 媒体卷，含付款凭证）=====
+  # 复用 mysql:8.0 镜像（自带 mysqldump/tar/bash），脚本挂载自仓库，改脚本无需重建镜像。
+  # 启动即执行一轮备份（部署即可验证），此后每 BACKUP_INTERVAL_SECONDS 一轮，保留 7 天。
+  # 产出在宿主机 ./backups（建议纳入宿主机异地同步，如 rsync/对象存储）。
+  backup:
+    image: mysql:8.0
+    container_name: jewelry-backup
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_USER: jewelry_user
+      DB_PASS: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      DB_NAME: jewelry_db
+      BACKUP_DIR: /backups
+      MEDIA_DIRS: /media/uploads:/media/private-media
+      DISK_WARN_PCT: ${DISK_WARN_PCT:-85}
+      RETENTION_DAYS: "7"
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    volumes:
+      - ./server/scripts/backup.sh:/usr/local/bin/backup.sh:ro
+      - uploads_data:/media/uploads:ro
+      - private_media_data:/media/private-media:ro
+      - ./backups:/backups
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        while true; do
+          /bin/bash /usr/local/bin/backup.sh || echo "🚨 ERROR: 备份执行失败，将在下个周期重试"
+          sleep "$${BACKUP_INTERVAL_SECONDS}"
+        done
+    networks:
+      - jewelry-network
+
+  # ===== 存活监控告警（OR-1：uptime-kuma 自托管，零外部账号依赖）=====
+  # 面板仅绑定 127.0.0.1:3001（浏览器访问 http://127.0.0.1:3001，远程经 SSH 隧道）。
+  # 首次部署后在 UI 中手动添加监控项：
+  #   http://server:3000/api/health  （后端+数据库就绪）
+  #   http://client:80/              （前台可达）
+  # 通知渠道在 UI 配置（邮件/企业微信/webhook 均可）。
+  # 备份容器与磁盘水位无 HTTP 端点，由 backup.sh 输出告警日志（docker logs jewelry-backup 巡检）。
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: jewelry-uptime-kuma
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - kuma_data:/app/data
+    ports:
+      - "127.0.0.1:3001:3001"
+    networks:
+      - jewelry-network
+
 volumes:
   mysql_data:
-  redis_data:
   uploads_data:
   private_media_data:
+  kuma_data:
 
 networks:
   jewelry-network:
