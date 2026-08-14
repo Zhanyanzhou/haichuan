@@ -1,101 +1,81 @@
 # HC-MASTER-ACCEPTANCE-10: 端到端流程矩阵
 
-> 按业务链路追踪起点到终点
+> 最后核对：2026-08-13（基于当前代码事实）
+> 代码闭环 ≠ 真实接口已验证。标注区分。
 
-## 商品发布链 (HC-PRODUCT-SEARCH-DETAIL-CLOSE-11C 更新)
-
-| 步骤 | 状态 | 证据 |
-|---|---|---|
-| 后台新增商品 | ✅ | POST /api/products → 201 |
-| 保存草稿 | ✅ | 数据库写入, 刷新保留 |
-| 草稿不显示 | ✅ | status=PUBLISHED 过滤 |
-| 后台发布商品 | ✅ | PUT /status → PUBLISHED |
-| 商品目录出现 | ✅ | Catalog 使用真实 API + 真实分类 |
-| 按商品名称搜索可找到 | ✅ | Search 客户端筛选 API 数据 |
-| 按货号搜索可找到 | ✅ | SKU 匹配 |
-| 分类筛选可找到 | ✅ | 真实分类 ID 匹配 |
-| 材质筛选可找到 | ✅ | 中文材质标签匹配 |
-| 商品详情可打开 | ✅ | productApi.getById |
-| 后台修改→前台同步 | ✅ | API 实时读取 |
-| 下架后目录/搜索/详情隐藏 | ✅ | status=PUBLISHED 过滤 |
-| 后台仍可查看 | ✅ | 软删除保留 |
-| 后端重启行为不变 | ✅ | MySQL 持久化 |
-| **完整闭环**: ✅ 通过 |
-
-## 页面发布链
+## 商品发布链
 
 | 步骤 | 状态 | 证据 |
 |---|---|---|
-| 添加模块 | ❌ | 前端未完全支持 |
-| 编辑内容 | ❌ | 仅 hero/doublePoster |
-| 保存草稿 | ⚠️ | API 存在, 前端未验证 |
-| 预览草稿 | ❌ | |
-| 发布 | ⚠️ | API 存在 |
-| 前台更新 | ✅ | published API 可用 |
-| 版本历史 | ⚠️ | API 存在, 0条记录 |
-| 恢复版本 | ⚠️ | API 存在 |
-| **阻断位置**: 第1步 (前端模块编辑器) |
+| 后台新增商品 | ✅ | POST /api/products，DTO 校验 |
+| 草稿不公开 | ✅ | 公开接口 status=PUBLISHED 过滤 |
+| 后台发布 | ✅ | 状态流转 |
+| 公开目录出现 | ✅ | Catalog → /products/public |
+| 搜索/筛选 | ✅ | Search → API |
+| 详情可打开 | ✅ | productApi.getPublicById |
+| 下架后隐藏 | ✅ | 公开接口过滤 |
+| **完整闭环**: ✅ 代码层通过；真实数据需部署后人工抽查 |
+
+## 页面发布链（Puck PageDocument）
+
+| 步骤 | 状态 | 证据 |
+|---|---|---|
+| 编辑器工作台 | ⚠️ | EditorWorkbench 存在，完整模块编辑需浏览器实测 |
+| 保存/发布 | ✅ | pageDocumentApi + 后端发布端点 |
+| 前台渲染 | ✅ | PuckDocumentRenderer（lazy） |
+| 未发布兜底 | ✅ | FallbackHome 不白屏 |
+| 版本历史 | ✅ | PageDocumentRevision |
+| **代码层**: ✅；可视化编辑完整度需浏览器实测 |
 
 ## 预约咨询链
 
 | 步骤 | 状态 | 证据 |
 |---|---|---|
-| 前台提交 | ✅ | inquiriesApi.submit |
-| 数据库写入 | ❌ | inquiries=0 (无测试数据) |
-| 后台出现 | ✅ | /api/leads 聚合查询 |
-| 状态修改 | ✅ | PUT /api/leads |
-| 内部备注 | ✅ | API 支持 |
-| 刷新保留 | ❌ | 无数据验证 |
-| **阻断位置**: 缺少端到端测试数据 |
+| 前台表单 | ✅ | Contact 页，label 关联 + 隐私同意 + 必填校验 |
+| 提交 | ✅ | inquiriesApi.submit → POST /inquiries（@Public + @Throttle） |
+| 后端校验 | ✅ | CreateInquiryDto class-validator |
+| 后台聚合 | ✅ | /api/leads + /admin/inquiries |
+| 状态流转 | ✅ | PUT /api/leads/:type/:id |
+| **代码层**: ✅；真实库写入属部署前人工验收项 |
 
 ## 客户选款链
 
 | 步骤 | 状态 | 证据 |
 |---|---|---|
-| 加入选款 | ✅ | Zustand selectionStore |
-| 提交选款 | ❌ | 无 API 提交 |
-| 商品快照 | ❌ | 无数据 |
-| 后台出现 | ❌ | |
-| **阻断位置**: 第2步 (无 API 提交) |
+| 加入选款 | ✅ | selectionStore（Zustand） |
+| 提交选款 | ✅ | selectionInquiryApi.submit（Catalog 选款托盘） |
+| 隐私同意 | ✅ | 2026-08-13 补齐 checkbox + /privacy 链接 |
+| 商品快照 | ✅ | productNameSnapshot/SkuSnapshot/ImageSnapshot |
+| 后端校验 | ✅ | name/phone regex + items 1-20 + @Throttle |
+| 后台管理 | ✅ | /admin/selection-inquiry |
+| **代码层**: ✅；真实库写入属部署前人工验收项 |
 
-## 数据采集链
-
-| 步骤 | 状态 | 证据 |
-|---|---|---|
-| 页面浏览 | ❌ | trackPageView 未调用 |
-| 商品查看 | ❌ | trackProductView 未调用 |
-| 搜索 | ❌ | trackSearch 未调用 |
-| 加入选款 | ❌ | trackAddToSelection 未调用 |
-| 提交咨询 | ❌ | trackSubmitInquiry 未调用 |
-| 数据库记录 | ❌ | analytics_events=0 |
-| **阻断位置**: 第1步 (前端未接入) |
-
-## 购物车链
+## 数据采集链（P0-C 设计决定：默认关闭）
 
 | 步骤 | 状态 | 证据 |
 |---|---|---|
-| 加入购物车 | ❌ | 无页面 |
-| 修改数量 | ❌ | |
-| 删除 | ❌ | |
-| 刷新保留 | ❌ | |
-| **阻断位置**: 全链路 (commerceEnabled=false) |
+| trackPageView / trackSearch 等 | 🧊 no-op | useAnalytics ANALYTICS_ENABLED=false |
+| _asid 匿名标识 | 🧊 不创建 | 模块级不写 localStorage |
+| /analytics/track 请求 | 🧊 不发送 | send 函数注释停用 |
+| **状态**: ✅ 安全关闭；未来开启需先完成隐私偏好/授权机制 |
 
-## 订单支付链
+## 交易链（P0-B/D 安全冻结）
+
+| 链路 | 状态 | 证据 |
+|---|---|---|
+| 购物车 | 🧊 | /cart 重定向咨询；CustomerCommerceGuard 503；加购按钮不渲染 |
+| 结算/下单 | 🧊 | /checkout 重定向咨询；customers/checkout 503 |
+| 支付 | 🧊 | 无支付网关；payment-proof 上传 503 |
+| 退款售后 | ⚠️ | 后台 /admin/trade/refunds + after-sales 管理页可用；前台入口冻结 |
+| 履约 | ⚠️ | 后台 /admin/trade/fulfillment 可用；无真实交易数据 |
+| **状态**: 前台全链路冻结；后台管理页代码就绪，无真实交易数据 |
+
+## 公开信息真实性链（P0-C，2026-08-13）
 
 | 步骤 | 状态 | 证据 |
 |---|---|---|
-| 创建订单 | ❌ | |
-| 支付 | ❌ | 无支付网关 |
-| 回调 | ❌ | |
-| 发货 | ❌ | |
-| 完成 | ❌ | |
-| **阻断位置**: 全链路 (无支付能力) |
-
-## 退款售后链
-
-| 步骤 | 状态 | 证据 |
-|---|---|---|
-| 退款创建 | ❌ | |
-| 退款处理 | ❌ | |
-| 售后 | ❌ | |
-| **阻断位置**: 全链路 (无交易数据) |
+| SiteSettings 后台配置 | ⚠️ | 联系字段待运营填入真实值 |
+| 公开设置接口 | ✅ | GET /settings/public（@Public，白名单字段） |
+| 前台联系信息显示 | ✅ | 空值隐藏，三态，无假兜底 |
+| 隐私说明可访问 | ✅ | /privacy 匿名路由 |
+| **代码层**: ✅；真实联系信息待运营提供 |

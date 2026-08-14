@@ -70,8 +70,8 @@
 
 ### B.4 ⚠️ 待更新：Feature Flags 控制电商上线
 - **原记录**（旧版 §3）：`commerceEnabled/cartEnabled/paymentEnabled = false`，"代码已完成但关闭"。
-- **当前事实**：`client/src/store/featureFlags.ts` 默认全 `false`，但**全仓 0 引用**——没有任何代码读取这些 flag；Puck 编辑器、订单/购物车/支付路由实际都在运行。
-- **处置**："开关控制"机制实际未接线，见 🟡 D.3。
+- **当前事实**：`client/src/store/featureFlags.ts` 中 `CUSTOMER_COMMERCE_ENABLED` 硬编码为 `false`，并由 `MyAccountDashboard`、`ProductDetail` 两处消费（隐藏交易 CTA）。服务端 `CustomerCommerceGuard`（读 `CUSTOMER_COMMERCE_ENABLED` 环境变量，默认关闭）是最终安全边界；前端开关仅同步隐藏入口，不作为安全依赖。
+- **处置**：前端开关已接线但硬编码为关；环境变量驱动的正式上线开关仍待定，见 🟡 D.3。
 
 ---
 
@@ -96,9 +96,9 @@
 - **现状**：订单/支付/购物车/退款代码完整，但**从未在真实环境验证**；项目当前不开放真实支付/退款/资金结算。
 - **待定**：何时、以何种方式联调与上线。
 
-### D.3 🟡 Feature Flags 是否接线
-- **现状**：`featureFlags.ts` 定义了 commerce/cart/payment/puck 等开关，但**全仓 0 引用**。
-- **待定**：删除该模块，还是正式接线作为上线开关。
+### D.3 🟡 Feature Flags 是否环境变量化
+- **现状**：`featureFlags.ts` 的 `CUSTOMER_COMMERCE_ENABLED` 已被 `MyAccountDashboard`、`ProductDetail` 消费，但硬编码为 `false`；服务端 `CustomerCommerceGuard` 读 `CUSTOMER_COMMERCE_ENABLED` 环境变量（默认关闭）。
+- **待定**：前端开关是否也从环境变量读取以与服务端联动；还是保持前端硬编码关、仅靠服务端守卫控制上线。
 
 ### D.4 🟡 权限粒度
 - **现状**：后端只做 `@Roles` 角色白名单（粗粒度）；前端 `permissionStore` 有细粒度权限键但后端不校验。

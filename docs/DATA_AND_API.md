@@ -1,6 +1,6 @@
 # 海川珠宝 — 数据与 API
 
-> 最后更新：2026-08-07
+> 最后更新：2026-08-13
 
 ## API 端点
 
@@ -35,6 +35,8 @@
 | POST   | `/api/page-modules/:id/duplicate` | 复制             |
 | DELETE | `/api/page-modules/:id`           | 删除             |
 | PUT    | `/api/page-modules/publish`       | 发布             |
+| GET    | `/api/health`                     | 进程存活探针     |
+| GET    | `/api/ready`                      | 数据库就绪探针   |
 
 ### 其他模块（摘要）
 
@@ -46,7 +48,7 @@
 | 线索    | `GET /api/leads`                                    |
 | AI 分类 | `POST /api/ai-classify/single\|batch`               |
 | 分析    | `GET /api/analytics/events`                         |
-| 统计    | `GET /api/statistics/dashboard`                     |
+| 统计    | `GET /api/statistics/dashboard`、`GET /api/statistics/trend` |
 | 上传    | `POST /api/upload/image`                            |
 | 设置    | `GET/PUT /api/settings`                             |
 
@@ -75,7 +77,8 @@
 | inventory        | productId, sku, stock, safetyStock, warehouse       |
 | gold_prices      | price, source(手动/自动)                            |
 | inquiries        | customerName, phone, message, status                |
-| page_modules     | pageKey, moduleType(9种), content(Json)             |
+| page_documents / page_document_revisions | pageKey, Puck JSON, 发布快照、版本历史 |
+| site_settings    | key, value(Json), version, updatedBy                |
 | operation_logs   | userId, action, detail                              |
 | analytics_events | eventType, sessionId, payload(Json)                 |
 
@@ -83,4 +86,4 @@
 
 - 认证：`Authorization: Bearer <jwt_token>`
 - 分页：`?page=1&pageSize=20`
-- Mock 模式：`api.ts` 中 `USE_MOCK = true`
+- Mock 模式：仅在构建变量 `VITE_USE_MOCK=true` 时启用；生产环境必须保持未设置或 `false`

@@ -1,95 +1,91 @@
 # HC-MASTER-ACCEPTANCE-10: 功能完成度矩阵
 
-> 按模块/功能逐项标注实际状态。✅=已证实 ❌=未证实 ⚠️=部分可用
+> 最后核对：2026-08-13（基于当前代码事实）
+> ✅=代码已证实  ⚠️=部分可用/待运行验证  ❌=未实现  🧊=安全冻结（代码保留）
 
 ## 商品中心
 
 | 功能 | 状态 | 证据 |
 |---|---|---|
-| Product 模型 | ✅ | 4条数据, PUBLISHED/OFFLINE |
-| Category 模型 | ✅ | 4条分类 |
-| 商品列表API (GET) | ✅ | 200, 可分页/搜索 |
-| 商品详情API (GET) | ✅ | 200 |
-| 商品创建API (POST) | ✅ | 201, HC-PRODUCT-CONTRACT-FIX-11A 修复 |
-| 商品更新API (PUT) | ✅ | 200, DTO + 显式字段映射 |
-| 商品状态流转API | ✅ | DRAFT→PUBLISHED→OFFLINE 验证通过 |
-| 完整性检查API | ✅ | 返回 score + missingFields |
-| 后台商品列表页 | ✅ | 页面可用, 状态枚举已更新 |
-| 后台商品编辑 | ✅ | 编辑弹窗可用, salesMode/shortDescription/sortOrder 已适配 |
-| 后台商品新增 | ✅ | 创建→数据库写入→列表出现→刷新保留→编辑→重启保留 |
-| 商品图片上传 | ⚠️ | 有 API, 有页面元素 |
-| 前台商品列表 | ⚠️ | ProductList 仍用 collections.ts |
-| 前台商品详情 | ✅ | productApi.getById |
-| 前台选款中心 | ⚠️ | useProductData→API, 已移除静态回退 |
-| 前台搜索 | ⚠️ | useProductData→API, 筛选静态 |
+| Product 模型 + 公开/会员/合作可见性 | ✅ | PUBLIC/MEMBER/PARTNER/INTERNAL |
+| Category 模型 | ✅ | 4 级树形 |
+| 公开商品列表 API | ✅ | GET /products/public，字段白名单（PUBLIC_ACCESS_MATRIX §3） |
+| 公开商品详情 API | ✅ | GET /products/public/:id，不可见统一 404 |
+| 会员目录 API | ✅ | GET /products/catalog，CustomerAuthGuard |
+| 公开媒体端点 | ✅ | productId+imageId 联合校验，DB buffer 输出，nosniff |
+| 商品管理 CRUD | ✅ | 后台 ProductManage/ProductEditor |
+| 前台商品列表 | ✅ | ProductList → useProductData → 公开 API |
+| 前台商品详情 | ✅ | ProductDetail → productApi.getPublicById |
+| 前台选款中心 | ✅ | Catalog → useProductData → API |
+| 前台搜索 | ✅ | Search → useProductData → API |
+| 空状态/loading/error | ✅ | ProductList/Catalog/Search 三态完整（P0-E 核对） |
 
-## 页面构建器
+## 页面构建器（Puck PageDocument）
 
 | 功能 | 状态 | 证据 |
 |---|---|---|
-| PageModule 模型 | ✅ | 含 publishedContent/version |
-| PageModuleVersion 模型 | ✅ | 表已创建 |
-| 模块类型注册 (8种) | ✅ | GET /api/page-modules/types → 200 |
-| 版本历史 API | ✅ | GET /versions |
-| 版本恢复 API | ✅ | PUT /restore |
-| 发布+快照 API | ✅ | PUT /publish |
-| 前台已发布读取 | ✅ | GET /published → 200 (0条) |
-| 三栏工作区 | ⚠️ | 冻结, 未测试 |
-| 模块编辑 | ❌ | 仅 hero/doublePoster |
-| 模块预览 | ❌ | 未验证 |
-| 设备切换 | ❌ | 未验证 |
-| 商品推荐模块 | ❌ | 模型有, 前端无 |
+| PageDocument 模型 + 版本历史 | ✅ | page_documents / page_document_revisions |
+| 已发布文档前台读取 | ✅ | pageDocumentApi.getPublished（@Public） |
+| Puck 渲染器 | ✅ | PuckDocumentRenderer（lazy） |
+| 编辑器工作台 | ⚠️ | EditorWorkbench 存在，模块编辑完整度需浏览器实测 |
+| 首页兜底 | ✅ | FallbackHome（无发布文档时不白屏） |
 
 ## 客户线索
 
 | 功能 | 状态 | 证据 |
 |---|---|---|
 | Inquiry 模型 | ✅ | 含 internalNote/nextFollowUpAt |
-| SelectionInquiry 模型 | ✅ | 含 internalNote/nextFollowUpAt |
+| SelectionInquiry 模型 | ✅ | 含商品快照 |
 | LeadFollowUp 模型 | ✅ | 表已创建 |
-| 统一线索聚合 API | ✅ | GET /api/leads → 200 |
-| 统一线索详情 API | ✅ | GET /api/leads/:type/:id |
-| 线索状态更新 API | ✅ | PUT /api/leads/:type/:id |
-| 跟进记录 API | ✅ | POST/GET follow-up |
-| 后台统一线索页 | ⚠️ | /admin/leads 页面框架 |
-| 客户前台预约提交 | ✅ | inquiriesApi (Contact页) |
-| 客户前台选款提交 | ❌ | Zustand only, 无 API 提交 |
-| 真实线索数据 | ❌ | inquiries=0, selection_inquiries=0 |
+| 统一线索聚合 API | ✅ | GET /api/leads |
+| 后台线索/咨询/选款管理页 | ✅ | /admin/leads、/admin/inquiries、/admin/selection-inquiry |
+| 客户前台预约提交 | ✅ | inquiriesApi.submit（Contact 页，含隐私同意） |
+| 客户前台选款提交 | ✅ | selectionInquiryApi.submit（Catalog 选款托盘，2026-08-13 补隐私同意） |
+| 提交限流 | ✅ | inquiry + selection-inquiry 均 @Throttle 5/min |
+| 真实线索数据 | ❌ | 不向真实库写测试线索，部署前人工验收 |
 
-## 客户前台数据源
+## 客户前台数据源（全部真实 API）
 
-| 页面 | 实际数据源 | 状态 |
+| 页面 | 数据源 | 状态 |
 |---|---|---|
-| 首页 | usePublishedModules/Slots | ✅ 真实API |
-| 商品列表 | collections.ts | ❌ 静态数据 |
-| 商品详情 | productApi.getById | ✅ 真实API |
-| 搜索 | useProductData→API | ✅ 真实API |
-| 选款中心 | useProductData→API | ✅ 真实API |
-| 预约咨询 | inquiriesApi | ✅ 真实API |
-| LOGO/电话/页脚 | 硬编码 | ❌ 未接入Settings API |
-| SEO | 硬编码 | ❌ 未接入 |
+| 首页 | Puck PageDocument / FallbackHome | ✅ |
+| 商品列表 | useProductData → /products/public | ✅ |
+| 商品详情 | productApi.getPublicById | ✅ |
+| 搜索 | useProductData → API | ✅ |
+| 选款中心 | useProductData → API | ✅ |
+| 预约咨询 | inquiriesApi | ✅ |
+| 联系信息 | settingsApi.getPublicSettings | ✅ 真实来源（P0-C） |
+| SEO meta | PublicLayout syncMeta + pageMetaStore | ✅ 动态（P1-C） |
 
-## 行为事件采集
+## 公开信息真实性（P0-C，2026-08-13）
 
 | 功能 | 状态 | 证据 |
 |---|---|---|
-| AnalyticsEvent 模型 | ✅ | 表已创建 |
-| track API | ✅ | POST /api/analytics/track |
-| events API | ✅ | GET /api/analytics/events |
-| 前端 Hook | ✅ | useAnalytics.ts 存在 |
-| 前端实际调用 | ❌ | 0条事件, 未接入页面 |
-| 防重复 | ⚠️ | 代码有节流, 未验证 |
-| 失败不阻塞 | ✅ | fire-and-forget |
+| 假电话/邮箱/地址清除 | ✅ | 全仓搜索仅测试文件保留断言 |
+| Contact 三态 | ✅ | loading/loaded/error + 空值过滤 |
+| /privacy 页面 | ✅ | 匿名可访问，7 章节 + SiteSettings 联系区块 |
+| 隐私链接（表单+页脚） | ✅ | Contact + Catalog + PublicLayout → /privacy |
+| 行为分析默认关闭 | ✅ | useAnalytics no-op，无 _asid、无 /analytics/track |
+| JSON-LD 仅可确认字段 | ✅ | 删除未确认域名 + 假电话 |
+| robots/sitemap 无未确认域名 | ✅ | sitemap 合法空结构 |
 
-## 电商交易
+## 交易冻结（P0-B/D）
 
 | 功能 | 状态 | 证据 |
 |---|---|---|
-| Payment 模型 | ✅ | 表已创建 |
-| Refund 模型 | ✅ | 表已创建 |
-| OrderItem 快照字段 | ✅ | 模型已更新 |
-| Feature Flags | ✅ | 4个开关, 全部 false |
-| 购物车 | ❌ | Cart API 存在但无前端 |
-| 订单创建 | ❌ | 无流程 |
-| 支付网关 | ❌ | 无对接 |
-| 交易后台 | ❌ | 无页面 |
+| 前端交易 CTA 冻结 | 🧊 | CUSTOMER_COMMERCE_ENABLED=false → 加购/付款凭证不渲染 |
+| /cart /checkout 重定向 | 🧊 | → /contact?reason=commerce-unavailable |
+| 后端交易写接口 503 | 🧊 | CustomerCommerceGuard 拒绝 cart/checkout/payment-proof |
+| 后台交易域管理 | ✅ | /admin/trade/*（payments/fulfillment/refunds/after-sales/quotations/overview/anomalies） |
+| 支付网关 | ❌ | 未对接（当前阶段不开放） |
+
+## 测试
+
+| 类型 | 状态 | 证据 |
+|---|---|---|
+| Playwright 公开访问 | ✅ | public-access.spec.ts |
+| Playwright 隐私信任 | ✅ | privacy-trust.spec.ts（2026-08-13 新增） |
+| Playwright 响应式 | ✅ | responsive-public.spec.ts（4 视口，含 /privacy） |
+| 契约测试 | ✅ | page-builder / trade 状态机 / 并发 / 契约 |
+| CI（lint+build+typecheck+契约） | ✅ | ci.yml + quality.yml |
+| Playwright 纳入 CI | ❌ | 需浏览器安装，记录建议 |
