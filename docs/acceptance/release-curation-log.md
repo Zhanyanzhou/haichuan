@@ -18,6 +18,8 @@
 
 `ec04ef3` 所含 SQL 仅作为版本化源码提交，未执行。部署或启动包含此服务端变更的环境前，必须由数据库负责人审核表结构影响、完成备份与演练，并在隔离环境验证后决定是否执行该 migration；在 migration 未执行的环境中，不应发布该服务端设置持久化代码。
 
+本轮对受控目录、合作商家申请与选款咨询的继续审查确认：`20260813130000_add_catalog_access_and_partner_applications` 不只是新增字段和表，还包含对既有 `products` 与 `customers` 的 `UPDATE`，会把存量商品的默认可见性处理为 `MEMBER` 并改变既有客户的访问策略。该策略必须先由业务负责人和数据库负责人共同确认（包括适用范围、备份、回滚与隔离环境验证），因此该 migration 源码及其依赖的目录/客户/合作商家/全局鉴权改动均未暂存、未提交、未执行；`test:selection-inquiry` 的静态契约通过不替代该项业务与数据库确认。
+
 | 提交 | 主题与文件 | 暂存复核 | 验证证据 |
 | --- | --- | --- | --- |
 | `b21cacb` | `fix(public): 移除未确认公开元数据并改善错误可访问性`。文件：`client/index.html`、`client/public/robots.txt`、`client/public/sitemap.xml`、`client/src/components/common/ErrorBoundary.tsx`、`client/src/pages/public/About/index.tsx`。移除未确认域名、电话与不存在的分享图；公开错误恢复按钮具备原生按钮语义与可见焦点；补充固定的品牌页元信息。 | 每次精确路径暂存后均执行 `git diff --cached --check`、`--name-only`、`--stat` 和完整暂存差异复核。未包含 Puck、交易、数据库、依赖、脚本或未跟踪候选。 | 当前完整工作区：`npm run typecheck`、`npm run lint`、`npm run test:selection-inquiry`、`npm run test:contracts`、`npm run build` 均退出成功；`git diff --check` 通过。运行时烟测报告记录公开路由及联系页隐私必填提示的桌面/移动复验；未将其视为真实 API 成功路径验收。 |
