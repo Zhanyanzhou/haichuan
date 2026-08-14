@@ -7,6 +7,7 @@
 import {
   isSafeInternalPath,
   normalizeLinkTargetType,
+  resolveLinkTargetUrl,
   type LinkTargetValue,
 } from "../utils/linkTarget";
 
@@ -695,6 +696,154 @@ export function evaluateHotspotContract(
   ) {
     errors.push("移动端存在未完成的热区");
   }
+  return {
+    completed: checks.filter(Boolean).length,
+    total: checks.length,
+    errors,
+    warnings,
+  };
+}
+
+/* ═══════ 文字横幅（引导横幅）契约 ═══════ */
+
+export const TEXT_BANNER_CONTRACT = {
+  type: "文字横幅",
+  purpose: "承接上新、活动利益点和咨询行动",
+  content: {
+    limits: {
+      eyebrow: 60,
+      title: 100,
+      body: 2000,
+      buttonText: 30,
+    },
+  },
+} as const;
+
+export interface TextBannerContractProps extends LinkTargetValue {
+  eyebrow?: string;
+  title?: string;
+  body?: string;
+  backgroundImage?: string;
+  buttonText?: string;
+}
+
+export function evaluateTextBannerContract(
+  props: TextBannerContractProps,
+): ModuleContractStatus {
+  const resolvedLink = resolveLinkTargetUrl(props);
+  const buttonReady =
+    !hasText(props.buttonText) || hasText(resolvedLink) || false;
+  const checks = [hasText(props.title), hasText(props.body), buttonReady];
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!hasText(props.title)) errors.push("请填写横幅标题");
+  if (hasText(props.buttonText) && !hasText(resolvedLink))
+    warnings.push("按钮文字已填写但未设置跳转，前台不会显示按钮");
+  return {
+    completed: checks.filter(Boolean).length,
+    total: checks.length,
+    errors,
+    warnings,
+  };
+}
+
+/* ═══════ 分割面板契约 ═══════ */
+
+export const SPLIT_PANEL_CONTRACT = {
+  type: "分割面板",
+  purpose: "左图右文的对称叙事区块，适合品牌故事与工艺说明",
+  content: {
+    limits: {
+      title: 100,
+      subtitle: 200,
+      body: 2000,
+      buttonText: 30,
+    },
+  },
+} as const;
+
+export interface SplitPanelContractProps extends LinkTargetValue {
+  image?: string;
+  title?: string;
+  subtitle?: string;
+  body?: string;
+  buttonText?: string;
+}
+
+export function evaluateSplitPanelContract(
+  props: SplitPanelContractProps,
+): ModuleContractStatus {
+  const resolvedLink = resolveLinkTargetUrl(props);
+  const buttonReady = !hasText(props.buttonText) || hasText(resolvedLink);
+  const checks = [
+    hasText(props.image),
+    hasText(props.title),
+    buttonReady,
+  ];
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!hasText(props.image)) errors.push("请上传分栏配图");
+  if (!hasText(props.title)) errors.push("请填写标题");
+  if (hasText(props.buttonText) && !hasText(resolvedLink))
+    warnings.push("按钮文字已填写但未设置跳转，前台不会显示按钮");
+  return {
+    completed: checks.filter(Boolean).length,
+    total: checks.length,
+    errors,
+    warnings,
+  };
+}
+
+/* ═══════ 卡片网格（品牌亮点 / 服务承诺）契约 ═══════ */
+
+export const CARD_GRID_CONTRACT = {
+  type: "卡片网格",
+  purpose: "以规则网格呈现工艺、材质与品牌价值",
+  content: {
+    limits: {
+      title: 100,
+      subtitle: 200,
+      cardTitle: 30,
+      cardBody: 200,
+    },
+  },
+} as const;
+
+export interface CardGridContractProps {
+  title?: string;
+  subtitle?: string;
+  cards?: Array<{ icon?: string; title?: string; body?: string }>;
+}
+
+/** 卡片网格与服务承诺共用同一契约规则（变体只差默认文案与用途）。 */
+export function evaluateCardGridContract(
+  props: CardGridContractProps,
+): ModuleContractStatus {
+  const cards = Array.isArray(props.cards) ? props.cards : [];
+  const cardsComplete =
+    cards.length > 0 &&
+    cards.every((card) => hasText(card.title) && hasText(card.body));
+  const checks = [hasText(props.title), cards.length > 0, cardsComplete];
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!hasText(props.title)) errors.push("请填写区块标题");
+  if (cards.length === 0) errors.push("请至少添加 1 张卡片");
+  const incomplete = cards.some(
+    (card) => !hasText(card.title) || !hasText(card.body),
+  );
+  if (incomplete)
+    errors.push(
+      cards.every((card) => hasText(card.title))
+        ? "存在正文为空的卡片"
+        : "存在标题为空的卡片",
+    );
+  const hasPlaceholder = cards.some((card) =>
+    [card.title, card.body].some(
+      (text) => hasText(text) && /待确认|待配置|请填写/.test(text as string),
+    ),
+  );
+  if (hasPlaceholder)
+    warnings.push("仍有占位文案（待确认/待配置），发布前请替换为正式内容");
   return {
     completed: checks.filter(Boolean).length,
     total: checks.length,

@@ -1,41 +1,22 @@
 /**
- * InspectorSection — 右侧模块设置面板的可折叠分组区。
- * 默认展开/折叠由 defaultOpen 控制；用户切换在会话内保持（组件内 state）。
+ * InspectorSection — 右侧模块设置面板的静态语义化分组区。
+ * 分组只负责阅读与视觉分隔，内容始终直接显示，不提供任何折叠/展开交互。
  */
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 interface InspectorSectionProps {
   title: string;
-  defaultOpen?: boolean;
-  /** 切换模块时重置折叠状态，避免沿用上一个模板的展开记录。 */
-  resetKey?: string;
   children: ReactNode;
 }
 
 export default function InspectorSection({
   title,
-  defaultOpen = true,
-  resetKey,
   children,
 }: InspectorSectionProps) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  useEffect(() => {
-    setOpen(defaultOpen);
-  }, [defaultOpen, resetKey]);
-
   return (
     <section className="homepage-editor__inspector-section">
-      <button
-        type="button"
-        className="homepage-editor__inspector-section-head"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span>{title}</span>
-        <span className="homepage-editor__inspector-section-icon" aria-hidden>{open ? "−" : "+"}</span>
-      </button>
-      {open && <div className="homepage-editor__inspector-section-body">{children}</div>}
+      <h3 className="homepage-editor__inspector-section-head">{title}</h3>
+      <div className="homepage-editor__inspector-section-body">{children}</div>
     </section>
   );
 }

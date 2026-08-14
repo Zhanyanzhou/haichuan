@@ -18,15 +18,21 @@ export const columnsField = {
   ],
 };
 
-/** 间距选项 */
+/**
+ * 间距选项（全站统一文案：紧凑 / 标准 / 宽松；值与旧数据 compact/normal/spacious 保持不变）
+ * Inspector Schema 与 Puck 字段均引用本常量，避免文案漂移。
+ */
+export const SPACING_OPTIONS = [
+  { label: "紧凑", value: "compact" },
+  { label: "标准", value: "normal" },
+  { label: "宽松", value: "spacious" },
+] as const;
+
+/** 间距选项（Puck 字段用，文案与 SPACING_OPTIONS 同源） */
 export const spacingField = {
   type: "radio" as const,
   label: "内边距",
-  options: [
-    { label: "紧凑", value: "compact" },
-    { label: "正常", value: "normal" },
-    { label: "宽松", value: "spacious" },
-  ],
+  options: SPACING_OPTIONS,
 };
 
 /** 背景色 */

@@ -10,6 +10,7 @@
  */
 
 import type { PageModule } from "@/types/pageModule";
+import { resolveLinkTargetUrl } from "./linkTarget";
 import type { HeroPuckProps } from "../adapters/hero.puck";
 import type { SinglePosterPuckProps } from "../adapters/singlePoster.puck";
 import type { DoublePosterPuckProps } from "../adapters/doublePoster.puck";
@@ -210,7 +211,9 @@ export function convertPuckProps(
           body: props.body,
           backgroundImage: props.backgroundImage,
           buttonText: props.buttonText,
-          linkUrl: props.linkUrl,
+          // 三件套（targetType/productId/linkUrl）统一解析为最终跳转地址；
+          // 旧草稿无 targetType 时 normalizeLinkTargetType 按 linkUrl 推断，行为兼容。
+          linkUrl: resolveLinkTargetUrl(props) || props.linkUrl || "",
         },
         { template: props.template || "center" },
         {
@@ -340,7 +343,8 @@ export function convertPuckProps(
           subtitle: props.subtitle,
           body: props.body,
           buttonText: props.buttonText,
-          linkUrl: props.linkUrl,
+          // 三件套统一解析为最终跳转地址；旧草稿无 targetType 时按 linkUrl 推断，行为兼容
+          linkUrl: resolveLinkTargetUrl(props) || props.linkUrl || "",
         },
         { template: props.template || "imageLeft", split: props.split || "50-50" },
         { bgColor: props.bgColor || "#FCFCFB", textColor: props.textBg || "#fff" },

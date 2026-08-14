@@ -77,7 +77,7 @@ export const textBannerPuckConfig = {
       label: "间距",
       options: [
         { label: "紧凑", value: "compact" },
-        { label: "正常", value: "normal" },
+        { label: "标准", value: "normal" },
         { label: "宽松", value: "spacious" },
       ],
     },
