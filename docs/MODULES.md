@@ -8,7 +8,7 @@
 | -------------- | ----------------- | ----------------------------------------- |
 | **products**   | `/api/products`   | CRUD、图片管理、状态流转、主图/列表图设置 |
 | **categories** | `/api/categories` | 4 级树形分类、软删除、SEO 字段            |
-| **inventory**  | `/api/inventory`  | 多仓库库存、安全预警、库存调整            |
+| **inventory**  | `/api/inventory`  | 多仓库库存、库存调整            |
 | **gold-price** | `/api/gold-price` | 手动调价、自动采集(定时任务 Cron)         |
 | **upload**     | `/api/upload`     | 图片上传、Sharp 裁剪压缩、日期目录存储    |
 
@@ -40,7 +40,6 @@
 
 | 模块              | 路由                 | 核心功能                                    |
 | ----------------- | -------------------- | ------------------------------------------- |
-| **homepage**      | `/api/homepage`      | 首页配置(旧版)                              |
 | **page-modules**  | `/api/page-modules`  | 页面构建器（20 种区块）、草稿/发布、版本快照、SSE 通知 |
 | **content-slots** | `/api/content-slots` | 内容槽位(已发布/草稿/管理)                  |
 | **settings**      | `/api/settings`      | 系统设置（`site_settings` 数据表持久化；旧 JSON 仅首次导入） |
