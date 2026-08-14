@@ -33,6 +33,12 @@
 
 明确保留：`docs/AUTONOMOUS_EXECUTION_REPORT.md` 与 `docs/PENDING_WORK.md` 未提交。两者记录的“无 Shell 工具/尚未运行验证”等状态与本轮实际完成的构建、契约和 Git 推送证据冲突；应由其作者更新为一致事实后，再作为历史报告单独审阅。
 
+### 2026-08-14 已验证运行时基线
+
+`93e248a` `chore(deps): 固化已验证运行时基线`：单独保存 `client` 与 `server` 的 `package.json` 和 `package-lock.json`，包含 Nest 10→11、Vite 5→8、React Router 6→7、Multer 1→2、Playwright 与 Recharts 等运行时/测试基线变化。审查确认当前安装树与锁文件声明相符；此前 `npm run typecheck`、`npm run lint`、所有静态契约及生产构建均在此依赖组合下通过。本批次未执行 `npm install`、升级、删除或网络安装动作。
+
+风险与后续：主版本升级会影响未来干净环境安装和运行行为，应在隔离的干净工作树使用锁文件执行一次依赖安装、构建与 E2E 回归后再考虑合并或发布；本次不部署，也不把通过本地既有安装树的结果表述为生产上线验证。
+
 ### 2026-08-14 后续整理
 
 | 提交 | 主题与文件 | 验证证据 | 推送状态 |
