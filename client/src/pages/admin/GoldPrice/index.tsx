@@ -42,7 +42,7 @@ export default function GoldPrice() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-display font-semibold text-brand-text">金价管理</h1><p className="text-sm text-brand-muted mt-1">实时金价 · 自动调价引擎</p></div>
+        <div><h1 className="text-2xl font-display font-semibold text-brand-text">金价管理</h1><p className="text-sm text-brand-muted mt-1">手动更新金价 · 一键联动按金重调价</p></div>
         <Button type="primary" icon={<EditOutlined />} onClick={() => { setNewPrice(currentPrice?.price || 485); setModalOpen(true); }}
           style={{ background: '#B8944E', borderColor: '#B8944E' }}>手动调价</Button>
       </div>

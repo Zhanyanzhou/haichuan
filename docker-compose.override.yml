@@ -1,13 +1,10 @@
 # 本地开发覆盖文件（docker compose 自动加载）
-# 目的：将 MySQL / Redis 端口映射到宿主机回环地址，供宿主机 `npm run dev` 的后端连接。
+# 目的：将 MySQL 端口映射到宿主机回环地址，供宿主机 `npm run dev` 的后端连接。
 # 仅绑定 127.0.0.1，不暴露到局域网/公网，主 docker-compose.yml 的生产安全设计不变。
 services:
   mysql:
     ports:
       - "127.0.0.1:3306:3306"
-  redis:
-    ports:
-      - "127.0.0.1:6379:6379"
   server:
     ports:
       - "127.0.0.1:3000:3000"
