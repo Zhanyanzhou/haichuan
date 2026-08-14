@@ -1,10 +1,14 @@
-import { useState, useEffect, useMemo } from 'react';
-import { productApi, categoryApi, publicProductStreamUrl } from '@/services/api';
-import { USE_MOCK } from '@/services/mockData';
-import { unwrapResponse } from '@/utils/unwrap';
-import { getMaterialLabel } from '@/utils/material';
-import { type CatalogProduct } from '@/data/catalogData';
-import { useReconnectingEventSource } from './useReconnectingEventSource';
+import { useState, useEffect, useMemo } from "react";
+import {
+  productApi,
+  categoryApi,
+  publicProductStreamUrl,
+} from "@/services/api";
+import { USE_MOCK } from "@/services/mockData";
+import { unwrapResponse } from "@/utils/unwrap";
+import { getMaterialLabel } from "@/utils/material";
+import { type CatalogProduct } from "@/data/catalogData";
+import { useReconnectingEventSource } from "./useReconnectingEventSource";
 
 /** 真实分类节点 */
 export interface RealCategory {
@@ -17,7 +21,10 @@ export interface RealCategory {
 }
 
 /** 转换 API 产品 → CatalogProduct（使用真实 categoryId） */
-function mapApiProduct(p: any, categoryById: Map<number, RealCategory>): CatalogProduct {
+function mapApiProduct(
+  p: any,
+  categoryById: Map<number, RealCategory>,
+): CatalogProduct {
   const lineage: RealCategory[] = [];
   let current = categoryById.get(p.categoryId);
   while (current) {
@@ -30,19 +37,21 @@ function mapApiProduct(p: any, categoryById: Map<number, RealCategory>): Catalog
 
   return {
     id: p.id,
-    sku: p.code || '',
-    name: p.name || '',
-    shortDescription: p.shortDescription || '',
-    primaryCategoryId: String(primaryCategory?.id || p.categoryId || ''),
-    secondaryCategoryId: String(secondaryCategory?.id || p.categoryId || ''),
+    sku: p.code || "",
+    name: p.name || "",
+    shortDescription: p.shortDescription || "",
+    primaryCategoryId: String(primaryCategory?.id || p.categoryId || ""),
+    secondaryCategoryId: String(secondaryCategory?.id || p.categoryId || ""),
     material: getMaterialLabel(p.materialType),
-    craft: Array.isArray(p.craftTechnique) ? p.craftTechnique.join('、') : (p.craftTechnique || ''),
-    weight: p.goldWeight ? `${p.goldWeight}g` : (p.weight ? `${p.weight}g` : ''),
-    size: p.size || '',
-    series: '',
-    scene: p.salesMode || '',
-    images: (p.images || []).map((img: any) => img.mediaUrl || img.url || ''),
-    categoryName: categoryById.get(p.categoryId)?.name || '',
+    craft: Array.isArray(p.craftTechnique)
+      ? p.craftTechnique.join("、")
+      : p.craftTechnique || "",
+    weight: p.goldWeight ? `${p.goldWeight}g` : p.weight ? `${p.weight}g` : "",
+    size: p.size || "",
+    series: "",
+    scene: p.salesMode || "",
+    images: (p.images || []).map((img: any) => img.mediaUrl || img.url || ""),
+    categoryName: categoryById.get(p.categoryId)?.name || "",
     price: Number(p.price) || 0,
   };
 }
@@ -94,7 +103,9 @@ export function useProductData() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [revision]);
 
   // P1-35：带自动重连 + debounce 的 SSE（断线重连；消息风暴合并为一次重拉）

@@ -1,12 +1,22 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from "react";
 import {
-  Table, Button, Card, Tag, Modal, Form, Input, InputNumber, Switch,
-  Space, message, Popconfirm,
-} from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
-import { attributeApi } from '@/services/api';
-import { unwrapResponse } from '@/utils/unwrap';
-import AdminPageHeader from '@/components/common/AdminPageHeader';
+  Table,
+  Button,
+  Card,
+  Tag,
+  Modal,
+  Form,
+  Input,
+  InputNumber,
+  Switch,
+  Space,
+  message,
+  Popconfirm,
+} from "antd";
+import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
+import { attributeApi } from "@/services/api";
+import { unwrapResponse } from "@/utils/unwrap";
+import AdminPageHeader from "@/components/common/AdminPageHeader";
 
 interface AttrValue {
   id: number;
@@ -41,7 +51,7 @@ export default function AttributeManage() {
       const res = await attributeApi.getAll();
       setList(unwrapResponse<Attr[]>(res) || []);
     } catch {
-      message.error('属性加载失败');
+      message.error("属性加载失败");
     } finally {
       setLoading(false);
     }
@@ -68,21 +78,21 @@ export default function AttributeManage() {
     try {
       if (editing) await attributeApi.update(editing.id, values);
       else await attributeApi.create(values);
-      message.success('已保存');
+      message.success("已保存");
       setAttrModalOpen(false);
       load();
     } catch (e: any) {
-      message.error(e?.message || '保存失败');
+      message.error(e?.message || "保存失败");
     }
   };
 
   const removeAttr = async (id: number) => {
     try {
       await attributeApi.remove(id);
-      message.success('已停用');
+      message.success("已停用");
       load();
     } catch (e: any) {
-      message.error(e?.message || '操作失败');
+      message.error(e?.message || "操作失败");
     }
   };
 
@@ -96,48 +106,62 @@ export default function AttributeManage() {
     const values = await valueForm.validateFields();
     try {
       await attributeApi.addValue(currentAttrId as number, values);
-      message.success('已添加属性值');
+      message.success("已添加属性值");
       setValueModalOpen(false);
       load();
     } catch (e: any) {
-      message.error(e?.message || '添加失败');
+      message.error(e?.message || "添加失败");
     }
   };
 
   const removeValue = async (valueId: number) => {
     try {
       await attributeApi.removeValue(valueId);
-      message.success('已停用属性值');
+      message.success("已停用属性值");
       load();
     } catch (e: any) {
-      message.error(e?.message || '操作失败');
+      message.error(e?.message || "操作失败");
     }
   };
 
   const columns = [
-    { title: '属性名', dataIndex: 'name', width: 140 },
+    { title: "属性名", dataIndex: "name", width: 140 },
     {
-      title: '稳定键',
-      dataIndex: 'key',
+      title: "稳定键",
+      dataIndex: "key",
       width: 140,
       render: (v: string) => <code style={{ fontSize: 12 }}>{v}</code>,
     },
     {
-      title: '可筛选',
-      dataIndex: 'isFilterable',
+      title: "可筛选",
+      dataIndex: "isFilterable",
       width: 90,
       render: (v: boolean) => (v ? <Tag color="gold">是</Tag> : <Tag>否</Tag>),
     },
-    { title: '排序', dataIndex: 'sortOrder', width: 70 },
-    { title: '状态', dataIndex: 'isActive', width: 90, render: (v: boolean) => (v ? <Tag color="green">启用</Tag> : <Tag color="#999">停用</Tag>) },
+    { title: "排序", dataIndex: "sortOrder", width: 70 },
     {
-      title: '操作',
+      title: "状态",
+      dataIndex: "isActive",
+      width: 90,
+      render: (v: boolean) =>
+        v ? <Tag color="green">启用</Tag> : <Tag color="#999">停用</Tag>,
+    },
+    {
+      title: "操作",
       width: 180,
       render: (_: any, r: Attr) => (
         <Space>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEditAttr(r)}>编辑</Button>
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => openEditAttr(r)}
+          >
+            编辑
+          </Button>
           <Popconfirm title="停用该属性？" onConfirm={() => removeAttr(r.id)}>
-            <Button size="small" danger icon={<DeleteOutlined />}>停用</Button>
+            <Button size="small" danger icon={<DeleteOutlined />}>
+              停用
+            </Button>
           </Popconfirm>
         </Space>
       ),
@@ -146,13 +170,23 @@ export default function AttributeManage() {
 
   return (
     <div>
-      <AdminPageHeader title="属性字典" subtitle="统一管理商品筛选维度（材质、工艺、尺寸、场景等），前台筛选器按此字典动态生成" />
+      <AdminPageHeader
+        title="属性字典"
+        subtitle="统一管理商品筛选维度（材质、工艺、尺寸、场景等），前台筛选器按此字典动态生成"
+      />
       <Card
-        style={{ borderRadius: 10, border: '1px solid #E7E6E2' }}
+        style={{ borderRadius: 10, border: "1px solid #E7E6E2" }}
         title={
           <Space>
             <span>属性列表</span>
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreateAttr}>新增属性</Button>
+            <Button
+              type="primary"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={openCreateAttr}
+            >
+              新增属性
+            </Button>
           </Space>
         }
       >
@@ -166,18 +200,38 @@ export default function AttributeManage() {
             expandedRowRender: (attr: Attr) => (
               <div style={{ paddingLeft: 24 }}>
                 <div style={{ marginBottom: 12 }}>
-                  <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => openAddValue(attr.id)}>新增属性值</Button>
+                  <Button
+                    size="small"
+                    type="dashed"
+                    icon={<PlusOutlined />}
+                    onClick={() => openAddValue(attr.id)}
+                  >
+                    新增属性值
+                  </Button>
                 </div>
                 {attr.values.length === 0 ? (
-                  <span style={{ color: '#999' }}>暂无属性值</span>
+                  <span style={{ color: "#999" }}>暂无属性值</span>
                 ) : (
                   <Space size={[8, 8]} wrap>
                     {attr.values.map((v) => (
-                      <Tag key={v.id} color={v.isActive ? 'default' : '#eee'} style={{ opacity: v.isActive ? 1 : 0.5 }}>
+                      <Tag
+                        key={v.id}
+                        color={v.isActive ? "default" : "#eee"}
+                        style={{ opacity: v.isActive ? 1 : 0.5 }}
+                      >
                         {v.value}
                         {v.isActive ? (
-                          <Popconfirm title="停用该属性值？" onConfirm={() => removeValue(v.id)}>
-                            <DeleteOutlined style={{ marginLeft: 6, cursor: 'pointer', color: '#999' }} />
+                          <Popconfirm
+                            title="停用该属性值？"
+                            onConfirm={() => removeValue(v.id)}
+                          >
+                            <DeleteOutlined
+                              style={{
+                                marginLeft: 6,
+                                cursor: "pointer",
+                                color: "#999",
+                              }}
+                            />
                           </Popconfirm>
                         ) : null}
                       </Tag>
@@ -191,30 +245,46 @@ export default function AttributeManage() {
       </Card>
 
       <Modal
-        title={editing ? '编辑属性' : '新增属性'}
+        title={editing ? "编辑属性" : "新增属性"}
         open={attrModalOpen}
         onOk={submitAttr}
         onCancel={() => setAttrModalOpen(false)}
         destroyOnClose
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="属性名" rules={[{ required: true, message: '请输入属性名' }]}>
+          <Form.Item
+            name="name"
+            label="属性名"
+            rules={[{ required: true, message: "请输入属性名" }]}
+          >
             <Input placeholder="如：材质" maxLength={50} />
           </Form.Item>
           <Form.Item
             name="key"
             label="稳定键"
             rules={[
-              { required: true, message: '请输入稳定键' },
-              { pattern: /^[a-z][a-z0-9_-]*$/, message: '仅支持小写字母、数字、下划线与连字符，且以字母开头' },
+              { required: true, message: "请输入稳定键" },
+              {
+                pattern: /^[a-z][a-z0-9_-]*$/,
+                message: "仅支持小写字母、数字、下划线与连字符，且以字母开头",
+              },
             ]}
           >
-            <Input placeholder="如：material" disabled={!!editing} maxLength={50} />
+            <Input
+              placeholder="如：material"
+              disabled={!!editing}
+              maxLength={50}
+            />
           </Form.Item>
           <Form.Item name="sortOrder" label="排序" initialValue={0}>
-            <InputNumber min={0} style={{ width: '100%' }} />
+            <InputNumber min={0} style={{ width: "100%" }} />
           </Form.Item>
-          <Form.Item name="isFilterable" label="前台可筛选" valuePropName="checked" initialValue>
+          <Form.Item
+            name="isFilterable"
+            label="前台可筛选"
+            valuePropName="checked"
+            initialValue
+          >
             <Switch />
           </Form.Item>
         </Form>
@@ -228,11 +298,15 @@ export default function AttributeManage() {
         destroyOnClose
       >
         <Form form={valueForm} layout="vertical">
-          <Form.Item name="value" label="属性值" rules={[{ required: true, message: '请输入属性值' }]}>
+          <Form.Item
+            name="value"
+            label="属性值"
+            rules={[{ required: true, message: "请输入属性值" }]}
+          >
             <Input placeholder="如：足金999" maxLength={100} />
           </Form.Item>
           <Form.Item name="sortOrder" label="排序" initialValue={0}>
-            <InputNumber min={0} style={{ width: '100%' }} />
+            <InputNumber min={0} style={{ width: "100%" }} />
           </Form.Item>
         </Form>
       </Modal>

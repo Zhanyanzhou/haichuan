@@ -24,25 +24,25 @@ model User {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  operationLogs      OperationLog[]
-  aiClassifyRecords  AIClassifyRecord[] @relation("Operator")
-  inquiries          Inquiry[]          @relation("AssignedTo")
-  notifications      Notification[]
-  Order              Order[]
-  selectionInquiries SelectionInquiry[] @relation("Handler")
-  leadFollowUps      LeadFollowUp[]     @relation("Creator")
+  operationLogs             OperationLog[]
+  aiClassifyRecords         AIClassifyRecord[]   @relation("Operator")
+  inquiries                 Inquiry[]            @relation("AssignedTo")
+  notifications             Notification[]
+  Order                     Order[]
+  selectionInquiries        SelectionInquiry[]   @relation("Handler")
+  leadFollowUps             LeadFollowUp[]       @relation("Creator")
   // 交易域审核/执行人关联（命名关系，避免与既有 User 关系冲突）
-  paymentReviews     Payment[]          @relation("PaymentReviewer")
-  refundRequests     Refund[]           @relation("RefundRequester")
-  refundReviews      Refund[]           @relation("RefundReviewer")
-  refundProcessings  Refund[]           @relation("RefundProcessor")
-  fulfillmentCreators Fulfillment[]     @relation("FulfillmentCreator")
-  afterSalesHandlers AfterSalesCase[]   @relation("AfterSalesHandler")
+  paymentReviews            Payment[]            @relation("PaymentReviewer")
+  refundRequests            Refund[]             @relation("RefundRequester")
+  refundReviews             Refund[]             @relation("RefundReviewer")
+  refundProcessings         Refund[]             @relation("RefundProcessor")
+  fulfillmentCreators       Fulfillment[]        @relation("FulfillmentCreator")
+  afterSalesHandlers        AfterSalesCase[]     @relation("AfterSalesHandler")
   // 合作申请审核人关联（命名关系，避免与既有 User 关系冲突）
   partnerApplicationReviews PartnerApplication[] @relation("PartnerApplicationReviewer")
   // 交易中心：销售顾问关联的订单与报价单
-  salesConsultantOrders Order[] @relation("OrderSalesConsultant")
-  quotationsAsConsultant Quotation[] @relation("QuotationSalesConsultant")
+  salesConsultantOrders     Order[]              @relation("OrderSalesConsultant")
+  quotationsAsConsultant    Quotation[]          @relation("QuotationSalesConsultant")
 
   @@map("users")
 }
@@ -91,48 +91,48 @@ model Category {
 // ========== 产品管理（核心） ==========
 
 model Product {
-  id               Int           @id @default(autoincrement())
-  code             String        @unique @db.VarChar(50) // 产品编码/货号
-  name             String        @db.VarChar(200)
-  shortDescription String?       @map("short_description") @db.VarChar(500) // 简介
-  description      String?       @db.Text
-  categoryId       Int           @map("category_id")
-  materialType     MaterialType  @default(GOLD_999) @map("material_type")
-  goldWeight       Decimal?      @default(0) @map("gold_weight") @db.Decimal(8, 2) // 金重(g)
-  craftFee         Decimal?      @default(0) @map("craft_fee") @db.Decimal(10, 2) // 工费
-  price            Decimal?      @default(0) @db.Decimal(10, 2) // 当前售价
-  priceMin         Decimal?      @default(0) @map("price_min") @db.Decimal(10, 2)
-  priceMax         Decimal?      @default(0) @map("price_max") @db.Decimal(10, 2)
-  weight           Decimal?      @default(0) @db.Decimal(8, 2) // 总重量(g)
-  size             String?       @db.VarChar(100) // 尺寸规格
-  gemInfo          Json?         @map("gem_info") // 宝石信息JSON
-  craftTechnique   Json?         @map("craft_technique") // 工艺技法JSON
-  status           ProductStatus @default(DRAFT)
+  id               Int               @id @default(autoincrement())
+  code             String            @unique @db.VarChar(50) // 产品编码/货号
+  name             String            @db.VarChar(200)
+  shortDescription String?           @map("short_description") @db.VarChar(500) // 简介
+  description      String?           @db.Text
+  categoryId       Int               @map("category_id")
+  materialType     MaterialType      @default(GOLD_999) @map("material_type")
+  goldWeight       Decimal?          @default(0) @map("gold_weight") @db.Decimal(8, 2) // 金重(g)
+  craftFee         Decimal?          @default(0) @map("craft_fee") @db.Decimal(10, 2) // 工费
+  price            Decimal?          @default(0) @db.Decimal(10, 2) // 当前售价
+  priceMin         Decimal?          @default(0) @map("price_min") @db.Decimal(10, 2)
+  priceMax         Decimal?          @default(0) @map("price_max") @db.Decimal(10, 2)
+  weight           Decimal?          @default(0) @db.Decimal(8, 2) // 总重量(g)
+  size             String?           @db.VarChar(100) // 尺寸规格
+  gemInfo          Json?             @map("gem_info") // 宝石信息JSON
+  craftTechnique   Json?             @map("craft_technique") // 工艺技法JSON
+  status           ProductStatus     @default(DRAFT)
   // 商品可见范围分级（受控产品库核心字段）
   // PUBLIC=公开宣传款（本期不迁移旧商品到此）；MEMBER=登录会员可见（默认）；
   // PARTNER=仅审核通过的合作商家可见；INTERNAL=仅后台员工可见，前台永不展示。
   visibility       ProductVisibility @default(MEMBER)
-  salesMode        SalesMode     @default(DISPLAY_ONLY) @map("sales_mode")
-  sortOrder        Int           @default(0) @map("sort_order")
-  isHot            Boolean       @default(false) @map("is_hot")
-  isNew            Boolean       @default(false) @map("is_new")
-  isRecommended    Boolean       @default(false) @map("is_recommended")
-  isLimited        Boolean       @default(false) @map("is_limited")
-  isCustom         Boolean       @default(false) @map("is_custom")
-  multiDiscount    Boolean       @default(false) @map("multi_discount")
-  viewCount        Int           @default(0) @map("view_count")
-  salesCount       Int           @default(0) @map("sales_count")
-  publishedAt      DateTime?     @map("published_at")
-  deletedAt        DateTime?     @map("deleted_at")
-  createdAt        DateTime      @default(now()) @map("created_at")
-  updatedAt        DateTime      @updatedAt @map("updated_at")
+  salesMode        SalesMode         @default(DISPLAY_ONLY) @map("sales_mode")
+  sortOrder        Int               @default(0) @map("sort_order")
+  isHot            Boolean           @default(false) @map("is_hot")
+  isNew            Boolean           @default(false) @map("is_new")
+  isRecommended    Boolean           @default(false) @map("is_recommended")
+  isLimited        Boolean           @default(false) @map("is_limited")
+  isCustom         Boolean           @default(false) @map("is_custom")
+  multiDiscount    Boolean           @default(false) @map("multi_discount")
+  viewCount        Int               @default(0) @map("view_count")
+  salesCount       Int               @default(0) @map("sales_count")
+  publishedAt      DateTime?         @map("published_at")
+  deletedAt        DateTime?         @map("deleted_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
 
-  category              Category               @relation(fields: [categoryId], references: [id])
+  category              Category                @relation(fields: [categoryId], references: [id])
   images                ProductImage[]
-  primaryImageId        Int?                   @map("primary_image_id")
-  listingImageId        Int?                   @map("listing_image_id")
-  primaryImage          ProductImage?          @relation("PrimaryImage", fields: [primaryImageId], references: [id], onDelete: SetNull)
-  listingImage          ProductImage?          @relation("ListingImage", fields: [listingImageId], references: [id], onDelete: SetNull)
+  primaryImageId        Int?                    @map("primary_image_id")
+  listingImageId        Int?                    @map("listing_image_id")
+  primaryImage          ProductImage?           @relation("PrimaryImage", fields: [primaryImageId], references: [id], onDelete: SetNull)
+  listingImage          ProductImage?           @relation("ListingImage", fields: [listingImageId], references: [id], onDelete: SetNull)
   skus                  ProductSKU[]
   tags                  ProductTag[]
   productAttributes     ProductAttributeValue[]
@@ -245,11 +245,11 @@ model ProductSKU {
   isActive    Boolean      @default(true) @map("is_active")
   createdAt   DateTime     @default(now()) @map("created_at")
 
-  product     Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
-  inventories Inventory[]
-  orderItems  OrderItem[]
-  cartItems   Cart[]
-  reservations InventoryReservation[]
+  product        Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
+  inventories    Inventory[]
+  orderItems     OrderItem[]
+  cartItems      Cart[]
+  reservations   InventoryReservation[]
   quotationItems QuotationItem[]
 
   @@map("product_skus")
@@ -309,7 +309,7 @@ model AttributeValue {
   sortOrder   Int     @default(0) @map("sort_order")
   isActive    Boolean @default(true) @map("is_active")
 
-  attribute         Attribute              @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  attribute         Attribute               @relation(fields: [attributeId], references: [id], onDelete: Cascade)
   productAttributes ProductAttributeValue[]
 
   @@unique([attributeId, value])
@@ -449,8 +449,8 @@ model Inventory {
   lastCheckAt DateTime? @map("last_check_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  sku       ProductSKU @relation(fields: [skuId], references: [id], onDelete: Cascade)
-  warehouse Warehouse  @relation(fields: [warehouseId], references: [id])
+  sku          ProductSKU             @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse              @relation(fields: [warehouseId], references: [id])
   reservations InventoryReservation[]
 
   @@unique([skuId, warehouseId])
@@ -460,31 +460,31 @@ model Inventory {
 // ========== 订单管理 ==========
 
 model Order {
-  id               Int         @id @default(autoincrement())
-  orderNo          String      @unique @map("order_no") @db.VarChar(30)
-  userId           Int?        @map("user_id") // 关联注册用户（可选，兼容游客下单）
-  customerName     String      @map("customer_name") @db.VarChar(50)
-  customerId       Int?        @map("customer_id")
-  customerPhone    String      @map("customer_phone") @db.VarChar(20)
-  customerEmail    String?     @map("customer_email") @db.VarChar(100)
-  address          String      @db.VarChar(500)
-  totalAmount      Decimal     @map("total_amount") @db.Decimal(12, 2)
-  discountAmount   Decimal     @default(0) @map("discount_amount") @db.Decimal(10, 2)
-  finalAmount      Decimal     @map("final_amount") @db.Decimal(12, 2)
-  status           OrderStatus @default(PENDING_PAYMENT)
-  paymentMethod    String?     @map("payment_method") @db.VarChar(50)
-  paymentProof     String?     @map("payment_proof") @db.VarChar(500)
-  logisticsCompany String?     @map("logistics_company") @db.VarChar(50)
-  logisticsNo      String?     @map("logistics_no") @db.VarChar(100)
-  internalNote     String?     @map("internal_note") @db.Text
-  lockedGoldPrice  Decimal?    @map("locked_gold_price") @db.Decimal(10, 2)
-  reservedAt       DateTime?   @map("reserved_at")
-  paymentConfirmedAt DateTime? @map("payment_confirmed_at")
-  shippedAt        DateTime?   @map("shipped_at")
-  completedAt      DateTime?   @map("completed_at")
-  cancelledAt      DateTime?   @map("cancelled_at")
-  createdAt        DateTime    @default(now()) @map("created_at")
-  updatedAt        DateTime    @updatedAt @map("updated_at")
+  id                 Int         @id @default(autoincrement())
+  orderNo            String      @unique @map("order_no") @db.VarChar(30)
+  userId             Int?        @map("user_id") // 关联注册用户（可选，兼容游客下单）
+  customerName       String      @map("customer_name") @db.VarChar(50)
+  customerId         Int?        @map("customer_id")
+  customerPhone      String      @map("customer_phone") @db.VarChar(20)
+  customerEmail      String?     @map("customer_email") @db.VarChar(100)
+  address            String      @db.VarChar(500)
+  totalAmount        Decimal     @map("total_amount") @db.Decimal(12, 2)
+  discountAmount     Decimal     @default(0) @map("discount_amount") @db.Decimal(10, 2)
+  finalAmount        Decimal     @map("final_amount") @db.Decimal(12, 2)
+  status             OrderStatus @default(PENDING_PAYMENT)
+  paymentMethod      String?     @map("payment_method") @db.VarChar(50)
+  paymentProof       String?     @map("payment_proof") @db.VarChar(500)
+  logisticsCompany   String?     @map("logistics_company") @db.VarChar(50)
+  logisticsNo        String?     @map("logistics_no") @db.VarChar(100)
+  internalNote       String?     @map("internal_note") @db.Text
+  lockedGoldPrice    Decimal?    @map("locked_gold_price") @db.Decimal(10, 2)
+  reservedAt         DateTime?   @map("reserved_at")
+  paymentConfirmedAt DateTime?   @map("payment_confirmed_at")
+  shippedAt          DateTime?   @map("shipped_at")
+  completedAt        DateTime?   @map("completed_at")
+  cancelledAt        DateTime?   @map("cancelled_at")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
 
   // 交易中心扩展字段（订单类型 / 销售顾问 / 来源 / 定金尾款 / 已收已退 / 定制阶段 / 发货维度）
   orderType         OrderType      @default(SPOT) @map("order_type")
@@ -501,20 +501,20 @@ model Order {
   deliveryStatus    DeliveryStatus @default(NONE) @map("delivery_status") // 发货维度独立状态
   receivedAt        DateTime?      @map("received_at") // 签收时间
 
-  items    OrderItem[]
-  payments Payment[]
-  refunds  Refund[]
-  reservations InventoryReservation[]
+  items           OrderItem[]
+  payments        Payment[]
+  refunds         Refund[]
+  reservations    InventoryReservation[]
   // 交易域扩展：履约、售后、不可变事件时间线
-  fulfillments   Fulfillment[]
+  fulfillments    Fulfillment[]
   afterSalesCases AfterSalesCase[]
-  tradeEvents    TradeEvent[]
-  user     User?       @relation(fields: [userId], references: [id])
-  customer Customer?   @relation(fields: [customerId], references: [id])
-  couponId Int?        @map("coupon_id")
+  tradeEvents     TradeEvent[]
+  user            User?                  @relation(fields: [userId], references: [id])
+  customer        Customer?              @relation(fields: [customerId], references: [id])
+  couponId        Int?                   @map("coupon_id")
   // 交易中心关系
-  salesConsultant User? @relation("OrderSalesConsultant", fields: [salesConsultantId], references: [id], onDelete: SetNull)
-  quotationSource Quotation? @relation("QuotationConvertedOrder") // 该订单由哪张报价单转出（一对一，外键在 Quotation.convertedOrderId）
+  salesConsultant User?                  @relation("OrderSalesConsultant", fields: [salesConsultantId], references: [id], onDelete: SetNull)
+  quotationSource Quotation?             @relation("QuotationConvertedOrder") // 该订单由哪张报价单转出（一对一，外键在 Quotation.convertedOrderId）
 
   @@index([orderNo])
   @@index([status])
@@ -531,26 +531,26 @@ model Order {
 }
 
 model Customer {
-  id          Int               @id @default(autoincrement())
-  phone       String            @unique @db.VarChar(20)
-  name        String?           @db.VarChar(50)
-  email       String?           @db.VarChar(100)
-  passwordHash String?          @map("password_hash") @db.VarChar(255)
-  status      Status            @default(ACTIVE)
+  id                Int                 @id @default(autoincrement())
+  phone             String              @unique @db.VarChar(20)
+  name              String?             @db.VarChar(50)
+  email             String?             @db.VarChar(100)
+  passwordHash      String?             @map("password_hash") @db.VarChar(255)
+  status            Status              @default(ACTIVE)
   // 合作商家体系：客户合作权限状态，独立于后台 User.Role。
   // accountType=PARTNER 表示当前可访问 PARTNER 可见范围商品（仅 partnerStatus=APPROVED 时生效）。
   accountType       CustomerAccountType @default(MEMBER) @map("account_type")
   partnerStatus     PartnerStatus       @default(NONE) @map("partner_status")
   partnerApprovedAt DateTime?           @map("partner_approved_at")
-  lastOrderAt DateTime?         @map("last_order_at")
-  createdAt   DateTime          @default(now()) @map("created_at")
-  updatedAt   DateTime          @updatedAt @map("updated_at")
+  lastOrderAt       DateTime?           @map("last_order_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
 
-  addresses CustomerAddress[]
-  orders    Order[]
-  inquiries Inquiry[]
-  selectionInquiries SelectionInquiry[]
-  afterSalesCases AfterSalesCase[]
+  addresses           CustomerAddress[]
+  orders              Order[]
+  inquiries           Inquiry[]
+  selectionInquiries  SelectionInquiry[]
+  afterSalesCases     AfterSalesCase[]
   partnerApplications PartnerApplication[]
   productAccessLogs   ProductAccessLog[]
   quotations          Quotation[]
@@ -660,9 +660,9 @@ model InventoryReservation {
   consumedAt  DateTime? @map("consumed_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  inventory Inventory?  @relation(fields: [inventoryId], references: [id], onDelete: Restrict)
-  sku       ProductSKU  @relation(fields: [skuId], references: [id], onDelete: Restrict)
+  order     Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inventory Inventory? @relation(fields: [inventoryId], references: [id], onDelete: Restrict)
+  sku       ProductSKU @relation(fields: [skuId], references: [id], onDelete: Restrict)
 
   @@index([orderId])
   @@index([inventoryId])
@@ -690,9 +690,9 @@ model Payment {
   paidAt         DateTime?     @map("paid_at")
   createdAt      DateTime      @default(now()) @map("created_at")
 
-  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  refunds Refund[]
-  reviewer User?   @relation("PaymentReviewer", fields: [reviewedBy], references: [id])
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  refunds  Refund[]
+  reviewer User?    @relation("PaymentReviewer", fields: [reviewedBy], references: [id])
 
   @@index([orderId])
   @@index([paymentNo])
@@ -710,32 +710,32 @@ enum PaymentStatus {
 // ========== 退款管理 ==========
 
 model Refund {
-  id              Int          @id @default(autoincrement())
-  orderId         Int          @map("order_id")
-  paymentId       Int?         @map("payment_id")
-  refundNo        String       @unique @map("refund_no") @db.VarChar(50)
-  amount          Decimal      @db.Decimal(12, 2)
-  reason          String?      @db.VarChar(500)
-  status          RefundStatus @default(PENDING)
-  gatewayRefundNo String?      @map("gateway_refund_no") @db.VarChar(100)
-  processedAt     DateTime?    @map("processed_at")
+  id               Int          @id @default(autoincrement())
+  orderId          Int          @map("order_id")
+  paymentId        Int?         @map("payment_id")
+  refundNo         String       @unique @map("refund_no") @db.VarChar(50)
+  amount           Decimal      @db.Decimal(12, 2)
+  reason           String?      @db.VarChar(500)
+  status           RefundStatus @default(PENDING)
+  gatewayRefundNo  String?      @map("gateway_refund_no") @db.VarChar(100)
+  processedAt      DateTime?    @map("processed_at")
   // 退款审核与执行链路（P2 扩展）：申请→审核→人工执行→完成/拒绝
-  requestedBy     Int?         @map("requested_by") // 申请人（管理员 id）
-  reviewedBy      Int?         @map("reviewed_by") // 审核人（管理员 id）
-  reviewedAt      DateTime?    @map("reviewed_at")
-  reviewNote      String?      @map("review_note") @db.VarChar(500)
-  processedBy     Int?         @map("processed_by") // 实际执行人（管理员 id）
-  completedAt     DateTime?    @map("completed_at")
+  requestedBy      Int?         @map("requested_by") // 申请人（管理员 id）
+  reviewedBy       Int?         @map("reviewed_by") // 审核人（管理员 id）
+  reviewedAt       DateTime?    @map("reviewed_at")
+  reviewNote       String?      @map("review_note") @db.VarChar(500)
+  processedBy      Int?         @map("processed_by") // 实际执行人（管理员 id）
+  completedAt      DateTime?    @map("completed_at")
   // 幂等键：防重复提交/重复执行（P2）；本阶段人工执行，预留第三方回调幂等
-  idempotencyKey  String?      @unique @map("idempotency_key") @db.VarChar(64)
-  afterSalesCaseId Int?        @map("after_sales_case_id")
-  createdAt       DateTime     @default(now()) @map("created_at")
+  idempotencyKey   String?      @unique @map("idempotency_key") @db.VarChar(64)
+  afterSalesCaseId Int?         @map("after_sales_case_id")
+  createdAt        DateTime     @default(now()) @map("created_at")
 
-  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  payment  Payment? @relation(fields: [paymentId], references: [id])
-  requester User?   @relation("RefundRequester", fields: [requestedBy], references: [id])
-  reviewer  User?   @relation("RefundReviewer", fields: [reviewedBy], references: [id])
-  processor User?   @relation("RefundProcessor", fields: [processedBy], references: [id])
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  payment   Payment? @relation(fields: [paymentId], references: [id])
+  requester User?    @relation("RefundRequester", fields: [requestedBy], references: [id])
+  reviewer  User?    @relation("RefundReviewer", fields: [reviewedBy], references: [id])
+  processor User?    @relation("RefundProcessor", fields: [processedBy], references: [id])
 
   @@index([orderId])
   @@index([status])
@@ -744,12 +744,12 @@ model Refund {
 }
 
 enum RefundStatus {
-  PENDING      // 待审核
-  APPROVED     // 审核通过，待执行
-  PROCESSING   // 执行中
-  COMPLETED    // 已完成
-  REJECTED     // 已拒绝
-  FAILED       // 执行失败
+  PENDING // 待审核
+  APPROVED // 审核通过，待执行
+  PROCESSING // 执行中
+  COMPLETED // 已完成
+  REJECTED // 已拒绝
+  FAILED // 执行失败
 }
 
 // ========== 交易事件（不可变时间线）==========
@@ -796,7 +796,7 @@ model Fulfillment {
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @updatedAt @map("updated_at")
 
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   creator User? @relation("FulfillmentCreator", fields: [createdBy], references: [id])
 
   @@index([orderId])
@@ -816,23 +816,23 @@ enum FulfillmentStatus {
 // ========== 售后工单（退款退货 / 换货 / 维修）==========
 // 售后 ≠ 退款：售后审核通过后可发起退款（关联 Refund），也可仅换货/维修。
 model AfterSalesCase {
-  id                     Int              @id @default(autoincrement())
-  caseNo                 String           @unique @map("case_no") @db.VarChar(50)
-  orderId                Int              @map("order_id")
-  orderItemId            Int?             @map("order_item_id")
-  customerId             Int?             @map("customer_id")
-  type                   AfterSalesType
-  status                 AfterSalesStatus @default(REQUESTED)
-  reason                 String           @db.VarChar(500)
-  evidenceUrls           Json?            @map("evidence_urls")
-  customerNote           String?          @map("customer_note") @db.Text
-  adminNote              String?          @map("admin_note") @db.Text
-  requestedRefundAmount  Decimal?         @map("requested_refund_amount") @db.Decimal(12, 2)
-  approvedRefundAmount   Decimal?         @map("approved_refund_amount") @db.Decimal(12, 2)
-  handledBy              Int?             @map("handled_by")
-  handledAt              DateTime?        @map("handled_at")
-  createdAt              DateTime         @default(now()) @map("created_at")
-  updatedAt              DateTime         @updatedAt @map("updated_at")
+  id                    Int              @id @default(autoincrement())
+  caseNo                String           @unique @map("case_no") @db.VarChar(50)
+  orderId               Int              @map("order_id")
+  orderItemId           Int?             @map("order_item_id")
+  customerId            Int?             @map("customer_id")
+  type                  AfterSalesType
+  status                AfterSalesStatus @default(REQUESTED)
+  reason                String           @db.VarChar(500)
+  evidenceUrls          Json?            @map("evidence_urls")
+  customerNote          String?          @map("customer_note") @db.Text
+  adminNote             String?          @map("admin_note") @db.Text
+  requestedRefundAmount Decimal?         @map("requested_refund_amount") @db.Decimal(12, 2)
+  approvedRefundAmount  Decimal?         @map("approved_refund_amount") @db.Decimal(12, 2)
+  handledBy             Int?             @map("handled_by")
+  handledAt             DateTime?        @map("handled_at")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
 
   order    Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
@@ -905,9 +905,9 @@ model Inquiry {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  product  Product? @relation(fields: [productId], references: [id])
+  product  Product?  @relation(fields: [productId], references: [id])
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  assignee User?    @relation("AssignedTo", fields: [assignedTo], references: [id])
+  assignee User?     @relation("AssignedTo", fields: [assignedTo], references: [id])
 
   @@index([status])
   @@index([customerId, createdAt])
@@ -1153,9 +1153,9 @@ model SelectionInquiry {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  items   SelectionInquiryItem[]
+  items    SelectionInquiryItem[]
   customer Customer?              @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  handler User?                  @relation("Handler", fields: [handledBy], references: [id])
+  handler  User?                  @relation("Handler", fields: [handledBy], references: [id])
 
   @@index([status])
   @@index([customerId, createdAt])
@@ -1329,9 +1329,9 @@ model Quotation {
   updatedAt         DateTime        @updatedAt @map("updated_at")
 
   items           QuotationItem[]
-  customer        Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  salesConsultant User?            @relation("QuotationSalesConsultant", fields: [salesConsultantId], references: [id], onDelete: SetNull)
-  convertedOrder  Order?           @relation("QuotationConvertedOrder", fields: [convertedOrderId], references: [id], onDelete: SetNull)
+  customer        Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  salesConsultant User?           @relation("QuotationSalesConsultant", fields: [salesConsultantId], references: [id], onDelete: SetNull)
+  convertedOrder  Order?          @relation("QuotationConvertedOrder", fields: [convertedOrderId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([customerPhone])
@@ -1350,21 +1350,21 @@ enum QuotationStatus {
 }
 
 model QuotationItem {
-  id           Int      @id @default(autoincrement())
-  quotationId  Int      @map("quotation_id")
-  productId    Int?     @map("product_id")
-  skuId        Int?     @map("sku_id")
-  productName  String   @map("product_name") @db.VarChar(200)
-  productImage String?  @map("product_image") @db.VarChar(500)
-  spec         String?  @db.VarChar(200) // 规格
-  quantity     Int      @default(1)
-  unitPrice    Decimal  @map("unit_price") @db.Decimal(10, 2) // 原价
-  quotedPrice  Decimal  @map("quoted_price") @db.Decimal(10, 2) // 报价（成交单价）
-  subtotal     Decimal  @db.Decimal(12, 2) // 报价小计
+  id           Int     @id @default(autoincrement())
+  quotationId  Int     @map("quotation_id")
+  productId    Int?    @map("product_id")
+  skuId        Int?    @map("sku_id")
+  productName  String  @map("product_name") @db.VarChar(200)
+  productImage String? @map("product_image") @db.VarChar(500)
+  spec         String? @db.VarChar(200) // 规格
+  quantity     Int     @default(1)
+  unitPrice    Decimal @map("unit_price") @db.Decimal(10, 2) // 原价
+  quotedPrice  Decimal @map("quoted_price") @db.Decimal(10, 2) // 报价（成交单价）
+  subtotal     Decimal @db.Decimal(12, 2) // 报价小计
 
-  quotation Quotation    @relation(fields: [quotationId], references: [id], onDelete: Cascade)
-  product   Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
-  sku       ProductSKU?  @relation(fields: [skuId], references: [id], onDelete: SetNull)
+  quotation Quotation   @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  product   Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+  sku       ProductSKU? @relation(fields: [skuId], references: [id], onDelete: SetNull)
 
   @@index([quotationId])
   @@map("quotation_items")

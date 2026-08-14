@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { attributeApi } from '@/services/api';
-import { unwrapResponse } from '@/utils/unwrap';
-import { MATERIALS, CRAFTS } from '@/data/catalogData';
+import { useEffect, useState } from "react";
+import { attributeApi } from "@/services/api";
+import { unwrapResponse } from "@/utils/unwrap";
+import { MATERIALS, CRAFTS } from "@/data/catalogData";
 
 interface AttributeOption {
   id: number;
@@ -45,8 +45,8 @@ export function useAttributeDictionary() {
   };
 
   return {
-    materialOptions: valuesOf('material', MATERIALS),
-    craftOptions: valuesOf('craft', CRAFTS),
+    materialOptions: valuesOf("material", MATERIALS),
+    craftOptions: valuesOf("craft", CRAFTS),
     loaded: nodes.length > 0,
   };
 }

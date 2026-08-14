@@ -24,6 +24,7 @@ import {
 import { ProductsService } from "./products.service";
 import { UploadService } from "../upload/upload.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { Throttle } from "@nestjs/throttler";
 import { CustomerAuthGuard } from "../customers/customer-auth.guard";
 import { CustomerOrStaffGuard } from "./customer-or-staff.guard";
 import { ProductMediaService } from "./product-media.service";
@@ -91,7 +92,11 @@ export class ProductsController {
     return product;
   }
 
+  // 媒体端点按"每图一请求"设计：一个列表页几十张图会瞬间耗尽全局 60/min 桶，
+  // 导致后续业务 API（列表/询价）被误伤 429。此处单独放宽到 600/min，
+  // 保留防刷底线（原图直出有同步读盘成本，不能不限流）。
   @Public()
+  @Throttle({ default: { limit: 600, ttl: 60000 } })
   @Get("public/:productId/media/:imageId")
   @ApiOperation({ summary: "公开商品媒体（仅 PUBLIC + PUBLISHED）" })
   servePublicMedia(
@@ -99,7 +104,11 @@ export class ProductsController {
     @Param("productId") productId: string,
     @Param("imageId") imageId: string,
   ) {
-    return this.productsService.servePublicMedia(+productId, +imageId, response);
+    return this.productsService.servePublicMedia(
+      +productId,
+      +imageId,
+      response,
+    );
   }
 
   /* ═══ 会员商品目录（登录会员 / 合作商家可见）═══ */
@@ -114,7 +123,11 @@ export class ProductsController {
   @ApiQuery({ name: "pageSize", required: false, description: "每页数量" })
   @ApiQuery({ name: "categoryId", required: false, description: "分类ID" })
   @ApiQuery({ name: "keyword", required: false, description: "搜索关键词" })
-  @ApiQuery({ name: "ids", required: false, description: "按 id 集合拉取（首页/区块用）" })
+  @ApiQuery({
+    name: "ids",
+    required: false,
+    description: "按 id 集合拉取（首页/区块用）",
+  })
   findCatalog(@Req() request: any, @Query() query: Record<string, unknown>) {
     return this.productsService.findCatalog(query, request.customer);
   }
@@ -132,7 +145,10 @@ export class ProductsController {
   @Get("catalog/:id")
   @ApiOperation({ summary: "受控商品详情（登录后访问，按可见范围过滤）" })
   async findCatalogById(@Req() request: any, @Param("id") id: string) {
-    const product = await this.productsService.findCatalogById(+id, request.customer);
+    const product = await this.productsService.findCatalogById(
+      +id,
+      request.customer,
+    );
     if (!product) throw new NotFoundException("商品当前不可浏览");
     return product;
   }
@@ -142,6 +158,8 @@ export class ProductsController {
   // 禁止仅凭 imageId 跨商品访问：必须 productId+imageId 联合校验。
   @Public()
   @UseGuards(CustomerOrStaffGuard)
+  // 同上：受控媒体每图一请求，单独放宽限流，避免吃满全局 60/min 桶误伤业务接口。
+  @Throttle({ default: { limit: 600, ttl: 60000 } })
   @Get("catalog/:productId/media/:imageId")
   @ApiOperation({ summary: "受控商品媒体（需鉴权，PARTNER 商品对客户加水印）" })
   async getCatalogMedia(
@@ -150,7 +168,12 @@ export class ProductsController {
     @Param("productId") productId: string,
     @Param("imageId") imageId: string,
   ) {
-    return this.productsService.serveCatalogMedia(+productId, +imageId, request, response);
+    return this.productsService.serveCatalogMedia(
+      +productId,
+      +imageId,
+      request,
+      response,
+    );
   }
 
   @Get("counts")
@@ -289,7 +312,8 @@ export class ProductsController {
 
     // 裁切：归一化坐标 → 实际像素 → sharp 处理
     // 读取原图字节与尺寸：优先私有存储，回退旧公开路径（迁移兼容）
-    const { buffer: sourceBuffer } = this.productMedia.readProductImage(sourceImg);
+    const { buffer: sourceBuffer } =
+      this.productMedia.readProductImage(sourceImg);
     const metadata = await sharp(sourceBuffer).metadata();
     const imgW = metadata.width || 1;
     const imgH = metadata.height || 1;
@@ -405,8 +429,14 @@ export class ProductsController {
   @ApiBearerAuth()
   @Put(":id/attributes")
   @ApiOperation({ summary: "批量设置商品属性值（按 attributeValueId）" })
-  updateAttributes(@Param("id") id: string, @Body() body: { attributeValueIds: number[] }) {
-    return this.productsService.setAttributes(+id, body.attributeValueIds || []);
+  updateAttributes(
+    @Param("id") id: string,
+    @Body() body: { attributeValueIds: number[] },
+  ) {
+    return this.productsService.setAttributes(
+      +id,
+      body.attributeValueIds || [],
+    );
   }
 
   /* ═══ 证书管理 ═══ */
@@ -414,10 +444,7 @@ export class ProductsController {
   @ApiBearerAuth()
   @Post(":id/certificates")
   @ApiOperation({ summary: "添加商品证书" })
-  addCertificate(
-    @Param("id") id: string,
-    @Body() dto: CreateCertificateDto,
-  ) {
+  addCertificate(@Param("id") id: string, @Body() dto: CreateCertificateDto) {
     return this.productsService.addCertificate(+id, dto);
   }
 
@@ -462,7 +489,11 @@ export class ProductsController {
   @ApiBearerAuth()
   @Put(":id/skus/:skuId")
   @ApiOperation({ summary: "更新SKU信息" })
-  updateSku(@Param("id") id: string, @Param("skuId") skuId: string, @Body() dto: UpdateSkuDto) {
+  updateSku(
+    @Param("id") id: string,
+    @Param("skuId") skuId: string,
+    @Body() dto: UpdateSkuDto,
+  ) {
     return this.productsService.updateSku(+id, +skuId, dto);
   }
 
