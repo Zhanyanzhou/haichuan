@@ -63,18 +63,20 @@
 
 ### 遗留待清退
 
-- 旧版 blockComponents(`blocks/index.ts` 注册表):HeroBlock 等 6 个,未直接引用。
-- `adapters/imageText.puck / splitPanel.puck` 与 `inspector/schema/modules/splitPanel.ts`:仅服务旧类型兼容渲染,模板库不再提供。
-- ContentSlot 体系(表/类型/2 端点):清退需 DB 迁移确认。
+- `adapters/imageText.puck / splitPanel.puck`:仅作为旧类型渲染映射的 Props 类型源保留(puckPropsToModule 类型联合引用),模板库不再提供;`inspector/schema/modules/splitPanel.ts` 已墓碑化。
+- ContentSlot 体系(表/类型/2 端点/useContentSlots):公开首页仍在消费 `usePublishedSlots`,清退需整体决策与 DB 迁移确认。
+
+> 注:早期文档记载的"旧版 blockComponents(blocks/index.ts,HeroBlock 等 6 个)"经核实文件已不存在,该条目撤销。
 
 ## 统计
 
-> 下表为装修体系重构前的旧统计;blocks/ 已从 17+6 变为 23 个单套渲染层组件(见上节),全量数字待下轮重数后更新。
+> 分域重数(2026-08-15 全域完成,含动态 import 复核)。
 
-| 状态                     | 数量   |
-| ------------------------ | ------ |
-| ✅ 使用中                | 17     |
-| ⚠️ 未被引用              | 8      |
-| ⚠️ 旧版 blocks(仅注册表) | 6      |
-| ⚠️ admin 组件未引用      | 1      |
-| **合计**                 | **32** |
+| 域 | 数量 | 状态 |
+| --- | --- | --- |
+| blocks/ 渲染层 | 24 文件 | ✅ 全部使用中(23 业务区块 + _shared/BlockEmptyPlaceholder) |
+| page-builder/adapters | 24 | 22 注册使用中;imageText/splitPanel 2 个仅作旧类型 Props 类型源(遗留) |
+| page-builder/inspector/schema/modules | 21 | 20 活跃 + splitPanel.ts 墓碑(待物理删除) |
+| page-builder/designSystem | 5 | ✅ tokens/masters/sectionShell/rhythm/index |
+| components/common | 17 | ✅ 10 使用中(含 ProtectedRoute/AntdProvider 动态导入);⚠️ 7 未引用:EmptyState/PageHeader/ImageUpload/FilterPanel/AdminConfirm/Logo/LinkSelector(LinkSelector 职责已被 page-builder LinkTargetField 取代) |
+| components/admin | 1 | ⚠️ ImageCropper 未被引用 |

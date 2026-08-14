@@ -1,7 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
-import { homeCampaign } from "@/data/homeCampaign";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import type { PageModule } from "@/types/pageModule";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
@@ -24,7 +23,6 @@ export default function HeroSection({ module, editMode }: Props) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
 
-  const defaults = homeCampaign.heroFilm;
   const c = module?.content as
     (PageModule["content"] & Record<string, any>) | undefined;
   const s = module?.styleConfig as
@@ -52,17 +50,18 @@ export default function HeroSection({ module, editMode }: Props) {
   // 未上传某一端时复用另一端已配置图片，不再引入活动素材兜底。
   const desktopImg = c.desktopImage || c.mobileImage;
   const mobileImg = c.mobileImage || c.desktopImage;
-  const title = c?.title ?? defaults.title;
-  const subtitle = c?.subtitle ?? defaults.eyebrow;
-  const actionText = c?.actionText ?? defaults.action;
-  const linkUrl = c?.linkUrl ?? defaults.href;
+  // 文案不再回退营销默认值:未填写即为空,公开态对应节点不渲染(编辑态有占位引导)
+  const title = typeof c?.title === "string" ? c.title : "";
+  const subtitle = typeof c?.subtitle === "string" ? c.subtitle : "";
+  const actionText = typeof c?.actionText === "string" ? c.actionText : "";
+  const linkUrl = typeof c?.linkUrl === "string" ? c.linkUrl : "";
   const targetUrl = resolveLinkTargetUrl({
     targetType: c?.targetType,
     productId: c?.productId,
     linkUrl,
   });
-  const legacyFocusX = s?.focusX ?? defaults.focusX;
-  const legacyFocusY = s?.focusY ?? defaults.focusY;
+  const legacyFocusX = s?.focusX ?? 50;
+  const legacyFocusY = s?.focusY ?? 50;
   const desktopFocusX = s?.desktopFocusX ?? legacyFocusX;
   const desktopFocusY = s?.desktopFocusY ?? legacyFocusY;
   const mobileFocusX = s?.mobileFocusX ?? legacyFocusX;
@@ -168,6 +167,7 @@ export default function HeroSection({ module, editMode }: Props) {
           textAlign: alignment,
         }}
       >
+        {subtitle ? (
         <p
           data-editor-field="subtitle"
           className="text-[10px] md:text-[11px] tracking-[.2em] uppercase mb-4 font-sans"
@@ -183,6 +183,8 @@ export default function HeroSection({ module, editMode }: Props) {
         >
           {subtitle}
         </p>
+        ) : null}
+        {title ? (
         <h1
           data-editor-field="title"
           className="leading-[1.1] tracking-[.02em] mb-6 whitespace-pre-line"
@@ -199,6 +201,7 @@ export default function HeroSection({ module, editMode }: Props) {
         >
           {title}
         </h1>
+        ) : null}
         {actionText && targetUrl ? (
           editMode ? (
             <span

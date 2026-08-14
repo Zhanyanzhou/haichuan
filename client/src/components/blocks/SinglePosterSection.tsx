@@ -1,5 +1,4 @@
 import { Link } from 'react-router-dom';
-import { homeCampaign } from '@/data/homeCampaign';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { RESPONSIVE_CANVAS, SINGLE_POSTER_CONTRACT } from '@/page-builder/config/blockContracts';
 import { isSafeInternalPath } from '@/page-builder/utils/linkTarget';
@@ -20,7 +19,6 @@ interface Props { module?: PageModule; editMode?: boolean; }
  * 支持双端独立素材与双端独立焦点(旧数据共享 focusX/Y 自动回退)。
  */
 export default function SinglePosterSection({ module, editMode }: Props) {
-  const defaults = homeCampaign.signaturePoster;
   const c = module?.content as (PageModule['content'] & Record<string, any>) | undefined;
   const l = module?.layoutConfig;
   const s = module?.styleConfig as (PageModule['styleConfig'] & Record<string, any>) | undefined;
@@ -29,11 +27,12 @@ export default function SinglePosterSection({ module, editMode }: Props) {
   const mobileImg = c?.mobileImage || c?.desktopImage;
   // 公开态无图不兜底陌生营销图,静默隐藏;编辑态显示占位
   if (!editMode && !desktopImg) return null;
-  const number = c?.number || defaults.number;
-  const label = c?.label || defaults.label;
-  const title = c?.title || defaults.title;
-  const subtitle = c?.subtitle || defaults.subtitle;
-  const actionText = c?.actionText || 'VIEW SERIES';
+  // 文案不再回退营销默认值:未填写即不渲染对应节点
+  const number = typeof c?.number === "string" ? c.number : "";
+  const label = typeof c?.label === "string" ? c.label : "";
+  const title = typeof c?.title === "string" ? c.title : "";
+  const subtitle = typeof c?.subtitle === "string" ? c.subtitle : "";
+  const actionText = c?.actionText || "查看系列";
   const linkUrl = isSafeInternalPath(c?.linkUrl) ? c?.linkUrl : '';
   const isImageLeft = l?.template === 'leftImageRightText';
   // 双端独立焦点;旧数据仅有共享 focusX/Y 时双端回退同值
@@ -65,9 +64,13 @@ export default function SinglePosterSection({ module, editMode }: Props) {
 
   const copyColumn = (
     <div className="homepage-single-poster__copy" style={{ order: isImageLeft ? 1 : 0 }}>
-      <p data-editor-field="number label" className="text-[10px] tracking-[.2em] uppercase mb-2" style={{ color: MU, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>{number} / {label}</p>
-      <h2 data-editor-field="title" className="leading-[1.12] tracking-[.02em] mb-1"
-        style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: 'var(--hc-type-h2, clamp(26px,2.8vw,40px))', color: TX }}>{title}</h2>
+      {(number || label) ? (
+        <p data-editor-field="number label" className="text-[10px] tracking-[.2em] uppercase mb-2" style={{ color: MU, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>{number} / {label}</p>
+      ) : null}
+      {title ? (
+        <h2 data-editor-field="title" className="leading-[1.12] tracking-[.02em] mb-1"
+          style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: 'var(--hc-type-h2, clamp(26px,2.8vw,40px))', color: TX }}>{title}</h2>
+      ) : null}
       {subtitle ? <p data-editor-field="subtitle" className="mb-5" style={{ color: MU, fontSize: 'var(--hc-type-body, 15px)', lineHeight: 1.9 }}>{subtitle}</p> : null}
       {linkUrl ? (
         <Link data-editor-field="linkUrl actionText" to={linkUrl} className="inline-flex items-center gap-2 text-[10px] tracking-[.14em] uppercase transition-opacity hover:opacity-55" style={{ color: TX, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>

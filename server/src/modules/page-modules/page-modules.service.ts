@@ -17,6 +17,7 @@ const PUCK_COMPONENT_LABELS = [
   "图文混排",
   "全屏出血图",
   "文字横幅",
+  "作品画廊",
   "产品展示行",
   "分类卡片",
   "卡片网格",
@@ -556,9 +557,19 @@ export class PageModulesService {
       };
 
       validateNestedAssets(props.categories, "分类卡片的", ["image"]);
+      validateNestedAssets(props.items, "画廊图片的", ["image"]);
       validateNestedAssets(props.certificates, "证书的", ["imageUrl"]);
       validateNestedAssets(props.steps, "定制步骤的", ["image"]);
       validateNestedAssets(props.testimonials, "评价的", ["image"]);
+
+      // 作品画廊:每张图片必填(与画廊契约一致)
+      if (type === "作品画廊" && Array.isArray(props.items)) {
+        props.items.forEach((item: any, index: number) => {
+          if (!this.isNonEmptyString(item?.image)) {
+            errors.push(`${label}：第 ${index + 1} 张画廊图片不能为空`);
+          }
+        });
+      }
 
       if (type === "热区图" && Array.isArray(props.hotspots)) {
         props.hotspots.forEach((item: any, index: number) => {

@@ -52,7 +52,7 @@ export const certificatePuckConfig = {
             value, onChange, readOnly,
           }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
             <MediaPickerField fieldKey="imageUrl" device="shared" value={value} onChange={onChange} readOnly={readOnly}
-              spec={{ width: 200, height: 200, ratio: "1:1", label: "证书图（建议 200×200）" }}
+              spec={{ width: 2000, height: 2000, ratio: "1:1", label: "证书图（建议 2000×2000，1:1）" }}
               placeholder="上传证书图（可选）" />
           ),
         },

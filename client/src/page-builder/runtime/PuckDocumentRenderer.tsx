@@ -70,6 +70,10 @@ function getLocalUploadUrls(props: Record<string, any>): string[] {
   if (Array.isArray(props.categories)) {
     props.categories.forEach((item: any) => collect(item?.image));
   }
+  if (Array.isArray(props.items)) {
+    // 作品画廊条目图
+    props.items.forEach((item: any) => collect(item?.image));
+  }
   if (Array.isArray(props.certificates)) {
     props.certificates.forEach((item: any) => collect(item?.imageUrl));
   }

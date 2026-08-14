@@ -1960,6 +1960,27 @@ function BlockTemplateVisual({ name }: { name: string }) {
         </>
       );
       break;
+    case "asymmetric-gallery":
+      // 作品画廊:大图(4:5)→小图错位→方图→宽图(3:2)的非对称节奏
+      content = (
+        <>
+          <PreviewText x={24} y={26} width={150} lines={2} />
+          <PreviewMedia x={18} y={64} width={168} height={132} />
+          <PreviewMedia x={196} y={92} width={86} height={104} />
+          <PreviewMedia x={18} y={216} width={86} height={86} />
+          <PreviewMedia x={114} y={216} width={168} height={112} />
+          <rect
+            x={18}
+            y={344}
+            width={96}
+            height={11}
+            rx={2}
+            fill="none"
+            stroke={PREVIEW_COLORS.accent}
+          />
+        </>
+      );
+      break;
     default:
       content = (
         <>

@@ -13,13 +13,13 @@
 | **分类导航** | — | `GET /api/categories/tree` (空) | `categories` (空表) | mockCategories (仅Mock) | **阻断** |
 | **搜索** | 客户端 filter | 无专用搜索 API | — | 内存过滤 | **静态数据** |
 | **选款目录** | `catalogData.ts` + `products.ts` | 无 | — | 硬编码 | **静态数据** |
-| **首页** | PageModule API | `GET /api/page-modules/published` | `page_modules` | 部分硬编码 | **部分闭环** |
-| **首页内容槽** | ContentSlot API | `GET /api/content-slots/published` | `content_slots` | — | **部分闭环** |
+| **首页/一级页装修** | PageDocument API | `GET /api/page-modules/:pageKey/published` | `page_documents` + `page_document_revisions` | 未发布时硬编码 FallbackHome(仅首页) | **真实闭环** |
+| **首页内容槽** | ContentSlot API | `GET /api/content-slots/published` | `content_slots` | — | **遗留体系**(仅首页 HERO 兜底消费,清退待定) |
 | **网站设置** | Settings API | `GET /api/settings` | `settings.json` (文件) | — | **真实闭环** |
 | **预约咨询** | Inquiry API | `POST /api/inquiries` | `inquiries` | — | **真实闭环** |
 | **选款咨询(后台)** | SelectionInquiry API | `GET/PUT /api/selection-inquiries` | `selection_inquiries` | — | **真实闭环** |
 | **选款咨询(前台)** | ❌ 不存在 | 无公开提交端点 | — | — | **未接入** |
-| **页面构建器** | PageModule API | `/api/page-modules/admin` | `page_modules` | — | **真实闭环** |
+| **页面构建器** | PageDocument API | `/api/page-modules/admin` 等 | `page_documents` / `page_document_revisions` | — | **真实闭环** |
 | **工作台** | products/inquiries/page-modules API | 3个 GET | 3个表 | — | **部分闭环** |
 | **购物车** | Zustand + localStorage | — | — | — | **本地状态** |
 | **结算** | Zustand | — | — | — | **本地状态** |
@@ -34,12 +34,12 @@
 - 网站设置 (Settings → JSON 文件)
 - 预约咨询提交 (Contact → Inquiry API → MySQL)
 - 选款咨询后台管理 (SelectionInquiry API → MySQL)
-- 页面构建器 (PageModule API → MySQL)
+- 页面构建器 (PageDocument API → `page_documents`/`page_document_revisions`)
 - 金价 (GoldPrice API → MySQL)
 - 认证 (Auth API → JWT + MySQL users 表)
 
 ### ⚠️ 部分闭环 (3项)
-- 首页 (PageModule API 可用，但有硬编码回退)
+- 首页 (PageDocument API;未发布装修时显示硬编码 FallbackHome)
 - 工作台 (API 调用有 400 错误)
 - 首页内容槽 (API 可用，数据为空)
 

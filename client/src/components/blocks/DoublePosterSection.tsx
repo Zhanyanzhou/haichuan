@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useReducedMotion } from 'framer-motion';
-import { homeCampaign } from '@/data/homeCampaign';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import type { PageModule } from '@/types/pageModule';
 import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
@@ -88,7 +87,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
     return () => o.disconnect();
   }, []);
 
-  const defaults = homeCampaign.editorialPair;
+  const defaults = { number: "", label: "", title: "", description: "", href: "" };
   const c = module?.content as (PageModule['content'] & Record<string, any>) | undefined;
   const s = module?.styleConfig as (PageModule['styleConfig'] & Record<string, any>) | undefined;
   const l = module?.layoutConfig as (PageModule['layoutConfig'] & Record<string, any>) | undefined;

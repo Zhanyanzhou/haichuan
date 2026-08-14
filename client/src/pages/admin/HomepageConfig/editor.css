@@ -1377,151 +1377,7 @@
   color: #A24324;
   background: #FFF8F5;
 }
-/* 作品陈列使用全展开结构：分区只负责建立层级，不提供折叠或收纳入口。 */
-.homepage-editor__product-row-inspector .homepage-editor__inspector-scroll {
-  padding-top: 6px;
-}
-.homepage-editor__product-row-section {
-  padding: 18px 0 20px;
-  border-top: 1px solid #ECE8E2;
-}
-.homepage-editor__product-row-section:first-of-type {
-  border-top: 0;
-}
-.homepage-editor__product-row-section-head {
-  display: grid;
-  gap: 4px;
-  margin-bottom: 13px;
-}
-.homepage-editor__product-row-section-head h3 {
-  margin: 0;
-  color: #2C2721;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.4;
-}
-.homepage-editor__product-row-section-head p {
-  margin: 0;
-  color: #93897D;
-  font-size: 11px;
-  line-height: 1.55;
-}
-.homepage-editor__product-row-section-body {
-  display: grid;
-  gap: 14px;
-  min-width: 0;
-}
-.homepage-editor__product-row-mode-picker {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 12px;
-}
-.homepage-editor__product-row-mode-picker button {
-  min-width: 0;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 6px 6px 10px;
-  border: 1px solid #E3DED6;
-  border-radius: 5px;
-  color: #625A51;
-  background: #FFFFFF;
-  cursor: pointer;
-  text-align: left;
-  transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
-}
-.homepage-editor__product-row-mode-picker button:hover {
-  border-color: #C8B17A;
-  background: #FCFAF5;
-}
-.homepage-editor__product-row-mode-picker button:focus-visible {
-  outline: 2px solid rgba(184, 148, 78, .42);
-  outline-offset: 2px;
-}
-.homepage-editor__product-row-mode-picker button.is-active {
-  border-color: #B8944E;
-  color: #76531B;
-  background: #FFFCF6;
-  box-shadow: 0 0 0 2px rgba(184, 148, 78, .10);
-}
-.homepage-editor__product-row-mode-preview {
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  display: block;
-  overflow: hidden;
-  border: 1px solid #ECE8E1;
-  border-radius: 3px;
-  background: #F7F6F3;
-}
-.homepage-editor__product-row-mode-preview img {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-  object-position: top center;
-}
-.homepage-editor__product-row-mode-picker button > span:last-child {
-  width: 100%;
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-  padding-inline: 3px;
-}
-.homepage-editor__product-row-mode-picker button strong {
-  color: #3F382F;
-  font-size: 13px;
-  font-weight: 600;
-}
-.homepage-editor__product-row-mode-picker button small {
-  color: #978D81;
-  font-size: 11px;
-  line-height: 1.4;
-}
-.homepage-editor__product-row-mode-note {
-  display: block;
-  margin-top: 8px;
-  color: #93897D;
-  font-size: 11px;
-  line-height: 1.5;
-}
-.homepage-editor__product-row-setting {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(116px, .8fr) minmax(180px, 1.2fr);
-  align-items: center;
-  gap: 16px;
-  padding: 2px 0;
-}
-.homepage-editor__product-row-setting > div:first-child {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-.homepage-editor__product-row-setting strong {
-  color: #4A4136;
-  font-size: 12px;
-  font-weight: 600;
-}
-.homepage-editor__product-row-setting span {
-  color: #93897D;
-  font-size: 11px;
-  line-height: 1.45;
-}
-.homepage-editor__product-row-inspector .homepage-editor__layout-rule {
-  margin-top: 2px;
-}
-.homepage-editor__product-row-inspector .homepage-editor__inspector-segmented button:focus-visible {
-  outline: 2px solid rgba(184, 148, 78, .38);
-  outline-offset: 1px;
-}
-@media (max-width: 1500px) {
-  .homepage-editor__product-row-setting {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-}
+/* 作品陈列/热区/旧专属面板样式已随 R4b 面板退役删除(2026-08);需要找回请查 git 历史。 */
 .homepage-editor__properties-actions {
   display: flex;
   justify-content: flex-end;
@@ -1640,38 +1496,6 @@
 .homepage-editor__inspector-hint { font-size: 11px; font-weight: 400; color: #9A9288; }
 .homepage-editor__inspector-field > label em { color: #B15645; font-size: 10px; font-style: normal; font-weight: 500; }
 .homepage-editor__inspector-warn { font-size: 11px; color: #B15645; }
-.homepage-editor__inspector-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6B6259; }
-.homepage-editor__inspector-image-actions { display: flex; gap: 8px; }
-.homepage-editor__inspector-image-summary {
-  display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  padding: 8px;
-  border: 1px solid #EAE3D8;
-  border-radius: 6px;
-  background: #FCFBF8;
-}
-.homepage-editor__inspector-image-summary img {
-  width: 76px;
-  height: 58px;
-  border-radius: 4px;
-  object-fit: cover;
-  background: #F1EDE6;
-}
-.homepage-editor__inspector-image-summary > div { min-width: 0; display: grid; gap: 4px; }
-.homepage-editor__inspector-image-summary strong { color: #4A4136; font-size: 12px; }
-.homepage-editor__inspector-image-summary span { color: #93897D; font-size: 11px; }
-.homepage-editor__inspector-image-summary .homepage-editor__inspector-image-actions { margin-top: 2px; }
-.homepage-editor__inspector-subsection { padding-top: 10px; border-top: 1px solid #EEEAE4; }
-.homepage-editor__inspector-subsection-title {
-  margin: 0 0 8px;
-  color: #766D62;
-  font-size: 12px;
-  font-weight: 600;
-}
-.homepage-editor__inspector-subsection .homepage-editor__focus-picker,
-.homepage-editor__inspector-subsection .homepage-editor__image-status { margin-bottom: 10px; }
 .homepage-editor__item-nav {
   display: flex;
   flex-direction: column;
@@ -1721,21 +1545,6 @@
   flex-direction: column;
   gap: 12px;
 }
-.homepage-editor__inspector-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 24px 12px;
-  text-align: center;
-  border: 1px dashed #E0D6C4;
-  border-radius: 8px;
-  background: #FCFAF5;
-  color: #8A7F72;
-}
-.homepage-editor__inspector-empty small { font-size: 11px; color: #ACA398; }
-.homepage-editor__inspector-placeholder,
-.homepage-editor__inspector-device-info { font-size: 12px; color: #8A7F72; line-height: 1.6; margin: 0; }
 .homepage-editor__inspector-option-group {
   display: grid;
   gap: 10px;
@@ -1788,61 +1597,12 @@
 .homepage-editor__contract-status.is-ready { border-color: #DCE8DC; color: #648067; background: #F7FBF7; }
 .homepage-editor__contract-status.is-warning { border-color: #EADFC9; color: #98742E; background: #FFFBF3; }
 .homepage-editor__contract-status.is-error { border-color: #EBD5CF; color: #A45543; background: #FFF8F6; }
-.homepage-editor__layout-rule {
-  display: grid;
-  gap: 4px;
-  padding: 10px;
-  border-left: 2px solid #B8944E;
-  color: #8C8277;
-  background: #FBF9F5;
-  font-size: 11px;
-  line-height: 1.45;
-}
-.homepage-editor__layout-rule strong { color: #5E5143; font-size: 12px; }
 .homepage-editor__section-note {
   margin: 0;
   color: #8E867C;
   font-size: 11px;
   line-height: 1.55;
 }
-.homepage-editor__copy-device-config,
-.homepage-editor__add-hotspot {
-  min-height: 34px;
-  border: 1px solid #D9C9A9;
-  border-radius: 5px;
-  color: #785A25;
-  background: #FFFCF6;
-  cursor: pointer;
-  font-size: 12px;
-}
-.homepage-editor__copy-device-config:hover,
-.homepage-editor__add-hotspot:hover:not(:disabled) { border-color: #B8944E; background: #FBF6EB; }
-.homepage-editor__add-hotspot:disabled { color: #AAA198; cursor: not-allowed; background: #F6F4F1; }
-.homepage-editor__hotspot-list { display: grid; gap: 10px; }
-.homepage-editor__hotspot-card {
-  display: grid;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid #E7E1D8;
-  border-radius: 6px;
-  background: #FCFBF8;
-}
-.homepage-editor__hotspot-card > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.homepage-editor__hotspot-card > header strong { color: #4A4136; font-size: 12px; }
-.homepage-editor__hotspot-card > header div { display: flex; gap: 3px; }
-.homepage-editor__hotspot-card > header button {
-  padding: 2px 5px;
-  border: 0;
-  color: #887B6C;
-  background: transparent;
-  cursor: pointer;
-  font-size: 10px;
-}
-.homepage-editor__hotspot-card > header button:last-child { color: #AC5A4B; }
-.homepage-editor__hotspot-card > header button:disabled { color: #C8C2BA; cursor: not-allowed; }
-.homepage-editor__hotspot-geometry { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
-.homepage-editor__hotspot-geometry label { min-width: 0; display: grid; gap: 4px; color: #8E867C; font-size: 10px; }
-.homepage-editor__hotspot-geometry input { padding-inline: 5px; text-align: center; }
 
 /* FocusPicker */
 .homepage-editor__focus-picker { display: flex; flex-direction: column; gap: 8px; }
