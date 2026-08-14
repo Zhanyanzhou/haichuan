@@ -1,37 +1,36 @@
 {
-  "prisma.pinToPrisma6": true,
-
-  // 关掉从 GitHub 下载 JSON Schema（国内网络问题）
-  "json.schemaDownload.enable": false,
-
-  // cSpell 拼写检查：只对英文文档开启，不影响代码
-  "cSpell.enabled": false,
-
-  // Todo Tree：指定 ripgrep 路径
-  "todo-tree.general.ripgrep": "C:\\Users\\Administrator\\AppData\\Local\\Programs\\Microsoft VS Code\\e4c7e7b1d6\\resources\\app\\extensions\\copilot\\node_modules\\@github\\copilot\\sdk\\ripgrep\\bin\\win32-x64\\rg.exe",
-
-  // === 格式化 ===
+  // 项目工作区设置（仅影响本项目，不修改 VS Code 用户级全局设置）。
   "editor.formatOnSave": true,
   "editor.defaultFormatter": "esbenp.prettier-vscode",
-  "[typescript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
-  "[typescriptreact]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
-  "[json]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
-  "[prisma]": { "editor.defaultFormatter": "Prisma.prisma" },
-
-  // === Tailwind ===
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  // TypeScript 项目配置
+  "typescript.tsdk": "client/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "typescript.preferences.includePackageJsonAutoImports": "on",
+  // Prisma
+  "[prisma]": {
+    "editor.defaultFormatter": "Prisma.prisma",
+    "editor.formatOnSave": true
+  },
+  // Tailwind CSS IntelliSense 文件范围（项目内含 Tailwind）
+  "tailwindCSS.includeLanguages": {
+    "typescriptreact": "html",
+    "typescript": "html"
+  },
   "tailwindCSS.experimental.classRegex": [
-    ["cva\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"]
+    ["className=\"([^\"]*)\"", "\"([^\"]*)\""]
   ],
-
-  // === 文件排除 ===
-  "files.exclude": {
+  // 文件排除（减少搜索噪声）
+  "search.exclude": {
     "**/node_modules": true,
     "**/dist": true,
-    "**/.turbo": true
+    "**/build": true,
+    "**/.next": true,
+    "**/coverage": true,
+    "**/prisma/migrations": false
   },
-  "files.watcherExclude": {
-    "**/node_modules/**": true,
-    "**/dist/**": true,
-    "**/uploads/**": true
-  }
+  // 终端默认使用 PowerShell（项目环境）
+  "terminal.integrated.defaultProfile.windows": "PowerShell"
 }

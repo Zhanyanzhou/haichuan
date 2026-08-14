@@ -137,10 +137,11 @@ async function main() {
   console.log('✅ 分类数据初始化完成');
 
   // Create default warehouses
+  // 仓库地址为可选字段；种子数据不写入未经确认的具体地址，部署后由后台配置真实信息。
   const warehouses = [
-    { name: '深圳展厅', type: 'SHOWROOM' as const, address: '深圳市罗湖区水贝珠宝园' },
-    { name: '广州工厂', type: 'FACTORY' as const, address: '广州市番禺区珠宝产业园' },
-    { name: '北京门店', type: 'STORE' as const, address: '北京市朝阳区国贸商城' },
+    { name: '深圳展厅', type: 'SHOWROOM' as const, address: '' },
+    { name: '广州工厂', type: 'FACTORY' as const, address: '' },
+    { name: '北京门店', type: 'STORE' as const, address: '' },
   ];
 
   for (const wh of warehouses) {

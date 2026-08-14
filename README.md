@@ -23,9 +23,9 @@ cd server && npm install
 # 3. 安装前端依赖
 cd ../client && npm install
 
-# 4. 启动数据库 (Docker)
+# 4. 仅启动本地开发所需的数据库与缓存 (Docker)
 cd ..
-docker-compose up -d
+docker-compose up -d mysql redis
 
 # 5. 数据库迁移 + 初始化
 cd server
@@ -40,10 +40,12 @@ npm run dev
 
 ### 访问地址
 
-- 前台首页: http://localhost:5174
-- 后台管理: http://localhost:5174/admin/login
+- Docker 整站（`docker-compose up -d`）：前台 http://localhost/，后台 http://localhost/admin/login
+- 本地开发（`npm run dev`）：前台 http://localhost:5174/，后台 http://localhost:5174/admin/login
 - API 接口: http://localhost:3000/api
 - 数据库管理: http://localhost:5555 (Prisma Studio)
+
+> 不要同时启动整套 Docker 服务与 `npm run dev`，两者都会使用后端 `3000` 端口。
 
 ### 默认账号
 

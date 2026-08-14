@@ -1,0 +1,11 @@
+{
+  // 推荐扩展（仅推荐，不自动安装）。AI 与协作者按需安装。
+  "recommendations": [
+    "dbaeumer.vscode-eslint",
+    "Prisma.prisma",
+    "bradlc.vscode-tailwindcss",
+    "ms-azuretools.vscode-docker",
+    "firsttris.vscode-jest-runner",
+    "esbenp.prettier-vscode"
+  ]
+}

@@ -273,3 +273,46 @@ final result: passed
 - [P3] 参考图没有悬停与键盘焦点状态，后续人工验收时应确认焦点环可见性。
 
 final result: passed
+
+---
+
+## 2026-08-13：作品陈列全展开编辑面板
+
+### Evidence
+
+- Source visual truth:
+  - `C:\Users\Administrator\AppData\Local\Temp\codex-clipboard-14adc727-9853-4503-ad08-eca540f44c7f.png`
+  - `C:\Users\Administrator\AppData\Local\Temp\codex-clipboard-afd7473d-da9a-4d0a-9cea-6e2f63d0c780.png`
+- Implementation route: `http://localhost:5174/admin/editor/about`，选中“作品陈列”。
+- Implementation screenshot: `G:\网站搭建2\design-qa-assets\product-row-flat-inspector-5174.png`.
+- Full-view comparison: `G:\网站搭建2\design-qa-assets\comparison-product-row-flat-inspector.png`.
+- Viewport: `898 × 778` CSS px；参考图以完整装修工作台为视觉方向，重点比较右侧编辑结构。
+- State: 已登录管理员，桌面端，“关于海川”页面中的作品陈列处于选中状态；未保存、未发布。
+
+### Findings
+
+- 无待修复的 P0、P1 或 P2 差异。
+- 信息结构：模块名称、样式预览、标题与副标题合并为连续的“模块基础内容”；商品、布局、商品信息和背景依次平铺，没有折叠区。
+- 字体与层级：沿用后台现有中文字体；分区标题、字段标签、辅助说明与字数提示保持清晰层级。
+- 间距与布局：样式选择使用两列大缩略图卡；商品未搜索时保持轻量空状态，不再默认铺满所有候选商品。
+- 色彩与视觉令牌：继续使用项目品牌金色与暖白背景，没有复制参考产品的蓝色品牌色。
+- 图片与资产：样式卡使用仓库已有的画册与作品陈列 SVG 预览资产，没有新增伪造商品图或 CSS 绘图。
+- 文案与内容：只展示现有的画册模式与标准选款模式；未伪造参考图中的第三种业务样式或智能分配功能。
+- 无障碍与交互：作品陈列面板中 `aria-expanded` 数量为 0；两张模式卡、3 个桌面列数选项和 2 个手机列数选项均提供可识别状态；浏览器控制台无错误。
+- 状态完整性：商品搜索保留加载、空值、无结果、错误和结果状态；已选商品保留加载、失效、移除及排序状态。
+- 响应式：桌面与手机列数在同一面板中同时可见，不会因当前预览设备而隐藏。
+
+### Comparison history
+
+- Iteration 1: 仅调整旧表单的标题和顺序，视觉上仍接近旧面板；商品候选列表默认铺满右栏。
+- Iteration 2: 将模式选择重做为真实缩略图卡，合并基础内容，并让商品候选仅在输入搜索词后出现。
+- Post-fix evidence: 在用户实际使用的 5174 开发服务中重新加载并选中作品陈列；确认无折叠控件、空搜索状态正确、所有配置平铺、控制台无错误。
+
+### Verification
+
+- TypeScript 与 Vite 生产构建通过。
+- 作品陈列渲染契约 8 项通过。
+- 页面构建器 26 种区块契约在上一轮通过，本轮未改动契约定义。
+- `git diff --check` 通过。
+
+final result: passed

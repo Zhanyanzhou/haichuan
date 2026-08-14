@@ -25,7 +25,8 @@
     "db:seed": "cd server && npx prisma db seed",
     "db:studio": "cd server && npx prisma studio",
     "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down"
+    "docker:down": "docker-compose down",
+    "prepare": "husky"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
