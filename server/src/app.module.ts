@@ -1,45 +1,43 @@
-import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
-import { PrismaModule } from './common/prisma/prisma.module';
-import { AuthModule } from './modules/auth/auth.module';
-import { UsersModule } from './modules/users/users.module';
-import { CategoriesModule } from './modules/categories/categories.module';
-import { AttributesModule } from './modules/attributes/attributes.module';
-import { ProductsModule } from './modules/products/products.module';
-import { UploadModule } from './modules/upload/upload.module';
-import { GoldPriceModule } from './modules/gold-price/gold-price.module';
-import { InventoryModule } from './modules/inventory/inventory.module';
-import { OrdersModule } from './modules/orders/orders.module';
-import { CustomersModule } from './modules/customers/customers.module';
-import { PaymentsModule } from './modules/payments/payments.module';
-import { TradeEventsModule } from './modules/trade-events/trade-events.module';
-import { FulfillmentModule } from './modules/fulfillment/fulfillment.module';
-import { RefundsModule } from './modules/refunds/refunds.module';
-import { AfterSalesModule } from './modules/after-sales/after-sales.module';
-import { QuotationsModule } from './modules/quotations/quotations.module';
-import { CartModule } from './modules/cart/cart.module';
-import { InquiriesModule } from './modules/inquiries/inquiries.module';
-import { NotificationsModule } from './modules/notifications/notifications.module';
-import { AiClassifyModule } from './modules/ai-classify/ai-classify.module';
-import { MarketingModule } from './modules/marketing/marketing.module';
-import { StatisticsModule } from './modules/statistics/statistics.module';
-import { SettingsModule } from './modules/settings/settings.module';
-import { SelectionInquiryModule } from './modules/selection-inquiry/selection-inquiry.module';
-import { LeadsModule } from './modules/leads/leads.module';
-import { AnalyticsModule } from './modules/analytics/analytics.module';
-import { PartnerApplicationsModule } from './modules/partner-applications/partner-applications.module';
-import { RecommendationsModule } from './modules/recommendations/recommendations.module';
-import { ContentSlotsModule } from './modules/content-slots/content-slots.module';
-import { PageModulesModule } from './modules/page-modules/page-modules.module';
-import { QueueModule } from './queue/queue.module';
-import { KimiModule } from './common/kimi/kimi.module';
-import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
-import { RolesGuard } from './common/guards/roles.guard';
-import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
-import { HealthController } from './common/health/health.controller';
-import { LoggerModule } from 'nestjs-pino';
+import { Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
+import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
+import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import { PrismaModule } from "./common/prisma/prisma.module";
+import { AuthModule } from "./modules/auth/auth.module";
+import { UsersModule } from "./modules/users/users.module";
+import { CategoriesModule } from "./modules/categories/categories.module";
+import { AttributesModule } from "./modules/attributes/attributes.module";
+import { ProductsModule } from "./modules/products/products.module";
+import { UploadModule } from "./modules/upload/upload.module";
+import { GoldPriceModule } from "./modules/gold-price/gold-price.module";
+import { InventoryModule } from "./modules/inventory/inventory.module";
+import { OrdersModule } from "./modules/orders/orders.module";
+import { CustomersModule } from "./modules/customers/customers.module";
+import { PaymentsModule } from "./modules/payments/payments.module";
+import { TradeEventsModule } from "./modules/trade-events/trade-events.module";
+import { FulfillmentModule } from "./modules/fulfillment/fulfillment.module";
+import { RefundsModule } from "./modules/refunds/refunds.module";
+import { AfterSalesModule } from "./modules/after-sales/after-sales.module";
+import { QuotationsModule } from "./modules/quotations/quotations.module";
+import { CartModule } from "./modules/cart/cart.module";
+import { InquiriesModule } from "./modules/inquiries/inquiries.module";
+import { AiClassifyModule } from "./modules/ai-classify/ai-classify.module";
+import { MarketingModule } from "./modules/marketing/marketing.module";
+import { StatisticsModule } from "./modules/statistics/statistics.module";
+import { SettingsModule } from "./modules/settings/settings.module";
+import { SelectionInquiryModule } from "./modules/selection-inquiry/selection-inquiry.module";
+import { LeadsModule } from "./modules/leads/leads.module";
+import { AnalyticsModule } from "./modules/analytics/analytics.module";
+import { PartnerApplicationsModule } from "./modules/partner-applications/partner-applications.module";
+import { RecommendationsModule } from "./modules/recommendations/recommendations.module";
+import { ContentSlotsModule } from "./modules/content-slots/content-slots.module";
+import { PageModulesModule } from "./modules/page-modules/page-modules.module";
+import { KimiModule } from "./common/kimi/kimi.module";
+import { JwtAuthGuard } from "./modules/auth/jwt-auth.guard";
+import { RolesGuard } from "./common/guards/roles.guard";
+import { AuditLogInterceptor } from "./common/interceptors/audit-log.interceptor";
+import { HealthController } from "./common/health/health.controller";
+import { LoggerModule } from "nestjs-pino";
 
 @Module({
   controllers: [HealthController],
@@ -51,20 +49,26 @@ import { LoggerModule } from 'nestjs-pino';
     LoggerModule.forRoot({
       pinoHttp: {
         transport:
-          process.env.NODE_ENV !== 'production'
+          process.env.NODE_ENV !== "production"
             ? {
-                target: 'pino-pretty',
-                options: { colorize: true, translateTime: 'SYS:HH:MM:ss.l' },
+                target: "pino-pretty",
+                options: { colorize: true, translateTime: "SYS:HH:MM:ss.l" },
               }
             : undefined,
         autoLogging: {
           ignore: (req) => {
-            const url = (req as { url?: string }).url ?? '';
-            return url.startsWith('/api/health') || url.startsWith('/api/ready');
+            const url = (req as { url?: string }).url ?? "";
+            return (
+              url.startsWith("/api/health") || url.startsWith("/api/ready")
+            );
           },
         },
         serializers: {
-          req: (req: { method: string; url: string; remoteAddress?: string }) => ({
+          req: (req: {
+            method: string;
+            url: string;
+            remoteAddress?: string;
+          }) => ({
             method: req.method,
             url: req.url,
             remoteAddress: req.remoteAddress,
@@ -74,13 +78,14 @@ import { LoggerModule } from 'nestjs-pino';
       },
     }),
     // 全局速率限制：默认 60次/分钟
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 60,
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 60,
+      },
+    ]),
     PrismaModule,
     KimiModule,
-    QueueModule,
     AuthModule,
     UsersModule,
     CategoriesModule,
@@ -100,7 +105,6 @@ import { LoggerModule } from 'nestjs-pino';
     QuotationsModule,
     CartModule,
     InquiriesModule,
-    NotificationsModule,
     AiClassifyModule,
     MarketingModule,
     StatisticsModule,

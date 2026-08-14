@@ -1334,18 +1334,6 @@ export const contentSlotsApi = {
   getAdminAll: async (pageKey = "home") => {
     return api.get("/content-slots/admin", { params: { pageKey } });
   },
-  saveDraft: async (data: any) => {
-    return api.put("/content-slots/draft", data);
-  },
-  publish: async (slotKey: string) => {
-    return api.put(`/content-slots/${slotKey}/publish`);
-  },
-  publishAll: async (pageKey = "home") => {
-    return api.put("/content-slots/publish-all", { pageKey });
-  },
-  unpublish: async (slotKey: string) => {
-    return api.put(`/content-slots/${slotKey}/unpublish`);
-  },
 };
 
 // ===== Puck PageDocument API =====
