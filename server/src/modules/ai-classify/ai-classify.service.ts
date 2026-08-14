@@ -310,31 +310,29 @@ ${this.classifyOutputSchema}`;
    * Get accuracy report
    */
   async getAccuracyReport() {
-    const [total, autoConfirmed, confirmed] = await Promise.all([
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const [total, autoConfirmed, confirmed, todayCount, correctRows] = await Promise.all([
       this.prisma.aIClassifyRecord.count(),
-      this.prisma.aIClassifyRecord.count({
-        where: { status: "auto_confirmed" },
-      }),
+      this.prisma.aIClassifyRecord.count({ where: { status: "auto_confirmed" } }),
       this.prisma.aIClassifyRecord.count({ where: { status: "confirmed" } }),
+      this.prisma.aIClassifyRecord.count({ where: { createdAt: { gte: todayStart } } }),
+      // P1-21：准确率必须比较 predictedCategoryId === confirmedCategoryId（Prisma 不支持列间比较，用参数化 raw SQL）
+      this.prisma.$queryRaw<{ count: bigint }[]>`
+        SELECT COUNT(*) AS count FROM ai_classify_records
+        WHERE status = 'confirmed' AND predicted_category_id IS NOT NULL
+          AND predicted_category_id = confirmed_category_id
+      `,
     ]);
 
-    const correctPredictions = await this.prisma.aIClassifyRecord.count({
-      where: {
-        status: "confirmed",
-        predictedCategoryId: { not: null },
-      },
-    });
+    const correctPredictions = Number(correctRows[0]?.count ?? 0);
 
     return {
       total,
       autoConfirmed,
-      autoConfirmRate:
-        total > 0 ? ((autoConfirmed / total) * 100).toFixed(1) : "0",
-      accuracy:
-        confirmed > 0
-          ? ((correctPredictions / confirmed) * 100).toFixed(1)
-          : "N/A",
-      todayCount: total, // Simplified
+      autoConfirmRate: total > 0 ? ((autoConfirmed / total) * 100).toFixed(1) : "0",
+      accuracy: confirmed > 0 ? ((correctPredictions / confirmed) * 100).toFixed(1) : "N/A",
+      todayCount,
     };
   }
 

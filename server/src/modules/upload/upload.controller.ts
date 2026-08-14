@@ -1,7 +1,8 @@
 import {
-  Controller, Post, UseInterceptors, UploadedFiles, UploadedFile,
-  UseGuards, Body, BadRequestException,
+  Controller, Post, Get, UseInterceptors, UploadedFiles, UploadedFile,
+  UseGuards, Body, BadRequestException, Param, Req, Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { diskStorage, memoryStorage } from 'multer';
@@ -61,8 +62,23 @@ export class UploadController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('payment-proof')
   @UseInterceptors(FileInterceptor('file', imageUploadOptions))
-  async uploadPaymentProof(@UploadedFile() file: Express.Multer.File) {
-    return this.uploadService.uploadFile(file);
+  async uploadPaymentProof(@Req() request: any, @UploadedFile() file: Express.Multer.File) {
+    return this.uploadService.uploadPrivatePaymentProof(request.customer.id, file);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Get('payment-proofs/:orderId')
+  async getPaymentProof(
+    @Req() request: any,
+    @Param('orderId') orderId: string,
+    @Res() response: Response,
+  ) {
+    const proof = await this.uploadService.getPaymentProofForCustomer(request.customer.id, +orderId);
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('Content-Disposition', 'inline');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.type(proof.mimeType).send(proof.buffer);
   }
 
   @ApiBearerAuth()
@@ -99,7 +115,7 @@ export class UploadController {
   }
 
   @ApiBearerAuth()
-  @ApiOperation({ summary: '上传商品图片（支持分类标记）' })
+  @ApiOperation({ summary: '上传商品图片到受控私有存储（支持分类标记）' })
   @UseGuards(JwtAuthGuard)
   @Post('product-images')
   @UseInterceptors(FilesInterceptor('files', 20, imageUploadOptions))
@@ -107,7 +123,8 @@ export class UploadController {
     @UploadedFiles() files: Express.Multer.File[],
     @Body('types') types: string,
   ) {
+    // 受控产品库：商品图片写入私有目录，返回 storageKey 供 ProductImage 持久化（不返回公开 url）
     const typeArray = types ? types.split(',') : [];
-    return this.uploadService.uploadProductImages(files, typeArray);
+    return this.uploadService.uploadPrivateProductImages(files, typeArray);
   }
 }

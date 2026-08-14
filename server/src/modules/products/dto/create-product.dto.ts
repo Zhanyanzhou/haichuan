@@ -3,7 +3,7 @@ import {
   Min, MaxLength, IsNotEmpty,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { MaterialType, ProductStatus, SalesMode } from '@prisma/client';
+import { MaterialType, ProductStatus, ProductVisibility, SalesMode } from '@prisma/client';
 
 /**
  * 创建商品 DTO
@@ -57,18 +57,6 @@ export class CreateProductDto {
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber({}, { message: '最低价必须是数字' })
-  @Min(0)
-  priceMin?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber({}, { message: '最高价必须是数字' })
-  @Min(0)
-  priceMax?: number;
-
-  @IsOptional()
-  @Type(() => Number)
   @IsNumber({}, { message: '重量必须是数字' })
   @Min(0, { message: '重量不能为负数' })
   weight?: number;
@@ -87,6 +75,10 @@ export class CreateProductDto {
   @IsOptional()
   @IsEnum(ProductStatus, { message: '商品状态不正确，请重新选择' })
   status?: ProductStatus;
+
+  @IsOptional()
+  @IsEnum(ProductVisibility, { message: '商品可见范围不正确' })
+  visibility?: ProductVisibility;
 
   @IsOptional()
   @IsEnum(SalesMode, { message: '销售模式不正确，请重新选择' })

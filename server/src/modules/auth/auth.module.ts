@@ -6,10 +6,11 @@ import { AuthController } from "./auth.controller";
 import { JwtStrategy } from "./jwt.strategy";
 
 const jwtExpiresIn = process.env.JWT_EXPIRES_IN?.trim();
-const jwtExpiresInOption = jwtExpiresIn && /^\d+$/.test(jwtExpiresIn)
+type JwtDuration = `${number}${'ms' | 's' | 'm' | 'h' | 'd' | 'w' | 'y'}`;
+const jwtExpiresInOption: number | JwtDuration = jwtExpiresIn && /^\d+$/.test(jwtExpiresIn)
   ? Number(jwtExpiresIn)
   : jwtExpiresIn && /^\d+(ms|s|m|h|d|w|y)$/.test(jwtExpiresIn)
-    ? jwtExpiresIn
+    ? jwtExpiresIn as JwtDuration
     : "7d";
 import { LocalStrategy } from "./local.strategy";
 import { UsersModule } from "../users/users.module";

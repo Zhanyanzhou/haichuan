@@ -4,14 +4,6 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
 
-type CheckoutInput = {
-  customerName: string;
-  customerPhone: string;
-  customerEmail?: string;
-  address: string;
-  items: { skuId: number; quantity: number }[];
-};
-
 type AddressInput = {
   recipientName: string;
   recipientPhone: string;
@@ -87,35 +79,40 @@ export class CustomersService {
     return this.accountResponse(customer);
   }
 
-  async checkout(data: CheckoutInput) {
-    const phone = this.normalizePhone(data.customerPhone);
-    const customer = await this.prisma.customer.upsert({
-      where: { phone },
-      create: { phone, name: data.customerName.trim(), email: data.customerEmail?.trim() || null, lastOrderAt: new Date() },
-      update: { name: data.customerName.trim(), email: data.customerEmail?.trim() || undefined, lastOrderAt: new Date() },
-    });
-    const order = await this.ordersService.create({ ...data, customerId: customer.id, customerPhone: phone, paymentMethod: 'bank_transfer' });
-    return { order, ...this.accountResponse(customer) };
-  }
+  /**
+   * 下单：仅登录客户可用（游客下单已关闭，见 DECISIONS D.7）。
+   * 不再签发 access token —— 登录态只来自 register/login，避免"知道手机号即可接管账户"。
+   * 不 upsert 覆盖既有客户资料（P1-19 同源问题随之消除）。
+   */
+  async checkout(
+    customerId: number,
+    data: { address: string; items: { skuId: number; quantity: number }[]; customerEmail?: string },
+  ) {
+    const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
+    if (!customer) throw new NotFoundException('客户不存在');
 
-  async accessByOrder(phoneInput: string, orderNoInput: string) {
-    const phone = this.normalizePhone(phoneInput);
-    const orderNo = orderNoInput?.trim();
-    if (!orderNo) throw new BadRequestException('请输入订单号');
-    const order = await this.prisma.order.findFirst({ where: { customerPhone: phone, orderNo } });
-    if (!order) throw new UnauthorizedException('手机号或订单号不匹配');
+    const address = data.address?.trim();
+    if (!address || address.length > 500) throw new BadRequestException('请提供有效的收货地址');
 
-    const customer = await this.prisma.customer.upsert({
-      where: { phone },
-      create: { phone, name: order.customerName, email: order.customerEmail, lastOrderAt: order.createdAt },
-      update: { name: order.customerName || undefined, email: order.customerEmail || undefined },
+    const order = await this.ordersService.create({
+      customerId: customer.id,
+      customerName: customer.name || customer.phone,
+      customerPhone: customer.phone,
+      customerEmail: data.customerEmail?.trim() || customer.email || undefined,
+      address,
+      items: data.items,
+      paymentMethod: 'bank_transfer',
     });
-    await this.prisma.order.updateMany({ where: { customerPhone: phone, customerId: null }, data: { customerId: customer.id } });
-    return this.accountResponse(customer);
+    await this.prisma.customer.update({ where: { id: customer.id }, data: { lastOrderAt: new Date() } });
+    return { order };
   }
 
   async getProfile(customerId: number) {
-    const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
+    // 显式 select 排除 passwordHash（P0-2），避免哈希外泄
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { id: true, phone: true, name: true, email: true, status: true, lastOrderAt: true, createdAt: true, updatedAt: true },
+    });
     if (!customer) throw new NotFoundException('客户不存在');
     return customer;
   }
@@ -140,8 +137,15 @@ export class CustomersService {
     const name = data.name?.trim();
     const email = data.email?.trim();
     if (name !== undefined && (!name || name.length > 50)) throw new BadRequestException('姓名格式不正确');
-    if (email !== undefined && email.length > 100) throw new BadRequestException('邮箱格式不正确');
-    return this.prisma.customer.update({ where: { id: customerId }, data: { name, email } });
+    if (email !== undefined && (email.length > 100 || (email.length > 0 && !/^\S+@\S+\.\S+$/.test(email)))) {
+      throw new BadRequestException('请填写正确的邮箱地址');
+    }
+    // 返回时显式排除 passwordHash（P0-2）
+    return this.prisma.customer.update({
+      where: { id: customerId },
+      data: { name, email },
+      select: { id: true, phone: true, name: true, email: true, status: true, lastOrderAt: true, createdAt: true, updatedAt: true },
+    });
   }
 
   async listAddresses(customerId: number) {

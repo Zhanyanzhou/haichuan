@@ -1,6 +1,7 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { ProductsService } from '../products/products.service';
 
 @Injectable()
 export class GoldPriceService {
@@ -8,7 +9,10 @@ export class GoldPriceService {
   private currentPrice = 485.60; // Default gold price
   private previousPrice = 483.30;
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly productsService: ProductsService,
+  ) {}
 
   /**
    * Get latest gold price
@@ -118,61 +122,63 @@ export class GoldPriceService {
   }
 
   /**
-   * Automatic price adjustment engine
-   * Formula: product_price = gold_weight × gold_price × coefficient + craft_fee
+   * 自动调价引擎（P1-2/P1-3）：
+   * - 仅作用于 PUBLISHED 商品（不再改动 DRAFT 草稿价）
+   * - 只更新 SKU.price；Product.price（起价）由 ProductsService.syncProductStartingPrice 统一维护为 min 活跃 SKU 价
+   *   （原来 gold-price 直接覆盖 Product.price 会破坏 syncProductStartingPrice 的单一真相源）
+   * - 调价后通知前台 SSE 刷新（原来不触发 notifyPublicChange，前台价格不更新）
+   * - 加价系数 1.05 暂硬编码（DECISIONS D.10 待决策：按 MaterialType 分级并参数化）
+   * Formula: sku_price = sku_gold_weight × gold_price × coefficient + craft_fee（取整到 10 元）
    */
   private async adjustProductPrices(goldPrice: number) {
-    const coefficient = 1.05; // 默认加价系数
+    const COEFFICIENT = 1.05;
+    const products = await this.prisma.product.findMany({
+      where: { status: 'PUBLISHED', goldWeight: { gt: 0 } },
+      select: { id: true, goldWeight: true, craftFee: true, price: true },
+    });
 
+    const affectedProductIds: number[] = [];
     const result = await this.prisma.$transaction(async (tx) => {
-      const products = await tx.product.findMany({
-        where: {
-          status: { in: ['PUBLISHED', 'DRAFT'] },
-          goldWeight: { gt: 0 },
-        },
-        select: { id: true, goldWeight: true, craftFee: true, price: true },
-      });
-
-      let adjustedCount = 0;
       for (const product of products) {
         const craftFee = Number(product.craftFee || 0);
-        const newPrice = Math.round((Number(product.goldWeight) * goldPrice * coefficient + craftFee) / 10) * 10;
+        const refPrice = Math.round((Number(product.goldWeight) * goldPrice * COEFFICIENT + craftFee) / 10) * 10;
+        if (Math.abs(refPrice - Number(product.price)) <= 1) continue;
 
-        if (Math.abs(newPrice - Number(product.price)) > 1) {
-          await tx.product.update({
-            where: { id: product.id },
-            data: { price: newPrice },
-          });
-
-          await tx.priceHistory.create({
-            data: {
-              productId: product.id,
-              oldPrice: product.price || 0,
-              newPrice,
-              goldPrice,
-              operatorId: 0, // 系统
-              reason: `金价变动 ¥${goldPrice}/克，自动调价`,
-            },
-          });
-
-          // 同步该商品下有金重的 SKU 价格：下单读 sku.price，否则仍是旧价导致实付金额错误
-          const skus = await tx.productSKU.findMany({
-            where: { productId: product.id, goldWeight: { gt: 0 } },
-            select: { id: true, goldWeight: true, price: true },
-          });
-          for (const sku of skus) {
-            const skuPrice = Math.round((Number(sku.goldWeight) * goldPrice * coefficient + craftFee) / 10) * 10;
-            if (Math.abs(skuPrice - Number(sku.price)) > 1) {
-              await tx.productSKU.update({ where: { id: sku.id }, data: { price: skuPrice } });
-            }
+        // 同步该商品下有金重的 SKU 售价（下单读 sku.price，否则实付金额错误）
+        const skus = await tx.productSKU.findMany({
+          where: { productId: product.id, goldWeight: { gt: 0 } },
+          select: { id: true, goldWeight: true, price: true },
+        });
+        let skuChanged = false;
+        for (const sku of skus) {
+          const skuPrice = Math.round((Number(sku.goldWeight) * goldPrice * COEFFICIENT + craftFee) / 10) * 10;
+          if (Math.abs(skuPrice - Number(sku.price)) > 1) {
+            await tx.productSKU.update({ where: { id: sku.id }, data: { price: skuPrice } });
+            skuChanged = true;
           }
-
-          adjustedCount++;
         }
-      }
+        if (!skuChanged) continue;
 
-      return { totalProducts: products.length, adjustedCount };
+        // PriceHistory 记商品级参考价；实际 Product.price 由 sync 重算为 min 活跃 SKU 价
+        await tx.priceHistory.create({
+          data: {
+            productId: product.id,
+            oldPrice: product.price || 0,
+            newPrice: refPrice,
+            goldPrice,
+            operatorId: 0, // 系统
+            reason: `金价变动 ¥${goldPrice}/克，自动调价`,
+          },
+        });
+        affectedProductIds.push(product.id);
+      }
+      return { totalProducts: products.length, adjustedCount: affectedProductIds.length };
     });
+
+    // 事务提交后：重算起价（Product.price = min 活跃 SKU 价）并通知前台 SSE 刷新（P1-2）
+    for (const pid of affectedProductIds) {
+      await this.productsService.refreshStartingPriceAndNotify(pid);
+    }
 
     this.logger.log(`Price adjustment complete: ${result.adjustedCount}/${result.totalProducts} products updated`);
     return result;

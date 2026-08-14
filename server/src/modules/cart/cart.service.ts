@@ -39,10 +39,15 @@ export class CartService {
     const owner = this.resolveOwner(data);
     const quantity = this.requireQuantity(Number(data.quantity));
     const sku = await this.prisma.productSKU.findFirst({
-      where: { id: data.skuId, productId: data.productId, isActive: true, product: { status: 'PUBLISHED', deletedAt: null } },
+      where: {
+        id: data.skuId,
+        productId: data.productId,
+        isActive: true,
+        product: { status: 'PUBLISHED', deletedAt: null, salesMode: 'DIRECT_PURCHASE' },
+      },
       select: { id: true },
     });
-    if (!sku) throw new NotFoundException('商品规格不存在或当前不可购买');
+    if (!sku) throw new BadRequestException('该商品不支持直接购买，请通过咨询/预约选购');
 
     const existing = await this.prisma.cart.findFirst({
       where: { ...owner, skuId: data.skuId },

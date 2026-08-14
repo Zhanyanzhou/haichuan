@@ -29,6 +29,8 @@ export class OptionalCustomerAuthGuard implements CanActivate {
       if (!customer || customer.status === 'DISABLED') {
         throw new UnauthorizedException('客户登录状态无效');
       }
+      // partnerStatus=SUSPENDED 不在此处拒绝：暂停的是合作商品访问权而非整个账户。
+      // 每次请求实时读取 customer，SUSPENDED 在 catalog 可见范围过滤层立即降级为 MEMBER。
       request.customer = customer;
       return true;
     } catch (error) {

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { Injectable, Logger, OnModuleInit, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import OpenAI from "openai";
 
@@ -24,9 +24,16 @@ export class KimiService implements OnModuleInit {
       return;
     }
 
+    if (!baseURL) {
+      // apiKey 已配但 baseURL 缺失时会打到 OpenAI 默认地址（非 Kimi），提醒运维补 KIMI_BASE_URL
+      this.logger.warn("KIMI_BASE_URL 未配置，请求将发往 OpenAI 默认地址而非 Kimi，请确认配置");
+    }
+
     this.client = new OpenAI({
       apiKey,
       baseURL,
+      timeout: 30_000, // P1-23：避免 SDK 默认 10 分钟长挂起占用连接与限流配额
+      maxRetries: 1,
     });
 
     this.logger.log(`Kimi 服务初始化成功，模型: ${this.model}`);
@@ -71,8 +78,9 @@ export class KimiService implements OnModuleInit {
         usage: response.usage,
       };
     } catch (error: any) {
-      this.logger.error("Kimi API 调用失败", error);
-      throw new Error(`Kimi API 调用失败: ${error.message}`);
+      // P1-23：详细错误仅记日志，对外抛通用异常，避免泄露 baseURL/状态等内部信息
+      this.logger.error("Kimi API 调用失败", error?.stack || error);
+      throw new ServiceUnavailableException("AI 服务暂时不可用，请稍后重试");
     }
   }
 
@@ -120,8 +128,8 @@ export class KimiService implements OnModuleInit {
         usage: response.usage,
       };
     } catch (error: any) {
-      this.logger.error("Kimi 图片识别失败", error);
-      throw new Error(`Kimi 图片识别失败: ${error.message}`);
+      this.logger.error("Kimi 图片识别失败", error?.stack || error);
+      throw new ServiceUnavailableException("AI 图片识别服务暂时不可用，请稍后重试");
     }
   }
 
@@ -156,15 +164,13 @@ export class KimiService implements OnModuleInit {
       return JSON.parse(jsonStr.trim()) as T;
     } catch (error) {
       this.logger.error("Kimi JSON 解析失败", result.content);
-      throw new Error(
-        `Kimi 返回的内容无法解析为 JSON: ${result.content.substring(0, 200)}`,
-      );
+      throw new ServiceUnavailableException("AI 返回内容无法解析，请稍后重试");
     }
   }
 
   private ensureAvailable(): void {
     if (!this.client) {
-      throw new Error("Kimi 服务未初始化，请检查 KIMI_API_KEY 环境变量配置");
+      throw new ServiceUnavailableException("AI 服务未初始化，请检查 KIMI_API_KEY 环境变量配置");
     }
   }
 }

@@ -7,6 +7,9 @@ import { CustomerCommerceGuard } from '../../common/guards/customer-commerce.gua
 
 @ApiTags('购物车')
 @Controller('cart')
+// 购物车为公开接口（游客靠 x-session-id，登录客户靠客户令牌）。
+// 必须标注 @Public() 让全局 JwtAuthGuard 旁通（JwtStrategy 会拒绝客户令牌），
+// 再由 OptionalCustomerAuthGuard 完成可选客户鉴权。
 @Public()
 // OptionalCustomerAuthGuard：有客户令牌则解析出 req.customer，无令牌匿名放行（游客靠 x-session-id）
 @UseGuards(CustomerCommerceGuard, OptionalCustomerAuthGuard)

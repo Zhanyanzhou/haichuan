@@ -26,6 +26,9 @@ export class CustomerAuthGuard implements CanActivate {
       if (!customer || customer.status === 'DISABLED') {
         throw new UnauthorizedException('客户访问身份无效');
       }
+      // 注意：partnerStatus=SUSPENDED 不在此处拒绝请求——暂停的是"合作商品访问权"，而非整个账户。
+      // 每次请求都从数据库实时读取 customer（含 partnerStatus），因此审核暂停即便旧 JWT 未过期，
+      // 也会在 catalog 可见范围过滤层立即生效（SUSPENDED 自动降级为 MEMBER 可见范围）。
       request.customer = customer;
       return true;
     } catch (error) {

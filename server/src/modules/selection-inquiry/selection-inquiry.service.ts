@@ -1,9 +1,13 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { ProductsService } from "../products/products.service";
 
 @Injectable()
 export class SelectionInquiryService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private productsService: ProductsService,
+  ) {}
 
   async findAll(params: {
     status?: string;
@@ -67,10 +71,36 @@ export class SelectionInquiryService {
     if (items.length === 0 || items.length > 20) {
       throw new BadRequestException("请选择 1 至 20 款作品");
     }
-    if (items.some((item) => !item.productNameSnapshot?.trim())) {
-      throw new BadRequestException("所选作品信息不完整");
+
+    // 服务端逐个复核 productId（P0 安全）：不再信任客户端传入的商品 ID、名称或图片。
+    // 每个条目必须带有效 productId，否则无法服务端复核，整次提交拒绝。
+    // 复用 ProductsService 既有可见性规则：游客仅 PUBLIC，会员/已审核合作商家按其可见范围；
+    // 不可见（不存在 / 下架 / 软删除 / 越权）统一拒绝，错误不区分原因、不泄露内部信息。
+    const validItems = items.filter(
+      (item): item is (typeof items)[number] & { productId: number } =>
+        typeof item.productId === "number" &&
+        Number.isInteger(item.productId) &&
+        item.productId > 0,
+    );
+    if (validItems.length !== items.length) {
+      throw new BadRequestException("所选作品信息不完整，请刷新页面后重新选择");
+    }
+    const distinctIds = Array.from(
+      new Set(validItems.map((item) => item.productId)),
+    );
+    const snapshots =
+      await this.productsService.resolveVisibleProductSnapshots(
+        distinctIds,
+        data.customer,
+      );
+    if (snapshots.size !== distinctIds.length) {
+      throw new BadRequestException(
+        "所选作品中有不存在或暂不可选的款式，请刷新页面后重新选择",
+      );
     }
 
+    // 写入时以服务端规范名称与受控媒体地址覆盖客户端快照；
+    // productSkuSnapshot 为展示性描述文本，保留客户端值（已 trim），不作为可见性或安全依据。
     return this.prisma.selectionInquiry.create({
       data: {
         customerName,
@@ -81,12 +111,20 @@ export class SelectionInquiryService {
         message: data.message?.trim() || null,
         status: "PENDING",
         items: {
-          create: items.map((item) => ({
-            productId: item.productId,
-            productNameSnapshot: item.productNameSnapshot,
-            productSkuSnapshot: item.productSkuSnapshot,
-            productImageSnapshot: item.productImageSnapshot,
-          })),
+          create: validItems.map((item) => {
+            const snap = snapshots.get(item.productId);
+            if (!snap) {
+              throw new BadRequestException(
+                "所选作品中有不存在或暂不可选的款式，请刷新页面后重新选择",
+              );
+            }
+            return {
+              productId: item.productId,
+              productNameSnapshot: snap.name,
+              productSkuSnapshot: item.productSkuSnapshot?.trim() || null,
+              productImageSnapshot: snap.mediaUrl,
+            };
+          }),
         },
       },
       include: { items: true },

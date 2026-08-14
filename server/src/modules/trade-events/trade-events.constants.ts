@@ -1,0 +1,81 @@
+/**
+ * 交易域常量：事件类型、实体类型、操作人类型。
+ *
+ * 这些值以字符串形式存储在 TradeEvent 表，跨模块共享，避免分散定义。
+ * 事件类型对应任务要求的最少事件集合 + 必要扩展。
+ */
+
+/** 交易事件类型（TradeEvent.eventType） */
+export const TRADE_EVENT_TYPE = {
+  // 订单生命周期
+  ORDER_CREATED: 'ORDER_CREATED',
+  ORDER_CANCELLED: 'ORDER_CANCELLED',
+  ORDER_COMPLETED: 'ORDER_COMPLETED',
+  // 库存
+  STOCK_RESERVED: 'STOCK_RESERVED',
+  STOCK_RELEASED: 'STOCK_RELEASED',
+  STOCK_CONSUMED: 'STOCK_CONSUMED',
+  // 付款
+  PAYMENT_PROOF_SUBMITTED: 'PAYMENT_PROOF_SUBMITTED',
+  PAYMENT_APPROVED: 'PAYMENT_APPROVED',
+  PAYMENT_REJECTED: 'PAYMENT_REJECTED',
+  // 履约
+  FULFILLMENT_CREATED: 'FULFILLMENT_CREATED',
+  SHIPMENT_DISPATCHED: 'SHIPMENT_DISPATCHED',
+  FULFMENT_DELIVERED: 'FULFILLMENT_DELIVERED',
+  FULFILLMENT_ABNORMAL: 'FULFILLMENT_ABNORMAL',
+  // 售后
+  AFTER_SALES_REQUESTED: 'AFTER_SALES_REQUESTED',
+  AFTER_SALES_APPROVED: 'AFTER_SALES_APPROVED',
+  AFTER_SALES_REJECTED: 'AFTER_SALES_REJECTED',
+  // 退款
+  REFUND_REQUESTED: 'REFUND_REQUESTED',
+  REFUND_APPROVED: 'REFUND_APPROVED',
+  REFUND_REJECTED: 'REFUND_REJECTED',
+  REFUND_COMPLETED: 'REFUND_COMPLETED',
+  REFUND_EXECUTE_FAILED: 'REFUND_EXECUTE_FAILED', // 执行失败（保持 APPROVED 可重试，仅记时间线）
+  // 报价
+  QUOTATION_CONVERTED: 'QUOTATION_CONVERTED', // 报价单转订单
+  // 订单管理操作（交易中心：金额/地址/备注/签收/顾问/定制阶段）
+  ORDER_AMOUNT_EDITED: 'ORDER_AMOUNT_EDITED', // 修改订单金额
+  ORDER_ADDRESS_EDITED: 'ORDER_ADDRESS_EDITED', // 修改收货地址
+  ORDER_NOTE_EDITED: 'ORDER_NOTE_EDITED', // 修改内部备注
+  ORDER_RECEIVED: 'ORDER_RECEIVED', // 确认签收
+  ORDER_CUSTOM_STAGE_CHANGED: 'ORDER_CUSTOM_STAGE_CHANGED', // 定制阶段推进
+  ORDER_CONSULTANT_CHANGED: 'ORDER_CONSULTANT_CHANGED', // 修改销售顾问
+} as const;
+
+export type TradeEventType = typeof TRADE_EVENT_TYPE[keyof typeof TRADE_EVENT_TYPE];
+
+/** 实体类型（TradeEvent.entityType） */
+export const TRADE_ENTITY_TYPE = {
+  ORDER: 'ORDER',
+  PAYMENT: 'PAYMENT',
+  REFUND: 'REFUND',
+  FULFILLMENT: 'FULFILLMENT',
+  AFTER_SALES: 'AFTER_SALES',
+  INVENTORY: 'INVENTORY',
+} as const;
+
+export type TradeEntityType = typeof TRADE_ENTITY_TYPE[keyof typeof TRADE_ENTITY_TYPE];
+
+/** 操作人类型（TradeEvent.operatorType） */
+export const OPERATOR_TYPE = {
+  CUSTOMER: 'CUSTOMER',
+  ADMIN: 'ADMIN',
+  SYSTEM: 'SYSTEM',
+} as const;
+
+export type OperatorType = typeof OPERATOR_TYPE[keyof typeof OPERATOR_TYPE];
+
+/**
+ * 操作人上下文：贯穿所有交易写操作，用于审计事件。
+ * - 客户结算/上传凭证：{ type: CUSTOMER, id: customerId }
+ * - 后台员工审核/发货/退款：{ type: ADMIN, id: userId, name?: realName }
+ * - 定时任务/系统：{ type: SYSTEM }
+ */
+export interface OperatorContext {
+  type: OperatorType;
+  id?: number;
+  name?: string;
+}

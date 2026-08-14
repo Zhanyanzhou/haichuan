@@ -99,4 +99,13 @@ export class InventoryService {
       lowStockCount: Number(lowStockRows[0]?.count ?? 0),
     };
   }
+
+  /** 聚合某商品全部 SKU 的可用库存总量(经 Inventory，统一库存真相源) */
+  async getTotalByProduct(productId: number) {
+    const result = await this.prisma.inventory.aggregate({
+      _sum: { quantity: true },
+      where: { sku: { productId } },
+    });
+    return result._sum.quantity ?? 0;
+  }
 }

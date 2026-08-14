@@ -15,6 +15,7 @@ import { Public } from "../../common/decorators/public.decorator";
 import { OptionalCustomerAuthGuard } from "../customers/optional-customer-auth.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { Throttle } from "@nestjs/throttler";
 
 @Controller("selection-inquiries")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -34,6 +35,8 @@ export class SelectionInquiryController {
     });
   }
 
+  // P0-6：公开提交收紧限流（5/min）
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Public()
   @UseGuards(OptionalCustomerAuthGuard)
   @Post()

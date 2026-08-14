@@ -1,7 +1,6 @@
 import {
   IsString,
   IsOptional,
-  IsInt,
   IsBoolean,
   IsEnum,
   IsNumber,
@@ -38,18 +37,8 @@ export class CreateSkuDto {
   @Min(0, { message: "价格不能为负数" })
   price!: number;
 
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt({ message: "库存必须是整数" })
-  @Min(0, { message: "库存不能为负数" })
-  stock?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt({ message: "安全库存必须是整数" })
-  @Min(0, { message: "安全库存不能为负数" })
-  safetyStock?: number;
-
+  // 注：库存(stock)与安全库存(safetyStock)已统一到 Inventory 模块管理，
+  // SKU 表不再承载库存，DTO 不再接收这两个字段（whitelist 会剥离历史调用方传入的值）。
   @IsOptional()
   @Type(() => Boolean)
   @IsBoolean({ message: "启用状态必须是布尔值" })
@@ -82,18 +71,6 @@ export class UpdateSkuDto {
   @IsNumber({}, { message: "价格必须是数字" })
   @Min(0)
   price?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt({ message: "库存必须是整数" })
-  @Min(0)
-  stock?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt({ message: "安全库存必须是整数" })
-  @Min(0)
-  safetyStock?: number;
 
   @IsOptional()
   @Type(() => Boolean)
