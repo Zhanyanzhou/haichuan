@@ -16,6 +16,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { CustomerAuthGuard } from '../customers/customer-auth.guard';
 import { Throttle } from '@nestjs/throttler';
+import { CustomerCommerceGuard } from '../../common/guards/customer-commerce.guard';
 
 const videoStorage = diskStorage({
   destination: (_req, _file, callback) => {
@@ -55,7 +56,7 @@ export class UploadController {
   }
 
   @Public()
-  @UseGuards(CustomerAuthGuard)
+  @UseGuards(CustomerCommerceGuard, CustomerAuthGuard)
   // 公开上传接口收紧行为限流(全局 60/min 偏宽),降低并发 10MB 内存存储的 DoS 风险
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('payment-proof')

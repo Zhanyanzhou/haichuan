@@ -2,11 +2,14 @@ import { Controller, Get, Post, Put, Delete, Param, Body, Headers, Req, UseGuard
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { CartService } from './cart.service';
 import { OptionalCustomerAuthGuard } from '../customers/optional-customer-auth.guard';
+import { Public } from '../../common/decorators/public.decorator';
+import { CustomerCommerceGuard } from '../../common/guards/customer-commerce.guard';
 
 @ApiTags('购物车')
 @Controller('cart')
+@Public()
 // OptionalCustomerAuthGuard：有客户令牌则解析出 req.customer，无令牌匿名放行（游客靠 x-session-id）
-@UseGuards(OptionalCustomerAuthGuard)
+@UseGuards(CustomerCommerceGuard, OptionalCustomerAuthGuard)
 export class CartController {
   constructor(private cartService: CartService) {}
 

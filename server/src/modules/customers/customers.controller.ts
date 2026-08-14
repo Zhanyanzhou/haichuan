@@ -4,6 +4,7 @@ import { OrdersService } from '../orders/orders.service';
 import { CustomerAuthGuard } from './customer-auth.guard';
 import { CustomersService } from './customers.service';
 import { Throttle } from '@nestjs/throttler';
+import { CustomerCommerceGuard } from '../../common/guards/customer-commerce.guard';
 
 @Controller('customers')
 export class CustomersController {
@@ -12,6 +13,7 @@ export class CustomersController {
     private readonly ordersService: OrdersService,
   ) {}
 
+  @UseGuards(CustomerCommerceGuard, CustomerAuthGuard)
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('checkout')
@@ -70,7 +72,8 @@ export class CustomersController {
     return this.customersService.getInquiries(request.customer.id);
   }
 
-  @UseGuards(CustomerAuthGuard)
+  @Public()
+  @UseGuards(CustomerCommerceGuard, CustomerAuthGuard)
   @Post('me/orders/:id/payment-proof')
   submitPaymentProof(@Req() request: any, @Param('id') id: string, @Body('proofUrl') proofUrl: string) {
     return this.ordersService.submitOfflinePaymentProof(request.customer.id, +id, proofUrl);

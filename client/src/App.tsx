@@ -17,8 +17,6 @@ const PagePreview = lazy(() =>
 );
 const ProductList = lazy(() => import("@/pages/public/ProductList"));
 const ProductDetail = lazy(() => import("@/pages/public/ProductDetail"));
-const Cart = lazy(() => import("@/pages/public/Cart"));
-const Checkout = lazy(() => import("@/pages/public/Checkout"));
 const CustomerCenter = lazy(() => import("@/pages/public/CustomerCenter"));
 const PaymentReview = lazy(() => import("@/pages/admin/PaymentReview"));
 const About = lazy(() => import("@/pages/public/About"));
@@ -70,8 +68,8 @@ function App() {
             <Route index element={<Home />} />
             <Route path="products" element={<ProductList />} />
             <Route path="products/:id" element={<ProductDetail />} />
-            <Route path="cart" element={<Cart />} />
-            <Route path="checkout" element={<Checkout />} />
+            <Route path="cart" element={<Navigate to="/contact?reason=commerce-unavailable" replace />} />
+            <Route path="checkout" element={<Navigate to="/contact?reason=commerce-unavailable" replace />} />
             <Route path="catalog" element={<Catalog />} />
             <Route path="custom" element={<Custom />} />
             <Route path="search" element={<Search />} />
