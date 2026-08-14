@@ -51,6 +51,12 @@
 
 运维前置条件：该 Compose 配置要求部署环境安全提供 `DATABASE_URL`、`REDIS_PASSWORD`、`JWT_SECRET` 与 `CORS_ORIGIN`，且健康检查依赖已提交的 `/api/ready`；本轮未读取/修改 `.env`，未运行 Docker、CI、安装、Prisma migration/seed 或部署。应由运维在隔离环境验证 Compose 健康检查、反代、事件流和 CORS，再安排上线。
 
+### 2026-08-14 Puck 平板预览校准
+
+`66574db` `fix(puck): 校准平板预览画布尺寸`：仅调整页面装修器的响应式画布与后台预览尺寸显示。Puck iframe 有 2px 边框，因此平板外框设为 770px、实际 CSS 画布仍为 768px；同步增加平板断点契约与单海报的平板列比例，并以 `isMobileCanvasWidth` 统一判断移动端。提交前 `git diff --cached --check`、工作树 `git diff --check` 与页面装修器区块契约（26 种）均通过。
+
+并行边界：提交完成时，另有 `CategoryCardsBlock`、`ImageTextBlock` 与 `SinglePosterSection` 出现新的未提交改动，未纳入本批次；应在其作者完成后重新审阅、验证并单独整理，避免把不同时间点的装修器调整混合进同一提交。
+
 ### 2026-08-14 后续整理
 
 | 提交 | 主题与文件 | 验证证据 | 推送状态 |
