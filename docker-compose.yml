@@ -12,8 +12,9 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    ports:
-      - "3306:3306"
+    # P0-3：生产不对宿主机暴露 3306（管理走 prisma studio / docker exec / SSH 隧道）
+    expose:
+      - "3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -27,13 +28,17 @@ services:
     image: redis:7-alpine
     container_name: jewelry-redis
     restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
-    ports:
-      - "6379:6379"
+    # P0-3：启用密码认证（密码经 REDIS_PASSWORD 环境变量传入，不硬编码到镜像/配置）
+    # $$ 转义让容器内 sh 展开 $REDIS_PASSWORD，而非被 compose 在解析期内联
+    command: sh -c "redis-server --appendonly yes --requirepass $$REDIS_PASSWORD"
+    expose:
+      - "6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -55,13 +60,24 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      # 地址与密码分离，避免强密码中的 @、:、/、# 等 URI 保留字符破坏 REDIS_URL 解析。
       REDIS_URL: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
-    ports:
-      - "3000:3000"
+    # P0-3：不对宿主机暴露 3000（仅 nginx 反代 /api 与 /uploads → server:3000，见 nginx.conf）
+    expose:
+      - "3000"
     volumes:
       - uploads_data:/app/uploads
+      # 受控商品媒体和付款凭证必须跨容器重建持久化，禁止写回镜像层。
+      - private_media_data:/app/private-media
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - jewelry-network
 
@@ -73,9 +89,15 @@ services:
     container_name: jewelry-client
     restart: unless-stopped
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     ports:
       - "80:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     networks:
       - jewelry-network
 
@@ -83,6 +105,7 @@ volumes:
   mysql_data:
   redis_data:
   uploads_data:
+  private_media_data:
 
 networks:
   jewelry-network:

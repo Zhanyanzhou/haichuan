@@ -18,7 +18,7 @@ nav-audit-assets/
 to-upload/
 .vite/
 server/migration-output/
-.github/workflows/
+# 持续集成工作流属于仓库交付物，必须纳入版本控制。
 client/dist-verify/
 client/dist-verify-inventory-reservation/
 
@@ -43,3 +43,8 @@ artifacts/
 
 # 指向 .agents/skills 的符号链接（target 已入库，链接本身不重复入库）
 /.github/skills/
+
+# 本机调试脚本与产物（含本机绝对路径，勿入库）
+/docker_check.cmd
+/docker_out.txt
+/codex-handoff.md

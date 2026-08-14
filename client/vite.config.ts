@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import path from "path";
+import { fileURLToPath, URL } from "node:url";
 
 const apiProxyTarget =
   process.env.VITE_API_PROXY_TARGET || "http://localhost:3000";
@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
   server: {
@@ -36,12 +36,27 @@ export default defineConfig({
   build: {
     // Windows 下清空包含大量图片的输出目录会触发 EPERM；Linux 容器仍执行干净构建。
     emptyOutDir: process.platform !== "win32",
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          vendor: ["react", "react-dom", "react-router-dom"],
-          antd: ["antd", "@ant-design/icons"],
-          motion: ["framer-motion"],
+        // 使用 Rolldown 原生分包，避免旧 manualChunks 兼容层把 React 依赖并入 Ant Design 块。
+        codeSplitting: {
+          groups: [
+            {
+              name: "react-vendor",
+              test: /[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/,
+              priority: 30,
+            },
+            {
+              name: "antd",
+              test: /[\\/]node_modules[\\/](@ant-design[\\/]icons|antd)[\\/]/,
+              priority: 20,
+            },
+            {
+              name: "motion",
+              test: /[\\/]node_modules[\\/]framer-motion[\\/]/,
+              priority: 10,
+            },
+          ],
         },
       },
     },

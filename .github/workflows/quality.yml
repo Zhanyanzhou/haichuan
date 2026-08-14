@@ -1,0 +1,50 @@
+name: Quality Gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+            server/package-lock.json
+
+      - name: 安装根目录依赖
+        run: npm ci
+
+      - name: 安装客户端依赖
+        working-directory: client
+        run: npm ci
+
+      - name: 安装服务端依赖
+        working-directory: server
+        run: npm ci
+
+      - name: 生成 Prisma Client
+        working-directory: server
+        run: npx prisma generate
+
+      - name: 校验 Prisma Schema
+        working-directory: server
+        run: npx prisma validate
+
+      - name: 运行质量检查
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run test:trade
+          npm run build
