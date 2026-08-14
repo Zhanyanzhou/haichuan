@@ -59,19 +59,23 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       const customerToken = localStorage.getItem("customerToken");
-      const requestAuthorization = String(error.config?.headers?.Authorization || "");
+      const requestAuthorization = String(
+        error.config?.headers?.Authorization || "",
+      );
       const isCustomerRequest = Boolean(
         customerToken && requestAuthorization === `Bearer ${customerToken}`,
       );
       if (isCustomerRequest) clearCustomerSession();
       else useAuthStore.getState().logout();
 
-      if (!isCustomerRequest &&
+      if (
+        !isCustomerRequest &&
         window.location.pathname.startsWith("/admin") &&
         !window.location.pathname.includes("/admin/login")
       ) {
         window.location.href = "/admin/login";
-      } else if (isCustomerRequest &&
+      } else if (
+        isCustomerRequest &&
         // 只有真正需要客户身份的页面才跳登录；公开浏览页会自动降级到游客目录。
         /^\/(cart|checkout|partner)(\/|$)/.test(window.location.pathname)
       ) {
@@ -310,7 +314,17 @@ export const productApi = {
   /* 图片管理 */
   addImage: async (
     productId: number,
-    data: { url?: string; storageKey?: string; type?: string; sortOrder?: number; isVideo?: boolean; width?: number; height?: number; mimeType?: string; fileSize?: number },
+    data: {
+      url?: string;
+      storageKey?: string;
+      type?: string;
+      sortOrder?: number;
+      isVideo?: boolean;
+      width?: number;
+      height?: number;
+      mimeType?: string;
+      fileSize?: number;
+    },
   ) => {
     if (USE_MOCK) {
       await mockDelay(200);
@@ -429,7 +443,9 @@ export const productApi = {
   updateTags: async (productId: number, tags: string[]) => {
     if (USE_MOCK) {
       await mockDelay(200);
-      const product = getMockProducts().find((item) => item.id === productId) as any;
+      const product = getMockProducts().find(
+        (item) => item.id === productId,
+      ) as any;
       if (!product) throw new Error("商品不存在");
       product.tags = tags.map((tagName, i) => ({
         id: Date.now() + i,
@@ -444,11 +460,18 @@ export const productApi = {
   /* 证书管理 */
   addCertificate: async (
     productId: number,
-    data: { certType: string; certNumber: string; certImage?: string; expireDate?: string },
+    data: {
+      certType: string;
+      certNumber: string;
+      certImage?: string;
+      expireDate?: string;
+    },
   ) => {
     if (USE_MOCK) {
       await mockDelay(200);
-      const product = getMockProducts().find((item) => item.id === productId) as any;
+      const product = getMockProducts().find(
+        (item) => item.id === productId,
+      ) as any;
       if (!product) throw new Error("商品不存在");
       const cert = { id: Date.now(), productId, ...data };
       if (!product.certificates) product.certificates = [];
@@ -461,11 +484,18 @@ export const productApi = {
   updateCertificate: async (
     productId: number,
     certId: number,
-    data: { certType?: string; certNumber?: string; certImage?: string; expireDate?: string },
+    data: {
+      certType?: string;
+      certNumber?: string;
+      certImage?: string;
+      expireDate?: string;
+    },
   ) => {
     if (USE_MOCK) {
       await mockDelay(200);
-      const product = getMockProducts().find((item) => item.id === productId) as any;
+      const product = getMockProducts().find(
+        (item) => item.id === productId,
+      ) as any;
       const cert = product?.certificates?.find((c: any) => c.id === certId);
       if (!cert) throw new Error("证书不存在");
       Object.assign(cert, data);
@@ -477,9 +507,13 @@ export const productApi = {
   deleteCertificate: async (productId: number, certId: number) => {
     if (USE_MOCK) {
       await mockDelay(200);
-      const product = getMockProducts().find((item) => item.id === productId) as any;
+      const product = getMockProducts().find(
+        (item) => item.id === productId,
+      ) as any;
       if (!product) throw new Error("商品不存在");
-      product.certificates = (product.certificates || []).filter((c: any) => c.id !== certId);
+      product.certificates = (product.certificates || []).filter(
+        (c: any) => c.id !== certId,
+      );
       persistMockProducts();
       return mockRes({ success: true });
     }
@@ -497,7 +531,9 @@ export const productApi = {
   createSku: async (productId: number, data: any) => {
     if (USE_MOCK) {
       await mockDelay(200);
-      const product = getMockProducts().find((item) => item.id === productId) as any;
+      const product = getMockProducts().find(
+        (item) => item.id === productId,
+      ) as any;
       if (!product) throw new Error("商品不存在");
       const sku = { id: Date.now(), productId, isActive: true, ...data };
       if (!product.skus) product.skus = [];
@@ -510,7 +546,9 @@ export const productApi = {
   updateSku: async (productId: number, skuId: number, data: any) => {
     if (USE_MOCK) {
       await mockDelay(200);
-      const product = getMockProducts().find((item) => item.id === productId) as any;
+      const product = getMockProducts().find(
+        (item) => item.id === productId,
+      ) as any;
       const sku = product?.skus?.find((s: any) => s.id === skuId);
       if (!sku) throw new Error("SKU不存在");
       Object.assign(sku, data);
@@ -522,7 +560,9 @@ export const productApi = {
   deleteSku: async (productId: number, skuId: number) => {
     if (USE_MOCK) {
       await mockDelay(200);
-      const product = getMockProducts().find((item) => item.id === productId) as any;
+      const product = getMockProducts().find(
+        (item) => item.id === productId,
+      ) as any;
       if (!product) throw new Error("商品不存在");
       // 与真实后端一致：彻底删除而非停用
       product.skus = (product.skus || []).filter((s: any) => s.id !== skuId);
@@ -627,6 +667,8 @@ export const orderApi = {
     return api.get("/orders", { params });
   },
   getById: (id: number) => api.get(`/orders/${id}`),
+  /** 后台人工建单（需 admin 角色） */
+  create: (data: any) => api.post("/orders", data),
   getStatistics: () => api.get("/orders/statistics"),
   getAnomalies: () => api.get("/orders/anomalies"),
   getTradeOverview: () => api.get("/orders/trade-overview"),
@@ -648,14 +690,17 @@ export const orderApi = {
     },
   ) => api.put(`/orders/${id}/ship`, data),
   // 交易中心：订单管理中心操作（金额/地址/备注/签收/顾问/定制阶段）
-  updateAmount: (id: number, data: {
-    discountAmount?: number;
-    adjustmentAmount?: number;
-    finalAmount?: number;
-    depositAmount?: number;
-    balanceAmount?: number;
-    reason?: string;
-  }) => api.put(`/orders/${id}/amount`, data),
+  updateAmount: (
+    id: number,
+    data: {
+      discountAmount?: number;
+      adjustmentAmount?: number;
+      finalAmount?: number;
+      depositAmount?: number;
+      balanceAmount?: number;
+      reason?: string;
+    },
+  ) => api.put(`/orders/${id}/amount`, data),
   updateAddress: (id: number, address: string) =>
     api.put(`/orders/${id}/address`, { address }),
   updateNote: (id: number, internalNote: string) =>
@@ -798,7 +843,9 @@ export const partnerApi = {
   submit: (data: any) =>
     api.post("/partner-applications", data, { headers: customerAuthHeaders() }),
   resubmit: (data: any) =>
-    api.put("/partner-applications/me", data, { headers: customerAuthHeaders() }),
+    api.put("/partner-applications/me", data, {
+      headers: customerAuthHeaders(),
+    }),
   // 后台（员工令牌，全局 interceptor 自动注入 Authorization）
   adminGetList: (params: any) => api.get("/partner-applications", { params }),
   adminGetById: (id: number) => api.get(`/partner-applications/${id}`),
@@ -818,7 +865,7 @@ export const paymentApi = {
     orderId: number;
     amount: number;
     method: string;
-    type: 'DEPOSIT' | 'BALANCE' | 'FULL' | 'SUPPLEMENT';
+    type: "DEPOSIT" | "BALANCE" | "FULL" | "SUPPLEMENT";
     paidAt?: string;
     gatewayTradeNo?: string;
     reviewNote?: string;
@@ -829,11 +876,17 @@ export const paymentApi = {
 export const fulfillmentApi = {
   getList: (params: any) => api.get("/fulfillments", { params }),
   getById: (id: number) => api.get(`/fulfillments/${id}`),
-  dispatch: (id: number, data: { carrier: string; trackingNo: string; internalNote?: string }) =>
-    api.put(`/fulfillments/${id}/dispatch`, data),
+  dispatch: (
+    id: number,
+    data: { carrier: string; trackingNo: string; internalNote?: string },
+  ) => api.put(`/fulfillments/${id}/dispatch`, data),
   updateStatus: (
     id: number,
-    data: { status: 'DELIVERED' | 'ABNORMAL'; abnormalReason?: string; internalNote?: string },
+    data: {
+      status: "DELIVERED" | "ABNORMAL";
+      abnormalReason?: string;
+      internalNote?: string;
+    },
   ) => api.put(`/fulfillments/${id}/status`, data),
 };
 
@@ -849,11 +902,17 @@ export const refundApi = {
     idempotencyKey?: string;
     afterSalesCaseId?: number;
   }) => api.post("/refunds", data),
-  review: (id: number, data: { action: 'APPROVED' | 'REJECTED'; reviewNote?: string }) =>
-    api.put(`/refunds/${id}/review`, data),
+  review: (
+    id: number,
+    data: { action: "APPROVED" | "REJECTED"; reviewNote?: string },
+  ) => api.put(`/refunds/${id}/review`, data),
   execute: (
     id: number,
-    data: { action: 'COMPLETED' | 'FAILED'; gatewayRefundNo?: string; reviewNote?: string },
+    data: {
+      action: "COMPLETED" | "FAILED";
+      gatewayRefundNo?: string;
+      reviewNote?: string;
+    },
   ) => api.put(`/refunds/${id}/execute`, data),
 };
 
@@ -865,7 +924,7 @@ export const afterSalesApi = {
     orderId: number;
     orderItemId?: number;
     customerId?: number;
-    type: 'REFUND' | 'EXCHANGE' | 'REPAIR';
+    type: "REFUND" | "EXCHANGE" | "REPAIR";
     reason: string;
     evidenceUrls?: string[];
     customerNote?: string;
@@ -873,7 +932,11 @@ export const afterSalesApi = {
   }) => api.post("/after-sales-cases", data),
   review: (
     id: number,
-    data: { action: 'APPROVED' | 'REJECTED'; approvedRefundAmount?: number; adminNote?: string },
+    data: {
+      action: "APPROVED" | "REJECTED";
+      approvedRefundAmount?: number;
+      adminNote?: string;
+    },
   ) => api.put(`/after-sales-cases/${id}/review`, data),
   updateStatus: (id: number, data: { status: string; adminNote?: string }) =>
     api.put(`/after-sales-cases/${id}/status`, data),
@@ -1467,7 +1530,11 @@ export const pageDocumentApi = {
       await mockDelay(100);
       return mockRes({ valid: true, errors: [] });
     }
-    return api.post("/page-modules/document/validate", { pageKey, puckData, metadata });
+    return api.post("/page-modules/document/validate", {
+      pageKey,
+      puckData,
+      metadata,
+    });
   },
   getRevisions: async (pageKey = "home") => {
     if (USE_MOCK) {

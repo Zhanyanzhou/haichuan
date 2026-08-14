@@ -21,9 +21,9 @@ import {
 import { EyeOutlined, ExportOutlined, ReloadOutlined, TruckOutlined } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
-import { orderApi, userApi } from "@/services/api";
+import { orderApi, userApi, productApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
-import type { Order, OrderItem, OrderStatus, PaginatedResult, TradeEvent, User } from "@/types";
+import type { Order, OrderItem, OrderStatus, PaginatedResult, TradeEvent, User, Product, ProductSKU } from "@/types";
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -170,6 +170,12 @@ export default function OrderManage() {
   const [exporting, setExporting] = useState(false);
   const [opModal, setOpModal] = useState<{ type: string; open: boolean }>({ type: "", open: false });
   const [consultants, setConsultants] = useState<User[]>([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createSaving, setCreateSaving] = useState(false);
+  const [createForm] = Form.useForm();
+  const [itemRows, setItemRows] = useState<Array<{ key: number; productId?: number; skuId?: number; quantity: number }>>([{ key: 1, quantity: 1 }]);
+  const [productOptions, setProductOptions] = useState<Array<{ value: number; label: string }>>([]);
+  const [skuOptionsMap, setSkuOptionsMap] = useState<Record<number, Array<{ value: number; label: string }>>>({});
   const canShip = useIsAdmin();
 
   const handleStatusFilter = (status: string) => {
@@ -364,6 +370,50 @@ export default function OrderManage() {
     });
   };
 
+  const searchProducts = async (kw: string) => {
+    try {
+      const res = await productApi.getList({ keyword: kw || undefined, pageSize: 30 });
+      const list = unwrapResponse<PaginatedResult<Product>>(res)?.list || [];
+      setProductOptions(list.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` })));
+    } catch {
+      setProductOptions([]);
+    }
+  };
+
+  const loadSkus = async (productId: number) => {
+    if (skuOptionsMap[productId]) return;
+    try {
+      const res = await productApi.getSkus(productId);
+      const list = unwrapResponse<ProductSKU[]>(res) || [];
+      setSkuOptionsMap((m) => ({ ...m, [productId]: list.map((s) => ({ value: s.id, label: s.skuCode })) }));
+    } catch {
+      setSkuOptionsMap((m) => ({ ...m, [productId]: [] }));
+    }
+  };
+
+  const submitCreate = async (values: any) => {
+    const items = itemRows.filter((r) => r.skuId).map((r) => ({ skuId: r.skuId, quantity: r.quantity }));
+    if (items.length === 0) {
+      message.error("请至少选择一个商品 SKU");
+      return;
+    }
+    setCreateSaving(true);
+    try {
+      await orderApi.create({ ...values, items });
+      message.success("订单已创建");
+      setCreateOpen(false);
+      createForm.resetFields();
+      setItemRows([{ key: 1, quantity: 1 }]);
+      setProductOptions([]);
+      setSkuOptionsMap({});
+      void load();
+    } catch (e: unknown) {
+      message.error(e instanceof Error ? e.message : "创建失败");
+    } finally {
+      setCreateSaving(false);
+    }
+  };
+
   const resetFilters = () => {
     setKeyword("");
     setKeywordInput("");
@@ -386,6 +436,9 @@ export default function OrderManage() {
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>刷新</Button>
           <Button icon={<ExportOutlined />} loading={exporting} onClick={handleExport}>导出</Button>
+          {canShip && (
+            <Button type="primary" onClick={() => { void searchProducts(""); setCreateOpen(true); }}>人工建单</Button>
+          )}
         </Space>
       </div>
 
@@ -780,6 +833,70 @@ export default function OrderManage() {
           <div className="flex justify-end gap-2">
             <Button onClick={() => setOpModal({ type: "", open: false })}>取消</Button>
             <Button type="primary" htmlType="submit">确认</Button>
+          </div>
+        </Form>
+      </Modal>
+
+      {/* 人工建单弹窗 */}
+      <Modal
+        title="人工建单"
+        open={createOpen}
+        onCancel={() => setCreateOpen(false)}
+        footer={null}
+        destroyOnClose
+        width={680}
+      >
+        <Form layout="vertical" form={createForm} onFinish={submitCreate}>
+          <div className="grid grid-cols-2 gap-4">
+            <Form.Item name="customerName" label="客户姓名" rules={[{ required: true, message: "请填写客户姓名" }]}>
+              <Input />
+            </Form.Item>
+            <Form.Item name="customerPhone" label="手机号" rules={[{ required: true, pattern: /^1\d{10}$/, message: "请填写有效手机号" }]}>
+              <Input />
+            </Form.Item>
+          </div>
+          <Form.Item name="customerEmail" label="邮箱"><Input /></Form.Item>
+          <Form.Item name="address" label="收货地址" rules={[{ required: true, message: "请填写收货地址" }]}>
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item name="paymentMethod" label="付款方式" initialValue="bank_transfer">
+            <Select options={[{ value: "bank_transfer", label: "银行转账" }, { value: "offline", label: "线下收款" }, { value: "other", label: "其他" }]} />
+          </Form.Item>
+          <Form.Item label="商品明细" required>
+            {itemRows.map((row) => (
+              <Space key={row.key} style={{ display: "flex", marginBottom: 8 }} align="baseline">
+                <Select
+                  showSearch
+                  placeholder="搜索并选择商品"
+                  style={{ width: 260 }}
+                  onSearch={searchProducts}
+                  filterOption={false}
+                  options={productOptions}
+                  value={row.productId}
+                  onChange={(pid: number) => {
+                    setItemRows((rs) => rs.map((r) => (r.key === row.key ? { ...r, productId: pid, skuId: undefined } : r)));
+                    if (pid) void loadSkus(pid);
+                  }}
+                />
+                <Select
+                  placeholder="SKU"
+                  style={{ width: 170 }}
+                  disabled={!row.productId}
+                  options={skuOptionsMap[row.productId || 0] || []}
+                  value={row.skuId}
+                  onChange={(sid: number) => setItemRows((rs) => rs.map((r) => (r.key === row.key ? { ...r, skuId: sid } : r)))}
+                />
+                <InputNumber min={1} max={99} value={row.quantity} style={{ width: 80 }}
+                  onChange={(q) => setItemRows((rs) => rs.map((r) => (r.key === row.key ? { ...r, quantity: q || 1 } : r)))} />
+                <Button danger size="small" disabled={itemRows.length <= 1}
+                  onClick={() => setItemRows((rs) => rs.filter((r) => r.key !== row.key))}>删除</Button>
+              </Space>
+            ))}
+            <Button type="dashed" onClick={() => setItemRows((rs) => [...rs, { key: Date.now(), quantity: 1 }])}>+ 添加商品</Button>
+          </Form.Item>
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setCreateOpen(false)}>取消</Button>
+            <Button type="primary" htmlType="submit" loading={createSaving}>创建订单</Button>
           </div>
         </Form>
       </Modal>
