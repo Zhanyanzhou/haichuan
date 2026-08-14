@@ -951,18 +951,30 @@ export class OrdersService {
       }
 
       const now = new Date();
+      // 履约单先进入待发货状态（进入履约状态机），随后在同一事务内推进为已发货，保留完整状态轨迹
       const fulfillment = await tx.fulfillment.create({
         data: {
           fulfillmentNo: this.createFulfillmentNo(),
           orderId: id,
-          status: 'SHIPPED',
+          status: 'PENDING_SHIP',
           carrier: logisticsCompany,
           trackingNo: logisticsNo,
-          shippedAt: now,
           internalNote: data.internalNote?.trim() || null,
           createdBy: actor.id ?? null,
         },
       });
+      await this.tradeEvents.record(tx, {
+        orderId: id, entityType: TRADE_ENTITY_TYPE.FULFILLMENT, entityId: fulfillment.id,
+        eventType: TRADE_EVENT_TYPE.FULFILLMENT_CREATED, toStatus: 'PENDING_SHIP', operator: actor,
+      });
+
+      // 状态机推进：PENDING_SHIP → SHIPPED（乐观锁，防并发）
+      const dispatched = await tx.fulfillment.updateMany({
+        where: { id: fulfillment.id, status: 'PENDING_SHIP' },
+        data: { status: 'SHIPPED', shippedAt: now },
+      });
+      if (dispatched.count === 0) throw new BadRequestException('履约单状态已变化，请刷新后重试');
+
       await tx.order.update({
         where: { id },
         data: {
@@ -975,14 +987,9 @@ export class OrdersService {
         },
       });
 
-      // 交易事件：履约创建 + 发货
       await this.tradeEvents.record(tx, {
         orderId: id, entityType: TRADE_ENTITY_TYPE.FULFILLMENT, entityId: fulfillment.id,
-        eventType: TRADE_EVENT_TYPE.FULFILLMENT_CREATED, toStatus: 'SHIPPED', operator: actor,
-      });
-      await this.tradeEvents.record(tx, {
-        orderId: id, entityType: TRADE_ENTITY_TYPE.FULFILLMENT, entityId: fulfillment.id,
-        eventType: TRADE_EVENT_TYPE.SHIPMENT_DISPATCHED, toStatus: 'SHIPPED', operator: actor,
+        eventType: TRADE_EVENT_TYPE.SHIPMENT_DISPATCHED, fromStatus: 'PENDING_SHIP', toStatus: 'SHIPPED', operator: actor,
         metadata: { carrier: logisticsCompany, trackingNo: logisticsNo },
       });
 
@@ -1090,14 +1097,17 @@ export class OrdersService {
 
   async getStatistics() {
     const [total, todayCount, monthlyRevenue, pendingShip] = await Promise.all([
-      this.prisma.order.count(),
+      this.prisma.order.count({ where: { status: { not: 'CANCELLED' } } }),
       this.prisma.order.count({
-        where: { createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } },
+        where: {
+          createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+          status: { not: 'CANCELLED' },
+        },
       }),
       this.prisma.order.aggregate({
         where: {
           createdAt: { gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
-          status: { in: ['SHIPPED', 'COMPLETED'] },
+          status: { not: 'CANCELLED' },
         },
         _sum: { finalAmount: true },
       }),
@@ -1328,8 +1338,8 @@ export class OrdersService {
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const [todayAgg, todayCount, paidAgg, finalAgg, refundedAgg, activeOrderCount, sourceGroup, typeGroup] = await Promise.all([
-      this.prisma.order.aggregate({ where: { createdAt: { gte: todayStart } }, _sum: { finalAmount: true } }),
-      this.prisma.order.count({ where: { createdAt: { gte: todayStart } } }),
+      this.prisma.order.aggregate({ where: { createdAt: { gte: todayStart }, status: { not: 'CANCELLED' } }, _sum: { finalAmount: true } }),
+      this.prisma.order.count({ where: { createdAt: { gte: todayStart }, status: { not: 'CANCELLED' } } }),
       this.prisma.order.aggregate({ _sum: { paidAmount: true } }),
       this.prisma.order.aggregate({ where: { status: { not: 'CANCELLED' } }, _sum: { finalAmount: true } }),
       this.prisma.order.aggregate({ _sum: { refundedAmount: true } }),

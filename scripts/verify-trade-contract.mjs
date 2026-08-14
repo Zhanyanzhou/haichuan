@@ -35,7 +35,6 @@ const uploadService = await readSrc("server/src/modules/upload/upload.service.ts
 const uploadModule = await readSrc("server/src/modules/upload/upload.module.ts");
 const nginxConfig = await readSrc("client/nginx.conf");
 const composeConfig = await readSrc("docker-compose.yml");
-const queueModule = await readSrc("server/src/queue/queue.module.ts");
 
 check("客户接口：所有 CustomerAuthGuard 端点均有 @Public()（绕过全局 JwtAuthGuard）", () => {
   // 每个含 CustomerAuthGuard 的方法前必须有 @Public()
@@ -82,10 +81,9 @@ check("受控图片：CSP 允许 Blob URL，且范围限定在 img-src", () => {
   assert.ok(!/script-src\s+[^;]*\bblob:/.test(csp[1]), "script-src 不可放宽 blob:");
 });
 
-check("Redis：强密码与连接地址分离，服务端优先读取独立密码", () => {
+check("Redis：强密码与连接地址分离（容器保留，业务侧已无队列消费者）", () => {
   assert.ok(composeConfig.includes("REDIS_URL: redis://redis:6379"), "Compose 中 Redis 地址不可拼接原始密码");
   assert.ok(composeConfig.includes("REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}"), "Compose 必须向服务端传递 Redis 密码");
-  assert.ok(queueModule.includes("process.env.REDIS_PASSWORD ||"), "队列连接必须优先读取独立 Redis 密码");
 });
 
 // ── 结算契约对齐（验收项 #3）──

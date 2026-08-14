@@ -19,7 +19,8 @@ export class StatisticsService {
     yesterdayStart.setDate(yesterdayStart.getDate() - 1);
     const yesterdayRange = { gte: yesterdayStart, lt: todayStart };
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const settledOrderStatuses: OrderStatus[] = ["SHIPPED", "COMPLETED"];
+    // 统一口径：成交额/订单数均排除已取消订单（非 CANCELLED），与交易中心保持一致
+    const notCancelled = { not: "CANCELLED" as OrderStatus };
 
     const [
       productCount,
@@ -44,26 +45,26 @@ export class StatisticsService {
     ] = await Promise.all([
       this.prisma.product.count(),
       this.prisma.product.count({ where: { status: "PUBLISHED" } }),
-      this.prisma.order.count({ where: { createdAt: { gte: todayStart } } }),
-      this.prisma.order.count({ where: { createdAt: yesterdayRange } }),
+      this.prisma.order.count({ where: { createdAt: { gte: todayStart }, status: notCancelled } }),
+      this.prisma.order.count({ where: { createdAt: yesterdayRange, status: notCancelled } }),
       this.prisma.order.aggregate({
         where: {
           createdAt: { gte: todayStart },
-          status: { in: settledOrderStatuses },
+          status: notCancelled,
         },
         _sum: { finalAmount: true },
       }),
       this.prisma.order.aggregate({
         where: {
           createdAt: yesterdayRange,
-          status: { in: settledOrderStatuses },
+          status: notCancelled,
         },
         _sum: { finalAmount: true },
       }),
       this.prisma.order.aggregate({
         where: {
           createdAt: { gte: monthStart },
-          status: { in: settledOrderStatuses },
+          status: notCancelled,
         },
         _sum: { finalAmount: true },
       }),
