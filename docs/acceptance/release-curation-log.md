@@ -24,6 +24,8 @@
 
 `9bd3a39` `fix(public): 冻结线上交易公开入口`：仅提交 `client/src/App.tsx` 中 `/cart`、`/checkout` 的咨询页重定向，以及 `CustomerCommerceGuard` 对购物车、客户结算和付款凭证上传入口的默认拒绝。只有部署环境显式设置 `CUSTOMER_COMMERCE_ENABLED=true` 才会解除守卫；本提交不设置该变量、不部署、不开放交易。暂存复核仅包含 5 个文件、37 行净改动，`git diff --cached --check` 通过；`npm run typecheck`、`npm run lint`、`npm run test:selection-inquiry`（20 项）、`npm run test:contracts`（26 种区块）、`npm run build` 与 `git diff --check` 均通过。交易、订单、支付后台、退款、履约、报价及所有 migration 仍排除在外。
 
+`5c639c5` `perf(home): 按需加载页面装修运行时`：仅提交 `client/src/pages/public/Home/index.tsx` 的 4 个性能 hunk。首页与预览页只在取得已发布的 Puck 数据后再动态加载渲染器，并为动态模块提供带 `role="status"` 的加载反馈；同文件中“移除失效图片”的独立 hunk 未暂存。`npm run typecheck`、`npm run lint`、`npm run build`、`git diff --check` 与 `git diff --cached --check` 均通过。
+
 | 提交 | 主题与文件 | 暂存复核 | 验证证据 |
 | --- | --- | --- | --- |
 | `b21cacb` | `fix(public): 移除未确认公开元数据并改善错误可访问性`。文件：`client/index.html`、`client/public/robots.txt`、`client/public/sitemap.xml`、`client/src/components/common/ErrorBoundary.tsx`、`client/src/pages/public/About/index.tsx`。移除未确认域名、电话与不存在的分享图；公开错误恢复按钮具备原生按钮语义与可见焦点；补充固定的品牌页元信息。 | 每次精确路径暂存后均执行 `git diff --cached --check`、`--name-only`、`--stat` 和完整暂存差异复核。未包含 Puck、交易、数据库、依赖、脚本或未跟踪候选。 | 当前完整工作区：`npm run typecheck`、`npm run lint`、`npm run test:selection-inquiry`、`npm run test:contracts`、`npm run build` 均退出成功；`git diff --check` 通过。运行时烟测报告记录公开路由及联系页隐私必填提示的桌面/移动复验；未将其视为真实 API 成功路径验收。 |
