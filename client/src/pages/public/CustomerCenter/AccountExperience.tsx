@@ -81,8 +81,7 @@ const navItems: Array<{
     detail: "顾问与到店安排",
   },
   { key: "orders", number: "04", label: "我的订单", detail: "订单与售后服务" },
-  { key: "favorites", number: "05", label: "我的收藏", detail: "珍藏心仪作品" },
-  { key: "profile", number: "06", label: "个人资料", detail: "账户与收货信息" },
+  { key: "profile", number: "05", label: "个人资料", detail: "账户与收货信息" },
 ];
 
 function EmptyState({
