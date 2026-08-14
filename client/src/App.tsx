@@ -62,7 +62,6 @@ const AuditLogs = lazy(() => import("@/pages/admin/AuditLogs"));
 const SiteContent = lazy(() => import("@/pages/admin/SiteContent"));
 const LeadManage = lazy(() => import("@/pages/admin/LeadManage"));
 const MarketingManage = lazy(() => import("@/pages/admin/MarketingManage"));
-const AnalyticsView = lazy(() => import("@/pages/admin/AnalyticsView"));
 const PartnerApplications = lazy(
   () => import("@/pages/admin/PartnerApplications"),
 );
@@ -429,14 +428,6 @@ function App() {
             <Route
               path="finance"
               element={<Navigate to="/admin/trade/payments" replace />}
-            />
-            <Route
-              path="analytics"
-              element={
-                <AdminPage route="/admin/analytics">
-                  <AnalyticsView />
-                </AdminPage>
-              }
             />
             <Route
               path="partner-applications"

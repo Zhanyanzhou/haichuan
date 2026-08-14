@@ -26,7 +26,7 @@ export default function SiteContent() {
   const onFinish = async (values: any) => {
     setSaving(true);
     try {
-      // 只保存本站特有的字段，不覆盖 Settings 页面的 siteName/logo
+      // 保存站点内容字段（品牌/联系方式/营业时间/SEO，含 siteName）
       await settingsApi.updateSettings(values);
       message.success('保存成功');
     } catch { message.error('保存失败'); }

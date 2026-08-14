@@ -92,7 +92,7 @@ export default function Settings() {
             <div className="bg-white border border-brand-line p-8 max-w-xl">
               <Form layout="vertical" form={form} onFinish={handleSave}>
                 <Form.Item name="siteName" label="网站名称"><Input /></Form.Item>
-                <Form.Item name="siteDesc" label="网站描述"><Input.TextArea rows={2} /></Form.Item>
+                <Form.Item name="siteDescription" label="网站描述"><Input.TextArea rows={2} /></Form.Item>
                 <Form.Item name="logo" label="LOGO">
                   <Upload accept="image/*" showUploadList={false}
                     beforeUpload={(file) => { handleLogoUpload(file); return false; }}>

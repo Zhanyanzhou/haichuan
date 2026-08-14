@@ -217,7 +217,7 @@ export default function Dashboard() {
         icon: <MessageOutlined />,
         value: formatNumber(stats.inquiriesToday),
         change: buildChange(stats.inquiriesToday, stats.inquiriesYesterday),
-        route: "/admin/inquiries",
+        route: "/admin/leads?type=inquiry",
       },
       {
         key: "pageView",
@@ -225,7 +225,6 @@ export default function Dashboard() {
         icon: <EyeOutlined />,
         value: formatNumber(stats.pageViewsToday),
         change: buildChange(stats.pageViewsToday, stats.pageViewsYesterday),
-        route: "/admin/analytics",
       },
       {
         key: "product",
@@ -255,7 +254,7 @@ export default function Dashboard() {
         key: "inquiry",
         label: "待处理咨询",
         count: (stats.pendingAppointmentInquiries || 0) + (stats.pendingSelectionInquiries || 0),
-        route: "/admin/inquiries?status=PENDING",
+        route: "/admin/leads?status=PENDING",
       },
       { key: "lowStock", label: "库存预警商品", count: stats.lowStock || 0, route: "/admin/inventory" },
       { key: "review", label: "待完善商品", count: stats.pendingReview || 0, route: "/admin/products" },

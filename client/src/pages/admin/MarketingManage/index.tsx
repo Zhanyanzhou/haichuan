@@ -14,6 +14,7 @@ import {
   Space,
   Tabs,
   Popconfirm,
+  Alert,
 } from "antd";
 import {
   PlusOutlined,
@@ -65,6 +66,13 @@ export default function MarketingManage() {
           促销活动 · 优惠券
         </p>
       </div>
+      <Alert
+        type="warning"
+        showIcon
+        message="促销活动与优惠券当前仅作记录管理，暂不参与线上结算"
+        description="电商结算功能处于冻结期，此处的活动与券不会影响客户下单金额。"
+        style={{ maxWidth: 680, marginBottom: 20 }}
+      />
       <Tabs
         activeKey={tab}
         onChange={(nextTab) => setSearchParams({ tab: nextTab })}

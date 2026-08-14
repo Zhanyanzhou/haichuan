@@ -328,7 +328,11 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: true,
         items: [
-          { key: "inquiry-list", label: "预约咨询", route: "/admin/leads?type=inquiry" },
+          {
+            key: "inquiry-list",
+            label: "预约咨询",
+            route: "/admin/leads?type=inquiry",
+          },
           {
             key: "inquiry-pending",
             label: "待处理预约",
@@ -420,29 +424,6 @@ export const navigationConfig: NavDomain[] = [
             key: "customer-leads-following",
             label: "跟进中",
             route: "/admin/leads?status=PROCESSING",
-          },
-        ],
-      },
-    ],
-  },
-  /* 11. 数据 */
-  {
-    key: "data",
-    label: "数据",
-    icon: "bar-chart",
-    order: 3,
-    section: "assets",
-    groups: [
-      {
-        key: "traffic-analytics",
-        label: "流量分析",
-        collapsible: false,
-        defaultOpen: true,
-        items: [
-          {
-            key: "traffic-analytics-view",
-            label: "访问分析",
-            route: "/admin/analytics",
           },
         ],
       },
