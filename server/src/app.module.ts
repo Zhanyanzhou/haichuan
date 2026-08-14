@@ -38,11 +38,40 @@ import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { HealthController } from './common/health/health.controller';
+import { LoggerModule } from 'nestjs-pino';
 
 @Module({
   controllers: [HealthController],
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // 结构化日志（nestjs-pino）：生产环境 JSON 单行、开发环境彩色可读。
+    // 健康探针不计入访问日志；请求序列化只保留 method/url/remoteAddress，
+    // 避免打印 Authorization / Cookie 等敏感请求头。
+    LoggerModule.forRoot({
+      pinoHttp: {
+        transport:
+          process.env.NODE_ENV !== 'production'
+            ? {
+                target: 'pino-pretty',
+                options: { colorize: true, translateTime: 'SYS:HH:MM:ss.l' },
+              }
+            : undefined,
+        autoLogging: {
+          ignore: (req) => {
+            const url = (req as { url?: string }).url ?? '';
+            return url.startsWith('/api/health') || url.startsWith('/api/ready');
+          },
+        },
+        serializers: {
+          req: (req: { method: string; url: string; remoteAddress?: string }) => ({
+            method: req.method,
+            url: req.url,
+            remoteAddress: req.remoteAddress,
+          }),
+          res: () => undefined,
+        },
+      },
+    }),
     // 全局速率限制：默认 60次/分钟
     ThrottlerModule.forRoot([{
       ttl: 60000,

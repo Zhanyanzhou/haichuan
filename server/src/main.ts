@@ -2,12 +2,15 @@ import { NestFactory } from "@nestjs/core";
 import { ValidationPipe, Logger } from "@nestjs/common";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import helmet from "helmet";
+import { Logger as PinoLogger } from "nestjs-pino";
 import { AppModule } from "./app.module";
 import { TransformInterceptor } from "./common/interceptors/transform.interceptor";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // nestjs-pino：统一接管框架与业务日志（生产 JSON 单行，便于采集检索）
+  app.useLogger(app.get(PinoLogger));
   const logger = new Logger("Bootstrap");
 
   app.setGlobalPrefix("api");
@@ -20,19 +23,7 @@ async function bootstrap() {
   // 安全头
   app.use(helmet({ contentSecurityPolicy: false }));
 
-  // 请求日志中间件
-  app.use((req: any, res: any, next: () => void) => {
-    const start = Date.now();
-    const { method, url } = req;
-
-    res.on("finish", () => {
-      const elapsed = Date.now() - start;
-      const { statusCode } = res;
-      logger.log(`${method} ${url} → ${statusCode} (${elapsed}ms)`);
-    });
-
-    next();
-  });
+  // 访问日志已由 nestjs-pino（pino-http）统一记录，不再手写请求日志中间件。
 
   // CORS：开发环境宽松，生产环境只接受显式配置的正式来源。
   // 不使用代码内置域名作为回退值，避免在域名变更或未确认时静默开放错误站点。
