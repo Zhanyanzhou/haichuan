@@ -1151,16 +1151,11 @@ function StoryBand({ item }: { item: (typeof storyBands)[number] }) {
 }
 
 function GiftPromenade() {
+  // 该区块原引用 /images/hero/oriental-water-bangle-v1.png，该资源不存在且无已确认的替代图，
+  // 故移除媒体区域以避免 404 与破损图标，仅保留标题、文案与 CTA（安全降级）。
   return (
     <Reveal className="vca-gift">
       <h2>迷人臻礼</h2>
-      <div className="vca-gift__image">
-        <img
-          src="/images/hero/oriental-water-bangle-v1.png"
-          alt="海川珠宝赠礼场景"
-          loading="lazy"
-        />
-      </div>
       <p>
         凭借金工、纹样与细节表达，海川珠宝陪伴生命中的重要时刻，也让日常佩戴拥有更柔和的仪式感。
       </p>
