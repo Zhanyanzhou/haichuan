@@ -3,19 +3,25 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  lazy,
   useRef,
+  Suspense,
   useState,
 } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import { usePublishedSlots } from "@/hooks/useContentSlots";
 import { usePagePublishStream } from "@/hooks/usePagePublishStream";
-import PuckDocumentRenderer from "@/page-builder/runtime/PuckDocumentRenderer";
 import { pageDocumentApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { trackPageView } from "@/hooks/useAnalytics";
 import type { PublishedSlots } from "@/types/contentSlot";
+
+// 首页基础内容与装修渲染器分离，只有取得已发布的 Puck 数据时才加载编辑器运行时。
+const PuckDocumentRenderer = lazy(
+  () => import("@/page-builder/runtime/PuckDocumentRenderer"),
+);
 
 const LG = "#F7F3EC";
 const SF = "#FFFFFF";
@@ -1347,6 +1353,18 @@ function HomeDocumentLoading() {
   );
 }
 
+function PuckDocumentLoading() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{ minHeight: 180, display: "grid", placeItems: "center", color: "#8C785C", fontSize: 12, letterSpacing: ".12em" }}
+    >
+      正在渲染首页内容
+    </div>
+  );
+}
+
 function HomeDocumentError({ onRetry }: { onRetry: () => void }) {
   return (
     <main role="status" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center", textAlign: "center", padding: 24 }}>
@@ -1416,7 +1434,9 @@ export default function Home() {
     <SlotCtx.Provider value={slots}>
       <main style={{ background: LG }}>
         {pageDocument?.puckData ? (
-          <PuckDocumentRenderer data={pageDocument.puckData} />
+          <Suspense fallback={<PuckDocumentLoading />}>
+            <PuckDocumentRenderer data={pageDocument.puckData} />
+          </Suspense>
         ) : (
           <FallbackHome />
         )}
@@ -1475,7 +1495,9 @@ export function PagePreview({ pageKey: pageKeyProp }: { pageKey?: string }) {
   return (
     <main style={{ background: LG }}>
       {pageDocument?.puckData ? (
-        <PuckDocumentRenderer data={pageDocument.puckData} />
+        <Suspense fallback={<PuckDocumentLoading />}>
+          <PuckDocumentRenderer data={pageDocument.puckData} />
+        </Suspense>
       ) : (
         <FallbackHome />
       )}
