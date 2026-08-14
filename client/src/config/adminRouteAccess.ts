@@ -75,6 +75,8 @@ const ROUTE_RULES: RouteRule[] = [
   { prefix: "/admin/products", roles: CONTENT_EDITORS },
   { prefix: "/admin/categories", roles: CONTENT_EDITORS },
   { prefix: "/admin/attributes", roles: CONTENT_EDITORS },
+  // 评价管理：客服可看列表跟进，审核写操作由后端 @Roles 限定 ADMIN（与服务端 reviews.controller 同口径）
+  { prefix: "/admin/reviews", roles: CUSTOMER_SERVICE },
   { prefix: "/admin/editor", roles: CONTENT_EDITORS },
   { prefix: "/admin/site-content", roles: CONTENT_EDITORS },
   { prefix: "/admin/media", roles: CONTENT_EDITORS },

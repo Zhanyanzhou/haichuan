@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import type { CSSProperties } from "react";
 import { SecureImage } from "@/components/common/SecureImage";
-import { PRODUCT_ROW_CONTRACT } from "@/page-builder/config/blockContracts";
+import { DecorSection } from "@/page-builder/designSystem/sectionShell";
+import { RATIOS } from "@/page-builder/designSystem/tokens";
 
 interface ProductRowBlockProps {
   module: {
@@ -12,8 +13,9 @@ interface ProductRowBlockProps {
   editMode?: boolean;
 }
 
-/** 支持的图片比例预设 */
+/** 图片比例:统一 4:5;仅旧数据的历史值(3:4/1:1/4:3/16:9)按原值渲染 */
 const IMAGE_RATIO_MAP: Record<string, string> = {
+  "4:5": RATIOS["4:5"],
   "3:4": "3 / 4",
   "1:1": "1 / 1",
   "4:3": "4 / 3",
@@ -67,10 +69,11 @@ export default function ProductRowBlock({
     ? "none"
     : configuredActionStyle || (showButton ? "button" : "none");
   const resolvedShowPrice = displayMode === "album" ? false : showPrice;
-  const resolvedMobileColumns = mobileColumns === 1 ? 1 : 2;
+  // schema segmented 写入的是字符串,统一在渲染入口归一为数字
+  const resolvedMobileColumns = Number(mobileColumns) === 1 ? 1 : 2;
 
   const cols = layout === "grid-2" ? 2 : layout === "grid-4" ? 4 : 3;
-  const ratio = IMAGE_RATIO_MAP[imageRatio] || "3 / 4";
+  const ratio = IMAGE_RATIO_MAP[imageRatio] || RATIOS["4:5"];
 
   const titleFontSize =
     titleSize === "large"
@@ -85,14 +88,7 @@ export default function ProductRowBlock({
     : Array.from({ length: cols }, (_, index) => ({ __empty: true, id: `empty-${index}` }));
 
   return (
-    <section
-      className="homepage-product-row"
-      data-display-mode={displayMode}
-      style={{
-        padding: displayMode === "album" ? "clamp(72px,9vh,128px) 0" : "clamp(60px,8vh,120px) 0",
-        background: bg,
-      }}
-    >
+    <DecorSection master="commerce-grid" background={bg}>
       <style>{`
         .homepage-product-row__grid { grid-template-columns: repeat(var(--product-row-columns), minmax(0, 1fr)); }
         .homepage-product-row__card { min-width: 0; }
@@ -103,7 +99,6 @@ export default function ProductRowBlock({
         .homepage-product-row__action.is-button { padding: 6px 16px; border: 1px solid #B8944E; border-radius: 3px; color: #9F7941; }
         .homepage-product-row__action.is-button:hover { color: #FFFFFF; background: #B8944E; }
         @media (max-width: 767px) {
-          .homepage-product-row { padding-block: 48px !important; }
           .homepage-product-row__grid { grid-template-columns: repeat(var(--product-row-mobile-columns), minmax(0, 1fr)) !important; gap: 24px 12px !important; }
           .homepage-product-row__heading { margin-bottom: 32px !important; }
         }
@@ -112,146 +107,138 @@ export default function ProductRowBlock({
           .homepage-product-row__card:hover .homepage-product-row__media img { transform: none; }
         }
       `}</style>
+      {/* ── 标题区 ── */}
+      {(title || subtitle) && (
+        <div className="homepage-product-row__heading" style={{ textAlign: "center", marginBottom: 48 }}>
+          {title && (
+            <h2
+              style={{
+                fontSize: `var(--hc-type-h2, ${titleFontSize})`,
+                fontFamily: 'var(--hc-font-display, "Cormorant Garamond","Noto Serif SC",serif)',
+                color: headingColor,
+                marginBottom: 12,
+                lineHeight: 1.2,
+              }}
+            >
+              {title}
+            </h2>
+          )}
+          {subtitle && (
+            <p
+              style={{
+                fontSize: 13,
+                color: "#8A7F72",
+                maxWidth: 480,
+                margin: "0 auto",
+                lineHeight: 1.6,
+              }}
+            >
+              {subtitle}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* ── 产品网格 ── */}
       <div
+        className="homepage-product-row__grid"
         style={{
-          maxWidth: PRODUCT_ROW_CONTRACT.canvas.maxWidth,
-          margin: "0 auto",
-          padding: "0 clamp(20px,4vw,60px)",
-        }}
+          display: "grid",
+          "--product-row-columns": cols,
+          "--product-row-mobile-columns": resolvedMobileColumns,
+          gap: gap != null ? `${gap}px` : displayMode === "album" ? (cols === 2 ? 40 : 28) : (cols === 2 ? 32 : 20),
+        } as CSSProperties}
       >
-        {/* ── 标题区 ── */}
-        {(title || subtitle) && (
-          <div className="homepage-product-row__heading" style={{ textAlign: "center", marginBottom: 48 }}>
-            {title && (
-              <h2
+        {displayProducts.map((p: any, i: number) => p.__empty ? (
+          <div key={p.id} className="homepage-product-row__empty-card" aria-label={`待选择商品 ${i + 1}`}>
+            <div style={{ aspectRatio: ratio, display: "grid", placeItems: "center", marginBottom: 16, border: "1px solid #E8E7E3", background: "#F8F7F4" }}>
+              <div style={{ textAlign: "center", color: "#A49B90" }}>
+                <strong style={{ display: "block", fontSize: 12, fontWeight: 500 }}>选择商品</strong>
+                <small style={{ display: "block", marginTop: 4, fontSize: 10 }}>右侧商品列表</small>
+              </div>
+            </div>
+            <div style={{ width: "68%", height: 8, borderRadius: 2, background: "#E9E6E0" }} />
+            <div style={{ width: "42%", height: 7, marginTop: 8, borderRadius: 2, background: "#F0EDE8" }} />
+          </div>
+        ) : (
+          <article key={p.id || p.link || i} className="homepage-product-row__card">
+            <Link
+              to={p.link || "/products"}
+              style={{
+                display: "block",
+                textDecoration: "none",
+                color: "inherit",
+              }}
+            >
+              {/* 图片 */}
+              <div
+                className="homepage-product-row__media"
                 style={{
-                  fontSize: titleFontSize,
-                  fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
-                  color: headingColor,
-                  marginBottom: 12,
-                  lineHeight: 1.2,
+                  overflow: "hidden",
+                  marginBottom: 16,
+                  aspectRatio: ratio,
+                  background: "#F5F2ED",
                 }}
               >
-                {title}
-              </h2>
-            )}
-            {subtitle && (
+                {p.image ? (
+                  <SecureImage
+                    src={p.image}
+                    alt={p.name || ""}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#D1CDC5",
+                      fontSize: 32,
+                    }}
+                  >
+                    暂无图片
+                  </div>
+                )}
+              </div>
+
+              {/* 产品名 */}
               <p
                 style={{
-                  fontSize: 13,
-                  color: "#8A7F72",
-                  maxWidth: 480,
-                  margin: "0 auto",
-                  lineHeight: 1.6,
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: "#2C2C2C",
+                  marginBottom: 4,
                 }}
               >
-                {subtitle}
+                {p.name || "产品名称"}
+              </p>
+            </Link>
+
+            {/* 价格（可单独隐藏） */}
+            {resolvedShowPrice && p.price && (
+              <p style={{ fontSize: 13, color: "#B8944E", marginBottom: actionStyle !== "none" ? 10 : 0 }}>
+                {p.price}
               </p>
             )}
-          </div>
-        )}
 
-        {/* ── 产品网格 ── */}
-        <div
-          className="homepage-product-row__grid"
-          style={{
-            display: "grid",
-            "--product-row-columns": cols,
-            "--product-row-mobile-columns": resolvedMobileColumns,
-            gap: gap != null ? `${gap}px` : displayMode === "album" ? (cols === 2 ? 40 : 28) : (cols === 2 ? 32 : 20),
-          } as CSSProperties}
-        >
-          {displayProducts.map((p: any, i: number) => p.__empty ? (
-            <div key={p.id} className="homepage-product-row__empty-card" aria-label={`待选择商品 ${i + 1}`}>
-              <div style={{ aspectRatio: ratio, display: "grid", placeItems: "center", marginBottom: 16, border: "1px solid #E8E7E3", background: "#F8F7F4" }}>
-                <div style={{ textAlign: "center", color: "#A49B90" }}>
-                  <strong style={{ display: "block", fontSize: 12, fontWeight: 500 }}>选择商品</strong>
-                  <small style={{ display: "block", marginTop: 4, fontSize: 10 }}>右侧商品列表</small>
-                </div>
-              </div>
-              <div style={{ width: "68%", height: 8, borderRadius: 2, background: "#E9E6E0" }} />
-              <div style={{ width: "42%", height: 7, marginTop: 8, borderRadius: 2, background: "#F0EDE8" }} />
-            </div>
-          ) : (
-            <article key={p.id || p.link || i} className="homepage-product-row__card">
+            {/* 操作入口（整张卡片始终可进入详情） */}
+            {actionStyle !== "none" && (
               <Link
                 to={p.link || "/products"}
-                style={{
-                  display: "block",
-                  textDecoration: "none",
-                  color: "inherit",
-                }}
+                className={`homepage-product-row__action${actionStyle === "button" ? " is-button" : ""}`}
               >
-                {/* 图片 */}
-                <div
-                  className="homepage-product-row__media"
-                  style={{
-                    overflow: "hidden",
-                    marginBottom: 16,
-                    aspectRatio: ratio,
-                    background: "#F5F2ED",
-                  }}
-                >
-                  {p.image ? (
-                    <SecureImage
-                      src={p.image}
-                      alt={p.name || ""}
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                      }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "#D1CDC5",
-                        fontSize: 32,
-                      }}
-                    >
-                      暂无图片
-                    </div>
-                  )}
-                </div>
-
-                {/* 产品名 */}
-                <p
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: "#2C2C2C",
-                    marginBottom: 4,
-                  }}
-                >
-                  {p.name || "产品名称"}
-                </p>
+                {actionStyle === "text" ? "查看作品 →" : buttonText || "查看详情"}
               </Link>
-
-              {/* 价格（可单独隐藏） */}
-              {resolvedShowPrice && p.price && (
-                <p style={{ fontSize: 13, color: "#B8944E", marginBottom: actionStyle !== "none" ? 10 : 0 }}>
-                  {p.price}
-                </p>
-              )}
-
-              {/* 操作入口（整张卡片始终可进入详情） */}
-              {actionStyle !== "none" && (
-                <Link
-                  to={p.link || "/products"}
-                  className={`homepage-product-row__action${actionStyle === "button" ? " is-button" : ""}`}
-                >
-                  {actionStyle === "text" ? "查看作品 →" : buttonText || "查看详情"}
-                </Link>
-              )}
-            </article>
-          ))}
-        </div>
+            )}
+          </article>
+        ))}
       </div>
-    </section>
+    </DecorSection>
   );
 }

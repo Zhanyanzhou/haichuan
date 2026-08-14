@@ -32,7 +32,7 @@ const COLOR_PRESETS = [
 
 export const textBannerSchema: ModuleInspectorSchema = {
   moduleType: "文字横幅",
-  displayName: "引导横幅",
+  displayName: "品牌宣言",
   purpose: TEXT_BANNER_CONTRACT.purpose,
   evaluate: evaluateTextBannerContract,
   // 恢复默认以 adapter defaultProps 为准（引用而非复写），并补齐三件套初始键
@@ -88,24 +88,27 @@ export const textBannerSchema: ModuleInspectorSchema = {
           placeholder: "如 立即选购",
         },
         {
-          key: "backgroundImage",
-          label: "背景海报",
-          control: "media",
-          spec: IMAGE_SPECS.textBanner.bgImage,
-          hint: "留空使用纯色背景",
-          placeholder: "上传横幅背景海报（可选）",
-          showSpecCheck: true,
-          visibleWhen: (ctx) => !ctx.props.backgroundImage,
+          key: "targetType",
+          label: "点击跳转",
+          control: "linkTarget",
+          linkLabel: "按钮点击后",
+          hint: "按钮文字与跳转都设置后前台才显示按钮",
         },
+      ],
+    },
+    {
+      id: "text-banner-media",
+      title: "媒体",
+      layer: "media",
+      description: "背景海报留空使用纯色；设置后文字自动切白保证可读",
+      fields: [
         {
           key: "backgroundImage",
           label: "背景海报",
           control: "media",
           spec: IMAGE_SPECS.textBanner.bgImage,
-          hint: "已设置海报；文字将自动切换为白色保证可读",
-          placeholder: "替换横幅背景海报",
+          placeholder: "上传背景海报（21:6，可选）",
           showSpecCheck: true,
-          visibleWhen: (ctx) => Boolean(ctx.props.backgroundImage),
         },
       ],
     },
@@ -146,20 +149,6 @@ export const textBannerSchema: ModuleInspectorSchema = {
             ...preset,
             isActive: (ctx) => ctx.props.bgColor === preset.patch.bgColor,
           })),
-        },
-      ],
-    },
-    {
-      id: "text-banner-interaction",
-      title: "交互",
-      layer: "interaction",
-      fields: [
-        {
-          key: "targetType",
-          label: "点击跳转",
-          control: "linkTarget",
-          linkLabel: "按钮点击后",
-          hint: "按钮文字与跳转都设置后前台才显示按钮",
         },
       ],
     },

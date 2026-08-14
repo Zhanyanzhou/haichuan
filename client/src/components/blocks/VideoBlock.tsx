@@ -1,4 +1,6 @@
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { DecorSection } from "@/page-builder/designSystem/sectionShell";
+import { RATIOS } from "@/page-builder/designSystem/tokens";
 
 interface VideoBlockProps {
   module: {
@@ -10,10 +12,20 @@ interface VideoBlockProps {
 }
 
 /**
- * 视频模块 — 对标旺铺"单视频"
+ * 品牌影片模块 — Cinematic Hero 母版(视频变体)
+ * 画面比例仅允许规范比例:16:9 / 16:7(宽幕) / 3:4(竖屏);
+ * 旧数据中的 4:3、9:16 仍可渲染(历史兼容),但新建不可再选。
  * content: { videoUrl, posterUrl, autoPlay, loop, muted, showControls, aspectRatio }
- * layoutConfig: { maxHeight }
  */
+const RATIO_MAP: Record<string, string> = {
+  "16:9": RATIOS["16:9"],
+  "16:7": RATIOS["16:7"],
+  "3:4": RATIOS["3:4"],
+  // 旧数据兼容:已保存的 4:3 / 9:16 区块继续按原比例渲染
+  "4:3": "4 / 3",
+  "9:16": "9 / 16",
+};
+
 export default function VideoBlock({ module, editMode }: VideoBlockProps) {
   const { content = {}, layoutConfig = {} } = module;
   const {
@@ -25,41 +37,30 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
     showControls,
     aspectRatio,
   } = content;
-  const maxHeight = layoutConfig.maxHeight || 720;
+  const maxHeight = layoutConfig.maxHeight || 760;
+  const ratio = RATIO_MAP[aspectRatio] || RATIOS["16:9"];
 
   if (!videoUrl) {
     if (!editMode) return null;
     return (
       <BlockEmptyPlaceholder
         icon="🎬"
-        hint="视频模块"
-        spec="请在右侧设置视频 URL"
+        hint="品牌影片"
+        spec="请设置视频地址 · 建议 16:9(3840×2160)"
       />
     );
   }
 
-  const ratioMap: Record<string, string> = {
-    "16:9": "56.25%",
-    "4:3": "75%",
-    "9:16": "177.78%",
-  };
-
   return (
-    <section
-      style={{
-        maxWidth: 1280,
-        margin: "0 auto",
-        padding: "clamp(40px,5vh,80px) clamp(20px,4vw,60px)",
-      }}
-    >
+    <DecorSection master="cinematic-hero" width="standard" flow="flow">
       <div
         style={{
           position: "relative",
-          paddingBottom: ratioMap[aspectRatio || "16:9"],
+          aspectRatio: ratio,
           maxHeight,
+          width: "100%",
           overflow: "hidden",
           background: "#0F0D0C",
-          borderRadius: 4,
         }}
       >
         <video
@@ -78,6 +79,6 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
           }}
         />
       </div>
-    </section>
+    </DecorSection>
   );
 }

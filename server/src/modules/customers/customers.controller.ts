@@ -34,7 +34,7 @@ export class CustomersController {
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('register')
-  register(@Body() body: { phone: string; password: string; name?: string; email?: string }) {
+  register(@Body() body: { phone: string; password: string; name?: string; email?: string; smsCode?: string }) {
     return this.customersService.register(body);
   }
 
@@ -43,6 +43,38 @@ export class CustomersController {
   @Post('login')
   login(@Body() body: { phone: string; password: string }) {
     return this.customersService.login(body);
+  }
+
+  // 密码找回：3/min 收紧——防止用找回流程轰炸他人邮箱
+  @Public()
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Post('forgot-password')
+  forgotPassword(@Body() body: { email: string }) {
+    return this.customersService.requestPasswordReset(body.email);
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Post('reset-password')
+  resetPassword(@Body() body: { token: string; password: string }) {
+    return this.customersService.resetPassword(body.token, body.password);
+  }
+
+  // ===== 手机验真（短信验证码，开关式强制）=====
+
+  /** 注册是否需要验证码（前端据此动态渲染验证码字段） */
+  @Public()
+  @Get('sms-requirements')
+  smsRequirements() {
+    return this.customersService.smsRequirements();
+  }
+
+  // 发码：IP 级 3/min + 库级同号 60s 冷却/日 10 条上限（多层防短信轰炸）
+  @Public()
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Post('sms-code')
+  requestSmsCode(@Body() body: { phone: string }) {
+    return this.customersService.requestSmsCode(body.phone);
   }
 
   @Public()
@@ -64,6 +96,14 @@ export class CustomersController {
   @Get('me/orders')
   getOrders(@Req() request: any) {
     return this.ordersService.findForCustomer(request.customer.id);
+  }
+
+  // 物流轨迹：客户查询自己已发货订单的快递轨迹（快递100，未配置凭据时 503）
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Get('me/orders/:id/tracking')
+  getOrderTracking(@Req() request: any, @Param('id') id: string) {
+    return this.ordersService.trackForCustomer(request.customer.id, +id);
   }
 
   @Public()
@@ -113,8 +153,42 @@ export class CustomersController {
 
   @Public()
   @UseGuards(CustomerAuthGuard)
+  @Get('me/favorites')
+  listFavorites(@Req() request: any) {
+    return this.customersService.listFavorites(request.customer.id);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @Post('me/favorites/:productId/toggle')
+  toggleFavorite(@Req() request: any, @Param('productId') productId: string) {
+    return this.customersService.toggleFavorite(request.customer.id, +productId);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
   @Delete('me/addresses/:id')
   deleteAddress(@Req() request: any, @Param('id') id: string) {
     return this.customersService.deleteAddress(request.customer.id, +id);
+  }
+
+  // ===== 合规（个保法：可携带权 + 注销权）=====
+
+  /** 导出我的全部个人数据（JSON；不含他人数据与内部凭据） */
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Get('me/data-export')
+  exportMyData(@Req() request: any) {
+    return this.customersService.exportMyData(request.customer.id);
+  }
+
+  /** 注销账户：密码二次确认 → 匿名化 + 永久无法登录（订单/评价按法定与展示需要保留） */
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Post('me/close')
+  closeAccount(@Req() request: any, @Body() body: { password: string }) {
+    return this.customersService.closeAccount(request.customer.id, body.password);
   }
 }

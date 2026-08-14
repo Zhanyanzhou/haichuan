@@ -11,6 +11,7 @@ import TestimonialBlock from "@/components/blocks/TestimonialBlock";
 import CarouselBlock from "@/components/blocks/CarouselBlock";
 import CardGridBlock from "@/components/blocks/CardGridBlock";
 import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
+import AsymmetricGalleryBlock from "@/components/blocks/AsymmetricGalleryBlock";
 import DoublePosterSection from "@/components/blocks/DoublePosterSection";
 import FullBleedBlock from "@/components/blocks/FullBleedBlock";
 import HeroSection from "@/components/blocks/HeroSection";
@@ -446,12 +447,17 @@ function renderBlock(block: PuckBlock, index: number) {
       return <SinglePosterSection key={key} module={module} />;
     case "双图海报":
       return <DoublePosterSection key={key} module={module} />;
+    // 旧类型(分割面板/图文混排/礼赠指南)分支保留:
+    // 已发布历史版本(revision)仍含这些类型,公开渲染永久兼容;
+    // 编辑器侧已由 migratePuckData 转为新类型,模板库不再提供添加。
     case "图文混排":
       return <ImageTextBlock key={key} module={module} />;
     case "全屏出血图":
       return <FullBleedBlock key={key} module={module} />;
     case "文字横幅":
       return <TextBannerBlock key={key} module={module} />;
+    case "作品画廊":
+      return <AsymmetricGalleryBlock key={key} module={module} />;
     case "分类卡片":
     case "按场景选购":
     case "礼赠指南":

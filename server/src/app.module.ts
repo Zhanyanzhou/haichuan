@@ -29,10 +29,15 @@ import { SelectionInquiryModule } from "./modules/selection-inquiry/selection-in
 import { LeadsModule } from "./modules/leads/leads.module";
 import { AnalyticsModule } from "./modules/analytics/analytics.module";
 import { PartnerApplicationsModule } from "./modules/partner-applications/partner-applications.module";
+import { ReviewsModule } from "./modules/reviews/reviews.module";
 import { RecommendationsModule } from "./modules/recommendations/recommendations.module";
 import { ContentSlotsModule } from "./modules/content-slots/content-slots.module";
 import { PageModulesModule } from "./modules/page-modules/page-modules.module";
 import { KimiModule } from "./common/kimi/kimi.module";
+import { MailerModule } from "./common/mailer/mailer.module";
+import { PaymentGatewayModule } from "./common/payment-gateway/payment-gateway.module";
+import { LogisticsTrackingModule } from "./common/logistics-tracking/logistics-tracking.module";
+import { SmsModule } from "./common/sms/sms.module";
 import { JwtAuthGuard } from "./modules/auth/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 import { AuditLogInterceptor } from "./common/interceptors/audit-log.interceptor";
@@ -86,6 +91,10 @@ import { LoggerModule } from "nestjs-pino";
     ]),
     PrismaModule,
     KimiModule,
+    MailerModule,
+    PaymentGatewayModule,
+    LogisticsTrackingModule,
+    SmsModule,
     AuthModule,
     UsersModule,
     CategoriesModule,
@@ -116,6 +125,7 @@ import { LoggerModule } from "nestjs-pino";
     AnalyticsModule,
     PartnerApplicationsModule,
     RecommendationsModule,
+    ReviewsModule,
   ],
   providers: [
     // 默认认证、默认角色判定：新增接口必须显式标注 @Public() 才允许匿名访问。

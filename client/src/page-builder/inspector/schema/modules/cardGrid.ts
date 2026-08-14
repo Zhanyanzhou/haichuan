@@ -141,7 +141,7 @@ export const cardGridSchema = makeCardGridSchema({
 /** 服务承诺（卡片网格变体：默认四项服务信息卡片） */
 export const servicePromiseSchema = makeCardGridSchema({
   moduleType: "服务承诺",
-  displayName: "服务承诺",
+  displayName: "服务保障",
   purpose: "集中呈现保养、售后、配送与鉴定等服务信息",
   defaults: puckConfig.components["服务承诺"]?.defaultProps,
 });

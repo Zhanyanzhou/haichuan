@@ -41,12 +41,12 @@ export const storeInfoPuckConfig = {
     mapUrl: { type: "text" as const, label: "地图链接（高德/百度地图链接，可选）" },
     image: {
       type: "custom" as const,
-      label: "门店照片",
+      label: "门店空间图",
       render: ({
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
         <MediaPickerField fieldKey="image" device="shared" value={value} onChange={onChange} readOnly={readOnly}
-          spec={IMAGE_SPECS.imageText.image} placeholder="上传门店照片" />
+          spec={IMAGE_SPECS.storeInfo.image} placeholder="上传门店空间图（3:2）" />
       ),
     },
     bgColor: colorPuckField("背景色"),

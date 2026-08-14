@@ -98,16 +98,18 @@ export class ProductsController {
   @Public()
   @Throttle({ default: { limit: 600, ttl: 60000 } })
   @Get("public/:productId/media/:imageId")
-  @ApiOperation({ summary: "公开商品媒体（仅 PUBLIC + PUBLISHED）" })
+  @ApiOperation({ summary: "公开商品媒体（仅 PUBLIC + PUBLISHED；?width=480/800/1200 动态缩放）" })
   servePublicMedia(
     @Res({ passthrough: false }) response: any,
     @Param("productId") productId: string,
     @Param("imageId") imageId: string,
+    @Query("width") width?: string,
   ) {
     return this.productsService.servePublicMedia(
       +productId,
       +imageId,
       response,
+      width,
     );
   }
 
@@ -161,18 +163,20 @@ export class ProductsController {
   // 同上：受控媒体每图一请求，单独放宽限流，避免吃满全局 60/min 桶误伤业务接口。
   @Throttle({ default: { limit: 600, ttl: 60000 } })
   @Get("catalog/:productId/media/:imageId")
-  @ApiOperation({ summary: "受控商品媒体（需鉴权，PARTNER 商品对客户加水印）" })
+  @ApiOperation({ summary: "受控商品媒体（需鉴权，PARTNER 商品对客户加水印；?width=480/800/1200）" })
   async getCatalogMedia(
     @Req() request: any,
     @Res({ passthrough: false }) response: any,
     @Param("productId") productId: string,
     @Param("imageId") imageId: string,
+    @Query("width") width?: string,
   ) {
     return this.productsService.serveCatalogMedia(
       +productId,
       +imageId,
       request,
       response,
+      width,
     );
   }
 

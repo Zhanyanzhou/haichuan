@@ -3,6 +3,8 @@ import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceho
 import { SecureImage } from "@/components/common/SecureImage";
 import { CATEGORY_CARDS_CONTRACT, getCategoryCardsMediaAspectRatio, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { isSafeInternalPath } from "@/page-builder/utils/linkTarget";
+import { DecorSection } from "@/page-builder/designSystem/sectionShell";
+import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 
 interface CategoryCardsBlockProps {
   module: {
@@ -45,28 +47,21 @@ export default function CategoryCardsBlock({
   }
 
   return (
-    <section style={{ padding: "clamp(60px,8vh,100px) 0", background: bg }}>
+    <DecorSection master="commerce-entry" background={bg}>
+      {(title || subtitle) && (
+        <div style={{ textAlign: "center", maxWidth: 560, margin: "0 auto 40px" }}>
+          {title && <h2 style={{ fontSize: 'var(--hc-type-h2, clamp(22px,2.5vw,34px))', fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, color: "#2C2C2C", margin: "0 0 10px", lineHeight: 1.2 }}>{title}</h2>}
+          {subtitle && <p style={{ margin: 0, color: "#8A7F72", fontSize: 13, lineHeight: 1.7 }}>{subtitle}</p>}
+        </div>
+      )}
       <div
         style={{
-          maxWidth: 1280,
-          margin: "0 auto",
-          padding: "0 clamp(20px,4vw,60px)",
+          display: "grid",
+          gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+          gap: cols === 2 ? 24 : 16,
         }}
+        className="homepage-category-cards__grid"
       >
-        {(title || subtitle) && (
-          <div style={{ textAlign: "center", maxWidth: 560, margin: "0 auto 40px" }}>
-            {title && <h2 style={{ fontSize: "clamp(22px,2.5vw,34px)", fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: "#2C2C2C", margin: "0 0 10px", lineHeight: 1.2 }}>{title}</h2>}
-            {subtitle && <p style={{ margin: 0, color: "#8A7F72", fontSize: 13, lineHeight: 1.7 }}>{subtitle}</p>}
-          </div>
-        )}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-            gap: cols === 2 ? 24 : 16,
-          }}
-          className="homepage-category-cards__grid"
-        >
           {visibleCategories.map((c: any, i: number) => {
             const card = (
               <div
@@ -170,16 +165,16 @@ export default function CategoryCardsBlock({
               <Link key={c.id || `${c.name}-${i}`} to={c.link} style={{ display: "block", textDecoration: "none" }}>{card}</Link>
             );
           })}
-        </div>
       </div>
       <style>{`
         @media ${RESPONSIVE_CANVAS.tabletMediaQuery} {
           .homepage-category-cards__grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 20px !important; }
         }
+        /* Mobile 两列(入口卡组母版规则) */
         @media (max-width: 767px) {
-          .homepage-category-cards__grid { grid-template-columns: minmax(0, 1fr) !important; }
+          .homepage-category-cards__grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 12px !important; }
         }
       `}</style>
-    </section>
+    </DecorSection>
   );
 }

@@ -16,8 +16,10 @@ export interface AppointmentPuckProps {
   linkUrl: string;
   phone: string;
   altText: string;
-  focusX: number;
-  focusY: number;
+  desktopFocusX: number;
+  desktopFocusY: number;
+  mobileFocusX: number;
+  mobileFocusY: number;
   tone: "dark" | "ivory";
   bgColor: string;
   locked?: boolean;
@@ -35,8 +37,10 @@ export const appointmentPuckConfig = {
     linkUrl: "/contact",
     phone: "",
     altText: "",
-    focusX: 50,
-    focusY: 50,
+    desktopFocusX: 50,
+    desktopFocusY: 50,
+    mobileFocusX: 50,
+    mobileFocusY: 50,
     tone: "dark",
     bgColor: "#1A1714",
     locked: false,
@@ -49,7 +53,7 @@ export const appointmentPuckConfig = {
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
         <MediaPickerField fieldKey="backgroundImage" device="shared" value={value} onChange={onChange} readOnly={readOnly}
-          spec={IMAGE_SPECS.fullBleed.desktop} placeholder="上传背景图（留空用纯色）" />
+          spec={IMAGE_SPECS.fullBleed.desktop} placeholder="上传背景图（21:6，留空用纯色）" />
       ),
     },
     title: { type: "text" as const, label: "主标题" },
@@ -58,8 +62,10 @@ export const appointmentPuckConfig = {
     linkUrl: { type: "text" as const, label: "主按钮跳转链接" },
     phone: { type: "text" as const, label: "咨询电话（可选，显示第二个按钮）" },
     altText: { type: "text" as const, label: "背景图替代文字" },
-    focusX: { type: "number" as const, label: "图片焦点 X", min: 0, max: 100 },
-    focusY: { type: "number" as const, label: "图片焦点 Y", min: 0, max: 100 },
+    desktopFocusX: { type: "number" as const, label: "桌面焦点 X (%)", min: 0, max: 100 },
+    desktopFocusY: { type: "number" as const, label: "桌面焦点 Y (%)", min: 0, max: 100 },
+    mobileFocusX: { type: "number" as const, label: "移动焦点 X (%)", min: 0, max: 100 },
+    mobileFocusY: { type: "number" as const, label: "移动焦点 Y (%)", min: 0, max: 100 },
     tone: {
       type: "radio" as const,
       label: "视觉预设",

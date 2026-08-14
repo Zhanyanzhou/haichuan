@@ -1,48 +1,129 @@
+import { DecorSection } from "@/page-builder/designSystem/sectionShell";
+import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+
 interface CustomProcessBlockProps {
   module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
   editMode?: boolean;
 }
 
+const INK = "#28231F";
+const MUTED = "rgba(40,35,31,0.58)";
+const GOLD = "#B8944E";
+
 /**
- * 定制流程模块 — 标题 + 副标题 + 横向步骤（序号圆 或 步骤图）+ 标题 + 说明。
+ * 定制旅程 — Journey 母版
+ * 01–05 大字叙事:衬线大编号 + 英文题 + 中文一句;PC 横向铺开,Mobile 纵向排列。
+ * 构图红线:不使用步骤圆、连线流程图等后台式形态。
  */
-export default function CustomProcessBlock({ module }: CustomProcessBlockProps) {
+export default function CustomProcessBlock({ module, editMode }: CustomProcessBlockProps) {
   const { content = {}, styleConfig = {} } = module;
-  const { title, subtitle, steps } = content;
+  const { title, subtitle } = content;
   const bgColor = styleConfig.bgColor || '#FBF9F6';
-  const list = Array.isArray(steps) ? steps : [];
+  const list = Array.isArray(content.steps) ? content.steps : [];
+
+  if (list.length === 0) {
+    if (!editMode) return null;
+    return (
+      <DecorSection master="journey" background={bgColor}>
+        <BlockEmptyPlaceholder hint="定制旅程" spec="请添加旅程节点（如 01 DISCOVERY · 理解您的故事）" />
+      </DecorSection>
+    );
+  }
 
   return (
-    <section style={{ padding: '72px 24px', background: bgColor }}>
-      <div style={{ maxWidth: 1200, margin: '0 auto', textAlign: 'center' }}>
-        {title && (
-          <h2 data-editor-field="title" style={{ fontSize: 32, fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#2C2C2C', marginBottom: 12 }}>
-            {title}
-          </h2>
-        )}
-        {subtitle && (
-          <p data-editor-field="subtitle" style={{ fontSize: 14, color: '#8A7F72', marginBottom: 48 }}>
-            {subtitle}
-          </p>
-        )}
-        {list.length > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: 0 }}>
-            {list.map((step: any, i: number) => (
-              <div key={i} style={{ flex: '1 1 180px', maxWidth: 240, padding: '0 12px' }}>
-                {step.image ? (
-                  <img data-editor-field={`steps.${i}.image`} src={step.image} alt={step.name || ''} style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: '50%', margin: '0 auto 20px', display: 'block' }} />
-                ) : (
-                  <div data-editor-field={`steps.${i}.number`} style={{ width: 48, height: 48, margin: '0 auto 20px', borderRadius: '50%', border: '1px solid #B8944E', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#B8944E', fontSize: 16, fontFamily: '"Cormorant Garamond",serif' }}>
-                    {step.number || String(i + 1).padStart(2, '0')}
-                  </div>
-                )}
-                {step.name && <p data-editor-field={`steps.${i}.name`} style={{ fontSize: 15, color: '#2C2C2C', fontWeight: 500, marginBottom: 8 }}>{step.name}</p>}
-                {step.desc && <p data-editor-field={`steps.${i}.desc`} style={{ fontSize: 12, color: '#9A9187', lineHeight: 1.7 }}>{step.desc}</p>}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
+    <DecorSection master="journey" background={bgColor}>
+      {(title || subtitle) && (
+        <header style={{ maxWidth: 640, margin: "0 auto 56px", textAlign: "center" }}>
+          {title && (
+            <h2 data-editor-field="title"
+              style={{
+                margin: "0 0 12px",
+                fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
+                fontSize: "var(--hc-type-h2, clamp(26px,3vw,38px))",
+                fontWeight: 500,
+                color: INK,
+                lineHeight: 1.2,
+              }}
+            >
+              {title}
+            </h2>
+          )}
+          {subtitle && (
+            <p data-editor-field="subtitle" style={{ margin: 0, fontSize: "var(--hc-type-body, 15px)", color: MUTED, lineHeight: 1.8 }}>
+              {subtitle}
+            </p>
+          )}
+        </header>
+      )}
+      <ol className="hc-journey" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+        <style>{`
+          .hc-journey {
+            display: grid;
+            grid-template-columns: repeat(${Math.max(list.length, 1)}, minmax(0, 1fr));
+            column-gap: clamp(20px, 2.5vw, 40px);
+            counter-reset: journey;
+          }
+          .hc-journey__step { min-width: 0; }
+          .hc-journey__num {
+            font-family: var(--hc-font-display, ${FONT_DISPLAY});
+            font-size: clamp(44px, 4.5vw, 72px);
+            line-height: 1;
+            color: ${GOLD};
+            font-weight: 400;
+            margin: 0 0 14px;
+          }
+          .hc-journey__num--ghost { color: rgba(184,148,78,0.32); }
+          .hc-journey__en {
+            font-size: 11px;
+            letter-spacing: 0.22em;
+            text-transform: uppercase;
+            color: ${MUTED};
+            font-family: var(--hc-font-sans, ${FONT_SANS});
+            margin: 0 0 10px;
+          }
+          .hc-journey__name {
+            font-family: var(--hc-font-display, ${FONT_DISPLAY});
+            font-size: var(--hc-type-h3, 20px);
+            color: ${INK};
+            font-weight: 500;
+            margin: 0 0 10px;
+          }
+          .hc-journey__desc {
+            font-size: var(--hc-type-caption, 13px);
+            color: ${MUTED};
+            line-height: 1.8;
+            margin: 0;
+          }
+          .hc-journey__image {
+            width: 96px;
+            height: 96px;
+            object-fit: cover;
+            display: block;
+            margin: 0 0 16px;
+          }
+          /* Mobile:横向铺开转纵向叙事 */
+          @media (max-width: 767px) {
+            .hc-journey { grid-template-columns: minmax(0, 1fr); row-gap: 36px; }
+            .hc-journey__step { display: grid; grid-template-columns: 72px minmax(0, 1fr); column-gap: 20px; align-items: start; }
+            .hc-journey__num, .hc-journey__num--ghost { font-size: 40px; margin: 0; grid-row: 1; }
+            .hc-journey__en { margin-top: 6px; }
+          }
+        `}</style>
+        {list.map((step: any, i: number) => (
+          <li key={step.number || i} className="hc-journey__step" data-editor-field={`steps.${i}`}>
+            {step.image ? (
+              <img className="hc-journey__image" src={step.image} alt={step.name || ""} loading="lazy" decoding="async" />
+            ) : null}
+            <p className={i % 2 === 1 ? "hc-journey__num hc-journey__num--ghost" : "hc-journey__num"} aria-hidden>
+              {step.number || String(i + 1).padStart(2, "0")}
+            </p>
+            {step.en ? <p className="hc-journey__en">{step.en}</p> : null}
+            {step.name ? <p className="hc-journey__name">{step.name}</p> : null}
+            {step.desc ? <p className="hc-journey__desc">{step.desc}</p> : null}
+          </li>
+        ))}
+      </ol>
+    </DecorSection>
   );
 }

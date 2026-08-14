@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { MarketingService } from './marketing.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -27,6 +27,13 @@ export class MarketingController {
 
   @ApiOperation({ summary: '获取优惠券列表' })
   @Get('coupons') getCoupons() { return this.marketingService.getCoupons(); }
+
+  // 注意：usable 必须置于 @Get('coupons/:id') 之类参数路由之前（当前无参数路由，保持防御性顺序）
+  @ApiOperation({ summary: '建单可用券查询（按订单金额试算折扣）' })
+  @Get('coupons/usable')
+  listUsableCoupons(@Query('amountCents') amountCents: string) {
+    return this.marketingService.listUsableCoupons(Number(amountCents) || 0);
+  }
 
   @ApiOperation({ summary: '获取优惠券统计' })
   @Get('coupons/stats') getCouponStats() { return this.marketingService.getCouponStats(); }

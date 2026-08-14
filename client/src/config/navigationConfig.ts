@@ -242,6 +242,19 @@ export const navigationConfig: NavDomain[] = [
         ],
       },
       {
+        key: "product-reviews",
+        label: "评价与口碑",
+        collapsible: true,
+        defaultOpen: false,
+        items: [
+          {
+            key: "reviews",
+            label: "评价管理",
+            route: "/admin/reviews",
+          },
+        ],
+      },
+      {
         key: "inventory-control",
         label: "库存控制",
         collapsible: true,
@@ -271,8 +284,7 @@ export const navigationConfig: NavDomain[] = [
         items: [
           {
             key: "ai-classify",
-            label: "智能分类",
-            route: "/admin/ai-classify",
+            label: "智能分类",            route: "/admin/ai-classify",
           },
         ],
       },

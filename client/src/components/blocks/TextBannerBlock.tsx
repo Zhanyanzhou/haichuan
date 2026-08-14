@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { DecorSection } from "@/page-builder/designSystem/sectionShell";
+import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 
 interface TextBannerBlockProps {
   module: {
@@ -11,10 +13,9 @@ interface TextBannerBlockProps {
 }
 
 /**
- * 纯文字横幅 — 大标题 + 描述 + CTA
- * content: { eyebrow, title, body, backgroundImage?, buttonText, linkUrl }
- * layoutConfig.template: 'center' | 'left'
- * styleConfig: { bgColor, textColor, spacing }
+ * 品牌宣言(文字横幅)— Editorial Text 母版
+ * 纯文字与大留白;可带背景海报(自动切白字)与一个 CTA。
+ * 纵向节奏交给 DecorSection(brand 密度 + 三档留白)。
  */
 export default function TextBannerBlock({
   module,
@@ -30,33 +31,25 @@ export default function TextBannerBlock({
   const isLightText = textColor.toLowerCase() === "#fff" || textColor.toLowerCase() === "#ffffff";
   const spacing = styleConfig.spacing || "normal";
 
-  const padMap: Record<string, string> = {
-    compact: "60px 0",
-    normal: "100px 0",
-    spacious: "140px 0",
-  };
-
   if (!title && !body) {
     if (!editMode) return null;
     return (
       <BlockEmptyPlaceholder
         icon="📝"
-        hint="文字横幅"
-        spec="请输入标题或描述"
+        hint="品牌宣言"
+        spec="请输入标题或正文"
         bg={bg}
       />
     );
   }
 
   return (
-    <section
-      style={{
-        position: "relative",
-        isolation: "isolate",
-        overflow: "hidden",
-        padding: padMap[spacing] || padMap.normal,
-        background: bg,
-      }}
+    <DecorSection
+      master="editorial-text"
+      width="editorial"
+      spacing={spacing}
+      background={bg}
+      style={{ color: textColor }}
     >
       {backgroundImage && (
         <div
@@ -75,22 +68,20 @@ export default function TextBannerBlock({
         style={{
           position: "relative",
           zIndex: 1,
-          maxWidth: template === "left" ? 1080 : 640,
+          maxWidth: template === "left" ? 720 : 640,
           margin: "0 auto",
-          padding: "0 clamp(20px,4vw,60px)",
-          textAlign:
-            template === "left" ? ("left" as const) : ("center" as const),
+          textAlign: template === "left" ? ("left" as const) : ("center" as const),
         }}
       >
         {eyebrow && (
           <p data-editor-field="eyebrow"
             style={{
-              fontSize: 10,
+              fontSize: "var(--hc-type-caption, 12px)",
               letterSpacing: "0.28em",
               textTransform: "uppercase",
-              color: "#B8944E",
+              color: "var(--hc-gold, #B8944E)",
               marginBottom: 16,
-              fontFamily: "Inter,system-ui,sans-serif",
+              fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
             }}
           >
             {eyebrow}
@@ -99,10 +90,10 @@ export default function TextBannerBlock({
         {title && (
           <h2 data-editor-field="title"
             style={{
-              fontSize: "clamp(28px,3.5vw,48px)",
+              fontSize: "var(--hc-type-display, clamp(28px,3.5vw,48px))",
               lineHeight: 1.15,
               marginBottom: 20,
-              fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
+              fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
               color: textColor,
               maxWidth: 600,
               marginLeft: template === "left" ? 0 : "auto",
@@ -115,9 +106,9 @@ export default function TextBannerBlock({
         {body && (
           <p data-editor-field="body"
             style={{
-              fontSize: 15,
-              color: isLightText ? "rgba(255,255,255,0.78)" : "#8A7F72",
-              lineHeight: 1.8,
+              fontSize: "var(--hc-type-body, 15px)",
+              color: isLightText ? "rgba(255,255,255,0.78)" : "var(--hc-muted, #8A7F72)",
+              lineHeight: 1.9,
               marginBottom: 28,
               maxWidth: template === "left" ? 520 : 480,
               marginLeft: template === "left" ? 0 : "auto",
@@ -133,9 +124,9 @@ export default function TextBannerBlock({
             style={{
               display: "inline-block",
               padding: "11px 38px",
-              border: `1px solid ${isLightText ? "rgba(255,255,255,0.5)" : "#B8944E"}`,
-              color: isLightText ? "#fff" : "#B8944E",
-              fontSize: 12,
+              border: `1px solid ${isLightText ? "rgba(255,255,255,0.5)" : "var(--hc-gold, #B8944E)"}`,
+              color: isLightText ? "#fff" : "var(--hc-gold, #B8944E)",
+              fontSize: "var(--hc-type-caption, 12px)",
               letterSpacing: "0.12em",
               textTransform: "uppercase",
               textDecoration: "none",
@@ -146,6 +137,6 @@ export default function TextBannerBlock({
           </Link>
         )}
       </div>
-    </section>
+    </DecorSection>
   );
 }

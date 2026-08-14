@@ -45,8 +45,12 @@ export class StatisticsService {
     ] = await Promise.all([
       this.prisma.product.count(),
       this.prisma.product.count({ where: { status: "PUBLISHED" } }),
-      this.prisma.order.count({ where: { createdAt: { gte: todayStart }, status: notCancelled } }),
-      this.prisma.order.count({ where: { createdAt: yesterdayRange, status: notCancelled } }),
+      this.prisma.order.count({
+        where: { createdAt: { gte: todayStart }, status: notCancelled },
+      }),
+      this.prisma.order.count({
+        where: { createdAt: yesterdayRange, status: notCancelled },
+      }),
       this.prisma.order.aggregate({
         where: {
           createdAt: { gte: todayStart },
@@ -128,7 +132,9 @@ export class StatisticsService {
 
     if (metric === "revenue") {
       // 成交额按日聚合：仅已结算订单(SHIPPED/COMPLETED)的 final_amount 之和
-      const rows = await this.prisma.$queryRaw<{ date: string; total: string | bigint | null }[]>`
+      const rows = await this.prisma.$queryRaw<
+        { date: string; total: string | bigint | null }[]
+      >`
         SELECT DATE_FORMAT(CONVERT_TZ(created_at,'+00:00','+08:00'), '%Y-%m-%d') AS date, COALESCE(SUM(final_amount), 0) AS total
         FROM orders
         WHERE created_at >= ${start} AND created_at < UTC_TIMESTAMP() AND status IN ('SHIPPED', 'COMPLETED')
@@ -137,7 +143,9 @@ export class StatisticsService {
       for (const r of rows) map.set(r.date, Number(r.total));
     } else if (metric === "pageViews") {
       // 注意：analytics_events 的事件名列在 schema 中无 @map，DB 列名即 eventName
-      const rows = await this.prisma.$queryRaw<{ date: string; count: bigint }[]>`
+      const rows = await this.prisma.$queryRaw<
+        { date: string; count: bigint }[]
+      >`
         SELECT DATE_FORMAT(CONVERT_TZ(occurred_at,'+00:00','+08:00'), '%Y-%m-%d') AS date, COUNT(*) AS count
         FROM analytics_events
         WHERE occurred_at >= ${start} AND occurred_at < UTC_TIMESTAMP() AND eventName = 'page_view'
@@ -165,7 +173,9 @@ export class StatisticsService {
       }
     } else {
       // 订单数(默认)：所有状态订单按日计数
-      const rows = await this.prisma.$queryRaw<{ date: string; count: bigint }[]>`
+      const rows = await this.prisma.$queryRaw<
+        { date: string; count: bigint }[]
+      >`
         SELECT DATE_FORMAT(CONVERT_TZ(created_at,'+00:00','+08:00'), '%Y-%m-%d') AS date, COUNT(*) AS count
         FROM orders
         WHERE created_at >= ${start} AND created_at < UTC_TIMESTAMP()

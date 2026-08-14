@@ -1,7 +1,11 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { ProductsService } from '../products/products.service';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from "@nestjs/common";
+import { Cron, CronExpression } from "@nestjs/schedule";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { ProductsService } from "../products/products.service";
 
 @Injectable()
 export class GoldPriceService {
@@ -18,19 +22,21 @@ export class GoldPriceService {
   async getLatest() {
     // 取最近两条金价记录计算涨跌,避免依赖进程内存变量(重启/多实例下会失真)
     const [latest, previous] = await this.prisma.goldPrice.findMany({
-      orderBy: { recordDate: 'desc' },
+      orderBy: { recordDate: "desc" },
       take: 2,
     });
 
     if (!latest) {
-      throw new ServiceUnavailableException('暂无经过验证的金价数据');
+      throw new ServiceUnavailableException("暂无经过验证的金价数据");
     }
 
     const price = Number(latest.price);
     const prevPrice = previous ? Number(previous.price) : price;
     const change = Number((price - prevPrice).toFixed(2));
     const changePercent =
-      prevPrice !== 0 ? (((price - prevPrice) / prevPrice) * 100).toFixed(2) : '0.00';
+      prevPrice !== 0
+        ? (((price - prevPrice) / prevPrice) * 100).toFixed(2)
+        : "0.00";
 
     return {
       price,
@@ -51,7 +57,7 @@ export class GoldPriceService {
 
     const records = await this.prisma.goldPrice.findMany({
       where: { recordDate: { gte: since } },
-      orderBy: { recordDate: 'asc' },
+      orderBy: { recordDate: "asc" },
       select: { price: true, source: true, recordDate: true },
     });
 
@@ -65,11 +71,15 @@ export class GoldPriceService {
   /**
    * Manually update gold price
    */
-  async updateManually(data: { price: number; operatorId: number; remark?: string }) {
+  async updateManually(data: {
+    price: number;
+    operatorId: number;
+    remark?: string;
+  }) {
     const record = await this.prisma.goldPrice.create({
       data: {
         price: data.price,
-        source: 'MANUAL',
+        source: "MANUAL",
         operatorId: data.operatorId,
         remark: data.remark,
         recordDate: new Date(),
@@ -94,12 +104,12 @@ export class GoldPriceService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_9AM)
   async fetchGoldPriceMorning() {
-    await this.fetchAndUpdateGoldPrice('AUTO_MORNING');
+    await this.fetchAndUpdateGoldPrice("AUTO_MORNING");
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_3PM)
   async fetchGoldPriceAfternoon() {
-    await this.fetchAndUpdateGoldPrice('AUTO_AFTERNOON');
+    await this.fetchAndUpdateGoldPrice("AUTO_AFTERNOON");
   }
 
   /**
@@ -121,7 +131,7 @@ export class GoldPriceService {
   private async adjustProductPrices(goldPrice: number) {
     const COEFFICIENT = 1.05;
     const products = await this.prisma.product.findMany({
-      where: { status: 'PUBLISHED', goldWeight: { gt: 0 } },
+      where: { status: "PUBLISHED", goldWeight: { gt: 0 } },
       select: { id: true, goldWeight: true, craftFee: true, price: true },
     });
 
@@ -129,7 +139,11 @@ export class GoldPriceService {
     const result = await this.prisma.$transaction(async (tx) => {
       for (const product of products) {
         const craftFee = Number(product.craftFee || 0);
-        const refPrice = Math.round((Number(product.goldWeight) * goldPrice * COEFFICIENT + craftFee) / 10) * 10;
+        const refPrice =
+          Math.round(
+            (Number(product.goldWeight) * goldPrice * COEFFICIENT + craftFee) /
+              10,
+          ) * 10;
         if (Math.abs(refPrice - Number(product.price)) <= 1) continue;
 
         // 同步该商品下有金重的 SKU 售价（下单读 sku.price，否则实付金额错误）
@@ -139,28 +153,27 @@ export class GoldPriceService {
         });
         let skuChanged = false;
         for (const sku of skus) {
-          const skuPrice = Math.round((Number(sku.goldWeight) * goldPrice * COEFFICIENT + craftFee) / 10) * 10;
+          const skuPrice =
+            Math.round(
+              (Number(sku.goldWeight) * goldPrice * COEFFICIENT + craftFee) /
+                10,
+            ) * 10;
           if (Math.abs(skuPrice - Number(sku.price)) > 1) {
-            await tx.productSKU.update({ where: { id: sku.id }, data: { price: skuPrice } });
+            await tx.productSKU.update({
+              where: { id: sku.id },
+              data: { price: skuPrice },
+            });
             skuChanged = true;
           }
         }
         if (!skuChanged) continue;
 
-        // PriceHistory 记商品级参考价；实际 Product.price 由 sync 重算为 min 活跃 SKU 价
-        await tx.priceHistory.create({
-          data: {
-            productId: product.id,
-            oldPrice: product.price || 0,
-            newPrice: refPrice,
-            goldPrice,
-            operatorId: 0, // 系统
-            reason: `金价变动 ¥${goldPrice}/克，自动调价`,
-          },
-        });
         affectedProductIds.push(product.id);
       }
-      return { totalProducts: products.length, adjustedCount: affectedProductIds.length };
+      return {
+        totalProducts: products.length,
+        adjustedCount: affectedProductIds.length,
+      };
     });
 
     // 事务提交后：重算起价（Product.price = min 活跃 SKU 价）并通知前台 SSE 刷新（P1-2）
@@ -168,7 +181,9 @@ export class GoldPriceService {
       await this.productsService.refreshStartingPriceAndNotify(pid);
     }
 
-    this.logger.log(`Price adjustment complete: ${result.adjustedCount}/${result.totalProducts} products updated`);
+    this.logger.log(
+      `Price adjustment complete: ${result.adjustedCount}/${result.totalProducts} products updated`,
+    );
     return result;
   }
 }

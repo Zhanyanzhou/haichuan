@@ -1,21 +1,27 @@
+// 作品详情：登录墙/灯箱/SKU/收藏/评价 Tab(晒单)/相似推荐/SEO meta
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Tabs, Spin, message } from "antd";
+import { Tabs, Spin, message, Rate } from "antd";
 import {
   ShoppingCartOutlined,
   SafetyCertificateOutlined,
+  HeartOutlined,
+  HeartFilled,
 } from "@ant-design/icons";
 import { getMaterialLabel } from "@/utils/material";
-import { getPrimaryImage, getThumbnailList } from "@/utils/productImage";
+import { getPrimaryImage, getThumbnailList, getListingImage } from "@/utils/productImage";
 import { SecureImage } from "@/components/common/SecureImage";
 import Lightbox from "yet-another-react-lightbox";
 import "yet-another-react-lightbox/styles.css";
 import {
   cartApi,
+  customerApi,
   productApi,
   publicProductStreamUrl,
   goldPriceApi,
+  reviewApi,
+  recommendationApi,
 } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -34,9 +40,140 @@ import {
 import { useReconnectingEventSource } from "@/hooks/useReconnectingEventSource";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 
-/** 未登录详情页登录墙：游客仅可浏览列表，完整详情需登录后查看 */
-function GuestDetailGate({ productId }: { productId?: string }) {
+/** 相似作品推荐（同分类/材质+热度加权；recommendations 模块首次接线启用） */
+function SimilarProducts({ productId }: { productId: number }) {
+  const [list, setList] = useState<Array<{ id: number; name: string; price?: number | string | null }>>([]);
+
+  useEffect(() => {
+    recommendationApi
+      .getSimilar(productId, 8)
+      .then((res: unknown) => {
+        setList(unwrapResponse<any[]>(res) || []);
+      })
+      .catch(() => setList([]));
+  }, [productId]);
+
+  if (list.length === 0) return null;
   return (
+    <div className="mt-12 pt-8 border-t border-brand-line">
+      <p className="text-xs tracking-[.15em] uppercase text-brand-gold mb-5 font-sans">
+        相似作品 · 为您甄选
+      </p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+        {list.map((item) => (
+          <Link key={item.id} to={`/products/${item.id}`} className="group">
+            <div className="aspect-square bg-brand-bg overflow-hidden">
+              <SecureImage
+                src={getListingImage(item as any)}
+                alt={item.name}
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+              />
+            </div>
+            <p className="text-sm mt-2 truncate group-hover:text-brand-gold transition-colors">
+              {item.name}
+            </p>
+            {item.price != null && Number(item.price) > 0 ? (
+              <p className="text-sm text-brand-gold mt-1">
+                ¥{Number(item.price).toLocaleString()}
+              </p>
+            ) : null}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 作品评价 Tab（先审后展）：平均分 + 审核通过的评价 + 商家回复 */
+function ProductReviewsTab({ productId }: { productId: number }) {
+  const [data, setData] = useState<{
+    list: Array<{
+      id: number;
+      rating: number;
+      content: string;
+      images?: string[];
+      reply: string | null;
+      createdAt: string;
+      reviewer: string;
+    }>;
+    total: number;
+    averageRating: number | null;
+  } | null>(null);
+
+  useEffect(() => {
+    reviewApi
+      .listForProduct(productId, { pageSize: 20 })
+      .then((res) => setData(unwrapResponse<any>(res) || null))
+      .catch(() => setData({ list: [], total: 0, averageRating: null }));
+  }, [productId]);
+
+  if (!data) {
+    return (
+      <p className="text-brand-muted text-sm py-4">评价加载中…</p>
+    );
+  }
+  if (data.total === 0) {
+    return (
+      <p className="text-brand-muted text-sm py-4">
+        这件作品还没有评价。完成购买后，欢迎分享您的佩戴体验。
+      </p>
+    );
+  }
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-6 pb-4 border-b border-brand-line">
+        <Rate
+          disabled
+          allowHalf
+          value={data.averageRating || 0}
+          className="text-brand-gold"
+        />
+        <span className="text-sm text-brand-muted">
+          {data.averageRating ?? "-"} 分 · {data.total} 条评价
+        </span>
+      </div>
+      <div className="space-y-6">
+        {data.list.map((review) => (
+          <div
+            key={review.id}
+            className="border-b border-brand-line pb-5 last:border-0"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">{review.reviewer}</span>
+              <Rate disabled value={review.rating} className="text-sm" />
+            </div>
+            <p className="text-sm mt-2 leading-relaxed">{review.content}</p>
+            {Array.isArray(review.images) && review.images.length > 0 ? (
+              <div className="flex gap-2 mt-3 flex-wrap">
+                {review.images.slice(0, 6).map((url: string) => (
+                  <img
+                    key={url}
+                    src={url}
+                    alt="买家晒单"
+                    loading="lazy"
+                    className="w-20 h-20 object-cover border border-brand-line"
+                  />
+                ))}
+              </div>
+            ) : null}
+            {review.reply ? (
+              <div className="mt-3 bg-brand-bg p-3 text-sm">
+                <span className="text-brand-gold">顾问回复：</span>
+                {review.reply}
+              </div>
+            ) : null}
+            <p className="text-xs text-brand-muted mt-2">
+              {new Date(review.createdAt).toLocaleDateString("zh-CN")}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 未登录详情页登录墙：游客仅可浏览列表，完整详情需登录后查看 */
+function GuestDetailGate({ productId }: { productId?: string }) {  return (
     <div className="min-h-screen flex items-center justify-center bg-brand-bg px-6">
       <div className="max-w-md w-full text-center py-16">
         <p className="text-xs tracking-[.2em] text-brand-gold font-sans mb-4">
@@ -89,6 +226,41 @@ export default function ProductDetail() {
   const isSignedIn = Boolean(
     typeof window !== "undefined" && localStorage.getItem("customerToken"),
   );
+  // 心愿单（登录墙内页面，isSignedIn 恒为 true）
+  const [favorited, setFavorited] = useState(false);
+  const [favBusy, setFavBusy] = useState(false);
+
+  // 初始收藏态：拉一次心愿单判断当前作品是否在列（心愿单量级小，整表判断成本可忽略）。
+  // 登录墙 return 之前 hooks 已执行，必须显式判断登录态，避免游客每次必发一个注定 401 的请求。
+  useEffect(() => {
+    if (!id || !isSignedIn) return;
+    customerApi
+      .getFavorites()
+      .then((res: unknown) => {
+        const list = unwrapResponse<Array<{ productId: number }>>(res) || [];
+        setFavorited(list.some((f) => f.productId === Number(id)));
+      })
+      .catch(() => setFavorited(false));
+  }, [id, isSignedIn]);
+
+  const handleToggleFavorite = async () => {
+    if (favBusy || !id) return;
+    setFavBusy(true);
+    // 乐观更新，失败回滚
+    const next = !favorited;
+    setFavorited(next);
+    try {
+      const res = await customerApi.toggleFavorite(Number(id));
+      const result = unwrapResponse<{ favorited: boolean }>(res);
+      setFavorited(Boolean(result?.favorited));
+      message.success(result?.favorited ? "已加入心愿单" : "已移出心愿单");
+    } catch (e: any) {
+      setFavorited(!next);
+      message.error(e?.response?.data?.message || e?.message || "操作失败，请稍后重试");
+    } finally {
+      setFavBusy(false);
+    }
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -416,6 +588,21 @@ export default function ProductDetail() {
                   {salesModeCta(product.salesMode)}
                 </Link>
               )}
+              {/* 心愿单：主 CTA 旁常驻（本页在登录墙内，无需登录判断） */}
+              <button
+                type="button"
+                aria-label={favorited ? "移出心愿单" : "加入心愿单"}
+                title={favorited ? "移出心愿单" : "加入心愿单"}
+                onClick={handleToggleFavorite}
+                disabled={favBusy}
+                className={`w-12 h-12 shrink-0 flex items-center justify-center border transition-colors font-sans ${
+                  favorited
+                    ? "border-brand-gold text-brand-gold"
+                    : "border-brand-line text-brand-muted hover:border-brand-gold hover:text-brand-gold"
+                }`}
+              >
+                {favorited ? <HeartFilled /> : <HeartOutlined />}
+              </button>
             </div>
 
             {/* Tabs */}
@@ -485,8 +672,19 @@ export default function ProductDetail() {
                     <p className="text-brand-muted text-sm">暂无证书信息</p>
                   ),
                 },
+                {
+                  key: "reviews",
+                  label: (
+                    <span className="font-sans text-xs tracking-[.1em]">
+                      评价
+                    </span>
+                  ),
+                  children: <ProductReviewsTab productId={product.id} />,
+                },
               ]}
             />
+            {/* 相似作品推荐（recommendations 模块首次接线） */}
+            <SimilarProducts productId={product.id} />
           </motion.div>
         </div>
       </div>

@@ -6,6 +6,8 @@ import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceho
 import type { PageModule } from "@/types/pageModule";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
+import { DesignSystemStyles } from "@/page-builder/designSystem/sectionShell";
+import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 
 const LT = "#F1ECE3";
 
@@ -81,7 +83,13 @@ export default function HeroSection({ module, editMode }: Props) {
     Record<"--hc-hero-focus-desktop" | "--hc-hero-focus-mobile", string>;
 
   return (
-    <section className="relative w-full overflow-hidden" style={heroStyle}>
+    <section
+      className="relative w-full overflow-hidden hc-section"
+      data-flow="bleed"
+      data-density="brand"
+      style={heroStyle}
+    >
+      <DesignSystemStyles />
       {editMode && (
         <div
           style={{
@@ -165,7 +173,7 @@ export default function HeroSection({ module, editMode }: Props) {
           className="text-[10px] md:text-[11px] tracking-[.2em] uppercase mb-4 font-sans"
           style={{
             color: "rgba(255,255,255,0.6)",
-            fontFamily: "Inter,system-ui,sans-serif",
+            fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
             opacity: rm ? 1 : 0,
             transform: rm ? "none" : "translateY(12px)",
             animation: rm
@@ -177,9 +185,10 @@ export default function HeroSection({ module, editMode }: Props) {
         </p>
         <h1
           data-editor-field="title"
-          className="text-[clamp(40px,5vw,68px)] leading-[1.1] tracking-[.02em] mb-6 whitespace-pre-line"
+          className="leading-[1.1] tracking-[.02em] mb-6 whitespace-pre-line"
           style={{
-            fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
+            fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
+            fontSize: "var(--hc-type-hero, clamp(40px,5vw,68px))",
             color: LT,
             opacity: rm ? 1 : 0,
             transform: rm ? "none" : "translateY(12px)",
@@ -197,7 +206,7 @@ export default function HeroSection({ module, editMode }: Props) {
               className="inline-flex items-center gap-2 text-[10px] md:text-[11px] tracking-[.14em] uppercase"
               style={{
                 color: "rgba(255,255,255,0.7)",
-                fontFamily: "Inter,system-ui,sans-serif",
+                fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
               }}
             >
               {actionText} <span>→</span>
@@ -209,7 +218,7 @@ export default function HeroSection({ module, editMode }: Props) {
               className="inline-flex items-center gap-2 text-[10px] md:text-[11px] tracking-[.14em] uppercase transition-opacity duration-300 hover:opacity-60"
               style={{
                 color: "rgba(255,255,255,0.7)",
-                fontFamily: "Inter,system-ui,sans-serif",
+                fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
                 opacity: rm ? 1 : 0,
                 transform: rm ? "none" : "translateY(12px)",
                 animation: rm

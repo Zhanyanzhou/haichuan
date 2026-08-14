@@ -15,9 +15,12 @@ export interface SinglePosterPuckProps {
   desktopImage: string;
   mobileImage: string;
   linkUrl: string;
+  actionText: string;
   template: string;
-  focusX: number;
-  focusY: number;
+  desktopFocusX: number;
+  desktopFocusY: number;
+  mobileFocusX: number;
+  mobileFocusY: number;
   locked?: boolean;
 }
 
@@ -33,9 +36,12 @@ export const singlePosterPuckConfig = {
     desktopImage: "",
     mobileImage: "",
     linkUrl: "",
+    actionText: "查看系列",
     template: "leftTextRightImage",
-    focusX: 50,
-    focusY: 50,
+    desktopFocusX: 50,
+    desktopFocusY: 50,
+    mobileFocusX: 50,
+    mobileFocusY: 50,
     locked: false,
   } satisfies SinglePosterPuckProps,
   fields: {
@@ -50,7 +56,7 @@ export const singlePosterPuckConfig = {
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
         <MediaPickerField fieldKey="desktopImage" device="desktop" value={value} onChange={onChange} readOnly={readOnly}
-          spec={IMAGE_SPECS.singlePoster.image} placeholder="上传单海报桌面图" />
+          spec={IMAGE_SPECS.singlePoster.image} placeholder="上传海报主图（4:5）" />
       ),
     },
     mobileImage: {
@@ -64,6 +70,7 @@ export const singlePosterPuckConfig = {
       ),
     },
     linkUrl: { type: "text" as const, label: "链接" },
+    actionText: { type: "text" as const, label: "引导文字" },
     template: {
       type: "radio" as const,
       label: "布局",
@@ -72,8 +79,10 @@ export const singlePosterPuckConfig = {
         { label: "左图右文", value: "leftImageRightText" },
       ],
     },
-    focusX: { type: "number" as const, label: "焦点 X (%)", min: 0, max: 100 },
-    focusY: { type: "number" as const, label: "焦点 Y (%)", min: 0, max: 100 },
+    desktopFocusX: { type: "number" as const, label: "桌面焦点 X (%)", min: 0, max: 100 },
+    desktopFocusY: { type: "number" as const, label: "桌面焦点 Y (%)", min: 0, max: 100 },
+    mobileFocusX: { type: "number" as const, label: "移动焦点 X (%)", min: 0, max: 100 },
+    mobileFocusY: { type: "number" as const, label: "移动焦点 Y (%)", min: 0, max: 100 },
   },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };

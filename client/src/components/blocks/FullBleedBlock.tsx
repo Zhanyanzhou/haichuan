@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import { FULL_BLEED_CONTRACT, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
+import { DesignSystemStyles } from "@/page-builder/designSystem/sectionShell";
+import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 
 interface FullBleedBlockProps {
   module: {
@@ -62,7 +64,7 @@ export default function FullBleedBlock({
     return (
       <BlockEmptyPlaceholder
         hint="请上传单张海报"
-        spec="桌面 3840×1600（12:5）· 移动 1500×1800（5:6）"
+        spec="桌面 3360×960（21:6）· 移动 1500×1875（4:5）"
       />
     );
   }
@@ -95,8 +97,10 @@ export default function FullBleedBlock({
 
   const poster = (
     <section
-      className="hc-single-poster"
+      className="hc-single-poster hc-section"
       data-text-position={template}
+      data-flow="bleed"
+      data-density="brand"
       style={{
         ...posterStyle,
         position: "relative",
@@ -105,6 +109,7 @@ export default function FullBleedBlock({
         background: "#E7DDCE",
       }}
     >
+      <DesignSystemStyles />
       {!imageFailed ? (
         <picture data-editor-field="image mobileImage">
           <source media={RESPONSIVE_CANVAS.mobileMediaQuery} srcSet={mobileImg} />
@@ -139,10 +144,10 @@ export default function FullBleedBlock({
           {title && (
             <h2 data-editor-field="title"
               style={{
-                fontSize: "clamp(28px,4vw,56px)",
+                fontSize: "var(--hc-type-display, clamp(28px,4vw,56px))",
                 lineHeight: 1.1,
                 margin: 0,
-                fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
+                fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
                 color: "#fff",
                 fontWeight: 500,
                 letterSpacing: ".04em",

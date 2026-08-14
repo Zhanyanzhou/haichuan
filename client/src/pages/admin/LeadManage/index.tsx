@@ -194,7 +194,9 @@ export default function LeadManage() {
     if (!detailId || !assignTo) return;
     setAssigning(true);
     try {
-      await api.put(`/inquiries/${detailId.id}/assign`, { assignedTo: assignTo });
+      await api.put(`/inquiries/${detailId.id}/assign`, {
+        assignedTo: assignTo,
+      });
       message.success("已指派");
       setAssignTo(undefined);
       openDetail(detailId.type, detailId.id);

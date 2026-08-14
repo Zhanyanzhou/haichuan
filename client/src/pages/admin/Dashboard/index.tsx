@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link } from "react-router-dom";
 import {
   AccountBookOutlined,
@@ -74,14 +80,24 @@ function buildChange(
 ): Change {
   const t = today === undefined ? undefined : Number(today);
   const y = yesterday === undefined ? undefined : Number(yesterday);
-  if (t === undefined || y === undefined || !Number.isFinite(t) || !Number.isFinite(y) || y === 0) {
+  if (
+    t === undefined ||
+    y === undefined ||
+    !Number.isFinite(t) ||
+    !Number.isFinite(y) ||
+    y === 0
+  ) {
     return null;
   }
   const pct = ((t - y) / y) * 100;
   return { pct, direction: t >= y ? "up" : "down" };
 }
 
-const TREND_METRICS: { key: TrendMetric; label: string; format: "number" | "currency" }[] = [
+const TREND_METRICS: {
+  key: TrendMetric;
+  label: string;
+  format: "number" | "currency";
+}[] = [
   { key: "orders", label: "订单数", format: "number" },
   { key: "revenue", label: "成交金额", format: "currency" },
   { key: "inquiries", label: "咨询数", format: "number" },
@@ -114,9 +130,11 @@ function TrendTooltip({
   label?: string;
   format: "number" | "currency";
 }) {
-  if (!active || !payload?.length || payload[0]?.value === undefined) return null;
+  if (!active || !payload?.length || payload[0]?.value === undefined)
+    return null;
   const value = payload[0].value;
-  const display = format === "currency" ? formatCurrency(value) : formatNumber(value);
+  const display =
+    format === "currency" ? formatCurrency(value) : formatNumber(value);
   const [, m = "", d = ""] = (label || "").split("-");
   const dateLabel = label ? `${Number(m)}/${Number(d)}` : "";
   return (
@@ -253,15 +271,28 @@ export default function Dashboard() {
       {
         key: "inquiry",
         label: "待处理咨询",
-        count: (stats.pendingAppointmentInquiries || 0) + (stats.pendingSelectionInquiries || 0),
+        count:
+          (stats.pendingAppointmentInquiries || 0) +
+          (stats.pendingSelectionInquiries || 0),
         route: "/admin/leads?status=PENDING",
       },
-      { key: "lowStock", label: "库存预警商品", count: stats.lowStock || 0, route: "/admin/inventory" },
-      { key: "review", label: "待完善商品", count: stats.pendingReview || 0, route: "/admin/products" },
+      {
+        key: "lowStock",
+        label: "库存预警商品",
+        count: stats.lowStock || 0,
+        route: "/admin/inventory",
+      },
+      {
+        key: "review",
+        label: "待完善商品",
+        count: stats.pendingReview || 0,
+        route: "/admin/products",
+      },
     ].filter((a) => a.count > 0);
   }, [stats]);
 
-  const trendFormat = TREND_METRICS.find((m) => m.key === trendMetric)?.format ?? "number";
+  const trendFormat =
+    TREND_METRICS.find((m) => m.key === trendMetric)?.format ?? "number";
   const todayText = new Intl.DateTimeFormat("zh-CN", {
     year: "numeric",
     month: "long",
@@ -298,7 +329,9 @@ export default function Dashboard() {
           onClick={handleRefresh}
           disabled={refreshState === "loading"}
         >
-          <ReloadOutlined className={refreshState === "loading" ? "is-spinning" : ""} />
+          <ReloadOutlined
+            className={refreshState === "loading" ? "is-spinning" : ""}
+          />
           {refreshLabel}
         </button>
       </header>
@@ -306,12 +339,17 @@ export default function Dashboard() {
       {loadError && (
         <div className="admin-dashboard__data-notice" role="alert">
           <span>核心经营数据暂时无法加载，请稍后重试。</span>
-          <button type="button" onClick={loadStats}>重新加载</button>
+          <button type="button" onClick={loadStats}>
+            重新加载
+          </button>
         </div>
       )}
 
       {/* 一、今日核心数据卡片 */}
-      <section className="admin-dashboard__section" aria-labelledby="cards-title">
+      <section
+        className="admin-dashboard__section"
+        aria-labelledby="cards-title"
+      >
         <div className="admin-dashboard__section-head">
           <h2 id="cards-title">今日核心数据</h2>
           <span>与昨日同口径对比</span>
@@ -319,22 +357,40 @@ export default function Dashboard() {
         <div className="admin-dashboard__cards">
           {loading || cards.length === 0
             ? Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="admin-dashboard__card is-skeleton" aria-hidden="true">
+                <div
+                  key={i}
+                  className="admin-dashboard__card is-skeleton"
+                  aria-hidden="true"
+                >
                   <span className="admin-dashboard__card-icon" />
                   <span className="admin-dashboard__card-label">载入中</span>
                   <strong className="admin-dashboard__card-value">—</strong>
-                  <span className="admin-dashboard__card-change is-neutral">{"\u00A0"}</span>
+                  <span className="admin-dashboard__card-change is-neutral">
+                    {"\u00A0"}
+                  </span>
                 </div>
               ))
             : cards.map((card) => {
                 const inner = (
                   <>
-                    <span className="admin-dashboard__card-icon">{card.icon}</span>
-                    <span className="admin-dashboard__card-label">{card.label}</span>
-                    <strong className="admin-dashboard__card-value">{card.value}</strong>
+                    <span className="admin-dashboard__card-icon">
+                      {card.icon}
+                    </span>
+                    <span className="admin-dashboard__card-label">
+                      {card.label}
+                    </span>
+                    <strong className="admin-dashboard__card-value">
+                      {card.value}
+                    </strong>
                     {card.change ? (
-                      <span className={`admin-dashboard__card-change is-${card.change.direction}`}>
-                        {card.change.direction === "up" ? <CaretUpOutlined /> : <CaretDownOutlined />}
+                      <span
+                        className={`admin-dashboard__card-change is-${card.change.direction}`}
+                      >
+                        {card.change.direction === "up" ? (
+                          <CaretUpOutlined />
+                        ) : (
+                          <CaretDownOutlined />
+                        )}
                         {Math.abs(card.change.pct).toFixed(1)}% 较昨日
                       </span>
                     ) : (
@@ -345,7 +401,11 @@ export default function Dashboard() {
                   </>
                 );
                 return card.route ? (
-                  <Link key={card.key} to={card.route} className="admin-dashboard__card">
+                  <Link
+                    key={card.key}
+                    to={card.route}
+                    className="admin-dashboard__card"
+                  >
                     {inner}
                   </Link>
                 ) : (
@@ -358,11 +418,18 @@ export default function Dashboard() {
       </section>
 
       {/* 二、经营趋势 */}
-      <section className="admin-dashboard__section" aria-labelledby="trend-title">
+      <section
+        className="admin-dashboard__section"
+        aria-labelledby="trend-title"
+      >
         <div className="admin-dashboard__section-head admin-dashboard__trend-head">
           <h2 id="trend-title">经营趋势</h2>
           <div className="admin-dashboard__trend-controls">
-            <div className="admin-dashboard__segmented" role="tablist" aria-label="趋势指标">
+            <div
+              className="admin-dashboard__segmented"
+              role="tablist"
+              aria-label="趋势指标"
+            >
               {TREND_METRICS.map((m) => (
                 <button
                   key={m.key}
@@ -376,7 +443,11 @@ export default function Dashboard() {
                 </button>
               ))}
             </div>
-            <div className="admin-dashboard__segmented" role="tablist" aria-label="时间范围">
+            <div
+              className="admin-dashboard__segmented"
+              role="tablist"
+              aria-label="时间范围"
+            >
               {TREND_RANGES.map((r) => (
                 <button
                   key={r.days}
@@ -410,14 +481,31 @@ export default function Dashboard() {
             <div className="admin-dashboard__empty-chart">暂无趋势数据</div>
           ) : (
             <ResponsiveContainer width="100%" height={280}>
-              <AreaChart data={trendData} margin={{ top: 10, right: 16, bottom: 0, left: -8 }}>
+              <AreaChart
+                data={trendData}
+                margin={{ top: 10, right: 16, bottom: 0, left: -8 }}
+              >
                 <defs>
-                  <linearGradient id="adminTrendFill" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient
+                    id="adminTrendFill"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
                     <stop offset="0%" stopColor="#b8944e" stopOpacity={0.28} />
-                    <stop offset="100%" stopColor="#b8944e" stopOpacity={0.02} />
+                    <stop
+                      offset="100%"
+                      stopColor="#b8944e"
+                      stopOpacity={0.02}
+                    />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ebe6dd" />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  vertical={false}
+                  stroke="#ebe6dd"
+                />
                 <XAxis
                   dataKey="date"
                   tickFormatter={(d: string) => {
@@ -441,9 +529,11 @@ export default function Dashboard() {
                   width={48}
                 />
                 <Tooltip
-                  content={(props: { active?: boolean; payload?: Array<{ value?: number }>; label?: string }) =>
-                    <TrendTooltip {...props} format={trendFormat} />
-                  }
+                  content={(props: {
+                    active?: boolean;
+                    payload?: Array<{ value?: number }>;
+                    label?: string;
+                  }) => <TrendTooltip {...props} format={trendFormat} />}
                   cursor={{ stroke: "#c2bdb5", strokeDasharray: "3 3" }}
                 />
                 <Area
@@ -464,16 +554,27 @@ export default function Dashboard() {
       </section>
 
       {/* 三、重要提醒 */}
-      <section className="admin-dashboard__section" aria-labelledby="alert-title">
+      <section
+        className="admin-dashboard__section"
+        aria-labelledby="alert-title"
+      >
         <div className="admin-dashboard__section-head">
           <h2 id="alert-title">重要提醒</h2>
-          <span>{alerts.length > 0 ? `${alerts.length} 项需要关注` : "暂无异常"}</span>
+          <span>
+            {alerts.length > 0 ? `${alerts.length} 项需要关注` : "暂无异常"}
+          </span>
         </div>
         {alerts.length > 0 ? (
           <div className="admin-dashboard__alerts">
             {alerts.map((a) => (
-              <Link key={a.key} to={a.route} className="admin-dashboard__alert-item">
-                <span className="admin-dashboard__alert-count">{formatNumber(a.count)}</span>
+              <Link
+                key={a.key}
+                to={a.route}
+                className="admin-dashboard__alert-item"
+              >
+                <span className="admin-dashboard__alert-count">
+                  {formatNumber(a.count)}
+                </span>
                 <div className="admin-dashboard__alert-text">
                   <strong>{a.label}</strong>
                   <span>点击查看与处理</span>

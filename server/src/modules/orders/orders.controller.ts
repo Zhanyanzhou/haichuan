@@ -37,14 +37,6 @@ export class OrdersController {
   }
 
   @ApiBearerAuth()
-  @Roles("SUPER_ADMIN", "ADMIN")
-  @Get("statistics")
-  @ApiOperation({ summary: "获取订单统计数据" })
-  getStatistics() {
-    return this.ordersService.getStatistics();
-  }
-
-  @ApiBearerAuth()
   @Roles("SUPER_ADMIN", "ADMIN", "FINANCE")
   @Get("anomalies")
   @ApiOperation({ summary: "异常订单聚合（长时间未付款/超时未发货/定制超期/物流异常/退款中）" })

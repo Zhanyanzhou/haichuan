@@ -14,6 +14,7 @@ export interface FeaturedProductPuckProps {
   secondaryText: string;
   secondaryLink: string;
   layout: "imageLeft" | "imageRight";
+  showPrice: boolean;
   bgColor: string;
   locked?: boolean;
 }
@@ -67,14 +68,15 @@ function FeaturedProductPreview(props: FeaturedProductPuckProps) {
 export const featuredProductPuckConfig = {
   render: (props: FeaturedProductPuckProps) => <FeaturedProductPreview {...props} />,
   defaultProps: {
-    eyebrow: "FEATURED PIECE",
-    title: "本季主推作品",
+    eyebrow: "SIGNATURE PIECE",
+    title: "代表作品",
     summary: "为重要时刻挑选一件值得珍藏的珠宝，细节与光泽都经得起近距离凝视。",
     productId: 0,
     primaryText: "查看作品",
     secondaryText: "预约鉴赏",
     secondaryLink: "/contact",
     layout: "imageLeft",
+    showPrice: false,
     bgColor: "#F5F2ED",
     locked: false,
   } satisfies FeaturedProductPuckProps,
@@ -96,8 +98,16 @@ export const featuredProductPuckConfig = {
       type: "radio" as const,
       label: "桌面版式",
       options: [
-        { label: "商品图在左", value: "imageLeft" },
-        { label: "商品图在右", value: "imageRight" },
+        { label: "作品图在左", value: "imageLeft" },
+        { label: "作品图在右", value: "imageRight" },
+      ],
+    },
+    showPrice: {
+      type: "radio" as const,
+      label: "显示价格（仅电商页开启）",
+      options: [
+        { label: "隐藏（品牌叙事）", value: false },
+        { label: "显示（电商选款）", value: true },
       ],
     },
     bgColor: colorPuckField("背景色"),

@@ -10,6 +10,13 @@ import {
   resolveLinkTargetUrl,
   type LinkTargetValue,
 } from "../utils/linkTarget";
+import { RATIOS } from "../designSystem/tokens";
+
+/**
+ * 比例单一来源:契约的 canvas 比例一律引用 designSystem/tokens 的 RATIOS,
+ * 不再手写字面值。已迁移母版:cinematic-hero(hero/video)、immersive-image
+ * (fullBleed)、conversion(appointment);其余契约随各自母版批次迁移。
+ */
 
 export type ImageTextTemplate =
   "textLeftImageRight" | "textRightImageLeft" | "textOnly" | "imageBackground";
@@ -149,8 +156,9 @@ export const HERO_CONTRACT = {
   purpose: "用全屏视觉建立网站的第一品牌印象，并提供一个清晰行动入口。",
   canvas: {
     heightMode: "viewport",
-    desktopMediaAspectRatio: "16 / 9",
-    mobileMediaAspectRatio: "9 / 16",
+    // 素材建议比例(渲染为视口裁切驱动,不锁比例):PC 16:7 / Mobile 4:5
+    desktopMediaAspectRatio: RATIOS["16:7"],
+    mobileMediaAspectRatio: RATIOS["4:5"],
     independentFocus: true,
   },
   content: { limits: { title: 24, subtitle: 48, actionText: 12, altText: 80 } },
@@ -161,8 +169,8 @@ export const FULL_BLEED_CONTRACT = {
   purpose: "用一张完整海报强化高级氛围，并承接一次明确点击。",
   canvas: {
     heightMode: "ratio",
-    desktopMediaAspectRatio: "12 / 5",
-    mobileMediaAspectRatio: "5 / 6",
+    desktopMediaAspectRatio: RATIOS["21:6"],
+    mobileMediaAspectRatio: RATIOS["4:5"],
     independentFocus: true,
   },
   content: { limits: { title: 24, subtitle: 48, actionText: 12, altText: 80 } },
@@ -174,8 +182,8 @@ export const DOUBLE_POSTER_CONTRACT = {
   canvas: {
     heightMode: "content",
     maxWidth: 1520,
-    mainMediaAspectRatio: "4 / 3",
-    detailMediaAspectRatio: "4 / 5",
+    mainMediaAspectRatio: RATIOS["3:2"],
+    detailMediaAspectRatio: RATIOS["4:5"],
     layouts: ["mainLeft", "mainRight"],
   },
   content: {
@@ -193,11 +201,11 @@ export const DOUBLE_POSTER_CONTRACT = {
 export const FEATURED_PRODUCT_CONTRACT = {
   type: "单品焦点推荐",
   purpose:
-    "集中呈现一件核心作品的主图、价格与关键卖点，并引导进入商品详情或预约鉴赏。",
+    "集中呈现一件核心作品的主图与关键卖点；品牌页隐藏价格，电商页可选显示。",
   canvas: {
     heightMode: "content",
     maxWidth: 1180,
-    mediaAspectRatio: "3 / 4",
+    mediaAspectRatio: RATIOS["4:5"],
     layouts: ["imageLeft", "imageRight"],
   },
   content: {
@@ -209,6 +217,7 @@ export const FEATURED_PRODUCT_CONTRACT = {
     layout: "imageLeft",
     primaryText: "查看作品",
     secondaryLink: "/contact",
+    showPrice: false,
   },
 } as const;
 
@@ -219,9 +228,9 @@ export const CATEGORY_CARDS_CONTRACT = {
   canvas: {
     heightMode: "content",
     maxWidth: 1280,
-    mediaAspectRatio: "3 / 4",
+    mediaAspectRatio: RATIOS["4:5"],
     desktopColumns: [2, 3, 4],
-    mobileColumns: 1,
+    mobileColumns: 2,
   },
   content: {
     minItems: 2,
@@ -232,7 +241,74 @@ export const CATEGORY_CARDS_CONTRACT = {
 } as const;
 
 export function getCategoryCardsMediaAspectRatio(layout?: string): string {
-  return layout === "grid-2" ? "16 / 9" : "3 / 4";
+  // grid-2 大卡用 3:2 横幅,其余统一 4:5
+  return layout === "grid-2" ? RATIOS["3:2"] : RATIOS["4:5"];
+}
+
+/* ═══════ 作品画廊(Asymmetric Gallery)契约 ═══════ */
+
+export interface GalleryContractItem {
+  image?: string;
+  altText?: string;
+  caption?: string;
+  link?: string;
+}
+
+export interface GalleryContractProps {
+  title?: string;
+  subtitle?: string;
+  items?: unknown;
+}
+
+export const GALLERY_CONTRACT = {
+  type: "作品画廊",
+  purpose: "以非对称多图画廊呈现作品、空间与证书,强调作品本身而非文案。",
+  canvas: {
+    heightMode: "content",
+    maxWidth: 1520,
+    primaryMediaAspectRatio: RATIOS["4:5"],
+    secondaryMediaAspectRatios: [RATIOS["1:1"], RATIOS["3:2"]],
+  },
+  content: {
+    minItems: 3,
+    maxItems: 6,
+    limits: { title: 24, subtitle: 60, caption: 24, altText: 80 },
+  },
+  defaults: {},
+} as const;
+
+export function evaluateGalleryContract(
+  props: GalleryContractProps,
+): ModuleContractStatus {
+  const items = Array.isArray(props.items) ? props.items : [];
+  const completeItems = items.filter(
+    (item: GalleryContractItem) => typeof item?.image === "string" && item.image.trim(),
+  );
+  const enoughItems = items.length >= GALLERY_CONTRACT.content.minItems;
+  const checks = [
+    hasText(props.title),
+    enoughItems,
+    enoughItems && completeItems.length === items.length,
+  ];
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!hasText(props.title)) errors.push("请填写画廊标题");
+  if (items.length > 0 && items.length < GALLERY_CONTRACT.content.minItems)
+    errors.push(`画廊至少需要 ${GALLERY_CONTRACT.content.minItems} 张图片,建议 3–5 张形成节奏`);
+  if (items.length > GALLERY_CONTRACT.content.maxItems)
+    errors.push(`画廊图片不能超过 ${GALLERY_CONTRACT.content.maxItems} 张`);
+  if (items.some((item: GalleryContractItem) => !hasText(item?.image)))
+    errors.push("存在未上传图片的条目");
+  if (items.some((item: GalleryContractItem) => !hasText(item?.altText)))
+    warnings.push("建议为每张图片补充替代文字");
+  if (items.every((item: GalleryContractItem) => !hasText(item?.caption)))
+    warnings.push("建议为关键作品补充一句图注(如 FIG. 01 · 系列名)");
+  return {
+    completed: checks.filter(Boolean).length,
+    total: checks.length,
+    errors,
+    warnings,
+  };
 }
 
 export const APPOINTMENT_CONTRACT = {
@@ -242,7 +318,7 @@ export const APPOINTMENT_CONTRACT = {
     heightMode: "content",
     minHeight: 380,
     maxWidth: 1280,
-    backgroundAspectRatio: "12 / 5",
+    backgroundAspectRatio: RATIOS["21:6"],
   },
   content: {
     limits: { title: 24, subtitle: 72, buttonText: 10, altText: 80 },
@@ -286,16 +362,17 @@ export const SINGLE_POSTER_CONTRACT = {
   canvas: {
     heightMode: "ratio",
     maxWidth: 1280,
-    desktopColumns: "5fr 7fr",
-    desktopImageLeftColumns: "7fr 5fr",
-    tabletColumns: "1fr 1.1fr",
-    tabletImageLeftColumns: "1.1fr 1fr",
-    desktopMediaAspectRatio: "3 / 2",
-    mobileMediaAspectRatio: "3 / 4",
+    // Editorial Split 构图红线:38/62(镜像 62/38),禁止 50/50
+    desktopColumns: "38fr 62fr",
+    desktopImageLeftColumns: "62fr 38fr",
+    tabletColumns: "1fr 1.4fr",
+    tabletImageLeftColumns: "1.4fr 1fr",
+    desktopMediaAspectRatio: RATIOS["4:5"],
+    mobileMediaAspectRatio: RATIOS["3:4"],
     mobileBreakpoint: 767,
   },
   content: {
-    limits: { number: 4, label: 16, title: 24, subtitle: 48 },
+    limits: { number: 4, label: 16, title: 24, subtitle: 48, actionText: 12 },
   },
   defaults: { template: "leftTextRightImage", focusX: 50, focusY: 50 },
 } as const;
@@ -305,8 +382,8 @@ export const CAROUSEL_CONTRACT = {
   purpose:
     "以固定的版式比例展示系列或活动主视觉，避免按任意像素高度拉伸导致不同宽度下失真。",
   canvas: {
-    desktopAspectRatios: { wide: "12 / 5", standard: "16 / 9" },
-    mobileAspectRatios: { portrait: "3 / 4", standard: "4 / 5" },
+    desktopAspectRatios: { wide: RATIOS["21:6"], standard: RATIOS["16:9"] },
+    mobileAspectRatios: { portrait: RATIOS["3:4"], standard: RATIOS["4:5"] },
   },
   defaults: { desktopRatio: "wide", mobileRatio: "portrait" },
 } as const;
@@ -333,7 +410,8 @@ export const PRODUCT_ROW_CONTRACT = {
     maxWidth: 1280,
     desktopColumns: [2, 3, 4],
     mobileColumns: [1, 2],
-    defaultMediaAspectRatio: "3 / 4",
+    // 商品图统一 4:5,不再开放其他比例
+    defaultMediaAspectRatio: RATIOS["4:5"],
   },
   content: {
     minProducts: 2,
@@ -343,7 +421,6 @@ export const PRODUCT_ROW_CONTRACT = {
   defaults: {
     layout: "grid-3",
     mobileColumns: 2,
-    imageRatio: "3:4",
     displayMode: "standard",
     actionStyle: "text",
   },
@@ -402,7 +479,7 @@ export function evaluateHeroContract(
   if (!hasText(props.title)) errors.push("请填写首屏标题");
   if (target.error) errors.push(target.error);
   if (!hasText(props.mobileImage))
-    warnings.push("建议上传移动端9:16竖图并单独调整焦点");
+    warnings.push("建议上传移动端4:5竖图并单独调整焦点");
   if (!hasText(props.altText)) warnings.push("建议填写图片替代文字");
   return {
     completed: checks.filter(Boolean).length,
@@ -422,7 +499,7 @@ export function evaluateFullBleedContract(
   if (!hasText(props.image)) errors.push("请上传桌面端海报");
   if (target.error) errors.push(target.error);
   if (!hasText(props.mobileImage))
-    warnings.push("建议上传移动端5:6竖图并单独调整焦点");
+    warnings.push("建议上传移动端4:5竖图并单独调整焦点");
   if (!hasText(props.altText)) warnings.push("建议填写图片替代文字");
   return {
     completed: checks.filter(Boolean).length,

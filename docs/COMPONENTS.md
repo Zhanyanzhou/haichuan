@@ -48,21 +48,28 @@
 | --------------- | -------- |
 | ImageCropper ⚠️ | 未被引用 |
 
-## 首页内容块 (blocks/)
+## 页面装修区块 (blocks/ 与 page-builder/)
 
-### 两套体系并存
+### 单套渲染层 + 声明式编辑体系(2026-08 重构后)
 
-**旧版 blockComponents** (`blocks/index.ts`) — 均未直接引用：
-HeroBlock, CategoriesBlock, StoryBlock, ProductsBlock, CraftBlock, ContactBlock
+- **渲染层唯一**:`blocks/` 下 23 个区块组件(含新建 AsymmetricGalleryBlock 作品画廊),`editMode` prop 区分编辑画布与公开页;admin 适配器与公开渲染器(PuckDocumentRenderer)共用同一批组件。
+- **编辑区**:22 个模块全部由 `page-builder/inspector/schema/modules/` 声明式 Schema 驱动(五层信息架构:内容→媒体→布局→样式→高级折叠),registry 全量注册;旧 10 个专属 Inspector 已于 R4b 退役(git 历史可查)。
+- **设计系统**:`page-builder/designSystem/`(tokens 8 规范比例/4 档宽度/双模式节奏、12 母版 masters、DecorSection 外壳、rhythm 页面节奏引擎)。
+- **旧类型兼容**:分割面板/图文混排/礼赠指南已从注册表移除;编辑器经 `migratePuckData` 自动转换,公开渲染器保留旧类型分支,已发布历史版本永久可渲染。
 
-**新版 MODULE_MAP** (`Home/index.tsx`) — 实际使用中：
-HeroSection, SinglePosterSection, DoublePosterSection, ImageTextBlock
+### 双轨页面(尚未合流)
 
-### 辅助
+`pages/public/About` 与 `pages/public/Custom` 为硬编码高水准 Brand 页;装修内容经 PublicLayout 的 PublishedPageDecoration 作为页面前置视觉区叠加。两轨合流为后续独立议题。
 
-| RevealOnScroll | 滚动显隐动画 |
+### 遗留待清退
+
+- 旧版 blockComponents(`blocks/index.ts` 注册表):HeroBlock 等 6 个,未直接引用。
+- `adapters/imageText.puck / splitPanel.puck` 与 `inspector/schema/modules/splitPanel.ts`:仅服务旧类型兼容渲染,模板库不再提供。
+- ContentSlot 体系(表/类型/2 端点):清退需 DB 迁移确认。
 
 ## 统计
+
+> 下表为装修体系重构前的旧统计;blocks/ 已从 17+6 变为 23 个单套渲染层组件(见上节),全量数字待下轮重数后更新。
 
 | 状态                     | 数量   |
 | ------------------------ | ------ |

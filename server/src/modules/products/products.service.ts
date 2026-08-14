@@ -418,10 +418,25 @@ export class ProductsService {
       where.isRecommended = params.isRecommended === "true";
     }
 
+    // 价格区间过滤（元，含边界；非法输入静默忽略）。基准为 Product.price（min 活跃 SKU 价）
+    const priceFilter: { gte?: number; lte?: number } = {};
+    const minPrice = Number(params.minPrice);
+    if (Number.isFinite(minPrice) && minPrice >= 0) priceFilter.gte = minPrice;
+    const maxPrice = Number(params.maxPrice);
+    if (Number.isFinite(maxPrice) && maxPrice > 0) priceFilter.lte = maxPrice;
+    if (priceFilter.gte !== undefined || priceFilter.lte !== undefined) {
+      where.price = priceFilter;
+    }
+
+    // 排序：sortOrder（运营定制序）/ 价格升降（选购场景）/ 默认最近更新
     const orderBy: Prisma.ProductOrderByWithRelationInput =
       params.sortBy === "sortOrder"
         ? { sortOrder: "asc" }
-        : { updatedAt: "desc" };
+        : params.sortBy === "price_asc"
+          ? { price: "asc" }
+          : params.sortBy === "price_desc"
+            ? { price: "desc" }
+            : { updatedAt: "desc" };
     const [list, total] = await Promise.all([
       this.prisma.product.findMany({
         where,
@@ -531,10 +546,41 @@ export class ProductsService {
   }
 
   /** 公开媒体：必须同时满足商品、图片归属以及 PUBLIC + PUBLISHED 条件。 */
+  /** 动态缩放宽白名单：列表 480 / 卡片 800 / 详情 1200（防任意参数滥用与超清抓取） */
+  private static readonly RESIZE_WIDTHS = new Set([480, 800, 1200]);
+
+  /**
+   * 按宽白名单生成 WebP 缩放版（动态 resize，旧图零回填即刻受益）。
+   * withoutEnlargement：小图不放大；失败时回退原图，绝不因 resize 挂掉媒体服务。
+   */
+  private async resizeMediaBuffer(
+    buffer: Buffer,
+    width: number,
+  ): Promise<{ buffer: Buffer; mimeType: string } | null> {
+    const allowed = ProductsService.RESIZE_WIDTHS.has(Number(width));
+    if (!allowed) return null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const sharp = require("sharp");
+      const out = await sharp(buffer)
+        .rotate()
+        .resize({ width: Number(width), withoutEnlargement: true })
+        .webp({ quality: 82 })
+        .toBuffer();
+      // 缩放产物明显更小才使用（极端小图可能反而更大）
+      return out.length < buffer.length
+        ? { buffer: out, mimeType: "image/webp" }
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   async servePublicMedia(
     productId: number,
     imageId: number,
     response: any,
+    width?: string,
   ): Promise<void> {
     if (
       !Number.isInteger(productId) ||
@@ -558,13 +604,15 @@ export class ProductsService {
     if (!image) throw new NotFoundException("媒体不存在");
 
     const { buffer, mimeType } = this.productMedia.readProductImage(image);
-    response.setHeader("Content-Type", mimeType);
+    const resized = await this.resizeMediaBuffer(buffer, width || "");
+    response.setHeader("Content-Type", resized?.mimeType ?? mimeType);
+    // 宽度在 URL query 上，不同宽度的变体按完整 URL 独立缓存
     response.setHeader(
       "Cache-Control",
       "public, max-age=300, stale-while-revalidate=86400",
     );
     response.setHeader("X-Content-Type-Options", "nosniff");
-    response.end(buffer);
+    response.end(resized?.buffer ?? buffer);
   }
 
   /**
@@ -577,6 +625,7 @@ export class ProductsService {
     imageId: number,
     request: any,
     response: any,
+    width?: string,
   ): Promise<void> {
     const image = await this.prisma.productImage.findFirst({
       where: { id: imageId, productId },
@@ -627,6 +676,14 @@ export class ProductsService {
       );
       outBuffer = watermarked.buffer;
       outMime = watermarked.mimeType;
+    }
+    // 动态缩放（水印之后，水印随图等比保留）：带宽优先于 CPU，移动端列表收益显著
+    if (!isVideo && width) {
+      const resized = await this.resizeMediaBuffer(outBuffer, width);
+      if (resized) {
+        outBuffer = resized.buffer;
+        outMime = resized.mimeType;
+      }
     }
 
     // 安全响应头（不泄露文件系统信息）

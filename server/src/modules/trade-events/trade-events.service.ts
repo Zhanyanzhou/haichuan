@@ -1,7 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { OperatorContext, TradeEntityType, TradeEventType } from './trade-events.constants';
+import { Injectable, Logger } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import {
+  OperatorContext,
+  TradeEntityType,
+  TradeEventType,
+} from "./trade-events.constants";
 
 /**
  * 交易事件服务：记录不可变事件时间线。

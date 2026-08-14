@@ -1,9 +1,11 @@
-import { useState } from "react";
+// 客户中心登录态主面板：账户总览/心愿单/订单(可视化进度+物流轨迹+评价)/个人资料(导出与注销)/地址管理
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Modal, Upload, message, Form, Input, Button } from "antd";
-import { customerApi } from "@/services/api";
+import { Modal, Upload, message, Form, Input, Button, Rate, Select } from "antd";
+import { customerApi, reviewApi, uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useCommerceEnabled } from "@/store/featureFlags";
+import { SecureImage } from "@/components/common/SecureImage";
 
 type AccountDashboardProps = {
   profile: { name?: string; phone?: string; email?: string } | null;
@@ -13,7 +15,12 @@ type AccountDashboardProps = {
     finalAmount: number | string;
     status: string;
     createdAt: string;
-    items?: Array<{ product?: { name: string } }>;
+    paymentConfirmedAt?: string | null;
+    shippedAt?: string | null;
+    completedAt?: string | null;
+    logisticsCompany?: string | null;
+    logisticsNo?: string | null;
+    items?: Array<{ productId: number; product?: { name: string } }>;
     payments?: Array<{ id: number; status: string; hasProof?: boolean }>;
   }>;
   addresses: Array<{
@@ -73,6 +80,36 @@ export default function MyAccountDashboard({
   const name = profile?.name || "海川贵宾";
   const commerceEnabled = useCommerceEnabled();
 
+  // 心愿单（组件自治拉取：CustomerCenter 无需为其扩展 props）
+  const [favorites, setFavorites] = useState<
+    Array<{
+      id: number;
+      productId: number;
+      name: string;
+      code?: string;
+      shortDescription?: string | null;
+      price?: number | string | null;
+      image?: string | null;
+      favoritedAt: string;
+    }>
+  >([]);
+
+  const removeFavorite = (productId: number) => {
+    customerApi
+      .toggleFavorite(productId)
+      .then(() => {
+        setFavorites((list) => list.filter((f) => f.productId !== productId));
+      })
+      .catch(() => message.error("移出失败，请稍后重试"));
+  };
+
+  useEffect(() => {
+    customerApi
+      .getFavorites()
+      .then((res) => setFavorites(unwrapResponse<any>(res) || []))
+      .catch(() => setFavorites([]));
+  }, []);
+
   // P1-29：付款凭证上传（电商闭环 —— 线下转账订单需顾客补凭证，否则卡死 PENDING_PAYMENT）
   const [proofOrderId, setProofOrderId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -86,6 +123,159 @@ export default function MyAccountDashboard({
   const [addressForm] = Form.useForm();
   const [savingAddress, setSavingAddress] = useState(false);
   const [editingAddressId, setEditingAddressId] = useState<number | null>(null);
+
+  // 评价（已完成订单 → 先审后展）
+  const [reviewOrder, setReviewOrder] = useState<{
+    id: number;
+    items: Array<{ productId: number; product?: { name: string } }>;
+  } | null>(null);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewProductId, setReviewProductId] = useState<number | null>(null);
+  const [reviewContent, setReviewContent] = useState("");
+  const [reviewImages, setReviewImages] = useState<string[]>([]);
+  const [submittingReview, setSubmittingReview] = useState(false);
+
+  // 合规：数据导出 + 注销
+  const [exportingData, setExportingData] = useState(false);
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [closePassword, setClosePassword] = useState("");
+  const [closing, setClosing] = useState(false);
+
+  const handleExportData = async () => {
+    setExportingData(true);
+    try {
+      const res = await customerApi.exportMyData();
+      const data = unwrapResponse<unknown>(res);
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `haichuan-my-data-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      message.error(e?.message || "导出失败，请稍后重试");
+    } finally {
+      setExportingData(false);
+    }
+  };
+
+  const handleCloseAccount = async () => {
+    if (!closePassword) {
+      message.warning("请输入登录密码确认");
+      return;
+    }
+    setClosing(true);
+    try {
+      await customerApi.closeAccount({ password: closePassword });
+      message.success("账户已注销");
+      onSignOut();
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || e?.message || "注销失败");
+    } finally {
+      setClosing(false);
+    }
+  };
+
+  // 物流轨迹（快递100，按订单展开）
+  const [trackingOrderId, setTrackingOrderId] = useState<number | null>(null);  const [trackingData, setTrackingData] = useState<{
+    carrier: string;
+    trackingNo: string;
+    state: string;
+    events: Array<{ time: string; context: string }>;
+  } | null>(null);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+
+  const TRACK_STATE: Record<string, string> = {
+    "0": "在途",
+    "1": "已揽收",
+    "2": "疑难",
+    "3": "已签收",
+    "4": "退签",
+    "5": "派件中",
+    "6": "退回",
+    "10": "待揽收",
+  };
+
+  const toggleTracking = async (orderId: number) => {
+    if (trackingOrderId === orderId) {
+      setTrackingOrderId(null);
+      setTrackingData(null);
+      return;
+    }
+    setTrackingOrderId(orderId);
+    setTrackingData(null);
+    setTrackingLoading(true);
+    try {
+      const res = await customerApi.getOrderTracking(orderId);
+      setTrackingData(unwrapResponse<any>(res) || null);
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || "轨迹查询失败";
+      setTrackingData({ carrier: "", trackingNo: "", state: "", events: [] });
+      message.error(msg);
+    } finally {
+      setTrackingLoading(false);
+    }
+  };
+
+  const openReview = (order: {
+    id: number;
+    items: Array<{ productId: number; product?: { name: string } }>;
+  }) => {
+    setReviewOrder(order);
+    setReviewProductId(order.items[0]?.productId ?? null);
+    setReviewRating(5);
+    setReviewContent("");
+    setReviewImages([]);
+  };
+
+  /** 晒单图上传：复用公开上传管线，成功后暂存 URL（提交时随评价一起落库） */
+  const uploadReviewImage = async (options: any) => {
+    const { onSuccess, onError, file } = options;
+    try {
+      const res = await uploadApi.uploadImage(file as File);
+      const url = unwrapResponse<{ url: string }>(res)?.url;
+      if (!url) throw new Error("上传失败");
+      setReviewImages((list) => (list.length >= 6 ? list : [...list, url]));
+      onSuccess?.(url);
+    } catch (e: any) {
+      message.error(e?.message || "晒单图上传失败");
+      onError?.(e);
+    }
+  };
+
+  const submitReview = async () => {
+    if (!reviewOrder || !reviewProductId) {
+      message.warning("请选择要评价的作品");
+      return;
+    }
+    if (reviewRating < 1) {
+      message.warning("请选择星级");
+      return;
+    }
+    if (reviewContent.trim().length < 5) {
+      message.warning("评价内容至少 5 个字");
+      return;
+    }
+    setSubmittingReview(true);
+    try {
+      await reviewApi.submit({
+        orderId: reviewOrder.id,
+        productId: reviewProductId,
+        rating: reviewRating,
+        content: reviewContent.trim(),
+        imageUrls: reviewImages.length ? reviewImages : undefined,
+      });
+      message.success("评价已提交，审核通过后将在作品页展示");
+      setReviewOrder(null);
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || e?.message || "提交失败");
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
 
   const hasPendingProof = (orderId: number) =>
     orders
@@ -121,7 +311,10 @@ export default function MyAccountDashboard({
     const values = await profileForm.validateFields();
     setSavingProfile(true);
     try {
-      await customerApi.updateProfile({ name: values.name, email: values.email });
+      await customerApi.updateProfile({
+        name: values.name,
+        email: values.email,
+      });
       message.success("资料已更新");
       setProfileEditOpen(false);
       onRefresh?.();
@@ -294,6 +487,105 @@ export default function MyAccountDashboard({
             )}
           </section>
 
+          {/* 心愿单：收藏的作品（商品详情页心形按钮加入） */}
+          <section
+            id="my-favorites"
+            className="my-account__panel my-account__panel--wide"
+          >
+            <div className="my-account__panel-head">
+              <div>
+                <p>WISHLIST</p>
+                <h2>我的心愿单</h2>
+              </div>
+              <strong>{String(favorites.length).padStart(2, "0")}</strong>
+            </div>
+            {favorites.length ? (
+              <div className="my-account__records">
+                {favorites.map((fav) => (
+                  <article
+                    key={fav.id}
+                    className="my-account__favorite"
+                    style={{ display: "flex", gap: 16, alignItems: "center" }}
+                  >
+                    <Link
+                      to={`/products/${fav.productId}`}
+                      style={{
+                        width: 72,
+                        height: 72,
+                        flexShrink: 0,
+                        background: "#f4f1ec",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {fav.image ? (
+                        <SecureImage
+                          src={fav.image}
+                          alt={fav.name}
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        />
+                      ) : (
+                        <span style={{ color: "#c9b78c", fontSize: 24 }}>◆</span>
+                      )}
+                    </Link>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Link to={`/products/${fav.productId}`}>
+                        <h3 style={{ fontSize: 15 }}>{fav.name}</h3>
+                      </Link>
+                      {fav.shortDescription ? (
+                        <p
+                          style={{
+                            fontSize: 12,
+                            color: "#8a8177",
+                            margin: "4px 0 0",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {fav.shortDescription}
+                        </p>
+                      ) : null}
+                      {fav.price != null && Number(fav.price) > 0 ? (
+                        <p style={{ fontSize: 13, margin: "6px 0 0", color: "#b8944e" }}>
+                          ¥{Number(fav.price).toLocaleString("zh-CN")}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <Link
+                        to={`/products/${fav.productId}`}
+                        style={{ fontSize: 12, color: "#b8944e" }}
+                      >
+                        查看作品
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => removeFavorite(fav.productId)}
+                        style={{
+                          fontSize: 12,
+                          color: "#9b938a",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        移出
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <Empty>
+                心愿单还是空的。<Link to="/catalog">去选款中心挑选心仪作品 →</Link>
+              </Empty>
+            )}
+          </section>
+
           <section
             id="my-orders"
             className="my-account__panel my-account__panel--wide"
@@ -306,7 +598,16 @@ export default function MyAccountDashboard({
             </div>
             {orders.length ? (
               <div className="my-account__records">
-                {orders.slice(0, 4).map((order) => (
+                {orders.slice(0, 4).map((order) => {
+                  // 履约进度（订单可视化）：四步推导自服务端时间戳
+                  const cancelled = order.status === "CANCELLED";
+                  const steps = [
+                    { label: "下单", done: true },
+                    { label: "收款", done: Boolean(order.paymentConfirmedAt) },
+                    { label: "发货", done: Boolean(order.shippedAt) },
+                    { label: "完成", done: Boolean(order.completedAt) },
+                  ];
+                  return (
                   <article key={order.id}>
                     <div>
                       <small>
@@ -315,11 +616,145 @@ export default function MyAccountDashboard({
                       </small>
                       <h3>{order.items?.[0]?.product?.name || "珠宝作品"}</h3>
                     </div>
+                    {/* 履约进度条 + 物流信息 */}
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 4,
+                        alignItems: "center",
+                        margin: "10px 0 6px",
+                      }}
+                      aria-label="订单进度"
+                    >
+                      {cancelled ? (
+                        <span style={{ fontSize: 11, color: "#a06a5a" }}>
+                          ✕ 订单已取消
+                        </span>
+                      ) : (
+                        steps.map((step, index) => (
+                          <span
+                            key={step.label}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 4,
+                              fontSize: 11,
+                              color: step.done ? "#b8944e" : "#b6ada2",
+                            }}
+                          >
+                            {index > 0 && (
+                              <span
+                                style={{
+                                  width: 18,
+                                  height: 1,
+                                  background: step.done ? "#b8944e" : "#e3ddd3",
+                                  display: "inline-block",
+                                }}
+                              />
+                            )}
+                            <span
+                              style={{
+                                width: 7,
+                                height: 7,
+                                borderRadius: "50%",
+                                background: step.done ? "#b8944e" : "#e3ddd3",
+                                display: "inline-block",
+                              }}
+                            />
+                            {step.label}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                    {order.logisticsCompany && order.logisticsNo ? (
+                      <p
+                        style={{
+                          fontSize: 11,
+                          color: "#8a8177",
+                          margin: "0 0 6px",
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
+                        <span>
+                          物流：{order.logisticsCompany} · 运单号 {order.logisticsNo}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleTracking(order.id)}
+                          style={{
+                            fontSize: 11,
+                            color: "#b8944e",
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            padding: 0,
+                          }}
+                        >
+                          {trackingOrderId === order.id ? "收起轨迹" : "查看轨迹"}
+                        </button>
+                      </p>
+                    ) : null}
+                    {trackingOrderId === order.id && (
+                      <div
+                        style={{
+                          background: "#f9f7f4",
+                          padding: 12,
+                          marginBottom: 8,
+                          fontSize: 12,
+                        }}
+                      >
+                        {trackingLoading ? (
+                          <p style={{ color: "#8a8177", margin: 0 }}>
+                            轨迹查询中…
+                          </p>
+                        ) : trackingData && trackingData.events.length ? (
+                          <>
+                            <p style={{ color: "#b8944e", margin: "0 0 8px" }}>
+                              {TRACK_STATE[trackingData.state] || "运输中"}
+                              {trackingData.carrier ? ` · ${trackingData.carrier}` : ""}
+                            </p>
+                            {trackingData.events.map((ev, i) => (
+                              <p
+                                key={i}
+                                style={{
+                                  margin: "0 0 6px",
+                                  color: i === 0 ? "#4a443d" : "#8a8177",
+                                }}
+                              >
+                                <span style={{ marginRight: 8 }}>{ev.time}</span>
+                                {ev.context}
+                              </p>
+                            ))}
+                          </>
+                        ) : (
+                          <p style={{ color: "#8a8177", margin: 0 }}>
+                            暂无轨迹数据（物流查询服务可能未接入，请联系顾问）
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div className="my-account__order-meta">
                       <em>{orderStatus[order.status] || order.status}</em>
                       <strong>
                         ¥{Number(order.finalAmount).toLocaleString("zh-CN")}
                       </strong>
+                      {order.status === "COMPLETED" && order.items?.length ? (
+                        <button
+                          type="button"
+                          className="my-account__summary-action"
+                          style={{ padding: "6px 12px", fontSize: 12, minHeight: 0 }}
+                          onClick={() =>
+                            openReview({
+                              id: order.id,
+                              items: order.items || [],
+                            })
+                          }
+                        >
+                          评价作品
+                        </button>
+                      ) : null}
                       {order.status === "PENDING_PAYMENT" &&
                         (commerceEnabled ? (
                           hasPendingProof(order.id) ? (
@@ -348,7 +783,8 @@ export default function MyAccountDashboard({
                         ))}
                     </div>
                   </article>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <Empty>
@@ -382,8 +818,39 @@ export default function MyAccountDashboard({
               </div>
             </dl>
             <div style={{ marginBottom: 12 }}>
-              <Button size="small" onClick={openProfileEdit} style={{ marginRight: 8 }}>编辑资料</Button>
-              <Button size="small" onClick={openAddressCreate}>新增地址</Button>
+              <Button
+                size="small"
+                onClick={openProfileEdit}
+                style={{ marginRight: 8 }}
+              >
+                编辑资料
+              </Button>
+              <Button size="small" onClick={openAddressCreate}>
+                新增地址
+              </Button>
+            </div>
+            {/* 合规（个保法）：数据导出 + 账户注销 */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "10px 12px",
+                background: "#f9f7f4",
+                marginBottom: 12,
+              }}
+            >
+              <span style={{ fontSize: 12, color: "#8a8177" }}>
+                我的个人数据（资料/订单/收藏等）可随时导出或注销账户
+              </span>
+              <span style={{ display: "flex", gap: 8 }}>
+                <Button size="small" onClick={handleExportData} loading={exportingData}>
+                  导出我的数据
+                </Button>
+                <Button size="small" danger onClick={() => setCloseOpen(true)}>
+                  注销账户
+                </Button>
+              </span>
             </div>
             <div className="my-account__address">
               <p>收货地址</p>
@@ -393,18 +860,26 @@ export default function MyAccountDashboard({
                     <span>
                       {addr.recipientName} · {addr.recipientPhone}
                       <br />
-                      {[
-                        addr.province,
-                        addr.city,
-                        addr.district,
-                        addr.detail,
-                      ]
+                      {[addr.province, addr.city, addr.district, addr.detail]
                         .filter(Boolean)
                         .join("")}
                     </span>
                     <div>
-                      <Button size="small" type="link" onClick={() => openAddressEdit(addr)}>编辑</Button>
-                      <Button size="small" type="link" danger onClick={() => removeAddress(addr.id)}>删除</Button>
+                      <Button
+                        size="small"
+                        type="link"
+                        onClick={() => openAddressEdit(addr)}
+                      >
+                        编辑
+                      </Button>
+                      <Button
+                        size="small"
+                        type="link"
+                        danger
+                        onClick={() => removeAddress(addr.id)}
+                      >
+                        删除
+                      </Button>
                     </div>
                   </div>
                 ))
@@ -456,6 +931,125 @@ export default function MyAccountDashboard({
 
       {/* 个人资料编辑 */}
       <Modal
+        open={reviewOrder !== null}
+        title="评价作品"
+        onCancel={() => setReviewOrder(null)}
+        onOk={submitReview}
+        confirmLoading={submittingReview}
+        okText="提交评价"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <p style={{ color: "#766f66", fontSize: 13, marginBottom: 16 }}>
+          评价提交后经审核将在作品页展示，感谢您分享佩戴体验。
+        </p>
+        <div style={{ marginBottom: 16 }}>
+          <p style={{ fontSize: 13, marginBottom: 8 }}>选择作品</p>
+          <Select
+            style={{ width: "100%" }}
+            value={reviewProductId}
+            onChange={(value: number) => setReviewProductId(value)}
+            options={(reviewOrder?.items || []).map((item) => ({
+              value: item.productId,
+              label: item.product?.name || `作品 #${item.productId}`,
+            }))}
+          />
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <p style={{ fontSize: 13, marginBottom: 8 }}>星级</p>
+          <Rate value={reviewRating} onChange={setReviewRating} />
+        </div>
+        <div>
+          <p style={{ fontSize: 13, marginBottom: 8 }}>评价内容（5-500 字）</p>
+          <Input.TextArea
+            rows={4}
+            maxLength={500}
+            showCount
+            value={reviewContent}
+            onChange={(e) => setReviewContent(e.target.value)}
+            placeholder="工艺、佩戴感受、顾问服务体验…"
+          />
+        </div>
+        <div>
+          <p style={{ fontSize: 13, marginBottom: 8 }}>晒单图（选填，最多 6 张）</p>
+          <Upload
+            listType="picture-card"
+            accept="image/*"
+            multiple
+            showUploadList={false}
+            customRequest={uploadReviewImage}
+            disabled={reviewImages.length >= 6}
+          >
+            {reviewImages.length >= 6 ? null : (
+              <span style={{ fontSize: 20, color: "#b8944e" }}>+</span>
+            )}
+          </Upload>
+          {reviewImages.length > 0 ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+              {reviewImages.map((url) => (
+                <div key={url} style={{ position: "relative" }}>
+                  <img
+                    src={url}
+                    alt="晒单图"
+                    style={{ width: 64, height: 64, objectFit: "cover" }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setReviewImages((list) => list.filter((u) => u !== url))
+                    }
+                    style={{
+                      position: "absolute",
+                      top: -6,
+                      right: -6,
+                      width: 18,
+                      height: 18,
+                      borderRadius: "50%",
+                      border: "none",
+                      background: "rgba(0,0,0,.6)",
+                      color: "#fff",
+                      fontSize: 10,
+                      lineHeight: "18px",
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
+      <Modal
+        open={closeOpen}
+        title="注销账户"
+        onCancel={() => { setCloseOpen(false); setClosePassword(""); }}
+        onOk={handleCloseAccount}
+        confirmLoading={closing}
+        okText="确认注销"
+        okButtonProps={{ danger: true }}
+        cancelText="再想想"
+        destroyOnClose
+      >
+        <div className="space-y-3">
+          <p style={{ color: "#a06a5a", fontSize: 13 }}>
+            注销后您的姓名、邮箱、地址与收藏将被清除，账户将永久无法登录，此操作不可恢复。
+          </p>
+          <p style={{ color: "#8a8177", fontSize: 13 }}>
+            依据法律要求，历史订单与收款记录将留存；您发布且已公开展示的评价将继续匿名展示。建议先"导出我的数据"留档。
+          </p>
+          <Input.Password
+            placeholder="输入登录密码确认注销"
+            value={closePassword}
+            onChange={(e) => setClosePassword(e.target.value)}
+          />
+        </div>
+      </Modal>
+
+      <Modal
         open={profileEditOpen}
         title="编辑个人资料"
         onCancel={() => setProfileEditOpen(false)}
@@ -465,7 +1059,11 @@ export default function MyAccountDashboard({
         cancelText="取消"
       >
         <Form form={profileForm} layout="vertical">
-          <Form.Item name="name" label="称呼" rules={[{ required: true, message: "请填写称呼" }]}>
+          <Form.Item
+            name="name"
+            label="称呼"
+            rules={[{ required: true, message: "请填写称呼" }]}
+          >
             <Input placeholder="您的称呼" />
           </Form.Item>
           <Form.Item name="email" label="邮箱">
@@ -485,18 +1083,43 @@ export default function MyAccountDashboard({
         cancelText="取消"
       >
         <Form form={addressForm} layout="vertical">
-          <div className="grid grid-cols-2 gap-4" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 16 }}>
-            <Form.Item name="recipientName" label="收件人" rules={[{ required: true, message: "请填写收件人" }]}>
+          <div
+            className="grid grid-cols-2 gap-4"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              columnGap: 16,
+            }}
+          >
+            <Form.Item
+              name="recipientName"
+              label="收件人"
+              rules={[{ required: true, message: "请填写收件人" }]}
+            >
               <Input />
             </Form.Item>
-            <Form.Item name="recipientPhone" label="联系电话" rules={[{ required: true, message: "请填写联系电话" }]}>
+            <Form.Item
+              name="recipientPhone"
+              label="联系电话"
+              rules={[{ required: true, message: "请填写联系电话" }]}
+            >
               <Input />
             </Form.Item>
           </div>
-          <Form.Item name="province" label="省"><Input /></Form.Item>
-          <Form.Item name="city" label="市"><Input /></Form.Item>
-          <Form.Item name="district" label="区/县"><Input /></Form.Item>
-          <Form.Item name="detail" label="详细地址" rules={[{ required: true, message: "请填写详细地址" }]}>
+          <Form.Item name="province" label="省">
+            <Input />
+          </Form.Item>
+          <Form.Item name="city" label="市">
+            <Input />
+          </Form.Item>
+          <Form.Item name="district" label="区/县">
+            <Input />
+          </Form.Item>
+          <Form.Item
+            name="detail"
+            label="详细地址"
+            rules={[{ required: true, message: "请填写详细地址" }]}
+          >
             <Input.TextArea rows={2} />
           </Form.Item>
         </Form>

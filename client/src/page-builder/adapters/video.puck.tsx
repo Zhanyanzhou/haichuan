@@ -81,8 +81,8 @@ export const videoPuckConfig = {
       label: "画面比例",
       options: [
         { label: "16:9 横屏", value: "16:9" },
-        { label: "4:3 经典", value: "4:3" },
-        { label: "9:16 竖屏", value: "9:16" },
+        { label: "16:7 宽幕", value: "16:7" },
+        { label: "3:4 竖屏", value: "3:4" },
       ],
     },
     maxHeight: {

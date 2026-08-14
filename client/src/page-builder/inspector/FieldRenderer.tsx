@@ -103,6 +103,11 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
             y: Number(ctx.props[def.focusKeys.y] ?? 50),
           }
         : undefined;
+      let inheritBaseValue: string | undefined;
+      if (def.inheritFrom) {
+        const base = ctx.props[def.inheritFrom.key];
+        inheritBaseValue = typeof base === "string" ? base : "";
+      }
       return (
         <MediaField
           def={def}
@@ -110,6 +115,7 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
           value={typeof value === "string" ? value : ""}
           focus={focus}
           onChange={(next) => update({ [def.key]: next })}
+          inheritBaseValue={inheritBaseValue}
         />
       );
     }

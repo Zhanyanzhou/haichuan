@@ -11,8 +11,6 @@ import { singlePosterPuckConfig } from "../adapters/singlePoster.puck";
 import type { SinglePosterPuckProps } from "../adapters/singlePoster.puck";
 import { doublePosterPuckConfig } from "../adapters/doublePoster.puck";
 import type { DoublePosterPuckProps } from "../adapters/doublePoster.puck";
-import { imageTextPuckConfig } from "../adapters/imageText.puck";
-import type { ImageTextPuckProps } from "../adapters/imageText.puck";
 import { fullBleedPuckConfig } from "../adapters/fullBleed.puck";
 import type { FullBleedPuckProps } from "../adapters/fullBleed.puck";
 import { textBannerPuckConfig } from "../adapters/textBanner.puck";
@@ -23,8 +21,8 @@ import { categoryCardsPuckConfig } from "../adapters/categoryCards.puck";
 import type { CategoryCardsPuckProps } from "../adapters/categoryCards.puck";
 import { cardGridPuckConfig } from "../adapters/cardGrid.puck";
 import type { CardGridPuckProps } from "../adapters/cardGrid.puck";
-import { splitPanelPuckConfig } from "../adapters/splitPanel.puck";
-import type { SplitPanelPuckProps } from "../adapters/splitPanel.puck";
+import { galleryPuckConfig } from "../adapters/gallery.puck";
+import type { GalleryPuckProps } from "../adapters/gallery.puck";
 import { carouselPuckConfig } from "../adapters/carousel.puck";
 import type { CarouselPuckProps } from "../adapters/carousel.puck";
 import { videoPuckConfig } from "../adapters/video.puck";
@@ -59,13 +57,12 @@ type MyComponents = {
   首屏主视觉: HeroPuckProps;
   单图海报: SinglePosterPuckProps;
   双图海报: DoublePosterPuckProps;
-  图文混排: ImageTextPuckProps;
   全屏出血图: FullBleedPuckProps;
   文字横幅: TextBannerPuckProps;
+  作品画廊: GalleryPuckProps;
   产品展示行: ProductRowPuckProps;
   分类卡片: CategoryCardsPuckProps;
   卡片网格: CardGridPuckProps;
-  分割面板: SplitPanelPuckProps;
   轮播图: CarouselPuckProps;
   视频区块: VideoPuckProps;
   热区图: HotspotPuckProps;
@@ -81,22 +78,25 @@ type MyComponents = {
   限时活动: LimitedOfferPuckProps;
   真实评价与实拍: TestimonialPuckProps;
   按场景选购: CategoryCardsPuckProps;
-  礼赠指南: CategoryCardsPuckProps;
 };
 
-/** 注册全部 Block — 中文 Key 即 Puck 侧栏显示名称 */
+/**
+ * 注册全部 Block — 中文 Key 即 Puck 侧栏显示名称。
+ * 旧类型「图文混排 / 分割面板 / 礼赠指南」已从注册表移除(2026-08 模板收敛):
+ * 编辑器载入时由 migratePuckData 转换为新类型;公开渲染器保留旧类型分支,
+ * 已发布历史版本(revision)不受影响。
+ */
 export const puckConfig: Config<MyComponents> = {
   components: {
     首屏主视觉: heroPuckConfig,
     单图海报: singlePosterPuckConfig,
     双图海报: doublePosterPuckConfig,
-    图文混排: imageTextPuckConfig,
     全屏出血图: fullBleedPuckConfig,
     文字横幅: textBannerPuckConfig,
+    作品画廊: galleryPuckConfig,
     产品展示行: productRowPuckConfig,
     分类卡片: categoryCardsPuckConfig,
     卡片网格: cardGridPuckConfig,
-    分割面板: splitPanelPuckConfig,
     轮播图: carouselPuckConfig,
     视频区块: videoPuckConfig,
     热区图: hotspotPuckConfig,
@@ -131,7 +131,7 @@ export const puckConfig: Config<MyComponents> = {
       ...categoryCardsPuckConfig,
       render: (props: CategoryCardsPuckProps) => <CategoryCardsBlock module={convertPuckProps("按场景选购", props as any) as any} />,
       defaultProps: {
-        title: "按场景选购",
+        title: "场景选款",
         subtitle: "从重要时刻出发，挑选一件恰到好处的珠宝。",
         categories: [
           { name: "求婚告白", image: "", link: "/products", count: "", description: "为承诺点亮心意" },
@@ -141,23 +141,6 @@ export const puckConfig: Config<MyComponents> = {
         ],
         layout: "grid-4",
         bgColor: "#FBF9F6",
-        locked: false,
-      },
-    },
-    礼赠指南: {
-      ...categoryCardsPuckConfig,
-      render: (props: CategoryCardsPuckProps) => <CategoryCardsBlock module={convertPuckProps("礼赠指南", props as any) as any} />,
-      defaultProps: {
-        title: "礼赠指南",
-        subtitle: "不必猜测心意，从送礼对象开始挑选。",
-        categories: [
-          { name: "送给爱人", image: "", link: "/products", count: "", description: "把爱意戴在身边" },
-          { name: "送给母亲", image: "", link: "/products", count: "", description: "感谢岁月的温柔" },
-          { name: "送给挚友", image: "", link: "/products", count: "", description: "纪念彼此的陪伴" },
-          { name: "犒赏自己", image: "", link: "/products", count: "", description: "为每一次成长喝彩" },
-        ],
-        layout: "grid-4",
-        bgColor: "#F5F2ED",
         locked: false,
       },
     },

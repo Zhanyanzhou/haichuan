@@ -1,4 +1,6 @@
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { DecorSection } from "@/page-builder/designSystem/sectionShell";
+import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 
 interface CardGridBlockProps {
   module: {
@@ -36,29 +38,23 @@ export default function CardGridBlock({
   }
 
   return (
-    <section style={{ padding: "clamp(60px,8vh,110px) 0", background: bg }}>
-      <div
-        style={{
-          maxWidth: 1080,
-          margin: "0 auto",
-          padding: "0 clamp(20px,4vw,60px)",
-        }}
-      >
-        {(title || subtitle) && (
-          <div style={{ textAlign: "center", marginBottom: 48 }}>
-            {title && (
-              <h2
-                style={{
-                  fontSize: "clamp(22px,2.6vw,36px)",
-                  fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
-                  color: "#2C2C2C",
-                  marginBottom: 12,
-                  lineHeight: 1.2,
-                }}
-              >
-                {title}
-              </h2>
-            )}
+    <DecorSection master="commerce-grid" background={bg} spacing="compact">
+      {(title || subtitle) && (
+        <div style={{ textAlign: "center", marginBottom: 48 }}>
+          {title && (
+            <h2
+              style={{
+                fontSize: "var(--hc-type-h3, clamp(22px,2.6vw,32px))",
+                fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
+                color: "#2C2C2C",
+                marginBottom: 12,
+                lineHeight: 1.2,
+                fontWeight: 500,
+              }}
+            >
+              {title}
+            </h2>
+          )}
             {subtitle && (
               <p
                 style={{
@@ -83,10 +79,10 @@ export default function CardGridBlock({
           }}
         >
           {cards.map((card: any, i: number) => (
-            <div key={i} style={{ textAlign: "center", padding: "24px 16px" }}>
+            <div key={i} style={{ textAlign: "center", padding: "16px 12px" }}>
               {card.icon && (
                 <div
-                  style={{ fontSize: 36, marginBottom: 16, color: "#B8944E" }}
+                  style={{ fontSize: 13, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 14, color: "#B8944E" }}
                 >
                   {card.icon}
                 </div>
@@ -95,10 +91,10 @@ export default function CardGridBlock({
                 <p
                   style={{
                     fontSize: 16,
-                    fontWeight: 600,
+                    fontWeight: 500,
                     color: "#2C2C2C",
                     marginBottom: 8,
-                    fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
+                    fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
                   }}
                 >
                   {card.title}
@@ -120,7 +116,6 @@ export default function CardGridBlock({
             </div>
           ))}
         </div>
-      </div>
-    </section>
+    </DecorSection>
   );
 }

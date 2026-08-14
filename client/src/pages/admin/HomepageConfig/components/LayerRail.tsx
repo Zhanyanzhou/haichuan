@@ -1,6 +1,7 @@
 /**
  * LayerRail.tsx — 编辑器右侧的页面图层栏。
  * 支持点选定位、拖拽排序；锁定模块（固定业务区）不可调整。
+ * 底部渲染页面节奏提示(软约束,不阻断发布)。
  * （自 index.tsx 平移，逻辑零变更）
  */
 import { useState } from "react";
@@ -8,12 +9,15 @@ import { message, Modal } from "antd";
 import { DragOutlined } from "@ant-design/icons";
 import { ROOT_ZONE, focusCanvasBlock, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
+import type { RhythmHint } from "@/page-builder/designSystem/rhythm";
 
 export default function LayerRail({
+  rhythmHints = [],
   onSaveAsTemplate,
   navigationPreviewOpen,
   onToggleNavigationPreview,
 }: {
+  rhythmHints?: RhythmHint[];
   onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
   navigationPreviewOpen: boolean;
   onToggleNavigationPreview: () => void;
@@ -147,6 +151,38 @@ export default function LayerRail({
         {appData.content.length === 0 && (
           <div className="homepage-editor__layer-empty">
             从左侧添加模块后，这里会显示页面结构。
+          </div>
+        )}
+        {rhythmHints.length > 0 && (
+          <div
+            className="homepage-editor__layer-rhythm"
+            aria-label="页面节奏提示"
+            style={{
+              margin: "12px 0 4px",
+              padding: "10px 12px",
+              border: "1px solid #E7DFCF",
+              background: "#FCF9F2",
+              fontSize: 11,
+              lineHeight: 1.7,
+              color: "#6F6250",
+            }}
+          >
+            <p style={{ margin: "0 0 6px", color: "#9A792E", fontWeight: 500 }}>
+              页面节奏提示
+            </p>
+            <ul style={{ margin: 0, paddingLeft: 16 }}>
+              {rhythmHints.slice(0, 6).map((hint, hintIndex, list) => (
+                <li
+                  key={hint.message}
+                  style={{
+                    marginBottom: hintIndex === list.length - 1 ? 0 : 6,
+                    color: hint.level === "warn" ? "#A24324" : undefined,
+                  }}
+                >
+                  {hint.message}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </div>

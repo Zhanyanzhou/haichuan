@@ -405,33 +405,6 @@ export interface Inquiry {
   createdAt: string;
 }
 
-// ===== Notification =====
-export interface Notification {
-  id: number;
-  userId: number;
-  title: string;
-  content: string;
-  type: "SYSTEM" | "ORDER" | "INVENTORY" | "PROMOTION";
-  isRead: boolean;
-  createdAt: string;
-}
-
-// ===== Homepage Config Block =====
-export interface HomepageBlock {
-  id: number;
-  type: "hero" | "categories" | "story" | "products" | "craft" | "contact";
-  title: string;
-  subtitle: string;
-  content: string;
-  imageUrl: string;
-  videoUrl: string;
-  linkUrl: string;
-  linkText: string;
-  isEnabled: boolean;
-  sortOrder: number;
-  settings: Record<string, unknown>;
-}
-
 // ===== Product Filter Params =====
 export interface ProductFilterParams {
   page?: number;

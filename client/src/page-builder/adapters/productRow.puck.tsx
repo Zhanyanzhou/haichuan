@@ -18,11 +18,9 @@ export interface ProductRowPuckProps {
   displayMode: string;
   actionStyle: string;
   bgColor: string;
-  imageRatio: string;
   showPrice: boolean;
   showButton: boolean;
   buttonText: string;
-  titleSize: string;
   locked?: boolean;
 }
 
@@ -119,11 +117,9 @@ export const productRowPuckConfig = {
     displayMode: "standard",
     actionStyle: "text",
     bgColor: "#FCFCFB",
-    imageRatio: "3:4",
     showPrice: true,
     showButton: false,
     buttonText: "查看详情",
-    titleSize: "medium",
     locked: false,
   } satisfies ProductRowPuckProps,
   fields: {
@@ -176,25 +172,6 @@ export const productRowPuckConfig = {
         { label: "整卡点击", value: "none" },
         { label: "文字链接", value: "text" },
         { label: "描边按钮", value: "button" },
-      ],
-    },
-    imageRatio: {
-      type: "radio" as const,
-      label: "图片比例",
-      options: [
-        { label: "3:4 竖版", value: "3:4" },
-        { label: "1:1 正方形", value: "1:1" },
-        { label: "4:3 横版", value: "4:3" },
-        { label: "16:9 宽屏", value: "16:9" },
-      ],
-    },
-    titleSize: {
-      type: "radio" as const,
-      label: "标题大小",
-      options: [
-        { label: "小", value: "small" },
-        { label: "中", value: "medium" },
-        { label: "大", value: "large" },
       ],
     },
     showPrice: {

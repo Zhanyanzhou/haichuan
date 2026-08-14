@@ -112,6 +112,14 @@ const PUCK_SEO_LIMITS: Record<string, number> = {
  */
 const PLACEHOLDER_MARKERS = ["待确认", "待配置", "请填写"];
 
+/**
+ * 发布校验：品牌保护(2026-08 模板体系)。
+ * 品牌页(Brand Mode)禁止出现 Commerce Campaign 母版的强导购组件；
+ * 选款中心等 Commerce 页不受限制。
+ */
+const BRAND_PAGE_KEYS = new Set(["home", "about", "products", "custom", "contact"]);
+const COMMERCE_CAMPAIGN_TYPES = new Set(["限时活动", "热区图", "轮播图"]);
+
 @Injectable()
 export class PageModulesService {
   private readonly publicEvents = new EventEmitter();
@@ -240,7 +248,7 @@ export class PageModulesService {
           "该页面已被其他编辑者更新，请重新加载后再发布",
         );
       }
-      const errors = await this.collectPuckDataErrors(tx, doc.puckData);
+      const errors = await this.collectPuckDataErrors(tx, doc.puckData, pageKey);
       errors.push(...this.collectMetadataErrors(doc.metadata));
       if (errors.length > 0) {
         const visibleErrors = errors.slice(0, 8).join("；");
@@ -313,7 +321,7 @@ export class PageModulesService {
       if (puckData === undefined) puckData = doc.puckData;
       if (metadata === undefined) metadata = doc.metadata;
     }
-    const errors = await this.collectPuckDataErrors(this.prisma, puckData);
+    const errors = await this.collectPuckDataErrors(this.prisma, puckData, pageKey);
     errors.push(...this.collectMetadataErrors(metadata));
     return { valid: errors.length === 0, errors };
   }
@@ -321,10 +329,12 @@ export class PageModulesService {
   private async collectPuckDataErrors(
     db: any,
     puckData: any,
+    pageKey = "",
   ): Promise<string[]> {
     const errors: string[] = [];
     const productIds = new Set<number>();
     const missingUploadUrls = new Set<string>();
+    const isBrandPage = BRAND_PAGE_KEYS.has(pageKey);
 
     if (!puckData || typeof puckData !== "object") {
       return ["页面数据为空或格式不正确"];
@@ -366,6 +376,14 @@ export class PageModulesService {
 
       // 编辑器说明区不会进入前台；隐藏区块也不应因未完成内容阻断其他模块发布。
       if (EDITOR_ONLY_COMPONENTS.has(type) || props.isVisible === false) return;
+
+      // 品牌保护:Brand 页(关于海川/珠宝作品/珠宝定制/预约咨询/首页)禁止强导购组件
+      if (isBrandPage && COMMERCE_CAMPAIGN_TYPES.has(type)) {
+        errors.push(
+          `${label}：「${type}」属于电商活动组件，品牌页不可使用，请移除后再发布`,
+        );
+        return;
+      }
 
       // 文本长度兜底：防止异常超长输入（如整篇文章误填入标题）发布到前台
       for (const [field, limit] of Object.entries(PUCK_TEXT_FIELD_LIMITS)) {

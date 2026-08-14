@@ -30,6 +30,7 @@ import type { CustomProcessPuckProps } from "../adapters/customProcess.puck";
 import type { StoreInfoPuckProps } from "../adapters/storeInfo.puck";
 import type { FeaturedProductPuckProps } from "../adapters/featuredProduct.puck";
 import type { LookbookPuckProps } from "../adapters/lookbook.puck";
+import type { GalleryPuckProps } from "../adapters/gallery.puck";
 import type { LimitedOfferPuckProps } from "../adapters/limitedOffer.puck";
 import type { TestimonialPuckProps } from "../adapters/testimonial.puck";
 
@@ -55,6 +56,7 @@ export type PuckProps =
   | { type: "门店信息"; props: StoreInfoPuckProps }
   | { type: "单品焦点推荐"; props: FeaturedProductPuckProps }
   | { type: "佩戴灵感"; props: LookbookPuckProps }
+  | { type: "作品画廊"; props: GalleryPuckProps }
   | { type: "限时活动"; props: LimitedOfferPuckProps }
   | { type: "真实评价与实拍"; props: TestimonialPuckProps }
   | { type: "按场景选购"; props: CategoryCardsPuckProps }
@@ -124,9 +126,16 @@ export function convertPuckProps(
           desktopImage: props.desktopImage,
           mobileImage: props.mobileImage,
           linkUrl: props.linkUrl,
+          actionText: props.actionText,
         },
         { template: props.template || "leftTextRightImage" },
-        { focusX: props.focusX ?? 50, focusY: props.focusY ?? 50 },
+        {
+          // 双端独立焦点;旧数据共享 focusX/Y 自动回退
+          desktopFocusX: props.desktopFocusX ?? props.focusX ?? 50,
+          desktopFocusY: props.desktopFocusY ?? props.focusY ?? 50,
+          mobileFocusX: props.mobileFocusX ?? props.focusX ?? 50,
+          mobileFocusY: props.mobileFocusY ?? props.focusY ?? 50,
+        },
       );
 
     case "双图海报":
@@ -252,7 +261,8 @@ export function convertPuckProps(
           mobileColumns: props.mobileColumns === 1 ? 1 : 2,
           displayMode: props.displayMode || "standard",
           actionStyle: props.actionStyle || (props.showButton ? "button" : "none"),
-          imageRatio: props.imageRatio || "3:4",
+          // 商品图统一 4:5;旧数据的其他比例仅按原值渲染,不再提供选项
+          imageRatio: props.imageRatio || "4:5",
           showPrice: props.showPrice ?? true,
           showButton: props.showButton ?? false,
           buttonText: props.buttonText || "查看详情",
@@ -274,6 +284,8 @@ export function convertPuckProps(
           primaryText: props.primaryText || "查看作品",
           secondaryText: props.secondaryText,
           secondaryLink: props.secondaryLink,
+          // 价格默认隐藏,仅电商场景显式开启(品牌保护)
+          showPrice: props.showPrice === true,
         },
         { template: props.layout || "imageLeft" },
         { bgColor: props.bgColor || "#F5F2ED" },
@@ -292,6 +304,18 @@ export function convertPuckProps(
         },
         {},
         { bgColor: props.bgColor || "#FCFCFB" },
+      );
+
+    case "作品画廊":
+      return baseModule(
+        "gallery",
+        {
+          title: props.title,
+          subtitle: props.subtitle,
+          items: props.items || [],
+        },
+        {},
+        { bgColor: props.bgColor || "#F7F4EE" },
       );
 
     case "分类卡片":
@@ -404,8 +428,11 @@ export function convertPuckProps(
         { template: props.tone || "dark" },
         {
           bgColor: props.bgColor || "#1A1714",
-          focusX: props.focusX ?? 50,
-          focusY: props.focusY ?? 50,
+          // 双端独立焦点;旧数据共享 focusX/Y 自动回退
+          desktopFocusX: props.desktopFocusX ?? props.focusX ?? 50,
+          desktopFocusY: props.desktopFocusY ?? props.focusY ?? 50,
+          mobileFocusX: props.mobileFocusX ?? props.focusX ?? 50,
+          mobileFocusY: props.mobileFocusY ?? props.focusY ?? 50,
         },
       );
 

@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { customerApi } from "@/services/api";
+import { unwrapResponse } from "@/utils/unwrap";
 
 type AccountExperienceProps = {
   isSignedIn: boolean;
@@ -41,6 +43,7 @@ type AccountExperienceProps = {
     password: string;
     name: string;
     email?: string;
+    smsCode?: string;
   }) => void;
   onSignOut: () => void;
 };
@@ -113,6 +116,43 @@ function MemberAccess({
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  // 手机验真：是否强制验证码由服务端开关决定（SMS 凭据接入后打开）
+  const [smsCode, setSmsCode] = useState("");
+  const [smsRequired, setSmsRequired] = useState(false);
+  const [smsCooldown, setSmsCooldown] = useState(0);
+  const [sendingSms, setSendingSms] = useState(false);
+
+  useEffect(() => {
+    customerApi
+      .smsRequirements()
+      .then((res: unknown) => {
+        const data = unwrapResponse<{ registerRequired?: boolean }>(res);
+        setSmsRequired(Boolean(data?.registerRequired));
+      })
+      .catch(() => setSmsRequired(false));
+  }, []);
+
+  useEffect(() => {
+    if (smsCooldown <= 0) return;
+    const timer = setInterval(() => setSmsCooldown((v) => v - 1), 1000);
+    return () => clearInterval(timer);
+  }, [smsCooldown]);
+
+  const handleSendSmsCode = async () => {
+    if (!/^1\d{10}$/.test(phone)) {
+      alert("请先填写有效的手机号");
+      return;
+    }
+    setSendingSms(true);
+    try {
+      await customerApi.requestSmsCode({ phone });
+      setSmsCooldown(60);
+    } catch (e: any) {
+      alert(e?.response?.data?.message || e?.message || "验证码发送失败");
+    } finally {
+      setSendingSms(false);
+    }
+  };
 
   return (
     <form
@@ -121,7 +161,14 @@ function MemberAccess({
       onSubmit={(event) => {
         event.preventDefault();
         if (mode === "login") onLogin({ phone, password });
-        else onRegister({ phone, password, name, email: email || undefined });
+        else
+          onRegister({
+            phone,
+            password,
+            name,
+            email: email || undefined,
+            smsCode: smsRequired ? smsCode.trim() : undefined,
+          });
       }}
     >
       <div className="account-access-tabs">
@@ -177,6 +224,30 @@ function MemberAccess({
           />
         </label>
       )}
+      {mode === "register" && smsRequired && (
+        <label>
+          短信验证码
+          <span
+            style={{ display: "flex", gap: 8 }}
+          >
+            <input
+              value={smsCode}
+              onChange={(event) => setSmsCode(event.target.value)}
+              inputMode="numeric"
+              maxLength={6}
+              required
+            />
+            <button
+              type="button"
+              onClick={handleSendSmsCode}
+              disabled={sendingSms || smsCooldown > 0 || !/^1\d{10}$/.test(phone)}
+              style={{ whiteSpace: "nowrap", fontSize: 12, minHeight: 0, padding: "0 10px" }}
+            >
+              {smsCooldown > 0 ? `${smsCooldown}s` : sendingSms ? "发送中…" : "获取验证码"}
+            </button>
+          </span>
+        </label>
+      )}
       <label>
         密码
         <input
@@ -188,6 +259,16 @@ function MemberAccess({
         />
       </label>
       <small>密码至少 8 位，需包含字母和数字。</small>
+      {mode === "login" && (
+        <div className="text-right">
+          <Link
+            to="/customer/forgot"
+            className="text-xs text-brand-muted hover:text-brand-gold underline underline-offset-2"
+          >
+            忘记密码？
+          </Link>
+        </div>
+      )}
       <button
         type="submit"
         className="account-button account-button--dark"

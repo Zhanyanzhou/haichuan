@@ -112,7 +112,7 @@ export const carouselPuckConfig = {
       type: "radio" as const,
       label: "电脑端画布比例",
       options: [
-        { label: "宽幕 12:5", value: "wide" },
+        { label: "宽幕 21:6", value: "wide" },
         { label: "标准 16:9", value: "standard" },
       ],
     },

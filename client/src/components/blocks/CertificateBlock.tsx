@@ -1,47 +1,126 @@
+import { DecorSection } from "@/page-builder/designSystem/sectionShell";
+import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+
 interface CertificateBlockProps {
   module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
   editMode?: boolean;
 }
 
+const INK = "#28231F";
+const MUTED = "rgba(40,35,31,0.58)";
+const GOLD = "#B8944E";
+
 /**
- * 资质证书模块 — 标题 + 副标题 + 证书网格（每张：证书图 + 名称 + 说明）。
+ * 权威认证 — Asymmetric Gallery 母版(信任变体)
+ * 画廊式 1:1 图墙:证书图直接呈现,名称与说明以极简文字随图;
+ * 无卡片边框、无底色、无圆角,与作品画廊同一视觉语言。
  */
-export default function CertificateBlock({ module }: CertificateBlockProps) {
+export default function CertificateBlock({ module, editMode }: CertificateBlockProps) {
   const { content = {}, styleConfig = {} } = module;
-  const { title, subtitle, certificates } = content;
+  const { title, subtitle } = content;
   const bgColor = styleConfig.bgColor || '#FBF9F6';
-  const list = Array.isArray(certificates) ? certificates : [];
-  const cols = Math.max(2, Math.min(list.length || 3, 4));
+  const list = Array.isArray(content.certificates) ? content.certificates : [];
+
+  if (list.length === 0) {
+    if (!editMode) return null;
+    return (
+      <DecorSection master="asymmetric-gallery" background={bgColor}>
+        <BlockEmptyPlaceholder hint="权威认证" spec="请添加证书条目 · 证书图建议 1:1（2000×2000）" />
+      </DecorSection>
+    );
+  }
 
   return (
-    <section style={{ padding: '72px 24px', background: bgColor }}>
-      <div style={{ maxWidth: 1200, margin: '0 auto', textAlign: 'center' }}>
-        {title && (
-          <h2 data-editor-field="title" style={{ fontSize: 32, fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#2C2C2C', marginBottom: 12 }}>
-            {title}
-          </h2>
-        )}
-        {subtitle && (
-          <p data-editor-field="subtitle" style={{ fontSize: 14, color: '#8A7F72', marginBottom: 40 }}>
-            {subtitle}
-          </p>
-        )}
-        {list.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${cols === 2 ? 280 : cols === 3 ? 220 : 190}px), 1fr))`, gap: 24 }}>
-            {list.map((cert: any, i: number) => (
-              <div key={i} style={{ background: '#FFFFFF', border: '1px solid #ECE5DA', borderRadius: 8, padding: 24, textAlign: 'center' }}>
-                {cert.imageUrl ? (
-                  <img src={cert.imageUrl} alt={cert.name || ''} data-editor-field={`certificates.${i}.imageUrl`} style={{ width: 72, height: 72, objectFit: 'contain', marginBottom: 14 }} />
-                ) : (
-                  <div data-editor-field={`certificates.${i}.imageUrl`} style={{ width: 72, height: 72, margin: '0 auto 14px', borderRadius: 8, background: 'linear-gradient(135deg, #EAE0CE, #C8A36A)' }} />
-                )}
-                {cert.name && <p data-editor-field={`certificates.${i}.name`} style={{ fontSize: 14, color: '#2C2C2C', fontWeight: 500, marginBottom: 6 }}>{cert.name}</p>}
-                {cert.desc && <p data-editor-field={`certificates.${i}.desc`} style={{ fontSize: 12, color: '#9A9187', lineHeight: 1.6 }}>{cert.desc}</p>}
-              </div>
-            ))}
-          </div>
-        )}
+    <DecorSection master="asymmetric-gallery" background={bgColor}>
+      {(title || subtitle) && (
+        <header style={{ maxWidth: 640, margin: "0 auto 48px", textAlign: "center" }}>
+          {title && (
+            <h2 data-editor-field="title"
+              style={{
+                margin: "0 0 12px",
+                fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
+                fontSize: "var(--hc-type-h2, clamp(24px,2.8vw,36px))",
+                fontWeight: 500,
+                color: INK,
+                lineHeight: 1.2,
+              }}
+            >
+              {title}
+            </h2>
+          )}
+          {subtitle && (
+            <p data-editor-field="subtitle" style={{ margin: 0, fontSize: "var(--hc-type-body, 15px)", color: MUTED, lineHeight: 1.8 }}>
+              {subtitle}
+            </p>
+          )}
+        </header>
+      )}
+      <div className="hc-cert-gallery">
+        <style>{`
+          .hc-cert-gallery {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            column-gap: clamp(24px, 3.5vw, 48px);
+            row-gap: clamp(32px, 4vw, 56px);
+          }
+          .hc-cert-gallery__frame {
+            aspect-ratio: 1 / 1;
+            overflow: hidden;
+            background: #EFEAE0;
+            display: grid;
+            place-items: center;
+          }
+          .hc-cert-gallery__frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+          .hc-cert-gallery__mark {
+            font-family: var(--hc-font-display, ${FONT_DISPLAY});
+            font-size: clamp(40px, 5vw, 64px);
+            color: rgba(184,148,78,0.4);
+            line-height: 1;
+          }
+          @media (max-width: 767px) {
+            .hc-cert-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; row-gap: 32px; }
+          }
+        `}</style>
+        {list.map((cert: any, i: number) => (
+          <figure key={i} style={{ margin: 0, minWidth: 0 }}>
+            <div data-editor-field={`certificates.${i}.imageUrl`} className="hc-cert-gallery__frame">
+              {cert.imageUrl ? (
+                <img src={cert.imageUrl} alt={cert.name || "证书"} loading="lazy" decoding="async" />
+              ) : (
+                <span className="hc-cert-gallery__mark" aria-hidden>
+                  {(cert.name || "证").slice(0, 1)}
+                </span>
+              )}
+            </div>
+            {cert.name && (
+              <figcaption data-editor-field={`certificates.${i}.name`}
+                style={{
+                  margin: "14px 0 0",
+                  fontSize: "var(--hc-type-body, 15px)",
+                  color: INK,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {cert.name}
+              </figcaption>
+            )}
+            {cert.desc && (
+              <p data-editor-field={`certificates.${i}.desc`}
+                style={{
+                  margin: "6px 0 0",
+                  fontSize: "var(--hc-type-caption, 12px)",
+                  color: MUTED,
+                  lineHeight: 1.7,
+                  fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
+                }}
+              >
+                {cert.desc}
+              </p>
+            )}
+          </figure>
+        ))}
       </div>
-    </section>
+    </DecorSection>
   );
 }

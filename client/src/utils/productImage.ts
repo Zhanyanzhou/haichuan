@@ -23,6 +23,15 @@ function pickImgUrl(img: any): string {
   return img.mediaUrl || img.url || '';
 }
 
+/**
+ * 媒体端点 URL 追加动态缩放参数（服务端白名单 480/800/1200，WebP 输出）。
+ * 仅对我们自己的媒体端点（含 /media/ 的路径）生效；静态资源与已带 width 的 URL 不动。
+ */
+function withResize(url: string, width: 480 | 800 | 1200): string {
+  if (!url || !url.includes('/media/') || url.includes('width=')) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}width=${width}`;
+}
+
 /** 从 images 数组中提取第一张有效 URL */
 function firstImageUrl(images?: ProductImage[] | string[]): string {
   if (!images || images.length === 0) return '';
@@ -45,28 +54,28 @@ type ProductLike = {
 } | null | undefined;
 
 /**
- * 获取列表图 URL（Catalog / Search / 推荐）
+ * 获取列表图 URL（Catalog / Search / 推荐）——自动请求 480px 缩放版，替代原图直出
  */
 export function getListingImage(product: ProductLike): string {
   if (!product) return '/images/products/placeholder.svg';
   const listing = pickImgUrl(product.listingImage);
-  if (listing) return listing;
+  if (listing) return withResize(listing, 480);
   const primary = pickImgUrl(product.primaryImage);
-  if (primary) return primary;
+  if (primary) return withResize(primary, 480);
   const fromImages = firstImageUrl(product.images);
-  if (fromImages) return fromImages;
+  if (fromImages) return withResize(fromImages, 480);
   return '/images/products/placeholder.svg';
 }
 
 /**
- * 获取详情主图 URL（ProductDetail）
+ * 获取详情主图 URL（ProductDetail）——1200px：灯箱清晰度与带宽的平衡点
  */
 export function getPrimaryImage(product: ProductLike): string {
   if (!product) return '/images/products/placeholder.svg';
   const primary = pickImgUrl(product.primaryImage);
-  if (primary) return primary;
+  if (primary) return withResize(primary, 1200);
   const fromImages = firstImageUrl(product.images);
-  if (fromImages) return fromImages;
+  if (fromImages) return withResize(fromImages, 1200);
   return '/images/products/placeholder.svg';
 }
 

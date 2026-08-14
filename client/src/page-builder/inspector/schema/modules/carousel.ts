@@ -1,0 +1,106 @@
+/**
+ * schema/modules/carousel.ts — 「轮播图(系列大片轮播)」编辑区 Schema。
+ * Commerce Campaign 母版:仅电商/活动页使用;条目级双端图。
+ */
+import { IMAGE_SPECS } from "../../../config/imageSpecs";
+import { carouselPuckConfig } from "../../../adapters/carousel.puck";
+import { moduleNameField } from "../shared";
+import type { ModuleInspectorSchema } from "../types";
+
+export const carouselSchema: ModuleInspectorSchema = {
+  moduleType: "轮播图",
+  displayName: "系列大片轮播",
+  purpose: "同时展示多个系列或活动主视觉；品牌叙事页不建议使用轮播。",
+  defaults: { ...carouselPuckConfig.defaultProps },
+  sections: [
+    {
+      id: "carousel-content",
+      title: "内容",
+      layer: "content",
+      fields: [
+        moduleNameField("系列大片轮播"),
+        {
+          key: "images",
+          label: "轮播图片",
+          control: "array",
+          itemLabel: "图片",
+          itemSummary: (item) =>
+            typeof item.alt === "string" && item.alt.trim()
+              ? item.alt
+              : "未命名图片",
+          itemFields: [
+            {
+              key: "url",
+              label: "桌面端图片",
+              control: "media",
+              spec: IMAGE_SPECS.carousel.image,
+              required: true,
+              device: "desktop",
+              placeholder: "上传桌面端轮播图（21:6）",
+              showSpecCheck: true,
+            },
+            {
+              key: "mobileUrl",
+              label: "手机端图片",
+              control: "media",
+              spec: IMAGE_SPECS.carousel.mobile,
+              device: "mobile",
+              placeholder: "上传手机端轮播图（3:4）",
+              showSpecCheck: true,
+            },
+            { key: "alt", label: "替代文字", control: "text" },
+            { key: "link", label: "跳转链接（可选）", control: "text" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "carousel-layout",
+      title: "布局",
+      layer: "layout",
+      fields: [
+        {
+          key: "desktopRatio",
+          label: "电脑端比例",
+          control: "segmented",
+          options: [
+            { label: "宽幕 21:6", value: "wide" },
+            { label: "标准 16:9", value: "standard" },
+          ],
+        },
+        {
+          key: "mobileRatio",
+          label: "手机端比例",
+          control: "segmented",
+          options: [
+            { label: "竖幅 3:4", value: "portrait" },
+            { label: "标准 4:5", value: "standard" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "carousel-advanced",
+      title: "高级设置",
+      layer: "style",
+      collapsible: true,
+      defaultCollapsed: true,
+      fields: [
+        { key: "autoPlay", label: "自动播放", control: "switch" },
+        { key: "showDots", label: "指示点", control: "switch" },
+        { key: "showArrows", label: "左右箭头", control: "switch" },
+        {
+          key: "interval",
+          label: "切换间隔（毫秒）",
+          control: "select",
+          options: [
+            { label: "3 秒", value: "3000" },
+            { label: "4 秒", value: "4000" },
+            { label: "6 秒", value: "6000" },
+            { label: "8 秒", value: "8000" },
+          ],
+        },
+      ],
+    },
+  ],
+};

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { DecorSection } from "@/page-builder/designSystem/sectionShell";
+import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 
 interface LimitedOfferBlockProps {
   module: { content: Record<string, any>; styleConfig?: Record<string, any> };
@@ -92,12 +94,12 @@ export default function LimitedOfferBlock({
     : [];
 
   return (
-    <section
-      style={{
-        padding: "clamp(54px, 7vw, 88px) clamp(20px, 4vw, 60px)",
-        background: bgColor,
-        color: "#fff",
-      }}
+    <DecorSection
+      master="commerce-campaign"
+      width="standard"
+      flow="flow"
+      background={bgColor}
+      style={{ color: "#fff" }}
     >
       <div
         style={{
@@ -128,8 +130,8 @@ export default function LimitedOfferBlock({
               style={{
                 margin: "0 0 14px",
                 color: "#fff",
-                fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
-                fontSize: "clamp(28px, 3.5vw, 44px)",
+                fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
+                fontSize: "var(--hc-type-h2, clamp(28px, 3.5vw, 44px))",
                 fontWeight: 500,
               }}
             >
@@ -235,6 +237,6 @@ export default function LimitedOfferBlock({
           )}
         </div>
       </div>
-    </section>
+    </DecorSection>
   );
 }

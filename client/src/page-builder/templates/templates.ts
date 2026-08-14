@@ -131,13 +131,14 @@ export const jewelryHomeTemplate: TemplateDefinition = {
     "首屏主视觉",
     "单图海报",
     "双图海报",
-    "图文混排",
+    "作品画廊",
     "全屏出血图",
     "文字横幅",
     "产品展示行",
     "分类卡片",
     "卡片网格",
-    "分割面板",
+    "视频区块",
+    "预约入口",
   ],
   lockedComponents: [
     {

@@ -26,6 +26,12 @@ const PagePreview = lazy(() =>
 const ProductList = lazy(() => import("@/pages/public/ProductList"));
 const ProductDetail = lazy(() => import("@/pages/public/ProductDetail"));
 const CustomerCenter = lazy(() => import("@/pages/public/CustomerCenter"));
+const ForgotPassword = lazy(
+  () => import("@/pages/public/CustomerCenter/ForgotPassword"),
+);
+const ResetPassword = lazy(
+  () => import("@/pages/public/CustomerCenter/ResetPassword"),
+);
 const PaymentReview = lazy(() => import("@/pages/admin/PaymentReview"));
 const About = lazy(() => import("@/pages/public/About"));
 const Contact = lazy(() => import("@/pages/public/Contact"));
@@ -65,6 +71,7 @@ const MarketingManage = lazy(() => import("@/pages/admin/MarketingManage"));
 const PartnerApplications = lazy(
   () => import("@/pages/admin/PartnerApplications"),
 );
+const ReviewManage = lazy(() => import("@/pages/admin/ReviewManage"));
 
 const Loading = () => (
   <div
@@ -180,6 +187,23 @@ function App() {
               element={
                 <AntdRoute>
                   <CustomerCenter />
+                </AntdRoute>
+              }
+            />
+            {/* 密码找回：邮件重置链接落地页（公开访问，令牌在链接内） */}
+            <Route
+              path="customer/forgot"
+              element={
+                <AntdRoute>
+                  <ForgotPassword />
+                </AntdRoute>
+              }
+            />
+            <Route
+              path="customer/reset"
+              element={
+                <AntdRoute>
+                  <ResetPassword />
                 </AntdRoute>
               }
             />
@@ -434,6 +458,14 @@ function App() {
               element={
                 <AdminPage route="/admin/partner-applications">
                   <PartnerApplications />
+                </AdminPage>
+              }
+            />
+            <Route
+              path="reviews"
+              element={
+                <AdminPage route="/admin/reviews">
+                  <ReviewManage />
                 </AdminPage>
               }
             />

@@ -168,45 +168,62 @@ function SidebarDomainItem({
       </div>
 
       {isExpanded && allItems.length > 0 && (
-        <div className="admin-sidebar__subnav" aria-label={`${domain.label}功能菜单`}>
+        <div
+          className="admin-sidebar__subnav"
+          aria-label={`${domain.label}功能菜单`}
+        >
           {allItems.map((item) => {
-          const [itemPath, itemQuery = ""] = item.route.split("?");
-          const hasQueryMatch = allItems.some((candidate) => {
-            const [candidatePath, candidateQuery = ""] = candidate.route.split("?");
-            return Boolean(candidateQuery) && candidatePath === location.pathname && `?${candidateQuery}` === location.search;
-          });
-          const pathMatches =
-            location.pathname === itemPath ||
-            (itemPath !== "/admin" && location.pathname.startsWith(`${itemPath}/`));
-          const isItemActive = pathMatches && (
-            itemQuery ? `?${itemQuery}` === location.search : !hasQueryMatch
-          );
-          const canPin = item.pinned || pinnedItemCount < 2;
-          return (
-            <div className="admin-sidebar__item-row" key={item.key}>
-              <button
-                type="button"
-                className={`admin-sidebar__item${isItemActive ? " is-active" : ""}`}
-                onClick={() => onItemClick(item.route)}
-                title={item.label}
-              >
-                {item.label}
-              </button>
-              {domain.key === "common" && (
+            const [itemPath, itemQuery = ""] = item.route.split("?");
+            const hasQueryMatch = allItems.some((candidate) => {
+              const [candidatePath, candidateQuery = ""] =
+                candidate.route.split("?");
+              return (
+                Boolean(candidateQuery) &&
+                candidatePath === location.pathname &&
+                `?${candidateQuery}` === location.search
+              );
+            });
+            const pathMatches =
+              location.pathname === itemPath ||
+              (itemPath !== "/admin" &&
+                location.pathname.startsWith(`${itemPath}/`));
+            const isItemActive =
+              pathMatches &&
+              (itemQuery
+                ? `?${itemQuery}` === location.search
+                : !hasQueryMatch);
+            const canPin = item.pinned || pinnedItemCount < 2;
+            return (
+              <div className="admin-sidebar__item-row" key={item.key}>
                 <button
                   type="button"
-                  className={`admin-sidebar__item-pin${item.pinned ? " is-pinned" : ""}`}
-                  onClick={() => onTogglePin(item.route)}
-                  aria-label={`${item.pinned ? "取消固定" : "固定"}${item.label}`}
-                  aria-pressed={item.pinned}
-                  title={canPin ? (item.pinned ? "取消固定" : "固定到常用") : "最多固定 2 项"}
-                  disabled={!canPin}
+                  className={`admin-sidebar__item${isItemActive ? " is-active" : ""}`}
+                  onClick={() => onItemClick(item.route)}
+                  title={item.label}
                 >
-                  {item.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+                  {item.label}
                 </button>
-              )}
-            </div>
-          );
+                {domain.key === "common" && (
+                  <button
+                    type="button"
+                    className={`admin-sidebar__item-pin${item.pinned ? " is-pinned" : ""}`}
+                    onClick={() => onTogglePin(item.route)}
+                    aria-label={`${item.pinned ? "取消固定" : "固定"}${item.label}`}
+                    aria-pressed={item.pinned}
+                    title={
+                      canPin
+                        ? item.pinned
+                          ? "取消固定"
+                          : "固定到常用"
+                        : "最多固定 2 项"
+                    }
+                    disabled={!canPin}
+                  >
+                    {item.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+                  </button>
+                )}
+              </div>
+            );
           })}
         </div>
       )}
@@ -271,7 +288,9 @@ export default function AdminLayout() {
 
   // SEO：后台页面禁止搜索引擎索引（robots.txt Disallow 的补充保障）
   useEffect(() => {
-    const tag = document.head.querySelector<HTMLMetaElement>('meta[name="robots"]');
+    const tag = document.head.querySelector<HTMLMetaElement>(
+      'meta[name="robots"]',
+    );
     if (tag) tag.setAttribute("content", "noindex, nofollow");
     else {
       const el = document.createElement("meta");
@@ -346,10 +365,13 @@ export default function AdminLayout() {
     [navigate, isCompact],
   );
 
-  const handleToggleCommonPin = useCallback((route: string) => {
-    toggleCommonNavPin(route, commonUserId);
-    setCommonItems(getCommonNavItems(commonUserId));
-  }, [commonUserId]);
+  const handleToggleCommonPin = useCallback(
+    (route: string) => {
+      toggleCommonNavPin(route, commonUserId);
+      setCommonItems(getCommonNavItems(commonUserId));
+    },
+    [commonUserId],
+  );
 
   /* ── 用户菜单 ── */
   const userMenuItems = [
@@ -382,15 +404,16 @@ export default function AdminLayout() {
               {visibleDomains.map((domain) => {
                 const isActive = navCtx?.domain.key === domain.key;
                 const isExpanded = expandedDomains.has(domain.key);
-                const allItems = domain.key === "common"
-                  ? commonItems.filter((item) =>
-                    canAccessAdminRoute(user?.role, item.route),
-                  )
-                  : domain.groups.flatMap((g) =>
-                    g.items
-                      .filter((i) => !i.featureFlag && !i.disabled)
-                      .map((i) => ({ ...i, pinned: false })),
-                  );
+                const allItems =
+                  domain.key === "common"
+                    ? commonItems.filter((item) =>
+                        canAccessAdminRoute(user?.role, item.route),
+                      )
+                    : domain.groups.flatMap((g) =>
+                        g.items
+                          .filter((i) => !i.featureFlag && !i.disabled)
+                          .map((i) => ({ ...i, pinned: false })),
+                      );
 
                 return (
                   <SidebarDomainItem
@@ -465,13 +488,31 @@ export default function AdminLayout() {
         </div>
 
         <div className="admin-header__right">
-          <Link to="/" target="_blank" className="admin-header__icon-btn" title="访问前台首页" aria-label="访问前台首页">
+          <Link
+            to="/"
+            target="_blank"
+            className="admin-header__icon-btn"
+            title="访问前台首页"
+            aria-label="访问前台首页"
+          >
             <GlobalOutlined />
           </Link>
-          <Link to="/search" target="_blank" className="admin-header__icon-btn" title="搜索商品" aria-label="搜索商品">
+          <Link
+            to="/search"
+            target="_blank"
+            className="admin-header__icon-btn"
+            title="搜索商品"
+            aria-label="搜索商品"
+          >
             <SearchOutlined />
           </Link>
-          <Link to="/catalog" target="_blank" className="admin-header__icon-btn" title="选款中心" aria-label="选款中心">
+          <Link
+            to="/catalog"
+            target="_blank"
+            className="admin-header__icon-btn"
+            title="选款中心"
+            aria-label="选款中心"
+          >
             <AppstoreOutlined />
           </Link>
           <button
@@ -532,7 +573,9 @@ export default function AdminLayout() {
         {/* 内容区 */}
         <div className="admin-content">
           {/* 页面内容 */}
-          <main className={`admin-main${isEditorWorkspace ? " admin-main--workspace" : ""}`}>
+          <main
+            className={`admin-main${isEditorWorkspace ? " admin-main--workspace" : ""}`}
+          >
             <Outlet />
           </main>
         </div>

@@ -47,8 +47,20 @@ export default function HotspotBlock({
   }, []);
   const desktopHotspots: HotspotItem[] = Array.isArray(hotspots) ? hotspots : [];
   const configuredMobileHotspots: HotspotItem[] = Array.isArray(mobileHotspots) ? mobileHotspots : [];
-  const usesDesktopFallback = isMobile && configuredMobileHotspots.length === 0;
-  const rawHotspots = isMobile && !usesDesktopFallback ? configuredMobileHotspots : desktopHotspots;
+  // schema 文本控件可能写入字符串数字,统一在入口归一为数值再参与几何校验
+  const normalizeGeometry = (list: HotspotItem[]): HotspotItem[] =>
+    list.map((item) => ({
+      ...item,
+      x: Number(item.x),
+      y: Number(item.y),
+      width: Number(item.width),
+      height: Number(item.height),
+    }));
+  const usesDesktopFallback =
+    isMobile && normalizeGeometry(configuredMobileHotspots).length === 0;
+  const rawHotspots = isMobile && !usesDesktopFallback
+    ? normalizeGeometry(configuredMobileHotspots)
+    : normalizeGeometry(desktopHotspots);
   const activeDevice = isMobile && !usesDesktopFallback ? "mobile" : "desktop";
   const visibleHotspots = rawHotspots
     .map((item, sourceIndex) => ({ item, sourceIndex }))

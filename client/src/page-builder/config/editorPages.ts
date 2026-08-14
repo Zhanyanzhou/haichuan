@@ -2,6 +2,7 @@ import {
   jewelryHomeTemplate,
   pageTemplates,
 } from "@/page-builder/templates/templates";
+import type { DesignMode } from "@/page-builder/designSystem/masters";
 
 export const EDITOR_PAGE_KEYS = [
   "home",
@@ -19,6 +20,8 @@ export type EditorPageDefinition = {
   label: string;
   description: string;
   publicPath: string;
+  /** 页面视觉模式:Brand=奢侈品牌体验 / Commerce=高端电商体验(选款中心)。 */
+  mode: DesignMode;
   /** 动态业务页仍由业务数据驱动，装修器只编辑其视觉框架。 */
   dynamic?: boolean;
   businessRegion?: { title: string; description: string; items: string };
@@ -30,18 +33,21 @@ export const editorPages: EditorPageDefinition[] = [
     label: "店铺首页",
     description: "品牌首屏与首页内容",
     publicPath: "/",
+    mode: "brand",
   },
   {
     key: "about",
     label: "关于海川",
     description: "品牌故事、工艺与价值表达",
     publicPath: "/about",
+    mode: "brand",
   },
   {
     key: "products",
     label: "珠宝作品",
     description: "视觉页头 + 固定商品列表；商品资料来自商品管理",
     publicPath: "/products",
+    mode: "brand",
     dynamic: true,
     businessRegion: {
       title: "商品列表与筛选",
@@ -54,6 +60,7 @@ export const editorPages: EditorPageDefinition[] = [
     label: "选款中心",
     description: "视觉页头 + 固定选款工具；筛选数据来自商品配置",
     publicPath: "/catalog",
+    mode: "commerce",
     dynamic: true,
     businessRegion: {
       title: "选款工具与商品结果",
@@ -66,12 +73,14 @@ export const editorPages: EditorPageDefinition[] = [
     label: "珠宝定制",
     description: "定制服务说明与案例内容",
     publicPath: "/custom",
+    mode: "brand",
   },
   {
     key: "contact",
     label: "预约咨询",
     description: "视觉页头 + 固定预约表单与联系信息",
     publicPath: "/contact",
+    mode: "brand",
     dynamic: true,
     businessRegion: {
       title: "预约表单与联系信息",

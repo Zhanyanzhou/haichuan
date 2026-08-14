@@ -9,7 +9,9 @@ import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
 
 /** 幂等写入/更新 <meta> 标签（按 name 或 property 选择）。 */
 function upsertMeta(attr: "name" | "property", key: string, content: string) {
-  let el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`);
+  let el = document.head.querySelector<HTMLMetaElement>(
+    `meta[${attr}="${key}"]`,
+  );
   if (!el) {
     el = document.createElement("meta");
     el.setAttribute(attr, key);
@@ -23,7 +25,9 @@ function syncMeta(attr: "name" | "property", key: string, content?: string) {
     upsertMeta(attr, key, content);
     return;
   }
-  document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`)?.remove();
+  document.head
+    .querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`)
+    ?.remove();
 }
 
 /* ═══════ 内联图标 ═══════ */
@@ -101,7 +105,15 @@ const CalendarIcon = () => (
   </svg>
 );
 const AccountIcon = () => (
-  <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+  <svg
+    width="30"
+    height="30"
+    viewBox="0 0 30 30"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.4"
+    strokeLinecap="round"
+  >
     <circle cx="15" cy="10" r="5" />
     <path d="M5 27c.8-5.2 4.2-8 10-8s9.2 2.8 10 8" />
   </svg>
@@ -138,9 +150,12 @@ export default function PublicLayout() {
   useEffect(() => {
     const siteName = siteSettings?.siteName || "海川珠宝";
     // 页面级 SEO 优先于站点级（装修页面可覆盖默认标题/描述）
-    const title = pageMeta.title || siteSettings?.seoTitle || siteSettings?.siteName;
+    const title =
+      pageMeta.title || siteSettings?.seoTitle || siteSettings?.siteName;
     const description =
-      pageMeta.description || siteSettings?.seoDescription || siteSettings?.siteDescription;
+      pageMeta.description ||
+      siteSettings?.seoDescription ||
+      siteSettings?.siteDescription;
     const keywords = siteSettings?.seoKeywords;
     // og:image/twitter:image 相对路径绝对化，避免社交爬虫解析失败
     let image: string | undefined;
@@ -166,7 +181,11 @@ export default function PublicLayout() {
     upsertMeta("property", "og:title", title || siteName);
     syncMeta("property", "og:description", description);
     syncMeta("property", "og:image", image);
-    upsertMeta("name", "twitter:card", image ? "summary_large_image" : "summary");
+    upsertMeta(
+      "name",
+      "twitter:card",
+      image ? "summary_large_image" : "summary",
+    );
     syncMeta("name", "twitter:title", title || siteName);
     syncMeta("name", "twitter:description", description);
     syncMeta("name", "twitter:image", image);
@@ -199,7 +218,9 @@ export default function PublicLayout() {
 
   // SEO：前台公开页确保可索引（与 AdminLayout 的 noindex 互补，防御性）
   useEffect(() => {
-    const tag = document.head.querySelector<HTMLMetaElement>('meta[name="robots"]');
+    const tag = document.head.querySelector<HTMLMetaElement>(
+      'meta[name="robots"]',
+    );
     if (tag) {
       tag.setAttribute("content", "index, follow");
       return;
@@ -287,7 +308,9 @@ export default function PublicLayout() {
               onMouseLeave={(e) => (e.currentTarget.style.color = navColor)}
             >
               <AccountIcon />
-              <span className="site-header__nav-label hidden sm:inline">我的账号</span>
+              <span className="site-header__nav-label hidden sm:inline">
+                我的账号
+              </span>
             </Link>
           </div>
         </div>
@@ -379,7 +402,10 @@ export default function PublicLayout() {
                 </a>
               )}
               {contactEmail && (
-                <a href={`mailto:${contactEmail}`} className="site-footer__link">
+                <a
+                  href={`mailto:${contactEmail}`}
+                  className="site-footer__link"
+                >
                   ✉ {contactEmail}
                 </a>
               )}
@@ -393,10 +419,7 @@ export default function PublicLayout() {
           </div>
           <p className="site-footer__copyright">
             © {new Date().getFullYear()} {siteName}
-            <Link
-              to="/privacy"
-              className="site-footer__copyright-link"
-            >
+            <Link to="/privacy" className="site-footer__copyright-link">
               隐私说明
             </Link>
           </p>

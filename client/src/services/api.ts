@@ -1,3 +1,4 @@
+// 前端 API 层：customer(认证/收藏/找回/SMS/合规)/marketing(含可用券)/reviews/recommendation 等
 import axios from "axios";
 import { notifyRequestError } from "@/services/requestErrorEvents";
 import type { ApiResponse, CategoryInput, CategorySortItem } from "@/types";
@@ -669,7 +670,6 @@ export const orderApi = {
   getById: (id: number) => api.get(`/orders/${id}`),
   /** 后台人工建单（需 admin 角色） */
   create: (data: any) => api.post("/orders", data),
-  getStatistics: () => api.get("/orders/statistics"),
   getAnomalies: () => api.get("/orders/anomalies"),
   getTradeOverview: () => api.get("/orders/trade-overview"),
   /** 导出订单（与当前筛选一致；仅 ADMIN） */
@@ -760,9 +760,17 @@ export const customerApi = {
     password: string;
     name: string;
     email?: string;
+    smsCode?: string;
   }) => api.post("/customers/register", data),
   login: (data: { phone: string; password: string }) =>
     api.post("/customers/login", data),
+  smsRequirements: () => api.get("/customers/sms-requirements"),
+  requestSmsCode: (data: { phone: string }) =>
+    api.post("/customers/sms-code", data),
+  forgotPassword: (data: { email: string }) =>
+    api.post("/customers/forgot-password", data),
+  resetPassword: (data: { token: string; password: string }) =>
+    api.post("/customers/reset-password", data),
   checkout: (data: any) => api.post("/customers/checkout", data),
   getProfile: () =>
     api.get("/customers/me", { headers: customerAuthHeaders() }),
@@ -770,6 +778,10 @@ export const customerApi = {
     api.put("/customers/me", data, { headers: customerAuthHeaders() }),
   getOrders: () =>
     api.get("/customers/me/orders", { headers: customerAuthHeaders() }),
+  getOrderTracking: (orderId: number) =>
+    api.get(`/customers/me/orders/${orderId}/tracking`, {
+      headers: customerAuthHeaders(),
+    }),
   getSelectionInquiries: () =>
     api.get("/customers/me/selection-inquiries", {
       headers: customerAuthHeaders(),
@@ -788,6 +800,16 @@ export const customerApi = {
     }),
   deleteAddress: (id: number) =>
     api.delete(`/customers/me/addresses/${id}`, {
+      headers: customerAuthHeaders(),
+    }),
+  getFavorites: () =>
+    api.get("/customers/me/favorites", { headers: customerAuthHeaders() }),
+  exportMyData: () =>
+    api.get("/customers/me/data-export", { headers: customerAuthHeaders() }),
+  closeAccount: (data: { password: string }) =>
+    api.post("/customers/me/close", data, { headers: customerAuthHeaders() }),
+  toggleFavorite: (productId: number) =>
+    api.post(`/customers/me/favorites/${productId}/toggle`, {}, {
       headers: customerAuthHeaders(),
     }),
   submitPaymentProof: (orderId: number, proofKey: string) =>
@@ -1560,6 +1582,26 @@ export const marketingApi = {
   updateCoupon: (id: number, data: any) =>
     api.put(`/marketing/coupons/${id}`, data),
   getCouponStats: () => api.get("/marketing/coupons/stats"),
+  /* 建单可用券（按订单金额试算折扣，营销生效） */
+  listUsableCoupons: (amountCents: number) =>
+    api.get("/marketing/coupons/usable", { params: { amountCents } }),
+};
+
+/* 商品评价 */
+export const reviewApi = {
+  submit: (data: {
+    orderId: number;
+    productId: number;
+    rating: number;
+    content: string;
+    imageUrls?: string[];
+  }) => api.post("/reviews", data, { headers: customerAuthHeaders() }),
+  mine: () => api.get("/reviews/me", { headers: customerAuthHeaders() }),
+  listForProduct: (productId: number, params?: { page?: number; pageSize?: number }) =>
+    api.get(`/reviews/product/${productId}`, { params }),
+  adminList: (params: any) => api.get("/reviews", { params }),
+  moderate: (id: number, data: { status: "APPROVED" | "REJECTED"; reply?: string }) =>
+    api.put(`/reviews/${id}/moderate`, data),
 };
 
 export default api;

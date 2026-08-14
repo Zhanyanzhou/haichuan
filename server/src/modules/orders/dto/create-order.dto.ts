@@ -65,6 +65,12 @@ export class CreateOrderDto {
   /** 付款方式，线下转账场景固定 bank_transfer；不传默认 bank_transfer */
   paymentMethod?: string;
 
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  /** 优惠券（可选，营销生效：服务端校验门槛/有效期并试算折扣，原子核销） */
+  couponId?: number;
+
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(MAX_ITEMS)

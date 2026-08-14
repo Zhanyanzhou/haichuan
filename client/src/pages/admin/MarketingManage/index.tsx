@@ -166,7 +166,7 @@ function PromotionsTab() {
       rule:
         record.rule && typeof record.rule === "object"
           ? JSON.stringify(record.rule, null, 2)
-          : record.rule ?? "{}",
+          : (record.rule ?? "{}"),
       range: [dayjs(record.startTime), dayjs(record.endTime)],
     });
     setModalOpen(true);
@@ -231,12 +231,13 @@ function PromotionsTab() {
                 >
                   编辑
                 </Button>
-                <Popconfirm title="确认删除该促销活动？" onConfirm={() => handleDelete(r.id)} okText="删除" cancelText="取消">
-                  <Button
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                  >
+                <Popconfirm
+                  title="确认删除该促销活动？"
+                  onConfirm={() => handleDelete(r.id)}
+                  okText="删除"
+                  cancelText="取消"
+                >
+                  <Button size="small" danger icon={<DeleteOutlined />}>
                     删除
                   </Button>
                 </Popconfirm>

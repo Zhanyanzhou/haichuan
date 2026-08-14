@@ -1,7 +1,8 @@
 /**
  * schema/types.ts — 模块编辑区（Inspector）的声明式 Schema 类型。
  *
- * 四层信息架构：内容(content) → 布局(layout) → 样式(style) → 交互(interaction)。
+ * 五层信息架构：内容(content) → 媒体(media) → 布局(layout) → 样式(style) → 交互(interaction)。
+ * media 层集中管理双端图片/焦点/alt；interaction 仅保留跳转类字段（新 Schema 建议并入 content）。
  * Schema 是纯 TS 常量：类型安全、可跳转定义、无运行时表单引擎依赖。
  * 字段的 key 即 Puck props 键名（持久化格式），面板只负责呈现与写入。
  */
@@ -9,11 +10,12 @@ import type { ReactNode } from "react";
 import type { MediaSpec } from "../../fields/MediaPickerField";
 import type { ModuleContractStatus } from "../../config/blockContracts";
 
-export type InspectorLayer = "content" | "layout" | "style" | "interaction";
+export type InspectorLayer = "content" | "media" | "layout" | "style" | "interaction";
 
 /** 层的固定排序（渲染顺序）与业务展示名 */
 export const INSPECTOR_LAYER_ORDER: InspectorLayer[] = [
   "content",
+  "media",
   "layout",
   "style",
   "interaction",
@@ -21,6 +23,7 @@ export const INSPECTOR_LAYER_ORDER: InspectorLayer[] = [
 
 export const INSPECTOR_LAYER_TITLES: Record<InspectorLayer, string> = {
   content: "内容",
+  media: "媒体",
   layout: "布局",
   style: "样式",
   interaction: "交互",
@@ -88,10 +91,16 @@ export interface MediaFieldDef extends FieldBase {
   spec: MediaSpec;
   /** 需要焦点裁切时的焦点键名（如 { x: "focusX", y: "focusY" }） */
   focusKeys?: { x: string; y: string };
-  /** 裁切预览比例（CSS aspect-ratio 语法） */
+  /** 裁切预览比例（CSS aspect-ratio 语法）；缺省按 spec 推导 */
   previewAspectRatio?: string;
   /** 是否内嵌图片规格检查（ImageStatus） */
   showSpecCheck?: boolean;
+  /**
+   * 移动端「继承/覆盖」模型（空值即继承）：
+   * 设置后 mobile 档渲染 DeviceOverrideBadge——
+   * 空值显示“继承电脑端”(可拷贝初值),非空显示“恢复继承”(清空回退桌面图)。
+   */
+  inheritFrom?: { key: string; label: string };
 }
 
 /** 链接三件套：一次写入 { targetType, productId?, linkUrl? } */

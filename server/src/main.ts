@@ -8,7 +8,11 @@ import { TransformInterceptor } from "./common/interceptors/transform.intercepto
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // rawBody：保留请求体原始字节串——微信支付 APIv3 回调验签必须对原始报文（重新序列化会改变字段序/空白导致验签必败）。
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+  });
   // nestjs-pino：统一接管框架与业务日志（生产 JSON 单行，便于采集检索）
   app.useLogger(app.get(PinoLogger));
   const logger = new Logger("Bootstrap");
