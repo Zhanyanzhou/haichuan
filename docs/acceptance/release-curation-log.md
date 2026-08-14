@@ -45,6 +45,12 @@
 
 审查与修正：移除了隐私测试中的固定 300ms 等待，改用可观察的表单校验状态；首页装修器网络夹具在 `VITE_USE_MOCK=true` 时明确跳过，因为浏览器内 mock 会绕过其网络拦截，非 mock 路径仍执行。测试期间本机未启动后端，Vite 对内容槽等未拦截读请求记录了连接拒绝日志，但没有造成断言失败；未访问生产、未传入真实令牌、未提交表单或写入业务数据。真实 API/角色/交易失败态仍需在隔离环境联调。
 
+### 2026-08-14 构建与运行边界
+
+`dd46827` `chore(platform): 固化构建与运行边界`：版本化 CI 质量门禁、根 `.gitignore`、前端 Nginx/Vite 与 Docker Compose 配置。Nginx 增加最小安全响应头与页面发布事件流反代；Vite 使用 Vite 8/Rolldown 分包；Compose 不再将 MySQL、Redis、服务端端口暴露到宿主机，增加 Redis 密码、私有媒体卷和健康检查；CI 在干净环境执行安装、Prisma generate/validate、类型/构建与静态契约。提交前复核仅含 6 个配置路径且 `git diff --cached --check` 通过；Vite 生产构建证据已在同一配置工作树取得。
+
+运维前置条件：该 Compose 配置要求部署环境安全提供 `DATABASE_URL`、`REDIS_PASSWORD`、`JWT_SECRET` 与 `CORS_ORIGIN`，且健康检查依赖已提交的 `/api/ready`；本轮未读取/修改 `.env`，未运行 Docker、CI、安装、Prisma migration/seed 或部署。应由运维在隔离环境验证 Compose 健康检查、反代、事件流和 CORS，再安排上线。
+
 ### 2026-08-14 后续整理
 
 | 提交 | 主题与文件 | 验证证据 | 推送状态 |
