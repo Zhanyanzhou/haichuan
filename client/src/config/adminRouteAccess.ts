@@ -60,8 +60,6 @@ const ROUTE_RULES: RouteRule[] = [
   { prefix: "/admin/ai-classify", roles: ADMIN_ONLY },
   { prefix: "/admin/gold-price", roles: ADMIN_ONLY },
   { prefix: "/admin/finance", roles: ADMIN_ONLY },
-  { prefix: "/admin/fintech", roles: ADMIN_ONLY },
-  { prefix: "/admin/promotion", roles: ADMIN_ONLY },
   { prefix: "/admin/inventory", roles: WAREHOUSE },
   // 交易域：订单中心对所有交易角色可见（查看）；EDITOR 无权限
   { prefix: "/admin/orders", roles: TRADE_VIEW },

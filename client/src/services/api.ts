@@ -808,14 +808,6 @@ export const customerApi = {
   },
 };
 
-// ===== Catalog API（受控商品目录，登录客户可见）=====
-export const catalogApi = {
-  getList: (params: any = {}) =>
-    api.get("/products/catalog", { params, headers: customerAuthHeaders() }),
-  getById: (id: number) =>
-    api.get(`/products/catalog/${id}`, { headers: customerAuthHeaders() }),
-};
-
 // ===== Recommendations API（规则推荐，登录客户）=====
 export const recommendationApi = {
   getHot: (limit = 12) =>
