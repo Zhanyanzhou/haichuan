@@ -6,6 +6,7 @@ import { PrismaModule } from './common/prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { CategoriesModule } from './modules/categories/categories.module';
+import { AttributesModule } from './modules/attributes/attributes.module';
 import { ProductsModule } from './modules/products/products.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { GoldPriceModule } from './modules/gold-price/gold-price.module';
@@ -83,6 +84,7 @@ import { LoggerModule } from 'nestjs-pino';
     AuthModule,
     UsersModule,
     CategoriesModule,
+    AttributesModule,
     ProductsModule,
     UploadModule,
     GoldPriceModule,

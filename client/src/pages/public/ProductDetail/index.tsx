@@ -21,9 +21,44 @@ import {
   isCommerceAllowed,
   salesModeRoute,
   salesModeCta,
+  useCommerceEnabled,
 } from "@/store/featureFlags";
 import { useReconnectingEventSource } from "@/hooks/useReconnectingEventSource";
 import { usePageMetaStore } from "@/store/pageMetaStore";
+
+/** 未登录详情页登录墙：游客仅可浏览列表，完整详情需登录后查看 */
+function GuestDetailGate({ productId }: { productId?: string }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-brand-bg px-6">
+      <div className="max-w-md w-full text-center py-16">
+        <p className="text-xs tracking-[.2em] text-brand-gold font-sans mb-4">
+          PRIVATE COLLECTION
+        </p>
+        <h1 className="text-2xl md:text-3xl font-display font-semibold text-brand-gold mb-4">
+          登录后查看作品详情
+        </h1>
+        <p className="text-sm text-brand-muted leading-relaxed mb-8">
+          为保护原创设计，作品的工艺细节、规格与高清图片仅向登录会员开放。游客可先浏览作品列表。
+        </p>
+        <div className="flex flex-col gap-3 items-center">
+          <Link
+            to="/customer"
+            state={{ returnTo: productId ? `/products/${productId}` : "/products" }}
+            className="btn btn-primary w-full"
+          >
+            登录 / 注册
+          </Link>
+          <Link
+            to="/products"
+            className="text-sm text-brand-muted hover:text-brand-gold transition-colors"
+          >
+            返回珠宝作品列表
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function ProductDetail() {
   const { id } = useParams();
@@ -38,6 +73,10 @@ export default function ProductDetail() {
   const [revision, setRevision] = useState(0);
   const [addingToCart, setAddingToCart] = useState(false);
   const [goldPrice, setGoldPrice] = useState<{ price?: number | string } | null>(null);
+  const commerceEnabled = useCommerceEnabled();
+  const isSignedIn = Boolean(
+    typeof window !== "undefined" && localStorage.getItem("customerToken"),
+  );
 
   useEffect(() => {
     const load = async () => {
@@ -78,7 +117,7 @@ export default function ProductDetail() {
 
   // 只有直接购买商品需要金价参考；咨询类作品不触发无用请求，也不暴露价格组成。
   useEffect(() => {
-    if (!isCommerceAllowed(product?.salesMode)) {
+    if (!isCommerceAllowed(product?.salesMode, commerceEnabled)) {
       setGoldPrice(null);
       return;
     }
@@ -86,7 +125,7 @@ export default function ProductDetail() {
       .getLatest()
       .then((res) => setGoldPrice(unwrapResponse<any>(res)))
       .catch(() => setGoldPrice(null));
-  }, [product?.salesMode]);
+  }, [product?.salesMode, commerceEnabled]);
 
   useEffect(() => {
     if (id) {
@@ -94,6 +133,11 @@ export default function ProductDetail() {
       trackProductView(Number(id));
     }
   }, [id]);
+
+  // 防抄袭：未登录不允许查看详情页，先引导登录（登录后经 returnTo 回跳）
+  if (!isSignedIn) {
+    return <GuestDetailGate productId={id} />;
+  }
 
   if (loading)
     return (
@@ -126,7 +170,7 @@ export default function ProductDetail() {
   const startingPrice =
     activePrices.length > 0 ? Math.min(...activePrices) : Number(product.price) || 0;
   const displayPrice = selectedSku ? Number(selectedSku.price) : startingPrice;
-  const commerceOk = isCommerceAllowed(product.salesMode);
+  const commerceOk = isCommerceAllowed(product.salesMode, commerceEnabled);
   const displayGoldWeight = selectedSku?.goldWeight ?? product.goldWeight;
 
   const handleAddToCart = async () => {

@@ -36,6 +36,7 @@ const Dashboard = lazy(() => import("@/pages/admin/Dashboard"));
 const ProductManage = lazy(() => import("@/pages/admin/ProductManage"));
 const ProductEditor = lazy(() => import("@/pages/admin/ProductEditor"));
 const CategoryManage = lazy(() => import("@/pages/admin/CategoryManage"));
+const AttributeManage = lazy(() => import("@/pages/admin/AttributeManage"));
 const AIClassify = lazy(() => import("@/pages/admin/AIClassify"));
 const GoldPrice = lazy(() => import("@/pages/admin/GoldPrice"));
 const Inventory = lazy(() => import("@/pages/admin/Inventory"));
@@ -50,15 +51,11 @@ const UserManage = lazy(() => import("@/pages/admin/UserManage"));
 const Settings = lazy(() => import("@/pages/admin/Settings"));
 const EditorWorkbench = lazy(() => import("@/pages/admin/EditorWorkbench"));
 
-const InquiryManage = lazy(() => import("@/pages/admin/InquiryManage"));
 const MediaLibrary = lazy(() => import("@/pages/admin/MediaLibrary"));
 const AuditLogs = lazy(() => import("@/pages/admin/AuditLogs"));
 const SiteContent = lazy(() => import("@/pages/admin/SiteContent"));
-const SelectionInquiry = lazy(() => import("@/pages/admin/SelectionInquiry"));
 const LeadManage = lazy(() => import("@/pages/admin/LeadManage"));
 const MarketingManage = lazy(() => import("@/pages/admin/MarketingManage"));
-const PromotionManage = lazy(() => import("@/pages/admin/PromotionManage"));
-const FintechManage = lazy(() => import("@/pages/admin/FintechManage"));
 const AnalyticsView = lazy(() => import("@/pages/admin/AnalyticsView"));
 const PartnerApplications = lazy(() => import("@/pages/admin/PartnerApplications"));
 
@@ -124,6 +121,7 @@ function App() {
             <Route path="products/new" element={<AdminPage route="/admin/products"><ProductEditor /></AdminPage>} />
             <Route path="products/:id/edit" element={<AdminPage route="/admin/products"><ProductEditor /></AdminPage>} />
             <Route path="categories" element={<AdminPage route="/admin/categories"><CategoryManage /></AdminPage>} />
+            <Route path="attributes" element={<AdminPage route="/admin/attributes"><AttributeManage /></AdminPage>} />
             <Route path="ai-classify" element={<AdminPage route="/admin/ai-classify"><AIClassify /></AdminPage>} />
             <Route path="gold-price" element={<AdminPage route="/admin/gold-price"><GoldPrice /></AdminPage>} />
             <Route path="inventory" element={<AdminPage route="/admin/inventory"><Inventory /></AdminPage>} />
@@ -150,17 +148,13 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="inquiries" element={<AdminPage route="/admin/inquiries"><InquiryManage /></AdminPage>} />
             <Route path="media" element={<AdminPage route="/admin/media"><MediaLibrary /></AdminPage>} />
             <Route path="audit-logs" element={<AdminPage route="/admin/audit-logs"><AuditLogs /></AdminPage>} />
             <Route path="site-content" element={<AdminPage route="/admin/site-content"><SiteContent /></AdminPage>} />
-            <Route path="selection-inquiry" element={<AdminPage route="/admin/selection-inquiry"><SelectionInquiry /></AdminPage>} />
             <Route path="leads" element={<AdminPage route="/admin/leads"><LeadManage /></AdminPage>} />
             <Route path="marketing" element={<AdminPage route="/admin/marketing"><MarketingManage /></AdminPage>} />
-            <Route path="promotion" element={<AdminPage route="/admin/promotion"><PromotionManage /></AdminPage>} />
-            {/* 付款审核已迁移至交易域 /admin/trade/payments；finance 域为禁用占位，旧入口重定向 */}
+            {/* 付款审核已迁移至交易域 /admin/trade/payments；旧 /admin/finance 入口重定向 */}
             <Route path="finance" element={<Navigate to="/admin/trade/payments" replace />} />
-            <Route path="fintech" element={<AdminPage route="/admin/fintech"><FintechManage /></AdminPage>} />
             <Route path="analytics" element={<AdminPage route="/admin/analytics"><AnalyticsView /></AdminPage>} />
             <Route path="partner-applications" element={<AdminPage route="/admin/partner-applications"><PartnerApplications /></AdminPage>} />
           </Route>

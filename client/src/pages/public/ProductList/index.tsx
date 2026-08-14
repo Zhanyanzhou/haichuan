@@ -4,12 +4,9 @@ import { usePageMetaStore } from "@/store/pageMetaStore";
 import { motion, useInView } from "framer-motion";
 import { Spin, Button } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
-import { productApi, publicProductStreamUrl } from "@/services/api";
-import { USE_MOCK } from "@/services/mockData";
-import { unwrapResponse } from "@/utils/unwrap";
-import { getMaterialLabel } from "@/utils/material";
 import { trackPageView } from "@/hooks/useAnalytics";
-import { useReconnectingEventSource } from "@/hooks/useReconnectingEventSource";
+import { useProductData } from "@/hooks/useProductData";
+import type { CatalogProduct } from "@/data/catalogData";
 import { SecureImage } from "@/components/common/SecureImage";
 
 /* ═══════ 视觉常量 ═══════ */
@@ -25,19 +22,6 @@ const MX = "max-w-[1760px] mx-auto";
 const PX = "clamp(48px,5vw,88px)";
 const SX = { paddingInline: PX } as const;
 
-/* ═══════ 类型 ═══════ */
-interface ProductCard {
-  id: number;
-  code: string;
-  name: string;
-  categoryName: string;
-  materialLabel: string;
-  shortDescription: string;
-  imageUrl: string;
-  price: number;
-  goldWeight: string;
-}
-
 /* ═══════ 工具 ═══════ */
 const U = { hidden: { opacity: 0, y: 14 }, visible: { opacity: 1, y: 0 } };
 const F = {
@@ -52,22 +36,6 @@ function useReveal(m?: string) {
   return {
     ref: r,
     inView: useInView(r, { once: true, margin: m || "-60px 0px" }),
-  };
-}
-
-function mapProduct(p: any): ProductCard {
-  return {
-    id: p.id,
-    code: p.code || "",
-    name: p.name || "",
-    categoryName: p.category?.name || "",
-    materialLabel: getMaterialLabel(p.materialType),
-    shortDescription: p.shortDescription || "",
-    imageUrl:
-      (p.listingImage as any)?.mediaUrl || (p.primaryImage as any)?.mediaUrl || (p.images?.[0] as any)?.mediaUrl ||
-      p.listingImage?.url || p.primaryImage?.url || p.images?.[0]?.url || "",
-    price: Number(p.price) || 0,
-    goldWeight: p.goldWeight ? `${p.goldWeight}g` : "",
   };
 }
 
@@ -124,7 +92,7 @@ function ProductCardItem({
   product,
   index,
 }: {
-  product: ProductCard;
+  product: CatalogProduct;
   index: number;
 }) {
   const { ref, inView } = useReveal();
@@ -148,9 +116,9 @@ function ProductCardItem({
             marginBottom: "14px",
           }}
         >
-          {product.imageUrl ? (
+          {product.images?.[0] ? (
             <SecureImage
-              src={product.imageUrl}
+              src={product.images?.[0]}
               alt={product.name}
               style={{
                 width: "100%",
@@ -184,7 +152,7 @@ function ProductCardItem({
             marginBottom: "6px",
           }}
         >
-          {product.code}
+          {product.sku}
         </p>
         <h3
           style={{
@@ -209,7 +177,7 @@ function ProductCardItem({
             overflow: "hidden",
           }}
         >
-          {product.shortDescription || product.materialLabel}
+          {product.shortDescription || product.material}
         </p>
         <div
           style={{
@@ -219,8 +187,8 @@ function ProductCardItem({
             color: V.sec,
           }}
         >
-          <span>{product.materialLabel}</span>
-          {product.goldWeight && <span>{product.goldWeight}</span>}
+          <span>{product.material}</span>
+          {product.weight && <span>{product.weight}</span>}
         </div>
       </Link>
     </motion.div>
@@ -239,39 +207,11 @@ export default function ProductList() {
     return () => clearPageMeta();
   }, [setPageMeta, clearPageMeta]);
 
-  const [products, setProducts] = useState<ProductCard[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  // 与选款中心/搜索共用同一数据源与映射逻辑，避免重复拉取与字段漂移
+  const { products, loading, error, reload } = useProductData();
   // P1-35：客户端逐步加载，避免一次渲染上千张卡片（DOM + IntersectionObserver 爆炸）
   const [visibleCount, setVisibleCount] = useState(24);
   const sentinelRef = useRef<HTMLDivElement>(null);
-
-  const fetchProducts = async () => {
-    setLoading(true);
-    setError(false);
-    try {
-      const res = await productApi.getPublicList({ pageSize: 2000 });
-      const data = unwrapResponse<any>(res);
-      const list: any[] = data?.list || data || [];
-      setProducts(list.map(mapProduct));
-      setVisibleCount(24); // P1-35：新数据/重拉时重置可见数量
-    } catch {
-      setError(true);
-      setProducts(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchProducts();
-  }, []);
-  // P1-35：带自动重连 + debounce 的 SSE（断线重连；消息风暴合并为一次重拉，避免 N 次 2000 条全量请求）
-  useReconnectingEventSource(
-    USE_MOCK ? null : publicProductStreamUrl,
-    () => void fetchProducts(),
-    { debounceMs: 500 },
-  );
 
   // P1-35：sentinel 进入视口时加载下一批（逐步加载，避免首屏渲染上千卡片）
   useEffect(() => {
@@ -326,7 +266,7 @@ export default function ProductList() {
               </p>
               <Button
                 icon={<ReloadOutlined />}
-                onClick={fetchProducts}
+                onClick={reload}
                 style={{ color: V.acc, borderColor: V.line }}
               >
                 重新加载
@@ -334,7 +274,7 @@ export default function ProductList() {
             </div>
           )}
 
-          {!loading && !error && products !== null && products.length === 0 && (
+          {!loading && !error && products.length === 0 && (
             <div
               style={{
                 textAlign: "center",
@@ -356,7 +296,7 @@ export default function ProductList() {
             </div>
           )}
 
-          {!loading && !error && products !== null && products.length > 0 && (
+          {!loading && !error && products.length > 0 && (
             <div
               style={{
                 display: "grid",
@@ -370,12 +310,12 @@ export default function ProductList() {
               ))}
             </div>
           )}
-          {products !== null && products.length > visibleCount && (
+          {products.length > visibleCount && (
             <div ref={sentinelRef} style={{ height: 1, width: "100%", marginTop: 40 }} aria-hidden />
           )}
 
           {/* ── 选款中心入口 ── */}
-          {!loading && !error && products !== null && products.length > 0 && (
+          {!loading && !error && products.length > 0 && (
             <div
               style={{
                 textAlign: "center",

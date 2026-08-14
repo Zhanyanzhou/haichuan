@@ -135,6 +135,7 @@ model Product {
   listingImage          ProductImage?          @relation("ListingImage", fields: [listingImageId], references: [id], onDelete: SetNull)
   skus                  ProductSKU[]
   tags                  ProductTag[]
+  productAttributes     ProductAttributeValue[]
   certificates          Certificate[]
   seriesItems           SeriesItem[]
   inquiries             Inquiry[]
@@ -254,17 +255,77 @@ model ProductSKU {
   @@map("product_skus")
 }
 
-// ========== 产品标签 ==========
+// ========== 标签字典 + 产品标签关联 ==========
+
+model Tag {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(50)
+  slug      String   @unique @db.VarChar(80)
+  group     String?  @db.VarChar(50) // 标签分组（如：工艺、寓意、场景）
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  productTags ProductTag[]
+
+  @@map("tags")
+}
 
 model ProductTag {
-  id        Int    @id @default(autoincrement())
-  productId Int    @map("product_id")
-  tagName   String @map("tag_name") @db.VarChar(50)
+  id        Int @id @default(autoincrement())
+  productId Int @map("product_id")
+  tagId     Int @map("tag_id")
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
-  @@unique([productId, tagName])
+  @@unique([productId, tagId])
+  @@index([tagId])
   @@map("product_tags")
+}
+
+// ========== 商品属性字典（Attribute / AttributeValue） ==========
+
+model Attribute {
+  id           Int      @id @default(autoincrement())
+  key          String   @unique @db.VarChar(50)
+  name         String   @db.VarChar(50)
+  sortOrder    Int      @default(0) @map("sort_order")
+  isFilterable Boolean  @default(true) @map("is_filterable")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  values AttributeValue[]
+
+  @@map("attributes")
+}
+
+model AttributeValue {
+  id          Int     @id @default(autoincrement())
+  attributeId Int     @map("attribute_id")
+  value       String  @db.VarChar(100)
+  sortOrder   Int     @default(0) @map("sort_order")
+  isActive    Boolean @default(true) @map("is_active")
+
+  attribute         Attribute              @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  productAttributes ProductAttributeValue[]
+
+  @@unique([attributeId, value])
+  @@map("attribute_values")
+}
+
+model ProductAttributeValue {
+  id               Int @id @default(autoincrement())
+  productId        Int @map("product_id")
+  attributeValueId Int @map("attribute_value_id")
+
+  product        Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attributeValue AttributeValue @relation(fields: [attributeValueId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, attributeValueId])
+  @@map("product_attribute_values")
 }
 
 // ========== 产品系列/套装 ==========
@@ -923,7 +984,7 @@ model AIClassifyRecord {
   confirmedCategoryId Int?     @map("confirmed_category_id")
   operatorId          Int?     @map("operator_id")
   productId           Int?     @map("product_id")
-  status              String   @default("pending") @db.VarChar(20) // auto_confirmed/pending_confirm/pending_review/confirmed/manual
+  status              String   @default("pending") @db.VarChar(20) // auto_confirmed/pending_confirm/pending_review/confirmed/rejected/manual
   createdAt           DateTime @default(now()) @map("created_at")
 
   operator User? @relation("Operator", fields: [operatorId], references: [id])

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Modal, Upload, message } from "antd";
 import { customerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
-import { isCustomerCommerceEnabled } from "@/store/featureFlags";
+import { useCommerceEnabled } from "@/store/featureFlags";
 
 type AccountDashboardProps = {
   profile: { name?: string; phone?: string; email?: string } | null;
@@ -72,7 +72,7 @@ export default function MyAccountDashboard({
 }: AccountDashboardProps) {
   const name = profile?.name || "海川贵宾";
   const primaryAddress = addresses[0];
-  const commerceEnabled = isCustomerCommerceEnabled();
+  const commerceEnabled = useCommerceEnabled();
 
   // P1-29：付款凭证上传（电商闭环 —— 线下转账订单需顾客补凭证，否则卡死 PENDING_PAYMENT）
   const [proofOrderId, setProofOrderId] = useState<number | null>(null);

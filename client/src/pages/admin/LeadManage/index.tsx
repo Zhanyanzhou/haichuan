@@ -10,10 +10,9 @@ import { SecureImage } from '@/components/common/SecureImage';
 
 const STATUS_MAP: Record<string, { color: string; label: string }> = {
   PENDING: { color: 'gold', label: '待处理' },
-  CONTACTED: { color: 'blue', label: '已联系' },
-  FOLLOWING: { color: 'processing', label: '跟进中' },
-  COMPLETED: { color: 'green', label: '已完成' },
-  INVALID: { color: '#999', label: '无效' },
+  PROCESSING: { color: 'blue', label: '处理中' },
+  REPLIED: { color: 'processing', label: '已回复' },
+  CLOSED: { color: '#999', label: '已关闭' },
 };
 
 const LEAD_TYPES = { inquiry: '预约咨询', selection: '选款咨询' } as const;
@@ -34,11 +33,17 @@ export default function LeadManage() {
   const [noteText, setNoteText] = useState('');
   const [saving, setSaving] = useState(false);
   const requestedStatus = searchParams.get('status') || '';
+  const requestedType = searchParams.get('type') || '';
 
   useEffect(() => {
     setStatus(Object.prototype.hasOwnProperty.call(STATUS_MAP, requestedStatus) ? requestedStatus : '');
     setPage(1);
   }, [requestedStatus]);
+
+  useEffect(() => {
+    setLeadType(requestedType === 'inquiry' || requestedType === 'selection' ? requestedType : '');
+    setPage(1);
+  }, [requestedType]);
 
   const pageSize = 15;
 

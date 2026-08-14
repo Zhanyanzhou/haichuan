@@ -40,6 +40,17 @@ const CUSTOMER_FACING_LIST_SELECT = {
   isLimited: true,
   isCustom: true,
   category: { select: { id: true, name: true } },
+  productAttributes: {
+    select: {
+      attributeValue: {
+        select: {
+          id: true,
+          value: true,
+          attribute: { select: { id: true, key: true, name: true } },
+        },
+      },
+    },
+  },
   images: {
     orderBy: { sortOrder: "asc" },
     take: 5,
@@ -465,6 +476,15 @@ export class ProductsService {
       isLimited: product.isLimited,
       isCustom: product.isCustom,
       category: product.category,
+      attributes: (product.productAttributes || [])
+        .map((pa: any) => pa.attributeValue)
+        .filter((v: any) => v?.id)
+        .map((v: any) => ({
+          id: v.id,
+          value: v.value,
+          attributeKey: v.attribute?.key,
+          attributeName: v.attribute?.name,
+        })),
       images: mapImageList(product.images),
       primaryImage: product.primaryImage ? mapImage(product.primaryImage) : null,
       listingImage: product.listingImage ? mapImage(product.listingImage) : null,
@@ -545,8 +565,8 @@ export class ProductsService {
         // 不可见：统一 404，不泄露商品存在性
         throw new NotFoundException("媒体不存在");
       }
-      // PARTNER 商品面向客户一律加水印（防止合作资料外泄）
-      if (product.visibility === "PARTNER") needsWatermark = true;
+      // 所有登录客户（非员工）访问受控媒体一律加水印，防止款式资料外泄
+      needsWatermark = true;
       // 记录媒体浏览审计（customerId 从令牌派生，不接受客户端提交）
       await this.productAccess.recordEvent(
         request.customer.id,
@@ -596,6 +616,8 @@ export class ProductsService {
 
   async findPublicById(id: number) {
     if (!Number.isInteger(id) || id <= 0) return null;
+    // 游客详情：仅返回列表级字段（不含 description/gemInfo/craftTechnique/skus），
+    // 防止未登录抓取工艺细节、价格与规格；完整详情需登录后走 catalog/:id。
     const product = await this.prisma.product.findFirst({
       where: {
         id,
@@ -603,7 +625,7 @@ export class ProductsService {
         status: "PUBLISHED",
         visibility: "PUBLIC",
       },
-      select: CUSTOMER_FACING_DETAIL_SELECT,
+      select: CUSTOMER_FACING_LIST_SELECT,
     });
     return product ? this.toCustomerFacingProduct(product, "public") : null;
   }
@@ -746,7 +768,7 @@ export class ProductsService {
         // 列表页 totalStock 的计算另走 findAll 的 isActive 过滤。
         skus: { orderBy: { createdAt: "asc" } },
         certificates: true,
-        tags: true,
+        tags: { include: { tag: true } },
       },
     });
     if (!product) return null;
@@ -755,6 +777,12 @@ export class ProductsService {
       img ? { ...img, mediaUrl: `/products/catalog/${product.id}/media/${img.id}` } : img;
     return {
       ...product,
+      tags: (product.tags || []).map((t: any) => ({
+        id: t.id,
+        productId: t.productId,
+        tagId: t.tagId,
+        tagName: t.tag?.name || '',
+      })),
       images: (product.images || []).map(withMedia),
       primaryImage: withMedia(product.primaryImage),
       listingImage: withMedia(product.listingImage),
@@ -1280,27 +1308,83 @@ export class ProductsService {
 
   /* ═══ 标签管理 ═══ */
   async getTags(productId: number) {
-    return this.prisma.productTag.findMany({ where: { productId } });
+    const rows = await this.prisma.productTag.findMany({
+      where: { productId },
+      include: { tag: true },
+      orderBy: { id: 'asc' },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      productId: r.productId,
+      tagId: r.tagId,
+      tagName: r.tag.name,
+    }));
   }
 
   async updateTags(productId: number, tags: string[]) {
-    // 校验单条标签长度（schema tagName VarChar(50)，超长会触发 Prisma 500）
+    // 校验单条标签长度（schema tag.name VarChar(50)，超长会触发 Prisma 500）
     for (const tag of tags) {
       if (typeof tag !== 'string' || tag.trim().length === 0 || tag.length > 50) {
         throw new BadRequestException('每个标签长度需在 1-50 字符之间');
       }
     }
-    // 删除 + 重建放入同一事务，避免重建失败导致标签全部丢失
+    const names = [...new Set(tags.map((t) => t.trim()))];
+    // 删除 + 重建放入同一事务；标签字典按名称 find-or-create（slug 即名称，保证幂等）
     await this.prisma.$transaction(async (tx) => {
+      const tagIds: number[] = [];
+      for (const name of names) {
+        const existing = await tx.tag.findUnique({ where: { slug: name } });
+        if (existing) {
+          tagIds.push(existing.id);
+        } else {
+          const created = await tx.tag.create({ data: { name, slug: name } });
+          tagIds.push(created.id);
+        }
+      }
       await tx.productTag.deleteMany({ where: { productId } });
-      if (tags.length > 0) {
+      if (tagIds.length > 0) {
         await tx.productTag.createMany({
-          data: tags.map((tag) => ({ productId, tagName: tag })),
+          data: tagIds.map((tagId) => ({ productId, tagId })),
         });
       }
     });
     this.notifyPublicChange(productId);
-    return this.prisma.productTag.findMany({ where: { productId } });
+    return this.getTags(productId);
+  }
+
+  /* ═══ 属性管理 ═══ */
+  async getAttributes(productId: number) {
+    return this.prisma.productAttributeValue.findMany({
+      where: { productId },
+      include: { attributeValue: { include: { attribute: true } } },
+      orderBy: { id: 'asc' },
+    });
+  }
+
+  async setAttributes(productId: number, attributeValueIds: number[]) {
+    const ids = [
+      ...new Set(
+        (attributeValueIds || [])
+          .map((v) => Number(v))
+          .filter((n) => Number.isInteger(n) && n > 0),
+      ),
+    ];
+    if (ids.length) {
+      const count = await this.prisma.attributeValue.count({ where: { id: { in: ids } } });
+      if (count !== ids.length) {
+        throw new BadRequestException('包含不存在的属性值');
+      }
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.productAttributeValue.deleteMany({ where: { productId } });
+      if (ids.length) {
+        await tx.productAttributeValue.createMany({
+          data: ids.map((attributeValueId) => ({ productId, attributeValueId })),
+        });
+      }
+    });
+    this.notifyPublicChange(productId);
+    return this.getAttributes(productId);
   }
 
   /**

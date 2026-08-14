@@ -948,14 +948,11 @@ export const inventoryApi = {
 
 // ===== AI Classify API =====
 export const aiClassifyApi = {
-  classify: (data: FormData) =>
-    api.post("/ai-classify/single", data, {
-      headers: { "Content-Type": "multipart/form-data" },
-    }),
-  batchClassify: (data: FormData) =>
-    api.post("/ai-classify/batch", data, {
-      headers: { "Content-Type": "multipart/form-data" },
-    }),
+  // 单张/批量识别：服务端 DTO 要求 JSON（imageUrl / imageUrls），非 multipart
+  classify: (data: { imageUrl: string }) =>
+    api.post("/ai-classify/single", data),
+  batchClassify: (data: { imageUrls: string[] }) =>
+    api.post("/ai-classify/batch", data),
   getRecords: async (params: any) => {
     if (USE_MOCK) {
       await mockDelay();
@@ -1008,8 +1005,10 @@ export const aiClassifyApi = {
     }
     return api.get("/ai-classify/records", { params });
   },
-  confirm: (id: number, data: any) =>
-    api.put(`/ai-classify/confirm/${id}`, data),
+  confirm: (
+    id: number,
+    data: { status: "confirmed" | "rejected"; confirmedCategoryId?: number },
+  ) => api.put(`/ai-classify/confirm/${id}`, data),
 };
 
 // ===== Settings API =====
@@ -1057,6 +1056,78 @@ export const settingsApi = {
       return mockRes({ list: [], total: 0, page: 1, pageSize: 30 });
     }
     return api.get("/settings/logs", { params });
+  },
+  getFlags: async () => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      return mockRes({
+        commerceEnabled: false,
+        cartEnabled: false,
+        paymentEnabled: false,
+        analyticsDashboardEnabled: false,
+      });
+    }
+    return api.get("/settings/flags");
+  },
+};
+
+// ===== Attribute API =====
+export const attributeApi = {
+  getPublic: async () => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      return mockRes({ list: [] });
+    }
+    return api.get("/attributes");
+  },
+  getAll: async () => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      return mockRes({ list: [] });
+    }
+    return api.get("/attributes/admin");
+  },
+  create: async (data: any) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      return mockRes(data);
+    }
+    return api.post("/attributes", data);
+  },
+  update: async (id: number, data: any) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      return mockRes(data);
+    }
+    return api.put(`/attributes/${id}`, data);
+  },
+  remove: async (id: number) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      return mockRes({ id });
+    }
+    return api.delete(`/attributes/${id}`);
+  },
+  addValue: async (attributeId: number, data: any) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      return mockRes(data);
+    }
+    return api.post(`/attributes/${attributeId}/values`, data);
+  },
+  updateValue: async (valueId: number, data: any) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      return mockRes(data);
+    }
+    return api.put(`/attributes/values/${valueId}`, data);
+  },
+  removeValue: async (valueId: number) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      return mockRes({ id: valueId });
+    }
+    return api.delete(`/attributes/values/${valueId}`);
   },
 };
 

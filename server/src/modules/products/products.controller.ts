@@ -392,6 +392,23 @@ export class ProductsController {
     return this.productsService.updateTags(+id, body.tags || []);
   }
 
+  /* ═══ 商品属性管理 ═══ */
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Get(":id/attributes")
+  @ApiOperation({ summary: "获取商品属性值列表" })
+  getAttributes(@Param("id") id: string) {
+    return this.productsService.getAttributes(+id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Put(":id/attributes")
+  @ApiOperation({ summary: "批量设置商品属性值（按 attributeValueId）" })
+  updateAttributes(@Param("id") id: string, @Body() body: { attributeValueIds: number[] }) {
+    return this.productsService.setAttributes(+id, body.attributeValueIds || []);
+  }
+
   /* ═══ 证书管理 ═══ */
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

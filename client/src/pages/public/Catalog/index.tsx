@@ -4,13 +4,9 @@ import { usePageMetaStore } from "@/store/pageMetaStore";
 import { motion, AnimatePresence } from "framer-motion";
 import { message } from "antd";
 import { useSelectionStore } from "@/store/selectionStore";
-import {
-  CRAFTS,
-  MATERIALS,
-  WEIGHT_RANGES,
-  type CatalogProduct,
-} from "@/data/catalogData";
+import { WEIGHT_RANGES, type CatalogProduct } from "@/data/catalogData";
 import { useProductData, type RealCategory } from "@/hooks/useProductData";
+import { useAttributeDictionary } from "@/hooks/useAttributeDictionary";
 import { getListingImage } from "@/utils/productImage";
 import { SecureImage } from "@/components/common/SecureImage";
 import { selectionInquiryApi } from "@/services/api";
@@ -372,6 +368,7 @@ function Toolbar({
   category,
   total,
   materials,
+  materialOptions,
   sort,
   selCount,
   onToggleMaterial,
@@ -381,6 +378,7 @@ function Toolbar({
   category: string;
   total: number;
   materials: string[];
+  materialOptions: string[];
   sort: string;
   selCount: number;
   onToggleMaterial: (m: string) => void;
@@ -444,7 +442,7 @@ function Toolbar({
                     padding: "14px 16px",
                   }}
                 >
-                  {MATERIALS.map((o) => (
+                  {materialOptions.map((o) => (
                     <label
                       key={o}
                       style={{
@@ -702,6 +700,8 @@ function Tag({ label, onRemove }: { label: string; onRemove: () => void }) {
 function FilterDrawer({
   materials,
   crafts,
+  materialOptions,
+  craftOptions,
   weights,
   sizes,
   sizeOptions,
@@ -715,6 +715,8 @@ function FilterDrawer({
 }: {
   materials: string[];
   crafts: string[];
+  materialOptions: string[];
+  craftOptions: string[];
   weights: string[];
   sizes: string[];
   sizeOptions: string[];
@@ -788,13 +790,13 @@ function FilterDrawer({
         <div style={{ flex: 1 }}>
           <FG
             title="材质"
-            options={MATERIALS}
+            options={materialOptions}
             selected={materials}
             onToggle={(v) => toggle(materials, v, onMaterials)}
           />
           <FG
             title="工艺"
-            options={CRAFTS}
+            options={craftOptions}
             selected={crafts}
             onToggle={(v) => toggle(crafts, v, onCrafts)}
           />
@@ -1930,6 +1932,7 @@ export default function Catalog() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickView, setQuickView] = useState<CatalogProduct | null>(null);
   const selCount = useSelectionStore((s) => s.selectedIds.size);
+  const { materialOptions, craftOptions } = useAttributeDictionary();
 
   /* ═══ API 产品数据（共享 Hook） ═══ */
   const {
@@ -2031,6 +2034,7 @@ export default function Catalog() {
           category={params.category}
           total={sorted.length}
           materials={params.materials}
+          materialOptions={materialOptions}
           sort={params.sort}
           selCount={selCount}
           onToggleMaterial={(m) => toggleArray("material", params.materials, m)}
@@ -2164,6 +2168,8 @@ export default function Catalog() {
         <FilterDrawer
           materials={params.materials}
           crafts={params.crafts}
+          materialOptions={materialOptions}
+          craftOptions={craftOptions}
           weights={params.weights}
           sizes={params.sizes}
           sizeOptions={sizeOptions}

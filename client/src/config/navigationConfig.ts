@@ -234,6 +234,11 @@ export const navigationConfig: NavDomain[] = [
             label: "类目与属性",
             route: "/admin/categories",
           },
+          {
+            key: "attributes",
+            label: "属性字典",
+            route: "/admin/attributes",
+          },
         ],
       },
       {
@@ -309,45 +314,6 @@ export const navigationConfig: NavDomain[] = [
       },
     ],
   },
-  /* 5. 推广 */
-  {
-    key: "promotion",
-    label: "推广",
-    icon: "send",
-    order: 2,
-    section: "growth",
-    disabled: true,
-    groups: [
-      {
-        key: "channels",
-        label: "渠道管理",
-        collapsible: false,
-        defaultOpen: true,
-        items: [
-          {
-            key: "channels-list",
-            label: "渠道管理",
-            route: "/admin/promotion",
-            disabled: true,
-          },
-        ],
-      },
-      {
-        key: "promo-plans",
-        label: "推广计划",
-        collapsible: false,
-        defaultOpen: false,
-        items: [
-          {
-            key: "promo-plans-list",
-            label: "推广计划",
-            route: "/admin/promotion",
-            disabled: true,
-          },
-        ],
-      },
-    ],
-  },
   /* 6. 客服 */
   {
     key: "service",
@@ -362,21 +328,21 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: true,
         items: [
-          { key: "inquiry-list", label: "预约咨询", route: "/admin/inquiries" },
+          { key: "inquiry-list", label: "预约咨询", route: "/admin/leads?type=inquiry" },
           {
             key: "inquiry-pending",
             label: "待处理预约",
-            route: "/admin/inquiries?status=PENDING",
+            route: "/admin/leads?type=inquiry&status=PENDING",
           },
           {
             key: "selection-list",
             label: "选款咨询",
-            route: "/admin/selection-inquiry",
+            route: "/admin/leads?type=selection",
           },
           {
             key: "selection-pending",
             label: "待处理选款",
-            route: "/admin/selection-inquiry?status=PENDING",
+            route: "/admin/leads?type=selection&status=PENDING",
           },
           {
             key: "partner-applications",
@@ -453,57 +419,7 @@ export const navigationConfig: NavDomain[] = [
           {
             key: "customer-leads-following",
             label: "跟进中",
-            route: "/admin/leads?status=FOLLOWING",
-          },
-        ],
-      },
-    ],
-  },
-  /* 9. 财务 */
-  {
-    key: "finance",
-    label: "财务",
-    icon: "account-book",
-    order: 1,
-    section: "assets",
-    disabled: true,
-    groups: [
-      {
-        key: "finance-overview",
-        label: "财务概览",
-        collapsible: false,
-        defaultOpen: true,
-        items: [
-          {
-            key: "finance-overview-page",
-            label: "财务概览",
-            route: "/admin/finance",
-            disabled: true,
-          },
-        ],
-      },
-    ],
-  },
-  /* 10. 金融 */
-  {
-    key: "fintech",
-    label: "金融",
-    icon: "insurance",
-    order: 2,
-    section: "assets",
-    disabled: true,
-    groups: [
-      {
-        key: "fintech-overview",
-        label: "金融服务",
-        collapsible: false,
-        defaultOpen: true,
-        items: [
-          {
-            key: "fintech-overview-page",
-            label: "金融服务",
-            route: "/admin/fintech",
-            disabled: true,
+            route: "/admin/leads?status=PROCESSING",
           },
         ],
       },

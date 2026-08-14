@@ -150,6 +150,7 @@ export interface Certificate {
 export interface ProductTag {
   id: number;
   productId: number;
+  tagId?: number;
   tagName: string;
 }
 

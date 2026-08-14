@@ -48,12 +48,17 @@ export class SettingsController {
   @ApiOperation({ summary: '获取系统日志' })
   @Get('logs') getLogs(@Query() query: any) { return this.settingsService.getLogs(query); }
 
+  @Public()
   @ApiOperation({ summary: '获取功能开关' })
   @Get('flags') getFlags() {
+    // 单一来源：与 CustomerCommerceGuard 读取同一环境变量。
+    // 缺失或写错一律按关闭处理；前端据此隐藏交易 CTA，服务端守卫负责最终拦截。
+    const commerceEnabled =
+      process.env.CUSTOMER_COMMERCE_ENABLED?.trim().toLowerCase() === 'true';
     return {
-      commerceEnabled: false,
-      cartEnabled: false,
-      paymentEnabled: false,
+      commerceEnabled,
+      cartEnabled: commerceEnabled,
+      paymentEnabled: commerceEnabled,
       analyticsDashboardEnabled: false,
     };
   }

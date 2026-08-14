@@ -2,14 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { productApi, categoryApi, publicProductStreamUrl } from '@/services/api';
 import { USE_MOCK } from '@/services/mockData';
 import { unwrapResponse } from '@/utils/unwrap';
+import { getMaterialLabel } from '@/utils/material';
 import { type CatalogProduct } from '@/data/catalogData';
 import { useReconnectingEventSource } from './useReconnectingEventSource';
-
-/** API enum → 中文材质 */
-const matLabel = (mt: string) => (
-  { GOLD_999: '足金999', GOLD_9999: '足金9999', AU750: '18K金', PT950: '铂金950',
-    S925: '银', DIAMOND: '镶钻', JADE: '玉石', PEARL: '珍珠', COLOR_GEM: '彩宝', OTHER: '其他' } as Record<string, string>
-)[mt] || mt;
 
 /** 真实分类节点 */
 export interface RealCategory {
@@ -37,9 +32,10 @@ function mapApiProduct(p: any, categoryById: Map<number, RealCategory>): Catalog
     id: p.id,
     sku: p.code || '',
     name: p.name || '',
+    shortDescription: p.shortDescription || '',
     primaryCategoryId: String(primaryCategory?.id || p.categoryId || ''),
     secondaryCategoryId: String(secondaryCategory?.id || p.categoryId || ''),
-    material: matLabel(p.materialType),
+    material: getMaterialLabel(p.materialType),
     craft: Array.isArray(p.craftTechnique) ? p.craftTechnique.join('、') : (p.craftTechnique || ''),
     weight: p.goldWeight ? `${p.goldWeight}g` : (p.weight ? `${p.weight}g` : ''),
     size: p.size || '',
@@ -115,5 +111,7 @@ export function useProductData() {
     return apiProducts;
   }, [apiProducts, loading, error]);
 
-  return { products, loading, error, categories };
+  const reload = () => setRevision((v) => v + 1);
+
+  return { products, loading, error, categories, reload };
 }

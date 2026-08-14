@@ -39,12 +39,11 @@ const ROUTE_RULES: RouteRule[] = [
   // 内容编辑
   { prefix: "/admin/products", roles: CONTENT_EDITORS },
   { prefix: "/admin/categories", roles: CONTENT_EDITORS },
+  { prefix: "/admin/attributes", roles: CONTENT_EDITORS },
   { prefix: "/admin/editor", roles: CONTENT_EDITORS },
   { prefix: "/admin/site-content", roles: CONTENT_EDITORS },
   { prefix: "/admin/media", roles: CONTENT_EDITORS },
   // 客服域
-  { prefix: "/admin/inquiries", roles: CUSTOMER_SERVICE },
-  { prefix: "/admin/selection-inquiry", roles: CUSTOMER_SERVICE },
   { prefix: "/admin/leads", roles: CUSTOMER_SERVICE },
   { prefix: "/admin/partner-applications", roles: CUSTOMER_SERVICE },
 ];
