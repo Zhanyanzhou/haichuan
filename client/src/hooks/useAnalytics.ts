@@ -1,10 +1,24 @@
 /**
  * 前端行为事件采集 Hook
- * — 采集失败不影响业务
- * — 匿名会话支持
- * — 自动去重（1s 内相同事件不重复发送）
+ *
+ * 当前阶段：行为分析默认关闭（见 docs/PUBLIC_ACCESS_MATRIX.md §隐私与分析）。
+ * - 不创建 `_asid` 匿名会话 ID；
+ * - 不发送 `/analytics/track` 请求；
+ * - 保留所有导出函数签名为安全 no-op，调用方无需改动。
+ *
+ * 在完成独立的隐私偏好与用户授权机制之前，不得恢复真实采集。
+ * 恢复方式：将 ANALYTICS_ENABLED 改为 true 并重新接入 send() 实现。
+ *
+ * 历史实现保留在下方注释参考，已彻底停用。
  */
 
+// 行为分析开关：当前阶段强制关闭。
+const ANALYTICS_ENABLED = false;
+
+// 关闭状态下不读写 localStorage，避免创建 `_asid` 等追踪标识。
+// 关闭状态下不发送任何网络请求。
+
+/* 关闭前的原始实现（仅供恢复时参考，当前不执行）
 let sessionId = localStorage.getItem("_asid");
 if (!sessionId) {
   sessionId =
@@ -41,59 +55,60 @@ async function send(event: Record<string, unknown>) {
       }),
     });
   } catch {
-    /* 采集静默失败 */
+    // 采集静默失败
   }
+}
+*/
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function noop(..._args: unknown[]) {
+  /* 分析关闭：安全 no-op */
 }
 
 export function trackPageView() {
-  if (!shouldSend("pv", 5000)) return;
-  send({ eventName: "page_view" });
+  if (!ANALYTICS_ENABLED) return noop();
 }
 
 export function trackProductView(productId: number) {
-  const key = `pv_${productId}`;
-  if (!shouldSend(key, 30000)) return;
-  send({ eventName: "product_view", productId });
+  if (!ANALYTICS_ENABLED) return noop(productId);
 }
 
 export function trackSearch(term: string) {
-  if (!term || !shouldSend("search", 3000)) return;
-  send({ eventName: "search", searchTerm: term });
+  if (!ANALYTICS_ENABLED) return noop(term);
 }
 
 export function trackFilter(filterType: string, value: string) {
-  if (!shouldSend(`filter_${filterType}`, 3000)) return;
-  send({ eventName: "filter", metadata: { filterType, value } });
+  if (!ANALYTICS_ENABLED) return noop(filterType, value);
 }
 
 export function trackAddToSelection(productId: number) {
-  send({ eventName: "add_to_selection", productId });
+  if (!ANALYTICS_ENABLED) return noop(productId);
 }
 
 export function trackAddToCart(productId: number, quantity: number) {
-  send({ eventName: "add_to_cart", productId, metadata: { quantity } });
+  if (!ANALYTICS_ENABLED) return noop(productId, quantity);
 }
 
 export function trackBeginCheckout(itemCount: number, amount: number) {
-  send({ eventName: "begin_checkout", metadata: { itemCount, amount } });
+  if (!ANALYTICS_ENABLED) return noop(itemCount, amount);
 }
 
 export function trackOrderCreated(orderId: number, amount: number) {
-  send({ eventName: "order_created", metadata: { orderId, amount } });
+  if (!ANALYTICS_ENABLED) return noop(orderId, amount);
 }
 
 export function trackRemoveFromSelection(productId: number) {
-  send({ eventName: "remove_from_selection", productId });
+  if (!ANALYTICS_ENABLED) return noop(productId);
 }
 
 export function trackSubmitSelection(count: number) {
-  send({ eventName: "submit_selection", metadata: { itemCount: count } });
+  if (!ANALYTICS_ENABLED) return noop(count);
 }
 
 export function trackSubmitInquiry() {
-  send({ eventName: "submit_inquiry" });
+  if (!ANALYTICS_ENABLED) return noop();
 }
 
 export function trackCtaClick(label: string) {
-  send({ eventName: "cta_click", metadata: { label } });
+  if (!ANALYTICS_ENABLED) return noop(label);
 }

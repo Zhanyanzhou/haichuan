@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Table, Select, Card, Space, Tag, Button } from 'antd';
 import api from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
@@ -17,17 +17,18 @@ export default function AnalyticsView() {
   const [hours, setHours] = useState(24);
   const [loading, setLoading] = useState(true);
 
-  const fetch = async () => {
+  const fetch = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get('/analytics/events', { params: { eventName: eventName || undefined, hours, pageSize: 100 } });
       const data = unwrapResponse<any>(res);
-      setList(data.list ?? []); setTotal(data.total ?? 0);
+      // P1-36：可选链，避免后端返回空体时 unwrapResponse 返回 null 导致整页崩溃
+      setList(data?.list ?? []); setTotal(data?.total ?? 0);
     } catch { /* */ }
     finally { setLoading(false); }
-  };
+  }, [eventName, hours]);
 
-  useEffect(() => { fetch(); }, [eventName, hours]);
+  useEffect(() => { void fetch(); }, [fetch]);
 
   const columns = [
     { title: '时间', dataIndex: 'occurredAt', width: 160, render: (v: string) => v ? new Date(v).toLocaleString('zh-CN') : '-' },

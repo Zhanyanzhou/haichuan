@@ -14,7 +14,7 @@
  * │  👤 用户   │                                         │
  * └────────────┴─────────────────────────────────────────┘
  */
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Outlet, useNavigate, useLocation, Link } from "react-router-dom";
 import { Button, Dropdown, Avatar, Drawer } from "antd";
 import {
@@ -56,7 +56,7 @@ import {
   toggleCommonNavPin,
   type CommonNavItem,
 } from "@/utils/adminCommonNav";
-import { hasPermission } from "@/store/permissionStore";
+import { canAccessAdminRoute } from "@/config/adminRouteAccess";
 
 /* ═══════ 图标映射 ═══════ */
 const domainIcons: Record<string, React.ReactNode> = {
@@ -75,17 +75,14 @@ const domainIcons: Record<string, React.ReactNode> = {
   setting: <SettingOutlined />,
 };
 
-/* ═══════ 按分区聚合域 ═══════ */
-function canAccessAdminRoute(role: string | undefined, route: string) {
-  if (route.startsWith("/admin/editor/")) {
-    return Boolean(role && hasPermission(role, "content.update"));
-  }
-  if (route.startsWith("/admin/site-content") || route.startsWith("/admin/media")) {
-    return Boolean(role && hasPermission(role, "content.read"));
-  }
-  return true;
+/** 浏览器放大或分屏时，优先释放侧栏空间，保证主操作区可用。 */
+const ADMIN_COMPACT_BREAKPOINT = 1024;
+
+function isCompactViewport() {
+  return window.innerWidth <= ADMIN_COMPACT_BREAKPOINT;
 }
 
+/* ═══════ 按分区聚合域 ═══════ */
 function useNavSections(role: string | undefined) {
   return useMemo(() => {
     return navSections.map((sec) => ({
@@ -220,7 +217,8 @@ function SidebarDomainItem({
 /* ═══════ 组件 ═══════ */
 export default function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [isCompact, setIsCompact] = useState(isCompactViewport);
+  const menuToggleRef = useRef<HTMLButtonElement>(null);
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(
     new Set(),
   );
@@ -247,15 +245,47 @@ export default function AdminLayout() {
 
   // 响应式检测
   useEffect(() => {
-    const h = () => setIsMobile(window.innerWidth < 768);
+    const h = () => setIsCompact(isCompactViewport());
     window.addEventListener("resize", h);
     return () => window.removeEventListener("resize", h);
   }, []);
+
+  useEffect(() => {
+    if (!isCompact || !mobileOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setMobileOpen(false);
+      requestAnimationFrame(() => menuToggleRef.current?.focus());
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isCompact, mobileOpen]);
 
   // 未登录跳转
   useEffect(() => {
     if (!isLoggedIn) navigate("/admin/login");
   }, [isLoggedIn, navigate]);
+
+  // SEO：后台页面禁止搜索引擎索引（robots.txt Disallow 的补充保障）
+  useEffect(() => {
+    const tag = document.head.querySelector<HTMLMetaElement>('meta[name="robots"]');
+    if (tag) tag.setAttribute("content", "noindex, nofollow");
+    else {
+      const el = document.createElement("meta");
+      el.setAttribute("name", "robots");
+      el.setAttribute("content", "noindex, nofollow");
+      document.head.appendChild(el);
+    }
+    return () => {
+      // 离开后台时移除 noindex，恢复前台页面的可索引性
+      document.head
+        .querySelector('meta[name="robots"]')
+        ?.setAttribute("content", "index, follow");
+    };
+  }, []);
 
   useEffect(() => {
     setCommonItems(getCommonNavItems(commonUserId));
@@ -285,7 +315,7 @@ export default function AdminLayout() {
       if (domain.directRoute) {
         setExpandedDomains(new Set());
         navigate(domain.directRoute);
-        if (isMobile) setMobileOpen(false);
+        if (isCompact) setMobileOpen(false);
         return;
       }
 
@@ -294,7 +324,7 @@ export default function AdminLayout() {
       if (defaultRoute && navCtx?.domain.key !== domain.key) {
         setExpandedDomains(new Set([domain.key]));
         navigate(defaultRoute);
-        if (isMobile) setMobileOpen(false);
+        if (isCompact) setMobileOpen(false);
         return;
       }
 
@@ -303,17 +333,17 @@ export default function AdminLayout() {
         return;
       }
 
-      if (isMobile) setMobileOpen(false);
+      if (isCompact) setMobileOpen(false);
     },
-    [isMobile, navCtx?.domain.key, navigate, toggleDomain],
+    [isCompact, navCtx?.domain.key, navigate, toggleDomain],
   );
 
   const handleItemClick = useCallback(
     (route: string) => {
       navigate(route);
-      if (isMobile) setMobileOpen(false);
+      if (isCompact) setMobileOpen(false);
     },
-    [navigate, isMobile],
+    [navigate, isCompact],
   );
 
   const handleToggleCommonPin = useCallback((route: string) => {
@@ -337,7 +367,11 @@ export default function AdminLayout() {
   const renderSidebar = () => (
     <div className="admin-sidebar">
       {/* 导航区 */}
-      <nav className="admin-sidebar__nav">
+      <nav
+        id={isCompact ? "admin-navigation-drawer" : undefined}
+        className="admin-sidebar__nav"
+        aria-label="后台导航"
+      >
         {sections.map((section) => {
           const visibleDomains = section.domains;
           if (visibleDomains.length === 0) return null;
@@ -418,12 +452,16 @@ export default function AdminLayout() {
       {/* ═══ Header ═══ */}
       <header className="admin-header">
         <div className="admin-header__left">
-          {isMobile && (
+          {isCompact && (
             <Button
+              ref={menuToggleRef}
               type="text"
               icon={<MenuOutlined />}
-              onClick={() => setMobileOpen(true)}
+              onClick={() => setMobileOpen((open) => !open)}
               className="admin-header__menu-btn"
+              aria-label={mobileOpen ? "关闭后台导航" : "打开后台导航"}
+              aria-controls="admin-navigation-drawer"
+              aria-expanded={mobileOpen}
             />
           )}
         </div>
@@ -478,10 +516,10 @@ export default function AdminLayout() {
       {/* ═══ Body ═══ */}
       <div className="admin-body">
         {/* 桌面端侧边栏 */}
-        {!isMobile && renderSidebar()}
+        {!isCompact && renderSidebar()}
 
         {/* 移动端抽屉 */}
-        {isMobile && (
+        {isCompact && (
           <Drawer
             placement="left"
             open={mobileOpen}

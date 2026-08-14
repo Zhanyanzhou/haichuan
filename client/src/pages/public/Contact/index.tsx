@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { inquiriesApi, settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackPageView, trackSubmitInquiry } from "@/hooks/useAnalytics";
@@ -126,6 +126,8 @@ function useSiteSettings() {
 }
 
 export default function Contact() {
+  const [searchParams] = useSearchParams();
+  const isCommerceRedirect = searchParams.get("reason") === "commerce-unavailable";
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
   // SEO：联系页独立标题与描述
@@ -324,6 +326,22 @@ export default function Contact() {
         }}
       >
         <div style={{ maxWidth: MW, marginInline: "auto", paddingInline: PX }}>
+          {isCommerceRedirect && (
+            <p
+              role="status"
+              style={{
+                margin: "0 0 18px",
+                padding: "12px 16px",
+                border: `1px solid ${T.gold}`,
+                background: "#FBF7EE",
+                color: T.txt,
+                fontSize: 13,
+                lineHeight: 1.6,
+              }}
+            >
+              线上购物与支付暂未开放。您可以在此提交需求，具体沟通与后续安排以实际沟通为准。
+            </p>
+          )}
           <p
             style={{
               fontSize: 10,

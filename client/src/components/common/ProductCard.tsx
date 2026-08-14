@@ -2,7 +2,7 @@ import { Card, Tag, Tooltip } from 'antd';
 import { EyeOutlined, ShoppingCartOutlined, FireOutlined, GiftOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { Product } from '@/types';
-import SafeImage from '@/components/ui/SafeImage';
+import { SecureImage } from '@/components/common/SecureImage';
 
 interface ProductCardProps {
   product: Product;
@@ -12,8 +12,8 @@ interface ProductCardProps {
 
 const ProductCard: React.FC<ProductCardProps> = ({ product, showSales = true, className = '' }) => {
   const navigate = useNavigate();
-  const mainImage = product.images?.[0]?.url || '';
-  const displayPrice = product.price || product.priceMin || 0;
+  const mainImage = (product.images?.[0] as any)?.mediaUrl || product.images?.[0]?.url || '';
+  const displayPrice = product.price || 0;
 
   return (
     <Card
@@ -21,7 +21,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, showSales = true, cl
       className={`group overflow-hidden border border-brand-line bg-white transition-shadow hover:shadow-lg ${className}`}
       cover={
         <div className="relative aspect-square overflow-hidden bg-gray-50">
-          <SafeImage
+          <SecureImage
             src={mainImage}
             alt={product.name}
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"

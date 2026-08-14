@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { getCarouselAspectRatio, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 
 interface CarouselBlockProps {
   module: {
@@ -14,7 +15,7 @@ interface CarouselBlockProps {
 /**
  * 轮播图模块 — 对标旺铺"轮播图海报"
  * content: { images: [{url,link,alt}], autoPlay, interval, showDots, showArrows }
- * layoutConfig: { height }
+ * layoutConfig: { desktopRatio, mobileRatio }
  */
 export default function CarouselBlock({
   module,
@@ -26,8 +27,8 @@ export default function CarouselBlock({
   const interval = content.interval || 4000;
   const showDots = content.showDots !== false;
   const showArrows = content.showArrows !== false;
-  const height = layoutConfig.height || 500;
-  const mobileHeight = layoutConfig.mobileHeight || 640;
+  const desktopRatio = getCarouselAspectRatio("desktop", layoutConfig.desktopRatio);
+  const mobileRatio = getCarouselAspectRatio("mobile", layoutConfig.mobileRatio);
 
   const [current, setCurrent] = useState(0);
   const validImages = (Array.isArray(images) ? images : []).filter(
@@ -64,8 +65,8 @@ export default function CarouselBlock({
       <BlockEmptyPlaceholder
         icon="🖼️"
         hint="轮播图"
-        spec="请添加轮播图片 · 建议 1920×600"
-        height={height}
+        spec="请添加轮播图片 · 电脑端建议 3840×1600（12:5）"
+        height="clamp(320px, 41.67vw, 600px)"
       />
     );
   }
@@ -73,7 +74,7 @@ export default function CarouselBlock({
   const img = validImages[current];
   const imageContent = (
     <picture data-editor-field="images">
-      {img.mobileUrl && <source media="(max-width: 1023px) and (orientation: portrait)" srcSet={img.mobileUrl} />}
+      {img.mobileUrl && <source media={RESPONSIVE_CANVAS.mobileMediaQuery} srcSet={img.mobileUrl} />}
       <img
         src={img.url}
         alt={img.alt || ""}
@@ -92,16 +93,16 @@ export default function CarouselBlock({
       className="homepage-carousel"
       style={{
         position: "relative",
-        "--homepage-carousel-height": `${height}px`,
-        "--homepage-carousel-mobile-height": `${mobileHeight}px`,
+        "--homepage-carousel-ratio": desktopRatio,
+        "--homepage-carousel-mobile-ratio": mobileRatio,
         overflow: "hidden",
         background: "#E7DDCE",
       } as CSSProperties}
     >
       <style>{`
-        .homepage-carousel { height: var(--homepage-carousel-height); }
-        @media (max-width: 1023px) and (orientation: portrait) {
-          .homepage-carousel { height: var(--homepage-carousel-mobile-height); }
+        .homepage-carousel { aspect-ratio: var(--homepage-carousel-ratio); }
+        @media ${RESPONSIVE_CANVAS.mobileMediaQuery} {
+          .homepage-carousel { aspect-ratio: var(--homepage-carousel-mobile-ratio); }
         }
         .homepage-carousel picture { display: block; width: 100%; height: 100%; }
       `}</style>

@@ -1,41 +1,50 @@
 /**
- * 海川珠宝 Feature Flags
+ * 海川珠宝 前台销售模式工具
  *
- * 功能开关统一管理。
- * 关 → 菜单隐藏 + 前台按钮隐藏 + API 拒绝 + 无假数据。
- *
- * 当前阶段: 电商功能全部关闭 (commerceEnabled = false)
+ * 电商开关（FeatureFlag）当前硬编码为关闭：CUSTOMER_COMMERCE_ENABLED = false。
+ * 现公开站采用“作品展示 + 顾问转化”模式，客户线上交易默认关闭。
+ * 服务端守卫（CustomerCommerceGuard）是最终安全边界；本模块同步关闭前台交易 CTA，
+ * 避免向访客展示不可用入口。当前消费者：MyAccountDashboard、ProductDetail。
  */
 
-export type FeatureFlag =
-  | "commerceEnabled"
-  | "cartEnabled"
-  | "paymentEnabled"
-  | "analyticsDashboardEnabled"
-  | "puckEditorEnabled";
+const CUSTOMER_COMMERCE_ENABLED = false;
 
-// 当前阶段默认值
-const defaults: Record<FeatureFlag, boolean> = {
-  commerceEnabled: false,
-  cartEnabled: false,
-  paymentEnabled: false,
-  analyticsDashboardEnabled: false,
-  puckEditorEnabled: false,
-};
-
-// 可从 settings API 动态覆盖
-const overrides: Partial<Record<FeatureFlag, boolean>> = {};
-
-export function getFeatureFlag(flag: FeatureFlag): boolean {
-  if (flag in overrides) return overrides[flag]!;
-  return defaults[flag];
+/** 前台交易功能是否整体开放。 */
+export function isCustomerCommerceEnabled(): boolean {
+  return CUSTOMER_COMMERCE_ENABLED;
 }
 
-export function setFeatureFlag(flag: FeatureFlag, value: boolean) {
-  overrides[flag] = value;
+/** 统一规则：全站交易开关开启且商品为“直接购买”时，才允许加购/下单。 */
+export function isCommerceAllowed(salesMode: string | undefined): boolean {
+  return isCustomerCommerceEnabled() && salesMode === "DIRECT_PURCHASE";
 }
 
-export function isCommerceAllowed(salesMode: string): boolean {
-  if (!getFeatureFlag("commerceEnabled")) return false;
-  return salesMode === "DIRECT_PURCHASE";
+/** 非直接购买场景的咨询入口路由 */
+export function salesModeRoute(salesMode?: string): string {
+  switch (salesMode) {
+    case "SELECTION":
+      return "/catalog";
+    case "APPOINTMENT":
+      return "/contact";
+    case "CUSTOM_INQUIRY":
+      return "/custom";
+    default:
+      return "/contact";
+  }
+}
+
+/** 非直接购买场景的按钮文案 */
+export function salesModeCta(salesMode?: string): string {
+  switch (salesMode) {
+    case "SELECTION":
+      return "去选款咨询";
+    case "APPOINTMENT":
+      return "预约到店";
+    case "CUSTOM_INQUIRY":
+      return "定制咨询";
+    case "DISPLAY_ONLY":
+      return "仅展示";
+    default:
+      return "联系我们";
+  }
 }

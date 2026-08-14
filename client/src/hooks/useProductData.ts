@@ -3,6 +3,7 @@ import { productApi, categoryApi, publicProductStreamUrl } from '@/services/api'
 import { USE_MOCK } from '@/services/mockData';
 import { unwrapResponse } from '@/utils/unwrap';
 import { type CatalogProduct } from '@/data/catalogData';
+import { useReconnectingEventSource } from './useReconnectingEventSource';
 
 /** API enum → 中文材质 */
 const matLabel = (mt: string) => (
@@ -44,7 +45,7 @@ function mapApiProduct(p: any, categoryById: Map<number, RealCategory>): Catalog
     size: p.size || '',
     series: '',
     scene: p.salesMode || '',
-    images: (p.images || []).map((img: any) => img.url || ''),
+    images: (p.images || []).map((img: any) => img.mediaUrl || img.url || ''),
     categoryName: categoryById.get(p.categoryId)?.name || '',
     price: Number(p.price) || 0,
   };
@@ -100,12 +101,12 @@ export function useProductData() {
     return () => { cancelled = true; };
   }, [revision]);
 
-  useEffect(() => {
-    if (USE_MOCK) return;
-    const stream = new EventSource(publicProductStreamUrl);
-    stream.onmessage = () => setRevision((value) => value + 1);
-    return () => stream.close();
-  }, []);
+  // P1-35：带自动重连 + debounce 的 SSE（断线重连；消息风暴合并为一次重拉）
+  useReconnectingEventSource(
+    USE_MOCK ? null : publicProductStreamUrl,
+    () => setRevision((value) => value + 1),
+    { debounceMs: 500 },
+  );
 
   const products = useMemo(() => {
     if (loading) return [];

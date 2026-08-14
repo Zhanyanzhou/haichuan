@@ -1,19 +1,26 @@
 /**
  * 统一商品图片选择函数
- * 
+ *
  * 读取规则（按优先级回退）：
  *   列表/搜索/推荐 → listingImage → primaryImage → 第一张 FRONT → 第一张 → placeholder
  *   商品详情       → primaryImage → 第一张 FRONT → 第一张 → placeholder
  *   后台缩略       → listingImage → primaryImage → 第一张 FRONT → placeholder
- * 
- * 禁止散落在各组件中的 images[0] 写法。
+ *
+ * 受控产品库：catalog 接口返回受保护媒体端点 mediaUrl（不含公开 url）；
+ * 此处优先取 mediaUrl，回退 url（兼容 admin 接口与历史数据）。禁止散落在各组件中的 images[0] 写法。
  */
 
 import type { ProductImage } from '@/types';
 
 /** ProductImage 对象判断 */
 function isImageObj(img: any): img is ProductImage {
-  return typeof img === 'object' && img !== null && 'url' in img;
+  return typeof img === 'object' && img !== null && ('url' in img || 'mediaUrl' in img);
+}
+
+/** 优先 mediaUrl（受控媒体端点），回退 url（admin 接口/历史数据） */
+function pickImgUrl(img: any): string {
+  if (!img) return '';
+  return img.mediaUrl || img.url || '';
 }
 
 /** 从 images 数组中提取第一张有效 URL */
@@ -22,9 +29,9 @@ function firstImageUrl(images?: ProductImage[] | string[]): string {
   const first = images[0];
   if (isImageObj(first)) {
     // ProductImage[] — 优先 FRONT
-    const front = images.find(img => isImageObj(img) && img.type === 'FRONT') as ProductImage | undefined;
-    if (front?.url) return front.url;
-    if (first.url) return first.url;
+    const front = images.find(img => isImageObj(img) && img.type === 'FRONT') as any | undefined;
+    if (pickImgUrl(front)) return pickImgUrl(front);
+    if (pickImgUrl(first)) return pickImgUrl(first);
   } else if (typeof first === 'string') {
     return first;
   }
@@ -42,8 +49,10 @@ type ProductLike = {
  */
 export function getListingImage(product: ProductLike): string {
   if (!product) return '/images/products/placeholder.svg';
-  if (product.listingImage?.url) return product.listingImage.url;
-  if (product.primaryImage?.url) return product.primaryImage.url;
+  const listing = pickImgUrl(product.listingImage);
+  if (listing) return listing;
+  const primary = pickImgUrl(product.primaryImage);
+  if (primary) return primary;
   const fromImages = firstImageUrl(product.images);
   if (fromImages) return fromImages;
   return '/images/products/placeholder.svg';
@@ -54,7 +63,8 @@ export function getListingImage(product: ProductLike): string {
  */
 export function getPrimaryImage(product: ProductLike): string {
   if (!product) return '/images/products/placeholder.svg';
-  if (product.primaryImage?.url) return product.primaryImage.url;
+  const primary = pickImgUrl(product.primaryImage);
+  if (primary) return primary;
   const fromImages = firstImageUrl(product.images);
   if (fromImages) return fromImages;
   return '/images/products/placeholder.svg';

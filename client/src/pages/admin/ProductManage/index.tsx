@@ -25,6 +25,7 @@ import { categoryApi, productApi } from "@/services/api";
 import { getMaterialLabel } from "@/utils/material";
 import { formatPrice } from "@/utils/format";
 import { getThumbnailImage } from "@/utils/productImage";
+import { SecureImage } from "@/components/common/SecureImage";
 import { productPlaceholder } from "@/utils/placeholder";
 import type { Category, Product, ProductStatus } from "@/types";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -104,17 +105,12 @@ export default function ProductManage() {
   const isProductIdSearch =
     productIdSearch.length > 0 && productIdSearch.every((id) => /^\d+$/.test(id));
   const hasFilters = Boolean(
-    titleKeyword || codeKeyword || merchantCodeKeyword || categoryId || activeStatus || qualityScope !== "all",
+    titleKeyword || codeKeyword || merchantCodeKeyword || categoryId || activeStatus,
   );
-  const visibleProducts = useMemo(
-    () =>
-      products.filter((product) => {
-        if (qualityScope === "all") return true;
-        const score = product.completeness?.score ?? 0;
-        return qualityScope === "complete" ? score >= 100 : score < 100;
-      }),
-    [products, qualityScope],
-  );
+  // 质量分为后端计算字段（非 DB 列），无法在 findAll 做 where 过滤；
+  // 前端对当前页 filter 会导致 total/分页计数不一致（误导）。
+  // 因此 qualityScope 不再作为列表过滤，仅用于「质量分统计」徽标展示（统计当前页）。
+  const visibleProducts = products;
   const qualityIssueCount = useMemo(
     () =>
       products.filter((product) => (product.completeness?.score ?? 0) < 100)
@@ -327,22 +323,48 @@ export default function ProductManage() {
       onOk: () => realDelete(product),
     });
 
+  // 有限并发执行批量操作，逐条汇总成功/失败，避免 Promise.all 整体失败 + 大量并发触发 429。
+  const runBatch = async (
+    ids: Key[],
+    action: (id: number) => Promise<unknown>,
+  ): Promise<{ ok: number; failed: string[] }> => {
+    const queue = ids.map((id) => Number(id));
+    const failed: string[] = [];
+    let ok = 0;
+    let cursor = 0;
+    const concurrency = 3;
+    const worker = async () => {
+      while (cursor < queue.length) {
+        const current = queue[cursor++];
+        try {
+          await action(current);
+          ok++;
+        } catch {
+          failed.push(String(current));
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
+    return { ok, failed };
+  };
+
   const changeSelectedStatus = async (status: ProductStatus) => {
     if (!selectedIds.length) {
       message.warning("请先选择商品，再进行批量操作");
       return;
     }
-    try {
-      await Promise.all(
-        selectedIds.map((id) => productApi.updateStatus(Number(id), status)),
-      );
-      message.success(`已处理 ${selectedIds.length} 件商品`);
-      setSelectedIds([]);
-      await Promise.all([loadProducts(), loadCounts()]);
-    } catch (requestError: any) {
-      console.error("批量更新状态失败:", requestError);
-      message.error(requestError?.message || "批量操作失败，请稍后重试");
+    message.loading({ content: `正在批量处理 ${selectedIds.length} 件商品…`, key: "batch-status", duration: 0 });
+    const { ok, failed } = await runBatch(selectedIds, (id) => productApi.updateStatus(id, status));
+    message.destroy("batch-status");
+    if (failed.length === 0) {
+      message.success(`已处理 ${ok} 件商品`);
+    } else if (ok > 0) {
+      message.warning(`成功 ${ok} 件，失败 ${failed.length} 件：${failed.join("、")}`);
+    } else {
+      message.error(`全部失败（${failed.length} 件）：${failed.join("、")}`);
     }
+    setSelectedIds([]);
+    await Promise.all([loadProducts(), loadCounts()]);
   };
 
   const batchDelete = async () => {
@@ -350,68 +372,30 @@ export default function ProductManage() {
       message.warning("请先选择商品，再进行批量删除");
       return;
     }
-    try {
-      await Promise.all(
-        selectedIds.map((id) =>
-          productApi.updateStatus(Number(id), "ARCHIVED"),
-        ),
-      );
-      message.success(`已将 ${selectedIds.length} 件商品移入回收站`);
-      setSelectedIds([]);
-      await Promise.all([loadProducts(), loadCounts()]);
-    } catch (requestError: any) {
-      console.error("批量移入回收站失败:", requestError);
-      message.error(requestError?.message || "批量操作失败，请稍后重试");
+    message.loading({ content: `正在将 ${selectedIds.length} 件商品移入回收站…`, key: "batch-delete", duration: 0 });
+    const { ok, failed } = await runBatch(selectedIds, (id) => productApi.updateStatus(id, "ARCHIVED"));
+    message.destroy("batch-delete");
+    if (failed.length === 0) {
+      message.success(`已将 ${ok} 件商品移入回收站`);
+    } else if (ok > 0) {
+      message.warning(`成功 ${ok} 件，失败 ${failed.length} 件：${failed.join("、")}`);
+    } else {
+      message.error(`全部失败（${failed.length} 件）：${failed.join("、")}`);
     }
+    setSelectedIds([]);
+    await Promise.all([loadProducts(), loadCounts()]);
   };
 
-  const openCreate = useCallback(async () => {
-    if (creating) return;
-    // 分类异步加载，未就绪时禁止创建（否则 categoryOptions 为空会被误判为「无分类」）
+  const openCreate = useCallback(() => {
+    // 进入新建模式（/admin/products/new）：不预创建草稿，编辑器显示空表单，
+    // 用户显式「保存草稿/创建商品」才落库，避免产生未命名商品垃圾数据。
+    // 分类未加载仅提示（编辑器内部也会加载分类）；无分类时仍允许进入（保存时校验必填）。
     if (!categoriesLoaded) {
       message.warning("分类数据加载中，请稍候再点");
       return;
     }
-    // 新建即建草稿：立即创建一条 DRAFT 商品拿到 ID，进入编辑页后主图/视频上传立即可用，
-    // 不再出现 disabled 的空表单状态。categoryId 用分类列表第一个占位（进编辑页后可改）。
-    if (categoryOptions.length === 0) {
-      message.warning("请先在「分类管理」创建分类后再新增商品");
-      return;
-    }
-    setCreating(true);
-    try {
-      // code 用 Date.now base36（与 ProductEditor.generateCode / cloneProduct 一致），
-      // DB 唯一约束冲突（409）时重新生成重试一次（极小概率，并发/快速点击可能撞）。
-      const tryCreate = async (): Promise<number> => {
-        const code = `HC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
-        const res = await productApi.create({
-          name: "未命名商品",
-          code,
-          categoryId: categoryOptions[0].value,
-          status: "DRAFT",
-        });
-        const created = unwrapResponse<Product>(res);
-        if (!created?.id) throw new Error("创建草稿失败：服务端未返回商品 ID");
-        return created.id;
-      };
-      let id: number;
-      try {
-        id = await tryCreate();
-      } catch (err: any) {
-        if (err?.response?.status === 409) {
-          id = await tryCreate();
-        } else {
-          throw err;
-        }
-      }
-      navigate(`/admin/products/${id}/edit`);
-    } catch (error: any) {
-      console.error("创建草稿失败:", error);
-      message.error(error?.message || "创建草稿失败，请重试");
-    } finally {
-      setCreating(false);
-    }
-  }, [categoryOptions, categoriesLoaded, creating, navigate]);
+    navigate("/admin/products/new");
+  }, [categoriesLoaded, navigate]);
 
   const openEdit = useCallback(
     (product: Product) => {
@@ -436,8 +420,6 @@ export default function ProductManage() {
           weight: pick("weight"),
           size: pick("size"),
           price: pick("price"),
-          priceMin: pick("priceMin"),
-          priceMax: pick("priceMax"),
           craftFee: pick("craftFee"),
           gemInfo: pick("gemInfo"),
           craftTechnique: pick("craftTechnique"),
@@ -474,14 +456,16 @@ export default function ProductManage() {
           ...(product.skus || [])
             .filter((s) => s.isActive)
             .map((sku, i) =>
+              // 副本 SKU 库存归零：后端 createSku 不复制原 SKU 的 stock/safetyStock（契约约定，
+              // 复制库存需业务授权）。副本 stock=0，避免假数据；运营需在编辑页显式补库存。
               productApi.createSku(created.id, {
                 skuCode: `${sku.skuCode}-${suffix}${i}`.slice(0, 100),
                 material: sku.material,
                 size: sku.size,
                 goldWeight: sku.goldWeight,
                 price: sku.price,
-                stock: sku.stock,
-                safetyStock: sku.safetyStock,
+                stock: 0,
+                safetyStock: 0,
                 isActive: true,
               }),
             ),
@@ -496,8 +480,8 @@ export default function ProductManage() {
         ).length;
         message.success(
           failedCount === 0
-            ? `已复制为「${created.name}」`
-            : `已复制为「${created.name}」，但 ${failedCount} 项子资源复制失败，请在编辑页核对`,
+            ? `已复制为「${created.name}」（SKU 库存已归零，请在编辑页补库存）`
+            : `已复制为「${created.name}」，${failedCount} 项子资源复制失败；SKU 库存已归零，请在编辑页核对`,
         );
         navigate(`/admin/products/${created.id}/edit`);
         void loadProducts();
@@ -520,16 +504,12 @@ export default function ProductManage() {
           const image = getThumbnailImage(product as any);
           return (
             <div className="product-manage__product-cell">
-              <img
-                src={image || productPlaceholder(product.id, product.name)}
+              <SecureImage
+                src={image}
+                fallback={productPlaceholder(product.id, product.name)}
                 alt=""
                 className="product-manage__thumbnail"
-                onError={(event) => {
-                  event.currentTarget.src = productPlaceholder(
-                    product.id,
-                    product.name,
-                  );
-                }}
+                tokenKind="staff"
               />
               <div className="product-manage__product-copy">
                 <button
@@ -794,22 +774,15 @@ export default function ProductManage() {
             onChange={(event) => setCodeKeyword(event.target.value)}
             onPressEnter={search}
           />
-          <Input
-            placeholder="商家编码"
-            value={merchantCodeKeyword}
-            allowClear
-            onChange={(event) => setMerchantCodeKeyword(event.target.value)}
-            onPressEnter={search}
-          />
           <Select
-            placeholder="质量分筛选　请选择"
+            placeholder="质量分统计（本页）"
             value={qualityScope}
             onChange={setQualityScope}
             popupClassName="product-manage__quality-dropdown"
             options={[
-              { value: "all", label: "全部质量分" },
-              { value: "incomplete", label: "待完善（低于 100 分）" },
-              { value: "complete", label: "完整（100 分）" },
+              { value: "all", label: "全部（本页统计）" },
+              { value: "incomplete", label: "待完善 · 本页 N 项" },
+              { value: "complete", label: "完整 · 本页 N 项" },
             ]}
           />
         </div>

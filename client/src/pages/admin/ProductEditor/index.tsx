@@ -31,6 +31,7 @@ import {
 import { categoryApi, productApi, uploadApi } from "@/services/api";
 import { getMaterialLabel } from "@/utils/material";
 import type { Category, Product, ProductImage, ProductStatus, Certificate, ProductSKU } from "@/types";
+import { SecureImage } from "@/components/common/SecureImage";
 import { unwrapResponse } from "@/utils/unwrap";
 import ScifiButton from "@/components/ui/ScifiButton";
 import { formatPrice } from "@/utils/format";
@@ -128,7 +129,7 @@ function UploadCell({
       <Upload accept="image/*" showUploadList={false} beforeUpload={onUpload as any} disabled={disabled || uploading} multiple={multiple}>
         <div className={`product-editor__upload-tile${image ? " is-filled" : ""}${disabled || uploading ? " is-disabled" : ""}`}>
           {image ? (
-            <img src={image.url} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <SecureImage src={(image as any).mediaUrl || image.url} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} tokenKind="staff" />
           ) : (
             <Space direction="vertical" size={5} align="center">
               <PictureOutlined />
@@ -183,7 +184,8 @@ function UploadCell({
 export default function ProductEditor() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const editingId = id ? Number(id) : undefined;
+  // 路由 /admin/products/new 进入新建模式；id 为纯数字才是编辑
+  const editingId = id && id !== "new" && /^\d+$/.test(id) ? Number(id) : undefined;
   const isCreating = !editingId;
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(!isCreating);
@@ -206,15 +208,16 @@ export default function ProductEditor() {
 
   const certDebounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const redirectedRef = useRef(false);
+  const saveRef = useRef<((asDraft?: boolean) => Promise<void>) | null>(null);
 
   /* 导航联动 */
   const [activeSection, setActiveSection] = useState("media");
-  const navItems = [
+  const navItems = useMemo(() => [
     { hash: "media", label: "图文描述" },
     { hash: "basic", label: "基本信息" },
     { hash: "pricing", label: "销售信息" },
     { hash: "publish", label: "上架设置" },
-  ];
+  ], []);
 
   useEffect(() => {
     const ids = navItems.map((n) => n.hash);
@@ -232,7 +235,7 @@ export default function ProductEditor() {
       if (el) observer.observe(el);
     });
     return () => observer.disconnect();
-  }, []);
+  }, [navItems]);
 
   /* Ctrl+S / Ctrl+Shift+S 快捷键 */
   useEffect(() => {
@@ -240,8 +243,8 @@ export default function ProductEditor() {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
         if (!saving) {
-          if (e.shiftKey) { void save(true); }
-          else { void save(); }
+          if (e.shiftKey) { void saveRef.current?.(true); }
+          else { void saveRef.current?.(); }
         }
       }
     };
@@ -303,6 +306,7 @@ export default function ProductEditor() {
       sortOrder: item.sortOrder || 0,
       salesMode: item.salesMode || "DISPLAY_ONLY",
       status: item.status,
+      visibility: (item as any).visibility || "MEMBER",
       isHot: item.isHot,
       isNew: item.isNew,
       isRecommended: item.isRecommended,
@@ -340,13 +344,9 @@ export default function ProductEditor() {
     void loadCategories();
     if (editingId) {
       void loadProduct(editingId);
-    } else if (!redirectedRef.current) {
-      // 正常入口（列表「新增商品」）已在 ProductManage.openCreate 创建草稿并跳到 /edit/{id}，
-      // 不会进入此分支。仅命中直接访问/书签 /new：重定向到列表，避免落入 disabled 的空表单状态。
-      redirectedRef.current = true;
-      message.info("请从商品列表点击「新增商品」");
-      navigate("/admin/products", { replace: true });
     }
+    // 新建模式（/admin/products/new）：editingId 为空，不加载商品，显示空表单；
+    // 用户显式点「保存草稿/创建商品」才落库，避免产生未命名草稿。
   }, [editingId, form, loadCategories, loadProduct, navigate]);
 
   const refreshImages = async (productId: number) => {
@@ -370,11 +370,17 @@ export default function ProductEditor() {
     );
     // 关键：validateFields 只返回命名字段，必须用 getFieldsValue 获取全部表单值
     const values = form.getFieldsValue();
-    // 发布前预校验价格（配合后端 price>0 拦截，避免填完一堆信息提交后才收 400）
-    if (!asDraft && values.status === "PUBLISHED" && !(Number(values.price) > 0)) {
-      form.setFields([{ name: "price", errors: ["发布前请填写大于 0 的价格"] }]);
-      message.warning("发布前请填写大于 0 的价格");
-      return;
+    // 发布前预校验(与后端 canPublish 同口径:价/图/SKU,避免填完一堆信息提交后才收 400)
+    if (!asDraft && values.status === "PUBLISHED") {
+      const problems: string[] = [];
+      if (!(Number(values.price) > 0)) problems.push("价格大于 0");
+      if (!images.length) problems.push("至少一张商品图片");
+      if (!skus.some((s) => s.isActive)) problems.push("至少一个有效规格 (SKU)");
+      if (problems.length) {
+        if (!(Number(values.price) > 0)) form.setFields([{ name: "price", errors: ["发布前请填写大于 0 的价格"] }]);
+        message.warning(`发布前请补全: ${problems.join("、")}`);
+        return;
+      }
     }
     setSaving(true);
     try {
@@ -386,6 +392,7 @@ export default function ProductEditor() {
         sortOrder: values.sortOrder ?? 0,
         salesMode: values.salesMode || "DISPLAY_ONLY",
         status: asDraft ? "DRAFT" : values.status || "DRAFT",
+        visibility: values.visibility || "MEMBER",
         isHot: values.isHot ?? false, isNew: values.isNew ?? false,
         isRecommended: values.isRecommended ?? false, isLimited: values.isLimited ?? false,
         isCustom: values.isCustom ?? false, multiDiscount: values.multiDiscount ?? false,
@@ -434,12 +441,24 @@ export default function ProductEditor() {
       message.error(error?.message || "保存失败");
     } finally { setSaving(false); }
   };
+  saveRef.current = save;
 
   /* ═══ 图片 & 视频上传 ═══ */
 
   const uploadImage = async (file: File, imageType = "SIDE", isVideo = false, slotKey?: string) => {
     if (!editingId) {
       message.warning("请先填写必填信息并保存商品，即可上传图片");
+      return false;
+    }
+    // 格式校验（不只依赖 accept=image/*）
+    const allowedImageTypes = ["image/jpeg", "image/png", "image/webp"];
+    if (!isVideo && !allowedImageTypes.includes(file.type)) {
+      message.error("仅支持 JPG / PNG / WebP 格式");
+      return false;
+    }
+    // 主图数量校验（视频数量已在 beforeUpload 校验）
+    if (!isVideo && mainImages.length >= 5) {
+      message.warning("主图最多 5 张，请先删除不需要的");
       return false;
     }
     // 图片大小校验（视频大小已在 beforeUpload 校验）
@@ -453,10 +472,26 @@ export default function ProductEditor() {
     const key = slotKey || `${file.name}-${file.size}`;
     setUploading(prev => new Set(prev).add(key));
     try {
-      const uploadFn = isVideo ? uploadApi.uploadVideo : uploadApi.uploadImage;
-      const uploaded = unwrapResponse<{ url: string }>(await uploadFn(file));
       const sortOrder = imageType === "FRONT" ? 0 : images.length;
-      await productApi.addImage(editingId, { url: uploaded.url, sortOrder, type: imageType, isVideo });
+      if (isVideo) {
+        const uploaded = unwrapResponse<{ url: string }>(await uploadApi.uploadVideo(file));
+        await productApi.addImage(editingId, { url: uploaded.url, sortOrder, type: imageType, isVideo: true });
+      } else {
+        // 受控产品库：商品图片写入私有存储，返回 storageKey（非公开 url）
+        const uploadedList = unwrapResponse<any[]>(await uploadApi.uploadProductImage(file));
+        const uploaded = uploadedList?.[0];
+        if (!uploaded?.storageKey) throw new Error("图片上传失败");
+        await productApi.addImage(editingId, {
+          storageKey: uploaded.storageKey,
+          width: uploaded.width,
+          height: uploaded.height,
+          mimeType: uploaded.mimeType,
+          fileSize: uploaded.fileSize,
+          sortOrder,
+          type: imageType,
+          isVideo: false,
+        });
+      }
       await refreshImages(editingId);
       message.success(isVideo ? "视频已上传" : "图片已上传");
     } catch (error: any) {
@@ -917,18 +952,13 @@ export default function ProductEditor() {
             <Table
               rowKey="id" dataSource={skus} pagination={false} size="middle" scroll={{ x: 900 }}
               onRow={(record: ProductSKU) => ({ style: { opacity: record.isActive ? 1 : 0.55 } })}
-              locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 SKU，单一规格可直接使用上方一口价" /> }}
+              locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 SKU（保存商品后将自动创建默认规格，库存请在「库存管理」维护）" /> }}
               columns={[
                 { title: "SKU 编码", dataIndex: "skuCode", width: 140 },
                 { title: "材质", dataIndex: "material", width: 90, render: (v: string) => getMaterialLabel(v) },
                 { title: "规格", dataIndex: "size", width: 100, render: (v: any) => v || "—" },
                 { title: "金重(g)", dataIndex: "goldWeight", width: 90, render: (v: any) => v ?? "—" },
                 { title: "价格", dataIndex: "price", width: 110, render: (v: number) => formatPrice(v) },
-                { title: "库存", dataIndex: "stock", width: 70,
-                  render: (v: number, sku: ProductSKU) => {
-                    const isLow = v <= (sku.safetyStock || 5);
-                    return <span style={{ color: isLow ? "#cf1322" : undefined, fontWeight: isLow ? 600 : undefined }}>{v}{isLow ? " ⚠" : ""}</span>;
-                  } },
                 { title: "状态", dataIndex: "isActive", width: 70,
                   render: (v: boolean) => <Tag color={v ? "green" : "default"}>{v ? "启用" : "停用"}</Tag> },
                 { title: "操作", width: 170,
@@ -967,7 +997,23 @@ export default function ProductEditor() {
               <Form.Item name="status" label="上架状态">
                 <Select options={statuses.map((s) => ({ value: s, label: statusMeta[s].label }))} />
               </Form.Item>
-              <Form.Item name="salesMode" label="销售方式">
+              <Form.Item
+                name="visibility"
+                label="可见范围"
+                tooltip="INTERNAL 不会出现在任何前台目录或推荐中；PARTNER 仅审核通过的合作商家可见"
+              >
+                <Select
+                  options={[
+                    { value: "PUBLIC", label: "公开宣传款" },
+                    { value: "MEMBER", label: "登录会员可见（默认）" },
+                    { value: "PARTNER", label: "合作商家专属" },
+                    { value: "INTERNAL", label: "内部不可见（前台永不展示）" },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item name="salesMode" label="销售方式"
+                tooltip="仅「直接购买」支持前台加购下单；其余方式将引导客户到对应咨询入口（选款/预约/定制）"
+                extra={<span style={{ color: "#8c8c8c", fontSize: 12 }}>仅「直接购买」可直接下单，其余引导咨询</span>}>
                 <Select options={[
                   { value: "DISPLAY_ONLY", label: "仅展示" },
                   { value: "SELECTION", label: "选款咨询" },
@@ -1085,8 +1131,7 @@ export default function ProductEditor() {
                 <Form.Item name="price" label="价格" rules={[{ required: true, message: "请输入价格" }]}>
                   <InputNumber min={0} precision={2} style={{ width: "100%" }} />
                 </Form.Item>
-                <Form.Item name="stock" label="库存"><InputNumber min={0} step={1} precision={0} style={{ width: "100%" }} /></Form.Item>
-                <Form.Item name="safetyStock" label="安全库存"><InputNumber min={0} step={1} precision={0} style={{ width: "100%" }} /></Form.Item>
+                {/* 库存已统一到「库存管理」(Inventory) 模块,SKU 不再承载库存字段 */}
                 <Form.Item name="isActive" label="启用" valuePropName="checked"><Switch /></Form.Item>
               </div>
             </Form>

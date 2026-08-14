@@ -1,4 +1,6 @@
 ﻿import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
+import { usePageMetaStore } from "@/store/pageMetaStore";
 import { motion, AnimatePresence } from "framer-motion";
 import { message } from "antd";
 import { useSelectionStore } from "@/store/selectionStore";
@@ -10,6 +12,7 @@ import {
 } from "@/data/catalogData";
 import { useProductData, type RealCategory } from "@/hooks/useProductData";
 import { getListingImage } from "@/utils/productImage";
+import { SecureImage } from "@/components/common/SecureImage";
 import { selectionInquiryApi } from "@/services/api";
 import {
   trackPageView,
@@ -956,7 +959,7 @@ function ProductCard({
 
   const priceText =
     product.price && product.price > 0
-      ? `¥${product.price.toLocaleString()}`
+      ? `¥${product.price.toLocaleString()} 起`
       : "咨询价格";
 
   const subInfo = [product.categoryName, product.material]
@@ -981,26 +984,15 @@ function ProductCard({
           position: "relative",
         }}
       >
-        <img
+        <SecureImage
           src={currentImg}
           alt={product.name || product.sku}
-          loading="lazy"
           className="catalog-img"
           style={{
             width: "100%",
             height: "100%",
             objectFit: "cover",
             transition: "transform 0.6s cubic-bezier(0.22,1,0.36,1)",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLImageElement).style.transform =
-              "scale(1.03)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLImageElement).style.transform = "scale(1)";
-          }}
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).style.display = "none";
           }}
         />
         {/* 图片切换指示器 — 极简细线（全部商品默认显示） */}
@@ -1241,16 +1233,11 @@ function QuickView({
             marginBottom: 28,
           }}
         >
-          <img
+          <SecureImage
             src={getListingImage(product as any)}
             alt={product.sku}
-            loading="lazy"
+            fallback="/images/products/placeholder.svg"
             style={{ width: "100%", height: "100%", objectFit: "contain" }}
-            onError={(e) => {
-              const t = e.currentTarget;
-              if (!t.src.endsWith("/placeholder.svg"))
-                t.src = "/images/products/placeholder.svg";
-            }}
           />
         </div>
         <h2
@@ -1423,6 +1410,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
     email: "",
     wechat: "",
     message: "",
+    privacyConsent: false,
   });
   const account = (() => {
     try {
@@ -1449,6 +1437,10 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
     }
     if (selected.length === 0) {
       message.warning("请至少选择一款作品");
+      return;
+    }
+    if (!form.privacyConsent) {
+      message.warning("请阅读并同意隐私说明");
       return;
     }
     setSubmitting(true);
@@ -1478,6 +1470,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
         email: "",
         wechat: "",
         message: "",
+        privacyConsent: false,
       });
     } catch {
       message.error("提交失败，请稍后重试");
@@ -1536,7 +1529,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
                 borderRadius: 2,
               }}
             >
-              <img
+              <SecureImage
                 src={p.images?.[0] || getListingImage(p as any)}
                 alt={p.sku}
                 style={{ width: "100%", height: "100%", objectFit: "contain" }}
@@ -1631,7 +1624,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
                     flexShrink: 0,
                   }}
                 >
-                  <img
+                  <SecureImage
                     src={p.images?.[0] || getListingImage(p as any)}
                     alt={p.sku}
                     style={{
@@ -1661,6 +1654,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
                 <>
               <div>
                 <label
+                  htmlFor="sel-name"
                   style={{
                     fontSize: 12,
                     color: T.txt,
@@ -1671,6 +1665,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
                   称呼 <span style={{ color: "#c00" }}>*</span>
                 </label>
                 <input
+                  id="sel-name"
                   value={form.customerName}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, customerName: e.target.value }))
@@ -1681,6 +1676,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
               </div>
               <div>
                 <label
+                  htmlFor="sel-phone"
                   style={{
                     fontSize: 12,
                     color: T.txt,
@@ -1691,6 +1687,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
                   手机号 <span style={{ color: "#c00" }}>*</span>
                 </label>
                 <input
+                  id="sel-phone"
                   value={form.phone}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, phone: e.target.value }))
@@ -1712,6 +1709,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
               >
                 <div>
                   <label
+                    htmlFor="sel-email"
                     style={{
                       fontSize: 12,
                       color: T.txt,
@@ -1722,6 +1720,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
                     邮箱
                   </label>
                   <input
+                    id="sel-email"
                     value={form.email}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, email: e.target.value }))
@@ -1732,6 +1731,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
                 </div>
                 <div>
                   <label
+                    htmlFor="sel-wechat"
                     style={{
                       fontSize: 12,
                       color: T.txt,
@@ -1742,6 +1742,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
                     微信
                   </label>
                   <input
+                    id="sel-wechat"
                     value={form.wechat}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, wechat: e.target.value }))
@@ -1753,6 +1754,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
               </div>
               <div>
                 <label
+                  htmlFor="sel-message"
                   style={{
                     fontSize: 12,
                     color: T.txt,
@@ -1763,6 +1765,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
                   备注
                 </label>
                 <textarea
+                  id="sel-message"
                   value={form.message}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, message: e.target.value }))
@@ -1779,7 +1782,41 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
               </div>
             </div>
 
+            <label
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                marginTop: 16,
+                cursor: "pointer",
+                fontSize: 12,
+                color: T.sec,
+                lineHeight: 1.6,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={form.privacyConsent}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, privacyConsent: e.target.checked }))
+                }
+                style={{ marginTop: 2, accentColor: T.txt }}
+              />
+              <span>
+                我已阅读并同意
+                <Link
+                  to="/privacy"
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ color: T.txt, textDecoration: "underline" }}
+                >
+                  隐私说明
+                </Link>
+                ，提交的信息仅用于选款咨询与顾问联系。
+              </span>
+            </label>
+
             <button
+              type="button"
               onClick={handleSubmit}
               disabled={submitting}
               style={{
@@ -1879,6 +1916,16 @@ function StickyBar({
    主页面
    ══════════════════════════════════════ */
 export default function Catalog() {
+  const setPageMeta = usePageMetaStore((s) => s.setMeta);
+  const clearPageMeta = usePageMetaStore((s) => s.clear);
+  useEffect(() => {
+    setPageMeta({
+      title: "选款中心 | 海川珠宝",
+      description: "按品类、材质与货号选款，加入心仪作品并提交选款咨询。",
+    });
+    return () => clearPageMeta();
+  }, [setPageMeta, clearPageMeta]);
+
   const { params, update } = useURLParams();
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickView, setQuickView] = useState<CatalogProduct | null>(null);

@@ -142,9 +142,15 @@ export const IMAGE_SPECS = {
   carousel: {
     image: {
       width: 3840,
-      height: 1800,
-      ratio: "2.13:1",
-      label: "轮播图（建议 3840×1800，2.13:1，4K）",
+      height: 1600,
+      ratio: "12:5",
+      label: "电脑端宽幕轮播图（建议 3840×1600，12:5）",
+    },
+    mobile: {
+      width: 1500,
+      height: 2000,
+      ratio: "3:4",
+      label: "手机端轮播图（建议 1500×2000，3:4）",
     },
   },
   video: {

@@ -9,14 +9,24 @@ import {
 } from "@ant-design/icons";
 import { getMaterialLabel } from "@/utils/material";
 import { getPrimaryImage, getThumbnailList } from "@/utils/productImage";
-import { cartApi, productApi, publicProductStreamUrl } from "@/services/api";
+import { SecureImage } from "@/components/common/SecureImage";
+import { cartApi, productApi, publicProductStreamUrl, goldPriceApi } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
 import { unwrapResponse } from "@/utils/unwrap";
 import type { Product, ProductSKU } from "@/types";
 import { trackAddToCart, trackPageView, trackProductView } from "@/hooks/useAnalytics";
+import {
+  isCommerceAllowed,
+  salesModeRoute,
+  salesModeCta,
+} from "@/store/featureFlags";
+import { useReconnectingEventSource } from "@/hooks/useReconnectingEventSource";
+import { usePageMetaStore } from "@/store/pageMetaStore";
 
 export default function ProductDetail() {
   const { id } = useParams();
+  const setPageMeta = usePageMetaStore((s) => s.setMeta);
+  const clearPageMeta = usePageMetaStore((s) => s.clear);
   const [loading, setLoading] = useState(true);
   const [product, setProduct] = useState<Product | null>(null);
   const [qty, setQty] = useState(1);
@@ -24,6 +34,7 @@ export default function ProductDetail() {
   const [mainImage, setMainImage] = useState(0);
   const [revision, setRevision] = useState(0);
   const [addingToCart, setAddingToCart] = useState(false);
+  const [goldPrice, setGoldPrice] = useState<{ price?: number | string } | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -33,7 +44,7 @@ export default function ProductDetail() {
         const res = await productApi.getPublicById(Number(id));
         const data = unwrapResponse<Product>(res);
         setProduct(data);
-        if (data?.skus?.length) setSelectedSku(data.skus[0]);
+        if (data?.skus?.length) setSelectedSku(data.skus.find((s) => s.isActive) ?? null);
       } catch {
         setProduct(null);
       } finally {
@@ -43,12 +54,34 @@ export default function ProductDetail() {
     load();
   }, [id, revision]);
 
+  // SEO：商品详情独立标题（不泄露内部编号；未加载时不设误导标题）
   useEffect(() => {
-    if (USE_MOCK) return;
-    const stream = new EventSource(publicProductStreamUrl);
-    stream.onmessage = () => setRevision((value) => value + 1);
-    return () => stream.close();
-  }, []);
+    if (product?.name) {
+      setPageMeta({
+        title: `${product.name} | 海川珠宝`,
+        description: product.shortDescription || undefined,
+      });
+    }
+    return () => clearPageMeta();
+  }, [product, setPageMeta, clearPageMeta]);
+
+  // P1-35：带自动重连的 SSE（断线指数退避重连，避免实时刷新静默失效）
+  useReconnectingEventSource(
+    USE_MOCK ? null : publicProductStreamUrl,
+    () => setRevision((value) => value + 1),
+  );
+
+  // 只有直接购买商品需要金价参考；咨询类作品不触发无用请求，也不暴露价格组成。
+  useEffect(() => {
+    if (!isCommerceAllowed(product?.salesMode)) {
+      setGoldPrice(null);
+      return;
+    }
+    goldPriceApi
+      .getLatest()
+      .then((res) => setGoldPrice(unwrapResponse<any>(res)))
+      .catch(() => setGoldPrice(null));
+  }, [product?.salesMode]);
 
   useEffect(() => {
     if (id) {
@@ -76,7 +109,20 @@ export default function ProductDetail() {
       </div>
     );
 
-  const displayPrice = selectedSku?.price || product.price || 0;
+  // 起价 = 活跃 SKU 最低价(与后端 Product.price 语义一致);选中 SKU 后切到该 SKU 价
+  const activeSkus = (product.skus ?? []).filter((s) => s.isActive);
+  // P1-33：缩略图与主图共享同一数据源，mainImage 驱动主图切换
+  // （原主图恒渲染 getPrimaryImage，点击缩略图只改高亮、主图不变）
+  const thumbnails = getThumbnailList(product.images);
+  const mainImageUrl = (thumbnails[mainImage] as any)?.mediaUrl || thumbnails[mainImage]?.url || getPrimaryImage(product as any);
+  const activePrices = activeSkus
+    .map((s) => Number(s.price) || 0)
+    .filter((p) => p > 0);
+  const startingPrice =
+    activePrices.length > 0 ? Math.min(...activePrices) : Number(product.price) || 0;
+  const displayPrice = selectedSku ? Number(selectedSku.price) : startingPrice;
+  const commerceOk = isCommerceAllowed(product.salesMode);
+  const displayGoldWeight = selectedSku?.goldWeight ?? product.goldWeight;
 
   const handleAddToCart = async () => {
     if (!selectedSku) {
@@ -127,9 +173,9 @@ export default function ProductDetail() {
             transition={{ duration: 1 }}
           >
             <div className="aspect-[4/5] bg-brand-bg flex items-center justify-center sticky top-24 border border-brand-line">
-              {getPrimaryImage(product as any) ? (
-                <img
-                  src={getPrimaryImage(product as any)}
+              {mainImageUrl ? (
+                <SecureImage
+                  src={mainImageUrl}
                   alt={product.name}
                   className="w-full h-full object-cover"
                 />
@@ -138,15 +184,15 @@ export default function ProductDetail() {
               )}
             </div>
             <div className="flex gap-3 mt-4">
-              {getThumbnailList(product.images).map((img, i) => (
+              {thumbnails.map((img, i) => (
                 <div
                   key={img.id}
                   onClick={() => setMainImage(i)}
                   className={`w-16 h-16 bg-brand-bg flex items-center justify-center cursor-pointer border transition-colors overflow-hidden ${i === mainImage ? "border-brand-gold" : "border-transparent hover:border-brand-gold"}`}
                 >
-                  {img.url ? (
-                    <img
-                      src={img.url}
+                  {((img as any).mediaUrl || img.url) ? (
+                    <SecureImage
+                      src={(img as any).mediaUrl || img.url}
                       alt=""
                       className="w-full h-full object-cover"
                     />
@@ -175,45 +221,56 @@ export default function ProductDetail() {
               {product.description}
             </p>
 
-            {/* Gold price reference */}
+            {/* 公开参数与价格：非直接购买模式不暴露价格组成，统一引导顾问服务。 */}
             <div className="border-y border-brand-line py-4 mb-8">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-brand-muted">金价参考</span>
-                <span className="font-sans font-medium">
-                  ¥485.60 <span className="text-xs text-brand-gold">/克</span>
-                </span>
-              </div>
+              {commerceOk && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-brand-muted">金价参考</span>
+                  <span className="font-sans font-medium">
+                    {goldPrice?.price ? `¥${Number(goldPrice.price).toFixed(2)}` : "—"}{" "}
+                    <span className="text-xs text-brand-gold">/克</span>
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between text-sm mt-2">
                 <span className="text-brand-muted">金重</span>
-                <span>{selectedSku?.goldWeight || product.goldWeight}g</span>
+                <span>{displayGoldWeight ? `${displayGoldWeight}g` : "—"}</span>
               </div>
-              <div className="flex items-center justify-between text-sm mt-2">
-                <span className="text-brand-muted">工费</span>
-                <span>¥{product.craftFee}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm mt-2 pt-2 border-t border-brand-line font-medium">
-                <span>售价</span>
-                <span className="price text-2xl">
-                  ¥{displayPrice.toLocaleString()}
-                </span>
-              </div>
+              {commerceOk && displayPrice > 0 ? (
+                <div className="flex items-center justify-between text-sm mt-2 pt-2 border-t border-brand-line font-medium">
+                  <span>售价</span>
+                  <span className="price text-2xl">
+                    ¥{displayPrice.toLocaleString()}
+                    {!selectedSku && activeSkus.length > 1 && (
+                      <span className="text-xs text-brand-muted ml-1">起</span>
+                    )}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between text-sm mt-2 pt-2 border-t border-brand-line">
+                  <span className="text-brand-muted">作品服务</span>
+                  <span className="font-medium">请咨询珠宝顾问</span>
+                </div>
+              )}
             </div>
 
             {/* SKU selection */}
-            {product.skus && product.skus.length > 0 && (
+            {activeSkus.length > 0 && (
               <div className="mb-8">
                 <p className="text-xs tracking-[.15em] uppercase text-brand-gold mb-3 font-sans">
                   规格
                 </p>
                 <div className="flex gap-2 flex-wrap">
-                  {product.skus.map((sku) => (
+                  {activeSkus.map((sku) => (
                     <button
                       key={sku.id}
                       onClick={() => setSelectedSku(sku)}
                       className={`px-5 py-2.5 text-sm border transition-colors font-sans ${selectedSku?.id === sku.id ? "border-brand-gold text-brand-gold" : "border-brand-line hover:border-brand-gold"}`}
                     >
-                      {getMaterialLabel(sku.material)} · {sku.goldWeight}g · ¥
-                      {sku.price.toLocaleString()}
+                      {getMaterialLabel(sku.material)} · {sku.goldWeight ? `${sku.goldWeight}g` : "—"}
+                      {commerceOk && Number(sku.price) > 0
+                        ? ` · ¥${Number(sku.price).toLocaleString()}`
+                        : ""}
                     </button>
                   ))}
                 </div>
@@ -222,29 +279,52 @@ export default function ProductDetail() {
 
             {/* Quantity + Actions */}
             <div className="flex items-center gap-4 mb-8">
-              <div className="flex items-center border border-brand-line">
+              {commerceOk && (
+                <div className="flex items-center border border-brand-line">
+                  <button
+                    type="button"
+                    aria-label="减少数量"
+                    className="px-4 py-2.5 text-brand-muted hover:text-brand-text transition-colors font-sans"
+                    onClick={() => setQty(Math.max(1, qty - 1))}
+                  >
+                    −
+                  </button>
+                  <span className="px-4 py-2.5 text-sm font-sans" aria-live="polite">{qty}</span>
+                  <button
+                    type="button"
+                    aria-label="增加数量"
+                    className="px-4 py-2.5 text-brand-muted hover:text-brand-text transition-colors font-sans"
+                    onClick={() => setQty(qty + 1)}
+                  >
+                    +
+                  </button>
+                </div>
+              )}
+              {commerceOk ? (
                 <button
-                  className="px-4 py-2.5 text-brand-muted hover:text-brand-text transition-colors font-sans"
-                  onClick={() => setQty(Math.max(1, qty - 1))}
+                  className="btn btn-primary flex-1"
+                  onClick={handleAddToCart}
+                  disabled={addingToCart || !selectedSku}
                 >
-                  −
+                  <ShoppingCartOutlined /> {addingToCart ? "加入中..." : "加入购物车"}
                 </button>
-                <span className="px-4 py-2.5 text-sm font-sans">{qty}</span>
-                <button
-                  className="px-4 py-2.5 text-brand-muted hover:text-brand-text transition-colors font-sans"
-                  onClick={() => setQty(qty + 1)}
+              ) : product.salesMode === "DISPLAY_ONLY" ? (
+                <div className="flex-1 text-center text-brand-muted text-sm py-3 border border-brand-line">
+                  仅展示，暂不售卖
+                </div>
+              ) : (
+                <Link
+                  to={salesModeRoute(product.salesMode)}
+                  className="btn btn-primary flex-1 text-center"
                 >
-                  +
-                </button>
-              </div>
+                  {salesModeCta(product.salesMode)}
+                </Link>
+              )}
               <button
-                className="btn btn-primary flex-1"
-                onClick={handleAddToCart}
-                disabled={addingToCart || !selectedSku}
+                type="button"
+                aria-label="收藏这件作品"
+                className="p-3 border border-brand-line hover:border-brand-gold transition-colors"
               >
-                <ShoppingCartOutlined /> {addingToCart ? "加入中..." : "加入购物车"}
-              </button>
-              <button className="p-3 border border-brand-line hover:border-brand-gold transition-colors">
                 <HeartOutlined className="text-brand-muted hover:text-brand-gold transition-colors" />
               </button>
             </div>
@@ -267,7 +347,6 @@ export default function ProductDetail() {
                           v: getMaterialLabel(product.materialType),
                         },
                         { l: "金重", v: `${product.goldWeight || "-"}g` },
-                        { l: "工费", v: `¥${product.craftFee || 0}` },
                         { l: "总重", v: `${product.weight || "-"}g` },
                         { l: "尺寸", v: product.size || "-" },
                       ].map((i) => (
@@ -320,24 +399,6 @@ export default function ProductDetail() {
               ]}
             />
           </motion.div>
-        </div>
-
-        {/* Related */}
-        <div className="mt-24 md:mt-32">
-          <h2 className="h3 mb-8 text-center">相似推荐</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {[1, 2, 3, 4].map((i) => (
-              <Link key={i} to="/products" className="block group">
-                <div className="aspect-square bg-brand-bg mb-3 flex items-center justify-center">
-                  <span className="text-2xl text-brand-gold/20">◆</span>
-                </div>
-                <p className="text-sm font-display group-hover:text-brand-gold transition-colors">
-                  相似臻品
-                </p>
-                <p className="text-xs text-brand-muted mt-1">查看详情</p>
-              </Link>
-            ))}
-          </div>
         </div>
       </div>
     </div>

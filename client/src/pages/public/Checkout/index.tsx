@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Form, Input, Radio, Spin, message } from "antd";
+import { Form, Input, Spin, message } from "antd";
 import { CheckCircleOutlined } from "@ant-design/icons";
 import { cartApi, customerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -22,8 +22,25 @@ export default function Checkout() {
   const [loadError, setLoadError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<{ id: number; orderNo: string; finalAmount: number } | null>(null);
+  // P0-1 联动：后端 checkout 已要求登录态；未登录需引导先登录/注册
+  const customerToken = typeof window !== "undefined" ? localStorage.getItem("customerToken") : null;
+  const [customer, setCustomer] = useState<{ name?: string; phone?: string; email?: string } | null>(null);
 
-  const loadCart = async () => {
+  // 结算契约对齐（P0 修复）：后端 checkout 仅接受 { address, items, customerEmail? }，
+  // 客户身份（姓名/手机号）来自登录态、支付方式固定线下转账。
+  // 前端不再展示后端会忽略的 customerName/customerPhone/paymentMethod 输入框，
+  // 改为只读展示登录客户信息，仅收集收货地址（必要时邮箱）。
+  const loadCustomer = useCallback(async () => {
+    if (!customerToken) return;
+    try {
+      const res = await customerApi.getProfile();
+      setCustomer(unwrapResponse<{ name?: string; phone?: string; email?: string }>(res));
+    } catch {
+      // 客户信息加载失败不阻断结算；后端会用登录态的客户资料。
+    }
+  }, [customerToken]);
+
+  const loadCart = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
     try {
@@ -35,11 +52,12 @@ export default function Checkout() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadCart();
-  }, []);
+    void loadCustomer();
+  }, [loadCart, loadCustomer]);
 
   const total = cartItems.reduce(
     (sum, item) => sum + getItemPrice(item) * item.quantity,
@@ -54,14 +72,16 @@ export default function Checkout() {
     setSubmitting(true);
     try {
       trackBeginCheckout(cartItems.length, total);
+      // 结算契约对齐（P0）：仅传后端会使用的字段 { address, items, customerEmail? }。
+      // 客户身份（姓名/手机号）由后端从登录态取，支付方式后端固定线下转账。
       const response = await customerApi.checkout({
-        ...values,
+        address: values.address,
+        customerEmail: values.customerEmail || undefined,
         items: cartItems.map((item) => ({ skuId: item.skuId, quantity: item.quantity })),
       });
-      const result = unwrapResponse<{ order: { id: number; orderNo: string; finalAmount: number }; accessToken: string; customer: unknown }>(response);
-      if (!result?.order || !result.accessToken) throw new Error("订单创建响应不完整");
-      localStorage.setItem("customerToken", result.accessToken);
-      localStorage.setItem("customer", JSON.stringify(result.customer));
+      // P0-1 联动：后端 checkout 已改为要求登录态、不再签发 access token；返回仅含 order
+      const result = unwrapResponse<{ order: { id: number; orderNo: string; finalAmount: number } }>(response);
+      if (!result?.order) throw new Error("订单创建响应不完整");
       try {
         await cartApi.clear();
       } catch {
@@ -88,6 +108,21 @@ export default function Checkout() {
           <p className="price text-2xl mt-3">¥{Number(createdOrder.finalAmount).toLocaleString()}</p>
           <p className="text-sm text-brand-muted mt-6 leading-6">库存已为您保留 24 小时，请在期限内按门店提供的账户完成线下转账，并在客户中心上传付款凭证。审核通过后，订单将进入发货流程。</p>
           <Link to="/customer" className="btn btn-primary w-full mt-8">前往客户中心上传凭证</Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!customerToken) {
+    return (
+      <div className="min-h-screen bg-brand-bg flex items-center justify-center px-6">
+        <div className="max-w-lg w-full text-center bg-brand-surface border border-brand-line p-10">
+          <h1 className="text-2xl font-display mb-3">请先登录后下单</h1>
+          <p className="text-brand-muted mb-6 leading-6">为保障账户与订单安全，结算需先登录或注册客户账号。登录后可继续结算当前购物车。</p>
+          <div className="flex flex-col gap-3">
+            <Link to="/customer" className="btn btn-primary">前往登录 / 注册</Link>
+            <Link to="/cart" className="text-sm text-brand-muted hover:text-brand-gold transition-colors">← 返回购物车</Link>
+          </div>
         </div>
       </div>
     );
@@ -136,22 +171,30 @@ export default function Checkout() {
           </div>
 
           <Form layout="vertical" onFinish={handleSubmit}>
-            <div className="grid grid-cols-2 gap-4">
-              <Form.Item name="customerName" label="收货人" rules={[{ required: true, message: "请输入收货人" }]}>
-                <Input />
-              </Form.Item>
-              <Form.Item name="customerPhone" label="手机号" rules={[{ required: true, pattern: /^1\d{10}$/, message: "请输入有效的手机号" }]}>
-                <Input inputMode="numeric" />
-              </Form.Item>
+            {/* 只读展示登录客户信息（后端从登录态取，前端不可改） */}
+            <div className="mb-6 pb-6 border-b border-brand-line">
+              <h3 className="font-display text-lg mb-3">收货人信息</h3>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="text-brand-muted">称呼：</span>
+                  <span className="text-brand-text">{customer?.name || "（未设置）"}</span>
+                </div>
+                <div>
+                  <span className="text-brand-muted">手机号：</span>
+                  <span className="text-brand-text">{customer?.phone || "（未设置）"}</span>
+                </div>
+              </div>
+              <p className="text-xs text-brand-muted mt-2">收货人姓名与手机号取自您的会员账户，如需修改请前往客户中心个人资料。</p>
             </div>
             <Form.Item name="address" label="收货地址" rules={[{ required: true, message: "请输入收货地址" }]}>
-              <Input.TextArea rows={2} />
+              <Input.TextArea rows={2} placeholder="请输入详细收货地址" />
             </Form.Item>
-            <Form.Item name="paymentMethod" label="支付方式">
-              <Radio.Group defaultValue="transfer">
-                <Radio value="transfer">线下转账（上传凭证）</Radio>
-              </Radio.Group>
+            <Form.Item name="customerEmail" label="邮箱（可选）">
+              <Input type="email" placeholder="用于接收订单通知" />
             </Form.Item>
+            <div className="mb-6">
+              <span className="text-sm text-brand-muted">支付方式：线下转账（提交订单后请在客户中心上传付款凭证）</span>
+            </div>
             <button type="submit" className="btn btn-primary w-full" disabled={submitting}>
               {submitting ? "提交中..." : `提交订单 ¥${total.toLocaleString()}`}
             </button>

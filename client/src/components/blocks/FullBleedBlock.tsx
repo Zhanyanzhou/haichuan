@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
+import { FULL_BLEED_CONTRACT, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 
 interface FullBleedBlockProps {
   module: {
@@ -106,7 +107,7 @@ export default function FullBleedBlock({
     >
       {!imageFailed ? (
         <picture data-editor-field="image mobileImage">
-          <source media="(max-width: 1023px) and (orientation: portrait)" srcSet={mobileImg} />
+          <source media={RESPONSIVE_CANVAS.mobileMediaQuery} srcSet={mobileImg} />
           <img
             className="hc-single-poster__image"
             src={desktopImg}
@@ -183,7 +184,7 @@ export default function FullBleedBlock({
         </div>
       </div>
       <style>{`
-        .hc-single-poster { aspect-ratio: 12 / 5; }
+        .hc-single-poster { aspect-ratio: ${FULL_BLEED_CONTRACT.canvas.desktopMediaAspectRatio}; }
         .hc-single-poster__image,
         .hc-single-poster__image-error {
           position: absolute;
@@ -211,8 +212,8 @@ export default function FullBleedBlock({
         }
         .hc-single-poster-link:hover .hc-single-poster__image { transform: scale(1.012); }
         .hc-single-poster-link:focus-visible { outline: 2px solid #B8944E; outline-offset: 3px; }
-        @media (max-width: 1023px) and (orientation: portrait) {
-          .hc-single-poster { aspect-ratio: 5 / 6; }
+        @media ${RESPONSIVE_CANVAS.mobileMediaQuery} {
+          .hc-single-poster { aspect-ratio: ${FULL_BLEED_CONTRACT.canvas.mobileMediaAspectRatio}; }
           .hc-single-poster__image { object-position: var(--hc-poster-focus-mobile); }
           .hc-single-poster__copy { max-width: min(78vw, 420px) !important; }
         }

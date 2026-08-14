@@ -356,7 +356,10 @@ export function convertPuckProps(
           showDots: props.showDots,
           showArrows: props.showArrows,
         },
-        { height: props.height || 500, mobileHeight: props.mobileHeight || 640 },
+        {
+          desktopRatio: props.desktopRatio || "wide",
+          mobileRatio: props.mobileRatio || "portrait",
+        },
       );
 
     case "视频区块":

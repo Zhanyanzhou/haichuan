@@ -1,20 +1,46 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { PlusOutlined, ReloadOutlined, RightOutlined } from "@ant-design/icons";
 import {
-  inquiriesApi,
-  statisticsApi,
-} from "@/services/api";
+  AccountBookOutlined,
+  CarOutlined,
+  CaretDownOutlined,
+  CaretUpOutlined,
+  EyeOutlined,
+  MessageOutlined,
+  ReloadOutlined,
+  RightOutlined,
+  ShoppingOutlined,
+  ShopOutlined,
+} from "@ant-design/icons";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { statisticsApi, type TrendMetric } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 
 interface DashboardStats {
-  revenueToday: number | string;
+  // 今日流量/经营指标
   orderToday: number;
-  pageViewsToday: number;
+  revenueToday: number | string;
   inquiriesToday: number;
+  pageViewsToday: number;
+  // 昨日同口径(用于环比；缺失或为 0 时视为无可比)
+  orderYesterday?: number;
+  revenueYesterday?: number | string;
+  inquiriesYesterday?: number;
+  pageViewsYesterday?: number;
+  // 存量指标(无环比概念)
+  publishedProductCount?: number;
+  pendingShip: number;
+  // 提醒
   pendingAppointmentInquiries: number;
   pendingSelectionInquiries: number;
-  pendingShip: number;
   lowStock: number;
   pendingReview: number;
 }
@@ -24,262 +50,445 @@ interface TrendPoint {
   count: number;
 }
 
-interface InquiryRecord {
-  id: number;
-  customerName?: string;
-  customerPhone?: string;
-  status?: string;
-  createdAt?: string;
-}
-
-const inquiryStatusLabel: Record<string, string> = {
-  PENDING: "待处理",
-  PROCESSING: "处理中",
-  REPLIED: "已回复",
-  CLOSED: "已关闭",
-};
+type RefreshState = "idle" | "loading" | "done" | "error";
+// 环比：null 表示无可比数据(昨日缺失或为 0，避免"无限增长"误导)
+type Change = { pct: number; direction: "up" | "down" } | null;
 
 function formatNumber(value: number | string | null | undefined) {
   if (value === undefined || value === null) return "—";
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue) ? numberValue.toLocaleString("zh-CN") : "—";
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString("zh-CN") : "—";
 }
 
 function formatCurrency(value: number | string | null | undefined) {
   if (value === undefined || value === null) return "—";
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue)
-    ? `¥${numberValue.toLocaleString("zh-CN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+  const n = Number(value);
+  return Number.isFinite(n)
+    ? `¥${n.toLocaleString("zh-CN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
     : "—";
 }
 
-function formatDateLabel(date: string) {
-  const [, month = "", day = ""] = date.split("-");
-  return `${Number(month)}/${Number(day)}`;
+function buildChange(
+  today: number | string | undefined,
+  yesterday: number | string | undefined,
+): Change {
+  const t = today === undefined ? undefined : Number(today);
+  const y = yesterday === undefined ? undefined : Number(yesterday);
+  if (t === undefined || y === undefined || !Number.isFinite(t) || !Number.isFinite(y) || y === 0) {
+    return null;
+  }
+  const pct = ((t - y) / y) * 100;
+  return { pct, direction: t >= y ? "up" : "down" };
+}
+
+const TREND_METRICS: { key: TrendMetric; label: string; format: "number" | "currency" }[] = [
+  { key: "orders", label: "订单数", format: "number" },
+  { key: "revenue", label: "成交金额", format: "currency" },
+  { key: "inquiries", label: "咨询数", format: "number" },
+  { key: "pageViews", label: "页面浏览", format: "number" },
+];
+
+const TREND_RANGES = [
+  { days: 7, label: "近 7 日" },
+  { days: 30, label: "近 30 日" },
+] as const;
+
+interface MetricCard {
+  key: string;
+  label: string;
+  icon: ReactNode;
+  value: string;
+  change: Change;
+  stockNote?: string;
+  route?: string;
+}
+
+function TrendTooltip({
+  active,
+  payload,
+  label,
+  format,
+}: {
+  active?: boolean;
+  payload?: Array<{ value?: number }>;
+  label?: string;
+  format: "number" | "currency";
+}) {
+  if (!active || !payload?.length || payload[0]?.value === undefined) return null;
+  const value = payload[0].value;
+  const display = format === "currency" ? formatCurrency(value) : formatNumber(value);
+  const [, m = "", d = ""] = (label || "").split("-");
+  const dateLabel = label ? `${Number(m)}/${Number(d)}` : "";
+  return (
+    <div className="admin-dashboard__trend-tooltip">
+      <span>{dateLabel}</span>
+      <strong>{display}</strong>
+    </div>
+  );
 }
 
 export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [orderTrend, setOrderTrend] = useState<TrendPoint[]>([]);
-  const [recentInquiries, setRecentInquiries] = useState<InquiryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [refreshState, setRefreshState] = useState<RefreshState>("idle");
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const loadDashboard = useCallback(async () => {
-    setLoading(true);
+  // 趋势区域独立状态：切换指标/时间只刷新本区域，不重新加载整页
+  const [trendMetric, setTrendMetric] = useState<TrendMetric>("orders");
+  const [trendDays, setTrendDays] = useState<number>(7);
+  const [trendData, setTrendData] = useState<TrendPoint[]>([]);
+  const [trendLoading, setTrendLoading] = useState(true);
+  const [trendError, setTrendError] = useState(false);
+
+  const loadStats = useCallback(async () => {
+    setRefreshState("loading");
     setLoadError(false);
-
     try {
-      const [statsResponse, trendResponse, inquiriesResponse] = await Promise.all([
-        statisticsApi.getDashboard(),
-        statisticsApi.getOrderTrend(7),
-        inquiriesApi.getList({ page: 1, pageSize: 5, status: "PENDING" }),
-      ]);
-
-      const statsData = unwrapResponse<DashboardStats>(statsResponse);
-      const trendData = unwrapResponse<TrendPoint[]>(trendResponse) ?? [];
-      const inquiriesData = unwrapResponse<{ list?: InquiryRecord[]; items?: InquiryRecord[] }>(inquiriesResponse);
-
-      setStats(statsData);
-      setOrderTrend(trendData);
-      setRecentInquiries(inquiriesData?.list ?? inquiriesData?.items ?? []);
+      const res = await statisticsApi.getDashboard();
+      setStats(unwrapResponse<DashboardStats>(res));
+      setLastUpdated(new Date());
+      setRefreshState("done");
     } catch {
       setLoadError(true);
+      setRefreshState("error");
     } finally {
       setLoading(false);
     }
   }, []);
 
+  const loadTrend = useCallback(async (metric: TrendMetric, days: number) => {
+    setTrendLoading(true);
+    setTrendError(false);
+    try {
+      const res = await statisticsApi.getTrend(days, metric);
+      setTrendData(unwrapResponse<TrendPoint[]>(res) ?? []);
+    } catch {
+      setTrendError(true);
+      setTrendData([]);
+    } finally {
+      setTrendLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    void loadDashboard();
-  }, [loadDashboard]);
+    void loadStats();
+  }, [loadStats]);
 
-  const metrics = useMemo(() => [
-    { label: "今日营业额", value: formatCurrency(stats?.revenueToday), route: "/admin/orders" },
-    { label: "今日订单", value: formatNumber(stats?.orderToday), route: "/admin/orders" },
-    { label: "页面访问量", value: formatNumber(stats?.pageViewsToday), route: "/admin/analytics" },
-    { label: "新增咨询", value: formatNumber(stats?.inquiriesToday), route: "/admin/inquiries" },
-  ], [stats]);
+  useEffect(() => {
+    void loadTrend(trendMetric, trendDays);
+  }, [trendMetric, trendDays, loadTrend]);
 
-  const workItems = useMemo(() => [
-    {
-      label: "待处理预约咨询",
-      detail: "等待首次响应",
-      count: stats?.pendingAppointmentInquiries,
-      route: "/admin/inquiries?status=PENDING",
-    },
-    {
-      label: "待处理选款咨询",
-      detail: "等待顾问跟进",
-      count: stats?.pendingSelectionInquiries,
-      route: "/admin/selection-inquiry?status=PENDING",
-    },
-    {
-      label: "待发货订单",
-      detail: "请确认履约时效",
-      count: stats?.pendingShip,
-      route: "/admin/orders?status=PENDING_SHIP",
-    },
-    {
-      label: "库存预警商品",
-      detail: "库存数量低于安全线",
-      count: stats?.lowStock,
-      route: "/admin/inventory",
-    },
-    {
-      label: "待完善商品",
-      detail: "草稿或未完成资料",
-      count: stats?.pendingReview,
-      route: "/admin/products",
-    },
-  ], [stats]);
+  // "刷新完成"短暂提示后回到默认按钮文案
+  useEffect(() => {
+    if (refreshState !== "done") return;
+    const t = window.setTimeout(() => setRefreshState("idle"), 2500);
+    return () => window.clearTimeout(t);
+  }, [refreshState]);
 
-  const pendingItemTotal = workItems.reduce((total, item) => total + (Number(item.count) || 0), 0);
-  const trendMaximum = Math.max(...orderTrend.map((item) => item.count), 1);
-  const today = new Intl.DateTimeFormat("zh-CN", {
+  const handleRefresh = useCallback(() => {
+    if (refreshState === "loading") return;
+    void loadStats();
+    void loadTrend(trendMetric, trendDays);
+  }, [loadStats, loadTrend, trendMetric, trendDays, refreshState]);
+
+  const cards = useMemo<MetricCard[]>(() => {
+    if (!stats) return [];
+    return [
+      {
+        key: "order",
+        label: "今日订单",
+        icon: <ShoppingOutlined />,
+        value: formatNumber(stats.orderToday),
+        change: buildChange(stats.orderToday, stats.orderYesterday),
+        route: "/admin/orders",
+      },
+      {
+        key: "revenue",
+        label: "成交金额",
+        icon: <AccountBookOutlined />,
+        value: formatCurrency(stats.revenueToday),
+        change: buildChange(stats.revenueToday, stats.revenueYesterday),
+        route: "/admin/orders",
+      },
+      {
+        key: "inquiry",
+        label: "新增咨询",
+        icon: <MessageOutlined />,
+        value: formatNumber(stats.inquiriesToday),
+        change: buildChange(stats.inquiriesToday, stats.inquiriesYesterday),
+        route: "/admin/inquiries",
+      },
+      {
+        key: "pageView",
+        label: "页面浏览量",
+        icon: <EyeOutlined />,
+        value: formatNumber(stats.pageViewsToday),
+        change: buildChange(stats.pageViewsToday, stats.pageViewsYesterday),
+        route: "/admin/analytics",
+      },
+      {
+        key: "product",
+        label: "在售商品数",
+        icon: <ShopOutlined />,
+        value: formatNumber(stats.publishedProductCount ?? 0),
+        change: null,
+        stockNote: "上架中商品",
+        route: "/admin/products",
+      },
+      {
+        key: "ship",
+        label: "待发货订单",
+        icon: <CarOutlined />,
+        value: formatNumber(stats.pendingShip),
+        change: null,
+        stockNote: "当前待发货",
+        route: "/admin/orders?status=PENDING_SHIP",
+      },
+    ];
+  }, [stats]);
+
+  const alerts = useMemo(() => {
+    if (!stats) return [];
+    return [
+      {
+        key: "inquiry",
+        label: "待处理咨询",
+        count: (stats.pendingAppointmentInquiries || 0) + (stats.pendingSelectionInquiries || 0),
+        route: "/admin/inquiries?status=PENDING",
+      },
+      { key: "lowStock", label: "库存预警商品", count: stats.lowStock || 0, route: "/admin/inventory" },
+      { key: "review", label: "待完善商品", count: stats.pendingReview || 0, route: "/admin/products" },
+    ].filter((a) => a.count > 0);
+  }, [stats]);
+
+  const trendFormat = TREND_METRICS.find((m) => m.key === trendMetric)?.format ?? "number";
+  const todayText = new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
     month: "long",
     day: "numeric",
     weekday: "short",
   }).format(new Date());
+  const updatedText = lastUpdated
+    ? `数据更新于 ${lastUpdated.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
+    : "";
+
+  const refreshLabel =
+    refreshState === "loading"
+      ? "刷新中…"
+      : refreshState === "done"
+        ? "已更新"
+        : refreshState === "error"
+          ? "刷新失败，点此重试"
+          : "刷新数据";
 
   return (
-    <div className="admin-dashboard" aria-label="今日经营工作台">
+    <div className="admin-dashboard" aria-label="今日经营数据看板">
       <header className="admin-dashboard__header">
-        <div>
-          <p className="admin-dashboard__eyebrow">首页 / 经营工作台</p>
+        <div className="admin-dashboard__heading">
+          <p className="admin-dashboard__eyebrow">首页 / 今日经营</p>
           <h1>今日经营</h1>
           <p className="admin-dashboard__subtitle">
-            {today} · {loading ? "正在同步经营数据" : "关键经营数据与待办事项同屏呈现"}
+            {todayText}
+            {updatedText ? ` · ${updatedText}` : ""}
           </p>
         </div>
-        <div className="admin-dashboard__header-actions">
-          <button type="button" className="admin-dashboard__refresh" onClick={loadDashboard}>
-            <ReloadOutlined /> 刷新数据
-          </button>
-          <Link to="/admin/products" className="admin-dashboard__primary-action">
-            <PlusOutlined /> 新增商品
-          </Link>
-        </div>
+        <button
+          type="button"
+          className={`admin-dashboard__refresh is-${refreshState}`}
+          onClick={handleRefresh}
+          disabled={refreshState === "loading"}
+        >
+          <ReloadOutlined className={refreshState === "loading" ? "is-spinning" : ""} />
+          {refreshLabel}
+        </button>
       </header>
 
       {loadError && (
         <div className="admin-dashboard__data-notice" role="alert">
-          <span>部分经营数据暂时无法加载，页面结构与可用入口仍可正常查看。</span>
-          <button type="button" onClick={loadDashboard}>重新加载</button>
+          <span>核心经营数据暂时无法加载，请稍后重试。</span>
+          <button type="button" onClick={loadStats}>重新加载</button>
         </div>
       )}
 
-      <section className="admin-dashboard__section" aria-labelledby="overview-title">
+      {/* 一、今日核心数据卡片 */}
+      <section className="admin-dashboard__section" aria-labelledby="cards-title">
         <div className="admin-dashboard__section-head">
-          <h2 id="overview-title">今日概览</h2>
-          <span>{stats ? "数据来自订单与网站行为事件" : "数据接入后自动显示"}</span>
+          <h2 id="cards-title">今日核心数据</h2>
+          <span>与昨日同口径对比</span>
         </div>
-        <div className="admin-dashboard__metrics">
-          {metrics.map((metric, index) => (
-            <Link
-              key={metric.label}
-              to={metric.route}
-              className={`admin-dashboard__metric${index === 0 ? " is-primary" : ""}`}
-            >
-              <span>{metric.label}</span>
-              <strong>{metric.value}</strong>
-              <small>{index === 0 ? "已结算订单金额" : "查看详情"} <RightOutlined /></small>
-            </Link>
-          ))}
+        <div className="admin-dashboard__cards">
+          {loading || cards.length === 0
+            ? Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="admin-dashboard__card is-skeleton" aria-hidden="true">
+                  <span className="admin-dashboard__card-icon" />
+                  <span className="admin-dashboard__card-label">载入中</span>
+                  <strong className="admin-dashboard__card-value">—</strong>
+                  <span className="admin-dashboard__card-change is-neutral">{"\u00A0"}</span>
+                </div>
+              ))
+            : cards.map((card) => {
+                const inner = (
+                  <>
+                    <span className="admin-dashboard__card-icon">{card.icon}</span>
+                    <span className="admin-dashboard__card-label">{card.label}</span>
+                    <strong className="admin-dashboard__card-value">{card.value}</strong>
+                    {card.change ? (
+                      <span className={`admin-dashboard__card-change is-${card.change.direction}`}>
+                        {card.change.direction === "up" ? <CaretUpOutlined /> : <CaretDownOutlined />}
+                        {Math.abs(card.change.pct).toFixed(1)}% 较昨日
+                      </span>
+                    ) : (
+                      <span className="admin-dashboard__card-change is-neutral">
+                        {card.stockNote || "暂无可比数据"}
+                      </span>
+                    )}
+                  </>
+                );
+                return card.route ? (
+                  <Link key={card.key} to={card.route} className="admin-dashboard__card">
+                    {inner}
+                  </Link>
+                ) : (
+                  <div key={card.key} className="admin-dashboard__card">
+                    {inner}
+                  </div>
+                );
+              })}
         </div>
       </section>
 
-      <div className="admin-dashboard__grid">
-        <section className="admin-dashboard__section" aria-labelledby="todo-title">
-          <div className="admin-dashboard__section-head">
-            <h2 id="todo-title">需要处理</h2>
-            <span>{stats ? `共 ${pendingItemTotal} 项需要关注` : "优先处理影响客户体验与履约的事项"}</span>
+      {/* 二、经营趋势 */}
+      <section className="admin-dashboard__section" aria-labelledby="trend-title">
+        <div className="admin-dashboard__section-head admin-dashboard__trend-head">
+          <h2 id="trend-title">经营趋势</h2>
+          <div className="admin-dashboard__trend-controls">
+            <div className="admin-dashboard__segmented" role="tablist" aria-label="趋势指标">
+              {TREND_METRICS.map((m) => (
+                <button
+                  key={m.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={trendMetric === m.key}
+                  className={trendMetric === m.key ? "is-active" : ""}
+                  onClick={() => setTrendMetric(m.key)}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <div className="admin-dashboard__segmented" role="tablist" aria-label="时间范围">
+              {TREND_RANGES.map((r) => (
+                <button
+                  key={r.days}
+                  type="button"
+                  role="tab"
+                  aria-selected={trendDays === r.days}
+                  className={trendDays === r.days ? "is-active" : ""}
+                  onClick={() => setTrendDays(r.days)}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="admin-dashboard__todo-list">
-            {workItems.map((item) => (
-              <Link
-                key={item.label}
-                to={item.route}
-                className={`admin-dashboard__todo-item${Number(item.count) > 0 ? " has-pending" : ""}`}
+        </div>
+        <div className="admin-dashboard__trend-chart">
+          {trendError ? (
+            <div className="admin-dashboard__empty-chart">
+              趋势数据加载失败
+              <button
+                type="button"
+                className="admin-dashboard__retry-link"
+                onClick={() => loadTrend(trendMetric, trendDays)}
               >
-                <div>
-                  <strong>{item.label}</strong>
-                  <span>{item.detail}</span>
+                重新加载
+              </button>
+            </div>
+          ) : trendLoading ? (
+            <div className="admin-dashboard__empty-chart">正在加载趋势数据</div>
+          ) : trendData.length === 0 ? (
+            <div className="admin-dashboard__empty-chart">暂无趋势数据</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <AreaChart data={trendData} margin={{ top: 10, right: 16, bottom: 0, left: -8 }}>
+                <defs>
+                  <linearGradient id="adminTrendFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#b8944e" stopOpacity={0.28} />
+                    <stop offset="100%" stopColor="#b8944e" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ebe6dd" />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={(d: string) => {
+                    const [, m = "", day = ""] = d.split("-");
+                    return `${Number(m)}/${Number(day)}`;
+                  }}
+                  interval={trendDays === 30 ? 3 : 0}
+                  tick={{ fill: "#96918a", fontSize: 11 }}
+                  axisLine={{ stroke: "#e9e5de" }}
+                  tickLine={false}
+                />
+                <YAxis
+                  tickFormatter={(v: number) =>
+                    trendFormat === "currency" && v >= 10000
+                      ? `${(v / 10000).toFixed(1)}万`
+                      : `${v}`
+                  }
+                  tick={{ fill: "#96918a", fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={48}
+                />
+                <Tooltip
+                  content={(props: { active?: boolean; payload?: Array<{ value?: number }>; label?: string }) =>
+                    <TrendTooltip {...props} format={trendFormat} />
+                  }
+                  cursor={{ stroke: "#c2bdb5", strokeDasharray: "3 3" }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="count"
+                  name="数值"
+                  stroke="#b8944e"
+                  strokeWidth={2}
+                  fill="url(#adminTrendFill)"
+                  dot={false}
+                  activeDot={{ r: 5, strokeWidth: 0 }}
+                  isAnimationActive={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </section>
+
+      {/* 三、重要提醒 */}
+      <section className="admin-dashboard__section" aria-labelledby="alert-title">
+        <div className="admin-dashboard__section-head">
+          <h2 id="alert-title">重要提醒</h2>
+          <span>{alerts.length > 0 ? `${alerts.length} 项需要关注` : "暂无异常"}</span>
+        </div>
+        {alerts.length > 0 ? (
+          <div className="admin-dashboard__alerts">
+            {alerts.map((a) => (
+              <Link key={a.key} to={a.route} className="admin-dashboard__alert-item">
+                <span className="admin-dashboard__alert-count">{formatNumber(a.count)}</span>
+                <div className="admin-dashboard__alert-text">
+                  <strong>{a.label}</strong>
+                  <span>点击查看与处理</span>
                 </div>
-                <div className="admin-dashboard__todo-value">
-                  <b>{formatNumber(item.count)}</b>
-                  <RightOutlined />
-                </div>
+                <RightOutlined className="admin-dashboard__alert-arrow" />
               </Link>
             ))}
           </div>
-        </section>
-
-        <section className="admin-dashboard__section" aria-labelledby="trend-title">
-          <div className="admin-dashboard__section-head">
-            <h2 id="trend-title">近 7 日订单趋势</h2>
-            <Link to="/admin/orders">订单中心 <RightOutlined /></Link>
+        ) : (
+          <div className="admin-dashboard__empty-list">
+            {loading ? "正在加载提醒" : "暂无异常提醒，经营状态良好"}
           </div>
-          {orderTrend.length > 0 ? (
-            <div className="admin-dashboard__trend" role="img" aria-label="近七日订单数量柱状图">
-              {orderTrend.map((item, index) => (
-                <div key={item.date} className="admin-dashboard__trend-column">
-                  <span>{item.count}</span>
-                  <div className="admin-dashboard__trend-track">
-                    <i
-                      className={index === orderTrend.length - 1 ? "is-today" : undefined}
-                      style={{ height: `${Math.max((item.count / trendMaximum) * 100, item.count > 0 ? 8 : 0)}%` }}
-                    />
-                  </div>
-                  <small>{formatDateLabel(item.date)}</small>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="admin-dashboard__empty-chart">{loading ? "正在加载订单趋势" : "暂无订单趋势数据"}</div>
-          )}
-        </section>
-      </div>
-
-      <div className="admin-dashboard__grid admin-dashboard__grid--bottom">
-        <section className="admin-dashboard__section" aria-labelledby="inquiry-title">
-          <div className="admin-dashboard__section-head">
-            <h2 id="inquiry-title">最新预约咨询</h2>
-            <Link to="/admin/inquiries">查看全部 <RightOutlined /></Link>
-          </div>
-          {recentInquiries.length > 0 ? (
-            <div className="admin-dashboard__inquiry-list">
-              {recentInquiries.map((inquiry) => (
-                <Link key={inquiry.id} to="/admin/inquiries" className="admin-dashboard__inquiry-item">
-                  <div>
-                    <strong>{inquiry.customerName || "未留名客户"}</strong>
-                    <span>{inquiry.customerPhone || "未留联系方式"}</span>
-                  </div>
-                  <div>
-                    <em>{inquiryStatusLabel[inquiry.status || ""] || inquiry.status || "待处理"}</em>
-                    <small>{inquiry.createdAt ? new Date(inquiry.createdAt).toLocaleDateString("zh-CN") : ""}</small>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <div className="admin-dashboard__empty-list">{loading ? "正在加载预约咨询" : "暂无待处理预约咨询"}</div>
-          )}
-        </section>
-
-        <section className="admin-dashboard__section" aria-labelledby="quick-title">
-          <div className="admin-dashboard__section-head">
-            <h2 id="quick-title">快捷进入</h2>
-            <span>常用经营操作</span>
-          </div>
-          <div className="admin-dashboard__quick-actions">
-            <Link to="/admin/products">新增或维护商品 <RightOutlined /></Link>
-            <Link to="/admin/selection-inquiry">处理选款咨询 <RightOutlined /></Link>
-            <Link to="/admin/orders">查看订单履约 <RightOutlined /></Link>
-            <Link to="/admin/editor/home">编辑网站首页 <RightOutlined /></Link>
-          </div>
-        </section>
-      </div>
+        )}
+      </section>
     </div>
   );
 }

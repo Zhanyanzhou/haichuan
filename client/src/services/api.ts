@@ -21,13 +21,25 @@ const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-export const publicProductStreamUrl = `${(import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "")}/products/public/stream`;
+type NormalizedRequestError = Error & { status?: number };
+
+function clearCustomerSession() {
+  localStorage.removeItem("customerToken");
+  localStorage.removeItem("customer");
+}
+
+function requestStatus(error: unknown): number | undefined {
+  return (error as NormalizedRequestError | undefined)?.status;
+}
+
+// 受控目录 SSE：仅发变更信号（不返回商品数据），前端收到信号后用鉴权 catalog 接口重拉
+export const publicProductStreamUrl = `${(import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "")}/products/catalog/stream`;
 export const publicPageDocumentStreamUrl = `${(import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "")}/page-modules/document/stream`;
 
 // Request interceptor - attach token
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
-  if (token) {
+  if (token && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
@@ -46,13 +58,25 @@ api.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      // 同步清空 Zustand 持久化状态(含 jewelry-auth),避免与 localStorage.token 不同步造成登录态僵尸残留
-      useAuthStore.getState().logout();
-      if (
+      const customerToken = localStorage.getItem("customerToken");
+      const requestAuthorization = String(error.config?.headers?.Authorization || "");
+      const isCustomerRequest = Boolean(
+        customerToken && requestAuthorization === `Bearer ${customerToken}`,
+      );
+      if (isCustomerRequest) clearCustomerSession();
+      else useAuthStore.getState().logout();
+
+      if (!isCustomerRequest &&
         window.location.pathname.startsWith("/admin") &&
         !window.location.pathname.includes("/admin/login")
       ) {
         window.location.href = "/admin/login";
+      } else if (isCustomerRequest &&
+        // 只有真正需要客户身份的页面才跳登录；公开浏览页会自动降级到游客目录。
+        /^\/(cart|checkout|partner)(\/|$)/.test(window.location.pathname)
+      ) {
+        const returnTo = window.location.pathname + window.location.search;
+        window.location.href = `/customer?returnTo=${encodeURIComponent(returnTo)}`;
       }
     } else if (error.response?.status === 403) {
       notifyRequestError("没有权限执行此操作");
@@ -62,7 +86,9 @@ api.interceptors.response.use(
       notifyRequestError("服务器繁忙，请稍后再试");
     }
     const msg = error.response?.data?.message || error.message || "网络错误";
-    return Promise.reject(new Error(msg));
+    const normalized = new Error(msg) as NormalizedRequestError;
+    normalized.status = error.response?.status;
+    return Promise.reject(normalized);
   },
 );
 
@@ -189,7 +215,20 @@ export const productApi = {
         paginate(filtered, params.page || 1, params.pageSize || 20),
       );
     }
-    return api.get("/products/public", { params });
+    if (!localStorage.getItem("customerToken")) {
+      return api.get("/products/public", { params });
+    }
+    try {
+      return await api.get("/products/catalog", {
+        params,
+        headers: customerAuthHeaders(),
+      });
+    } catch (error) {
+      if (requestStatus(error) !== 401) throw error;
+      // 客户令牌失效时不把公开浏览变成登录墙，清理旧会话后降级到游客目录。
+      clearCustomerSession();
+      return api.get("/products/public", { params });
+    }
   },
   getById: async (id: number) => {
     if (USE_MOCK) {
@@ -209,7 +248,18 @@ export const productApi = {
       if (!product) throw new Error("商品当前不可浏览");
       return mockRes(product);
     }
-    return api.get(`/products/public/${id}`);
+    if (!localStorage.getItem("customerToken")) {
+      return api.get(`/products/public/${id}`);
+    }
+    try {
+      return await api.get(`/products/catalog/${id}`, {
+        headers: customerAuthHeaders(),
+      });
+    } catch (error) {
+      if (requestStatus(error) !== 401) throw error;
+      clearCustomerSession();
+      return api.get(`/products/public/${id}`);
+    }
   },
   create: async (data: any) => {
     if (USE_MOCK) {
@@ -260,7 +310,7 @@ export const productApi = {
   /* 图片管理 */
   addImage: async (
     productId: number,
-    data: { url: string; type?: string; sortOrder?: number; isVideo?: boolean },
+    data: { url?: string; storageKey?: string; type?: string; sortOrder?: number; isVideo?: boolean; width?: number; height?: number; mimeType?: string; fileSize?: number },
   ) => {
     if (USE_MOCK) {
       await mockDelay(200);
@@ -577,6 +627,11 @@ export const orderApi = {
     return api.get("/orders", { params });
   },
   getById: (id: number) => api.get(`/orders/${id}`),
+  getStatistics: () => api.get("/orders/statistics"),
+  getAnomalies: () => api.get("/orders/anomalies"),
+  getTradeOverview: () => api.get("/orders/trade-overview"),
+  /** 导出订单（与当前筛选一致；仅 ADMIN） */
+  exportList: (params: any) => api.get("/orders/export", { params }),
   updateStatus: async (id: number, data: any) => {
     if (USE_MOCK) {
       await mockDelay(200);
@@ -592,6 +647,38 @@ export const orderApi = {
       internalNote?: string;
     },
   ) => api.put(`/orders/${id}/ship`, data),
+  // 交易中心：订单管理中心操作（金额/地址/备注/签收/顾问/定制阶段）
+  updateAmount: (id: number, data: {
+    discountAmount?: number;
+    adjustmentAmount?: number;
+    finalAmount?: number;
+    depositAmount?: number;
+    balanceAmount?: number;
+    reason?: string;
+  }) => api.put(`/orders/${id}/amount`, data),
+  updateAddress: (id: number, address: string) =>
+    api.put(`/orders/${id}/address`, { address }),
+  updateNote: (id: number, internalNote: string) =>
+    api.put(`/orders/${id}/note`, { internalNote }),
+  confirmReceive: (id: number) => api.put(`/orders/${id}/receive`),
+  updateConsultant: (id: number, salesConsultantId: number | null) =>
+    api.put(`/orders/${id}/consultant`, { salesConsultantId }),
+  advanceCustomStage: (id: number, stage: string) =>
+    api.put(`/orders/${id}/custom-stage`, { stage }),
+};
+
+// ===== 报价管理 API =====
+export const quotationApi = {
+  getList: (params: any) => api.get("/quotations", { params }),
+  getById: (id: number) => api.get(`/quotations/${id}`),
+  create: (data: any) => api.post("/quotations", data),
+  update: (id: number, data: any) => api.put(`/quotations/${id}`, data),
+  submit: (id: number) => api.put(`/quotations/${id}/submit`),
+  confirm: (id: number) => api.put(`/quotations/${id}/confirm`),
+  cancel: (id: number) => api.put(`/quotations/${id}/cancel`),
+  convertToOrder: (id: number, data: { address: string; orderType?: string }) =>
+    api.post(`/quotations/${id}/convert`, data),
+  remove: (id: number) => api.delete(`/quotations/${id}`),
 };
 
 const customerAuthHeaders = () => {
@@ -632,8 +719,6 @@ export const customerApi = {
   login: (data: { phone: string; password: string }) =>
     api.post("/customers/login", data),
   checkout: (data: any) => api.post("/customers/checkout", data),
-  accessByOrder: (data: { phone: string; orderNo: string }) =>
-    api.post("/customers/order-access", data),
   getProfile: () =>
     api.get("/customers/me", { headers: customerAuthHeaders() }),
   updateProfile: (data: { name?: string; email?: string }) =>
@@ -660,10 +745,10 @@ export const customerApi = {
     api.delete(`/customers/me/addresses/${id}`, {
       headers: customerAuthHeaders(),
     }),
-  submitPaymentProof: (orderId: number, proofUrl: string) =>
+  submitPaymentProof: (orderId: number, proofKey: string) =>
     api.post(
       `/customers/me/orders/${orderId}/payment-proof`,
-      { proofUrl },
+      { proofKey },
       { headers: customerAuthHeaders() },
     ),
   uploadPaymentProof: (file: File) => {
@@ -678,6 +763,49 @@ export const customerApi = {
   },
 };
 
+// ===== Catalog API（受控商品目录，登录客户可见）=====
+export const catalogApi = {
+  getList: (params: any = {}) =>
+    api.get("/products/catalog", { params, headers: customerAuthHeaders() }),
+  getById: (id: number) =>
+    api.get(`/products/catalog/${id}`, { headers: customerAuthHeaders() }),
+};
+
+// ===== Recommendations API（规则推荐，登录客户）=====
+export const recommendationApi = {
+  getHot: (limit = 12) =>
+    api.get("/recommendations/hot", {
+      params: { limit },
+      headers: customerAuthHeaders(),
+    }),
+  getForYou: (limit = 12) =>
+    api.get("/recommendations/for-you", {
+      params: { limit },
+      headers: customerAuthHeaders(),
+    }),
+  getSimilar: (productId: number, limit = 12) =>
+    api.get(`/recommendations/similar/${productId}`, {
+      params: { limit },
+      headers: customerAuthHeaders(),
+    }),
+};
+
+// ===== Partner Applications API（合作申请）=====
+export const partnerApi = {
+  // 客户侧（用客户令牌）
+  getMine: () =>
+    api.get("/partner-applications/me", { headers: customerAuthHeaders() }),
+  submit: (data: any) =>
+    api.post("/partner-applications", data, { headers: customerAuthHeaders() }),
+  resubmit: (data: any) =>
+    api.put("/partner-applications/me", data, { headers: customerAuthHeaders() }),
+  // 后台（员工令牌，全局 interceptor 自动注入 Authorization）
+  adminGetList: (params: any) => api.get("/partner-applications", { params }),
+  adminGetById: (id: number) => api.get(`/partner-applications/${id}`),
+  adminReview: (id: number, data: { action: string; reviewNote?: string }) =>
+    api.put(`/partner-applications/${id}/review`, data),
+};
+
 export const paymentApi = {
   getList: (params: any) => api.get("/payments", { params }),
   getById: (id: number) => api.get(`/payments/${id}`),
@@ -685,13 +813,81 @@ export const paymentApi = {
     api.put(`/payments/${id}/approve`, { reviewNote }),
   reject: (id: number, reviewNote?: string) =>
     api.put(`/payments/${id}/reject`, { reviewNote }),
+  // 后台手动登记收款（定金/尾款/全款/补款，财务直接录入已到账收款）
+  createReceipt: (data: {
+    orderId: number;
+    amount: number;
+    method: string;
+    type: 'DEPOSIT' | 'BALANCE' | 'FULL' | 'SUPPLEMENT';
+    paidAt?: string;
+    gatewayTradeNo?: string;
+    reviewNote?: string;
+  }) => api.post("/payments/receipt", data),
+};
+
+// ===== 履约 API =====
+export const fulfillmentApi = {
+  getList: (params: any) => api.get("/fulfillments", { params }),
+  getById: (id: number) => api.get(`/fulfillments/${id}`),
+  dispatch: (id: number, data: { carrier: string; trackingNo: string; internalNote?: string }) =>
+    api.put(`/fulfillments/${id}/dispatch`, data),
+  updateStatus: (
+    id: number,
+    data: { status: 'DELIVERED' | 'ABNORMAL'; abnormalReason?: string; internalNote?: string },
+  ) => api.put(`/fulfillments/${id}/status`, data),
+};
+
+// ===== 退款 API =====
+export const refundApi = {
+  getList: (params: any) => api.get("/refunds", { params }),
+  getById: (id: number) => api.get(`/refunds/${id}`),
+  create: (data: {
+    orderId: number;
+    paymentId?: number;
+    amount: number;
+    reason: string;
+    idempotencyKey?: string;
+    afterSalesCaseId?: number;
+  }) => api.post("/refunds", data),
+  review: (id: number, data: { action: 'APPROVED' | 'REJECTED'; reviewNote?: string }) =>
+    api.put(`/refunds/${id}/review`, data),
+  execute: (
+    id: number,
+    data: { action: 'COMPLETED' | 'FAILED'; gatewayRefundNo?: string; reviewNote?: string },
+  ) => api.put(`/refunds/${id}/execute`, data),
+};
+
+// ===== 售后 API =====
+export const afterSalesApi = {
+  getList: (params: any) => api.get("/after-sales-cases", { params }),
+  getById: (id: number) => api.get(`/after-sales-cases/${id}`),
+  create: (data: {
+    orderId: number;
+    orderItemId?: number;
+    customerId?: number;
+    type: 'REFUND' | 'EXCHANGE' | 'REPAIR';
+    reason: string;
+    evidenceUrls?: string[];
+    customerNote?: string;
+    requestedRefundAmount?: number;
+  }) => api.post("/after-sales-cases", data),
+  review: (
+    id: number,
+    data: { action: 'APPROVED' | 'REJECTED'; approvedRefundAmount?: number; adminNote?: string },
+  ) => api.put(`/after-sales-cases/${id}/review`, data),
+  updateStatus: (id: number, data: { status: string; adminNote?: string }) =>
+    api.put(`/after-sales-cases/${id}/status`, data),
 };
 
 // ===== Dashboard Statistics API =====
+export type TrendMetric = "orders" | "revenue" | "inquiries" | "pageViews";
+
 export const statisticsApi = {
   getDashboard: () => api.get("/statistics/dashboard"),
   getOrderTrend: (days = 7) =>
     api.get("/statistics/order-trend", { params: { days } }),
+  getTrend: (days = 7, metric: TrendMetric = "orders") =>
+    api.get("/statistics/trend", { params: { days, metric } }),
 };
 
 // ===== Gold Price API =====
@@ -968,6 +1164,14 @@ export const uploadApi = {
     const formData = new FormData();
     formData.append("file", file);
     return api.post("/upload/image", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  },
+  // 受控产品库：商品图片上传到私有存储（返回 storageKey，不返回公开 url）
+  uploadProductImage: async (file: File) => {
+    const formData = new FormData();
+    formData.append("files", file);
+    return api.post("/upload/product-images", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },

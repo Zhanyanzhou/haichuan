@@ -1,10 +1,12 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { usePageMetaStore } from "@/store/pageMetaStore";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "react-router-dom";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { MATERIALS, type CatalogProduct } from "@/data/catalogData";
 import { useProductData, type RealCategory } from "@/hooks/useProductData";
 import { getListingImage } from "@/utils/productImage";
+import { SecureImage } from "@/components/common/SecureImage";
 import { trackPageView, trackSearch } from "@/hooks/useAnalytics";
 
 const T = {
@@ -352,7 +354,6 @@ function FilterTags({
 
 /* ═══════ 产品卡片 ═══════ */
 function ProductCard({ product }: { product: CatalogProduct }) {
-  const fallbackRef = useRef(false);
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -371,27 +372,15 @@ function ProductCard({ product }: { product: CatalogProduct }) {
             marginBottom: 14,
           }}
         >
-          <img
+          <SecureImage
             src={getListingImage(product as any)}
             alt={`${product.name} ${product.sku}`}
-            loading="lazy"
+            fallback="/images/products/placeholder.svg"
             style={{
               width: "100%",
               height: "100%",
               objectFit: "contain",
               transition: "transform 600ms cubic-bezier(0.22,1,0.36,1)",
-            }}
-            onMouseEnter={(e) => {
-              (e.target as HTMLImageElement).style.transform = "scale(1.02)";
-            }}
-            onMouseLeave={(e) => {
-              (e.target as HTMLImageElement).style.transform = "scale(1)";
-            }}
-            onError={(e) => {
-              if (fallbackRef.current) return;
-              fallbackRef.current = true;
-              (e.target as HTMLImageElement).src =
-                "/images/products/placeholder.svg";
             }}
           />
         </div>
@@ -416,6 +405,17 @@ function ProductCard({ product }: { product: CatalogProduct }) {
 
 /* ═══════ 主页面 ═══════ */
 export default function Search() {
+  const setPageMeta = usePageMetaStore((s) => s.setMeta);
+  const clearPageMeta = usePageMetaStore((s) => s.clear);
+  // SEO：搜索页使用固定中性标题，不在 title 中拼搜索词或结果数，避免生成误导性标题
+  useEffect(() => {
+    setPageMeta({
+      title: "搜索珠宝作品 | 海川珠宝",
+      description: "按品类、材质与货号搜索海川珠宝公开作品。",
+    });
+    return () => clearPageMeta();
+  }, [setPageMeta, clearPageMeta]);
+
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<Filters>({
     category: "",

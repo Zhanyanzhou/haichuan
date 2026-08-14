@@ -143,6 +143,73 @@ export const navigationConfig: NavDomain[] = [
             label: "已发货",
             route: "/admin/orders?status=SHIPPED",
           },
+          {
+            key: "trade-fulfillment",
+            label: "履约中心",
+            route: "/admin/trade/fulfillment",
+          },
+        ],
+      },
+      {
+        key: "trade-quotation",
+        label: "报价管理",
+        collapsible: false,
+        defaultOpen: false,
+        items: [
+          {
+            key: "trade-quotations",
+            label: "报价单",
+            route: "/admin/trade/quotations",
+          },
+        ],
+      },
+      {
+        key: "trade-finance",
+        label: "收款与退款",
+        collapsible: false,
+        defaultOpen: false,
+        items: [
+          {
+            key: "trade-payments",
+            label: "付款审核",
+            route: "/admin/trade/payments",
+          },
+          {
+            key: "trade-refunds",
+            label: "退款中心",
+            route: "/admin/trade/refunds",
+          },
+        ],
+      },
+      {
+        key: "trade-service",
+        label: "售后服务",
+        collapsible: false,
+        defaultOpen: false,
+        items: [
+          {
+            key: "trade-after-sales",
+            label: "售后中心",
+            route: "/admin/trade/after-sales",
+          },
+        ],
+      },
+      {
+        key: "trade-data",
+        label: "交易数据",
+        collapsible: false,
+        defaultOpen: false,
+        items: [
+          {
+            key: "trade-overview",
+            label: "交易概览",
+            route: "/admin/trade/overview",
+          },
+          {
+            key: "trade-anomalies",
+            label: "异常订单",
+            route: "/admin/trade/anomalies",
+          },
         ],
       },
     ],
@@ -310,6 +377,11 @@ export const navigationConfig: NavDomain[] = [
             key: "selection-pending",
             label: "待处理选款",
             route: "/admin/selection-inquiry?status=PENDING",
+          },
+          {
+            key: "partner-applications",
+            label: "合作申请",
+            route: "/admin/partner-applications",
           },
         ],
       },

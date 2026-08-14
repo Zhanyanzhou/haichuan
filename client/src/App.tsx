@@ -1,12 +1,16 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Suspense, lazy } from "react";
-import { Spin } from "antd";
 import PublicLayout from "@/components/layout/PublicLayout";
-import AdminLayout from "@/components/layout/AdminLayout";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { RequestErrorNotice } from "@/components/common/RequestErrorNotice";
-import ProtectedRoute from "@/components/common/ProtectedRoute";
+import { CustomerProtectedRoute } from "@/components/common/CustomerProtectedRoute";
 import ProgressBar from "@/components/common/ProgressBar";
+import { rolesForAdminRoute } from "@/config/adminRouteAccess";
+
+// 后台布局与后台鉴权失败页依赖 Ant Design，不应进入前台首屏依赖图。
+const AdminLayout = lazy(() => import("@/components/layout/AdminLayout"));
+const ProtectedRoute = lazy(() => import("@/components/common/ProtectedRoute"));
+const AntdProvider = lazy(() => import("@/components/common/AntdProvider"));
 // Lazy load pages
 const Home = lazy(() => import("@/pages/public/Home"));
 const HomePreview = lazy(() =>
@@ -25,6 +29,7 @@ const Privacy = lazy(() => import("@/pages/public/Privacy"));
 const Catalog = lazy(() => import("@/pages/public/Catalog"));
 const Custom = lazy(() => import("@/pages/public/Custom"));
 const Search = lazy(() => import("@/pages/public/Search"));
+const PartnerApplication = lazy(() => import("@/pages/public/PartnerApplication"));
 
 const Login = lazy(() => import("@/pages/admin/Login"));
 const Dashboard = lazy(() => import("@/pages/admin/Dashboard"));
@@ -35,6 +40,12 @@ const AIClassify = lazy(() => import("@/pages/admin/AIClassify"));
 const GoldPrice = lazy(() => import("@/pages/admin/GoldPrice"));
 const Inventory = lazy(() => import("@/pages/admin/Inventory"));
 const OrderManage = lazy(() => import("@/pages/admin/OrderManage"));
+const QuotationManage = lazy(() => import("@/pages/admin/QuotationManage"));
+const TradeOverview = lazy(() => import("@/pages/admin/TradeOverview"));
+const AnomalyOrders = lazy(() => import("@/pages/admin/AnomalyOrders"));
+const FulfillmentCenter = lazy(() => import("@/pages/admin/FulfillmentCenter"));
+const RefundManage = lazy(() => import("@/pages/admin/RefundManage"));
+const AfterSalesManage = lazy(() => import("@/pages/admin/AfterSalesManage"));
 const UserManage = lazy(() => import("@/pages/admin/UserManage"));
 const Settings = lazy(() => import("@/pages/admin/Settings"));
 const EditorWorkbench = lazy(() => import("@/pages/admin/EditorWorkbench"));
@@ -49,11 +60,21 @@ const MarketingManage = lazy(() => import("@/pages/admin/MarketingManage"));
 const PromotionManage = lazy(() => import("@/pages/admin/PromotionManage"));
 const FintechManage = lazy(() => import("@/pages/admin/FintechManage"));
 const AnalyticsView = lazy(() => import("@/pages/admin/AnalyticsView"));
+const PartnerApplications = lazy(() => import("@/pages/admin/PartnerApplications"));
 
 const Loading = () => (
-  <div className="flex items-center justify-center min-h-screen bg-brand-bg">
-    <Spin size="large" />
+  <div className="flex min-h-screen items-center justify-center bg-brand-bg" role="status" aria-live="polite">
+    <span className="h-10 w-10 animate-spin rounded-full border-4 border-brand-line border-t-brand-gold" aria-hidden="true" />
+    <span className="sr-only">页面加载中</span>
   </div>
+);
+
+const AdminPage = ({ children, route }: { children: React.ReactNode; route: string }) => (
+  <ProtectedRoute roles={[...(rolesForAdminRoute(route) || [])]}>{children}</ProtectedRoute>
+);
+
+const AntdRoute = ({ children }: { children: React.ReactNode }) => (
+  <AntdProvider>{children}</AntdProvider>
 );
 
 function App() {
@@ -66,14 +87,15 @@ function App() {
           {/* Public Routes — 首页和其他页面统一使用 PublicLayout */}
           <Route element={<PublicLayout />}>
             <Route index element={<Home />} />
-            <Route path="products" element={<ProductList />} />
-            <Route path="products/:id" element={<ProductDetail />} />
+            <Route path="products" element={<AntdRoute><ProductList /></AntdRoute>} />
+            <Route path="products/:id" element={<AntdRoute><ProductDetail /></AntdRoute>} />
             <Route path="cart" element={<Navigate to="/contact?reason=commerce-unavailable" replace />} />
             <Route path="checkout" element={<Navigate to="/contact?reason=commerce-unavailable" replace />} />
-            <Route path="catalog" element={<Catalog />} />
+            <Route path="catalog" element={<AntdRoute><Catalog /></AntdRoute>} />
             <Route path="custom" element={<Custom />} />
             <Route path="search" element={<Search />} />
-            <Route path="customer" element={<CustomerCenter />} />
+            <Route path="partner" element={<CustomerProtectedRoute><AntdRoute><PartnerApplication /></AntdRoute></CustomerProtectedRoute>} />
+            <Route path="customer" element={<AntdRoute><CustomerCenter /></AntdRoute>} />
             <Route path="about" element={<About />} />
             <Route path="contact" element={<Contact />} />
             <Route path="privacy" element={<Privacy />} />
@@ -81,7 +103,7 @@ function App() {
               path="preview/home"
               element={
                 <ProtectedRoute roles={["SUPER_ADMIN", "ADMIN", "EDITOR"]}>
-                  <HomePreview />
+                  <AntdRoute><HomePreview /></AntdRoute>
                 </ProtectedRoute>
               }
             />
@@ -89,25 +111,33 @@ function App() {
               path="preview/:pageKey"
               element={
                 <ProtectedRoute roles={["SUPER_ADMIN", "ADMIN", "EDITOR"]}>
-                  <PagePreview />
+                  <AntdRoute><PagePreview /></AntdRoute>
                 </ProtectedRoute>
               }
             />
           </Route>
 
-          <Route path="/admin" element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
+          <Route path="/admin" element={<ProtectedRoute><AntdRoute><AdminLayout /></AntdRoute></ProtectedRoute>}>
             <Route index element={<Navigate to="/admin/dashboard" replace />} />
-            <Route path="dashboard" element={<Dashboard />} />
-            <Route path="products" element={<ProductManage />} />
-            <Route path="products/new" element={<ProductEditor />} />
-            <Route path="products/:id/edit" element={<ProductEditor />} />
-            <Route path="categories" element={<CategoryManage />} />
-            <Route path="ai-classify" element={<AIClassify />} />
-            <Route path="gold-price" element={<GoldPrice />} />
-            <Route path="inventory" element={<Inventory />} />
-            <Route path="orders" element={<OrderManage />} />
-            <Route path="users" element={<UserManage />} />
-            <Route path="settings" element={<Settings />} />
+            <Route path="dashboard" element={<AdminPage route="/admin/dashboard"><Dashboard /></AdminPage>} />
+            <Route path="products" element={<AdminPage route="/admin/products"><ProductManage /></AdminPage>} />
+            <Route path="products/new" element={<AdminPage route="/admin/products"><ProductEditor /></AdminPage>} />
+            <Route path="products/:id/edit" element={<AdminPage route="/admin/products"><ProductEditor /></AdminPage>} />
+            <Route path="categories" element={<AdminPage route="/admin/categories"><CategoryManage /></AdminPage>} />
+            <Route path="ai-classify" element={<AdminPage route="/admin/ai-classify"><AIClassify /></AdminPage>} />
+            <Route path="gold-price" element={<AdminPage route="/admin/gold-price"><GoldPrice /></AdminPage>} />
+            <Route path="inventory" element={<AdminPage route="/admin/inventory"><Inventory /></AdminPage>} />
+            <Route path="orders" element={<AdminPage route="/admin/orders"><OrderManage /></AdminPage>} />
+            {/* 交易域子页面 */}
+            <Route path="trade/payments" element={<AdminPage route="/admin/trade/payments"><PaymentReview /></AdminPage>} />
+            <Route path="trade/fulfillment" element={<AdminPage route="/admin/trade/fulfillment"><FulfillmentCenter /></AdminPage>} />
+            <Route path="trade/refunds" element={<AdminPage route="/admin/trade/refunds"><RefundManage /></AdminPage>} />
+            <Route path="trade/after-sales" element={<AdminPage route="/admin/trade/after-sales"><AfterSalesManage /></AdminPage>} />
+            <Route path="trade/quotations" element={<AdminPage route="/admin/trade/quotations"><QuotationManage /></AdminPage>} />
+            <Route path="trade/overview" element={<AdminPage route="/admin/trade/overview"><TradeOverview /></AdminPage>} />
+            <Route path="trade/anomalies" element={<AdminPage route="/admin/trade/anomalies"><AnomalyOrders /></AdminPage>} />
+            <Route path="users" element={<AdminPage route="/admin/users"><UserManage /></AdminPage>} />
+            <Route path="settings" element={<AdminPage route="/admin/settings"><Settings /></AdminPage>} />
             <Route
               path="homepage"
               element={<Navigate to="/admin/editor/home" replace />}
@@ -120,21 +150,23 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="inquiries" element={<InquiryManage />} />
-            <Route path="media" element={<MediaLibrary />} />
-            <Route path="audit-logs" element={<AuditLogs />} />
-            <Route path="site-content" element={<SiteContent />} />
-            <Route path="selection-inquiry" element={<SelectionInquiry />} />
-            <Route path="leads" element={<LeadManage />} />
-            <Route path="marketing" element={<MarketingManage />} />
-            <Route path="promotion" element={<PromotionManage />} />
-            <Route path="finance" element={<PaymentReview />} />
-            <Route path="fintech" element={<FintechManage />} />
-            <Route path="analytics" element={<AnalyticsView />} />
+            <Route path="inquiries" element={<AdminPage route="/admin/inquiries"><InquiryManage /></AdminPage>} />
+            <Route path="media" element={<AdminPage route="/admin/media"><MediaLibrary /></AdminPage>} />
+            <Route path="audit-logs" element={<AdminPage route="/admin/audit-logs"><AuditLogs /></AdminPage>} />
+            <Route path="site-content" element={<AdminPage route="/admin/site-content"><SiteContent /></AdminPage>} />
+            <Route path="selection-inquiry" element={<AdminPage route="/admin/selection-inquiry"><SelectionInquiry /></AdminPage>} />
+            <Route path="leads" element={<AdminPage route="/admin/leads"><LeadManage /></AdminPage>} />
+            <Route path="marketing" element={<AdminPage route="/admin/marketing"><MarketingManage /></AdminPage>} />
+            <Route path="promotion" element={<AdminPage route="/admin/promotion"><PromotionManage /></AdminPage>} />
+            {/* 付款审核已迁移至交易域 /admin/trade/payments；finance 域为禁用占位，旧入口重定向 */}
+            <Route path="finance" element={<Navigate to="/admin/trade/payments" replace />} />
+            <Route path="fintech" element={<AdminPage route="/admin/fintech"><FintechManage /></AdminPage>} />
+            <Route path="analytics" element={<AdminPage route="/admin/analytics"><AnalyticsView /></AdminPage>} />
+            <Route path="partner-applications" element={<AdminPage route="/admin/partner-applications"><PartnerApplications /></AdminPage>} />
           </Route>
 
           {/* Login */}
-          <Route path="/admin/login" element={<Login />} />
+          <Route path="/admin/login" element={<AntdRoute><Login /></AntdRoute>} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

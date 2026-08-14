@@ -1,7 +1,7 @@
 ﻿import { productPlaceholder } from '@/utils/placeholder';
 
 // ===== Mock Data for Demo Mode (no backend required) =====
-// 由环境变量 VITE_USE_MOCK 控制；默认启用 Mock 模式
+// 由环境变量 VITE_USE_MOCK 控制；默认关闭（仅 VITE_USE_MOCK=true 时启用），生产环境不得开启。
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
 
 // ===== Categories (4-level tree) =====
@@ -161,7 +161,7 @@ export const mockHomepageConfig = [
   {
     id: 6, type: 'contact', title: '联系我们', subtitle: '期待与您相遇',
     content: '', imageUrl: 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?w=800', videoUrl: '', linkUrl: '/contact', linkText: '在线咨询', isEnabled: true, sortOrder: 6,
-    settings: { phone: '400-888-8888', email: 'contact@haichuan.com', address: '深圳市龙岗区珠宝产业园A座', hours: '周一至周日 09:00-18:00' },
+    settings: { phone: '', email: '', address: '', hours: '' },
   },
 ];
 

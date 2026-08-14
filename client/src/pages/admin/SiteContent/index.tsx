@@ -51,7 +51,7 @@ export default function SiteContent() {
 
         <Card title="联系方式" style={{ borderRadius: 10, border: '1px solid #E7E6E2', boxShadow: '0 6px 20px rgba(40,36,30,0.035)', marginBottom: 20 }}>
           <Form.Item name="contactPhone" label="联系电话"><Input placeholder="400-xxx-xxxx" /></Form.Item>
-          <Form.Item name="contactEmail" label="联系邮箱"><Input placeholder="contact@haichuan.com" /></Form.Item>
+          <Form.Item name="contactEmail" label="联系邮箱"><Input placeholder="name@example.com" /></Form.Item>
           <Form.Item name="contactAddress" label="公司地址"><Input placeholder="详细地址" /></Form.Item>
         </Card>
 

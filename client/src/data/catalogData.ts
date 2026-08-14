@@ -1,5 +1,6 @@
 /**
- * 选款中心 — 分类结构 + 临时产品数据
+ * 选款中心 — 分类结构定义 + 筛选常量 + 类型
+ * （产品数据由 useProductData 从真实 API 获取，本文件不含产品数据）
  */
 export interface PrimaryCategory { id: string; name: string; sortOrder: number; }
 export interface SecondaryCategory { id: string; parentId: string; name: string; displayGroup?: string; sortOrder: number; }

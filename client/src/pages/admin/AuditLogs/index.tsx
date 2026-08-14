@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, Table, Tag, Button, Select } from 'antd';
 import { SettingOutlined, ReloadOutlined } from '@ant-design/icons';
 import { settingsApi } from '@/services/api';
@@ -14,7 +14,7 @@ export default function AuditLogs() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
 
-  const load = async (p = page) => {
+  const load = useCallback(async (p = page) => {
     setLoading(true); setError('');
     try {
       const res = await settingsApi.getLogs({ page: p, pageSize: 30 });
@@ -23,9 +23,9 @@ export default function AuditLogs() {
       setTotal(data?.total || 0);
     } catch (e: any) { setError(e.message || '加载失败'); }
     finally { setLoading(false); }
-  };
+  }, [page]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { void load(); }, [load]);
 
   const columns = [
     { title: '时间', dataIndex: 'createdAt', width: 160, render: (v: string) => <span style={{ fontSize: 12, color: '#96928A' }}>{v}</span> },

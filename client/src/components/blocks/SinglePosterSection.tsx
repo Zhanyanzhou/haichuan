@@ -79,7 +79,7 @@ export default function SinglePosterSection({ module, editMode }: Props) {
       <style>{`
         .homepage-single-poster__inner {
           display: grid;
-          grid-template-columns: ${isImageLeft ? '3fr 1fr' : SINGLE_POSTER_CONTRACT.canvas.desktopColumns};
+          grid-template-columns: ${isImageLeft ? SINGLE_POSTER_CONTRACT.canvas.desktopImageLeftColumns : SINGLE_POSTER_CONTRACT.canvas.desktopColumns};
           align-items: stretch;
           gap: clamp(28px,4vw,56px);
           max-width: ${SINGLE_POSTER_CONTRACT.canvas.maxWidth}px;

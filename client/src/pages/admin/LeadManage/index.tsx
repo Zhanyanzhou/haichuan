@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Table, Tag, Select, Input, Button, Drawer, Descriptions, Space, Card, Timeline, message } from 'antd';
 import { SearchOutlined, EyeOutlined, PhoneOutlined, MailOutlined } from '@ant-design/icons';
@@ -6,6 +6,7 @@ import api from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import AdminPageHeader from '@/components/common/AdminPageHeader';
 import { AdminLoadingState, AdminEmptyState, AdminErrorState } from '@/components/common/AdminDataStates';
+import { SecureImage } from '@/components/common/SecureImage';
 
 const STATUS_MAP: Record<string, { color: string; label: string }> = {
   PENDING: { color: 'gold', label: '待处理' },
@@ -29,6 +30,7 @@ export default function LeadManage() {
   const [error, setError] = useState(false);
   const [detailId, setDetailId] = useState<{ type: string; id: number } | null>(null);
   const [detail, setDetail] = useState<any>(null);
+  const [detailError, setDetailError] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [saving, setSaving] = useState(false);
   const requestedStatus = searchParams.get('status') || '';
@@ -40,7 +42,7 @@ export default function LeadManage() {
 
   const pageSize = 15;
 
-  const fetchList = async () => {
+  const fetchList = useCallback(async () => {
     setLoading(true); setError(false);
     try {
       const res = await api.get('/leads', { params: { page, pageSize, status: status || undefined, type: leadType || undefined, keyword: keyword || undefined } });
@@ -48,16 +50,21 @@ export default function LeadManage() {
       setList(data.list ?? []); setTotal(data.total ?? 0);
     } catch { setError(true); }
     finally { setLoading(false); }
-  };
+  }, [keyword, leadType, page, pageSize, status]);
 
-  useEffect(() => { fetchList(); }, [page, status, leadType]);
+  useEffect(() => { void fetchList(); }, [fetchList]);
 
   const openDetail = async (type: string, id: number) => {
     setDetailId({ type, id });
+    setDetailError(false);
+    setDetail(null);
     try {
       const res = await api.get(`/leads/${type}/${id}`);
       setDetail(unwrapResponse<any>(res));
-    } catch { /* ignore */ }
+    } catch {
+      // P1-39：详情加载失败标记错误态，避免抽屉永久 loading 无法区分加载中/失败
+      setDetailError(true);
+    }
   };
 
   const updateStatus = async (newStatus: string) => {
@@ -155,7 +162,7 @@ export default function LeadManage() {
                 {detail.items.map((item: any) => (
                   <Card key={item.id} size="small" style={{ marginBottom: 8 }}>
                     <Space>
-                      {item.productImageSnapshot && <img src={item.productImageSnapshot} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }} />}
+                      {item.productImageSnapshot && <SecureImage src={item.productImageSnapshot} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }} tokenKind="staff" />}
                       <div><strong>{item.productNameSnapshot}</strong><div style={{ color: '#999', fontSize: 12 }}>{item.productSkuSnapshot}</div></div>
                     </Space>
                   </Card>
@@ -188,7 +195,7 @@ export default function LeadManage() {
               </Space>
             </div>
           </>
-        ) : <AdminLoadingState />}
+        ) : detailError ? <AdminErrorState onRetry={() => { if (detailId) void openDetail(detailId.type, detailId.id); }} /> : <AdminLoadingState />}
       </Drawer>
     </div>
   );

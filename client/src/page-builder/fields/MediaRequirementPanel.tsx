@@ -24,41 +24,41 @@ function getMediaSpec(type: string, props: Record<string, any>): MediaSpec | nul
     case "首屏主视觉":
       return {
         title: "首屏双端素材",
-        description: "首屏采用 cover 裁切，电脑与手机需要分别构图；文字请在右侧字段编辑，不要烧录进图片。",
-        viewport: "电脑验收画布 1440×900（16:10）｜手机验收画布 390×844（约 9:19.5）",
+        description: "电脑画布为 1440×900，但主图按 16:9 的安全区 cover 裁切；平板继承电脑图，只有手机使用独立竖图。文字请在右侧字段编辑，不要烧录进图片。",
+        viewport: "电脑验收画布 1440×900｜平板继承电脑｜手机独立画布 390×844（≤767px）",
         slots: [
-          { label: "电脑端主图", url: props.desktopImage, targetRatio: [16, 10], recommendedSize: "建议不低于 2880×1800", required: true },
-          { label: "手机端主图", url: props.mobileImage, targetRatio: [390, 844], recommendedSize: "建议不低于 1170×2532", required: true },
+          { label: "电脑端主图", url: props.desktopImage, targetRatio: [16, 9], recommendedSize: "建议不低于 3840×2160（16:9）", required: true },
+          { label: "手机端主图", url: props.mobileImage, targetRatio: [9, 16], recommendedSize: "建议不低于 1170×2080（9:16）", required: true },
         ],
       };
     case "单图海报":
       return {
         title: "单图海报双端素材",
-        description: "窄屏会自动采用手机端图片；未填写时会回退为电脑端图片，并可能产生裁切。",
-        viewport: "电脑验收画布 1440×900｜平板竖屏、手机端使用竖构图",
+        description: "平板继承电脑构图；只有手机会自动采用竖图。未填写手机图时会回退电脑图，并可能产生裁切。",
+        viewport: "电脑/平板 3:2｜手机 3:4（≤767px）",
         slots: [
-          { label: "电脑端海报", url: props.desktopImage, targetRatio: [16, 10], recommendedSize: "建议不低于 2400×1500", required: true },
+          { label: "电脑端海报", url: props.desktopImage, targetRatio: [3, 2], recommendedSize: "建议不低于 2400×1600", required: true },
           { label: "手机端海报", url: props.mobileImage, targetRatio: [3, 4], recommendedSize: "建议不低于 1170×1560" },
         ],
       };
     case "全屏出血图":
       return {
         title: "全屏图双端素材",
-        description: "此模块会铺满视口。若复用电脑图，手机端通常会大幅裁切，因此建议单独上传手机图。",
-        viewport: "电脑验收画布 1440×900（16:10）｜手机验收画布 390×844（约 9:19.5）",
+        description: "这是固定比例的全宽视觉，不随设备视口高度拉伸。平板继承 12:5 的电脑图；手机建议单独准备竖图。",
+        viewport: "电脑/平板 12:5｜手机 5:6（≤767px）",
         slots: [
-          { label: "电脑端背景图", url: props.image, targetRatio: [16, 10], recommendedSize: "建议不低于 2880×1800", required: true },
-          { label: "手机端背景图", url: props.mobileImage, targetRatio: [390, 844], recommendedSize: "建议不低于 1170×2532", required: true },
+          { label: "电脑端背景图", url: props.image, targetRatio: [12, 5], recommendedSize: "建议不低于 3840×1600", required: true },
+          { label: "手机端背景图", url: props.mobileImage, targetRatio: [5, 6], recommendedSize: "建议不低于 1500×1800", required: true },
         ],
       };
     case "轮播图":
       return {
         title: "轮播图双端素材",
-        description: "轮播图在不同端使用不同高度。每一张电脑图都应有对应的手机图，避免推广文案或主体被裁掉。",
-        viewport: `电脑高度 ${props.height || 500}px｜手机高度 ${props.mobileHeight || 640}px`,
+        description: "轮播使用固定比例而不是任意高度：平板继承电脑比例，手机可单独选竖幅或标准竖图。每张电脑图建议配置对应手机图。",
+        viewport: `电脑/平板 ${props.desktopRatio === "standard" ? "16:9" : "12:5"}｜手机 ${props.mobileRatio === "standard" ? "4:5" : "3:4"}（≤767px）`,
         slots: (Array.isArray(props.images) ? props.images : []).flatMap((image: any, index: number) => [
-          { label: `第 ${index + 1} 张电脑图`, url: image?.url, targetRatio: [3, 1], recommendedSize: "建议 1920×640 或更高", required: true },
-          { label: `第 ${index + 1} 张手机图`, url: image?.mobileUrl, targetRatio: [1, 2], recommendedSize: "建议 750×1500 或更高", required: true },
+          { label: `第 ${index + 1} 张电脑图`, url: image?.url, targetRatio: props.desktopRatio === "standard" ? [16, 9] : [12, 5], recommendedSize: props.desktopRatio === "standard" ? "建议 3840×2160" : "建议 3840×1600", required: true },
+          { label: `第 ${index + 1} 张手机图`, url: image?.mobileUrl, targetRatio: props.mobileRatio === "standard" ? [4, 5] : [3, 4], recommendedSize: props.mobileRatio === "standard" ? "建议 1600×2000" : "建议 1500×2000" },
         ]),
       };
     case "热区图":

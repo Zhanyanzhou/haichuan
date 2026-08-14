@@ -18,6 +18,22 @@ export type ImageTextTemplate =
 
 export type ModuleDensity = "compact" | "normal" | "spacious";
 
+/**
+ * 装修响应式规则：电脑是基础布局，平板继承电脑；只有手机进入独立覆写层。
+ * 画布、运行时区块和素材校验共用这份边界，避免分别判断设备。
+ */
+export const RESPONSIVE_CANVAS = {
+  desktop: { width: 1440, height: 900 },
+  tablet: { width: 768, height: 1024 },
+  mobile: { width: 390, height: 844 },
+  mobileMaxWidth: 767,
+  mobileMediaQuery: "(max-width: 767px)",
+} as const;
+
+export function isMobileCanvasWidth(width: number | "100%"): boolean {
+  return typeof width === "number" && width <= RESPONSIVE_CANVAS.mobileMaxWidth;
+}
+
 export interface ImageTextContractProps extends LinkTargetValue {
   label?: string;
   title?: string;
@@ -200,6 +216,10 @@ export const CATEGORY_CARDS_CONTRACT = {
   defaults: { layout: "grid-3" },
 } as const;
 
+export function getCategoryCardsMediaAspectRatio(layout?: string): string {
+  return layout === "grid-2" ? "16 / 9" : "3 / 4";
+}
+
 export const APPOINTMENT_CONTRACT = {
   type: "预约入口",
   purpose: "以一个明确主行动引导访客进入预约咨询；电话仅作为次要联系入口。",
@@ -251,7 +271,8 @@ export const SINGLE_POSTER_CONTRACT = {
   canvas: {
     heightMode: "ratio",
     maxWidth: 1280,
-    desktopColumns: "1fr 3fr",
+    desktopColumns: "5fr 7fr",
+    desktopImageLeftColumns: "7fr 5fr",
     desktopMediaAspectRatio: "3 / 2",
     mobileMediaAspectRatio: "3 / 4",
     mobileBreakpoint: 767,
@@ -261,6 +282,30 @@ export const SINGLE_POSTER_CONTRACT = {
   },
   defaults: { template: "leftTextRightImage", focusX: 50, focusY: 50 },
 } as const;
+
+export const CAROUSEL_CONTRACT = {
+  type: "轮播图",
+  purpose: "以固定的版式比例展示系列或活动主视觉，避免按任意像素高度拉伸导致不同宽度下失真。",
+  canvas: {
+    desktopAspectRatios: { wide: "12 / 5", standard: "16 / 9" },
+    mobileAspectRatios: { portrait: "3 / 4", standard: "4 / 5" },
+  },
+  defaults: { desktopRatio: "wide", mobileRatio: "portrait" },
+} as const;
+
+export function getCarouselAspectRatio(
+  device: "desktop" | "mobile",
+  format?: string,
+): string {
+  if (device === "mobile") {
+    return format === "standard"
+      ? CAROUSEL_CONTRACT.canvas.mobileAspectRatios.standard
+      : CAROUSEL_CONTRACT.canvas.mobileAspectRatios.portrait;
+  }
+  return format === "standard"
+    ? CAROUSEL_CONTRACT.canvas.desktopAspectRatios.standard
+    : CAROUSEL_CONTRACT.canvas.desktopAspectRatios.wide;
+}
 
 export const PRODUCT_ROW_CONTRACT = {
   type: "产品展示行",

@@ -13,6 +13,7 @@ import {
   Tag,
   Space,
   Tabs,
+  Popconfirm,
 } from "antd";
 import {
   PlusOutlined,
@@ -81,6 +82,7 @@ function PromotionsTab() {
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
 
   const load = async () => {
@@ -99,32 +101,64 @@ function PromotionsTab() {
   }, []);
 
   const handleSave = async () => {
-    const values = await form.validateFields();
-    const data = {
-      ...values,
-      startTime: values.range[0].toISOString(),
-      endTime: values.range[1].toISOString(),
-    };
-    delete data.range;
-    if (editing) await marketingApi.updatePromotion(editing.id, data);
-    else await marketingApi.createPromotion(data);
-    message.success(editing ? "已更新" : "已创建");
-    setModalOpen(false);
-    setEditing(null);
-    form.resetFields();
-    load();
+    setSaving(true);
+    try {
+      const values = await form.validateFields();
+      // P1-38：rule 为 JSON 字符串，提交前 parse 为对象（后端 rule: Json）；parse 失败给提示
+      let parsedRule: unknown = values.rule;
+      if (typeof values.rule === "string" && values.rule.trim() !== "") {
+        try {
+          parsedRule = JSON.parse(values.rule);
+        } catch {
+          message.error("规则(JSON) 格式错误，请检查");
+          return;
+        }
+      }
+      const data = {
+        ...values,
+        rule: parsedRule,
+        startTime: values.range[0].toISOString(),
+        endTime: values.range[1].toISOString(),
+      };
+      delete data.range;
+      if (editing) await marketingApi.updatePromotion(editing.id, data);
+      else await marketingApi.createPromotion(data);
+      message.success(editing ? "已更新" : "已创建");
+      setModalOpen(false);
+      setEditing(null);
+      form.resetFields();
+      load();
+    } catch (e: any) {
+      // P1-37：校验失败（errorFields）由 antd 字段内提示，不重复弹；其余失败给反馈，避免 Modal 卡 loading
+      if (e?.errorFields) return;
+      message.error(e?.message || "保存失败");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async (id: number) => {
-    await marketingApi.deletePromotion(id);
-    message.success("已删除");
-    load();
+    setSaving(true);
+    try {
+      await marketingApi.deletePromotion(id);
+      message.success("已删除");
+      load();
+    } catch (e: any) {
+      message.error(e?.message || "删除失败");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openEdit = (record: any) => {
     setEditing(record);
     form.setFieldsValue({
       ...record,
+      // P1-38：后端 rule 是 Json 对象，编辑时序列化为字符串供 TextArea 显示，避免渲染成 [object Object]
+      rule:
+        record.rule && typeof record.rule === "object"
+          ? JSON.stringify(record.rule, null, 2)
+          : record.rule ?? "{}",
       range: [dayjs(record.startTime), dayjs(record.endTime)],
     });
     setModalOpen(true);
@@ -189,14 +223,15 @@ function PromotionsTab() {
                 >
                   编辑
                 </Button>
-                <Button
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={() => handleDelete(r.id)}
-                >
-                  删除
-                </Button>
+                <Popconfirm title="确认删除该促销活动？" onConfirm={() => handleDelete(r.id)} okText="删除" cancelText="取消">
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                  >
+                    删除
+                  </Button>
+                </Popconfirm>
               </Space>
             ),
           },
@@ -206,6 +241,7 @@ function PromotionsTab() {
         title={editing ? "编辑活动" : "新建活动"}
         open={modalOpen}
         onOk={handleSave}
+        confirmLoading={saving}
         onCancel={() => {
           setModalOpen(false);
           setEditing(null);
@@ -233,7 +269,7 @@ function PromotionsTab() {
             name="rule"
             label="规则(JSON)"
             rules={[{ required: true }]}
-            initialValue={{}}
+            initialValue="{}"
           >
             <Input.TextArea
               rows={3}
@@ -258,6 +294,7 @@ function CouponsTab() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
   const [stats, setStats] = useState<any>({});
 
   const load = async () => {
@@ -280,14 +317,23 @@ function CouponsTab() {
   }, []);
 
   const handleSave = async () => {
-    const values = await form.validateFields();
-    if (editing) await marketingApi.updateCoupon(editing.id, values);
-    else await marketingApi.createCoupon(values);
-    message.success(editing ? "已更新" : "已创建");
-    setModalOpen(false);
-    setEditing(null);
-    form.resetFields();
-    load();
+    setSaving(true);
+    try {
+      const values = await form.validateFields();
+      if (editing) await marketingApi.updateCoupon(editing.id, values);
+      else await marketingApi.createCoupon(values);
+      message.success(editing ? "已更新" : "已创建");
+      setModalOpen(false);
+      setEditing(null);
+      form.resetFields();
+      load();
+    } catch (e: any) {
+      // P1-37：校验失败由 antd 字段提示；其余失败给反馈，避免 Modal 卡 loading
+      if (e?.errorFields) return;
+      message.error(e?.message || "保存失败");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -423,6 +469,7 @@ function CouponsTab() {
         title={editing ? "编辑优惠券" : "新建优惠券"}
         open={modalOpen}
         onOk={handleSave}
+        confirmLoading={saving}
         onCancel={() => {
           setModalOpen(false);
           setEditing(null);

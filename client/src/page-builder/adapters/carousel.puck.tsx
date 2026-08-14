@@ -1,6 +1,7 @@
 /** carousel.puck.ts — CarouselBlock 的 Puck 适配器 */
 import CarouselBlock from "@/components/blocks/CarouselBlock";
 import { IMAGE_SPECS } from "../config/imageSpecs";
+import { CAROUSEL_CONTRACT } from "../config/blockContracts";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import MediaPickerField from "../fields/MediaPickerField";
 
@@ -10,8 +11,8 @@ export interface CarouselPuckProps {
   interval: number;
   showDots: boolean;
   showArrows: boolean;
-  height: number;
-  mobileHeight: number;
+  desktopRatio: "wide" | "standard";
+  mobileRatio: "portrait" | "standard";
   locked?: boolean;
 }
 
@@ -42,8 +43,8 @@ export const carouselPuckConfig = {
     interval: 4000,
     showDots: true,
     showArrows: true,
-    height: 500,
-    mobileHeight: 640,
+    desktopRatio: CAROUSEL_CONTRACT.defaults.desktopRatio,
+    mobileRatio: CAROUSEL_CONTRACT.defaults.mobileRatio,
     locked: false,
   } satisfies CarouselPuckProps,
   fields: {
@@ -69,7 +70,7 @@ export const carouselPuckConfig = {
             value, onChange, readOnly,
           }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
             <MediaPickerField value={value} onChange={onChange} readOnly={readOnly}
-              spec={{ width: 750, height: 1000, ratio: "3:4", label: "手机端轮播图（建议 750×1000，3:4）" }}
+              spec={IMAGE_SPECS.carousel.mobile}
               placeholder="上传手机端图片（可选）" />
           ),
         },
@@ -107,45 +108,21 @@ export const carouselPuckConfig = {
         { label: "隐藏", value: false },
       ],
     },
-    height: {
-      type: "custom" as const,
-      label: "电脑端高度(px)",
-      render: ({ value, onChange, readOnly }: { value?: number; onChange: (value: number) => void; readOnly?: boolean }) => (
-        <div data-editor-device="desktop">
-          <label className="homepage-editor__device-number-field">
-            <span>电脑端高度（px）</span>
-            <input
-              type="number"
-              min={200}
-              max={800}
-              value={value ?? 500}
-              disabled={readOnly}
-              aria-label="电脑端高度（像素）"
-              onChange={(event) => onChange(Number(event.target.value) || 200)}
-            />
-          </label>
-        </div>
-      ),
+    desktopRatio: {
+      type: "radio" as const,
+      label: "电脑端画布比例",
+      options: [
+        { label: "宽幕 12:5", value: "wide" },
+        { label: "标准 16:9", value: "standard" },
+      ],
     },
-    mobileHeight: {
-      type: "custom" as const,
-      label: "手机端高度(px)",
-      render: ({ value, onChange, readOnly }: { value?: number; onChange: (value: number) => void; readOnly?: boolean }) => (
-        <div data-editor-device="mobile">
-          <label className="homepage-editor__device-number-field">
-            <span>手机端高度（px）</span>
-            <input
-              type="number"
-              min={320}
-              max={1200}
-              value={value ?? 640}
-              disabled={readOnly}
-              aria-label="手机端高度（像素）"
-              onChange={(event) => onChange(Number(event.target.value) || 320)}
-            />
-          </label>
-        </div>
-      ),
+    mobileRatio: {
+      type: "radio" as const,
+      label: "手机端画布比例",
+      options: [
+        { label: "竖幅 3:4", value: "portrait" },
+        { label: "标准 4:5", value: "standard" },
+      ],
     },
   },
 };

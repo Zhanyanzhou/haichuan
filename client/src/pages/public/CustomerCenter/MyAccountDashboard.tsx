@@ -1,4 +1,9 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
+import { Modal, Upload, message } from "antd";
+import { customerApi } from "@/services/api";
+import { unwrapResponse } from "@/utils/unwrap";
+import { isCustomerCommerceEnabled } from "@/store/featureFlags";
 
 type AccountDashboardProps = {
   profile: { name?: string; phone?: string; email?: string } | null;
@@ -9,6 +14,7 @@ type AccountDashboardProps = {
     status: string;
     createdAt: string;
     items?: Array<{ product?: { name: string } }>;
+    payments?: Array<{ id: number; status: string; hasProof?: boolean }>;
   }>;
   addresses: Array<{
     id: number;
@@ -33,6 +39,7 @@ type AccountDashboardProps = {
     product?: { name?: string };
   }>;
   onSignOut: () => void;
+  onRefresh?: () => void;
 };
 
 const orderStatus: Record<string, string> = {
@@ -61,11 +68,39 @@ export default function MyAccountDashboard({
   selectionInquiries,
   inquiries,
   onSignOut,
+  onRefresh,
 }: AccountDashboardProps) {
   const name = profile?.name || "海川贵宾";
   const primaryAddress = addresses[0];
+  const commerceEnabled = isCustomerCommerceEnabled();
+
+  // P1-29：付款凭证上传（电商闭环 —— 线下转账订单需顾客补凭证，否则卡死 PENDING_PAYMENT）
+  const [proofOrderId, setProofOrderId] = useState<number | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const hasPendingProof = (orderId: number) =>
+    orders.find((x) => x.id === orderId)?.payments?.some((p) => p.status === "PENDING" && p.hasProof);
+
+  const handleUploadProof = async (file: File) => {
+    if (proofOrderId == null) return;
+    setUploading(true);
+    try {
+      const upRes = await customerApi.uploadPaymentProof(file);
+      const proofKey = unwrapResponse<{ storageKey?: string }>(upRes)?.storageKey;
+      if (!proofKey) throw new Error("凭证上传失败");
+      await customerApi.submitPaymentProof(proofOrderId, proofKey);
+      message.success("付款凭证已提交，等待审核");
+      setProofOrderId(null);
+      onRefresh?.();
+    } catch (e: any) {
+      message.error(e?.message || "凭证上传失败");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
+    <>
     <main className="my-account">
       <style>{styles}</style>
       <section className="my-account__intro">
@@ -104,7 +139,7 @@ export default function MyAccountDashboard({
 
         <section id="my-orders" className="my-account__panel my-account__panel--wide">
           <div className="my-account__panel-head"><div><p>ORDER ARCHIVE</p><h2>我的订单</h2></div></div>
-          {orders.length ? <div className="my-account__records">{orders.slice(0, 4).map((order) => <article key={order.id}><div><small>{order.orderNo} · {new Date(order.createdAt).toLocaleDateString("zh-CN")}</small><h3>{order.items?.[0]?.product?.name || "珠宝作品"}</h3></div><div className="my-account__order-meta"><em>{orderStatus[order.status] || order.status}</em><strong>¥{Number(order.finalAmount).toLocaleString("zh-CN")}</strong></div></article>)}</div> : <Empty>暂未有订单记录。<Link to="/catalog">浏览珠宝作品 →</Link></Empty>}
+          {orders.length ? <div className="my-account__records">{orders.slice(0, 4).map((order) => <article key={order.id}><div><small>{order.orderNo} · {new Date(order.createdAt).toLocaleDateString("zh-CN")}</small><h3>{order.items?.[0]?.product?.name || "珠宝作品"}</h3></div><div className="my-account__order-meta"><em>{orderStatus[order.status] || order.status}</em><strong>¥{Number(order.finalAmount).toLocaleString("zh-CN")}</strong>{order.status === "PENDING_PAYMENT" && (commerceEnabled ? (hasPendingProof(order.id) ? <span style={{ fontSize: 11, color: "#b8944e" }}>凭证已提交·待审核</span> : <button type="button" className="my-account__summary-action" style={{ padding: "6px 12px", fontSize: 12, minHeight: 0 }} onClick={() => setProofOrderId(order.id)} disabled={uploading}>上传付款凭证</button>) : <span style={{ fontSize: 11, color: "#766f66" }}>线上付款暂未开放·顾问将联系您</span>)}</div></article>)}</div> : <Empty>暂未有订单记录。<Link to="/catalog">浏览珠宝作品 →</Link></Empty>}
         </section>
 
         <section className="my-account__panel my-account__panel--collection">
@@ -118,6 +153,27 @@ export default function MyAccountDashboard({
         </section>
       </div>
     </main>
+      {commerceEnabled && <Modal
+        open={proofOrderId !== null}
+        title="上传付款凭证"
+        onCancel={() => setProofOrderId(null)}
+        footer={null}
+        destroyOnClose
+      >
+        <p style={{ color: "#766f66", fontSize: 13, marginBottom: 16 }}>请上传转账截图或凭证图片（JPG/PNG/WebP，≤10MB）。审核通过后订单进入发货流程。</p>
+        <Upload
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          maxCount={1}
+          showUploadList={false}
+          beforeUpload={(file) => { void handleUploadProof(file); return false; }}
+          disabled={uploading}
+        >
+          <button type="button" className="my-account__button" disabled={uploading} style={{ padding: "10px 16px", background: "#b8944e", color: "#fff", border: 0, cursor: "pointer" }}>
+            {uploading ? "上传中..." : "选择图片并上传"}
+          </button>
+        </Upload>
+      </Modal>}
+    </>
   );
 }
 

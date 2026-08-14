@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { productPlaceholder } from '@/utils/placeholder';
+import { usePageMetaStore } from '@/store/pageMetaStore';
 
 /* ═══════ 设计常量 ═══════ */
 const DARK = '#1a1a1a';
@@ -58,16 +59,16 @@ function IconSizing() {
   );
 }
 
-/* ═══════ FAQ 数据 ═══════ */
+/* ═══════ FAQ 数据（中性说明，不含未经确认的价格、工期、物流、地域与售后承诺） ═══════ */
 const faqItems = [
-  { q: '可以自带黄金或宝石进行定制吗？', a: '当然。我们支持您提供自有贵金属或宝石进行定制，我们的鉴定师会先对您的材料进行专业检测，确认品质后进入设计流程。材料检测费用为 ¥200/次。' },
-  { q: '旧款珠宝可以翻新改造吗？', a: '可以。我们提供旧款翻新、改款、改圈口等服务。工艺师会对旧件进行评估，根据材质状况、结构复杂度给出改造方案和报价。改制过程中会尽量保留原有材质的价值。' },
-  { q: '定制周期需要多长时间？', a: '常规定制周期为 15-30 个工作日，具体视设计复杂度与工艺难度而定。加急服务可在 7-10 个工作日内完成，需额外收取加急费（总价的 20%）。' },
-  { q: '定制预算有最低门槛吗？', a: '我们专注高端定制，建议预算起点为 ¥5,000。最终费用由设计费、材料费、工费三部分组成，设计费 ¥500-2,000/件，工费根据工艺复杂度核算。我们会在设计提案阶段提供清晰报价。' },
-  { q: '设计方案不满意可以修改吗？', a: '设计提案阶段我们提供 3 次免费修改。超出部分按 ¥300/次收取设计调整费。我们鼓励在设计初期充分沟通，确保方向一致。' },
-  { q: '定制完成后尺寸不合适怎么处理？', a: '交付后 30 天内提供一次免费尺寸调整。超出期限或需要大幅结构调整的，按实际工费收取。我们建议在定制过程中提供精准尺寸数据，减少后期调整。' },
-  { q: '不在深圳，如何完成定制？', a: '我们支持全国顺丰保价邮寄。设计沟通通过视频会议进行，实物样品可邮寄确认。整个流程均可远程完成，无需到店。到店体验更佳。' },
-  { q: '定制珠宝的售后保养如何？', a: '所有定制作品享受终身免费清洗保养服务（每年一次），非人为损坏提供 2 年免费维修。邮寄保养来回运费由我们承担。' },
+  { q: '可以自带黄金或宝石进行定制吗？', a: '欢迎就自有材料定制与我们沟通。顾问会结合您的材料情况与定制需求给出建议，具体可行性与流程在咨询阶段确认。' },
+  { q: '旧款珠宝可以翻新改造吗？', a: '我们提供旧款改造类咨询。是否适合改造、可采用的方案，需在了解旧件实际状况后由顾问与您共同确认。' },
+  { q: '定制周期一般需要多长时间？', a: '定制周期视设计复杂度、材料与工艺而定。具体时间安排会在方案沟通阶段明确告知。' },
+  { q: '定制费用如何计算？', a: '费用与设计、材料、工艺相关。我们会在充分了解需求后提供清晰的方案说明，由您确认后再推进。' },
+  { q: '设计方案可以调整吗？', a: '在设计沟通阶段，我们与您反复对齐方向。具体调整安排以沟通确认的方案为准。' },
+  { q: '交付后尺寸不合适怎么办？', a: '交付相关事宜会在方案阶段与您明确约定。如有调整需求，可通过咨询联系顾问协助处理。' },
+  { q: '异地客户如何沟通定制？', a: '我们支持线上沟通，也可到店进一步交流；具体方式可在咨询阶段选择最适合您的安排。' },
+  { q: '定制作品的保养与售后如何安排？', a: '售后与保养安排会在交付时与您说明。如需了解详情，欢迎通过咨询与顾问沟通。' },
 ];
 
 /* ═══════ 工艺数据 ═══════ */
@@ -80,71 +81,58 @@ const craftItems = [
   { id: 9914, title: '质检品控' },
 ];
 
-/* ═══════ 案例数据（数据接口预留） ═══════ */
+/* ═══════ 定制案例 ═══════ */
 /*
- * TODO: 接入后端 API — GET /api/custom-cases
- * 返回结构: { id, title, description, inspiration, story, images: string[] }[]
- * 当前使用静态占位数据。
+ * 真实客户案例与图片需取得书面授权后方可展示。
+ * 在运营提供获授权的真实案例前，本页不展示任何案例与客户故事，
+ * 也不以虚构内容占位；访客可经底部"预约私人顾问"入口发起咨询。
  */
-const caseItems = [
-  {
-    id: 9915,
-    title: '海洋系列·珍珠项链',
-    desc: '客户希望在婚礼上佩戴一件能够承载家族记忆的珍珠饰品。',
-    inspiration: '灵感源自南海珍珠的天然光泽与流动的水纹形态，将不规则的巴洛克珍珠以海浪曲线串联。',
-    story: '这件作品历时 45 天完成，客户母亲婚礼上的珍珠项链被拆解融入设计，成为跨越两代人的信物。',
-  },
-  {
-    id: 9916,
-    title: '东方雅韵·翡翠戒指',
-    desc: '客户收藏了一枚祖传翡翠蛋面多年，希望将其设计成一枚日常可佩戴的戒指。',
-    inspiration: '以中国传统窗棂纹样为骨架，用 18K 金勾勒简洁的几何轮廓，让翡翠成为视觉重心。',
-    story: '戒指内侧镌刻了客户祖母的名字缩写，将家族记忆以最私密的方式融入作品。',
-  },
-  {
-    id: 9917,
-    title: '星辰·钻石耳钉',
-    desc: '一对年轻的建筑师夫妇希望定制一对属于彼此的建筑感耳钉。',
-    inspiration: '以包豪斯建筑的几何构成和光影关系为蓝本，用铂金线条构建空间层次，钻石点缀其间。',
-    story: '耳钉的不对称设计刻意呼应了两人不同的性格——她理性精准的直线，他感性流动的弧线。',
-  },
-];
 
 /* ═══════ 流程步骤数据 ═══════ */
 const processSteps = [
   {
     num: '01',
     title: '灵感沟通',
-    desc: '与您的专属顾问进行一对一深度交流。我们倾听您的故事、喜好、佩戴场景与预算范围，共同梳理创作方向。您可携带参考图、旧物或任何灵感碎片前来。',
+    desc: '与专属顾问一对一交流，倾听您的故事、喜好与佩戴场景，共同梳理创作方向。您可携带参考图、旧物或任何灵感碎片参与沟通。',
     imgId: 9905,
     imgAlt: '灵感沟通 — 一对一顾问咨询场景',
   },
   {
     num: '02',
     title: '设计提案',
-    desc: '设计师在 5-7 个工作日内为您呈现手绘草图与 3D 效果图。包含材质搭配建议、工艺可实现性分析及初步报价。此阶段支持 3 次免费修改，直至方案完善。',
+    desc: '设计师根据沟通成果呈现设计方向、材质搭配建议与工艺可实现性分析，并与您反复对齐直至方案明确。',
     imgId: 9906,
-    imgAlt: '设计提案 — 手绘草图与效果图',
+    imgAlt: '设计提案 — 设计方向与材质建议',
   },
   {
     num: '03',
     title: '工艺制作',
-    desc: '方案确认后进入工坊制作。从蜡模雕刻、贵金属铸造到宝石镶嵌、表面打磨抛光，每一步均由拥有 15 年以上经验的工匠手工完成。您可预约到工坊实地探访。',
+    desc: '方案确认后进入工坊制作。从蜡模、铸造到镶嵌与表面处理，逐步完成作品。具体进度由顾问与您同步。',
     imgId: 9907,
-    imgAlt: '工艺制作 — 工匠手工打造',
+    imgAlt: '工艺制作 — 工坊制作过程',
   },
   {
     num: '04',
     title: '作品交付',
-    desc: '完成后进行 16 道质检工序，以专属珠宝盒精心包装。我们为您准备作品档案（含设计手稿、材质证书、保养指南），可选择到店取件或顺丰保价配送。',
+    desc: '完成后为您整理作品资料，并就交付方式与后续保养安排与您确认。',
     imgId: 9908,
-    imgAlt: '作品交付 — 精致珠宝盒包装',
+    imgAlt: '作品交付 — 作品资料与交付确认',
   },
 ];
 
 /* ═══════ 组件 ═══════ */
 
 export default function Custom() {
+  const setPageMeta = usePageMetaStore((s) => s.setMeta);
+  const clearPageMeta = usePageMetaStore((s) => s.clear);
+  useEffect(() => {
+    setPageMeta({
+      title: '珠宝定制 | 海川珠宝',
+      description: '海川珠宝高级定制服务：设计灵感、材质、宝石与工艺的一对一沟通。',
+    });
+    return () => clearPageMeta();
+  }, [setPageMeta, clearPageMeta]);
+
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   const toggleFaq = (i: number) => setOpenFaq(openFaq === i ? null : i);
@@ -423,109 +411,6 @@ export default function Custom() {
 
 
       {/* ═══════════════════════════════════════════
-          5. 定制案例（数据接口预留）
-          ═══════════════════════════════════════════ */}
-      <section style={{
-        background: '#F3F0EA',
-        padding: 'clamp(60px, 8vw, 100px) 24px',
-      }}>
-        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-          <motion.div
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true, margin: '-80px' }}
-            variants={fadeIn}
-            style={{ textAlign: 'center', marginBottom: 56 }}
-          >
-            <p style={{ fontSize: 11, letterSpacing: '0.22em', color: GOLD, textTransform: 'uppercase', marginBottom: 12 }}>
-              CASE STUDIES
-            </p>
-            <h2 style={{
-              fontFamily: FONT_SERIF,
-              fontSize: 'clamp(28px, 3.2vw, 40px)',
-              fontWeight: 400,
-              color: BODY,
-              margin: 0,
-            }}>
-              定制案例
-            </h2>
-          </motion.div>
-
-          {caseItems.map((item, i) => (
-            <motion.div
-              key={item.id}
-              initial="hidden"
-              whileInView="visible"
-              viewport={{ once: true, margin: '-80px' }}
-              variants={fadeIn}
-              style={{
-                display: 'flex',
-                flexDirection: 'row',
-                alignItems: 'stretch',
-                gap: 'clamp(24px, 5vw, 64px)',
-                marginBottom: i < caseItems.length - 1 ? 'clamp(48px, 6vw, 80px)' : 0,
-                paddingBottom: i < caseItems.length - 1 ? 'clamp(48px, 6vw, 80px)' : 0,
-                borderBottom: i < caseItems.length - 1 ? '1px solid rgba(138,127,114,0.12)' : 'none',
-              }}
-            >
-              {/* 图片 */}
-              <div style={{
-                flex: '0 0 clamp(220px, 32%, 340px)',
-                aspectRatio: '3 / 4',
-                background: '#E8E3D9',
-              }}>
-                {/* TODO: 替换为真实案例摄影作品，建议 3:4 竖版 */}
-                <img
-                  src={productPlaceholder(item.id, '案例')}
-                  alt={`定制案例 — ${item.title}`}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                />
-              </div>
-
-              {/* 文字 */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <h3 style={{
-                  fontFamily: FONT_SERIF,
-                  fontSize: 'clamp(20px, 2vw, 26px)',
-                  fontWeight: 400,
-                  color: BODY,
-                  margin: '0 0 16px',
-                }}>
-                  {item.title}
-                </h3>
-                <p style={{
-                  fontSize: 'clamp(12px, 0.95vw, 14px)',
-                  lineHeight: 1.8,
-                  color: MUTED,
-                  margin: '0 0 12px',
-                  fontStyle: 'italic',
-                }}>
-                  「{item.desc}」
-                </p>
-                <p style={{
-                  fontSize: 'clamp(12px, 0.95vw, 14px)',
-                  lineHeight: 1.8,
-                  color: '#555',
-                  margin: '0 0 12px',
-                }}>
-                  <span style={{ color: GOLD, fontWeight: 500 }}>设计灵感</span>&emsp;{item.inspiration}
-                </p>
-                <p style={{
-                  fontSize: 'clamp(12px, 0.95vw, 14px)',
-                  lineHeight: 1.8,
-                  color: '#555',
-                  margin: 0,
-                }}>
-                  <span style={{ color: GOLD, fontWeight: 500 }}>定制故事</span>&emsp;{item.story}
-                </p>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-
-      {/* ═══════════════════════════════════════════
           6. 常见问题（折叠面板）
           ═══════════════════════════════════════════ */}
       <section style={{
@@ -650,7 +535,7 @@ export default function Custom() {
             lineHeight: 1.8,
             margin: '0 0 40px',
           }}>
-            预约私人顾问，开启一对一定制之旅。<br />我们将在 24 小时内与您联系。
+            预约私人顾问，开启一对一定制之旅。<br />提交后由顾问与您联系，具体响应方式在沟通中确认。
           </p>
 
           <div style={{

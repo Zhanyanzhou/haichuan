@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { SecureImage } from "@/components/common/SecureImage";
-import { CATEGORY_CARDS_CONTRACT } from "@/page-builder/config/blockContracts";
+import { CATEGORY_CARDS_CONTRACT, getCategoryCardsMediaAspectRatio } from "@/page-builder/config/blockContracts";
 import { isSafeInternalPath } from "@/page-builder/utils/linkTarget";
 
 interface CategoryCardsBlockProps {
@@ -26,6 +26,7 @@ export default function CategoryCardsBlock({
   const layout = module.layoutConfig?.template || content.layout || "grid-3";
   const bg = styleConfig.bgColor || "#FBF9F6";
   const cols = layout === "grid-2" ? 2 : layout === "grid-4" ? 4 : 3;
+  const mediaAspectRatio = getCategoryCardsMediaAspectRatio(layout);
   const normalizedCategories = Array.isArray(categories) ? categories.slice(0, CATEGORY_CARDS_CONTRACT.content.maxItems) : [];
   const visibleCategories = editMode
     ? normalizedCategories
@@ -80,7 +81,7 @@ export default function CategoryCardsBlock({
             >
               <div
                 style={{
-                  aspectRatio: CATEGORY_CARDS_CONTRACT.canvas.mediaAspectRatio,
+                  aspectRatio: mediaAspectRatio,
                   overflow: "hidden",
                   background: "#EDE9E2",
                 }}

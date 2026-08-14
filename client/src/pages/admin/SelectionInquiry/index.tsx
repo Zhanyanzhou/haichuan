@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Table, Tag, Input, Select, Button, Drawer, Descriptions, message, Space, Card } from 'antd';
 import { SearchOutlined, EyeOutlined } from '@ant-design/icons';
@@ -7,6 +7,7 @@ import { unwrapResponse } from '@/utils/unwrap';
 import AdminPageHeader from '@/components/common/AdminPageHeader';
 import AdminStatusTag from '@/components/common/AdminStatusTag';
 import { AdminLoadingState, AdminEmptyState, AdminErrorState } from '@/components/common/AdminDataStates';
+import { SecureImage } from '@/components/common/SecureImage';
 
 const STATUS_MAP: Record<string, { color: string; label: string }> = {
   PENDING: { color: 'gold', label: '待处理' },
@@ -26,6 +27,7 @@ export default function SelectionInquiryManage() {
   const [error, setError] = useState(false);
   const [drawerId, setDrawerId] = useState<number | null>(null);
   const [detail, setDetail] = useState<any>(null);
+  const [detailError, setDetailError] = useState(false);
   const requestedStatus = searchParams.get('status') || '';
 
   useEffect(() => {
@@ -35,7 +37,7 @@ export default function SelectionInquiryManage() {
 
   const pageSize = 15;
 
-  const fetchList = async () => {
+  const fetchList = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
@@ -45,16 +47,21 @@ export default function SelectionInquiryManage() {
       setTotal(data.total ?? 0);
     } catch { setError(true); }
     finally { setLoading(false); }
-  };
+  }, [keyword, page, pageSize, status]);
 
-  useEffect(() => { fetchList(); }, [page, status]);
+  useEffect(() => { void fetchList(); }, [fetchList]);
 
   const openDetail = async (id: number) => {
     setDrawerId(id);
+    setDetailError(false);
+    setDetail(null);
     try {
       const res = await selectionInquiryApi.getDetail(id);
       setDetail(unwrapResponse<any>(res));
-    } catch { /* ignore */ }
+    } catch {
+      // P1-39：详情加载失败标记错误态，避免抽屉永久 loading
+      setDetailError(true);
+    }
   };
 
   const handleStatus = async (id: number, newStatus: string) => {
@@ -132,7 +139,7 @@ export default function SelectionInquiryManage() {
                 <Card key={item.id} size="small" style={{ border: '1px solid #f0f0f0' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     {item.productImageSnapshot && (
-                      <img src={item.productImageSnapshot} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6 }} />
+                      <SecureImage src={item.productImageSnapshot} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6 }} tokenKind="staff" />
                     )}
                     <div>
                       <div style={{ fontWeight: 600 }}>{item.productNameSnapshot}</div>
@@ -159,6 +166,8 @@ export default function SelectionInquiryManage() {
               )}
             </div>
           </>
+        ) : detailError ? (
+          <AdminErrorState onRetry={() => { if (drawerId) void openDetail(drawerId); }} />
         ) : (
           <AdminLoadingState />
         )}

@@ -34,9 +34,7 @@ type AccountExperienceProps = {
     consultationType?: string;
     product?: { name?: string };
   }>;
-  accessing: boolean;
   authLoading: boolean;
-  onOrderAccess: (values: { phone: string; orderNo: string }) => void;
   onLogin: (values: { phone: string; password: string }) => void;
   onRegister: (values: { phone: string; password: string; name: string; email?: string }) => void;
   onSignOut: () => void;
@@ -69,36 +67,6 @@ function EmptyState({ title, description, action }: { title: string; description
       <p>{description}</p>
       {action}
     </div>
-  );
-}
-
-function OrderAccess({ accessing, onOrderAccess }: Pick<AccountExperienceProps, "accessing" | "onOrderAccess">) {
-  const [phone, setPhone] = useState("");
-  const [orderNo, setOrderNo] = useState("");
-
-  return (
-    <form
-      className="account-access"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onOrderAccess({ phone, orderNo });
-      }}
-    >
-      <p className="account-kicker">ORDER ACCESS</p>
-      <h2>已有订单？</h2>
-      <p>使用下单手机号和订单号，查看订单、付款凭证及收货信息。</p>
-      <label>
-        下单手机号
-        <input value={phone} onChange={(event) => setPhone(event.target.value)} inputMode="numeric" maxLength={11} required />
-      </label>
-      <label>
-        订单号
-        <input value={orderNo} onChange={(event) => setOrderNo(event.target.value)} required />
-      </label>
-      <button type="submit" className="account-button account-button--dark" disabled={accessing}>
-        {accessing ? "验证中…" : "验证并进入账户"}
-      </button>
-    </form>
   );
 }
 
@@ -137,9 +105,7 @@ export default function AccountExperience({
   addresses,
   selectionInquiries,
   inquiries,
-  accessing,
   authLoading,
-  onOrderAccess,
   onLogin,
   onRegister,
   onSignOut,
@@ -183,7 +149,6 @@ export default function AccountExperience({
           </div>
           <div className="account-guest-side">
             <MemberAccess authLoading={authLoading} onLogin={onLogin} onRegister={onRegister} />
-            <OrderAccess accessing={accessing} onOrderAccess={onOrderAccess} />
           </div>
         </section>
       </main>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
+import { usePageMetaStore } from "@/store/pageMetaStore";
 import { motion, useInView } from "framer-motion";
 import { Spin, Button } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
@@ -8,6 +9,8 @@ import { USE_MOCK } from "@/services/mockData";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getMaterialLabel } from "@/utils/material";
 import { trackPageView } from "@/hooks/useAnalytics";
+import { useReconnectingEventSource } from "@/hooks/useReconnectingEventSource";
+import { SecureImage } from "@/components/common/SecureImage";
 
 /* ═══════ 视觉常量 ═══════ */
 const V = {
@@ -61,6 +64,7 @@ function mapProduct(p: any): ProductCard {
     materialLabel: getMaterialLabel(p.materialType),
     shortDescription: p.shortDescription || "",
     imageUrl:
+      (p.listingImage as any)?.mediaUrl || (p.primaryImage as any)?.mediaUrl || (p.images?.[0] as any)?.mediaUrl ||
       p.listingImage?.url || p.primaryImage?.url || p.images?.[0]?.url || "",
     price: Number(p.price) || 0,
     goldWeight: p.goldWeight ? `${p.goldWeight}g` : "",
@@ -145,10 +149,9 @@ function ProductCardItem({
           }}
         >
           {product.imageUrl ? (
-            <img
+            <SecureImage
               src={product.imageUrl}
               alt={product.name}
-              loading="lazy"
               style={{
                 width: "100%",
                 height: "100%",
@@ -226,9 +229,22 @@ function ProductCardItem({
 
 /* ═══════ 主组件 ═══════ */
 export default function ProductList() {
+  const setPageMeta = usePageMetaStore((s) => s.setMeta);
+  const clearPageMeta = usePageMetaStore((s) => s.clear);
+  useEffect(() => {
+    setPageMeta({
+      title: "珠宝作品 | 海川珠宝",
+      description: "浏览海川珠宝公开作品，涵盖黄金、镶嵌与花丝等东方工艺。",
+    });
+    return () => clearPageMeta();
+  }, [setPageMeta, clearPageMeta]);
+
   const [products, setProducts] = useState<ProductCard[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  // P1-35：客户端逐步加载，避免一次渲染上千张卡片（DOM + IntersectionObserver 爆炸）
+  const [visibleCount, setVisibleCount] = useState(24);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -238,6 +254,7 @@ export default function ProductList() {
       const data = unwrapResponse<any>(res);
       const list: any[] = data?.list || data || [];
       setProducts(list.map(mapProduct));
+      setVisibleCount(24); // P1-35：新数据/重拉时重置可见数量
     } catch {
       setError(true);
       setProducts(null);
@@ -249,11 +266,25 @@ export default function ProductList() {
   useEffect(() => {
     fetchProducts();
   }, []);
+  // P1-35：带自动重连 + debounce 的 SSE（断线重连；消息风暴合并为一次重拉，避免 N 次 2000 条全量请求）
+  useReconnectingEventSource(
+    USE_MOCK ? null : publicProductStreamUrl,
+    () => void fetchProducts(),
+    { debounceMs: 500 },
+  );
+
+  // P1-35：sentinel 进入视口时加载下一批（逐步加载，避免首屏渲染上千卡片）
   useEffect(() => {
-    if (USE_MOCK) return;
-    const stream = new EventSource(publicProductStreamUrl);
-    stream.onmessage = () => void fetchProducts();
-    return () => stream.close();
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) setVisibleCount((c) => c + 12);
+      },
+      { rootMargin: "300px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
   }, []);
   useEffect(() => {
     trackPageView();
@@ -334,10 +365,13 @@ export default function ProductList() {
                 gap: "clamp(32px,4vw,56px) clamp(20px,2.5vw,36px)",
               }}
             >
-              {products.map((p, i) => (
+              {products.slice(0, visibleCount).map((p, i) => (
                 <ProductCardItem key={p.id} product={p} index={i} />
               ))}
             </div>
+          )}
+          {products !== null && products.length > visibleCount && (
+            <div ref={sentinelRef} style={{ height: 1, width: "100%", marginTop: 40 }} aria-hidden />
           )}
 
           {/* ── 选款中心入口 ── */}

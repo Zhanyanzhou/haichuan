@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, Table, Tag, Button, Drawer, Select, Input, message, Space } from 'antd';
 import { EyeOutlined, PhoneOutlined, MailOutlined, CheckCircleOutlined } from '@ant-design/icons';
@@ -36,7 +36,7 @@ export default function InquiryManage() {
     setPage(1);
   }, [requestedStatus]);
 
-  const load = async (p = page, status = statusFilter) => {
+  const load = useCallback(async (p = page, status = statusFilter) => {
     setLoading(true);
     try {
       const res = await inquiriesApi.getList({ page: p, pageSize: 20, status: status || undefined });
@@ -45,9 +45,9 @@ export default function InquiryManage() {
       setTotal(data?.total || 0);
     } catch { setList([]); }
     finally { setLoading(false); }
-  };
+  }, [page, statusFilter]);
 
-  useEffect(() => { load(1, statusFilter); }, [statusFilter]);
+  useEffect(() => { void load(1, statusFilter); }, [load, statusFilter]);
 
   const handleReply = async () => {
     if (!replyText.trim()) return;

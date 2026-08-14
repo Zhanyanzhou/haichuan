@@ -66,6 +66,7 @@ import {
   APPOINTMENT_CONTRACT,
   IMAGE_TEXT_CONTRACT,
   PRODUCT_ROW_CONTRACT,
+  RESPONSIVE_CANVAS,
   SINGLE_POSTER_CONTRACT,
   evaluateHotspotContract,
   evaluateHeroContract,
@@ -159,9 +160,9 @@ function getEditorHttpStatus(error: unknown) {
 }
 
 const VIEWPORT_PRESETS: ViewportPreset[] = [
-  { label: "桌面端", icon: <DesktopOutlined />, width: 1440, height: 900 },
-  { label: "平板端", icon: <TabletOutlined />, width: 768, height: 1024 },
-  { label: "移动端", icon: <MobileOutlined />, width: 390, height: 844 },
+  { label: "桌面端", icon: <DesktopOutlined />, ...RESPONSIVE_CANVAS.desktop },
+  { label: "平板端", icon: <TabletOutlined />, ...RESPONSIVE_CANVAS.tablet },
+  { label: "移动端", icon: <MobileOutlined />, ...RESPONSIVE_CANVAS.mobile },
 ];
 
 // 固定由顶部设备切换器控制预览尺寸，避免 Puck 根据浏览器窗口宽度回写为桌面端。
@@ -542,7 +543,9 @@ function CanvasPageDataSynchronizer({ data, pageKey }: { data: any; pageKey: Edi
 }
 
 function getInspectorDevice(viewport: { width: number | "100%" }): InspectorDevice {
-  return viewport.width === 390 ? "mobile" : "desktop";
+  return typeof viewport.width === "number" && viewport.width <= RESPONSIVE_CANVAS.mobileMaxWidth
+    ? "mobile"
+    : "desktop";
 }
 
 function getFieldDevice(type: string, field: string): "desktop" | "mobile" | "shared" {
@@ -1535,6 +1538,7 @@ function EditorToolbar({
           </button>
         ))}
       </div>
+      <span className="homepage-editor__responsive-note">平板继承电脑布局；仅手机端（≤767px）可覆写素材与焦点</span>
 
       <div className="homepage-editor__toolbar-actions">
         <Button
@@ -4591,6 +4595,7 @@ export default function HomepageConfig({ pageKey = "home" }: { pageKey?: EditorP
           cursor: pointer;
           white-space: nowrap;
         }
+        .homepage-editor__responsive-note { color: #8A7F72; font-size: 10px; white-space: nowrap; }
         .homepage-editor__viewport-switcher button > .anticon { display: inline-flex; }
         .homepage-editor__viewport-switcher button > span:not(.anticon) { display: grid; gap: 1px; line-height: 1.1; text-align: left; white-space: nowrap; }
         .homepage-editor__viewport-switcher button small { color: currentColor; font-size: 9px; opacity: .62; }

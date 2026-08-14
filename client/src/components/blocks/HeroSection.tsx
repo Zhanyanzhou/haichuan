@@ -5,6 +5,7 @@ import { homeCampaign } from '@/data/homeCampaign';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import type { PageModule } from '@/types/pageModule';
 import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
+import { RESPONSIVE_CANVAS } from '@/page-builder/config/blockContracts';
 
 const LT = '#F1ECE3';
 
@@ -82,7 +83,7 @@ export default function HeroSection({ module, editMode }: Props) {
         </div>
       )}
       <picture data-editor-field="desktopImage mobileImage">
-        <source media="(max-width: 1023px) and (orientation: portrait)" srcSet={mobileImg} />
+        <source media={RESPONSIVE_CANVAS.mobileMediaQuery} srcSet={mobileImg} />
         <img
           src={desktopImg} alt={c?.altText || title}
           loading="eager"
@@ -149,7 +150,7 @@ export default function HeroSection({ module, editMode }: Props) {
       <span className="absolute bottom-[22px] left-1/2 -translate-x-1/2 w-8 h-px animate-pulse opacity-40" style={{ background: 'rgba(255,255,255,0.5)' }} />
       <style>{`
         .hc-hero__image { object-position: var(--hc-hero-focus-desktop); }
-        @media (max-width: 1023px) and (orientation: portrait) {
+        @media ${RESPONSIVE_CANVAS.mobileMediaQuery} {
           .hc-hero__image { object-position: var(--hc-hero-focus-mobile); }
         }
       `}</style>

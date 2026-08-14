@@ -18,8 +18,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, roles }) => {
   }
 
   // 角色检查
-  if (roles && roles.length > 0 && user) {
-    if (!roles.includes(user.role)) {
+  if (roles && roles.length > 0) {
+    if (!user?.role || !roles.includes(user.role)) {
       return (
         <Result
           status="403"
