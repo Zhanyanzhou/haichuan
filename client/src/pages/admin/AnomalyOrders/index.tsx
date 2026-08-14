@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button, Card, message, Space, Table, Tag } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
@@ -19,6 +20,7 @@ const ORDER_TYPE_LABEL: Record<string, string> = { SPOT: "现货", CUSTOM: "定�
 type AnomalyOrder = Order & { anomalyReasons: string[] };
 
 export default function AnomalyOrders() {
+  const navigate = useNavigate();
   const [list, setList] = useState<AnomalyOrder[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -85,7 +87,7 @@ export default function AnomalyOrders() {
               { title: "下单时间", dataIndex: "createdAt", width: 140, render: (v: string) => <span className="text-brand-muted text-xs">{v ? dayjs(v).format("YYYY-MM-DD HH:mm") : ""}</span> },
               {
                 title: "操作", width: 90, render: (_: unknown, r: Order) => (
-                  <Button size="small" onClick={() => { window.location.hash = `/admin/orders`; }}>查看</Button>
+                  <Button size="small" onClick={() => navigate("/admin/orders")}>查看</Button>
                 ),
               },
             ]}

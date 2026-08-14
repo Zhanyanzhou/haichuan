@@ -9,6 +9,7 @@ import type { User, PaginatedResult } from '@/types';
 const rm: Record<string, { c: string; t: string }> = {
   SUPER_ADMIN: { c: 'red', t: '超级管理员' }, ADMIN: { c: 'blue', t: '管理员' },
   EDITOR: { c: 'green', t: '编辑' }, CUSTOMER_SERVICE: { c: 'gold', t: '客服' }, WAREHOUSE: { c: 'purple', t: '仓库管理' },
+  SALES_CONSULTANT: { c: 'cyan', t: '销售顾问' }, FINANCE: { c: 'magenta', t: '财务' },
 };
 
 export default function UserManage() {
@@ -84,9 +85,9 @@ export default function UserManage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between"><div><h1 className="text-2xl font-display font-semibold text-brand-text">用户管理</h1><p className="text-sm text-brand-muted mt-1">RBAC 五角色权限</p></div>
+      <div className="flex items-center justify-between"><div><h1 className="text-2xl font-display font-semibold text-brand-text">用户管理</h1><p className="text-sm text-brand-muted mt-1">RBAC 七角色权限</p></div>
         <ScifiButton variant="gold" onClick={openCreate}><PlusOutlined /> 新增用户</ScifiButton></div>
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-7 gap-3">
         {Object.entries(rm).map(([k, v]) => (
           <div key={k} className="bg-white border border-brand-line p-3 text-center"><p className="text-lg font-sans font-bold" style={{ color: v.c }}>{users.filter(u => u.role === k).length}</p><p className="text-[10px] text-brand-muted mt-1">{v.t}</p></div>
         ))}

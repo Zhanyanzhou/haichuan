@@ -353,8 +353,6 @@ export default function AdminLayout() {
 
   /* ── 用户菜单 ── */
   const userMenuItems = [
-    { key: "profile", icon: <UserOutlined />, label: "个人资料" },
-    { type: "divider" as const },
     {
       key: "logout",
       icon: <LogoutOutlined />,
