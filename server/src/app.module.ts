@@ -31,7 +31,6 @@ import { AnalyticsModule } from "./modules/analytics/analytics.module";
 import { PartnerApplicationsModule } from "./modules/partner-applications/partner-applications.module";
 import { ReviewsModule } from "./modules/reviews/reviews.module";
 import { RecommendationsModule } from "./modules/recommendations/recommendations.module";
-import { ContentSlotsModule } from "./modules/content-slots/content-slots.module";
 import { PageModulesModule } from "./modules/page-modules/page-modules.module";
 import { KimiModule } from "./common/kimi/kimi.module";
 import { MailerModule } from "./common/mailer/mailer.module";
@@ -117,7 +116,6 @@ import { LoggerModule } from "nestjs-pino";
     AiClassifyModule,
     MarketingModule,
     StatisticsModule,
-    ContentSlotsModule,
     PageModulesModule,
     SettingsModule,
     SelectionInquiryModule,

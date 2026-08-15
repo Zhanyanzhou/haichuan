@@ -1339,14 +1339,8 @@ export const uploadApi = {
   },
 };
 
-export const contentSlotsApi = {
-  getPublished: async (pageKey = "home") => {
-    return api.get("/content-slots/published", { params: { pageKey } });
-  },
-  getAdminAll: async (pageKey = "home") => {
-    return api.get("/content-slots/admin", { params: { pageKey } });
-  },
-};
+// contentSlotsApi 已删除（2026-08-15 ContentSlot 死资产清退）：
+// 插槽写侧从未有入口、HOME_HERO 永远为空，首页统一走 Puck PageDocument。
 
 // ===== Puck PageDocument API =====
 type MockPageDocument = {

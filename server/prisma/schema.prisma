@@ -1039,30 +1039,8 @@ model Coupon {
 }
 
 // ========== 内容插槽（可视化编辑） ==========
-
-model ContentSlot {
-  id           Int      @id @default(autoincrement())
-  slotKey      String   @unique @db.VarChar(100)
-  pageKey      String   @db.VarChar(50)
-  sectionKey   String   @db.VarChar(50)
-  contentType  String   @default("image") @db.VarChar(20)
-  desktopAsset String?  @map("desktop_asset") @db.VarChar(500)
-  mobileAsset  String?  @map("mobile_asset") @db.VarChar(500)
-  title        String?  @db.VarChar(300)
-  subtitle     String?  @db.VarChar(500)
-  linkUrl      String?  @map("link_url") @db.VarChar(500)
-  altText      String?  @map("alt_text") @db.VarChar(200)
-  sortOrder    Int      @default(0) @map("sort_order")
-  isVisible    Boolean  @default(true) @map("is_visible")
-  status       String   @default("DRAFT") @db.VarChar(20)
-  updatedBy    Int?     @map("updated_by")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-
-  @@index([pageKey])
-  @@index([status])
-  @@map("content_slots")
-}
+// ContentSlot 模型已删除（2026-08-15 死资产清退）：写侧从未有入口、HOME_HERO 插槽永远为空，
+// 页面内容统一由 PageDocument（Puck）承载；表由迁移 20260815100000_drop_content_slots 幂等删除。
 
 // ========== 页面文档（Puck 页面级 JSON 存储）==========
 
