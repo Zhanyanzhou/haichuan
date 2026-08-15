@@ -1,11 +1,21 @@
 /**
  * RevisionDrawer.tsx — 发布版本历史抽屉。
- * 展示最近 20 条发布快照，支持恢复到草稿。
- * （自 index.tsx 平移，逻辑零变更）
+ * 展示最近 20 条发布快照，支持恢复到草稿；
+ * 存在未发布草稿时置顶展示草稿条目，可一键“编辑草稿”继续编辑。
+ * 每个版本都标注发布状态（已发布 / 当前线上版本 / 未发布草稿）。
  */
-import { Button, Drawer, Spin } from "antd";
-import { ClockCircleOutlined, RollbackOutlined } from "@ant-design/icons";
-import type { PageDocumentRevision } from "../editor-store";
+import { Button, Drawer, Spin, Tag } from "antd";
+import {
+  CheckCircleFilled,
+  ClockCircleOutlined,
+  EditOutlined,
+  FileTextOutlined,
+  RollbackOutlined,
+} from "@ant-design/icons";
+import type {
+  PageDocumentRevision,
+  PageDraftSnapshot,
+} from "../editor-store";
 import { formatEditorTime } from "../editor-utils";
 
 export default function RevisionDrawer({
@@ -13,16 +23,21 @@ export default function RevisionDrawer({
   revisions,
   loading,
   restoringVersion,
+  draft,
   onClose,
   onRestore,
+  onEditDraft,
 }: {
   open: boolean;
   revisions: PageDocumentRevision[];
   loading: boolean;
   restoringVersion: number | null;
+  draft: PageDraftSnapshot | null;
   onClose: () => void;
   onRestore: (revision: PageDocumentRevision) => void;
+  onEditDraft: () => void;
 }) {
+  const hasDraft = Boolean(draft);
   return (
     <Drawer
       title="发布版本"
@@ -36,34 +51,93 @@ export default function RevisionDrawer({
         <div className="homepage-editor__revision-loading">
           <Spin />
         </div>
-      ) : revisions.length > 0 ? (
-        <div className="homepage-editor__revision-list">
-          {revisions.map((revision) => (
-            <article
-              key={revision.id}
-              className="homepage-editor__revision-item"
-            >
+      ) : (
+        <div className="homepage-editor__revision-scroll">
+          {hasDraft ? (
+            <article className="homepage-editor__revision-item is-draft">
               <div>
-                <strong>版本 {revision.version}</strong>
-                <span>
+                <strong>
+                  <FileTextOutlined />
+                  未发布草稿
+                </strong>
+                <span className="homepage-editor__revision-time">
                   <ClockCircleOutlined />
-                  {formatEditorTime(revision.publishedAt || revision.createdAt)}
+                  {formatEditorTime(draft?.updatedAt)}
+                </span>
+                <span className="homepage-editor__revision-status-row">
+                  <Tag
+                    className="homepage-editor__revision-status is-draft"
+                    bordered={false}
+                  >
+                    未发布
+                  </Tag>
                 </span>
               </div>
               <Button
                 size="small"
-                icon={<RollbackOutlined />}
-                loading={restoringVersion === revision.version}
-                onClick={() => onRestore(revision)}
+                type="primary"
+                ghost
+                icon={<EditOutlined />}
+                onClick={onEditDraft}
               >
-                恢复到草稿
+                编辑草稿
               </Button>
             </article>
-          ))}
-        </div>
-      ) : (
-        <div className="homepage-editor__revision-empty">
-          还没有发布版本。发布首页后，这里会保留可回滚的快照。
+          ) : null}
+
+          {revisions.length > 0 ? (
+            <div className="homepage-editor__revision-list">
+              {revisions.map((revision, index) => (
+                <article
+                  key={revision.id}
+                  className={`homepage-editor__revision-item${
+                    index === 0 ? " is-current" : ""
+                  }`}
+                >
+                  <div>
+                    <strong>版本 {revision.version}</strong>
+                    <span className="homepage-editor__revision-time">
+                      <ClockCircleOutlined />
+                      {formatEditorTime(
+                        revision.publishedAt || revision.createdAt,
+                      )}
+                    </span>
+                    <span className="homepage-editor__revision-status-row">
+                      <Tag
+                        className="homepage-editor__revision-status is-published"
+                        bordered={false}
+                        icon={<CheckCircleFilled />}
+                      >
+                        发布成功
+                      </Tag>
+                      {index === 0 ? (
+                        <Tag
+                          className="homepage-editor__revision-status is-live"
+                          bordered={false}
+                        >
+                          当前线上版本
+                        </Tag>
+                      ) : null}
+                    </span>
+                  </div>
+                  <Button
+                    size="small"
+                    icon={<RollbackOutlined />}
+                    loading={restoringVersion === revision.version}
+                    onClick={() => onRestore(revision)}
+                  >
+                    恢复到草稿
+                  </Button>
+                </article>
+              ))}
+            </div>
+          ) : null}
+
+          {!hasDraft && revisions.length === 0 ? (
+            <div className="homepage-editor__revision-empty">
+              还没有发布版本。发布首页后，这里会保留可回滚的快照。
+            </div>
+          ) : null}
         </div>
       )}
     </Drawer>

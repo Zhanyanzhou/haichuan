@@ -98,6 +98,14 @@ export type PageDocumentRevision = {
   createdAt?: string;
 };
 
+/** 后台草稿快照：发布版本抽屉中用于展示与一键编辑的“未发布草稿”。 */
+export type PageDraftSnapshot = {
+  pageKey: string;
+  puckData: unknown;
+  metadata?: Record<string, any>;
+  updatedAt?: string | null;
+};
+
 export type PageSessionCache = {
   data: any;
   metadata: Record<string, any>;

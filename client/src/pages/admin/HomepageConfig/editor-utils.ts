@@ -59,9 +59,8 @@ export function getModuleDisplayName(
   type: string,
   props?: Record<string, any>,
 ) {
-  return typeof props?.moduleName === "string" && props.moduleName.trim()
-    ? props.moduleName.trim()
-    : (BLOCK_META[type]?.name ?? type);
+  // 2026-08-16 用户决策：模块名固定为模板显示名，忽略历史自定义 moduleName。
+  return BLOCK_META[type]?.name ?? type;
 }
 
 export function formatEditorTime(value?: string | Date | null) {

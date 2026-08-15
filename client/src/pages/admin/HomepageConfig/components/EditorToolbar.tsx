@@ -9,16 +9,19 @@ import {
   DesktopOutlined,
   DownloadOutlined,
   HistoryOutlined,
+  LayoutOutlined,
   MobileOutlined,
   MoreOutlined,
   SaveOutlined,
   SendOutlined,
   SettingOutlined,
-  TabletOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import type { EditorPageKey } from "@/page-builder/config/editorPages";
-import { editorPages } from "@/page-builder/config/editorPages";
+import {
+  createEditorPageDefault,
+  editorPages,
+} from "@/page-builder/config/editorPages";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { BLOCK_META } from "@/page-builder/config/blockMeta";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
@@ -30,8 +33,9 @@ import {
 import { formatViewportSize, type ViewportPreset } from "../editor-utils";
 
 export const VIEWPORT_PRESETS: ViewportPreset[] = [
+  // 平板档已移除（2026-08-16 用户决策）：平板继承桌面布局无独立编辑价值，
+  // 仅移动端有独立素材/焦点/比例，保留两档。
   { label: "桌面端", icon: <DesktopOutlined />, ...RESPONSIVE_CANVAS.desktop },
-  { label: "平板端", icon: <TabletOutlined />, ...RESPONSIVE_CANVAS.tablet },
   { label: "移动端", icon: <MobileOutlined />, ...RESPONSIVE_CANVAS.mobile },
 ];
 
@@ -184,7 +188,31 @@ export default function EditorToolbar({
     [dispatch],
   );
 
+  /* ── 套用推荐结构:整页替换为该页面的预置结构(模块全部可编辑,不锁定) ── */
+
+  const applyRecommendedStructure = useCallback(() => {
+    const recommended = createEditorPageDefault(pageKey);
+    Modal.confirm({
+      title: "套用推荐结构？",
+      content:
+        "当前画布将被该页面的推荐结构整体替换；尚未保存的修改会丢失，发布前不影响线上页面。",
+      okText: "套用并替换画布",
+      cancelText: "取消",
+      onOk: () => {
+        dispatch({ type: "setData", data: recommended });
+        dispatch({ type: "setUi", ui: { itemSelector: null } });
+        message.success("推荐结构已套用，模块可自由调整，请检查后保存草稿");
+      },
+    });
+  }, [dispatch, pageKey]);
+
   const compactActionItems = [
+    {
+      key: "recommended",
+      icon: <LayoutOutlined />,
+      label: "套用推荐结构",
+      onClick: applyRecommendedStructure,
+    },
     {
       key: "revisions",
       icon: <HistoryOutlined />,
@@ -262,8 +290,8 @@ export default function EditorToolbar({
 
       <div
         className="homepage-editor__viewport-switcher"
-        aria-label="预览设备：平板继承电脑布局，仅手机端可覆写素材与焦点"
-        title="平板继承电脑布局；仅手机端（≤767px）可覆写素材与焦点"
+        aria-label="预览设备：仅手机端可覆写素材与焦点"
+        title="仅手机端（≤767px）可覆写素材与焦点"
       >
         {VIEWPORT_PRESETS.map((preset) => (
           <button
@@ -271,14 +299,16 @@ export default function EditorToolbar({
             type="button"
             className={
               currentViewport.width === preset.width ||
-              (preset.width === 1440 && currentViewport.width === "100%")
+              (preset.width === RESPONSIVE_CANVAS.desktop.width &&
+                currentViewport.width === "100%")
                 ? "is-active"
                 : ""
             }
             onClick={() => setViewport(preset)}
             aria-pressed={
               currentViewport.width === preset.width ||
-              (preset.width === 1440 && currentViewport.width === "100%")
+              (preset.width === RESPONSIVE_CANVAS.desktop.width &&
+                currentViewport.width === "100%")
             }
             title={`${preset.label}预览（${formatViewportSize(preset)}）`}
           >
