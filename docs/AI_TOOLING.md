@@ -18,14 +18,14 @@
 
 ### Copilot（DeepSeek）
 - 指令：`.github/copilot-instructions.md`（Copilot 适配）+ `AGENTS.md` + `PROJECT_RULES.md` + `WORKFLOW.md`（三工具共用）
-- 技能：`.agents/skills/`（VS Code 侧，4 个）、`.github/skills/`（GitHub 侧，4 个）
+- 技能：`.agents/skills/`（4 个，唯一权威；`.github/skills/` 已废弃删除）
 - MCP：`.vscode/mcp.json`（5 个：github / playwright / chrome-devtools / context7 / prisma）
 - 提示词模板：`.github/prompts/`（developer / planner / project-manager / reviewer）
 
 ### Claude Code（智谱 GLM-5.2）
 - 指令：`CLAUDE.md`（Claude Code 适配）+ `AGENTS.md` + `PROJECT_RULES.md` + `WORKFLOW.md`
-- 技能：`.claude/skills/`（4 个：code-review / playwright-testing / react-best-practices / taste-skill）
-- 子代理：`.claude/agents/`（code-reviewer / contract-verifier / frontend-visual-reviewer）
+- 技能：`.claude/skills/`（符号链接 → `.agents/skills/`，4 个，不入库、自动同步）
+- 子代理：`.claude/agents/`（code-reviewer / contract-verifier / frontend-visual-reviewer，入库共享）
 - MCP：`.mcp.json`（2 个：playwright / context7）
 - 权限白名单：`.claude/settings.local.json`
 
@@ -36,7 +36,7 @@
 
 ## 3. 配置维护约定（防止不一致）
 
-1. **技能三处同步**：同名技能存在于 `.agents/skills/`、`.github/skills/`、`.claude/skills/` 三处，格式略不同（Copilot 技能 frontmatter 含 `applyTo`，Claude Code 技能不含）。修改或新增技能时三处都要同步。
+1. **技能单一来源**：技能只维护 `.agents/skills/` 一份（入库）；`.claude/skills/` 通过符号链接指向它（不入库、自动同步）。修改或新增技能只需改 `.agents/skills/`。
 2. **MCP 三处独立、格式不同、禁止互相复制**：
    - Copilot：`.vscode/mcp.json` → `{ "servers": { name: { type, command, args } } }`
    - Claude Code：`.mcp.json` → `{ "mcpServers": { name: { type, command, args } } }`

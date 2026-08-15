@@ -27,8 +27,9 @@ screenshot-*.png
 /test-results/
 /*.sql
 
-# AI 工具本地状态（Claude Code session / 指向 .agents 的符号链接）
-.claude/
+# Claude Code：skills 为指向 .agents/skills 的符号链接（不入库）；仅子代理入库共享
+.claude/*
+!.claude/agents/
 
 # 设计 QA 产物与根级 QA 截图（非部署所需）
 artifacts/
@@ -41,7 +42,7 @@ artifacts/
 # 商品导入试点上传数据（运行时商品图，勿入库）
 /to-upload-pilot/
 
-# 指向 .agents/skills 的符号链接（target 已入库，链接本身不重复入库）
+# 已废弃：技能统一放 .agents/skills（Copilot 实际读取位置）；.github/skills 不再使用
 /.github/skills/
 
 # 本机调试脚本与产物（含本机绝对路径，勿入库）
