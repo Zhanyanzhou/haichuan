@@ -10,18 +10,23 @@ import { existsSync } from "fs";
 import { relative, resolve, sep } from "path";
 import { fromEvent, interval, map, merge, Observable, startWith } from "rxjs";
 
+/**
+ * 页面构建器区块类型契约 — 与前端 puckConfig MyComponents 严格一致,
+ * 由 scripts/verify-page-builder-contract.mjs 双向校验,变更任一侧必须同步另一侧。
+ * 旧类型(图文混排/分割面板/礼赠指南)已由前端 migratePuckData 在载入时转换,
+ * 新保存的草稿不再包含,故不列入本契约。
+ */
 const PUCK_COMPONENT_LABELS = [
   "首屏主视觉",
   "单图海报",
   "双图海报",
-  "图文混排",
   "全屏出血图",
   "文字横幅",
   "作品画廊",
+  "改款对比",
   "产品展示行",
   "分类卡片",
   "卡片网格",
-  "分割面板",
   "轮播图",
   "视频区块",
   "热区图",
@@ -37,7 +42,6 @@ const PUCK_COMPONENT_LABELS = [
   "限时活动",
   "真实评价与实拍",
   "按场景选购",
-  "礼赠指南",
 ] as const;
 
 const PUCK_COMPONENT_SET = new Set<string>(PUCK_COMPONENT_LABELS);
@@ -48,8 +52,8 @@ const PUCK_REQUIRED_IMAGE_FIELDS: Record<string, string[]> = {
   单图海报: ["desktopImage"],
   双图海报: ["mainImage", "detailImage"],
   全屏出血图: ["image"],
-  分割面板: ["image"],
   热区图: ["image"],
+  改款对比: ["beforeImage", "afterImage"],
 };
 
 const PUCK_IMAGE_FIELDS = [
@@ -61,6 +65,8 @@ const PUCK_IMAGE_FIELDS = [
   "posterUrl",
   "url",
   "backgroundImage",
+  "beforeImage",
+  "afterImage",
 ];
 
 const PUCK_LINK_FIELDS = ["linkUrl", "link", "mapUrl"];
@@ -112,14 +118,6 @@ const PUCK_SEO_LIMITS: Record<string, number> = {
  * 默认模板与新增模块内置了“待确认 / 待配置”等占位文案，运营未替换时不得发布到前台。
  */
 const PLACEHOLDER_MARKERS = ["待确认", "待配置", "请填写"];
-
-/**
- * 发布校验：品牌保护(2026-08 模板体系)。
- * 品牌页(Brand Mode)禁止出现 Commerce Campaign 母版的强导购组件；
- * 选款中心等 Commerce 页不受限制。
- */
-const BRAND_PAGE_KEYS = new Set(["home", "about", "products", "custom", "contact"]);
-const COMMERCE_CAMPAIGN_TYPES = new Set(["限时活动", "热区图", "轮播图"]);
 
 @Injectable()
 export class PageModulesService {
@@ -335,7 +333,7 @@ export class PageModulesService {
     const errors: string[] = [];
     const productIds = new Set<number>();
     const missingUploadUrls = new Set<string>();
-    const isBrandPage = BRAND_PAGE_KEYS.has(pageKey);
+    void pageKey; // 模板全页面通用(2026-08-15 用户决策),pageKey 仅保留参数位便于未来扩展
 
     if (!puckData || typeof puckData !== "object") {
       return ["页面数据为空或格式不正确"];
@@ -377,14 +375,6 @@ export class PageModulesService {
 
       // 编辑器说明区不会进入前台；隐藏区块也不应因未完成内容阻断其他模块发布。
       if (EDITOR_ONLY_COMPONENTS.has(type) || props.isVisible === false) return;
-
-      // 品牌保护:Brand 页(关于海川/珠宝作品/珠宝定制/预约咨询/首页)禁止强导购组件
-      if (isBrandPage && COMMERCE_CAMPAIGN_TYPES.has(type)) {
-        errors.push(
-          `${label}：「${type}」属于电商活动组件，品牌页不可使用，请移除后再发布`,
-        );
-        return;
-      }
 
       // 文本长度兜底：防止异常超长输入（如整篇文章误填入标题）发布到前台
       for (const [field, limit] of Object.entries(PUCK_TEXT_FIELD_LIMITS)) {

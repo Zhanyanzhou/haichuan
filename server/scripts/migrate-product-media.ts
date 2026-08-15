@@ -108,22 +108,7 @@ async function collectPublicRefs(): Promise<Set<string>> {
   // PageDocument.puckData JSON 内引用
   const docs = await (prisma as any).pageDocument.findMany({ select: { puckData: true } });
   for (const d of docs) walk(d.puckData);
-
-  // HomeSection / ContentSlot 的图片字段
-  const sections = await (prisma as any).homeSection.findMany({
-    select: { imageUrl: true, videoUrl: true },
-  });
-  for (const s of sections) {
-    push(s.imageUrl);
-    push(s.videoUrl);
-  }
-  const slots = await (prisma as any).contentSlot.findMany({
-    select: { desktopAsset: true, mobileAsset: true },
-  });
-  for (const s of slots) {
-    push(s.desktopAsset);
-    push(s.mobileAsset);
-  }
+  // home_sections / content_slots 已删除（2026-08-14/15 死表清退），此处不再收集
   return refs;
 }
 
@@ -144,27 +129,7 @@ async function neutralizePublicRefs(url: string): Promise<void> {
       console.warn(`[neutralize] PageDocument ${d.id} 替换失败: ${err.message}`);
     }
   }
-  const sections = await (prisma as any).homeSection.findMany({ where: { OR: [{ imageUrl: url }, { videoUrl: url }] } });
-  for (const s of sections) {
-    await (prisma as any).homeSection.update({
-      where: { id: s.id },
-      data: { imageUrl: s.imageUrl === url ? PLACEHOLDER_URL : s.imageUrl, videoUrl: s.videoUrl === url ? null : s.videoUrl },
-    });
-    stats.neutralized++;
-  }
-  const slots = await (prisma as any).contentSlot.findMany({
-    where: { OR: [{ desktopAsset: url }, { mobileAsset: url }] },
-  });
-  for (const s of slots) {
-    await (prisma as any).contentSlot.update({
-      where: { id: s.id },
-      data: {
-        desktopAsset: s.desktopAsset === url ? PLACEHOLDER_URL : s.desktopAsset,
-        mobileAsset: s.mobileAsset === url ? PLACEHOLDER_URL : s.mobileAsset,
-      },
-    });
-    stats.neutralized++;
-  }
+  // home_sections / content_slots 已删除（2026-08-14/15 死表清退），无对应替换逻辑
 }
 
 async function main() {

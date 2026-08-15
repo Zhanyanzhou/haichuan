@@ -84,13 +84,50 @@ export class SettingsService {
   }
 
   async getBackupStatus() {
-    return {
-      lastBackup: null,
-      autoBackup: false,
-      backupSchedule: null,
-      totalBackups: 0,
-      message: '当前未接入可验证的自动备份任务，请配置数据库备份后再启用自动备份状态。',
-    };
+    // OR-1 备份容器产物目录（compose 将宿主 ./backups 只读挂载到 server 容器 /backups）。
+    // 本地开发未挂载该目录时诚实说明，不返回误导性的"未接入"。
+    const dir = process.env.BACKUP_DIR || '/backups';
+    try {
+      const entries = await fs.promises.readdir(dir);
+      const files: { name: string; size: number; mtime: Date }[] = [];
+      for (const name of entries) {
+        // backup.sh 产物两类：数据库 dump（*.sql.gz）与媒体归档（*.tar.gz）
+        if (!/\.(sql\.gz|tar\.gz)$/.test(name)) continue;
+        const stat = await fs.promises.stat(path.join(dir, name));
+        if (stat.isFile()) files.push({ name, size: stat.size, mtime: stat.mtime });
+      }
+      files.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+      const intervalHours = Math.max(1, Math.round(Number(process.env.BACKUP_INTERVAL_SECONDS || 86400) / 3600));
+      const schedule = `backup 容器每 ${intervalHours} 小时一轮（保留 7 天）`;
+      if (files.length === 0) {
+        return {
+          lastBackup: null,
+          autoBackup: true,
+          backupSchedule: schedule,
+          totalBackups: 0,
+          message: `备份目录已挂载（${dir}），但暂无备份产物；请确认 backup 容器已启动，详见 docker logs jewelry-backup。`,
+        };
+      }
+      return {
+        lastBackup: files[0].mtime.toISOString(),
+        autoBackup: true,
+        backupSchedule: schedule,
+        totalBackups: files.length,
+        latestFiles: files.slice(0, 5).map((f) => ({ name: f.name, size: f.size })),
+        message: `最近备份：${files[0].name}，共 ${files.length} 份产物。`,
+      };
+    } catch (error: any) {
+      if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') {
+        return {
+          lastBackup: null,
+          autoBackup: false,
+          backupSchedule: null,
+          totalBackups: 0,
+          message: '备份目录未挂载到 server 容器（本地开发环境属正常）；生产部署请确认 ./backups 已只读挂载。',
+        };
+      }
+      throw error;
+    }
   }
 
   async getLogs(params: { page?: number; pageSize?: number }) {

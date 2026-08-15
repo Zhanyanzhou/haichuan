@@ -137,8 +137,8 @@ model Product {
   productAttributes     ProductAttributeValue[]
   certificates          Certificate[]
   inquiries             Inquiry[]
-  favorites            CustomerFavorite[]
-  reviews              ProductReview[]
+  favorites             CustomerFavorite[]
+  reviews               ProductReview[]
   orderItems            OrderItem[]
   cartItems             Cart[]
   selectionInquiryItems SelectionInquiryItem[]
@@ -486,21 +486,21 @@ model Order {
 }
 
 model Customer {
-  id                Int                 @id @default(autoincrement())
-  phone             String              @unique @db.VarChar(20)
-  name              String?             @db.VarChar(50)
-  email             String?             @db.VarChar(100)
-  passwordHash      String?             @map("password_hash") @db.VarChar(255)
-  status            Status              @default(ACTIVE)
+  id                  Int                          @id @default(autoincrement())
+  phone               String                       @unique @db.VarChar(20)
+  name                String?                      @db.VarChar(50)
+  email               String?                      @db.VarChar(100)
+  passwordHash        String?                      @map("password_hash") @db.VarChar(255)
+  status              Status                       @default(ACTIVE)
   // 合作商家体系：客户合作权限状态，独立于后台 User.Role。
   // accountType=PARTNER 表示当前可访问 PARTNER 可见范围商品（仅 partnerStatus=APPROVED 时生效）。
-  accountType       CustomerAccountType @default(MEMBER) @map("account_type")
-  partnerStatus     PartnerStatus       @default(NONE) @map("partner_status")
-  partnerApprovedAt DateTime?           @map("partner_approved_at")
-  lastOrderAt       DateTime?           @map("last_order_at")
+  accountType         CustomerAccountType          @default(MEMBER) @map("account_type")
+  partnerStatus       PartnerStatus                @default(NONE) @map("partner_status")
+  partnerApprovedAt   DateTime?                    @map("partner_approved_at")
+  lastOrderAt         DateTime?                    @map("last_order_at")
   passwordResetTokens CustomerPasswordResetToken[]
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
+  createdAt           DateTime                     @default(now()) @map("created_at")
+  updatedAt           DateTime                     @updatedAt @map("updated_at")
 
   addresses           CustomerAddress[]
   favorites           CustomerFavorite[]
@@ -519,12 +519,12 @@ model Customer {
 
 // 客户密码重置令牌：只存 SHA-256 哈希（库泄露不泄露令牌本身），一次性使用，30 分钟过期
 model CustomerPasswordResetToken {
-  id          Int       @id @default(autoincrement())
-  customerId  Int       @map("customer_id")
-  tokenHash   String    @unique @map("token_hash") @db.VarChar(64)
-  expiresAt   DateTime  @map("expires_at")
-  usedAt      DateTime? @map("used_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
+  id         Int       @id @default(autoincrement())
+  customerId Int       @map("customer_id")
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
+  expiresAt  DateTime  @map("expires_at")
+  usedAt     DateTime? @map("used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
@@ -534,10 +534,10 @@ model CustomerPasswordResetToken {
 
 // 客户收藏（心愿单）：一人一作品唯一，删除商品时级联清理
 model CustomerFavorite {
-  id          Int      @id @default(autoincrement())
-  customerId  Int      @map("customer_id")
-  productId   Int      @map("product_id")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id         Int      @id @default(autoincrement())
+  customerId Int      @map("customer_id")
+  productId  Int      @map("product_id")
+  createdAt  DateTime @default(now()) @map("created_at")
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -549,13 +549,13 @@ model CustomerFavorite {
 
 // 短信验证码（手机验真）：只存 SHA-256 哈希，5 分钟时效，一次性；60s 冷却与日上限由服务层约束
 model CustomerSmsCode {
-  id         Int       @id @default(autoincrement())
-  phone      String    @db.VarChar(20)
-  codeHash   String    @map("code_hash") @db.VarChar(64)
-  purpose    String    @default("REGISTER") @db.VarChar(20)
-  expiresAt  DateTime  @map("expires_at")
-  usedAt     DateTime? @map("used_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  id        Int       @id @default(autoincrement())
+  phone     String    @db.VarChar(20)
+  codeHash  String    @map("code_hash") @db.VarChar(64)
+  purpose   String    @default("REGISTER") @db.VarChar(20)
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
 
   @@index([phone, createdAt])
   @@map("customer_sms_codes")
@@ -572,7 +572,7 @@ model ProductReview {
   images     Json? // 晒单图 URL 列表（string[]，公开上传管线，最多 6 张）
   status     String    @default("PENDING") @db.VarChar(20) // PENDING | APPROVED | REJECTED
   reply      String?   @db.Text // 商家回复（后台填写，随评价一并展示）
-  repliedAt  DateTime?
+  repliedAt  DateTime? @map("replied_at")
   createdAt  DateTime  @default(now()) @map("created_at")
 
   product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)

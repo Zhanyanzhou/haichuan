@@ -528,4 +528,94 @@ export class CustomersService {
       postalCode: data.postalCode?.trim() || null,
     };
   }
+
+  // ===== 后台客户档案（只读运营视图；写操作不在本批范围）=====
+
+  /** 客户列表：分页 + 关键词（手机/姓名/邮箱）。与订单中心同口径：客服可见完整联系方式。 */
+  async adminListCustomers(params: { page?: string; pageSize?: string; keyword?: string; status?: string }) {
+    const page = Math.max(1, Number(params.page) || 1);
+    const pageSize = Math.min(50, Math.max(1, Number(params.pageSize) || 20));
+    const where: Prisma.CustomerWhereInput = {};
+    const keyword = params.keyword?.trim();
+    if (keyword) {
+      where.OR = [
+        { phone: { contains: keyword } },
+        { name: { contains: keyword } },
+        { email: { contains: keyword } },
+      ];
+    }
+    if (params.status === 'ACTIVE' || params.status === 'DISABLED') where.status = params.status;
+
+    const [list, total] = await Promise.all([
+      this.prisma.customer.findMany({
+        where,
+        // 显式 select 排除 passwordHash（与 getProfile 同规则）
+        select: {
+          id: true, phone: true, name: true, email: true, status: true,
+          accountType: true, partnerStatus: true, lastOrderAt: true, createdAt: true,
+          _count: { select: { orders: true, favorites: true, inquiries: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.customer.count({ where }),
+    ]);
+    return { list, total, page, pageSize };
+  }
+
+  /** 客户 360° 详情：档案 + 消费聚合 + 最近订单 + 收藏 + 地址数。 */
+  async adminGetCustomer(customerId: number) {
+    if (!Number.isInteger(customerId) || customerId <= 0) throw new BadRequestException('无效的客户');
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: {
+        id: true, phone: true, name: true, email: true, status: true,
+        accountType: true, partnerStatus: true, lastOrderAt: true, createdAt: true, updatedAt: true,
+        _count: { select: { inquiries: true, selectionInquiries: true, reviews: true } },
+      },
+    });
+    if (!customer) throw new NotFoundException('客户不存在');
+
+    const [orderAgg, recentOrders, favorites, addressCount] = await Promise.all([
+      // 消费聚合：排除已取消订单；金额显式转字符串，避免 Decimal 序列化差异
+      this.prisma.order.aggregate({
+        where: { customerId, status: { not: 'CANCELLED' } },
+        _count: true,
+        _sum: { finalAmount: true, paidAmount: true, refundedAmount: true },
+      }),
+      this.prisma.order.findMany({
+        where: { customerId },
+        select: {
+          id: true, orderNo: true, status: true, orderType: true,
+          finalAmount: true, paidAmount: true, createdAt: true, shippedAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+      this.prisma.customerFavorite.findMany({
+        where: { customerId },
+        select: {
+          createdAt: true,
+          product: { select: { id: true, name: true, status: true, deletedAt: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+      this.prisma.customerAddress.count({ where: { customerId } }),
+    ]);
+
+    return {
+      customer,
+      stats: {
+        orderCount: orderAgg._count,
+        totalSpent: orderAgg._sum.finalAmount?.toString() ?? '0',
+        totalPaid: orderAgg._sum.paidAmount?.toString() ?? '0',
+        totalRefunded: orderAgg._sum.refundedAmount?.toString() ?? '0',
+      },
+      recentOrders,
+      favorites,
+      addressCount,
+    };
+  }
 }

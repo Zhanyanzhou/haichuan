@@ -1,5 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { OrdersService } from '../orders/orders.service';
 import { CustomerAuthGuard } from './customer-auth.guard';
 import { CustomersService } from './customers.service';
@@ -190,5 +193,25 @@ export class CustomersController {
   @Post('me/close')
   closeAccount(@Req() request: any, @Body() body: { password: string }) {
     return this.customersService.closeAccount(request.customer.id, body.password);
+  }
+
+  // ===== 后台客户档案（只读运营视图）=====
+  // 不标 @Public：走全局 JwtAuthGuard（员工令牌）+ RolesGuard；
+  // 与订单中心同口径，客服可查看（跟进客户），本批不含写操作。
+
+  /** 客户列表：分页 + 关键词（手机/姓名/邮箱）+ 状态筛选 */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE')
+  @Get('admin')
+  adminList(@Query() query: { page?: string; pageSize?: string; keyword?: string; status?: string }) {
+    return this.customersService.adminListCustomers(query);
+  }
+
+  /** 客户 360° 详情：档案 + 消费聚合 + 最近订单 + 收藏 + 地址数 */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE')
+  @Get('admin/:id')
+  adminDetail(@Param('id') id: string) {
+    return this.customersService.adminGetCustomer(+id);
   }
 }
