@@ -1,0 +1,15 @@
+# Codex 项目级配置（MCP 服务器）
+# 正版 Codex（OpenAI 模型）工具面放开，配全套 MCP。
+# 注意：Windows 上 stdio 命令需用 cmd /c 包装，否则 npx 无法直接 spawn。
+
+[mcp_servers.playwright]
+command = "cmd"
+args = ["/c", "npx", "-y", "@playwright/mcp@latest"]
+
+[mcp_servers.chrome-devtools]
+command = "cmd"
+args = ["/c", "npx", "-y", "chrome-devtools-mcp@latest"]
+
+[mcp_servers.context7]
+command = "cmd"
+args = ["/c", "npx", "-y", "@upstash/context7-mcp"]

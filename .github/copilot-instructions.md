@@ -35,6 +35,7 @@
 | 设计/样式        | `docs/UI_GUIDE.md`             |
 | 技术决策         | `docs/DECISIONS.md`            |
 | 开发流程         | `docs/DEVELOPMENT_WORKFLOW.md` |
+| AI 工具与模型分工 | `docs/AI_TOOLING.md`           |
 
 > 按需读取，不要一次把所有 docs 加入上下文。
 
