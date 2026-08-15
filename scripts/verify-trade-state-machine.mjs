@@ -31,7 +31,13 @@ console.log("交易域状态机契约测试\n");
 const ordersSrc = await readSrc("server/src/modules/orders/orders.service.ts");
 
 check("订单状态机定义存在且包含全部 5 状态", () => {
-  for (const s of ["PENDING_PAYMENT", "PENDING_SHIP", "SHIPPED", "COMPLETED", "CANCELLED"]) {
+  for (const s of [
+    "PENDING_PAYMENT",
+    "PENDING_SHIP",
+    "SHIPPED",
+    "COMPLETED",
+    "CANCELLED",
+  ]) {
     assert.ok(ordersSrc.includes(s), `缺少状态: ${s}`);
   }
 });
@@ -50,7 +56,10 @@ check("订单：待发货只能转发货", () => {
   const block = ordersSrc.match(/PENDING_SHIP:\s*\[([^\]]+)\]/);
   assert.ok(block, "未找到 PENDING_SHIP 转换定义");
   assert.ok(block[1].includes("SHIPPED"), "待发货必须能转发货");
-  assert.ok(!block[1].includes("CANCELLED"), "待发货不可直接取消（需退款流程）");
+  assert.ok(
+    !block[1].includes("CANCELLED"),
+    "待发货不可直接取消（需退款流程）",
+  );
 });
 
 check("订单：已发货只能转完成", () => {
@@ -60,22 +69,42 @@ check("订单：已发货只能转完成", () => {
 });
 
 check("订单：COMPLETED 与 CANCELLED 为终态", () => {
-  assert.ok(/COMPLETED:\s*\[\s*\]/.test(ordersSrc), "COMPLETED 必须为空数组（终态）");
-  assert.ok(/CANCELLED:\s*\[\s*\]/.test(ordersSrc), "CANCELLED 必须为空数组（终态）");
+  assert.ok(
+    /COMPLETED:\s*\[\s*\]/.test(ordersSrc),
+    "COMPLETED 必须为空数组（终态）",
+  );
+  assert.ok(
+    /CANCELLED:\s*\[\s*\]/.test(ordersSrc),
+    "CANCELLED 必须为空数组（终态）",
+  );
 });
 
 check("订单：updateStatus 拒绝 PENDING_SHIP 与 SHIPPED 的直接设置", () => {
   // 这两个状态必须分别通过付款审核、发货专用接口进入
   // 引号无关匹配：代码可能使用单引号或双引号（当前为双引号）
-  assert.ok(/newStatus === ['"]PENDING_SHIP['"][\s\S]*?待发货必须通过付款审核进入/.test(ordersSrc), "待发货必须通过付款审核进入");
-  assert.ok(/newStatus === ['"]SHIPPED['"][\s\S]*?发货请使用专用接口/.test(ordersSrc), "发货必须使用专用接口");
+  assert.ok(
+    /newStatus === ['"]PENDING_SHIP['"][\s\S]*?待发货必须通过付款审核进入/.test(
+      ordersSrc,
+    ),
+    "待发货必须通过付款审核进入",
+  );
+  assert.ok(
+    /newStatus === ['"]SHIPPED['"][\s\S]*?发货请使用专用接口/.test(ordersSrc),
+    "发货必须使用专用接口",
+  );
 });
 
 check("订单：发货接口校验订单处于 PENDING_SHIP（未付款不可发货）", () => {
   const shipMatch = ordersSrc.match(/async ship\([\s\S]*?\}\s*\n\s*\}/);
   assert.ok(shipMatch, "未找到 ship 方法");
-  assert.ok(shipMatch[0].includes("PENDING_SHIP"), "ship 必须校验 PENDING_SHIP 状态");
-  assert.ok(shipMatch[0].includes("只有待发货订单可以发货"), "ship 必须拒绝非待发货订单");
+  assert.ok(
+    shipMatch[0].includes("PENDING_SHIP"),
+    "ship 必须校验 PENDING_SHIP 状态",
+  );
+  assert.ok(
+    shipMatch[0].includes("只有待发货订单可以发货"),
+    "ship 必须拒绝非待发货订单",
+  );
 });
 
 // ── 内联等价测试：模拟状态机校验函数 ──
@@ -100,20 +129,46 @@ check("内联：合法转换被接受", () => {
 });
 
 check("内联：非法转换被拒绝（关键验收项 #11）", () => {
-  assert.equal(canTransition("PENDING_PAYMENT", "SHIPPED"), false, "待付款不可直接发货");
-  assert.equal(canTransition("PENDING_PAYMENT", "COMPLETED"), false, "待付款不可直接完成");
-  assert.equal(canTransition("COMPLETED", "CANCELLED"), false, "已完成不可取消");
-  assert.equal(canTransition("CANCELLED", "PENDING_PAYMENT"), false, "已取消不可复活");
-  assert.equal(canTransition("SHIPPED", "PENDING_SHIP"), false, "已发货不可退回待发货");
+  assert.equal(
+    canTransition("PENDING_PAYMENT", "SHIPPED"),
+    false,
+    "待付款不可直接发货",
+  );
+  assert.equal(
+    canTransition("PENDING_PAYMENT", "COMPLETED"),
+    false,
+    "待付款不可直接完成",
+  );
+  assert.equal(
+    canTransition("COMPLETED", "CANCELLED"),
+    false,
+    "已完成不可取消",
+  );
+  assert.equal(
+    canTransition("CANCELLED", "PENDING_PAYMENT"),
+    false,
+    "已取消不可复活",
+  );
+  assert.equal(
+    canTransition("SHIPPED", "PENDING_SHIP"),
+    false,
+    "已发货不可退回待发货",
+  );
 });
 
 // ── 售后状态机 ──
-const afterSalesSrc = await readSrc("server/src/modules/after-sales/after-sales.service.ts");
+const afterSalesSrc = await readSrc(
+  "server/src/modules/after-sales/after-sales.service.ts",
+);
 
 check("售后状态机：REQUESTED 只能被审核（非直接推进）", () => {
   const block = afterSalesSrc.match(/REQUESTED:\s*\[([^\]]*)\]/);
   assert.ok(block, "未找到售后 REQUESTED 转换定义");
-  assert.equal(block[1].trim(), "", "REQUESTED 必须为空（只能通过 review 审核）");
+  assert.equal(
+    block[1].trim(),
+    "",
+    "REQUESTED 必须为空（只能通过 review 审核）",
+  );
 });
 
 check("售后状态机：APPROVED 可进入逆向物流/完成/取消", () => {
@@ -126,25 +181,40 @@ check("售后状态机：APPROVED 可进入逆向物流/完成/取消", () => {
 
 check("售后状态机：终态 REJECTED/COMPLETED/CANCELLED 无后续转换", () => {
   for (const terminal of ["REJECTED", "COMPLETED", "CANCELLED"]) {
-    const block = afterSalesSrc.match(new RegExp(`${terminal}:\\s*\\[([^\\]]*)\\]`));
+    const block = afterSalesSrc.match(
+      new RegExp(`${terminal}:\\s*\\[([^\\]]*)\\]`),
+    );
     assert.ok(block, `未找到售后 ${terminal} 转换定义`);
     assert.equal(block[1].trim(), "", `${terminal} 必须为空数组（终态）`);
   }
 });
 
 // ── 履约状态：发货守卫 ──
-const fulfillmentSrc = await readSrc("server/src/modules/fulfillment/fulfillment.service.ts");
+const fulfillmentSrc = await readSrc(
+  "server/src/modules/fulfillment/fulfillment.service.ts",
+);
 
 check("履约：dispatch 仅允许待拣货/待复核/待发货状态", () => {
-  assert.ok(fulfillmentSrc.includes("['PENDING_PICK', 'PENDING_CHECK', 'PENDING_SHIP']"), "dispatch 状态白名单缺失");
+  assert.ok(
+    fulfillmentSrc.includes(
+      "['PENDING_PICK', 'PENDING_CHECK', 'PENDING_SHIP']",
+    ),
+    "dispatch 状态白名单缺失",
+  );
 });
 
 check("履约：dispatch 校验订单必须已付款（PENDING_SHIP）", () => {
-  assert.ok(fulfillmentSrc.includes("订单未完成付款审核，不可发货"), "dispatch 必须校验订单付款状态");
+  assert.ok(
+    fulfillmentSrc.includes("订单未完成付款审核，不可发货"),
+    "dispatch 必须校验订单付款状态",
+  );
 });
 
 check("履约：标记送达仅允许 SHIPPED 状态", () => {
-  assert.ok(/只有已发货的履约单可标记送达/.test(fulfillmentSrc), "送达状态守卫缺失");
+  assert.ok(
+    /只有已发货的履约单可标记送达/.test(fulfillmentSrc),
+    "送达状态守卫缺失",
+  );
 });
 
 console.log(`\n${passed} 项通过，状态机契约验证完成。`);

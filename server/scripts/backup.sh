@@ -54,6 +54,7 @@ mysqldump \
   -u "$DB_USER" \
   -p"$DB_PASS" \
   --single-transaction \
+  --no-tablespaces \
   --routines \
   --triggers \
   --add-drop-table \
@@ -71,10 +72,25 @@ if [ -n "$MEDIA_DIRS" ]; then
       continue
     fi
     # 用目录名区分归档: jewelry_media_20260814_020000_uploads.tar.gz
-    dirname_part=$(basename "$dir" | tr -c 'a-zA-Z0-9_.-' '_')
+    # 纯 bash 替换做白名单清洗（tr -c 会把 basename 的尾部换行也映射成 '_'，导致 uploads_.tar.gz）
+    dirname_part=$(basename "$dir")
+    dirname_part=${dirname_part//[^a-zA-Z0-9_.-]/_}
     media_file="${BACKUP_DIR}/${MEDIA_PREFIX}_${TIMESTAMP}_${dirname_part}.tar.gz"
+    # tar 退出码 1 = 读取期间文件变更（"file changed as we read it"），归档仍完整生成。
+    # 按本脚本头部一致性说明，对只增不改的图片/凭证存储可接受；>1 才是真实失败。
+    set +e
     tar -czf "$media_file" -C "$(dirname "$dir")" "$(basename "$dir")"
-    echo "✅ 媒体备份完成: $media_file ($(du -h "$media_file" | cut -f1))"
+    tar_status=$?
+    set -e
+    if [ "$tar_status" -gt 1 ]; then
+      echo "🚨 ERROR: tar 退出码 ${tar_status}，媒体归档失败: $media_file"
+      rm -f "$media_file"
+      exit "$tar_status"
+    elif [ "$tar_status" -eq 1 ]; then
+      echo "⚠️  tar 退出码 1（读取期间文件变更，归档已生成，按设计接受）: $media_file ($(du -h "$media_file" | cut -f1))"
+    else
+      echo "✅ 媒体备份完成: $media_file ($(du -h "$media_file" | cut -f1))"
+    fi
   done
 else
   echo "ℹ️  未设置 MEDIA_DIRS，跳过媒体备份（容器内运行时由 compose 注入）"

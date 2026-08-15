@@ -5,9 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { PageModulesService } = require(
-  "../server/dist/modules/page-modules/page-modules.service.js",
-);
+const {
+  PageModulesService,
+} = require("../server/dist/modules/page-modules/page-modules.service.js");
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const oldPublishedAt = new Date("2026-08-11T10:07:45.021Z");
@@ -63,7 +63,8 @@ const state = {
 const db = {
   pageDocument: {
     findUnique: async ({ where }) =>
-      state.document?.pageKey === where.pageKey || state.document?.id === where.id
+      state.document?.pageKey === where.pageKey ||
+      state.document?.id === where.id
         ? clone(state.document)
         : null,
     updateMany: async ({ where, data }) => {
@@ -73,7 +74,9 @@ const db = {
       ) {
         return { count: 0 };
       }
-      Object.assign(state.document, clone(data), { updatedAt: nextUpdatedAt() });
+      Object.assign(state.document, clone(data), {
+        updatedAt: nextUpdatedAt(),
+      });
       return { count: 1 };
     },
     create: async ({ data }) => {
@@ -87,7 +90,9 @@ const db = {
       return clone(state.document);
     },
     update: async ({ data }) => {
-      Object.assign(state.document, clone(data), { updatedAt: nextUpdatedAt() });
+      Object.assign(state.document, clone(data), {
+        updatedAt: nextUpdatedAt(),
+      });
       return clone(state.document);
     },
   },
@@ -123,8 +128,7 @@ const db = {
     findMany: async () => clone(state.revisions),
   },
   product: {
-    findMany: async ({ where }) =>
-      where.id.in.map((id) => ({ id })),
+    findMany: async ({ where }) => where.id.in.map((id) => ({ id })),
   },
   $queryRaw: async () => {
     lockCount += 1;
@@ -147,13 +151,20 @@ const editorOnlyResult = await service.validatePageDocument("home", {
     { type: "网站全局设置", props: { id: "settings" } },
     {
       type: "全屏出血图",
-      props: { id: "hidden-story", title: "隐藏故事", image: "", isVisible: false },
+      props: {
+        id: "hidden-story",
+        title: "隐藏故事",
+        image: "",
+        isVisible: false,
+      },
     },
   ],
   root: { props: {} },
 });
 assert.equal(editorOnlyResult.valid, false);
-assert.deepEqual(editorOnlyResult.errors, ["页面至少需要 1 个可见的前台内容模块"]);
+assert.deepEqual(editorOnlyResult.errors, [
+  "页面至少需要 1 个可见的前台内容模块",
+]);
 
 const invalidResult = await service.validatePageDocument("home", {
   content: [
@@ -172,7 +183,10 @@ assert.ok(
 const publicBeforeSave = await service.getPublishedPageDocument("home");
 assert.equal(publicBeforeSave.version, 17);
 assert.equal(publicBeforeSave.puckData.content[0].props.title, "旧版首页");
-assert.equal(publicBeforeSave.updatedAt.toISOString(), oldPublishedAt.toISOString());
+assert.equal(
+  publicBeforeSave.updatedAt.toISOString(),
+  oldPublishedAt.toISOString(),
+);
 
 const saved = await service.savePageDocument(
   "home",
@@ -186,7 +200,10 @@ assert.equal(saved.status, "DRAFT");
 const publicAfterSave = await service.getPublishedPageDocument("home");
 assert.equal(publicAfterSave.version, 17);
 assert.equal(publicAfterSave.puckData.content[0].props.title, "旧版首页");
-assert.equal(publicAfterSave.updatedAt.toISOString(), oldPublishedAt.toISOString());
+assert.equal(
+  publicAfterSave.updatedAt.toISOString(),
+  oldPublishedAt.toISOString(),
+);
 
 await service.publishPageDocument(
   "home",

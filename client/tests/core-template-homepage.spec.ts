@@ -119,7 +119,8 @@ const puckData = {
         id: "core-featured-product",
         eyebrow: "FEATURED PIECE",
         title: "本季主推作品",
-        summary: "把一件重点作品放大讲清，让品牌叙事自然进入商品详情与预约路径。",
+        summary:
+          "把一件重点作品放大讲清，让品牌叙事自然进入商品详情与预约路径。",
         productId: 1,
         primaryText: "查看作品",
         secondaryText: "预约鉴赏",
@@ -156,9 +157,33 @@ const puckData = {
         layout: "grid-3",
         bgColor: "#FBF9F6",
         categories: [
-          { name: "日常佩戴", description: "轻盈、耐看、易搭配", image: image("category-cards"), link: "/products", altText: "日常佩戴珠宝", focusX: 50, focusY: 50 },
-          { name: "重要赠礼", description: "为重要关系留下纪念", image: image("gift-guide"), link: "/products", altText: "重要赠礼珠宝", focusX: 50, focusY: 50 },
-          { name: "专属定制", description: "从需求开始共同完成", image: image("custom-process"), link: "/custom", altText: "珠宝定制服务", focusX: 50, focusY: 50 },
+          {
+            name: "日常佩戴",
+            description: "轻盈、耐看、易搭配",
+            image: image("category-cards"),
+            link: "/products",
+            altText: "日常佩戴珠宝",
+            focusX: 50,
+            focusY: 50,
+          },
+          {
+            name: "重要赠礼",
+            description: "为重要关系留下纪念",
+            image: image("gift-guide"),
+            link: "/products",
+            altText: "重要赠礼珠宝",
+            focusX: 50,
+            focusY: 50,
+          },
+          {
+            name: "专属定制",
+            description: "从需求开始共同完成",
+            image: image("custom-process"),
+            link: "/custom",
+            altText: "珠宝定制服务",
+            focusX: 50,
+            focusY: 50,
+          },
         ],
       },
     },
@@ -208,27 +233,44 @@ async function seedCoreHomepage(page: Page) {
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ code: 200, data: publishedStore.published.home, message: "success" }),
+      body: JSON.stringify({
+        code: 200,
+        data: publishedStore.published.home,
+        message: "success",
+      }),
     }),
   );
   await page.route("**/api/products/public**", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ code: 200, data: { list: publishedProducts }, message: "success" }),
+      body: JSON.stringify({
+        code: 200,
+        data: { list: publishedProducts },
+        message: "success",
+      }),
     }),
   );
 }
 
 async function expectNoHorizontalOverflow(page: Page) {
   await expect
-    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      ),
+    )
     .toBe(true);
 }
 
 test.describe("八个核心装修模块首页闭环", () => {
   // VITE mock 在浏览器内直接返回空页面文档，会绕过本套件的网络拦截夹具。
-  test.skip(useMock, "首页装修器闭环依赖网络 API 拦截，mock 模式下由静态渲染契约覆盖");
+  test.skip(
+    useMock,
+    "首页装修器闭环依赖网络 API 拦截，mock 模式下由静态渲染契约覆盖",
+  );
 
   test.beforeEach(async ({ page }) => {
     await seedCoreHomepage(page);
@@ -239,18 +281,38 @@ test.describe("八个核心装修模块首页闭环", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/");
 
-    await expect(page.getByRole("heading", { name: "海川典藏", level: 1 })).toBeVisible();
-    await expect(page.locator(".hc-single-poster")).toHaveCSS("aspect-ratio", "21 / 6");
+    await expect(
+      page.getByRole("heading", { name: "海川典藏", level: 1 }),
+    ).toBeVisible();
+    await expect(page.locator(".hc-single-poster")).toHaveCSS(
+      "aspect-ratio",
+      "21 / 6",
+    );
     await expect(page.locator(".homepage-product-row__card")).toHaveCount(4);
     await expect(page.locator(".hc-double-poster")).toBeVisible();
-    await expect(page.locator(".homepage-featured-product__media")).toHaveCSS("order", "2");
+    await expect(page.locator(".homepage-featured-product__media")).toHaveCSS(
+      "order",
+      "2",
+    );
     await expect(page.locator(".homepage-image-text")).toBeVisible();
-    await expect(page.locator(".homepage-category-cards__grid > a")).toHaveCount(3);
-    await expect(page.getByRole("heading", { name: "预约一对一鉴赏" })).toBeVisible();
+    await expect(
+      page.locator(".homepage-category-cards__grid > a"),
+    ).toHaveCount(3);
+    await expect(
+      page.getByRole("heading", { name: "预约一对一鉴赏" }),
+    ).toBeVisible();
 
-    await expect(page.getByRole("link", { name: /探索本季作品/ })).toHaveAttribute("href", "/products");
-    await expect(page.getByRole("link", { name: /关于海川/ })).toHaveAttribute("href", "/about");
-    await expect(page.getByRole("link", { name: /立即预约/ })).toHaveAttribute("href", "/contact");
+    await expect(
+      page.getByRole("link", { name: /探索本季作品/ }),
+    ).toHaveAttribute("href", "/products");
+    await expect(page.getByRole("link", { name: /关于海川/ })).toHaveAttribute(
+      "href",
+      "/about",
+    );
+    await expect(page.getByRole("link", { name: /立即预约/ })).toHaveAttribute(
+      "href",
+      "/contact",
+    );
     await expectNoHorizontalOverflow(page);
   });
 
@@ -258,12 +320,28 @@ test.describe("八个核心装修模块首页闭环", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
 
-    await expect(page.getByRole("heading", { name: "海川典藏", level: 1 })).toBeVisible();
-    await expect(page.locator(".hc-single-poster")).toHaveCSS("aspect-ratio", "4 / 5");
-    await expect(page.locator(".homepage-product-row__grid")).toHaveCSS("grid-template-columns", /.+ .+/);
-    await expect(page.locator(".homepage-featured-product__media")).toHaveCSS("order", "1");
-    await expect(page.locator(".homepage-category-cards__grid")).toHaveCSS("grid-template-columns", /\d+(\.\d+)?px/);
-    await expect(page.locator(".homepage-category-cards__grid > a")).toHaveCount(3);
+    await expect(
+      page.getByRole("heading", { name: "海川典藏", level: 1 }),
+    ).toBeVisible();
+    await expect(page.locator(".hc-single-poster")).toHaveCSS(
+      "aspect-ratio",
+      "4 / 5",
+    );
+    await expect(page.locator(".homepage-product-row__grid")).toHaveCSS(
+      "grid-template-columns",
+      /.+ .+/,
+    );
+    await expect(page.locator(".homepage-featured-product__media")).toHaveCSS(
+      "order",
+      "1",
+    );
+    await expect(page.locator(".homepage-category-cards__grid")).toHaveCSS(
+      "grid-template-columns",
+      /\d+(\.\d+)?px/,
+    );
+    await expect(
+      page.locator(".homepage-category-cards__grid > a"),
+    ).toHaveCount(3);
     await expectNoHorizontalOverflow(page);
   });
 });
