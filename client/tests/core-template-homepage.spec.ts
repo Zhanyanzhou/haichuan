@@ -240,10 +240,10 @@ test.describe("八个核心装修模块首页闭环", () => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { name: "海川典藏", level: 1 })).toBeVisible();
-    await expect(page.locator(".hc-single-poster")).toHaveCSS("aspect-ratio", "12 / 5");
+    await expect(page.locator(".hc-single-poster")).toHaveCSS("aspect-ratio", "21 / 6");
     await expect(page.locator(".homepage-product-row__card")).toHaveCount(4);
     await expect(page.locator(".hc-double-poster")).toBeVisible();
-    await expect(page.locator(".homepage-featured-product")).toHaveAttribute("data-layout", "imageRight");
+    await expect(page.locator(".homepage-featured-product__media")).toHaveCSS("order", "2");
     await expect(page.locator(".homepage-image-text")).toBeVisible();
     await expect(page.locator(".homepage-category-cards__grid > a")).toHaveCount(3);
     await expect(page.getByRole("heading", { name: "预约一对一鉴赏" })).toBeVisible();
@@ -259,7 +259,7 @@ test.describe("八个核心装修模块首页闭环", () => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { name: "海川典藏", level: 1 })).toBeVisible();
-    await expect(page.locator(".hc-single-poster")).toHaveCSS("aspect-ratio", "5 / 6");
+    await expect(page.locator(".hc-single-poster")).toHaveCSS("aspect-ratio", "4 / 5");
     await expect(page.locator(".homepage-product-row__grid")).toHaveCSS("grid-template-columns", /.+ .+/);
     await expect(page.locator(".homepage-featured-product__media")).toHaveCSS("order", "1");
     await expect(page.locator(".homepage-category-cards__grid")).toHaveCSS("grid-template-columns", /\d+(\.\d+)?px/);

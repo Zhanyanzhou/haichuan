@@ -144,16 +144,18 @@ check("受控图片：CSP 允许 Blob URL，且范围限定在 img-src", () => {
   );
 });
 
-check("Redis：强密码与连接地址分离（容器保留，业务侧已无队列消费者）", () => {
+check("Redis：已移除（OR 批决策，服务端零消费方）", () => {
   assert.ok(
-    composeConfig.includes("REDIS_URL: redis://redis:6379"),
-    "Compose 中 Redis 地址不可拼接原始密码",
+    !/^\s*redis:\s*$/m.test(composeConfig),
+    "Compose 不应再定义 redis 服务（queue 已删，无消费方）",
   );
   assert.ok(
-    composeConfig.includes(
-      "REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}",
-    ),
-    "Compose 必须向服务端传递 Redis 密码",
+    !composeConfig.includes("REDIS_URL"),
+    "Compose 不应再拼接 Redis 连接地址",
+  );
+  assert.ok(
+    !composeConfig.includes("REDIS_PASSWORD"),
+    "Compose 不应再传递 Redis 密码",
   );
 });
 
@@ -203,7 +205,7 @@ const ordersService = await readSrc(
 
 check("下单：仅 DIRECT_PURCHASE 商品可下单（非直接购买被拒绝）", () => {
   assert.ok(
-    ordersService.includes("salesMode: 'DIRECT_PURCHASE'"),
+    /salesMode:\s*['"]DIRECT_PURCHASE['"]/.test(ordersService),
     "必须校验 salesMode=DIRECT_PURCHASE",
   );
   assert.ok(
@@ -214,7 +216,7 @@ check("下单：仅 DIRECT_PURCHASE 商品可下单（非直接购买被拒绝�
 
 check("下单：商品必须 PUBLISHED 且未软删除", () => {
   assert.ok(
-    ordersService.includes("status: 'PUBLISHED'"),
+    /status:\s*['"]PUBLISHED['"]/.test(ordersService),
     "必须校验商品 PUBLISHED",
   );
   assert.ok(ordersService.includes("deletedAt: null"), "必须过滤软删除商品");

@@ -146,7 +146,7 @@ const editorOnlyResult = await service.validatePageDocument("home", {
   content: [
     { type: "网站全局设置", props: { id: "settings" } },
     {
-      type: "图文混排",
+      type: "全屏出血图",
       props: { id: "hidden-story", title: "隐藏故事", image: "", isVisible: false },
     },
   ],
@@ -158,7 +158,7 @@ assert.deepEqual(editorOnlyResult.errors, ["页面至少需要 1 个可见的前
 const invalidResult = await service.validatePageDocument("home", {
   content: [
     {
-      type: "图文混排",
+      type: "全屏出血图",
       props: { id: "story", title: "品牌故事", image: "" },
     },
   ],

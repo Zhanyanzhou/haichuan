@@ -47,4 +47,6 @@ jobs:
           npm run typecheck
           npm test
           npm run test:trade
+          npm run test:selection-inquiry
           npm run build
+          npm run test:page-builder-publish

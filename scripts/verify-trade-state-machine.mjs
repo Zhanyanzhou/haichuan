@@ -66,8 +66,9 @@ check("订单：COMPLETED 与 CANCELLED 为终态", () => {
 
 check("订单：updateStatus 拒绝 PENDING_SHIP 与 SHIPPED 的直接设置", () => {
   // 这两个状态必须分别通过付款审核、发货专用接口进入
-  assert.ok(/newStatus === 'PENDING_SHIP'[\s\S]*?待发货必须通过付款审核进入/.test(ordersSrc), "待发货必须通过付款审核进入");
-  assert.ok(/newStatus === 'SHIPPED'[\s\S]*?发货请使用专用接口/.test(ordersSrc), "发货必须使用专用接口");
+  // 引号无关匹配：代码可能使用单引号或双引号（当前为双引号）
+  assert.ok(/newStatus === ['"]PENDING_SHIP['"][\s\S]*?待发货必须通过付款审核进入/.test(ordersSrc), "待发货必须通过付款审核进入");
+  assert.ok(/newStatus === ['"]SHIPPED['"][\s\S]*?发货请使用专用接口/.test(ordersSrc), "发货必须使用专用接口");
 });
 
 check("订单：发货接口校验订单处于 PENDING_SHIP（未付款不可发货）", () => {
