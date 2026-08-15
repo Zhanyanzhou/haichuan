@@ -39,6 +39,9 @@ jobs:
 
       - name: 校验 Prisma Schema
         working-directory: server
+        env:
+          # prisma validate（5.22+）会校验 env("DATABASE_URL") 是否存在；CI 无 .env，提供占位值仅供语法校验，不连接真实库
+          DATABASE_URL: "mysql://ci:ci@localhost:3306/ci_db"
         run: npx prisma validate
 
       - name: 运行质量检查
