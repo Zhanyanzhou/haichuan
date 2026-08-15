@@ -117,13 +117,16 @@ export class PaymentGatewayService {
   }
 
   private initWechatPay() {
-    const appid = this.configService.get<string>('WECHAT_APP_ID');
+    // 微信支付 AppID（商户号绑定的公众号/小程序/APP 的 AppID）——与扫码登录的
+    // WECHAT_APP_ID（开放平台网站应用 AppID）通常不是同一个值，故意拆成独立变量，
+    // 避免两边共用一个变量导致必有一侧配置错误的联调地雷（OR 盘点 2026-08-15）。
+    const appid = this.configService.get<string>('WECHAT_PAY_APP_ID');
     const mchid = this.configService.get<string>('WECHAT_MCH_ID');
     const publicKey = this.configService.get<string>('WECHAT_PLATFORM_CERT_PATH');
     const privateKeyPath = this.configService.get<string>('WECHAT_MCH_PRIVATE_KEY_PATH');
     const apiV3Key = this.configService.get<string>('WECHAT_API_V3_KEY');
     if (!appid || !mchid || !publicKey || !privateKeyPath || !apiV3Key) {
-      this.logger.warn('WECHAT_APP_ID/WECHAT_MCH_ID/WECHAT_PLATFORM_CERT_PATH/WECHAT_MCH_PRIVATE_KEY_PATH/WECHAT_API_V3_KEY 未配置，微信支付通道不可用');
+      this.logger.warn('WECHAT_PAY_APP_ID/WECHAT_MCH_ID/WECHAT_PLATFORM_CERT_PATH/WECHAT_MCH_PRIVATE_KEY_PATH/WECHAT_API_V3_KEY 未配置，微信支付通道不可用');
       return;
     }
     try {

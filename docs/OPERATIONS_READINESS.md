@@ -188,7 +188,7 @@ Sentry 类错误聚合｜慢查询追踪｜自动 CD（手动 git pull+compose�
 TLS 终结（方案拍板）｜登录失败锁定｜dependabot+npm audit 入 CI｜Playwright 入 CI｜ICP 备案号占位｜docs 滞后批刷新（DECISIONS D.1/D.3、DEPLOYMENT、PROJECT、PENDING_WORK、PRODUCT_DATA_CONTRACT、CLEANUP_PLAN）
 
 ### P2 · 交易解冻前
-外部凭据接入联调（SMTP→快递100→短信→支付宝/微信，签约周期长尽早启动）｜**WECHAT_APP_ID 拆分**（扫码登录与微信支付共用一个变量，两者 AppID 通常不同值，接入前必须拆）｜对账能力｜订单创建/支付成功通知补全｜库存预警｜备份异地化+加密（rsync/对象存储）｜Sentry 类错误聚合｜PII 日志脱敏｜薄弱端点补 DTO（marketing `b:any` 等）
+外部凭据接入联调（SMTP→快递100→短信→支付宝/微信，签约周期长尽早启动）｜~~**WECHAT_APP_ID 拆分**~~（✅ 2026-08-15 已完成：支付侧改读独立的 `WECHAT_PAY_APP_ID`，扫码登录保持 `WECHAT_APP_ID`）｜对账能力｜订单创建/支付成功通知补全｜库存预警｜备份异地化+加密（rsync/对象存储）｜Sentry 类错误聚合｜PII 日志脱敏｜薄弱端点补 DTO（marketing `b:any` 等）
 
 ### P3 · 运营增强（按业务节奏）
 博客/资讯模块｜在线客服｜FAQ 页｜CDN+nginx gzip/expires｜连接池调参｜Catalog/Search 服务端化迁移｜容器非 root+优雅停机｜JWT 双 secret 拆分｜埋点隐私授权机制（G-2）｜图片双体系收敛（IMAGE_MIGRATION.md 五阶段方案就绪待拍板）
