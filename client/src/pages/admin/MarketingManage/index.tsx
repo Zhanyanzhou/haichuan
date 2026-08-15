@@ -67,10 +67,10 @@ export default function MarketingManage() {
         </p>
       </div>
       <Alert
-        type="warning"
+        type="info"
         showIcon
-        message="促销活动与优惠券当前仅作记录管理，暂不参与线上结算"
-        description="电商结算功能处于冻结期，此处的活动与券不会影响客户下单金额。"
+        message="优惠券已接入下单结算；促销活动当前仅作记录管理"
+        description="后台人工建单时可选可用券（服务端试算与核销，单一公式口径）；促销活动暂不自动改价。客户侧线上交易仍处于冻结期。"
         style={{ maxWidth: 680, marginBottom: 20 }}
       />
       <Tabs

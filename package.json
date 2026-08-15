@@ -17,7 +17,7 @@
     "test": "npm run test:contracts",
     "test:contracts": "node scripts/verify-page-builder-contract.mjs",
     "test:page-builder-publish": "node scripts/verify-page-builder-publish.mjs",
-    "test:selection-inquiry": "node scripts/verify-selection-inquiry-security.mjs",
+    "test:selection-inquiry": "node scripts/verify-selection-inquiry-security.mjs && node scripts/verify-selection-inquiry-validation.mjs",
     "test:trade": "npm run test:trade-state && npm run test:trade-concurrency && npm run test:trade-contract",
     "test:trade-state": "node scripts/verify-trade-state-machine.mjs",
     "test:trade-concurrency": "node scripts/verify-trade-concurrency.mjs",
