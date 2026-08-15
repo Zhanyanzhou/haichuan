@@ -1084,6 +1084,24 @@ model PageDocumentRevision {
   @@map("page_document_revisions")
 }
 
+// ========== 页面装修方案（多套命名草稿快照，2026-08-16） ==========
+// 与 PageDocumentRevision 职责区分：方案 = 运营主动保存的整页快照（可载入编辑/删除）；
+// revision = 发布历史（自动生成，仅回滚用）。
+model PageScheme {
+  id        Int      @id @default(autoincrement())
+  pageKey   String   @db.VarChar(50)
+  name      String   @db.VarChar(100)
+  puckData  Json
+  metadata  Json     @default("{}")
+  createdBy Int?     @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([pageKey, name])
+  @@index([pageKey])
+  @@map("page_schemes")
+}
+
 // ========== 选款咨询 ==========
 
 model SelectionInquiry {

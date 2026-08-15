@@ -778,4 +778,130 @@ export class PageModulesService {
       changedAt: new Date().toISOString(),
     });
   }
+
+  /* ═══════════ 页面装修方案（多套命名快照，2026-08-16） ═══════════
+   * 与 revision 的职责区分：方案 = 运营主动保存的整页快照（可载入/删除/改名）；
+   * revision = 发布历史（自动生成，仅回滚用）。每页上限 10 套（防膨胀）。 */
+
+  private static readonly PAGE_SCHEME_LIMIT = 10;
+
+  async listPageSchemes(pageKey: string) {
+    const rows = await this.prisma.pageScheme.findMany({
+      where: { pageKey },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        pageKey: true,
+        name: true,
+        createdAt: true,
+        updatedAt: true,
+        puckData: true,
+      },
+    });
+    // 列表轻量返回：元信息 + 区块数（微缩结构预览由前端按需取全量）
+    return rows.map((row) => ({
+      id: row.id,
+      pageKey: row.pageKey,
+      name: row.name,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      blockCount: Array.isArray((row.puckData as any)?.content)
+        ? (row.puckData as any).content.filter(
+            (block: any) => block?.type && block.type !== "业务功能区",
+          ).length
+        : 0,
+    }));
+  }
+
+  async getPageScheme(id: number) {
+    const scheme = await this.prisma.pageScheme.findUnique({ where: { id } });
+    if (!scheme) throw new BadRequestException("装修方案不存在");
+    return scheme;
+  }
+
+  async savePageScheme(input: {
+    pageKey: string;
+    name: string;
+    puckData: any;
+    metadata?: any;
+    createdBy?: number | null;
+  }) {
+    const name = (input.name || "").trim();
+    if (!name) throw new BadRequestException("方案名称不能为空");
+    const existing = await this.prisma.pageScheme.findUnique({
+      where: { pageKey_name: { pageKey: input.pageKey, name } },
+    });
+    if (existing) {
+      throw new ConflictException("同名方案已存在，请换一个名称保存");
+    }
+    const count = await this.prisma.pageScheme.count({
+      where: { pageKey: input.pageKey },
+    });
+    if (count >= PageModulesService.PAGE_SCHEME_LIMIT) {
+      throw new BadRequestException(
+        `每页最多保存 ${PageModulesService.PAGE_SCHEME_LIMIT} 套方案，请先删除旧方案`,
+      );
+    }
+    return this.prisma.pageScheme.create({
+      data: {
+        pageKey: input.pageKey,
+        name,
+        puckData: input.puckData,
+        metadata: (input.metadata ?? {}) as any,
+        createdBy: input.createdBy ?? null,
+      },
+    });
+  }
+
+  async updatePageScheme(
+    id: number,
+    input: { name?: string; puckData?: any; metadata?: any },
+  ) {
+    const scheme = await this.prisma.pageScheme.findUnique({ where: { id } });
+    if (!scheme) throw new BadRequestException("装修方案不存在");
+    const data: Record<string, unknown> = {};
+    if (typeof input.name === "string") {
+      const name = input.name.trim();
+      if (!name) throw new BadRequestException("方案名称不能为空");
+      if (name !== scheme.name) {
+        const clash = await this.prisma.pageScheme.findUnique({
+          where: { pageKey_name: { pageKey: scheme.pageKey, name } },
+        });
+        if (clash) throw new ConflictException("同名方案已存在");
+      }
+      data.name = name;
+    }
+    if (input.puckData !== undefined) data.puckData = input.puckData;
+    if (input.metadata !== undefined) data.metadata = input.metadata;
+    return this.prisma.pageScheme.update({ where: { id }, data: data as any });
+  }
+
+  async deletePageScheme(id: number) {
+    const scheme = await this.prisma.pageScheme.findUnique({ where: { id } });
+    if (!scheme) throw new BadRequestException("装修方案不存在");
+    await this.prisma.pageScheme.delete({ where: { id } });
+    return { deleted: true };
+  }
+
+  /** 删除草稿：有已发布版本则回到线上数据（线上零感知），否则整行删除（编辑器回落默认结构） */
+  async discardPageDocumentDraft(pageKey: string) {
+    const doc = await this.prisma.pageDocument.findUnique({ where: { pageKey } });
+    if (!doc) throw new BadRequestException("该页面没有草稿");
+    const latestRevision = await this.prisma.pageDocumentRevision.findFirst({
+      where: { documentId: doc.id },
+      orderBy: { version: "desc" },
+    });
+    if (latestRevision) {
+      return this.prisma.pageDocument.update({
+        where: { pageKey },
+        data: {
+          puckData: latestRevision.puckData as any,
+          metadata: latestRevision.metadata as any,
+          status: "PUBLISHED",
+        },
+      });
+    }
+    await this.prisma.pageDocument.delete({ where: { pageKey } });
+    return { deleted: true };
+  }
 }
