@@ -30,8 +30,8 @@
 | AIClassifyRecord | AI分类记录 | ✅ |
 | Promotion | 营销活动 | ✅ |
 | Coupon | 优惠券 | ✅ |
-| HomeSection | 首页布局 | ⚠️ 可能废弃 |
-| ContentSlot | 内容插槽 | ✅ 可视化编辑 |
+| HomeSection | 首页布局 | ❌ 已删除（死表清退） |
+| ContentSlot | 内容插槽 | ❌ 已删除（2026-08-15 死资产清退，PageDocument 统一承载） |
 | PageModule | 页面模块 | ✅ 构建器核心 |
 | SelectionInquiry | 选款咨询 | ✅ HC-ADMIN-FRAMEWORK-01 新增 |
 | SelectionInquiryItem | 选款咨询明细 | ✅ HC-ADMIN-FRAMEWORK-01 新增 |

@@ -25,13 +25,15 @@
 
 ### 后台（含交易域子页面）
 
-工作台、商品管理、商品编辑、分类管理、库存、金价、素材库、订单管理、咨询管理、选款咨询、线索、页面编辑器（editor/:pageKey）、网站设置、AI 分类、行为分析、用户管理、操作日志、系统设置、登录、合作商申请审核。
+工作台、商品管理、商品编辑、分类管理、属性字典、库存、金价、素材库、订单管理、咨询管理、选款咨询、线索、客户管理（/admin/customers，只读档案+消费聚合+收藏）、评价管理、页面编辑器（editor/:pageKey）、网站设置、AI 分类、行为分析、用户管理、操作日志、系统设置、登录、合作商申请审核。
 
 交易域子页面：`/admin/trade/payments`、`/admin/trade/fulfillment`、`/admin/trade/refunds`、`/admin/trade/after-sales`、`/admin/trade/quotations`、`/admin/trade/overview`、`/admin/trade/anomalies`。
 
 ## 服务端模块（含交易域）
 
-products, categories, auth, users, orders, inventory, inquiries, selection-inquiry, leads, gold-price, upload, settings, homepage, page-modules, content-slots, ai-classify, analytics, marketing, notifications, statistics, cart, customers, recommendations, partner-applications, fulfillment, refunds, after-sales, trade-events。
+products, categories, auth, users, orders, inventory, inquiries, selection-inquiry, leads, gold-price, upload, settings, page-modules, ai-classify, analytics, marketing, statistics, cart, customers, recommendations, partner-applications, fulfillment, refunds, after-sales, trade-events, reviews, attributes。
+
+（homepage 已并入 page-modules；notifications 站内信与 content-slots 插槽已作为死资产删除。）
 
 ## 当前交易冻结状态（P0-B/D）
 

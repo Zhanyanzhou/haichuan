@@ -33,7 +33,7 @@ App.tsx (路由总表)
   └─ AdminLayout → 后台 18 页面
       ├─ pages/admin/*
       ├─ components/common/*
-      └─ hooks/usePageModules, useContentSlots
+      └─ hooks/usePageModules
 
 共享层:
   ├─ services/api.ts       — HTTP 封装 (26 文件依赖)

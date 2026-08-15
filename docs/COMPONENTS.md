@@ -16,11 +16,11 @@
 | **AdminPageHeader** | 6 个后台页面   | 统一标题栏              |
 | **AdminDataStates** | 5 个后台页面   | 加载/空数据/错误状态    |
 | **AdminStatusTag**  | 2 个页面       | 状态标签                |
-| **LinkSelector**    | HomepageConfig | 链接选择器(预设+自定义) |
 | **ErrorBoundary**   | App.tsx        | React 错误边界          |
 | **ProtectedRoute**  | App.tsx        | 认证路由守卫            |
 | **ProgressBar**     | App.tsx        | 页面加载进度条          |
 | **Logo**            | AdminLayout    | 品牌 Logo               |
+| **FilterPanel**     | ProductList    | 商品筛选面板(2026-08-15 批次D 转正) |
 
 ## 通用组件 — 未被引用 ⚠️
 
@@ -28,10 +28,8 @@
 | ------------ | --------------------------------------- |
 | AdminConfirm | 未被引用                                |
 | EmptyState   | 未被引用                                |
-| FilterPanel  | 未被引用                                |
 | ImageUpload  | 未被引用(HomepageConfig 内联了自有版本) |
 | PageHeader   | 未被引用(被 AdminPageHeader 替代)       |
-| ProductCard  | 未被引用                                |
 
 ## UI 组件 (ui/)
 
@@ -64,7 +62,7 @@
 ### 遗留待清退
 
 - `adapters/imageText.puck / splitPanel.puck`:仅作为旧类型渲染映射的 Props 类型源保留(puckPropsToModule 类型联合引用),模板库不再提供;`inspector/schema/modules/splitPanel.ts` 已墓碑化。
-- ContentSlot 体系(表/类型/2 端点/useContentSlots):公开首页仍在消费 `usePublishedSlots`,清退需整体决策与 DB 迁移确认。
+- ContentSlot 体系(表/类型/2 端点/useContentSlots):已删除（2026-08-15 死资产清退，墓碑文件待 git rm）。
 
 > 注:早期文档记载的"旧版 blockComponents(blocks/index.ts,HeroBlock 等 6 个)"经核实文件已不存在,该条目撤销。
 
@@ -74,9 +72,9 @@
 
 | 域 | 数量 | 状态 |
 | --- | --- | --- |
-| blocks/ 渲染层 | 24 文件 | ✅ 全部使用中(23 业务区块 + _shared/BlockEmptyPlaceholder) |
-| page-builder/adapters | 24 | 22 注册使用中;imageText/splitPanel 2 个仅作旧类型 Props 类型源(遗留) |
-| page-builder/inspector/schema/modules | 21 | 20 活跃 + splitPanel.ts 墓碑(待物理删除) |
+| blocks/ 渲染层 | 25 文件 | ✅ 全部使用中(24 业务区块 + _shared/BlockEmptyPlaceholder) |
+| page-builder/adapters | 25 | 23 注册使用中;imageText/splitPanel 2 个仅作旧类型 Props 类型源(遗留) |
+| page-builder/inspector/schema/modules | 22 | 21 活跃 + splitPanel.ts 墓碑(待物理删除) |
 | page-builder/designSystem | 5 | ✅ tokens/masters/sectionShell/rhythm/index |
-| components/common | 17 | ✅ 10 使用中(含 ProtectedRoute/AntdProvider 动态导入);⚠️ 7 未引用:EmptyState/PageHeader/ImageUpload/FilterPanel/AdminConfirm/Logo/LinkSelector(LinkSelector 职责已被 page-builder LinkTargetField 取代) |
+| components/common | 17 | ✅ 11 使用中(含 ProtectedRoute/AntdProvider 动态导入、FilterPanel 批次D 转正);⚠️ 6 未引用:EmptyState/PageHeader/ImageUpload/AdminConfirm/Logo/LinkSelector(LinkSelector 职责已被 page-builder LinkTargetField 取代,顶部表"使用中"记载有误已撤销) |
 | components/admin | 1 | ⚠️ ImageCropper 未被引用 |

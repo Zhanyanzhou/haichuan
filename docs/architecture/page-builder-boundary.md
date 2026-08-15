@@ -16,20 +16,20 @@
 |---|---|---|
 | 设计系统 | `client/src/page-builder/designSystem/` | tokens(宽度/比例/节奏/排版/配色)、masters(12 母版注册表)、DecorSection 外壳、rhythm 页面节奏引擎 |
 | 编辑器 | `client/src/pages/admin/HomepageConfig/` | 编辑器主体(index.tsx)+ LayerRail/RevisionDrawer/PageSettingsDrawer/EditorToolbar |
-| 编辑区 Schema | `client/src/page-builder/inspector/schema/` | 22 模块全量声明式 Schema(五层信息架构:内容→媒体→布局→样式→高级折叠),registry 统一注册 |
+| 编辑区 Schema | `client/src/page-builder/inspector/schema/` | 23 模块全量声明式 Schema(五层信息架构:内容→媒体→布局→样式→高级折叠),registry 统一注册 |
 | Puck 适配器 | `client/src/page-builder/adapters/*.puck.tsx` | 区块注册/默认值;旧专属 Inspector 已于 2026-08 R4b 退役(git 历史可查) |
 | 前台渲染块 | `client/src/components/blocks/` | 23 个区块组件(含作品画廊),`editMode` 区分编辑/公开态 |
 | 公开渲染器 | `client/src/page-builder/runtime/` | PuckDocumentRenderer(含旧类型兼容分支)+ PublishedPageDecoration(业务页前置视觉区) |
 | 元数据 | `client/src/page-builder/config/` | blockMeta(mode/master 挂靠)、blockContracts(比例/文案上限/完成度)、editorPages(页面 mode)、imageSpecs(上传规格目录) |
 | 后端 API | `server/src/modules/page-modules/` | PageDocument CRUD + 发布校验(含 Brand 页禁 Commerce Campaign 组件) |
-| 数据库 | `page_documents` / `page_document_revisions` | 整页 Puck JSON + 50 条发布历史(旧 `page_modules` 表已不存在;`content_slots` 为遗留,待清退) |
+| 数据库 | `page_documents` / `page_document_revisions` | 整页 Puck JSON + 50 条发布历史(旧 `page_modules`、`content_slots` 表均已删除) |
 
 ---
 
 ## 模板体系(2026-08 重构)
 
-- **双模式**:Brand Mode(首页/关于海川/珠宝作品/珠宝定制/预约咨询)× Commerce Mode(选款中心);品牌页模板库与服务端发布校验双重拦截强导购组件(轮播/热区/限时)。
-- **12 母版**:Brand 9(Cinematic Hero / Immersive Image / Editorial Split / Editorial Story / Asymmetric Gallery / Editorial Text / Hero Piece / Journey / Conversion)+ Commerce 3(Commerce Grid / Entry / Campaign);22 个运营语义命名模板挂靠其上。
+- **双模式(Brand/Commerce)**:页面与母版保留 mode 元数据,用于节奏参考与视觉语言归档;**不做强制限制**(2026-08-15 用户决策:模板全页面通用,运营自行取舍)。
+- **12 母版**:Brand 9(Cinematic Hero / Immersive Image / Editorial Split / Editorial Story / Asymmetric Gallery / Editorial Text / Hero Piece / Journey / Conversion)+ Commerce 3(Commerce Grid / Entry / Campaign);23 个运营语义命名模板挂靠其上(含作品画廊与改款前后)。
 - **规范比例**:21:9 / 21:6 / 16:7 / 16:9 / 3:2 / 4:5 / 3:4 / 1:1(RATIOS 单一来源);模板契约定义各自双端比例,运营不可自选。
 - **焦点**:desktopFocusX/Y + mobileFocusX/Y 双端独立(旧共享 focusX/Y 读取回退)。
 - **旧类型迁移**:分割面板/图文混排/礼赠指南已从注册表移除;编辑器载入经 `utils/migratePuckData` 自动转换;公开渲染器保留旧类型分支,已发布历史版本永久可渲染。

@@ -14,7 +14,7 @@
 | **搜索** | 客户端 filter | 无专用搜索 API | — | 内存过滤 | **静态数据** |
 | **选款目录** | `catalogData.ts` + `products.ts` | 无 | — | 硬编码 | **静态数据** |
 | **首页/一级页装修** | PageDocument API | `GET /api/page-modules/:pageKey/published` | `page_documents` + `page_document_revisions` | 未发布时硬编码 FallbackHome(仅首页) | **真实闭环** |
-| **首页内容槽** | ContentSlot API | `GET /api/content-slots/published` | `content_slots` | — | **遗留体系**(仅首页 HERO 兜底消费,清退待定) |
+| **首页内容槽** | — | ~~`GET /api/content-slots/published`~~ | ~~`content_slots`~~ | — | **已删除**(2026-08-15 死资产清退,内容统一由 PageDocument 承载) |
 | **网站设置** | Settings API | `GET /api/settings` | `settings.json` (文件) | — | **真实闭环** |
 | **预约咨询** | Inquiry API | `POST /api/inquiries` | `inquiries` | — | **真实闭环** |
 | **选款咨询(后台)** | SelectionInquiry API | `GET/PUT /api/selection-inquiries` | `selection_inquiries` | — | **真实闭环** |

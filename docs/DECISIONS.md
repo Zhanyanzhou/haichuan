@@ -43,7 +43,7 @@
 - **决策**：前台页面装修统一用 Puck `PageDocument` 体系（草稿/发布/版本回滚 + 多设备预览）。
 - **原因**：所见即所得、内容与业务分离、支持模板与发布流。
 - **当前事实**：`PageDocument`/`PageTemplate`/`PageDocumentRevision` + `page-modules` 后端 + `pageDocumentApi` + `HomepageConfig` 编辑器 + `PuckDocumentRenderer` + `components/blocks` + `page-builder/adapters`。
-- **注意**：`HomeSection`、`HomepageBlock` 已成死代码（见 ⚠️ B.2）；`ContentSlot` 边界见 🟡 D.8。
+- **注意**：`HomeSection`、`HomepageBlock` 已成死代码（见 ⚠️ B.2）；`ContentSlot` 已全链路废弃（见 ✅ D.8，2026-08-15 清退）。
 
 ### A.7 新增样式优先 Tailwind ✅
 - **决策**：新代码优先 Tailwind 类名，仅动态计算值用行内样式；不强制重写已有代码。
@@ -116,9 +116,9 @@
 - **现状**：`POST /customers/checkout`（`@Public`）是真实公开下单入口，upsert 无密码 `Customer`；`POST /orders` 注释"公开"但实际继承类级 admin-only。
 - **待定**：公开下单入口是否整合/统一；`Order.userId`（死字段）与 `Cart.userId`（实存 `Customer.id`）的语义/命名是否修正。
 
-### D.8 🟡 Puck / ContentSlot 边界
-- **现状**：Puck `PageDocument` 是唯一在用的装修体系；`ContentSlot` 仅作为首页未装修时的 HERO fallback；`HomeSection`/`HomepageBlock` 是死代码。
-- **待定**：`ContentSlot` 保留/扩展/废弃；死代码是否清理。
+### D.8 ✅ Puck / ContentSlot 边界（已拍板：2026-08-15）
+- **现状**：Puck `PageDocument` 是唯一在用的装修体系。
+- **已决**：`ContentSlot` 全链路废弃（写侧零入口、HERO 插槽永远空、清退后公开页行为零变化）——模块/端点/schema 模型/前端消费方已删，`content_slots` 表由迁移 20260815100000 幂等 DROP；`HomeSection`/`HomepageBlock` 死代码此前已清理。
 
 ### D.9 🟡 默认仓库与多仓启用
 - **现状**：`Inventory` 模型支持多仓（`Warehouse: SHOWROOM/FACTORY/STORE`），但库存实际主要落在 `ProductSKU.stock`，未确认默认仓库与多仓启用范围。

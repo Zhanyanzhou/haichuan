@@ -58,6 +58,8 @@ services:
       - uploads_data:/app/uploads
       # 受控商品媒体和付款凭证必须跨容器重建持久化，禁止写回镜像层。
       - private_media_data:/app/private-media
+      # 备份产物只读挂载：settings.getBackupStatus 据此向后台展示真实备份状态（OR-1 衔接）。
+      - ./backups:/backups:ro
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 15s
