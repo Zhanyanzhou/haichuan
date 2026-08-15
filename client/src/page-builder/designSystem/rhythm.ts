@@ -55,6 +55,15 @@ export function analyzePageRhythm(
     if (block?.type && !VIRTUAL_TYPES.has(block.type)) indexMap.push(index);
   });
 
+  /* 0. 总数提示:品牌页区块超过 8 个,后半段曝光有限(2026-08-16 用户定标准 6–8) */
+  if (pageMode === "brand" && blocks.length > 8) {
+    hints.push({
+      level: "info",
+      message: `页面共 ${blocks.length} 个区块,品牌页建议控制在 6–8 个,排序靠后的区块曝光有限。`,
+      blockIndexes: [],
+    });
+  }
+
   /* 1. 相邻同母版构图重复(仅排版建议,不做模式限制——模板全页面通用) */
   blocks.forEach((block, i) => {
     const meta = BLOCK_META[block.type!];

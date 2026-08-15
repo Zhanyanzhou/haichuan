@@ -59,7 +59,7 @@ export const IMAGE_SPECS = {
       ratio: "4:3",
       label: "图文配图（建议 1600×1200，4:3）",
     },
-  },
+  }, // 遗留模块（已退役），仅供旧数据编辑兜底
   fullBleed: {
     desktop: {
       width: 3360,
@@ -80,6 +80,31 @@ export const IMAGE_SPECS = {
       height: 1600,
       ratio: "3:4",
       label: "分栏配图（建议 1200×1600，3:4）",
+    },
+  },
+  /* ═══ 2026-08-16 归口新增：此前以 adapter 内联对象散落 ═══ */
+  certificate: {
+    image: {
+      width: 2000,
+      height: 2000,
+      ratio: "1:1",
+      label: "证书图（建议 2000×2000，1:1）",
+    },
+  },
+  customProcess: {
+    node: {
+      width: 2000,
+      height: 2000,
+      ratio: "1:1",
+      label: "节点图（建议 2000×2000，1:1）",
+    },
+  },
+  testimonial: {
+    image: {
+      width: 1200,
+      height: 900,
+      ratio: "4:3",
+      label: "实拍图（建议 1200×900，4:3）",
     },
   },
   cardGrid: {

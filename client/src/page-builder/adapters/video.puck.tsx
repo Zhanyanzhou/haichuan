@@ -92,4 +92,6 @@ export const videoPuckConfig = {
       max: 1080,
     },
   },
+  resolvePermissions: (data: any) =>
+    data.props?.locked ? { delete: false, drag: false } : {},
 };

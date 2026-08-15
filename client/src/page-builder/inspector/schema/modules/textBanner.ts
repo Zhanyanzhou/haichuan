@@ -121,8 +121,8 @@ export const textBannerSchema: ModuleInspectorSchema = {
           label: "文字对齐",
           control: "segmented",
           options: [
-            { label: "居中", value: "center" },
-            { label: "左对齐", value: "left" },
+            { label: "居中", value: "center", diagram: "alignCenter" },
+            { label: "左对齐", value: "left", diagram: "alignLeft" },
           ],
         },
       ],
@@ -149,8 +149,6 @@ export const textBannerSchema: ModuleInspectorSchema = {
       id: "text-banner-advanced",
       title: "高级设置",
       layer: "style",
-      collapsible: true,
-      defaultCollapsed: true,
       description: "覆盖配色预设的精确色值",
       fields: [
         {

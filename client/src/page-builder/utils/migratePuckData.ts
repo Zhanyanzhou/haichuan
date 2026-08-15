@@ -140,14 +140,22 @@ function migrateBlock(block: PuckBlock): PuckBlock {
 export function migratePuckData<T extends PuckDocument>(data: T): T {
   if (!data || typeof data !== "object") return data;
   const next: PuckDocument = { ...data };
+  // 存量清洗(2026-08-16 用户决策:全部模块可删):历史草稿中仅业务功能区允许保持锁定。
+  const unlock = (block: any) => {
+    if (block?.type === "业务功能区") return block;
+    if (block?.props?.locked) {
+      return { ...block, props: { ...block.props, locked: false } };
+    }
+    return block;
+  };
   if (Array.isArray(next.content)) {
-    next.content = next.content.map(migrateBlock);
+    next.content = next.content.map((block) => unlock(migrateBlock(block)));
   }
   if (next.zones && typeof next.zones === "object") {
     next.zones = Object.fromEntries(
       Object.entries(next.zones).map(([zoneKey, blocks]) => [
         zoneKey,
-        Array.isArray(blocks) ? blocks.map(migrateBlock) : blocks,
+        Array.isArray(blocks) ? blocks.map((block) => unlock(migrateBlock(block))) : blocks,
       ]),
     );
   }

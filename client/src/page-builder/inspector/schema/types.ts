@@ -70,7 +70,8 @@ export interface TextFieldDef extends FieldBase {
 
 export interface SegmentedFieldDef extends FieldBase {
   control: "segmented";
-  options: ReadonlyArray<{ label: string; value: string }>;
+  /** diagram: 选项的微缩构图示意键（2026-08-16 布局图示化），由 SegmentedField 内置渲染 */
+  options: ReadonlyArray<{ label: string; value: string; diagram?: string }>;
 }
 
 export interface SwitchFieldDef extends FieldBase {
@@ -167,9 +168,6 @@ export interface SectionDef {
   id: string;
   title: string;
   layer: InspectorLayer;
-  /** 折叠分区（如高级设置）；defaultCollapsed 默认收起 */
-  collapsible?: boolean;
-  defaultCollapsed?: boolean;
   description?: string;
   visibleWhen?: (ctx: InspectorContext) => boolean;
   fields: FieldDef[];

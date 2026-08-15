@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import {
   getCarouselAspectRatio,
   RESPONSIVE_CANVAS,
@@ -75,7 +76,7 @@ export default function CarouselBlock({
       <BlockEmptyPlaceholder
         icon="🖼️"
         hint="轮播图"
-        spec="请添加轮播图片 · 电脑端建议 3840×1600（12:5）"
+        spec={`请添加轮播图片 · 电脑端 ${IMAGE_SPECS.carousel.image.label}`}
         height="clamp(320px, 41.67vw, 600px)"
       />
     );

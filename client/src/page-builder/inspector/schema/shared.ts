@@ -16,15 +16,16 @@ import type {
   TextFieldDef,
 } from "./types";
 
-/** 图层名称(仅页面结构识别,不进前台) */
-export function moduleNameField(defaultName: string): TextFieldDef {
+/** 图层名称 — 2026-08-16 退役：模块名固定为模板显示名（getModuleDisplayName），
+ * 保留字段构造器以兼容既有 schema 引用，但永不在面板中渲染。 */
+export function moduleNameField(_defaultName: string): TextFieldDef {
   return {
     key: "moduleName",
     label: "图层名称",
     control: "text",
     maxLength: 24,
     hint: "仅用于页面结构识别",
-    placeholder: `默认使用${defaultName}`,
+    visibleWhen: () => false,
   };
 }
 

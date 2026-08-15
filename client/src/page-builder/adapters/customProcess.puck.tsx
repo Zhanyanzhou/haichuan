@@ -6,6 +6,7 @@ import CustomProcessBlock from "@/components/blocks/CustomProcessBlock";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import { colorPuckField } from "../fields/ColorField";
 import MediaPickerField from "../fields/MediaPickerField";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 
 export interface CustomProcessStep {
   number: string;
@@ -59,7 +60,7 @@ export const customProcessPuckConfig = {
             value, onChange, readOnly,
           }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
             <MediaPickerField fieldKey="image" device="shared" value={value} onChange={onChange} readOnly={readOnly}
-              spec={{ width: 2000, height: 2000, ratio: "1:1", label: "节点图（建议 2000×2000，1:1）" }}
+              spec={IMAGE_SPECS.customProcess.node}
               placeholder="上传节点图（可选）" />
           ),
         },

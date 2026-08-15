@@ -1,5 +1,6 @@
 import TestimonialBlock from "@/components/blocks/TestimonialBlock";
 import MediaPickerField from "../fields/MediaPickerField";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { colorPuckField } from "../fields/ColorField";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 
@@ -34,7 +35,7 @@ export const testimonialPuckConfig = {
       name: { type: "text" as const, label: "顾客称呼" },
       meta: { type: "text" as const, label: "购买信息" },
       content: { type: "textarea" as const, label: "评价内容" },
-      image: { type: "custom" as const, label: "实拍图（可选）", render: ({ value, onChange, readOnly }: { value?: string; onChange: (value: string) => void; readOnly?: boolean }) => <MediaPickerField fieldKey="image" device="shared" value={value} onChange={onChange} readOnly={readOnly} spec={{ width: 1200, height: 900, ratio: "4:3", label: "实拍图（建议 1200×900，4:3）" }} placeholder="上传顾客实拍图" /> },
+      image: { type: "custom" as const, label: "实拍图（可选）", render: ({ value, onChange, readOnly }: { value?: string; onChange: (value: string) => void; readOnly?: boolean }) => <MediaPickerField fieldKey="image" device="shared" value={value} onChange={onChange} readOnly={readOnly} spec={IMAGE_SPECS.testimonial.image} placeholder="上传顾客实拍图" /> },
     } } as any,
     bgColor: colorPuckField("背景色"),
   },

@@ -1,36 +1,21 @@
 /**
- * SectionRenderer.tsx — 渲染一个分区：静态区用 InspectorSection，折叠区用 CollapsibleSection。
+ * SectionRenderer.tsx — 渲染一个分区。
+ * 2026-08-16 起折叠机制退役（用户决策：编辑面板不折叠、字段全平铺），仅静态分区。
  */
 import type { ReactNode } from "react";
 import InspectorSection from "./InspectorSection";
-import CollapsibleSection from "./CollapsibleSection";
 
 interface SectionRendererProps {
   title: string;
   description?: string;
-  collapsible?: boolean;
-  defaultCollapsed?: boolean;
   children: ReactNode;
 }
 
 export default function SectionRenderer({
   title,
   description,
-  collapsible,
-  defaultCollapsed,
   children,
 }: SectionRendererProps) {
-  if (collapsible) {
-    return (
-      <CollapsibleSection
-        title={title}
-        description={description}
-        defaultCollapsed={defaultCollapsed}
-      >
-        {children}
-      </CollapsibleSection>
-    );
-  }
   return (
     <InspectorSection title={title}>
       {description ? (

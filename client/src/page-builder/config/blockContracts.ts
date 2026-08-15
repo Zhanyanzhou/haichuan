@@ -28,7 +28,9 @@ export type ModuleDensity = "compact" | "normal" | "spacious";
  * 画布、运行时区块和素材校验共用这份边界，避免分别判断设备。
  */
 export const RESPONSIVE_CANVAS = {
-  desktop: { width: 1440, height: 900 },
+  // 桌面画布 1920（2026-08-16）：wide 内容档 1520 在 1440 画布下被压至 ~1267px，
+  // 观感失真约 20%；1920 视口下 wide 档（1520+两侧留白）可完整呈现。
+  desktop: { width: 1920, height: 1200 },
   // Puck iframe 有 2px 边框；外层 770px 才能得到真实的 768px CSS 画布宽度。
   tablet: { width: 770, height: 1024, displayWidth: 768 },
   mobile: { width: 390, height: 844 },

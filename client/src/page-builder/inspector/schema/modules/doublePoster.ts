@@ -106,8 +106,8 @@ export const doublePosterSchema: ModuleInspectorSchema = {
           label: "桌面版式",
           control: "segmented",
           options: [
-            { label: "主图在左", value: "mainLeft" },
-            { label: "主图在右", value: "mainRight" },
+            { label: "主图在左", value: "mainLeft", diagram: "mainLeft" },
+            { label: "主图在右", value: "mainRight", diagram: "mainRight" },
           ],
         },
       ],
@@ -116,8 +116,6 @@ export const doublePosterSchema: ModuleInspectorSchema = {
       id: "double-poster-advanced",
       title: "高级设置",
       layer: "style",
-      collapsible: true,
-      defaultCollapsed: true,
       description: "SEO 与无障碍用，不在页面显示",
       fields: [
         {

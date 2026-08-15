@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 
 interface SplitPanelBlockProps {
   module: {
@@ -37,7 +38,7 @@ export default function SplitPanelBlock({
       <BlockEmptyPlaceholder
         icon="◧"
         hint="左右分割面板"
-        spec="请上传图片 · 建议 960×720"
+        spec={`遗留模块 · ${IMAGE_SPECS.splitPanel.image.label}`}
         bg={bg}
       />
     );

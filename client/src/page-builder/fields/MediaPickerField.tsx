@@ -1,15 +1,15 @@
 /**
  * MediaPickerField.tsx — Puck 自定义媒体字段
  *
- * 替代纯文本 URL 输入，提供：
- * 1. 直接上传图片（复用现有 uploadApi）
- * 2. 手动输入 URL（保留兼容）
- * 3. 显示推荐尺寸和当前图片尺寸
- * 4. 图片预览
+ * 交互模型（2026-08-16 重写，修复更换/删除死胡同）：
+ * 1. 预览为默认态；点"更换"在预览下方内嵌展开上传区（预览不消失），可取消；
+ * 2. URL 态：清空输入后确认 = 清除图片（不再无动作）；
+ * 3. value 外部变化（撤销/预设/载入方案）自动收起所有临时面板；
+ * 4. 操作按钮全部带文字：更换 / 链接 / 删除(danger)。
  */
 
-import { useState, useRef, useEffect, type ChangeEvent } from "react";
-import { Upload, Button, Input, message } from "antd";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { Upload, Button, Input, Modal, message } from "antd";
 import {
   InboxOutlined,
   LinkOutlined,
@@ -122,9 +122,10 @@ export default function MediaPickerField({
   previewAspectRatio,
   previewFocus,
 }: MediaPickerFieldProps) {
-  const [mode, setMode] = useState<"upload" | "url" | "preview">(
-    value ? "preview" : "upload",
-  );
+  /** 更换面板：在预览下方内嵌展开，预览保持可见 */
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  /** URL 输入态：可从更换面板或空态进入 */
+  const [urlMode, setUrlMode] = useState(false);
   const [urlInput, setUrlInput] = useState(value || "");
   const [uploading, setUploading] = useState(false);
   const imgSize = useImageSize(value);
@@ -136,6 +137,13 @@ export default function MediaPickerField({
   const hasCropPreview = Boolean(previewAspectRatio);
   const focusX = Math.min(100, Math.max(0, previewFocus?.x ?? 50));
   const focusY = Math.min(100, Math.max(0, previewFocus?.y ?? 50));
+
+  /* value 外部变化（上传成功 / URL 确认 / 撤销 / 预设 / 载入方案）→ 收起全部临时面板 */
+  useEffect(() => {
+    setReplaceOpen(false);
+    setUrlMode(false);
+    setUrlInput(value || "");
+  }, [value]);
 
   /* ── 上传 ── */
   const handleUpload = async (file: File) => {
@@ -156,8 +164,6 @@ export default function MediaPickerField({
       const finalUrl = data?.url || (result as any)?.data?.url;
       if (finalUrl) {
         onChange?.(finalUrl);
-        setUrlInput(finalUrl);
-        setMode("preview");
         message.success("上传成功");
       } else {
         message.error("上传返回结果异常");
@@ -170,13 +176,10 @@ export default function MediaPickerField({
     return false;
   };
 
-  /* ── URL 输入 ── */
+  /* ── URL 输入：清空 + 确认 = 清除图片 ── */
   const confirmUrl = () => {
     const trimmed = urlInput.trim();
-    if (trimmed) {
-      onChange?.(trimmed);
-      setMode("preview");
-    }
+    onChange?.(trimmed);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -185,14 +188,20 @@ export default function MediaPickerField({
 
   /* ── 清除 ── */
   const handleClear = () => {
-    onChange?.("");
-    setUrlInput("");
-    setMode("upload");
+    const doClear = () => onChange?.("");
+    if (required) {
+      Modal.confirm({
+        title: "删除这张图片？",
+        content: "该图片为必填项，删除后请重新上传或填写链接。",
+        okText: "删除",
+        okButtonProps: { danger: true },
+        cancelText: "取消",
+        onOk: doClear,
+      });
+    } else {
+      doClear();
+    }
   };
-
-  /* ── 切换到上传模式 ── */
-  const switchToUpload = () => setMode("upload");
-  const switchToUrl = () => setMode("url");
 
   /* ── 尺寸状态指示 ── */
   const statusLabel: Record<string, string> = {
@@ -213,8 +222,8 @@ export default function MediaPickerField({
       data-media-device={device}
       tabIndex={fieldKey ? -1 : undefined}
     >
-      {/* ═══ 预览模式 ═══ */}
-      {mode === "preview" && hasValue && (
+      {/* ═══ 预览（有图时的默认态） ═══ */}
+      {hasValue && (
         <div className="homepage-editor__media-preview">
           <div
             className={`homepage-editor__media-preview-img${hasCropPreview ? " is-crop-preview" : ""}`}
@@ -235,72 +244,84 @@ export default function MediaPickerField({
               }}
             />
           </div>
-          <p className="homepage-editor__media-preview-note">
-            {hasCropPreview
-              ? `画布裁切预览 · 焦点 ${Math.round(focusX)}% × ${Math.round(focusY)}%`
-              : "原图缩略；实际画布会按当前设备与焦点位置裁切显示。"}
-          </p>
-          <div className="homepage-editor__media-preview-actions">
-            {!readOnly && (
-              <>
-                <Button
-                  size="small"
-                  icon={<SwapOutlined />}
-                  onClick={switchToUpload}
-                  title="更换图片"
-                >
-                  更换
-                </Button>
-                <Button
-                  size="small"
-                  icon={<LinkOutlined />}
-                  onClick={switchToUrl}
-                  title="输入 URL"
-                />
-                <Button
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={handleClear}
-                  title={required ? "该图片为必填项，清除后请重新上传" : "清除"}
-                />
-              </>
-            )}
+          {hasCropPreview ? (
+            <p className="homepage-editor__media-preview-note">
+              画布裁切预览 · 焦点 {Math.round(focusX)}% × {Math.round(focusY)}%
+            </p>
+          ) : null}
+          {!readOnly && (
+            <div className="homepage-editor__media-preview-actions">
+              <Button
+                size="small"
+                icon={<SwapOutlined />}
+                onClick={() => setReplaceOpen((open) => !open)}
+                title="在下方展开上传区，预览保持可见"
+              >
+                更换
+              </Button>
+              <Button
+                size="small"
+                icon={<LinkOutlined />}
+                onClick={() => {
+                  setUrlMode(true);
+                  setReplaceOpen(false);
+                }}
+                title="输入或清除图片链接"
+              >
+                链接
+              </Button>
+              <Button
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={handleClear}
+                title="清除图片"
+              >
+                删除
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══ 更换面板（预览下方内嵌展开） ═══ */}
+      {hasValue && !readOnly && replaceOpen && !urlMode && (
+        <div className="homepage-editor__media-replace" style={{ marginTop: 8 }}>
+          <Upload.Dragger
+            accept="image/*"
+            showUploadList={false}
+            beforeUpload={(file) => {
+              void handleUpload(file);
+              return false;
+            }}
+            disabled={uploading}
+            style={{
+              minHeight: 96,
+              padding: "12px",
+              border: "1px dashed #CDB981",
+              borderRadius: 5,
+              background: "#FCFAF5",
+            }}
+          >
+            <InboxOutlined style={{ color: "#B8944E", fontSize: 20 }} />
+            <div style={{ marginTop: 6, color: "#4A4239", fontSize: 12 }}>
+              {uploading ? "图片上传中…" : "拖入新图或点击上传（替换当前图片）"}
+            </div>
+          </Upload.Dragger>
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <Button size="small" type="link" onClick={() => setUrlMode(true)}>
+              粘贴链接
+            </Button>
+            <Button size="small" onClick={() => setReplaceOpen(false)}>
+              取消
+            </Button>
           </div>
         </div>
       )}
 
-      {/* ═══ 上传模式 ═══ */}
-      {(mode === "upload" || (mode === "preview" && !hasValue)) && (
-        <Upload.Dragger
-          accept="image/*"
-          showUploadList={false}
-          beforeUpload={(file) => {
-            void handleUpload(file);
-            return false;
-          }}
-          disabled={readOnly || uploading}
-          style={{
-            minHeight: 116,
-            padding: "16px 12px",
-            border: "1px dashed #CDB981",
-            borderRadius: 5,
-            background: "#FCFAF5",
-          }}
-        >
-          <InboxOutlined style={{ color: "#B8944E", fontSize: 22 }} />
-          <div style={{ marginTop: 8, color: "#4A4239", fontSize: 13 }}>
-            {uploading ? "图片上传中…" : placeholder || "拖入图片或点击上传"}
-          </div>
-          <div style={{ marginTop: 4, color: "#91877A", fontSize: 11 }}>
-            支持拖拽、点击上传；仅图片，单张不超过 10MB
-          </div>
-        </Upload.Dragger>
-      )}
-
-      {/* ═══ URL 输入模式 ═══ */}
-      {mode === "url" && (
-        <div style={{ display: "grid", gap: 8 }}>
+      {/* ═══ URL 输入态（可来自更换面板或空态） ═══ */}
+      {urlMode && !readOnly && (
+        <div style={{ display: "grid", gap: 8, marginTop: hasValue ? 8 : 0 }}>
           <Input
             ref={inputRef as any}
             value={urlInput}
@@ -308,7 +329,7 @@ export default function MediaPickerField({
               setUrlInput(e.target.value)
             }
             onKeyDown={handleKeyDown}
-            placeholder="输入图片 URL 或 /uploads/xxx.jpg"
+            placeholder="输入图片 URL；清空后确认 = 删除图片"
             size="small"
             allowClear
           />
@@ -316,35 +337,67 @@ export default function MediaPickerField({
             <Button size="small" type="primary" ghost onClick={confirmUrl}>
               确认
             </Button>
-            <Button size="small" onClick={switchToUpload}>
-              返回上传
+            <Button
+              size="small"
+              onClick={() => {
+                setUrlMode(false);
+                setUrlInput(value || "");
+              }}
+            >
+              取消
             </Button>
           </div>
         </div>
       )}
 
-      {/* ═══ 空状态辅助操作 ═══ */}
-      {isEmpty && !readOnly && mode !== "url" && (
-        <div
-          className="homepage-editor__media-alt-actions"
-          style={{ marginTop: 6 }}
-        >
-          <button
-            type="button"
-            onClick={switchToUrl}
+      {/* ═══ 空态上传（无图且不在 URL 态） ═══ */}
+      {isEmpty && !readOnly && !urlMode && (
+        <>
+          <Upload.Dragger
+            accept="image/*"
+            showUploadList={false}
+            beforeUpload={(file) => {
+              void handleUpload(file);
+              return false;
+            }}
+            disabled={uploading}
             style={{
-              border: 0,
-              background: "transparent",
-              color: "#8E867C",
-              cursor: "pointer",
-              fontSize: 11,
-              textDecoration: "underline",
-              padding: 0,
+              minHeight: 116,
+              padding: "16px 12px",
+              border: "1px dashed #CDB981",
+              borderRadius: 5,
+              background: "#FCFAF5",
             }}
           >
-            或粘贴图片链接
-          </button>
-        </div>
+            <InboxOutlined style={{ color: "#B8944E", fontSize: 22 }} />
+            <div style={{ marginTop: 8, color: "#4A4239", fontSize: 13 }}>
+              {uploading ? "图片上传中…" : placeholder || "拖入图片或点击上传"}
+            </div>
+            <div style={{ marginTop: 4, color: "#91877A", fontSize: 11 }}>
+              仅图片，单张 ≤ 10MB
+            </div>
+          </Upload.Dragger>
+          <div
+            className="homepage-editor__media-alt-actions"
+            style={{ marginTop: 6 }}
+          >
+            <button
+              type="button"
+              onClick={() => setUrlMode(true)}
+              style={{
+                border: 0,
+                background: "transparent",
+                color: "#8E867C",
+                cursor: "pointer",
+                fontSize: 11,
+                textDecoration: "underline",
+                padding: 0,
+              }}
+            >
+              或粘贴图片链接
+            </button>
+          </div>
+        </>
       )}
 
       {/* 推荐比例紧跟图片操作区，便于先选图、再核对素材是否适合当前模板。 */}

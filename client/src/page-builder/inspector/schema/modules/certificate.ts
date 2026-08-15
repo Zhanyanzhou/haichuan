@@ -3,10 +3,11 @@
  * Asymmetric Gallery 母版(信任变体):1:1 图墙,无卡片边框。
  */
 import { certificatePuckConfig } from "../../../adapters/certificate.puck";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { bgColorPresetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
-const CERT_IMAGE_SPEC = { width: 2000, height: 2000, ratio: "1:1", label: "证书图（建议 2000×2000，1:1）" };
+const CERT_IMAGE_SPEC = IMAGE_SPECS.certificate.image;
 
 export const certificateSchema: ModuleInspectorSchema = {
   moduleType: "资质证书",

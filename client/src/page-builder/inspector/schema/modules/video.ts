@@ -66,8 +66,6 @@ export const videoSchema: ModuleInspectorSchema = {
       id: "video-advanced",
       title: "高级设置",
       layer: "style",
-      collapsible: true,
-      defaultCollapsed: true,
       fields: [
         { key: "autoPlay", label: "自动播放", control: "switch" },
         { key: "loop", label: "循环播放", control: "switch" },

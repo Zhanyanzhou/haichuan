@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { RESPONSIVE_CANVAS, SINGLE_POSTER_CONTRACT } from '@/page-builder/config/blockContracts';
+import { IMAGE_SPECS } from '@/page-builder/config/imageSpecs';
 import { isSafeInternalPath } from '@/page-builder/utils/linkTarget';
 import { DesignSystemStyles } from '@/page-builder/designSystem/sectionShell';
 import { FONT_DISPLAY, FONT_SANS } from '@/page-builder/designSystem/tokens';
@@ -57,7 +58,7 @@ export default function SinglePosterSection({ module, editMode }: Props) {
           />
         </picture>
       ) : (
-        <BlockEmptyPlaceholder hint="品牌故事" spec="请上传海报主图 · 建议 1600×2000（4:5）" height="100%" />
+        <BlockEmptyPlaceholder hint="品牌故事" spec={`请上传海报主图 · ${IMAGE_SPECS.singlePoster.image.label}`} height="100%" />
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { RATIOS } from "@/page-builder/designSystem/tokens";
 
@@ -46,7 +47,7 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
       <BlockEmptyPlaceholder
         icon="🎬"
         hint="品牌影片"
-        spec="请设置视频地址 · 建议 16:9(3840×2160)"
+        spec={`请设置视频地址 · ${IMAGE_SPECS.video.poster.label}`}
       />
     );
   }

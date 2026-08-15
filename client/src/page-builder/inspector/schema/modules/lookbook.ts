@@ -69,8 +69,6 @@ export const lookbookSchema: ModuleInspectorSchema = {
       id: "lookbook-advanced",
       title: "高级设置",
       layer: "style",
-      collapsible: true,
-      defaultCollapsed: true,
       description: "SEO 与无障碍用，不在页面显示",
       fields: [altTextField()],
     },

@@ -64,7 +64,16 @@ export default function MediaField({
     "";
   const showOverrideBadge = Boolean(def.inheritFrom && device === "mobile");
   const overridden = showOverrideBadge && Boolean(value && value.trim());
-  const canPickFocus = Boolean(def.focusKeys && onFocusChange && value && value.trim());
+  /* 焦点只在会真发生裁切时有意义：图片比例与图位比例偏差 > 8% 容差才显示（2026-08-16） */
+  const cropApplies = (() => {
+    if (!natural.width || !natural.height) return false;
+    const target = def.spec.width / def.spec.height;
+    const actual = natural.width / natural.height;
+    return Math.abs(actual - target) / target > 0.08;
+  })();
+  const canPickFocus =
+    Boolean(def.focusKeys && onFocusChange && value && value.trim()) &&
+    cropApplies;
   return (
     <div className="homepage-editor__inspector-field">
       <label>
@@ -122,8 +131,8 @@ export default function MediaField({
               cursor: "pointer",
             }}
           >
-            {focusOpen ? "收起" : "调整"}裁切焦点
-            {focus ? `（当前 ${Math.round(focus.x)}% × ${Math.round(focus.y)}%）` : ""}
+            {focusOpen ? "收起" : "图片将被裁切 · 调整保留区域"}
+            {focus ? `（${Math.round(focus.x)}% × ${Math.round(focus.y)}%）` : ""}
             <span aria-hidden>{focusOpen ? " ▴" : " ▾"}</span>
           </button>
           {focusOpen ? (

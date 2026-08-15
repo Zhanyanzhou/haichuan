@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { IMAGE_TEXT_CONTRACT, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { SecureImage } from "@/components/common/SecureImage";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 
@@ -62,7 +63,7 @@ export default function ImageTextBlock({ module, editMode }: ImageTextBlockProps
   // 背景图模式
   if (template === 'imageBackground') {
     if (!image && editMode) {
-      return <BlockEmptyPlaceholder hint="图文背景图" spec="请上传背景配图 · 建议 1600×1200（4:3）" height={500} />;
+      return <BlockEmptyPlaceholder hint="图文背景图" spec={`请上传背景配图 · ${IMAGE_SPECS.imageText.image.label}`} height={500} />;
     }
     if (!image) return null;
     return (
@@ -91,7 +92,7 @@ export default function ImageTextBlock({ module, editMode }: ImageTextBlockProps
     </div>
   ) : editMode ? (
     <div data-editor-field="image" className="homepage-image-text__image">
-      <BlockEmptyPlaceholder hint="图文配图" spec="请上传图片 · 建议 1600×1200（4:3）" height="100%" />
+      <BlockEmptyPlaceholder hint="图文配图" spec={`请上传图片 · ${IMAGE_SPECS.imageText.image.label}`} height="100%" />
     </div>
   ) : null;
   const textCol = (

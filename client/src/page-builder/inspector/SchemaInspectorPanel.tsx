@@ -20,6 +20,7 @@ import FieldRenderer, { isFieldVisible } from "./FieldRenderer";
 import { useInspectorModuleEditor } from "./useInspectorModuleEditor";
 import {
   INSPECTOR_LAYER_ORDER,
+  INSPECTOR_LAYER_TITLES,
   type InspectorContext,
   type ModuleInspectorSchema,
 } from "./schema/types";
@@ -153,32 +154,62 @@ export default function SchemaInspectorPanel({
           <p className="homepage-editor__properties-helper">{schema.purpose}</p>
         ) : null}
 
-        {sections.map((section) => (
-          <SectionRenderer
-            key={section.id}
-            title={section.title}
-            description={section.description}
-            collapsible={section.collapsible}
-            defaultCollapsed={section.defaultCollapsed}
-          >
-            {section.fields
-              .filter(
-                (field) =>
-                  isFieldVisible(field, ctx) &&
-                  (!field.device ||
-                    field.device === "shared" ||
-                    field.device === editor.device),
-              )
-              .map((field, fieldIndex) => (
-                <FieldRenderer
-                  key={`${section.id}-${field.key}-${fieldIndex}`}
-                  def={field}
-                  ctx={ctx}
-                  update={editor.update}
-                />
-              ))}
-          </SectionRenderer>
-        ))}
+        {/* 层锚点导航：点击滚动到首个该层分区 */}
+        <nav
+          className="homepage-editor__inspector-anchors"
+          aria-label="分区导航"
+        >
+          {INSPECTOR_LAYER_ORDER.filter((layer) =>
+            sections.some((section) => section.layer === layer),
+          ).map((layer) => (
+            <button
+              key={layer}
+              type="button"
+              onClick={() => {
+                document
+                  .getElementById(`inspector-layer-${layer}`)
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            >
+              {INSPECTOR_LAYER_TITLES[layer]}
+            </button>
+          ))}
+        </nav>
+
+        {sections.map((section, sectionIndex) => {
+          const isFirstOfLayer =
+            !sections
+              .slice(0, sectionIndex)
+              .some((prev) => prev.layer === section.layer);
+          return (
+            <div
+              key={section.id}
+              id={isFirstOfLayer ? `inspector-layer-${section.layer}` : undefined}
+            >
+              <SectionRenderer
+                title={section.title}
+                description={section.description}
+              >
+                {section.fields
+                  .filter(
+                    (field) =>
+                      isFieldVisible(field, ctx) &&
+                      (!field.device ||
+                        field.device === "shared" ||
+                        field.device === editor.device),
+                  )
+                  .map((field, fieldIndex) => (
+                    <FieldRenderer
+                      key={`${section.id}-${field.key}-${fieldIndex}`}
+                      def={field}
+                      ctx={ctx}
+                      update={editor.update}
+                    />
+                  ))}
+              </SectionRenderer>
+            </div>
+          );
+        })}
       </div>
 
       <InspectorFooterBar dirty={editor.dirty} onRevert={editor.revert} />

@@ -23,7 +23,7 @@ export default function InspectorFooterBar({
 }: InspectorFooterBarProps) {
   return (
     <footer className="homepage-editor__properties-actions">
-      <span>修改自动保存为草稿；正式发布在顶部工具栏</span>
+      <span>改动自动存草稿 · 发布在顶栏</span>
       <Button size="small" disabled={!dirty} onClick={onRevert}>
         撤销修改
       </Button>

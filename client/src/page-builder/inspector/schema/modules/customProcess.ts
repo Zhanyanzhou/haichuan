@@ -3,6 +3,7 @@
  * Journey 母版:01–05 大字叙事,不用步骤圆/连线流程图。
  */
 import { customProcessPuckConfig } from "../../../adapters/customProcess.puck";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { bgColorPresetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
@@ -51,7 +52,7 @@ export const customProcessSchema: ModuleInspectorSchema = {
               key: "image",
               label: "节点图（可选）",
               control: "media",
-              spec: { width: 2000, height: 2000, ratio: "1:1", label: "节点图（建议 2000×2000，1:1）" },
+              spec: IMAGE_SPECS.customProcess.node,
               placeholder: "上传节点图（可选）",
             },
           ],

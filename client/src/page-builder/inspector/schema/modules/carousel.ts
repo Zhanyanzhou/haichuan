@@ -83,8 +83,6 @@ export const carouselSchema: ModuleInspectorSchema = {
       id: "carousel-advanced",
       title: "高级设置",
       layer: "style",
-      collapsible: true,
-      defaultCollapsed: true,
       fields: [
         { key: "autoPlay", label: "自动播放", control: "switch" },
         { key: "showDots", label: "指示点", control: "switch" },

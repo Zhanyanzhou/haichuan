@@ -5,6 +5,7 @@ import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceho
 import type { PageModule } from "@/types/pageModule";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DesignSystemStyles } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 
@@ -41,7 +42,7 @@ export default function HeroSection({ module, editMode }: Props) {
       <BlockEmptyPlaceholder
         icon="🖼️"
         hint="首屏主视觉"
-        spec="请上传桌面端主视觉图 · 建议 1920×1080 (16:9)"
+        spec={`请上传桌面端主视觉图 · ${IMAGE_SPECS.hero.desktop.label}`}
         height="var(--homepage-editor-viewport-height, 900px)"
       />
     );

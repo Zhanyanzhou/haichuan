@@ -1,4 +1,5 @@
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 
@@ -26,7 +27,7 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
     if (!editMode) return null;
     return (
       <DecorSection master="asymmetric-gallery" background={bgColor}>
-        <BlockEmptyPlaceholder hint="权威认证" spec="请添加证书条目 · 证书图建议 1:1（2000×2000）" />
+        <BlockEmptyPlaceholder hint="权威认证" spec={`请添加证书条目 · ${IMAGE_SPECS.certificate.image.label}`} />
       </DecorSection>
     );
   }

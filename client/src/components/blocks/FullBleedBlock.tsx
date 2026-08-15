@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import { FULL_BLEED_CONTRACT, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DesignSystemStyles } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 
@@ -64,7 +65,7 @@ export default function FullBleedBlock({
     return (
       <BlockEmptyPlaceholder
         hint="请上传单张海报"
-        spec="桌面 3360×960（21:6）· 移动 1500×1875（4:5）"
+        spec={`桌面 ${IMAGE_SPECS.fullBleed.desktop.label} · 移动 ${IMAGE_SPECS.fullBleed.mobile.label}`}
       />
     );
   }

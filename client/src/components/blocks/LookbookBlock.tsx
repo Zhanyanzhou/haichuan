@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 
@@ -68,7 +69,7 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
           {image ? (
             <img src={image} alt={imageAlt || title || "佩戴大片"} loading="lazy" decoding="async" />
           ) : (
-            <BlockEmptyPlaceholder hint="佩戴大片" spec="请上传 4:5 佩戴大片" height="100%" />
+            <BlockEmptyPlaceholder hint="佩戴大片" spec={`请上传佩戴大片 · ${IMAGE_SPECS.lookbook.image.label}`} height="100%" />
           )}
         </div>
         <div className="hc-lookbook__products">

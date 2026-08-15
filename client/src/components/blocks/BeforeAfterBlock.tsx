@@ -1,6 +1,7 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { BEFORE_AFTER_CONTRACT } from "@/page-builder/config/blockContracts";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 
@@ -62,7 +63,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
       <DecorSection master="editorial-story" background={bgColor}>
         <BlockEmptyPlaceholder
           hint="改款前后对比"
-          spec="请上传改款前/后两张同比例图 · 建议 1600×2000（4:5）"
+          spec={`请上传改款前/后两张同比例图 · ${IMAGE_SPECS.beforeAfter.image.label}`}
         />
       </DecorSection>
     );

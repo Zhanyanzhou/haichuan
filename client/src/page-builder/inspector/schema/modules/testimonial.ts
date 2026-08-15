@@ -3,6 +3,7 @@
  * Editorial Story 母版(口碑变体):引语式排版,需顾客授权。
  */
 import { testimonialPuckConfig } from "../../../adapters/testimonial.puck";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { bgColorPresetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
@@ -52,7 +53,7 @@ export const testimonialSchema: ModuleInspectorSchema = {
               key: "image",
               label: "实拍图（可选 4:3）",
               control: "media",
-              spec: { width: 1200, height: 900, ratio: "4:3", label: "实拍图（建议 1200×900，4:3）" },
+              spec: IMAGE_SPECS.testimonial.image,
               placeholder: "上传顾客授权实拍图",
             },
           ],

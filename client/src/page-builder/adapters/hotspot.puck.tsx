@@ -82,4 +82,6 @@ export const hotspotPuckConfig = {
       },
     } as any,
   },
+  resolvePermissions: (data: any) =>
+    data.props?.locked ? { delete: false, drag: false } : {},
 };

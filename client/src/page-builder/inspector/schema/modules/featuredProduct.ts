@@ -87,8 +87,8 @@ export const featuredProductSchema: ModuleInspectorSchema = {
           label: "桌面版式",
           control: "segmented",
           options: [
-            { label: "作品图在左", value: "imageLeft" },
-            { label: "作品图在右", value: "imageRight" },
+            { label: "作品图在左", value: "imageLeft", diagram: "imageLeftTextRight" },
+            { label: "作品图在右", value: "imageRight", diagram: "textLeftImageRight" },
           ],
         },
       ],

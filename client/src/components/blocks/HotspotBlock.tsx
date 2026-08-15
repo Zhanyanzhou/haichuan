@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useState, useCallback, useRef, useEffect } from "react";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { HOTSPOT_CONTRACT } from "@/page-builder/config/blockContracts";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 
 interface HotspotItem {
   x: number; // 左边距百分比
@@ -171,7 +172,7 @@ export default function HotspotBlock({
         `}</style>
         <BlockEmptyPlaceholder
           hint="热区图"
-          spec="先上传底图，再添加点击热区 · 桌面建议 3840×2160（16:9）"
+          spec={`先上传底图，再添加点击热区 · 桌面 ${IMAGE_SPECS.hotspot.desktop.label}`}
           height="100%"
         />
       </section>

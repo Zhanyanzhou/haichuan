@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useReducedMotion } from 'framer-motion';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import type { PageModule } from '@/types/pageModule';
 import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
 import { DOUBLE_POSTER_CONTRACT } from '@/page-builder/config/blockContracts';
@@ -141,7 +142,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
             {mainImg ? (
               <EditorialImage src={mainImg} alt={c?.mainAltText || ""} focusX={s?.mainFocusX ?? 50} focusY={s?.mainFocusY ?? 50} />
             ) : (
-              <MissingImageSlot field="mainImage" label="主海报" spec="建议 2400×1600（3:2）" height="100%" />
+              <MissingImageSlot field="mainImage" label="主海报" spec={IMAGE_SPECS.doublePoster.main.label} height="100%" />
             )}
           </div>
         </div>
@@ -155,7 +156,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
               {detailImg ? (
                 <EditorialImage src={detailImg} alt={c?.detailAltText || ""} focusX={s?.detailFocusX ?? 50} focusY={s?.detailFocusY ?? 50} />
               ) : (
-                <MissingImageSlot field="detailImage" label="细节海报" spec="建议 1280×1600（4:5）" height="100%" />
+                <MissingImageSlot field="detailImage" label="细节海报" spec={IMAGE_SPECS.doublePoster.detail.label} height="100%" />
               )}
             </div>
           ) : null}

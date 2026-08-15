@@ -91,55 +91,14 @@ export const editorPages: EditorPageDefinition[] = [
   },
 ];
 
-const templateIndexByPage: Record<EditorPageKey, number> = {
-  home: 0,
-  about: 0,
-  products: 1,
-  catalog: 1,
-  custom: 2,
-  contact: 3,
-};
-
-const pageCopy: Record<
-  EditorPageKey,
-  { title: string; subtitle: string; posterTitle: string; ctaTitle: string }
-> = {
-  home: {
-    title: "海川珠宝",
-    subtitle: "传承东方美学，匠心铸造经典",
-    posterTitle: "品牌故事",
-    ctaTitle: "预约鉴赏",
-  },
-  about: {
-    title: "关于海川",
-    subtitle: "在东方审美与当代工艺之间，守护每一份珍贵",
-    posterTitle: "海川的匠心",
-    ctaTitle: "走进海川",
-  },
-  products: {
-    title: "珠宝作品",
-    subtitle: "从经典系列到当季新作，发现心仪臻品",
-    posterTitle: "本季精选",
-    ctaTitle: "预约专属选购",
-  },
-  catalog: {
-    title: "选款中心",
-    subtitle: "按风格、材质与场景，快速找到合适作品",
-    posterTitle: "从心挑选",
-    ctaTitle: "获取选款建议",
-  },
-  custom: {
-    title: "珠宝定制",
-    subtitle: "以专属设计，记录独一无二的重要时刻",
-    posterTitle: "定制之旅",
-    ctaTitle: "预约定制咨询",
-  },
-  contact: {
-    title: "预约咨询",
-    subtitle: "一对一珠宝顾问，为您安排专属服务",
-    posterTitle: "专属服务",
-    ctaTitle: "联系我们",
-  },
+/** 每个页面的推荐结构模板 id（templates.ts 单一来源）。 */
+const templateIdByPage: Record<EditorPageKey, string> = {
+  home: "jewelry-home-v2",
+  about: "jewelry-about-v1",
+  products: "jewelry-products-v1",
+  catalog: "jewelry-catalog-v1",
+  custom: "jewelry-custom-v1",
+  contact: "jewelry-contact-v1",
 };
 
 export function isEditorPageKey(
@@ -156,42 +115,29 @@ export function getEditorPageByPath(path: string) {
   return editorPages.find((page) => page.publicPath === path);
 }
 
-/** 为尚未保存的页面提供可立即编辑、且彼此可区分的初始画布。 */
+/** 为尚未保存的页面提供可立即编辑、且彼此可区分的初始画布（即该页面的推荐结构）。 */
 export function createEditorPageDefault(key: EditorPageKey) {
-  const source =
-    pageTemplates[templateIndexByPage[key]]?.puckData ??
-    jewelryHomeTemplate.puckData;
-  const data = JSON.parse(JSON.stringify(source));
-  const copy = pageCopy[key];
+  const template = pageTemplates.find((t) => t.id === templateIdByPage[key]);
+  const data = JSON.parse(
+    JSON.stringify(template?.puckData ?? jewelryHomeTemplate.puckData),
+  );
   const page = getEditorPage(key);
-  const editableContent = (data.content ?? []).map((block: any) => {
-    if (block.type === "首屏主视觉")
-      return {
-        ...block,
-        props: { ...block.props, title: copy.title, subtitle: copy.subtitle },
-      };
-    if (block.type === "单图海报")
-      return { ...block, props: { ...block.props, title: copy.posterTitle } };
-    if (block.type === "文字横幅")
-      return { ...block, props: { ...block.props, title: copy.ctaTitle } };
-    return block;
-  });
-  // 动态业务页的基础框架遵循真实前台顺序：视觉页头 → 固定业务区。
-  data.content = page.businessRegion
-    ? [
-        editableContent.find((block: any) => block.type === "首屏主视觉") ??
-          editableContent[0],
-        {
-          type: "业务功能区",
-          props: {
-            id: `${key}-business-region`,
-            pageKey: key,
-            ...page.businessRegion,
-            locked: true,
-          },
-        },
-      ].filter(Boolean)
-    : editableContent;
+  if (!page.businessRegion) return data;
+
+  // 动态业务页：公开渲染把装修模块全部置于业务内容之前（PublishedPageDecoration），
+  // 故业务功能区固定排在视觉模块之后，画布顺序与线上顺序一致。
+  data.content = [
+    ...(data.content ?? []),
+    {
+      type: "业务功能区",
+      props: {
+        id: `${key}-business-region`,
+        pageKey: key,
+        ...page.businessRegion,
+        locked: true,
+      },
+    },
+  ];
   return data;
 }
 

@@ -6,6 +6,7 @@ import CertificateBlock from "@/components/blocks/CertificateBlock";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import { colorPuckField } from "../fields/ColorField";
 import MediaPickerField from "../fields/MediaPickerField";
+import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 
 export interface CertificateItem {
   name: string;
@@ -52,7 +53,7 @@ export const certificatePuckConfig = {
             value, onChange, readOnly,
           }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
             <MediaPickerField fieldKey="imageUrl" device="shared" value={value} onChange={onChange} readOnly={readOnly}
-              spec={{ width: 2000, height: 2000, ratio: "1:1", label: "证书图（建议 2000×2000，1:1）" }}
+              spec={IMAGE_SPECS.certificate.image}
               placeholder="上传证书图（可选）" />
           ),
         },

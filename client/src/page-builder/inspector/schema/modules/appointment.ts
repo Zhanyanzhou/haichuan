@@ -109,8 +109,6 @@ export const appointmentSchema: ModuleInspectorSchema = {
       id: "appointment-advanced",
       title: "高级设置",
       layer: "style",
-      collapsible: true,
-      defaultCollapsed: true,
       description: "手机端按 4:3 独立裁切；焦点为百分比坐标",
       fields: [
         { key: "mobileFocusX", label: "移动焦点 X (%)", control: "text" },

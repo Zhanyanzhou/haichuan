@@ -125,4 +125,6 @@ export const carouselPuckConfig = {
       ],
     },
   },
+  resolvePermissions: (data: any) =>
+    data.props?.locked ? { delete: false, drag: false } : {},
 };
