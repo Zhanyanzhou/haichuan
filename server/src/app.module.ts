@@ -13,6 +13,7 @@ import { GoldPriceModule } from "./modules/gold-price/gold-price.module";
 import { InventoryModule } from "./modules/inventory/inventory.module";
 import { OrdersModule } from "./modules/orders/orders.module";
 import { CustomersModule } from "./modules/customers/customers.module";
+import { WechatAuthModule } from "./modules/wechat-auth/wechat-auth.module";
 import { PaymentsModule } from "./modules/payments/payments.module";
 import { TradeEventsModule } from "./modules/trade-events/trade-events.module";
 import { FulfillmentModule } from "./modules/fulfillment/fulfillment.module";
@@ -104,6 +105,7 @@ import { LoggerModule } from "nestjs-pino";
     InventoryModule,
     OrdersModule,
     CustomersModule,
+    WechatAuthModule,
     PaymentsModule,
     // 交易域扩展模块：事件时间线、履约、退款、售后
     TradeEventsModule,

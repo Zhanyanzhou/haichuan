@@ -764,6 +764,13 @@ export const customerApi = {
   }) => api.post("/customers/register", data),
   login: (data: { phone: string; password: string }) =>
     api.post("/customers/login", data),
+  wechatConfig: () => api.get("/customers/wechat/config"),
+  wechatBind: (data: {
+    bindToken: string;
+    phone: string;
+    password: string;
+    name?: string;
+  }) => api.post("/customers/wechat/bind", data),
   smsRequirements: () => api.get("/customers/sms-requirements"),
   requestSmsCode: (data: { phone: string }) =>
     api.post("/customers/sms-code", data),

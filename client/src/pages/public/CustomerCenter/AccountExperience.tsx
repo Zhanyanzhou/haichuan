@@ -46,6 +46,7 @@ type AccountExperienceProps = {
     smsCode?: string;
   }) => void;
   onSignOut: () => void;
+  onWechatAuth: (result: { accessToken: string; customer: unknown }) => void;
 };
 
 type Section =
@@ -106,11 +107,171 @@ function EmptyState({
   );
 }
 
+function WechatLoginPanel({
+  onAuthenticated,
+}: {
+  onAuthenticated: (result: { accessToken: string; customer: unknown }) => void;
+}) {
+  const [qrConnectUrl, setQrConnectUrl] = useState<string | null>(null);
+  const [notConfigured, setNotConfigured] = useState(false);
+  const [bindToken, setBindToken] = useState<string | null>(null);
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [binding, setBinding] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    customerApi
+      .wechatConfig()
+      .then((res: unknown) => {
+        const data = unwrapResponse<{ enabled: boolean; qrConnectUrl?: string }>(res);
+        if (cancelled) return;
+        if (data?.enabled && data.qrConnectUrl) {
+          setQrConnectUrl(data.qrConnectUrl);
+        } else {
+          setNotConfigured(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setNotConfigured(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as {
+        type?: string;
+        payload?: {
+          kind?: "success" | "need-bind" | "error";
+          accessToken?: string;
+          customer?: unknown;
+          bindToken?: string;
+          message?: string;
+        };
+      };
+      if (data?.type !== "wechat-login-result" || !data.payload) return;
+      const payload = data.payload;
+      if (payload.kind === "success" && payload.accessToken && payload.customer) {
+        onAuthenticated({
+          accessToken: payload.accessToken,
+          customer: payload.customer,
+        });
+      } else if (payload.kind === "need-bind" && payload.bindToken) {
+        setBindToken(payload.bindToken);
+      } else if (payload.kind === "error") {
+        alert(payload.message || "微信登录失败，请重试");
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [onAuthenticated]);
+
+  const handleBind = async () => {
+    if (!/^1\d{10}$/.test(phone)) {
+      alert("请填写有效的手机号");
+      return;
+    }
+    if (password.length < 8) {
+      alert("密码至少 8 位");
+      return;
+    }
+    setBinding(true);
+    try {
+      const res = await customerApi.wechatBind({
+        bindToken: bindToken!,
+        phone,
+        password,
+      });
+      const result = unwrapResponse<{ accessToken: string; customer: unknown }>(res);
+      onAuthenticated(result);
+    } catch (error: any) {
+      alert(error?.response?.data?.message || error?.message || "绑定失败，请重试");
+    } finally {
+      setBinding(false);
+    }
+  };
+
+  if (notConfigured) return null;
+
+  if (bindToken) {
+    return (
+      <div
+        className="account-wechat-login"
+        style={{ marginTop: 24, paddingTop: 24, borderTop: "1px solid rgba(0,0,0,0.08)" }}
+      >
+        <p className="text-xs">已通过微信验证身份，请绑定手机号完成登录</p>
+        <label style={{ display: "block", marginTop: 12 }}>
+          手机号
+          <input
+            value={phone}
+            onChange={(event) => setPhone(event.target.value)}
+            inputMode="numeric"
+            maxLength={11}
+            style={{ marginTop: 6 }}
+          />
+        </label>
+        <label style={{ display: "block", marginTop: 12 }}>
+          密码
+          <input
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            type="password"
+            minLength={8}
+            style={{ marginTop: 6 }}
+          />
+        </label>
+        <p className="text-xs" style={{ marginTop: 6 }}>
+          已注册手机号请填原密码绑定；未注册将创建新会员账户。
+        </p>
+        <button
+          type="button"
+          className="account-button account-button--dark"
+          style={{ width: "100%", marginTop: 12 }}
+          disabled={binding}
+          onClick={handleBind}
+        >
+          {binding ? "绑定中…" : "绑定并登录"}
+        </button>
+      </div>
+    );
+  }
+
+  if (!qrConnectUrl) {
+    return (
+      <p className="text-xs" style={{ marginTop: 24, textAlign: "center" }}>
+        正在加载微信登录…
+      </p>
+    );
+  }
+
+  return (
+    <div
+      className="account-wechat-login"
+      style={{ marginTop: 24, paddingTop: 24, borderTop: "1px solid rgba(0,0,0,0.08)", textAlign: "center" }}
+    >
+      <p className="text-xs">或使用微信扫码登录</p>
+      <iframe
+        title="微信扫码登录"
+        src={qrConnectUrl}
+        style={{ width: 240, height: 240, border: "none", marginTop: 12 }}
+      />
+      <p className="text-xs">使用微信「扫一扫」，扫码后自动登录</p>
+    </div>
+  );
+}
+
 function MemberAccess({
   authLoading,
   onLogin,
   onRegister,
-}: Pick<AccountExperienceProps, "authLoading" | "onLogin" | "onRegister">) {
+  onWechatAuth,
+}: Pick<
+  AccountExperienceProps,
+  "authLoading" | "onLogin" | "onRegister" | "onWechatAuth"
+>) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -155,6 +316,7 @@ function MemberAccess({
   };
 
   return (
+    <>
     <form
       id="member-access-form"
       className="account-member-access"
@@ -281,6 +443,8 @@ function MemberAccess({
             : "创建会员账户"}
       </button>
     </form>
+    <WechatLoginPanel onAuthenticated={onWechatAuth} />
+    </>
   );
 }
 
@@ -295,6 +459,7 @@ export default function AccountExperience({
   onLogin,
   onRegister,
   onSignOut,
+  onWechatAuth,
 }: AccountExperienceProps) {
   const [section, setSection] = useState<Section>("overview");
   const firstOrder = orders[0];
@@ -376,6 +541,7 @@ export default function AccountExperience({
               authLoading={authLoading}
               onLogin={onLogin}
               onRegister={onRegister}
+              onWechatAuth={onWechatAuth}
             />
           </div>
         </section>

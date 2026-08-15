@@ -492,6 +492,9 @@ model Customer {
   email               String?                      @db.VarChar(100)
   passwordHash        String?                      @map("password_hash") @db.VarChar(255)
   status              Status                       @default(ACTIVE)
+  // 微信开放平台扫码登录：openid 唯一绑定；unionid 同开放平台账号跨应用一致（未扫码绑定前为 NULL）
+  wechatOpenId        String?                      @unique @map("wechat_open_id") @db.VarChar(64)
+  wechatUnionId       String?                      @map("wechat_union_id") @db.VarChar(64)
   // 合作商家体系：客户合作权限状态，独立于后台 User.Role。
   // accountType=PARTNER 表示当前可访问 PARTNER 可见范围商品（仅 partnerStatus=APPROVED 时生效）。
   accountType         CustomerAccountType          @default(MEMBER) @map("account_type")

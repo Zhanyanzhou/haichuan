@@ -100,6 +100,17 @@ export default function CustomerCenter() {
     }
   };
 
+  // 微信扫码登录：postMessage 回传的结果已是业务数据（无需 unwrap），直接落本地并刷新
+  const applyWechatAuth = (result: { accessToken: string; customer: unknown }) => {
+    localStorage.setItem('customerToken', result.accessToken);
+    localStorage.setItem('customer', JSON.stringify(result.customer));
+    setLoading(true);
+    void load();
+    message.success('已通过微信登录您的会员账户');
+    const returnTo = consumeReturnTo();
+    if (returnTo) navigate(returnTo, { replace: true });
+  };
+
   if (loading) return <div className="min-h-screen bg-brand-bg flex items-center justify-center"><Spin size="large" /></div>;
 
   const isSignedIn = Boolean(localStorage.getItem('customerToken'));
@@ -129,6 +140,7 @@ export default function CustomerCenter() {
       authLoading={authLoading}
       onLogin={(values) => completeAuth(customerApi.login(values))}
       onRegister={(values) => completeAuth(customerApi.register(values))}
+      onWechatAuth={applyWechatAuth}
       onSignOut={signOut}
     />
   );
