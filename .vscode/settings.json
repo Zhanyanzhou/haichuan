@@ -32,5 +32,7 @@
     "**/prisma/migrations": false
   },
   // 终端默认使用 PowerShell（项目环境）
-  "terminal.integrated.defaultProfile.windows": "PowerShell"
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  // MCP 服务器自动启动（新配置或配置变化时自动启动，免手动点 Start）
+  "chat.mcp.autostart": "newAndOutdated"
 }

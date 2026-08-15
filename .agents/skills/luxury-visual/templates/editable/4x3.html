@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>4:3 高级海报</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    .canvas {
+      width: 1200px;
+      height: 900px;
+      position: relative;
+      overflow: hidden;
+      /* 深色氛围：径向渐变模拟珠宝在暗处发光 */
+      background:
+        radial-gradient(ellipse at 32% 38%, rgba(184,148,78,0.28), transparent 42%),
+        radial-gradient(ellipse at 32% 38%, rgba(255,255,255,0.10), transparent 22%),
+        linear-gradient(135deg, #151515 0%, #242424 55%, #1b1b1b 100%);
+    }
+
+    /* 左下角文字区 */
+    .text {
+      position: absolute;
+      left: 8%;
+      bottom: 10%;
+      width: 45%;
+      color: #F5F2EC;
+    }
+
+    /* 品牌细标：金色，宽字距 */
+    .kicker {
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: 13px;
+      letter-spacing: 0.42em;
+      color: #B8944E;
+      text-transform: uppercase;
+      margin-bottom: 40px;
+    }
+
+    /* 主标题：思源宋体，字距宽 */
+    h1 {
+      font-family: "Noto Serif SC", "Songti SC", "SimSun", serif;
+      font-weight: 400;
+      font-size: 68px;
+      letter-spacing: 0.22em;
+      line-height: 1.35;
+      color: #F5F2EC;
+      margin-bottom: 32px;
+    }
+
+    /* 副标题：灰字，一句话 */
+    .sub {
+      font-family: "Noto Serif SC", "Songti SC", serif;
+      font-size: 16px;
+      letter-spacing: 0.08em;
+      line-height: 1.8;
+      color: rgba(245,242,236,0.55);
+      margin-bottom: 48px;
+    }
+
+    /* CTA：金色细线，像品牌印章 */
+    .cta {
+      font-family: "Noto Serif SC", "Songti SC", serif;
+      font-size: 14px;
+      letter-spacing: 0.3em;
+      color: #D4B87A;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(184,148,78,0.6);
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <div class="canvas">
+    <div class="text">
+      <div class="kicker">Haichuan Jewellery</div>
+      <h1>珠 光 之 约</h1>
+      <p class="sub">星河万里，不如腕间一点光</p>
+      <span class="cta">探 索 系 列</span>
+    </div>
+  </div>
+</body>
+</html>

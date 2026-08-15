@@ -55,6 +55,7 @@ artifacts/
 /docker_check.cmd
 /docker_out.txt
 /codex-handoff.md
+/_audio-check.ps1
 
 # Playwright MCP 浏览器工具的快照/日志产物
 /.playwright-mcp/

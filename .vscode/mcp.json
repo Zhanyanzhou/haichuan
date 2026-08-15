@@ -4,6 +4,14 @@
       "type": "http",
       "url": "https://api.githubcopilot.com/mcp/"
     },
+    "figma": {
+      "type": "http",
+      "url": "https://mcp.figma.com/mcp"
+    },
+    "tavily": {
+      "type": "http",
+      "url": "https://mcp.tavily.com/mcp"
+    },
     "playwright": {
       "type": "stdio",
       "command": "npx",
