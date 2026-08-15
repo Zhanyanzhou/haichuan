@@ -40,6 +40,7 @@ screenshot-*.png
 # 设计 QA 产物与根级 QA 截图（非部署所需）
 artifacts/
 /design-qa-*.png
+/template-preview-contact-sheet.png
 
 # 商品导入脚本本地暂存数据（未被代码引用）
 /_names.json
