@@ -7,7 +7,7 @@ import {
   Get,
 } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
-import { ThrottlerGuard, Throttle } from "@nestjs/throttler";
+import { Throttle } from "@nestjs/throttler";
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiBody } from "@nestjs/swagger";
 import { AuthService } from "./auth.service";
 import { JwtAuthGuard } from "./jwt-auth.guard";
@@ -22,9 +22,10 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Public()
-  // ThrottlerGuard 必须在 AuthGuard 之前:登录失败时让限流先计数,
-  // 避免 AuthGuard('local') 抛 401 短路掉限流,导致暴力破解计数器永不增长
-  @UseGuards(ThrottlerGuard, AuthGuard("local"))
+  // 限流说明：ThrottlerGuard 已由 APP_GUARD 全局注册（先于方法级 guard 执行），此处无需重复
+  // @UseGuards——此前写法会让同一请求被全局+方法级各计数一次，5/min 实际约 2 次/分钟即触发 429。
+  // 保留 @Throttle 元数据（全局 Guard 读取），AuthGuard 单独挂载即可。
+  @UseGuards(AuthGuard("local"))
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post("login")
   @ApiOperation({ summary: "用户登录" })

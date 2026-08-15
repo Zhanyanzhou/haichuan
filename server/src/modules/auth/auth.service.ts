@@ -38,8 +38,11 @@ export class AuthService {
         403,
       );
     }
-    // 锁定期已过：视为新周期，清空记录
-    this.loginAttempts.delete(username);
+    // 仅在「曾锁定且锁定期已满」时清空（新一轮从零开始）；
+    // 未锁定状态（lockedUntil=0）的累积失败计数必须保留，否则每次断言都清零、锁定永远无法累积触发。
+    if (record.lockedUntil > 0) {
+      this.loginAttempts.delete(username);
+    }
   }
 
   private recordLoginFailure(username: string): void {
