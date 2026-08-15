@@ -7,6 +7,12 @@ import { getEditorPageByPath } from "@/page-builder/config/editorPages";
 import PublishedPageDecoration from "@/page-builder/runtime/PublishedPageDecoration";
 import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
 
+/**
+ * 页脚 ICP 备案号：国内公网上线前完成备案后填入（格式如"京ICP备2026XXXXXX号-1"），
+ * 未填写时不渲染该行——不展示占位假号。公安备案（公安网备）如需同展示，在此扩展。
+ */
+const FOOTER_ICP_NUMBER = "";
+
 /** 幂等写入/更新 <meta> 标签（按 name 或 property 选择）。 */
 function upsertMeta(attr: "name" | "property", key: string, content: string) {
   let el = document.head.querySelector<HTMLMetaElement>(
@@ -423,6 +429,20 @@ export default function PublicLayout() {
               隐私说明
             </Link>
           </p>
+          {/* ICP 备案号占位（P1：OR 盘点 2026-08-15）。
+              国内公网上线前须完成备案并在下常量填入真实号码；未填写时不渲染（不显示假号）。 */}
+          {FOOTER_ICP_NUMBER && (
+            <p className="site-footer__copyright">
+              <a
+                href="https://beian.miit.gov.cn/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="site-footer__copyright-link"
+              >
+                {FOOTER_ICP_NUMBER}
+              </a>
+            </p>
+          )}
         </footer>
       )}
     </div>

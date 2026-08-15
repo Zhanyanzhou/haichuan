@@ -1,6 +1,13 @@
 # 待办事项报告 — 需要做但尚未完成的工作
 
-> 生成时间：2026-08-13
+> 生成时间：2026-08-13 | **状态更新：2026-08-15**
+> ⚠️ 本文档为 2026-08-13 快照，部分结论已被后续工作超越，阅读时以下述更新为准：
+> - A 组验证命令 → 已由 `docs/VERIFICATION_RUNBOOK.md` 取代并**全部实跑通过**（2026-08-15：静态门禁/迁移无 drift/五容器+恢复演练/Playwright 59 过/admin 后台回归）
+> - C-5 CORS 默认域名 → 已解决：生产强制 `CORS_ORIGIN` 环境变量，缺失即拒绝启动
+> - E-1 Playwright 入 CI → 已完成（quality.yml 新增 e2e-public job）
+> - G-5 Feature Flags → 已完成服务端单一来源化（DECISIONS D.3 已修订）
+> - git rm 死资产 → 已执行（2026-08-15：homepage.ts/根 nginx.conf/homeCampaign.ts/splitPanel.ts/save-slot.dto.ts）
+> - B 组经营资料、域名、ICP、外部凭据 → **仍然有效**，见 `docs/OPERATIONS_READINESS.md` §8
 > 范围：P0-C → P2-C 全阶段代码层工作已完成，本报告汇总所有**仍未完成**的事项。
 > 分类依据：按阻塞原因和责任方分组，便于逐项推进。
 

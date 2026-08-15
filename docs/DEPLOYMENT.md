@@ -1,22 +1,26 @@
 # 海川珠宝 · 部署指南
 
-> 最后更新：2026-08-10
+> 最后更新：2026-08-15（OR 盘点核对：架构图与现状对齐，Redis 已移除，补 backup/kuma/TLS 说明）
 
 ## 架构概览
 
 ```
 VPS (Ubuntu 22.04)
-├── Nginx (端口 80/443 → client 容器)
-├── Docker Compose
-│   ├── mysql:8.0      (端口 3306)
-│   ├── redis:7-alpine  (端口 6379)
-│   ├── server (NestJS) (端口 3000)
-│   └── client (Nginx)  (端口 80)
+├── Docker Compose（五服务，docker-compose.yml 为唯一事实来源）
+│   ├── mysql:8.0        (仅容器网络，不对宿主机暴露；管理走 SSH 隧道/ exec)
+│   ├── server (NestJS)  (仅容器网络，nginx 反代 /api 与 /uploads)
+│   ├── client (Nginx)   (80 端口对外，静态资源 + 反代 + CSP/安全响应头)
+│   ├── backup           (mysql:8.0 镜像复用，每日 DB+媒体卷备份至 ./backups)
+│   └── uptime-kuma      (127.0.0.1:3001，存活监控，远程经 SSH 隧道访问)
 └── 数据卷
-    ├── mysql_data
-    ├── redis_data
-    └── uploads_data
+    ├── mysql_data / uploads_data / private_media_data（付款凭证）
+    └── ./backups（宿主机目录，建议异地同步——3-2-1 原则）
 ```
+
+**TLS/HTTPS（上线前必办）**：当前 compose 无 443 终结（内网部署态）。公网上线两条路线待拍板：
+① 宿主机 Nginx + certbot 终结 TLS 后反代 client:80（本文档历史方案，配置已不在仓库）；
+② 在 client 容器 nginx.conf 内加 443 server 块 + 证书挂载。
+无论哪种，启用后应同步开启 HSTS 并复核 CSP（见 client/nginx.conf）。
 
 ---
 

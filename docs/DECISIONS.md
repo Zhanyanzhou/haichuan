@@ -87,18 +87,18 @@
 
 > 以下为审查中发现但尚未由项目负责人拍板的事项。任何 AI 遇到相关任务**必须先报告**，不得自行选择方案或写成既定事实。
 
-### D.1 🟡 库存架构迁移（最严重）
-- **现状**：`ProductSKU.stock` 标 `@deprecated`（注释称应统一走 `InventoryService`），但 `InventoryService` **无外部消费者**；`products.service`、`orders.service` 仍**直接读写 `ProductSKU.stock`**；订单预占在无 `Inventory` 行时回退 `SKU.stock`。双轨并存、无迁移路径。
-- **待定**：未来以 `SKU.stock` 还是 `Inventory`（多仓）为单一来源？迁移路径？
-- **约束**：未定前，新增库存读写**必须报告**，不得自行选其一。
+### D.1 ✅ 库存已收敛单轨（2026-08-15 复核修订）
+- **已落地**：`Inventory` 为唯一库存来源——`orders.service` 下单预占/核销/释放全部走 `Inventory` 表，**不再 fallback `SKU.stock`**（代码注释明确标注"Inventory 单一来源，DECISIONS D.1"）；`ProductSKU.stock` 仅作展示参考。
+- **历史状态（已过时）**：曾双轨并存（`ProductSKU.stock` 直接读写 + Inventory 无消费者）。2026-08-14/15 批次完成收敛，`verify-trade-concurrency.mjs` 契约测试含"库存为唯一来源：无库存时不 fallback"断言护栏。
+- **遗留**：多仓架构（Warehouse 模型）仍未启用，见 D.9。
 
 ### D.2 🟡 电商功能上线
 - **现状**：订单/支付/购物车/退款代码完整，但**从未在真实环境验证**；项目当前不开放真实支付/退款/资金结算。
 - **待定**：何时、以何种方式联调与上线。
 
-### D.3 🟡 Feature Flags 是否环境变量化
-- **现状**：`featureFlags.ts` 的 `CUSTOMER_COMMERCE_ENABLED` 已被 `MyAccountDashboard`、`ProductDetail` 消费，但硬编码为 `false`；服务端 `CustomerCommerceGuard` 读 `CUSTOMER_COMMERCE_ENABLED` 环境变量（默认关闭）。
-- **待定**：前端开关是否也从环境变量读取以与服务端联动；还是保持前端硬编码关、仅靠服务端守卫控制上线。
+### D.3 ✅ Feature Flags 已服务端单一来源化（2026-08-15 复核修订）
+- **已落地**：服务端 `GET /settings/flags` 读取 `CUSTOMER_COMMERCE_ENABLED` 环境变量作为**单一来源**；前端 `featureFlags.ts` 拉取该端点，请求失败回退 `SAFE_FLAGS`（三项全 false，安全默认关）。服务端 `CustomerCommerceGuard` 仍是最终安全边界。
+- **历史状态（已过时）**：曾为前端硬编码 false。
 
 ### D.4 🟡 权限粒度
 - **现状**：后端只做 `@Roles` 角色白名单（粗粒度）；前端 `permissionStore` 有细粒度权限键但后端不校验。
