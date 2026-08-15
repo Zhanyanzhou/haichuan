@@ -27,14 +27,14 @@ jobs:
 
       # 依赖安全审计（P1：OR 盘点 2026-08-15）。镜像 registry 不支持 audit 端点，须指定官方源。
       # --package-lock-only：仅审 lockfile，不要求 node_modules。
-      # 级别说明：nodemailer ≤9.0.0 的 high（SMTP 注入/SSRF）待升级后把级别收紧到 high。
+      # 级别 high：nodemailer 已升 9.0.5（2026-08-15），生产依赖当前 0 漏洞，high 及以上挡 CI。
       - name: 依赖安全审计（client）
         working-directory: client
-        run: npm audit --omit=dev --package-lock-only --audit-level=critical --registry=https://registry.npmjs.org
+        run: npm audit --omit=dev --package-lock-only --audit-level=high --registry=https://registry.npmjs.org
 
       - name: 依赖安全审计（server）
         working-directory: server
-        run: npm audit --omit=dev --package-lock-only --audit-level=critical --registry=https://registry.npmjs.org
+        run: npm audit --omit=dev --package-lock-only --audit-level=high --registry=https://registry.npmjs.org
 
       - name: 安装客户端依赖
         working-directory: client
