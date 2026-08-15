@@ -4,9 +4,10 @@
  * （自 index.tsx 平移，逻辑零变更）
  */
 import { useCallback, useEffect } from "react";
-import { Button, Dropdown } from "antd";
+import { Button, Dropdown, Modal, message } from "antd";
 import {
   DesktopOutlined,
+  DownloadOutlined,
   HistoryOutlined,
   MobileOutlined,
   MoreOutlined,
@@ -14,10 +15,13 @@ import {
   SendOutlined,
   SettingOutlined,
   TabletOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import type { EditorPageKey } from "@/page-builder/config/editorPages";
 import { editorPages } from "@/page-builder/config/editorPages";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
+import { BLOCK_META } from "@/page-builder/config/blockMeta";
+import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import {
   ROOT_ZONE,
   useHomepagePuck,
@@ -105,6 +109,81 @@ export default function EditorToolbar({
     });
   }, [appData, dispatch, onPublish]);
 
+  /* ── 装修方案导入/导出(纯编辑器侧,便于跨环境迁移与备份) ── */
+
+  const exportPageDecoration = useCallback(() => {
+    const payload = {
+      kind: "haichuan-page-decoration",
+      version: 1,
+      pageKey,
+      exportedAt: new Date().toISOString(),
+      puckData: appData,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    anchor.href = url;
+    anchor.download = `haichuan-${pageKey}-${stamp}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    message.success("方案已导出为 JSON");
+  }, [appData, pageKey]);
+
+  const importPageDecoration = useCallback(
+    async (file: File) => {
+      try {
+        const text = await file.text();
+        const raw = JSON.parse(text);
+        const puck = raw?.puckData ?? raw;
+        if (
+          !puck ||
+          typeof puck !== "object" ||
+          !Array.isArray(puck.content) ||
+          puck.content.length === 0
+        ) {
+          message.error("导入失败：文件中未找到有效的页面内容（content）");
+          return;
+        }
+        // 未知模块类型直接拒绝,避免画布出现未注册坏块
+        const knownTypes = new Set(Object.keys(BLOCK_META));
+        const unknownTypes = [
+          ...new Set(
+            puck.content
+              .map((block: { type?: string }) => block?.type)
+              .filter(
+                (type: string | undefined) =>
+                  type && !knownTypes.has(type),
+              ),
+          ),
+        ];
+        if (unknownTypes.length > 0) {
+          message.error(
+            `导入失败：包含未知模块类型（${unknownTypes.join("、")}），可能来自其他版本`,
+          );
+          return;
+        }
+        const migrated = migratePuckData(puck);
+        Modal.confirm({
+          title: "导入装修方案？",
+          content:
+            "当前画布内容将被导入的方案整体替换；尚未保存的修改会丢失，发布前不影响线上页面。",
+          okText: "导入并替换画布",
+          cancelText: "取消",
+          onOk: () => {
+            dispatch({ type: "setData", data: migrated });
+            message.success("方案已导入画布，请检查后保存草稿");
+          },
+        });
+      } catch {
+        message.error("导入失败：文件不是合法的 JSON");
+      }
+    },
+    [dispatch],
+  );
+
   const compactActionItems = [
     {
       key: "revisions",
@@ -120,6 +199,23 @@ export default function EditorToolbar({
     },
     { type: "divider" as const },
     {
+      key: "export",
+      icon: <DownloadOutlined />,
+      label: "导出方案 JSON",
+      onClick: exportPageDecoration,
+    },
+    {
+      key: "import",
+      icon: <UploadOutlined />,
+      label: "导入方案 JSON",
+      onClick: () => {
+        const input = document.getElementById(
+          "homepage-editor-import-file",
+        ) as HTMLInputElement | null;
+        input?.click();
+      },
+    },
+    {
       key: "save",
       icon: <SaveOutlined />,
       label: "保存草稿",
@@ -129,6 +225,17 @@ export default function EditorToolbar({
 
   return (
     <header className="homepage-editor__toolbar">
+      <input
+        id="homepage-editor-import-file"
+        type="file"
+        accept="application/json,.json"
+        style={{ display: "none" }}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void importPageDecoration(file);
+        }}
+      />
       <div className="homepage-editor__toolbar-context">
         <strong>海川珠宝</strong>
         <span className="homepage-editor__toolbar-divider" />

@@ -33,6 +33,7 @@ export const BLOCK_PREVIEW_KIND: Record<string, string> = {
   双图海报: "double-poster",
   全屏出血图: "full-bleed",
   作品画廊: "asymmetric-gallery",
+  改款对比: "before-after",
   产品展示行: "product-row",
   分类卡片: "category-cards",
   卡片网格: "card-grid",
@@ -141,6 +142,17 @@ export const BLOCK_META: Record<string, BlockMeta> = {
     limit: 2,
     recommended: true,
     master: "asymmetric-gallery",
+    mode: "brand",
+  },
+  改款对比: {
+    name: "改款前后",
+    category: "服务与信任",
+    order: 6,
+    type: "改款对比",
+    description: "滑动分割线对比改款前/后的同比例影像，承载旧物新生的情感叙事。",
+    tags: ["改款", "定制", "对比"],
+    limit: 2,
+    master: "editorial-story",
     mode: "brand",
   },
   全屏出血图: {
@@ -352,20 +364,15 @@ export const BLOCK_META: Record<string, BlockMeta> = {
 
 /**
  * 按分类聚合区块名列表（供 puckConfig.categories 使用）。
- * 传入 pageMode 时按页面模式过滤:Brand 页隐藏 Commerce Campaign 母版
- * (轮播/热区/限时等强导购组件),Commerce 页(选款中心)展示全部。
+ * 模板全页面通用,不做模式过滤(2026-08-15 用户决策)。
  */
-export function getCategoryComponents(
-  pageMode?: DesignMode,
-): Record<string, { defaultExpanded: boolean; components: string[] }> {
-  const isVisible = (_key: string, meta: BlockMeta) =>
-    !pageMode || pageMode !== "brand" || meta.master !== "commerce-campaign";
+export function getCategoryComponents(): Record<string, { defaultExpanded: boolean; components: string[] }> {
   const map: Record<string, { defaultExpanded: boolean; components: string[] }> = {};
   for (const cat of BLOCK_CATEGORIES) {
     map[cat] = {
       defaultExpanded: cat === "形象展示",
       components: Object.entries(BLOCK_META)
-        .filter(([key, meta]) => meta.category === cat && isVisible(key, meta))
+        .filter(([, meta]) => meta.category === cat)
         .sort(([, left], [, right]) => left.order - right.order)
         .map(([name]) => name),
     };

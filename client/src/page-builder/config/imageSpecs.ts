@@ -180,6 +180,14 @@ export const IMAGE_SPECS = {
       label: "门店空间图（建议 2400×1600，3:2）",
     },
   },
+  beforeAfter: {
+    image: {
+      width: 1600,
+      height: 2000,
+      ratio: "4:5",
+      label: "改款对比图（建议 1600×2000，4:5，前后同比例）",
+    },
+  },
   video: {
     poster: {
       width: 3840,

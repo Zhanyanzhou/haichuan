@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Button, Switch, message } from "antd";
+import { useCallback, useEffect, useState } from "react";
+import { Button, Spin, Tag, message } from "antd";
 import { DatabaseOutlined, LoadingOutlined } from "@ant-design/icons";
 import { unwrapResponse } from "@/utils/unwrap";
 
@@ -12,38 +12,65 @@ function getToken(): string {
       return parsed?.state?.token || "";
     }
   } catch {
-    // Ignore invalid serialized authentication state and try the legacy key.
+    // Ignore invalid serialized authentication and try the legacy key.
   }
   return localStorage.getItem("token") || "";
 }
 
-export default function Settings() {
-  const [backingUp, setBackingUp] = useState(false);
+/** 服务端 /settings/backup 真实返回（读 backup 容器产物目录） */
+interface BackupStatus {
+  lastBackup: string | null;
+  autoBackup: boolean;
+  backupSchedule: string | null;
+  totalBackups: number;
+  latestFiles?: Array<{ name: string; size: number }>;
+  message: string;
+}
 
-  const handleBackup = async () => {
-    setBackingUp(true);
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function formatTime(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString("zh-CN", { hour12: false });
+}
+
+export default function Settings() {
+  const [checking, setChecking] = useState(false);
+  const [status, setStatus] = useState<BackupStatus | null>(null);
+
+  const fetchStatus = useCallback(async () => {
+    setChecking(true);
     try {
       const res = await fetch("/api/settings/backup", {
         method: "GET",
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // 按服务端真实状态反馈：当前备份任务未接入（返回占位状态），不假报成功
+      // 展示服务端真实状态：读 backup 容器产物目录，不假报成功
       const body = await res.json().catch(() => null);
-      const payload = unwrapResponse(body) ?? body;
+      const payload = unwrapResponse<BackupStatus>(body) ?? body ?? null;
+      setStatus(payload);
       if (payload?.lastBackup) {
-        message.info(`最近备份：${payload.lastBackup}`);
+        message.success(`最近备份：${formatTime(payload.lastBackup)}`);
       } else {
-        message.warning(
-          payload?.message || "备份功能未接入，请使用数据库侧备份方案",
-        );
+        message.warning(payload?.message || "暂无备份产物");
       }
     } catch {
-      message.error("备份失败，请检查后端服务");
+      setStatus(null);
+      message.error("查询备份状态失败，请检查后端服务");
     } finally {
-      setBackingUp(false);
+      setChecking(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void fetchStatus();
+  }, [fetchStatus]);
 
   return (
     <div className="space-y-6">
@@ -56,26 +83,73 @@ export default function Settings() {
       <div className="bg-white border border-brand-line p-8 max-w-xl space-y-4">
         <div className="flex items-center justify-between p-4 bg-brand-bg">
           <div>
-            <p className="font-medium text-brand-text">数据库备份</p>
-            <p className="text-xs text-brand-muted">导出完整数据库</p>
-          </div>
-          <Button
-            icon={backingUp ? <LoadingOutlined /> : <DatabaseOutlined />}
-            loading={backingUp}
-            onClick={handleBackup}
-          >
-            {backingUp ? "备份中..." : "立即备份"}
-          </Button>
-        </div>
-        <div className="flex items-center justify-between p-4 bg-brand-bg">
-          <div>
-            <p className="font-medium text-brand-text">自动备份</p>
+            <p className="font-medium text-brand-text">数据库与媒体备份</p>
             <p className="text-xs text-brand-muted">
-              未接入：服务端暂无自动备份任务
+              {checking && !status ? (
+                "查询备份产物中…"
+              ) : status?.lastBackup ? (
+                <>
+                  最近备份 {formatTime(status.lastBackup)}
+                  {status.totalBackups ? ` · 共 ${status.totalBackups} 份产物` : ""}
+                </>
+              ) : (
+                "暂无备份产物"
+              )}
             </p>
           </div>
-          <Switch checked={false} disabled />
+          <Button
+            icon={checking ? <LoadingOutlined /> : <DatabaseOutlined />}
+            loading={checking}
+            onClick={() => void fetchStatus()}
+          >
+            {checking ? "查询中..." : "刷新备份状态"}
+          </Button>
         </div>
+
+        {checking && !status ? (
+          <div className="flex justify-center p-6">
+            <Spin />
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between p-4 bg-brand-bg">
+              <div>
+                <p className="font-medium text-brand-text">自动备份</p>
+                <p className="text-xs text-brand-muted">
+                  {status?.autoBackup
+                    ? status.backupSchedule || "backup 容器定时执行"
+                    : status?.message || "备份目录未挂载，自动备份状态未知"}
+                </p>
+              </div>
+              <Tag color={status?.autoBackup ? "green" : "default"}>
+                {status?.autoBackup ? "运行中" : "未挂载"}
+              </Tag>
+            </div>
+
+            {status?.latestFiles && status.latestFiles.length > 0 && (
+              <div className="p-4 bg-brand-bg">
+                <p className="text-xs text-brand-muted mb-2">最近备份产物</p>
+                <ul className="space-y-1">
+                  {status.latestFiles.map((file) => (
+                    <li
+                      key={file.name}
+                      className="flex items-center justify-between text-xs text-brand-text"
+                    >
+                      <span className="truncate mr-3">{file.name}</span>
+                      <span className="text-brand-muted shrink-0">
+                        {formatBytes(file.size)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[11px] text-brand-muted mt-2">
+                  恢复演练：备份文件位于宿主机 ./backups（数据库 .sql.gz + 媒体 .tar.gz），
+                  请定期在测试环境做一次真实恢复验证。
+                </p>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

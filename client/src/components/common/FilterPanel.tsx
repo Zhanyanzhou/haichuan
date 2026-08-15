@@ -1,15 +1,14 @@
 import { Select, Input, Button, Space } from 'antd';
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
-import type { MaterialType } from '@/types';
 
 interface FilterPanelProps {
   keyword: string;
   onKeywordChange: (value: string) => void;
   materialType?: string;
   onMaterialTypeChange?: (value: string) => void;
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
-  onSortChange?: (sortBy: string, sortOrder: 'asc' | 'desc') => void;
+  /** 排序值（单段，直传服务端 sortBy：updatedAt_desc / price_asc / price_desc / sortOrder） */
+  sortValue?: string;
+  onSortChange?: (value: string) => void;
   onReset?: () => void;
   onSearch?: () => void;
   showMaterial?: boolean;
@@ -28,21 +27,19 @@ const materialOptions = [
 ];
 
 const sortOptions = [
-  { label: '默认排序', value: 'createdAt_desc' },
+  { label: '默认排序', value: 'updatedAt_desc' },
   { label: '价格从低到高', value: 'price_asc' },
   { label: '价格从高到低', value: 'price_desc' },
-  { label: '销量优先', value: 'salesCount_desc' },
+  { label: '运营精选序', value: 'sortOrder' },
 ];
 
 const FilterPanel: React.FC<FilterPanelProps> = ({
   keyword, onKeywordChange,
   materialType, onMaterialTypeChange,
-  sortBy, sortOrder, onSortChange,
+  sortValue, onSortChange,
   onReset, onSearch,
   showMaterial = true, showSort = true,
 }) => {
-  const currentSort = sortBy && sortOrder ? `${sortBy}_${sortOrder}` : undefined;
-
   return (
     <div className="flex flex-wrap items-center gap-3 p-4 bg-white border border-brand-line">
       <Input
@@ -64,11 +61,8 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
       )}
       {showSort && onSortChange && (
         <Select
-          value={currentSort}
-          onChange={(val: string) => {
-            const [by, order] = val.split('_');
-            onSortChange(by, order as 'asc' | 'desc');
-          }}
+          value={sortValue}
+          onChange={onSortChange}
           options={sortOptions}
           className="w-full sm:w-40"
         />

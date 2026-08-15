@@ -77,16 +77,10 @@ export const featuredProductSchema: ModuleInspectorSchema = {
       ],
     },
     {
-      id: "featured-media",
-      title: "媒体",
-      layer: "media",
-      description: "作品图固定 4:5；请在商品管理维护作品图片",
-      fields: [],
-    },
-    {
       id: "featured-layout",
       title: "布局",
       layer: "layout",
+      description: "作品图固定 4:5，请在商品管理维护作品图片",
       fields: [
         {
           key: "layout",

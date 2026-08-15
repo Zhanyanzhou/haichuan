@@ -12,6 +12,7 @@ import { singlePosterSchema } from "./modules/singlePoster";
 import { doublePosterSchema } from "./modules/doublePoster";
 import { fullBleedSchema } from "./modules/fullBleed";
 import { gallerySchema } from "./modules/gallery";
+import { beforeAfterSchema } from "./modules/beforeAfter";
 import { videoSchema } from "./modules/video";
 import { carouselSchema } from "./modules/carousel";
 import { hotspotSchema } from "./modules/hotspot";
@@ -38,6 +39,7 @@ export const MODULE_INSPECTOR_SCHEMAS: Record<
   双图海报: doublePosterSchema,
   全屏出血图: fullBleedSchema,
   作品画廊: gallerySchema,
+  改款对比: beforeAfterSchema,
   文字横幅: textBannerSchema,
   视频区块: videoSchema,
   预约入口: appointmentSchema,

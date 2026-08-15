@@ -115,6 +115,15 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
           value={typeof value === "string" ? value : ""}
           focus={focus}
           onChange={(next) => update({ [def.key]: next })}
+          onFocusChange={
+            def.focusKeys
+              ? (x, y) =>
+                  update({
+                    [def.focusKeys!.x]: x,
+                    [def.focusKeys!.y]: y,
+                  })
+              : undefined
+          }
           inheritBaseValue={inheritBaseValue}
         />
       );

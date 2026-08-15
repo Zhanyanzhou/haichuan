@@ -32,7 +32,6 @@ import {
   BLOCK_PREVIEW_KIND,
   BLOCK_CATEGORIES,
   TEMPLATE_MEDIA_HINT,
-  getCategoryComponents,
   type BlockMeta,
 } from "@/page-builder/config/blockMeta";
 import { pageDocumentApi } from "@/services/api";
@@ -1981,6 +1980,26 @@ function BlockTemplateVisual({ name }: { name: string }) {
         </>
       );
       break;
+    case "before-after":
+      // 改款前后:4:5 对比图 + 滑动分割线手柄
+      content = (
+        <>
+          <PreviewText x={70} y={24} width={160} lines={2} />
+          <PreviewMedia x={18} y={66} width={264} height={250} />
+          <rect
+            x={150}
+            y={66}
+            width={132}
+            height={250}
+            fill={PREVIEW_COLORS.surface}
+          />
+          <rect x={149} y={66} width={2} height={250} fill="#FFFFFF" />
+          <circle cx={150} cy={191} r={13} fill={PREVIEW_COLORS.accent} stroke="#FFFFFF" strokeWidth={2} />
+          <rect x={26} y={76} width={34} height={9} rx={2} fill="rgba(15,13,12,.45)" />
+          <rect x={240} y={76} width={34} height={9} rx={2} fill="rgba(15,13,12,.45)" />
+        </>
+      );
+      break;
     default:
       content = (
         <>
@@ -2187,13 +2206,10 @@ function TemplateCard({
 }
 
 function TemplateLibrary({
-  pageMode,
   onTemplatePointerDragMove,
   onTemplatePointerDragEnd,
   onSaveAsTemplate,
 }: {
-  /** 当前页面视觉模式:brand 页隐藏 Commerce Campaign 母版(轮播/热区/限时) */
-  pageMode: "brand" | "commerce";
   onTemplatePointerDragMove: (
     name: string,
     clientX: number,
@@ -2282,10 +2298,6 @@ function TemplateLibrary({
     () =>
       Object.entries(BLOCK_META)
         .filter(([name, meta]) => {
-          // 品牌页不提供强导购组件(Commerce Campaign 母版)
-          if (pageMode === "brand" && meta.master === "commerce-campaign") {
-            return false;
-          }
           const matchKeyword =
             `${name}${meta.name}${meta.description}${meta.tags.join("")}`.includes(
               keyword.trim(),
@@ -2298,7 +2310,7 @@ function TemplateLibrary({
             BLOCK_CATEGORIES.indexOf(right.category);
           return categoryOrder || left.order - right.order;
         }),
-    [keyword, pageMode],
+    [keyword],
   );
   const groupedEntries = useMemo(
     () =>
@@ -2378,31 +2390,41 @@ function TemplateLibrary({
                         type="button"
                         className="homepage-editor__template-card-main"
                         onClick={() => {
-                          const meta = BLOCK_META[tpl.type];
+                          // 常用方案可能保存于模板收敛之前(图文混排/分割面板/礼赠指南),
+                          // 插入前经 migratePuckData 转为新类型,避免画布出现未注册坏块
+                          const migratedBlock = migratePuckData({
+                            content: [
+                              {
+                                type: tpl.type,
+                                props: {
+                                  ...JSON.parse(JSON.stringify(tpl.props)),
+                                  id: `homepage-block-${Date.now()}-${blockIdSequence++}`,
+                                  locked: false,
+                                },
+                              },
+                            ],
+                          }).content[0] ?? { type: tpl.type, props: {} };
+                          const meta = BLOCK_META[migratedBlock.type];
                           const limit = meta?.limit ?? 5;
                           const usedCount = (appData.content ?? []).filter(
-                            (item: { type: string }) => item.type === tpl.type,
+                            (item: { type: string }) => item.type === migratedBlock.type,
                           ).length;
                           if (usedCount >= limit) {
                             message.info(
-                              `“${getModuleDisplayName(tpl.type)}”最多可添加 ${limit} 个`,
+                              `“${getModuleDisplayName(migratedBlock.type)}”最多可添加 ${limit} 个`,
                             );
                             return;
                           }
-                          const newBlock = {
-                            type: tpl.type,
-                            props: {
-                              ...JSON.parse(JSON.stringify(tpl.props)),
-                              id: `homepage-block-${Date.now()}-${blockIdSequence++}`,
-                              locked: false,
-                            },
-                          };
                           const updated = {
                             ...appData,
-                            content: [...(appData.content ?? []), newBlock],
+                            content: [...(appData.content ?? []), migratedBlock],
                           };
                           dispatch({ type: "setData", data: updated });
-                          message.success(`已添加“${tpl.name}”`);
+                          message.success(
+                            migratedBlock.type !== tpl.type
+                              ? `已添加“${tpl.name}”(已升级为「${getModuleDisplayName(migratedBlock.type)}」)`
+                              : `已添加“${tpl.name}”`,
+                          );
                         }}
                       >
                         <span className="homepage-editor__template-preview-wrap">
@@ -3343,7 +3365,6 @@ function EditorBody({
       className={`homepage-editor__body${isInspecting ? " is-inspecting" : ""}`}
     >
       <TemplateLibrary
-        pageMode={pageMode}
         onTemplatePointerDragMove={handleTemplatePointerDragMove}
         onTemplatePointerDragEnd={handleTemplatePointerDragEnd}
         onSaveAsTemplate={onSaveAsTemplate}
@@ -3527,8 +3548,6 @@ export default function HomepageConfig({
     () =>
       ({
         ...puckConfig,
-        // 品牌页隐藏 Commerce Campaign 母版(轮播/热区/限时);选款中心展示全部
-        categories: getCategoryComponents(getEditorPage(pageKey).mode) as any,
         root: {
           ...puckConfig.root,
           render: ({ children }: { children: ReactNode }) => (

@@ -1,7 +1,5 @@
 import React, {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   lazy,
   useRef,
@@ -10,13 +8,11 @@ import React, {
 } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
-import { usePublishedSlots } from "@/hooks/useContentSlots";
 import { usePagePublishStream } from "@/hooks/usePagePublishStream";
 import { pageDocumentApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { trackPageView } from "@/hooks/useAnalytics";
-import type { PublishedSlots } from "@/types/contentSlot";
 
 // 首页基础内容与装修渲染器分离，只有取得已发布的 Puck 数据时才加载编辑器运行时。
 const PuckDocumentRenderer = lazy(
@@ -31,13 +27,6 @@ const MU = "rgba(37,32,27,0.62)";
 const LT = "#FBF7EF";
 const LM = "rgba(251,247,239,0.72)";
 const PAD = "clamp(20px,4.8vw,76px)";
-
-const SlotCtx = createContext<PublishedSlots>({});
-
-function useSlot(key: string) {
-  const slots = useContext(SlotCtx);
-  return slots[key];
-}
 
 function useInView(threshold = 0.12) {
   const ref = useRef<HTMLElement>(null);
@@ -59,7 +48,7 @@ function useInView(threshold = 0.12) {
   return { ref, visible };
 }
 
-export { LG, SF, DK, TX, MU, LT, LM, PAD, SlotCtx, useInView };
+export { LG, SF, DK, TX, MU, LT, LM, PAD, useInView };
 
 const productFocus = [
   {
@@ -1027,27 +1016,14 @@ function Reveal({
 }
 
 export function HeroFilm() {
-  const slot = useSlot("HOME_HERO");
-  const heroImage = slot?.desktopAsset;
-
   return (
     <section className="vca-hero">
-      {heroImage ? (
-        <img
-          src={heroImage}
-          alt="海川珠宝黄金手镯主视觉"
-          className="vca-hero__image"
-          fetchPriority="high"
-          decoding="sync"
-        />
-      ) : (
-        <div className="vca-hero__stage" aria-hidden="true">
-          <span className="vca-hero__disc" />
-          <img src={productFocus[0].image} alt="" />
-          <img src={productFocus[1].image} alt="" />
-          <img src={productFocus[2].image} alt="" />
-        </div>
-      )}
+      <div className="vca-hero__stage" aria-hidden="true">
+        <span className="vca-hero__disc" />
+        <img src={productFocus[0].image} alt="" />
+        <img src={productFocus[1].image} alt="" />
+        <img src={productFocus[2].image} alt="" />
+      </div>
       <div className="vca-hero__veil" />
       <div className="vca-hero__copy">
         <h1>礼赞东方</h1>
@@ -1372,7 +1348,6 @@ function HomeDocumentError({ onRetry }: { onRetry: () => void }) {
 }
 
 export default function Home() {
-  const { slots } = usePublishedSlots("home");
   const {
     pageDocument,
     loading: documentLoading,
@@ -1426,17 +1401,15 @@ export default function Home() {
   }
 
   return (
-    <SlotCtx.Provider value={slots}>
-      <main style={{ background: LG }}>
-        {pageDocument?.puckData ? (
-          <Suspense fallback={<PuckDocumentLoading />}>
-            <PuckDocumentRenderer data={pageDocument.puckData} />
-          </Suspense>
-        ) : (
-          <FallbackHome />
-        )}
-      </main>
-    </SlotCtx.Provider>
+    <main style={{ background: LG }}>
+      {pageDocument?.puckData ? (
+        <Suspense fallback={<PuckDocumentLoading />}>
+          <PuckDocumentRenderer data={pageDocument.puckData} />
+        </Suspense>
+      ) : (
+        <FallbackHome />
+      )}
+    </main>
   );
 }
 

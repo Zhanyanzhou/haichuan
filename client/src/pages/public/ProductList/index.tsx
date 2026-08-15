@@ -1,13 +1,21 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { motion, useInView } from "framer-motion";
 import { Spin, Button } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { trackPageView } from "@/hooks/useAnalytics";
-import { useProductData } from "@/hooks/useProductData";
+import {
+  useProductData,
+  expandCategoryIds,
+  type ProductQuery,
+  type RealCategory,
+} from "@/hooks/useProductData";
+import { categoryApi } from "@/services/api";
+import { unwrapResponse } from "@/utils/unwrap";
 import type { CatalogProduct } from "@/data/catalogData";
 import { SecureImage } from "@/components/common/SecureImage";
+import FilterPanel from "@/components/common/FilterPanel";
 
 /* ═══════ 视觉常量 ═══════ */
 const V = {
@@ -207,38 +215,154 @@ export default function ProductList() {
     return () => clearPageMeta();
   }, [setPageMeta, clearPageMeta]);
 
-  // 与选款中心/搜索共用同一数据源与映射逻辑，避免重复拉取与字段漂移
-  const { products: allProducts, loading, error, reload } = useProductData();
-  // 解析 ?categoryId= 并按主分类过滤（首页 storyBands 的 /products?categoryId=6 由此激活）
+  // 服务端查询模式：关键词/材质/排序/分类透传后端（替代原 2000 全量 + 本地过滤）
+  // keyword 拆输入态/查询态：输入不触发请求，回车或搜索按钮才应用（防逐键请求风暴）
+  const [filters, setFilters] = useState({ keyword: "", materialType: "", sortBy: "updatedAt_desc" });
+  const [keywordInput, setKeywordInput] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 24;
+  // 累积页结果：触底加载下一页并追加（服务端分页下的无限滚动）
+  const [accum, setAccum] = useState<CatalogProduct[]>([]);
+  const [seenRevision, setSeenRevision] = useState<number | null>(null);
+  const [categories, setCategories] = useState<RealCategory[]>([]);
+
+  // 解析 ?categoryId=：分类树就绪后展开为"该分类+全部后代"ID 集合（首页链接由此激活）
   const [searchParams] = useSearchParams();
-  const categoryId = searchParams.get("categoryId");
-  const products = categoryId
-    ? allProducts.filter((p) => p.primaryCategoryId === categoryId)
-    : allProducts;
-  // P1-35：客户端逐步加载，避免一次渲染上千张卡片（DOM + IntersectionObserver 爆炸）
-  const [visibleCount, setVisibleCount] = useState(24);
+  const categoryIdParam = searchParams.get("categoryId");
+
+  // 分类树独立拉取：query 组装依赖它，不能等商品 hook 返回（否则形成循环）
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await categoryApi.getTree();
+        const cats = unwrapResponse<any[]>(res) || [];
+        if (!cancelled) setCategories(Array.isArray(cats) ? cats : []);
+      } catch {
+        // 分类树拉取失败不阻塞列表（分类筛选不生效但商品可浏览）
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const categoryIds = useMemo(
+    () =>
+      categoryIdParam && categories.length > 0
+        ? expandCategoryIds(categories, Number(categoryIdParam))
+        : "",
+    [categories, categoryIdParam],
+  );
+  // 带 URL 分类参数时先等分类树（null 暂停查询，避免首拉漏过滤）
+  const query = useMemo<ProductQuery | null>(() => {
+    if (categoryIdParam && categories.length === 0) return null;
+    return {
+      keyword: filters.keyword.trim() || undefined,
+      materialType: filters.materialType || undefined,
+      sortBy:
+        filters.sortBy === "updatedAt_desc"
+          ? undefined
+          : (filters.sortBy as NonNullable<ProductQuery["sortBy"]>),
+      ids: categoryIds || undefined,
+      page,
+      pageSize: PAGE_SIZE,
+    };
+  }, [filters, categoryIds, page, categoryIdParam, categories.length]);
+
+  const { products: pageProducts, total, loading, error, reload, revision } =
+    useProductData(query);
+  const waitingCategory = query === null;
+
+  // SSE 商品变更（revision 变化）→ 回第一页重新累积；正常翻页 → 追加去重
+  useEffect(() => {
+    if (seenRevision === null) {
+      setSeenRevision(revision);
+      return;
+    }
+    if (revision !== seenRevision) {
+      setSeenRevision(revision);
+      setPage(1);
+      setAccum([]);
+      return;
+    }
+    if (loading) return;
+    if (page === 1) {
+      setAccum(pageProducts);
+      return;
+    }
+    setAccum((prev) => {
+      const seen = new Set(prev.map((p) => p.id));
+      return [...prev, ...pageProducts.filter((p) => !seen.has(p.id))];
+    });
+  }, [revision, seenRevision, loading, page, pageProducts]);
+
+  // 筛选条件 / URL 分类参数变化 → 回第一页重新累积
+  useEffect(() => {
+    setPage(1);
+    setAccum([]);
+  }, [filters, categoryIdParam]);
+
+  const hasMore = !loading && !error && !waitingCategory && accum.length < total;
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  // P1-35：sentinel 进入视口时加载下一批（逐步加载，避免首屏渲染上千卡片）
+  // 触底加载下一页（服务端分页，替代原 visibleCount 全量切片）
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el) return;
+    if (!el || !hasMore) return;
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting) setVisibleCount((c) => c + 12);
+        if (entries[0]?.isIntersecting) setPage((p) => p + 1);
       },
       { rootMargin: "300px" },
     );
     io.observe(el);
     return () => io.disconnect();
-  }, []);
+  }, [hasMore]);
   useEffect(() => {
     trackPageView();
   }, []);
 
+  const products = accum;
+
   return (
     <div style={{ background: V.bg, overflowX: "hidden", minHeight: "100vh" }}>
       <PageHeader />
+
+      {/* ── 筛选与排序（服务端查询） ── */}
+      <section className="w-full" style={{ background: V.bg }}>
+        <div className={MX} style={{ paddingTop: "clamp(28px,4vh,48px)", ...SX }}>
+          <FilterPanel
+            keyword={keywordInput}
+            onKeywordChange={(value) => {
+              setKeywordInput(value);
+              // allowClear 清空时同步重置已应用的关键词
+              if (value === "" && filters.keyword) {
+                setFilters((f) => ({ ...f, keyword: "" }));
+              }
+            }}
+            onSearch={() => {
+              const applied = keywordInput.trim();
+              setKeywordInput(applied);
+              // 值未变化时保持原引用，避免无谓的列表重置
+              setFilters((f) => (f.keyword === applied ? f : { ...f, keyword: applied }));
+            }}
+            materialType={filters.materialType}
+            onMaterialTypeChange={(value) => setFilters((f) => ({ ...f, materialType: value }))}
+            sortValue={filters.sortBy}
+            onSortChange={(value) => setFilters((f) => ({ ...f, sortBy: value }))}
+            onReset={() => {
+              setKeywordInput("");
+              setFilters({ keyword: "", materialType: "", sortBy: "updatedAt_desc" });
+            }}
+          />
+          {!loading && !error && !waitingCategory && total > 0 && (
+            <p style={{ fontSize: "12px", color: V.sec, marginTop: "12px" }}>
+              共 {total} 件作品
+            </p>
+          )}
+        </div>
+      </section>
 
       {/* ── 产品网格 ── */}
       <section
@@ -246,7 +370,7 @@ export default function ProductList() {
         style={{ paddingBottom: "clamp(100px,12vh,150px)", background: V.bg }}
       >
         <div className={MX} style={SX}>
-          {loading && (
+          {(loading || waitingCategory) && (
             <div
               style={{
                 display: "flex",
@@ -280,7 +404,7 @@ export default function ProductList() {
             </div>
           )}
 
-          {!loading && !error && products.length === 0 && (
+          {!loading && !waitingCategory && !error && products.length === 0 && (
             <div
               style={{
                 textAlign: "center",
@@ -297,7 +421,9 @@ export default function ProductList() {
                 ◆
               </p>
               <p style={{ fontSize: "15px", color: V.sec }}>
-                暂无珠宝作品，敬请期待
+                {filters.keyword || filters.materialType || categoryIdParam
+                  ? "没有符合筛选条件的作品，试试调整关键词或材质"
+                  : "暂无珠宝作品，敬请期待"}
               </p>
             </div>
           )}
@@ -311,17 +437,30 @@ export default function ProductList() {
                 gap: "clamp(32px,4vw,56px) clamp(20px,2.5vw,36px)",
               }}
             >
-              {products.slice(0, visibleCount).map((p, i) => (
+              {products.map((p, i) => (
                 <ProductCardItem key={p.id} product={p} index={i} />
               ))}
             </div>
           )}
-          {products.length > visibleCount && (
-            <div
-              ref={sentinelRef}
-              style={{ height: 1, width: "100%", marginTop: 40 }}
-              aria-hidden
-            />
+          {hasMore && (
+            <>
+              <div
+                ref={sentinelRef}
+                style={{ height: 1, width: "100%", marginTop: 40 }}
+                aria-hidden
+              />
+              {loading && products.length > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    marginTop: 32,
+                  }}
+                >
+                  <Spin />
+                </div>
+              )}
+            </>
           )}
 
           {/* ── 选款中心入口 ── */}

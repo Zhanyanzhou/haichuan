@@ -1496,6 +1496,8 @@
 .homepage-editor__inspector-hint { font-size: 11px; font-weight: 400; color: #9A9288; }
 .homepage-editor__inspector-field > label em { color: #B15645; font-size: 10px; font-style: normal; font-weight: 500; }
 .homepage-editor__inspector-warn { font-size: 11px; color: #B15645; }
+/* 媒体字段内的焦点编辑子区(MediaField) */
+.homepage-editor__inspector-subsection { padding-top: 10px; border-top: 1px solid #EEEAE4; }
 .homepage-editor__item-nav {
   display: flex;
   flex-direction: column;

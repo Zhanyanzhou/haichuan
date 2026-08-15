@@ -17,7 +17,6 @@ import InspectorTopBar from "./InspectorTopBar";
 import InspectorFooterBar from "./InspectorFooterBar";
 import SectionRenderer from "./SectionRenderer";
 import FieldRenderer, { isFieldVisible } from "./FieldRenderer";
-import ContractStatusBanner from "./ContractStatusBanner";
 import { useInspectorModuleEditor } from "./useInspectorModuleEditor";
 import {
   INSPECTOR_LAYER_ORDER,
@@ -49,11 +48,6 @@ export default function SchemaInspectorPanel({
     [editor?.props, editor?.device, viewports.current.width],
   );
 
-  const status = useMemo(
-    () => (schema.evaluate && editor ? schema.evaluate(editor.props) : null),
-    [schema, editor?.props],
-  );
-
   if (!editor || !ctx) return null;
 
   const sections = [...schema.sections]
@@ -63,10 +57,6 @@ export default function SchemaInspectorPanel({
         INSPECTOR_LAYER_ORDER.indexOf(a.layer) -
         INSPECTOR_LAYER_ORDER.indexOf(b.layer),
     );
-
-  const renameModule = (moduleName: string) => {
-    editor.update({ moduleName });
-  };
 
   const removeModule = () => {
     const content = appData.content as Array<{
@@ -126,7 +116,7 @@ export default function SchemaInspectorPanel({
       className="homepage-editor__inspector"
       data-active-device={editor.device}
       data-module-type={editor.moduleType}
-      aria-label="模块属性"
+      aria-label="模块设置"
     >
       <InspectorTopBar
         displayName={schema.displayName}
@@ -146,13 +136,7 @@ export default function SchemaInspectorPanel({
         }
         dirty={editor.dirty}
         onClose={editor.close}
-        onRename={renameModule}
         actions={[
-          {
-            key: "duplicate",
-            label: "复制模块",
-            onClick: () => message.info("复制模块将在后续版本提供"),
-          },
           {
             key: "visibility",
             label:
@@ -168,7 +152,6 @@ export default function SchemaInspectorPanel({
         {schema.purpose ? (
           <p className="homepage-editor__properties-helper">{schema.purpose}</p>
         ) : null}
-        {status ? <ContractStatusBanner status={status} /> : null}
 
         {sections.map((section) => (
           <SectionRenderer

@@ -784,6 +784,53 @@ export function evaluateHotspotContract(
   };
 }
 
+/* ═══════ 改款前后对比契约 ═══════ */
+
+export interface BeforeAfterContractProps {
+  title?: string;
+  subtitle?: string;
+  beforeImage?: string;
+  afterImage?: string;
+  beforeLabel?: string;
+  afterLabel?: string;
+}
+
+export const BEFORE_AFTER_CONTRACT = {
+  type: "改款对比",
+  purpose: "以滑动分割线对比珠宝改款前/后的同比例影像,承载旧物新生的情感叙事。",
+  canvas: {
+    heightMode: "content",
+    maxWidth: 1280,
+    mediaAspectRatio: RATIOS["4:5"],
+  },
+  content: {
+    limits: { title: 24, subtitle: 60, label: 8, altText: 80 },
+  },
+  defaults: { beforeLabel: "改款前", afterLabel: "改款后" },
+} as const;
+
+export function evaluateBeforeAfterContract(
+  props: BeforeAfterContractProps,
+): ModuleContractStatus {
+  const checks = [
+    hasText(props.title),
+    hasText(props.beforeImage),
+    hasText(props.afterImage),
+  ];
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!hasText(props.title)) errors.push("请填写标题");
+  if (!hasText(props.beforeImage)) errors.push("请上传改款前图片");
+  if (!hasText(props.afterImage)) errors.push("请上传改款后图片");
+  if (!hasText(props.subtitle)) warnings.push("建议补充一句改款说明,让对比更有故事感");
+  return {
+    completed: checks.filter(Boolean).length,
+    total: checks.length,
+    errors,
+    warnings,
+  };
+}
+
 /* ═══════ 文字横幅（引导横幅）契约 ═══════ */
 
 export const TEXT_BANNER_CONTRACT = {

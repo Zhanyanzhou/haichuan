@@ -12,6 +12,7 @@ import CarouselBlock from "@/components/blocks/CarouselBlock";
 import CardGridBlock from "@/components/blocks/CardGridBlock";
 import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
 import AsymmetricGalleryBlock from "@/components/blocks/AsymmetricGalleryBlock";
+import BeforeAfterBlock from "@/components/blocks/BeforeAfterBlock";
 import DoublePosterSection from "@/components/blocks/DoublePosterSection";
 import FullBleedBlock from "@/components/blocks/FullBleedBlock";
 import HeroSection from "@/components/blocks/HeroSection";
@@ -50,6 +51,8 @@ const BLOCK_ASSET_FIELDS = [
   "url",
   "videoUrl",
   "backgroundImage",
+  "beforeImage",
+  "afterImage",
 ];
 
 function getLocalUploadUrls(props: Record<string, any>): string[] {
@@ -462,6 +465,8 @@ function renderBlock(block: PuckBlock, index: number) {
       return <TextBannerBlock key={key} module={module} />;
     case "作品画廊":
       return <AsymmetricGalleryBlock key={key} module={module} />;
+    case "改款对比":
+      return <BeforeAfterBlock key={key} module={module} />;
     case "分类卡片":
     case "按场景选购":
     case "礼赠指南":

@@ -88,7 +88,6 @@ export const singlePosterSchema: ModuleInspectorSchema = {
           focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
           placeholder: "上传手机端海报（3:4）",
         }),
-        altTextField(),
       ],
     },
     {
@@ -107,6 +106,15 @@ export const singlePosterSchema: ModuleInspectorSchema = {
           ],
         },
       ],
+    },
+    {
+      id: "single-poster-advanced",
+      title: "高级设置",
+      layer: "style",
+      collapsible: true,
+      defaultCollapsed: true,
+      description: "SEO 与无障碍用，不在页面显示",
+      fields: [altTextField()],
     },
   ],
 };

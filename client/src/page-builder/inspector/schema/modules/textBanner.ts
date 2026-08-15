@@ -7,7 +7,6 @@
  */
 import { TEXT_BANNER_CONTRACT, evaluateTextBannerContract } from "../../../config/blockContracts";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
-import { SPACING_OPTIONS } from "../../../config/layoutFields";
 import { textBannerPuckConfig } from "../../../adapters/textBanner.puck";
 import type { ModuleInspectorSchema } from "../types";
 
@@ -125,12 +124,6 @@ export const textBannerSchema: ModuleInspectorSchema = {
             { label: "居中", value: "center" },
             { label: "左对齐", value: "left" },
           ],
-        },
-        {
-          key: "spacing",
-          label: "上下留白",
-          control: "segmented",
-          options: SPACING_OPTIONS,
         },
       ],
     },

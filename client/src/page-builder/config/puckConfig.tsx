@@ -23,6 +23,8 @@ import { cardGridPuckConfig } from "../adapters/cardGrid.puck";
 import type { CardGridPuckProps } from "../adapters/cardGrid.puck";
 import { galleryPuckConfig } from "../adapters/gallery.puck";
 import type { GalleryPuckProps } from "../adapters/gallery.puck";
+import { beforeAfterPuckConfig } from "../adapters/beforeAfter.puck";
+import type { BeforeAfterPuckProps } from "../adapters/beforeAfter.puck";
 import { carouselPuckConfig } from "../adapters/carousel.puck";
 import type { CarouselPuckProps } from "../adapters/carousel.puck";
 import { videoPuckConfig } from "../adapters/video.puck";
@@ -60,6 +62,7 @@ type MyComponents = {
   全屏出血图: FullBleedPuckProps;
   文字横幅: TextBannerPuckProps;
   作品画廊: GalleryPuckProps;
+  改款对比: BeforeAfterPuckProps;
   产品展示行: ProductRowPuckProps;
   分类卡片: CategoryCardsPuckProps;
   卡片网格: CardGridPuckProps;
@@ -94,6 +97,7 @@ export const puckConfig: Config<MyComponents> = {
     全屏出血图: fullBleedPuckConfig,
     文字横幅: textBannerPuckConfig,
     作品画廊: galleryPuckConfig,
+    改款对比: beforeAfterPuckConfig,
     产品展示行: productRowPuckConfig,
     分类卡片: categoryCardsPuckConfig,
     卡片网格: cardGridPuckConfig,

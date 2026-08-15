@@ -72,6 +72,7 @@ const PartnerApplications = lazy(
   () => import("@/pages/admin/PartnerApplications"),
 );
 const ReviewManage = lazy(() => import("@/pages/admin/ReviewManage"));
+const CustomerManage = lazy(() => import("@/pages/admin/CustomerManage"));
 
 const Loading = () => (
   <div
@@ -466,6 +467,14 @@ function App() {
               element={
                 <AdminPage route="/admin/reviews">
                   <ReviewManage />
+                </AdminPage>
+              }
+            />
+            <Route
+              path="customers"
+              element={
+                <AdminPage route="/admin/customers">
+                  <CustomerManage />
                 </AdminPage>
               }
             />

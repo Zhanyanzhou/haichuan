@@ -31,6 +31,7 @@ import type { StoreInfoPuckProps } from "../adapters/storeInfo.puck";
 import type { FeaturedProductPuckProps } from "../adapters/featuredProduct.puck";
 import type { LookbookPuckProps } from "../adapters/lookbook.puck";
 import type { GalleryPuckProps } from "../adapters/gallery.puck";
+import type { BeforeAfterPuckProps } from "../adapters/beforeAfter.puck";
 import type { LimitedOfferPuckProps } from "../adapters/limitedOffer.puck";
 import type { TestimonialPuckProps } from "../adapters/testimonial.puck";
 
@@ -57,6 +58,7 @@ export type PuckProps =
   | { type: "单品焦点推荐"; props: FeaturedProductPuckProps }
   | { type: "佩戴灵感"; props: LookbookPuckProps }
   | { type: "作品画廊"; props: GalleryPuckProps }
+  | { type: "改款对比"; props: BeforeAfterPuckProps }
   | { type: "限时活动"; props: LimitedOfferPuckProps }
   | { type: "真实评价与实拍"; props: TestimonialPuckProps }
   | { type: "按场景选购"; props: CategoryCardsPuckProps }
@@ -316,6 +318,29 @@ export function convertPuckProps(
         },
         {},
         { bgColor: props.bgColor || "#F7F4EE" },
+      );
+
+    case "改款对比":
+      return baseModule(
+        "beforeAfter",
+        {
+          title: props.title,
+          subtitle: props.subtitle,
+          beforeImage: props.beforeImage,
+          afterImage: props.afterImage,
+          beforeLabel: props.beforeLabel || "改款前",
+          afterLabel: props.afterLabel || "改款后",
+          beforeAltText: props.beforeAltText,
+          afterAltText: props.afterAltText,
+        },
+        {},
+        {
+          bgColor: props.bgColor || "#F7F4EE",
+          beforeFocusX: props.beforeFocusX ?? 50,
+          beforeFocusY: props.beforeFocusY ?? 50,
+          afterFocusX: props.afterFocusX ?? 50,
+          afterFocusY: props.afterFocusY ?? 50,
+        },
       );
 
     case "分类卡片":

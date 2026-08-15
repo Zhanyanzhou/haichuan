@@ -79,13 +79,6 @@ export const gallerySchema: ModuleInspectorSchema = {
       ],
     },
     {
-      id: "gallery-layout",
-      title: "布局",
-      layer: "layout",
-      description: "桌面自动按「大图→小图→小图→宽图」节奏排布；手机重排为大图与双列交替",
-      fields: [],
-    },
-    {
       id: "gallery-style",
       title: "样式",
       layer: "style",

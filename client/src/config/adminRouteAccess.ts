@@ -83,6 +83,8 @@ const ROUTE_RULES: RouteRule[] = [
   // 客服域
   { prefix: "/admin/leads", roles: CUSTOMER_SERVICE },
   { prefix: "/admin/partner-applications", roles: CUSTOMER_SERVICE },
+  // 客户档案：客服可查看（跟进客户），写操作由后端 @Roles 限定（与服务端 customers.controller 同口径）
+  { prefix: "/admin/customers", roles: CUSTOMER_SERVICE },
 ];
 
 export function rolesForAdminRoute(

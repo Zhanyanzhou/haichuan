@@ -13,7 +13,6 @@ interface InspectorTopBarProps {
   deviceLabel: string;
   dirty: boolean;
   onClose: () => void;
-  onRename: (moduleName: string) => void;
   actions: EditorAction[];
 }
 
@@ -23,24 +22,17 @@ export default function InspectorTopBar({
   deviceLabel,
   dirty,
   onClose,
-  onRename,
   actions,
 }: InspectorTopBarProps) {
-  const menuItems = [
-    {
-      key: "rename",
-      label: "重命名模块",
-      onClick: () => {
-        const next = window.prompt("模块名称", moduleName || displayName);
-        if (next !== null && next.trim()) onRename(next.trim());
-      },
-    },
-    ...actions.map(({ onClick, ...action }) => ({ ...action, onClick })),
-  ];
+  // 重命名统一走「内容」区的图层名称字段,不再提供 prompt 弹窗入口
+  const menuItems = actions.map(({ onClick, ...action }) => ({ ...action, onClick }));
 
   return (
     <header className="homepage-editor__inspector-header">
-      <span className="homepage-editor__inspector-eyebrow">{displayName}</span>
+      {/* 眉标=模块类型名;仅当运营改过名(与类型名不同)时显示,避免默认态上下两行重复同一文本 */}
+      {moduleName && moduleName !== displayName ? (
+        <span className="homepage-editor__inspector-eyebrow">{displayName}</span>
+      ) : null}
       <strong className="homepage-editor__inspector-title">
         {moduleName || displayName}
       </strong>

@@ -71,7 +71,6 @@ export const fullBleedSchema: ModuleInspectorSchema = {
           focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
           placeholder: "上传手机端海报（4:5）",
         }),
-        altTextField(FULL_BLEED_CONTRACT.content.limits.altText),
       ],
     },
     {
@@ -101,6 +100,15 @@ export const fullBleedSchema: ModuleInspectorSchema = {
           ],
         },
       ],
+    },
+    {
+      id: "full-bleed-advanced",
+      title: "高级设置",
+      layer: "style",
+      collapsible: true,
+      defaultCollapsed: true,
+      description: "SEO 与无障碍用，不在页面显示",
+      fields: [altTextField(FULL_BLEED_CONTRACT.content.limits.altText)],
     },
   ],
 };

@@ -21,6 +21,7 @@ export const productRowSchema: ModuleInspectorSchema = {
       id: "product-row-content",
       title: "内容",
       layer: "content",
+      description: "商品图统一 4:5，请在商品管理维护作品图片",
       fields: [
         moduleNameField("商品精选"),
         {
@@ -39,13 +40,6 @@ export const productRowSchema: ModuleInspectorSchema = {
           hint: "留空不显示",
         },
       ],
-    },
-    {
-      id: "product-row-media",
-      title: "媒体",
-      layer: "media",
-      description: "商品图统一 4:5；请在商品管理维护作品图片",
-      fields: [],
     },
     {
       id: "product-row-layout",

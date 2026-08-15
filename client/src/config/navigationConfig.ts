@@ -421,6 +421,19 @@ export const navigationConfig: NavDomain[] = [
     section: "customers",
     groups: [
       {
+        key: "profiles",
+        label: "客户档案",
+        collapsible: false,
+        defaultOpen: true,
+        items: [
+          {
+            key: "customer-profiles",
+            label: "客户管理",
+            route: "/admin/customers",
+          },
+        ],
+      },
+      {
         key: "leads",
         label: "客户线索",
         collapsible: false,

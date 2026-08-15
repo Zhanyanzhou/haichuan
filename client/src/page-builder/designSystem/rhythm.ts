@@ -55,7 +55,7 @@ export function analyzePageRhythm(
     if (block?.type && !VIRTUAL_TYPES.has(block.type)) indexMap.push(index);
   });
 
-  /* 1. 相邻同母版 / 模式不匹配 */
+  /* 1. 相邻同母版构图重复(仅排版建议,不做模式限制——模板全页面通用) */
   blocks.forEach((block, i) => {
     const meta = BLOCK_META[block.type!];
     if (!meta) return;
@@ -65,13 +65,6 @@ export function analyzePageRhythm(
         level: "warn",
         message: `第 ${indexMap[i - 1] + 1}、${indexMap[i] + 1} 个区块连续使用「${prev.master}」母版,构图重复;建议用留白章节或画廊调节节奏。`,
         blockIndexes: [indexMap[i - 1], indexMap[i]],
-      });
-    }
-    if (meta.mode !== pageMode) {
-      hints.push({
-        level: "warn",
-        message: `第 ${indexMap[i] + 1} 个区块「${meta.name}」属于${meta.mode === "commerce" ? "电商" : "品牌"}模式,与当前${pageMode === "commerce" ? "电商" : "品牌"}页面的视觉定位不一致。`,
-        blockIndexes: [indexMap[i]],
       });
     }
   });

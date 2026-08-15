@@ -1,11 +1,13 @@
 /**
  * MediaField.tsx — 媒体字段控件。
  * 组合 MediaPickerField（上传/URL/预览/规格）与可选的 ImageStatus 紧凑检查条；
+ * 配置 focusKeys 且已有图片时内嵌 FocusPicker 可视化焦点拖拽(回写双端焦点键);
  * mobile 档配置 inheritFrom 时渲染 DeviceOverrideBadge（空值即继承模型）。
  */
 import { useEffect, useState } from "react";
 import MediaPickerField from "../../fields/MediaPickerField";
 import ImageStatus from "../ImageStatus";
+import FocusPicker from "../FocusPicker";
 import DeviceOverrideBadge from "./DeviceOverrideBadge";
 import type { MediaFieldDef } from "../schema/types";
 
@@ -15,6 +17,8 @@ interface MediaFieldProps {
   focus?: { x: number; y: number };
   device: "desktop" | "mobile" | "shared";
   onChange: (value: string) => void;
+  /** 焦点拖拽回调(focusKeys 配置时由 FieldRenderer 传入,写回对应焦点键) */
+  onFocusChange?: (x: number, y: number) => void;
   /** 继承来源键的当前值（inheritFrom 配置时由 FieldRenderer 传入） */
   inheritBaseValue?: string;
 }
@@ -50,14 +54,17 @@ export default function MediaField({
   focus,
   device,
   onChange,
+  onFocusChange,
   inheritBaseValue,
 }: MediaFieldProps) {
   const natural = useImageNaturalSize(value);
+  const [focusOpen, setFocusOpen] = useState(false);
   const format =
     (value || "").match(/\.(webp|avif|jpe?g|png|gif)/i)?.[1]?.toLowerCase() ||
     "";
   const showOverrideBadge = Boolean(def.inheritFrom && device === "mobile");
   const overridden = showOverrideBadge && Boolean(value && value.trim());
+  const canPickFocus = Boolean(def.focusKeys && onFocusChange && value && value.trim());
   return (
     <div className="homepage-editor__inspector-field">
       <label>
@@ -96,6 +103,51 @@ export default function MediaField({
           }
           previewFocus={focus}
         />
+      ) : null}
+      {canPickFocus ? (
+        <div
+          className="homepage-editor__inspector-subsection"
+          style={{ marginTop: 10 }}
+        >
+          <button
+            type="button"
+            onClick={() => setFocusOpen((open) => !open)}
+            style={{
+              border: 0,
+              padding: 0,
+              background: "transparent",
+              color: "#8E6A35",
+              fontSize: 12,
+              letterSpacing: "0.04em",
+              cursor: "pointer",
+            }}
+          >
+            {focusOpen ? "收起" : "调整"}裁切焦点
+            {focus ? `（当前 ${Math.round(focus.x)}% × ${Math.round(focus.y)}%）` : ""}
+            <span aria-hidden>{focusOpen ? " ▴" : " ▾"}</span>
+          </button>
+          {focusOpen ? (
+            <>
+              <p
+                className="homepage-editor__inspector-hint"
+                style={{ margin: "6px 0 8px" }}
+              >
+                拖拽圆点或用九宫格快速定位
+                {device === "mobile" ? "；手机端与桌面端独立保存" : ""}
+              </p>
+              <FocusPicker
+                src={value}
+                focusX={focus?.x ?? 50}
+                focusY={focus?.y ?? 50}
+                aspectRatio={
+                  def.previewAspectRatio ??
+                  `${def.spec.width} / ${def.spec.height}`
+                }
+                onChange={onFocusChange!}
+              />
+            </>
+          ) : null}
+        </div>
       ) : null}
       {def.showSpecCheck && natural.width && (!showOverrideBadge || overridden) ? (
         <ImageStatus

@@ -830,6 +830,15 @@ export const customerApi = {
   },
 };
 
+// ===== 后台客户档案 API（只读运营视图，员工令牌由全局拦截器注入）=====
+export const customerAdminApi = {
+  /** 客户列表：分页 + 关键词（手机/姓名/邮箱）+ 状态筛选 */
+  list: (params: { page?: number; pageSize?: number; keyword?: string; status?: string }) =>
+    api.get("/customers/admin", { params }),
+  /** 客户 360° 详情：档案 + 消费聚合 + 最近订单 + 收藏 + 地址数 */
+  detail: (id: number) => api.get(`/customers/admin/${id}`),
+};
+
 // ===== Recommendations API（规则推荐，登录客户）=====
 export const recommendationApi = {
   getHot: (limit = 12) =>
