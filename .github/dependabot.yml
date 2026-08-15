@@ -1,0 +1,51 @@
+# 依赖供应链自动更新（P1：OR 盘点 2026-08-15）
+# npm 三处 lockfile（根目录 / server / client）+ GitHub Actions + Docker 镜像。
+# 安全更新自动开 PR，非安全更新集中周批，避免 PR 洪水。
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      # 安全更新即时单独提 PR；常规小版本按组聚合减少噪音
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      # 重大版本升级一律人工评估（技术栈锁定见 docs/PROJECT_GUARDRAILS.md §3）
+      - update-types: ["major"]
+
+  - package-ecosystem: "npm"
+    directory: "/server"
+    schedule:
+      interval: "weekly"
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - update-types: ["major"]
+
+  - package-ecosystem: "npm"
+    directory: "/client"
+    schedule:
+      interval: "weekly"
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - update-types: ["major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/server"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/client"
+    schedule:
+      interval: "weekly"
