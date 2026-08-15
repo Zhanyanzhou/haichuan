@@ -9,12 +9,13 @@
 
 ## 0. 职责分工与优先级（不建第二套规则）
 
-| 文件 | 职责 |
-| --- | --- |
-| `PROJECT_RULES.md`（本文件） | 现在必须遵守的技术硬规则 |
-| `docs/DECISIONS.md` | 已批准的架构决定及原因；过时标记；【待决策】事项 |
-| `WORKFLOW.md` | AI 应怎样工作（执行流程） |
-| `AGENTS.md` / `docs/PROJECT_GUARDRAILS.md` / `docs/AI_COLLABORATION_STANDARD.md` | 安全、工作区、项目边界、任务分级、交付格式 |
+| 文件                                                                                | 职责                                             |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `PROJECT_RULES.md`（本文件）                                                        | 现在必须遵守的技术硬规则                         |
+| `docs/DECISIONS.md`                                                                 | 已批准的架构决定及原因；过时标记；【待决策】事项 |
+| `WORKFLOW.md`                                                                       | AI 应怎样工作（执行流程）                        |
+| `AGENTS.md` / `docs/PROJECT_GUARDRAILS.md` / `docs/AI_COLLABORATION_STANDARD.md`    | 安全、工作区、项目边界、任务分级、交付格式       |
+| `.agents/skills/critical-review/SKILL.md` + `docs/AI_COLLABORATION_STANDARD.md` §13 | 论证与事实标准、重大决策法庭审校                 |
 
 冲突优先级：`AGENTS.md` → `docs/PROJECT_GUARDRAILS.md` → **本文件** → 当前代码/类型/配置/工作区变更（运行事实）→ 其他 `docs/*` → 单次任务需求。
 
@@ -22,18 +23,18 @@
 
 ## 1. 单一事实来源（禁止建第二套）
 
-| 事实 | 唯一来源 |
-| --- | --- |
-| 数据库模型 | `server/prisma/schema.prisma` |
-| 后台用户 / 前台客户 | `User` 模型 / `Customer` 模型（见 §2） |
-| 商品唯一标识 | `Product.code`（`@unique`），对外不得用 id |
-| 商品图选取 | `client/src/utils/productImage.ts`（listing→primary→首张 FRONT→首张→placeholder） |
-| 统一响应包装 | 后端全局 `TransformInterceptor`（`{code,data,message,timestamp}`） |
-| 响应解包 | `client/src/utils/unwrap.ts`（`unwrapResponse`/`unwrapList`） |
-| 前端 HTTP 入口 | `client/src/services/api.ts`（按模块 `xxxApi` 命名空间） |
-| 前台页面装修 | Puck `PageDocument` 体系（见 §7） |
-| 配置加载 | `@nestjs/config` `ConfigModule.forRoot({ isGlobal: true })` |
-| 材质码到中文 | `client/src/utils/material.ts`（`getMaterialLabel`） |
+| 事实                | 唯一来源                                                                          |
+| ------------------- | --------------------------------------------------------------------------------- |
+| 数据库模型          | `server/prisma/schema.prisma`                                                     |
+| 后台用户 / 前台客户 | `User` 模型 / `Customer` 模型（见 §2）                                            |
+| 商品唯一标识        | `Product.code`（`@unique`），对外不得用 id                                        |
+| 商品图选取          | `client/src/utils/productImage.ts`（listing→primary→首张 FRONT→首张→placeholder） |
+| 统一响应包装        | 后端全局 `TransformInterceptor`（`{code,data,message,timestamp}`）                |
+| 响应解包            | `client/src/utils/unwrap.ts`（`unwrapResponse`/`unwrapList`）                     |
+| 前端 HTTP 入口      | `client/src/services/api.ts`（按模块 `xxxApi` 命名空间）                          |
+| 前台页面装修        | Puck `PageDocument` 体系（见 §7）                                                 |
+| 配置加载            | `@nestjs/config` `ConfigModule.forRoot({ isGlobal: true })`                       |
+| 材质码到中文        | `client/src/utils/material.ts`（`getMaterialLabel`）                              |
 
 **禁止**为上述任一新建第二套来源（第二个 axios 实例、第二套响应包装、第二套商品图选取、第二套装修体系、第二套库存来源、第二套权限表等）。
 
@@ -146,15 +147,11 @@
 
 ## 13. 修改后必须验证（硬规则）
 
-项目**无自动化测试**（无 jest/vitest、无 `test` 脚本、无用例）。最低验证按改动类型（验证类型划分另见 `docs/AI_COLLABORATION_STANDARD.md` §9）：
+项目**无 jest/vitest 单测框架**，但存在契约/状态机脚本 `scripts/verify-*.mjs`
+（`npm run test`、`npm run test:trade`、`npm run test:selection-inquiry` 等）。
+关键域（交易、页面构建器、选款咨询）改动后**必须运行对应契约脚本**。
 
-| 改动 | 最低验证 |
-| --- | --- |
-| 前端组件/页面/类型 | `cd client && npx tsc --noEmit -p tsconfig.json`；视觉改动增实际页面断点（1440/1024/768/390）验收 |
-| 后端模块/接口 | `cd server && npm run build`（`nest build`）；验证成功/失败/边界路径 |
-| 前后端联动 | 前后端均构建 + 真实接口联调，明确 Mock/真实状态 |
-| Prisma Schema | `npx prisma validate`；Migration 仅获批后执行 |
-| 文案/静态内容 | 页面核对、链接核对、移动端显示 |
+最低验证类型与标准见 `docs/AI_COLLABORATION_STANDARD.md` §9（单一事实来源）：
 
 - 视觉改动**构建成功 ≠ 完成**，必须实际页面或截图验收。
 - 接口改动**必须同步核对** `services/api.ts`、调用页面、后端 Controller/Service/DTO。

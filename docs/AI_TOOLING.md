@@ -6,30 +6,33 @@
 
 ## 1. 三个 AI 工具与模型
 
-| 工具 | 底层模型 | 定位 | 工具面策略 |
-| --- | --- | --- | --- |
-| VS Code Copilot | DeepSeek | 编辑器内快速问答、补全、小改动 | 适中（5 个 MCP） |
-| Claude Code | 智谱 GLM-5.2（ccswitch 切换） | 日常编码、轻量工具链 | 精简（2 个 MCP） |
-| Codex（正版） | OpenAI | 复杂重构、多文件编辑、git/CI 执行 | 全配（3 个 MCP） |
+| 工具            | 底层模型                      | 定位                              | 工具面策略       |
+| --------------- | ----------------------------- | --------------------------------- | ---------------- |
+| VS Code Copilot | DeepSeek                      | 编辑器内快速问答、补全、小改动    | 适中（5 个 MCP） |
+| Claude Code     | 智谱 GLM-5.2（ccswitch 切换） | 日常编码、轻量工具链              | 精简（2 个 MCP） |
+| Codex（正版）   | OpenAI                        | 复杂重构、多文件编辑、git/CI 执行 | 全配（3 个 MCP） |
 
 分工原则：**按模型能力定工具面**——强模型（Codex）放开，中模型（DeepSeek）适中，弱模型（GLM）精简。GLM 的工具调用与多步 agent 能力弱于前两者，故 Claude Code 的 MCP 收敛为 2 个、子代理执行质量有限，复杂任务建议交给 Codex。
 
 ## 2. 各工具配置位置
 
 ### Copilot（DeepSeek）
+
 - 指令：`.github/copilot-instructions.md`（Copilot 适配）+ `AGENTS.md` + `PROJECT_RULES.md` + `WORKFLOW.md`（三工具共用）
-- 技能：`.agents/skills/`（4 个，唯一权威；`.github/skills/` 已废弃删除）
+- 技能：`.agents/skills/`（5 个，唯一权威；`.github/skills/` 已废弃删除）
 - MCP：`.vscode/mcp.json`（5 个：github / playwright / chrome-devtools / context7 / prisma）
 - 提示词模板：`.github/prompts/`（developer / planner / project-manager / reviewer）
 
 ### Claude Code（智谱 GLM-5.2）
+
 - 指令：`CLAUDE.md`（Claude Code 适配）+ `AGENTS.md` + `PROJECT_RULES.md` + `WORKFLOW.md`
-- 技能：`.claude/skills/`（符号链接 → `.agents/skills/`，4 个，不入库、自动同步）
+- 技能：`.claude/skills/`（符号链接 → `.agents/skills/`，5 个，不入库、自动同步）
 - 子代理：`.claude/agents/`（code-reviewer / contract-verifier / frontend-visual-reviewer，入库共享）
 - MCP：`.mcp.json`（2 个：playwright / context7）
 - 权限白名单：`.claude/settings.local.json`
 
 ### Codex（正版 OpenAI）
+
 - 指令：`AGENTS.md` + `PROJECT_RULES.md` + `WORKFLOW.md`
 - MCP：`.codex/config.toml`（3 个：playwright / chrome-devtools / context7）
 - 说明：Codex 无独立的技能/子代理目录机制，靠 `AGENTS.md` 与 MCP；git 写操作由 Codex 执行（见交接实践）。

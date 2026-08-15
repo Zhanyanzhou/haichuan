@@ -24,18 +24,19 @@
 
 ## 按任务读取 docs
 
-| 任务类型         | 读取文件                       |
-| ---------------- | ------------------------------ |
-| 项目概况/技术栈  | `docs/PROJECT.md`              |
-| 了解当前实现状态 | `docs/CURRENT_STATE.md`        |
-| 系统架构/数据流  | `docs/ARCHITECTURE.md`         |
-| 服务端模块       | `docs/MODULES.md`              |
-| 公共组件         | `docs/COMPONENTS.md`           |
-| API/数据库       | `docs/DATA_AND_API.md`         |
-| 设计/样式        | `docs/UI_GUIDE.md`             |
-| 技术决策         | `docs/DECISIONS.md`            |
-| 开发流程         | `docs/DEVELOPMENT_WORKFLOW.md` |
+| 任务类型          | 读取文件                       |
+| ----------------- | ------------------------------ |
+| 项目概况/技术栈   | `docs/PROJECT.md`              |
+| 了解当前实现状态  | `docs/CURRENT_STATE.md`        |
+| 系统架构/数据流   | `docs/ARCHITECTURE.md`         |
+| 服务端模块        | `docs/MODULES.md`              |
+| 公共组件          | `docs/COMPONENTS.md`           |
+| API/数据库        | `docs/DATA_AND_API.md`         |
+| 设计/样式         | `docs/UI_GUIDE.md`             |
+| 技术决策          | `docs/DECISIONS.md`            |
+| 开发流程          | `docs/DEVELOPMENT_WORKFLOW.md` |
 | AI 工具与模型分工 | `docs/AI_TOOLING.md`           |
+| 重大问题论证/法庭审校 | `critical-review` 技能 + `AI_COLLABORATION_STANDARD.md` 第 13 节 |
 
 > 按需读取，不要一次把所有 docs 加入上下文。
 
