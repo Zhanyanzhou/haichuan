@@ -171,15 +171,15 @@ export default function HeroSection({ module, editMode }: Props) {
         {subtitle ? (
         <p
           data-editor-field="subtitle"
-          className="text-[10px] md:text-[11px] tracking-[.2em] uppercase mb-4 font-sans"
+          className="hc-hero__reveal text-[10px] md:text-[11px] tracking-[.2em] uppercase mb-4 font-sans"
           style={{
             color: "rgba(255,255,255,0.6)",
             fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
-            opacity: rm ? 1 : 0,
-            transform: rm ? "none" : "translateY(12px)",
+            opacity: 1,
+            transform: "none",
             animation: rm
               ? "none"
-              : "fadeUp 0.7s 0.18s cubic-bezier(0.22,1,0.36,1) forwards",
+              : "hcHeroFadeUp 0.7s 0.18s cubic-bezier(0.22,1,0.36,1) both",
           }}
         >
           {subtitle}
@@ -188,16 +188,16 @@ export default function HeroSection({ module, editMode }: Props) {
         {title ? (
         <h1
           data-editor-field="title"
-          className="leading-[1.1] tracking-[.02em] mb-6 whitespace-pre-line"
+          className="hc-hero__reveal leading-[1.1] tracking-[.02em] mb-6 whitespace-pre-line"
           style={{
             fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
             fontSize: "var(--hc-type-hero, clamp(40px,5vw,68px))",
             color: LT,
-            opacity: rm ? 1 : 0,
-            transform: rm ? "none" : "translateY(12px)",
+            opacity: 1,
+            transform: "none",
             animation: rm
               ? "none"
-              : "fadeUp 0.7s 0.28s cubic-bezier(0.22,1,0.36,1) forwards",
+              : "hcHeroFadeUp 0.7s 0.28s cubic-bezier(0.22,1,0.36,1) both",
           }}
         >
           {title}
@@ -219,15 +219,15 @@ export default function HeroSection({ module, editMode }: Props) {
             <Link
               data-editor-field="actionText linkUrl productId"
               to={targetUrl}
-              className="inline-flex items-center gap-2 text-[10px] md:text-[11px] tracking-[.14em] uppercase transition-opacity duration-300 hover:opacity-60"
+              className="hc-hero__reveal inline-flex items-center gap-2 text-[10px] md:text-[11px] tracking-[.14em] uppercase transition-opacity duration-300 hover:opacity-60"
               style={{
                 color: "rgba(255,255,255,0.7)",
                 fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
-                opacity: rm ? 1 : 0,
-                transform: rm ? "none" : "translateY(12px)",
+                opacity: 1,
+                transform: "none",
                 animation: rm
                   ? "none"
-                  : "fadeUp 0.7s 0.38s cubic-bezier(0.22,1,0.36,1) forwards",
+                  : "hcHeroFadeUp 0.7s 0.38s cubic-bezier(0.22,1,0.36,1) both",
               }}
             >
               {actionText} <span>→</span>
@@ -241,9 +241,20 @@ export default function HeroSection({ module, editMode }: Props) {
         style={{ background: "rgba(255,255,255,0.5)" }}
       />
       <style>{`
+        @keyframes hcHeroFadeUp {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
         .hc-hero__image { object-position: var(--hc-hero-focus-desktop); }
         @media ${RESPONSIVE_CANVAS.mobileMediaQuery} {
           .hc-hero__image { object-position: var(--hc-hero-focus-mobile); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .hc-hero__reveal {
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+          }
         }
       `}</style>
     </section>
