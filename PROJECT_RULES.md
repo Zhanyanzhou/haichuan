@@ -1,9 +1,9 @@
 # 海川珠宝 — 项目技术硬规则（PROJECT_RULES）
 
-> 本文件规定**现在必须遵守什么**（技术实现硬规则）。所有 AI（Claude、Codex、DeepSeek、智谱等）必须遵守。
+> 本文件规定**现在必须遵守什么**（技术实现硬规则），不按模型或工具分别建立规则。
 > 架构决策与【待决策】事项见 `docs/DECISIONS.md`；AI 执行流程见 `WORKFLOW.md`。
-> 安全、工作区、敏感信息、任务分级、交付格式等上层规则见 `AGENTS.md`、`docs/PROJECT_GUARDRAILS.md`、`docs/AI_COLLABORATION_STANDARD.md`，本文件不重复。
-> 最近核对：2026-08-12（基于当前工作区代码）。
+> 安全、工作区、敏感信息与审批见 `AGENTS.md`；项目与品牌边界见 `docs/PROJECT_GUARDRAILS.md`；跨工具交付契约见 `docs/AI_COLLABORATION_STANDARD.md`。
+> 最近核对：2026-08-17（本轮核对治理优先级、鉴权/角色、店铺装修与视觉规则；其他技术事实仍须按当前代码逐项复核）。
 
 ---
 
@@ -14,10 +14,16 @@
 | `PROJECT_RULES.md`（本文件）                                                        | 现在必须遵守的技术硬规则                         |
 | `docs/DECISIONS.md`                                                                 | 已批准的架构决定及原因；过时标记；【待决策】事项 |
 | `WORKFLOW.md`                                                                       | AI 应怎样工作（执行流程）                        |
-| `AGENTS.md` / `docs/PROJECT_GUARDRAILS.md` / `docs/AI_COLLABORATION_STANDARD.md`    | 安全、工作区、项目边界、任务分级、交付格式       |
+| `AGENTS.md`                                                                         | 安全、权限、工作区、敏感信息与审批底线           |
+| `docs/PROJECT_GUARDRAILS.md`                                                        | 项目定位、品牌原则与技术边界                     |
+| `docs/AI_COLLABORATION_STANDARD.md`                                                 | 跨工具任务分级、验证矩阵与交付兼容契约           |
+| `docs/UI_GUIDE.md`                                                                  | 客户前台品牌视觉与体验的唯一详细规范             |
+| `docs/CONTENT_TEMPLATE_STANDARD.md`                                                  | 23 个内容模板的设计、编辑、合同与验收标准         |
 | `.agents/skills/critical-review/SKILL.md` + `docs/AI_COLLABORATION_STANDARD.md` §13 | 论证与事实标准、重大决策法庭审校                 |
 
-冲突优先级：`AGENTS.md` → `docs/PROJECT_GUARDRAILS.md` → **本文件** → 当前代码/类型/配置/工作区变更（运行事实）→ 其他 `docs/*` → 单次任务需求。
+权限与行为冲突时先遵守 `AGENTS.md`，再核对用户本次明确授权；仍与项目基线、技术规则或已批准决策冲突时必须报告，不得自行挑选。`docs/UI_GUIDE.md` 只在客户前台品牌与体验范围内具有详细解释权，不能覆盖安全、事实真实性或业务授权。
+
+事实判断时：实际运行结果 → 当前代码/类型/schema/配置 → 已核对的当前状态文档 → 历史记录。规则决定“允许怎样做”，不能把过时描述变成代码事实；发现冲突先报告，不凭任一旧文档改写当前实现。
 
 ---
 
@@ -42,11 +48,12 @@
 
 ## 2. User / Customer 边界（硬规则）
 
-- **User** = 后台员工，角色 `SUPER_ADMIN | ADMIN | EDITOR | CUSTOMER_SERVICE | WAREHOUSE`。
+- **User** = 后台员工，角色 `SUPER_ADMIN | ADMIN | EDITOR | CUSTOMER_SERVICE | WAREHOUSE | SALES_CONSULTANT | FINANCE`。
 - **Customer** = 前台客户，`phone` 唯一，`passwordHash` 可空（兼容游客）。
 - 两者是**两套独立体系**，代码与文档中不得用"用户"模糊指代。
 - 后台/admin 接口用 `JwtAuthGuard` + `JwtStrategy`；前台/customer 接口用 `CustomerAuthGuard` / `OptionalCustomerAuthGuard`。两域共用 `JWT_SECRET`，靠 payload `type` 字段区分——**不得移除** `type` 校验。
-- **新增 Controller/方法必须显式 `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles(...)`**。`JwtAuthGuard` **不是全局 Guard**（全局只有 `ThrottlerGuard`）；漏写 = 默认**无鉴权暴露**。
+- `JwtAuthGuard`、`RolesGuard`、`ThrottlerGuard` 均为全局 Guard：接口默认要求后台员工身份；匿名接口必须显式 `@Public()`，客户接口必须在 `@Public()` 后叠加 `CustomerAuthGuard` / `OptionalCustomerAuthGuard` 等客户域守卫。
+- 后台受限能力必须显式 `@Roles(...)`。方法或 Controller 上重复声明 `@UseGuards(JwtAuthGuard, RolesGuard)` 可作为纵深防御与可读性约定，但不得据此误判全局守卫不存在。
 - 权限只认 `@Roles` 角色白名单；**前端隐藏菜单/按钮 ≠ 服务端拒绝调用**。需要强制细粒度权限时必须同时在后端补守卫。
 
 ---
@@ -82,17 +89,25 @@
 - 响应解包**必须**走 `utils/unwrap.ts`；**禁止**在页面组件里重复 `response.data.data` 逻辑。
 - 前端类型是**手写**（`client/src/types/`，非 Prisma 生成）；改 schema 时必须同步前端类型。
 - **禁止**新增无类型 `any`（eslint 已关 `no-explicit-any`，不能依赖 lint 兜底）。
-- 全局状态用 Zustand；**注意** `store/permissionStore.ts`、`store/featureFlags.ts` 不是 store（纯模块）。
+- 全局状态沿用 Zustand；具体 Store、开关与权限导出属于易变化事实，修改前以当前代码和 `docs/CURRENT_STATE.md` 复核，禁止只凭文件名或旧文档推断。
 - 异步界面必须处理 loading / empty / error 三态；危险操作（删除/发布/上下架）二次确认；重点页检查 1440/1024/768/390 断点。
+- 客户前台必须遵守 `docs/UI_GUIDE.md`，采用“排版驱动 + 摄影驱动 + 极简 + 艺术指导”的高级珠宝品牌方向；品牌视觉不得做成通用商城、促销会场、SaaS 模板或廉价仿奢风格。
+- 视觉数值、色盘、字体、图片、组件、动效、响应式、无障碍与验收细则只认 `docs/UI_GUIDE.md`；禁止在页面或其他规则文件中另建第二套品牌标准。
+- 新增样式优先使用现有设计令牌、组件和 Tailwind 约定；不得以大量任意像素、临时颜色、内联常量或页面私有按钮体系绕过全局一致性。动态计算值可使用行内样式。
+- 管理后台以效率、清晰、状态完整性、响应式和无障碍为第一目标；未经单独批准，不把客户前台的大留白、衬线标题或编辑型动效全局套入后台。
 
 ---
 
 ## 7. 店铺装修（硬规则）
 
 - 前台页面装修**唯一在用**的是 Puck `PageDocument` 体系（schema + `page-modules` 后端 + `pageDocumentApi` + `HomepageConfig` 编辑器 + `PuckDocumentRenderer` + `components/blocks` + `page-builder/adapters`）。新增装修能力**必须**沿用此体系。
-- `HomeSection`、`HomepageBlock` 是**死代码**，**禁止**复活/扩展。
-- `ContentSlot` 仅作为首页未装修时的 HERO fallback，**不得**扩展为通用内容体系。
-- 装修边界与清理计划的细节见 `docs/DECISIONS.md` 【待决策】。
+- 禁止恢复已归档的旧装修体系或新建平行内容系统；历史清退记录见 `docs/DECISIONS.md`，当前组件名与 Fallback 行为必须以代码复核。
+- Puck 模板和运营配置必须遵守 `docs/UI_GUIDE.md`；可配置不等于可以绕过品牌、内容真实性、图片授权、性能、响应式或无障碍门禁。
+- 23 个运营内容模板的定义、整体构图、固定/受控边界、编辑顺序、响应式、版本、发布和验收统一遵守 `docs/CONTENT_TEMPLATE_STANDARD.md`；模板是完整根构图，不得把内部图片、文字或 CTA 降级为可任意拖动的散件。
+- 模板缩略图、Inspector、页面画布、公开 Renderer、客户端校验和服务端发布门禁必须消费同一机器合同；禁止手工维护第二套缩略图规则或前后端各写一套限制。
+- 新增模板或改变模板结构前，必须先更新对应设计卡和机器合同并说明兼容/迁移范围；旧草稿不得在普通保存时静默升级合同版本。
+- 店铺装修最终视觉验收使用电脑外部真实浏览器，至少检查 1920/1440/1024/768/390；内置浏览器、构建成功或单张编辑器截图不能代替最终验收。
+- 装修边界见 `docs/DECISIONS.md` A.6 / D.8，品牌视觉方向见 A.8。
 
 ---
 
@@ -115,12 +130,9 @@
 ## 10. 敏感信息与环境变量（硬规则）
 
 - **不读、不输出、不记录、不提交** `.env` 真实值（只允许检查变量名/示例结构）。
-- **API Key / Token / 密码只能存在于服务端环境变量**；**禁止**进入 `client/`、浏览器代码、文档、日志、截图、提交记录。
+- **真实 API Key / Token / 密码只能存在于服务端安全环境**；**禁止**进入 `client/`、浏览器代码、文档、日志、截图、提交记录。任何 `VITE_*` 值均视为公开信息，`VITE_MOCK_ADMIN_PASSWORD` 只能是本地假凭据，绝不能复用真实密码或进入生产构建。
 - **新增环境变量必须同步补到 `.env.example`**（属 B 类，需确认）。
-- 变量名清单（完整说明见 `.env.example`）：
-  - 必需：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`DATABASE_URL`、`JWT_SECRET`、`JWT_EXPIRES_IN`、`CORS_ORIGIN`、`BOOTSTRAP_ADMIN_PASSWORD`
-  - 前端：`VITE_USE_MOCK`、`VITE_API_BASE_URL`、`VITE_API_PROXY_TARGET`、`VITE_MOCK_ADMIN_USERNAME`、`VITE_MOCK_ADMIN_PASSWORD`
-  - 服务端可选：`OSS_*`、`AI_ACCESS_KEY_ID/SECRET`、`KIMI_API_KEY`、`KIMI_BASE_URL`、`KIMI_MODEL`、`GOLD_PRICE_API_URL`、`UPLOAD_DIR`、`REDIS_HOST`、`REDIS_PORT`、`PRODUCT_MEDIA_ROOT`、`NODE_ENV`、`PORT`
+- 环境变量名称、用途和是否必需只认 `.env.example`；本文件不复制完整清单，避免两处漂移。Docker/部署环境是否真实注入仍以当前编排配置为准，不能把“写进 `.env.example`”误当成“容器已经可用”。
 
 ---
 
@@ -147,9 +159,7 @@
 
 ## 13. 修改后必须验证（硬规则）
 
-项目**无 jest/vitest 单测框架**，但存在契约/状态机脚本 `scripts/verify-*.mjs`
-（`npm run test`、`npm run test:trade`、`npm run test:selection-inquiry` 等）。
-关键域（交易、页面构建器、选款咨询）改动后**必须运行对应契约脚本**。
+测试框架、脚本名称和覆盖范围属于易变化事实，必须从当前 `package.json`、`scripts/` 与 `client/tests/` 选择对应验证，不能因旧文档写过“无测试”或“已有测试”就推断当前覆盖。关键域（交易、页面构建器、选款咨询）改动后必须运行现有对应契约或端到端测试；缺失时明确报告覆盖缺口。
 
 最低验证类型与标准见 `docs/AI_COLLABORATION_STANDARD.md` §9（单一事实来源）：
 

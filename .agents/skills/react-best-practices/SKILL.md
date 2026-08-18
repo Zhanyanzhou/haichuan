@@ -1,149 +1,74 @@
 ---
 name: vercel-react-best-practices
-description: React and Next.js performance optimization guidelines from Vercel Engineering. This skill should be used when writing, reviewing, or refactoring React/Next.js code to ensure optimal performance patterns. Triggers on tasks involving React components, Next.js pages, data fetching, bundle optimization, or performance improvements.
+description: 海川项目的 React 性能审查适配层，基于 Vercel React/Next.js 规则库。仅在有性能目标或性能证据的 React 编写、审查、重构、数据请求、渲染和包体优化任务中使用；必须先读取当前 client/package.json、tsconfig、Vite 配置与已安装依赖，排除 Next.js、React 新版本、未安装依赖及当前编译目标不支持的规则。普通文案、样式和无性能诉求的小组件修改不触发。
 license: MIT
 metadata:
   author: vercel
   version: "1.0.0"
 ---
 
-# Vercel React Best Practices
+# 海川 React 性能适配层
 
-Comprehensive performance optimization guide for React and Next.js applications, maintained by Vercel. Contains 70 rules across 8 categories, prioritized by impact to guide automated refactoring and code generation.
+本目录保留 Vercel 的通用规则库作为参考，但项目适用性由本入口裁定。上游示例不是海川项目的默认架构、依赖或升级授权。
 
-## When to Apply
+## 1. 强制预检
 
-Reference these guidelines when:
-- Writing new React components or Next.js pages
-- Implementing data fetching (client or server-side)
-- Reviewing code for performance issues
-- Refactoring existing React/Next.js code
-- Optimizing bundle size or load times
+开始前读取：
 
-## Rule Categories by Priority
+- `client/package.json`：React、路由、Puck、构建工具和实际依赖。
+- `client/tsconfig.json`：`target` 与 `lib`。
+- `client/vite.config.*`、入口和目标组件：确认是 Vite 客户端应用还是其他渲染模式。
+- 当前性能证据：浏览器 Performance、React Profiler、包分析、Web Vitals、请求瀑布或可复现卡顿。
 
-| Priority | Category | Impact | Prefix |
-|----------|----------|--------|--------|
-| 1 | Eliminating Waterfalls | CRITICAL | `async-` |
-| 2 | Bundle Size Optimization | CRITICAL | `bundle-` |
-| 3 | Server-Side Performance | HIGH | `server-` |
-| 4 | Client-Side Data Fetching | MEDIUM-HIGH | `client-` |
-| 5 | Re-render Optimization | MEDIUM | `rerender-` |
-| 6 | Rendering Performance | MEDIUM | `rendering-` |
-| 7 | JavaScript Performance | LOW-MEDIUM | `js-` |
-| 8 | Advanced Patterns | LOW | `advanced-` |
+没有性能证据时，只做低风险的明显修正，不发起大范围“最佳实践重构”。
 
-## Quick Reference
+## 2. 海川项目硬门禁
 
-### 1. Eliminating Waterfalls (CRITICAL)
+除非当前代码和依赖明确支持，否则不得应用：
 
-- `async-cheap-condition-before-await` - Check cheap sync conditions before awaiting flags or remote values
-- `async-defer-await` - Move await into branches where actually used
-- `async-parallel` - Use Promise.all() for independent operations
-- `async-dependencies` - Use better-all for partial dependencies
-- `async-api-routes` - Start promises early, await late in API routes
-- `async-suspense-boundaries` - Use Suspense to stream content
+- Next.js、RSC、SSR、Server Action、`next/dynamic`、`after()` 与 Next API Route 规则。
+- 当前 React 主版本未提供的 `<Activity>`、`useEffectEvent`、资源提示等 API。
+- SWR、`better-all`、`lru-cache` 或其他未安装依赖；安装或升级依赖必须先获批准。
+- 当前 TypeScript `target/lib` 不支持的 `toSorted()` 等 API。
+- 违反当前 CSP 的内联脚本或以 `suppressHydrationWarning` 掩盖真实错误的方案。
+- 将 NestJS 服务端问题套用 React/Next 服务端缓存规则。
 
-### 2. Bundle Size Optimization (CRITICAL)
+## 3. 优先采用的兼容规则
 
-- `bundle-barrel-imports` - Import directly, avoid barrel files
-- `bundle-analyzable-paths` - Prefer statically analyzable import and file-system paths to avoid broad bundles and traces
-- `bundle-dynamic-imports` - Use next/dynamic for heavy components
-- `bundle-defer-third-party` - Load analytics/logging after hydration
-- `bundle-conditional` - Load modules only when feature is activated
-- `bundle-preload` - Preload on hover/focus for perceived speed
+按证据选择，不全量套用：
 
-### 3. Server-Side Performance (HIGH)
+- 独立请求并行、延迟不需要的等待、先做廉价条件判断。
+- 避免无意引入大包；使用 Vite/React 可用的动态 `import()`，不使用 `next/dynamic`。
+- 去重全局事件监听，滚动监听按需使用 passive，给本地存储数据加版本。
+- 消除可证明的重复计算和无效渲染；优先派生状态、函数式更新、稳定依赖和必要的懒初始化。
+- 长列表在验证浏览器兼容与可访问性后使用虚拟化或 `content-visibility`。
+- 重复查找使用 `Map`/`Set`，但不为小数据制造抽象和缓存一致性问题。
+- 不可变排序在当前编译目标不支持 `toSorted()` 时使用复制后排序。
 
-- `server-auth-actions` - Authenticate server actions like API routes
-- `server-cache-react` - Use React.cache() for per-request deduplication
-- `server-cache-lru` - Use LRU cache for cross-request caching
-- `server-dedup-props` - Avoid duplicate serialization in RSC props
-- `server-hoist-static-io` - Hoist static I/O (fonts, logos) to module level
-- `server-no-shared-module-state` - Avoid module-level mutable request state in RSC/SSR
-- `server-serialization` - Minimize data passed to client components
-- `server-parallel-fetching` - Restructure components to parallelize fetches
-- `server-parallel-nested-fetching` - Chain nested fetches per item in Promise.all
-- `server-after-nonblocking` - Use after() for non-blocking operations
+## 4. 海川场景边界
 
-### 4. Client-Side Data Fetching (MEDIUM-HIGH)
+- Puck 编辑器：先保证拖入、选择、编辑、保存、重载和前台渲染语义一致，再优化渲染；不得用 memo 掩盖状态不同步。
+- 品牌前台：性能优化不得降低图片清晰度、文字可读性、键盘可用性或破坏 `docs/UI_GUIDE.md` 的品牌节奏。
+- 管理后台：优先表格、筛选、表单和状态反馈的响应速度，不加载奢侈品摄影或展示型动效规则。
+- 数据请求：沿用现有服务层、鉴权和错误状态；不得为减少请求绕过权限、缓存用户敏感数据或创建第二套数据来源。
 
-- `client-swr-dedup` - Use SWR for automatic request deduplication
-- `client-event-listeners` - Deduplicate global event listeners
-- `client-passive-event-listeners` - Use passive listeners for scroll
-- `client-localstorage-schema` - Version and minimize localStorage data
+## 5. 实施与验证
 
-### 5. Re-render Optimization (MEDIUM)
+1. 写明性能问题、基线和目标，不把个人偏好称为优化。
+2. 读取最相关的 `rules/*.md`；遇到门禁项立即停用该条，不机械照抄示例。
+3. 采用最小改动，保持类型、业务状态、错误处理和可访问性。
+4. 运行与改动相称的类型检查、测试和构建。
+5. 用同一场景复测性能；只有构建通过而没有性能复测时，交付为「代码验证通过，性能收益未验证」。
+6. 报告前后指标、功能回归、未验证项和依赖/兼容风险。
 
-- `rerender-defer-reads` - Don't subscribe to state only used in callbacks
-- `rerender-memo` - Extract expensive work into memoized components
-- `rerender-memo-with-default-value` - Hoist default non-primitive props
-- `rerender-dependencies` - Use primitive dependencies in effects
-- `rerender-derived-state` - Subscribe to derived booleans, not raw values
-- `rerender-derived-state-no-effect` - Derive state during render, not effects
-- `rerender-functional-setstate` - Use functional setState for stable callbacks
-- `rerender-lazy-state-init` - Pass function to useState for expensive values
-- `rerender-simple-expression-in-memo` - Avoid memo for simple primitives
-- `rerender-split-combined-hooks` - Split hooks with independent dependencies
-- `rerender-move-effect-to-event` - Put interaction logic in event handlers
-- `rerender-transitions` - Use startTransition for non-urgent updates
-- `rerender-use-deferred-value` - Defer expensive renders to keep input responsive
-- `rerender-use-ref-transient-values` - Use refs for transient frequent values
-- `rerender-no-inline-components` - Don't define components inside components
+## 6. 规则库路由
 
-### 6. Rendering Performance (MEDIUM)
-
-- `rendering-animate-svg-wrapper` - Animate div wrapper, not SVG element
-- `rendering-content-visibility` - Use content-visibility for long lists
-- `rendering-hoist-jsx` - Extract static JSX outside components
-- `rendering-svg-precision` - Reduce SVG coordinate precision
-- `rendering-hydration-no-flicker` - Use inline script for client-only data
-- `rendering-hydration-suppress-warning` - Suppress expected mismatches
-- `rendering-activity` - Use Activity component for show/hide
-- `rendering-conditional-render` - Use ternary, not && for conditionals
-- `rendering-usetransition-loading` - Prefer useTransition for loading state
-- `rendering-resource-hints` - Use React DOM resource hints for preloading
-- `rendering-script-defer-async` - Use defer or async on script tags
-
-### 7. JavaScript Performance (LOW-MEDIUM)
-
-- `js-batch-dom-css` - Group CSS changes via classes or cssText
-- `js-index-maps` - Build Map for repeated lookups
-- `js-cache-property-access` - Cache object properties in loops
-- `js-cache-function-results` - Cache function results in module-level Map
-- `js-cache-storage` - Cache localStorage/sessionStorage reads
-- `js-combine-iterations` - Combine multiple filter/map into one loop
-- `js-length-check-first` - Check array length before expensive comparison
-- `js-early-exit` - Return early from functions
-- `js-hoist-regexp` - Hoist RegExp creation outside loops
-- `js-min-max-loop` - Use loop for min/max instead of sort
-- `js-set-map-lookups` - Use Set/Map for O(1) lookups
-- `js-tosorted-immutable` - Use toSorted() for immutability
-- `js-flatmap-filter` - Use flatMap to map and filter in one pass
-- `js-request-idle-callback` - Defer non-critical work to browser idle time
-
-### 8. Advanced Patterns (LOW)
-
-- `advanced-effect-event-deps` - Don't put `useEffectEvent` results in effect deps
-- `advanced-event-handler-refs` - Store event handlers in refs
-- `advanced-init-once` - Initialize app once per app load
-- `advanced-use-latest` - useLatest for stable callback refs
-
-## How to Use
-
-Read individual rule files for detailed explanations and code examples:
+只读取与已确认问题对应的规则，例如：
 
 ```
 rules/async-parallel.md
 rules/bundle-barrel-imports.md
+rules/rerender-derived-state-no-effect.md
 ```
 
-Each rule file contains:
-- Brief explanation of why it matters
-- Incorrect code example with explanation
-- Correct code example with explanation
-- Additional context and references
-
-## Full Compiled Document
-
-For the complete guide with all rules expanded: `AGENTS.md`
+不要把本目录内汇总文件 `AGENTS.md` 当成项目根规则；项目治理只认仓库根 `AGENTS.md`、`PROJECT_RULES.md` 与 `WORKFLOW.md`。

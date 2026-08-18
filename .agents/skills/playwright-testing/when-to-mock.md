@@ -1,19 +1,20 @@
 # When to Mock vs Use Real Services
 
 > **When to use**: When deciding whether to mock API calls, intercept network requests, or hit real services in your Playwright tests.
-> **Prerequisites**: [core/locators.md](locators.md), [core/assertions-and-waiting.md](assertions-and-waiting.md)
+> **Prerequisites**: [locators.md](locators.md), [assertions-and-waiting.md](assertions-and-waiting.md)
 
 ## Quick Answer
 
-**Mock at the boundary, test your stack end-to-end.** Mock third-party services you do not own (Stripe, SendGrid, OAuth providers, analytics). Never mock your own frontend-to-backend communication. Your tests should prove that YOUR code works, not that third-party APIs are up.
+**Use layered confidence.** Mock third-party side effects and paid or unstable services. Test critical frontend-to-backend contracts with the real local/test stack. You may Mock your own API to create deterministic UI, visual, loading, empty, error, permission and boundary states, but label those tests as mocked and never count them as proof of real integration.
 
 ## Decision Flowchart
 
 ```
 Is this service part of YOUR codebase (your API, your backend)?
-├── YES → Do NOT mock. Test the real integration.
-│   ├── Is it slow? → Optimize the service, not the test.
-│   └── Is it flaky? → Fix the service. Flaky infra is a bug.
+├── YES → What confidence does this test need?
+│   ├── Contract / critical business integration → use the real local or test API.
+│   ├── Deterministic UI / visual / failure state → Mock is allowed; label it and keep separate real coverage.
+│   └── Service is slow or flaky → investigate the service; do not hide the only integration path behind mocks.
 └── NO → It's a third-party service.
     ├── Is it free, fast, and reliable? (rare)
     │   └── Consider real in CI. Mock if rate-limited.
@@ -31,8 +32,8 @@ Is this service part of YOUR codebase (your API, your backend)?
 
 | Scenario | Mock? | Why | Strategy |
 |---|---|---|---|
-| Your own REST/GraphQL API | Never | This IS the integration you are testing | Hit real API against staging or local dev |
-| Your database (through your API) | Never | Data round-trips are the whole point of E2E | Seed via API or fixtures, never mock DB |
+| Your own REST/GraphQL API | Depends on test layer | Real for contracts and critical flows; Mock allowed for deterministic UI/error/visual states | Keep mocked suites clearly named and retain separate real API coverage |
+| Your database (through your API) | Real for persistence/integration | Data round-trips require the real stack; UI-only suites may replace the API boundary | Seed isolated test data for integration; never claim a UI mock validates persistence |
 | Authentication (your auth system) | Mostly no | Auth bugs are critical; test the real flow | Use `storageState` to skip login in most tests, but keep a few real login tests |
 | Stripe / payment gateway | Always | Costs money, rate-limited, flaky in CI | `route.fulfill()` with expected responses |
 | SendGrid / email service | Always | Side effects (real emails), no UI to assert | Mock the API call, verify request payload |
@@ -330,7 +331,7 @@ test('dashboard loads with recorded data', async ({ page }) => {
 
 **HAR maintenance workflow:**
 1. Record HAR files against a known-good staging environment.
-2. Commit `.har` files to version control (they are JSON, diffable).
+2. Sanitize HAR files before version control; never commit real customer, order, payment, token, cookie or contact data.
 3. Re-record monthly or when APIs change. Add a CI reminder or calendar event.
 4. Use `update: true` in a dedicated test file to refresh recordings.
 5. Scope HAR to specific URL patterns (`url: '**/api/v2/**'`) so unrelated requests still hit real servers.
@@ -540,7 +541,7 @@ module.exports = function globalTeardown() {
 
 ## Hybrid Approach
 
-The strongest test suites combine real and mocked services. The principle: **mock what you do not own, run what you do.**
+The strongest test suites combine real and mocked services. The principle: **run critical contracts you own, Mock external side effects, and use labeled mocks for deterministic UI states.**
 
 ### Fixture-Based Mock Control
 
@@ -808,7 +809,7 @@ test.describe('mock contract validation', () => {
 
 | Don't Do This | Problem | Do This Instead |
 |---|---|---|
-| Mock your own API (`page.route('**/api/users', ...)` when you own the `/api/users` endpoint) | You are testing a fiction. Your frontend and backend may be completely incompatible. | Hit your real API. Mock only third-party services behind your API. |
+| Mock your own API and report the test as E2E integration | The frontend and backend may be incompatible even though the UI test passes. | Label it as mocked UI/visual/failure-state coverage and keep a separate real contract or integration test. |
 | Mock everything for speed | Tests pass, app breaks. You have zero integration coverage. | Mock only external boundaries. Optimize your own services for test speed. |
 | Never mock anything | Tests are slow, flaky, and fail when Stripe has an outage. You test third-party uptime, not your code. | Mock third-party services. Your CI should not depend on someone else's infrastructure. |
 | Use outdated mocks that do not match the real API | Mock returns `{ status: "ok" }` but real API returns `{ status: "success", data: {...} }`. Tests pass, production breaks. | Run contract validation tests periodically. Re-record HAR files monthly. |

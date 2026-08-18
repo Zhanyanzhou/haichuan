@@ -1,54 +1,63 @@
-# 海川珠宝 — AI 工具与模型分工（AI_TOOLING）
+# 海川珠宝 — AI 工具与协作配置（AI_TOOLING）
 
-> 本文档记录本项目使用的三个 AI 工具的模型、配置位置与分工约定。
-> 它不是安全/技术硬规则（那些见 `AGENTS.md`、`PROJECT_RULES.md`、`docs/PROJECT_GUARDRAILS.md`、`docs/AI_COLLABORATION_STANDARD.md`），而是"配置现状 + 使用建议"，帮助任何 AI 快速了解配置全貌、避免重复配置或不一致。
-> 最近核对：2026-08-15
+> 本文档记录项目级 AI 工具入口、已发现的 MCP 配置和协作职责。它不是安全或技术硬规则：安全与审批见 `AGENTS.md`，技术实现见 `PROJECT_RULES.md`，执行流程见 `WORKFLOW.md`，协作与交付见 `docs/AI_COLLABORATION_STANDARD.md`。
+>
+> 最近实际核对：2026-08-16。模型供应商、模型版本、API Key、用户级扩展和用户级权限不在本仓库内，本文件不把它们写成已验证事实。
 
-## 1. 三个 AI 工具与模型
+## 1. 共同治理，不按模型强弱分权
 
-| 工具            | 底层模型                      | 定位                              | 工具面策略       |
-| --------------- | ----------------------------- | --------------------------------- | ---------------- |
-| VS Code Copilot | DeepSeek                      | 编辑器内快速问答、补全、小改动    | 适中（5 个 MCP） |
-| Claude Code     | 智谱 GLM-5.2（ccswitch 切换） | 日常编码、轻量工具链              | 精简（2 个 MCP） |
-| Codex（正版）   | OpenAI                        | 复杂重构、多文件编辑、git/CI 执行 | 全配（3 个 MCP） |
+本项目可以使用 Codex、Claude Code 与 VS Code 智能体（包括经智谱或 DeepSeek 路由的模型）。无论当前模型或供应商如何变化，以下规则只有一套：
 
-分工原则：**按模型能力定工具面**——强模型（Codex）放开，中模型（DeepSeek）适中，弱模型（GLM）精简。GLM 的工具调用与多步 agent 能力弱于前两者，故 Claude Code 的 MCP 收敛为 2 个、子代理执行质量有限，复杂任务建议交给 Codex。
+1. 所有工具遵守 `AGENTS.md`、`PROJECT_RULES.md`、`WORKFLOW.md` 和协作标准；工具专属文件只做适配，不复制或覆盖共同规则。
+2. 权限按任务角色和用户授权决定，不按模型品牌或推定能力决定。读取、建议、实现、验证、Git 写入和生产操作的边界以共同规则为准。
+3. 同一工作区同一时间只允许一个智能体写入；其他智能体只做只读研究、评审或验证。实施前认领文件，发现同一文件或逻辑区域冲突即暂停。
+4. AI 输出均须区分已核验事实与建议。一个工具生成的结论不能替代另一个工具的代码、构建、测试或实际页面验证。
 
-## 2. 各工具配置位置
+建议的角色分工：
 
-### Copilot（DeepSeek）
+| 角色 | 允许的工作 | 不允许的工作 |
+| --- | --- | --- |
+| 研究/评审者 | 只读取证据、提出方案、审查差异和测试建议 | 在未获授权时写文件、改配置、执行 Git 写入 |
+| 实现者 | 只修改已认领且已确认的文件，并完成相称验证 | 与其他智能体并发修改同一逻辑区域、扩大任务范围 |
+| 验证者 | 复核 diff、类型、构建、测试、失败路径和界面结果 | 将未执行的验证写成已通过 |
+| 集成者 | 在项目负责人明确批准后暂存、提交、推送或处理配置 | 以工具身份自行取得更高权限 |
 
-- 指令：`.github/copilot-instructions.md`（Copilot 适配）+ `AGENTS.md` + `PROJECT_RULES.md` + `WORKFLOW.md`（三工具共用）
-- 技能：`.agents/skills/`（5 个，唯一权威；`.github/skills/` 已废弃删除）
-- MCP：`.vscode/mcp.json`（5 个：github / playwright / chrome-devtools / context7 / prisma）
-- 提示词模板：`.github/prompts/`（developer / planner / project-manager / reviewer）
+## 2. 项目级入口
 
-### Claude Code（智谱 GLM-5.2）
+| 入口 | 适配文件 | 项目级 MCP 配置 | 已发现 MCP | 说明 |
+| --- | --- | --- | --- | --- |
+| Codex（OpenAI） | `AGENTS.md` | `.codex/config.toml` | playwright、chrome-devtools、context7 | Codex 的项目指令以 `AGENTS.md` 为入口；仍须按其中顺序读取共同规则。 |
+| Claude Code | `CLAUDE.md` | `.mcp.json` | playwright、context7 | `.claude/agents/` 有审查代理；仅在当前会话确实提供该能力时使用。 |
+| VS Code 智能体 | `.github/copilot-instructions.md` | `.vscode/mcp.json` | github、figma、tavily、playwright、chrome-devtools、context7、prisma | 是否加载该指令、实际模型和可用 MCP 取决于用户安装的扩展与当前会话，需以运行界面为准。 |
 
-- 指令：`CLAUDE.md`（Claude Code 适配）+ `AGENTS.md` + `PROJECT_RULES.md` + `WORKFLOW.md`
-- 技能：`.claude/skills/`（符号链接 → `.agents/skills/`，5 个，不入库、自动同步）
-- 子代理：`.claude/agents/`（code-reviewer / contract-verifier / frontend-visual-reviewer，入库共享）
-- MCP：`.mcp.json`（2 个：playwright / context7）
-- 权限白名单：`.claude/settings.local.json`
+`.agents/skills/` 是项目内技能内容的唯一维护位置；如某工具通过链接或扩展加载它，只能视为该工具的适配机制，不改变共同规则。
 
-### Codex（正版 OpenAI）
+## 3. MCP 供应链规则
 
-- 指令：`AGENTS.md` + `PROJECT_RULES.md` + `WORKFLOW.md`
-- MCP：`.codex/config.toml`（3 个：playwright / chrome-devtools / context7）
-- 说明：Codex 无独立的技能/子代理目录机制，靠 `AGENTS.md` 与 MCP；git 写操作由 Codex 执行（见交接实践）。
+三个 MCP 配置文件格式独立，禁止机械复制：
 
-## 3. 配置维护约定（防止不一致）
+- VS Code：`.vscode/mcp.json`，`servers` 格式；
+- Claude Code：`.mcp.json`，`mcpServers` 格式；
+- Codex：`.codex/config.toml`，`mcp_servers` 格式。
 
-1. **技能单一来源**：技能只维护 `.agents/skills/` 一份（入库）；`.claude/skills/` 通过符号链接指向它（不入库、自动同步）。修改或新增技能只需改 `.agents/skills/`。
-2. **MCP 三处独立、格式不同、禁止互相复制**：
-   - Copilot：`.vscode/mcp.json` → `{ "servers": { name: { type, command, args } } }`
-   - Claude Code：`.mcp.json` → `{ "mcpServers": { name: { type, command, args } } }`
-   - Codex：`.codex/config.toml` → `[mcp_servers.name]` + `command` / `args`
-3. **MCP 数量按模型能力**：给弱模型（GLM）加 MCP 前先考虑工具面是否过大；强模型（Codex）可放开。
+配置当前包含 `npx -y` 和部分 `@latest` 引用。它们只是启动候选，不代表已被每个工具成功验证。任何 MCP 新增、删除、版本锁定、命令或参数变更都必须先获批准，并在变更记录中写明：
 
-## 4. 已知坑（配置时注意）
+- 精确包版本、注册表与 Node.js 兼容性；
+- 可由哪些工具调用、可访问哪些数据与外部服务；
+- 实际启动验证结果与日期；
+- 失败时的回退版本或禁用方式。
 
-- Windows 上 stdio MCP 需 `cmd /c` 包装（Claude Code 与 Codex 已用此格式），否则 `npx` 无法直接 spawn。
-- 项目 Prisma 5.8 的 CLI 无内置 `mcp` 子命令（需 7.x），故不为任何工具配 prisma MCP；数据库 schema 查询直接读 `server/prisma/schema.prisma` 文件。
-- Claude Code 供应商由 ccswitch 切换，只影响全局（`~/.claude.json` 等），不影响项目级 `.mcp.json`、`.claude/`、`.codex/`。
-- 本机 PowerShell 的 PATH 无 `codex` 命令（用户另行启动），无法用 `codex mcp list` 做端到端验证。
+当前 `.vscode/mcp.json` 的 Prisma 配置与项目文档历史描述存在冲突；在未完成独立版本与启动核验前，不把它视为可用数据库能力，也不得以它替代直接阅读 `server/prisma/schema.prisma`。
+
+## 4. 用户级配置与数据边界
+
+以下内容不纳入仓库，也不应写进项目文档、MCP 配置或日志：模型路由、智谱/DeepSeek/API Key、访问令牌、用户级 VS Code 设置、用户级 Claude 切换器设置和本地权限白名单。
+
+如需核验用户级配置，必须获得项目负责人对精确路径和只读/写入范围的单独授权。无论供应商为何，客户姓名、电话、地址、邮箱、咨询正文、订单、支付和真实业务导出数据均不得为无关任务发送给外部模型。
+
+## 5. 使用与维护
+
+1. 开始任务：说明任务角色、认领文件、是否已有其他智能体写入，以及本次是否触及配置、密钥、依赖、Git 或生产环境。
+2. 完成任务：以真实命令输出、页面核对或审查证据交付；模型回答本身不是验证。
+3. 变更工具配置：先更新本文件的事实清单，再由获授权的集成者修改相应配置并完成隔离验证；未验证项明确标为待确认。
+4. 更换模型或供应商：无需改动共同规则；只在对应工具适配文件和用户级配置中处理其可用能力与数据边界。

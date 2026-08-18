@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Perform a deep, scoped review of a working tree, staged diff, commit range, branch diff, pull request, focused file set, or pasted code. Use for `/code-review`, PR or diff review, merge-safety assessment, and one bounded post-implementation review. Begin with a read-only orchestration assessment, ground expected behavior in authoritative product or contract evidence, trace propagated risk, persist a canonical lineage-aware report, and never edit code or Git state unless the user separately requests fixes. A post-implementation report is terminal for its automatic review chain.
+description: 对工作区、暂存区、提交范围、分支、PR、指定文件或粘贴代码执行只读代码审查。用于用户明确要求 code review、PR/合并安全检查或实现后的有界复核。小范围审查默认在对话中交付，不自动创建子代理或持久报告；跨层、高风险或用户要求正式审计时才启用完整覆盖账本、可选独立审查与报告验证。审查不得修改代码或 Git 状态，除非用户另行要求修复。
 ---
 
 # Code Review
@@ -9,24 +9,24 @@ description: Perform a deep, scoped review of a working tree, staged diff, commi
 
 Produce the deepest review that is practical for the requested scope. Findings and coverage evidence are the primary output. Praise, style preferences, and broad refactor suggestions are secondary.
 
-The coordinating agent owns scope, final judgment, de-duplication, severity, and the persisted report. Subagents provide bounded analysis; never copy their conclusions into the report without independent synthesis.
+The coordinating agent owns scope, final judgment, de-duplication, severity, and delivery. Subagents are optional bounded evidence sources for authorized formal audits; never copy their conclusions without independent synthesis.
 
-## Required Resources
+## Review Modes and Resources
 
-- Read [references/subagent-orchestration.md](references/subagent-orchestration.md) before delegating review work.
-- Write the report from [references/report-template.md](references/report-template.md).
-- Validate generation `0` with `python3 scripts/validate_review_report.py <report-path>`. Validate generation `1` with the additional `--parent-report <generation-0-report> --parent-resolution <resolution-report>` arguments.
+- **Focused review (default)**: use for a cohesive file set or bounded change. Review in the current task, return findings and verification in the project delivery format, and do not write a report merely because this Skill triggered.
+- **Formal audit**: use when the user requests a persisted audit/report, a release or merge gate requires an artifact, or the authorized scope is broad/high-risk enough that a coverage ledger materially improves safety.
+- Before delegating in a formal audit, read [references/subagent-orchestration.md](references/subagent-orchestration.md). Delegate only when user/instruction authorization exists and independent partitions add value.
+- When a canonical persisted report is authorized, use [references/report-template.md](references/report-template.md) and validate it with `scripts/validate_review_report.py`. A later generation is allowed only when an explicit re-review request provides the parent artifacts.
 
 ## Hard Gates
 
-- Before substantive review, launch exactly one read-only orchestration-assessment subagent.
-- Before launching that assessor, inspect only enough Git and request metadata to identify the scope, baseline, changed-file inventory, diff size, and obvious constraints. Do not form findings first.
-- Let the assessor decide whether specialist subagents add material value. Do not equate depth with agent count.
-- If the environment has no subagent primitive, record `Subagent unavailable` and execute the same assessment protocol in the coordinator. Never claim a subagent ran when it did not.
+- Begin with a read-only scope assessment. For a focused review, the coordinator performs it directly. For an authorized formal audit, use an orchestration assessor only when independent review adds material value.
+- Inspect scope, baseline, changed-file inventory, diff size, requirements and obvious constraints before forming final findings. Do not equate depth with agent count.
+- If no subagent is authorized or available, continue in the coordinator and disclose the limitation only when it affects coverage. Never claim a subagent ran when it did not.
 - Keep every review subagent read-only. Do not edit files, stage, commit, push, reset, checkout, rebase, or mutate Git state.
 - Do not make code changes during this skill unless the user explicitly changes the task from review to implementation.
-- Put every report in a review chain. Use generation `0` for the frozen initial scope and generation `1` only for the implementation delta plus affected execution chains after a `receiving-code-review` resolution.
-- Treat generation `1` as terminal: write the report, return remaining findings to the user or product owner, and do not automatically invoke `receiving-code-review`. Any later work requires an explicit user request and a new generation `0` chain.
+- In formal report mode, use generation `0` for the frozen initial scope. Use generation `1` only for an explicitly requested implementation-delta review with complete parent review and resolution artifacts; generation `1` is terminal.
+- This repository does not assume a `receiving-code-review` Skill exists. Return findings to the user; implementation and re-review require separate authorization.
 - Do not classify a disputed product choice as `Blocker`, `Major`, or `Minor` without an authoritative expected-behavior basis. Use `Question` when product intent is unconfirmed.
 
 ## Scope and Identity
@@ -34,13 +34,15 @@ The coordinating agent owns scope, final judgment, de-duplication, severity, and
 1. Resolve the requested scope: working tree, staged diff, commit range, branch diff, pull request, file set, or pasted code.
 2. Choose the narrowest reasonable scope when none is explicit. Prefer staged changes when present; otherwise compare the working tree with `HEAD`.
 3. Record the baseline and target precisely. Use commit SHAs when available.
-4. Create a review chain ID and record generation, trigger, parent resolution ID/path, and scope mode. Generation `1` must read the complete parent resolution before reviewing.
-5. Compute a scope fingerprint when practical from the baseline, target, changed paths, and normalized diff hash. Record why a fingerprint is unavailable.
+4. In formal report mode, create a review chain ID and record generation, trigger, parent resolution ID/path, and scope mode. Generation `1` must read the complete parent resolution before reviewing.
+5. In formal report mode, compute a scope fingerprint when practical from the baseline, target, changed paths, and normalized diff hash. Record why a fingerprint is unavailable.
 6. Read requirements, issue text, PR description, design notes, migrations, relevant contracts, and settled parent-resolution decisions before judging intent.
-7. Freeze generation `0` scope. For generation `1`, review the implementation delta and only the callers, callees, contracts, and execution chains it can affect; do not reopen the full original discovery frontier.
+7. Freeze the requested scope. In formal generation `1`, review the implementation delta and only the callers, callees, contracts, and execution chains it can affect; do not reopen the full original discovery frontier.
 8. Do not silently widen scope. Mark unrelated context as supporting evidence or a follow-up rather than a finding in the current chain.
 
-## Orchestration
+## Formal Audit Orchestration
+
+Skip this section for focused review. When formal orchestration is authorized:
 
 1. Give the assessment subagent the scope identity, diff inventory, change statistics, touched subsystems, known requirements, and environment limitations.
 2. Require a structured decision: `Single reviewer` or `Parallel specialists`, with rationale, risk dimensions, proposed partitions, overlap plan, and verification needs.
@@ -82,15 +84,14 @@ Stop only when every changed review-relevant or unknown-impact area is accounted
 ## Completeness Contract
 
 - Enumerate every distinct finding reasonably discoverable within the reviewed scope, not only the top risks.
-- Maintain a `Review Coverage Ledger` with stable `A#` area IDs. Map every changed review-relevant or unknown-impact area to:
+- In formal report mode, maintain a `Review Coverage Ledger` with stable `A#` area IDs. In focused mode, account for each reviewed area in the response without manufacturing report IDs. Map every changed review-relevant or unknown-impact area to:
   - `Finding F#`
   - `Reviewed - no issue found`
   - `Not review-relevant`
   - `Not covered`
-- Give every standalone test gap a stable `T#` ID and severity.
-- Give every `F#` and `T#` a canonical semantic issue key. Use `behavior; entry=<semantic entry>; contract=<stable expectation>; effect=<terminal failure>` for findings and `test-gap; entry=<semantic entry>; contract=<stable expectation>; gap=<missing coverage>` for standalone test gaps. Exclude line numbers, report-local IDs, generation, and current implementation symbols. Compute its fingerprint as `ifp-sha256:<sha256 of the exact UTF-8 issue key>` so the same claim can be recognized across generations.
-- Record meaningful dismissed or merged candidates in `Subagent Candidate Adjudication` or the evidence appendix.
-- Mark the report `Incomplete` and identify exact uncovered surfaces when context, credentials, runtime, diff size, or other limits prevent complete coverage.
+- In formal report mode, give standalone test gaps stable `T#` IDs and give every `F#`/`T#` a canonical semantic key and fingerprint. In focused mode, use concise finding labels only when they improve readability.
+- In formal orchestration, record meaningful dismissed or merged candidates in `Subagent Candidate Adjudication` or the evidence appendix.
+- Mark the delivery `Incomplete` and identify exact uncovered surfaces when context, credentials, runtime, diff size, or other limits prevent complete coverage.
 - Never present a partial review as complete.
 
 ## Findings and Evidence
@@ -111,8 +112,8 @@ For every accepted finding:
 - separate verified facts from inference
 - state assumptions and reduce confidence when proof is incomplete
 - include exactly one or two primary code links in `Look here first`
-- record which reviewer proposed it and how the coordinator verified it
-- record the structured expected-behavior basis, canonical issue key, and verified semantic issue fingerprint
+- state the expected-behavior basis and how the claim was verified
+- in formal report mode, additionally record reviewer origin, canonical issue key and verified semantic issue fingerprint
 
 Do not invent defects. A clean result still requires a full coverage ledger, strongest blind spot, and verification record.
 
@@ -133,42 +134,34 @@ Downgrade an unproven suspected blocker rather than retaining a hand-wavy `Block
 
 ## Persistence and Handoff
 
-- Always write a fresh Markdown report using the canonical `code-review` report contract.
-- Generate a unique report ID and filename. Follow an existing repository report convention; otherwise use `tmp/reviews/YYYY-MM-DD-code-review-report-<random-id>.md`.
-- Never overwrite an existing report.
-- Persist scope identity, scope fingerprint, orchestration decision, specialist assignments, candidate adjudication, findings, test gaps, coverage, evidence, and a `Receiving Handoff` section.
-- Persist review-chain identity, generation, trigger, parent review and resolution, semantic issue keys and fingerprints, expected-behavior bases, and inherited-settlement reconciliation.
-- Treat the completed review report as a fixed input artifact. Do not rewrite it during receiving or implementation; record later dispositions and code changes in a separate `receiving-code-review` resolution report linked by Report ID.
-- A generation `0` report may be handed to `receiving-code-review`. A generation `1` report must use a terminal handoff and must not be consumed automatically.
-- Partition every non-Question finding and standalone test gap exactly once into actionable or deferred handoff IDs. List every `Question` and `Not covered` area in its matching open-ID field.
-- Run the validator and fix every error before claiming the report is complete.
+- Focused review is read-only and conversation-first; do not create `tmp/reviews` or any report file automatically.
+- Write a fresh Markdown report only when the user explicitly requests a persisted report or the approved workflow requires an audit artifact.
+- Follow the repository's existing audit convention, currently `docs/audits/`, unless the user specifies another project-local path. Never overwrite an existing report.
+- For a canonical formal report, persist scope identity, coverage, evidence, findings, test gaps, open questions and a terminal/manual handoff. Use the template's receiving fields as a manual handoff contract; do not invoke a missing Skill.
+- Run the validator and fix every error before claiming a canonical report is complete. If the validator cannot run, report the exact reason and do not call the report validated.
+- Implementation, Git writes and post-fix re-review are separate tasks and require explicit user authorization.
 
 ## Workflow
 
-1. Resolve review-chain identity, generation, trigger, scope, baseline, target, and minimal diff inventory.
-2. Launch the orchestration-assessment subagent.
-3. Record and execute the single-reviewer or specialist plan.
-4. Build the semantic diff inventory and `A#` coverage areas.
-5. Trace changed control, data, security, persistence, integration, and test paths.
-6. Run focused verification where it materially improves confidence.
-7. Collect candidate findings and specialist coverage results.
-8. Independently verify, de-duplicate, challenge, and classify every candidate against its expected-behavior basis and inherited settlements.
-9. Assign final `F#`, `T#`, and `A#` IDs plus semantic issue fingerprints.
-10. Derive the recommendation from unresolved items and coverage.
-11. Write the canonical report from the template.
-12. Run `scripts/validate_review_report.py` and correct all failures.
-13. Return a short summary with report path, recommendation, completion, severity counts, orchestration mode, and top risks.
+1. Resolve mode, scope, baseline, target, requirements and minimal diff inventory.
+2. Choose coordinator-only review or, for an authorized formal audit, proportionate independent partitions.
+3. Trace changed control, data, security, persistence, integration and test paths far enough to evaluate risk.
+4. Run focused non-destructive verification where it materially improves confidence.
+5. Independently verify, de-duplicate, challenge and classify every candidate against expected behavior.
+6. Derive the recommendation from unresolved findings, questions and uncovered areas.
+7. Focused mode: return findings, evidence, verification and blind spots in the conversation.
+8. Formal mode: assign canonical IDs, write the authorized report, run the validator, then return its path and summary.
 
 ## Final Self-Check
 
-- The assessment subagent ran, or the report honestly records the unavailable fallback.
-- The orchestration decision is supported by scope and risk, not arbitrary agent count.
-- Every specialist candidate was verified, rejected, merged, or retained with evidence.
-- Every changed review-relevant or unknown-impact area has an `A#` row.
-- Every `F#` and `T#` has an authoritative expected-behavior basis or is an explicit `Question`, plus a unique semantic issue fingerprint.
-- Generation and handoff are consistent: generation `0` may allow receiving; generation `1` is terminal and links its parent resolution.
-- Every indexed finding has one matching card and every `Finding F#` area references a real finding.
-- Every `Not covered` row has a reason and concrete next step.
+- The selected mode is proportionate; no subagent or report was created merely because the Skill triggered.
+- Any orchestration decision is supported by scope and risk, not arbitrary agent count.
+- In formal orchestration, every specialist candidate was verified, rejected, merged or retained with evidence.
+- Every changed review-relevant or unknown-impact area is accounted for; formal reports use `A#` rows and focused reviews use a concise coverage statement.
+- Every finding has an authoritative expected-behavior basis or is an explicit approval question; formal `F#`/`T#` items additionally have unique semantic issue fingerprints.
+- In formal mode, generation and manual handoff are consistent; generation `1` is terminal and links its parent artifacts.
+- In formal mode, every indexed finding has one matching card and every `Finding F#` area references a real finding.
+- Every uncovered area has a reason and concrete next step.
 - Recommendation mapping is exact.
-- The report validator passes.
+- A canonical persisted report was validated, or no persisted report was requested; unavailable validation is disclosed.
 - Git state is unchanged.

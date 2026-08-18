@@ -1,6 +1,6 @@
 # 海川珠宝 · Copilot 适配
 
-> VS Code GitHub Copilot 自动读取。公共规则以 `AGENTS.md`、`docs/PROJECT_GUARDRAILS.md` 和 `docs/AI_COLLABORATION_STANDARD.md` 为准；本文件仅定义 Copilot 适配。
+> VS Code 的支持该格式的智能体可读取本文件。公共规则以 `AGENTS.md`、`PROJECT_RULES.md`、`WORKFLOW.md`、`docs/PROJECT_GUARDRAILS.md` 和 `docs/AI_COLLABORATION_STANDARD.md` 为准；本文件仅定义 VS Code 适配。
 
 ---
 
@@ -15,10 +15,17 @@
 ## 行为
 
 - 严格遵守 `AGENTS.md` 全部规则
+- 开始任务先阅读 `PROJECT_RULES.md` 与 `WORKFLOW.md`，再按任务读取 `docs/DECISIONS.md` 的相关部分和必要 `docs/`
 - 先用简洁方案说明范围、影响文件和预期结果；用户明确要求实现且任务属于已授权的小范围修改时可直接实施
 - 只读检查和已确认的验证命令无需逐项等待确认；高风险操作遵循 `AGENTS.md` 与协作标准的审批边界
 - 当前相关代码、类型、配置和工作区变更优先于可能过期的项目事实文档；发现冲突时报告
 - 不确定时先询问，不猜测
+
+## 工具与模型边界
+
+- 本文件不假定当前 VS Code 智能体使用 GitHub Copilot、DeepSeek 或其他供应商；模型路由、扩展配置和 API Key 均属于用户级敏感配置，不得写入仓库。
+- 仅使用当前会话真实提供的工具、技能和 MCP；若无法确认本智能体是否加载本文件、是否支持 MCP 或某项技能，必须说明限制，不得虚构可用能力。
+- `.vscode/mcp.json` 的 MCP 包、版本、命令或启动参数属于工具供应链配置，修改前必须获得明确批准。
 
 ---
 

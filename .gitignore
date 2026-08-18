@@ -7,6 +7,7 @@ dist/
 *.log
 .DS_Store
 uploads/
+server/private-media/
 client/public/images/products/
 .turbo/
 coverage/
@@ -16,6 +17,7 @@ _local_backups/
 backups/
 *.tsbuildinfo
 design-qa/
+/design-qa.md
 design-qa-assets/
 nav-design-qa/
 nav-audit-assets/
@@ -53,6 +55,7 @@ artifacts/
 /.github/skills/
 
 # 本机调试脚本与产物（含本机绝对路径，勿入库）
+server/scripts/tmp-*.cjs
 /docker_check.cmd
 /docker_out.txt
 /codex-handoff.md

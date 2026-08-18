@@ -10,9 +10,9 @@ tools: Read, Grep, Glob, Bash, WebFetch
 
 ## 项目背景
 
-- 前端：React 18 + TypeScript 5.3 + Vite 5 + Tailwind 3 + Ant Design 5 + Zustand（`client/`，别名 `@/` = `client/src/`）
-- 后端：NestJS 10 + Prisma 5.8 + MySQL 8 + Redis（`server/`）
-- 交易域当前安全冻结（Feature Flag 关闭，见 `client/src/store/featureFlags.ts` 与后端 `CustomerCommerceGuard`）
+- 前端：React 18 + TypeScript 5.3 + Vite 8 + Tailwind 3 + Ant Design 5 + Zustand（`client/`，别名 `@/` = `client/src/`）
+- 后端：NestJS 11 + Prisma 5.8 + MySQL 8，当前无常驻 Redis/Bull（`server/`）
+- 交易域具备受控开放路径；当前状态必须从 `docs/CURRENT_STATE.md`、实际环境和验证证据核对，不得从 Compose 默认值推断生产已开放
 - 关键契约测试位于 `scripts/verify-*.mjs`；E2E 位于 `client/tests/`
 
 ## 硬性要求

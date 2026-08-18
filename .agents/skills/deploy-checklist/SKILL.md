@@ -1,44 +1,63 @@
 ---
 name: deploy-checklist
-description: 海川珠宝部署与上线检查清单 — 执行 Docker 部署、公网发布、上线前安全核查时使用；核对 TLS、环境变量、数据库迁移、备份、健康检查与上线前必办安全项，以 docs/DEPLOYMENT.md、docs/OPERATIONS_READINESS.md、docker-compose.yml 为准
+description: 海川珠宝动态部署门禁——仅在规划、核查或执行 Docker 部署、公网发布、生产迁移、回滚和上线验收时使用。必须从当前 .env.example、docker-compose.yml、Prisma、运行容器和项目运维文档取证，核对交易开关、管理员初始化、媒体持久化、备份恢复、TLS/CSP、健康探针与外部服务接线；不得把 Skill 中的旧状态当成生产事实。
 ---
 
-# 部署上线检查清单 Skill
+# 海川珠宝动态部署门禁
 
-> 仅用于部署、发布、上线、docker compose 相关任务与上线前安全检查。
-> 事实以 docs/DEPLOYMENT.md、docs/OPERATIONS_READINESS.md、docker-compose.yml 为准；本清单不具执行权，高危操作（迁移、部署、删除）须经用户审批。
+> 本 Skill 规定检查方法，不保存环境变量清单、迁移批次、已修问题或第三方服务当前状态。
+> 部署、迁移、生产写入、密钥和基础设施变更必须遵守 `AGENTS.md` 的审批边界。
 
----
+## 1. 先确定本次部署合同
 
-## 一、部署前核对
+- 明确目标环境、域名、部署版本、是否首次部署、允许的停机窗口、回滚点和负责人。
+- 从 `docs/DECISIONS.md`、`docs/OPERATIONS_READINESS.md` 与用户本轮授权确认本次开放能力；文档和代码不一致时标为阻断项。
+- 交易能力不得根据 compose 默认值推断。核对 `CUSTOMER_COMMERCE_ENABLED` 的批准状态、显式配置、前端入口和服务端守卫是否一致。
+- 没有目标环境证据时只能给出「预检结果」，不得宣布生产上线通过。
 
-1. 环境变量：确认 `.env` 已按 `.env.example` 配齐必填项——MYSQL_ROOT_PASSWORD、MYSQL_PASSWORD、DATABASE_URL、JWT_SECRET（openssl rand -hex 32）、CORS_ORIGIN、BOOTSTRAP_ADMIN_PASSWORD。
-2. 产品图片：`client/public/images/products/` 不在 Git 仓库，需单独上传（scp 或手动建目录）。
-3. 安全红线：不读取/输出 `.env` 真实值；不提交任何密钥。
+## 2. 动态读取当前事实
 
-## 二、上线前必办安全项（P0/P1）
+每次重新读取，不沿用历史报告：
 
-- TLS/HTTPS：当前 compose 无 443 终结；公网开放前必须补 TLS（宿主 Nginx+certbot 或容器内 443），并同步开启 HSTS、复核 CSP（client/nginx.conf）。
-- 登录失败锁定：目前仅 5/min 限流，无账号锁定；公网前补齐。
-- 依赖供应链扫描：CI 接入 npm audit / dependabot。
-- nginx 上传限制：`client_max_body_size 110m` 已配（勿回退，否则 >1MB 上传全 413）。
-- 备份防线：`backups/` 已在 .gitignore；backup 容器每日 DB+媒体备份；异地化（3-2-1）上线前评估。
+- `.env.example`：只读取变量名、用途和说明，不读取或输出 `.env` 真实值。
+- `docker-compose.yml`、Dockerfile、反向代理配置：核对变量是否实际注入、端口、卷、健康检查、启动命令和默认值。
+- `server/prisma/schema.prisma`、`server/prisma/migrations/` 与目标环境 `prisma migrate status`：确认迁移，不把仓库目录名当成生产状态。
+- `server/prisma/seed.ts` 与容器环境：首次部署必须证明管理员初始化能执行、可审计且不会重复创建错误账号。
+- 当前 CI、依赖清单、鉴权代码和安全配置：以实际文件和命令结果判断，不复述旧盘点结论。
+- 静态资源目录、上传目录、私有媒体目录和 Docker 卷：区分构建期资产与运行时媒体，验证持久化、权限和恢复路径。
 
-## 三、启动与迁移
+## 3. 上线门禁
 
-- 启动：`docker compose up -d`；查看 `docker compose ps` 与 `docker compose logs -f`。
-- 迁移：首次启动后 `docker compose exec server npx prisma migrate deploy`。
-- 生产库迁移状态未确认前，不执行破坏性迁移（批次 B drop_content_slots 等 deploy 状态需先确认）。
+以下任一项缺少证据时不得判为通过：
 
-## 四、健康检查
+1. **配置**：必需变量存在且被目标服务消费；密钥强度、跨域来源和 Feature Flag 符合本次批准范围。
+2. **数据库**：有部署前备份和可回滚点；迁移状态明确；破坏性或数据变更已单独批准。
+3. **管理员初始化**：首次环境能安全建立首个管理员；初始化凭据不进入日志、镜像或版本库，完成后按方案撤销或轮换。
+4. **媒体**：上传和私有媒体使用持久卷或已批准的对象存储；重建容器不丢失；备份包含数据库与媒体。
+5. **边界安全**：公网入口具备 TLS；HSTS、CSP、Cookie、安全响应头、上传体积和反向代理配置与实际资源来源一致。
+6. **外部服务**：邮件、短信、物流、支付、微信和对象存储逐项核对“代码实现、变量注入、网络连通、真实凭据、回调配置、失败降级”；六项均成立或明确证明不适用，才可称为已接通。
+7. **供应链**：根据当前工作流和锁文件执行适用的依赖审计；发现项按可利用性和生产暴露面分级，不把单次扫描等同于长期安全。
+8. **备份恢复**：确认保留周期、异地副本和恢复步骤；没有实际恢复演练时明确标记未验证。
 
-- `/api/health`、`/api/ready` 双探针。
-- 前台首页、后台 `/admin/login`、API 冒烟测试。
+## 4. 受控实施顺序
 
-## 五、验证还债（最高优先）
+获得相应批准后，按以下顺序执行；具体命令以当前部署文档和配置为准：
 
-- 跑 docs/VERIFICATION_RUNBOOK.md 七节；`prisma migrate status` 确认迁移；恢复演练脚本验证备份可恢复。
+1. 记录版本、备份和回滚点。
+2. 校验配置结构与实际注入，不打印密钥。
+3. 拉取或构建镜像，记录镜像版本与构建结果。
+4. 先执行数据库迁移检查，再执行获批迁移。
+5. 启动服务并检查容器状态、启动日志和重启策略。
+6. 验证 `/api/health`、`/api/ready`、前台首页、后台登录和本次开放的关键业务闭环。
+7. 验证失败路径、权限、重复提交、超时及外部服务降级。
+8. 按 `docs/VERIFICATION_RUNBOOK.md` 完成相称验证；不适用的项目写明原因。
 
-## 六、外部凭据（代码就绪，等真实值）
+## 5. 交付格式
 
-- SMTP、阿里云短信、快递100、支付宝/微信支付、微信开放平台、OSS 六类凭据，填入即激活；未配时相关功能降级（邮件转日志、支付/短信/物流不可用）。
+逐项给出：
+
+- `通过`：附文件、命令或运行结果。
+- `阻断`：说明风险、影响和解除条件。
+- `未验证`：说明缺少的环境、权限或真实输入。
+
+最后明确区分「代码/配置预检通过」「测试环境验收通过」「生产上线通过」，不得互相替代。
