@@ -263,19 +263,26 @@ export default function SchemaInspectorPanel({
                 },
               ]
             : []),
-          {
-            key: "visibility",
-            label:
-              editor.props.isVisible === false ? "取消隐藏模块" : "隐藏模块",
-            onClick: toggleVisibility,
-          },
-          { key: "reset", label: "恢复默认", onClick: resetToDefaults },
-          {
-            key: "remove",
-            label: "删除模块",
-            danger: true,
-            onClick: removeModule,
-          },
+          // 系统区块(全局设置/业务功能区)只读或仅提供管理入口,不给破坏性动作
+          ...(schema.systemBlock
+            ? []
+            : [
+                {
+                  key: "visibility",
+                  label:
+                    editor.props.isVisible === false
+                      ? "取消隐藏模块"
+                      : "隐藏模块",
+                  onClick: toggleVisibility,
+                },
+                { key: "reset", label: "恢复默认", onClick: resetToDefaults },
+                {
+                  key: "remove",
+                  label: "删除模块",
+                  danger: true,
+                  onClick: removeModule,
+                },
+              ]),
         ]}
       />
 

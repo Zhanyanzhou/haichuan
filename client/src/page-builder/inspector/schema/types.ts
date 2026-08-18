@@ -185,6 +185,8 @@ export interface ModuleInspectorSchema {
   displayName: string;
   /** 模块用途一句话，展示在面板顶部 */
   purpose?: string;
+  /** 系统区块（网站全局设置/业务功能区）：面板隐藏删除/隐藏/恢复默认等动作 */
+  systemBlock?: boolean;
   /** 完成度横幅；无契约的模块可省略 */
   evaluate?: (props: Record<string, any>) => ModuleContractStatus;
   /** 「恢复默认」使用；缺省时取 adapter defaultProps */
