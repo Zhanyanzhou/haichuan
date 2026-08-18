@@ -53,6 +53,11 @@ import {
   getEditorPageByPath,
   type EditorPageKey,
 } from "@/page-builder/config/editorPages";
+import {
+  PAGE_RECIPES,
+  RECIPE_NECESSITY_LABEL,
+  type PageRecipeSection,
+} from "@/page-builder/config/pageRecipes";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import ContentTemplateSkeletonPreview from "@/page-builder/preview/ContentTemplateSkeletonPreview";
 import ContentTemplateFrameworkOverview from "@/page-builder/preview/ContentTemplateFrameworkOverview";
@@ -1643,10 +1648,12 @@ function TemplateCard({
 }
 
 function TemplateLibrary({
+  pageKey,
   onTemplatePointerDragMove,
   onTemplatePointerDragEnd,
   onSaveAsTemplate,
 }: {
+  pageKey: EditorPageKey;
   onTemplatePointerDragMove: (
     name: string,
     clientX: number,
@@ -1720,6 +1727,21 @@ function TemplateLibrary({
       })).filter((section) => section.entries.length > 0),
     [entries],
   );
+
+  /* 本页推荐序列:配方置顶引导(搜索时让位;其余分类不清失——配方是引导不是门禁) */
+  const recipe = keyword.trim() ? null : PAGE_RECIPES[pageKey] ?? null;
+  const recipeEntries = useMemo(() => {
+    if (!recipe) return [];
+    return recipe.sections
+      .map((section) => ({
+        section,
+        entry: entries.find(([name]) => name === section.moduleType),
+      }))
+      .filter((item): item is {
+        section: PageRecipeSection;
+        entry: [string, (typeof BLOCK_META)[string]];
+      } => Boolean(item.entry));
+  }, [recipe, entries]);
 
   /* 左栏收缩（2026-08-16 用户需求）：收起为窄条，画布最大化；偏好记入 sessionStorage */
   const [libraryCollapsed, setLibraryCollapsed] = useState(() => {
@@ -1937,6 +1959,43 @@ function TemplateLibrary({
                         <DeleteOutlined />
                       </button>
                     </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+            {recipeEntries.length > 0 && recipe ? (
+              <section
+                className="homepage-editor__template-group homepage-editor__recipe-group"
+                aria-labelledby="template-group-recipe"
+              >
+                <h3 id="template-group-recipe">本页推荐序列</h3>
+                <p className="homepage-editor__recipe-narrative">
+                  {recipe.narrative}
+                </p>
+                <div className="homepage-editor__template-group-grid">
+                  {recipeEntries.map(({ section, entry }) => (
+                    <div
+                      className="homepage-editor__recipe-item"
+                      key={`recipe-${section.moduleType}`}
+                    >
+                      <span className="homepage-editor__recipe-phase">
+                        {section.phase} ·{" "}
+                        <em data-necessity={section.necessity}>
+                          {RECIPE_NECESSITY_LABEL[section.necessity]}
+                        </em>
+                      </span>
+                      <TemplateCard
+                        name={entry[0]}
+                        meta={entry[1]}
+                        viewMode={viewMode}
+                        previewViewport={previewViewport}
+                        onPointerDragMove={onTemplatePointerDragMove}
+                        onPointerDragEnd={onTemplatePointerDragEnd}
+                      />
+                      <span className="homepage-editor__recipe-note">
+                        {section.note}
+                      </span>
+                    </div>
                   ))}
                 </div>
               </section>
@@ -2291,6 +2350,7 @@ function CanvasBlockActionDock({
 
 function EditorBody({
   onSaveAsTemplate,
+  pageKey,
   pageLabel,
   pageMode,
   hasUnsavedChanges,
@@ -2298,6 +2358,7 @@ function EditorBody({
   onSaveDraft,
 }: {
   onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
+  pageKey: EditorPageKey;
   pageLabel: string;
   pageMode: "brand" | "commerce";
   hasUnsavedChanges: boolean;
@@ -2612,6 +2673,7 @@ function EditorBody({
       className={`homepage-editor__body${isInspecting ? " is-inspecting" : ""}`}
     >
       <TemplateLibrary
+        pageKey={pageKey}
         onTemplatePointerDragMove={handleTemplatePointerDragMove}
         onTemplatePointerDragEnd={handleTemplatePointerDragEnd}
         onSaveAsTemplate={onSaveAsTemplate}
@@ -3689,6 +3751,7 @@ export default function HomepageConfig({
           />
           <EditorBody
             onSaveAsTemplate={saveBlockAsTemplate}
+            pageKey={pageKey}
             pageLabel={getEditorPage(pageKey).label}
             pageMode={getEditorPage(pageKey).mode}
             hasUnsavedChanges={hasUnsavedChanges}

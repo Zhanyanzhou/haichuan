@@ -4969,3 +4969,38 @@ body:has(.homepage-editor__storefront-frame) {
 .homepage-editor__draft-status[data-mode="clean"] {
   color: #98948D;
 }
+
+/* ═══ 本页推荐序列(2026-08-18 P2:配方引导) ═══ */
+.homepage-editor__recipe-narrative {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #66645F;
+  line-height: 1.6;
+}
+.homepage-editor__recipe-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.homepage-editor__recipe-phase {
+  font-size: 11px;
+  color: #98948D;
+  letter-spacing: 0.04em;
+}
+.homepage-editor__recipe-phase em {
+  font-style: normal;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #F2F1EE;
+  color: #66645F;
+}
+.homepage-editor__recipe-phase em[data-necessity="required"] {
+  background: #FCF8F1;
+  color: #8C5A2B;
+}
+.homepage-editor__recipe-note {
+  font-size: 11px;
+  color: #98948D;
+  line-height: 1.5;
+}
