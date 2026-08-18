@@ -20,6 +20,7 @@ import {
 } from "@ant-design/icons";
 import { uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { ratioLabelOf } from "@/page-builder/config/imageSpecs";
 
 export interface MediaSpec {
   width: number;
@@ -124,6 +125,8 @@ export default function MediaPickerField({
 }: MediaPickerFieldProps) {
   /** 更换面板：在预览下方内嵌展开，预览保持可见 */
   const [replaceOpen, setReplaceOpen] = useState(false);
+  /** 上传区比例后缀：一律由规格派生,schema 的 placeholder 只写人话不写比例 */
+  const ratioSuffix = spec ? `（${ratioLabelOf(spec)}）` : "";
   /** URL 输入态：可从更换面板或空态进入 */
   const [urlMode, setUrlMode] = useState(false);
   const [urlInput, setUrlInput] = useState(value || "");
@@ -381,7 +384,9 @@ export default function MediaPickerField({
           >
             <InboxOutlined style={{ color: "#B8944E", fontSize: 22 }} />
             <div style={{ marginTop: 8, color: "#4A4239", fontSize: 13 }}>
-              {uploading ? "图片上传中…" : placeholder || "拖入图片或点击上传"}
+              {uploading
+                ? "图片上传中…"
+                : `${placeholder || "拖入图片或点击上传"}${ratioSuffix}`}
             </div>
             <div style={{ marginTop: 4, color: "#91877A", fontSize: 11 }}>
               仅图片，单张 ≤ 10MB

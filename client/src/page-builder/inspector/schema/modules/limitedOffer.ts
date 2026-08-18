@@ -23,7 +23,7 @@ export const limitedOfferSchema: ModuleInspectorSchema = {
           label: "活动视觉",
           control: "media",
           spec: IMAGE_SPECS.limitedOffer.event,
-          placeholder: "上传活动视觉（16:7）",
+          placeholder: "上传活动视觉",
           showSpecCheck: true,
         },
       ],

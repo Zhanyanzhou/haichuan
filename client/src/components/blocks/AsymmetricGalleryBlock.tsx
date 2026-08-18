@@ -134,7 +134,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
             align-items: start;
           }
           .hc-gallery__item { display: block; min-width: 0; color: inherit; text-decoration: none; }
-          .hc-gallery__frame { background: #E7DDCE; overflow: hidden; }
+          .hc-gallery__frame { background: #E4E3DF; overflow: hidden; }
           .hc-gallery__img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .7s ease; }
           .hc-gallery__item:hover .hc-gallery__img { transform: scale(1.02); }
           /* 桌面非对称节奏 */

@@ -35,7 +35,7 @@ export const carouselSchema: ModuleInspectorSchema = {
               spec: IMAGE_SPECS.carousel.image,
               required: true,
               device: "desktop",
-              placeholder: "上传桌面端轮播图（21:6）",
+              placeholder: "上传桌面端轮播图",
               showSpecCheck: true,
             },
             {
@@ -44,7 +44,7 @@ export const carouselSchema: ModuleInspectorSchema = {
               control: "media",
               spec: IMAGE_SPECS.carousel.mobile,
               device: "mobile",
-              placeholder: "上传手机端轮播图（3:4）",
+              placeholder: "上传手机端轮播图",
               showSpecCheck: true,
             },
             { key: "alt", label: "替代文字", control: "text" },
@@ -64,7 +64,6 @@ export const carouselSchema: ModuleInspectorSchema = {
           control: "segmented",
           options: [
             { label: "宽幕 21:6", value: "wide" },
-            { label: "标准 16:9", value: "standard" },
           ],
         },
         {
@@ -73,7 +72,6 @@ export const carouselSchema: ModuleInspectorSchema = {
           control: "segmented",
           options: [
             { label: "竖幅 3:4", value: "portrait" },
-            { label: "标准 4:5", value: "standard" },
           ],
         },
       ],

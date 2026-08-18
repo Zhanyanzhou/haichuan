@@ -47,7 +47,7 @@ export const hotspotSchema: ModuleInspectorSchema = {
           spec: IMAGE_SPECS.hotspot.desktop,
           required: true,
           device: "desktop",
-          placeholder: "上传桌面端底图（16:9）",
+          placeholder: "上传桌面端底图",
           showSpecCheck: true,
         },
         {
@@ -56,7 +56,7 @@ export const hotspotSchema: ModuleInspectorSchema = {
           control: "media",
           spec: IMAGE_SPECS.hotspot.mobile,
           device: "mobile",
-          placeholder: "上传手机端底图（3:4）",
+          placeholder: "上传手机端底图",
           showSpecCheck: true,
         },
       ],

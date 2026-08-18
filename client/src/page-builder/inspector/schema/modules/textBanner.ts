@@ -30,7 +30,7 @@ export const textBannerSchema: ModuleInspectorSchema = {
           label: "背景图（可选）",
           control: "media",
           spec: IMAGE_SPECS.textBanner.bgImage,
-          placeholder: "上传横幅背景图（21:6）",
+          placeholder: "上传横幅背景图",
           showSpecCheck: true,
         },
       ],

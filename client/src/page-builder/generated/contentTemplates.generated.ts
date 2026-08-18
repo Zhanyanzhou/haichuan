@@ -1,7 +1,7 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：aa329a00851de569adaec8f8f27ea6089432b42ac06c78a80d178b75b85f5071
+ * SHA-256：3c6fa91e6a81bf5dc173857fedf79ee1ea2bae51cc350def9c149d944571c234
  */
 
 export const CONTENT_TEMPLATE_REGISTRY_VERSION = 2;
@@ -650,11 +650,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "master": "sequence-stage",
     "media": [
       {
-        "desktopRatio": "16 / 7",
+        "desktopRatio": "21 / 6",
         "key": "frames",
-        "mobileRatio": "4 / 5",
+        "mobileRatio": "3 / 4",
         "required": false,
-        "tabletRatio": "16 / 7"
+        "tabletRatio": "21 / 6"
       }
     ],
     "moduleType": "轮播图",
@@ -756,19 +756,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "allowedRatioPresetsByViewport": {
           "desktop": [
-            "16 / 7"
+            "21 / 6"
           ],
           "mobile": [
-            "4 / 5"
+            "3 / 4"
           ],
           "tablet": [
-            "16 / 7"
+            "21 / 6"
           ]
         },
         "defaultRatioByViewport": {
-          "desktop": "16 / 7",
-          "mobile": "4 / 5",
-          "tablet": "16 / 7"
+          "desktop": "21 / 6",
+          "mobile": "3 / 4",
+          "tablet": "21 / 6"
         },
         "id": "frames",
         "kind": "media",
@@ -931,19 +931,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "allowedRatioPresetsByViewport": {
           "desktop": [
-            "4 / 5"
+            "1 / 1"
           ],
           "mobile": [
             "4 / 5"
           ],
           "tablet": [
-            "4 / 5"
+            "1 / 1"
           ]
         },
         "defaultRatioByViewport": {
-          "desktop": "4 / 5",
+          "desktop": "1 / 1",
           "mobile": "4 / 5",
-          "tablet": "4 / 5"
+          "tablet": "1 / 1"
         },
         "id": "categories",
         "kind": "collection",
@@ -1162,18 +1162,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "master": "comparison-stage",
     "media": [
       {
-        "desktopRatio": "1 / 1",
+        "desktopRatio": "4 / 5",
         "key": "before",
         "mobileRatio": "4 / 5",
         "required": false,
-        "tabletRatio": "1 / 1"
+        "tabletRatio": "4 / 5"
       },
       {
-        "desktopRatio": "1 / 1",
+        "desktopRatio": "4 / 5",
         "key": "after",
         "mobileRatio": "4 / 5",
         "required": false,
-        "tabletRatio": "1 / 1"
+        "tabletRatio": "4 / 5"
       }
     ],
     "moduleType": "改款对比",
@@ -1296,19 +1296,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "allowedRatioPresetsByViewport": {
           "desktop": [
-            "1 / 1"
+            "4 / 5"
           ],
           "mobile": [
             "4 / 5"
           ],
           "tablet": [
-            "1 / 1"
+            "4 / 5"
           ]
         },
         "defaultRatioByViewport": {
-          "desktop": "1 / 1",
+          "desktop": "4 / 5",
           "mobile": "4 / 5",
-          "tablet": "1 / 1"
+          "tablet": "4 / 5"
         },
         "id": "before",
         "kind": "media",
@@ -1318,19 +1318,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "allowedRatioPresetsByViewport": {
           "desktop": [
-            "1 / 1"
+            "4 / 5"
           ],
           "mobile": [
             "4 / 5"
           ],
           "tablet": [
-            "1 / 1"
+            "4 / 5"
           ]
         },
         "defaultRatioByViewport": {
-          "desktop": "1 / 1",
+          "desktop": "4 / 5",
           "mobile": "4 / 5",
-          "tablet": "1 / 1"
+          "tablet": "4 / 5"
         },
         "id": "after",
         "kind": "media",
@@ -2382,11 +2382,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "master": "hotspot-stage",
     "media": [
       {
-        "desktopRatio": "16 / 8",
+        "desktopRatio": "16 / 9",
         "key": "sceneImage",
-        "mobileRatio": "4 / 5",
+        "mobileRatio": "3 / 4",
         "required": true,
-        "tabletRatio": "4 / 3"
+        "tabletRatio": "16 / 9"
       }
     ],
     "moduleType": "热区图",
@@ -2530,19 +2530,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "allowedRatioPresetsByViewport": {
           "desktop": [
-            "16 / 8"
+            "16 / 9"
           ],
           "mobile": [
-            "4 / 5"
+            "3 / 4"
           ],
           "tablet": [
-            "4 / 3"
+            "16 / 9"
           ]
         },
         "defaultRatioByViewport": {
-          "desktop": "16 / 8",
-          "mobile": "4 / 5",
-          "tablet": "4 / 3"
+          "desktop": "16 / 9",
+          "mobile": "3 / 4",
+          "tablet": "16 / 9"
         },
         "id": "sceneImage",
         "kind": "media",
@@ -3244,19 +3244,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "allowedRatioPresetsByViewport": {
           "desktop": [
-            "1 / 1"
+            "4 / 5"
           ],
           "mobile": [
             "4 / 5"
           ],
           "tablet": [
-            "1 / 1"
+            "4 / 5"
           ]
         },
         "defaultRatioByViewport": {
-          "desktop": "1 / 1",
+          "desktop": "4 / 5",
           "mobile": "4 / 5",
-          "tablet": "1 / 1"
+          "tablet": "4 / 5"
         },
         "id": "scenes",
         "kind": "collection",
@@ -3674,11 +3674,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "master": "store-visit",
     "media": [
       {
-        "desktopRatio": "16 / 8",
+        "desktopRatio": "3 / 2",
         "key": "store",
         "mobileRatio": "4 / 5",
         "required": false,
-        "tabletRatio": "4 / 3"
+        "tabletRatio": "3 / 2"
       }
     ],
     "moduleType": "门店信息",
@@ -3797,19 +3797,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "allowedRatioPresetsByViewport": {
           "desktop": [
-            "16 / 8"
+            "3 / 2"
           ],
           "mobile": [
             "4 / 5"
           ],
           "tablet": [
-            "4 / 3"
+            "3 / 2"
           ]
         },
         "defaultRatioByViewport": {
-          "desktop": "16 / 8",
+          "desktop": "3 / 2",
           "mobile": "4 / 5",
-          "tablet": "4 / 3"
+          "tablet": "3 / 2"
         },
         "id": "store",
         "kind": "media",
@@ -4409,11 +4409,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "master": "wearing-story",
     "media": [
       {
-        "desktopRatio": "3 / 4",
+        "desktopRatio": "4 / 5",
         "key": "wearingImage",
         "mobileRatio": "3 / 4",
         "required": false,
-        "tabletRatio": "3 / 4"
+        "tabletRatio": "4 / 5"
       }
     ],
     "moduleType": "佩戴灵感",
@@ -4532,19 +4532,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "allowedRatioPresetsByViewport": {
           "desktop": [
-            "3 / 4"
+            "4 / 5"
           ],
           "mobile": [
             "3 / 4"
           ],
           "tablet": [
-            "3 / 4"
+            "4 / 5"
           ]
         },
         "defaultRatioByViewport": {
-          "desktop": "3 / 4",
+          "desktop": "4 / 5",
           "mobile": "3 / 4",
-          "tablet": "3 / 4"
+          "tablet": "4 / 5"
         },
         "id": "wearingImage",
         "kind": "media",
@@ -4786,11 +4786,11 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     },
     "slots": [
       {
-        "desktopRatio": "16 / 7",
+        "desktopRatio": "21 / 6",
         "key": "frames",
-        "mobileRatio": "4 / 5",
+        "mobileRatio": "3 / 4",
         "role": "media",
-        "tabletRatio": "16 / 7"
+        "tabletRatio": "21 / 6"
       },
       {
         "key": "copy",
@@ -4864,11 +4864,11 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     },
     "slots": [
       {
-        "desktopRatio": "4 / 5",
+        "desktopRatio": "1 / 1",
         "key": "categories",
         "mobileRatio": "4 / 5",
         "role": "card",
-        "tabletRatio": "4 / 5"
+        "tabletRatio": "1 / 1"
       },
       {
         "key": "copy",
@@ -5020,18 +5020,18 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     },
     "slots": [
       {
-        "desktopRatio": "1 / 1",
+        "desktopRatio": "4 / 5",
         "key": "before",
         "mobileRatio": "4 / 5",
         "role": "mainMedia",
-        "tabletRatio": "1 / 1"
+        "tabletRatio": "4 / 5"
       },
       {
-        "desktopRatio": "1 / 1",
+        "desktopRatio": "4 / 5",
         "key": "after",
         "mobileRatio": "4 / 5",
         "role": "detailMedia",
-        "tabletRatio": "1 / 1"
+        "tabletRatio": "4 / 5"
       },
       {
         "key": "copy",
@@ -5290,11 +5290,11 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     },
     "slots": [
       {
-        "desktopRatio": "16 / 8",
+        "desktopRatio": "16 / 9",
         "key": "sceneImage",
-        "mobileRatio": "4 / 5",
+        "mobileRatio": "3 / 4",
         "role": "media",
-        "tabletRatio": "4 / 3"
+        "tabletRatio": "16 / 9"
       },
       {
         "key": "hotspots",
@@ -5599,11 +5599,11 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     },
     "slots": [
       {
-        "desktopRatio": "1 / 1",
+        "desktopRatio": "4 / 5",
         "key": "scenes",
         "mobileRatio": "4 / 5",
         "role": "card",
-        "tabletRatio": "1 / 1"
+        "tabletRatio": "4 / 5"
       },
       {
         "key": "copy",
@@ -5757,11 +5757,11 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     },
     "slots": [
       {
-        "desktopRatio": "16 / 8",
+        "desktopRatio": "3 / 2",
         "key": "store",
         "mobileRatio": "4 / 5",
         "role": "media",
-        "tabletRatio": "4 / 3"
+        "tabletRatio": "3 / 2"
       },
       {
         "key": "details",
@@ -6011,11 +6011,11 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     },
     "slots": [
       {
-        "desktopRatio": "3 / 4",
+        "desktopRatio": "4 / 5",
         "key": "wearingImage",
         "mobileRatio": "3 / 4",
         "role": "mainMedia",
-        "tabletRatio": "3 / 4"
+        "tabletRatio": "4 / 5"
       },
       {
         "key": "copy",

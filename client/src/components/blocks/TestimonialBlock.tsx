@@ -13,7 +13,7 @@ const TESTIMONIAL_RATIO = getContractRoleRatio("testimonials", "authorizedPhoto"
 
 /**
  * 顾客之声 — Editorial Story 母版(口碑变体)
- * 引语式排版:大字引文 + 署名,实拍图 4:3 作为辅图交替错位;
+ * 引语式排版:大字引文 + 署名,授权实拍图(契约比例)作为辅图交替错位;
  * 不使用白卡、边框与评论卡形态。
  */
 export default function TestimonialBlock({ module, editMode }: TestimonialBlockProps) {
@@ -29,7 +29,7 @@ export default function TestimonialBlock({ module, editMode }: TestimonialBlockP
   if (!list.length && editMode) {
     return (
       <DecorSection master="editorial-story" background={bgColor}>
-        <BlockEmptyPlaceholder hint="顾客之声" spec="请添加顾客引语（建议 2–3 条，需取得顾客授权）" />
+        <BlockEmptyPlaceholder hint="顾客之声" spec="请添加顾客引语（建议 2–3 条，需取得顾客授权）" ratio={TESTIMONIAL_RATIO} />
       </DecorSection>
     );
   }

@@ -138,7 +138,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
       )}
       <div className="hc-content-template__container hc-phase1-double">
         <div data-editor-field="mainImage" className="hc-content-template__media hc-phase1-double__main" style={{
-            background: '#E7DDCE',
+            background: '#E4E3DF',
             opacity: rm || visible ? 1 : 0,
             transform: rm || visible ? 'translateY(0)' : 'translateY(18px)',
             transition: 'opacity 0.9s 0.05s ease, transform 0.9s 0.05s ease',
@@ -153,7 +153,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
           <div
             data-editor-field="detailImage"
             className="hc-content-template__media hc-phase1-double__detail"
-            style={{ background: '#E7DDCE' }}
+            style={{ background: '#E4E3DF' }}
           >
             {detailImg ? (
               <EditorialImage src={detailImg} alt={c?.detailAltText || ""} focusX={s?.detailFocusX ?? 50} focusY={s?.detailFocusY ?? 50} />

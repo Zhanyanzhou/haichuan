@@ -416,14 +416,16 @@
 .homepage-editor__template-preview-img {
   display: block;
   width: 100%;
-  aspect-ratio: 3 / 4;
-  object-fit: cover;
+  /* 缩略图按合同比例出图(横版横框/竖版竖框),SVG viewBox 决定高度,上限夹取防极宽模板拉长卡片 */
+  height: auto;
+  max-height: 320px;
+  object-fit: contain;
   background: #f4f5f7;
 }
-/* 双列预览统一 3:4（与 SVG viewBox 一致，无裁切）；名称单行省略，保证每张卡片尺寸完全一致 */
+/* 双列预览名称单行省略;高度同样由 SVG 固有比例决定 */
 .homepage-editor__template-scroll.is-double
   .homepage-editor__template-preview-img {
-  aspect-ratio: 3 / 4;
+  height: auto;
 }
 .homepage-editor__template-scroll.is-double .homepage-editor__template-name {
   white-space: nowrap;
@@ -555,7 +557,9 @@
 .homepage-editor__template-visual {
   position: relative;
   display: block;
-  aspect-ratio: 3 / 4;
+  /* 手绘小样兜底同规则:按内容比例,上限夹取 */
+  height: auto;
+  max-height: 320px;
   overflow: hidden;
   background: #f4f5f7;
 }

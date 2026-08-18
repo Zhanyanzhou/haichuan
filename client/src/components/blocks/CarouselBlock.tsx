@@ -77,7 +77,7 @@ export default function CarouselBlock({
         icon="🖼️"
         hint="轮播图"
         spec={`请添加轮播图片 · 电脑端 ${IMAGE_SPECS.carousel.image.label}`}
-        height="clamp(320px, 41.67vw, 600px)"
+        ratio={desktopRatio}
       />
     );
   }
@@ -113,7 +113,7 @@ export default function CarouselBlock({
           "--homepage-carousel-ratio": desktopRatio,
           "--homepage-carousel-mobile-ratio": mobileRatio,
           overflow: "hidden",
-          background: "#E7DDCE",
+          background: "#E4E3DF",
         } as CSSProperties
       }
     >

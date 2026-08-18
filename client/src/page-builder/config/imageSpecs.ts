@@ -1,58 +1,118 @@
 import { CONTENT_TEMPLATE_CONTRACTS } from "../generated/contentTemplates.generated";
+import { getContractRoleRatio } from "./blockContracts";
+
+type ContractKey = keyof typeof CONTENT_TEMPLATE_CONTRACTS;
+type SpecViewport = "desktop" | "mobile";
 
 /**
  * 图片尺寸规格目录 — 各模块上传素材的推荐尺寸(建议值,8% 容差内提示"尺寸合适",不阻断)。
  *
- * 定位(2026-08 模板体系重构后):
- * - 比例规则唯一来源是 designSystem/tokens 的 RATIOS 与 blockContracts 各模板契约;
- * - 本表只负责"给运营看的上传规格文案 + 编辑器尺寸检查数据源",数值已与契约对齐;
+ * 定位(2026-08-18 比例派生管道):
+ * - 比例唯一来源是内容模板契约(roles[].defaultRatioByViewport),本表不再手写比例字面值;
+ * - 每条目只声明「用途文案 + 建议像素宽度」,宽高与比例名由契约现算,评审改契约后全链路自动跟随;
  * - imageText / splitPanel 条目为已退役模板的遗留规格,仅供旧数据编辑兜底,不再新增使用。
  *
  * 桌面端按 2K+ 出图,移动端按 3x 出图,商品图可放大看细节。
  * 注意:大像素原图需配套后端按需缩放(srcset / 多尺寸),避免移动端直接加载 4K 拖慢。
  */
+interface ContractSpecInput {
+  /** 契约模板 key */
+  template: ContractKey;
+  /** 契约 roles[].id(媒体槽位 id) */
+  role: string;
+  viewport: SpecViewport;
+  /** 用途短语,label 前缀(如 "证书图") */
+  note: string;
+  /** 建议像素宽度(桌面 2K+,移动 3x) */
+  baseWidth: number;
+  /** label 尾注,保留 "2K+ / 4K / 超宽" 等运营提示 */
+  suffix?: string;
+}
+
+function contractSpec({
+  template,
+  role,
+  viewport,
+  note,
+  baseWidth,
+  suffix,
+}: ContractSpecInput) {
+  const ratio = getContractRoleRatio(template, role, viewport); // "3 / 2"
+  const [num, den] = ratio.split("/").map((part) => Number(part.trim()));
+  const height = Math.round((baseWidth * den) / num);
+  return {
+    width: baseWidth,
+    height,
+    ratio,
+    label: `${note}（建议 ${baseWidth}×${height}，${num}:${den}${suffix ? "，" + suffix : ""}）`,
+  };
+}
+
+/**
+ * 从规格派生 "a:b" 比例文案。
+ * placeholder/分区描述等所有给人看的比例文案统一经此生成,
+ * 评审改契约后自动跟随,禁止手写字面值。
+ */
+export function ratioLabelOf(
+  spec: { ratio: string } | undefined | null,
+): string {
+  return spec
+    ? spec.ratio
+        .split("/")
+        .map((part) => part.trim())
+        .join(":")
+    : "";
+}
+
 export const IMAGE_SPECS = {
   hero: {
-    desktop: {
-      width: 3360,
-      height: 1470,
-      ratio: CONTENT_TEMPLATE_CONTRACTS.hero.media[0].desktopRatio!,
-      label: "桌面端主视觉（建议 3360×1470，16:7，2K+）",
-    },
-    mobile: {
-      width: 1500,
-      height: 1875,
-      ratio: CONTENT_TEMPLATE_CONTRACTS.hero.media[1].mobileRatio!,
-      label: "移动端主视觉（建议 1500×1875，4:5）",
-    },
+    desktop: contractSpec({
+      template: "hero",
+      role: "desktopImage",
+      viewport: "desktop",
+      note: "桌面端主视觉",
+      baseWidth: 3360,
+      suffix: "2K+",
+    }),
+    mobile: contractSpec({
+      template: "hero",
+      role: "mobileImage",
+      viewport: "mobile",
+      note: "移动端主视觉",
+      baseWidth: 1500,
+    }),
   },
   singlePoster: {
-    image: {
-      width: 1600,
-      height: 2000,
-      ratio: CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[0].desktopRatio!,
-      label: "海报主图（建议 1600×2000，4:5）",
-    },
-    mobile: {
-      width: 1500,
-      height: 2000,
-      ratio: CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[1].mobileRatio!,
-      label: "移动端单海报（建议 1500×2000，3:4）",
-    },
+    image: contractSpec({
+      template: "singlePoster",
+      role: "desktopImage",
+      viewport: "desktop",
+      note: "海报主图",
+      baseWidth: 1600,
+    }),
+    mobile: contractSpec({
+      template: "singlePoster",
+      role: "mobileImage",
+      viewport: "mobile",
+      note: "移动端单海报",
+      baseWidth: 1500,
+    }),
   },
   doublePoster: {
-    main: {
-      width: 2400,
-      height: 1600,
-      ratio: CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[0].desktopRatio!,
-      label: "主海报（建议 2400×1600，3:2）",
-    },
-    detail: {
-      width: 1280,
-      height: 1600,
-      ratio: CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[1].desktopRatio!,
-      label: "细节海报（建议 1280×1600，4:5）",
-    },
+    main: contractSpec({
+      template: "doublePoster",
+      role: "mainImage",
+      viewport: "desktop",
+      note: "主海报",
+      baseWidth: 2400,
+    }),
+    detail: contractSpec({
+      template: "doublePoster",
+      role: "detailImage",
+      viewport: "desktop",
+      note: "细节海报",
+      baseWidth: 1280,
+    }),
   },
   imageText: {
     image: {
@@ -61,20 +121,23 @@ export const IMAGE_SPECS = {
       ratio: "4:3",
       label: "图文配图（建议 1600×1200，4:3）",
     },
-  }, // 遗留模块（已退役），仅供旧数据编辑兜底
+  }, // 遗留模块（已退役），仅供旧数据编辑兜底;4:3 不在规范比例内,不随契约派生
   fullBleed: {
-    desktop: {
-      width: 3360,
-      height: 960,
-      ratio: CONTENT_TEMPLATE_CONTRACTS.fullBleed.media[0].desktopRatio!,
-      label: "通栏桌面图（建议 3360×960，21:6，超宽）",
-    },
-    mobile: {
-      width: 1500,
-      height: 1875,
-      ratio: CONTENT_TEMPLATE_CONTRACTS.fullBleed.media[1].mobileRatio!,
-      label: "通栏移动图（建议 1500×1875，4:5）",
-    },
+    desktop: contractSpec({
+      template: "fullBleed",
+      role: "image",
+      viewport: "desktop",
+      note: "通栏桌面图",
+      baseWidth: 3360,
+      suffix: "超宽",
+    }),
+    mobile: contractSpec({
+      template: "fullBleed",
+      role: "mobileImage",
+      viewport: "mobile",
+      note: "通栏移动图",
+      baseWidth: 1500,
+    }),
   },
   splitPanel: {
     image: {
@@ -83,16 +146,18 @@ export const IMAGE_SPECS = {
       ratio: "3:4",
       label: "分栏配图（建议 1200×1600，3:4）",
     },
-  },
-  /* ═══ 2026-08-16 归口新增：此前以 adapter 内联对象散落 ═══ */
+  }, // 遗留模块（已退役），仅供旧数据编辑兜底
+  /* ═══ 契约派生(2026-08-18):比例/宽高/文案由合同现算,禁止回填字面值 ═══ */
   certificate: {
-    image: {
-      width: 3000,
-      height: 2000,
-      ratio: "3:2",
-      label: "证书图（建议 3000×2000，3:2）",
-    },
+    image: contractSpec({
+      template: "certificates",
+      role: "certificates",
+      viewport: "desktop",
+      note: "证书图",
+      baseWidth: 3000,
+    }),
   },
+  // 契约缺口:journey.steps 无默认比例(构图评审待定),1:1 为暂定保留值
   customProcess: {
     node: {
       width: 2000,
@@ -102,13 +167,15 @@ export const IMAGE_SPECS = {
     },
   },
   testimonial: {
-    image: {
-      width: 1600,
-      height: 2000,
-      ratio: "4:5",
-      label: "实拍图（建议 1600×2000，4:5）",
-    },
+    image: contractSpec({
+      template: "testimonials",
+      role: "authorizedPhoto",
+      viewport: "desktop",
+      note: "实拍图",
+      baseWidth: 1600,
+    }),
   },
+  // 契约缺口:brandPoints.points 无默认比例(构图评审待定),1:1 为暂定保留值
   cardGrid: {
     image: {
       width: 2000,
@@ -118,117 +185,160 @@ export const IMAGE_SPECS = {
     },
   },
   hotspot: {
-    desktop: {
-      width: 3840,
-      height: 2160,
-      ratio: "16:9",
-      label: "热区桌面图（建议 3840×2160，16:9，4K）",
-    },
-    mobile: {
-      width: 1170,
-      height: 1560,
-      ratio: "3:4",
-      label: "热区移动图（建议 1170×1560，3:4）",
-    },
+    desktop: contractSpec({
+      template: "hotspot",
+      role: "sceneImage",
+      viewport: "desktop",
+      note: "热区桌面图",
+      baseWidth: 3840,
+      suffix: "4K",
+    }),
+    mobile: contractSpec({
+      template: "hotspot",
+      role: "sceneImage",
+      viewport: "mobile",
+      note: "热区移动图",
+      baseWidth: 1170,
+    }),
   },
   textBanner: {
-    bgImage: {
-      width: 3360,
-      height: 960,
-      ratio: "21:6",
-      label: "横幅背景图（建议 3360×960，21:6）",
-    },
+    bgImage: contractSpec({
+      template: "textBanner",
+      role: "bgImage",
+      viewport: "desktop",
+      note: "横幅背景图",
+      baseWidth: 3360,
+    }),
   },
   productRow: {
-    image: {
-      width: 2000,
-      height: 2500,
-      ratio: "4:5",
-      label: "商品图（建议 2000×2500，4:5，统一比例）",
-    },
+    image: contractSpec({
+      template: "productRow",
+      role: "productCards",
+      viewport: "desktop",
+      note: "商品图",
+      baseWidth: 2000,
+    }),
   },
   featuredProduct: {
-    image: {
-      width: 1600,
-      height: 2000,
-      ratio: "4:5",
-      label: "主推作品图（建议 1600×2000，4:5）",
-    },
+    image: contractSpec({
+      template: "featuredProduct",
+      role: "product",
+      viewport: "desktop",
+      note: "主推作品图",
+      baseWidth: 1600,
+    }),
   },
   lookbook: {
-    image: {
-      width: 1600,
-      height: 2000,
-      ratio: "4:5",
-      label: "佩戴大片（建议 1600×2000，4:5）",
-    },
+    image: contractSpec({
+      template: "wearingInspiration",
+      role: "wearingImage",
+      viewport: "desktop",
+      note: "佩戴大片",
+      baseWidth: 1600,
+    }),
+    mobile: contractSpec({
+      template: "wearingInspiration",
+      role: "wearingImage",
+      viewport: "mobile",
+      note: "佩戴大片（手机端）",
+      baseWidth: 1500,
+    }),
   },
   categoryCards: {
-    image: {
-      width: 1600,
-      height: 2000,
-      ratio: "4:5",
-      label: "入口卡图（建议 1600×2000，4:5）",
-    },
+    image: contractSpec({
+      template: "categoryCards",
+      role: "categories",
+      viewport: "desktop",
+      note: "入口卡图",
+      baseWidth: 1600,
+    }),
+  },
+  // 分类卡片(1:1)与场景选购(4:5)同用 CategoryCardsBlock,模板类型二选一,规格分列
+  sceneShopping: {
+    image: contractSpec({
+      template: "sceneShopping",
+      role: "scenes",
+      viewport: "desktop",
+      note: "场景入口图",
+      baseWidth: 1600,
+    }),
   },
   carousel: {
-    image: {
-      width: 3360,
-      height: 960,
-      ratio: "21:6",
-      label: "电脑端宽幕轮播图（建议 3360×960，21:6）",
-    },
-    mobile: {
-      width: 1500,
-      height: 2000,
-      ratio: "3:4",
-      label: "手机端轮播图（建议 1500×2000，3:4）",
-    },
+    image: contractSpec({
+      template: "carousel",
+      role: "frames",
+      viewport: "desktop",
+      note: "电脑端宽幕轮播图",
+      baseWidth: 3360,
+    }),
+    mobile: contractSpec({
+      template: "carousel",
+      role: "frames",
+      viewport: "mobile",
+      note: "手机端轮播图",
+      baseWidth: 1500,
+    }),
   },
   gallery: {
-    primary: {
-      width: 1600,
-      height: 2000,
-      ratio: "4:5",
-      label: "画廊主图（建议 1600×2000，4:5）",
-    },
-    secondary: {
-      width: 2000,
-      height: 2000,
-      ratio: "1:1",
-      label: "画廊辅图（建议 2000×2000，1:1）",
-    },
+    primary: contractSpec({
+      template: "gallery",
+      role: "works",
+      viewport: "desktop",
+      note: "画廊主图",
+      baseWidth: 1600,
+    }),
   },
   storeInfo: {
-    image: {
-      width: 2400,
-      height: 1600,
-      ratio: "3:2",
-      label: "门店空间图（建议 2400×1600，3:2）",
-    },
+    image: contractSpec({
+      template: "storeInfo",
+      role: "store",
+      viewport: "desktop",
+      note: "门店空间图",
+      baseWidth: 2400,
+    }),
+    mobile: contractSpec({
+      template: "storeInfo",
+      role: "store",
+      viewport: "mobile",
+      note: "门店空间图（手机端）",
+      baseWidth: 1500,
+    }),
   },
   beforeAfter: {
-    image: {
-      width: 1600,
-      height: 2000,
-      ratio: "4:5",
-      label: "改款对比图（建议 1600×2000，4:5，前后同比例）",
-    },
+    image: contractSpec({
+      template: "comparison",
+      role: "before",
+      viewport: "desktop",
+      note: "改款对比图",
+      baseWidth: 1600,
+      suffix: "前后同比例",
+    }),
   },
   video: {
-    poster: {
-      width: 3840,
-      height: 2160,
-      ratio: "16:9",
-      label: "视频封面（建议 3840×2160，16:9，4K）",
-    },
+    poster: contractSpec({
+      template: "video",
+      role: "coverImage",
+      viewport: "desktop",
+      note: "视频封面",
+      baseWidth: 3840,
+      suffix: "4K",
+    }),
+    posterMobile: contractSpec({
+      template: "video",
+      role: "coverImage",
+      viewport: "mobile",
+      note: "视频封面（手机端）",
+      baseWidth: 1500,
+    }),
   },
   limitedOffer: {
-    event: {
-      width: 3360,
-      height: 1470,
-      ratio: CONTENT_TEMPLATE_CONTRACTS.limitedEvent.media[0].desktopRatio!,
-      label: "活动视觉（建议 3360×1470，16:7，超宽）",
-    },
+    event: contractSpec({
+      template: "limitedEvent",
+      role: "event",
+      viewport: "desktop",
+      note: "活动视觉",
+      baseWidth: 3360,
+      suffix: "超宽",
+    }),
   },
-} as const;
+};

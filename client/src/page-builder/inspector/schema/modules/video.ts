@@ -41,7 +41,7 @@ export const videoSchema: ModuleInspectorSchema = {
           control: "media",
           spec: IMAGE_SPECS.video.poster,
           hint: "未播放时显示的封面",
-          placeholder: "上传视频封面（16:9）",
+          placeholder: "上传视频封面",
           showSpecCheck: true,
         },
       ],

@@ -76,7 +76,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
           position: relative;
           aspect-ratio: ${BEFORE_AFTER_CONTRACT.canvas.desktopMediaAspectRatio};
           overflow: hidden;
-          background: #E7DDCE;
+          background: #E4E3DF;
           touch-action: none;
           cursor: ${dragging ? "grabbing" : "ew-resize"};
         }

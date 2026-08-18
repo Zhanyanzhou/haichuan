@@ -89,7 +89,7 @@ export const doublePosterSchema: ModuleInspectorSchema = {
           spec: IMAGE_SPECS.doublePoster.main,
           required: true,
           focusKeys: { x: "mainFocusX", y: "mainFocusY" },
-          placeholder: "上传主海报（3:2）",
+          placeholder: "上传主海报",
           showSpecCheck: true,
         },
         {
@@ -99,7 +99,7 @@ export const doublePosterSchema: ModuleInspectorSchema = {
           spec: IMAGE_SPECS.doublePoster.detail,
           required: true,
           focusKeys: { x: "detailFocusX", y: "detailFocusY" },
-          placeholder: "上传细节海报（4:5）",
+          placeholder: "上传细节海报",
           showSpecCheck: true,
         },
       ],

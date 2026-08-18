@@ -62,7 +62,7 @@ export default function HeroSection({ module, editMode }: Props) {
   const mobileFocusY = s?.mobileFocusY ?? legacyFocusY;
   const alignment = l?.template === "center" ? "center" : "left";
   const heroStyle = {
-    background: "#E7DDCE",
+    background: "#E4E3DF",
     outline: editMode ? "2px solid rgba(184,148,78,0.6)" : undefined,
     outlineOffset: -2,
     position: "relative",

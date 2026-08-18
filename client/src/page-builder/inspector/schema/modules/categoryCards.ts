@@ -6,7 +6,7 @@ import {
   CATEGORY_CARDS_CONTRACT,
   evaluateCategoryCardsContract,
 } from "../../../config/blockContracts";
-import { IMAGE_SPECS } from "../../../config/imageSpecs";
+import { IMAGE_SPECS, ratioLabelOf } from "../../../config/imageSpecs";
 import { categoryCardsPuckConfig } from "../../../adapters/categoryCards.puck";
 import { puckConfig } from "../../../config/puckConfig";
 import { bgColorPresetField, moduleNameField } from "../shared";
@@ -26,6 +26,12 @@ export function makeCategoryCardsSchema(
     variant.defaults ??
     puckConfig.components[variant.moduleType]?.defaultProps ??
     categoryCardsPuckConfig.defaultProps;
+  // 分类卡片与按场景选购同用本 schema,素材比例按契约分形态派生(1:1 / 4:5)
+  const isScene = variant.moduleType === "按场景选购";
+  const entrySpec = isScene
+    ? IMAGE_SPECS.sceneShopping.image
+    : IMAGE_SPECS.categoryCards.image;
+  const entryRatioLabel = ratioLabelOf(entrySpec);
   return {
     moduleType: variant.moduleType,
     displayName: variant.displayName,
@@ -97,9 +103,9 @@ export function makeCategoryCardsSchema(
                 key: "image",
                 label: "卡片图片",
                 control: "media",
-                spec: IMAGE_SPECS.categoryCards.image,
+                spec: entrySpec,
                 required: true,
-                placeholder: "上传入口图（4:5）",
+                placeholder: `上传入口图（${entryRatioLabel}）`,
                 showSpecCheck: true,
               },
               {

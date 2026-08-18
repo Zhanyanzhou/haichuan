@@ -69,7 +69,7 @@ export const beforeAfterPuckConfig = {
           onChange={onChange}
           readOnly={readOnly}
           spec={IMAGE_SPECS.beforeAfter.image}
-          placeholder="上传改款前图片（4:5）"
+          placeholder="上传改款前图片"
         />
       ),
     },
@@ -92,7 +92,7 @@ export const beforeAfterPuckConfig = {
           onChange={onChange}
           readOnly={readOnly}
           spec={IMAGE_SPECS.beforeAfter.image}
-          placeholder="上传改款后图片（4:5）"
+          placeholder="上传改款后图片"
         />
       ),
     },

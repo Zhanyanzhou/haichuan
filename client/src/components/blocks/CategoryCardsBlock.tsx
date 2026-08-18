@@ -48,6 +48,7 @@ export default function CategoryCardsBlock({
         icon="📂"
         hint="分类导航卡片"
         spec="请在右侧配置分类数据"
+        ratio={mediaAspectRatio}
         bg={bg}
       />
     );

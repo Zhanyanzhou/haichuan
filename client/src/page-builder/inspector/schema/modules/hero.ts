@@ -6,7 +6,7 @@ import {
   HERO_CONTRACT,
   evaluateHeroContract,
 } from "../../../config/blockContracts";
-import { IMAGE_SPECS } from "../../../config/imageSpecs";
+import { IMAGE_SPECS, ratioLabelOf } from "../../../config/imageSpecs";
 import { heroPuckConfig } from "../../../adapters/hero.puck";
 import {
   altTextField,
@@ -68,7 +68,7 @@ export const heroSchema: ModuleInspectorSchema = {
       id: "hero-media",
       title: "媒体",
       layer: "media",
-      description: "首屏按视口裁切；素材建议 桌面 16:7 / 手机 4:5",
+      description: `首屏按视口裁切；素材建议 桌面 ${ratioLabelOf(IMAGE_SPECS.hero.desktop)} / 手机 ${ratioLabelOf(IMAGE_SPECS.hero.mobile)}`,
       fields: [
         desktopMediaField(
           "desktopImage",
@@ -77,7 +77,7 @@ export const heroSchema: ModuleInspectorSchema = {
           {
             required: true,
             focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
-            placeholder: "上传桌面端主视觉（16:7）",
+            placeholder: "上传桌面端主视觉",
           },
         ),
         mobileMediaField(
@@ -87,7 +87,7 @@ export const heroSchema: ModuleInspectorSchema = {
           "desktopImage",
           {
             focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
-            placeholder: "上传手机端主视觉（4:5）",
+            placeholder: "上传手机端主视觉",
           },
         ),
       ],

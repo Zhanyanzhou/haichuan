@@ -10,13 +10,12 @@ import {
   resolveLinkTargetUrl,
   type LinkTargetValue,
 } from "../utils/linkTarget";
-import { RATIOS } from "../designSystem/tokens";
 import { CONTENT_TEMPLATE_CONTRACTS } from "../generated/contentTemplates.generated";
 
 /**
- * 比例单一来源:契约的 canvas 比例一律引用 designSystem/tokens 的 RATIOS,
- * 不再手写字面值。已迁移母版:cinematic-hero(hero/video)、immersive-image
- * (fullBleed)、conversion(appointment);其余契约随各自母版批次迁移。
+ * 比例单一来源:schema v2 生成契约的 roles[].defaultRatioByViewport。
+ * 给人看的规格(imageSpecs/上传提示)也一律经 getContractRoleRatio 派生,
+ * 不再手写字面值(2026-08-18 比例派生管道)。
  */
 
 export type ImageTextTemplate =

@@ -62,7 +62,7 @@ export const certificateSchema: ModuleInspectorSchema = {
               label: "证书图（可选）",
               control: "media",
               spec: CERT_IMAGE_SPEC,
-              placeholder: "上传证书图（3:2）",
+              placeholder: "上传证书图",
               showSpecCheck: true,
             },
           ],

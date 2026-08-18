@@ -77,7 +77,7 @@ export const appointmentSchema: ModuleInspectorSchema = {
       id: "appointment-media",
       title: "媒体",
       layer: "media",
-      description: "桌面 21:6 背景带（留空用纯色）；手机 4:3 独立裁切",
+      description: "桌面超宽背景带（留空用纯色）；手机独立裁切",
       fields: [
         {
           key: "backgroundImage",
@@ -85,7 +85,7 @@ export const appointmentSchema: ModuleInspectorSchema = {
           control: "media",
           spec: IMAGE_SPECS.fullBleed.desktop,
           focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
-          placeholder: "上传背景图（21:6）",
+          placeholder: "上传背景图（留空用纯色）",
           showSpecCheck: true,
         },
         {

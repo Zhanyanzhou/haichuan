@@ -2,7 +2,7 @@
  * schema/modules/storeInfo.ts — 「门店信息」编辑区 Schema。
  * Editorial Split 母版(信息变体):3:2 门店空间图 + 极简到访信息。
  */
-import { IMAGE_SPECS } from "../../../config/imageSpecs";
+import { IMAGE_SPECS, ratioLabelOf } from "../../../config/imageSpecs";
 import { storeInfoPuckConfig } from "../../../adapters/storeInfo.puck";
 import { bgColorPresetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
@@ -49,14 +49,14 @@ export const storeInfoSchema: ModuleInspectorSchema = {
       id: "store-info-media",
       title: "媒体",
       layer: "media",
-      description: "门店空间图 3:2；手机转为 4:5",
+      description: `门店空间图 ${ratioLabelOf(IMAGE_SPECS.storeInfo.image)}；手机转为 ${ratioLabelOf(IMAGE_SPECS.storeInfo.mobile)}`,
       fields: [
         {
           key: "image",
           label: "门店空间图",
           control: "media",
           spec: IMAGE_SPECS.storeInfo.image,
-          placeholder: "上传门店空间图（3:2）",
+          placeholder: "上传门店空间图",
           showSpecCheck: true,
         },
       ],

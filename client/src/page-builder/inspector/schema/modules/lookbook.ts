@@ -61,7 +61,7 @@ export const lookbookSchema: ModuleInspectorSchema = {
           spec: IMAGE_SPECS.lookbook.image,
           required: true,
           focusKeys: { x: "focusX", y: "focusY" },
-          placeholder: "上传佩戴大片（4:5）",
+          placeholder: "上传佩戴大片",
           showSpecCheck: true,
         },
       ],

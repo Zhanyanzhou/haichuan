@@ -48,7 +48,7 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
       id: "before-after-media",
       title: "媒体",
       layer: "media",
-      description: "前后两张图建议同机位、同比例（4:5），对比效果最佳",
+      description: "前后两张图建议同机位、同比例，对比效果最佳",
       fields: [
         {
           key: "beforeImage",
@@ -57,7 +57,7 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
           spec: IMAGE_SPECS.beforeAfter.image,
           required: true,
           focusKeys: { x: "beforeFocusX", y: "beforeFocusY" },
-          placeholder: "上传改款前图片（4:5）",
+          placeholder: "上传改款前图片",
           showSpecCheck: true,
         },
         {
@@ -79,7 +79,7 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
           spec: IMAGE_SPECS.beforeAfter.image,
           required: true,
           focusKeys: { x: "afterFocusX", y: "afterFocusY" },
-          placeholder: "上传改款后图片（4:5）",
+          placeholder: "上传改款后图片",
           showSpecCheck: true,
         },
         {

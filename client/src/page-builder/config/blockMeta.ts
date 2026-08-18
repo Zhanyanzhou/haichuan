@@ -70,7 +70,7 @@ export const TEMPLATE_MEDIA_HINT: Record<string, string> = {
   真实评价与实拍: "建议准备顾客授权实拍图",
   改款对比: `前后同尺寸 桌面 ${CONTENT_TEMPLATE_CONTRACTS.comparison.media[0].desktopRatio} + 手机 ${CONTENT_TEMPLATE_CONTRACTS.comparison.media[0].mobileRatio}`,
   产品展示行: "关联商品，无需额外图片",
-  分类卡片: "卡片图 4/5",
+  分类卡片: "卡片图 桌面 1/1 + 手机 4/5",
   卡片网格: "文字条目，无需图片",
   文字横幅: "纯文字，无需图片",
   视频区块: `封面 桌面 ${CONTENT_TEMPLATE_CONTRACTS.video.media[0].desktopRatio} + 手机 ${CONTENT_TEMPLATE_CONTRACTS.video.media[0].mobileRatio}`,
@@ -80,7 +80,7 @@ export const TEMPLATE_MEDIA_HINT: Record<string, string> = {
   服务承诺: "文字承诺条目，无需图片",
   门店信息: `门店图 桌面 ${CONTENT_TEMPLATE_CONTRACTS.storeInfo.media[0].desktopRatio} + 手机 ${CONTENT_TEMPLATE_CONTRACTS.storeInfo.media[0].mobileRatio}`,
   限时活动: `活动主图 桌面 ${CONTENT_TEMPLATE_CONTRACTS.limitedEvent.media[0].desktopRatio} + 手机 ${CONTENT_TEMPLATE_CONTRACTS.limitedEvent.media[0].mobileRatio}`,
-  按场景选购: "场景卡片 桌面 1/1 + 手机 4/5",
+  按场景选购: "场景卡片 4/5",
 };
 
 /* ═══════ 区块元数据 ═══════ */

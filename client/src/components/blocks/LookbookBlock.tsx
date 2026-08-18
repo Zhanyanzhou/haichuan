@@ -16,11 +16,13 @@ const MUTED = "rgba(40,35,31,0.58)";
 const GOLD = "#B8944E";
 const WEARING_RATIO_DESKTOP = getContractRoleRatio("wearingInspiration", "wearingImage", "desktop");
 const WEARING_RATIO_MOBILE = getContractRoleRatio("wearingInspiration", "wearingImage", "mobile");
+/** 关联作品缩略与商品行同源,比例取 productRow 契约 */
+const PRODUCT_THUMB_RATIO = getContractRoleRatio("productRow", "productCards", "desktop");
 
 /**
  * 佩戴大片 — Hero Piece 母版(场景变体)
  * 桌面:4:5 佩戴大片(58%) + 关联作品纵列(42%,3:4 缩略);
- * Mobile:大片全宽 4:5 → 关联作品两列。
+ * Mobile:大片全宽 3:4 → 关联作品两列。
  * 品牌叙事场景,关联作品不显示价格。
  */
 export default function LookbookBlock({ module, editMode }: LookbookBlockProps) {
@@ -51,7 +53,7 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
             gap: 20px 16px;
           }
           .hc-lookbook__product-link { color: inherit; text-decoration: none; min-width: 0; }
-          .hc-lookbook__thumb { aspect-ratio: 3 / 4; overflow: hidden; background: #F0ECE5; margin-bottom: 10px; }
+          .hc-lookbook__thumb { aspect-ratio: ${PRODUCT_THUMB_RATIO}; overflow: hidden; background: #F0ECE5; margin-bottom: 10px; }
           .hc-lookbook__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
           @media (max-width: 767px) {
             .hc-lookbook { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; row-gap: 28px; }

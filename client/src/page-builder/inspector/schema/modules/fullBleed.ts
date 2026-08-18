@@ -6,7 +6,7 @@ import {
   FULL_BLEED_CONTRACT,
   evaluateFullBleedContract,
 } from "../../../config/blockContracts";
-import { IMAGE_SPECS } from "../../../config/imageSpecs";
+import { IMAGE_SPECS, ratioLabelOf } from "../../../config/imageSpecs";
 import { fullBleedPuckConfig } from "../../../adapters/fullBleed.puck";
 import {
   altTextField,
@@ -67,7 +67,7 @@ export const fullBleedSchema: ModuleInspectorSchema = {
       id: "full-bleed-media",
       title: "媒体",
       layer: "media",
-      description: "桌面 21:6 超宽横幅；手机独立 4:5 竖图",
+      description: `桌面 ${ratioLabelOf(IMAGE_SPECS.fullBleed.desktop)} 超宽横幅；手机独立 ${ratioLabelOf(IMAGE_SPECS.fullBleed.mobile)} 竖图`,
       fields: [
         desktopMediaField(
           "image",
@@ -76,7 +76,7 @@ export const fullBleedSchema: ModuleInspectorSchema = {
           {
             required: true,
             focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
-            placeholder: "上传桌面端海报（21:6）",
+            placeholder: "上传桌面端海报",
           },
         ),
         mobileMediaField(
@@ -86,7 +86,7 @@ export const fullBleedSchema: ModuleInspectorSchema = {
           "image",
           {
             focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
-            placeholder: "上传手机端海报（4:5）",
+            placeholder: "上传手机端海报",
           },
         ),
       ],

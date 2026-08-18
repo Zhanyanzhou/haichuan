@@ -70,7 +70,7 @@ export const singlePosterPuckConfig = {
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
         <MediaPickerField fieldKey="desktopImage" device="desktop" value={value} onChange={onChange} readOnly={readOnly}
-          spec={IMAGE_SPECS.singlePoster.image} placeholder="上传海报主图（4:5）" />
+          spec={IMAGE_SPECS.singlePoster.image} placeholder="上传海报主图" />
       ),
     },
     mobileImage: {

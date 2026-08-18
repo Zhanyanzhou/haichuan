@@ -46,7 +46,7 @@ export const storeInfoPuckConfig = {
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
         <MediaPickerField fieldKey="image" device="shared" value={value} onChange={onChange} readOnly={readOnly}
-          spec={IMAGE_SPECS.storeInfo.image} placeholder="上传门店空间图（3:2）" />
+          spec={IMAGE_SPECS.storeInfo.image} placeholder="上传门店空间图" />
       ),
     },
     bgColor: colorPuckField("背景色"),

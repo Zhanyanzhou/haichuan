@@ -93,7 +93,7 @@ export const singlePosterSchema: ModuleInspectorSchema = {
           {
             required: true,
             focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
-            placeholder: "上传海报主图（4:5）",
+            placeholder: "上传海报主图",
           },
         ),
         mobileMediaField(
@@ -103,7 +103,7 @@ export const singlePosterSchema: ModuleInspectorSchema = {
           "desktopImage",
           {
             focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
-            placeholder: "上传手机端海报（3:4）",
+            placeholder: "上传手机端海报",
           },
         ),
       ],
