@@ -156,12 +156,13 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
       );
 
     case "linkTarget": {
-      // keyPrefix(如 "secondary")把读写切到 secondaryTargetType/secondaryProductId/secondaryLinkUrl
+      // keyPrefix(如 "secondary")把读写切到 secondaryTargetType/secondaryProductId/secondaryLinkUrl;
+      // 无前缀时首字母小写驼峰,与持久化键一致
       const prefix = def.keyPrefix ?? "";
       const readKey = (suffix: "TargetType" | "ProductId" | "LinkUrl") =>
         prefix
           ? ctx.props[`${prefix}${suffix}`]
-          : ctx.props[suffix.toLowerCase()];
+          : ctx.props[suffix.charAt(0).toLowerCase() + suffix.slice(1)];
       return (
         <LinkTargetField
           id={String(ctx.props.id ?? def.key)}

@@ -40,9 +40,13 @@ export default function LinkTargetField({
 }: LinkTargetFieldProps) {
   const normalizedTargetType = normalizeLinkTargetType({ targetType, productId, linkUrl });
   const normalizedProductId = Number(productId) || 0;
-  // 前缀键遵循 camelCase:targetType / secondaryTargetType
+  // 前缀键遵循 camelCase:targetType / secondaryTargetType。
+  // 无前缀时仅首字母小写(TargetType→targetType),不能整词 toLowerCase——
+  // 否则写入 targettype 键,渲染端/发布校验读驼峰键会静默失联(2026-08-18 实测抓出)。
   const key = (suffix: "TargetType" | "ProductId" | "LinkUrl") =>
-    keyPrefix ? `${keyPrefix}${suffix}` : suffix.toLowerCase();
+    keyPrefix
+      ? `${keyPrefix}${suffix}`
+      : suffix.charAt(0).toLowerCase() + suffix.slice(1);
 
   const updateTargetType = (nextTargetType: LinkTargetType) => {
     // 切换类型时清掉残留,保证三件套状态完整:
