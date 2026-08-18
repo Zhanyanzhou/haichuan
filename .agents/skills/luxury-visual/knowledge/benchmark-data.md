@@ -1,47 +1,21 @@
-# 知识库 · 品牌实测基准与设计平台（Benchmark Data）
+# 知识库 · 品牌实测基准（指针文件）
 
-> 2026-08-15 的外部样本快照，用于提出假设而非直接生成海川规则。外部网站会变化，复用前需重新核验；品牌专有字体、素材和文案不得复制。
+> 2026-08-18 起，完整实测数据与设计平台分类体系统一维护在仓库级素材库 `design-library/`，本文件不再保留数据副本，防止两处漂移。
 
----
+## 数据在哪里
 
-## 一、6 家顶级珠宝品牌官网实测
+| 要查 | 去读 |
+| --- | --- |
+| 6 家顶级珠宝品牌官网实测（2026-08-15 快照，含中文标题字距列） | `design-library/04-case-studies.md` §一 |
+| 归纳规律与两条风格路线（经典衬线 / 现代极细） | `design-library/04-case-studies.md` §一 |
+| SiteInspire / Awwwards 分类收录数 | `design-library/02-luxury-principles.md` §三 |
+| 网格、字号、留白、Hero、触控、字体等数值基线 | `design-library/03-quantitative-baselines.md` |
 
-| 品牌 | 底色 | 正文字色 | 标题字体 | 正文字体 | 标题字重 | 中文标题字距 | 主视觉 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| VCA 梵克雅宝 | `#FFF` | `#222` | Janson Text 衬线 | Maison Neue 无衬线 | — | — | 全屏视频 1328×748 |
-| Cartier 卡地亚 | `#FFF` | `#000` | cartierFont 衬线 | cartierFont | — | — | 全屏轮播 1854×1368 |
-| Buccellati 布契拉提 | `#FFF` | `#0F0F0F` | Novecento + Cormorant | Helvetica | 500 | — | 产品图 + 署名摄影 |
-| Graff 格拉夫 | `#F5F5F5` | `#000` | ChronicleDisplay 衬线 | OptimaNova | 300 | — | 产品图 1080² + 佩戴图 |
-| Harry Winston 海瑞温斯顿 | `#FFF` | `#383838` | Noto Serif SC 宋体 | FranklinGothic | 400 | **-0.2px** | 产品图 750×900 |
-| Bvlgari 宝格丽 | `#F3F2F3` | `#000` | Bulgari Type 无衬线 | Bulgari Type | **300** | normal | 横幅 336×252 |
+## 项目侧结论（仅此一条留在这里）
 
-## 二、归纳出的规律
+- 海川现有字体选型（Cormorant + 思源宋体）指向**经典衬线路线**（VCA / HW / Buccellati / Graff 一侧）；依据见 `design-library/04-case-studies.md` 的路线表。
 
-1. 样本以纯白或极浅中性色为主；这不构成“暖白绝对禁止”的规则。
-2. 字体双轨：标题衬线 + 正文无衬线。
-3. 中文标题字距 0 或微负；英文全大写才加字距。
-4. 标题字重 300~500，无粗黑体。
-5. 图片两大类分离：产品图（纯底柔光）+ 氛围图（景深故事）。
-6. 色彩克制：白 + 黑 + 一个点缀色（<5%）。
+## 使用规则
 
-## 三、两条风格路线
-
-| 路线 | 特征 | 代表 |
-| --- | --- | --- |
-| 经典衬线路线 | 衬线标题、黑白灰、纯白底 | VCA / HW / Buccellati / Graff |
-| 现代极细路线 | 无衬线标题、字重 300、一个品牌色 | Bvlgari / Cartier |
-
-> 海川现有字体选型（Cormorant + 思源宋体）指向**经典衬线路线**。
-
-## 四、设计平台分类体系（方法论来源）
-
-| 来源 | 分类 | 收录数 |
-| --- | --- | --- |
-| SiteInspire | Typographic 排版驱动 | 2,084 |
-| SiteInspire | Design & Art Direction 艺术指导 | 1,903 |
-| SiteInspire | Fashion 时尚 | 794 |
-| SiteInspire | Minimal 极简 | 744 |
-| SiteInspire | Photography 摄影驱动 | 463 |
-| Awwwards | Luxury 奢侈 | 544 |
-
-> 方法论 = **排版驱动 + 摄影驱动 + 极简 + 艺术指导**。
+- 引用实测数据时保留来源与快照日期；外部网站会变化，复用前需重新核验。
+- 品牌专有字体、素材与文案不得复制；实测样本只用于论证方向，不构成复制许可。

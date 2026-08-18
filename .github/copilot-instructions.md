@@ -51,6 +51,7 @@
 
 ## Skill 使用
 
+- 编码类任务（编写、新增、重构、修复、审查代码或选择依赖库）→ `.agents/skills/ponytail/SKILL.md`
 - 视觉/布局/响应式/交互任务 → `.agents/skills/taste-skill/SKILL.md`
 - 管理后台只参考 Skill 中的信息层级、色彩对比度、响应式和无障碍部分
 - 禁止对整个项目做全局视觉大改

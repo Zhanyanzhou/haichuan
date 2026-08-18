@@ -7,12 +7,12 @@ description: 海川珠宝客户前台的奢侈品艺术指导与视觉审查—�
 
 > 依据：2026-08-15 对 6 家顶级珠宝品牌官网（梵克雅宝 VCA、卡地亚 Cartier、布契拉提 Buccellati、格拉夫 Graff、海瑞温斯顿 Harry Winston、宝格丽 Bvlgari）与 2 家设计平台（Awwwards Luxury、SiteInspire）的实测调研。
 > 本 Skill 提供可执行方法论、诊断参考与研究基线，不具产品决策权；项目硬规则只认 `docs/UI_GUIDE.md`，不得擅自更改品牌色、字体或 Logo。
-> 知识来源分层：`rules/`、`knowledge/benchmark-data.md` 为实测数据；`knowledge/design-principles.md` 为公认方法论（有出处）；`process/diagnosis.md` 的清单为项目演绎（已标注非权威原文）。
+> 知识来源分层：`rules/` 为项目规则演绎；实测数据、量化基线与通用方法论的完整版统一在仓库级素材库 `design-library/`（04 案例、03 数值、02 原则），`knowledge/` 内只保留指针与项目侧结论；`process/diagnosis.md` 的清单为项目演绎（已标注非权威原文）。
 
 ## 零、海川项目边界
 
 - **客户前台**：只负责艺术方向、视觉层级、图文关系、影像与品牌气质；功能、内容真实性、无障碍和性能仍受项目规则约束。
-- **Puck/CMS 内容模板**：结构事实来自当前 `client/src/page-builder/`、`components/blocks/`、Schema、适配器和渲染器。先定义模板整体、槽位比例、主次关系、文字层级、可编辑边界和响应式重排；本 Skill 只能补充公开页面的艺术判断，不能把摄影海报比例当成技术合同。
+- **Puck/CMS 内容模板**：结构事实来自当前 `client/src/page-builder/`、`components/blocks/`、Schema、适配器和渲染器。先定义模板整体、槽位比例、主次关系、文字层级、可编辑边界和响应式重排；本 Skill 只能补充公开页面的艺术判断，不能把摄影海报比例当成技术合同（模板体系方法论见 `design-library/06-jewelry-template-system.md`）。
 - **模板缩略图与空状态**：默认使用中性几何图片占位和真实文字层级，清楚展示图片框、比例与文字位置；不得用生成摄影图掩盖结构问题。
 - **管理后台**：编辑器壳层、表格、表单、状态和操作不触发本 Skill；仅嵌入的公开内容预览按前台规则审查。
 - **AI 图片**：只有用户明确要求时才进入生成流程。生成结果只能作为内部概念稿，不能冒充真实珠宝、材质、证书、工艺、佩戴效果或可发布商品素材；公开使用前必须完成人工真实性、版权和品牌审核。
@@ -21,23 +21,22 @@ description: 海川珠宝客户前台的奢侈品艺术指导与视觉审查—�
 
 ## 一、核心方法论（一句话）
 
-> **排版驱动（Typographic） + 摄影驱动（Photographic） + 极简（Minimal） + 艺术指导（Art Direction）**
+> **排版驱动 + 摄影驱动 + 极简 + 艺术指导**
 
 这四个词来自 SiteInspire 分类体系（Typographic 2,084、Art Direction 1,903、Minimal 744、Photography 463），
 与 6 家珠宝官网实测规律互相印证。**数值只是方法论的落地结果，不是源头。**
 
 ---
 
-## 二、体系导航（本体系已拆分为五层，按需读取）
+## 二、体系导航（本体系已拆分为四层，按需读取）
 
-> 详细规则、模板、知识库、流程已拆分到子目录。**不要一次全部加载**，按任务读取对应文件。
+> 详细规则、知识库、流程已拆分到子目录。**不要一次全部加载**，按任务读取对应文件。
 
 | 层 | 目录 | 内容 | 何时读取 |
 | --- | --- | --- | --- |
 | 流程 | `process/` | 视觉诊断清单 + 设计决策链 + 强制看图 | **任何视觉任务第一步必读** |
 | 规则 | `rules/` | 排印色彩 / 版式图片 / 文案禁忌 | 任何视觉任务必读 |
-| 模板 | `templates/` | 比例骨架框架 + 7 类模板（产品图 / Hero / 节日 / 模特 / 系列 / 社媒 / 详情头图） | 明确对应某类图片时读对应模板；定比例先读 `ratio-framework.md` |
-| 知识库 | `knowledge/` | 品牌实测数据 / AI 提示词库 / 设计原则 | 需要证据、提示词或方法论依据时读 |
+| 知识库 | `knowledge/` + `design-library/` | AI 提示词库 / 实测与原则指针；通用理论、量化基线与品牌证据全库在 `design-library/` | 需要证据、提示词或方法论依据时读 `design-library/` 对应文件；涉及模板构图、槽位与可编辑性设计时读 `design-library/06-jewelry-template-system.md` |
 
 ### process/（1 份，任何视觉任务第一步必读）
 - `diagnosis.md` — 视觉诊断清单 + 设计决策链 + 强制看图动作
@@ -47,19 +46,10 @@ description: 海川珠宝客户前台的奢侈品艺术指导与视觉审查—�
 - `layout-imagery.md` — 版式构图与图片规则
 - `copywriting-forbidden.md` — 文案规则与禁忌清单
 
-### templates/（8 份，按需读取）
-| 文件 | 模板 | 文件 | 模板 |
-| --- | --- | --- | --- |
-| `ratio-framework.md` | 多比例骨架框架（8 比例，先读） | `collection-banner.md` | 系列 / 专题封面 |
-| `product-image.md` | 纯产品图 | `social-card.md` | 社媒卡片 |
-| `hero-poster.md` | 品牌 Hero 海报 | `detail-header.md` | 详情页头图 |
-| `festival-poster.md` | 节日营销海报 | | |
-| `model-editorial.md` | 模特佩戴氛围图 | | |
-
 ### knowledge/（3 份，按需读取）
-- `benchmark-data.md` — 6 家品牌实测数据 + 设计平台分类体系
+- `benchmark-data.md` — 指向 `design-library/04-case-studies.md` 的品牌实测指针 + 项目侧结论（海川走经典衬线路线）
 - `prompt-library.md` — AI 图像生成提示词库 + 术语对照表
-- `design-principles.md` — 有出处的设计原则（Dieter Rams / 双钻模型 / Paul Rand 等）
+- `design-principles.md` — 有出处的设计原则（Dieter Rams / 双钻模型 / Paul Rand 等）；通用理论全版见 `design-library/02-luxury-principles.md`
 
 ---
 
@@ -70,10 +60,9 @@ description: 海川珠宝客户前台的奢侈品艺术指导与视觉审查—�
 0. **先看图（强制）**：截图 / 打开真实图像；无图则明说「无图，以下为假设」。
 1. **诊断**：读取 `process/diagnosis.md`，按 7 项诊断清单逐项判断「合格 / 不合格」。
 2. **定位**：难看在哪一层（图本身 / 图文关系 / 层级 / 字体 / 色彩）。
-3. **读基线**：读取 `rules/` 三份用于诊断，并以 `docs/UI_GUIDE.md` 裁定项目规则。
-4. **读模板**：读取 `templates/` 对应文件作为构图起点，按实际页面任务调整，不机械套版。
-5. **生成图片**：仅当用户明确要求生成或编辑图片时，读取 `knowledge/prompt-library.md`；模板结构、缩略图和版式讨论不得自动进入出图流程。
-6. **检验**：按模板「验收点」+ 检验三问（眯眼 / 换尺寸 / 删减）逐项自检。
+3. **读基线**：读取 `rules/` 三份用于诊断，并以 `docs/UI_GUIDE.md` 裁定项目规则；需要外部证据或数值依据时读 `design-library/03/04`（冲突仍以 UI_GUIDE 为准）。
+4. **生成图片**：仅当用户明确要求生成或编辑图片时，读取 `knowledge/prompt-library.md`；模板结构、缩略图和版式讨论不得自动进入出图流程。
+5. **检验**：按 `docs/UI_GUIDE.md` 验收与检验三问（眯眼 / 换尺寸 / 删减）逐项自检。
 
 ---
 

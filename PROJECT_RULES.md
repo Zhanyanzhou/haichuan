@@ -18,7 +18,6 @@
 | `docs/PROJECT_GUARDRAILS.md`                                                        | 项目定位、品牌原则与技术边界                     |
 | `docs/AI_COLLABORATION_STANDARD.md`                                                 | 跨工具任务分级、验证矩阵与交付兼容契约           |
 | `docs/UI_GUIDE.md`                                                                  | 客户前台品牌视觉与体验的唯一详细规范             |
-| `docs/CONTENT_TEMPLATE_STANDARD.md`                                                  | 23 个内容模板的设计、编辑、合同与验收标准         |
 | `.agents/skills/critical-review/SKILL.md` + `docs/AI_COLLABORATION_STANDARD.md` §13 | 论证与事实标准、重大决策法庭审校                 |
 
 权限与行为冲突时先遵守 `AGENTS.md`，再核对用户本次明确授权；仍与项目基线、技术规则或已批准决策冲突时必须报告，不得自行挑选。`docs/UI_GUIDE.md` 只在客户前台品牌与体验范围内具有详细解释权，不能覆盖安全、事实真实性或业务授权。
@@ -103,7 +102,7 @@
 - 前台页面装修**唯一在用**的是 Puck `PageDocument` 体系（schema + `page-modules` 后端 + `pageDocumentApi` + `HomepageConfig` 编辑器 + `PuckDocumentRenderer` + `components/blocks` + `page-builder/adapters`）。新增装修能力**必须**沿用此体系。
 - 禁止恢复已归档的旧装修体系或新建平行内容系统；历史清退记录见 `docs/DECISIONS.md`，当前组件名与 Fallback 行为必须以代码复核。
 - Puck 模板和运营配置必须遵守 `docs/UI_GUIDE.md`；可配置不等于可以绕过品牌、内容真实性、图片授权、性能、响应式或无障碍门禁。
-- 23 个运营内容模板的定义、整体构图、固定/受控边界、编辑顺序、响应式、版本、发布和验收统一遵守 `docs/CONTENT_TEMPLATE_STANDARD.md`；模板是完整根构图，不得把内部图片、文字或 CTA 降级为可任意拖动的散件。
+- 23 个运营内容模板的历史设计标准已归档至 `docs/archived/2026-08-18-template-rules/CONTENT_TEMPLATE_STANDARD.md`，不再作为活跃设计规则；模板是完整根构图，不得把内部图片、文字或 CTA 降级为可任意拖动的散件。
 - 模板缩略图、Inspector、页面画布、公开 Renderer、客户端校验和服务端发布门禁必须消费同一机器合同；禁止手工维护第二套缩略图规则或前后端各写一套限制。
 - 新增模板或改变模板结构前，必须先更新对应设计卡和机器合同并说明兼容/迁移范围；旧草稿不得在普通保存时静默升级合同版本。
 - 店铺装修最终视觉验收使用电脑外部真实浏览器，至少检查 1920/1440/1024/768/390；内置浏览器、构建成功或单张编辑器截图不能代替最终验收。
