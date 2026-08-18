@@ -22,11 +22,9 @@ export const videoSchema: ModuleInspectorSchema = {
         moduleNameField("视频"),
         {
           key: "videoUrl",
-          label: "视频地址",
-          control: "text",
+          label: "视频",
+          control: "video",
           required: true,
-          hint: "支持 /uploads/ 视频或 https 链接",
-          placeholder: "输入视频地址",
         },
       ],
     },

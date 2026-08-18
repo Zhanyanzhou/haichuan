@@ -8,6 +8,7 @@ import SwitchField from "./controls/SwitchField";
 import SelectField from "./controls/SelectField";
 import PresetField from "./controls/PresetField";
 import MediaField from "./controls/MediaField";
+import VideoField from "./controls/VideoField";
 import ArrayField from "./controls/ArrayField";
 import ColorField from "../fields/ColorField";
 import LinkTargetField from "./LinkTargetField";
@@ -128,6 +129,16 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
         />
       );
     }
+
+    case "video":
+      return (
+        <VideoField
+          fieldKey={def.key}
+          value={typeof value === "string" ? value : ""}
+          onChange={(next) => update({ [def.key]: next })}
+          required={def.required}
+        />
+      );
 
     case "linkTarget": {
       // keyPrefix(如 "secondary")把读写切到 secondaryTargetType/secondaryProductId/secondaryLinkUrl

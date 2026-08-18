@@ -107,6 +107,11 @@ export interface MediaFieldDef extends FieldBase {
   inheritFrom?: { key: string; label: string };
 }
 
+/** 视频字段：上传(/upload/video,≤100MB)或粘贴地址,带预览与替换/删除 */
+export interface VideoFieldDef extends FieldBase {
+  control: "video";
+}
+
 /** 链接字段（紧凑一行式）：一次写入 { targetType, productId?, linkUrl? } */
 export interface LinkTargetFieldDef extends FieldBase {
   control: "linkTarget";
@@ -167,6 +172,7 @@ export type FieldDef =
   | SelectFieldDef
   | ColorFieldDef
   | MediaFieldDef
+  | VideoFieldDef
   | LinkTargetFieldDef
   | PresetFieldDef
   | CustomFieldDef
