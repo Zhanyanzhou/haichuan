@@ -13,6 +13,8 @@ export interface GalleryPuckItem {
   altText: string;
   caption: string;
   link: string;
+  focusX?: number;
+  focusY?: number;
 }
 
 export interface GalleryPuckProps {
@@ -60,8 +62,10 @@ export const galleryPuckConfig = {
         caption: { type: "text" as const, label: "图注（可选，如 FIG. 01 · 系列名）" },
         altText: { type: "text" as const, label: "替代文字" },
         link: { type: "text" as const, label: "跳转链接（可选）" },
+        focusX: { type: "number" as const, label: "焦点 X", min: 0, max: 100 },
+        focusY: { type: "number" as const, label: "焦点 Y", min: 0, max: 100 },
       },
-      defaultItemProps: { image: "", altText: "", caption: "", link: "" },
+      defaultItemProps: { image: "", altText: "", caption: "", link: "", focusX: 50, focusY: 50 },
     } as any,
     bgColor: colorPuckField("背景色"),
   },

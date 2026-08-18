@@ -49,7 +49,7 @@ export const certificateSchema: ModuleInspectorSchema = {
           label: "证书条目",
           control: "array",
           itemLabel: "证书",
-          defaultItem: { name: "", desc: "", imageUrl: "" },
+          defaultItem: { name: "", desc: "", imageUrl: "", focusX: 50, focusY: 50 },
           itemSummary: (item) =>
             typeof item.name === "string" && item.name.trim()
               ? item.name
@@ -62,6 +62,7 @@ export const certificateSchema: ModuleInspectorSchema = {
               label: "证书图（可选）",
               control: "media",
               spec: CERT_IMAGE_SPEC,
+              focusKeys: { x: "focusX", y: "focusY" },
               placeholder: "上传证书图",
               showSpecCheck: true,
             },

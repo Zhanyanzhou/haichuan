@@ -38,6 +38,7 @@ export const videoSchema: ModuleInspectorSchema = {
           label: "封面图",
           control: "media",
           spec: IMAGE_SPECS.video.poster,
+          focusKeys: { x: "focusX", y: "focusY" },
           hint: "未播放时显示的封面",
           placeholder: "上传视频封面",
           showSpecCheck: true,

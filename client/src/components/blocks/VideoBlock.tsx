@@ -16,7 +16,7 @@ interface VideoBlockProps {
  * 品牌影片模块 — Cinematic Hero 母版(视频变体)
  * 画面比例仅允许规范比例:16:9 / 16:7(宽幕) / 3:4(竖屏);
  * 旧数据中的 4:3、9:16 仍可渲染(历史兼容),但新建不可再选。
- * content: { videoUrl, posterUrl, autoPlay, loop, muted, showControls, aspectRatio }
+ * content: { videoUrl, posterUrl, autoPlay, loop, muted, showControls, aspectRatio, focusX, focusY }
  */
 const RATIO_MAP: Record<string, string> = {
   "16:9": "16 / 9",
@@ -37,6 +37,8 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
     muted,
     showControls,
     aspectRatio,
+    focusX,
+    focusY,
   } = content;
   const maxHeight = layoutConfig.maxHeight || 760;
   const contract = getContentTemplateContract("视频区块");
@@ -92,6 +94,7 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
             width: "100%",
             height: "100%",
             objectFit: "cover",
+            objectPosition: `${Number(focusX ?? 50)}% ${Number(focusY ?? 50)}%`,
           }}
         />
       </div>

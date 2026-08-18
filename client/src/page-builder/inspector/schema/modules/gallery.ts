@@ -53,7 +53,7 @@ export const gallerySchema: ModuleInspectorSchema = {
           control: "array",
           itemLabel: "图片",
           maxItems: GALLERY_CONTRACT.content.maxItems,
-          defaultItem: { image: "", altText: "", caption: "", link: "" },
+          defaultItem: { image: "", altText: "", caption: "", link: "", focusX: 50, focusY: 50 },
           itemSummary: (item) =>
             typeof item.caption === "string" && item.caption.trim()
               ? item.caption
@@ -65,6 +65,7 @@ export const gallerySchema: ModuleInspectorSchema = {
               control: "media",
               spec: IMAGE_SPECS.gallery.primary,
               required: true,
+              focusKeys: { x: "focusX", y: "focusY" },
               placeholder: "上传画廊图片",
               showSpecCheck: true,
             },

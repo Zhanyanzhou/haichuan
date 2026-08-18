@@ -91,7 +91,15 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
           <figure key={i} style={{ margin: 0, minWidth: 0 }}>
             <div data-editor-field={`certificates.${i}.imageUrl`} className="hc-cert-gallery__frame">
               {cert.imageUrl ? (
-                <img src={cert.imageUrl} alt={cert.name || "证书"} loading="lazy" decoding="async" />
+                <img
+                  src={cert.imageUrl}
+                  alt={cert.name || "证书"}
+                  loading="lazy"
+                  decoding="async"
+                  style={{
+                    objectPosition: `${Number(cert.focusX ?? 50)}% ${Number(cert.focusY ?? 50)}%`,
+                  }}
+                />
               ) : (
                 <span className="hc-cert-gallery__mark" aria-hidden>
                   {(cert.name || "证").slice(0, 1)}

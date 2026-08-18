@@ -438,6 +438,8 @@ export function convertPuckProps(
           muted: props.muted,
           showControls: props.showControls,
           aspectRatio: props.aspectRatio || "16:9",
+          focusX: props.focusX ?? 50,
+          focusY: props.focusY ?? 50,
         },
         { maxHeight: props.maxHeight || 720 },
       );

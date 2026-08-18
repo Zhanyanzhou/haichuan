@@ -13,6 +13,8 @@ export interface VideoPuckProps {
   showControls: boolean;
   aspectRatio: string;
   maxHeight: number;
+  focusX: number;
+  focusY: number;
   locked?: boolean;
 }
 
@@ -30,6 +32,8 @@ export const videoPuckConfig = {
     showControls: true,
     aspectRatio: "16:9",
     maxHeight: 720,
+    focusX: 50,
+    focusY: 50,
     locked: false,
   } satisfies VideoPuckProps,
   fields: {

@@ -12,6 +12,8 @@ export interface CertificateItem {
   name: string;
   desc: string;
   imageUrl: string;
+  focusX?: number;
+  focusY?: number;
 }
 
 export interface CertificatePuckProps {
@@ -57,7 +59,10 @@ export const certificatePuckConfig = {
               placeholder="上传证书图（可选）" />
           ),
         },
+        focusX: { type: "number" as const, label: "焦点 X", min: 0, max: 100 },
+        focusY: { type: "number" as const, label: "焦点 Y", min: 0, max: 100 },
       },
+      defaultItemProps: { name: "", desc: "", imageUrl: "", focusX: 50, focusY: 50 },
     } as any,
     bgColor: colorPuckField("背景色"),
   },

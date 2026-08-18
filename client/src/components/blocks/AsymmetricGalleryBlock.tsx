@@ -10,6 +10,8 @@ interface GalleryItem {
   altText?: string;
   caption?: string;
   link?: string;
+  focusX?: number;
+  focusY?: number;
 }
 
 interface GalleryBlockProps {
@@ -58,6 +60,9 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
             loading="lazy"
             decoding="async"
             className="hc-gallery__img"
+            style={{
+              objectPosition: `${Number(item.focusX ?? 50)}% ${Number(item.focusY ?? 50)}%`,
+            }}
           />
         </div>
         {item.caption ? (
