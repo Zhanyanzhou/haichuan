@@ -132,6 +132,11 @@
 - **现状**：`Inventory` 已是订单预占、核销和释放的唯一库存来源；模型支持 `SHOWROOM / FACTORY / STORE` 等多仓类型，但默认仓库、仓库启停和跨仓归属尚未形成完整产品决策。
 - **待定**：是否启用多仓、默认仓库设定、存量库存归属、跨仓调拨与前台可售口径。
 
+### D.12 ✅ 模板规范化批次决议（2026-08-18）
+- **批次事实**：比例单一来源管道落地（imageSpecs/提示/预览/空态全由契约派生，verify-content-template-image-specs.mjs 守护）；25 组件统一声明式 Schema 面板（Puck.Fields fallback 与三套旧规格源删除）；跳转链接统一轻量一行式（旧数据双读兼容）；放弃草稿走真丢弃接口（乐观锁防并发覆盖）；六页叙事配方（pageRecipes）+ 模板库推荐序列 + 图层栏完成度提示。
+- **决议 1（rhythm.ts 退役）**：页面节奏提示引擎上线两周零 UI 消费，删除；页面级引导职责由配方与完成度提示承接。
+- **决议 2（母版词汇不强行映射）**：BLOCK_META.master（12 视觉母版）在 rhythm 退役后无运行时消费者，转为归档元数据；运行时构图由各区块 DecorSection master 决定，合同侧母版词汇以契约 master（23 模板专属 id）为准，两套词汇不再建映射表。
+- **决议 3（implementationStatus 语义澄清，不改动）**：该字段零逻辑消费（仅生成产物数据）；"planned" 的准确语义是「受控能力门禁（allowedControls 执行，P3 范围）未实施」，而非「渲染未真实化」——渲染真实性由 PLANNED_TEMPLATE_LAYOUTS 的 isSkeleton:false 保证。待 P3 实施门禁时随批次重估。
 ### D.10 🟡 金价 AUTO 采集
 - **现状**：`@Cron` `fetchAndUpdateGoldPrice` 是空壳（只打 warn），未接行情源；调价系数 `1.05` 硬编码；调价绕过 `ProductsService`（不触发前台 SSE）。
 - **待定**：是否接入自动行情源、调价系数参数化、SSE 通知补齐。

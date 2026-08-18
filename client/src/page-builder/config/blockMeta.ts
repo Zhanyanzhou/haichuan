@@ -104,7 +104,11 @@ export interface BlockMeta {
   limit?: number;
   /** 是否在“推荐”筛选中展示 */
   recommended?: boolean;
-  /** 所属视觉母版（构图规则的单一来源，designSystem/masters） */
+  /**
+   * 所属视觉母版 — 归档元数据(2026-08-18:rhythm.ts 退役后无运行时消费者)。
+   * 运行时构图由各区块 DecorSection master 决定;合同侧母版词汇以契约
+   * master 字段(23 个模板专属 id)为准,两者不再强行映射。
+   */
   master: MasterId;
   /** Brand=奢侈品牌视觉 / Commerce=高端电商视觉 */
   mode: DesignMode;
