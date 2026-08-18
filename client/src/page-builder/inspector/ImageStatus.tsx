@@ -1,7 +1,9 @@
 /**
  * ImageStatus — 图片状态紧凑检测条（≤4 行）
  * 比例 / 清晰度（分辨率）/ 文件大小 / 格式。只提示，不阻止保存。
+ * 比例容差与 MediaPickerField 同源(fields/specCheck)。
  */
+import { SPEC_TOLERANCE_GOOD } from "../fields/specCheck";
 interface ImageStatusSpec {
   width: number;
   height: number;
@@ -38,7 +40,7 @@ export default function ImageStatus({ width, height, format, size, spec }: Image
 
   const actualRatio = width / height;
   const targetRatio = spec ? spec.width / spec.height : actualRatio;
-  const ratioOk = spec ? Math.abs(actualRatio - targetRatio) / targetRatio <= 0.08 : true;
+  const ratioOk = spec ? Math.abs(actualRatio - targetRatio) / targetRatio <= SPEC_TOLERANCE_GOOD : true;
 
   const resLevel = !spec ? "good" : width >= spec.width ? "good" : width >= spec.width * 0.75 ? "watch" : "risk";
   const sizeLevel = !size ? null : size <= 500 * 1024 ? "good" : size <= 2 * 1024 * 1024 ? "watch" : "risk";

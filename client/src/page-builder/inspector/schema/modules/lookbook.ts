@@ -64,14 +64,8 @@ export const lookbookSchema: ModuleInspectorSchema = {
           placeholder: "上传佩戴大片",
           showSpecCheck: true,
         },
+        altTextField(),
       ],
-    },
-    {
-      id: "lookbook-advanced",
-      title: "高级设置",
-      layer: "style",
-      description: "SEO 与无障碍用，不在页面显示",
-      fields: [altTextField()],
     },
     {
       id: "lookbook-style",

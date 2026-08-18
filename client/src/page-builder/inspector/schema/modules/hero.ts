@@ -90,6 +90,7 @@ export const heroSchema: ModuleInspectorSchema = {
             placeholder: "上传手机端主视觉",
           },
         ),
+        altTextField(HERO_CONTRACT.content.limits.altText),
       ],
     },
     {
@@ -111,13 +112,6 @@ export const heroSchema: ModuleInspectorSchema = {
           ],
         },
       ],
-    },
-    {
-      id: "hero-advanced",
-      title: "高级设置",
-      layer: "style",
-      description: "SEO 与无障碍用，不在页面显示",
-      fields: [altTextField(HERO_CONTRACT.content.limits.altText)],
     },
   ],
 };

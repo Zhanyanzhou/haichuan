@@ -4,6 +4,7 @@
  */
 import TextField from "./controls/TextField";
 import SegmentedField from "./controls/SegmentedField";
+import NumberField from "./controls/NumberField";
 import SwitchField from "./controls/SwitchField";
 import SelectField from "./controls/SelectField";
 import PresetField from "./controls/PresetField";
@@ -51,6 +52,20 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
           ariaLabel={def.label}
           value={typeof value === "string" ? value : ""}
           options={def.options}
+          onChange={(next) => update({ [def.key]: next })}
+        />
+      );
+
+    case "number":
+      return (
+        <NumberField
+          label={def.label}
+          hint={def.hint}
+          unit={def.unit}
+          min={def.min}
+          max={def.max}
+          step={def.step}
+          value={typeof value === "number" ? value : Number(value)}
           onChange={(next) => update({ [def.key]: next })}
         />
       );

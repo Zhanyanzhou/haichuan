@@ -21,6 +21,7 @@ import {
 import { uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { ratioLabelOf } from "@/page-builder/config/imageSpecs";
+import { sizeMatchStatus, useImageNaturalSize } from "./specCheck";
 
 export interface MediaSpec {
   width: number;
@@ -52,65 +53,6 @@ interface MediaPickerFieldProps {
   previewFocus?: { x: number; y: number };
 }
 
-/** 图片加载状态检测，返回实际尺寸 */
-function useImageSize(url: string | undefined): {
-  loaded: boolean;
-  width: number;
-  height: number;
-  error: boolean;
-} {
-  const [state, setState] = useState({
-    loaded: false,
-    width: 0,
-    height: 0,
-    error: false,
-  });
-
-  useEffect(() => {
-    if (!url || url.trim().length === 0) {
-      setState({ loaded: false, width: 0, height: 0, error: false });
-      return;
-    }
-    let cancelled = false;
-    const img = new Image();
-    img.onload = () => {
-      if (!cancelled)
-        setState({
-          loaded: true,
-          width: img.naturalWidth,
-          height: img.naturalHeight,
-          error: false,
-        });
-    };
-    img.onerror = () => {
-      if (!cancelled)
-        setState({ loaded: false, width: 0, height: 0, error: true });
-    };
-    img.src = url;
-    return () => {
-      cancelled = true;
-    };
-  }, [url]);
-
-  return state;
-}
-
-/** 对比推荐尺寸与实际尺寸，返回匹配状态 */
-function sizeMatchStatus(
-  spec: MediaSpec | undefined,
-  actualWidth: number,
-  actualHeight: number,
-): "good" | "watch" | "risk" | null {
-  if (!spec || actualWidth === 0) return null;
-  const ratioTolerance = 0.08;
-  const targetRatio = spec.width / spec.height;
-  const actualRatio = actualWidth / actualHeight;
-  const deviation = Math.abs(actualRatio - targetRatio) / targetRatio;
-  if (deviation <= ratioTolerance) return "good";
-  if (deviation <= ratioTolerance * 3) return "watch";
-  return "risk";
-}
-
 export default function MediaPickerField({
   fieldKey,
   device = "shared",
@@ -131,7 +73,7 @@ export default function MediaPickerField({
   const [urlMode, setUrlMode] = useState(false);
   const [urlInput, setUrlInput] = useState(value || "");
   const [uploading, setUploading] = useState(false);
-  const imgSize = useImageSize(value);
+  const imgSize = useImageNaturalSize(value);
   const matchStatus = sizeMatchStatus(spec, imgSize.width, imgSize.height);
   const inputRef = useRef<HTMLInputElement>(null);
 

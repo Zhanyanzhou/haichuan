@@ -4888,3 +4888,47 @@ body:has(.homepage-editor__storefront-frame) {
     min-height: auto;
   }
 }
+
+/* ═══ 模块完成度横幅(2026-08-18 P1-5:evaluate 契约检查可视化) ═══ */
+.homepage-editor__module-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #FCFCFB;
+  border-bottom: 1px solid #E4E3DF;
+  font-size: 12px;
+  color: #66645F;
+}
+.homepage-editor__module-status strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: #222;
+  white-space: nowrap;
+}
+.homepage-editor__module-status span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.homepage-editor__module-status-meter {
+  position: relative;
+  flex: 1;
+  min-width: 48px;
+  height: 3px;
+  border-radius: 2px;
+  background: #E4E3DF;
+  overflow: hidden;
+}
+.homepage-editor__module-status-meter i {
+  display: block;
+  height: 100%;
+  background: #B8944E;
+  transition: width 0.3s ease;
+}
+.homepage-editor__module-status.is-ok strong {
+  color: #66645F;
+}
+.homepage-editor__module-status.is-blocked strong {
+  color: #8C5A2B;
+}

@@ -77,6 +77,16 @@ export interface SegmentedFieldDef extends FieldBase {
   options: ReadonlyArray<{ label: string; value: string; diagram?: string }>;
 }
 
+/** 数值字段：百分比坐标等（min/max/step 校验） */
+export interface NumberFieldDef extends FieldBase {
+  control: "number";
+  min?: number;
+  max?: number;
+  step?: number;
+  /** 数值单位后缀（如 "%"） */
+  unit?: string;
+}
+
 export interface SwitchFieldDef extends FieldBase {
   control: "switch";
 }
@@ -168,6 +178,7 @@ export interface ArrayFieldDef extends FieldBase {
 export type FieldDef =
   | TextFieldDef
   | SegmentedFieldDef
+  | NumberFieldDef
   | SwitchFieldDef
   | SelectFieldDef
   | ColorFieldDef

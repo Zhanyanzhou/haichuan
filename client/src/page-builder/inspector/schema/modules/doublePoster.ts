@@ -102,14 +102,6 @@ export const doublePosterSchema: ModuleInspectorSchema = {
           placeholder: "上传细节海报",
           showSpecCheck: true,
         },
-      ],
-    },
-    {
-      id: "double-poster-advanced",
-      title: "高级设置",
-      layer: "style",
-      description: "SEO 与无障碍用，不在页面显示",
-      fields: [
         {
           key: "mainAltText",
           label: "主图替代文字",

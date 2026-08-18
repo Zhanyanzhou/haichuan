@@ -4,12 +4,13 @@
  * 配置 focusKeys 且已有图片时内嵌 FocusPicker 可视化焦点拖拽(回写双端焦点键);
  * mobile 档配置 inheritFrom 时渲染 DeviceOverrideBadge（空值即继承模型）。
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AimOutlined } from "@ant-design/icons";
 import MediaPickerField from "../../fields/MediaPickerField";
 import ImageStatus from "../ImageStatus";
 import FocusPicker from "../FocusPicker";
 import DeviceOverrideBadge from "./DeviceOverrideBadge";
+import { useImageNaturalSize } from "../../fields/specCheck";
 import type { MediaFieldDef } from "../schema/types";
 
 interface MediaFieldProps {
@@ -22,31 +23,6 @@ interface MediaFieldProps {
   onFocusChange?: (x: number, y: number) => void;
   /** 继承来源键的当前值（inheritFrom 配置时由 FieldRenderer 传入） */
   inheritBaseValue?: string;
-}
-
-/** 探测图片真实尺寸，供 ImageStatus 比例/清晰度检查。 */
-function useImageNaturalSize(url: string | undefined) {
-  const [size, setSize] = useState({ width: 0, height: 0 });
-  useEffect(() => {
-    if (!url) {
-      setSize({ width: 0, height: 0 });
-      return;
-    }
-    let cancelled = false;
-    const img = new Image();
-    img.onload = () => {
-      if (!cancelled)
-        setSize({ width: img.naturalWidth, height: img.naturalHeight });
-    };
-    img.onerror = () => {
-      if (!cancelled) setSize({ width: 0, height: 0 });
-    };
-    img.src = url;
-    return () => {
-      cancelled = true;
-    };
-  }, [url]);
-  return size;
 }
 
 export default function MediaField({

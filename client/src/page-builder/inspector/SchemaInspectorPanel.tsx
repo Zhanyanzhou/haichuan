@@ -286,6 +286,46 @@ export default function SchemaInspectorPanel({
         ]}
       />
 
+      {/* 完成度横幅:让 evaluate 契约检查真正可见,编辑不迷失 */}
+      {schema.evaluate
+        ? (() => {
+            const status = schema.evaluate(editor.props);
+            const ratio = status.total
+              ? Math.round((status.completed / status.total) * 100)
+              : 100;
+            const blocked = status.errors.length > 0;
+            return (
+              <div
+                className={`homepage-editor__module-status${blocked ? " is-blocked" : " is-ok"}`}
+                role="status"
+                aria-label={`完成度 ${status.completed}/${status.total}`}
+              >
+                <span
+                  className="homepage-editor__module-status-meter"
+                  aria-hidden="true"
+                >
+                  <i style={{ width: `${ratio}%` }} />
+                </span>
+                <strong>
+                  {blocked
+                    ? `待完善 ${status.total - status.completed} 项`
+                    : "内容齐备"}
+                </strong>
+                {blocked ? (
+                  <span>
+                    {status.errors[0]}
+                    {status.errors.length > 1
+                      ? ` 等 ${status.errors.length} 项`
+                      : ""}
+                  </span>
+                ) : status.warnings.length > 0 ? (
+                  <span>{status.warnings[0]}</span>
+                ) : null}
+              </div>
+            );
+          })()
+        : null}
+
       <div className="homepage-editor__inspector-scroll">
         {taskGroups.map(({ group, entries }) => {
           const meta = TASK_GROUP_META[group];

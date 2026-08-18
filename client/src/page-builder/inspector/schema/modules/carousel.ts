@@ -91,8 +91,9 @@ export const carouselSchema: ModuleInspectorSchema = {
         { key: "showArrows", label: "左右箭头", control: "switch" },
         {
           key: "interval",
-          label: "切换间隔（毫秒）",
-          control: "select",
+          label: "切换间隔",
+          control: "segmented",
+          // 值域沿用历史毫秒字符串,持久化零迁移;渲染端 Number() 兜底
           options: [
             { label: "3 秒", value: "3000" },
             { label: "4 秒", value: "4000" },

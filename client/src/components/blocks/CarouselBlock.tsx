@@ -29,7 +29,7 @@ export default function CarouselBlock({
   const { content = {}, layoutConfig = {} } = module;
   const images = content.images || [];
   const autoPlay = content.autoPlay !== false;
-  const interval = content.interval || 4000;
+  const interval = Number(content.interval) || 4000;
   const showDots = content.showDots !== false;
   const showArrows = content.showArrows !== false;
   const desktopRatio = getCarouselAspectRatio(

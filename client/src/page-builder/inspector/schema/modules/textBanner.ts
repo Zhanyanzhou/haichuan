@@ -5,6 +5,7 @@ import {
 } from "../../../config/blockContracts";
 import { textBannerPuckConfig } from "../../../adapters/textBanner.puck";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
+import { moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 export const textBannerSchema: ModuleInspectorSchema = {
@@ -40,14 +41,7 @@ export const textBannerSchema: ModuleInspectorSchema = {
       title: "内容",
       layer: "content",
       fields: [
-        {
-          key: "moduleName",
-          label: "图层名称",
-          control: "text",
-          maxLength: 24,
-          hint: "仅用于页面结构识别",
-          placeholder: "默认使用纯文字",
-        },
+        moduleNameField("文字横幅"),
         {
           key: "eyebrow",
           label: "眉题",

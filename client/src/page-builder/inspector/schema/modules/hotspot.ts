@@ -19,10 +19,10 @@ const hotspotArrayFields = [
     control: "linkTarget" as const,
     compact: true,
   },
-  { key: "x", label: "左边距 %", control: "text" as const },
-  { key: "y", label: "上边距 %", control: "text" as const },
-  { key: "width", label: "宽度 %", control: "text" as const },
-  { key: "height", label: "高度 %", control: "text" as const },
+  { key: "x", label: "左边距", control: "number" as const, min: 0, max: 100, unit: "%" },
+  { key: "y", label: "上边距", control: "number" as const, min: 0, max: 100, unit: "%" },
+  { key: "width", label: "宽度", control: "number" as const, min: 0, max: 100, unit: "%" },
+  { key: "height", label: "高度", control: "number" as const, min: 0, max: 100, unit: "%" },
 ];
 
 export const hotspotSchema: ModuleInspectorSchema = {

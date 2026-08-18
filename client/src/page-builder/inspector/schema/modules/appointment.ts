@@ -8,7 +8,7 @@ import {
 } from "../../../config/blockContracts";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { appointmentPuckConfig } from "../../../adapters/appointment.puck";
-import { moduleNameField } from "../shared";
+import { moduleNameField, ADVANCED_BG_COLOR_FIELD } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 export const appointmentSchema: ModuleInspectorSchema = {
@@ -106,17 +106,24 @@ export const appointmentSchema: ModuleInspectorSchema = {
             { label: "象牙留白", value: "ivory" },
           ],
         },
-      ],
-    },
-    {
-      id: "appointment-advanced",
-      title: "高级设置",
-      layer: "style",
-      description: "手机端按 4:3 独立裁切；焦点为百分比坐标",
-      fields: [
-        { key: "mobileFocusX", label: "移动焦点 X (%)", control: "text" },
-        { key: "mobileFocusY", label: "移动焦点 Y (%)", control: "text" },
-        { key: "bgColor", label: "自定义背景色", control: "color" },
+        // 手机端独立裁切焦点(百分比);背景图为 shared 单字段,focusKeys 仅承载桌面端对
+        {
+          key: "mobileFocusX",
+          label: "手机端焦点 X",
+          control: "number",
+          min: 0,
+          max: 100,
+          unit: "%",
+        },
+        {
+          key: "mobileFocusY",
+          label: "手机端焦点 Y",
+          control: "number",
+          min: 0,
+          max: 100,
+          unit: "%",
+        },
+        ADVANCED_BG_COLOR_FIELD,
       ],
     },
   ],
