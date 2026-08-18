@@ -74,10 +74,13 @@ assert.equal(byKey.productRow.presetValues.columns.defaultByViewport.desktop, 3,
 assert.ok(byKey.hotspot.roles.some((role) => role.id === "hotspots" && role.parentRole === "sceneImage" && role.positioning === "relative-to-media"), "热点必须从属于媒体槽");
 assert.deepEqual(byKey.testimonials.roles.map((role) => role.id).sort(), ["attribution", "authorizedPhoto", "mainQuote"].sort(), "顾客分享只能保留授权实拍、主引语和署名角色");
 assert.deepEqual(byKey.testimonials.preview.desktop.order, ["authorizedPhoto", "mainQuote", "attribution"], "顾客分享预览顺序必须与批准结构一致");
-assert.deepEqual(byKey.booking.roles.map((role) => role.id).sort(), ["copy", "primaryAction", "secondaryContact"].sort(), "预约入口只能保留文案、一个主行动和可选联系方式");
+// 2026-08-18 构图评审修订:预约入口补可选氛围背景(bgImage,不承载内容/行动,
+// 仍维持一个主行动与禁 form 的尾章语义)
+assert.deepEqual(byKey.booking.roles.map((role) => role.id).sort(), ["bgImage", "copy", "primaryAction", "secondaryContact"].sort(), "预约入口只能保留可选背景、文案、一个主行动和可选联系方式");
 assert.equal(byKey.booking.roles.filter((role) => role.kind === "action").length, 1, "预约入口必须且只能有一个行动角色");
 assert.equal(byKey.booking.roles.some((role) => role.kind === "form" || role.role === "form"), false, "预约入口禁止 form 角色");
-for (const device of ["desktop", "mobile"]) assert.deepEqual(byKey.booking.preview[device].order, ["copy", "primaryAction", "secondaryContact"], `预约入口 ${device} 预览顺序不一致`);
+assert.equal(byKey.booking.roles.find((role) => role.id === "bgImage")?.required, false, "预约入口背景必须是可选角色");
+for (const device of ["desktop", "mobile"]) assert.deepEqual(byKey.booking.preview[device].order, ["copy", "primaryAction", "secondaryContact"], `预约入口 ${device} 预览顺序不一致(背景不进结构预览)`);
 
 const sortReplacer = (_key, value) =>
   value && typeof value === "object" && !Array.isArray(value)

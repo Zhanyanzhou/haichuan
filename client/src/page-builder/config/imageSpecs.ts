@@ -157,14 +157,14 @@ export const IMAGE_SPECS = {
       baseWidth: 3000,
     }),
   },
-  // 契约缺口:journey.steps 无默认比例(构图评审待定),1:1 为暂定保留值
   customProcess: {
-    node: {
-      width: 2000,
-      height: 2000,
-      ratio: "1:1",
-      label: "节点图（建议 2000×2000，1:1）",
-    },
+    node: contractSpec({
+      template: "journey",
+      role: "steps",
+      viewport: "desktop",
+      note: "节点图",
+      baseWidth: 2000,
+    }),
   },
   testimonial: {
     image: contractSpec({
@@ -175,15 +175,7 @@ export const IMAGE_SPECS = {
       baseWidth: 1600,
     }),
   },
-  // 契约缺口:brandPoints.points 无默认比例(构图评审待定),1:1 为暂定保留值
-  cardGrid: {
-    image: {
-      width: 2000,
-      height: 2000,
-      ratio: "1:1",
-      label: "卡片图（建议 2000×2000，1:1，可放大）",
-    },
-  },
+  // 2026-08-18 构图评审 #5/#6 决议:品牌要点与服务承诺定位纯文字卡,原卡片图规格删除
   hotspot: {
     desktop: contractSpec({
       template: "hotspot",
@@ -339,6 +331,23 @@ export const IMAGE_SPECS = {
       note: "活动视觉",
       baseWidth: 3360,
       suffix: "超宽",
+    }),
+  },
+  // 2026-08-18 构图评审 #3:预约入口补可选氛围背景(裁切驱动,比例为宽度保障建议)
+  booking: {
+    bgImage: contractSpec({
+      template: "booking",
+      role: "bgImage",
+      viewport: "desktop",
+      note: "预约背景图",
+      baseWidth: 3360,
+    }),
+    bgImageMobile: contractSpec({
+      template: "booking",
+      role: "bgImage",
+      viewport: "mobile",
+      note: "预约背景图（手机端）",
+      baseWidth: 1500,
     }),
   },
 };

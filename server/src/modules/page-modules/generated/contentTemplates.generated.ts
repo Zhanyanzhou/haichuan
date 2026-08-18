@@ -1,7 +1,7 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：3c6fa91e6a81bf5dc173857fedf79ee1ea2bae51cc350def9c149d944571c234
+ * SHA-256：26c776b7cd3826fc2329e1360f187692a93784adc7deb5d7c632f9b94f58bb39
  */
 
 export const CONTENT_TEMPLATE_REGISTRY_VERSION = 2;
@@ -344,20 +344,31 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "key": "booking",
     "master": "booking-epilogue",
-    "media": [],
+    "media": [
+      {
+        "desktopRatio": "21 / 6",
+        "key": "bgImage",
+        "mobileRatio": "4 / 5",
+        "required": false,
+        "tabletRatio": "21 / 6"
+      }
+    ],
     "moduleType": "预约入口",
     "order": {
       "desktop": [
+        "bgImage",
         "copy",
         "primaryAction",
         "secondaryContact"
       ],
       "mobile": [
+        "bgImage",
         "copy",
         "primaryAction",
         "secondaryContact"
       ],
       "tablet": [
+        "bgImage",
         "copy",
         "primaryAction",
         "secondaryContact"
@@ -448,6 +459,29 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "required": true,
         "role": "action",
         "semantic": "primary-booking-action"
+      },
+      {
+        "allowedRatioPresetsByViewport": {
+          "desktop": [
+            "21 / 6"
+          ],
+          "mobile": [
+            "4 / 5"
+          ],
+          "tablet": [
+            "21 / 6"
+          ]
+        },
+        "defaultRatioByViewport": {
+          "desktop": "21 / 6",
+          "mobile": "4 / 5",
+          "tablet": "21 / 6"
+        },
+        "id": "bgImage",
+        "kind": "media",
+        "required": false,
+        "role": "media",
+        "semantic": "atmosphere-background"
       },
       {
         "id": "copy",
@@ -2676,8 +2710,22 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "roles": [
       {
-        "allowedRatioPresetsByViewport": {},
-        "defaultRatioByViewport": {},
+        "allowedRatioPresetsByViewport": {
+          "desktop": [
+            "1 / 1"
+          ],
+          "mobile": [
+            "1 / 1"
+          ],
+          "tablet": [
+            "1 / 1"
+          ]
+        },
+        "defaultRatioByViewport": {
+          "desktop": "1 / 1",
+          "mobile": "1 / 1",
+          "tablet": "1 / 1"
+        },
         "id": "steps",
         "kind": "collection",
         "quantity": {
@@ -4598,16 +4646,19 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "moduleType": "预约入口",
     "order": {
       "desktop": [
+        "media",
         "copy",
         "action",
         "marker"
       ],
       "mobile": [
+        "media",
         "copy",
         "action",
         "marker"
       ],
       "tablet": [
+        "media",
         "copy",
         "action",
         "marker"
@@ -4643,6 +4694,13 @@ export const CONTENT_TEMPLATE_SKELETONS = {
       {
         "key": "primaryAction",
         "role": "action"
+      },
+      {
+        "desktopRatio": "21 / 6",
+        "key": "bgImage",
+        "mobileRatio": "4 / 5",
+        "role": "media",
+        "tabletRatio": "21 / 6"
       },
       {
         "key": "copy",
@@ -5355,8 +5413,11 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     },
     "slots": [
       {
+        "desktopRatio": "1 / 1",
         "key": "steps",
-        "role": "timeline"
+        "mobileRatio": "1 / 1",
+        "role": "timeline",
+        "tabletRatio": "1 / 1"
       },
       {
         "key": "copy",

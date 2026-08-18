@@ -79,7 +79,7 @@ export const appointmentSchema: ModuleInspectorSchema = {
           key: "backgroundImage",
           label: "背景图（可选）",
           control: "media",
-          spec: IMAGE_SPECS.fullBleed.desktop,
+          spec: IMAGE_SPECS.booking.bgImage,
           focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
           placeholder: "上传背景图，留空用纯色",
           showSpecCheck: true,

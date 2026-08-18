@@ -53,7 +53,7 @@ export const appointmentPuckConfig = {
         value, onChange, readOnly,
       }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
         <MediaPickerField fieldKey="backgroundImage" device="shared" value={value} onChange={onChange} readOnly={readOnly}
-          spec={IMAGE_SPECS.fullBleed.desktop} placeholder="上传背景图（留空用纯色）" />
+          spec={IMAGE_SPECS.booking.bgImage} placeholder="上传背景图（留空用纯色）" />
       ),
     },
     title: { type: "text" as const, label: "主标题" },

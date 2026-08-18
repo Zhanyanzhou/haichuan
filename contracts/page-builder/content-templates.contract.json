@@ -1076,8 +1076,16 @@
           "role": "timeline",
           "kind": "collection",
           "required": false,
-          "defaultRatioByViewport": {},
-          "allowedRatioPresetsByViewport": {},
+          "defaultRatioByViewport": {
+            "desktop": "1 / 1",
+            "tablet": "1 / 1",
+            "mobile": "1 / 1"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["1 / 1"],
+            "tablet": ["1 / 1"],
+            "mobile": ["1 / 1"]
+          },
           "quantity": {
             "default": 5,
             "min": 3,
@@ -3219,6 +3227,23 @@
           "semantic": "primary-booking-action"
         },
         {
+          "id": "bgImage",
+          "role": "media",
+          "kind": "media",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "21 / 6",
+            "tablet": "21 / 6",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["21 / 6"],
+            "tablet": ["21 / 6"],
+            "mobile": ["4 / 5"]
+          },
+          "semantic": "atmosphere-background"
+        },
+        {
           "id": "copy",
           "role": "copy",
           "kind": "text",
@@ -3234,9 +3259,9 @@
         }
       ],
       "order": {
-        "desktop": ["copy", "primaryAction", "secondaryContact"],
-        "tablet": ["copy", "primaryAction", "secondaryContact"],
-        "mobile": ["copy", "primaryAction", "secondaryContact"]
+        "desktop": ["bgImage", "copy", "primaryAction", "secondaryContact"],
+        "tablet": ["bgImage", "copy", "primaryAction", "secondaryContact"],
+        "mobile": ["bgImage", "copy", "primaryAction", "secondaryContact"]
       },
       "presets": ["locationData"],
       "contentBudget": {
