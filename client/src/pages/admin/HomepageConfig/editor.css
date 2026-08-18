@@ -4932,3 +4932,40 @@ body:has(.homepage-editor__storefront-frame) {
 .homepage-editor__module-status.is-blocked strong {
   color: #8C5A2B;
 }
+
+/* ═══ 草稿状态徽标(2026-08-18 P1-5:六态常显) ═══ */
+.homepage-editor__draft-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid #D7D5D0;
+  border-radius: 999px;
+  background: #FCFCFB;
+  font-size: 12px;
+  color: #66645F;
+  white-space: nowrap;
+}
+.homepage-editor__draft-status small {
+  color: #98948D;
+  font-size: 11px;
+}
+.homepage-editor__draft-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #B8944E;
+}
+.homepage-editor__draft-status[data-mode="dirty"] {
+  border-color: #B8944E;
+  color: #8C5A2B;
+  background: #FCF8F1;
+}
+.homepage-editor__draft-status[data-mode="published"] {
+  border-color: #222;
+  color: #222;
+  background: #F2F1EE;
+}
+.homepage-editor__draft-status[data-mode="clean"] {
+  color: #98948D;
+}

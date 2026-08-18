@@ -1568,6 +1568,18 @@ export const pageDocumentApi = {
     }
     return api.get("/page-modules/document/admin", { params: { pageKey } });
   },
+  discardDraft: async (pageKey = "home", expectedUpdatedAt?: string) => {
+    if (USE_MOCK) {
+      await mockDelay(160);
+      const store = loadMockPageDocuments();
+      delete store.drafts[pageKey];
+      persistMockPageDocuments();
+      return mockRes({ discarded: true });
+    }
+    return api.delete("/page-modules/document/draft", {
+      params: { pageKey, expectedUpdatedAt },
+    });
+  },
   save: async (data: {
     pageKey: string;
     puckData: any;

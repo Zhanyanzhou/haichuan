@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Delete,
   Param,
   Body,
   Query,
@@ -83,6 +84,20 @@ export class PageModulesController {
       body?.pageKey || "home",
       req.user?.id,
       body?.expectedUpdatedAt,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Delete("document/draft")
+  @ApiOperation({ summary: "放弃草稿并恢复为线上版本（乐观锁防护）" })
+  discardDocumentDraft(
+    @Query("pageKey") pageKey: string,
+    @Query("expectedUpdatedAt") expectedUpdatedAt?: string,
+  ) {
+    return this.service.discardPageDocumentDraft(
+      pageKey || "home",
+      expectedUpdatedAt,
     );
   }
 

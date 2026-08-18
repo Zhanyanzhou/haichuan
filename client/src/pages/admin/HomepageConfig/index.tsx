@@ -2954,8 +2954,8 @@ export default function HomepageConfig({
         setHasUnsavedChanges(false);
       }
       try {
-        // 同时拉取线上已发布版本与后台草稿：进入编辑器默认展示与前端一致的线上版本，
-        // 草稿仅作为“未发布修改”叠加，避免运营误把未发布草稿当成线上效果。
+        // 同时拉取线上已发布版本与后台草稿:存在未发布草稿差异时默认进入草稿继续编辑,
+        // 否则展示线上版本(与下方 displayPuck 判定一致,2026-08-18 P1.5 核对)。
         const [publishedResponse, adminResponse] = await Promise.all([
           pageDocumentApi.getPublished(pageKey),
           pageDocumentApi.getAdmin(pageKey),
@@ -3315,14 +3315,24 @@ export default function HomepageConfig({
     Modal.confirm({
       title: "放弃当前草稿并恢复线上版本？",
       content:
-        "将删除当前草稿并恢复为线上已发布内容；线上版本不受影响，此操作不可撤销。",
+        "当前草稿的全部未发布修改将丢失，画布回到线上已发布版本；此操作不可撤销。",
       okText: "放弃草稿",
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: async () => {
         if (!publishedDataRef.current) return;
-        const ok = await saveDraft(publishedDataRef.current, { silent: true });
-        if (!ok) return;
+        // 真丢弃:服务端用最新发布版覆盖草稿(无发布版则删除文档),
+        // 乐观锁防并发覆盖其他编辑者的修改。
+        const expectedUpdatedAt =
+          pageSessionCacheRef.current[pageKey]?.updatedAt ?? undefined;
+        try {
+          await pageDocumentApi.discardDraft(pageKey, expectedUpdatedAt);
+        } catch (error) {
+          message.error(
+            error instanceof Error ? error.message : "放弃草稿失败，请刷新后重试",
+          );
+          return;
+        }
         setData(publishedDataRef.current);
         latestData.current = publishedDataRef.current;
         dataSignatureRef.current = JSON.stringify(publishedDataRef.current);
@@ -3334,9 +3344,22 @@ export default function HomepageConfig({
         pendingDraftRef.current = null;
         setDraftSavedAtLabel(null);
         message.success("已放弃草稿，当前内容与线上版本一致");
+        // 重拉 admin 文档建立新的乐观锁与保存基准
+        try {
+          const adminResponse = await pageDocumentApi.getAdmin(pageKey);
+          const adminDoc = unwrapResponse<any>(adminResponse);
+          pageSessionCacheRef.current[pageKey] = {
+            data: publishedDataRef.current,
+            metadata: publishedMetadataRef.current,
+            lastSaved: null,
+            updatedAt: adminDoc?.updatedAt || null,
+          };
+        } catch {
+          // 基准刷新失败不阻断;下次保存若乐观锁不匹配会显式提示
+        }
       },
     });
-  }, [saveDraft]);
+  }, [pageKey]);
 
   const openRevisions = useCallback(() => {
     setRevisionsOpen(true);
@@ -3651,6 +3674,8 @@ export default function HomepageConfig({
             saving={saving}
             hasPendingDraft={hasPendingDraft}
             viewingPublished={viewingPublished}
+            hasUnsavedChanges={hasUnsavedChanges}
+            draftSavedAtLabel={draftSavedAtLabel}
             onPublish={publishHome}
             onSaveDraft={(nextData) => {
               void saveDraft(nextData);

@@ -3,7 +3,7 @@
  * 设备切换器 + 保存/发布主操作；版本与页面设置收纳到更多菜单。
  * （自 index.tsx 平移，逻辑零变更）
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button, Dropdown, Modal, message } from "antd";
 import {
@@ -36,12 +36,72 @@ export const VIEWPORT_PRESETS: ViewportPreset[] = [
   { label: "移动端", icon: <MobileOutlined />, ...RESPONSIVE_CANVAS.mobile },
 ];
 
+/** 草稿状态机的展示态:查看线上 > 未保存 > 未发布差异 > 与线上一致 */
+type DraftStatusMode = "published" | "dirty" | "pending" | "clean";
+
+function getDraftStatusMode(options: {
+  viewingPublished: boolean;
+  hasUnsavedChanges: boolean;
+  hasPendingDraft: boolean;
+}): DraftStatusMode {
+  if (options.viewingPublished) return "published";
+  if (options.hasUnsavedChanges) return "dirty";
+  if (options.hasPendingDraft) return "pending";
+  return "clean";
+}
+
+/** 草稿状态徽标(六态可视化的常显部分;查看线上/放弃草稿入口在「更多」菜单) */
+function DraftStatusBadge({
+  mode,
+  draftSavedAtLabel,
+}: {
+  mode: DraftStatusMode;
+  draftSavedAtLabel: string | null;
+}) {
+  let content: ReactNode;
+  if (mode === "published") {
+    content = (
+      <>
+        <EyeOutlined /> 正在查看线上版本
+      </>
+    );
+  } else if (mode === "dirty") {
+    content = (
+      <>
+        <i className="homepage-editor__draft-status-dot" aria-hidden="true" />
+        有未保存修改
+      </>
+    );
+  } else if (mode === "pending") {
+    content = (
+      <>
+        草稿有未发布修改
+        {draftSavedAtLabel ? <small>已保存 {draftSavedAtLabel}</small> : null}
+      </>
+    );
+  } else {
+    content = <>与线上版本一致</>;
+  }
+  return (
+    <div
+      className="homepage-editor__draft-status"
+      data-mode={mode}
+      role="status"
+      aria-label="草稿状态"
+    >
+      {content}
+    </div>
+  );
+}
+
 export default function EditorToolbar({
   pageKey,
   publishing,
   saving,
   hasPendingDraft,
   viewingPublished,
+  hasUnsavedChanges,
+  draftSavedAtLabel,
   onPublish,
   onSaveDraft,
   onEditPendingDraft,
@@ -56,6 +116,10 @@ export default function EditorToolbar({
   saving: boolean;
   hasPendingDraft: boolean;
   viewingPublished: boolean;
+  /** 画布存在未保存修改 */
+  hasUnsavedChanges: boolean;
+  /** 草稿最后保存时间标签(如 "14:32") */
+  draftSavedAtLabel: string | null;
   onPublish: (data: unknown, locateBlock: (blockIndex: number) => void) => void;
   onSaveDraft: (data: unknown) => void;
   onEditPendingDraft: () => void;
@@ -326,6 +390,16 @@ export default function EditorToolbar({
           </button>
         ))}
       </div>
+
+      {/* 草稿状态徽标:编辑草稿/未保存/未发布差异/查看线上 四态常显,编辑不迷失 */}
+      <DraftStatusBadge
+        mode={getDraftStatusMode({
+          viewingPublished,
+          hasUnsavedChanges,
+          hasPendingDraft,
+        })}
+        draftSavedAtLabel={draftSavedAtLabel}
+      />
 
       <div className="homepage-editor__toolbar-actions">
         <div className="homepage-editor__toolbar-secondary-actions">

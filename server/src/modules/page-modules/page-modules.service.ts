@@ -1073,9 +1073,21 @@ export class PageModulesService {
   }
 
   /** 删除草稿：有已发布版本则回到线上数据（线上零感知），否则整行删除（编辑器回落默认结构） */
-  async discardPageDocumentDraft(pageKey: string) {
+  /** 放弃草稿:恢复为最新发布版(无发布版则删除文档)。expectedUpdatedAt 为乐观锁,防并发覆盖他人修改。 */
+  async discardPageDocumentDraft(
+    pageKey: string,
+    expectedUpdatedAt?: string,
+  ) {
     const doc = await this.prisma.pageDocument.findUnique({ where: { pageKey } });
     if (!doc) throw new BadRequestException("该页面没有草稿");
+    if (
+      expectedUpdatedAt &&
+      doc.updatedAt.toISOString() !== expectedUpdatedAt
+    ) {
+      throw new ConflictException(
+        "草稿已被其他编辑保存，请刷新页面后重试",
+      );
+    }
     const latestRevision = await this.prisma.pageDocumentRevision.findFirst({
       where: { documentId: doc.id },
       orderBy: { version: "desc" },
