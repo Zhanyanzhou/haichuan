@@ -14,18 +14,18 @@
 
 ## 订单与客户
 
-| 模块                     | 路由                        | 核心功能                                                |
-| ------------------------ | --------------------------- | ------------------------------------------------------- |
-| **orders**               | `/api/orders`               | 订单状态机(合法转换校验)、发货/完成                     |
-| **cart**                 | `/api/cart`                 | 购物车(userId/sessionId 双模式) 🧊交易冻结 503          |
-| **customers**            | `/api/customers`            | 前台客户注册/登录/me 资料/地址；checkout 🧊交易冻结 503；`/admin` 后台客户档案(列表/360°详情，只读，ADMIN+客服) |
-| **inquiries**            | `/api/inquiries`            | 咨询提交(Public)、列表查询、分配/回复                   |
-| **selection-inquiry**    | `/api/selection-inquiry`    | 选款咨询、状态流转                                      |
-| **leads**                | `/api/leads`                | 统一线索管理(聚合 inquiry+selection)、跟进记录          |
-| **recommendations**      | `/api/recommendations`      | 热门/为你推荐（CustomerAuthGuard）                      |
-| **partner-applications** | `/api/partner-applications` | 合作商申请与审核                                        |
+| 模块                     | 路由                        | 核心功能                                                                                                   |
+| ------------------------ | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **orders**               | `/api/orders`               | 订单状态机(合法转换校验)、发货/完成                                                                        |
+| **cart**                 | `/api/cart`                 | 购物车(userId/sessionId 双模式，需登录/会话)                                                               |
+| **customers**            | `/api/customers`            | 前台客户注册/登录/me 资料/地址；checkout（需登录）；`/admin` 后台客户档案(列表/360°详情，只读，ADMIN+客服) |
+| **inquiries**            | `/api/inquiries`            | 咨询提交(Public)、列表查询、分配/回复                                                                      |
+| **selection-inquiry**    | `/api/selection-inquiry`    | 选款咨询、状态流转                                                                                         |
+| **leads**                | `/api/leads`                | 统一线索管理(聚合 inquiry+selection)、跟进记录                                                             |
+| **recommendations**      | `/api/recommendations`      | 热门/为你推荐（CustomerAuthGuard）                                                                         |
+| **partner-applications** | `/api/partner-applications` | 合作商申请与审核                                                                                           |
 
-## 交易域（后台管理页可用，前台交易入口冻结）
+## 交易域（前台交易已开放，后台管理页可用）
 
 | 模块             | 路由               | 核心功能      |
 | ---------------- | ------------------ | ------------- |
@@ -38,12 +38,12 @@
 
 ## 内容管理
 
-| 模块              | 路由                 | 核心功能                                                     |
-| ----------------- | -------------------- | ------------------------------------------------------------ |
-| **page-modules**  | `/api/page-modules`  | 页面构建器(23 模块/12 母版,Puck):草稿/发布、版本快照(50 条)、SSE 通知;模板全页面通用(无模式限制,2026-08-15 用户决策) |
-| **content-slots** | ~~`/api/content-slots`~~ | 已删除（2026-08-15 死资产清退：写侧零入口、HERO 插槽永远空，内容统一由 PageDocument 承载） |
-| **settings**      | `/api/settings`      | 系统设置（`site_settings` 数据表持久化；旧 JSON 仅首次导入） |
-| **marketing**     | `/api/marketing`     | 促销+优惠券管理                                              |
+| 模块              | 路由                     | 核心功能                                                                                                             |
+| ----------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| **page-modules**  | `/api/page-modules`      | 页面构建器(23 模块/12 母版,Puck):草稿/发布、版本快照(50 条)、SSE 通知;模板全页面通用(无模式限制,2026-08-15 用户决策) |
+| **content-slots** | ~~`/api/content-slots`~~ | 已删除（2026-08-15 死资产清退：写侧零入口、HERO 插槽永远空，内容统一由 PageDocument 承载）                           |
+| **settings**      | `/api/settings`          | 系统设置（`site_settings` 数据表持久化；旧 JSON 仅首次导入）                                                         |
+| **marketing**     | `/api/marketing`         | 促销+优惠券管理                                                                                                      |
 
 ## 工具与系统
 

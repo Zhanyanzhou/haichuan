@@ -18,14 +18,10 @@ export const testimonialPuckConfig = {
     return <TestimonialBlock module={module as NonNullable<typeof module>} editMode />;
   },
   defaultProps: {
-    title: "来自顾客的真实分享",
-    subtitle: "每一份选择，都成为值得被珍藏的故事。",
-    testimonials: [
-      { name: "林女士", meta: "订制钻戒", content: "从选石到设计都很细致，成品比想象中更有光泽。", image: "" },
-      { name: "周先生", meta: "周年纪念礼物", content: "门店顾问很专业，包装和仪式感都让人满意。", image: "" },
-      { name: "陈女士", meta: "翡翠吊坠", content: "实物温润通透，证书齐全，佩戴后很喜欢。", image: "" },
-    ],
-    bgColor: "#FBF9F6",
+    title: "",
+    subtitle: "",
+    testimonials: [],
+    bgColor: "#FCFCFB",
     locked: false,
   } satisfies TestimonialPuckProps,
   fields: {

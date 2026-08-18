@@ -9,10 +9,11 @@ import React, {
 import { Link, useParams } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import { usePagePublishStream } from "@/hooks/usePagePublishStream";
-import { pageDocumentApi } from "@/services/api";
+import { pageDocumentApi, productApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { trackPageView } from "@/hooks/useAnalytics";
+import { SecureImage } from "@/components/common/SecureImage";
 
 // 首页基础内容与装修渲染器分离，只有取得已发布的 Puck 数据时才加载编辑器运行时。
 const PuckDocumentRenderer = lazy(
@@ -1074,6 +1075,49 @@ function ProductMoment() {
 }
 
 function ProductRail() {
+  const [products, setProducts] = useState<any[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    productApi
+      .getPublicList({ isRecommended: "true", page: 1, pageSize: 6 })
+      .then((res) => {
+        const data = unwrapResponse<any>(res);
+        if (!cancelled) setProducts(data?.list || []);
+      })
+      .catch(() => {
+        if (!cancelled) setProducts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 有真实推荐商品时展示真实商品（点击进详情）
+  if (products && products.length > 0) {
+    return (
+      <Reveal className="vca-rail">
+        <div className="vca-rail__head">
+          <h2>本季精选</h2>
+          <p>甄选当季推荐作品，点击查看详情。</p>
+        </div>
+        <div className="vca-rail__grid">
+          {products.map((p) => {
+            const img = p.primaryImage?.mediaUrl || p.images?.[0]?.mediaUrl;
+            return (
+              <Link key={p.id} className="vca-rail-card" to={`/products/${p.id}`}>
+                <SecureImage src={img} alt={p.name} />
+                <h3>{p.name}</h3>
+                <p>{p.shortDescription || p.materialType || "海川珠宝"}</p>
+              </Link>
+            );
+          })}
+        </div>
+      </Reveal>
+    );
+  }
+
+  // 静态兑底（商品数据尚未就绪时）
   return (
     <Reveal className="vca-rail">
       <div className="vca-rail__head">

@@ -178,7 +178,7 @@ function createHomeVariant(
 }
 
 /** 首页整页方案：用于新建或替换首页，不与单个区块混在模板库里。 */
-export const pageTemplates: TemplateDefinition[] = [
+const rawPageTemplates: TemplateDefinition[] = [
   {
     ...jewelryHomeTemplate,
     coverImage: "/images/editorial/hero-gold-bangle-v1.webp",
@@ -1040,7 +1040,45 @@ export const pageTemplates: TemplateDefinition[] = [
   },
 ];
 
+/**
+ * 页面模板只交付可保存的结构和空白必填位，不把示意文案、虚构评价或外部
+ * 占位图片写入草稿/发布数据。编辑器卡片使用独立的 skeleton 示例。
+ */
+function asBlankStructuralTemplate(template: TemplateDefinition): TemplateDefinition {
+  const blankBlock = (block: { type?: string; props?: Record<string, any> }) => {
+    const props = { ...(block.props || {}) };
+    for (const [key, value] of Object.entries(props)) {
+      if (key === "id" || key === "locked" || key === "template" || key === "layout" || key === "spacing" || key === "bgColor" || key === "textColor" || key === "tone") continue;
+      if (key === "targetType") {
+        props[key] = "none";
+      } else if (key === "productId") {
+        props[key] = 0;
+      } else if (Array.isArray(value)) {
+        props[key] = [];
+      } else if (typeof value === "string") {
+        props[key] = "";
+      }
+    }
+    return { ...block, props };
+  };
+  const puckData = template.puckData || {};
+  return {
+    ...template,
+    puckData: {
+      ...puckData,
+      content: Array.isArray(puckData.content) ? puckData.content.map(blankBlock) : [],
+      zones: puckData.zones && typeof puckData.zones === "object"
+        ? Object.fromEntries(Object.entries(puckData.zones).map(([key, blocks]) => [
+            key,
+            Array.isArray(blocks) ? blocks.map(blankBlock) : blocks,
+          ]))
+        : puckData.zones,
+    },
+  };
+}
+
 /** 全部可用模板 */
+export const pageTemplates: TemplateDefinition[] = rawPageTemplates.map(asBlankStructuralTemplate);
 export const templates: TemplateDefinition[] = pageTemplates;
 
 /** 根据 id 获取模板 */

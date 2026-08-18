@@ -11,14 +11,34 @@
   --adm-header-bg: #ffffff;
 
   /* 品牌 */
-  --adm-gold: #b8944e;
+  --adm-brand-gold: #b8944e;
+  --adm-gold: var(--adm-brand-gold);
   --adm-gold-soft: #f3efe7;
+  --adm-action: #6f5733;
+  --adm-focus: #6f5733;
 
   /* 文字 */
-  --adm-ink: #1a1a1a;
-  --adm-text: #5e5a54;
-  --adm-muted: #96918a;
-  --adm-subtle: #c2bdb5;
+  --adm-ink: #191918;
+  --adm-text-strong: #4c4945;
+  --adm-text: #5f5b55;
+  --adm-muted: #76716a;
+  --adm-subtle: #aaa39a;
+
+  /* 语义状态 */
+  --adm-success: #3e6e4f;
+  --adm-success-bg: #f0f5f1;
+  --adm-success-border: #b7c8bb;
+  --adm-warning: #8a5a1f;
+  --adm-warning-bg: #fbf4e9;
+  --adm-warning-border: #d8c3a4;
+  --adm-error: #9a4a45;
+  --adm-error-bg: #faf0ef;
+  --adm-error-border: #d8bbb8;
+  --adm-info: #3d668a;
+  --adm-info-bg: #eef3f7;
+  --adm-info-border: #b7c6d1;
+  --adm-neutral-bg: #f5f4f1;
+  --adm-neutral-border: #d9d3c8;
 
   /* 边框 */
   --adm-line: #e9e5de;
@@ -36,6 +56,26 @@
   --adm-content-gutter: clamp(24px, 1.944vw, 28px);
   --adm-breadcrumb-h: 38px;
 
+  /* 排版、密度与间距令牌：详细来源见 docs/UI_GUIDE.md 附录 A。 */
+  --adm-type-page: 600 26px/34px "PingFang SC", "Microsoft YaHei", sans-serif;
+  --adm-type-section: 600 18px/26px "PingFang SC", "Microsoft YaHei", sans-serif;
+  --adm-type-card: 600 16px/24px "PingFang SC", "Microsoft YaHei", sans-serif;
+  --adm-type-body: 400 14px/22px "PingFang SC", "Microsoft YaHei", sans-serif;
+  --adm-type-secondary: 400 13px/20px "PingFang SC", "Microsoft YaHei", sans-serif;
+  --adm-type-caption: 400 12px/18px "PingFang SC", "Microsoft YaHei", sans-serif;
+  --adm-control-compact: 32px;
+  --adm-control-default: 36px;
+  --adm-control-large: 40px;
+  --adm-space-1: 4px;
+  --adm-space-2: 8px;
+  --adm-space-3: 12px;
+  --adm-space-4: 16px;
+  --adm-space-5: 20px;
+  --adm-space-6: 24px;
+  --adm-space-8: 32px;
+  --adm-space-10: 40px;
+  --adm-space-12: 48px;
+
   /* 字体 */
   font-family:
     "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC",
@@ -48,7 +88,129 @@
   background: var(--adm-content-bg);
   color: var(--adm-ink);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.5714285714;
+}
+
+/* 后台事实与操作标题统一使用无衬线层级，页面局部工具类不得重新带入前台展示字体。 */
+.admin-shell-v7 h1 {
+  font: var(--adm-type-page);
+  letter-spacing: 0;
+}
+
+.admin-shell-v7 h2,
+.admin-shell-v7 h3 {
+  font: var(--adm-type-section);
+  letter-spacing: 0;
+}
+
+.admin-shell-v7 .ant-card-head-title,
+.admin-shell-v7 .ant-modal-title,
+.admin-shell-v7 .ant-drawer-title {
+  font: var(--adm-type-card);
+  letter-spacing: 0;
+}
+
+.admin-shell-v7 .ant-tag {
+  font-size: 12px;
+  line-height: 20px;
+  letter-spacing: 0;
+}
+
+/* Ant 预设色统一收敛到后台五类语义色；状态含义仍由页面文字提供。 */
+.admin-shell-v7 .ant-tag-green,
+.admin-shell-v7 .ant-tag-success {
+  color: var(--adm-success);
+  background: var(--adm-success-bg);
+  border-color: var(--adm-success-border);
+}
+
+.admin-shell-v7 .ant-tag-gold,
+.admin-shell-v7 .ant-tag-orange,
+.admin-shell-v7 .ant-tag-warning {
+  color: var(--adm-warning);
+  background: var(--adm-warning-bg);
+  border-color: var(--adm-warning-border);
+}
+
+.admin-shell-v7 .ant-tag-blue,
+.admin-shell-v7 .ant-tag-cyan,
+.admin-shell-v7 .ant-tag-processing,
+.admin-shell-v7 .ant-tag-purple,
+.admin-shell-v7 .ant-tag-magenta {
+  color: var(--adm-info);
+  background: var(--adm-info-bg);
+  border-color: var(--adm-info-border);
+}
+
+.admin-shell-v7 .ant-tag-red,
+.admin-shell-v7 .ant-tag-error {
+  color: var(--adm-error);
+  background: var(--adm-error-bg);
+  border-color: var(--adm-error-border);
+}
+
+.admin-shell-v7 .ant-tag-default,
+.admin-shell-v7 .ant-tag:not([class*="ant-tag-"]) {
+  color: var(--adm-text);
+  background: var(--adm-neutral-bg);
+  border-color: var(--adm-neutral-border);
+}
+
+/* 后台历史 Tailwind 文字色统一映射到语义令牌，避免页面继续继承前台色盘。 */
+.admin-shell-v7 .text-brand-text {
+  color: var(--adm-ink) !important;
+}
+
+.admin-shell-v7 .text-brand-muted,
+.admin-shell-v7 .text-gray-400 {
+  color: var(--adm-muted) !important;
+}
+
+.admin-shell-v7 .text-brand-gold {
+  color: var(--adm-action) !important;
+}
+
+.admin-shell-v7 .text-green-500,
+.admin-shell-v7 .text-green-600 {
+  color: var(--adm-success) !important;
+}
+
+.admin-shell-v7 .text-orange-500 {
+  color: var(--adm-warning) !important;
+}
+
+.admin-shell-v7 .text-red-400,
+.admin-shell-v7 .text-red-500 {
+  color: var(--adm-error) !important;
+}
+
+.admin-shell-v7 .hover\:text-brand-text:hover {
+  color: var(--adm-ink) !important;
+}
+
+.admin-shell-v7 .hover\:text-brand-gold:hover {
+  color: var(--adm-action) !important;
+}
+
+.admin-type-kpi {
+  font: 600 28px/36px "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.admin-shell-v7 button:focus-visible,
+.admin-shell-v7 a:focus-visible,
+.admin-shell-v7 [role="button"]:focus-visible,
+.admin-shell-v7 [role="tab"]:focus-visible {
+  outline: 2px solid var(--adm-focus);
+  outline-offset: 2px;
+}
+
+/* Ant Design 确认框挂载在后台壳层之外，需单独提供键盘焦点。 */
+.ant-modal-confirm .ant-btn:focus-visible {
+  outline: 2px solid #6f5733;
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 /* ═══════════════════════════════════════════════
@@ -93,7 +255,9 @@
   cursor: pointer;
   color: var(--adm-muted);
   font-size: 14px;
-  padding: 4px;
+  width: var(--adm-control-compact);
+  height: var(--adm-control-compact);
+  padding: 0;
   line-height: 1;
   border-radius: 4px;
   transition:
@@ -106,13 +270,16 @@
 }
 
 .admin-header__link {
+  display: inline-flex;
+  min-height: var(--adm-control-compact);
+  align-items: center;
   color: var(--adm-muted);
   font-size: 13px;
   text-decoration: none;
   transition: color 0.15s;
 }
 .admin-header__link:hover {
-  color: var(--adm-gold);
+  color: var(--adm-action);
 }
 
 .admin-header__avatar {
@@ -134,12 +301,17 @@
   .admin-header__link {
     display: none;
   }
+
+  .admin-sidebar__collapse-handle {
+    display: none;
+  }
 }
 
 /* ═══════════════════════════════════════════════
    Body
    ═══════════════════════════════════════════════ */
 .admin-body {
+  position: relative;
   display: flex;
   flex: 1;
   overflow: hidden;
@@ -157,6 +329,64 @@
   border-right: 1px solid var(--adm-line);
   overflow: hidden;
   user-select: none;
+  transition:
+    width 0.22s ease,
+    flex-basis 0.22s ease,
+    border-width 0.22s ease;
+}
+
+.admin-sidebar.is-collapsed {
+  flex-basis: 0;
+  width: 0;
+  border-right-width: 0;
+}
+
+/* 参考装修工作台的边缘把手：不占主内容宽度，收起后仍可随时恢复。 */
+.admin-sidebar__collapse-handle {
+  position: absolute;
+  z-index: 12;
+  top: 50%;
+  left: calc(var(--adm-sidebar-w) - 1px);
+  display: grid;
+  width: 24px;
+  height: 78px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--adm-line);
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  color: var(--adm-muted);
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 3px 0 10px rgb(54 44 28 / 6%);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition:
+    left 0.22s ease,
+    color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.admin-sidebar__collapse-handle:hover {
+  color: var(--adm-ink);
+  background: #fff;
+  box-shadow: 4px 0 14px rgb(54 44 28 / 10%);
+}
+
+.admin-sidebar__collapse-handle:focus-visible {
+  outline: 2px solid var(--adm-focus);
+  outline-offset: 2px;
+}
+
+.admin-shell-v7.is-sidebar-collapsed .admin-sidebar__collapse-handle {
+  left: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-sidebar,
+  .admin-sidebar__collapse-handle {
+    transition: none;
+  }
 }
 
 /* 导航滚动区 */
@@ -190,11 +420,11 @@
 .admin-sidebar__section-title {
   height: 20px;
   padding: 0 12px;
-  color: #aaa69f;
-  font-size: 10px;
+  color: var(--adm-muted);
+  font-size: 12px;
   font-weight: 500;
   line-height: 20px;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   white-space: nowrap;
 }
 
@@ -241,7 +471,7 @@
 
 .admin-sidebar__domain-row.is-workspace:not(.is-active)
   .admin-sidebar__domain-icon {
-  color: #5f6469;
+  color: var(--adm-text);
   opacity: 0.78;
 }
 
@@ -321,26 +551,26 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 20px;
+  width: 24px;
   height: var(--adm-nav-row-h);
   padding: 0;
   border: none;
   background: transparent;
   cursor: pointer;
-  font-size: 9px;
-  color: var(--adm-subtle);
+  font-size: 12px;
+  color: var(--adm-muted);
   transition:
     transform 0.2s ease,
     opacity 0.15s ease;
-  opacity: 0.38;
+  opacity: 0.78;
 }
 .admin-sidebar__domain-row:hover .admin-sidebar__chevron,
 .admin-sidebar__chevron.is-open {
-  opacity: 0.68;
+  opacity: 1;
 }
 .admin-sidebar__chevron.is-open {
   transform: rotate(90deg);
-  opacity: 0.72;
+  opacity: 1;
 }
 
 /* ═══ 二级菜单 — 极简手风琴 ═══
@@ -376,7 +606,7 @@
   cursor: pointer;
   font-size: 12px;
   font-family: inherit;
-  color: rgba(50, 46, 41, 0.58);
+  color: var(--adm-text);
   background: transparent;
   text-align: left;
   letter-spacing: 0.01em;
@@ -393,7 +623,7 @@
   font-weight: 500;
 }
 .admin-sidebar__item:focus-visible {
-  outline: 1px solid rgba(184, 148, 78, 0.72);
+  outline: 2px solid var(--adm-focus);
   outline-offset: -2px;
 }
 .admin-sidebar__item-row {
@@ -416,7 +646,7 @@
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--adm-subtle);
+  color: var(--adm-muted);
   cursor: pointer;
   font-size: 12px;
   opacity: 0;
@@ -426,7 +656,10 @@
 }
 .admin-sidebar__item-row:hover .admin-sidebar__item-pin,
 .admin-sidebar__item-pin.is-pinned {
-  opacity: 0.62;
+  opacity: 0.82;
+}
+.admin-sidebar__item-pin:focus-visible {
+  opacity: 1;
 }
 .admin-sidebar__item-pin:hover:not(:disabled) {
   color: var(--adm-ink);
@@ -502,7 +735,7 @@
   transition: color 0.12s;
 }
 .admin-breadcrumb__link:hover {
-  color: var(--adm-gold);
+  color: var(--adm-action);
 }
 .admin-breadcrumb__current {
   color: var(--adm-ink);
@@ -637,16 +870,14 @@
 .admin-dashboard__eyebrow {
   margin: 0 0 8px;
   color: var(--adm-muted);
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  font-size: 12px;
+  letter-spacing: 0;
 }
 .admin-dashboard__header h1 {
   margin: 0;
   color: var(--adm-ink);
-  font-family: "Cormorant Garamond", "Noto Serif SC", serif;
-  font-size: 30px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font: var(--adm-type-page);
+  letter-spacing: 0;
 }
 .admin-dashboard__subtitle {
   margin: 7px 0 0;
@@ -707,11 +938,11 @@
   color: var(--adm-muted);
 }
 .admin-dashboard__refresh.is-done {
-  color: #5e8a6b;
+  color: var(--adm-success);
   border-color: #cdd9d0;
 }
 .admin-dashboard__refresh.is-error {
-  color: #b15f5a;
+  color: var(--adm-error);
   border-color: #e3c9c6;
 }
 .admin-dashboard__refresh .is-spinning {
@@ -740,11 +971,11 @@
 .admin-dashboard__section-head span,
 .admin-dashboard__section-head a {
   color: var(--adm-muted);
-  font-size: 11px;
+  font-size: 12px;
   text-decoration: none;
 }
 .admin-dashboard__section-head a:hover {
-  color: var(--adm-gold);
+  color: var(--adm-action);
 }
 /* ═══ 今日核心数据卡片：6 张统一白卡，不再单独强调深色卡 ═══ */
 .admin-dashboard__cards {
@@ -782,7 +1013,7 @@
   margin-bottom: 10px;
   border-radius: 8px;
   background: var(--adm-gold-soft);
-  color: var(--adm-gold);
+  color: var(--adm-action);
   font-size: 16px;
 }
 .admin-dashboard__card-label {
@@ -793,11 +1024,12 @@
 .admin-dashboard__card-value {
   margin-top: 4px;
   color: var(--adm-ink);
-  font-family: "Cormorant Garamond", "Noto Serif SC", serif;
-  font-size: 30px;
+  font-family: inherit;
+  font-size: 28px;
   font-weight: 600;
-  line-height: 1.1;
-  letter-spacing: 0.01em;
+  line-height: 36px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 .admin-dashboard__card-change {
   display: inline-flex;
@@ -807,15 +1039,15 @@
   margin-top: auto;
   padding: 2px 8px;
   border-radius: 10px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 .admin-dashboard__card-change.is-up {
-  color: #3e6e4f;
+  color: var(--adm-success);
   background: #eaf2ec;
 }
 .admin-dashboard__card-change.is-down {
-  color: #9a4a45;
+  color: var(--adm-error);
   background: #f4e7e5;
 }
 .admin-dashboard__card-change.is-neutral {
@@ -864,6 +1096,7 @@
   background: var(--adm-active-bg);
 }
 .admin-dashboard__segmented button {
+  min-height: var(--adm-control-compact);
   padding: 4px 10px;
   border: none;
   border-radius: 3px;
@@ -871,7 +1104,7 @@
   color: var(--adm-muted);
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   transition:
     background 0.15s ease,
     color 0.15s ease;
@@ -889,6 +1122,9 @@
   min-height: 280px;
   padding: 8px 4px 0;
 }
+.admin-dashboard__trend-chart .recharts-cartesian-axis-tick-value {
+  font-size: 12px;
+}
 .admin-dashboard__trend-tooltip {
   padding: 6px 10px;
   border: 1px solid var(--adm-line);
@@ -900,20 +1136,21 @@
 .admin-dashboard__trend-tooltip span {
   display: block;
   color: var(--adm-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .admin-dashboard__trend-tooltip strong {
   color: var(--adm-ink);
-  font-family: "Cormorant Garamond", "Noto Serif SC", serif;
+  font-family: inherit;
   font-size: 16px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .admin-dashboard__retry-link {
   margin-left: 10px;
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--adm-gold);
+  color: var(--adm-action);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
@@ -946,11 +1183,12 @@
   background: #fafaf8;
 }
 .admin-dashboard__alert-count {
-  color: var(--adm-gold);
-  font-family: "Cormorant Garamond", Georgia, serif;
+  color: var(--adm-action);
+  font-family: inherit;
   font-size: 22px;
   font-weight: 600;
   min-width: 32px;
+  font-variant-numeric: tabular-nums;
 }
 .admin-dashboard__alert-text strong {
   display: block;
@@ -960,12 +1198,12 @@
 }
 .admin-dashboard__alert-text span {
   color: var(--adm-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .admin-dashboard__alert-arrow {
   margin-left: auto;
   color: var(--adm-subtle);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .admin-dashboard__empty-chart {
@@ -1030,13 +1268,23 @@
 .admin-shell {
   --admin-bg: #ffffff;
   --admin-line: #ebe8e3;
-  --admin-accent: #c4a87c;
-  --admin-ink: #1d1c1a;
-  --admin-muted: #96918a;
-  --admin-subtle: #c5c0b8;
-  --admin-gold: #c4a87c;
+  --admin-accent: #b8944e;
+  --admin-ink: #191918;
+  --admin-muted: #76716a;
+  --admin-subtle: #aaa39a;
+  --admin-gold: #b8944e;
   --admin-gold-soft: #f2ede5;
-  --admin-text: #5c5752;
+  --admin-action: #6f5733;
+  --admin-text-strong: #4c4945;
+  --admin-text: #5f5b55;
+  --admin-success: #3e6e4f;
+  --admin-success-bg: #f0f5f1;
+  --admin-warning: #8a5a1f;
+  --admin-warning-bg: #fbf4e9;
+  --admin-error: #9a4a45;
+  --admin-error-bg: #faf0ef;
+  --admin-info: #3d668a;
+  --admin-info-bg: #eef3f7;
 }
 .admin-shell .lux-empty {
   color: var(--admin-muted);
@@ -1048,6 +1296,12 @@
 /* ═══════════════════════════════════════════════
    响应式
    ═══════════════════════════════════════════════ */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .admin-shell-v7 {
+    --adm-content-gutter: 20px;
+  }
+}
+
 @media (max-width: 767px) {
   .admin-header {
     padding: 0 12px;

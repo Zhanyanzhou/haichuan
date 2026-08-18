@@ -8,6 +8,7 @@ import { useState, useCallback } from 'react';
 import Cropper from 'react-easy-crop';
 import type { Area } from 'react-easy-crop';
 import { Slider, Button, message, Spin } from 'antd';
+import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
 
 interface ImageCropperProps {
   imageUrl: string;           // 完整图片URL（如 /uploads/2026/08/06/xxx.png）
@@ -61,14 +62,14 @@ export default function ImageCropper({
       );
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.message || '裁切失败');
+        throw new Error('裁切请求未完成');
       }
       const data = await res.json();
       const result = data?.data || data;
       message.success('列表图已生成（1200×1200 WebP）');
       onSaved(result.url);
     } catch (e: any) {
-      message.error(e?.message || '裁切保存失败');
+      message.error(getSafeAdminErrorMessage(e, '图片裁切保存失败，请调整裁切区域后重试。'));
     } finally {
       setSaving(false);
     }
@@ -104,7 +105,7 @@ export default function ImageCropper({
         background: '#fff', padding: '16px 24px',
         display: 'flex', alignItems: 'center', gap: 16,
       }}>
-        <span style={{ fontSize: 12, color: '#999', whiteSpace: 'nowrap' }}>缩放</span>
+        <span style={{ fontSize: 12, color: 'var(--adm-muted)', whiteSpace: 'nowrap' }}>缩放</span>
         <Slider
           min={1} max={3} step={0.01}
           value={zoom}

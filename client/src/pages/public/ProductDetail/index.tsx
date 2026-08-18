@@ -1,4 +1,4 @@
-// 作品详情：登录墙/灯箱/SKU/收藏/评价 Tab(晒单)/相似推荐/SEO meta
+// 作品详情：公开安全字段/灯箱/SKU/收藏/评价 Tab(晒单)/相似推荐/SEO meta
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -172,41 +172,6 @@ function ProductReviewsTab({ productId }: { productId: number }) {
   );
 }
 
-/** 未登录详情页登录墙：游客仅可浏览列表，完整详情需登录后查看 */
-function GuestDetailGate({ productId }: { productId?: string }) {  return (
-    <div className="min-h-screen flex items-center justify-center bg-brand-bg px-6">
-      <div className="max-w-md w-full text-center py-16">
-        <p className="text-xs tracking-[.2em] text-brand-gold font-sans mb-4">
-          PRIVATE COLLECTION
-        </p>
-        <h1 className="text-2xl md:text-3xl font-display font-semibold text-brand-gold mb-4">
-          登录后查看作品详情
-        </h1>
-        <p className="text-sm text-brand-muted leading-relaxed mb-8">
-          为保护原创设计，作品的工艺细节、规格与高清图片仅向登录会员开放。游客可先浏览作品列表。
-        </p>
-        <div className="flex flex-col gap-3 items-center">
-          <Link
-            to="/customer"
-            state={{
-              returnTo: productId ? `/products/${productId}` : "/products",
-            }}
-            className="btn btn-primary w-full"
-          >
-            登录 / 注册
-          </Link>
-          <Link
-            to="/products"
-            className="text-sm text-brand-muted hover:text-brand-gold transition-colors"
-          >
-            返回珠宝作品列表
-          </Link>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function ProductDetail() {
   const { id } = useParams();
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
@@ -226,7 +191,7 @@ export default function ProductDetail() {
   const isSignedIn = Boolean(
     typeof window !== "undefined" && localStorage.getItem("customerToken"),
   );
-  // 心愿单（登录墙内页面，isSignedIn 恒为 true）
+  // 心愿单仅对登录客户启用；游客仍可浏览公开安全字段。
   const [favorited, setFavorited] = useState(false);
   const [favBusy, setFavBusy] = useState(false);
 
@@ -317,11 +282,6 @@ export default function ProductDetail() {
       trackProductView(Number(id));
     }
   }, [id]);
-
-  // 防抄袭：未登录不允许查看详情页，先引导登录（登录后经 returnTo 回跳）
-  if (!isSignedIn) {
-    return <GuestDetailGate productId={id} />;
-  }
 
   if (loading)
     return (
@@ -568,14 +528,24 @@ export default function ProductDetail() {
                 </div>
               )}
               {commerceOk ? (
-                <button
-                  className="btn btn-primary flex-1"
-                  onClick={handleAddToCart}
-                  disabled={addingToCart || !selectedSku}
-                >
-                  <ShoppingCartOutlined />{" "}
-                  {addingToCart ? "加入中..." : "加入购物车"}
-                </button>
+                isSignedIn ? (
+                  <button
+                    className="btn btn-primary flex-1"
+                    onClick={handleAddToCart}
+                    disabled={addingToCart || !selectedSku}
+                  >
+                    <ShoppingCartOutlined />{" "}
+                    {addingToCart ? "加入中..." : "加入购物车"}
+                  </button>
+                ) : (
+                  <Link
+                    to="/customer"
+                    state={{ returnTo: `/products/${product.id}` }}
+                    className="btn btn-primary flex-1 text-center"
+                  >
+                    登录后购买
+                  </Link>
+                )
               ) : product.salesMode === "DISPLAY_ONLY" ? (
                 <div className="flex-1 text-center text-brand-muted text-sm py-3 border border-brand-line">
                   仅展示，暂不售卖
@@ -588,21 +558,29 @@ export default function ProductDetail() {
                   {salesModeCta(product.salesMode)}
                 </Link>
               )}
-              {/* 心愿单：主 CTA 旁常驻（本页在登录墙内，无需登录判断） */}
-              <button
-                type="button"
-                aria-label={favorited ? "移出心愿单" : "加入心愿单"}
-                title={favorited ? "移出心愿单" : "加入心愿单"}
-                onClick={handleToggleFavorite}
-                disabled={favBusy}
-                className={`w-12 h-12 shrink-0 flex items-center justify-center border transition-colors font-sans ${
-                  favorited
-                    ? "border-brand-gold text-brand-gold"
-                    : "border-brand-line text-brand-muted hover:border-brand-gold hover:text-brand-gold"
-                }`}
-              >
-                {favorited ? <HeartFilled /> : <HeartOutlined />}
-              </button>
+              {isSignedIn ? (
+                <button
+                  type="button"
+                  aria-label={favorited ? "移出心愿单" : "加入心愿单"}
+                  title={favorited ? "移出心愿单" : "加入心愿单"}
+                  onClick={handleToggleFavorite}
+                  disabled={favBusy}
+                  className={`w-12 h-12 shrink-0 flex items-center justify-center border transition-colors font-sans ${
+                    favorited
+                      ? "border-brand-gold text-brand-gold"
+                      : "border-brand-line text-brand-muted hover:border-brand-gold hover:text-brand-gold"
+                  }`}
+                >
+                  {favorited ? <HeartFilled /> : <HeartOutlined />}
+                </button>
+              ) : (
+                <Link
+                  to="/contact"
+                  className="text-sm text-brand-gold hover:underline shrink-0"
+                >
+                  咨询此款
+                </Link>
+              )}
             </div>
 
             {/* Tabs */}

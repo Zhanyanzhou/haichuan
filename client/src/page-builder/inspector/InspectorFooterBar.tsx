@@ -1,6 +1,6 @@
 /**
  * InspectorFooterBar.tsx — Schema 面板底部固定操作栏。
- * 保存统一走顶栏「保存草稿」与 2 秒静默自动保存；本栏只负责撤销本模块未保存修改。
+ * 右栏修改会立即同步画布，但只在用户明确点击后保存整页草稿。
  */
 import { Button } from "antd";
 
@@ -13,21 +13,33 @@ export interface EditorAction {
 }
 
 interface InspectorFooterBarProps {
-  dirty: boolean;
-  onRevert: () => void;
+  hasUnsavedChanges: boolean;
+  saving: boolean;
+  onSaveDraft: () => void;
 }
 
 export default function InspectorFooterBar({
-  dirty,
-  onRevert,
+  hasUnsavedChanges,
+  saving,
+  onSaveDraft,
 }: InspectorFooterBarProps) {
   return (
     <footer className="homepage-editor__properties-actions">
-      <span>改动自动存草稿 · 发布在顶栏</span>
-      <Button size="small" disabled={!dirty} onClick={onRevert}>
-        撤销修改
+      <span role="status" aria-live="polite">
+        {saving
+          ? "正在保存页面草稿…"
+          : hasUnsavedChanges
+            ? "已同步到画布，尚未保存草稿"
+            : "页面草稿已保存"}
+      </span>
+      <Button
+        type="primary"
+        loading={saving}
+        disabled={!hasUnsavedChanges}
+        onClick={onSaveDraft}
+      >
+        保存草稿
       </Button>
     </footer>
   );
 }
-

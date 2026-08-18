@@ -1,5 +1,5 @@
 /**
- * schema/modules/appointment.ts — 「预约入口(预约尾章)」编辑区 Schema。
+ * schema/modules/appointment.ts — 「预约入口」编辑区 Schema。
  * Conversion 母版:21:6 定比背景,1 主 CTA + 可选电话,双端焦点。
  */
 import {
@@ -13,7 +13,7 @@ import type { ModuleInspectorSchema } from "../types";
 
 export const appointmentSchema: ModuleInspectorSchema = {
   moduleType: "预约入口",
-  displayName: "预约尾章",
+  displayName: "预约入口",
   purpose: APPOINTMENT_CONTRACT.purpose,
   evaluate: evaluateAppointmentContract,
   defaults: { ...appointmentPuckConfig.defaultProps },
@@ -23,7 +23,7 @@ export const appointmentSchema: ModuleInspectorSchema = {
       title: "内容",
       layer: "content",
       fields: [
-        moduleNameField("预约尾章"),
+        moduleNameField("预约入口"),
         {
           key: "title",
           label: "主标题",
@@ -40,6 +40,13 @@ export const appointmentSchema: ModuleInspectorSchema = {
           hint: "服务方式或响应时间，≤2 行",
           placeholder: "如 一对一珠宝顾问，为您安排专属服务",
         },
+      ],
+    },
+    {
+      id: "appointment-action",
+      title: "行动与关联",
+      layer: "interaction",
+      fields: [
         {
           key: "buttonText",
           label: "主按钮文字",

@@ -3,6 +3,7 @@ import { Card, Empty, message, Spin, Tag } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { orderApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { getAdminEmptyText, getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
 interface TradeOverviewData {
   today: { revenue: number; orderCount: number };
@@ -22,7 +23,7 @@ function StatCard({ title, value, hint, accent }: { title: string; value: string
   return (
     <Card className="!bg-white !border-brand-line" size="small">
       <p className="text-xs text-brand-muted">{title}</p>
-      <p className={`text-2xl font-display font-semibold mt-1 ${accentClass}`}>{value}</p>
+      <p className={`admin-type-kpi mt-1 ${accentClass}`}>{value}</p>
       {hint && <p className="text-xs text-brand-muted mt-1">{hint}</p>}
     </Card>
   );
@@ -41,7 +42,7 @@ export default function TradeOverview() {
       setData(unwrapResponse<TradeOverviewData>(res));
     } catch (e: any) {
       setLoadError(true);
-      message.error(e?.message || "交易数据加载失败");
+      message.error(getSafeAdminErrorMessage(e, "交易概览加载失败，请稍后重新加载。"));
     } finally {
       setLoading(false);
     }
@@ -56,7 +57,7 @@ export default function TradeOverview() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-display font-semibold text-brand-text">交易数据</h1>
+          <h1 className="font-semibold text-brand-text">交易数据</h1>
           <p className="text-sm text-brand-muted mt-1">今日成交 · 收款概况 · 订单分布（严格区分订单金额与实际到账）</p>
         </div>
         <button
@@ -68,7 +69,7 @@ export default function TradeOverview() {
         </button>
       </div>
 
-      <Spin spinning={loading}>
+      <Spin spinning={loading} tip="正在加载交易概览…">
         <div className="space-y-4">
           {/* 今日 */}
           <div>
@@ -106,7 +107,7 @@ export default function TradeOverview() {
                     </div>
                   ))}
                 </div>
-              ) : <Empty description="暂无数据" />}
+              ) : <Empty description={getAdminEmptyText("订单来源数据")} />}
             </Card>
             <Card title="订单类型分布" className="!bg-white !border-brand-line" size="small">
               {data?.distribution.orderType.length ? (
@@ -115,7 +116,7 @@ export default function TradeOverview() {
                     <Tag key={t.orderType} color="gold">{ORDER_TYPE_LABEL[t.orderType] || t.orderType}：{t.count}</Tag>
                   ))}
                 </div>
-              ) : <Empty description="暂无数据" />}
+              ) : <Empty description={getAdminEmptyText("订单类型数据")} />}
             </Card>
           </div>
 

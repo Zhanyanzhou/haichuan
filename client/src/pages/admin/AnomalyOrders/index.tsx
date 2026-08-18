@@ -5,6 +5,7 @@ import { ReloadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { orderApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import type { Order, OrderStatus } from "@/types";
 
 const STATUS_LABEL: Record<string, { c: string; t: string }> = {
@@ -41,7 +42,7 @@ export default function AnomalyOrders() {
       setTotal(data?.total || 0);
     } catch (e: any) {
       setLoadError(true);
-      message.error(e?.message || "异常订单加载失败");
+      message.error(getSafeAdminErrorMessage(e, "异常订单加载失败，请稍后重新加载。"));
     } finally {
       setLoading(false);
     }
@@ -55,7 +56,7 @@ export default function AnomalyOrders() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-display font-semibold text-brand-text">
+          <h1 className="font-semibold text-brand-text">
             异常订单
           </h1>
           <p className="text-sm text-brand-muted mt-1">

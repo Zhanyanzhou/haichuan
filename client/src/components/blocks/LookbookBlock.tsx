@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
+import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 
@@ -13,6 +14,8 @@ interface LookbookBlockProps {
 const INK = "#28231F";
 const MUTED = "rgba(40,35,31,0.58)";
 const GOLD = "#B8944E";
+const WEARING_RATIO_DESKTOP = getContractRoleRatio("wearingInspiration", "wearingImage", "desktop");
+const WEARING_RATIO_MOBILE = getContractRoleRatio("wearingInspiration", "wearingImage", "mobile");
 
 /**
  * 佩戴大片 — Hero Piece 母版(场景变体)
@@ -30,27 +33,17 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
 
   return (
     <DecorSection master="hero-piece" background={bgColor}>
-      {(title || subtitle) && (
-        <header style={{ maxWidth: 540, margin: "0 auto 44px" }}>
-          {title && (
-            <h2 style={{ margin: "0 0 12px", color: INK, fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-type-h2, clamp(28px,3.4vw,42px))", fontWeight: 500, lineHeight: 1.2 }}>
-              {title}
-            </h2>
-          )}
-          {subtitle && (
-            <p style={{ margin: 0, color: MUTED, fontSize: "var(--hc-type-body, 14px)", lineHeight: 1.8 }}>{subtitle}</p>
-          )}
-        </header>
-      )}
       <div className="hc-lookbook">
         <style>{`
           .hc-lookbook {
             display: grid;
             grid-template-columns: 58fr 42fr;
+            grid-template-rows: auto 1fr;
             column-gap: clamp(24px, 4vw, 56px);
+            row-gap: 28px;
             align-items: start;
           }
-          .hc-lookbook__scene { aspect-ratio: 4 / 5; overflow: hidden; background: #EAE3D8; }
+          .hc-lookbook__scene { grid-row: 1 / span 2; aspect-ratio: ${WEARING_RATIO_DESKTOP}; overflow: hidden; background: #E5E5E2; }
           .hc-lookbook__scene img { width: 100%; height: 100%; object-fit: cover; display: block; }
           .hc-lookbook__products {
             display: grid;
@@ -61,7 +54,9 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
           .hc-lookbook__thumb { aspect-ratio: 3 / 4; overflow: hidden; background: #F0ECE5; margin-bottom: 10px; }
           .hc-lookbook__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
           @media (max-width: 767px) {
-            .hc-lookbook { grid-template-columns: minmax(0, 1fr); row-gap: 32px; }
+            .hc-lookbook { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; row-gap: 28px; }
+            .hc-lookbook__scene { grid-row: auto; }
+            .hc-lookbook__scene { aspect-ratio: ${WEARING_RATIO_MOBILE}; }
             .hc-lookbook__products { gap: 24px 12px; }
           }
         `}</style>
@@ -72,6 +67,18 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
             <BlockEmptyPlaceholder hint="佩戴大片" spec={`请上传佩戴大片 · ${IMAGE_SPECS.lookbook.image.label}`} height="100%" />
           )}
         </div>
+        {(title || subtitle) && (
+          <div className="hc-lookbook__copy" data-content-role="copy">
+            {title && (
+              <h2 data-editor-field="title" style={{ margin: "0 0 12px", color: INK, fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-type-h2, clamp(28px,3.4vw,42px))", fontWeight: 500, lineHeight: 1.2 }}>
+                {title}
+              </h2>
+            )}
+            {subtitle && (
+              <p data-editor-field="subtitle" style={{ margin: 0, color: MUTED, fontSize: "var(--hc-type-body, 14px)", lineHeight: 1.8 }}>{subtitle}</p>
+            )}
+          </div>
+        )}
         <div className="hc-lookbook__products">
           {hasProducts ? products.map((product: any, index: number) => (
             <Link

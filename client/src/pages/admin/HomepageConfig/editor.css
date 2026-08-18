@@ -74,61 +74,40 @@
   background: #ffffff;
   border-bottom: 1px solid #e8e4dc;
 }
-.homepage-editor__toolbar-context {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: #8e877c;
-  font-size: 12px;
+
+/* 店铺装修专注模式：将装修工具栏挂入后台顶栏。 */
+.admin-header--editor {
+  height: 60px;
+  min-height: 60px;
+  gap: 8px;
+  padding: 0 12px 0 0;
+}
+.admin-header--editor .admin-header__left:empty {
+  display: none;
+}
+.admin-header__editor-slot {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+}
+.admin-header__editor-slot .homepage-editor__toolbar {
+  width: 100%;
+  height: 59px;
+  min-height: 59px;
+  padding: 0 12px 0 20px;
+  border-bottom: 0;
+}
+.admin-header--editor .admin-header__right {
+  flex: 0 0 auto;
+  gap: 8px;
+  padding-left: 10px;
+  border-left: 1px solid #ece7df;
+}
+.admin-header--editor .admin-header__link {
   white-space: nowrap;
 }
-.homepage-editor__toolbar-context strong {
-  color: #27231e;
-  font-size: 14px;
-}
-.homepage-editor__toolbar-divider {
-  width: 1px;
-  height: 14px;
-  background: #ded8ce;
-}
-.homepage-editor__page-picker {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #756b5f;
-  font-size: 12px;
-}
-.homepage-editor__page-picker select {
-  min-width: 116px;
-  height: 28px;
-  padding: 0 26px 0 8px;
-  color: #3e3529;
-  border: 1px solid #ded8ce;
-  border-radius: 4px;
-  background: #fffdfc;
-  font-size: 12px;
-  cursor: pointer;
-}
-.homepage-editor__page-picker select:focus-visible {
-  outline: 2px solid rgba(184, 148, 78, 0.72);
-  outline-offset: 2px;
-}
-.homepage-editor__save-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: #7e9a74;
-}
-.homepage-editor__save-status.is-error {
-  color: #b14d45;
-}
-.homepage-editor__save-status i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
 .homepage-editor__viewport-switcher {
+  grid-column: 2;
   display: flex;
   align-items: center;
   flex: 0 0 auto;
@@ -171,6 +150,7 @@
   box-shadow: 0 1px 3px rgba(47, 38, 25, 0.1);
 }
 .homepage-editor__toolbar-actions {
+  grid-column: 3;
   justify-self: end;
   display: flex;
   align-items: center;
@@ -183,7 +163,7 @@
   gap: 8px;
 }
 .homepage-editor__toolbar-more {
-  display: none;
+  display: inline-flex;
 }
 .homepage-editor__toolbar-actions .ant-btn {
   border-radius: 3px;
@@ -1254,8 +1234,8 @@
 }
 .homepage-editor__canvas-action-dock button:hover:not(:disabled),
 .homepage-editor__canvas-action-dock button:focus-visible {
-  color: #3048cd;
-  background: #eef1ff;
+  color: #8a692d;
+  background: #f6ecd8;
   outline: 0;
 }
 .homepage-editor__canvas-action-dock button.is-danger:hover:not(:disabled),
@@ -1405,9 +1385,9 @@ body:has(.homepage-editor__storefront-frame) {
 .homepage-editor__preview-frame [class*="DraggableComponent--isSelected"] {
   position: relative;
   z-index: 1;
-  outline: 2px solid #4d68f7;
+  outline: 2px solid #b8944e;
   outline-offset: -2px;
-  box-shadow: 0 0 0 3px rgba(77, 104, 247, 0.09);
+  box-shadow: 0 0 0 3px rgba(184, 148, 78, 0.12);
 }
 .homepage-editor__preview-frame :is(img, video, embed, object) {
   position: relative !important;
@@ -2490,10 +2470,6 @@ body:has(.homepage-editor__storefront-frame) {
   .homepage-editor__body.is-inspecting .homepage-editor__layer-frame {
     padding: 7px;
   }
-  .homepage-editor__toolbar-context > span:not(.homepage-editor__save-status),
-  .homepage-editor__toolbar-divider {
-    display: none;
-  }
   .homepage-editor__toolbar-secondary-actions {
     display: none;
   }
@@ -2506,6 +2482,46 @@ body:has(.homepage-editor__storefront-frame) {
   }
   .homepage-editor__toolbar-publish {
     min-width: 72px !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .admin-header--editor {
+    gap: 4px;
+    padding-right: 6px;
+  }
+  .admin-header--editor .admin-header__right {
+    gap: 4px;
+    padding-left: 4px;
+  }
+  .admin-header__editor-slot .homepage-editor__toolbar {
+    grid-template-columns: auto auto;
+    justify-content: space-between;
+    gap: 4px;
+    padding-inline: 6px;
+  }
+  .homepage-editor__viewport-switcher {
+    grid-column: 1;
+  }
+  .homepage-editor__toolbar-actions {
+    grid-column: 2;
+  }
+  .homepage-editor__viewport-switcher button {
+    width: 34px;
+    height: 32px;
+    justify-content: center;
+    padding: 0;
+  }
+  .homepage-editor__viewport-switcher button > span:not(.anticon),
+  .homepage-editor__toolbar-more > span:not(.ant-btn-icon),
+  .homepage-editor__toolbar-publish > span:not(.ant-btn-icon) {
+    display: none;
+  }
+  .homepage-editor__toolbar-more,
+  .homepage-editor__toolbar-publish {
+    width: 34px;
+    min-width: 34px !important;
+    padding-inline: 0 !important;
   }
 }
 
@@ -2742,49 +2758,6 @@ body:has(.homepage-editor__storefront-frame) {
   color: #694a17;
   background: #ffffff;
   box-shadow: 0 1px 2px rgba(78, 58, 29, 0.14);
-}
-.homepage-editor__contract-status {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 8px;
-  margin: 10px 0 2px;
-  padding: 10px;
-  border: 1px solid #e7e0d4;
-  border-radius: 6px;
-  color: #786d61;
-  background: #fcfbf8;
-}
-.homepage-editor__contract-status > .anticon {
-  margin-top: 2px;
-  font-size: 14px;
-}
-.homepage-editor__contract-status > div {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-.homepage-editor__contract-status strong {
-  color: #4a4136;
-  font-size: 12px;
-}
-.homepage-editor__contract-status span {
-  font-size: 11px;
-  line-height: 1.5;
-}
-.homepage-editor__contract-status.is-ready {
-  border-color: #dce8dc;
-  color: #648067;
-  background: #f7fbf7;
-}
-.homepage-editor__contract-status.is-warning {
-  border-color: #eadfc9;
-  color: #98742e;
-  background: #fffbf3;
-}
-.homepage-editor__contract-status.is-error {
-  border-color: #ebd5cf;
-  color: #a45543;
-  background: #fff8f6;
 }
 .homepage-editor__section-note {
   margin: 0;
@@ -3182,12 +3155,12 @@ body:has(.homepage-editor__storefront-frame) {
 .homepage-editor__layer-item.is-active
   .homepage-editor__layer-select
   > span:last-child {
-  color: #3048cd;
+  color: #b8944e;
 }
 .homepage-editor__layer-item.is-active
   .homepage-editor__layer-select
   > .anticon {
-  color: #4d68f7;
+  color: #b8944e;
 }
 .homepage-editor__layer-actions {
   position: absolute;
@@ -3335,9 +3308,9 @@ body:has(.homepage-editor__storefront-frame) {
   box-shadow: 0 1px 2px rgba(40, 51, 70, 0.025);
 }
 .homepage-editor__layer-item:hover {
-  border-color: #c8d1e7;
+  border-color: #d4c09a;
   background: #ffffff;
-  box-shadow: 0 4px 10px rgba(45, 61, 93, 0.06);
+  box-shadow: 0 4px 10px rgba(73, 56, 30, 0.06);
 }
 .homepage-editor__layer-item.is-active {
   border-color: #4d68f7;
@@ -3373,17 +3346,17 @@ body:has(.homepage-editor__storefront-frame) {
   transform: translateY(-50%);
 }
 .homepage-editor__layer-item:hover .homepage-editor__layer-select > .anticon {
-  color: #687792;
-  background: #f2f4f8;
+  color: #b8944e;
+  background: #f6ecd8;
 }
 .homepage-editor__layer-item.is-active .homepage-editor__layer-select > span {
-  color: #3048cd;
+  color: #5d4c35;
 }
 .homepage-editor__layer-item.is-active
   .homepage-editor__layer-select
   > .anticon {
-  color: #4d68f7;
-  background: #eaeeff;
+  color: #b8944e;
+  background: transparent;
 }
 @media (max-width: 1500px) {
   .homepage-editor__body,
@@ -3482,16 +3455,16 @@ body:has(.homepage-editor__storefront-frame) {
 .homepage-editor__layer-frame button:hover,
 .homepage-editor__layer-frame button[aria-pressed="true"] {
   border-color: transparent;
-  color: #3f59e4;
-  background: #f5f7fc;
+  color: #8a692d;
+  background: #f4efe7;
   box-shadow: none;
   transform: none;
 }
 .homepage-editor__layer-item.is-active {
-  border-color: #dce3ff;
-  color: #3048cd;
-  background: #f3f5ff;
-  box-shadow: inset 3px 0 0 #4d68f7;
+  border-color: #c5a461;
+  color: #5d4c35;
+  background: #fcf8ef;
+  box-shadow: inset 3px 0 0 #b8944e;
 }
 .homepage-editor__layer-select {
   min-height: 42px;
@@ -3562,4 +3535,1352 @@ body:has(.homepage-editor__storefront-frame) {
 }
 .homepage-editor__device-override button:hover {
   color: #634313;
+}
+
+/* ═══ 画布居中的页面搭建工作台（2026-08-17） ═══
+ * 左侧集中“添加模板 + 管理结构”，右侧只编辑当前模块。
+ * 各栏收起时通过 CSS 变量真正释放空间，避免保留空白网格列。 */
+.homepage-editor__body,
+.homepage-editor__body.is-inspecting {
+  --editor-library-width: 256px;
+  --editor-structure-width: 208px;
+  --editor-inspector-width: 480px;
+  grid-template-columns:
+    var(--editor-library-width)
+    var(--editor-structure-width)
+    minmax(0, 1fr)
+    var(--editor-inspector-width);
+}
+.homepage-editor__body:has(.homepage-editor__library--collapsed) {
+  --editor-library-width: 40px;
+}
+.homepage-editor__body:has(.homepage-editor__structure-workspace.is-collapsed) {
+  --editor-structure-width: 40px;
+}
+.homepage-editor__body:has(
+  .homepage-editor__right-workspace.is-inspector-collapsed
+) {
+  --editor-inspector-width: 28px;
+}
+.homepage-editor__library {
+  grid-column: 1;
+  min-width: 0;
+}
+.homepage-editor__structure-workspace {
+  position: relative;
+  grid-column: 2;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  border-right: 1px solid #e7e3dc;
+  background: #ffffff;
+}
+.homepage-editor__structure-workspace .homepage-editor__layer-rail {
+  width: 100%;
+  min-height: 0;
+  border: 0;
+}
+.homepage-editor__structure-collapse-btn {
+  position: absolute;
+  top: 10px;
+  right: 8px;
+  z-index: 4;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #e5e0d8;
+  border-radius: 4px;
+  color: #746b61;
+  background: rgba(255, 255, 255, 0.94);
+  cursor: pointer;
+}
+.homepage-editor__structure-collapse-btn:hover,
+.homepage-editor__structure-collapse-btn:focus-visible {
+  border-color: #cdb47b;
+  color: #76531c;
+  outline: 0;
+  box-shadow: 0 0 0 2px rgba(184, 148, 78, 0.12);
+}
+.homepage-editor__structure-workspace.is-collapsed {
+  overflow: hidden;
+}
+.homepage-editor__structure-expand-btn {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0 0;
+  border: 0;
+  color: #76531c;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+.homepage-editor__structure-expand-btn span {
+  writing-mode: vertical-rl;
+}
+.homepage-editor__structure-expand-btn:hover,
+.homepage-editor__structure-expand-btn:focus-visible {
+  color: #5c3e12;
+  background: #fbf8f1;
+  outline: 0;
+}
+.homepage-editor__stage {
+  grid-column: 3;
+  min-width: 0;
+}
+.homepage-editor__right-workspace,
+.homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
+  grid-column: 4;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  display: block;
+  overflow: hidden;
+  border-left: 1px solid #e7e3dc;
+  background: #ffffff;
+}
+.homepage-editor__right-workspace.is-inspector-collapsed,
+.homepage-editor__body.is-inspecting
+  .homepage-editor__right-workspace.is-inspector-collapsed {
+  width: auto;
+  display: block;
+}
+.homepage-editor__inspector-holder,
+.homepage-editor__inspector-holder > .homepage-editor__properties,
+.homepage-editor__inspector-holder > .homepage-editor__inspector,
+.homepage-editor__right-workspace > .homepage-editor__inspector {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+/* 中等桌面：模板库成为覆盖式抽屉，不再持续挤压画布。 */
+@media (max-width: 1599px) {
+  .homepage-editor__body,
+  .homepage-editor__body.is-inspecting {
+    --editor-library-width: 0px;
+    --editor-structure-width: 208px;
+    --editor-inspector-width: 440px;
+  }
+  .homepage-editor__body:has(.homepage-editor__library--collapsed) {
+    --editor-library-width: 40px;
+  }
+  .homepage-editor__library {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    width: 320px;
+    box-shadow: 12px 0 28px rgba(42, 48, 58, 0.1);
+  }
+  .homepage-editor__library--collapsed {
+    width: 40px;
+    box-shadow: none;
+  }
+}
+
+/* 平板：模块设置覆盖在画布右侧，页面结构默认收为 40px 导航条。 */
+@media (max-width: 1199px) {
+  .homepage-editor__body,
+  .homepage-editor__body.is-inspecting {
+    --editor-inspector-width: 0px;
+  }
+  .homepage-editor__body:has(
+    .homepage-editor__right-workspace.is-inspector-collapsed
+  ) {
+    --editor-inspector-width: 0px;
+  }
+  .homepage-editor__right-workspace,
+  .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
+    position: absolute;
+    inset: 0 0 0 auto;
+    grid-column: auto;
+    z-index: 28;
+    width: min(440px, calc(100% - var(--editor-structure-width)));
+    box-shadow: -14px 0 30px rgba(42, 48, 58, 0.11);
+  }
+  .homepage-editor__right-workspace.is-inspector-collapsed,
+  .homepage-editor__body.is-inspecting
+    .homepage-editor__right-workspace.is-inspector-collapsed {
+    width: 28px;
+    box-shadow: none;
+  }
+  .homepage-editor__body:not(.is-inspecting)
+    .homepage-editor__right-workspace:not(.is-inspector-collapsed) {
+    display: none;
+  }
+}
+
+/* 手机：画布占满工作台；模板库、页面结构和设置均作为覆盖面板。 */
+@media (max-width: 767px) {
+  .homepage-editor__body,
+  .homepage-editor__body.is-inspecting {
+    --editor-structure-width: 0px;
+  }
+  .homepage-editor__body:has(.homepage-editor__library--collapsed) {
+    --editor-library-width: 0px;
+  }
+  .homepage-editor__body:has(
+    .homepage-editor__structure-workspace.is-collapsed
+  ) {
+    --editor-structure-width: 0px;
+  }
+  .homepage-editor__structure-workspace {
+    position: absolute;
+    inset: 0 auto 0 40px;
+    z-index: 26;
+    width: 208px;
+    box-shadow: 12px 0 28px rgba(42, 48, 58, 0.1);
+  }
+  .homepage-editor__structure-workspace.is-collapsed {
+    width: 40px;
+    box-shadow: none;
+  }
+  .homepage-editor__right-workspace,
+  .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
+    width: min(440px, calc(100% - 80px));
+  }
+  .homepage-editor__stage {
+    padding-inline: 16px;
+  }
+}
+
+/* ═══ 右侧模板编辑栏（参考图对齐，2026-08-17） ═══
+ * 白底连续表单、紧凑基础信息、清晰分区和固定保存栏。
+ * 仅作用于最右侧 Inspector，不改变模板库、结构栏或画布组件。 */
+@media (min-width: 1600px) {
+  .homepage-editor__body,
+  .homepage-editor__body.is-inspecting {
+    --editor-inspector-width: 520px;
+  }
+}
+
+@media (min-width: 1200px) and (max-width: 1599px) {
+  .homepage-editor__body,
+  .homepage-editor__body.is-inspecting {
+    --editor-inspector-width: 480px;
+  }
+}
+
+.homepage-editor__inspector {
+  color: #252932;
+  background: #ffffff;
+}
+.homepage-editor__inspector .homepage-editor__inspector-header {
+  min-height: 56px;
+  gap: 8px;
+  padding: 0 16px 0 20px;
+  border-bottom: 1px solid #e6e8ec;
+  background: #ffffff;
+}
+.homepage-editor__inspector .homepage-editor__inspector-title {
+  color: #20242c;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.homepage-editor__inspector .homepage-editor__inspector-eyebrow {
+  color: #8a9099;
+  font-size: 10px;
+}
+.homepage-editor__inspector .homepage-editor__inspector-device {
+  padding: 4px 8px;
+  border: 1px solid #dfd6c4;
+  border-radius: 4px;
+  color: #725522;
+  background: #fffaf1;
+  font-size: 11px;
+}
+.homepage-editor__inspector .homepage-editor__close-panel {
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  color: #737981;
+  background: #f7f7f8;
+}
+.homepage-editor__inspector .homepage-editor__close-panel:hover,
+.homepage-editor__inspector .homepage-editor__close-panel:focus-visible {
+  color: #2d323a;
+  background: #eeeeef;
+}
+.homepage-editor__inspector .homepage-editor__inspector-scroll {
+  padding: 0 20px 32px;
+  background: #ffffff;
+}
+
+/* 固定上下文压缩为单行：只负责确认“正在编辑什么”，不与文字和图片争夺首屏。 */
+.homepage-editor__template-context {
+  padding: 0;
+  border-bottom: 1px solid #e7e9ed;
+  background: #ffffff;
+}
+.homepage-editor__template-context-summary {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.homepage-editor__template-context-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.homepage-editor__template-context-name > span {
+  flex: none;
+  color: #898f98;
+  font-size: 11px;
+}
+.homepage-editor__template-context-name strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #262b32;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.homepage-editor__template-position {
+  flex: none;
+  color: #7f858e;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.homepage-editor__template-context-summary > button {
+  flex: none;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  color: #76571f;
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+}
+.homepage-editor__template-context-summary > button:hover,
+.homepage-editor__template-context-summary > button:focus-visible {
+  color: #49330f;
+  outline: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.homepage-editor__template-rules-dialog > p {
+  margin: 0 0 16px;
+  color: #60666f;
+  line-height: 1.65;
+}
+.homepage-editor__template-rules-dialog dl {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border-top: 1px solid #e7e9ed;
+}
+.homepage-editor__template-rules-dialog dl > div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid #eceef1;
+}
+.homepage-editor__template-rules-dialog dt,
+.homepage-editor__template-rules-dialog dd {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.homepage-editor__template-rules-dialog dt {
+  color: #8b9098;
+}
+.homepage-editor__template-rules-dialog dd {
+  color: #30353c;
+}
+
+/* 参考图式连续表单：不用页签或折叠，靠标题、说明和留白分层。 */
+.homepage-editor__task-group {
+  border-bottom: 1px solid #e7e9ed;
+}
+.homepage-editor__task-group:last-child {
+  border-bottom: 0;
+}
+.homepage-editor__inspector .homepage-editor__inspector-section {
+  margin: 0;
+  padding: 22px 0 28px;
+}
+.homepage-editor__inspector .homepage-editor__inspector-section-head {
+  margin: 0;
+  padding: 0;
+  color: #20242c;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.homepage-editor__inspector .homepage-editor__section-note {
+  margin: -8px 0 0;
+  color: #858b94;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.homepage-editor__inspector .homepage-editor__inspector-section-body {
+  gap: 20px;
+  padding: 0;
+}
+.homepage-editor__media-device-switcher {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.homepage-editor__media-device-switcher button {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #dfe3e8;
+  border-radius: 4px;
+  color: #777d86;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+}
+.homepage-editor__media-device-switcher button:hover,
+.homepage-editor__media-device-switcher button:focus-visible {
+  border-color: #c4a86b;
+  color: #674c1b;
+  outline: 0;
+}
+.homepage-editor__media-device-switcher button.is-active {
+  border-color: #b8944e;
+  color: #624717;
+  background: #fffcf6;
+  box-shadow: inset 0 0 0 1px rgba(184, 148, 78, 0.12);
+}
+.homepage-editor__media-device-switcher button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.homepage-editor__task-field {
+  display: grid;
+  gap: 8px;
+}
+.homepage-editor__inspector .homepage-editor__inspector-field {
+  gap: 8px;
+}
+.homepage-editor__inspector .homepage-editor__inspector-field > label {
+  color: #3c424a;
+  font-size: 12px;
+  font-weight: 500;
+}
+.homepage-editor__inspector .homepage-editor__inspector-count,
+.homepage-editor__inspector .homepage-editor__inspector-hint {
+  color: #969ba3;
+  font-size: 10px;
+}
+.homepage-editor__inspector .homepage-editor__inspector-field > label em {
+  color: #b44b3e;
+  font-size: 10px;
+}
+.homepage-editor__inspector .homepage-editor__inspector-field .ant-input,
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  .ant-select-selector,
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  textarea.ant-input,
+.homepage-editor__inspector .homepage-editor__inspector-field > select {
+  border: 1px solid #dfe3e8;
+  border-radius: 4px;
+  color: #282d34;
+  background: #ffffff;
+  box-shadow: none;
+}
+.homepage-editor__inspector .homepage-editor__inspector-field .ant-input,
+.homepage-editor__inspector .homepage-editor__inspector-field > select {
+  min-height: 40px;
+}
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  textarea.ant-input {
+  min-height: 92px;
+  padding-block: 9px;
+  line-height: 1.6;
+}
+
+/* 图片是编辑区第二主角：桌面图使用大幅横向预览，手机图保留竖向构图。 */
+.homepage-editor__inspector .homepage-editor__media-preview-img {
+  width: 100%;
+  min-height: 0;
+  border: 1px solid #e1e4e8;
+  border-radius: 3px;
+  background: #f5f3ef;
+}
+.homepage-editor__inspector
+  .homepage-editor__media-picker:not([data-media-device="mobile"])
+  .homepage-editor__media-preview-img {
+  /* 预览比例以字段 spec 的内联 aspect-ratio 为准，不再硬编码覆盖（仅无 spec 时兜底 16:9）。 */
+  aspect-ratio: 16 / 9;
+}
+.homepage-editor__inspector
+  .homepage-editor__media-picker:not([data-media-device="mobile"])
+  .homepage-editor__media-preview-img[style*="aspect-ratio"] {
+  aspect-ratio: auto;
+}
+.homepage-editor__inspector
+  .homepage-editor__media-picker[data-media-device="mobile"]
+  .homepage-editor__media-preview-img {
+  max-height: 460px;
+  aspect-ratio: 4 / 5;
+}
+.homepage-editor__inspector
+  .homepage-editor__media-picker[data-media-device="mobile"]
+  .homepage-editor__media-preview-img[style*="aspect-ratio"] {
+  aspect-ratio: auto;
+}
+.homepage-editor__inspector .homepage-editor__media-preview-note {
+  margin: 7px 0 0;
+  color: #8e949c;
+  font-size: 10px;
+}
+.homepage-editor__inspector .homepage-editor__media-preview-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.homepage-editor__inspector .homepage-editor__media-preview-img {
+  position: relative;
+}
+.homepage-editor__media-preview-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  padding: 24px;
+  color: #727880;
+  background: #f7f6f2;
+  text-align: center;
+}
+.homepage-editor__media-preview-error .anticon {
+  color: #b8944e;
+  font-size: 20px;
+}
+.homepage-editor__media-preview-error strong {
+  color: #3f444c;
+  font-size: 13px;
+  font-weight: 600;
+}
+.homepage-editor__media-preview-error span {
+  max-width: 240px;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.homepage-editor__inspector .homepage-editor__media-preview-actions .ant-btn {
+  min-width: 0;
+  min-height: 38px;
+  padding-inline: 8px;
+  border-color: #dfe3e8;
+  border-radius: 3px;
+  color: #4b5159;
+  background: #ffffff;
+  box-shadow: none;
+  font-size: 11px;
+}
+.homepage-editor__inspector
+  .homepage-editor__media-preview-actions
+  .ant-btn:hover,
+.homepage-editor__inspector
+  .homepage-editor__media-preview-actions
+  .ant-btn:focus-visible {
+  border-color: #b8944e;
+  color: #6c501d;
+}
+.homepage-editor__media-focus-editor {
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.homepage-editor__media-focus-toggle {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid #dfe3e8;
+  border-radius: 3px;
+  color: #4c525a;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+.homepage-editor__media-focus-toggle:hover,
+.homepage-editor__media-focus-toggle:focus-visible {
+  border-color: #b8944e;
+  color: #6c501d;
+  outline: 0;
+}
+.homepage-editor__media-focus-toggle small {
+  margin-left: auto;
+  color: #9399a1;
+  font-size: 10px;
+}
+.homepage-editor__media-focus-note {
+  margin: 8px 0 10px;
+  color: #858b94;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.homepage-editor__media-information {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.homepage-editor__media-information > strong {
+  color: #3c424a;
+  font-size: 12px;
+  font-weight: 600;
+}
+.homepage-editor__inspector .homepage-editor__image-status {
+  margin: 0;
+  border-color: #e3e6ea;
+  border-radius: 3px;
+  background: #fafafa;
+}
+.homepage-editor__inspector .homepage-editor__inspector-field .ant-input:hover,
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  .ant-select-selector:hover,
+.homepage-editor__inspector .homepage-editor__inspector-field > select:hover {
+  border-color: #b8bec6;
+}
+.homepage-editor__inspector .homepage-editor__inspector-field .ant-input:focus,
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  .ant-input-focused,
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  > select:focus-visible {
+  border-color: #b8944e;
+  outline: 0;
+  box-shadow: 0 0 0 2px rgba(184, 148, 78, 0.12);
+}
+
+/* 选项控件沿用参考图的浅灰底、白色激活态。 */
+.homepage-editor__inspector .homepage-editor__inspector-option-group {
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e1e4e8;
+  border-radius: 4px;
+  background: #ffffff;
+}
+.homepage-editor__inspector .homepage-editor__inspector-option-group strong {
+  color: #3c424a;
+  font-size: 12px;
+}
+.homepage-editor__inspector .homepage-editor__inspector-option-group span {
+  color: #8a9098;
+  font-size: 11px;
+}
+.homepage-editor__inspector .homepage-editor__inspector-segmented {
+  gap: 2px;
+  padding: 3px;
+  border-radius: 4px;
+  background: #f1f2f4;
+}
+.homepage-editor__inspector .homepage-editor__inspector-segmented button {
+  min-height: 34px;
+  color: #737982;
+  border-radius: 3px;
+}
+.homepage-editor__inspector
+  .homepage-editor__inspector-segmented
+  button.is-active {
+  color: #6e511d;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px #e4dccd,
+    0 1px 2px rgba(42, 45, 50, 0.08);
+}
+.homepage-editor__inspector .homepage-editor__item-nav {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  max-height: none;
+  overflow-x: auto;
+  border-bottom: 1px solid #e1e4e8;
+}
+.homepage-editor__inspector .homepage-editor__item-nav-button {
+  width: auto;
+  min-width: 88px;
+  justify-content: center;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: #666d76;
+  background: transparent;
+}
+.homepage-editor__inspector .homepage-editor__item-nav-button.is-active {
+  border-bottom-color: #b8944e;
+  color: #765820;
+  background: transparent;
+}
+.homepage-editor__inspector .homepage-editor__item-nav-index {
+  display: none;
+}
+
+/* 底部只负责手动保存整页草稿，不出现自动保存表达。 */
+.homepage-editor__inspector .homepage-editor__properties-actions {
+  min-height: 60px;
+  align-items: center;
+  padding: 10px 20px;
+  border-top: 1px solid #e1e4e8;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: none;
+}
+.homepage-editor__inspector .homepage-editor__properties-actions span {
+  margin-right: auto;
+  color: #7d838c;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.homepage-editor__inspector
+  .homepage-editor__properties-actions
+  .ant-btn-primary {
+  min-width: 96px;
+  min-height: 38px;
+  border-color: #b8944e;
+  border-radius: 3px;
+  color: #ffffff;
+  background: #b8944e;
+  box-shadow: none;
+}
+.homepage-editor__inspector
+  .homepage-editor__properties-actions
+  .ant-btn-primary:not(:disabled):hover {
+  border-color: #967532;
+  background: #967532;
+}
+.homepage-editor__inspector
+  .homepage-editor__properties-actions
+  .ant-btn-primary:focus-visible {
+  outline: 2px solid rgba(184, 148, 78, 0.5);
+  outline-offset: 2px;
+}
+.homepage-editor__inspector
+  .homepage-editor__properties-actions
+  .ant-btn-primary:disabled {
+  border-color: #e3e5e8;
+  color: #a7acb3;
+  background: #f1f2f4;
+}
+
+@media (max-width: 1199px) {
+  .homepage-editor__right-workspace,
+  .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
+    width: min(480px, calc(100% - var(--editor-structure-width)));
+  }
+}
+
+@media (max-width: 560px) {
+  .homepage-editor__right-workspace,
+  .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
+    inset: 0;
+    z-index: 34;
+    width: auto;
+    max-width: none;
+  }
+  .homepage-editor__inspector .homepage-editor__inspector-header {
+    padding-inline: 14px 10px;
+  }
+  .homepage-editor__inspector-collapse-btn {
+    display: none;
+  }
+  .homepage-editor__inspector .homepage-editor__inspector-scroll {
+    padding-inline: 16px;
+  }
+  .homepage-editor__template-position {
+    display: none;
+  }
+  .homepage-editor__inspector .homepage-editor__properties-actions {
+    padding-inline: 16px;
+  }
+}
+
+/* ═══ 工作台密度优化：保留现有五区骨架，仅收紧非编辑信息 ═══ */
+/* 顶栏只保留保存、预览、发布与更多；历史和页面设置已进入更多菜单。 */
+.homepage-editor__toolbar {
+  gap: 12px;
+}
+.admin-header__editor-slot .homepage-editor__toolbar {
+  padding-inline: 16px 10px;
+}
+.homepage-editor__viewport-switcher {
+  min-height: 38px;
+  padding: 2px;
+  border-radius: 5px;
+  background: #f7f6f3;
+}
+.homepage-editor__viewport-switcher button {
+  min-height: 34px;
+  padding: 0 13px;
+  gap: 7px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.homepage-editor__viewport-switcher button > span:not(.anticon) {
+  display: inline;
+}
+.homepage-editor__viewport-switcher button small {
+  display: none;
+}
+.homepage-editor__viewport-switcher button.is-active {
+  box-shadow: 0 1px 2px rgba(47, 38, 25, 0.1);
+}
+.homepage-editor__toolbar-actions {
+  gap: 6px;
+}
+.homepage-editor__toolbar-secondary-actions {
+  gap: 0;
+}
+.homepage-editor__toolbar-actions .ant-btn {
+  min-height: 34px;
+}
+.homepage-editor__toolbar-more {
+  width: 34px;
+  padding-inline: 0 !important;
+  justify-content: center;
+}
+.homepage-editor__toolbar-more > span:not(.ant-btn-icon) {
+  display: none;
+}
+.admin-header--editor .admin-header__right {
+  gap: 6px;
+  padding-left: 8px;
+}
+
+/* 模块库保留检索与视图切换，移除重复说明和常驻统计。 */
+.homepage-editor__library-tools {
+  padding: 12px 12px 11px;
+}
+.homepage-editor__library-title {
+  min-height: 28px;
+  margin-bottom: 10px;
+}
+.homepage-editor__library-title small,
+.homepage-editor__library-drag-tip {
+  display: none;
+}
+.homepage-editor__library-overview-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  margin-left: auto;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #83796d;
+  background: transparent;
+  cursor: pointer;
+}
+.homepage-editor__library-overview-btn:hover,
+.homepage-editor__library-overview-btn:focus-visible {
+  border-color: #d8c49a;
+  color: #76531c;
+  background: #fbf7ee;
+  outline: 0;
+}
+.homepage-editor__library-collapse-btn {
+  margin-left: 4px;
+}
+.homepage-editor__library-search-row {
+  gap: 8px;
+}
+.homepage-editor__library-search-row .ant-input-affix-wrapper {
+  min-height: 34px;
+}
+.homepage-editor__view-toggle {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid #e6e0d7;
+  border-radius: 4px;
+}
+.homepage-editor__view-toggle button {
+  width: 30px;
+  height: 32px;
+  border: 0;
+  border-radius: 0;
+}
+.homepage-editor__view-toggle button + button {
+  border-left: 1px solid #e6e0d7;
+}
+.homepage-editor__template-scroll {
+  padding: 12px 12px 32px;
+}
+
+/* 页面结构仍独立存在，但避免在内容较少时占用过宽空间。 */
+.homepage-editor__layer-heading {
+  min-height: 58px;
+  padding: 14px 14px 10px;
+}
+.homepage-editor__layer-scroll {
+  padding: 14px 10px 24px;
+}
+.homepage-editor__structure-collapse-btn,
+.homepage-editor__library-collapse-btn,
+.homepage-editor__inspector-collapse-btn {
+  width: 28px;
+  height: 28px;
+}
+
+/* 桌面端保留三块侧栏；右栏宽度固定，不再因选中模块而伸缩，避免画布抖动缩放。 */
+.homepage-editor__body {
+  --editor-library-width: 240px;
+  --editor-structure-width: 184px;
+  --editor-inspector-width: 420px;
+}
+.homepage-editor__body.is-inspecting {
+  --editor-structure-width: 184px;
+  --editor-inspector-width: 420px;
+}
+.homepage-editor__stage {
+  padding: 20px 20px 72px;
+}
+.homepage-editor__stage-label {
+  margin-bottom: 14px;
+  color: #7d756b;
+}
+.homepage-editor__canvas-controls {
+  margin-bottom: 12px;
+}
+.homepage-editor__canvas-controls output.homepage-editor__canvas-readout {
+  display: inline-flex;
+  min-width: 94px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding-inline: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.homepage-editor__canvas-readout span {
+  color: #716a61;
+}
+
+/* 全局导航继续保留，但其收缩把手不再跨栏遮挡模块库。 */
+.admin-body:has(.homepage-editor) .admin-sidebar__collapse-handle {
+  left: calc(var(--adm-sidebar-w) - 24px);
+  z-index: 5;
+  width: 24px;
+  height: 56px;
+  border-left: 1px solid var(--adm-line);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgb(54 44 28 / 8%);
+}
+.admin-shell-v7.is-sidebar-collapsed
+  .admin-body:has(.homepage-editor)
+  .admin-sidebar__collapse-handle {
+  left: 0;
+}
+
+@media (min-width: 1600px) {
+  .homepage-editor__body {
+    --editor-library-width: 240px;
+    --editor-structure-width: 184px;
+    --editor-inspector-width: 420px;
+  }
+  .homepage-editor__body.is-inspecting {
+    --editor-structure-width: 184px;
+    --editor-inspector-width: 420px;
+  }
+}
+
+@media (min-width: 1200px) and (max-width: 1599px) {
+  .homepage-editor__body {
+    --editor-structure-width: 184px;
+    --editor-inspector-width: 400px;
+  }
+  .homepage-editor__body.is-inspecting {
+    --editor-structure-width: 184px;
+    --editor-inspector-width: 400px;
+  }
+  .homepage-editor__right-workspace,
+  .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
+    width: auto;
+  }
+}
+
+@media (max-width: 767px) {
+  .homepage-editor__viewport-switcher button {
+    padding-inline: 9px;
+  }
+  .homepage-editor__canvas-controls
+    output.homepage-editor__canvas-readout
+    span {
+    display: none;
+  }
+}
+
+/* 右栏参考图色彩映射：全局 globals.css 对 Ant 控件使用了 !important，
+ * 因此必须在右栏作用域内显式收回输入框和主按钮的视觉控制权。 */
+.homepage-editor__inspector {
+  --inspector-canvas: #ffffff;
+  --inspector-surface-subtle: #fbf9f6;
+  --inspector-ink: #191918;
+  --inspector-text: #5f5b55;
+  --inspector-muted: #76716a;
+  --inspector-line: #dedbd6;
+  --inspector-line-strong: #bcb7af;
+  --inspector-gold: #b8944e;
+  --inspector-action: #6f5733;
+  --inspector-danger: #a44437;
+  color: var(--inspector-ink);
+  background: var(--inspector-canvas);
+}
+
+.homepage-editor__inspector .homepage-editor__inspector-header,
+.homepage-editor__inspector .homepage-editor__inspector-scroll,
+.homepage-editor__inspector .homepage-editor__template-context,
+.homepage-editor__inspector .homepage-editor__properties-actions {
+  background: var(--inspector-canvas);
+}
+
+.homepage-editor__inspector .homepage-editor__inspector-title,
+.homepage-editor__inspector .homepage-editor__inspector-section-head,
+.homepage-editor__inspector .homepage-editor__inspector-option-group strong,
+.homepage-editor__inspector .homepage-editor__inspector-field > label,
+.homepage-editor__inspector .homepage-editor__media-information > strong {
+  color: var(--inspector-ink);
+}
+
+.homepage-editor__inspector .homepage-editor__inspector-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-color: var(--inspector-line);
+  color: var(--inspector-text);
+  background: var(--inspector-canvas);
+}
+.homepage-editor__inspector .homepage-editor__inspector-device[title]::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--inspector-gold);
+  content: "";
+}
+.homepage-editor__inspector .homepage-editor__close-panel {
+  color: var(--inspector-text);
+  background: var(--inspector-canvas);
+}
+.homepage-editor__inspector .homepage-editor__close-panel:hover,
+.homepage-editor__inspector .homepage-editor__close-panel:focus-visible {
+  color: var(--inspector-ink);
+  background: #f5f4f2;
+}
+
+.homepage-editor__inspector .homepage-editor__template-context-summary {
+  min-height: 52px;
+}
+.homepage-editor__inspector .homepage-editor__template-context-name > span,
+.homepage-editor__inspector .homepage-editor__template-position {
+  color: var(--inspector-muted);
+}
+.homepage-editor__inspector .homepage-editor__template-context-name strong {
+  color: var(--inspector-ink);
+}
+.homepage-editor__inspector
+  .homepage-editor__template-context-summary
+  > button {
+  color: var(--inspector-action);
+}
+
+.homepage-editor__inspector .homepage-editor__task-group,
+.homepage-editor__inspector .homepage-editor__template-context,
+.homepage-editor__inspector .homepage-editor__properties-actions {
+  border-color: var(--inspector-line);
+}
+.homepage-editor__inspector .homepage-editor__inspector-section {
+  padding: 26px 0 30px;
+}
+.homepage-editor__inspector .homepage-editor__section-note {
+  display: none;
+}
+.homepage-editor__inspector .homepage-editor__inspector-section-body {
+  gap: 18px;
+  margin-top: 16px;
+}
+
+/* 参考图采用左侧标签、右侧控件；只在文字与跳转字段使用该密度。 */
+.homepage-editor__inspector
+  .homepage-editor__task-group[data-task-group="content"]
+  .homepage-editor__inspector-field,
+.homepage-editor__inspector
+  .homepage-editor__task-group[data-task-group="link"]
+  .homepage-editor__inspector-field {
+  display: grid;
+  position: relative;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 12px;
+}
+.homepage-editor__inspector
+  .homepage-editor__task-group[data-task-group="content"]
+  .homepage-editor__inspector-field
+  > label,
+.homepage-editor__inspector
+  .homepage-editor__task-group[data-task-group="link"]
+  .homepage-editor__inspector-field
+  > label {
+  min-height: 40px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+}
+.homepage-editor__inspector .homepage-editor__inspector-field > label em {
+  margin-left: 3px;
+  color: var(--inspector-danger);
+  font-size: 0;
+  font-style: normal;
+}
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  > label
+  em::after {
+  font-size: 12px;
+  content: "*";
+}
+.homepage-editor__inspector
+  .homepage-editor__task-group[data-task-group="content"]
+  .homepage-editor__inspector-count {
+  position: absolute;
+  z-index: 1;
+  right: 12px;
+  bottom: 12px;
+  color: var(--inspector-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* 收回被 globals.css !important 覆盖的暖米色、无边框输入样式。 */
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  :is(.ant-input, .ant-input-number, .ant-select-selector),
+.homepage-editor__inspector .homepage-editor__inspector-field > select {
+  border: 1px solid var(--inspector-line) !important;
+  border-radius: 4px !important;
+  color: var(--inspector-ink) !important;
+  background: var(--inspector-canvas) !important;
+  box-shadow: none !important;
+}
+.homepage-editor__inspector
+  .homepage-editor__task-group[data-task-group="content"]
+  .homepage-editor__inspector-field
+  .ant-input {
+  padding-right: 64px;
+}
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  :is(.ant-input, .ant-select-selector):hover,
+.homepage-editor__inspector .homepage-editor__inspector-field > select:hover {
+  border-color: var(--inspector-line-strong) !important;
+}
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  :is(.ant-input, .ant-input-focused, .ant-select-selector):focus,
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  .ant-select-focused
+  .ant-select-selector,
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  > select:focus-visible {
+  border-color: var(--inspector-action) !important;
+  outline: 2px solid rgba(111, 87, 51, 0.24) !important;
+  outline-offset: 1px;
+  box-shadow: none !important;
+}
+.homepage-editor__inspector
+  .homepage-editor__inspector-field
+  .ant-input::placeholder {
+  color: #98938c;
+}
+
+.homepage-editor__inspector .homepage-editor__media-device-switcher button,
+.homepage-editor__inspector .homepage-editor__media-preview-actions .ant-btn,
+.homepage-editor__inspector .homepage-editor__media-focus-toggle {
+  border-color: var(--inspector-line);
+  color: var(--inspector-text);
+  background: var(--inspector-canvas);
+  box-shadow: none;
+}
+.homepage-editor__inspector
+  .homepage-editor__media-device-switcher
+  button:hover,
+.homepage-editor__inspector
+  .homepage-editor__media-device-switcher
+  button:focus-visible,
+.homepage-editor__inspector
+  .homepage-editor__media-preview-actions
+  .ant-btn:hover,
+.homepage-editor__inspector
+  .homepage-editor__media-preview-actions
+  .ant-btn:focus-visible,
+.homepage-editor__inspector .homepage-editor__media-focus-toggle:hover,
+.homepage-editor__inspector .homepage-editor__media-focus-toggle:focus-visible {
+  border-color: var(--inspector-action);
+  color: var(--inspector-action);
+  outline: 2px solid rgba(111, 87, 51, 0.18);
+  outline-offset: 1px;
+}
+.homepage-editor__inspector
+  .homepage-editor__media-device-switcher
+  button.is-active {
+  border-color: var(--inspector-gold);
+  color: var(--inspector-action);
+  background: var(--inspector-canvas);
+  box-shadow: inset 0 0 0 1px rgba(184, 148, 78, 0.14);
+}
+.homepage-editor__inspector .homepage-editor__media-preview-img {
+  border-color: var(--inspector-line);
+  background: var(--inspector-surface-subtle);
+}
+.homepage-editor__inspector .homepage-editor__media-preview-error {
+  color: var(--inspector-muted);
+  background: var(--inspector-surface-subtle);
+}
+.homepage-editor__inspector .homepage-editor__media-preview-error .anticon {
+  color: #8a651f;
+}
+.homepage-editor__inspector .homepage-editor__media-preview-error strong {
+  color: var(--inspector-ink);
+}
+
+/* 跳转与构图使用同一套独立白色按钮，不再出现灰色分段底槽。 */
+.homepage-editor__inspector .homepage-editor__inspector-option-group {
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.homepage-editor__inspector
+  .homepage-editor__inspector-option-group
+  > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+.homepage-editor__inspector .homepage-editor__inspector-option-group span {
+  color: var(--inspector-muted);
+}
+.homepage-editor__inspector .homepage-editor__inspector-segmented {
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+}
+.homepage-editor__inspector .homepage-editor__inspector-segmented button {
+  min-height: 40px;
+  border: 1px solid var(--inspector-line);
+  border-radius: 4px;
+  color: var(--inspector-text);
+  background: var(--inspector-canvas);
+  box-shadow: none;
+}
+.homepage-editor__inspector .homepage-editor__inspector-segmented button:hover,
+.homepage-editor__inspector
+  .homepage-editor__inspector-segmented
+  button:focus-visible {
+  border-color: var(--inspector-action);
+  color: var(--inspector-action);
+  outline: 2px solid rgba(111, 87, 51, 0.18);
+  outline-offset: 1px;
+}
+.homepage-editor__inspector
+  .homepage-editor__inspector-segmented
+  button.is-active {
+  border-color: var(--inspector-gold);
+  color: var(--inspector-action);
+  background: var(--inspector-canvas);
+  box-shadow: inset 0 0 0 1px rgba(184, 148, 78, 0.12);
+}
+
+.homepage-editor__inspector .homepage-editor__properties-actions {
+  min-height: 64px;
+  padding: 12px 20px;
+}
+.homepage-editor__inspector .homepage-editor__properties-actions span {
+  color: var(--inspector-text);
+  font-size: 12px;
+}
+.homepage-editor__inspector
+  .homepage-editor__properties-actions
+  .ant-btn-primary:not(:disabled) {
+  border-color: var(--inspector-action) !important;
+  border-radius: 4px !important;
+  color: #ffffff !important;
+  background: var(--inspector-action) !important;
+  letter-spacing: 0;
+}
+.homepage-editor__inspector
+  .homepage-editor__properties-actions
+  .ant-btn-primary:not(:disabled)
+  span {
+  color: #ffffff;
+}
+.homepage-editor__inspector
+  .homepage-editor__properties-actions
+  .ant-btn-primary:not(:disabled):hover {
+  border-color: #584427 !important;
+  background: #584427 !important;
+}
+.homepage-editor__inspector
+  .homepage-editor__properties-actions
+  .ant-btn-primary:disabled {
+  border-color: #e1dfdb !important;
+  color: #8c8882 !important;
+  background: #f1f0ee !important;
+}
+.homepage-editor__inspector
+  .homepage-editor__properties-actions
+  .ant-btn-primary:disabled
+  span {
+  color: #8c8882;
+}
+
+@media (max-width: 560px) {
+  .homepage-editor__inspector
+    .homepage-editor__task-group[data-task-group="content"]
+    .homepage-editor__inspector-field,
+  .homepage-editor__inspector
+    .homepage-editor__task-group[data-task-group="link"]
+    .homepage-editor__inspector-field,
+  .homepage-editor__inspector .homepage-editor__inspector-option-group {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .homepage-editor__inspector
+    .homepage-editor__task-group[data-task-group="content"]
+    .homepage-editor__inspector-field
+    > label,
+  .homepage-editor__inspector
+    .homepage-editor__task-group[data-task-group="link"]
+    .homepage-editor__inspector-field
+    > label {
+    min-height: auto;
+  }
 }

@@ -5,14 +5,17 @@ import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceho
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import type { PageModule } from '@/types/pageModule';
 import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
-import { DOUBLE_POSTER_CONTRACT } from '@/page-builder/config/blockContracts';
 import { DesignSystemStyles } from '@/page-builder/designSystem/sectionShell';
 import { FONT_DISPLAY, FONT_SANS } from '@/page-builder/designSystem/tokens';
+import {
+  CONTENT_TEMPLATE_LAYOUTS,
+  ContentTemplateLayoutStyles,
+  templateLayoutVars,
+} from '@/page-builder/layout/contentTemplateLayouts';
 
 const SF = '#F8F6F1';
 const TX = '#28231F';
 const MU = 'rgba(40,35,31,0.58)';
-const PAD = 'clamp(24px,5vw,80px)';
 
 interface Props { module?: PageModule; editMode?: boolean; }
 
@@ -72,9 +75,7 @@ function EditorialImage({
   );
 }
 
-/**
- * 双海报模块 — 主图 + 细节图错位
- */
+/** 双图文 — 主图优先、细节图从属的不可拆分编辑式骨架。 */
 export default function DoublePosterSection({ module, editMode }: Props) {
   const rm = useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
@@ -91,7 +92,6 @@ export default function DoublePosterSection({ module, editMode }: Props) {
   const defaults = { number: "", label: "", title: "", description: "", href: "" };
   const c = module?.content as (PageModule['content'] & Record<string, any>) | undefined;
   const s = module?.styleConfig as (PageModule['styleConfig'] & Record<string, any>) | undefined;
-  const l = module?.layoutConfig as (PageModule['layoutConfig'] & Record<string, any>) | undefined;
 
   // 双图海报的两个字段表达固定版式角色，绝不再借用桌面/移动端字段。
   const mainImage = c?.mainImage;
@@ -104,36 +104,40 @@ export default function DoublePosterSection({ module, editMode }: Props) {
   const label = c?.label ?? defaults.label;
   const title = c?.title ?? defaults.title;
   const description = c?.description ?? defaults.description;
-  const actionText = c?.actionText ?? "查看系列";
+  const actionText = typeof c?.actionText === "string" ? c.actionText : "";
   const linkUrl = c?.linkUrl ?? defaults.href;
   const targetUrl = resolveLinkTargetUrl({ targetType: c?.targetType, productId: c?.productId, linkUrl });
-  const mainLeft = l?.template !== "mainRight";
 
   return (
     <section
       ref={ref}
-      className="hc-double-poster hc-section"
-      data-layout={mainLeft ? "mainLeft" : "mainRight"}
+      className="hc-content-template hc-double-poster hc-section"
+      data-content-template={CONTENT_TEMPLATE_LAYOUTS.doublePoster.key}
+      data-visual-role={CONTENT_TEMPLATE_LAYOUTS.doublePoster.visualRole}
+      data-height-mode-desktop={CONTENT_TEMPLATE_LAYOUTS.doublePoster.heightModeByViewport.desktop}
+      data-height-mode-tablet={CONTENT_TEMPLATE_LAYOUTS.doublePoster.heightModeByViewport.tablet}
+      data-height-mode-mobile={CONTENT_TEMPLATE_LAYOUTS.doublePoster.heightModeByViewport.mobile}
+      data-mobile-order={CONTENT_TEMPLATE_LAYOUTS.doublePoster.mobile.order.join(",")}
       data-density="brand"
-      data-flow="flow"
+      data-spacing="normal"
+      data-flow={CONTENT_TEMPLATE_LAYOUTS.doublePoster.flow}
       style={{
-        padding: 'clamp(72px,10vw,140px) 0 clamp(88px,11vw,160px)',
         background: s?.bgColor || SF,
         outline: editMode ? '2px solid rgba(184,148,78,0.6)' : undefined,
         outlineOffset: -2,
         position: 'relative' as const,
+        ...templateLayoutVars(CONTENT_TEMPLATE_LAYOUTS.doublePoster),
       }}
     >
       <DesignSystemStyles />
+      <ContentTemplateLayoutStyles />
       {editMode && (
         <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 10, background: '#B8944E', color: '#fff', fontSize: 10, padding: '2px 8px', letterSpacing: '0.04em' }}>
-          可编辑 · 双海报
+          可编辑 · 双图文
         </div>
       )}
-      <div className="grid grid-cols-12 gap-x-6 max-w-[1520px] mx-auto" style={{ padding: `0 ${PAD}` }}>
-        <div className="hc-double-poster__main col-span-12 md:col-span-8">
-          <div data-editor-field="mainImage" className="overflow-hidden" style={{
-            aspectRatio: DOUBLE_POSTER_CONTRACT.canvas.mainMediaAspectRatio,
+      <div className="hc-content-template__container hc-phase1-double">
+        <div data-editor-field="mainImage" className="hc-content-template__media hc-phase1-double__main" style={{
             background: '#E7DDCE',
             opacity: rm || visible ? 1 : 0,
             transform: rm || visible ? 'translateY(0)' : 'translateY(18px)',
@@ -144,49 +148,46 @@ export default function DoublePosterSection({ module, editMode }: Props) {
             ) : (
               <MissingImageSlot field="mainImage" label="主海报" spec={IMAGE_SPECS.doublePoster.main.label} height="100%" />
             )}
-          </div>
         </div>
-        <div className="hc-double-poster__detail col-span-12 mt-10 md:col-span-4 md:mt-[12%]">
-          {detailImg || editMode ? (
-            <div
-              data-editor-field="detailImage"
-              className="overflow-hidden"
-              style={{ aspectRatio: DOUBLE_POSTER_CONTRACT.canvas.detailMediaAspectRatio, background: '#E7DDCE' }}
-            >
-              {detailImg ? (
-                <EditorialImage src={detailImg} alt={c?.detailAltText || ""} focusX={s?.detailFocusX ?? 50} focusY={s?.detailFocusY ?? 50} />
-              ) : (
-                <MissingImageSlot field="detailImage" label="细节海报" spec={IMAGE_SPECS.doublePoster.detail.label} height="100%" />
-              )}
-            </div>
+        {detailImg || editMode ? (
+          <div
+            data-editor-field="detailImage"
+            className="hc-content-template__media hc-phase1-double__detail"
+            style={{ background: '#E7DDCE' }}
+          >
+            {detailImg ? (
+              <EditorialImage src={detailImg} alt={c?.detailAltText || ""} focusX={s?.detailFocusX ?? 50} focusY={s?.detailFocusY ?? 50} />
+            ) : (
+              <MissingImageSlot field="detailImage" label="细节海报" spec={IMAGE_SPECS.doublePoster.detail.label} height="100%" />
+            )}
+          </div>
+        ) : null}
+        <div className="hc-content-template__copy hc-phase1-double__copy">
+          {(number || label) ? (
+            <p data-editor-field="number label" className="hc-content-template__eyebrow" style={{ color: MU, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+              {[number, label].filter(Boolean).join(" / ")}
+            </p>
           ) : null}
-          <div className="mt-6">
-            <p data-editor-field="number label" className="text-[10px] tracking-[.2em] uppercase mb-2" style={{ color: MU, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>{number} / {label}</p>
-            <h2 data-editor-field="title" className="leading-[1.12] tracking-[.02em] mb-1"
+          {title ? (
+            <h2 data-editor-field="title" className="hc-content-template__title"
               style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: 'var(--hc-type-h3, clamp(22px,2.2vw,32px))', color: TX }}>{title}</h2>
-            <p data-editor-field="description" className="text-sm mb-4 max-w-[240px]" style={{ color: MU }}>{description}</p>
-            {actionText && targetUrl ? (
-              editMode ? (
-                <span data-editor-field="actionText linkUrl productId" className="inline-flex items-center gap-2 text-[10px] tracking-[.14em] uppercase font-sans" style={{ color: TX }}>
-                  {actionText} <span>→</span>
-                </span>
-              ) : (
-                <Link data-editor-field="actionText linkUrl productId" to={targetUrl} className="inline-flex items-center gap-2 text-[10px] tracking-[.14em] uppercase transition-opacity hover:opacity-55 font-sans" style={{ color: TX }}>
-                  {actionText} <span>→</span>
-                </Link>
-              )
-            ) : null}
-          </div>
+          ) : null}
+          {description ? (
+            <p data-editor-field="description" className="hc-content-template__body" style={{ color: MU }}>{description}</p>
+          ) : null}
         </div>
+        {actionText && targetUrl ? (
+          editMode ? (
+            <span data-editor-field="actionText linkUrl productId" className="hc-content-template__action hc-phase1-double__action" style={{ color: TX }}>
+              {actionText} <span>→</span>
+            </span>
+          ) : (
+            <Link data-editor-field="actionText linkUrl productId" to={targetUrl} className="hc-content-template__action hc-phase1-double__action transition-opacity hover:opacity-55" style={{ color: TX }}>
+              {actionText} <span>→</span>
+            </Link>
+          )
+        ) : null}
       </div>
-      <style>{`
-        .hc-double-poster__main { order: 1; }
-        .hc-double-poster__detail { order: 2; }
-        @media (min-width: 768px) {
-          .hc-double-poster[data-layout="mainRight"] .hc-double-poster__main { order: 2; }
-          .hc-double-poster[data-layout="mainRight"] .hc-double-poster__detail { order: 1; }
-        }
-      `}</style>
     </section>
   );
 }

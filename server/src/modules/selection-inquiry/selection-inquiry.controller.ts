@@ -16,6 +16,7 @@ import { OptionalCustomerAuthGuard } from "../customers/optional-customer-auth.g
 import { Roles } from "../../common/decorators/roles.decorator";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Throttle } from "@nestjs/throttler";
+import { CreateSelectionInquiryDto } from "./dto/create-selection-inquiry.dto";
 
 @Controller("selection-inquiries")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -42,20 +43,7 @@ export class SelectionInquiryController {
   @Post()
   create(
     @Req() request: any,
-    @Body()
-    body: {
-      customerName?: string;
-      phone?: string;
-      email?: string;
-      wechat?: string;
-      message?: string;
-      items: Array<{
-        productId?: number;
-        productNameSnapshot: string;
-        productSkuSnapshot?: string;
-        productImageSnapshot?: string;
-      }>;
-    },
+    @Body() body: CreateSelectionInquiryDto,
   ) {
     return this.service.create({ ...body, customer: request.customer });
   }

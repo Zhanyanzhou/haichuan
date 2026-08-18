@@ -23,6 +23,12 @@ const api = axios.create({
 });
 
 type NormalizedRequestError = Error & { status?: number };
+type LifecycleMockProduct = {
+  id: number;
+  status: string;
+  deletedAt?: string | null;
+  [key: string]: unknown;
+};
 
 function clearCustomerSession() {
   localStorage.removeItem("customerToken");
@@ -31,6 +37,12 @@ function clearCustomerSession() {
 
 function requestStatus(error: unknown): number | undefined {
   return (error as NormalizedRequestError | undefined)?.status;
+}
+
+function mockRequestError(message: string, status: number): NormalizedRequestError {
+  const error = new Error(message) as NormalizedRequestError;
+  error.status = status;
+  return error;
 }
 
 // 受控目录 SSE：仅发变更信号（不返回商品数据），前端收到信号后用鉴权 catalog 接口重拉
@@ -154,6 +166,12 @@ function getMockProducts() {
   return mockProducts;
 }
 
+function findActiveMockProduct(id: number): LifecycleMockProduct | undefined {
+  return (getMockProducts() as unknown as LifecycleMockProduct[]).find(
+    (product) => product.id === id && !product.deletedAt,
+  );
+}
+
 function persistMockProducts() {
   if (typeof window === "undefined") return;
   try {
@@ -178,8 +196,16 @@ export const productApi = {
               .filter((id) => Number.isInteger(id) && id > 0),
           )
         : null;
-      const filtered = filterProducts(getMockProducts(), params).filter(
-        (product) => !idSet || idSet.has(product.id),
+      const availableProducts = (
+        getMockProducts() as unknown as LifecycleMockProduct[]
+      ).filter((product) => !product.deletedAt);
+      const filtered = filterProducts(
+        availableProducts as typeof mockProducts,
+        params,
+      ).filter(
+        (product) =>
+          (!idSet || idSet.has(product.id)) &&
+          (params?.status ? true : product.status !== "ARCHIVED"),
       );
       return mockRes(
         paginate(filtered, params.page || 1, params.pageSize || 20),
@@ -190,8 +216,12 @@ export const productApi = {
   getCounts: async () => {
     if (USE_MOCK) {
       await mockDelay();
-      const products = getMockProducts();
-      const counts: Record<string, number> = { all: products.length };
+      const products = (
+        getMockProducts() as unknown as LifecycleMockProduct[]
+      ).filter((product) => !product.deletedAt);
+      const counts: Record<string, number> = {
+        all: products.filter((product) => product.status !== "ARCHIVED").length,
+      };
       ["PUBLISHED", "OFFLINE", "DRAFT", "ARCHIVED"].forEach((status) => {
         counts[status] = products.filter(
           (p: any) => p.status === status,
@@ -238,11 +268,25 @@ export const productApi = {
   getById: async (id: number) => {
     if (USE_MOCK) {
       await mockDelay();
-      const p = getMockProducts().find((x) => x.id === id);
+      const p = findActiveMockProduct(id);
       if (!p) throw new Error("产品不存在");
       return mockRes(p);
     }
     return api.get(`/products/${id}`);
+  },
+  getAttributes: async (id: number) => {
+    if (USE_MOCK) {
+      await mockDelay();
+      return mockRes([]);
+    }
+    return api.get(`/products/${id}/attributes`);
+  },
+  setAttributes: async (id: number, attributeValueIds: number[]) => {
+    if (USE_MOCK) {
+      await mockDelay();
+      return mockRes([]);
+    }
+    return api.put(`/products/${id}/attributes`, { attributeValueIds });
   },
   getPublicById: async (id: number) => {
     if (USE_MOCK) {
@@ -305,12 +349,33 @@ export const productApi = {
     }
     return api.put(`/products/${id}`, data);
   },
-  delete: async (id: number) => {
+  archive: async (id: number) => {
     if (USE_MOCK) {
       await mockDelay(200);
-      return mockRes({ success: true });
+      const product = findActiveMockProduct(id);
+      if (!product) throw mockRequestError("商品不存在或已被其他人处理", 404);
+      if (product.status === "ARCHIVED") {
+        throw mockRequestError("商品已在回收站，请刷新列表确认最新状态", 409);
+      }
+      product.status = "ARCHIVED";
+      persistMockProducts();
+      return mockRes(product);
     }
-    return api.delete(`/products/${id}`);
+    return api.put(`/products/${id}/archive`);
+  },
+  restore: async (id: number) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      const product = findActiveMockProduct(id);
+      if (!product) throw mockRequestError("商品不存在或已被其他人处理", 404);
+      if (product.status !== "ARCHIVED") {
+        throw mockRequestError("商品已不在回收站，请刷新列表确认最新状态", 409);
+      }
+      product.status = "OFFLINE";
+      persistMockProducts();
+      return mockRes(product);
+    }
+    return api.put(`/products/${id}/restore`);
   },
   /* 图片管理 */
   addImage: async (
@@ -764,7 +829,8 @@ export const customerApi = {
   }) => api.post("/customers/register", data),
   login: (data: { phone: string; password: string }) =>
     api.post("/customers/login", data),
-  wechatConfig: () => api.get("/customers/wechat/config"),
+  wechatConfig: (origin?: string) =>
+    api.get("/customers/wechat/config", { params: origin ? { origin } : {} }),
   wechatBind: (data: {
     bindToken: string;
     phone: string;
@@ -816,9 +882,13 @@ export const customerApi = {
   closeAccount: (data: { password: string }) =>
     api.post("/customers/me/close", data, { headers: customerAuthHeaders() }),
   toggleFavorite: (productId: number) =>
-    api.post(`/customers/me/favorites/${productId}/toggle`, {}, {
-      headers: customerAuthHeaders(),
-    }),
+    api.post(
+      `/customers/me/favorites/${productId}/toggle`,
+      {},
+      {
+        headers: customerAuthHeaders(),
+      },
+    ),
   submitPaymentProof: (orderId: number, proofKey: string) =>
     api.post(
       `/customers/me/orders/${orderId}/payment-proof`,
@@ -840,8 +910,12 @@ export const customerApi = {
 // ===== 后台客户档案 API（只读运营视图，员工令牌由全局拦截器注入）=====
 export const customerAdminApi = {
   /** 客户列表：分页 + 关键词（手机/姓名/邮箱）+ 状态筛选 */
-  list: (params: { page?: number; pageSize?: number; keyword?: string; status?: string }) =>
-    api.get("/customers/admin", { params }),
+  list: (params: {
+    page?: number;
+    pageSize?: number;
+    keyword?: string;
+    status?: string;
+  }) => api.get("/customers/admin", { params }),
   /** 客户 360° 详情：档案 + 消费聚合 + 最近订单 + 收藏 + 地址数 */
   detail: (id: number) => api.get(`/customers/admin/${id}`),
 };
@@ -1037,6 +1111,20 @@ export const inventoryApi = {
   update: (id: number, data: any) => api.put(`/inventory/${id}`, data),
 };
 
+// ===== Warehouse API（仓库管理）=====
+export const warehouseApi = {
+  list: () => api.get("/warehouses"),
+  create: (data: any) => api.post("/warehouses", data),
+  update: (id: number, data: any) => api.put(`/warehouses/${id}`, data),
+};
+
+// ===== Tag API（标签字典）=====
+export const tagApi = {
+  list: () => api.get("/tags"),
+  create: (data: any) => api.post("/tags", data),
+  update: (id: number, data: any) => api.put(`/tags/${id}`, data),
+};
+
 // ===== AI Classify API =====
 export const aiClassifyApi = {
   // 单张/批量识别：服务端 DTO 要求 JSON（imageUrl / imageUrls），非 multipart
@@ -1044,6 +1132,12 @@ export const aiClassifyApi = {
     api.post("/ai-classify/single", data),
   batchClassify: (data: { imageUrls: string[] }) =>
     api.post("/ai-classify/batch", data),
+  generateDescription: (data: { productName: string; category: string; material: string; style?: string }) =>
+    api.post("/ai-classify/generate-description", data),
+  // 通用 AI 对话（产品文案/客户咨询/数据分析等，Kimi 驱动）
+  chat: (data: { message: string; systemPrompt?: string }) =>
+    api.post("/ai-classify/chat", data),
+  getReport: () => api.get("/ai-classify/report"),
   getRecords: async (params: any) => {
     if (USE_MOCK) {
       await mockDelay();
@@ -1141,7 +1235,7 @@ export const settingsApi = {
     }
     return api.put("/settings", data);
   },
-  getLogs: async (params?: { page?: number; pageSize?: number }) => {
+  getLogs: async (params?: { page?: number; pageSize?: number; keyword?: string; module?: string }) => {
     if (USE_MOCK) {
       await mockDelay();
       return mockRes({ list: [], total: 0, page: 1, pageSize: 30 });
@@ -1155,7 +1249,7 @@ export const settingsApi = {
         commerceEnabled: false,
         cartEnabled: false,
         paymentEnabled: false,
-        analyticsDashboardEnabled: false,
+        analyticsDashboardEnabled: true,
       });
     }
     return api.get("/settings/flags");
@@ -1240,6 +1334,7 @@ export const selectionInquiryApi = {
     email?: string;
     wechat?: string;
     message?: string;
+    privacyConsent: boolean;
     items: Array<{
       productId?: number;
       productNameSnapshot: string;
@@ -1538,7 +1633,7 @@ export const pageDocumentApi = {
   validate: async (pageKey = "home", puckData?: any, metadata?: any) => {
     if (USE_MOCK) {
       await mockDelay(100);
-      return mockRes({ valid: true, errors: [] });
+      return mockRes({ valid: true, errors: [], issues: [] });
     }
     return api.post("/page-modules/document/validate", {
       pageKey,
@@ -1607,11 +1702,15 @@ export const reviewApi = {
     imageUrls?: string[];
   }) => api.post("/reviews", data, { headers: customerAuthHeaders() }),
   mine: () => api.get("/reviews/me", { headers: customerAuthHeaders() }),
-  listForProduct: (productId: number, params?: { page?: number; pageSize?: number }) =>
-    api.get(`/reviews/product/${productId}`, { params }),
+  listForProduct: (
+    productId: number,
+    params?: { page?: number; pageSize?: number },
+  ) => api.get(`/reviews/product/${productId}`, { params }),
   adminList: (params: any) => api.get("/reviews", { params }),
-  moderate: (id: number, data: { status: "APPROVED" | "REJECTED"; reply?: string }) =>
-    api.put(`/reviews/${id}/moderate`, data),
+  moderate: (
+    id: number,
+    data: { status: "APPROVED" | "REJECTED"; reply?: string },
+  ) => api.put(`/reviews/${id}/moderate`, data),
 };
 
 export default api;

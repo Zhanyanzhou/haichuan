@@ -55,7 +55,7 @@ export default function AnalyticsView() {
             <Select.Option value={24}>最近24小时</Select.Option>
             <Select.Option value={72}>最近3天</Select.Option>
           </Select>
-          <Button onClick={fetch} type="primary" style={{ background: '#B69052', borderColor: '#B69052' }}>刷新</Button>
+          <Button onClick={fetch} type="primary">刷新数据</Button>
         </Space>
       </Card>
       <Table columns={columns} dataSource={list} rowKey="id" loading={loading}

@@ -3,6 +3,7 @@ import { Button, Descriptions, Drawer, Form, Input, message, Modal, Select, Spac
 import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import { afterSalesApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
+import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
 import type { AfterSalesCase, AfterSalesStatus, AfterSalesType, PaginatedResult } from '@/types';
 
 const STATUS_META: Record<AfterSalesStatus, { color: string; label: string }> = {
@@ -113,7 +114,7 @@ export default function AfterSalesManage() {
       createForm.resetFields();
       void load();
     } catch (e: any) {
-      message.error(e?.message || '创建失败');
+      message.error(getSafeAdminErrorMessage(e, '售后工单创建失败，请检查必填信息后重试。'));
     } finally {
       setCreating(false);
     }
@@ -144,7 +145,7 @@ export default function AfterSalesManage() {
           message.success(action === 'APPROVED' ? '已审核通过' : '已驳回');
           void load();
         } catch (e: any) {
-          message.error(e?.message || '操作失败');
+          message.error(getSafeAdminErrorMessage(e, '售后审核未完成，请重新加载工单后重试。'));
         }
       },
     });
@@ -179,7 +180,7 @@ export default function AfterSalesManage() {
           message.success('状态已更新');
           void load();
         } catch (e: any) {
-          message.error(e?.message || '操作失败');
+          message.error(getSafeAdminErrorMessage(e, '售后状态更新失败，请重新加载工单后重试。'));
         }
       },
     });
@@ -189,7 +190,7 @@ export default function AfterSalesManage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-display font-semibold text-brand-text">售后中心</h1>
+          <h1 className="font-semibold text-brand-text">售后中心</h1>
           <p className="text-sm text-brand-muted mt-1">退款退货 · 换货 · 维修（售后审核通过后可在退款中心发起退款）</p>
         </div>
         <Space>

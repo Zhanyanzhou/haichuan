@@ -1,15 +1,15 @@
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
 
 interface TestimonialBlockProps {
   module: { content: Record<string, any>; styleConfig?: Record<string, any> };
   editMode?: boolean;
 }
 
-const INK = "#28231F";
-const MUTED = "rgba(40,35,31,0.58)";
 const GOLD = "#B8944E";
+const TESTIMONIAL_RATIO = getContractRoleRatio("testimonials", "authorizedPhoto", "desktop");
 
 /**
  * 顾客之声 — Editorial Story 母版(口碑变体)
@@ -18,11 +18,13 @@ const GOLD = "#B8944E";
  */
 export default function TestimonialBlock({ module, editMode }: TestimonialBlockProps) {
   const { content = {}, styleConfig = {} } = module;
-  const { title, subtitle } = content;
   const bgColor = styleConfig.bgColor || "#FBF9F6";
   const list = Array.isArray(content.testimonials) ? content.testimonials : [];
+  const visibleList = editMode
+    ? list
+    : list.filter((item: any) => Boolean(item?.image && item?.content));
 
-  if (!list.length && !editMode) return null;
+  if (!visibleList.length && !editMode) return null;
 
   if (!list.length && editMode) {
     return (
@@ -34,65 +36,48 @@ export default function TestimonialBlock({ module, editMode }: TestimonialBlockP
 
   return (
     <DecorSection master="editorial-story" background={bgColor}>
-      {(title || subtitle) && (
-        <header style={{ maxWidth: 640, margin: "0 auto 56px", textAlign: "center" }}>
-          {title && (
-            <h2 style={{ margin: "0 0 12px", fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-type-h2, clamp(26px,3vw,40px))", fontWeight: 500, color: INK, lineHeight: 1.2 }}>
-              {title}
-            </h2>
-          )}
-          {subtitle && (
-            <p style={{ margin: 0, fontSize: "var(--hc-type-body, 15px)", color: MUTED, lineHeight: 1.8 }}>{subtitle}</p>
-          )}
-        </header>
-      )}
       <div className="hc-voices">
         <style>{`
           .hc-voices { display: grid; row-gap: clamp(56px, 8vw, 104px); }
           .hc-voices__row {
             display: grid;
-            grid-template-columns: 58fr 42fr;
+            grid-template-columns: minmax(0, 45fr) minmax(0, 55fr);
             column-gap: clamp(28px, 4vw, 64px);
             align-items: center;
           }
-          .hc-voices__row--reverse { grid-template-columns: 42fr 58fr; }
           .hc-voices__quote {
             font-family: var(--hc-font-display, ${FONT_DISPLAY});
             font-size: clamp(22px, 2.6vw, 34px);
             line-height: 1.5;
-            color: ${INK};
+            color: #222222;
             font-weight: 400;
             margin: 0 0 18px;
           }
-          .hc-voices__image { aspect-ratio: 4 / 3; overflow: hidden; background: #EAE3D8; }
+          .hc-voices__image { aspect-ratio: ${TESTIMONIAL_RATIO}; overflow: hidden; background: #E5E5E2; }
           .hc-voices__image img { width: 100%; height: 100%; object-fit: cover; display: block; }
-          .hc-voices__row--reverse .hc-voices__quote { order: 2; }
-          .hc-voices__row--reverse .hc-voices__figure { order: 1; }
           @media (max-width: 767px) {
             .hc-voices { row-gap: 48px; }
-            .hc-voices__row,
-            .hc-voices__row--reverse { grid-template-columns: minmax(0, 1fr); row-gap: 20px; }
-            .hc-voices__quote,
-            .hc-voices__row--reverse .hc-voices__quote { order: 1; font-size: 21px; }
-            .hc-voices__figure,
-            .hc-voices__row--reverse .hc-voices__figure { order: 2; }
+            .hc-voices__row { grid-template-columns: minmax(0, 1fr); row-gap: 24px; }
+            .hc-voices__quote { font-size: 21px; }
           }
         `}</style>
-        {list.map((item: any, index: number) => (
-          <div key={`${item.name}-${index}`} className={`hc-voices__row${index % 2 === 1 ? " hc-voices__row--reverse" : ""}`}>
+        {visibleList.map((item: any, index: number) => (
+          <div key={`${item.name}-${index}`} className="hc-voices__row">
+            <figure className="hc-voices__figure" style={{ margin: 0, minWidth: 0 }} data-content-role="authorizedPhoto" data-editor-field={`testimonials.${index}.image`}>
+              <div className="hc-voices__image">
+                {item.image ? (
+                  <img src={item.image} alt={item.name || "顾客授权实拍"} loading="lazy" decoding="async" />
+                ) : (
+                  <BlockEmptyPlaceholder hint="授权实拍" spec="请上传已取得公开授权的顾客实拍" height="100%" />
+                )}
+              </div>
+            </figure>
             <div>
-              <p className="hc-voices__quote">“{item.content}”</p>
-              <p style={{ margin: 0, fontSize: 13, letterSpacing: "0.08em", color: GOLD, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+              <p className="hc-voices__quote" data-content-role="mainQuote" data-editor-field={`testimonials.${index}.content`}>“{item.content || "主引语待填写"}”</p>
+              <p data-content-role="attribution" data-editor-field={`testimonials.${index}.name testimonials.${index}.meta`} style={{ margin: 0, fontSize: 13, letterSpacing: "0.08em", color: GOLD, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
                 {item.name}{item.meta ? ` · ${item.meta}` : ""}
               </p>
             </div>
-            {item.image ? (
-              <figure className="hc-voices__figure" style={{ margin: 0, minWidth: 0 }} data-editor-field={`testimonials.${index}.image`}>
-                <div className="hc-voices__image">
-                  <img src={item.image} alt={item.name || "顾客实拍"} loading="lazy" decoding="async" />
-                </div>
-              </figure>
-            ) : null}
           </div>
         ))}
       </div>

@@ -10,15 +10,17 @@ import type { ReactNode } from "react";
 import type { MediaSpec } from "../../fields/MediaPickerField";
 import type { ModuleContractStatus } from "../../config/blockContracts";
 
-export type InspectorLayer = "content" | "media" | "layout" | "style" | "interaction";
+export type InspectorLayer =
+  "content" | "media" | "layout" | "style" | "interaction" | "feature";
 
 /** 层的固定排序（渲染顺序）与业务展示名 */
 export const INSPECTOR_LAYER_ORDER: InspectorLayer[] = [
-  "content",
   "media",
+  "content",
+  "interaction",
   "layout",
   "style",
-  "interaction",
+  "feature",
 ];
 
 export const INSPECTOR_LAYER_TITLES: Record<InspectorLayer, string> = {
@@ -27,6 +29,7 @@ export const INSPECTOR_LAYER_TITLES: Record<InspectorLayer, string> = {
   layout: "布局",
   style: "样式",
   interaction: "交互",
+  feature: "模板专属功能",
 };
 
 export type InspectorDevice = "desktop" | "mobile";
@@ -186,5 +189,9 @@ export interface ModuleInspectorSchema {
   evaluate?: (props: Record<string, any>) => ModuleContractStatus;
   /** 「恢复默认」使用；缺省时取 adapter defaultProps */
   defaults?: Record<string, any>;
+  /** 分组标题覆盖（如商品模板把「图片素材」改为「选择商品」），未覆盖时用默认标题 */
+  groupTitles?: Partial<
+    Record<"content" | "media" | "link" | "composition" | "feature", string>
+  >;
   sections: SectionDef[];
 }

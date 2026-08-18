@@ -184,6 +184,7 @@ export default function HotspotBlock({
   return (
     <section
       className="homepage-hotspot"
+      data-content-role="sceneImage"
       style={{
         position: "relative",
         width: "100%",
@@ -211,9 +212,10 @@ export default function HotspotBlock({
       </picture>
 
       {/* 热区叠加层 */}
-      {visibleHotspots.map(({ item: h, sourceIndex }) => (
+          {visibleHotspots.map(({ item: h, sourceIndex }) => (
         <Link
           key={sourceIndex}
+          data-content-role="hotspots"
           to={editMode ? "#" : h.link || "#"}
           onClick={(e) => {
             if (editMode) {
@@ -234,11 +236,11 @@ export default function HotspotBlock({
             cursor: editMode ? "move" : "pointer",
             outline:
               editMode && selectedIndex === sourceIndex
-                ? "2px solid #4D68F7"
+                ? "2px solid #B8944E"
                 : "1px dashed rgba(184,148,78,0.4)",
             background:
               editMode && selectedIndex === sourceIndex
-                ? "rgba(77,104,247,0.08)"
+                ? "rgba(184,148,78,0.10)"
                 : "transparent",
             transition: editMode ? "none" : "background 0.2s",
           }}
@@ -284,7 +286,7 @@ export default function HotspotBlock({
                       width: 10,
                       height: 10,
                       borderRadius: "50%",
-                      background: "#4D68F7",
+                      background: "#B8944E",
                       border: "2px solid #fff",
                       boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
                       cursor: `${pos}-resize`,

@@ -1,5 +1,5 @@
 /**
- * schema/modules/storeInfo.ts — 「门店信息(门店与到访)」编辑区 Schema。
+ * schema/modules/storeInfo.ts — 「门店信息」编辑区 Schema。
  * Editorial Split 母版(信息变体):3:2 门店空间图 + 极简到访信息。
  */
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
@@ -9,7 +9,7 @@ import type { ModuleInspectorSchema } from "../types";
 
 export const storeInfoSchema: ModuleInspectorSchema = {
   moduleType: "门店信息",
-  displayName: "门店与到访",
+  displayName: "门店信息",
   purpose: "门店空间、地址、营业时间与联系方式。",
   defaults: { ...storeInfoPuckConfig.defaultProps },
   sections: [
@@ -18,7 +18,7 @@ export const storeInfoSchema: ModuleInspectorSchema = {
       title: "内容",
       layer: "content",
       fields: [
-        moduleNameField("门店与到访"),
+        moduleNameField("门店信息"),
         {
           key: "storeName",
           label: "门店名称",
@@ -29,6 +29,13 @@ export const storeInfoSchema: ModuleInspectorSchema = {
         },
         { key: "address", label: "地址", control: "text" },
         { key: "hours", label: "营业时间", control: "text" },
+      ],
+    },
+    {
+      id: "store-info-contact",
+      title: "行动与关联",
+      layer: "interaction",
+      fields: [
         { key: "phone", label: "联系电话", control: "text" },
         {
           key: "mapUrl",

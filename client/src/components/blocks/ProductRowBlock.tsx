@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import type { CSSProperties } from "react";
 import { SecureImage } from "@/components/common/SecureImage";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
-import { RATIOS } from "@/page-builder/designSystem/tokens";
+import { PRODUCT_ROW_CONTRACT } from "@/page-builder/config/blockContracts";
 
 interface ProductRowBlockProps {
   module: {
@@ -15,8 +15,8 @@ interface ProductRowBlockProps {
 
 /** 图片比例:统一 4:5;仅旧数据的历史值(3:4/1:1/4:3/16:9)按原值渲染 */
 const IMAGE_RATIO_MAP: Record<string, string> = {
-  "4:5": RATIOS["4:5"],
-  "3:4": "3 / 4",
+  "4:5": "4 / 5",
+  "3:4": PRODUCT_ROW_CONTRACT.canvas.defaultMediaAspectRatio,
   "1:1": "1 / 1",
   "4:3": "4 / 3",
   "16:9": "16 / 9",
@@ -73,7 +73,7 @@ export default function ProductRowBlock({
   const resolvedMobileColumns = Number(mobileColumns) === 1 ? 1 : 2;
 
   const cols = layout === "grid-2" ? 2 : layout === "grid-4" ? 4 : 3;
-  const ratio = IMAGE_RATIO_MAP[imageRatio] || RATIOS["4:5"];
+  const ratio = IMAGE_RATIO_MAP[imageRatio] || PRODUCT_ROW_CONTRACT.canvas.defaultMediaAspectRatio;
 
   const titleFontSize =
     titleSize === "large"

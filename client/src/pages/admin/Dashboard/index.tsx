@@ -28,6 +28,7 @@ import {
   YAxis,
 } from "recharts";
 import { statisticsApi, type TrendMetric } from "@/services/api";
+import { ADMIN_COPY, getAdminLoadError } from "@/constants/adminCopy";
 import { unwrapResponse } from "@/utils/unwrap";
 
 interface DashboardStats {
@@ -311,6 +312,7 @@ export default function Dashboard() {
         : refreshState === "error"
           ? "刷新失败，点此重试"
           : "刷新数据";
+  const dashboardLoadError = getAdminLoadError("核心经营数据");
 
   return (
     <div className="admin-dashboard" aria-label="今日经营数据看板">
@@ -338,9 +340,9 @@ export default function Dashboard() {
 
       {loadError && (
         <div className="admin-dashboard__data-notice" role="alert">
-          <span>核心经营数据暂时无法加载，请稍后重试。</span>
+          <span>{dashboardLoadError.description}</span>
           <button type="button" onClick={loadStats}>
-            重新加载
+            {ADMIN_COPY.actions.retry}
           </button>
         </div>
       )}
@@ -363,7 +365,9 @@ export default function Dashboard() {
                   aria-hidden="true"
                 >
                   <span className="admin-dashboard__card-icon" />
-                  <span className="admin-dashboard__card-label">载入中</span>
+                  <span className="admin-dashboard__card-label">
+                    {ADMIN_COPY.feedback.loading}
+                  </span>
                   <strong className="admin-dashboard__card-value">—</strong>
                   <span className="admin-dashboard__card-change is-neutral">
                     {"\u00A0"}
@@ -466,17 +470,17 @@ export default function Dashboard() {
         <div className="admin-dashboard__trend-chart">
           {trendError ? (
             <div className="admin-dashboard__empty-chart">
-              趋势数据加载失败
+              趋势数据加载失败，请稍后重试。
               <button
                 type="button"
                 className="admin-dashboard__retry-link"
                 onClick={() => loadTrend(trendMetric, trendDays)}
               >
-                重新加载
+                {ADMIN_COPY.actions.retry}
               </button>
             </div>
           ) : trendLoading ? (
-            <div className="admin-dashboard__empty-chart">正在加载趋势数据</div>
+            <div className="admin-dashboard__empty-chart">正在加载趋势数据…</div>
           ) : trendData.length === 0 ? (
             <div className="admin-dashboard__empty-chart">暂无趋势数据</div>
           ) : (
@@ -493,10 +497,10 @@ export default function Dashboard() {
                     x2="0"
                     y2="1"
                   >
-                    <stop offset="0%" stopColor="#b8944e" stopOpacity={0.28} />
+                    <stop offset="0%" stopColor="var(--adm-brand-gold)" stopOpacity={0.28} />
                     <stop
                       offset="100%"
-                      stopColor="#b8944e"
+                      stopColor="var(--adm-brand-gold)"
                       stopOpacity={0.02}
                     />
                   </linearGradient>
@@ -504,7 +508,7 @@ export default function Dashboard() {
                 <CartesianGrid
                   strokeDasharray="3 3"
                   vertical={false}
-                  stroke="#ebe6dd"
+                  stroke="var(--adm-line)"
                 />
                 <XAxis
                   dataKey="date"
@@ -513,8 +517,8 @@ export default function Dashboard() {
                     return `${Number(m)}/${Number(day)}`;
                   }}
                   interval={trendDays === 30 ? 3 : 0}
-                  tick={{ fill: "#96918a", fontSize: 11 }}
-                  axisLine={{ stroke: "#e9e5de" }}
+                  tick={{ fill: "var(--adm-muted)", fontSize: 12 }}
+                  axisLine={{ stroke: "var(--adm-line)" }}
                   tickLine={false}
                 />
                 <YAxis
@@ -523,7 +527,7 @@ export default function Dashboard() {
                       ? `${(v / 10000).toFixed(1)}万`
                       : `${v}`
                   }
-                  tick={{ fill: "#96918a", fontSize: 11 }}
+                  tick={{ fill: "var(--adm-muted)", fontSize: 12 }}
                   axisLine={false}
                   tickLine={false}
                   width={48}
@@ -534,13 +538,13 @@ export default function Dashboard() {
                     payload?: Array<{ value?: number }>;
                     label?: string;
                   }) => <TrendTooltip {...props} format={trendFormat} />}
-                  cursor={{ stroke: "#c2bdb5", strokeDasharray: "3 3" }}
+                  cursor={{ stroke: "var(--adm-subtle)", strokeDasharray: "3 3" }}
                 />
                 <Area
                   type="monotone"
                   dataKey="count"
                   name="数值"
-                  stroke="#b8944e"
+                  stroke="var(--adm-brand-gold)"
                   strokeWidth={2}
                   fill="url(#adminTrendFill)"
                   dot={false}
@@ -585,7 +589,7 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="admin-dashboard__empty-list">
-            {loading ? "正在加载提醒" : "暂无异常提醒，经营状态良好"}
+            {loading ? "正在加载提醒…" : "暂无异常提醒"}
           </div>
         )}
       </section>

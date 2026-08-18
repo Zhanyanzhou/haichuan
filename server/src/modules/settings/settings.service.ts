@@ -130,16 +130,27 @@ export class SettingsService {
     }
   }
 
-  async getLogs(params: { page?: number; pageSize?: number }) {
-    const { page = 1, pageSize = 50 } = params;
+  async getLogs(params: { page?: number; pageSize?: number; keyword?: string; module?: string }) {
+    const { page = 1, pageSize = 50, keyword, module } = params;
+    const where: any = {};
+    if (module) where.module = module;
+    if (keyword) {
+      where.OR = [
+        { action: { contains: keyword } },
+        { module: { contains: keyword } },
+        { user: { username: { contains: keyword } } },
+        { user: { realName: { contains: keyword } } },
+      ];
+    }
     const [list, total] = await Promise.all([
       this.prisma.operationLog.findMany({
+        where,
         skip: (+page - 1) * +pageSize,
         take: +pageSize,
         orderBy: { createdAt: 'desc' },
         include: { user: { select: { username: true, realName: true } } },
       }),
-      this.prisma.operationLog.count(),
+      this.prisma.operationLog.count({ where }),
     ]);
     return { list, total, page: +page, pageSize: +pageSize };
   }

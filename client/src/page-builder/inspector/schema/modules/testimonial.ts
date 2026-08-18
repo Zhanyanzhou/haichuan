@@ -1,5 +1,5 @@
 /**
- * schema/modules/testimonial.ts — 「真实评价与实拍(顾客之声)」编辑区 Schema。
+ * schema/modules/testimonial.ts — 「真实评价与实拍(顾客分享)」编辑区 Schema。
  * Editorial Story 母版(口碑变体):引语式排版,需顾客授权。
  */
 import { testimonialPuckConfig } from "../../../adapters/testimonial.puck";
@@ -9,9 +9,10 @@ import type { ModuleInspectorSchema } from "../types";
 
 export const testimonialSchema: ModuleInspectorSchema = {
   moduleType: "真实评价与实拍",
-  displayName: "顾客之声",
+  displayName: "顾客分享",
   purpose: "以引语与授权实拍补充第三方信任证据。",
   defaults: { ...testimonialPuckConfig.defaultProps },
+  groupTitles: { media: "顾客引语与实拍" },
   sections: [
     {
       id: "testimonial-content",
@@ -19,7 +20,7 @@ export const testimonialSchema: ModuleInspectorSchema = {
       layer: "content",
       description: "真实顾客评价与实拍需取得书面授权后方可展示",
       fields: [
-        moduleNameField("顾客之声"),
+        moduleNameField("顾客分享"),
         {
           key: "title",
           label: "标题",
@@ -35,6 +36,13 @@ export const testimonialSchema: ModuleInspectorSchema = {
           maxLength: 60,
           hint: "留空不显示",
         },
+      ],
+    },
+    {
+      id: "testimonial-media",
+      title: "素材",
+      layer: "media",
+      fields: [
         {
           key: "testimonials",
           label: "顾客引语",
@@ -47,11 +55,22 @@ export const testimonialSchema: ModuleInspectorSchema = {
               : "未署名引语",
           itemFields: [
             { key: "name", label: "顾客称呼", control: "text", required: true },
-            { key: "meta", label: "购买信息", control: "text", hint: "如 订制钻戒" },
-            { key: "content", label: "引语内容", control: "textarea", rows: 2, required: true },
+            {
+              key: "meta",
+              label: "购买信息",
+              control: "text",
+              hint: "如 订制钻戒",
+            },
+            {
+              key: "content",
+              label: "引语内容",
+              control: "textarea",
+              rows: 2,
+              required: true,
+            },
             {
               key: "image",
-              label: "实拍图（可选 4:3）",
+              label: "实拍图（可选 4:5）",
               control: "media",
               spec: IMAGE_SPECS.testimonial.image,
               placeholder: "上传顾客授权实拍图",

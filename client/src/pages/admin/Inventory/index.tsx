@@ -11,8 +11,9 @@ import {
   message,
 } from "antd";
 import { ExportOutlined } from "@ant-design/icons";
-import { inventoryApi } from "@/services/api";
+import { inventoryApi, warehouseApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
 const sm: Record<string, { c: string; t: string }> = {
   normal: { c: "green", t: "正常" },
@@ -24,6 +25,8 @@ export default function Inventory() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("all");
+  const [warehouseId, setWarehouseId] = useState<number | undefined>(undefined);
+  const [warehouses, setWarehouses] = useState<{ id: number; name: string }[]>([]);
   const [adjustModal, setAdjustModal] = useState<{
     open: boolean;
     record: any;
@@ -36,7 +39,7 @@ export default function Inventory() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await inventoryApi.getList({ page, pageSize });
+      const res = await inventoryApi.getList({ page, pageSize, warehouseId });
       const data = unwrapResponse<{ list: any[]; total: number }>(res);
       // 服务端返回嵌套 sku/warehouse，mock 返回扁平字段——两侧兼容，并在前端统一计算库存状态
       const rows = (data?.list || []).map((i: any) => {
@@ -64,7 +67,21 @@ export default function Inventory() {
 
   useEffect(() => {
     load();
-  }, [page, pageSize]);
+  }, [page, pageSize, warehouseId]);
+
+  useEffect(() => {
+    warehouseApi
+      .list()
+      .then((res) => {
+        const data = unwrapResponse<any[]>(res);
+        setWarehouses(
+          (Array.isArray(data) ? data : []).map((w) => ({ id: w.id, name: w.name })),
+        );
+      })
+      .catch(() => {
+        /* 仓库列表加载失败不阻断库存展示 */
+      });
+  }, []);
 
   const filtered =
     filter === "all" ? items : items.filter((i) => i.status === filter);
@@ -77,7 +94,7 @@ export default function Inventory() {
       setAdjustModal({ open: false, record: null });
       load();
     } catch (e: any) {
-      message.error(e?.message || "调整失败");
+      message.error(getSafeAdminErrorMessage(e, "库存调整失败，请重新加载库存后核对数量。"));
     }
   };
 
@@ -111,12 +128,23 @@ export default function Inventory() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-display font-semibold text-brand-text">
+          <h1 className="font-semibold text-brand-text">
             库存管理
           </h1>
           <p className="text-sm text-brand-muted mt-1">多仓库 · 安全预警</p>
         </div>
         <Space>
+          <Select
+            allowClear
+            placeholder="全部仓库"
+            className="w-36"
+            value={warehouseId}
+            onChange={(v) => {
+              setWarehouseId(v);
+              setPage(1);
+            }}
+            options={warehouses.map((w) => ({ value: w.id, label: w.name }))}
+          />
           <Select value={filter} onChange={setFilter} className="w-32">
             <Select.Option value="all">全部</Select.Option>
             <Select.Option value="normal">正常</Select.Option>
@@ -212,11 +240,8 @@ export default function Inventory() {
         open={adjustModal.open}
         onCancel={() => setAdjustModal({ open: false, record: null })}
         onOk={handleAdjust}
-        okText="确认"
+        okText="保存库存调整"
         cancelText="取消"
-        okButtonProps={{
-          style: { background: "#B8944E", borderColor: "#B8944E" },
-        }}
       >
         <div className="py-4">
           <p className="text-sm text-brand-muted mb-2">

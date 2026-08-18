@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { MailerService } from '../../common/mailer/mailer.service';
+import { PRIVACY_CONSENT_VERSION } from '../../common/privacy/privacy-consent';
 
 @Injectable()
 export class InquiriesService {
@@ -21,6 +22,10 @@ export class InquiriesService {
   }
 
   async create(data: any) {
+    // 终线守卫：内部调用绕过 DTO 时也不得保存未同意的个人信息。
+    if (data.privacyConsent !== true) {
+      throw new BadRequestException('请阅读并同意隐私说明');
+    }
     const customer = data.customer;
     return this.prisma.inquiry.create({
       data: {
@@ -33,7 +38,9 @@ export class InquiriesService {
         preferredTime: data.preferredTime,
         budgetRange: data.budgetRange,
         message: data.message,
-        privacyConsent: data.privacyConsent === true || data.privacyConsent === 'true',
+        privacyConsent: true,
+        privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+        privacyConsentedAt: new Date(),
         status: 'PENDING',
       },
     });

@@ -11,6 +11,7 @@ import {
   type LinkTargetValue,
 } from "../utils/linkTarget";
 import { RATIOS } from "../designSystem/tokens";
+import { CONTENT_TEMPLATE_CONTRACTS } from "../generated/contentTemplates.generated";
 
 /**
  * 比例单一来源:契约的 canvas 比例一律引用 designSystem/tokens 的 RATIOS,
@@ -22,6 +23,25 @@ export type ImageTextTemplate =
   "textLeftImageRight" | "textRightImageLeft" | "textOnly" | "imageBackground";
 
 export type ModuleDensity = "compact" | "normal" | "spacious";
+
+type ContractKey = keyof typeof CONTENT_TEMPLATE_CONTRACTS;
+type ContractViewport = "desktop" | "tablet" | "mobile";
+
+/** 所有真实 Renderer 的素材比例只从 schema v2 生成产物读取。 */
+export function getContractRoleRatio(
+  key: ContractKey,
+  roleId: string,
+  viewport: ContractViewport,
+): string {
+  const role = CONTENT_TEMPLATE_CONTRACTS[key].roles.find((item) => item.id === roleId);
+  const ratioMap: Partial<Record<ContractViewport, string>> | undefined =
+    role && "defaultRatioByViewport" in role
+      ? role.defaultRatioByViewport
+      : undefined;
+  const ratio = ratioMap?.[viewport];
+  if (!ratio) throw new Error(`内容模板 ${String(key)}.${roleId}.${viewport} 缺少默认比例`);
+  return ratio;
+}
 
 /**
  * 装修响应式规则：电脑是基础布局，平板继承电脑；只有手机进入独立覆写层。
@@ -61,6 +81,7 @@ export interface SinglePosterContractProps {
   desktopImage?: string;
   mobileImage?: string;
   linkUrl?: string;
+  altText?: string;
 }
 
 export interface ProductRowContractProps {
@@ -159,23 +180,23 @@ export const HERO_CONTRACT = {
   canvas: {
     heightMode: "viewport",
     // 素材建议比例(渲染为视口裁切驱动,不锁比例):PC 16:7 / Mobile 4:5
-    desktopMediaAspectRatio: RATIOS["16:7"],
-    mobileMediaAspectRatio: RATIOS["4:5"],
+    desktopMediaAspectRatio: CONTENT_TEMPLATE_CONTRACTS.hero.media[0].desktopRatio,
+    mobileMediaAspectRatio: CONTENT_TEMPLATE_CONTRACTS.hero.media[1].mobileRatio,
     independentFocus: true,
   },
-  content: { limits: { title: 24, subtitle: 48, actionText: 12, altText: 80 } },
+  content: { limits: CONTENT_TEMPLATE_CONTRACTS.hero.contentBudget.limits },
 } as const;
 
 export const FULL_BLEED_CONTRACT = {
   type: "全屏出血图",
-  purpose: "用一张完整海报强化高级氛围，并承接一次明确点击。",
+  purpose: "用一张超宽图片完成章节转场，短说明与行动入口固定在图片下方。",
   canvas: {
     heightMode: "ratio",
-    desktopMediaAspectRatio: RATIOS["21:6"],
-    mobileMediaAspectRatio: RATIOS["4:5"],
+    desktopMediaAspectRatio: CONTENT_TEMPLATE_CONTRACTS.fullBleed.media[0].desktopRatio,
+    mobileMediaAspectRatio: CONTENT_TEMPLATE_CONTRACTS.fullBleed.media[1].mobileRatio,
     independentFocus: true,
   },
-  content: { limits: { title: 24, subtitle: 48, actionText: 12, altText: 80 } },
+  content: { limits: CONTENT_TEMPLATE_CONTRACTS.fullBleed.contentBudget.limits },
 } as const;
 
 export const DOUBLE_POSTER_CONTRACT = {
@@ -183,19 +204,14 @@ export const DOUBLE_POSTER_CONTRACT = {
   purpose: "使用主图和细节图共同呈现系列气质、作品全貌与工艺细节。",
   canvas: {
     heightMode: "content",
-    maxWidth: 1520,
-    mainMediaAspectRatio: RATIOS["3:2"],
-    detailMediaAspectRatio: RATIOS["4:5"],
-    layouts: ["mainLeft", "mainRight"],
+    maxWidth: 1280,
+    mainMediaAspectRatio: CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[0].desktopRatio,
+    detailMediaAspectRatio: CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[1].desktopRatio,
+    layouts: ["mainLeft"],
   },
   content: {
     limits: {
-      number: 4,
-      label: 16,
-      title: 24,
-      description: 100,
-      actionText: 12,
-      altText: 80,
+      ...CONTENT_TEMPLATE_CONTRACTS.doublePoster.contentBudget.limits,
     },
   },
 } as const;
@@ -207,7 +223,7 @@ export const FEATURED_PRODUCT_CONTRACT = {
   canvas: {
     heightMode: "content",
     maxWidth: 1180,
-    mediaAspectRatio: RATIOS["4:5"],
+    mediaAspectRatio: getContractRoleRatio("featuredProduct", "product", "desktop"),
     layouts: ["imageLeft", "imageRight"],
   },
   content: {
@@ -230,7 +246,7 @@ export const CATEGORY_CARDS_CONTRACT = {
   canvas: {
     heightMode: "content",
     maxWidth: 1280,
-    mediaAspectRatio: RATIOS["4:5"],
+    mediaAspectRatio: getContractRoleRatio("categoryCards", "categories", "desktop"),
     desktopColumns: [2, 3, 4],
     mobileColumns: 2,
   },
@@ -243,8 +259,8 @@ export const CATEGORY_CARDS_CONTRACT = {
 } as const;
 
 export function getCategoryCardsMediaAspectRatio(layout?: string): string {
-  // grid-2 大卡用 3:2 横幅,其余统一 4:5
-  return layout === "grid-2" ? RATIOS["3:2"] : RATIOS["4:5"];
+  void layout;
+  return getContractRoleRatio("categoryCards", "categories", "desktop");
 }
 
 /* ═══════ 作品画廊(Asymmetric Gallery)契约 ═══════ */
@@ -268,8 +284,8 @@ export const GALLERY_CONTRACT = {
   canvas: {
     heightMode: "content",
     maxWidth: 1520,
-    primaryMediaAspectRatio: RATIOS["4:5"],
-    secondaryMediaAspectRatios: [RATIOS["1:1"], RATIOS["3:2"]],
+    primaryMediaAspectRatio: getContractRoleRatio("gallery", "works", "desktop"),
+    secondaryMediaAspectRatios: [getContractRoleRatio("gallery", "works", "desktop")],
   },
   content: {
     minItems: 3,
@@ -323,7 +339,7 @@ export const APPOINTMENT_CONTRACT = {
     heightMode: "content",
     minHeight: 380,
     maxWidth: 1280,
-    backgroundAspectRatio: RATIOS["21:6"],
+    heightModeByViewport: CONTENT_TEMPLATE_CONTRACTS.booking.heightModeByViewport,
   },
   content: {
     limits: { title: 24, subtitle: 72, buttonText: 10, altText: 80, phone: 30 },
@@ -372,12 +388,12 @@ export const SINGLE_POSTER_CONTRACT = {
     desktopImageLeftColumns: "62fr 38fr",
     tabletColumns: "1fr 1.4fr",
     tabletImageLeftColumns: "1.4fr 1fr",
-    desktopMediaAspectRatio: RATIOS["4:5"],
-    mobileMediaAspectRatio: RATIOS["3:4"],
+    desktopMediaAspectRatio: CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[0].desktopRatio,
+    mobileMediaAspectRatio: CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[1].mobileRatio,
     mobileBreakpoint: 767,
   },
   content: {
-    limits: { number: 4, label: 16, title: 24, subtitle: 48, actionText: 12 },
+    limits: CONTENT_TEMPLATE_CONTRACTS.singlePoster.contentBudget.limits,
   },
   defaults: { template: "leftTextRightImage", focusX: 50, focusY: 50 },
 } as const;
@@ -387,8 +403,14 @@ export const CAROUSEL_CONTRACT = {
   purpose:
     "以固定的版式比例展示系列或活动主视觉，避免按任意像素高度拉伸导致不同宽度下失真。",
   canvas: {
-    desktopAspectRatios: { wide: RATIOS["21:6"], standard: RATIOS["16:9"] },
-    mobileAspectRatios: { portrait: RATIOS["3:4"], standard: RATIOS["4:5"] },
+    desktopAspectRatios: {
+      wide: getContractRoleRatio("carousel", "frames", "desktop"),
+      standard: getContractRoleRatio("carousel", "frames", "desktop"),
+    },
+    mobileAspectRatios: {
+      portrait: getContractRoleRatio("carousel", "frames", "mobile"),
+      standard: getContractRoleRatio("carousel", "frames", "mobile"),
+    },
   },
   defaults: { desktopRatio: "wide", mobileRatio: "portrait" },
 } as const;
@@ -416,7 +438,7 @@ export const PRODUCT_ROW_CONTRACT = {
     desktopColumns: [2, 3, 4],
     mobileColumns: [1, 2],
     // 商品图统一 4:5,不再开放其他比例
-    defaultMediaAspectRatio: RATIOS["4:5"],
+    defaultMediaAspectRatio: getContractRoleRatio("productRow", "productCards", "desktop"),
   },
   content: {
     minProducts: 2,
@@ -437,8 +459,8 @@ export const HOTSPOT_CONTRACT = {
   canvas: {
     heightMode: "ratio",
     maxWidth: 1280,
-    desktopMediaAspectRatio: "16 / 9",
-    mobileMediaAspectRatio: "3 / 4",
+    desktopMediaAspectRatio: getContractRoleRatio("hotspot", "sceneImage", "desktop"),
+    mobileMediaAspectRatio: getContractRoleRatio("hotspot", "sceneImage", "mobile"),
     mobileBreakpoint: 767,
   },
   content: {
@@ -803,7 +825,8 @@ export const BEFORE_AFTER_CONTRACT = {
   canvas: {
     heightMode: "content",
     maxWidth: 1280,
-    mediaAspectRatio: RATIOS["4:5"],
+    desktopMediaAspectRatio: getContractRoleRatio("comparison", "before", "desktop"),
+    mobileMediaAspectRatio: getContractRoleRatio("comparison", "before", "mobile"),
   },
   content: {
     limits: { title: 24, subtitle: 60, label: 8, altText: 80 },
@@ -837,13 +860,10 @@ export function evaluateBeforeAfterContract(
 
 export const TEXT_BANNER_CONTRACT = {
   type: "文字横幅",
-  purpose: "承接上新、活动利益点和咨询行动",
+  purpose: "以纯文字和大留白完成章节声明，不承载图片或自由背景配置。",
   content: {
     limits: {
-      eyebrow: 60,
-      title: 100,
-      body: 2000,
-      buttonText: 30,
+      ...CONTENT_TEMPLATE_CONTRACTS.textBanner.contentBudget.limits,
     },
   },
 } as const;

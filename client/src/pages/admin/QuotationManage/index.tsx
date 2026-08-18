@@ -18,8 +18,9 @@ import {
 import { PlusOutlined, ReloadOutlined, EyeOutlined, ExportOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
-import { quotationApi } from "@/services/api";
+import { productApi, quotationApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import type { PaginatedResult, Quotation, QuotationStatus } from "@/types";
 
 const { Text } = Typography;
@@ -69,9 +70,109 @@ interface ItemFormValue {
   productName: string;
   productImage?: string;
   spec?: string;
+  skuId?: number;
+  productId?: number;
   quantity: number;
   unitPrice: number;
   quotedPrice: number;
+}
+
+/** 报价商品行：关联商品 + SKU 两级选择器，选中后自动填充行内字段 */
+function LinkedSkuSelector({ fieldName, form }: { fieldName: number; form: any }) {
+  const [productOptions, setProductOptions] = useState<
+    { value: number; label: string; name: string }[]
+  >([]);
+  const [productId, setProductId] = useState<number | null>(null);
+  const [skuOptions, setSkuOptions] = useState<
+    { value: number; label: string; price: number; spec: string }[]
+  >([]);
+  const [productSearching, setProductSearching] = useState(false);
+  const [skuLoading, setSkuLoading] = useState(false);
+
+  const searchProducts = async (kw: string) => {
+    if (!kw) { setProductOptions([]); return; }
+    setProductSearching(true);
+    try {
+      const res = await productApi.getList({ keyword: kw, page: 1, pageSize: 20 });
+      const data = unwrapResponse<{ list: any[] }>(res);
+      setProductOptions((data?.list || []).map((p) => ({
+        value: p.id,
+        label: `${p.name} · ${p.code || ""}`.trim(),
+        name: p.name,
+      })));
+    } catch {
+      setProductOptions([]);
+    } finally {
+      setProductSearching(false);
+    }
+  };
+
+  const selectProduct = async (pid: number) => {
+    const opt = productOptions.find((p) => p.value === pid);
+    setProductId(pid);
+    form.setFieldValue(["items", fieldName, "productId"], pid);
+    form.setFieldValue(["items", fieldName, "productName"], opt?.name || "");
+    setSkuLoading(true);
+    try {
+      const res = await productApi.getSkus(pid);
+      const list = unwrapResponse<any[]>(res) || [];
+      setSkuOptions(
+        list.filter((s) => s.isActive).map((s) => ({
+          value: s.id,
+          label: `${[s.material, s.size, s.skuCode].filter(Boolean).join(" · ")}（¥${Number(s.price || 0)}）`,
+          price: Number(s.price || 0),
+          spec: [s.material, s.size].filter(Boolean).join(" "),
+        })),
+      );
+    } catch {
+      setSkuOptions([]);
+    } finally {
+      setSkuLoading(false);
+    }
+  };
+
+  const selectSku = (skuId: number) => {
+    const opt = skuOptions.find((s) => s.value === skuId);
+    form.setFieldValue(["items", fieldName, "skuId"], skuId);
+    if (opt) {
+      form.setFieldValue(["items", fieldName, "spec"], opt.spec);
+      form.setFieldValue(["items", fieldName, "unitPrice"], opt.price);
+      form.setFieldValue(["items", fieldName, "quotedPrice"], opt.price);
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      <Select
+        showSearch
+        filterOption={false}
+        onSearch={searchProducts}
+        loading={productSearching}
+        placeholder="搜索并关联商品（按名称/货号）"
+        size="small"
+        style={{ width: "100%" }}
+        value={productId || undefined}
+        onChange={(v) => {
+          if (!v) { setProductId(null); setSkuOptions([]); }
+        }}
+        onSelect={(v) => void selectProduct(v as number)}
+        options={productOptions}
+        allowClear
+        notFoundContent={productSearching ? "搜索中…" : "输入关键字搜索商品"}
+      />
+      {productId && (
+        <Select
+          placeholder="选择 SKU"
+          size="small"
+          style={{ width: "100%" }}
+          loading={skuLoading}
+          onSelect={(v) => selectSku(v as number)}
+          options={skuOptions}
+          notFoundContent={skuLoading ? "正在加载商品规格…" : "该商品暂无可用 SKU"}
+        />
+      )}
+    </div>
+  );
 }
 
 export default function QuotationManage() {
@@ -88,6 +189,7 @@ export default function QuotationManage() {
   const [detail, setDetail] = useState<QuotationDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [convertTarget, setConvertTarget] = useState<QuotationDetail | null>(null);
   const [convertLoading, setConvertLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -123,7 +225,7 @@ export default function QuotationManage() {
       const res = await quotationApi.getById(id);
       setDetail(unwrapResponse<QuotationDetail>(res));
     } catch (e: any) {
-      message.error(e?.message || "报价详情加载失败");
+      message.error(getSafeAdminErrorMessage(e, "报价单详情加载失败，请稍后重新加载。"));
     } finally {
       setDetailLoading(false);
     }
@@ -150,7 +252,7 @@ export default function QuotationManage() {
           void load();
           if (detail?.id === record.id) void reloadDetail(record.id);
         } catch (e: any) {
-          message.error(e?.message || "操作失败");
+          message.error(getSafeAdminErrorMessage(e, "报价单状态更新失败，请重新加载后确认当前状态。"));
         }
       },
     });
@@ -165,17 +267,46 @@ export default function QuotationManage() {
       onOk: async () => {
         try {
           await quotationApi.remove(record.id);
-          message.success("已删除");
+          message.success("报价单已删除");
           void load();
           if (detail?.id === record.id) setDetail(null);
         } catch (e: any) {
-          message.error(e?.message || "删除失败");
+          message.error(getSafeAdminErrorMessage(e, "报价单删除失败，请重新加载后确认当前状态。"));
         }
       },
     });
   };
 
-  const handleCreate = async () => {
+  const openEdit = async (record: Quotation) => {
+    try {
+      const res = await quotationApi.getById(record.id);
+      const data = unwrapResponse<QuotationDetail>(res);
+      form.setFieldsValue({
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        customerEmail: data.customerEmail || undefined,
+        salesConsultantId: data.salesConsultantId || undefined,
+        remark: data.remark || undefined,
+        depositAmount: data.depositAmount ? Number(data.depositAmount) : undefined,
+        validUntil: data.validUntil ? dayjs(data.validUntil) : undefined,
+        items: (data.items || []).map((it) => ({
+          productName: it.productName,
+          spec: it.spec,
+          skuId: it.skuId ?? undefined,
+          productId: it.productId ?? undefined,
+          quantity: it.quantity,
+          unitPrice: Number(it.unitPrice),
+          quotedPrice: Number(it.quotedPrice),
+        })),
+      });
+      setEditingId(record.id);
+      setCreateOpen(true);
+    } catch (e: any) {
+      message.error(getSafeAdminErrorMessage(e, "报价单列表加载失败，请稍后重新加载。"));
+    }
+  };
+
+  const handleSave = async () => {
     let values: any;
     try {
       values = await form.validateFields();
@@ -184,8 +315,7 @@ export default function QuotationManage() {
     }
     setSubmitting(true);
     try {
-      await quotationApi.create({
-        customerId: values.customerId || undefined,
+      const payload = {
         customerName: values.customerName,
         customerPhone: values.customerPhone,
         customerEmail: values.customerEmail || undefined,
@@ -197,17 +327,26 @@ export default function QuotationManage() {
           productName: it.productName,
           productImage: it.productImage || undefined,
           spec: it.spec || undefined,
+          skuId: it.skuId || undefined,
+          productId: it.productId || undefined,
           quantity: it.quantity,
           unitPrice: it.unitPrice,
           quotedPrice: it.quotedPrice,
         })),
-      });
-      message.success("报价单已创建（草稿）");
+      };
+      if (editingId) {
+        await quotationApi.update(editingId, payload);
+        message.success("报价单已更新");
+      } else {
+        await quotationApi.create(payload);
+        message.success("报价单已创建（草稿）");
+      }
       setCreateOpen(false);
       form.resetFields();
+      setEditingId(null);
       void load();
     } catch (e: any) {
-      message.error(e?.message || "创建失败");
+      message.error(getSafeAdminErrorMessage(e, editingId ? "报价单更新失败，请检查填写内容后重试。" : "报价单创建失败，请检查填写内容后重试。"));
     } finally {
       setSubmitting(false);
     }
@@ -234,7 +373,7 @@ export default function QuotationManage() {
       void load();
       if (detail?.id === convertTarget.id) void reloadDetail(convertTarget.id);
     } catch (e: any) {
-      message.error(e?.message || "转订单失败");
+      message.error(getSafeAdminErrorMessage(e, "报价单转订单失败，请核对商品和客户信息后重试。"));
     } finally {
       setConvertLoading(false);
     }
@@ -244,12 +383,12 @@ export default function QuotationManage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-display font-semibold text-brand-text">报价管理</h1>
-          <p className="text-sm text-brand-muted mt-1">珠宝报价单 · 客户确认 · 一键转订单（保留报价单↔订单关联）</p>
+          <h1 className="font-semibold text-brand-text">报价管理</h1>
+          <p className="text-sm text-brand-muted mt-1">管理报价、客户确认与转订单流程，并保留报价单和订单关联</p>
         </div>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>刷新</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建报价</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingId(null); form.resetFields(); setCreateOpen(true); }}>新建报价</Button>
         </Space>
       </div>
 
@@ -295,7 +434,7 @@ export default function QuotationManage() {
               showTotal: (t) => `共 ${t} 条`,
               onChange: (p, ps) => { setPage(p); setPageSize(ps); },
             }}
-            locale={{ emptyText: "暂无报价单（客户确认报价后可一键转订单）" }}
+            locale={{ emptyText: "暂无报价单；新建报价后可继续完成客户确认和转订单" }}
             columns={[
               { title: "报价单号", dataIndex: "quoteNo", render: (v: string) => <code className="text-xs text-brand-gold">{v}</code> },
               { title: "客户", dataIndex: "customerName", render: (v: string, r: Quotation) => <div><p>{v}</p><p className="text-xs text-brand-muted">{r.customerPhone}</p></div> },
@@ -306,9 +445,12 @@ export default function QuotationManage() {
               { title: "状态", dataIndex: "status", width: 100, render: (v: QuotationStatus) => <Tag color={STATUS_META[v]?.c}>{STATUS_META[v]?.t}</Tag> },
               { title: "创建时间", dataIndex: "createdAt", render: (v: string) => <span className="text-brand-muted text-xs">{v ? dayjs(v).format("YYYY-MM-DD HH:mm") : ""}</span> },
               {
-                title: "操作", width: 180, render: (_: unknown, r: Quotation) => (
+                title: "操作", width: 220, render: (_: unknown, r: Quotation) => (
                   <Space>
                     <Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(r.id)}>详情</Button>
+                    {r.status === "DRAFT" && (
+                      <Button size="small" onClick={() => void openEdit(r)}>编辑</Button>
+                    )}
                     {r.status === "CONFIRMED" && !r.convertedOrderId && (
                       <Button size="small" type="primary" onClick={() => { setConvertTarget(detail && detail.id === r.id ? detail : r as QuotationDetail); convertForm.resetFields(); }}>转订单</Button>
                     )}
@@ -332,7 +474,7 @@ export default function QuotationManage() {
           <div className="space-y-6">
             <div>
               <div className="flex items-center justify-between mb-2">
-                <h3 className="font-display text-lg">报价摘要</h3>
+                <h3 className="font-semibold">报价摘要</h3>
                 <Tag color={STATUS_META[detail.status]?.c}>{STATUS_META[detail.status]?.t}</Tag>
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
@@ -352,7 +494,7 @@ export default function QuotationManage() {
             </div>
 
             <div>
-              <h3 className="font-display text-lg mb-2">报价商品</h3>
+              <h3 className="font-semibold mb-2">报价商品</h3>
               <Table
                 rowKey="id"
                 dataSource={detail.items || []}
@@ -392,12 +534,12 @@ export default function QuotationManage() {
               )}
               {detail.status === "CONFIRMED" && !detail.convertedOrderId && (
                 <>
-                  <Button type="primary" onClick={() => { setConvertTarget(detail); convertForm.resetFields(); }}>一键转订单</Button>
+                  <Button type="primary" onClick={() => { setConvertTarget(detail); convertForm.resetFields(); }}>转为订单</Button>
                   <Button danger onClick={() => changeStatus(detail, "cancel", "取消")}>取消报价</Button>
                 </>
               )}
               {(detail.status === "DRAFT" || detail.status === "CANCELLED") && (
-                <Button danger onClick={() => handleRemove(detail)}>删除</Button>
+                <Button danger onClick={() => handleRemove(detail)}>删除报价单</Button>
               )}
             </div>
           </div>
@@ -406,12 +548,12 @@ export default function QuotationManage() {
 
       {/* 新建报价 Modal */}
       <Modal
-        title="新建报价单"
+        title={editingId ? "编辑报价单" : "新建报价单"}
         open={createOpen}
-        onCancel={() => { setCreateOpen(false); form.resetFields(); }}
-        onOk={handleCreate}
+        onCancel={() => { setCreateOpen(false); setEditingId(null); form.resetFields(); }}
+        onOk={handleSave}
         confirmLoading={submitting}
-        okText="创建草稿"
+        okText={editingId ? "保存修改" : "创建草稿"}
         width={720}
         destroyOnClose
       >
@@ -437,34 +579,39 @@ export default function QuotationManage() {
             {(fields, { add, remove }) => (
               <div className="space-y-2">
                 {fields.map((field) => (
-                  <div key={field.key} className="grid grid-cols-12 gap-2 items-start border border-brand-line p-2 rounded">
-                    <div className="col-span-3">
-                      <Form.Item name={[field.name, "productName"]} noStyle rules={[{ required: true, message: "商品名" }]}>
-                        <Input placeholder="商品名称" size="small" />
-                      </Form.Item>
-                    </div>
-                    <div className="col-span-3">
-                      <Form.Item name={[field.name, "spec"]} noStyle>
-                        <Input placeholder="规格（选填）" size="small" />
-                      </Form.Item>
-                    </div>
-                    <div className="col-span-2">
-                      <Form.Item name={[field.name, "quantity"]} noStyle rules={[{ required: true, message: "数量" }]}>
-                        <InputNumber placeholder="数量" min={1} max={99} size="small" className="w-full" />
-                      </Form.Item>
-                    </div>
-                    <div className="col-span-2">
-                      <Form.Item name={[field.name, "unitPrice"]} noStyle rules={[{ required: true, message: "原价" }]}>
-                        <InputNumber placeholder="原价" min={0} prefix="¥" size="small" className="w-full" />
-                      </Form.Item>
-                    </div>
-                    <div className="col-span-2">
-                      <Form.Item name={[field.name, "quotedPrice"]} noStyle rules={[{ required: true, message: "报价" }]}>
-                        <InputNumber placeholder="报价" min={0} prefix="¥" size="small" className="w-full" />
-                      </Form.Item>
+                  <div key={field.key} className="space-y-2 border border-brand-line p-2 rounded">
+                    <LinkedSkuSelector fieldName={field.name} form={form} />
+                    <Form.Item name={[field.name, "skuId"]} hidden><Input /></Form.Item>
+                    <Form.Item name={[field.name, "productId"]} hidden><Input /></Form.Item>
+                    <div className="grid grid-cols-12 gap-2 items-start">
+                      <div className="col-span-3">
+                        <Form.Item name={[field.name, "productName"]} noStyle rules={[{ required: true, message: "商品名" }]}>
+                          <Input placeholder="商品名称" size="small" />
+                        </Form.Item>
+                      </div>
+                      <div className="col-span-3">
+                        <Form.Item name={[field.name, "spec"]} noStyle>
+                          <Input placeholder="规格（选填）" size="small" />
+                        </Form.Item>
+                      </div>
+                      <div className="col-span-2">
+                        <Form.Item name={[field.name, "quantity"]} noStyle rules={[{ required: true, message: "数量" }]}>
+                          <InputNumber placeholder="数量" min={1} max={99} size="small" className="w-full" />
+                        </Form.Item>
+                      </div>
+                      <div className="col-span-2">
+                        <Form.Item name={[field.name, "unitPrice"]} noStyle rules={[{ required: true, message: "原价" }]}>
+                          <InputNumber placeholder="原价" min={0} prefix="¥" size="small" className="w-full" />
+                        </Form.Item>
+                      </div>
+                      <div className="col-span-2">
+                        <Form.Item name={[field.name, "quotedPrice"]} noStyle rules={[{ required: true, message: "报价" }]}>
+                          <InputNumber placeholder="报价" min={0} prefix="¥" size="small" className="w-full" />
+                        </Form.Item>
+                      </div>
                     </div>
                     {fields.length > 1 && (
-                      <Button type="link" danger size="small" className="col-span-12 -mt-1" onClick={() => remove(field.name)}>移除该行</Button>
+                      <Button type="link" danger size="small" onClick={() => remove(field.name)}>移除该行</Button>
                     )}
                   </div>
                 ))}
@@ -472,7 +619,7 @@ export default function QuotationManage() {
               </div>
             )}
           </Form.List>
-          <p className="text-xs text-brand-muted mt-2">提示：转订单时商品行需关联 SKU（暂支持手录，SKU 关联可在详情补全后转单）。</p>
+          <p className="text-xs text-brand-muted mt-2">提示：搜索并关联商品 SKU 后会自动填充名称/规格/价格；转订单前请确保每行都已关联 SKU。</p>
         </Form>
       </Modal>
 
@@ -483,7 +630,7 @@ export default function QuotationManage() {
         onCancel={() => { setConvertTarget(null); convertForm.resetFields(); }}
         onOk={handleConvert}
         confirmLoading={convertLoading}
-        okText="确认转订单"
+        okText="转为订单"
         destroyOnClose
       >
         {convertTarget && (
@@ -508,7 +655,7 @@ export default function QuotationManage() {
                   { value: "OFFLINE", label: "线下订单" },
                 ]} />
               </Form.Item>
-              <p className="text-xs text-brand-muted">转单后自动生成订单号、预占库存、记录交易事件，并保留报价单↔订单关联。</p>
+              <p className="text-xs text-brand-muted">转单后将生成订单号、预占库存、记录交易事件，并保留报价单和订单关联。</p>
             </Form>
           </div>
         )}

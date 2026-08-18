@@ -1,33 +1,35 @@
 /**
  * 前端行为事件采集 Hook
  *
- * 当前阶段：行为分析默认关闭（见 docs/PUBLIC_ACCESS_MATRIX.md §隐私与分析）。
- * - 不创建 `_asid` 匿名会话 ID；
- * - 不发送 `/analytics/track` 请求；
- * - 保留所有导出函数签名为安全 no-op，调用方无需改动。
- *
- * 在完成独立的隐私偏好与用户授权机制之前，不得恢复真实采集。
- * 恢复方式：将 ANALYTICS_ENABLED 改为 true 并重新接入 send() 实现。
- *
- * 历史实现保留在下方注释参考，已彻底停用。
+ * 行为分析已开启（2026-08-16，项目负责人决定取消关闭限制）。
+ * 可通过 `VITE_ANALYTICS_ENABLED=false` 显式关闭（默认开启）。
+ * 采集静默失败：不阻塞页面、不向用户报错、失败不重试。
  */
 
-// 行为分析开关：当前阶段强制关闭。
-const ANALYTICS_ENABLED = false;
+const ANALYTICS_ENABLED = import.meta.env.VITE_ANALYTICS_ENABLED !== "false";
 
-// 关闭状态下不读写 localStorage，避免创建 `_asid` 等追踪标识。
-// 关闭状态下不发送任何网络请求。
-
-/* 关闭前的原始实现（仅供恢复时参考，当前不执行）
-let sessionId = localStorage.getItem("_asid");
-if (!sessionId) {
-  sessionId =
-    "s_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  localStorage.setItem("_asid", sessionId);
+// 匿名会话标识：仅用于区分会话，不关联任何个人信息
+let sessionId = "";
+function ensureSessionId(): string {
+  if (sessionId) return sessionId;
+  if (typeof window === "undefined") return "";
+  try {
+    sessionId = localStorage.getItem("_asid") || "";
+    if (!sessionId) {
+      sessionId =
+        "s_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      localStorage.setItem("_asid", sessionId);
+    }
+  } catch {
+    // localStorage 不可用（隐私模式等）时退化为内存会话 ID
+    sessionId = "s_" + Date.now().toString(36);
+  }
+  return sessionId;
 }
 
 const pending = new Map<string, number>();
 
+/** 同一事件 1 秒节流，避免重复埋点刷屏 */
 function shouldSend(key: string, throttleMs = 1000): boolean {
   const now = Date.now();
   const last = pending.get(key);
@@ -44,7 +46,7 @@ async function send(event: Record<string, unknown>) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...event,
-        sessionId,
+        sessionId: ensureSessionId(),
         deviceType:
           window.innerWidth < 768
             ? "mobile"
@@ -55,60 +57,60 @@ async function send(event: Record<string, unknown>) {
       }),
     });
   } catch {
-    // 采集静默失败
+    // 采集静默失败，不打扰用户
   }
 }
-*/
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function noop(..._args: unknown[]) {
-  /* 分析关闭：安全 no-op */
+function fire(eventName: string, payload?: Record<string, unknown>) {
+  if (!ANALYTICS_ENABLED) return;
+  if (!shouldSend(eventName)) return;
+  void send({ eventName, ...(payload || {}) });
 }
 
 export function trackPageView() {
-  if (!ANALYTICS_ENABLED) return noop();
+  fire("page_view");
 }
 
 export function trackProductView(productId: number) {
-  if (!ANALYTICS_ENABLED) return noop(productId);
+  fire("product_view", { productId });
 }
 
 export function trackSearch(term: string) {
-  if (!ANALYTICS_ENABLED) return noop(term);
+  fire("search", { searchTerm: term });
 }
 
 export function trackFilter(filterType: string, value: string) {
-  if (!ANALYTICS_ENABLED) return noop(filterType, value);
+  fire("filter", { metadata: { filterType, value } });
 }
 
 export function trackAddToSelection(productId: number) {
-  if (!ANALYTICS_ENABLED) return noop(productId);
+  fire("add_to_selection", { productId });
 }
 
 export function trackAddToCart(productId: number, quantity: number) {
-  if (!ANALYTICS_ENABLED) return noop(productId, quantity);
+  fire("add_to_cart", { productId, metadata: { quantity } });
 }
 
 export function trackBeginCheckout(itemCount: number, amount: number) {
-  if (!ANALYTICS_ENABLED) return noop(itemCount, amount);
+  fire("begin_checkout", { metadata: { itemCount, amount } });
 }
 
 export function trackOrderCreated(orderId: number, amount: number) {
-  if (!ANALYTICS_ENABLED) return noop(orderId, amount);
+  fire("order_created", { metadata: { orderId, amount } });
 }
 
 export function trackRemoveFromSelection(productId: number) {
-  if (!ANALYTICS_ENABLED) return noop(productId);
+  fire("remove_from_selection", { productId });
 }
 
 export function trackSubmitSelection(count: number) {
-  if (!ANALYTICS_ENABLED) return noop(count);
+  fire("submit_selection", { metadata: { count } });
 }
 
 export function trackSubmitInquiry() {
-  if (!ANALYTICS_ENABLED) return noop();
+  fire("submit_inquiry");
 }
 
 export function trackCtaClick(label: string) {
-  if (!ANALYTICS_ENABLED) return noop(label);
+  fire("cta_click", { metadata: { label } });
 }

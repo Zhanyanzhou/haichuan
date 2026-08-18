@@ -2,25 +2,23 @@
  * LayerRail.tsx — 编辑器右侧的页面图层栏。
  * 2026-08-16 升级：同类型模块自动序号（品牌故事 1/2）；Shift/Ctrl 多选批量删除与移动。
  * 固定业务区不可删除/调整；点选定位、拖拽排序保持原有行为。
- * 底部渲染页面节奏提示(软约束,不阻断发布)。
  */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { message, Modal } from "antd";
 import { DragOutlined } from "@ant-design/icons";
 import { ROOT_ZONE, focusCanvasBlock, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
-import type { RhythmHint } from "@/page-builder/designSystem/rhythm";
 
 export default function LayerRail({
-  rhythmHints = [],
   onSaveAsTemplate,
   navigationPreviewOpen,
   onToggleNavigationPreview,
+  scrollSpyIndex,
 }: {
-  rhythmHints?: RhythmHint[];
   onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
   navigationPreviewOpen: boolean;
   onToggleNavigationPreview: () => void;
+  scrollSpyIndex: number | null;
 }) {
   const appData = useHomepagePuck((state) => state.appState.data);
   const dispatch = useHomepagePuck((state) => state.dispatch);
@@ -49,6 +47,16 @@ export default function LayerRail({
       return (totals.get(item.type) || 0) > 1 ? `${base} ${ordinal}/${totals.get(item.type)}` : base;
     });
   }, [content]);
+
+  const layerScrollRef = useRef<HTMLDivElement>(null);
+
+  // 画布滚动时，让图层列表自动滚动到当前可见模块（仅滚动，不改选中态）。
+  useEffect(() => {
+    if (scrollSpyIndex === null) return;
+    layerScrollRef.current
+      ?.querySelector<HTMLElement>(`[data-layer-index="${scrollSpyIndex}"]`)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [scrollSpyIndex]);
 
   const multiActive = multiIndices.length >= 2;
 
@@ -154,7 +162,7 @@ export default function LayerRail({
 
   return (
     <section className="homepage-editor__layer-rail" aria-label="页面图层">
-      <div className="homepage-editor__layer-scroll">
+      <div className="homepage-editor__layer-scroll" ref={layerScrollRef}>
         <div className="homepage-editor__layer-frame homepage-editor__layer-global">
           <button
             type="button"
@@ -189,6 +197,7 @@ export default function LayerRail({
           return (
             <div
               key={item.props?.id ?? `${item.type}-${index}`}
+              data-layer-index={index}
               className={`homepage-editor__layer-item${active ? " is-active" : ""}${multiSelected ? " is-multi-selected" : ""}${draggingIndex === index ? " is-dragging" : ""}${dropIndex === index ? " is-drop-target" : ""}`}
               draggable={!item.props?.locked}
               onDragStart={(event) => {
@@ -226,38 +235,6 @@ export default function LayerRail({
         {appData.content.length === 0 && (
           <div className="homepage-editor__layer-empty">
             从左侧添加模块后，这里会显示页面结构。
-          </div>
-        )}
-        {rhythmHints.length > 0 && (
-          <div
-            className="homepage-editor__layer-rhythm"
-            aria-label="页面节奏提示"
-            style={{
-              margin: "12px 0 4px",
-              padding: "10px 12px",
-              border: "1px solid #E7DFCF",
-              background: "#FCF9F2",
-              fontSize: 11,
-              lineHeight: 1.7,
-              color: "#6F6250",
-            }}
-          >
-            <p style={{ margin: "0 0 6px", color: "#9A792E", fontWeight: 500 }}>
-              页面节奏提示
-            </p>
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
-              {rhythmHints.slice(0, 6).map((hint, hintIndex, list) => (
-                <li
-                  key={hint.message}
-                  style={{
-                    marginBottom: hintIndex === list.length - 1 ? 0 : 6,
-                    color: hint.level === "warn" ? "#A24324" : undefined,
-                  }}
-                >
-                  {hint.message}
-                </li>
-              ))}
-            </ul>
           </div>
         )}
       </div>

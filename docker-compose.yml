@@ -51,6 +51,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
+      # 线上交易总开关（true=开放购物车/结算/线下转账付款；与 CustomerCommerceGuard 同一变量）
+      CUSTOMER_COMMERCE_ENABLED: ${CUSTOMER_COMMERCE_ENABLED:-"true"}
     # P0-3：不对宿主机暴露 3000（仅 nginx 反代 /api 与 /uploads → server:3000，见 nginx.conf）
     expose:
       - "3000"
@@ -61,7 +63,11 @@ services:
       # 备份产物只读挂载：settings.getBackupStatus 据此向后台展示真实备份状态（OR-1 衔接）。
       - ./backups:/backups:ro
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:3000/api/ready'').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
       interval: 15s
       timeout: 5s
       retries: 5

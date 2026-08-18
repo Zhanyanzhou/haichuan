@@ -1,5 +1,5 @@
 /**
- * schema/modules/beforeAfter.ts — 「改款对比(改款前后)」编辑区 Schema。
+ * schema/modules/beforeAfter.ts — 「改款对比(前后对比)」编辑区 Schema。
  * Editorial Story 母版(改款叙事变体):4:5 同比例双图滑动对比,两图独立焦点。
  */
 import {
@@ -13,17 +13,18 @@ import type { ModuleInspectorSchema } from "../types";
 
 export const beforeAfterSchema: ModuleInspectorSchema = {
   moduleType: "改款对比",
-  displayName: "改款前后",
+  displayName: "前后对比",
   purpose: BEFORE_AFTER_CONTRACT.purpose,
   evaluate: evaluateBeforeAfterContract,
   defaults: { ...beforeAfterPuckConfig.defaultProps },
+  groupTitles: { media: "对比图片" },
   sections: [
     {
       id: "before-after-content",
       title: "内容",
       layer: "content",
       fields: [
-        moduleNameField("改款前后"),
+        moduleNameField("前后对比"),
         {
           key: "title",
           label: "标题",
@@ -40,18 +41,6 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
           maxLength: BEFORE_AFTER_CONTRACT.content.limits.subtitle,
           hint: "一两句情感或工艺说明,留空不显示",
           placeholder: "如 旧物的情感，以新的形态延续。",
-        },
-        {
-          key: "beforeLabel",
-          label: "改款前标签",
-          control: "text",
-          maxLength: BEFORE_AFTER_CONTRACT.content.limits.label,
-        },
-        {
-          key: "afterLabel",
-          label: "改款后标签",
-          control: "text",
-          maxLength: BEFORE_AFTER_CONTRACT.content.limits.label,
         },
       ],
     },
@@ -72,6 +61,12 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
           showSpecCheck: true,
         },
         {
+          key: "beforeLabel",
+          label: "改款前标签",
+          control: "text",
+          maxLength: BEFORE_AFTER_CONTRACT.content.limits.label,
+        },
+        {
           key: "beforeAltText",
           label: "改款前替代文字",
           control: "text",
@@ -86,6 +81,12 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
           focusKeys: { x: "afterFocusX", y: "afterFocusY" },
           placeholder: "上传改款后图片（4:5）",
           showSpecCheck: true,
+        },
+        {
+          key: "afterLabel",
+          label: "改款后标签",
+          control: "text",
+          maxLength: BEFORE_AFTER_CONTRACT.content.limits.label,
         },
         {
           key: "afterAltText",

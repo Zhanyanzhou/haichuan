@@ -1,9 +1,10 @@
 import {
   IsString, IsOptional, IsInt, IsBoolean, IsEnum, IsNumber,
-  Min, MaxLength, IsNotEmpty,
+  Min, MaxLength, IsNotEmpty, ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { MaterialType, ProductStatus, ProductVisibility, SalesMode } from '@prisma/client';
+import { CreateSkuDto } from './sku.dto';
 
 /**
  * 创建商品 DTO
@@ -118,4 +119,10 @@ export class CreateProductDto {
   @Type(() => Boolean)
   @IsBoolean({ message: '多件优惠标记必须是布尔值' })
   multiDiscount?: boolean;
+
+  /** 多规格模式：传入 SKU 列表则不再自动创建默认 SKU，商品起价取 SKU 最低价 */
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => CreateSkuDto)
+  skus?: CreateSkuDto[];
 }

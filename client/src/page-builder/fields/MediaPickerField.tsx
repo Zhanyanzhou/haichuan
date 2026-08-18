@@ -243,6 +243,16 @@ export default function MediaPickerField({
                 (e.target as HTMLImageElement).style.display = "none";
               }}
             />
+            {imgSize.error ? (
+              <div
+                className="homepage-editor__media-preview-error"
+                role="alert"
+              >
+                <ExclamationCircleOutlined />
+                <strong>当前图片暂不可用</strong>
+                <span>请替换图片，或检查图片链接是否仍然有效。</span>
+              </div>
+            ) : null}
           </div>
           {hasCropPreview ? (
             <p className="homepage-editor__media-preview-note">
@@ -257,7 +267,7 @@ export default function MediaPickerField({
                 onClick={() => setReplaceOpen((open) => !open)}
                 title="在下方展开上传区，预览保持可见"
               >
-                更换
+                替换图片
               </Button>
               <Button
                 size="small"
@@ -268,7 +278,7 @@ export default function MediaPickerField({
                 }}
                 title="输入或清除图片链接"
               >
-                链接
+                图片链接
               </Button>
               <Button
                 size="small"

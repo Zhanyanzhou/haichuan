@@ -2,6 +2,12 @@ import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
+import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
+import {
+  CONTENT_TEMPLATE_LAYOUTS,
+  ContentTemplateLayoutStyles,
+  templateLayoutVars,
+} from "@/page-builder/layout/contentTemplateLayouts";
 
 interface TextBannerBlockProps {
   module: {
@@ -12,31 +18,29 @@ interface TextBannerBlockProps {
   editMode?: boolean;
 }
 
-/**
- * 品牌宣言(文字横幅)— Editorial Text 母版
- * 纯文字与大留白;可带背景海报(自动切白字)与一个 CTA。
- * 纵向节奏交给 DecorSection(brand 密度 + 三档留白)。
- */
+/** 纯文字 — 无图片槽，只允许对齐和上下留白两个受控布局预设。 */
 export default function TextBannerBlock({
   module,
   editMode,
 }: TextBannerBlockProps) {
   const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
-  const { eyebrow, title, body, backgroundImage, buttonText, linkUrl } = content;
+  const { eyebrow, title, body, buttonText, bgImage } = content;
+  const targetUrl = resolveLinkTargetUrl({
+    targetType: content.targetType,
+    productId: content.productId,
+    linkUrl: content.linkUrl,
+  });
   const template = layoutConfig.template || "center";
   const bg = styleConfig.bgColor || "#FBF9F6";
-  const textColor = backgroundImage && (!styleConfig.textColor || styleConfig.textColor === "#2C2C2C")
-    ? "#FFFFFF"
-    : styleConfig.textColor || "#2C2C2C";
-  const isLightText = textColor.toLowerCase() === "#fff" || textColor.toLowerCase() === "#ffffff";
-  const spacing = styleConfig.spacing || "normal";
+  const textColor = styleConfig.textColor || "#2C2C2C";
+  const spacing = styleConfig.spacing === "spacious" ? "spacious" : "normal";
 
   if (!title && !body) {
     if (!editMode) return null;
     return (
       <BlockEmptyPlaceholder
         icon="📝"
-        hint="品牌宣言"
+        hint={CONTENT_TEMPLATE_LAYOUTS.textBanner.displayName}
         spec="请输入标题或正文"
         bg={bg}
       />
@@ -45,36 +49,51 @@ export default function TextBannerBlock({
 
   return (
     <DecorSection
-      master="editorial-text"
-      width="editorial"
+      master={CONTENT_TEMPLATE_LAYOUTS.textBanner.master}
+      width={CONTENT_TEMPLATE_LAYOUTS.textBanner.width}
+      flow={CONTENT_TEMPLATE_LAYOUTS.textBanner.flow}
       spacing={spacing}
       background={bg}
-      style={{ color: textColor }}
-    >
-      {backgroundImage && (
-        <div
-          data-editor-field="backgroundImage"
-          style={{
-            position: "absolute",
-            zIndex: 0,
-            inset: 0,
-            backgroundImage: `linear-gradient(rgba(20, 17, 13, 0.48), rgba(20, 17, 13, 0.48)), url(${backgroundImage})`,
-            backgroundPosition: "center",
-            backgroundSize: "cover",
-          }}
-        />
+      className="hc-content-template"
+      data-content-template={CONTENT_TEMPLATE_LAYOUTS.textBanner.key}
+      data-visual-role={CONTENT_TEMPLATE_LAYOUTS.textBanner.visualRole}
+      data-height-mode-desktop={
+        CONTENT_TEMPLATE_LAYOUTS.textBanner.heightModeByViewport.desktop
+      }
+      data-height-mode-tablet={
+        CONTENT_TEMPLATE_LAYOUTS.textBanner.heightModeByViewport.tablet
+      }
+      data-height-mode-mobile={
+        CONTENT_TEMPLATE_LAYOUTS.textBanner.heightModeByViewport.mobile
+      }
+      data-mobile-order={CONTENT_TEMPLATE_LAYOUTS.textBanner.mobile.order.join(
+        ",",
       )}
+      style={{
+        color: textColor,
+        ...(bgImage
+          ? {
+              backgroundImage: `url(${bgImage})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            }
+          : {}),
+        ...templateLayoutVars(CONTENT_TEMPLATE_LAYOUTS.textBanner),
+      }}
+    >
+      <ContentTemplateLayoutStyles />
       <div
+        className="hc-content-template__copy hc-phase1-text"
+        data-align={template === "left" ? "left" : "center"}
+        data-spacing={spacing}
         style={{
           position: "relative",
           zIndex: 1,
-          maxWidth: template === "left" ? 720 : 640,
-          margin: "0 auto",
-          textAlign: template === "left" ? ("left" as const) : ("center" as const),
         }}
       >
         {eyebrow && (
-          <p data-editor-field="eyebrow"
+          <p
+            data-editor-field="eyebrow"
             style={{
               fontSize: "var(--hc-type-caption, 12px)",
               letterSpacing: "0.28em",
@@ -88,13 +107,15 @@ export default function TextBannerBlock({
           </p>
         )}
         {title && (
-          <h2 data-editor-field="title"
+          <h2
+            data-editor-field="title"
+            className="hc-content-template__title"
             style={{
               fontSize: "var(--hc-type-display, clamp(28px,3.5vw,48px))",
               lineHeight: 1.15,
               marginBottom: 20,
               fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
-              color: textColor,
+              color: "var(--hc-ink, #2C2C2C)",
               maxWidth: 600,
               marginLeft: template === "left" ? 0 : "auto",
               marginRight: template === "left" ? 0 : "auto",
@@ -104,10 +125,12 @@ export default function TextBannerBlock({
           </h2>
         )}
         {body && (
-          <p data-editor-field="body"
+          <p
+            data-editor-field="body"
+            className="hc-content-template__body"
             style={{
               fontSize: "var(--hc-type-body, 15px)",
-              color: isLightText ? "rgba(255,255,255,0.78)" : "var(--hc-muted, #8A7F72)",
+              color: "var(--hc-muted, #5C5C5C)",
               lineHeight: 1.9,
               marginBottom: 28,
               maxWidth: template === "left" ? 520 : 480,
@@ -118,24 +141,26 @@ export default function TextBannerBlock({
             {body}
           </p>
         )}
-        {buttonText && linkUrl && (
-          <Link data-editor-field="buttonText linkUrl"
-            to={linkUrl}
-            style={{
-              display: "inline-block",
-              padding: "11px 38px",
-              border: `1px solid ${isLightText ? "rgba(255,255,255,0.5)" : "var(--hc-gold, #B8944E)"}`,
-              color: isLightText ? "#fff" : "var(--hc-gold, #B8944E)",
-              fontSize: "var(--hc-type-caption, 12px)",
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-              textDecoration: "none",
-              transition: "all 0.2s",
-            }}
-          >
-            {buttonText}
-          </Link>
-        )}
+        {buttonText &&
+          targetUrl &&
+          (editMode ? (
+            <span
+              data-editor-field="buttonText targetType productId linkUrl"
+              className="hc-content-template__action"
+              style={{ color: "var(--hc-ink, #2C2C2C)" }}
+            >
+              {buttonText}
+            </span>
+          ) : (
+            <Link
+              data-editor-field="buttonText targetType productId linkUrl"
+              className="hc-content-template__action"
+              to={targetUrl}
+              style={{ color: "var(--hc-ink, #2C2C2C)" }}
+            >
+              {buttonText}
+            </Link>
+          ))}
       </div>
     </DecorSection>
   );

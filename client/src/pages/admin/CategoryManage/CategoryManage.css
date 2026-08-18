@@ -136,7 +136,7 @@
   flex-shrink: 0;
 }
 .cat-tree-title.is-selected .cat-tree-title__icon {
-  color: var(--adm-gold);
+  color: var(--adm-action);
 }
 .cat-tree-title__name {
   flex: 1;
@@ -155,8 +155,8 @@
   font-weight: 400;
 }
 .cat-tree-title__count {
-  font-size: 11px;
-  color: var(--adm-subtle);
+  font-size: 12px;
+  color: var(--adm-muted);
   flex-shrink: 0;
 }
 .cat-tree-title__dot {
@@ -222,7 +222,7 @@
   margin-bottom: 28px;
 }
 .cat-detail__section-title {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -242,7 +242,7 @@
   min-width: 0;
 }
 .cat-detail__field-label {
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   color: var(--adm-muted);
 }
@@ -252,7 +252,7 @@
   word-break: break-all;
 }
 .cat-detail__field-value--muted {
-  color: var(--adm-subtle);
+  color: var(--adm-muted);
 }
 
 .cat-detail__products {
@@ -314,7 +314,7 @@
   color: var(--adm-text);
 }
 .cat-detail__switch-tip {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--adm-muted);
   margin-left: 4px;
 }
@@ -324,12 +324,12 @@
   padding-top: 20px;
 }
 .cat-modal .ant-modal-footer .ant-btn-primary {
-  background: var(--adm-gold);
-  border-color: var(--adm-gold);
+  background: var(--adm-action);
+  border-color: var(--adm-action);
 }
 .cat-modal .ant-modal-footer .ant-btn-primary:hover {
-  background: var(--adm-gold);
-  opacity: 0.9;
+  background: #5f492a;
+  border-color: #5f492a;
 }
 
 /* ───── 响应式 ───── */

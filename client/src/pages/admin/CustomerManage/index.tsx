@@ -9,7 +9,6 @@ import {
   Pagination,
   Segmented,
   Space,
-  Spin,
   Table,
   Tag,
   Typography,
@@ -17,6 +16,7 @@ import {
 import { HeartOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { customerAdminApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { AdminLoadingState } from "@/components/common/AdminDataStates";
 
 /**
  * 客户档案管理（只读运营视图）
@@ -258,7 +258,7 @@ export default function CustomerManage() {
     <div className="space-y-4">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-display font-semibold text-brand-text">客户管理</h1>
+          <h1 className="font-semibold text-brand-text">客户管理</h1>
           <p className="text-sm text-brand-muted mt-1">
             注册客户档案与消费全景（只读）；联系与跟进请前往订单中心 / 客户线索
           </p>
@@ -358,7 +358,7 @@ export default function CustomerManage() {
       >
         {detailLoading ? (
           <div className="py-20 text-center">
-            <Spin tip="加载中" />
+            <AdminLoadingState subject="客户详情" compact />
           </div>
         ) : detailError ? (
           <div className="py-10 text-center">

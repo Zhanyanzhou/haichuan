@@ -5,6 +5,7 @@
  * mobile 档配置 inheritFrom 时渲染 DeviceOverrideBadge（空值即继承模型）。
  */
 import { useEffect, useState } from "react";
+import { AimOutlined } from "@ant-design/icons";
 import MediaPickerField from "../../fields/MediaPickerField";
 import ImageStatus from "../ImageStatus";
 import FocusPicker from "../FocusPicker";
@@ -64,16 +65,8 @@ export default function MediaField({
     "";
   const showOverrideBadge = Boolean(def.inheritFrom && device === "mobile");
   const overridden = showOverrideBadge && Boolean(value && value.trim());
-  /* 焦点只在会真发生裁切时有意义：图片比例与图位比例偏差 > 8% 容差才显示（2026-08-16） */
-  const cropApplies = (() => {
-    if (!natural.width || !natural.height) return false;
-    const target = def.spec.width / def.spec.height;
-    const actual = natural.width / natural.height;
-    return Math.abs(actual - target) / target > 0.08;
-  })();
   const canPickFocus =
-    Boolean(def.focusKeys && onFocusChange && value && value.trim()) &&
-    cropApplies;
+    Boolean(def.focusKeys && onFocusChange && value && value.trim());
   return (
     <div className="homepage-editor__inspector-field">
       <label>
@@ -114,34 +107,23 @@ export default function MediaField({
         />
       ) : null}
       {canPickFocus ? (
-        <div
-          className="homepage-editor__inspector-subsection"
-          style={{ marginTop: 10 }}
-        >
+        <div className="homepage-editor__inspector-subsection homepage-editor__media-focus-editor">
           <button
             type="button"
+            className="homepage-editor__media-focus-toggle"
             onClick={() => setFocusOpen((open) => !open)}
-            style={{
-              border: 0,
-              padding: 0,
-              background: "transparent",
-              color: "#8E6A35",
-              fontSize: 12,
-              letterSpacing: "0.04em",
-              cursor: "pointer",
-            }}
+            aria-expanded={focusOpen}
           >
-            {focusOpen ? "收起" : "图片将被裁切 · 调整保留区域"}
-            {focus ? `（${Math.round(focus.x)}% × ${Math.round(focus.y)}%）` : ""}
-            <span aria-hidden>{focusOpen ? " ▴" : " ▾"}</span>
+            <AimOutlined />
+            <span>{focusOpen ? "完成裁切设置" : "裁切与焦点"}</span>
+            {focus ? (
+              <small>{Math.round(focus.x)}% × {Math.round(focus.y)}%</small>
+            ) : null}
           </button>
           {focusOpen ? (
             <>
-              <p
-                className="homepage-editor__inspector-hint"
-                style={{ margin: "6px 0 8px" }}
-              >
-                拖拽圆点或用九宫格快速定位
+              <p className="homepage-editor__media-focus-note">
+                拖拽焦点或使用快速定位，画布会同步显示裁切结果
                 {device === "mobile" ? "；手机端与桌面端独立保存" : ""}
               </p>
               <FocusPicker
@@ -159,12 +141,15 @@ export default function MediaField({
         </div>
       ) : null}
       {def.showSpecCheck && natural.width && (!showOverrideBadge || overridden) ? (
-        <ImageStatus
-          width={natural.width}
-          height={natural.height}
-          format={format}
-          spec={def.spec}
-        />
+        <div className="homepage-editor__media-information">
+          <strong>素材信息</strong>
+          <ImageStatus
+            width={natural.width}
+            height={natural.height}
+            format={format}
+            spec={def.spec}
+          />
+        </div>
       ) : null}
     </div>
   );

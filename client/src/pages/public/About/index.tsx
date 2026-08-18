@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { usePageMetaStore } from '@/store/pageMetaStore';
+import { pageDocumentApi } from '@/services/api';
+import { unwrapResponse } from '@/utils/unwrap';
 
 /* ═══════ 设计常量 ═══════ */
 const DARK = '#24211E';
@@ -24,6 +26,8 @@ const designChapters = [
 export default function About() {
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
+  // 检测 about 装修内容：已发布则由 PublishedPageDecoration 渲染，本页不重复硬编码；未发布才兑底
+  const [published, setPublished] = useState<boolean | null>(null);
   useEffect(() => {
     setPageMeta({
       title: '品牌故事 | 海川珠宝',
@@ -31,6 +35,22 @@ export default function About() {
     });
     return () => clearPageMeta();
   }, [setPageMeta, clearPageMeta]);
+
+  useEffect(() => {
+    let cancelled = false;
+    pageDocumentApi
+      .getPublished("about")
+      .then((res) => {
+        const data = unwrapResponse<any>(res);
+        if (!cancelled) setPublished(Boolean(data?.puckData?.content?.length));
+      })
+      .catch(() => {
+        if (!cancelled) setPublished(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const [activeDesign, setActiveDesign] = useState(0);
   const designRefs = useRef<(HTMLElement | null)[]>([]);
@@ -44,6 +64,9 @@ export default function About() {
     refs.forEach((r) => r && obs.observe(r));
     return () => obs.disconnect();
   }, []);
+
+  // 检测中或已有装修内容：交由 PublishedPageDecoration 渲染，本页不重复
+  if (published !== false) return null;
 
   return (
     <main className="about-page" style={{ background: LIGHT }}>

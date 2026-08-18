@@ -212,12 +212,31 @@ export class ProductsController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
+  @Put(":id/archive")
+  @ApiOperation({ summary: "将商品移入回收站" })
+  archive(@Param("id") id: string) {
+    return this.productsService.archive(+id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Put(":id/restore")
+  @ApiOperation({ summary: "从回收站恢复商品（恢复为草稿）" })
+  restore(@Param("id") id: string) {
+    return this.productsService.restore(+id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Put(":id/status")
   @ApiOperation({ summary: "更新产品状态" })
   async updateStatus(@Param("id") id: string, @Body("status") status: string) {
     const validStatuses = ["DRAFT", "PUBLISHED", "OFFLINE", "ARCHIVED"];
     if (!validStatuses.includes(status)) {
       throw new BadRequestException("商品状态不正确，请重新选择");
+    }
+    if (status === "ARCHIVED") {
+      return this.productsService.archive(+id);
     }
     // 发布校验由 service.update 的统一上架门禁 (canPublish) 兜底,
     // 避免与 PUT /:id 直写 status 两条路径产生不一致。
@@ -235,7 +254,7 @@ export class ProductsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Delete(":id")
-  @ApiOperation({ summary: "下架产品（软删除）" })
+  @ApiOperation({ summary: "移除回收站商品（已停用：回收站只读，仅支持恢复为草稿）" })
   delete(@Param("id") id: string) {
     return this.productsService.delete(+id);
   }

@@ -152,12 +152,9 @@ export class UploadService {
     return this.readPaymentProof(payment.proofUrl);
   }
 
-  /** 仅被已完成权限校验的接口调用，同时兼容历史公开目录中的旧凭证。 */
+  /** 仅被已完成权限校验的接口调用；凭证只存于私有目录 private-media/payment-proofs。 */
   private async readPaymentProof(proofReference: string): Promise<{ buffer: Buffer; mimeType: string }> {
-    const isLegacyPublicProof = proofReference.startsWith('/uploads/');
-    const root = isLegacyPublicProof ? resolve(this.uploadDir) : this.paymentProofRoot;
-    const requestedPath = isLegacyPublicProof ? proofReference.slice('/uploads/'.length) : proofReference;
-    const filePath = this.resolveWithinRoot(root, requestedPath);
+    const filePath = this.resolveWithinRoot(this.paymentProofRoot, proofReference);
     if (!filePath || !existsSync(filePath)) throw new NotFoundException('付款凭证不存在');
 
     const extension = extname(filePath).toLowerCase();

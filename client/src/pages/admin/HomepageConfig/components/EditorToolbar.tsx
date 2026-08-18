@@ -1,13 +1,17 @@
 /**
  * EditorToolbar.tsx — 装修编辑器顶部工具栏。
- * 品牌标识 / 页面切换 / 自动保存状态 + 设备切换器 + 版本/设置/保存/发布操作。
+ * 设备切换器 + 保存/发布主操作；版本与页面设置收纳到更多菜单。
  * （自 index.tsx 平移，逻辑零变更）
  */
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button, Dropdown, Modal, message } from "antd";
 import {
+  DeleteOutlined,
   DesktopOutlined,
   DownloadOutlined,
+  EditOutlined,
+  EyeOutlined,
   HistoryOutlined,
   LayoutOutlined,
   MobileOutlined,
@@ -18,18 +22,11 @@ import {
   UploadOutlined,
 } from "@ant-design/icons";
 import type { EditorPageKey } from "@/page-builder/config/editorPages";
-import {
-  createEditorPageDefault,
-  editorPages,
-} from "@/page-builder/config/editorPages";
+import { createEditorPageDefault } from "@/page-builder/config/editorPages";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { BLOCK_META } from "@/page-builder/config/blockMeta";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
-import {
-  ROOT_ZONE,
-  useHomepagePuck,
-  type AutoSaveState,
-} from "../editor-store";
+import { ROOT_ZONE, useHomepagePuck } from "../editor-store";
 import { formatViewportSize, type ViewportPreset } from "../editor-utils";
 
 export const VIEWPORT_PRESETS: ViewportPreset[] = [
@@ -41,53 +38,46 @@ export const VIEWPORT_PRESETS: ViewportPreset[] = [
 
 export default function EditorToolbar({
   pageKey,
-  lastSaved,
   publishing,
   saving,
-  hasUnsavedChanges,
-  hasPublished,
   hasPendingDraft,
-  autoSaveState,
+  viewingPublished,
   onPublish,
   onSaveDraft,
+  onEditPendingDraft,
+  onViewPublishedVersion,
+  onDiscardDraft,
   onOpenRevisions,
   onOpenPageSettings,
   onDataChange,
-  onPageChange,
 }: {
   pageKey: EditorPageKey;
-  lastSaved: string | null;
   publishing: boolean;
   saving: boolean;
-  hasUnsavedChanges: boolean;
-  hasPublished: boolean;
   hasPendingDraft: boolean;
-  autoSaveState: AutoSaveState;
+  viewingPublished: boolean;
   onPublish: (data: unknown, locateBlock: (blockIndex: number) => void) => void;
-  onSaveDraft: () => void;
+  onSaveDraft: (data: unknown) => void;
+  onEditPendingDraft: () => void;
+  onViewPublishedVersion: () => void;
+  onDiscardDraft: () => void;
   onOpenRevisions: () => void;
   onOpenPageSettings: () => void;
   onDataChange: (data: unknown) => void;
-  onPageChange: (pageKey: EditorPageKey) => void;
 }) {
+  const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
   const appData = useHomepagePuck((state) => state.appState.data);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const currentViewport = viewports.current;
-  const saveStatusText =
-    autoSaveState === "error"
-      ? "保存失败，请点保存重试"
-      : hasPendingDraft
-        ? "有未发布修改"
-        : hasUnsavedChanges
-          ? "有未保存修改"
-          : hasPublished
-            ? "已发布"
-            : "尚未发布";
 
   useEffect(() => {
     onDataChange(appData);
   }, [appData, onDataChange]);
+
+  useEffect(() => {
+    setToolbarHost(document.getElementById("admin-editor-toolbar-slot"));
+  }, []);
 
   const setViewport = useCallback(
     (preset: ViewportPreset) => {
@@ -206,7 +196,36 @@ export default function EditorToolbar({
     });
   }, [dispatch, pageKey]);
 
+  const draftMenuItems = viewingPublished
+    ? [
+        {
+          key: "edit-draft",
+          icon: <EditOutlined />,
+          label: "继续编辑草稿",
+          onClick: onEditPendingDraft,
+        },
+      ]
+    : hasPendingDraft
+      ? [
+          {
+            key: "view-published",
+            icon: <EyeOutlined />,
+            label: "查看线上版本",
+            onClick: onViewPublishedVersion,
+          },
+          {
+            key: "discard-draft",
+            icon: <DeleteOutlined />,
+            label: "放弃草稿",
+            danger: true,
+            onClick: onDiscardDraft,
+          },
+        ]
+      : [];
+
   const compactActionItems = [
+    ...draftMenuItems,
+    ...(draftMenuItems.length > 0 ? [{ type: "divider" as const }] : []),
     {
       key: "recommended",
       icon: <LayoutOutlined />,
@@ -243,15 +262,26 @@ export default function EditorToolbar({
         input?.click();
       },
     },
-    {
-      key: "save",
-      icon: <SaveOutlined />,
-      label: "保存草稿",
-      onClick: onSaveDraft,
-    },
   ];
 
-  return (
+  const menuItems = compactActionItems.map((item) => {
+    if ("onClick" in item) {
+      const { onClick, ...rest } = item;
+      return rest;
+    }
+    return item;
+  });
+
+  const handleMenuClick = ({ key }: { key: string }) => {
+    for (const item of compactActionItems) {
+      if ("key" in item && item.key === key && "onClick" in item) {
+        item.onClick();
+        return;
+      }
+    }
+  };
+
+  const toolbar = (
     <header className="homepage-editor__toolbar">
       <input
         id="homepage-editor-import-file"
@@ -264,30 +294,6 @@ export default function EditorToolbar({
           if (file) void importPageDecoration(file);
         }}
       />
-      <div className="homepage-editor__toolbar-context">
-        <strong>海川珠宝</strong>
-        <span className="homepage-editor__toolbar-divider" />
-        <label className="homepage-editor__page-picker">
-          <span>当前编辑</span>
-          <select
-            value={pageKey}
-            onChange={(event) =>
-              onPageChange(event.target.value as EditorPageKey)
-            }
-          >
-            {editorPages.map((page) => (
-              <option key={page.key} value={page.key}>
-                {page.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className={`homepage-editor__save-status is-${autoSaveState}`}>
-          <i />
-          {saveStatusText}
-        </span>
-      </div>
-
       <div
         className="homepage-editor__viewport-switcher"
         aria-label="预览设备：仅手机端可覆写素材与焦点"
@@ -325,25 +331,9 @@ export default function EditorToolbar({
         <div className="homepage-editor__toolbar-secondary-actions">
           <Button
             size="small"
-            icon={<HistoryOutlined />}
-            onClick={onOpenRevisions}
-            title="查看历史发布版本并回滚到草稿"
-          >
-            发布历史
-          </Button>
-          <Button
-            size="small"
-            icon={<SettingOutlined />}
-            onClick={onOpenPageSettings}
-            title="页面 SEO 标题与描述（影响搜索与社交分享）"
-          >
-            SEO 设置
-          </Button>
-          <Button
-            size="small"
             icon={<SaveOutlined />}
             loading={saving}
-            onClick={onSaveDraft}
+            onClick={() => onSaveDraft(appData)}
             title="立即保存当前装修草稿"
           >
             保存草稿
@@ -352,11 +342,7 @@ export default function EditorToolbar({
         <Dropdown
           trigger={["click"]}
           placement="bottomRight"
-          menu={{
-            items: compactActionItems.map(({ onClick, ...item }) => item),
-            onClick: ({ key }) =>
-              compactActionItems.find((item) => item.key === key)?.onClick?.(),
-          }}
+          menu={{ items: menuItems, onClick: handleMenuClick }}
         >
           <Button
             className="homepage-editor__toolbar-more"
@@ -372,6 +358,7 @@ export default function EditorToolbar({
           size="small"
           type="primary"
           icon={<SendOutlined />}
+          aria-label="发布到前台网站"
           loading={publishing}
           onClick={publishCurrentPage}
           title="发布到前台网站"
@@ -381,4 +368,6 @@ export default function EditorToolbar({
       </div>
     </header>
   );
+
+  return toolbarHost ? createPortal(toolbar, toolbarHost) : toolbar;
 }

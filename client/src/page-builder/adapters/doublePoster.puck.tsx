@@ -7,6 +7,10 @@ import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import MediaPickerField from "../fields/MediaPickerField";
 import type { LinkTargetType } from "../utils/linkTarget";
+import {
+  createContentTemplateMarker,
+  type ContentTemplateMarker,
+} from "../generated/contentTemplates.generated";
 
 export interface DoublePosterPuckProps {
   number: string;
@@ -19,13 +23,14 @@ export interface DoublePosterPuckProps {
   targetType: LinkTargetType;
   productId: number;
   linkUrl: string;
-  layout: "mainLeft" | "mainRight";
   mainAltText: string;
   detailAltText: string;
   mainFocusX: number;
   mainFocusY: number;
   detailFocusX: number;
   detailFocusY: number;
+  /** 系统保留：区块级内容模板合同印记，不在 Inspector 中展示。 */
+  __contentTemplate?: ContentTemplateMarker;
   locked?: boolean;
 }
 
@@ -34,23 +39,23 @@ export const doublePosterPuckConfig = {
     <DoublePosterSection module={convertPuckProps("双图海报", props as any)!} editMode />
   ),
   defaultProps: {
-    number: "02",
-    label: "COLLECTION",
-    title: "新品系列",
+    number: "",
+    label: "",
+    title: "",
     description: "",
     mainImage: "",
     detailImage: "",
-    actionText: "查看系列",
+    actionText: "",
     targetType: "none",
     productId: 0,
     linkUrl: "",
-    layout: "mainLeft",
     mainAltText: "",
     detailAltText: "",
     mainFocusX: 50,
     mainFocusY: 50,
     detailFocusX: 50,
     detailFocusY: 50,
+    __contentTemplate: createContentTemplateMarker("双图海报"),
     locked: false,
   } satisfies DoublePosterPuckProps,
   fields: {
@@ -90,14 +95,6 @@ export const doublePosterPuckConfig = {
     },
     productId: { type: "number" as const, label: "商品 ID" },
     linkUrl: { type: "text" as const, label: "站内页面" },
-    layout: {
-      type: "radio" as const,
-      label: "桌面版式",
-      options: [
-        { label: "主图在左", value: "mainLeft" },
-        { label: "主图在右", value: "mainRight" },
-      ],
-    },
     mainAltText: { type: "text" as const, label: "主图替代文字" },
     detailAltText: { type: "text" as const, label: "细节图替代文字" },
     mainFocusX: {

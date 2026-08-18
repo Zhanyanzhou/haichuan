@@ -1,10 +1,11 @@
 /**
  * schema/registry.ts — 模块编辑区 Schema 注册表(全量)。
  *
- * 22 个模板全部 Schema 化:InspectorPanel 命中本表即渲染 SchemaInspectorPanel。
+ * 23 个模板全部 Schema 化:InspectorPanel 命中本表即渲染 SchemaInspectorPanel。
  * 旧路径(index.tsx 内 10 个专属面板与 Puck.Fields fallback)已不可达,仅作死代码保留待清理。
  */
 import type { ModuleInspectorSchema } from "./types";
+import { BLOCK_META } from "../../config/blockMeta";
 import { textBannerSchema } from "./modules/textBanner";
 import { cardGridSchema, servicePromiseSchema } from "./modules/cardGrid";
 import { heroSchema } from "./modules/hero";
@@ -30,10 +31,7 @@ import { storeInfoSchema } from "./modules/storeInfo";
 import { limitedOfferSchema } from "./modules/limitedOffer";
 import { testimonialSchema } from "./modules/testimonial";
 
-export const MODULE_INSPECTOR_SCHEMAS: Record<
-  string,
-  ModuleInspectorSchema
-> = {
+const MODULE_INSPECTOR_SCHEMA_SOURCE: Record<string, ModuleInspectorSchema> = {
   首屏主视觉: heroSchema,
   单图海报: singlePosterSchema,
   双图海报: doublePosterSchema,
@@ -58,6 +56,17 @@ export const MODULE_INSPECTOR_SCHEMAS: Record<
   轮播图: carouselSchema,
   热区图: hotspotSchema,
 };
+
+/** 属性面板标题统一从 BLOCK_META 取运营显示名，schema 内名称仅作兼容回退。 */
+export const MODULE_INSPECTOR_SCHEMAS = Object.fromEntries(
+  Object.entries(MODULE_INSPECTOR_SCHEMA_SOURCE).map(([moduleType, schema]) => [
+    moduleType,
+    {
+      ...schema,
+      displayName: BLOCK_META[moduleType]?.name ?? schema.displayName,
+    },
+  ]),
+) as Record<string, ModuleInspectorSchema>;
 
 export function getInspectorSchema(
   moduleType: string,

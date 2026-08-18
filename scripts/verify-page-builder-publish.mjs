@@ -17,11 +17,16 @@ let lockCount = 0;
 const clone = (value) => structuredClone(value);
 const nextUpdatedAt = () => new Date(++clock);
 const image = "https://example.com/jewelry.jpg";
-const validData = (title) => ({
+const validData = (title, marker = undefined) => ({
   content: [
     {
       type: "首屏主视觉",
-      props: { id: "hero", title, desktopImage: image },
+      props: {
+        id: "hero",
+        title,
+        desktopImage: image,
+        ...(marker ? { __contentTemplate: marker } : {}),
+      },
     },
   ],
   root: { props: {} },
@@ -32,11 +37,11 @@ const state = {
   document: {
     id: 3,
     pageKey: "home",
-    schemaVersion: 1,
+    schemaVersion: 7,
     editorType: "puck",
     editorVersion: "0.22.4",
-    templateId: null,
-    templateVersion: null,
+    templateId: "existing-page-template",
+    templateVersion: 4,
     puckData: validData("当前草稿"),
     metadata: {},
     status: "DRAFT",
@@ -180,6 +185,45 @@ assert.ok(
   invalidResult.errors.includes("第 1 个区块「品牌故事」：image 图片不能为空"),
 );
 
+const legacyResult = await service.validatePageDocument("home", validData("历史区块"));
+assert.equal(legacyResult.valid, true, "legacy-0 区块必须仍可读取和发布");
+assert.ok(
+  legacyResult.issues.some(
+    (issue) => issue.code === "content-template-legacy" && issue.severity === "info",
+  ),
+  "历史区块必须明确标记为 legacy-0，而不是静默升级",
+);
+
+const mismatchedData = validData("错误印记", { key: "textBanner", version: 1 });
+const mismatchResult = await service.validatePageDocument("home", mismatchedData);
+assert.equal(mismatchResult.valid, false);
+assert.ok(
+  mismatchResult.issues.some((issue) => issue.code === "content-template-key-mismatch"),
+  "区块 type 与内容模板 key 不匹配必须形成结构化 issue",
+);
+
+const unknownVersionData = validData("未知版本", { key: "hero", version: 99 });
+const unknownVersionResult = await service.validatePageDocument("home", unknownVersionData);
+assert.equal(unknownVersionResult.valid, false);
+assert.ok(
+  unknownVersionResult.issues.some((issue) => issue.code === "content-template-version-unsupported"),
+  "未知内容模板版本不得猜测为当前版本",
+);
+
+state.document.puckData = mismatchedData;
+const revisionsBeforeRejectedPublish = state.revisions.length;
+await assert.rejects(
+  () => service.publishPageDocument("home", 1, state.document.updatedAt.toISOString()),
+  /页面发布校验失败/,
+  "服务端发布必须阻止合同印记错误",
+);
+assert.equal(
+  state.revisions.length,
+  revisionsBeforeRejectedPublish,
+  "合同印记错误不得写入发布 revision",
+);
+state.document.puckData = validData("当前草稿");
+
 const publicBeforeSave = await service.getPublishedPageDocument("home");
 assert.equal(publicBeforeSave.version, 17);
 assert.equal(publicBeforeSave.puckData.content[0].props.title, "旧版首页");
@@ -190,12 +234,27 @@ assert.equal(
 
 const saved = await service.savePageDocument(
   "home",
-  validData("新版首页"),
-  { seoTitle: "新版首页" },
+  validData("新版首页", { key: "hero", version: 1 }),
+  {
+    seoTitle: "新版首页",
+    contentTemplateContract: { version: 999, templates: [{ id: "hero", version: 999 }] },
+  },
   "0.22.4",
   state.document.updatedAt.toISOString(),
 );
 assert.equal(saved.status, "DRAFT");
+assert.deepEqual(saved.puckData.content[0].props.__contentTemplate, {
+  key: "hero",
+  version: 1,
+});
+assert.equal(saved.schemaVersion, 7, "区块合同不得提升页面 schemaVersion");
+assert.equal(saved.templateId, "existing-page-template", "区块合同不得改写整页模板 ID");
+assert.equal(saved.templateVersion, 4, "区块合同不得提升整页模板版本");
+assert.equal(
+  Object.hasOwn(saved.metadata, "contentTemplateContract"),
+  false,
+  "普通保存不得重新写入旧页面级合同摘要",
+);
 
 const publicAfterSave = await service.getPublishedPageDocument("home");
 assert.equal(publicAfterSave.version, 17);
@@ -211,7 +270,7 @@ await service.publishPageDocument(
   state.document.updatedAt.toISOString(),
 );
 const publicAfterPublish = await service.getPublishedPageDocument("home");
-assert.equal(lockCount, 1, "发布前必须锁定页面文档");
+assert.equal(lockCount, 2, "每次发布尝试都必须先锁定页面文档");
 assert.equal(publicAfterPublish.version, 18);
 assert.equal(publicAfterPublish.puckData.content[0].props.title, "新版首页");
 assert.equal(

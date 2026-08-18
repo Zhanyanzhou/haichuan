@@ -9,6 +9,10 @@ import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import MediaPickerField from "../fields/MediaPickerField";
 import type { LinkTargetType } from "../utils/linkTarget";
+import {
+  createContentTemplateMarker,
+  type ContentTemplateMarker,
+} from "../generated/contentTemplates.generated";
 
 /** Puck 扁平 props（编辑器使用） */
 export interface HeroPuckProps {
@@ -26,6 +30,8 @@ export interface HeroPuckProps {
   desktopFocusY: number;
   mobileFocusX: number;
   mobileFocusY: number;
+  /** 系统保留：区块级内容模板合同印记，不在 Inspector 中展示。 */
+  __contentTemplate?: ContentTemplateMarker;
   /** 模板锁定标记 */
   locked?: boolean;
 }
@@ -38,18 +44,19 @@ export const heroPuckConfig = {
   defaultProps: {
     desktopImage: "",
     mobileImage: "",
-    title: "海川珠宝",
-    subtitle: "CAMPAIGN / NEW COLLECTION",
-    actionText: "探索新品",
-    linkUrl: "/products",
-    targetType: "page",
+    title: "",
+    subtitle: "",
+    actionText: "",
+    linkUrl: "",
+    targetType: "none",
     productId: 0,
-    altText: "海川珠宝 Hero",
-    alignment: "center",
+    altText: "",
+    alignment: "left",
     desktopFocusX: 50,
     desktopFocusY: 50,
     mobileFocusX: 50,
     mobileFocusY: 50,
+    __contentTemplate: createContentTemplateMarker("首屏主视觉"),
     locked: false,
   } satisfies HeroPuckProps,
 

@@ -69,11 +69,14 @@ export class SettingsController {
     // 缺失或写错一律按关闭处理；前端据此隐藏交易 CTA，服务端守卫负责最终拦截。
     const commerceEnabled =
       process.env.CUSTOMER_COMMERCE_ENABLED?.trim().toLowerCase() === "true";
+    // 行为分析后台：默认开启；显式设置 ANALYTICS_DASHBOARD_ENABLED=false 才关闭。
+    const analyticsDashboardEnabled =
+      process.env.ANALYTICS_DASHBOARD_ENABLED?.trim().toLowerCase() !== "false";
     return {
       commerceEnabled,
       cartEnabled: commerceEnabled,
       paymentEnabled: commerceEnabled,
-      analyticsDashboardEnabled: false,
+      analyticsDashboardEnabled,
     };
   }
 }

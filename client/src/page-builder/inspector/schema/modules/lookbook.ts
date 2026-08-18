@@ -1,5 +1,5 @@
 /**
- * schema/modules/lookbook.ts — 「佩戴灵感(佩戴大片)」编辑区 Schema。
+ * schema/modules/lookbook.ts — 「佩戴灵感(佩戴展示)」编辑区 Schema。
  * Hero Piece 母版(场景变体):4:5 佩戴大片 + 关联作品。
  */
 import { createElement } from "react";
@@ -11,22 +11,23 @@ import type { ModuleInspectorSchema } from "../types";
 
 export const lookbookSchema: ModuleInspectorSchema = {
   moduleType: "佩戴灵感",
-  displayName: "佩戴大片",
+  displayName: "佩戴展示",
   purpose: "以 4:5 佩戴大片串联可直接查看的关联作品。",
   defaults: { ...lookbookPuckConfig.defaultProps },
+  groupTitles: { media: "佩戴素材与关联作品" },
   sections: [
     {
       id: "lookbook-content",
       title: "内容",
       layer: "content",
       fields: [
-        moduleNameField("佩戴大片"),
+        moduleNameField("佩戴展示"),
         {
           key: "title",
           label: "标题",
           control: "text",
           maxLength: 24,
-          placeholder: "如 佩戴灵感",
+          placeholder: "如 佩戴展示",
         },
         {
           key: "subtitle",
@@ -35,6 +36,14 @@ export const lookbookSchema: ModuleInspectorSchema = {
           maxLength: 60,
           hint: "留空不显示",
         },
+      ],
+    },
+    {
+      id: "lookbook-media",
+      title: "媒体",
+      layer: "media",
+      description: "桌面 4:5 大片占 58% 分栏；手机全宽",
+      fields: [
         {
           key: "productIds",
           label: "关联作品（建议 2–4 件）",
@@ -45,14 +54,6 @@ export const lookbookSchema: ModuleInspectorSchema = {
               onChange: (ids: number[]) => update({ productIds: ids }),
             }),
         },
-      ],
-    },
-    {
-      id: "lookbook-media",
-      title: "媒体",
-      layer: "media",
-      description: "桌面 4:5 大片占 58% 分栏；手机全宽",
-      fields: [
         {
           key: "image",
           label: "佩戴大片",

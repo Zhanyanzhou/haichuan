@@ -1,7 +1,7 @@
 /**
  * schema/modules/cardGrid.ts — 「卡片网格」系编辑区 Schema 工厂。
  *
- * 变体共享同一结构（卡片网格=品牌亮点、服务承诺），只差
+ * 变体共享同一结构（卡片网格=品牌要点、服务承诺），只差
  * displayName / purpose / defaults —— 与 puckConfig 的 spread 复用方式对齐：
  * fields 同源，defaultProps 各自定义。
  */
@@ -26,14 +26,15 @@ export function makeCardGridSchema(
 ): ModuleInspectorSchema {
   const defaults =
     variant.defaults ??
-    (puckConfig.components[variant.moduleType]?.defaultProps ??
-      cardGridPuckConfig.defaultProps);
+    puckConfig.components[variant.moduleType]?.defaultProps ??
+    cardGridPuckConfig.defaultProps;
   return {
     moduleType: variant.moduleType,
     displayName: variant.displayName,
     purpose: variant.purpose,
     evaluate: evaluateCardGridContract,
     defaults: { ...defaults },
+    groupTitles: { media: "卡片列表" },
     sections: [
       {
         id: `${variant.moduleType}-content`,
@@ -62,6 +63,13 @@ export function makeCardGridSchema(
             maxLength: CARD_GRID_CONTRACT.content.limits.subtitle,
             hint: "留空不显示",
           },
+        ],
+      },
+      {
+        id: `${variant.moduleType}-media`,
+        title: "素材",
+        layer: "media",
+        fields: [
           {
             key: "cards",
             label: "卡片列表",
@@ -131,17 +139,17 @@ export function makeCardGridSchema(
   };
 }
 
-/** 卡片网格（品牌亮点） */
+/** 卡片网格（品牌要点） */
 export const cardGridSchema = makeCardGridSchema({
   moduleType: "卡片网格",
-  displayName: "品牌亮点",
+  displayName: "品牌要点",
   purpose: CARD_GRID_CONTRACT.purpose,
 });
 
 /** 服务承诺（卡片网格变体：默认四项服务信息卡片） */
 export const servicePromiseSchema = makeCardGridSchema({
   moduleType: "服务承诺",
-  displayName: "服务保障",
+  displayName: "服务承诺",
   purpose: "集中呈现保养、售后、配送与鉴定等服务信息",
   defaults: puckConfig.components["服务承诺"]?.defaultProps,
 });

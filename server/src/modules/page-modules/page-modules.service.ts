@@ -9,6 +9,11 @@ import { EventEmitter } from "events";
 import { existsSync } from "fs";
 import { relative, resolve, sep } from "path";
 import { fromEvent, interval, map, merge, Observable, startWith } from "rxjs";
+import {
+  CONTENT_TEMPLATE_BY_MODULE_TYPE,
+  getContentTemplateIssues,
+  type ContentTemplateIssue,
+} from "./content-template-contract";
 
 /**
  * 页面构建器区块类型契约 — 与前端 puckConfig MyComponents 严格一致,
@@ -188,6 +193,16 @@ export class PageModulesService {
     editorVersion?: string,
     expectedUpdatedAt?: string,
   ) {
+    // 区块合同版本只存在于 puckData.props.__contentTemplate。页面级摘要仅兼容旧数据读取，
+    // 普通保存不得重新写入，更不能借用 schemaVersion/templateVersion 标记区块合同。
+    const metadataWithoutContract =
+      metadata && typeof metadata === "object" && !Array.isArray(metadata)
+        ? Object.fromEntries(
+            Object.entries(metadata).filter(
+              ([key]) => key !== "contentTemplateContract",
+            ),
+          )
+        : metadata || {};
     const existing = await this.prisma.pageDocument.findUnique({
       where: { pageKey },
     });
@@ -204,7 +219,7 @@ export class PageModulesService {
         where: { pageKey, updatedAt: existing.updatedAt },
         data: {
           puckData,
-          metadata: metadata || {},
+          metadata: metadataWithoutContract,
           editorVersion,
           status: "DRAFT",
         },
@@ -220,7 +235,7 @@ export class PageModulesService {
       data: {
         pageKey,
         puckData,
-        metadata: metadata || {},
+        metadata: metadataWithoutContract,
         editorVersion,
         schemaVersion: 1,
       },
@@ -247,15 +262,23 @@ export class PageModulesService {
           "该页面已被其他编辑者更新，请重新加载后再发布",
         );
       }
-      const errors = await this.collectPuckDataErrors(tx, doc.puckData, pageKey);
-      errors.push(...this.collectMetadataErrors(doc.metadata));
+      const validation = await this.collectPageDocumentValidation(
+        tx,
+        doc.puckData,
+        doc.metadata,
+        pageKey,
+      );
+      const errors = validation.errors;
       if (errors.length > 0) {
         const visibleErrors = errors.slice(0, 8).join("；");
         const suffix =
           errors.length > 8 ? `；另有 ${errors.length - 8} 个问题` : "";
-        throw new BadRequestException(
-          `页面发布校验失败：${visibleErrors}${suffix}`,
-        );
+        throw new BadRequestException({
+          message: `页面发布校验失败：${visibleErrors}${suffix}`,
+          valid: false,
+          errors,
+          issues: validation.issues,
+        });
       }
 
       // Save revision
@@ -316,13 +339,94 @@ export class PageModulesService {
       const doc = await this.prisma.pageDocument.findUnique({
         where: { pageKey },
       });
-      if (!doc) return { valid: false, errors: ["页面草稿不存在"] };
+      if (!doc) {
+        const issues: ContentTemplateIssue[] = [
+          this.createServerValidationIssue("页面草稿不存在"),
+        ];
+        return { valid: false, errors: ["页面草稿不存在"], issues };
+      }
       if (puckData === undefined) puckData = doc.puckData;
       if (metadata === undefined) metadata = doc.metadata;
     }
-    const errors = await this.collectPuckDataErrors(this.prisma, puckData, pageKey);
-    errors.push(...this.collectMetadataErrors(metadata));
-    return { valid: errors.length === 0, errors };
+    const validation = await this.collectPageDocumentValidation(
+      this.prisma,
+      puckData,
+      metadata,
+      pageKey,
+    );
+    return validation;
+  }
+
+  private async collectPageDocumentValidation(
+    db: any,
+    puckData: any,
+    metadata: any,
+    pageKey: string,
+  ): Promise<{ valid: boolean; errors: string[]; issues: ContentTemplateIssue[] }> {
+    const issues = [
+      ...this.collectContentTemplateIssues(puckData),
+      ...(await this.collectPuckDataErrors(db, puckData, pageKey)).map(
+        (message) => this.createServerValidationIssue(message),
+      ),
+      ...this.collectMetadataErrors(metadata).map((message) =>
+        this.createServerValidationIssue(message, "metadata"),
+      ),
+    ];
+    const errors = issues
+      .filter((issue) => issue.severity === "error")
+      .map((issue) => issue.message);
+    return { valid: errors.length === 0, errors, issues };
+  }
+
+  private collectContentTemplateIssues(puckData: unknown): ContentTemplateIssue[] {
+    if (!puckData || typeof puckData !== "object") return [];
+    const document = puckData as {
+      content?: unknown;
+      zones?: Record<string, unknown>;
+    };
+    const issues: ContentTemplateIssue[] = [];
+    const collectBlock = (block: unknown, path: string) => {
+      if (!block || typeof block !== "object") return;
+      const value = block as { type?: unknown; props?: unknown };
+      const props = value.props && typeof value.props === "object"
+        ? value.props as Record<string, unknown>
+        : undefined;
+      issues.push(
+        ...getContentTemplateIssues({
+          moduleType: value.type,
+          props,
+          blockId: props?.id,
+          path: `${path}.props.__contentTemplate`,
+        }),
+      );
+    };
+    if (Array.isArray(document.content)) {
+      document.content.forEach((block, index) =>
+        collectBlock(block, `content[${index}]`),
+      );
+    }
+    if (document.zones && typeof document.zones === "object") {
+      Object.entries(document.zones).forEach(([zoneKey, blocks]) => {
+        if (!Array.isArray(blocks)) return;
+        blocks.forEach((block, index) =>
+          collectBlock(block, `zones.${zoneKey}[${index}]`),
+        );
+      });
+    }
+    return issues;
+  }
+
+  private createServerValidationIssue(
+    message: string,
+    path = "puckData",
+  ): ContentTemplateIssue {
+    return {
+      code: "page-validation",
+      severity: "error",
+      layer: "page",
+      path,
+      message,
+    };
   }
 
   private async collectPuckDataErrors(
@@ -333,7 +437,9 @@ export class PageModulesService {
     const errors: string[] = [];
     const productIds = new Set<number>();
     const missingUploadUrls = new Set<string>();
-    void pageKey; // 模板全页面通用(2026-08-15 用户决策),pageKey 仅保留参数位便于未来扩展
+    if (!/^[a-z0-9-]{1,50}$/i.test(pageKey)) {
+      errors.push("页面标识不合法");
+    }
 
     if (!puckData || typeof puckData !== "object") {
       return ["页面数据为空或格式不正确"];
@@ -377,7 +483,9 @@ export class PageModulesService {
       if (EDITOR_ONLY_COMPONENTS.has(type) || props.isVisible === false) return;
 
       // 文本长度兜底：防止异常超长输入（如整篇文章误填入标题）发布到前台
-      for (const [field, limit] of Object.entries(PUCK_TEXT_FIELD_LIMITS)) {
+      const contentTemplate = CONTENT_TEMPLATE_BY_MODULE_TYPE[type];
+      const textLimits = contentTemplate?.contentBudget.limits || PUCK_TEXT_FIELD_LIMITS;
+      for (const [field, limit] of Object.entries(textLimits)) {
         const textValue = props[field];
         if (typeof textValue === "string" && textValue.length > limit) {
           errors.push(
@@ -386,7 +494,10 @@ export class PageModulesService {
         }
       }
 
-      for (const field of PUCK_REQUIRED_IMAGE_FIELDS[type] || []) {
+      const requiredImageFields = contentTemplate
+        ? contentTemplate.media.filter((slot) => slot.required).map((slot) => slot.key)
+        : PUCK_REQUIRED_IMAGE_FIELDS[type] || [];
+      for (const field of requiredImageFields) {
         if (!this.isNonEmptyString(props[field])) {
           errors.push(`${label}：${field} 图片不能为空`);
         }
@@ -416,6 +527,26 @@ export class PageModulesService {
         const value = props[field];
         if (this.isNonEmptyString(value) && !this.isSafeLink(value)) {
           errors.push(`${label}：${field} 链接不合法`);
+        }
+      }
+
+      if (contentTemplate?.supportsLinkTarget) {
+        const targetType = typeof props.targetType === "string" ? props.targetType : "";
+        const linkUrl = typeof props.linkUrl === "string" ? props.linkUrl.trim() : "";
+        const productId = Number(props.productId);
+        // 老版本没有 targetType 时保持旧 linkUrl 行为，任何新合同状态都必须完整。
+        if (targetType === "none" && linkUrl) {
+          errors.push(`${label}：不跳转时不能保留 linkUrl`);
+        } else if (targetType === "product") {
+          if (!Number.isInteger(productId) || productId <= 0) {
+            errors.push(`${label}：商品跳转必须选择有效商品`);
+          } else {
+            productIds.add(productId);
+          }
+        } else if (targetType === "page" && !linkUrl) {
+          errors.push(`${label}：站内页面跳转必须填写 linkUrl`);
+        } else if (targetType && !["none", "product", "page"].includes(targetType)) {
+          errors.push(`${label}：targetType 不合法`);
         }
       }
 
@@ -606,6 +737,34 @@ export class PageModulesService {
       errors.push(
         `页面可见模块过多（${visibleContentCount + visibleZoneCount}/${MAX_VISIBLE_BLOCKS}），请精简后再发布`,
       );
+    }
+
+    const orderedVisibleBlocks = [
+      ...(Array.isArray(puckData.content) ? puckData.content : []),
+      ...(puckData.zones && typeof puckData.zones === "object"
+        ? Object.values(puckData.zones).flatMap((blocks) =>
+            Array.isArray(blocks) ? blocks : [],
+          )
+        : []),
+    ].filter(
+      (block: any) =>
+        block &&
+        typeof block === "object" &&
+        block.props?.isVisible !== false &&
+        !EDITOR_ONLY_COMPONENTS.has(block.type),
+    );
+    const primaryStageIndexes = orderedVisibleBlocks
+      .map((block: any, index: number) =>
+        CONTENT_TEMPLATE_BY_MODULE_TYPE[block.type]?.visualRole === "primary-stage"
+          ? index
+          : -1,
+      )
+      .filter((index: number) => index >= 0);
+    if (primaryStageIndexes.length > 1) {
+      errors.push("每页最多只能有 1 个首屏主舞台（primary-stage）");
+    }
+    if (primaryStageIndexes.length === 1 && primaryStageIndexes[0] !== 0) {
+      errors.push("首屏主舞台（primary-stage）必须是首个可见品牌内容区");
     }
 
     if (Array.isArray(puckData.content)) {

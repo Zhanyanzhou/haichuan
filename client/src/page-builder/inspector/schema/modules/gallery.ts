@@ -17,6 +17,7 @@ export const gallerySchema: ModuleInspectorSchema = {
   purpose: GALLERY_CONTRACT.purpose,
   evaluate: evaluateGalleryContract,
   defaults: { ...galleryPuckConfig.defaultProps },
+  groupTitles: { media: "画廊图片" },
   sections: [
     {
       id: "gallery-content",
@@ -39,6 +40,13 @@ export const gallerySchema: ModuleInspectorSchema = {
           maxLength: GALLERY_CONTRACT.content.limits.subtitle,
           hint: "留空不显示",
         },
+      ],
+    },
+    {
+      id: "gallery-media",
+      title: "素材",
+      layer: "media",
+      fields: [
         {
           key: "items",
           label: "画廊图片",

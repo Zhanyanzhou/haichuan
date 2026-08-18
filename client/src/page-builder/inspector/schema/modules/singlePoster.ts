@@ -19,7 +19,7 @@ import type { ModuleInspectorSchema } from "../types";
 
 export const singlePosterSchema: ModuleInspectorSchema = {
   moduleType: "单图海报",
-  displayName: "品牌故事",
+  displayName: "单图文",
   purpose: SINGLE_POSTER_CONTRACT.purpose,
   evaluate: evaluateSinglePosterContract,
   defaults: { ...singlePosterPuckConfig.defaultProps },
@@ -29,7 +29,7 @@ export const singlePosterSchema: ModuleInspectorSchema = {
       title: "内容",
       layer: "content",
       fields: [
-        moduleNameField("品牌故事"),
+        moduleNameField("单图文"),
         {
           key: "title",
           label: "标题",
@@ -62,6 +62,13 @@ export const singlePosterSchema: ModuleInspectorSchema = {
           hint: "编号旁的英文小字，留空不显示",
           placeholder: "如 SIGNATURE",
         },
+      ],
+    },
+    {
+      id: "single-poster-action",
+      title: "行动与关联",
+      layer: "interaction",
+      fields: [
         {
           key: "actionText",
           label: "引导文字",
@@ -79,15 +86,26 @@ export const singlePosterSchema: ModuleInspectorSchema = {
       layer: "media",
       description: "桌面 4:5 竖图占 62% 分栏；手机独立 3:4 竖图",
       fields: [
-        desktopMediaField("desktopImage", "海报主图", IMAGE_SPECS.singlePoster.image, {
-          required: true,
-          focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
-          placeholder: "上传海报主图（4:5）",
-        }),
-        mobileMediaField("mobileImage", "手机端海报", IMAGE_SPECS.singlePoster.mobile, "desktopImage", {
-          focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
-          placeholder: "上传手机端海报（3:4）",
-        }),
+        desktopMediaField(
+          "desktopImage",
+          "海报主图",
+          IMAGE_SPECS.singlePoster.image,
+          {
+            required: true,
+            focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
+            placeholder: "上传海报主图（4:5）",
+          },
+        ),
+        mobileMediaField(
+          "mobileImage",
+          "手机端海报",
+          IMAGE_SPECS.singlePoster.mobile,
+          "desktopImage",
+          {
+            focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
+            placeholder: "上传手机端海报（3:4）",
+          },
+        ),
       ],
     },
     {
@@ -101,8 +119,16 @@ export const singlePosterSchema: ModuleInspectorSchema = {
           label: "构图镜像",
           control: "segmented",
           options: [
-            { label: "文左图右", value: "leftTextRightImage", diagram: "textLeftImageRight" },
-            { label: "图左文右", value: "leftImageRightText", diagram: "imageLeftTextRight" },
+            {
+              label: "文左图右",
+              value: "leftTextRightImage",
+              diagram: "textLeftImageRight",
+            },
+            {
+              label: "图左文右",
+              value: "leftImageRightText",
+              diagram: "imageLeftTextRight",
+            },
           ],
         },
       ],

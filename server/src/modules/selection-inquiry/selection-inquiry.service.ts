@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
+import { PRIVACY_CONSENT_VERSION } from "../../common/privacy/privacy-consent";
+import { CreateSelectionInquiryDto } from "./dto/create-selection-inquiry.dto";
 
 @Injectable()
 export class SelectionInquiryService {
@@ -44,20 +46,15 @@ export class SelectionInquiryService {
     });
   }
 
-  async create(data: {
-    customerName?: string;
-    phone?: string;
-    email?: string;
-    wechat?: string;
-    message?: string;
-    items: Array<{
-      productId?: number;
-      productNameSnapshot: string;
-      productSkuSnapshot?: string;
-      productImageSnapshot?: string;
-    }>;
-    customer?: { id: number; name: string | null; phone: string; email: string | null };
-  }) {
+  async create(
+    data: CreateSelectionInquiryDto & {
+      customer?: { id: number; name: string | null; phone: string; email: string | null };
+    },
+  ) {
+    // 终线守卫：controller 以外的调用也必须提交真正的 boolean true。
+    if (data.privacyConsent !== true) {
+      throw new BadRequestException("请阅读并同意隐私说明");
+    }
     const customerName = data.customer?.name?.trim() || data.customerName?.trim();
     const phone = data.customer?.phone || data.phone?.trim();
     const items = data.items || [];
@@ -109,6 +106,9 @@ export class SelectionInquiryService {
         email: data.customer?.email || data.email?.trim() || null,
         wechat: data.wechat?.trim() || null,
         message: data.message?.trim() || null,
+        privacyConsent: true,
+        privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+        privacyConsentedAt: new Date(),
         status: "PENDING",
         items: {
           create: validItems.map((item) => {

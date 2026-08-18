@@ -1,29 +1,50 @@
 /**
- * schema/modules/productRow.ts — 「产品展示行(商品精选)」编辑区 Schema。
+ * schema/modules/productRow.ts — 「产品展示行(商品列表)」编辑区 Schema。
  * Commerce Grid 母版:商品图统一 4:5,不再开放比例与标题字号选项。
  */
 import {
   PRODUCT_ROW_CONTRACT,
   evaluateProductRowContract,
 } from "../../../config/blockContracts";
+import { createElement } from "react";
 import { productRowPuckConfig } from "../../../adapters/productRow.puck";
+import ProductIdsField from "../../../fields/ProductIdsField";
 import { bgColorPresetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 export const productRowSchema: ModuleInspectorSchema = {
   moduleType: "产品展示行",
-  displayName: "商品精选",
+  displayName: "商品列表",
   purpose: PRODUCT_ROW_CONTRACT.purpose,
   evaluate: evaluateProductRowContract,
   defaults: { ...productRowPuckConfig.defaultProps },
+  groupTitles: { media: "选择商品" },
   sections: [
+    {
+      id: "product-row-media",
+      title: "素材",
+      layer: "media",
+      description: "从商品系统选择商品，商品图统一 4:5，不重复上传",
+      fields: [
+        {
+          key: "productIds",
+          label: "选择商品",
+          control: "custom",
+          render: ({ props, update }) =>
+            createElement(ProductIdsField, {
+              value: Array.isArray(props.productIds) ? props.productIds : [],
+              onChange: (ids: number[]) => update({ productIds: ids }),
+            }),
+        },
+      ],
+    },
     {
       id: "product-row-content",
       title: "内容",
       layer: "content",
       description: "商品图统一 4:5，请在商品管理维护作品图片",
       fields: [
-        moduleNameField("商品精选"),
+        moduleNameField("商品列表"),
         {
           key: "title",
           label: "标题",

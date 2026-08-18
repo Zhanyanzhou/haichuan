@@ -15,6 +15,7 @@ import { settingsApi, uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import AdminPageHeader from "@/components/common/AdminPageHeader";
 import { AdminLoadingState } from "@/components/common/AdminDataStates";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
 export default function SiteContent() {
   const [form] = Form.useForm();
@@ -40,9 +41,9 @@ export default function SiteContent() {
     try {
       // 保存站点内容字段（品牌/联系方式/营业时间/SEO，含 siteName）
       await settingsApi.updateSettings(values);
-      message.success("保存成功");
-    } catch {
-      message.error("保存失败");
+      message.success("店铺资料已保存");
+    } catch (error) {
+      message.error(getSafeAdminErrorMessage(error, "店铺资料保存失败，请检查填写内容后重试。"));
     } finally {
       setSaving(false);
     }
@@ -56,13 +57,13 @@ export default function SiteContent() {
         form.setFieldsValue({ logo: data.url });
         message.success("Logo 已上传，保存后生效");
       }
-    } catch {
-      message.error("Logo 上传失败");
+    } catch (error) {
+      message.error(getSafeAdminErrorMessage(error, "Logo 上传失败，请检查文件格式和网络后重试。"));
     }
     return false; // 阻止默认上传行为
   };
 
-  if (loading) return <AdminLoadingState />;
+  if (loading) return <AdminLoadingState subject="店铺资料" />;
 
   return (
     <div>
@@ -174,8 +175,6 @@ export default function SiteContent() {
           loading={saving}
           icon={<SaveOutlined />}
           style={{
-            background: "#B69052",
-            borderColor: "#B69052",
             height: 44,
             paddingInline: 32,
           }}

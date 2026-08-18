@@ -19,7 +19,7 @@ import type { ModuleInspectorSchema } from "../types";
 
 export const fullBleedSchema: ModuleInspectorSchema = {
   moduleType: "全屏出血图",
-  displayName: "沉浸视觉",
+  displayName: "通栏图",
   purpose: FULL_BLEED_CONTRACT.purpose,
   evaluate: evaluateFullBleedContract,
   defaults: { ...fullBleedPuckConfig.defaultProps },
@@ -29,7 +29,7 @@ export const fullBleedSchema: ModuleInspectorSchema = {
       title: "内容",
       layer: "content",
       fields: [
-        moduleNameField("沉浸视觉"),
+        moduleNameField("通栏图"),
         {
           key: "title",
           label: "标题",
@@ -45,12 +45,19 @@ export const fullBleedSchema: ModuleInspectorSchema = {
           maxLength: FULL_BLEED_CONTRACT.content.limits.subtitle,
           hint: "留空不显示",
         },
+      ],
+    },
+    {
+      id: "full-bleed-action",
+      title: "行动与关联",
+      layer: "interaction",
+      fields: [
         {
           key: "buttonText",
           label: "引导文字",
           control: "text",
-          maxLength: FULL_BLEED_CONTRACT.content.limits.actionText,
-          hint: "留空则整图点击跳转",
+          maxLength: FULL_BLEED_CONTRACT.content.limits.buttonText,
+          hint: "留空不显示行动入口",
           placeholder: "如 进入系列",
         },
         linkTargetField("点击后"),
@@ -62,43 +69,26 @@ export const fullBleedSchema: ModuleInspectorSchema = {
       layer: "media",
       description: "桌面 21:6 超宽横幅；手机独立 4:5 竖图",
       fields: [
-        desktopMediaField("image", "桌面端海报", IMAGE_SPECS.fullBleed.desktop, {
-          required: true,
-          focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
-          placeholder: "上传桌面端海报（21:6）",
-        }),
-        mobileMediaField("mobileImage", "手机端海报", IMAGE_SPECS.fullBleed.mobile, "image", {
-          focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
-          placeholder: "上传手机端海报（4:5）",
-        }),
-      ],
-    },
-    {
-      id: "full-bleed-layout",
-      title: "布局",
-      layer: "layout",
-      fields: [
-        {
-          key: "template",
-          label: "文字位置",
-          control: "segmented",
-          options: [
-            { label: "居中", value: "textCenter", diagram: "textCenter" },
-            { label: "左对齐", value: "textLeft", diagram: "textLeft" },
-            { label: "右对齐", value: "textRight", diagram: "textRight" },
-            { label: "左下", value: "textBottomLeft", diagram: "textBottomLeft" },
-          ],
-        },
-        {
-          key: "overlayPreset",
-          label: "文字遮罩",
-          control: "segmented",
-          options: [
-            { label: "无", value: "none" },
-            { label: "柔和", value: "soft" },
-            { label: "加强", value: "strong" },
-          ],
-        },
+        desktopMediaField(
+          "image",
+          "桌面端海报",
+          IMAGE_SPECS.fullBleed.desktop,
+          {
+            required: true,
+            focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
+            placeholder: "上传桌面端海报（21:6）",
+          },
+        ),
+        mobileMediaField(
+          "mobileImage",
+          "手机端海报",
+          IMAGE_SPECS.fullBleed.mobile,
+          "image",
+          {
+            focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
+            placeholder: "上传手机端海报（4:5）",
+          },
+        ),
       ],
     },
     {

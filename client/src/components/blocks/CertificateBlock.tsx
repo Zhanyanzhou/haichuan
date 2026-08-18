@@ -1,5 +1,6 @@
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
+import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 
@@ -11,6 +12,8 @@ interface CertificateBlockProps {
 const INK = "#28231F";
 const MUTED = "rgba(40,35,31,0.58)";
 const GOLD = "#B8944E";
+const CERTIFICATE_RATIO_DESKTOP = getContractRoleRatio("certificates", "certificates", "desktop");
+const CERTIFICATE_RATIO_MOBILE = getContractRoleRatio("certificates", "certificates", "mobile");
 
 /**
  * 权威认证 — Asymmetric Gallery 母版(信任变体)
@@ -66,7 +69,7 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
             row-gap: clamp(32px, 4vw, 56px);
           }
           .hc-cert-gallery__frame {
-            aspect-ratio: 1 / 1;
+            aspect-ratio: ${CERTIFICATE_RATIO_DESKTOP};
             overflow: hidden;
             background: #EFEAE0;
             display: grid;
@@ -81,6 +84,7 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
           }
           @media (max-width: 767px) {
             .hc-cert-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; row-gap: 32px; }
+            .hc-cert-gallery__frame { aspect-ratio: ${CERTIFICATE_RATIO_MOBILE}; }
           }
         `}</style>
         {list.map((cert: any, i: number) => (

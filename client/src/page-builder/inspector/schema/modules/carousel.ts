@@ -1,24 +1,23 @@
 /**
- * schema/modules/carousel.ts — 「轮播图(系列大片轮播)」编辑区 Schema。
+ * schema/modules/carousel.ts — 「轮播图(轮播)」编辑区 Schema。
  * Commerce Campaign 母版:仅电商/活动页使用;条目级双端图。
  */
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { carouselPuckConfig } from "../../../adapters/carousel.puck";
-import { moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 export const carouselSchema: ModuleInspectorSchema = {
   moduleType: "轮播图",
-  displayName: "系列大片轮播",
+  displayName: "轮播",
   purpose: "同时展示多个系列或活动主视觉；品牌叙事页不建议使用轮播。",
   defaults: { ...carouselPuckConfig.defaultProps },
+  groupTitles: { media: "轮播图片" },
   sections: [
     {
-      id: "carousel-content",
-      title: "内容",
-      layer: "content",
+      id: "carousel-media",
+      title: "图片素材",
+      layer: "media",
       fields: [
-        moduleNameField("系列大片轮播"),
         {
           key: "images",
           label: "轮播图片",
@@ -81,8 +80,8 @@ export const carouselSchema: ModuleInspectorSchema = {
     },
     {
       id: "carousel-advanced",
-      title: "高级设置",
-      layer: "style",
+      title: "模板专属功能",
+      layer: "feature",
       fields: [
         { key: "autoPlay", label: "自动播放", control: "switch" },
         { key: "showDots", label: "指示点", control: "switch" },

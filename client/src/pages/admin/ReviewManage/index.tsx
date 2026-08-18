@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button, Input, Modal, Rate, Select, Space, Table, Tag, message } from 'antd';
 import { reviewApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
+import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
 
 const STATUS_META: Record<string, { c: string; t: string }> = {
   PENDING: { c: 'gold', t: '待审核' },
@@ -60,7 +61,7 @@ export default function ReviewManage() {
       setReplyText('');
       void load();
     } catch (e: any) {
-      message.error(e?.response?.data?.message || e?.message || '操作失败');
+      message.error(getSafeAdminErrorMessage(e, '评价审核未完成，请重新加载后确认当前状态。'));
     } finally {
       setHandling(false);
     }
@@ -70,7 +71,7 @@ export default function ReviewManage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-display font-semibold text-brand-text">评价管理</h1>
+          <h1 className="font-semibold text-brand-text">评价管理</h1>
           <p className="text-sm text-brand-muted mt-1">先审后展：通过的评价对前台可见，可附顾问回复</p>
         </div>
         <Select

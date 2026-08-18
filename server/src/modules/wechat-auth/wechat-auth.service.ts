@@ -18,6 +18,25 @@ const WECHAT_ACCESS_TOKEN_API =
 const STATE_TTL_MS = 5 * 60 * 1000; // 二维码 state 5 分钟有效
 const BIND_TTL_MS = 10 * 60 * 1000; // 绑定令牌 10 分钟有效
 
+/** 回调父页来源必须是完整 http(s) origin（无路径/查询/尾斜杠），否则降级为 null 不投递 */
+function normalizeParentOrigin(origin: unknown): string | null {
+  if (typeof origin !== "string" || !origin.trim()) return null;
+  const value = origin.trim();
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    if (url.origin !== value) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+interface WechatStateRecord {
+  createdAt: number;
+  parentOrigin: string | null;
+}
+
 export type WechatCallbackResult =
   | {
       kind: "success";
@@ -32,11 +51,16 @@ export type WechatCallbackResult =
   | { kind: "need-bind"; bindToken: string }
   | { kind: "error"; message: string };
 
+export type WechatCallbackOutcome = {
+  result: WechatCallbackResult;
+  parentOrigin: string | null;
+};
+
 @Injectable()
 export class WechatAuthService {
   // 内存态：state → 签发时间戳；bindToken → openid 绑定上下文。
   // 单实例部署足够；若未来横向扩容，需迁移到 Redis/DB 存储。
-  private readonly states = new Map<string, number>();
+  private readonly states = new Map<string, WechatStateRecord>();
   private readonly binds = new Map<
     string,
     { openid: string; unionid: string | null; expiresAt: number }
@@ -81,8 +105,8 @@ export class WechatAuthService {
 
   private prune() {
     const now = Date.now();
-    for (const [state, ts] of this.states) {
-      if (now - ts > STATE_TTL_MS) this.states.delete(state);
+    for (const [state, record] of this.states) {
+      if (now - record.createdAt > STATE_TTL_MS) this.states.delete(state);
     }
     for (const [token, record] of this.binds) {
       if (now > record.expiresAt) this.binds.delete(token);
@@ -90,13 +114,16 @@ export class WechatAuthService {
   }
 
   /** 生成微信扫码登录的二维码地址（WeChat 官方 qrconnect 页面，iframe 内嵌自带二维码渲染） */
-  buildQrConnectUrl(): { url: string; state: string } {
+  buildQrConnectUrl(parentOrigin?: unknown): { url: string; state: string } {
     if (!this.isConfigured()) {
       throw new ServiceUnavailableException("微信扫码登录未配置");
     }
     this.prune();
     const state = randomBytes(16).toString("hex");
-    this.states.set(state, Date.now());
+    this.states.set(state, {
+      createdAt: Date.now(),
+      parentOrigin: normalizeParentOrigin(parentOrigin),
+    });
     const url = new URL(WECHAT_QR_CONNECT);
     url.searchParams.set("appid", process.env.WECHAT_APP_ID!.trim());
     url.searchParams.set(
@@ -137,13 +164,22 @@ export class WechatAuthService {
   async handleCallback(
     code: string,
     state: string,
-  ): Promise<WechatCallbackResult> {
+  ): Promise<WechatCallbackOutcome> {
     if (!this.isConfigured()) {
-      return { kind: "error", message: "微信扫码登录未配置" };
+      return {
+        result: { kind: "error", message: "微信扫码登录未配置" },
+        parentOrigin: null,
+      };
     }
-    if (!state || !this.states.delete(state)) {
-      return { kind: "error", message: "登录状态已失效，请重新扫码" };
+    const record = state ? this.states.get(state) : undefined;
+    if (!record) {
+      return {
+        result: { kind: "error", message: "登录状态已失效，请重新扫码" },
+        parentOrigin: null,
+      };
     }
+    this.states.delete(state);
+    const { parentOrigin } = record;
     try {
       const { openid, unionid } = await this.exchangeCode(code);
       const existing = await this.prisma.customer.findUnique({
@@ -151,9 +187,15 @@ export class WechatAuthService {
       });
       if (existing) {
         if (existing.status === "DISABLED") {
-          return { kind: "error", message: "该账户已被停用" };
+          return {
+            result: { kind: "error", message: "该账户已被停用" },
+            parentOrigin,
+          };
         }
-        return { kind: "success", ...this.accountResponse(existing) };
+        return {
+          result: { kind: "success", ...this.accountResponse(existing) },
+          parentOrigin,
+        };
       }
       const bindToken = randomBytes(24).toString("hex");
       this.binds.set(bindToken, {
@@ -161,11 +203,11 @@ export class WechatAuthService {
         unionid,
         expiresAt: Date.now() + BIND_TTL_MS,
       });
-      return { kind: "need-bind", bindToken };
+      return { result: { kind: "need-bind", bindToken }, parentOrigin };
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "微信授权失败";
-      return { kind: "error", message };
+      return { result: { kind: "error", message }, parentOrigin };
     }
   }
 

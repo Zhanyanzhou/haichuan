@@ -1,11 +1,21 @@
 // 客户中心登录态主面板：账户总览/心愿单/订单(可视化进度+物流轨迹+评价)/个人资料(导出与注销)/地址管理
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Modal, Upload, message, Form, Input, Button, Rate, Select } from "antd";
+import {
+  Modal,
+  Upload,
+  message,
+  Form,
+  Input,
+  Button,
+  Rate,
+  Select,
+} from "antd";
 import { customerApi, reviewApi, uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useCommerceEnabled } from "@/store/featureFlags";
 import { SecureImage } from "@/components/common/SecureImage";
+import ForYouRecommendations from "./ForYouRecommendations";
 
 type AccountDashboardProps = {
   profile: { name?: string; phone?: string; email?: string } | null;
@@ -45,6 +55,14 @@ type AccountDashboardProps = {
     consultationType?: string;
     product?: { name?: string };
   }>;
+  partner: {
+    customer?: {
+      accountType?: string;
+      partnerStatus?: string;
+      partnerApprovedAt?: string | null;
+    } | null;
+    latest?: { reviewNote?: string | null } | null;
+  } | null;
   onSignOut: () => void;
   onRefresh?: () => void;
 };
@@ -64,12 +82,32 @@ const inquiryStatus: Record<string, string> = {
   CLOSED: "已结束",
 };
 
+// 合作商家身份状态文案（与后端 PartnerStatus 对齐）
+const PARTNER_STATUS_LABEL: Record<string, string> = {
+  NONE: "尚未申请合作商家身份",
+  PENDING: "合作申请审核中",
+  NEEDS_SUPPLEMENT: "合作申请待补充资料",
+  REJECTED: "合作申请未通过",
+  SUSPENDED: "合作资格已暂停",
+};
+
+// 合作商家区块入口动作：按状态给出可操作目标
+const PARTNER_ACTION: Record<string, { label: string; to: string }> = {
+  NONE: { label: "申请合作商家", to: "/partner" },
+  PENDING: { label: "查看进度", to: "/partner" },
+  NEEDS_SUPPLEMENT: { label: "补充资料", to: "/partner" },
+  REJECTED: { label: "重新申请", to: "/partner" },
+  SUSPENDED: { label: "联系顾问", to: "/contact" },
+  APPROVED: { label: "查看合作作品", to: "/catalog" },
+};
+
 function Empty({ children }: { children: React.ReactNode }) {
   return <p className="my-account-empty">{children}</p>;
 }
 
 export default function MyAccountDashboard({
   profile,
+  partner,
   orders,
   addresses,
   selectionInquiries,
@@ -79,6 +117,8 @@ export default function MyAccountDashboard({
 }: AccountDashboardProps) {
   const name = profile?.name || "海川贵宾";
   const commerceEnabled = useCommerceEnabled();
+  const partnerStatus = partner?.customer?.partnerStatus || "NONE";
+  const partnerApprovedAt = partner?.customer?.partnerApprovedAt || null;
 
   // 心愿单（组件自治拉取：CustomerCenter 无需为其扩展 props）
   const [favorites, setFavorites] = useState<
@@ -180,7 +220,8 @@ export default function MyAccountDashboard({
   };
 
   // 物流轨迹（快递100，按订单展开）
-  const [trackingOrderId, setTrackingOrderId] = useState<number | null>(null);  const [trackingData, setTrackingData] = useState<{
+  const [trackingOrderId, setTrackingOrderId] = useState<number | null>(null);
+  const [trackingData, setTrackingData] = useState<{
     carrier: string;
     trackingNo: string;
     state: string;
@@ -524,10 +565,16 @@ export default function MyAccountDashboard({
                         <SecureImage
                           src={fav.image}
                           alt={fav.name}
-                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                          }}
                         />
                       ) : (
-                        <span style={{ color: "#c9b78c", fontSize: 24 }}>◆</span>
+                        <span style={{ color: "#c9b78c", fontSize: 24 }}>
+                          ◆
+                        </span>
                       )}
                     </Link>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -549,12 +596,20 @@ export default function MyAccountDashboard({
                         </p>
                       ) : null}
                       {fav.price != null && Number(fav.price) > 0 ? (
-                        <p style={{ fontSize: 13, margin: "6px 0 0", color: "#b8944e" }}>
+                        <p
+                          style={{
+                            fontSize: 13,
+                            margin: "6px 0 0",
+                            color: "#b8944e",
+                          }}
+                        >
                           ¥{Number(fav.price).toLocaleString("zh-CN")}
                         </p>
                       ) : null}
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 12 }}
+                    >
                       <Link
                         to={`/products/${fav.productId}`}
                         style={{ fontSize: 12, color: "#b8944e" }}
@@ -581,7 +636,8 @@ export default function MyAccountDashboard({
               </div>
             ) : (
               <Empty>
-                心愿单还是空的。<Link to="/catalog">去选款中心挑选心仪作品 →</Link>
+                心愿单还是空的。
+                <Link to="/catalog">去选款中心挑选心仪作品 →</Link>
               </Empty>
             )}
           </section>
@@ -608,181 +664,198 @@ export default function MyAccountDashboard({
                     { label: "完成", done: Boolean(order.completedAt) },
                   ];
                   return (
-                  <article key={order.id}>
-                    <div>
-                      <small>
-                        {order.orderNo} ·{" "}
-                        {new Date(order.createdAt).toLocaleDateString("zh-CN")}
-                      </small>
-                      <h3>{order.items?.[0]?.product?.name || "珠宝作品"}</h3>
-                    </div>
-                    {/* 履约进度条 + 物流信息 */}
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 4,
-                        alignItems: "center",
-                        margin: "10px 0 6px",
-                      }}
-                      aria-label="订单进度"
-                    >
-                      {cancelled ? (
-                        <span style={{ fontSize: 11, color: "#a06a5a" }}>
-                          ✕ 订单已取消
-                        </span>
-                      ) : (
-                        steps.map((step, index) => (
-                          <span
-                            key={step.label}
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 4,
-                              fontSize: 11,
-                              color: step.done ? "#b8944e" : "#b6ada2",
-                            }}
-                          >
-                            {index > 0 && (
+                    <article key={order.id}>
+                      <div>
+                        <small>
+                          {order.orderNo} ·{" "}
+                          {new Date(order.createdAt).toLocaleDateString(
+                            "zh-CN",
+                          )}
+                        </small>
+                        <h3>{order.items?.[0]?.product?.name || "珠宝作品"}</h3>
+                      </div>
+                      {/* 履约进度条 + 物流信息 */}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 4,
+                          alignItems: "center",
+                          margin: "10px 0 6px",
+                        }}
+                        aria-label="订单进度"
+                      >
+                        {cancelled ? (
+                          <span style={{ fontSize: 11, color: "#a06a5a" }}>
+                            ✕ 订单已取消
+                          </span>
+                        ) : (
+                          steps.map((step, index) => (
+                            <span
+                              key={step.label}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                                fontSize: 11,
+                                color: step.done ? "#b8944e" : "#b6ada2",
+                              }}
+                            >
+                              {index > 0 && (
+                                <span
+                                  style={{
+                                    width: 18,
+                                    height: 1,
+                                    background: step.done
+                                      ? "#b8944e"
+                                      : "#e3ddd3",
+                                    display: "inline-block",
+                                  }}
+                                />
+                              )}
                               <span
                                 style={{
-                                  width: 18,
-                                  height: 1,
+                                  width: 7,
+                                  height: 7,
+                                  borderRadius: "50%",
                                   background: step.done ? "#b8944e" : "#e3ddd3",
                                   display: "inline-block",
                                 }}
                               />
-                            )}
-                            <span
-                              style={{
-                                width: 7,
-                                height: 7,
-                                borderRadius: "50%",
-                                background: step.done ? "#b8944e" : "#e3ddd3",
-                                display: "inline-block",
-                              }}
-                            />
-                            {step.label}
-                          </span>
-                        ))
-                      )}
-                    </div>
-                    {order.logisticsCompany && order.logisticsNo ? (
-                      <p
-                        style={{
-                          fontSize: 11,
-                          color: "#8a8177",
-                          margin: "0 0 6px",
-                          display: "flex",
-                          gap: 8,
-                          alignItems: "center",
-                        }}
-                      >
-                        <span>
-                          物流：{order.logisticsCompany} · 运单号 {order.logisticsNo}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => toggleTracking(order.id)}
-                          style={{
-                            fontSize: 11,
-                            color: "#b8944e",
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            padding: 0,
-                          }}
-                        >
-                          {trackingOrderId === order.id ? "收起轨迹" : "查看轨迹"}
-                        </button>
-                      </p>
-                    ) : null}
-                    {trackingOrderId === order.id && (
-                      <div
-                        style={{
-                          background: "#f9f7f4",
-                          padding: 12,
-                          marginBottom: 8,
-                          fontSize: 12,
-                        }}
-                      >
-                        {trackingLoading ? (
-                          <p style={{ color: "#8a8177", margin: 0 }}>
-                            轨迹查询中…
-                          </p>
-                        ) : trackingData && trackingData.events.length ? (
-                          <>
-                            <p style={{ color: "#b8944e", margin: "0 0 8px" }}>
-                              {TRACK_STATE[trackingData.state] || "运输中"}
-                              {trackingData.carrier ? ` · ${trackingData.carrier}` : ""}
-                            </p>
-                            {trackingData.events.map((ev, i) => (
-                              <p
-                                key={i}
-                                style={{
-                                  margin: "0 0 6px",
-                                  color: i === 0 ? "#4a443d" : "#8a8177",
-                                }}
-                              >
-                                <span style={{ marginRight: 8 }}>{ev.time}</span>
-                                {ev.context}
-                              </p>
-                            ))}
-                          </>
-                        ) : (
-                          <p style={{ color: "#8a8177", margin: 0 }}>
-                            暂无轨迹数据（物流查询服务可能未接入，请联系顾问）
-                          </p>
+                              {step.label}
+                            </span>
+                          ))
                         )}
                       </div>
-                    )}
-                    <div className="my-account__order-meta">
-                      <em>{orderStatus[order.status] || order.status}</em>
-                      <strong>
-                        ¥{Number(order.finalAmount).toLocaleString("zh-CN")}
-                      </strong>
-                      {order.status === "COMPLETED" && order.items?.length ? (
-                        <button
-                          type="button"
-                          className="my-account__summary-action"
-                          style={{ padding: "6px 12px", fontSize: 12, minHeight: 0 }}
-                          onClick={() =>
-                            openReview({
-                              id: order.id,
-                              items: order.items || [],
-                            })
-                          }
+                      {order.logisticsCompany && order.logisticsNo ? (
+                        <p
+                          style={{
+                            fontSize: 11,
+                            color: "#8a8177",
+                            margin: "0 0 6px",
+                            display: "flex",
+                            gap: 8,
+                            alignItems: "center",
+                          }}
                         >
-                          评价作品
-                        </button>
-                      ) : null}
-                      {order.status === "PENDING_PAYMENT" &&
-                        (commerceEnabled ? (
-                          hasPendingProof(order.id) ? (
-                            <span style={{ fontSize: 11, color: "#b8944e" }}>
-                              凭证已提交·待审核
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              className="my-account__summary-action"
-                              style={{
-                                padding: "6px 12px",
-                                fontSize: 12,
-                                minHeight: 0,
-                              }}
-                              onClick={() => setProofOrderId(order.id)}
-                              disabled={uploading}
-                            >
-                              上传付款凭证
-                            </button>
-                          )
-                        ) : (
-                          <span style={{ fontSize: 11, color: "#766f66" }}>
-                            线上付款暂未开放·顾问将联系您
+                          <span>
+                            物流：{order.logisticsCompany} · 运单号{" "}
+                            {order.logisticsNo}
                           </span>
-                        ))}
-                    </div>
-                  </article>
+                          <button
+                            type="button"
+                            onClick={() => toggleTracking(order.id)}
+                            style={{
+                              fontSize: 11,
+                              color: "#b8944e",
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              padding: 0,
+                            }}
+                          >
+                            {trackingOrderId === order.id
+                              ? "收起轨迹"
+                              : "查看轨迹"}
+                          </button>
+                        </p>
+                      ) : null}
+                      {trackingOrderId === order.id && (
+                        <div
+                          style={{
+                            background: "#f9f7f4",
+                            padding: 12,
+                            marginBottom: 8,
+                            fontSize: 12,
+                          }}
+                        >
+                          {trackingLoading ? (
+                            <p style={{ color: "#8a8177", margin: 0 }}>
+                              轨迹查询中…
+                            </p>
+                          ) : trackingData && trackingData.events.length ? (
+                            <>
+                              <p
+                                style={{ color: "#b8944e", margin: "0 0 8px" }}
+                              >
+                                {TRACK_STATE[trackingData.state] || "运输中"}
+                                {trackingData.carrier
+                                  ? ` · ${trackingData.carrier}`
+                                  : ""}
+                              </p>
+                              {trackingData.events.map((ev, i) => (
+                                <p
+                                  key={i}
+                                  style={{
+                                    margin: "0 0 6px",
+                                    color: i === 0 ? "#4a443d" : "#8a8177",
+                                  }}
+                                >
+                                  <span style={{ marginRight: 8 }}>
+                                    {ev.time}
+                                  </span>
+                                  {ev.context}
+                                </p>
+                              ))}
+                            </>
+                          ) : (
+                            <p style={{ color: "#8a8177", margin: 0 }}>
+                              暂无轨迹数据（物流查询服务可能未接入，请联系顾问）
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      <div className="my-account__order-meta">
+                        <em>{orderStatus[order.status] || order.status}</em>
+                        <strong>
+                          ¥{Number(order.finalAmount).toLocaleString("zh-CN")}
+                        </strong>
+                        {order.status === "COMPLETED" && order.items?.length ? (
+                          <button
+                            type="button"
+                            className="my-account__summary-action"
+                            style={{
+                              padding: "6px 12px",
+                              fontSize: 12,
+                              minHeight: 0,
+                            }}
+                            onClick={() =>
+                              openReview({
+                                id: order.id,
+                                items: order.items || [],
+                              })
+                            }
+                          >
+                            评价作品
+                          </button>
+                        ) : null}
+                        {order.status === "PENDING_PAYMENT" &&
+                          (commerceEnabled ? (
+                            hasPendingProof(order.id) ? (
+                              <span style={{ fontSize: 11, color: "#b8944e" }}>
+                                凭证已提交·待审核
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="my-account__summary-action"
+                                style={{
+                                  padding: "6px 12px",
+                                  fontSize: 12,
+                                  minHeight: 0,
+                                }}
+                                onClick={() => setProofOrderId(order.id)}
+                                disabled={uploading}
+                              >
+                                上传付款凭证
+                              </button>
+                            )
+                          ) : (
+                            <span style={{ fontSize: 11, color: "#766f66" }}>
+                              线上付款暂未开放·顾问将联系您
+                            </span>
+                          ))}
+                      </div>
+                    </article>
                   );
                 })}
               </div>
@@ -817,6 +890,53 @@ export default function MyAccountDashboard({
                 <dd>{profile?.email || "暂未填写"}</dd>
               </div>
             </dl>
+            {/* 申请合作：申请入口 + 当前状态（协议未落地前，入口指向说明页，不开放表单提交） */}
+            <div style={{ marginBottom: 12 }}>
+              <p style={{ fontSize: 12, color: "#8a8177", margin: "0 0 8px" }}>
+                申请合作
+              </p>
+              <div
+                style={{
+                  padding: "12px 14px",
+                  background:
+                    partnerStatus === "APPROVED" ? "#f7f4ee" : "#f9f7f4",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <span style={{ fontSize: 13, color: "#4a443d" }}>
+                    {partnerStatus === "APPROVED"
+                      ? "✓ 已认证合作商家"
+                      : PARTNER_STATUS_LABEL[partnerStatus] ||
+                        "尚未申请合作商家身份"}
+                    {partnerStatus === "APPROVED" && partnerApprovedAt
+                      ? ` · ${new Date(partnerApprovedAt).toLocaleDateString("zh-CN")}`
+                      : ""}
+                  </span>
+                  {partnerStatus !== "APPROVED" &&
+                  partner?.latest?.reviewNote ? (
+                    <p
+                      style={{
+                        fontSize: 12,
+                        color: "#8a8177",
+                        margin: "6px 0 0",
+                      }}
+                    >
+                      审核说明：{partner.latest.reviewNote}
+                    </p>
+                  ) : null}
+                </div>
+                <Link
+                  to={PARTNER_ACTION[partnerStatus]?.to || "/partner"}
+                  style={{ fontSize: 12, color: "#b8944e", flexShrink: 0 }}
+                >
+                  {PARTNER_ACTION[partnerStatus]?.label || "了解详情"} →
+                </Link>
+              </div>
+            </div>
             <div style={{ marginBottom: 12 }}>
               <Button
                 size="small"
@@ -844,7 +964,11 @@ export default function MyAccountDashboard({
                 我的个人数据（资料/订单/收藏等）可随时导出或注销账户
               </span>
               <span style={{ display: "flex", gap: 8 }}>
-                <Button size="small" onClick={handleExportData} loading={exportingData}>
+                <Button
+                  size="small"
+                  onClick={handleExportData}
+                  loading={exportingData}
+                >
                   导出我的数据
                 </Button>
                 <Button size="small" danger onClick={() => setCloseOpen(true)}>
@@ -889,6 +1013,7 @@ export default function MyAccountDashboard({
             </div>
           </section>
         </div>
+        <ForYouRecommendations />
       </main>
       {commerceEnabled && (
         <Modal
@@ -971,7 +1096,9 @@ export default function MyAccountDashboard({
           />
         </div>
         <div>
-          <p style={{ fontSize: 13, marginBottom: 8 }}>晒单图（选填，最多 6 张）</p>
+          <p style={{ fontSize: 13, marginBottom: 8 }}>
+            晒单图（选填，最多 6 张）
+          </p>
           <Upload
             listType="picture-card"
             accept="image/*"
@@ -985,7 +1112,14 @@ export default function MyAccountDashboard({
             )}
           </Upload>
           {reviewImages.length > 0 ? (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                marginTop: 8,
+              }}
+            >
               {reviewImages.map((url) => (
                 <div key={url} style={{ position: "relative" }}>
                   <img
@@ -1026,7 +1160,10 @@ export default function MyAccountDashboard({
       <Modal
         open={closeOpen}
         title="注销账户"
-        onCancel={() => { setCloseOpen(false); setClosePassword(""); }}
+        onCancel={() => {
+          setCloseOpen(false);
+          setClosePassword("");
+        }}
         onOk={handleCloseAccount}
         confirmLoading={closing}
         okText="确认注销"

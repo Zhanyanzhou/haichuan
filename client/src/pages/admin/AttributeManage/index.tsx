@@ -17,6 +17,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { attributeApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import AdminPageHeader from "@/components/common/AdminPageHeader";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
 interface AttrValue {
   id: number;
@@ -42,6 +43,7 @@ export default function AttributeManage() {
   const [attrModalOpen, setAttrModalOpen] = useState(false);
   const [valueModalOpen, setValueModalOpen] = useState(false);
   const [currentAttrId, setCurrentAttrId] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState<AttrValue | null>(null);
   const [form] = Form.useForm();
   const [valueForm] = Form.useForm();
 
@@ -78,39 +80,52 @@ export default function AttributeManage() {
     try {
       if (editing) await attributeApi.update(editing.id, values);
       else await attributeApi.create(values);
-      message.success("已保存");
+      message.success("属性已保存");
       setAttrModalOpen(false);
       load();
     } catch (e: any) {
-      message.error(e?.message || "保存失败");
+      message.error(getSafeAdminErrorMessage(e, "属性保存失败，请检查填写内容后重试。"));
     }
   };
 
   const removeAttr = async (id: number) => {
     try {
       await attributeApi.remove(id);
-      message.success("已停用");
+      message.success("属性已停用");
       load();
     } catch (e: any) {
-      message.error(e?.message || "操作失败");
+      message.error(getSafeAdminErrorMessage(e, "属性停用失败，请重新加载后重试。"));
     }
   };
 
   const openAddValue = (attrId: number) => {
     setCurrentAttrId(attrId);
+    setEditingValue(null);
     valueForm.resetFields();
+    setValueModalOpen(true);
+  };
+
+  const openEditValue = (attrId: number, v: AttrValue) => {
+    setCurrentAttrId(attrId);
+    setEditingValue(v);
+    valueForm.setFieldsValue({ value: v.value, sortOrder: v.sortOrder });
     setValueModalOpen(true);
   };
 
   const submitValue = async () => {
     const values = await valueForm.validateFields();
     try {
-      await attributeApi.addValue(currentAttrId as number, values);
-      message.success("已添加属性值");
+      if (editingValue) {
+        await attributeApi.updateValue(editingValue.id, values);
+        message.success("已更新属性值");
+      } else {
+        await attributeApi.addValue(currentAttrId as number, values);
+        message.success("已添加属性值");
+      }
       setValueModalOpen(false);
       load();
     } catch (e: any) {
-      message.error(e?.message || "添加失败");
+      message.error(getSafeAdminErrorMessage(e, "属性值保存失败，请检查填写内容后重试。"));
     }
   };
 
@@ -120,7 +135,7 @@ export default function AttributeManage() {
       message.success("已停用属性值");
       load();
     } catch (e: any) {
-      message.error(e?.message || "操作失败");
+      message.error(getSafeAdminErrorMessage(e, "属性值停用失败，请重新加载后重试。"));
     }
   };
 
@@ -136,7 +151,7 @@ export default function AttributeManage() {
       title: "可筛选",
       dataIndex: "isFilterable",
       width: 90,
-      render: (v: boolean) => (v ? <Tag color="gold">是</Tag> : <Tag>否</Tag>),
+      render: (v: boolean) => (v ? <Tag>是</Tag> : <Tag>否</Tag>),
     },
     { title: "排序", dataIndex: "sortOrder", width: 70 },
     {
@@ -144,7 +159,7 @@ export default function AttributeManage() {
       dataIndex: "isActive",
       width: 90,
       render: (v: boolean) =>
-        v ? <Tag color="green">启用</Tag> : <Tag color="#999">停用</Tag>,
+        v ? <Tag color="success">启用</Tag> : <Tag color="default">停用</Tag>,
     },
     {
       title: "操作",
@@ -185,7 +200,7 @@ export default function AttributeManage() {
               icon={<PlusOutlined />}
               onClick={openCreateAttr}
             >
-              新增属性
+              新建属性
             </Button>
           </Space>
         }
@@ -206,20 +221,24 @@ export default function AttributeManage() {
                     icon={<PlusOutlined />}
                     onClick={() => openAddValue(attr.id)}
                   >
-                    新增属性值
+                    新建属性值
                   </Button>
                 </div>
                 {attr.values.length === 0 ? (
-                  <span style={{ color: "#999" }}>暂无属性值</span>
+                  <span style={{ color: "var(--adm-muted)" }}>暂无属性值</span>
                 ) : (
                   <Space size={[8, 8]} wrap>
                     {attr.values.map((v) => (
                       <Tag
                         key={v.id}
-                        color={v.isActive ? "default" : "#eee"}
+                        color="default"
                         style={{ opacity: v.isActive ? 1 : 0.5 }}
                       >
                         {v.value}
+                        <EditOutlined
+                          style={{ marginLeft: 6, cursor: "pointer", color: "var(--adm-action)" }}
+                          onClick={() => openEditValue(attr.id, v)}
+                        />
                         {v.isActive ? (
                           <Popconfirm
                             title="停用该属性值？"
@@ -229,7 +248,7 @@ export default function AttributeManage() {
                               style={{
                                 marginLeft: 6,
                                 cursor: "pointer",
-                                color: "#999",
+                                color: "var(--adm-error)",
                               }}
                             />
                           </Popconfirm>
@@ -245,7 +264,7 @@ export default function AttributeManage() {
       </Card>
 
       <Modal
-        title={editing ? "编辑属性" : "新增属性"}
+        title={editing ? "编辑属性" : "新建属性"}
         open={attrModalOpen}
         onOk={submitAttr}
         onCancel={() => setAttrModalOpen(false)}
@@ -291,7 +310,7 @@ export default function AttributeManage() {
       </Modal>
 
       <Modal
-        title="新增属性值"
+        title={editingValue ? "编辑属性值" : "新建属性值"}
         open={valueModalOpen}
         onOk={submitValue}
         onCancel={() => setValueModalOpen(false)}

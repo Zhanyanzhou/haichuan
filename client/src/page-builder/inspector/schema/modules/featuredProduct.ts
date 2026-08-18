@@ -1,28 +1,51 @@
 /**
- * schema/modules/featuredProduct.ts — 「单品焦点推荐(代表作品)」编辑区 Schema。
+ * schema/modules/featuredProduct.ts — 「单品焦点推荐(单品展示)」编辑区 Schema。
  * Hero Piece 母版:品牌页隐藏价格(默认),仅电商页开启。
  */
 import {
   FEATURED_PRODUCT_CONTRACT,
   evaluateFeaturedProductContract,
 } from "../../../config/blockContracts";
+import { createElement } from "react";
 import { featuredProductPuckConfig } from "../../../adapters/featuredProduct.puck";
+import ProductIdsField from "../../../fields/ProductIdsField";
 import { bgColorPresetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 export const featuredProductSchema: ModuleInspectorSchema = {
   moduleType: "单品焦点推荐",
-  displayName: "代表作品",
+  displayName: "单品展示",
   purpose: FEATURED_PRODUCT_CONTRACT.purpose,
   evaluate: evaluateFeaturedProductContract,
   defaults: { ...featuredProductPuckConfig.defaultProps },
+  groupTitles: { media: "选择作品" },
   sections: [
+    {
+      id: "featured-product",
+      title: "素材",
+      layer: "media",
+      description: "从商品系统选择主推作品，作品图固定 4:5，不重复上传",
+      fields: [
+        {
+          key: "productId",
+          label: "选择作品",
+          control: "custom",
+          render: ({ props, update }) =>
+            createElement(ProductIdsField, {
+              value:
+                Number(props.productId) > 0 ? [Number(props.productId)] : [],
+              onChange: (ids: number[]) => update({ productId: ids[0] ?? 0 }),
+              maxProducts: 1,
+            }),
+        },
+      ],
+    },
     {
       id: "featured-content",
       title: "内容",
       layer: "content",
       fields: [
-        moduleNameField("代表作品"),
+        moduleNameField("单品展示"),
         {
           key: "eyebrow",
           label: "眉题",
@@ -37,7 +60,7 @@ export const featuredProductSchema: ModuleInspectorSchema = {
           control: "text",
           required: true,
           maxLength: FEATURED_PRODUCT_CONTRACT.content.limits.title,
-          placeholder: "如 代表作品",
+          placeholder: "如 单品展示",
         },
         {
           key: "summary",
@@ -47,6 +70,13 @@ export const featuredProductSchema: ModuleInspectorSchema = {
           maxLength: FEATURED_PRODUCT_CONTRACT.content.limits.summary,
           hint: "设计、材质或工艺的一两句表达",
         },
+      ],
+    },
+    {
+      id: "featured-action",
+      title: "行动与关联",
+      layer: "interaction",
+      fields: [
         {
           key: "primaryText",
           label: "主行动文字",
@@ -87,8 +117,16 @@ export const featuredProductSchema: ModuleInspectorSchema = {
           label: "桌面版式",
           control: "segmented",
           options: [
-            { label: "作品图在左", value: "imageLeft", diagram: "imageLeftTextRight" },
-            { label: "作品图在右", value: "imageRight", diagram: "textLeftImageRight" },
+            {
+              label: "作品图在左",
+              value: "imageLeft",
+              diagram: "imageLeftTextRight",
+            },
+            {
+              label: "作品图在右",
+              value: "imageRight",
+              diagram: "textLeftImageRight",
+            },
           ],
         },
       ],
@@ -97,10 +135,15 @@ export const featuredProductSchema: ModuleInspectorSchema = {
       id: "featured-style",
       title: "样式",
       layer: "style",
+      fields: [bgColorPresetField()],
+    },
+    {
+      id: "featured-feature",
+      title: "模板专属功能",
+      layer: "feature",
       description: "品牌叙事页保持价格隐藏；仅电商选款场景开启",
       fields: [
         { key: "showPrice", label: "显示价格（仅电商页）", control: "switch" },
-        bgColorPresetField(),
       ],
     },
   ],

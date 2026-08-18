@@ -62,8 +62,8 @@ const puckData = {
         targetType: "page",
         linkUrl: "/products",
         productId: 0,
-        template: "textBottomLeft",
-        overlayPreset: "soft",
+        template: "captionBelow",
+        overlayPreset: "none",
         altText: "鎏光之境系列海报",
         desktopFocusX: 50,
         desktopFocusY: 50,
@@ -284,7 +284,7 @@ test.describe("八个核心装修模块首页闭环", () => {
     await expect(
       page.getByRole("heading", { name: "海川典藏", level: 1 }),
     ).toBeVisible();
-    await expect(page.locator(".hc-single-poster")).toHaveCSS(
+    await expect(page.locator(".hc-phase1-full-bleed__media")).toHaveCSS(
       "aspect-ratio",
       "21 / 6",
     );
@@ -323,7 +323,7 @@ test.describe("八个核心装修模块首页闭环", () => {
     await expect(
       page.getByRole("heading", { name: "海川典藏", level: 1 }),
     ).toBeVisible();
-    await expect(page.locator(".hc-single-poster")).toHaveCSS(
+    await expect(page.locator(".hc-phase1-full-bleed__media")).toHaveCSS(
       "aspect-ratio",
       "4 / 5",
     );

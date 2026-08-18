@@ -4,6 +4,7 @@ import { Throttle } from "@nestjs/throttler";
 import { Public } from "../../common/decorators/public.decorator";
 import {
   WechatAuthService,
+  type WechatCallbackOutcome,
   type WechatCallbackResult,
 } from "./wechat-auth.service";
 
@@ -15,11 +16,11 @@ export class WechatAuthController {
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Get("config")
-  config() {
+  config(@Query("origin") origin?: string) {
     if (!this.wechatAuth.isConfigured()) return { enabled: false };
     return {
       enabled: true,
-      qrConnectUrl: this.wechatAuth.buildQrConnectUrl().url,
+      qrConnectUrl: this.wechatAuth.buildQrConnectUrl(origin).url,
     };
   }
 
@@ -31,10 +32,15 @@ export class WechatAuthController {
     @Query("state") state: string,
     @Res() res: any,
   ) {
-    const result: WechatCallbackResult = code
+    const outcome: WechatCallbackOutcome = code
       ? await this.wechatAuth.handleCallback(code, state)
-      : { kind: "error", message: "缺少授权码" };
-    res.type("html").send(renderCallbackPage(result));
+      : {
+          result: { kind: "error", message: "缺少授权码" },
+          parentOrigin: null,
+        };
+    res
+      .type("html")
+      .send(renderCallbackPage(outcome.result, outcome.parentOrigin));
   }
 
   /** 扫码后绑定手机号：既有账户校验密码绑定，新手机号直接建号 */
@@ -49,21 +55,32 @@ export class WechatAuthController {
   }
 }
 
-/** 回调落地页：安全序列化结果并 postMessage 到父窗口（iframe 同源） */
-function renderCallbackPage(result: WechatCallbackResult): string {
+/** 回调落地页：序列化结果并按 state 中记录的父页 origin 精确回传（不再使用通配 origin） */
+function renderCallbackPage(
+  result: WechatCallbackResult,
+  parentOrigin: string | null,
+): string {
   const payload = JSON.stringify(result).replace(/</g, "\\u003c");
+  const allowedOrigin = JSON.stringify(parentOrigin ?? "");
   return `<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
 <body style="font-family:sans-serif;text-align:center;padding:48px 24px;color:#68645E;">
-  <p>登录处理中，请返回原页面…</p>
+  <p id="hint">登录处理中，请返回原页面…</p>
   <script>
     (function () {
       var payload = ${payload};
+      var allowedOrigin = ${allowedOrigin};
       try {
         var target = window.parent !== window ? window.parent : window.opener;
-        if (target) target.postMessage({ type: "wechat-login-result", payload: payload }, "*");
-      } catch (e) {}
+        if (target && allowedOrigin) {
+          target.postMessage({ type: "wechat-login-result", payload: payload }, allowedOrigin);
+        } else {
+          document.getElementById("hint").textContent = "登录失败：无法确认来源页面，请返回原页面重新扫码。";
+        }
+      } catch (e) {
+        document.getElementById("hint").textContent = "登录失败：无法安全回传结果，请返回原页面重新扫码。";
+      }
     })();
   </script>
 </body>

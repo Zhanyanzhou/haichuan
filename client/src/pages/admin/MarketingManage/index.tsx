@@ -24,6 +24,7 @@ import {
 } from "@ant-design/icons";
 import { marketingApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import dayjs from "dayjs";
 
 const PROMO_TYPE: Record<string, string> = {
@@ -46,9 +47,9 @@ export default function MarketingManage() {
       <div style={{ marginBottom: 24 }}>
         <h1
           style={{
-            fontSize: 24,
+            fontSize: 26,
             fontWeight: 600,
-            lineHeight: "32px",
+            lineHeight: "34px",
             color: "var(--admin-ink)",
             margin: 0,
           }}
@@ -70,7 +71,7 @@ export default function MarketingManage() {
         type="info"
         showIcon
         message="优惠券已接入下单结算；促销活动当前仅作记录管理"
-        description="后台人工建单时可选可用券（服务端试算与核销，单一公式口径）；促销活动暂不自动改价。客户侧线上交易仍处于冻结期。"
+        description="后台人工建单时可选可用券（服务端试算与核销，单一公式口径）；促销活动暂不自动改价。客户侧交易已开放（线下转账模式），结算下单时可使用优惠券。"
         style={{ maxWidth: 680, marginBottom: 20 }}
       />
       <Tabs
@@ -131,7 +132,7 @@ function PromotionsTab() {
       delete data.range;
       if (editing) await marketingApi.updatePromotion(editing.id, data);
       else await marketingApi.createPromotion(data);
-      message.success(editing ? "已更新" : "已创建");
+      message.success(editing ? "营销活动已更新" : "营销活动已创建");
       setModalOpen(false);
       setEditing(null);
       form.resetFields();
@@ -139,7 +140,7 @@ function PromotionsTab() {
     } catch (e: any) {
       // P1-37：校验失败（errorFields）由 antd 字段内提示，不重复弹；其余失败给反馈，避免 Modal 卡 loading
       if (e?.errorFields) return;
-      message.error(e?.message || "保存失败");
+      message.error(getSafeAdminErrorMessage(e, "营销活动保存失败，请检查填写内容后重试。"));
     } finally {
       setSaving(false);
     }
@@ -149,10 +150,10 @@ function PromotionsTab() {
     setSaving(true);
     try {
       await marketingApi.deletePromotion(id);
-      message.success("已删除");
+      message.success("营销活动已删除");
       load();
     } catch (e: any) {
-      message.error(e?.message || "删除失败");
+      message.error(getSafeAdminErrorMessage(e, "营销活动删除失败，请重新加载后重试。"));
     } finally {
       setSaving(false);
     }
@@ -232,9 +233,9 @@ function PromotionsTab() {
                   编辑
                 </Button>
                 <Popconfirm
-                  title="确认删除该促销活动？"
+                  title="删除该营销活动？"
                   onConfirm={() => handleDelete(r.id)}
-                  okText="删除"
+                  okText="删除活动"
                   cancelText="取消"
                 >
                   <Button size="small" danger icon={<DeleteOutlined />}>
@@ -331,7 +332,7 @@ function CouponsTab() {
       const values = await form.validateFields();
       if (editing) await marketingApi.updateCoupon(editing.id, values);
       else await marketingApi.createCoupon(values);
-      message.success(editing ? "已更新" : "已创建");
+      message.success(editing ? "优惠券已更新" : "优惠券已创建");
       setModalOpen(false);
       setEditing(null);
       form.resetFields();
@@ -339,7 +340,7 @@ function CouponsTab() {
     } catch (e: any) {
       // P1-37：校验失败由 antd 字段提示；其余失败给反馈，避免 Modal 卡 loading
       if (e?.errorFields) return;
-      message.error(e?.message || "保存失败");
+      message.error(getSafeAdminErrorMessage(e, "优惠券保存失败，请检查填写内容后重试。"));
     } finally {
       setSaving(false);
     }
@@ -381,7 +382,7 @@ function CouponsTab() {
               fontSize: 20,
               fontWeight: 600,
               margin: 0,
-              color: "#52c41a",
+              color: "var(--admin-success)",
             }}
           >
             {stats.active || 0}

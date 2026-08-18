@@ -243,6 +243,9 @@ function PrimaryNav({
                 whiteSpace: "nowrap",
                 color: isA ? T.txt : T.sec,
                 padding: "0 0 8px 0",
+                minHeight: 44,
+                display: "inline-flex",
+                alignItems: "center",
                 transition: "color 280ms",
               }}
             >
@@ -421,7 +424,10 @@ function Toolbar({
                 cursor: "pointer",
                 fontSize: 12,
                 color: T.sec,
-                padding: "4px 8px",
+                padding: "0 8px",
+                minHeight: 44,
+                display: "inline-flex",
+                alignItems: "center",
               }}
             >
               材质{materials.length > 0 ? ` ${materials.length}` : ""}
@@ -480,6 +486,7 @@ function Toolbar({
               color: T.sec,
               cursor: "pointer",
               outline: "none",
+              minHeight: 44,
             }}
           >
             <option value="recommended">推荐</option>
@@ -494,7 +501,10 @@ function Toolbar({
               cursor: "pointer",
               fontSize: 12,
               color: T.sec,
-              padding: "4px 8px",
+              padding: "0 8px",
+              minHeight: 44,
+              display: "inline-flex",
+              alignItems: "center",
             }}
           >
             更多筛选
@@ -666,7 +676,10 @@ function ActiveFilters({
             fontSize: 11,
             color: T.sec,
             textDecoration: "underline",
-            padding: "4px 2px",
+            padding: "0 2px",
+            minHeight: 44,
+            display: "inline-flex",
+            alignItems: "center",
           }}
         >
           清除筛选
@@ -1473,6 +1486,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
         email: form.email.trim() || undefined,
         wechat: form.wechat.trim() || undefined,
         message: form.message.trim() || undefined,
+        privacyConsent: form.privacyConsent,
         items: selected.map((p) => ({
           productId: p.id,
           productNameSnapshot: p.name || p.sku,
@@ -2024,6 +2038,17 @@ export default function Catalog() {
     update("weight", []);
     update("size", []);
   };
+  const hasActiveFilters = Boolean(
+    params.category ||
+      params.subcategory ||
+      params.query.trim() ||
+      params.materials.length ||
+      params.crafts.length ||
+      params.weights.length ||
+      params.sizes.length,
+  );
+  const showCatalogTools =
+    apiLoading || mergedProducts.length > 0 || hasActiveFilters;
   const toggleArray = (key: string, arr: string[], val: string) => {
     const newArr = arr.includes(val)
       ? arr.filter((x) => x !== val)
@@ -2037,7 +2062,7 @@ export default function Catalog() {
   }, []);
 
   return (
-    <main
+    <div
       style={{
         background: T.bg,
         minHeight: "100vh",
@@ -2045,74 +2070,80 @@ export default function Catalog() {
         overflowX: "hidden",
       }}
     >
-      <PrimaryNav
-        active={params.category}
-        onChange={(c) => update("category", c)}
-        categories={categories}
-      />
-      {params.category && (
-        <SecondaryNav
-          parentId={params.category}
-          active={params.subcategory}
-          onChange={(s) => update("subcategory", s)}
-          categories={categories}
-        />
-      )}
-      <div ref={sentinelRef}>
-        <Toolbar
-          category={params.category}
-          total={sorted.length}
-          materials={params.materials}
-          materialOptions={materialOptions}
-          sort={params.sort}
-          selCount={selCount}
-          onToggleMaterial={(m) => toggleArray("material", params.materials, m)}
-          onSort={(s) => update("sort", s)}
-          onOpenFilter={() => setFilterOpen(true)}
-          categories={categories}
-        />
-      </div>
-      {stickyVisible && (
-        <StickyBar
-          category={params.category}
-          total={sorted.length}
-          sort={params.sort}
-          selCount={selCount}
-          onSort={(s) => update("sort", s)}
-          categories={categories}
-        />
-      )}
-      <ActiveFilters
-        materials={params.materials}
-        crafts={params.crafts}
-        weights={params.weights}
-        sizes={params.sizes}
-        onClearMat={(m) =>
-          update(
-            "material",
-            params.materials.filter((x) => x !== m),
-          )
-        }
-        onClearCraft={(c) =>
-          update(
-            "craft",
-            params.crafts.filter((x) => x !== c),
-          )
-        }
-        onClearWeight={(w) =>
-          update(
-            "weight",
-            params.weights.filter((x) => x !== w),
-          )
-        }
-        onClearSize={(s) =>
-          update(
-            "size",
-            params.sizes.filter((x) => x !== s),
-          )
-        }
-        onClearAll={clearAll}
-      />
+      {showCatalogTools ? (
+        <>
+          <PrimaryNav
+            active={params.category}
+            onChange={(c) => update("category", c)}
+            categories={categories}
+          />
+          {params.category ? (
+            <SecondaryNav
+              parentId={params.category}
+              active={params.subcategory}
+              onChange={(s) => update("subcategory", s)}
+              categories={categories}
+            />
+          ) : null}
+          <div ref={sentinelRef}>
+            <Toolbar
+              category={params.category}
+              total={sorted.length}
+              materials={params.materials}
+              materialOptions={materialOptions}
+              sort={params.sort}
+              selCount={selCount}
+              onToggleMaterial={(m) =>
+                toggleArray("material", params.materials, m)
+              }
+              onSort={(s) => update("sort", s)}
+              onOpenFilter={() => setFilterOpen(true)}
+              categories={categories}
+            />
+          </div>
+          {stickyVisible ? (
+            <StickyBar
+              category={params.category}
+              total={sorted.length}
+              sort={params.sort}
+              selCount={selCount}
+              onSort={(s) => update("sort", s)}
+              categories={categories}
+            />
+          ) : null}
+          <ActiveFilters
+            materials={params.materials}
+            crafts={params.crafts}
+            weights={params.weights}
+            sizes={params.sizes}
+            onClearMat={(m) =>
+              update(
+                "material",
+                params.materials.filter((x) => x !== m),
+              )
+            }
+            onClearCraft={(c) =>
+              update(
+                "craft",
+                params.crafts.filter((x) => x !== c),
+              )
+            }
+            onClearWeight={(w) =>
+              update(
+                "weight",
+                params.weights.filter((x) => x !== w),
+              )
+            }
+            onClearSize={(s) =>
+              update(
+                "size",
+                params.sizes.filter((x) => x !== s),
+              )
+            }
+            onClearAll={clearAll}
+          />
+        </>
+      ) : null}
       {apiLoading ? (
         <div
           style={{
@@ -2136,21 +2167,38 @@ export default function Catalog() {
           }}
         >
           <p style={{ fontSize: 15, color: T.txt, marginBottom: 12 }}>
-            产品加载失败，请稍后重试
+            作品目录暂时无法加载
           </p>
-          <button
-            onClick={() => window.location.reload()}
-            style={{
-              background: "none",
-              border: `1px solid ${T.line}`,
-              padding: "8px 20px",
-              cursor: "pointer",
-              fontSize: 12,
-              color: T.txt,
-            }}
-          >
-            重新加载
-          </button>
+          <p style={{ fontSize: 13, color: T.sec, marginBottom: 20 }}>
+            您可以重新加载，或先提交需求由顾问协助选款。
+          </p>
+          <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
+            <button
+              onClick={() => window.location.reload()}
+              style={{
+                background: "none",
+                border: `1px solid ${T.line}`,
+                padding: "8px 20px",
+                cursor: "pointer",
+                fontSize: 12,
+                color: T.txt,
+              }}
+            >
+              重新加载
+            </button>
+            <Link
+              to="/contact"
+              style={{
+                border: `1px solid ${T.txt}`,
+                padding: "8px 20px",
+                fontSize: 12,
+                color: T.txt,
+                textDecoration: "none",
+              }}
+            >
+              预约咨询
+            </Link>
+          </div>
         </div>
       ) : sorted.length === 0 ? (
         <div
@@ -2162,22 +2210,59 @@ export default function Catalog() {
             paddingInline: "clamp(48px,5vw,80px)",
           }}
         >
-          <p style={{ fontSize: 15, color: T.txt, marginBottom: 8 }}>
-            暂无可展示的珠宝作品
-          </p>
-          <button
-            onClick={clearAll}
-            style={{
-              background: "none",
-              border: `1px solid ${T.line}`,
-              padding: "8px 20px",
-              cursor: "pointer",
-              fontSize: 12,
-              color: T.txt,
-            }}
-          >
-            清除筛选
-          </button>
+          {hasActiveFilters ? (
+            <>
+              <p style={{ fontSize: 15, color: T.txt, marginBottom: 8 }}>
+                没有符合当前筛选的作品
+              </p>
+              <button
+                onClick={clearAll}
+                style={{
+                  background: "none",
+                  border: `1px solid ${T.line}`,
+                  padding: "8px 20px",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  color: T.txt,
+                }}
+              >
+                清除筛选
+              </button>
+            </>
+          ) : (
+            <>
+              <p style={{ fontSize: 15, color: T.txt, marginBottom: 8 }}>
+                珠宝作品正在筹备中
+              </p>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: T.sec,
+                  marginBottom: 20,
+                  maxWidth: 360,
+                  marginInline: "auto",
+                }}
+              >
+                当前暂无已上架作品，欢迎预约咨询，顾问将为您推荐最新臻品。
+              </p>
+              <Link
+                to="/contact"
+                style={{
+                  display: "inline-flex",
+                  minHeight: 44,
+                  alignItems: "center",
+                  border: `1px solid ${T.txt}`,
+                  padding: "0 24px",
+                  fontSize: 12,
+                  color: T.txt,
+                  textDecoration: "none",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                预约咨询
+              </Link>
+            </>
+          )}
         </div>
       ) : (
         <ProductGrid
@@ -2218,6 +2303,6 @@ export default function Catalog() {
         />
       )}
       <SelectionTray products={mergedProducts} />
-    </main>
+    </div>
   );
 }

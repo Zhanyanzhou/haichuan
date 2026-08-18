@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, Spin, Tag, message } from "antd";
+import { Button, Tag, message } from "antd";
 import { DatabaseOutlined, LoadingOutlined } from "@ant-design/icons";
 import { unwrapResponse } from "@/utils/unwrap";
+import { AdminLoadingState } from "@/components/common/AdminDataStates";
 
 /** 获取 token（兼容多种存储方式） */
 function getToken(): string {
@@ -75,7 +76,7 @@ export default function Settings() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-display font-semibold text-brand-text">
+        <h1 className="font-semibold text-brand-text">
           系统设置
         </h1>
         <p className="text-sm text-brand-muted mt-1">备份恢复</p>
@@ -108,7 +109,7 @@ export default function Settings() {
 
         {checking && !status ? (
           <div className="flex justify-center p-6">
-            <Spin />
+            <AdminLoadingState subject="服务状态" compact />
           </div>
         ) : (
           <>
@@ -142,7 +143,7 @@ export default function Settings() {
                     </li>
                   ))}
                 </ul>
-                <p className="text-[11px] text-brand-muted mt-2">
+                <p className="text-xs leading-[18px] text-brand-muted mt-2">
                   恢复演练：备份文件位于宿主机 ./backups（数据库 .sql.gz + 媒体 .tar.gz），
                   请定期在测试环境做一次真实恢复验证。
                 </p>

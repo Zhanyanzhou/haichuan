@@ -11,7 +11,6 @@ import {
   Popconfirm,
   Select,
   Space,
-  Spin,
   Switch,
   Tag,
   Tooltip,
@@ -33,6 +32,8 @@ import { categoryApi, uploadApi } from "@/services/api";
 import type { Category, CategoryInput, CategorySortItem } from "@/types";
 import { unwrapResponse } from "@/utils/unwrap";
 import "./CategoryManage.css";
+import { ADMIN_COPY, getAdminEmptyText, getSafeAdminErrorMessage } from "@/constants/adminCopy";
+import { AdminLoadingState } from "@/components/common/AdminDataStates";
 
 /* ═══════════════════════════════════════════════
    类型与辅助函数
@@ -187,7 +188,7 @@ function CategoryImageUpload({
       message.success("分类图片上传成功");
     } catch (err) {
       console.error("分类图片上传失败:", err);
-      message.error("分类图片上传失败,请重试");
+      message.error("分类图片上传失败，请重试。");
     }
     return false;
   };
@@ -292,7 +293,7 @@ export default function CategoryManage() {
   const handleDrop = (info: any) => {
     // 1) 拒绝"成为某节点子级"的放置
     if (!info.dropToGap) {
-      message.warning("仅支持同级节点之间排序,不能改变层级");
+      message.warning("仅支持同级节点之间排序，不能改变层级。");
       return;
     }
     const dragKey = Number(info.dragNode.key);
@@ -336,7 +337,7 @@ export default function CategoryManage() {
       // 乐观更新已生效,不强制 refresh(以本地为准,减少请求)
     } catch (err: any) {
       console.error("排序更新失败:", err);
-      message.error(err?.message || "排序更新失败,已还原");
+      message.error(getSafeAdminErrorMessage(err, "分类排序更新失败，页面已还原原顺序，请重试。"));
       if (prevTreeRef.current) setTree(prevTreeRef.current);
     } finally {
       setReordering(false);
@@ -398,7 +399,7 @@ export default function CategoryManage() {
       await refresh();
     } catch (err: any) {
       console.error("保存分类失败:", err);
-      message.error(err?.message || "保存失败,请稍后重试");
+      message.error(getSafeAdminErrorMessage(err, "分类保存失败，请检查填写内容后重试。"));
     } finally {
       setSaving(false);
     }
@@ -408,22 +409,22 @@ export default function CategoryManage() {
   const handleDisable = async (node: CatTreeNode) => {
     try {
       await categoryApi.delete(node.id);
-      message.success("已停用");
+      message.success("分类已停用");
       await refresh();
     } catch (err: any) {
       console.error("停用失败:", err);
-      message.error(err?.message || "停用失败,请先处理关联项");
+      message.error(getSafeAdminErrorMessage(err, "分类停用失败，请检查关联商品后重试。"));
     }
   };
 
   const handleEnable = async (node: CatTreeNode) => {
     try {
       await categoryApi.update(node.id, { isActive: true });
-      message.success("已启用");
+      message.success("分类已启用");
       await refresh();
     } catch (err: any) {
       console.error("启用失败:", err);
-      message.error(err?.message || "启用失败,请稍后重试");
+      message.error(getSafeAdminErrorMessage(err, "分类启用失败，请重新加载后重试。"));
     }
   };
 
@@ -435,7 +436,7 @@ export default function CategoryManage() {
   if (loading) {
     return (
       <div className="cat-manage" style={{ alignItems: "center", justifyContent: "center" }}>
-        <Spin tip="正在加载分类…" />
+        <AdminLoadingState subject="分类" />
       </div>
     );
   }
@@ -445,11 +446,11 @@ export default function CategoryManage() {
       <header className="cat-manage__header">
         <div className="cat-manage__title">
           <h1>分类管理</h1>
-          <p>维护一、二级分类;拖拽同级节点可调整前后台展示顺序。</p>
+          <p>维护一、二级分类；拖拽同级节点可调整前后台展示顺序。</p>
         </div>
-        <ScifiButton variant="gold" size="sm" onClick={() => openCreate(null)}>
-          <PlusOutlined /> 新增一级分类
-        </ScifiButton>
+        <Button type="primary" size="small" onClick={() => openCreate(null)}>
+          <PlusOutlined /> 新建一级分类
+        </Button>
       </header>
 
       <div className="cat-manage__body">
@@ -466,15 +467,15 @@ export default function CategoryManage() {
           </div>
           <div className="cat-manage__tree-widget">
             {loadError ? (
-              <Empty description="分类加载失败" style={{ margin: "32px 0" }}>
+              <Empty description="分类加载失败，请稍后重试。" style={{ margin: "32px 0" }}>
                 <ScifiButton variant="outline" size="sm" onClick={() => void refresh()}>
-                  重新加载
+                  {ADMIN_COPY.actions.retry}
                 </ScifiButton>
               </Empty>
             ) : treeData.length === 0 ? (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={keyword ? "没有匹配的分类" : "暂无分类"}
+                description={getAdminEmptyText("分类", Boolean(keyword))}
                 style={{ margin: "32px 0" }}
               />
             ) : (
@@ -542,12 +543,12 @@ export default function CategoryManage() {
       <Modal
         className="cat-modal"
         destroyOnClose
-        title={editing ? "编辑分类" : "新增分类"}
+        title={editing ? "编辑分类" : "新建分类"}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={() => void handleSave()}
-        okText="保存"
-        cancelText="取消"
+        okText={ADMIN_COPY.actions.save}
+        cancelText={ADMIN_COPY.actions.cancel}
         confirmLoading={saving}
         width={560}
       >
@@ -570,11 +571,11 @@ export default function CategoryManage() {
                 { required: true, whitespace: true, message: "请填写分类名称" },
               ]}
             >
-              <Input placeholder="例如:吊坠" />
+              <Input placeholder="例如：吊坠" />
             </Form.Item>
             <Form.Item
               name="slug"
-              label="分类编码 Slug"
+              label="分类编码（Slug）"
               rules={[
                 { required: true, whitespace: true, message: "请填写 Slug" },
                 {
@@ -583,7 +584,7 @@ export default function CategoryManage() {
                 },
               ]}
             >
-              <Input placeholder="例如:pendant" />
+              <Input placeholder="例如：pendant" />
             </Form.Item>
           </div>
 
@@ -591,12 +592,12 @@ export default function CategoryManage() {
             <Form.Item name="sortOrder" label="排序">
               <InputNumber min={0} className="w-full" />
             </Form.Item>
-            <Form.Item name="icon" label="图标(可选 emoji)">
-              <Input maxLength={20} placeholder="例如:◆" />
+            <Form.Item name="icon" label="图标（可选 Emoji）">
+              <Input maxLength={20} placeholder="例如：◆" />
             </Form.Item>
           </div>
 
-          <Form.Item name="coverImage" label="分类图片(可选)">
+          <Form.Item name="coverImage" label="分类图片（可选）">
             <CategoryImageUpload />
           </Form.Item>
 
@@ -656,7 +657,7 @@ function DetailPanel({
         <div className="cat-detail__actions">
           {node.level === 1 && (
             <Button size="small" icon={<PlusOutlined />} onClick={onCreateSub} disabled={reordering}>
-              新增二级
+              新建二级分类
             </Button>
           )}
           <Button size="small" icon={<EditOutlined />} onClick={onEdit} disabled={reordering}>
@@ -667,8 +668,8 @@ function DetailPanel({
               <Tooltip
                 title={
                   node.level === 1
-                    ? "该分类下还有二级分类或商品,请先处理关联项"
-                    : "该分类包含商品,请先处理关联商品"
+                    ? "该分类下还有二级分类或商品，请先处理关联项。"
+                    : "该分类包含商品，请先处理关联商品。"
                 }
               >
                 <span>
@@ -681,8 +682,8 @@ function DetailPanel({
               <Popconfirm
                 title="停用分类"
                 description="停用后该分类在后台与前台均不再展示。"
-                okText="确认停用"
-                cancelText="取消"
+                okText="停用分类"
+                cancelText={ADMIN_COPY.actions.cancel}
                 onConfirm={onDisable}
               >
                 <Button size="small" danger icon={<DeleteOutlined />}>
@@ -709,7 +710,7 @@ function DetailPanel({
           <div className="cat-detail__field">
             <span className="cat-detail__field-label">状态</span>
             <Tag color={enabled ? "success" : "default"} style={{ width: "fit-content" }}>
-              {enabled ? "启用" : "已停用"}
+              {enabled ? ADMIN_COPY.status.enabled : ADMIN_COPY.status.disabled}
             </Tag>
           </div>
         </div>
@@ -748,15 +749,15 @@ function DetailPanel({
             </div>
           )}
           <div className="cat-detail__products-label">
-            分类图片{node.coverImage ? "" : "(未设置)"},在弹窗中编辑上传。
+            分类图片{node.coverImage ? "" : "（未设置）"}，可在编辑分类弹窗中上传。
           </div>
         </div>
         <div className="cat-detail__switches">
           <div className="cat-detail__switch-row">
             <Switch checked={enabled} disabled onChange={enabled ? onDisable : onEnable} />
-            <span>前台显示 / 导航显示</span>
+            <span>前台显示/导航显示</span>
             <span className="cat-detail__switch-tip">
-              (当前共用同一开关:关闭后该分类在后台导航与前台均不展示)
+              （当前共用同一开关；关闭后该分类在后台导航与前台均不展示）
             </span>
           </div>
         </div>

@@ -35,6 +35,7 @@ import {
   UserOutlined,
   LogoutOutlined,
   MenuOutlined,
+  LeftOutlined,
   RightOutlined,
   PushpinOutlined,
   PushpinFilled,
@@ -77,9 +78,18 @@ const domainIcons: Record<string, React.ReactNode> = {
 
 /** 浏览器放大或分屏时，优先释放侧栏空间，保证主操作区可用。 */
 const ADMIN_COMPACT_BREAKPOINT = 1024;
+const ADMIN_SIDEBAR_STORAGE_KEY = "admin-primary-sidebar-collapsed";
 
 function isCompactViewport() {
   return window.innerWidth <= ADMIN_COMPACT_BREAKPOINT;
+}
+
+function getInitialSidebarCollapsed() {
+  try {
+    return window.localStorage.getItem(ADMIN_SIDEBAR_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
 }
 
 /* ═══════ 按分区聚合域 ═══════ */
@@ -235,6 +245,9 @@ function SidebarDomainItem({
 export default function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isCompact, setIsCompact] = useState(isCompactViewport);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    getInitialSidebarCollapsed,
+  );
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(
     new Set(),
@@ -266,6 +279,17 @@ export default function AdminLayout() {
     window.addEventListener("resize", h);
     return () => window.removeEventListener("resize", h);
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        ADMIN_SIDEBAR_STORAGE_KEY,
+        String(sidebarCollapsed),
+      );
+    } catch {
+      // 隐私模式或存储受限时仅保留当前会话状态。
+    }
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     if (!isCompact || !mobileOpen) return;
@@ -384,94 +408,109 @@ export default function AdminLayout() {
   ];
 
   /* ── 侧边栏渲染 ── */
-  const renderSidebar = () => (
-    <div className="admin-sidebar">
-      {/* 导航区 */}
-      <nav
-        id={isCompact ? "admin-navigation-drawer" : undefined}
-        className="admin-sidebar__nav"
-        aria-label="后台导航"
-      >
-        {sections.map((section) => {
-          const visibleDomains = section.domains;
-          if (visibleDomains.length === 0) return null;
+  const renderSidebar = ({
+    collapsed = false,
+    id,
+  }: {
+    collapsed?: boolean;
+    id?: string;
+  } = {}) => (
+    <aside
+      id={id}
+      className={`admin-sidebar${collapsed ? " is-collapsed" : ""}`}
+      aria-label="后台一级导航"
+      aria-hidden={collapsed || undefined}
+    >
+      {!collapsed ? (
+        <>
+          {/* 导航区 */}
+          <nav className="admin-sidebar__nav" aria-label="后台导航">
+            {sections.map((section) => {
+              const visibleDomains = section.domains;
+              if (visibleDomains.length === 0) return null;
 
-          return (
-            <div
-              key={section.key}
-              className={`admin-sidebar__section admin-sidebar__section--${section.key}`}
-            >
-              {visibleDomains.map((domain) => {
-                const isActive = navCtx?.domain.key === domain.key;
-                const isExpanded = expandedDomains.has(domain.key);
-                const allItems =
-                  domain.key === "common"
-                    ? commonItems.filter((item) =>
-                        canAccessAdminRoute(user?.role, item.route),
-                      )
-                    : domain.groups.flatMap((g) =>
-                        g.items
-                          .filter((i) => !i.featureFlag && !i.disabled)
-                          .map((i) => ({ ...i, pinned: false })),
-                      );
+              return (
+                <div
+                  key={section.key}
+                  className={`admin-sidebar__section admin-sidebar__section--${section.key}`}
+                >
+                  {visibleDomains.map((domain) => {
+                    const isActive = navCtx?.domain.key === domain.key;
+                    const isExpanded = expandedDomains.has(domain.key);
+                    const allItems =
+                      domain.key === "common"
+                        ? commonItems.filter((item) =>
+                            canAccessAdminRoute(user?.role, item.route),
+                          )
+                        : domain.groups.flatMap((g) =>
+                            g.items
+                              .filter((i) => !i.featureFlag && !i.disabled)
+                              .map((i) => ({ ...i, pinned: false })),
+                          );
 
-                return (
-                  <SidebarDomainItem
-                    key={domain.key}
-                    domain={domain}
-                    isActive={isActive}
-                    isExpanded={isExpanded}
-                    allItems={allItems}
-                    location={location}
-                    onDomainClick={handleDomainClick}
-                    onToggle={toggleDomain}
-                    onItemClick={handleItemClick}
-                    onTogglePin={handleToggleCommonPin}
-                  />
-                );
-              })}
-            </div>
-          );
-        })}
-      </nav>
+                    return (
+                      <SidebarDomainItem
+                        key={domain.key}
+                        domain={domain}
+                        isActive={isActive}
+                        isExpanded={isExpanded}
+                        allItems={allItems}
+                        location={location}
+                        onDomainClick={handleDomainClick}
+                        onToggle={toggleDomain}
+                        onItemClick={handleItemClick}
+                        onTogglePin={handleToggleCommonPin}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </nav>
 
-      {/* 底部用户区 */}
-      <div className="admin-sidebar__footer">
-        <Dropdown
-          menu={{
-            items: userMenuItems,
-            onClick: ({ key }) => {
-              if (key === "logout") {
-                logout();
-                navigate("/admin/login");
-              }
-            },
-          }}
-          placement="topRight"
-        >
-          <div className="admin-sidebar__user">
-            <Avatar
-              size={28}
-              icon={<UserOutlined />}
-              style={{
-                backgroundColor: "var(--adm-gold-soft)",
-                color: "var(--adm-gold)",
-                flexShrink: 0,
+          {/* 底部用户区 */}
+          <div className="admin-sidebar__footer">
+            <Dropdown
+              menu={{
+                items: userMenuItems,
+                onClick: ({ key }) => {
+                  if (key === "logout") {
+                    logout();
+                    navigate("/admin/login");
+                  }
+                },
               }}
-            />
-            <span className="admin-sidebar__user-name">
-              {user?.realName || "管理员"}
-            </span>
+              placement="topRight"
+            >
+              <div className="admin-sidebar__user">
+                <Avatar
+                  size={28}
+                  icon={<UserOutlined />}
+                  style={{
+                    backgroundColor: "var(--adm-gold-soft)",
+                    color: "var(--adm-action)",
+                    flexShrink: 0,
+                  }}
+                />
+                <span className="admin-sidebar__user-name">
+                  {user?.realName || "管理员"}
+                </span>
+              </div>
+            </Dropdown>
           </div>
-        </Dropdown>
-      </div>
-    </div>
+        </>
+      ) : null}
+    </aside>
   );
 
   return (
-    <div className="admin-shell-v7">
+    <div
+      className={`admin-shell-v7${!isCompact && sidebarCollapsed ? " is-sidebar-collapsed" : ""}`}
+    >
       {/* ═══ Header ═══ */}
-      <header className="admin-header">
+      <header
+        className={`admin-header${isEditorWorkspace ? " admin-header--editor" : ""}`}
+      >
         <div className="admin-header__left">
           {isCompact && (
             <Button
@@ -487,43 +526,55 @@ export default function AdminLayout() {
           )}
         </div>
 
+        {isEditorWorkspace ? (
+          <div
+            id="admin-editor-toolbar-slot"
+            className="admin-header__editor-slot"
+            aria-label="店铺装修工具栏"
+          />
+        ) : null}
+
         <div className="admin-header__right">
-          <Link
-            to="/"
-            target="_blank"
-            className="admin-header__icon-btn"
-            title="访问前台首页"
-            aria-label="访问前台首页"
-          >
-            <GlobalOutlined />
-          </Link>
-          <Link
-            to="/search"
-            target="_blank"
-            className="admin-header__icon-btn"
-            title="搜索商品"
-            aria-label="搜索商品"
-          >
-            <SearchOutlined />
-          </Link>
-          <Link
-            to="/catalog"
-            target="_blank"
-            className="admin-header__icon-btn"
-            title="选款中心"
-            aria-label="选款中心"
-          >
-            <AppstoreOutlined />
-          </Link>
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="admin-header__icon-btn"
-            aria-label="刷新"
-            title="刷新"
-          >
-            <ReloadOutlined />
-          </button>
+          {!isEditorWorkspace ? (
+            <>
+              <Link
+                to="/"
+                target="_blank"
+                className="admin-header__icon-btn"
+                title="访问前台首页"
+                aria-label="访问前台首页"
+              >
+                <GlobalOutlined />
+              </Link>
+              <Link
+                to="/search"
+                target="_blank"
+                className="admin-header__icon-btn"
+                title="搜索商品"
+                aria-label="搜索商品"
+              >
+                <SearchOutlined />
+              </Link>
+              <Link
+                to="/catalog"
+                target="_blank"
+                className="admin-header__icon-btn"
+                title="选款中心"
+                aria-label="选款中心"
+              >
+                <AppstoreOutlined />
+              </Link>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="admin-header__icon-btn"
+                aria-label="刷新"
+                title="刷新"
+              >
+                <ReloadOutlined />
+              </button>
+            </>
+          ) : null}
           <Link to="/" target="_blank" className="admin-header__link">
             预览网站
           </Link>
@@ -544,7 +595,7 @@ export default function AdminLayout() {
                 icon={<UserOutlined />}
                 style={{
                   backgroundColor: "var(--adm-gold-soft)",
-                  color: "var(--adm-gold)",
+                  color: "var(--adm-action)",
                 }}
               />
             </div>
@@ -555,7 +606,25 @@ export default function AdminLayout() {
       {/* ═══ Body ═══ */}
       <div className="admin-body">
         {/* 桌面端侧边栏 */}
-        {!isCompact && renderSidebar()}
+        {!isCompact &&
+          renderSidebar({
+            collapsed: sidebarCollapsed,
+            id: "admin-navigation-sidebar",
+          })}
+
+        {!isCompact && (
+          <button
+            type="button"
+            className="admin-sidebar__collapse-handle"
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            aria-label={sidebarCollapsed ? "展开一级导航" : "收起一级导航"}
+            aria-controls="admin-navigation-sidebar"
+            aria-expanded={!sidebarCollapsed}
+            title={sidebarCollapsed ? "展开一级导航" : "收起一级导航"}
+          >
+            {sidebarCollapsed ? <RightOutlined /> : <LeftOutlined />}
+          </button>
+        )}
 
         {/* 移动端抽屉 */}
         {isCompact && (
@@ -566,7 +635,7 @@ export default function AdminLayout() {
             width={260}
             styles={{ body: { padding: 0 }, header: { display: "none" } }}
           >
-            {renderSidebar()}
+            {renderSidebar({ id: "admin-navigation-drawer" })}
           </Drawer>
         )}
 

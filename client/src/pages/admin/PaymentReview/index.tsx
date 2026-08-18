@@ -4,6 +4,7 @@ import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined, ReloadOutlined
 import { SecureImage } from '@/components/common/SecureImage';
 import { paymentApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
+import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
 import type { PaginatedResult, Payment } from '@/types';
 
 const statusMap: Record<string, { color: string; label: string }> = {
@@ -118,7 +119,7 @@ export default function PaymentReview() {
           if (detail?.id === payment.id) void openDetail(payment);
         } catch (e: any) {
           // 并发审核失败时后端返回明确中文错误（"该付款记录已被处理，请刷新后重试"）
-          message.error(e?.message || '操作失败');
+          message.error(getSafeAdminErrorMessage(e, '付款凭证审核未完成，请重新加载后确认当前状态。'));
         } finally {
           setReviewing(false);
         }
@@ -150,7 +151,7 @@ export default function PaymentReview() {
       receiptForm.resetFields();
       void load();
     } catch (e: any) {
-      message.error(e?.message || '登记失败');
+      message.error(getSafeAdminErrorMessage(e, '收款登记失败，请核对金额和付款信息后重试。'));
     } finally {
       setReceiptSubmitting(false);
     }
@@ -160,7 +161,7 @@ export default function PaymentReview() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-display font-semibold text-brand-text">付款审核</h1>
+          <h1 className="font-semibold text-brand-text">付款审核</h1>
           <p className="text-sm text-brand-muted mt-1">线下转账凭证审核与收款确认（审核通过后订单自动进入待发货，库存实扣）</p>
         </div>
         <Space>
@@ -257,7 +258,7 @@ export default function PaymentReview() {
         onCancel={() => setReceiptOpen(false)}
         onOk={handleCreateReceipt}
         confirmLoading={receiptSubmitting}
-        okText="确认登记"
+        okText="登记收款"
         destroyOnClose
       >
         <Form form={receiptForm} layout="vertical" initialValues={{ type: 'FULL', method: 'bank_transfer' }}>

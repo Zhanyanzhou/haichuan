@@ -924,6 +924,8 @@ model Inquiry {
   budgetRange      String?   @map("budget_range") @db.VarChar(30)
   message          String    @db.Text
   privacyConsent   Boolean   @default(false) @map("privacy_consent")
+  privacyConsentVersion String? @map("privacy_consent_version") @db.VarChar(50)
+  privacyConsentedAt DateTime? @map("privacy_consented_at")
   status           String    @default("PENDING") @db.VarChar(20)
   assignedTo       Int?      @map("assigned_to")
   reply            String?   @db.Text
@@ -1112,6 +1114,9 @@ model SelectionInquiry {
   email          String?   @db.VarChar(100)
   wechat         String?   @db.VarChar(50)
   message        String?   @db.Text
+  privacyConsent Boolean   @default(false) @map("privacy_consent")
+  privacyConsentVersion String? @map("privacy_consent_version") @db.VarChar(50)
+  privacyConsentedAt DateTime? @map("privacy_consented_at")
   status         String    @default("PENDING") @db.VarChar(20)
   internalNote   String?   @map("internal_note") @db.Text
   handledBy      Int?      @map("handled_by")

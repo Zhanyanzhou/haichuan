@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import PublicLayout from "@/components/layout/PublicLayout";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { RequestErrorNotice } from "@/components/common/RequestErrorNotice";
@@ -10,6 +10,7 @@ import {
   canAccessAdminRoute,
 } from "@/config/adminRouteAccess";
 import { useAuthStore } from "@/store/authStore";
+import { useCommerceFlags } from "@/store/featureFlags";
 
 // 后台布局与后台鉴权失败页依赖 Ant Design，不应进入前台首屏依赖图。
 const AdminLayout = lazy(() => import("@/components/layout/AdminLayout"));
@@ -36,6 +37,8 @@ const PaymentReview = lazy(() => import("@/pages/admin/PaymentReview"));
 const About = lazy(() => import("@/pages/public/About"));
 const Contact = lazy(() => import("@/pages/public/Contact"));
 const Privacy = lazy(() => import("@/pages/public/Privacy"));
+const Cart = lazy(() => import("@/pages/public/Cart"));
+const Checkout = lazy(() => import("@/pages/public/Checkout"));
 const Catalog = lazy(() => import("@/pages/public/Catalog"));
 const Custom = lazy(() => import("@/pages/public/Custom"));
 const Search = lazy(() => import("@/pages/public/Search"));
@@ -49,9 +52,12 @@ const ProductManage = lazy(() => import("@/pages/admin/ProductManage"));
 const ProductEditor = lazy(() => import("@/pages/admin/ProductEditor"));
 const CategoryManage = lazy(() => import("@/pages/admin/CategoryManage"));
 const AttributeManage = lazy(() => import("@/pages/admin/AttributeManage"));
+const TagManage = lazy(() => import("@/pages/admin/TagManage"));
 const AIClassify = lazy(() => import("@/pages/admin/AIClassify"));
+const AnalyticsView = lazy(() => import("@/pages/admin/AnalyticsView"));
 const GoldPrice = lazy(() => import("@/pages/admin/GoldPrice"));
 const Inventory = lazy(() => import("@/pages/admin/Inventory"));
+const WarehouseManage = lazy(() => import("@/pages/admin/WarehouseManage"));
 const OrderManage = lazy(() => import("@/pages/admin/OrderManage"));
 const QuotationManage = lazy(() => import("@/pages/admin/QuotationManage"));
 const TradeOverview = lazy(() => import("@/pages/admin/TradeOverview"));
@@ -87,6 +93,24 @@ const Loading = () => (
     <span className="sr-only">页面加载中</span>
   </div>
 );
+
+/**
+ * 交易开关关闭或读取失败时，直接访问旧链接也不能进入购物车/结算页面。
+ * 服务端 CustomerCommerceGuard 仍是写操作的最终保护；本组件只负责访客路径降级。
+ */
+const CommerceRoute = ({ children }: { children: React.ReactNode }) => {
+  const flags = useCommerceFlags((state) => state.flags);
+  const loading = useCommerceFlags((state) => state.loading);
+  const load = useCommerceFlags((state) => state.load);
+
+  useEffect(() => {
+    if (!flags && !loading) void load();
+  }, [flags, loading, load]);
+
+  if (!flags) return <Loading />;
+  if (!flags.commerceEnabled) return <Navigate to="/contact" replace />;
+  return <>{children}</>;
+};
 
 const AdminPage = ({
   children,
@@ -154,13 +178,25 @@ function App() {
             <Route
               path="cart"
               element={
-                <Navigate to="/contact?reason=commerce-unavailable" replace />
+                <CommerceRoute>
+                  <CustomerProtectedRoute>
+                    <AntdRoute>
+                      <Cart />
+                    </AntdRoute>
+                  </CustomerProtectedRoute>
+                </CommerceRoute>
               }
             />
             <Route
               path="checkout"
               element={
-                <Navigate to="/contact?reason=commerce-unavailable" replace />
+                <CommerceRoute>
+                  <CustomerProtectedRoute>
+                    <AntdRoute>
+                      <Checkout />
+                    </AntdRoute>
+                  </CustomerProtectedRoute>
+                </CommerceRoute>
               }
             />
             <Route
@@ -293,10 +329,26 @@ function App() {
               }
             />
             <Route
+              path="tags"
+              element={
+                <AdminPage route="/admin/tags">
+                  <TagManage />
+                </AdminPage>
+              }
+            />
+            <Route
               path="ai-classify"
               element={
                 <AdminPage route="/admin/ai-classify">
                   <AIClassify />
+                </AdminPage>
+              }
+            />
+            <Route
+              path="analytics"
+              element={
+                <AdminPage route="/admin/analytics">
+                  <AnalyticsView />
                 </AdminPage>
               }
             />
@@ -313,6 +365,14 @@ function App() {
               element={
                 <AdminPage route="/admin/inventory">
                   <Inventory />
+                </AdminPage>
+              }
+            />
+            <Route
+              path="warehouses"
+              element={
+                <AdminPage route="/admin/warehouses">
+                  <WarehouseManage />
                 </AdminPage>
               }
             />

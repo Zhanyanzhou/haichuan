@@ -13,7 +13,7 @@ import type { ModuleInspectorSchema } from "../types";
 
 export const doublePosterSchema: ModuleInspectorSchema = {
   moduleType: "双图海报",
-  displayName: "系列对照·双幅",
+  displayName: "双图文",
   purpose: DOUBLE_POSTER_CONTRACT.purpose,
   evaluate: evaluateDoublePosterContract,
   defaults: { ...doublePosterPuckConfig.defaultProps },
@@ -23,7 +23,7 @@ export const doublePosterSchema: ModuleInspectorSchema = {
       title: "内容",
       layer: "content",
       fields: [
-        moduleNameField("系列对照·双幅"),
+        moduleNameField("双图文"),
         {
           key: "title",
           label: "标题",
@@ -57,6 +57,13 @@ export const doublePosterSchema: ModuleInspectorSchema = {
           hint: "留空不显示",
           placeholder: "如 COLLECTION",
         },
+      ],
+    },
+    {
+      id: "double-poster-action",
+      title: "行动与关联",
+      layer: "interaction",
+      fields: [
         {
           key: "actionText",
           label: "引导文字",
@@ -72,7 +79,8 @@ export const doublePosterSchema: ModuleInspectorSchema = {
       id: "double-poster-media",
       title: "媒体",
       layer: "media",
-      description: "主图 3:2（约 2/3 宽）+ 细节图 4:5（细节下移错位）；手机上下排列",
+      description:
+        "主图 3:2（约 2/3 宽）+ 细节图 4:5（细节下移错位）；手机上下排列",
       fields: [
         {
           key: "mainImage",
@@ -97,22 +105,6 @@ export const doublePosterSchema: ModuleInspectorSchema = {
       ],
     },
     {
-      id: "double-poster-layout",
-      title: "布局",
-      layer: "layout",
-      fields: [
-        {
-          key: "layout",
-          label: "桌面版式",
-          control: "segmented",
-          options: [
-            { label: "主图在左", value: "mainLeft", diagram: "mainLeft" },
-            { label: "主图在右", value: "mainRight", diagram: "mainRight" },
-          ],
-        },
-      ],
-    },
-    {
       id: "double-poster-advanced",
       title: "高级设置",
       layer: "style",
@@ -122,13 +114,13 @@ export const doublePosterSchema: ModuleInspectorSchema = {
           key: "mainAltText",
           label: "主图替代文字",
           control: "text",
-          maxLength: DOUBLE_POSTER_CONTRACT.content.limits.altText,
+          maxLength: DOUBLE_POSTER_CONTRACT.content.limits.mainAltText,
         },
         {
           key: "detailAltText",
           label: "细节图替代文字",
           control: "text",
-          maxLength: DOUBLE_POSTER_CONTRACT.content.limits.altText,
+          maxLength: DOUBLE_POSTER_CONTRACT.content.limits.detailAltText,
         },
       ],
     },

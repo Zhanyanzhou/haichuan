@@ -3,6 +3,7 @@ import { colorPuckField } from "../fields/ColorField";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 
 export interface LimitedOfferPuckProps {
+  eventImage: string;
   eyebrow: string;
   title: string;
   body: string;
@@ -20,6 +21,7 @@ export const limitedOfferPuckConfig = {
     return <LimitedOfferBlock module={module as NonNullable<typeof module>} />;
   },
   defaultProps: {
+    eventImage: "",
     eyebrow: "CAMPAIGN",
     title: "活动信息待配置",
     body: "请在发布前填写已确认的活动内容、结束时间与适用规则。",
@@ -31,6 +33,7 @@ export const limitedOfferPuckConfig = {
     locked: false,
   } satisfies LimitedOfferPuckProps,
   fields: {
+    eventImage: { type: "text" as const, label: "活动视觉 URL" },
     eyebrow: { type: "text" as const, label: "眉题" },
     title: { type: "text" as const, label: "活动标题" },
     body: { type: "textarea" as const, label: "活动说明" },

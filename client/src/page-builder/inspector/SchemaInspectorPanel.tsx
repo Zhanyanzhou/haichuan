@@ -1,13 +1,14 @@
 /**
  * SchemaInspectorPanel.tsx — 由模块 Schema 驱动的统一编辑面板。
  *
- * 结构：TopBar（模块上下文）→ 完成度横幅 →
- *       按层排序的分区（内容→布局→样式→交互，折叠区默认收起）→
- *       FooterBar（撤销本模块修改 / 保存整页草稿）。
+ * 结构：TopBar（当前实例）→
+ *       连续任务分区（素材→内容→跳转→构图，全部直接展示）→
+ *       FooterBar（手动保存整页草稿）。
  * 与 InspectorPanel 的三级分派配合：仅在 registry 命中时渲染。
  */
-import { useMemo } from "react";
+import { DesktopOutlined, MobileOutlined } from "@ant-design/icons";
 import { message, Modal } from "antd";
+import { RESPONSIVE_CANVAS } from "../config/blockContracts";
 import { useHomepagePuck } from "../../pages/admin/HomepageConfig/editor-store";
 import {
   cloneModuleProps,
@@ -19,51 +20,163 @@ import SectionRenderer from "./SectionRenderer";
 import FieldRenderer, { isFieldVisible } from "./FieldRenderer";
 import { useInspectorModuleEditor } from "./useInspectorModuleEditor";
 import {
-  INSPECTOR_LAYER_ORDER,
-  INSPECTOR_LAYER_TITLES,
+  type FieldDef,
   type InspectorContext,
+  type InspectorLayer,
   type ModuleInspectorSchema,
 } from "./schema/types";
 
 interface SchemaInspectorPanelProps {
   schema: ModuleInspectorSchema;
+  hasUnsavedChanges: boolean;
+  saving: boolean;
+  onSaveDraft: () => void;
+}
+
+type InspectorTaskGroup =
+  "content" | "media" | "link" | "composition" | "feature";
+
+interface VisibleFieldEntry {
+  sectionId: string;
+  field: FieldDef;
+}
+
+const TASK_GROUP_ORDER: InspectorTaskGroup[] = [
+  "media",
+  "content",
+  "link",
+  "composition",
+  "feature",
+];
+
+const TASK_GROUP_META: Record<
+  InspectorTaskGroup,
+  { label: string; description: string }
+> = {
+  media: {
+    label: "图片素材",
+    description: "替换图片并检查双端裁切、清晰度与替代文字。",
+  },
+  content: {
+    label: "文字内容",
+    description: "先完成页面上真正展示的文字，修改会立即同步到画布。",
+  },
+  link: {
+    label: "行动与关联",
+    description: "设置当前区块的行动入口与站内去向。",
+  },
+  composition: {
+    label: "构图与设备素材",
+    description: "仅使用模板允许的布局、留白和视觉预设。",
+  },
+  feature: {
+    label: "模板专属功能",
+    description: "仅本模板具备的受控能力，修改会立即同步到画布。",
+  },
+};
+
+function getTaskGroup(
+  field: FieldDef,
+  layer: InspectorLayer,
+): InspectorTaskGroup {
+  if (layer === "feature") {
+    return "feature";
+  }
+  if (
+    field.control === "media" ||
+    layer === "media" ||
+    field.key.toLowerCase().includes("alt")
+  ) {
+    return "media";
+  }
+  if (field.control === "linkTarget" || layer === "interaction") {
+    return "link";
+  }
+  if (layer === "layout" || layer === "style") {
+    return "composition";
+  }
+  return "content";
 }
 
 export default function SchemaInspectorPanel({
   schema,
+  hasUnsavedChanges,
+  saving,
+  onSaveDraft,
 }: SchemaInspectorPanelProps) {
   const editor = useInspectorModuleEditor();
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const appData = useHomepagePuck((state) => state.appState.data);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
 
-  const ctx: InspectorContext | null = useMemo(
-    () =>
-      editor
-        ? {
-            props: editor.props,
-            device: editor.device,
-            viewportWidth: viewports.current.width,
-          }
-        : null,
-    [editor?.props, editor?.device, viewports.current.width],
-  );
+  const ctx: InspectorContext | null = editor
+    ? {
+        props: editor.props,
+        device: editor.device,
+        viewportWidth: viewports.current.width,
+      }
+    : null;
 
   if (!editor || !ctx) return null;
 
-  const sections = [...schema.sections]
+  const content = appData.content as Array<{
+    type: string;
+    props: Record<string, any>;
+  }>;
+
+  const visibleFields = schema.sections
     .filter((section) => !section.visibleWhen || section.visibleWhen(ctx))
-    .sort(
-      (a, b) =>
-        INSPECTOR_LAYER_ORDER.indexOf(a.layer) -
-        INSPECTOR_LAYER_ORDER.indexOf(b.layer),
+    .flatMap((section) =>
+      section.fields
+        .filter(
+          (field) =>
+            field.key !== "moduleName" &&
+            isFieldVisible(field, ctx) &&
+            (!field.device ||
+              field.device === "shared" ||
+              field.device === editor.device),
+        )
+        .map((field) => ({
+          sectionId: section.id,
+          layer: section.layer,
+          field,
+        })),
     );
 
+  const taskGroups = TASK_GROUP_ORDER.map((group) => ({
+    group,
+    entries: visibleFields
+      .filter((entry) => getTaskGroup(entry.field, entry.layer) === group)
+      .map<VisibleFieldEntry>(({ layer: _layer, ...entry }) => entry),
+  })).filter((item) => item.entries.length > 0);
+
+  const deviceMediaFields = schema.sections
+    .flatMap((section) => section.fields)
+    .filter((field) => field.control === "media");
+  const hasDesktopMedia = deviceMediaFields.some(
+    (field) =>
+      !field.device || field.device === "shared" || field.device === "desktop",
+  );
+  const hasMobileMedia = deviceMediaFields.some(
+    (field) =>
+      !field.device || field.device === "shared" || field.device === "mobile",
+  );
+  const hasDeviceMedia = deviceMediaFields.length > 0;
+
+  const setInspectorDevice = (device: "desktop" | "mobile") => {
+    const preset = RESPONSIVE_CANVAS[device];
+    dispatch({
+      type: "setUi",
+      ui: {
+        viewports: {
+          ...viewports,
+          current: { width: preset.width, height: preset.height },
+        },
+      },
+    });
+  };
+
   const removeModule = () => {
-    const content = appData.content as Array<{
-      type: string;
-      props: Record<string, any>;
-    }>;
     const index = content.findIndex(
       (item) => item.props?.id === editor.props.id,
     );
@@ -74,7 +187,7 @@ export default function SchemaInspectorPanel({
     }
     Modal.confirm({
       title: `删除“${getModuleDisplayName(editor.moduleType, editor.props)}”？`,
-      content: "删除后可从模块库重新添加；尚未发布的修改可通过版本记录恢复。",
+      content: "删除后可通过顶部撤销恢复；保存草稿前不会影响前台页面。",
       okText: "删除模块",
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -105,7 +218,8 @@ export default function SchemaInspectorPanel({
     }
     Modal.confirm({
       title: "恢复默认设置？",
-      content: "当前模块的全部配置将重置为模板默认值，此操作可通过「撤销修改」回退。",
+      content:
+        "当前模块的全部配置将重置为模板默认值，此操作可通过「撤销修改」回退。",
       okText: "恢复默认",
       cancelText: "取消",
       onOk: () => editor.update({ ...defaults, id: editor.props.id }),
@@ -128,16 +242,27 @@ export default function SchemaInspectorPanel({
         }
         deviceLabel={
           schema.sections.every((section) =>
-            section.fields.every((field) => !field.device || field.device === "shared"),
+            section.fields.every(
+              (field) => !field.device || field.device === "shared",
+            ),
           )
             ? "全设备"
             : editor.device === "mobile"
               ? "移动端"
               : "桌面端"
         }
-        dirty={editor.dirty}
+        dirty={hasUnsavedChanges}
         onClose={editor.close}
         actions={[
+          ...(editor.dirty
+            ? [
+                {
+                  key: "revert",
+                  label: "撤销本区修改",
+                  onClick: editor.revert,
+                },
+              ]
+            : []),
           {
             key: "visibility",
             label:
@@ -145,74 +270,80 @@ export default function SchemaInspectorPanel({
             onClick: toggleVisibility,
           },
           { key: "reset", label: "恢复默认", onClick: resetToDefaults },
-          { key: "remove", label: "删除模块", danger: true, onClick: removeModule },
+          {
+            key: "remove",
+            label: "删除模块",
+            danger: true,
+            onClick: removeModule,
+          },
         ]}
       />
 
       <div className="homepage-editor__inspector-scroll">
-        {schema.purpose ? (
-          <p className="homepage-editor__properties-helper">{schema.purpose}</p>
-        ) : null}
-
-        {/* 层锚点导航：点击滚动到首个该层分区 */}
-        <nav
-          className="homepage-editor__inspector-anchors"
-          aria-label="分区导航"
-        >
-          {INSPECTOR_LAYER_ORDER.filter((layer) =>
-            sections.some((section) => section.layer === layer),
-          ).map((layer) => (
-            <button
-              key={layer}
-              type="button"
-              onClick={() => {
-                document
-                  .getElementById(`inspector-layer-${layer}`)
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
-              }}
-            >
-              {INSPECTOR_LAYER_TITLES[layer]}
-            </button>
-          ))}
-        </nav>
-
-        {sections.map((section, sectionIndex) => {
-          const isFirstOfLayer =
-            !sections
-              .slice(0, sectionIndex)
-              .some((prev) => prev.layer === section.layer);
+        {taskGroups.map(({ group, entries }) => {
+          const meta = TASK_GROUP_META[group];
+          const groupTitle = schema.groupTitles?.[group] ?? meta.label;
           return (
             <div
-              key={section.id}
-              id={isFirstOfLayer ? `inspector-layer-${section.layer}` : undefined}
+              key={group}
+              className="homepage-editor__task-group"
+              data-task-group={group}
             >
               <SectionRenderer
-                title={section.title}
-                description={section.description}
+                title={groupTitle}
+                description={meta.description}
               >
-                {section.fields
-                  .filter(
-                    (field) =>
-                      isFieldVisible(field, ctx) &&
-                      (!field.device ||
-                        field.device === "shared" ||
-                        field.device === editor.device),
-                  )
-                  .map((field, fieldIndex) => (
+                {group === "media" && hasDeviceMedia ? (
+                  <div
+                    className="homepage-editor__media-device-switcher"
+                    role="group"
+                    aria-label="切换图片编辑设备"
+                  >
+                    <button
+                      type="button"
+                      className={editor.device === "desktop" ? "is-active" : ""}
+                      aria-pressed={editor.device === "desktop"}
+                      disabled={!hasDesktopMedia}
+                      onClick={() => setInspectorDevice("desktop")}
+                    >
+                      <DesktopOutlined />
+                      <span>桌面端</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={editor.device === "mobile" ? "is-active" : ""}
+                      aria-pressed={editor.device === "mobile"}
+                      disabled={!hasMobileMedia}
+                      onClick={() => setInspectorDevice("mobile")}
+                    >
+                      <MobileOutlined />
+                      <span>移动端</span>
+                    </button>
+                  </div>
+                ) : null}
+                {entries.map((entry, fieldIndex) => (
+                  <div
+                    key={`${entry.sectionId}-${entry.field.key}-${fieldIndex}`}
+                    className="homepage-editor__task-field"
+                  >
                     <FieldRenderer
-                      key={`${section.id}-${field.key}-${fieldIndex}`}
-                      def={field}
+                      def={entry.field}
                       ctx={ctx}
                       update={editor.update}
                     />
-                  ))}
+                  </div>
+                ))}
               </SectionRenderer>
             </div>
           );
         })}
       </div>
 
-      <InspectorFooterBar dirty={editor.dirty} onRevert={editor.revert} />
+      <InspectorFooterBar
+        hasUnsavedChanges={hasUnsavedChanges}
+        saving={saving}
+        onSaveDraft={onSaveDraft}
+      />
     </section>
   );
 }

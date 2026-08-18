@@ -2088,6 +2088,10 @@ body.nav-locked {
   line-height: 1.5;
 }
 
+.brand-menu__contact a {
+  min-height: 44px;
+}
+
 .brand-menu__contact a:hover {
   opacity: 0.65;
 }
@@ -2485,6 +2489,12 @@ body.nav-locked {
   .site-header__spacer {
     width: 44px;
   }
+  .site-header__nav-item {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    padding: 0;
+  }
   .site-header__nav-item svg {
     width: 22px;
     height: 22px;
@@ -2512,6 +2522,7 @@ body.nav-locked {
   }
   .site-menu-toggle {
     min-width: 44px;
+    min-height: 44px;
   }
   .site-menu-toggle svg {
     width: 22px;
@@ -2833,6 +2844,12 @@ body.nav-locked {
   .site-header__spacer {
     width: 44px;
   }
+  .site-header__nav-item {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    padding: 0;
+  }
   .site-header__nav-item svg {
     width: 22px;
     height: 22px;
@@ -3006,5 +3023,16 @@ body.nav-locked {
   .brand-drawer .ant-drawer-content-wrapper,
   .editorial-header {
     transition: none;
+  }
+}
+
+/* ═══ 移动端触控目标补强（2026-08-16）：页脚导航/隐私链接 ≥44px 高 ═══ */
+@media (max-width: 767px) {
+  .site-footer nav a,
+  .site-footer__link,
+  .site-footer__copyright-link {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
   }
 }

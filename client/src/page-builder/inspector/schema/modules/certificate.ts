@@ -1,5 +1,5 @@
 /**
- * schema/modules/certificate.ts — 「资质证书(权威认证·画廊)」编辑区 Schema。
+ * schema/modules/certificate.ts — 「资质证书(证书展示·画廊)」编辑区 Schema。
  * Asymmetric Gallery 母版(信任变体):1:1 图墙,无卡片边框。
  */
 import { certificatePuckConfig } from "../../../adapters/certificate.puck";
@@ -11,23 +11,24 @@ const CERT_IMAGE_SPEC = IMAGE_SPECS.certificate.image;
 
 export const certificateSchema: ModuleInspectorSchema = {
   moduleType: "资质证书",
-  displayName: "权威认证",
-  purpose: "以画廊式 1:1 图墙展示权威认证，与作品同一视觉语言。",
+  displayName: "证书展示",
+  purpose: "以画廊式 3:2 图墙展示权威认证，与作品同一视觉语言。",
   defaults: { ...certificatePuckConfig.defaultProps },
+  groupTitles: { media: "证书材料" },
   sections: [
     {
       id: "certificate-content",
       title: "内容",
       layer: "content",
       fields: [
-        moduleNameField("权威认证"),
+        moduleNameField("证书展示"),
         {
           key: "title",
           label: "标题",
           control: "text",
           required: true,
           maxLength: 24,
-          placeholder: "如 权威认证",
+          placeholder: "如 证书展示",
         },
         {
           key: "subtitle",
@@ -36,6 +37,13 @@ export const certificateSchema: ModuleInspectorSchema = {
           maxLength: 60,
           hint: "留空不显示",
         },
+      ],
+    },
+    {
+      id: "certificate-media",
+      title: "素材",
+      layer: "media",
+      fields: [
         {
           key: "certificates",
           label: "证书条目",
@@ -54,7 +62,7 @@ export const certificateSchema: ModuleInspectorSchema = {
               label: "证书图（可选）",
               control: "media",
               spec: CERT_IMAGE_SPEC,
-              placeholder: "上传证书图（1:1）",
+              placeholder: "上传证书图（3:2）",
               showSpecCheck: true,
             },
           ],

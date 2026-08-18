@@ -8,8 +8,11 @@ import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DesignSystemStyles } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
-
-const LT = "#F1ECE3";
+import {
+  CONTENT_TEMPLATE_LAYOUTS,
+  ContentTemplateLayoutStyles,
+  templateLayoutVars,
+} from "@/page-builder/layout/contentTemplateLayouts";
 
 interface Props {
   module?: PageModule;
@@ -36,21 +39,11 @@ export default function HeroSection({ module, editMode }: Props) {
   }, [c?.desktopImage, c?.mobileImage]);
 
   // 已配置的装修区块没有素材时，不能回退到活动默认图，避免前台或画布闪出陌生图片。
-  if (!c?.desktopImage && !c?.mobileImage) {
-    if (!editMode) return null;
-    return (
-      <BlockEmptyPlaceholder
-        icon="🖼️"
-        hint="首屏主视觉"
-        spec={`请上传桌面端主视觉图 · ${IMAGE_SPECS.hero.desktop.label}`}
-        height="var(--homepage-editor-viewport-height, 900px)"
-      />
-    );
-  }
+  if (!c?.desktopImage && !c?.mobileImage && !editMode) return null;
 
   // 未上传某一端时复用另一端已配置图片，不再引入活动素材兜底。
-  const desktopImg = c.desktopImage || c.mobileImage;
-  const mobileImg = c.mobileImage || c.desktopImage;
+  const desktopImg = c?.desktopImage || c?.mobileImage || "";
+  const mobileImg = c?.mobileImage || c?.desktopImage || "";
   // 文案不再回退营销默认值:未填写即为空,公开态对应节点不渲染(编辑态有占位引导)
   const title = typeof c?.title === "string" ? c.title : "";
   const subtitle = typeof c?.subtitle === "string" ? c.subtitle : "";
@@ -69,27 +62,38 @@ export default function HeroSection({ module, editMode }: Props) {
   const mobileFocusY = s?.mobileFocusY ?? legacyFocusY;
   const alignment = l?.template === "center" ? "center" : "left";
   const heroStyle = {
-    height: editMode
-      ? "var(--homepage-editor-viewport-height, 900px)"
-      : "100svh",
-    minHeight: editMode ? undefined : "680px",
     background: "#E7DDCE",
     outline: editMode ? "2px solid rgba(184,148,78,0.6)" : undefined,
     outlineOffset: -2,
     position: "relative",
     "--hc-hero-focus-desktop": `${desktopFocusX}% ${desktopFocusY}%`,
     "--hc-hero-focus-mobile": `${mobileFocusX}% ${mobileFocusY}%`,
+    ...templateLayoutVars(CONTENT_TEMPLATE_LAYOUTS.hero),
   } as CSSProperties &
     Record<"--hc-hero-focus-desktop" | "--hc-hero-focus-mobile", string>;
 
   return (
     <section
-      className="relative w-full overflow-hidden hc-section"
-      data-flow="bleed"
+      className={`hc-content-template hc-phase1-hero${editMode ? " hc-phase1-hero--edit" : ""} relative w-full overflow-hidden hc-section`}
+      data-content-template={CONTENT_TEMPLATE_LAYOUTS.hero.key}
+      data-visual-role={CONTENT_TEMPLATE_LAYOUTS.hero.visualRole}
+      data-height-mode-desktop={
+        CONTENT_TEMPLATE_LAYOUTS.hero.heightModeByViewport.desktop
+      }
+      data-height-mode-tablet={
+        CONTENT_TEMPLATE_LAYOUTS.hero.heightModeByViewport.tablet
+      }
+      data-height-mode-mobile={
+        CONTENT_TEMPLATE_LAYOUTS.hero.heightModeByViewport.mobile
+      }
+      data-mobile-order={CONTENT_TEMPLATE_LAYOUTS.hero.mobile.order.join(",")}
+      data-flow={CONTENT_TEMPLATE_LAYOUTS.hero.flow}
       data-density="brand"
+      data-spacing="normal"
       style={heroStyle}
     >
       <DesignSystemStyles />
+      <ContentTemplateLayoutStyles />
       {editMode && (
         <div
           style={{
@@ -104,142 +108,142 @@ export default function HeroSection({ module, editMode }: Props) {
             letterSpacing: "0.04em",
           }}
         >
-          可编辑 · Hero
+          可编辑 · 首屏
         </div>
       )}
-      <picture data-editor-field="desktopImage mobileImage">
-        <source media={RESPONSIVE_CANVAS.mobileMediaQuery} srcSet={mobileImg} />
-        <img
-          src={desktopImg}
-          alt={c?.altText || title}
-          loading="eager"
-          decoding="async"
-          onLoad={() => setImageLoaded(true)}
-          onError={() => {
-            setImageFailed(true);
-            setImageLoaded(true);
-          }}
-          width={3840}
-          height={2160}
-          className="hc-hero__image absolute inset-0 w-full h-full object-cover"
-          style={{
-            opacity: imageLoaded && !imageFailed ? 1 : 0,
-            transition: rm ? "none" : "opacity 240ms ease-out",
-          }}
-        />
-      </picture>
-      {imageFailed ? (
-        <div
-          className="absolute inset-0 grid place-items-center text-xs tracking-[.08em]"
-          role="img"
-          aria-label={c?.altText || "主视觉图片暂不可用"}
-          style={{
-            color: "#7E7468",
-            background: "linear-gradient(135deg,#EDE6DC,#D9CDBD)",
-          }}
-        >
-          主视觉图片暂不可用
-        </div>
-      ) : null}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background:
-            "linear-gradient(to top, rgba(15,13,12,0.32), rgba(15,13,12,0.02) 44%, rgba(15,13,12,0.06))",
-        }}
-      />
-      {/* 顶部安全区渐变 */}
-      <div
-        className="absolute top-0 left-0 right-0 pointer-events-none"
-        style={{
-          height: "140px",
-          background:
-            "linear-gradient(to bottom, rgba(246,243,237,0.22) 0%, rgba(246,243,237,0.08) 52%, rgba(246,243,237,0) 100%)",
-        }}
-      />
-
-      {/* 左下文案 */}
-      <div
-        className="absolute bottom-[clamp(38px,7vh,76px)] z-10"
-        style={{
-          maxWidth: "520px",
-          left: alignment === "center" ? "50%" : "clamp(28px,4.2vw,72px)",
-          transform: alignment === "center" ? "translateX(-50%)" : undefined,
-          textAlign: alignment,
-        }}
-      >
-        {subtitle ? (
-        <p
-          data-editor-field="subtitle"
-          className="hc-hero__reveal text-[10px] md:text-[11px] tracking-[.2em] uppercase mb-4 font-sans"
-          style={{
-            color: "rgba(255,255,255,0.6)",
-            fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
-            opacity: 1,
-            transform: "none",
-            animation: rm
-              ? "none"
-              : "hcHeroFadeUp 0.7s 0.18s cubic-bezier(0.22,1,0.36,1) both",
-          }}
-        >
-          {subtitle}
-        </p>
-        ) : null}
-        {title ? (
-        <h1
-          data-editor-field="title"
-          className="hc-hero__reveal leading-[1.1] tracking-[.02em] mb-6 whitespace-pre-line"
-          style={{
-            fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
-            fontSize: "var(--hc-type-hero, clamp(40px,5vw,68px))",
-            color: LT,
-            opacity: 1,
-            transform: "none",
-            animation: rm
-              ? "none"
-              : "hcHeroFadeUp 0.7s 0.28s cubic-bezier(0.22,1,0.36,1) both",
-          }}
-        >
-          {title}
-        </h1>
-        ) : null}
-        {actionText && targetUrl ? (
-          editMode ? (
-            <span
-              data-editor-field="actionText linkUrl productId"
-              className="inline-flex items-center gap-2 text-[10px] md:text-[11px] tracking-[.14em] uppercase"
-              style={{
-                color: "rgba(255,255,255,0.7)",
-                fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
+      <div className="hc-content-template__media hc-phase1-hero__media">
+        {desktopImg ? (
+          <picture data-editor-field="desktopImage mobileImage">
+            <source
+              media={RESPONSIVE_CANVAS.mobileMediaQuery}
+              srcSet={mobileImg}
+            />
+            <img
+              src={desktopImg}
+              alt={c?.altText || title}
+              loading="eager"
+              decoding="async"
+              onLoad={() => setImageLoaded(true)}
+              onError={() => {
+                setImageFailed(true);
+                setImageLoaded(true);
               }}
-            >
-              {actionText} <span>→</span>
-            </span>
-          ) : (
-            <Link
-              data-editor-field="actionText linkUrl productId"
-              to={targetUrl}
-              className="hc-hero__reveal inline-flex items-center gap-2 text-[10px] md:text-[11px] tracking-[.14em] uppercase transition-opacity duration-300 hover:opacity-60"
+              width={3360}
+              height={1470}
+              className="hc-hero__image absolute inset-0 h-full w-full object-cover"
               style={{
-                color: "rgba(255,255,255,0.7)",
-                fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
-                opacity: 1,
-                transform: "none",
-                animation: rm
-                  ? "none"
-                  : "hcHeroFadeUp 0.7s 0.38s cubic-bezier(0.22,1,0.36,1) both",
+                opacity: imageLoaded && !imageFailed ? 1 : 0,
+                transition: rm ? "none" : "opacity 240ms ease-out",
               }}
-            >
-              {actionText} <span>→</span>
-            </Link>
-          )
+            />
+          </picture>
+        ) : (
+          <BlockEmptyPlaceholder
+            hint={CONTENT_TEMPLATE_LAYOUTS.hero.displayName}
+            spec={IMAGE_SPECS.hero.desktop.label}
+            height="100%"
+          />
+        )}
+        {imageFailed ? (
+          <div
+            className="absolute inset-0 grid place-items-center text-xs tracking-[.08em]"
+            role="img"
+            aria-label={c?.altText || "主视觉图片暂不可用"}
+            style={{ color: "#7E7468", background: "#F5F5F5" }}
+          >
+            主视觉图片暂不可用
+          </div>
+        ) : null}
+        {desktopImg ? (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background:
+                "linear-gradient(to top, rgba(15,13,12,0.32), rgba(15,13,12,0.02) 44%, rgba(15,13,12,0.06))",
+            }}
+          />
         ) : null}
       </div>
+
+      {/* 桌面位于图片安全区；平板和手机由共享布局移到图片下方。 */}
+      {title || subtitle || (actionText && targetUrl) || editMode ? (
+        <div className="hc-phase1-hero__copy-band">
+          <div
+            className="hc-content-template__copy hc-phase1-hero__copy"
+            data-align={alignment}
+          >
+            {subtitle ? (
+              <p
+                data-editor-field="subtitle"
+                className="hc-content-template__eyebrow hc-hero__reveal"
+                style={{
+                  fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
+                  opacity: 1,
+                  transform: "none",
+                  animation: rm
+                    ? "none"
+                    : "hcHeroFadeUp 0.7s 0.18s cubic-bezier(0.22,1,0.36,1) both",
+                }}
+              >
+                {subtitle}
+              </p>
+            ) : null}
+            {title ? (
+              <h1
+                data-editor-field="title"
+                className="hc-content-template__title hc-hero__reveal whitespace-pre-line"
+                style={{
+                  fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
+                  fontSize: "var(--hc-type-hero, clamp(40px,5vw,68px))",
+                  opacity: 1,
+                  transform: "none",
+                  animation: rm
+                    ? "none"
+                    : "hcHeroFadeUp 0.7s 0.28s cubic-bezier(0.22,1,0.36,1) both",
+                }}
+              >
+                {title}
+              </h1>
+            ) : null}
+            {actionText && targetUrl ? (
+              editMode ? (
+                <span
+                  data-editor-field="actionText linkUrl productId"
+                  className="hc-content-template__action"
+                  style={{
+                    fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
+                  }}
+                >
+                  {actionText} <span>→</span>
+                </span>
+              ) : (
+                <Link
+                  data-editor-field="actionText linkUrl productId"
+                  to={targetUrl}
+                  className="hc-content-template__action hc-hero__reveal transition-opacity duration-300 hover:opacity-60"
+                  style={{
+                    fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
+                    opacity: 1,
+                    transform: "none",
+                    animation: rm
+                      ? "none"
+                      : "hcHeroFadeUp 0.7s 0.38s cubic-bezier(0.22,1,0.36,1) both",
+                  }}
+                >
+                  {actionText} <span>→</span>
+                </Link>
+              )
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       {/* 底部下滑线：编辑预览中静态化，避免持续 pulse 动画拖慢画布滚动 */}
-      <span
-        className={`absolute bottom-[22px] left-1/2 -translate-x-1/2 w-8 h-px ${editMode ? "" : "animate-pulse"} opacity-40`}
-        style={{ background: "rgba(255,255,255,0.5)" }}
-      />
+      {desktopImg ? (
+        <span
+          className={`absolute bottom-[22px] left-1/2 -translate-x-1/2 w-8 h-px ${editMode ? "" : "animate-pulse"} opacity-40`}
+          style={{ background: "rgba(255,255,255,0.5)" }}
+        />
+      ) : null}
       <style>{`
         @keyframes hcHeroFadeUp {
           from { opacity: 0; transform: translateY(12px); }

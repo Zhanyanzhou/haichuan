@@ -2,10 +2,15 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
-import { FULL_BLEED_CONTRACT, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
+import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DesignSystemStyles } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
+import {
+  CONTENT_TEMPLATE_LAYOUTS,
+  ContentTemplateLayoutStyles,
+  templateLayoutVars,
+} from "@/page-builder/layout/contentTemplateLayouts";
 
 interface FullBleedBlockProps {
   module: {
@@ -16,16 +21,12 @@ interface FullBleedBlockProps {
   editMode?: boolean;
 }
 
-/**
- * 单张海报 — 固定比例大图 + 可选文字 + 整张点击
- * content: { image, mobileImage, title, subtitle, buttonText, targetType, productId, linkUrl }
- * layoutConfig.template: 'textCenter' | 'textLeft' | 'textRight' | 'textBottomLeft'
- */
+/** 通栏图 — 三端受控观看窗，说明和行动入口始终位于图片下方。 */
 export default function FullBleedBlock({
   module,
   editMode,
 }: FullBleedBlockProps) {
-  const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
+  const { content = {}, styleConfig = {} } = module;
   const {
     image,
     mobileImage,
@@ -37,15 +38,6 @@ export default function FullBleedBlock({
     productId,
     altText,
   } = content;
-  const template = layoutConfig.template || "textCenter";
-  const overlayPreset = styleConfig.overlayPreset || "soft";
-  const overlay = overlayPreset === "none"
-    ? "transparent"
-    : overlayPreset === "strong"
-      ? "rgba(15,13,12,0.38)"
-      : targetType === undefined && styleConfig.bgColor
-        ? styleConfig.bgColor
-        : "rgba(15,13,12,0.2)";
   const desktopFocusX = Math.min(100, Math.max(0, Number(styleConfig.desktopFocusX ?? 50)));
   const desktopFocusY = Math.min(100, Math.max(0, Number(styleConfig.desktopFocusY ?? 50)));
   const mobileFocusX = Math.min(100, Math.max(0, Number(styleConfig.mobileFocusX ?? desktopFocusX)));
@@ -60,181 +52,121 @@ export default function FullBleedBlock({
     setImageFailed(false);
   }, [desktopImg, mobileImg]);
 
-  if (!desktopImg) {
-    if (!editMode) return null;
-    return (
-      <BlockEmptyPlaceholder
-        hint="请上传单张海报"
-        spec={`桌面 ${IMAGE_SPECS.fullBleed.desktop.label} · 移动 ${IMAGE_SPECS.fullBleed.mobile.label}`}
-      />
-    );
-  }
-
-  const textX =
-    template === "textLeft" || template === "textBottomLeft"
-      ? "flex-start"
-      : template === "textRight"
-        ? "flex-end"
-        : "center";
-  const textY = template === "textBottomLeft" ? "flex-end" : "center";
-  const textAlign =
-    template === "textLeft"
-      ? "left"
-      : template === "textRight"
-        ? "right"
-        : template === "textBottomLeft"
-          ? "left"
-          : "center";
-  const padLeft =
-    template === "textLeft" || template === "textBottomLeft"
-      ? "clamp(28px,4.2vw,72px)"
-      : "24px";
-  const padRight = template === "textRight" ? "clamp(28px,4.2vw,72px)" : "24px";
+  if (!desktopImg && !editMode) return null;
 
   const posterStyle = {
     "--hc-poster-focus-desktop": `${desktopFocusX}% ${desktopFocusY}%`,
     "--hc-poster-focus-mobile": `${mobileFocusX}% ${mobileFocusY}%`,
+    ...templateLayoutVars(CONTENT_TEMPLATE_LAYOUTS.fullBleed),
   } as CSSProperties & Record<"--hc-poster-focus-desktop" | "--hc-poster-focus-mobile", string>;
 
   const poster = (
     <section
-      className="hc-single-poster hc-section"
-      data-text-position={template}
-      data-flow="bleed"
+      className="hc-content-template hc-phase1-full-bleed hc-section"
+      data-content-template={CONTENT_TEMPLATE_LAYOUTS.fullBleed.key}
+      data-visual-role={CONTENT_TEMPLATE_LAYOUTS.fullBleed.visualRole}
+      data-height-mode-desktop={CONTENT_TEMPLATE_LAYOUTS.fullBleed.heightModeByViewport.desktop}
+      data-height-mode-tablet={CONTENT_TEMPLATE_LAYOUTS.fullBleed.heightModeByViewport.tablet}
+      data-height-mode-mobile={CONTENT_TEMPLATE_LAYOUTS.fullBleed.heightModeByViewport.mobile}
+      data-mobile-order={CONTENT_TEMPLATE_LAYOUTS.fullBleed.mobile.order.join(",")}
+      data-flow={CONTENT_TEMPLATE_LAYOUTS.fullBleed.flow}
       data-density="brand"
+      data-spacing="normal"
       style={{
         ...posterStyle,
         position: "relative",
         width: "100%",
         overflow: "hidden",
-        background: "#E7DDCE",
+        background: "#FFFFFF",
       }}
     >
       <DesignSystemStyles />
-      {!imageFailed ? (
+      <ContentTemplateLayoutStyles />
+      <div className="hc-content-template__media hc-phase1-full-bleed__media">
+      {!desktopImg ? (
+        <BlockEmptyPlaceholder
+          hint={CONTENT_TEMPLATE_LAYOUTS.fullBleed.displayName}
+          spec={`桌面 ${IMAGE_SPECS.fullBleed.desktop.label} · 移动 ${IMAGE_SPECS.fullBleed.mobile.label}`}
+          height="100%"
+        />
+      ) : !imageFailed ? (
         <picture data-editor-field="image mobileImage">
           <source media={RESPONSIVE_CANVAS.mobileMediaQuery} srcSet={mobileImg} />
           <img
-            className="hc-single-poster__image"
+            className="hc-full-bleed__image"
             src={desktopImg}
             alt={altText || ""}
             loading="lazy"
             decoding="async"
+            width={3360}
+            height={960}
             onError={() => setImageFailed(true)}
           />
         </picture>
       ) : (
-        <div className="hc-single-poster__image-error" role="img" aria-label={altText || "海报图片暂不可用"}>
-          海报图片暂不可用
+        <div className="hc-full-bleed__image-error" role="img" aria-label={altText || "通栏图片暂不可用"}>
+          通栏图片暂不可用
         </div>
       )}
-      <div style={{ position: "absolute", inset: 0, background: overlay }} />
+      </div>
 
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          alignItems: textY,
-          justifyContent: textX,
-          padding: `${template === "textBottomLeft" ? "0 0 clamp(28px,5vw,72px)" : "0"} ${padRight} 0 ${padLeft}`,
-          textAlign: textAlign as any,
-        }}
-      >
-        <div className="hc-single-poster__copy" style={{ maxWidth: 520 }}>
+      {(title || subtitle || (buttonText && targetUrl)) ? (
+      <div className="hc-content-template__container hc-phase1-full-bleed__caption">
+        <div className="hc-content-template__copy hc-phase1-full-bleed__copy">
           {title && (
-            <h2 data-editor-field="title"
+            <h2 data-editor-field="title" className="hc-content-template__title"
               style={{
-                fontSize: "var(--hc-type-display, clamp(28px,4vw,56px))",
-                lineHeight: 1.1,
-                margin: 0,
+                fontSize: "var(--hc-type-h2, clamp(24px,3vw,34px))",
                 fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
-                color: "#fff",
-                fontWeight: 500,
-                letterSpacing: ".04em",
               }}
             >
               {title}
             </h2>
           )}
           {subtitle && (
-            <p data-editor-field="subtitle"
-              style={{
-                fontSize: 14,
-                color: "rgba(255,255,255,0.82)",
-                lineHeight: 1.6,
-                margin: "14px 0 0",
-                maxWidth: 400,
-              }}
+            <p data-editor-field="subtitle" className="hc-content-template__body"
             >
               {subtitle}
             </p>
           )}
-          {buttonText && targetUrl && (
-            <span data-editor-field="buttonText linkUrl productId"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 10,
-                marginTop: 22,
-                paddingBottom: 5,
-                borderBottom: "1px solid rgba(255,255,255,0.64)",
-                color: "#fff",
-                fontSize: 12,
-                letterSpacing: "0.12em",
-              }}
-            >
+        </div>
+        {buttonText && targetUrl ? (
+          editMode ? (
+            <span className="hc-content-template__action hc-phase1-full-bleed__action" data-editor-field="buttonText linkUrl productId">
               {buttonText}<span aria-hidden>→</span>
             </span>
-          )}
-        </div>
+          ) : (
+            <Link className="hc-content-template__action hc-phase1-full-bleed__action" data-editor-field="buttonText linkUrl productId" to={targetUrl}>
+              {buttonText}<span aria-hidden>→</span>
+            </Link>
+          )
+        ) : null}
       </div>
+      ) : null}
       <style>{`
-        .hc-single-poster { aspect-ratio: ${FULL_BLEED_CONTRACT.canvas.desktopMediaAspectRatio}; }
-        .hc-single-poster__image,
-        .hc-single-poster__image-error {
-          position: absolute;
-          inset: 0;
+        .hc-full-bleed__image,
+        .hc-full-bleed__image-error {
           width: 100%;
           height: 100%;
         }
-        .hc-single-poster__image {
+        .hc-full-bleed__image {
           object-fit: cover;
           object-position: var(--hc-poster-focus-desktop);
-          transition: transform 700ms cubic-bezier(.22,.61,.36,1);
         }
-        .hc-single-poster__image-error {
+        .hc-full-bleed__image-error {
           display: grid;
           place-items: center;
           color: #7E7468;
-          background: linear-gradient(135deg, #EDE6DC, #D9CDBD);
+          background: #F5F5F5;
           font-size: 13px;
           letter-spacing: .08em;
         }
-        .hc-single-poster-link {
-          display: block;
-          color: inherit;
-          text-decoration: none;
-        }
-        .hc-single-poster-link:hover .hc-single-poster__image { transform: scale(1.012); }
-        .hc-single-poster-link:focus-visible { outline: 2px solid #B8944E; outline-offset: 3px; }
         @media ${RESPONSIVE_CANVAS.mobileMediaQuery} {
-          .hc-single-poster { aspect-ratio: ${FULL_BLEED_CONTRACT.canvas.mobileMediaAspectRatio}; }
-          .hc-single-poster__image { object-position: var(--hc-poster-focus-mobile); }
-          .hc-single-poster__copy { max-width: min(78vw, 420px) !important; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .hc-single-poster__image { transition: none; }
-          .hc-single-poster-link:hover .hc-single-poster__image { transform: none; }
+          .hc-full-bleed__image { object-position: var(--hc-poster-focus-mobile); }
         }
       `}</style>
     </section>
   );
 
-  if (!targetUrl || editMode) return poster;
-  return (
-    <Link className="hc-single-poster-link" to={targetUrl} aria-label={title || altText || "查看海报详情"}>
-      {poster}
-    </Link>
-  );
+  return poster;
 }

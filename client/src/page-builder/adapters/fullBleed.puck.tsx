@@ -7,6 +7,10 @@ import type { LinkTargetType } from "@/page-builder/utils/linkTarget";
 import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import MediaPickerField from "../fields/MediaPickerField";
+import {
+  createContentTemplateMarker,
+  type ContentTemplateMarker,
+} from "../generated/contentTemplates.generated";
 
 export type FullBleedOverlayPreset = "none" | "soft" | "strong";
 
@@ -26,6 +30,8 @@ export interface FullBleedPuckProps {
   desktopFocusY: number;
   mobileFocusX: number;
   mobileFocusY: number;
+  /** 系统保留：区块级内容模板合同印记，不在 Inspector 中展示。 */
+  __contentTemplate?: ContentTemplateMarker;
   locked?: boolean;
 }
 
@@ -42,13 +48,14 @@ export const fullBleedPuckConfig = {
     linkUrl: "",
     targetType: "none",
     productId: 0,
-    template: "textCenter",
-    overlayPreset: "soft",
+    template: "captionBelow",
+    overlayPreset: "none",
     altText: "",
     desktopFocusX: 50,
     desktopFocusY: 50,
     mobileFocusX: 50,
     mobileFocusY: 50,
+    __contentTemplate: createContentTemplateMarker("全屏出血图"),
     locked: false,
   } satisfies FullBleedPuckProps,
   fields: {
@@ -89,21 +96,12 @@ export const fullBleedPuckConfig = {
     template: {
       type: "radio" as const,
       label: "文字位置",
-      options: [
-        { label: "居中", value: "textCenter" },
-        { label: "左对齐", value: "textLeft" },
-        { label: "右对齐", value: "textRight" },
-        { label: "左下", value: "textBottomLeft" },
-      ],
+      options: [{ label: "图片下方", value: "captionBelow" }],
     },
     overlayPreset: {
       type: "radio" as const,
       label: "文字遮罩",
-      options: [
-        { label: "无", value: "none" },
-        { label: "柔和", value: "soft" },
-        { label: "加强", value: "strong" },
-      ],
+      options: [{ label: "无", value: "none" }],
     },
     altText: { type: "text" as const, label: "图片替代文字" },
     desktopFocusX: { type: "number" as const, label: "桌面焦点 X" },

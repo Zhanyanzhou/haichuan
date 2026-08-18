@@ -29,12 +29,13 @@ import {
   AdminErrorState,
 } from "@/components/common/AdminDataStates";
 import { SecureImage } from "@/components/common/SecureImage";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
 const STATUS_MAP: Record<string, { color: string; label: string }> = {
-  PENDING: { color: "gold", label: "待处理" },
-  PROCESSING: { color: "blue", label: "处理中" },
-  REPLIED: { color: "processing", label: "已回复" },
-  CLOSED: { color: "#999", label: "已关闭" },
+  PENDING: { color: "warning", label: "待处理" },
+  PROCESSING: { color: "processing", label: "处理中" },
+  REPLIED: { color: "success", label: "已回复" },
+  CLOSED: { color: "default", label: "已关闭" },
 };
 
 const LEAD_TYPES = { inquiry: "预约咨询", selection: "选款咨询" } as const;
@@ -136,8 +137,8 @@ export default function LeadManage() {
       message.success("状态已更新");
       openDetail(detailId.type, detailId.id);
       fetchList();
-    } catch {
-      message.error("更新失败");
+    } catch (error) {
+      message.error(getSafeAdminErrorMessage(error, "线索状态更新失败，请重新加载后重试。"));
     } finally {
       setSaving(false);
     }
@@ -152,8 +153,8 @@ export default function LeadManage() {
       });
       message.success("备注已保存");
       openDetail(detailId.type, detailId.id);
-    } catch {
-      message.error("保存失败");
+    } catch (error) {
+      message.error(getSafeAdminErrorMessage(error, "内部备注保存失败，请检查内容后重试。"));
     } finally {
       setSaving(false);
     }
@@ -170,8 +171,8 @@ export default function LeadManage() {
       message.success("跟进已添加");
       setNoteText("");
       openDetail(detailId.type, detailId.id);
-    } catch {
-      message.error("添加失败");
+    } catch (error) {
+      message.error(getSafeAdminErrorMessage(error, "跟进记录添加失败，请检查内容后重试。"));
     } finally {
       setSaving(false);
     }
@@ -201,8 +202,8 @@ export default function LeadManage() {
       setAssignTo(undefined);
       openDetail(detailId.type, detailId.id);
       fetchList();
-    } catch {
-      message.error("指派失败");
+    } catch (error) {
+      message.error(getSafeAdminErrorMessage(error, "线索指派失败，请重新加载人员列表后重试。"));
     } finally {
       setAssigning(false);
     }
@@ -339,7 +340,6 @@ export default function LeadManage() {
           <Button
             type="primary"
             onClick={fetchList}
-            style={{ background: "#B69052", borderColor: "#B69052" }}
           >
             搜索
           </Button>
@@ -437,7 +437,7 @@ export default function LeadManage() {
                       )}
                       <div>
                         <strong>{item.productNameSnapshot}</strong>
-                        <div style={{ color: "#999", fontSize: 12 }}>
+                        <div style={{ color: "var(--adm-muted)", fontSize: 12 }}>
                           {item.productSkuSnapshot}
                         </div>
                       </div>
@@ -454,7 +454,7 @@ export default function LeadManage() {
                   children: (
                     <div>
                       <div>{f.content}</div>
-                      <small style={{ color: "#999" }}>
+                      <small style={{ color: "var(--adm-muted)" }}>
                         {f.creator?.realName || "系统"} ·{" "}
                         {new Date(f.createdAt).toLocaleString("zh-CN")}
                       </small>
@@ -481,7 +481,6 @@ export default function LeadManage() {
                   onClick={addFollowUp}
                   loading={saving}
                   type="primary"
-                  style={{ background: "#B69052", borderColor: "#B69052" }}
                 >
                   添加跟进
                 </Button>
@@ -554,7 +553,7 @@ export default function LeadManage() {
             }}
           />
         ) : (
-          <AdminLoadingState />
+          <AdminLoadingState subject="线索详情" />
         )}
       </Drawer>
     </div>

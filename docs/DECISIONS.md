@@ -2,7 +2,7 @@
 
 > 本文件 = **已批准的架构决定及原因**（历史保留），并标注与当前代码冲突的过时条目和尚未确定的【待决策】事项。
 > 现在必须遵守的硬规则见根目录 `PROJECT_RULES.md`；AI 执行流程见根目录 `WORKFLOW.md`。
-> 最近核对：2026-08-12（基于当前工作区代码）。
+> 最近核对：2026-08-17（本轮核对品牌方向、鉴权/角色、店铺装修、库存与 Feature Flag 相关条目；其他历史事实仍须按当前代码逐项复核）。
 
 ## 阅读约定
 
@@ -20,7 +20,7 @@
 - **当前事实**：`authStore`、`shopStore` 用 `persist`；`selectionStore`、`pageMetaStore`、`appStore` 非持久。
 
 ### A.2 固定技术栈 ✅
-- **决策**：前端 React 18 + TS + Vite + Ant Design 5 + Tailwind + Zustand；后端 NestJS 10 + Prisma 5 + MySQL 8 + Redis + Bull + JWT + bcrypt + Sharp。
+- **决策**：前端 React 18 + TypeScript 5 + Vite 8 + Ant Design 5 + Tailwind CSS 3 + Zustand 4；后端 NestJS 11 + Prisma 5 + MySQL 8 + JWT + bcrypt + Sharp。当前不常驻 Redis/Bull，未来恢复缓存或队列须单独决策。
 - **原因**：围绕展示、商品管理、内容编辑、选款咨询定位选型。
 - **约束**：不得自行替换/升级/降级；详细清单与禁止替代项见 `docs/PROJECT_GUARDRAILS.md` §3、`PROJECT_RULES.md` §0。
 
@@ -43,35 +43,43 @@
 - **决策**：前台页面装修统一用 Puck `PageDocument` 体系（草稿/发布/版本回滚 + 多设备预览）。
 - **原因**：所见即所得、内容与业务分离、支持模板与发布流。
 - **当前事实**：`PageDocument`/`PageTemplate`/`PageDocumentRevision` + `page-modules` 后端 + `pageDocumentApi` + `HomepageConfig` 编辑器 + `PuckDocumentRenderer` + `components/blocks` + `page-builder/adapters`。
-- **注意**：`HomeSection`、`HomepageBlock` 已成死代码（见 ⚠️ B.2）；`ContentSlot` 已全链路废弃（见 ✅ D.8，2026-08-15 清退）。
+- **注意**：旧首页内容块与 `ContentSlot` 已归档；当前边界见 ✅ D.8，历史错误结论见 B 节索引。
 
 ### A.7 新增样式优先 Tailwind ✅
 - **决策**：新代码优先 Tailwind 类名，仅动态计算值用行内样式；不强制重写已有代码。
 - **原因**：历史组件 Tailwind / 行内样式混杂，统一未来方向即可（见 🟡 C.1）。
 
+### A.8 客户前台采用高级珠宝品牌级数字体验体系 ✅
+- **决策日期**：2026-08-17；项目负责人明确要求以“顶级奢侈品珠宝品牌网站”为目标，形成高级、简约、奢华但克制的统一规则。
+- **决策**：客户前台采用“排版驱动 + 摄影驱动 + 极简 + 艺术指导”方法，以珠宝、工艺、品牌内容和顾问服务为主角；不做通用电商商城、促销会场、批发目录、SaaS 模板或对竞品页面的复刻。
+- **视觉路线**：当前实现以 Cormorant Garamond 英文展示字体、Noto Serif SC 中文标题、无衬线正文和品牌金 `#B8944E` 为基线，建立经典衬线、现代克制的高级珠宝表达；字体授权、品牌资产和最终识别系统仍需独立确认，不能把实现现状写成品牌历史或永久资产。
+- **执行边界**：详细色彩、排印、留白、图片、组件、动效、文案、响应式、无障碍、性能和验收只认 `docs/UI_GUIDE.md`；其他治理文件只能引用，不复制具体数值。
+- **可用性底线**：极简不得隐藏商品关键事实、表单错误、隐私说明和服务流程；高质量图片与动效不得牺牲性能、键盘操作、对比度或移动端体验。
+- **后台边界**：管理后台以清晰、效率、状态完整性和无障碍为先，不进行全局奢侈品化改版。
+
+### A.9 内容模板采用完整构图与统一合同 ✅
+- **决策日期**：2026-08-17；项目负责人批准先统一模板产品与设计规则，再继续分批实施。
+- **决策**：店铺装修保留 6 类、23 个运营内容模板；每个模板是一个完整根构图，先按用途和视觉角色设计桌面、平板、手机整体效果，再由模板特征决定素材、文字、行动、构图和专属编辑能力。
+- **编辑顺序**：固定状态栏 → 主要对象或素材 → 文字内容 → 行动与关联 → 构图 → 模板专属功能 → 固定保存栏；无对应内容的分组隐藏，商品等业务模板先选择业务对象。
+- **治理边界**：模板结构分为固定结构、受控预设、内容可编辑和业务对象关联；运营不得自由改变根构图，也不得在模板中复制商品、门店、活动等业务事实的第二套来源。
+- **单一合同**：缩略图、Inspector、页面画布、公开 Renderer、客户端校验和服务端发布门禁必须消费同一仓库级纯机器合同；每个区块独立记录合同版本，旧草稿不得因普通保存而静默升级。
+- **验收**：按完整模板而非单张图片尺寸判断视觉权重；电脑外部真实浏览器是最终视觉证据，内置浏览器只作诊断。
+- **实施状态**：本条批准目标和边界，不代表 23 个模板已完成代码接入；必须按 `docs/CONTENT_TEMPLATE_STANDARD.md` 的设计卡和验收门禁分批实施。
+
 ---
 
-## B. 过时/待更新的记录（⚠️ 历史保留，与当前代码不符）
+## B. 已失效记录索引（⚠️ 不具执行力）
 
-### B.1 ⚠️ 过时：两套首页内容块体系并存
-- **原记录**（旧版 §2）：旧版 `blockComponents`（`blocks/index.ts`，HeroBlock 等 6 个）与新版 `MODULE_MAP`（`Home/index.tsx`，HeroSection 等 4 个）并存。
-- **当前事实**：`client/src/components/blocks/index.ts` **不存在**；全仓搜不到 `MODULE_MAP` / `blockComponents`。首页通过 `PuckDocumentRenderer` 渲染 `PageDocument`（见 ✅ A.6）。
-- **处置**：此条已失效，以 A.6 为准；待项目负责人确认后清理本条。
+以下旧结论已从正文清理，只保留索引，防止被搜索结果再次当成当前规则：
 
-### B.2 ⚠️ 过时：`(this.prisma as any)` 5 处
-- **原记录**（旧版 §5）：5 个 service 用 `(this.prisma as any)` 绕过 Prisma 类型（schema 改后未 `prisma generate`）。
-- **当前事实**：实际 **0 处** PrismaClient 绕过；残留约 12 处 `as any` 是 DTO 字符串→Prisma 枚举/Json 的**类型窄化**，非 `prisma generate` 缺失。
-- **处置**：此条已失效；新增 DTO 字段应直接声明为对应枚举类型以避免断言（见 `PROJECT_RULES.md` §3）。
+| 失效结论 | 当前依据 |
+| --- | --- |
+| 首页存在两套内容块体系 | 以 A.6 的 Puck PageDocument 决策和当前代码为准 |
+| Prisma Client 存在固定数量的 `(this.prisma as any)` | 数量会变化；以当前搜索、类型检查和 `PROJECT_RULES.md` §3 为准 |
+| 页面构建器使用旧 postMessage 消息名 | 以当前编辑器协议代码为准，文档不复制易漂移消息清单 |
+| 交易开关固定为全关或全开 | 以当前代码、部署配置、实际环境和独立上线批准共同判断 |
 
-### B.3 ⚠️ 部分过时：页面构建器 iframe + postMessage
-- **原记录**（旧版 §6）：iframe 内嵌 `/preview/home`，postMessage 消息为 `SET_EDITOR_MODE / PATCH_MODULE / CANVAS_READY / MODULE_HOVERED / MODULE_SELECTED`。
-- **当前事实**：仍是 **iframe + postMessage** 架构（编辑/预览隔离），但消息协议已变为 `homepage-editor:focus-block`、`homepage-editor:canvas-height` 等；首页渲染改为直接读 `PageDocument`。
-- **处置**：架构决策仍有效（iframe 隔离）；消息协议描述已过时，待更新。
-
-### B.4 ⚠️ 待更新：Feature Flags 控制电商上线
-- **原记录**（旧版 §3）：`commerceEnabled/cartEnabled/paymentEnabled = false`，"代码已完成但关闭"。
-- **当前事实**：`client/src/store/featureFlags.ts` 中 `CUSTOMER_COMMERCE_ENABLED` 硬编码为 `false`，并由 `MyAccountDashboard`、`ProductDetail` 两处消费（隐藏交易 CTA）。服务端 `CustomerCommerceGuard`（读 `CUSTOMER_COMMERCE_ENABLED` 环境变量，默认关闭）是最终安全边界；前端开关仅同步隐藏入口，不作为安全依赖。
-- **处置**：前端开关已接线但硬编码为关；环境变量驱动的正式上线开关仍待定，见 🟡 D.3。
+失效记录不作为实现、上线或回退依据；需要审计轨迹时查看 Git 历史。
 
 ---
 
@@ -83,9 +91,9 @@
 
 ---
 
-## D. 【待决策】事项（🟡 不得自行选方案）
+## D. 专项决策台账（✅ 已决 / 🟡 待决）
 
-> 以下为审查中发现但尚未由项目负责人拍板的事项。任何 AI 遇到相关任务**必须先报告**，不得自行选择方案或写成既定事实。
+> 本节保留稳定编号供代码和其他文档引用。✅ 条目已经落地，只记录边界；🟡 条目尚未拍板，任何 AI 遇到相关任务必须先报告，不得自行选择方案或写成既定事实。
 
 ### D.1 ✅ 库存已收敛单轨（2026-08-15 复核修订）
 - **已落地**：`Inventory` 为唯一库存来源——`orders.service` 下单预占/核销/释放全部走 `Inventory` 表，**不再 fallback `SKU.stock`**（代码注释明确标注"Inventory 单一来源，DECISIONS D.1"）；`ProductSKU.stock` 仅作展示参考。
@@ -93,8 +101,8 @@
 - **遗留**：多仓架构（Warehouse 模型）仍未启用，见 D.9。
 
 ### D.2 🟡 电商功能上线
-- **现状**：订单/支付/购物车/退款代码完整，但**从未在真实环境验证**；项目当前不开放真实支付/退款/资金结算。
-- **待定**：何时、以何种方式联调与上线。
+- **现状**：仓库文档对交易开关与开放范围存在冲突，且“代码存在、默认开关、接口放行、线下凭证流程、线上支付凭据、生产上线批准”是不同事实。
+- **待定**：逐能力确认公开范围、真实环境联调证据、经营与支付前置条件、回退开关和上线批准。未完成该记录前，不得用单一配置值宣称完整交易闭环已上线。
 
 ### D.3 ✅ Feature Flags 已服务端单一来源化（2026-08-15 复核修订）
 - **已落地**：服务端 `GET /settings/flags` 读取 `CUSTOMER_COMMERCE_ENABLED` 环境变量作为**单一来源**；前端 `featureFlags.ts` 拉取该端点，请求失败回退 `SAFE_FLAGS`（三项全 false，安全默认关）。服务端 `CustomerCommerceGuard` 仍是最终安全边界。
@@ -109,8 +117,8 @@
 - **待定**：分类采用软删除（启用 `deletedAt`）还是停用（`isActive`）；是否清理 `deletedAt` 字段。
 
 ### D.6 🟡 JWT 双域 secret / 全局 Guard
-- **现状**：admin 与 customer 共用 `JWT_SECRET` 靠 `type` 区分；`JwtAuthGuard` **非全局**（opt-in，漏写则无鉴权暴露）。
-- **待定**：是否拆分双 secret / 双 strategy；是否把 `JwtAuthGuard` 注册为全局 Guard + `@Public` 白名单。
+- **现状**：admin 与 customer 共用 `JWT_SECRET` 靠 `type` 区分；`JwtAuthGuard`、`RolesGuard`、`ThrottlerGuard` 已注册为全局 Guard，接口默认要求后台身份，匿名或客户域接口通过 `@Public()` 后叠加相应客户守卫。
+- **待定**：是否拆分双 secret / 双 strategy；是否为客户会话增加独立吊销、刷新与风险控制机制。
 
 ### D.7 🟡 checkout 认证与游客下单
 - **现状**：`POST /customers/checkout`（`@Public`）是真实公开下单入口，upsert 无密码 `Customer`；`POST /orders` 注释"公开"但实际继承类级 admin-only。
@@ -121,8 +129,8 @@
 - **已决**：`ContentSlot` 全链路废弃（写侧零入口、HERO 插槽永远空、清退后公开页行为零变化）——模块/端点/schema 模型/前端消费方已删，`content_slots` 表由迁移 20260815100000 幂等 DROP；`HomeSection`/`HomepageBlock` 死代码此前已清理。
 
 ### D.9 🟡 默认仓库与多仓启用
-- **现状**：`Inventory` 模型支持多仓（`Warehouse: SHOWROOM/FACTORY/STORE`），但库存实际主要落在 `ProductSKU.stock`，未确认默认仓库与多仓启用范围。
-- **待定**：是否启用多仓、默认仓库设定、库存读写在多仓下的归属。
+- **现状**：`Inventory` 已是订单预占、核销和释放的唯一库存来源；模型支持 `SHOWROOM / FACTORY / STORE` 等多仓类型，但默认仓库、仓库启停和跨仓归属尚未形成完整产品决策。
+- **待定**：是否启用多仓、默认仓库设定、存量库存归属、跨仓调拨与前台可售口径。
 
 ### D.10 🟡 金价 AUTO 采集
 - **现状**：`@Cron` `fetchAndUpdateGoldPrice` 是空壳（只打 warn），未接行情源；调价系数 `1.05` 硬编码；调价绕过 `ProductsService`（不触发前台 SSE）。

@@ -4,6 +4,8 @@ import {
   IsOptional,
   IsEmail,
   IsBoolean,
+  IsDefined,
+  Equals,
   Matches,
   MaxLength,
 } from 'class-validator';
@@ -49,7 +51,9 @@ export class CreateInquiryDto {
   @MaxLength(2000, { message: '咨询内容不能超过2000个字符' })
   message!: string;
 
-  @IsOptional()
-  @IsBoolean()
-  privacyConsent?: boolean;
+  // 保持 unknown，避免全局 enableImplicitConversion 将字符串 "false" 转为 true。
+  @IsDefined({ message: '请阅读并同意隐私说明' })
+  @IsBoolean({ message: '请阅读并同意隐私说明' })
+  @Equals(true, { message: '请阅读并同意隐私说明' })
+  privacyConsent!: unknown;
 }

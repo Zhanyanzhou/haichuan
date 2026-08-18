@@ -109,7 +109,7 @@ export function SecureImage({
   if (status === "loading") {
     return (
       <div className={className} style={{ ...placeholderStyle }}>
-        加载中…
+        正在加载图片…
       </div>
     );
   }

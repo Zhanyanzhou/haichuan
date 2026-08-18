@@ -74,7 +74,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
       <style>{`
         .hc-before-after__track {
           position: relative;
-          aspect-ratio: ${BEFORE_AFTER_CONTRACT.canvas.mediaAspectRatio};
+          aspect-ratio: ${BEFORE_AFTER_CONTRACT.canvas.desktopMediaAspectRatio};
           overflow: hidden;
           background: #E7DDCE;
           touch-action: none;
@@ -129,6 +129,9 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
         }
         .hc-before-after__tag--before { left: 14px; }
         .hc-before-after__tag--after { right: 14px; }
+        @media (max-width: 767px) {
+          .hc-before-after__track { aspect-ratio: ${BEFORE_AFTER_CONTRACT.canvas.mobileMediaAspectRatio}; }
+        }
       `}</style>
       {(title || subtitle) && (
         <header style={{ maxWidth: 640, margin: "0 auto 40px", textAlign: "center" }}>

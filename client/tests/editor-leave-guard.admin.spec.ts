@@ -123,9 +123,6 @@ test.describe("店铺装修 —— 未保存内容保护（D1）", () => {
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
 
     await addModuleToCanvas(page);
-    await expect(page.locator(".homepage-editor__save-status")).toContainText("有未保存修改", {
-      timeout: 8000,
-    });
 
     // 触发 SPA 路由跳转：点击侧栏「首页」域（directRoute = /admin/dashboard）
     const leaveTrigger = page
@@ -134,7 +131,7 @@ test.describe("店铺装修 —— 未保存内容保护（D1）", () => {
       .first();
     await leaveTrigger.click();
 
-    const guard = page.getByRole("dialog").filter({ hasText: "有未保存的装修修改" });
+    const guard = page.getByRole("dialog", { name: "有未保存的修改" });
     await expect(guard).toBeVisible();
     // 确认出现时，URL 仍停留在编辑器
     await expect(page).toHaveURL(/\/admin\/editor\/home/);
@@ -149,16 +146,13 @@ test.describe("店铺装修 —— 未保存内容保护（D1）", () => {
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
     await addModuleToCanvas(page);
-    await expect(page.locator(".homepage-editor__save-status")).toContainText("有未保存修改", {
-      timeout: 8000,
-    });
 
     await page
       .locator(".admin-sidebar__nav")
       .getByRole("button", { name: "首页" })
       .first()
       .click();
-    const guard = page.getByRole("dialog").filter({ hasText: "有未保存的装修修改" });
+    const guard = page.getByRole("dialog", { name: "有未保存的修改" });
     await expect(guard).toBeVisible();
 
     await page.getByRole("button", { name: "不保存离开" }).click();
@@ -169,9 +163,6 @@ test.describe("店铺装修 —— 未保存内容保护（D1）", () => {
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
     await addModuleToCanvas(page);
-    await expect(page.locator(".homepage-editor__save-status")).toContainText("有未保存修改", {
-      timeout: 8000,
-    });
 
     // 工具栏「保存」入口
     const saveBtn = page
@@ -179,7 +170,6 @@ test.describe("店铺装修 —— 未保存内容保护（D1）", () => {
       .getByRole("button", { name: "保存" });
     await saveBtn.click();
     await expect(page.getByText("页面草稿已保存")).toBeVisible({ timeout: 8000 });
-    await expect(page.locator(".homepage-editor__save-status")).not.toContainText("有未保存修改");
 
     // 刷新后重新加载，校验已保存内容回显（admin 接口返回 saved）
     await page.reload();

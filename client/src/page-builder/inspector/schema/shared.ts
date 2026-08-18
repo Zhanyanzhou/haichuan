@@ -70,7 +70,7 @@ export function bgColorPresetField(): FieldDef {
     key: "bgColor",
     label: "配色方案",
     control: "preset",
-    hint: "品牌调性预设;需要精确色值时展开高级设置",
+    hint: "品牌调性预设；精确色值可在下方直接输入",
     options: Object.entries(TONE_PRESETS).map(([key, preset]) => ({
       label: preset.label,
       value: key,

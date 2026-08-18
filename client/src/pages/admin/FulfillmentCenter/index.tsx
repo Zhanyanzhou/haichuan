@@ -3,6 +3,7 @@ import { Button, Drawer, Form, Input, message, Modal, Select, Space, Table, Tag,
 import { ExportOutlined, EyeOutlined, TruckOutlined } from '@ant-design/icons';
 import { fulfillmentApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
+import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
 import type { Fulfillment, FulfillmentStatus, PaginatedResult } from '@/types';
 
 // 履约状态映射（含颜色与中文标签）
@@ -97,7 +98,7 @@ export default function FulfillmentCenter() {
       dispatchForm.resetFields();
       void load();
     } catch (e: any) {
-      message.error(e?.message || '发货失败');
+      message.error(getSafeAdminErrorMessage(e, '发货登记失败，请核对物流信息后重试。'));
     } finally {
       setDispatching(false);
     }
@@ -105,7 +106,7 @@ export default function FulfillmentCenter() {
 
   const handleMarkDelivered = async (id: number) => {
     Modal.confirm({
-      title: '确认该包裹已送达？',
+      title: '将该包裹标记为已送达？',
       content: '标记送达后，履约单进入终态，不可再变更。',
       okText: '确认送达',
       onOk: async () => {
@@ -114,7 +115,7 @@ export default function FulfillmentCenter() {
           message.success('已标记送达');
           void load();
         } catch (e: any) {
-          message.error(e?.message || '操作失败');
+          message.error(getSafeAdminErrorMessage(e, '送达状态更新失败，请重新加载后重试。'));
         }
       },
     });
@@ -134,7 +135,7 @@ export default function FulfillmentCenter() {
       setAbnormalReason('');
       void load();
     } catch (e: any) {
-      message.error(e?.message || '操作失败');
+      message.error(getSafeAdminErrorMessage(e, '物流异常登记失败，请检查原因后重试。'));
     } finally {
       setSubmitting(false);
     }
@@ -163,7 +164,7 @@ export default function FulfillmentCenter() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-display font-semibold text-brand-text">履约中心</h1>
+          <h1 className="font-semibold text-brand-text">履约中心</h1>
           <p className="text-sm text-brand-muted mt-1">拣货 · 复核 · 发货 · 物流跟踪 · 异常处理</p>
         </div>
         <Space>
@@ -301,7 +302,7 @@ export default function FulfillmentCenter() {
         open={!!abnormalTarget}
         onCancel={() => { setAbnormalTarget(null); setAbnormalReason(''); }}
         onOk={submitAbnormal}
-        okText="确认异常"
+        okText="标记物流异常"
         okButtonProps={{ danger: true }}
         confirmLoading={submitting}
       >

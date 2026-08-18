@@ -3,10 +3,12 @@
  */
 
 import TextBannerBlock from "@/components/blocks/TextBannerBlock";
-import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
-import { colorPuckField } from "../fields/ColorField";
-import MediaPickerField from "../fields/MediaPickerField";
+import type { LinkTargetType } from "../utils/linkTarget";
+import {
+  createContentTemplateMarker,
+  type ContentTemplateMarker,
+} from "../generated/contentTemplates.generated";
 
 export interface TextBannerPuckProps {
   eyebrow: string;
@@ -14,17 +16,23 @@ export interface TextBannerPuckProps {
   body: string;
   buttonText: string;
   linkUrl: string;
-  backgroundImage?: string;
+  targetType: LinkTargetType;
+  productId: number;
   template: string;
-  bgColor: string;
-  textColor: string;
   spacing: string;
+  /** 可选横幅背景图；留空则为纯色大留白 */
+  bgImage: string;
+  /** 系统保留：区块级内容模板合同印记，不在 Inspector 中展示。 */
+  __contentTemplate?: ContentTemplateMarker;
   locked?: boolean;
 }
 
 export const textBannerPuckConfig = {
   render: (props: TextBannerPuckProps) => (
-    <TextBannerBlock module={convertPuckProps("文字横幅", props as any) as any} />
+    <TextBannerBlock
+      module={convertPuckProps("文字横幅", props as any) as any}
+      editMode
+    />
   ),
   defaultProps: {
     eyebrow: "",
@@ -32,36 +40,30 @@ export const textBannerPuckConfig = {
     body: "",
     buttonText: "",
     linkUrl: "",
-    backgroundImage: "",
+    targetType: "none",
+    productId: 0,
     template: "center",
-    bgColor: "#FBF9F6",
-    textColor: "#2C2C2C",
     spacing: "normal",
+    bgImage: "",
+    __contentTemplate: createContentTemplateMarker("文字横幅"),
     locked: false,
   } satisfies TextBannerPuckProps,
   fields: {
     eyebrow: { type: "text" as const, label: "眉题" },
     title: { type: "text" as const, label: "标题" },
     body: { type: "textarea" as const, label: "正文" },
-    backgroundImage: {
-      type: "custom" as const,
-      label: "背景海报（可选）",
-      render: ({
-        value, onChange, readOnly,
-      }: { value?: string; onChange: (value: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField
-          fieldKey="backgroundImage"
-          device="shared"
-          value={value}
-          onChange={onChange}
-          readOnly={readOnly}
-          spec={IMAGE_SPECS.textBanner.bgImage}
-          placeholder="上传横幅背景海报（留空使用纯色）"
-        />
-      ),
-    },
     buttonText: { type: "text" as const, label: "按钮文字" },
     linkUrl: { type: "text" as const, label: "按钮跳转链接" },
+    targetType: {
+      type: "radio" as const,
+      label: "按钮跳转",
+      options: [
+        { label: "不跳转", value: "none" },
+        { label: "商品详情", value: "product" },
+        { label: "站内页面", value: "page" },
+      ],
+    },
+    productId: { type: "number" as const, label: "商品 ID" },
     template: {
       type: "radio" as const,
       label: "对齐",
@@ -70,17 +72,15 @@ export const textBannerPuckConfig = {
         { label: "左对齐", value: "left" },
       ],
     },
-    bgColor: colorPuckField("背景色"),
-    textColor: colorPuckField("文字色"),
     spacing: {
       type: "radio" as const,
       label: "间距",
       options: [
-        { label: "紧凑", value: "compact" },
         { label: "标准", value: "normal" },
         { label: "宽松", value: "spacious" },
       ],
     },
+    bgImage: { type: "text" as const, label: "背景图 URL" },
   },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };

@@ -2,7 +2,10 @@
  * schema/modules/hero.ts — 「首屏主视觉(品牌电影首屏)」编辑区 Schema。
  * 五层结构:内容(文案+跳转) → 媒体(双端图+双焦点+alt) → 布局(文字位)。
  */
-import { HERO_CONTRACT, evaluateHeroContract } from "../../../config/blockContracts";
+import {
+  HERO_CONTRACT,
+  evaluateHeroContract,
+} from "../../../config/blockContracts";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { heroPuckConfig } from "../../../adapters/hero.puck";
 import {
@@ -16,7 +19,7 @@ import type { ModuleInspectorSchema } from "../types";
 
 export const heroSchema: ModuleInspectorSchema = {
   moduleType: "首屏主视觉",
-  displayName: "品牌电影首屏",
+  displayName: "首屏",
   purpose: HERO_CONTRACT.purpose,
   evaluate: evaluateHeroContract,
   defaults: { ...heroPuckConfig.defaultProps },
@@ -26,7 +29,7 @@ export const heroSchema: ModuleInspectorSchema = {
       title: "内容",
       layer: "content",
       fields: [
-        moduleNameField("品牌电影首屏"),
+        moduleNameField("首屏"),
         {
           key: "title",
           label: "主标题",
@@ -43,6 +46,13 @@ export const heroSchema: ModuleInspectorSchema = {
           hint: "标题上方的小字引导，留空不显示",
           placeholder: "如 CAMPAIGN / NEW COLLECTION",
         },
+      ],
+    },
+    {
+      id: "hero-action",
+      title: "行动与关联",
+      layer: "interaction",
+      fields: [
         {
           key: "actionText",
           label: "行动入口文字",
@@ -60,15 +70,26 @@ export const heroSchema: ModuleInspectorSchema = {
       layer: "media",
       description: "首屏按视口裁切；素材建议 桌面 16:7 / 手机 4:5",
       fields: [
-        desktopMediaField("desktopImage", "桌面端主视觉", IMAGE_SPECS.hero.desktop, {
-          required: true,
-          focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
-          placeholder: "上传桌面端主视觉（16:7）",
-        }),
-        mobileMediaField("mobileImage", "手机端主视觉", IMAGE_SPECS.hero.mobile, "desktopImage", {
-          focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
-          placeholder: "上传手机端主视觉（4:5）",
-        }),
+        desktopMediaField(
+          "desktopImage",
+          "桌面端主视觉",
+          IMAGE_SPECS.hero.desktop,
+          {
+            required: true,
+            focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
+            placeholder: "上传桌面端主视觉（16:7）",
+          },
+        ),
+        mobileMediaField(
+          "mobileImage",
+          "手机端主视觉",
+          IMAGE_SPECS.hero.mobile,
+          "desktopImage",
+          {
+            focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
+            placeholder: "上传手机端主视觉（4:5）",
+          },
+        ),
       ],
     },
     {
@@ -81,7 +102,11 @@ export const heroSchema: ModuleInspectorSchema = {
           label: "文字位置",
           control: "segmented",
           options: [
-            { label: "左下（电影式）", value: "left", diagram: "textBottomLeft" },
+            {
+              label: "左下（电影式）",
+              value: "left",
+              diagram: "textBottomLeft",
+            },
             { label: "居中", value: "center", diagram: "textCenter" },
           ],
         },

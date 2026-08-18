@@ -6,24 +6,26 @@ import { UserOutlined, LockOutlined, EyeInvisibleOutlined, EyeOutlined, SafetyCe
 import { useAuthStore } from '@/store/authStore';
 import { authApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
+import { ADMIN_COLORS } from '@/styles/antdTheme';
 
 /* ═══════ 局部视觉令牌 — 仅作用于登录页 ═══════ */
 const TOKENS = {
   bg: '#F2EFEA',
   bgLight: '#F8F6F2',
   card: 'rgba(255,255,255,0.88)',
-  title: '#5A5048',
-  text: '#3F3934',
-  muted: '#8C847C',
+  title: ADMIN_COLORS.ink,
+  text: ADMIN_COLORS.textStrong,
+  muted: ADMIN_COLORS.muted,
   border: '#DCD6CF',
-  accent: '#C3A06A',
-  accentHover: '#B58F58',
-  accentActive: '#A9824E',
+  brandGold: ADMIN_COLORS.brandGold,
+  accent: ADMIN_COLORS.action,
+  accentHover: ADMIN_COLORS.actionHover,
+  accentActive: ADMIN_COLORS.actionActive,
   accentDisabled: '#D8C7AC',
   inputBg: '#FBFAF8',
-  placeholder: '#AAA39B',
-  error: '#A85D58',
-  hint: '#AAA39C',
+  placeholder: ADMIN_COLORS.muted,
+  error: ADMIN_COLORS.error,
+  hint: ADMIN_COLORS.muted,
 } as const;
 
 const REMEMBER_KEY = 'haichuan_remembered_user';
@@ -96,14 +98,14 @@ export default function Login() {
         {/* ═══ 标题区 ═══ */}
         <div className="text-center mb-8">
           <h1
-            className="text-[32px] font-medium tracking-[0.04em] m-0"
-            style={{ color: TOKENS.title, fontFamily: '"Noto Serif SC", "PingFang SC", serif' }}
+            className="text-[26px] font-semibold tracking-normal m-0"
+            style={{ color: TOKENS.title, fontFamily: '"PingFang SC", "Microsoft YaHei", sans-serif', lineHeight: '34px' }}
           >
             欢迎登录
           </h1>
           <div
             className="mx-auto mt-4"
-            style={{ width: 30, height: 2, background: TOKENS.accent, borderRadius: 1 }}
+            style={{ width: 30, height: 2, background: TOKENS.brandGold, borderRadius: 1 }}
           />
         </div>
 
@@ -220,9 +222,10 @@ export default function Login() {
               borderRadius: 8,
               background: TOKENS.accent,
               border: 'none',
+              color: ADMIN_COLORS.onAction,
               fontWeight: 500,
               fontSize: 16,
-              letterSpacing: '0.06em',
+              letterSpacing: 0,
               boxShadow: 'none',
             }}
             onMouseEnter={(e) => {
@@ -253,13 +256,13 @@ export default function Login() {
 
       {/* ═══ 全局样式注入 ═══ */}
       <style>{`
-        /* 聚焦样式 — 低饱和香槟金 */
+        /* 聚焦样式使用高对比交互色，不以品牌金作唯一焦点。 */
         .ant-input-affix-wrapper:focus-within,
         .ant-input-affix-wrapper:hover,
         .ant-input:focus,
         .ant-input:hover {
-          border-color: #B99763 !important;
-          box-shadow: 0 0 0 3px rgba(185,151,99,0.12) !important;
+          border-color: ${TOKENS.accent} !important;
+          box-shadow: 0 0 0 3px rgba(111,87,51,0.18) !important;
         }
         /* 密码输入框 */
         .ant-input-affix-wrapper {
@@ -305,7 +308,7 @@ export default function Login() {
             border-radius: 14px !important;
             max-width: calc(100vw - 40px) !important;
           }
-          h1 { font-size: 28px !important; }
+          h1 { font-size: 26px !important; line-height: 34px !important; }
         }
       `}</style>
     </div>

@@ -17,6 +17,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { partnerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
 const STATUS_OPTIONS = [
   { value: "PENDING", label: "待审核", color: "processing" },
@@ -84,7 +85,7 @@ export default function PartnerApplications() {
       setData((res?.list as ApplicationRow[]) || []);
       setTotal(res?.total || 0);
     } catch (e: any) {
-      message.error(e.message || "加载失败");
+      message.error(getSafeAdminErrorMessage(e, "合作申请列表加载失败，请稍后重新加载。"));
     } finally {
       setLoading(false);
     }
@@ -100,7 +101,7 @@ export default function PartnerApplications() {
       setDetail(full as ApplicationRow);
       setDetailOpen(true);
     } catch (e: any) {
-      message.error(e.message || "加载详情失败");
+      message.error(getSafeAdminErrorMessage(e, "合作申请详情加载失败，请稍后重新加载。"));
     }
   };
 
@@ -115,7 +116,7 @@ export default function PartnerApplications() {
       reviewForm.resetFields();
       await load();
     } catch (e: any) {
-      message.error(e.message || "审核失败");
+      message.error(getSafeAdminErrorMessage(e, "审核提交失败，请检查审核意见后重试。"));
     } finally {
       setSubmitting(false);
     }
@@ -176,7 +177,7 @@ export default function PartnerApplications() {
     <div className="p-6">
       <Card>
         <div className="mb-4 flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold mr-4">合作商家申请</h1>
+          <h1 className="font-semibold mr-4">合作申请</h1>
           <Select
             allowClear
             placeholder="按状态筛选"

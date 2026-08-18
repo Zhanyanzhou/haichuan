@@ -29,6 +29,7 @@ import { SecureImage } from "@/components/common/SecureImage";
 import { productPlaceholder } from "@/utils/placeholder";
 import type { Category, Product, ProductStatus } from "@/types";
 import { unwrapResponse } from "@/utils/unwrap";
+import { ADMIN_COPY, getAdminEmptyText } from "@/constants/adminCopy";
 import "./ProductManage.css";
 
 type ProductListItem = Product & {
@@ -39,6 +40,27 @@ type ProductListItem = Product & {
     isComplete: boolean;
   };
 };
+
+type ProductActionError = Error & { status?: number };
+
+function getProductActionErrorMessage(error: unknown, action: string): string {
+  const requestError = error as ProductActionError | undefined;
+  const status = requestError?.status;
+  const serverMessage = requestError?.message?.trim();
+
+  if (status === 401) return `${action}未完成：登录已失效，请重新登录后再试。`;
+  if (status === 403) return `${action}未完成：当前账号没有操作权限，请联系管理员处理。`;
+  if (status === 404) {
+    return `${action}未完成：商品不存在或已被其他人处理，请刷新列表确认最新状态。`;
+  }
+  if (status === 400 || status === 409) {
+    return `${action}未完成：${serverMessage || "商品存在关联数据或状态冲突"}。请刷新列表确认后再试。`;
+  }
+  if (status && status >= 500) {
+    return `${action}未完成：服务端暂时无法处理，请稍后重试；若持续失败，请联系管理员。`;
+  }
+  return `${action}未完成：网络连接或服务发生异常，请检查网络后重试。`;
+}
 
 const statusMeta: Record<ProductStatus, { label: string; color: string }> = {
   DRAFT: { label: "草稿", color: "default" },
@@ -82,6 +104,8 @@ export default function ProductManage() {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [debouncedKeyword, setDebouncedKeyword] = useState("");
   const [creating, setCreating] = useState(false);
+  const [pendingProductId, setPendingProductId] = useState<number | null>(null);
+  const [batchProcessing, setBatchProcessing] = useState(false);
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [qualityScope, setQualityScope] = useState<
@@ -120,7 +144,8 @@ export default function ProductManage() {
 
   const loadCategories = useCallback(async () => {
     try {
-      const response = await categoryApi.getTree();
+      // 管理端分类树：返回全部分类（公开树 /categories/tree 只含有公开商品的分类，商品清空后会变空）
+      const response = await categoryApi.getManageTree();
       const options: { value: number; label: string }[] = [];
       const walk = (nodes: Category[], parentLabel = "") => {
         nodes.forEach((node) => {
@@ -246,7 +271,27 @@ export default function ProductManage() {
     void loadProducts(1, { keyword });
   };
 
+  const refreshAfterRowsLeave = async (affectedIds: number[]) => {
+    const affected = new Set(affectedIds);
+    const remainingProducts = products.filter((product) => !affected.has(product.id));
+    const affectedOnPage = products.length - remainingProducts.length;
+
+    setSelectedIds((ids) => ids.filter((id) => !affected.has(Number(id))));
+    setProducts(remainingProducts);
+    setTotal((current) => Math.max(0, current - affectedOnPage));
+
+    if (remainingProducts.length === 0 && page > 1) {
+      setLoading(true);
+      setPage((current) => Math.max(1, current - 1));
+      await loadCounts();
+      return;
+    }
+    await Promise.all([loadProducts(page), loadCounts()]);
+  };
+
   const changeStatus = async (id: number, status: ProductStatus) => {
+    if (pendingProductId !== null) return;
+    setPendingProductId(id);
     try {
       await productApi.updateStatus(id, status);
       message.success(
@@ -257,40 +302,43 @@ export default function ProductManage() {
             : "商品状态已更新",
       );
       await Promise.all([loadProducts(), loadCounts()]);
-    } catch (requestError: any) {
+    } catch (requestError: unknown) {
       console.error("更新商品状态失败:", requestError);
-      message.error(requestError?.message || "状态更新失败");
+      message.error(getProductActionErrorMessage(requestError, "商品状态更新"));
+    } finally {
+      setPendingProductId(null);
     }
   };
 
-  const deleteProduct = async (product: Product) => {
+  const archiveProduct = async (product: Product) => {
+    if (pendingProductId !== null) return;
+    setPendingProductId(product.id);
     try {
-      await productApi.updateStatus(product.id, "ARCHIVED");
-      message.success(`已将「${product.name}」移入回收站`);
-      setSelectedIds((ids) => ids.filter((id) => id !== product.id));
-      await Promise.all([
-        loadProducts(products.length === 1 && page > 1 ? page - 1 : page),
-        loadCounts(),
-      ]);
-    } catch (requestError: any) {
+      await productApi.archive(product.id);
+      await refreshAfterRowsLeave([product.id]);
+      message.success(`已将「${product.name}」移入回收站，可在回收站中恢复。`);
+    } catch (requestError: unknown) {
       console.error("移入回收站失败:", requestError);
-      message.error(requestError?.message || "移入回收站失败");
+      message.error(getProductActionErrorMessage(requestError, "移入回收站"));
+      throw requestError;
+    } finally {
+      setPendingProductId(null);
     }
   };
 
-  // 彻底删除：调用后端 DELETE（deletedAt 软删、不可恢复），激活原本零调用的 productApi.delete
-  const realDelete = async (product: Product) => {
+  const restoreProduct = async (product: Product) => {
+    if (pendingProductId !== null) return;
+    setPendingProductId(product.id);
     try {
-      await productApi.delete(product.id);
-      message.success(`已彻底删除「${product.name}」`);
-      setSelectedIds((ids) => ids.filter((id) => id !== product.id));
-      await Promise.all([
-        loadProducts(products.length === 1 && page > 1 ? page - 1 : page),
-        loadCounts(),
-      ]);
-    } catch (requestError: any) {
-      console.error("彻底删除失败:", requestError);
-      message.error(requestError?.message || "彻底删除失败");
+      await productApi.restore(product.id);
+      await refreshAfterRowsLeave([product.id]);
+      message.success(`已恢复「${product.name}」为草稿，可重新编辑后发布。`);
+    } catch (requestError: unknown) {
+      console.error("恢复商品失败:", requestError);
+      message.error(getProductActionErrorMessage(requestError, "恢复商品"));
+      throw requestError;
+    } finally {
+      setPendingProductId(null);
     }
   };
 
@@ -301,36 +349,29 @@ export default function ProductManage() {
       content: `将「${product.name}」移入回收站？之后可从回收站恢复。`,
       okText: "移入",
       cancelText: "取消",
-      onOk: () => deleteProduct(product),
+      onOk: () => archiveProduct(product),
     });
 
   const confirmRestore = (product: Product) =>
     Modal.confirm({
-      title: "恢复商品",
-      content: `将「${product.name}」恢复到仓库中？恢复后不会自动上架，需在「仓库中」手动上架。`,
-      okText: "恢复",
+      title: "恢复草稿",
+      content: `将「${product.name}」恢复为草稿？恢复后可重新编辑并发布。`,
+      okText: "恢复草稿",
       cancelText: "取消",
-      onOk: () => changeStatus(product.id, "OFFLINE"),
-    });
-
-  const confirmRealDelete = (product: Product) =>
-    Modal.confirm({
-      title: "彻底删除",
-      content: `「${product.name}」将被永久删除，此操作不可恢复。`,
-      okText: "确认删除",
-      okButtonProps: { danger: true },
-      cancelText: "取消",
-      onOk: () => realDelete(product),
+      onOk: () => restoreProduct(product),
     });
 
   // 有限并发执行批量操作，逐条汇总成功/失败，避免 Promise.all 整体失败 + 大量并发触发 429。
   const runBatch = async (
     ids: Key[],
     action: (id: number) => Promise<unknown>,
-  ): Promise<{ ok: number; failed: string[] }> => {
+  ): Promise<{
+    succeeded: number[];
+    failed: Array<{ id: number; error: unknown }>;
+  }> => {
     const queue = ids.map((id) => Number(id));
-    const failed: string[] = [];
-    let ok = 0;
+    const failed: Array<{ id: number; error: unknown }> = [];
+    const succeeded: number[] = [];
     let cursor = 0;
     const concurrency = 3;
     const worker = async () => {
@@ -338,14 +379,14 @@ export default function ProductManage() {
         const current = queue[cursor++];
         try {
           await action(current);
-          ok++;
-        } catch {
-          failed.push(String(current));
+          succeeded.push(current);
+        } catch (error: unknown) {
+          failed.push({ id: current, error });
         }
       }
     };
     await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
-    return { ok, failed };
+    return { succeeded, failed };
   };
 
   const changeSelectedStatus = async (status: ProductStatus) => {
@@ -353,37 +394,63 @@ export default function ProductManage() {
       message.warning("请先选择商品，再进行批量操作");
       return;
     }
-    message.loading({ content: `正在批量处理 ${selectedIds.length} 件商品…`, key: "batch-status", duration: 0 });
-    const { ok, failed } = await runBatch(selectedIds, (id) => productApi.updateStatus(id, status));
-    message.destroy("batch-status");
-    if (failed.length === 0) {
-      message.success(`已处理 ${ok} 件商品`);
-    } else if (ok > 0) {
-      message.warning(`成功 ${ok} 件，失败 ${failed.length} 件：${failed.join("、")}`);
-    } else {
-      message.error(`全部失败（${failed.length} 件）：${failed.join("、")}`);
+    setBatchProcessing(true);
+    try {
+      message.loading({ content: `正在批量处理 ${selectedIds.length} 件商品…`, key: "batch-status", duration: 0 });
+      const { succeeded, failed } = await runBatch(selectedIds, (id) => productApi.updateStatus(id, status));
+      message.destroy("batch-status");
+      if (failed.length === 0) {
+        message.success(`已处理 ${succeeded.length} 件商品`);
+      } else if (succeeded.length > 0) {
+        message.warning(`成功 ${succeeded.length} 件，失败 ${failed.length} 件。${getProductActionErrorMessage(failed[0].error, "批量状态更新")}`);
+      } else {
+        message.error(getProductActionErrorMessage(failed[0]?.error, "批量状态更新"));
+      }
+      setSelectedIds([]);
+      await Promise.all([loadProducts(), loadCounts()]);
+    } finally {
+      message.destroy("batch-status");
+      setBatchProcessing(false);
     }
-    setSelectedIds([]);
-    await Promise.all([loadProducts(), loadCounts()]);
   };
 
-  const batchDelete = async () => {
+  const batchArchive = async () => {
     if (!selectedIds.length) {
       message.warning("请先选择商品，再进行批量删除");
       return;
     }
-    message.loading({ content: `正在将 ${selectedIds.length} 件商品移入回收站…`, key: "batch-delete", duration: 0 });
-    const { ok, failed } = await runBatch(selectedIds, (id) => productApi.updateStatus(id, "ARCHIVED"));
-    message.destroy("batch-delete");
-    if (failed.length === 0) {
-      message.success(`已将 ${ok} 件商品移入回收站`);
-    } else if (ok > 0) {
-      message.warning(`成功 ${ok} 件，失败 ${failed.length} 件：${failed.join("、")}`);
-    } else {
-      message.error(`全部失败（${failed.length} 件）：${failed.join("、")}`);
+    setBatchProcessing(true);
+    try {
+      message.loading({ content: `正在将 ${selectedIds.length} 件商品移入回收站…`, key: "batch-delete", duration: 0 });
+      const { succeeded, failed } = await runBatch(selectedIds, (id) => productApi.archive(id));
+      message.destroy("batch-delete");
+      if (succeeded.length > 0) await refreshAfterRowsLeave(succeeded);
+      if (failed.length === 0) {
+        message.success(`已将 ${succeeded.length} 件商品移入回收站，可在回收站中恢复。`);
+      } else if (succeeded.length > 0) {
+        message.warning(`成功 ${succeeded.length} 件，失败 ${failed.length} 件。${getProductActionErrorMessage(failed[0].error, "批量移入回收站")}`);
+      } else {
+        message.error(getProductActionErrorMessage(failed[0]?.error, "批量移入回收站"));
+      }
+    } finally {
+      message.destroy("batch-delete");
+      setBatchProcessing(false);
     }
-    setSelectedIds([]);
-    await Promise.all([loadProducts(), loadCounts()]);
+  };
+
+  const confirmBatchArchive = () => {
+    if (!selectedIds.length) {
+      message.warning("请先选择商品，再进行批量删除");
+      return;
+    }
+    Modal.confirm({
+      title: "批量移入回收站",
+      content: `将选中的 ${selectedIds.length} 件商品移入回收站？之后可逐件恢复。`,
+      okText: "确认移入",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: () => batchArchive(),
+    });
   };
 
   const openCreate = useCallback(() => {
@@ -491,7 +558,7 @@ export default function ProductManage() {
       }
     } catch (requestError: any) {
       console.error("复制商品失败:", requestError);
-      message.error(requestError?.message || "复制失败");
+      message.error(requestError?.message || "商品复制失败，请稍后重试。");
     }
   };
 
@@ -604,57 +671,62 @@ export default function ProductManage() {
         key: "actions",
         fixed: "right" as const,
         width: 210,
-        render: (_: unknown, product: Product) => (
+        render: (_: unknown, product: Product) => {
+          const rowPending = pendingProductId === product.id;
+          return (
           <Space className="product-manage__row-actions" size={10} wrap>
-            <Button
-              type="link"
-              size="small"
-              className="product-manage__action-link"
-              onClick={() => openEdit(product)}
-            >
-              编辑商品
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              className="product-manage__action-link"
-              onClick={() => void cloneProduct(product)}
-            >
-              复制
-            </Button>
             {product.status === "ARCHIVED" ? (
-              /* 回收站商品：恢复到仓库 + 彻底删除（不可恢复） */
-              <Dropdown
-                overlayClassName="product-manage__dropdown"
-                menu={{
-                  items: [
-                    {
-                      key: "restore",
-                      label: "恢复到仓库",
-                      onClick: () => confirmRestore(product),
-                    },
-                    {
-                      key: "realDelete",
-                      danger: true,
-                      label: "彻底删除",
-                      onClick: () => confirmRealDelete(product),
-                    },
-                  ],
-                }}
-              >
-                <Button type="link" size="small" className="product-manage__action-link">
-                  回收站操作 <DownOutlined />
-                </Button>
-              </Dropdown>
-            ) : (
-              /* 正常商品：上架/下架 + 移入回收站（去掉了原来和移入回收站语义重复的「删除」） */
+              /* 回收站商品只读：仅提供查看与恢复为草稿，不提供编辑/发布/下架/软删除等操作 */
               <>
+                <Button
+                  type="link"
+                  size="small"
+                  className="product-manage__action-link"
+                  onClick={() => openEdit(product)}
+                  disabled={rowPending}
+                >
+                  查看
+                </Button>
+                <Button
+                  type="link"
+                  size="small"
+                  className="product-manage__action-link"
+                  onClick={() => confirmRestore(product)}
+                  loading={rowPending}
+                  disabled={pendingProductId !== null && !rowPending}
+                >
+                  恢复草稿
+                </Button>
+              </>
+            ) : (
+              /* 正常商品：编辑/复制 + 上架下架 + 移入回收站（去掉了原来和移入回收站语义重复的「删除」） */
+              <>
+                <Button
+                  type="link"
+                  size="small"
+                  className="product-manage__action-link"
+                  onClick={() => openEdit(product)}
+                  disabled={rowPending}
+                >
+                  编辑商品
+                </Button>
+                <Button
+                  type="link"
+                  size="small"
+                  className="product-manage__action-link"
+                  onClick={() => void cloneProduct(product)}
+                  disabled={rowPending}
+                >
+                  复制
+                </Button>
                 {product.status === "PUBLISHED" ? (
                   <Button
                     type="link"
                     size="small"
                     className="product-manage__action-link"
                     onClick={() => void changeStatus(product.id, "OFFLINE")}
+                    loading={rowPending}
+                    disabled={pendingProductId !== null && !rowPending}
                   >
                     下架
                   </Button>
@@ -664,38 +736,43 @@ export default function ProductManage() {
                     size="small"
                     className="product-manage__action-link"
                     onClick={() => void changeStatus(product.id, "PUBLISHED")}
+                    loading={rowPending}
+                    disabled={pendingProductId !== null && !rowPending}
                   >
                     上架
                   </Button>
                 )}
                 <Dropdown
                   overlayClassName="product-manage__dropdown"
+                  disabled={pendingProductId !== null}
                   menu={{
                     items: [
                       {
                         key: "archive",
                         label: "移入回收站",
+                        disabled: pendingProductId !== null,
                         onClick: () => confirmArchive(product),
                       },
                     ],
                   }}
                 >
-                  <Button type="link" size="small" className="product-manage__action-link">
+                  <Button type="link" size="small" className="product-manage__action-link" loading={rowPending}>
                     更多 <DownOutlined />
                   </Button>
                 </Dropdown>
               </>
             )}
           </Space>
-        ),
+          );
+        },
       },
   ];
 
   const tabs = [
-    { key: "all", label: `全部 (${counts.all ?? total})` },
+    { key: "all", label: `全部（${counts.all ?? total}）` },
     ...statuses.map((status) => ({
       key: status,
-      label: `${statusMeta[status].label} (${counts[status] ?? 0})`,
+      label: `${statusMeta[status].label}（${counts[status] ?? 0}）`,
     })),
   ];
 
@@ -727,7 +804,7 @@ export default function ProductManage() {
           className="product-manage__tab"
           onClick={() => message.info("当前没有违规商品")}
         >
-          违规 (0)
+          违规（0）
         </button>
         <Dropdown
           overlayClassName="product-manage__dropdown"
@@ -735,7 +812,7 @@ export default function ProductManage() {
             items: [
               {
                 key: "violation",
-                label: "违规商品 (0)",
+                label: "违规商品（0）",
                 onClick: () => message.info("当前没有违规商品"),
               },
             ],
@@ -755,7 +832,7 @@ export default function ProductManage() {
           setIsAdvancedOpen(true);
         }}
       >
-        质量分/属性问题商品 ({qualityIssueCount}) <InfoCircleOutlined aria-hidden="true" />
+        质量分/属性问题商品（{qualityIssueCount}） <InfoCircleOutlined aria-hidden="true" />
       </button>
 
       <div className="product-manage__filters">
@@ -768,7 +845,7 @@ export default function ProductManage() {
             onPressEnter={search}
           />
           <Input
-            placeholder="商品ID，多个ID以逗号或空格分隔"
+            placeholder="商品 ID，多个 ID 以逗号或空格分隔"
             value={codeKeyword}
             allowClear
             onChange={(event) => setCodeKeyword(event.target.value)}
@@ -789,9 +866,9 @@ export default function ProductManage() {
         <div className="product-manage__filter-actions">
           <Space size={8}>
             <Button type="primary" className="product-manage__search-button" onClick={search}>
-              搜索
+              {ADMIN_COPY.actions.search}
             </Button>
-            <Button className="product-manage__secondary-button" onClick={resetFilters}>重置</Button>
+            <Button className="product-manage__secondary-button" onClick={resetFilters}>{ADMIN_COPY.actions.reset}</Button>
           </Space>
           <Space className="product-manage__filter-more" size={4}>
             <Dropdown
@@ -852,7 +929,7 @@ export default function ProductManage() {
             loading={creating}
             disabled={!categoriesLoaded}
           >
-            发布商品
+            新建商品
           </Button>
           <Button className="product-manage__secondary-button" onClick={() => message.info("商品装修功能将接入商品编辑页")}>商品装修</Button>
           <Button
@@ -866,7 +943,7 @@ export default function ProductManage() {
               if (selected) openEdit(selected);
             }}
           >
-            SKU管理
+            SKU 管理
           </Button>
           <Dropdown
             overlayClassName="product-manage__dropdown"
@@ -875,23 +952,26 @@ export default function ProductManage() {
                 {
                   key: "published",
                   label: "批量上架",
+                  disabled: batchProcessing || activeStatus === "ARCHIVED",
                   onClick: () => void changeSelectedStatus("PUBLISHED"),
                 },
                 {
                   key: "offline",
                   label: "批量下架",
+                  disabled: batchProcessing || activeStatus === "ARCHIVED",
                   onClick: () => void changeSelectedStatus("OFFLINE"),
                 },
                 {
                   key: "delete",
                   label: "移入回收站",
                   danger: true,
-                  onClick: () => void batchDelete(),
+                  disabled: batchProcessing || activeStatus === "ARCHIVED",
+                  onClick: confirmBatchArchive,
                 },
               ],
             }}
           >
-            <Button className="product-manage__secondary-button" disabled={!selectedIds.length}>
+            <Button className="product-manage__secondary-button" disabled={!selectedIds.length || batchProcessing || pendingProductId !== null || activeStatus === "ARCHIVED"} loading={batchProcessing}>
               更多批量操作 <DownOutlined />
             </Button>
           </Dropdown>
@@ -910,7 +990,7 @@ export default function ProductManage() {
               icon={<ReloadOutlined />}
               onClick={() => void loadProducts()}
             >
-              重新加载
+              {ADMIN_COPY.actions.retry}
             </Button>
           }
         />
@@ -926,11 +1006,14 @@ export default function ProductManage() {
           rowSelection={{
             selectedRowKeys: selectedIds,
             onChange: setSelectedIds,
+            getCheckboxProps: () => ({
+              disabled: batchProcessing || pendingProductId !== null,
+            }),
           }}
           locale={{
             emptyText: hasFilters
-              ? "没有符合当前筛选条件的商品"
-              : "暂无商品，点击“新增商品”开始添加",
+              ? getAdminEmptyText("商品", true)
+              : "暂无商品，点击“新建商品”开始添加。",
           }}
         />
       )}

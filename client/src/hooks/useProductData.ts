@@ -80,6 +80,8 @@ export interface ProductQuery {
   maxPrice?: number;
   /** 排序：运营序 / 价格升降；缺省为最近更新 */
   sortBy?: "sortOrder" | "price_asc" | "price_desc";
+  /** 属性值 ID 集合，逗号分隔（前台属性字典多选） */
+  attributeValueIds?: string;
   page?: number;
   pageSize?: number;
 }
@@ -123,6 +125,7 @@ export function useProductData(query?: ProductQuery | null) {
                 minPrice: query.minPrice,
                 maxPrice: query.maxPrice,
                 sortBy: query.sortBy,
+                attributeValueIds: query.attributeValueIds || undefined,
               }).filter(([, v]) => v !== undefined),
             )
           : { pageSize: 2000 };

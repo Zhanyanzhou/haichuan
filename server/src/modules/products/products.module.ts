@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
+import { TagsController } from './tags.controller';
 import { UploadModule } from '../upload/upload.module';
 import { CustomersModule } from '../customers/customers.module';
 import { AuthModule } from '../auth/auth.module';
@@ -11,7 +12,7 @@ import { CustomerOrStaffGuard } from './customer-or-staff.guard';
 @Module({
   // AuthModule 提供 JwtService，供 CustomerOrStaffGuard 解析客户/员工令牌
   imports: [UploadModule, CustomersModule, AuthModule],
-  controllers: [ProductsController],
+  controllers: [ProductsController, TagsController],
   providers: [ProductsService, ProductMediaService, ProductAccessService, CustomerOrStaffGuard],
   exports: [ProductsService, ProductAccessService],
 })

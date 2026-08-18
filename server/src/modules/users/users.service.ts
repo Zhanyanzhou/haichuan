@@ -19,7 +19,7 @@ export class UsersService {
     if (role) where.role = role;
 
     const _page = +page, _pageSize = +pageSize;
-    const [list, total] = await Promise.all([
+    const [list, total, roleRows] = await Promise.all([
       this.prisma.user.findMany({
         where,
         skip: (_page - 1) * _pageSize,
@@ -39,9 +39,14 @@ export class UsersService {
         },
       }),
       this.prisma.user.count({ where }),
+      // 角色分布统计不受分页/搜索影响，保持仪表盘七角色计数准确
+      this.prisma.user.groupBy({ by: ['role'], _count: { _all: true } }),
     ]);
 
-    return { list, total, page: _page, pageSize: _pageSize };
+    const roleCounts: Record<string, number> = {};
+    for (const r of roleRows) roleCounts[r.role] = r._count._all;
+
+    return { list, total, page: _page, pageSize: _pageSize, roleCounts };
   }
 
   async findById(id: number) {

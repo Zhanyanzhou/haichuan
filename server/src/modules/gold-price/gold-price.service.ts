@@ -113,10 +113,81 @@ export class GoldPriceService {
   }
 
   /**
-   * 自动金价源尚未接入前禁止写入模拟报价，避免影响商品售价。
+   * 自动金价采集：从 GOLD_PRICE_API_URL 拉取行情并写库、触发全店调价。
+   * - 未配置数据源时诚实跳过（不写模拟报价，避免污染商品售价）；
+   * - 价格越界（<100 或 >2000 元/克）视为脏数据丢弃；
+   * - 失败仅记录日志，不影响商品价格与既有金价记录。
    */
   private async fetchAndUpdateGoldPrice(source: string) {
-    this.logger.warn(`已跳过 ${source} 金价任务：尚未配置可信行情源`);
+    const apiUrl = process.env.GOLD_PRICE_API_URL?.trim();
+    if (!apiUrl) {
+      this.logger.warn(`已跳过 ${source} 金价任务：未配置 GOLD_PRICE_API_URL`);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const res = await fetch(apiUrl, { signal: controller.signal });
+      if (!res.ok) {
+        throw new Error(`行情源返回 HTTP ${res.status}`);
+      }
+      const data: unknown = await res.json();
+      const price = this.extractPrice(data);
+      if (!price || price < 100 || price > 2000) {
+        throw new Error(`行情源价格越界：${price}`);
+      }
+
+      await this.prisma.goldPrice.create({
+        // GoldPriceSource 仅 AUTO / MANUAL：自动采集统一记 AUTO，remark 记录早盘/午盘时段
+        data: { price, source: "AUTO", remark: source, recordDate: new Date() },
+      });
+      await this.adjustProductPrices(price);
+
+      this.logger.log(`金价自动更新成功：¥${price}/g（${source}）`);
+    } catch (e: any) {
+      this.logger.error(`金价自动更新失败（${source}）：${e?.message || e}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * 从行情源响应中提取价格（元/克）。
+   * 契约：优先读取 price；兼容 {data:{price}}、数组 [{price}] 与常见别名
+   * （goldPrice/latestPrice/au9999/Au9999）。数据源字段映射可按实际返回调整。
+   */
+  private extractPrice(data: unknown): number | null {
+    const pick = (obj: any): number | null => {
+      for (const key of [
+        "price",
+        "goldPrice",
+        "latestPrice",
+        "au9999",
+        "Au9999",
+      ]) {
+        const n = Number(obj?.[key]);
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      return null;
+    };
+
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        const p = pick(item);
+        if (p) return p;
+      }
+      return null;
+    }
+
+    const direct = pick(data);
+    if (direct) return direct;
+
+    const inner = (data as any)?.data;
+    if (inner && typeof inner === "object") {
+      return this.extractPrice(inner);
+    }
+    return null;
   }
 
   /**

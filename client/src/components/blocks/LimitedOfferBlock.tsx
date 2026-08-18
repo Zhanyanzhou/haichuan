@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
+import { SecureImage } from "@/components/common/SecureImage";
+import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
 
 interface LimitedOfferBlockProps {
   module: { content: Record<string, any>; styleConfig?: Record<string, any> };
@@ -41,6 +44,7 @@ export default function LimitedOfferBlock({
 }: LimitedOfferBlockProps) {
   const { content = {}, styleConfig = {} } = module;
   const {
+    eventImage,
     eyebrow,
     title,
     body,
@@ -60,6 +64,8 @@ export default function LimitedOfferBlock({
     getRemainingTime(targetDate),
   );
   const bgColor = styleConfig.bgColor || "#211D19";
+  const desktopEventRatio = getContractRoleRatio("limitedEvent", "event", "desktop");
+  const mobileEventRatio = getContractRoleRatio("limitedEvent", "event", "mobile");
 
   useEffect(() => {
     setRemaining(getRemainingTime(targetDate));
@@ -94,30 +100,41 @@ export default function LimitedOfferBlock({
     : [];
 
   return (
-    <DecorSection
-      master="commerce-campaign"
-      width="standard"
-      flow="flow"
-      background={bgColor}
-      style={{ color: "#fff" }}
-    >
-      <div
-        style={{
-          maxWidth: 1120,
-          margin: "0 auto",
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
-          gap: 36,
-          alignItems: "center",
-        }}
-      >
-        <div>
+    <DecorSection master="commerce-campaign" width="standard" flow="flow" background={bgColor} style={{ color: "#fff" }}>
+      <div className="hc-limited-event">
+        <style>{`
+          .hc-limited-event { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: clamp(28px, 5vw, 64px); align-items: center; }
+          .hc-limited-event__media { grid-row: 1 / span 3; aspect-ratio: ${desktopEventRatio}; overflow: hidden; background: #30302F; }
+          .hc-limited-event__media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+          .hc-limited-event__time { display: flex; flex-wrap: wrap; gap: 10px; }
+          @media (max-width: 767px) {
+            .hc-limited-event { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+            .hc-limited-event__media { grid-row: auto; aspect-ratio: ${mobileEventRatio}; }
+          }
+        `}</style>
+        <div className="hc-limited-event__media" data-content-role="event" data-editor-field="eventImage">
+          {eventImage ? (
+            <SecureImage src={eventImage} alt={title || "活动视觉"} />
+          ) : editMode ? (
+            <BlockEmptyPlaceholder hint="活动视觉" spec={`桌面 ${desktopEventRatio} · 手机 ${mobileEventRatio}`} height="100%" />
+          ) : null}
+        </div>
+        <div className="hc-limited-event__time" data-content-role="time" data-editor-field="targetDate">
+          {units.length > 0 && !isExpired ? units.map(([label, value]) => (
+            <div key={label as string}>
+              <strong style={{ display: "block", minWidth: 48, padding: "10px 8px", border: "1px solid rgba(184,148,78,.65)", color: "#F7F7F5", fontSize: 24, fontWeight: 500, textAlign: "center" }}>{value}</strong>
+              <small style={{ display: "block", marginTop: 6, color: "rgba(255,255,255,.68)", fontSize: 11, textAlign: "center" }}>{label}</small>
+            </div>
+          )) : (
+            <p style={{ margin: 0, color: "rgba(255,255,255,.72)", fontSize: 14 }}>{targetDate ? "活动已结束" : "请设置活动结束时间"}</p>
+          )}
+        </div>
+        <div data-content-role="copy">
           {eyebrow && (
-            <p
+            <p data-editor-field="eyebrow"
               style={{
                 margin: "0 0 12px",
-                color: "#D8B86D",
+                color: "#B8944E",
                 fontSize: 12,
                 letterSpacing: "0.16em",
               }}
@@ -126,7 +143,7 @@ export default function LimitedOfferBlock({
             </p>
           )}
           {title && (
-            <h2
+            <h2 data-editor-field="title"
               style={{
                 margin: "0 0 14px",
                 color: "#fff",
@@ -139,7 +156,7 @@ export default function LimitedOfferBlock({
             </h2>
           )}
           {body && (
-            <p
+            <p data-editor-field="body"
               style={{
                 margin: 0,
                 maxWidth: 480,
@@ -164,8 +181,8 @@ export default function LimitedOfferBlock({
                 <span
                   key={`${benefit}-${index}`}
                   style={{
-                    border: "1px solid rgba(216,184,109,0.6)",
-                    color: "#F3DEAE",
+                    border: "1px solid rgba(184,148,78,0.6)",
+                    color: "#F2F1EE",
                     padding: "6px 10px",
                     fontSize: 12,
                   }}
@@ -176,51 +193,9 @@ export default function LimitedOfferBlock({
             </div>
           )}
         </div>
-        <div style={{ textAlign: "center" }}>
-          {units.length > 0 && !isExpired ? (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                gap: 10,
-                marginBottom: 25,
-              }}
-            >
-              {units.map(([label, value]) => (
-                <div key={label as string}>
-                  <strong
-                    style={{
-                      display: "block",
-                      minWidth: 48,
-                      padding: "11px 8px",
-                      background: "rgba(255,255,255,0.1)",
-                      color: "#F7E8C7",
-                      fontSize: 25,
-                      fontWeight: 500,
-                    }}
-                  >
-                    {value}
-                  </strong>
-                  <small
-                    style={{
-                      display: "block",
-                      marginTop: 6,
-                      color: "rgba(255,255,255,0.55)",
-                      fontSize: 11,
-                    }}
-                  >
-                    {label}
-                  </small>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p style={{ margin: "0 0 25px", color: "#F7E8C7", fontSize: 16 }}>
-              {targetDate ? "活动已结束" : "请设置活动结束时间"}
-            </p>
-          )}
+        <div data-content-role="action">
           {buttonText && linkUrl && !isExpired && (
-            <Link
+            <Link data-editor-field="buttonText linkUrl"
               to={linkUrl}
               style={{
                 display: "inline-block",

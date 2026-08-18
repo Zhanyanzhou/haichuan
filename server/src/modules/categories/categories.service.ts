@@ -5,35 +5,92 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 export class CategoriesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
-    return this.prisma.category.findMany({
-      where: { isActive: true },
-      orderBy: { sortOrder: 'asc' },
-      include: { children: { where: { isActive: true }, orderBy: { sortOrder: 'asc' } } },
+  private retainPublicBranches<T extends { id: number; children?: T[] }>(
+    nodes: T[],
+    publicCategoryIds: Set<number>,
+  ): T[] {
+    return nodes.flatMap((node) => {
+      const children = this.retainPublicBranches(
+        node.children ?? [],
+        publicCategoryIds,
+      );
+      if (!publicCategoryIds.has(node.id) && children.length === 0) return [];
+      return [{ ...node, children } as T];
     });
   }
 
+  private async findPublicProductCategoryIds(): Promise<Set<number>> {
+    const categories = await this.prisma.product.findMany({
+      where: {
+        status: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        deletedAt: null,
+        category: { isActive: true },
+      },
+      select: { categoryId: true },
+      distinct: ['categoryId'],
+    });
+    return new Set(categories.map(({ categoryId }) => categoryId));
+  }
+
+  async findAll() {
+    const [categories, directPublicIds] = await Promise.all([
+      this.prisma.category.findMany({
+        where: { isActive: true },
+        orderBy: { sortOrder: 'asc' },
+        include: {
+          children: {
+            where: { isActive: true },
+            orderBy: { sortOrder: 'asc' },
+          },
+        },
+      }),
+      this.findPublicProductCategoryIds(),
+    ]);
+    const byId = new Map(categories.map((category) => [category.id, category]));
+    const publicIds = new Set(directPublicIds);
+    for (const categoryId of directPublicIds) {
+      let parentId = byId.get(categoryId)?.parentId;
+      while (parentId) {
+        publicIds.add(parentId);
+        parentId = byId.get(parentId)?.parentId;
+      }
+    }
+    return categories
+      .filter(({ id }) => publicIds.has(id))
+      .map((category) => ({
+        ...category,
+        children: category.children.filter(({ id }) => publicIds.has(id)),
+      }));
+  }
+
   async findTree() {
-    const categories = await this.prisma.category.findMany({
-      where: { level: 1, isActive: true },
-      orderBy: { sortOrder: 'asc' },
-      include: {
-        children: {
-          where: { isActive: true },
-          orderBy: { sortOrder: 'asc' },
-          include: {
-            children: {
-              where: { isActive: true },
-              orderBy: { sortOrder: 'asc' },
-              include: {
-                children: { where: { isActive: true }, orderBy: { sortOrder: 'asc' } },
+    const [categories, publicCategoryIds] = await Promise.all([
+      this.prisma.category.findMany({
+        where: { level: 1, isActive: true },
+        orderBy: { sortOrder: 'asc' },
+        include: {
+          children: {
+            where: { isActive: true },
+            orderBy: { sortOrder: 'asc' },
+            include: {
+              children: {
+                where: { isActive: true },
+                orderBy: { sortOrder: 'asc' },
+                include: {
+                  children: {
+                    where: { isActive: true },
+                    orderBy: { sortOrder: 'asc' },
+                  },
+                },
               },
             },
           },
         },
-      },
-    });
-    return categories;
+      }),
+      this.findPublicProductCategoryIds(),
+    ]);
+    return this.retainPublicBranches(categories, publicCategoryIds);
   }
 
   /** 管理端分类树：保留已停用的二、三级类目，便于重新启用。 */

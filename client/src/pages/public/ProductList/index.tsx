@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { motion, useInView } from "framer-motion";
-import { Spin, Button } from "antd";
+import { Spin, Button, Select } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { trackPageView } from "@/hooks/useAnalytics";
 import {
@@ -11,7 +11,7 @@ import {
   type ProductQuery,
   type RealCategory,
 } from "@/hooks/useProductData";
-import { categoryApi } from "@/services/api";
+import { categoryApi, attributeApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import type { CatalogProduct } from "@/data/catalogData";
 import { SecureImage } from "@/components/common/SecureImage";
@@ -218,6 +218,8 @@ export default function ProductList() {
   // 服务端查询模式：关键词/材质/排序/分类透传后端（替代原 2000 全量 + 本地过滤）
   // keyword 拆输入态/查询态：输入不触发请求，回车或搜索按钮才应用（防逐键请求风暴）
   const [filters, setFilters] = useState({ keyword: "", materialType: "", sortBy: "updatedAt_desc" });
+  const [selectedAttributeIds, setSelectedAttributeIds] = useState<number[]>([]);
+  const [attributeGroups, setAttributeGroups] = useState<{ id: number; name: string; values: { id: number; value: string }[] }[]>([]);
   const [keywordInput, setKeywordInput] = useState("");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 24;
@@ -225,9 +227,10 @@ export default function ProductList() {
   const [accum, setAccum] = useState<CatalogProduct[]>([]);
   const [seenRevision, setSeenRevision] = useState<number | null>(null);
   const [categories, setCategories] = useState<RealCategory[]>([]);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
 
   // 解析 ?categoryId=：分类树就绪后展开为"该分类+全部后代"ID 集合（首页链接由此激活）
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const categoryIdParam = searchParams.get("categoryId");
 
   // 分类树独立拉取：query 组装依赖它，不能等商品 hook 返回（否则形成循环）
@@ -240,6 +243,33 @@ export default function ProductList() {
         if (!cancelled) setCategories(Array.isArray(cats) ? cats : []);
       } catch {
         // 分类树拉取失败不阻塞列表（分类筛选不生效但商品可浏览）
+      } finally {
+        if (!cancelled) setCategoriesLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 属性字典独立拉取：动态渲染筛选维度（材质/工艺/尺寸/场景等）
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await attributeApi.getPublic();
+        const nodes = unwrapResponse<any[]>(res) || [];
+        if (!cancelled) {
+          setAttributeGroups(
+            nodes.map((n) => ({
+              id: n.id,
+              name: n.name,
+              values: (n.values || []).map((v: any) => ({ id: v.id, value: v.value })),
+            })),
+          );
+        }
+      } catch {
+        // 属性字典拉取失败不阻塞列表
       }
     })();
     return () => {
@@ -254,9 +284,12 @@ export default function ProductList() {
         : "",
     [categories, categoryIdParam],
   );
+  const invalidCategory = Boolean(
+    categoryIdParam && categoriesLoaded && !categoryIds,
+  );
   // 带 URL 分类参数时先等分类树（null 暂停查询，避免首拉漏过滤）
   const query = useMemo<ProductQuery | null>(() => {
-    if (categoryIdParam && categories.length === 0) return null;
+    if (categoryIdParam && (!categoriesLoaded || invalidCategory)) return null;
     return {
       keyword: filters.keyword.trim() || undefined,
       materialType: filters.materialType || undefined,
@@ -265,14 +298,25 @@ export default function ProductList() {
           ? undefined
           : (filters.sortBy as NonNullable<ProductQuery["sortBy"]>),
       ids: categoryIds || undefined,
+      attributeValueIds: selectedAttributeIds.length
+        ? selectedAttributeIds.join(",")
+        : undefined,
       page,
       pageSize: PAGE_SIZE,
     };
-  }, [filters, categoryIds, page, categoryIdParam, categories.length]);
+  }, [
+    filters,
+    categoryIds,
+    page,
+    categoryIdParam,
+    categoriesLoaded,
+    invalidCategory,
+    selectedAttributeIds,
+  ]);
 
   const { products: pageProducts, total, loading, error, reload, revision } =
     useProductData(query);
-  const waitingCategory = query === null;
+  const waitingCategory = query === null && !invalidCategory;
 
   // SSE 商品变更（revision 变化）→ 回第一页重新累积；正常翻页 → 追加去重
   useEffect(() => {
@@ -301,7 +345,7 @@ export default function ProductList() {
   useEffect(() => {
     setPage(1);
     setAccum([]);
-  }, [filters, categoryIdParam]);
+  }, [filters, categoryIdParam, selectedAttributeIds]);
 
   const hasMore = !loading && !error && !waitingCategory && accum.length < total;
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -324,45 +368,99 @@ export default function ProductList() {
   }, []);
 
   const products = accum;
+  const hasAppliedFilters = Boolean(
+    filters.keyword.trim() ||
+      filters.materialType ||
+      selectedAttributeIds.length ||
+      categoryIdParam,
+  );
+  const showDiscoveryTools =
+    loading || waitingCategory || total > 0 || hasAppliedFilters;
+  const resetDiscovery = () => {
+    setKeywordInput("");
+    setSelectedAttributeIds([]);
+    setFilters({
+      keyword: "",
+      materialType: "",
+      sortBy: "updatedAt_desc",
+    });
+    if (categoryIdParam) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("categoryId");
+      setSearchParams(nextParams, { replace: true });
+    }
+  };
 
   return (
     <div style={{ background: V.bg, overflowX: "hidden", minHeight: "100vh" }}>
       <PageHeader />
 
       {/* ── 筛选与排序（服务端查询） ── */}
-      <section className="w-full" style={{ background: V.bg }}>
-        <div className={MX} style={{ paddingTop: "clamp(28px,4vh,48px)", ...SX }}>
-          <FilterPanel
-            keyword={keywordInput}
-            onKeywordChange={(value) => {
-              setKeywordInput(value);
-              // allowClear 清空时同步重置已应用的关键词
-              if (value === "" && filters.keyword) {
-                setFilters((f) => ({ ...f, keyword: "" }));
+      {showDiscoveryTools ? (
+        <section className="w-full" style={{ background: V.bg }}>
+          <div className={MX} style={{ paddingTop: "clamp(28px,4vh,48px)", ...SX }}>
+            <FilterPanel
+              keyword={keywordInput}
+              onKeywordChange={(value) => {
+                setKeywordInput(value);
+                // allowClear 清空时同步重置已应用的关键词
+                if (value === "" && filters.keyword) {
+                  setFilters((f) => ({ ...f, keyword: "" }));
+                }
+              }}
+              onSearch={() => {
+                const applied = keywordInput.trim();
+                setKeywordInput(applied);
+                // 值未变化时保持原引用，避免无谓的列表重置
+                setFilters((f) =>
+                  f.keyword === applied ? f : { ...f, keyword: applied },
+                );
+              }}
+              materialType={filters.materialType}
+              onMaterialTypeChange={(value) =>
+                setFilters((f) => ({ ...f, materialType: value }))
               }
-            }}
-            onSearch={() => {
-              const applied = keywordInput.trim();
-              setKeywordInput(applied);
-              // 值未变化时保持原引用，避免无谓的列表重置
-              setFilters((f) => (f.keyword === applied ? f : { ...f, keyword: applied }));
-            }}
-            materialType={filters.materialType}
-            onMaterialTypeChange={(value) => setFilters((f) => ({ ...f, materialType: value }))}
-            sortValue={filters.sortBy}
-            onSortChange={(value) => setFilters((f) => ({ ...f, sortBy: value }))}
-            onReset={() => {
-              setKeywordInput("");
-              setFilters({ keyword: "", materialType: "", sortBy: "updatedAt_desc" });
-            }}
-          />
-          {!loading && !error && !waitingCategory && total > 0 && (
-            <p style={{ fontSize: "12px", color: V.sec, marginTop: "12px" }}>
-              共 {total} 件作品
-            </p>
-          )}
-        </div>
-      </section>
+              sortValue={filters.sortBy}
+              onSortChange={(value) =>
+                setFilters((f) => ({ ...f, sortBy: value }))
+              }
+              onReset={resetDiscovery}
+            />
+            {attributeGroups.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-3 mt-3">
+                {attributeGroups.map((g) => (
+                  <Select
+                    key={g.id}
+                    mode="multiple"
+                    allowClear
+                    maxTagCount={2}
+                    placeholder={g.name}
+                    value={selectedAttributeIds.filter((id) =>
+                      g.values.some((v) => v.id === id),
+                    )}
+                    onChange={(selected: number[]) => {
+                      const others = selectedAttributeIds.filter(
+                        (id) => !g.values.some((v) => v.id === id),
+                      );
+                      setSelectedAttributeIds([...others, ...selected]);
+                    }}
+                    options={g.values.map((v) => ({
+                      value: v.id,
+                      label: v.value,
+                    }))}
+                    className="w-full sm:w-44"
+                  />
+                ))}
+              </div>
+            ) : null}
+            {!loading && !error && !waitingCategory && total > 0 ? (
+              <p style={{ fontSize: "12px", color: V.sec, marginTop: "12px" }}>
+                共 {total} 件作品
+              </p>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       {/* ── 产品网格 ── */}
       <section
@@ -406,25 +504,84 @@ export default function ProductList() {
 
           {!loading && !waitingCategory && !error && products.length === 0 && (
             <div
+              aria-labelledby="product-list-empty-title"
               style={{
                 textAlign: "center",
-                paddingBlock: "clamp(80px,10vh,120px)",
+                paddingBlock: "clamp(72px,11vh,136px)",
               }}
             >
               <p
                 style={{
-                  fontSize: "36px",
-                  color: V.line,
-                  marginBottom: "12px",
+                  margin: "0 0 14px",
+                  color: V.acc,
+                  fontSize: "10px",
+                  letterSpacing: "0.18em",
                 }}
               >
-                ◆
+                {hasAppliedFilters ? "FILTER RESULTS" : "PRIVATE SELECTION"}
               </p>
-              <p style={{ fontSize: "15px", color: V.sec }}>
-                {filters.keyword || filters.materialType || categoryIdParam
-                  ? "没有符合筛选条件的作品，试试调整关键词或材质"
-                  : "暂无珠宝作品，敬请期待"}
+              <h2
+                id="product-list-empty-title"
+                style={{
+                  margin: "0 0 16px",
+                  color: V.text,
+                  fontFamily:
+                    'var(--hc-font-display, "Cormorant Garamond", "Noto Serif SC", serif)',
+                  fontSize: "clamp(24px,2.4vw,34px)",
+                  fontWeight: 400,
+                  letterSpacing: 0,
+                }}
+              >
+                {hasAppliedFilters ? "未找到符合条件的作品" : "作品静候呈现"}
+              </h2>
+              <p
+                style={{
+                  maxWidth: 440,
+                  margin: "0 auto 28px",
+                  color: V.sec,
+                  fontSize: "14px",
+                  lineHeight: 1.8,
+                }}
+              >
+                {hasAppliedFilters
+                  ? "您可以清除当前条件，重新浏览公开作品。"
+                  : "公开作品正在整理中。您可以先提交选款需求，我们将结合实际情况与您确认。"}
               </p>
+              {hasAppliedFilters ? (
+                <button
+                  type="button"
+                  onClick={resetDiscovery}
+                  style={{
+                    minHeight: 44,
+                    padding: "0 24px",
+                    border: `1px solid ${V.text}`,
+                    background: "transparent",
+                    color: V.text,
+                    cursor: "pointer",
+                    fontSize: 12,
+                    letterSpacing: "0.08em",
+                  }}
+                >
+                  清除筛选
+                </button>
+              ) : (
+                <Link
+                  to="/contact"
+                  style={{
+                    display: "inline-flex",
+                    minHeight: 44,
+                    alignItems: "center",
+                    padding: "0 26px",
+                    border: `1px solid ${V.text}`,
+                    color: V.text,
+                    textDecoration: "none",
+                    fontSize: 12,
+                    letterSpacing: "0.08em",
+                  }}
+                >
+                  提交选款需求
+                </Link>
+              )}
             </div>
           )}
 

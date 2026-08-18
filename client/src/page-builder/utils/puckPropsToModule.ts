@@ -129,6 +129,9 @@ export function convertPuckProps(
           mobileImage: props.mobileImage,
           linkUrl: props.linkUrl,
           actionText: props.actionText,
+          targetType: props.targetType,
+          productId: Number(props.productId) || 0,
+          altText: props.altText,
         },
         { template: props.template || "leftTextRightImage" },
         {
@@ -157,7 +160,7 @@ export function convertPuckProps(
           mainAltText: props.mainAltText,
           detailAltText: props.detailAltText,
         },
-        { template: props.layout || "mainLeft" },
+        {},
         {
           mainFocusX: props.mainFocusX ?? 50,
           mainFocusY: props.mainFocusY ?? 50,
@@ -202,7 +205,7 @@ export function convertPuckProps(
           productId: Number(props.productId) || 0,
           altText: props.altText,
         },
-        { template: props.template || "textCenter" },
+        { template: props.template || "captionBelow" },
         {
           bgColor: props.overlay || "rgba(15,13,12,0.2)",
           overlayPreset: props.overlayPreset || "soft",
@@ -220,11 +223,11 @@ export function convertPuckProps(
           eyebrow: props.eyebrow,
           title: props.title,
           body: props.body,
-          backgroundImage: props.backgroundImage,
           buttonText: props.buttonText,
-          // 三件套（targetType/productId/linkUrl）统一解析为最终跳转地址；
-          // 旧草稿无 targetType 时 normalizeLinkTargetType 按 linkUrl 推断，行为兼容。
-          linkUrl: resolveLinkTargetUrl(props) || props.linkUrl || "",
+          linkUrl: props.linkUrl,
+          targetType: props.targetType,
+          productId: Number(props.productId) || 0,
+          bgImage: props.bgImage || "",
         },
         { template: props.template || "center" },
         {
@@ -238,6 +241,7 @@ export function convertPuckProps(
       return baseModule(
         "limitedOffer",
         {
+          eventImage: props.eventImage,
           eyebrow: props.eyebrow,
           title: props.title,
           body: props.body,
@@ -262,9 +266,10 @@ export function convertPuckProps(
           layout: props.layout,
           mobileColumns: props.mobileColumns === 1 ? 1 : 2,
           displayMode: props.displayMode || "standard",
-          actionStyle: props.actionStyle || (props.showButton ? "button" : "none"),
-          // 商品图统一 4:5;旧数据的其他比例仅按原值渲染,不再提供选项
-          imageRatio: props.imageRatio || "4:5",
+          actionStyle:
+            props.actionStyle || (props.showButton ? "button" : "none"),
+          // schema v2 商品卡三端统一 3:4；旧数据的显式比例仍兼容读取。
+          imageRatio: props.imageRatio || "3:4",
           showPrice: props.showPrice ?? true,
           showButton: props.showButton ?? false,
           buttonText: props.buttonText || "查看详情",
@@ -353,6 +358,7 @@ export function convertPuckProps(
           subtitle: props.subtitle,
           categoryId: props.categoryId,
           categories: props.categories || [],
+          templateType: type,
         },
         { template: props.layout || "grid-3" },
         { bgColor: props.bgColor || "#FBF9F6" },
@@ -395,8 +401,14 @@ export function convertPuckProps(
           // 三件套统一解析为最终跳转地址；旧草稿无 targetType 时按 linkUrl 推断，行为兼容
           linkUrl: resolveLinkTargetUrl(props) || props.linkUrl || "",
         },
-        { template: props.template || "imageLeft", split: props.split || "50-50" },
-        { bgColor: props.bgColor || "#FCFCFB", textColor: props.textBg || "#fff" },
+        {
+          template: props.template || "imageLeft",
+          split: props.split || "50-50",
+        },
+        {
+          bgColor: props.bgColor || "#FCFCFB",
+          textColor: props.textBg || "#fff",
+        },
       );
 
     case "轮播图":

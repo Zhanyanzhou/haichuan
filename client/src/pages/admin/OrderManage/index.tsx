@@ -26,8 +26,10 @@ import {
 } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import { orderApi, userApi, productApi, marketingApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { ADMIN_COPY, getAdminEmptyText } from "@/constants/adminCopy";
 import type {
   Order,
   OrderItem,
@@ -319,7 +321,7 @@ export default function OrderManage() {
       const res = await orderApi.getById(orderId);
       setDetail(unwrapResponse<OrderDetail>(res));
     } catch (e: any) {
-      message.error(e?.message || "订单详情加载失败");
+      message.error(getSafeAdminErrorMessage(e, "订单详情加载失败，请稍后重新加载。"));
     } finally {
       setDetailLoading(false);
     }
@@ -336,12 +338,12 @@ export default function OrderManage() {
     setShipping(true);
     try {
       await orderApi.ship(id, values);
-      message.success("已发货，订单进入已发货");
+      message.success("发货信息已登记，订单状态已更新为“已发货”。");
       setShippingOrder(null);
       void load();
       if (detail?.id === id) void openDetail(id);
     } catch (e: any) {
-      message.error(e?.message || "操作失败");
+      message.error(getSafeAdminErrorMessage(e, "发货登记失败，请核对物流信息后重试。"));
     } finally {
       setShipping(false);
     }
@@ -352,13 +354,14 @@ export default function OrderManage() {
       title: "确认完成该订单？",
       content: "订单完成后进入终态，不可再变更。",
       okText: "确认完成",
+      cancelText: ADMIN_COPY.actions.cancel,
       onOk: async () => {
         try {
           await orderApi.updateStatus(record.id, { status: "COMPLETED" });
           message.success("订单已完成");
           void load();
         } catch (e: any) {
-          message.error(e?.message || "操作失败");
+          message.error(getSafeAdminErrorMessage(e, "订单完成状态更新失败，请重新加载后重试。"));
         }
       },
     });
@@ -378,6 +381,7 @@ export default function OrderManage() {
         />
       ),
       okText: "确认取消",
+      cancelText: ADMIN_COPY.actions.cancel,
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
@@ -388,7 +392,7 @@ export default function OrderManage() {
           message.success("订单已取消");
           void load();
         } catch (e: any) {
-          message.error(e?.message || "操作失败");
+          message.error(getSafeAdminErrorMessage(e, "订单取消失败，请重新加载后确认当前状态。"));
         }
       },
     });
@@ -440,7 +444,7 @@ export default function OrderManage() {
       URL.revokeObjectURL(url);
       message.success(`已导出 ${rows.length} 条订单（与当前筛选一致）`);
     } catch (e: any) {
-      message.error(e?.message || "导出失败");
+      message.error(getSafeAdminErrorMessage(e, "订单导出失败，请检查筛选条件后重试。"));
     } finally {
       setExporting(false);
     }
@@ -485,12 +489,12 @@ export default function OrderManage() {
         );
       else if (opModal.type === "custom-stage")
         await orderApi.advanceCustomStage(detail.id, values.stage);
-      message.success("操作成功");
+      message.success("订单信息已更新");
       setOpModal({ type: "", open: false });
       void openDetail(detail.id);
       void load();
     } catch (e: unknown) {
-      message.error(e instanceof Error ? e.message : "操作失败");
+      message.error(getSafeAdminErrorMessage(e, "订单信息更新失败，请检查填写内容后重试。"));
     }
   };
 
@@ -498,16 +502,17 @@ export default function OrderManage() {
     if (!detail) return;
     Modal.confirm({
       title: "确认签收？",
-      content: "将订单标记为已签收（发货维度 SHIPPED→RECEIVED）。",
+      content: "确认后，订单的发货状态将更新为“已签收”。",
       okText: "确认签收",
+      cancelText: ADMIN_COPY.actions.cancel,
       onOk: async () => {
         try {
           await orderApi.confirmReceive(detail.id);
-          message.success("已签收");
+          message.success("订单已签收");
           void openDetail(detail.id);
           void load();
         } catch (e: unknown) {
-          message.error(e instanceof Error ? e.message : "操作失败");
+          message.error(getSafeAdminErrorMessage(e, "签收状态更新失败，请重新加载后重试。"));
         }
       },
     });
@@ -612,7 +617,7 @@ export default function OrderManage() {
       setSkuOptionsMap({});
       void load();
     } catch (e: unknown) {
-      message.error(e instanceof Error ? e.message : "创建失败");
+      message.error(getSafeAdminErrorMessage(e, "订单创建失败，请核对必填信息和商品明细后重试。"));
     } finally {
       setCreateSaving(false);
     }
@@ -634,7 +639,7 @@ export default function OrderManage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-display font-semibold text-brand-text">
+          <h1 className="font-semibold text-brand-text">
             订单中心
           </h1>
           <p className="text-sm text-brand-muted mt-1">
@@ -804,7 +809,7 @@ export default function OrderManage() {
                 setPageSize(ps);
               },
             }}
-            locale={{ emptyText: "暂无订单" }}
+            locale={{ emptyText: getAdminEmptyText("订单") }}
             columns={[
               {
                 title: "订单号",
@@ -952,7 +957,7 @@ export default function OrderManage() {
             {/* 基本信息 */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <h3 className="font-display text-lg">订单摘要</h3>
+                <h3 className="font-semibold">订单摘要</h3>
                 <Tag color={STATUS_META[detail.status]?.c}>
                   {STATUS_META[detail.status]?.t}
                 </Tag>
@@ -1051,7 +1056,7 @@ export default function OrderManage() {
 
             {/* 金额信息（商品金额/优惠/调整/应收/已收/待收/定金/尾款/已退/净收） */}
             <div>
-              <h3 className="font-display text-lg mb-2">金额信息</h3>
+              <h3 className="font-semibold mb-2">金额信息</h3>
               <div className="grid grid-cols-2 gap-2 text-sm border border-brand-line p-3 rounded">
                 <div>
                   <Text type="secondary">商品金额：</Text>¥
@@ -1126,7 +1131,7 @@ export default function OrderManage() {
 
             {/* 商品快照 */}
             <div>
-              <h3 className="font-display text-lg mb-2">商品成交快照</h3>
+              <h3 className="font-semibold mb-2">商品成交快照</h3>
               <Table
                 rowKey="id"
                 dataSource={detail.items || []}
@@ -1179,7 +1184,7 @@ export default function OrderManage() {
 
             {/* 收款信息 */}
             <div>
-              <h3 className="font-display text-lg mb-2">收款信息</h3>
+              <h3 className="font-semibold mb-2">收款信息</h3>
               {detail.payments && detail.payments.length > 0 ? (
                 <div className="space-y-2">
                   {detail.payments.map((p) => (
@@ -1240,7 +1245,7 @@ export default function OrderManage() {
 
             {/* 库存预占 */}
             <div>
-              <h3 className="font-display text-lg mb-2">库存预占 / 实扣</h3>
+              <h3 className="font-semibold mb-2">库存预占 / 实扣</h3>
               {detail.reservations && detail.reservations.length > 0 ? (
                 <div className="space-y-1 text-sm">
                   {detail.reservations.map((r) => (
@@ -1273,7 +1278,7 @@ export default function OrderManage() {
 
             {/* 履约 */}
             <div>
-              <h3 className="font-display text-lg mb-2">履约信息</h3>
+              <h3 className="font-semibold mb-2">履约信息</h3>
               {detail.logisticsCompany ||
               detail.logisticsNo ||
               (detail.fulfillments && detail.fulfillments.length > 0) ? (
@@ -1304,7 +1309,7 @@ export default function OrderManage() {
             {/* 订单管理操作（仅管理员） */}
             {canShip && (
               <div>
-                <h3 className="font-display text-lg mb-2">订单操作</h3>
+                <h3 className="font-semibold mb-2">订单操作</h3>
                 <Space wrap>
                   <Button size="small" onClick={() => openOp("amount")}>
                     修改金额
@@ -1334,7 +1339,7 @@ export default function OrderManage() {
 
             {/* 交易事件时间线 */}
             <div>
-              <h3 className="font-display text-lg mb-2">交易事件时间线</h3>
+              <h3 className="font-semibold mb-2">交易事件时间线</h3>
               {detail.tradeEvents && detail.tradeEvents.length > 0 ? (
                 <Timeline
                   items={detail.tradeEvents.map((ev) => ({
@@ -1428,7 +1433,7 @@ export default function OrderManage() {
               <Input.TextArea rows={3} />
             </Form.Item>
             <div className="flex justify-end gap-2">
-              <Button onClick={() => setShippingOrder(null)}>取消</Button>
+              <Button onClick={() => setShippingOrder(null)}>{ADMIN_COPY.actions.cancel}</Button>
               <Button type="primary" htmlType="submit" loading={shipping}>
                 确认发货
               </Button>
@@ -1514,10 +1519,10 @@ export default function OrderManage() {
           )}
           <div className="flex justify-end gap-2">
             <Button onClick={() => setOpModal({ type: "", open: false })}>
-              取消
+              {ADMIN_COPY.actions.cancel}
             </Button>
             <Button type="primary" htmlType="submit">
-              确认
+              {ADMIN_COPY.actions.confirm}
             </Button>
           </div>
         </Form>
@@ -1677,7 +1682,7 @@ export default function OrderManage() {
             </>
           )}
           <div className="flex justify-end gap-2">
-            <Button onClick={() => setCreateOpen(false)}>取消</Button>
+            <Button onClick={() => setCreateOpen(false)}>{ADMIN_COPY.actions.cancel}</Button>
             <Button type="primary" htmlType="submit" loading={createSaving}>
               创建订单
             </Button>

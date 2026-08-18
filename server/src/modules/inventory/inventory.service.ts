@@ -94,4 +94,55 @@ export class InventoryService {
     });
     return result._sum.quantity ?? 0;
   }
+
+  /* ═══ 仓库管理 ═══ */
+  async listWarehouses() {
+    return this.prisma.warehouse.findMany({
+      orderBy: [{ isActive: "desc" }, { id: "asc" }],
+      include: { _count: { select: { inventories: true } } },
+    });
+  }
+
+  async createWarehouse(data: {
+    name: string;
+    type?: string;
+    address?: string;
+    contact?: string;
+    phone?: string;
+  }) {
+    const name = String(data.name || "").trim();
+    if (!name) throw new BadRequestException("仓库名称不能为空");
+    return this.prisma.warehouse.create({
+      data: {
+        name,
+        type: (data.type as any) || "SHOWROOM",
+        address: data.address?.trim() || null,
+        contact: data.contact?.trim() || null,
+        phone: data.phone?.trim() || null,
+      },
+    });
+  }
+
+  async updateWarehouse(
+    id: number,
+    data: {
+      name?: string;
+      type?: string;
+      address?: string;
+      contact?: string;
+      phone?: string;
+      isActive?: boolean;
+    },
+  ) {
+    const warehouse = await this.prisma.warehouse.findUnique({ where: { id } });
+    if (!warehouse) throw new NotFoundException("仓库不存在");
+    const updateData: any = {};
+    if (data.name !== undefined) updateData.name = String(data.name).trim();
+    if (data.type !== undefined) updateData.type = data.type;
+    if (data.address !== undefined) updateData.address = data.address?.trim() || null;
+    if (data.contact !== undefined) updateData.contact = data.contact?.trim() || null;
+    if (data.phone !== undefined) updateData.phone = data.phone?.trim() || null;
+    if (data.isActive !== undefined) updateData.isActive = data.isActive;
+    return this.prisma.warehouse.update({ where: { id }, data: updateData });
+  }
 }

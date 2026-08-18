@@ -3,6 +3,7 @@ import {
   pageTemplates,
 } from "@/page-builder/templates/templates";
 import type { DesignMode } from "@/page-builder/designSystem/masters";
+import { createContentTemplateMarker } from "@/page-builder/generated/contentTemplates.generated";
 
 export const EDITOR_PAGE_KEYS = [
   "home",
@@ -121,6 +122,14 @@ export function createEditorPageDefault(key: EditorPageKey) {
   const data = JSON.parse(
     JSON.stringify(template?.puckData ?? jewelryHomeTemplate.puckData),
   );
+  // 仅新建整页方案时写入印记；已有草稿、导入内容和历史 revision 保持 legacy-0，
+  // 普通读取与保存均不会借此补写或升级。
+  data.content = (data.content ?? []).map((block: { type?: string; props?: Record<string, unknown> }) => {
+    const marker = createContentTemplateMarker(block.type || "");
+    return marker
+      ? { ...block, props: { ...(block.props ?? {}), __contentTemplate: marker } }
+      : block;
+  });
   const page = getEditorPage(key);
   if (!page.businessRegion) return data;
 

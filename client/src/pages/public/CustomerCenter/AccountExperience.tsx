@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { customerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -118,11 +118,12 @@ function WechatLoginPanel({
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [binding, setBinding] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     customerApi
-      .wechatConfig()
+      .wechatConfig(window.location.origin)
       .then((res: unknown) => {
         const data = unwrapResponse<{ enabled: boolean; qrConnectUrl?: string }>(res);
         if (cancelled) return;
@@ -142,6 +143,8 @@ function WechatLoginPanel({
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
+      // 只接受我们嵌入的扫码 iframe 发来的消息，拒绝任何其它窗口伪造的登录结果
+      if (event.source !== iframeRef.current?.contentWindow) return;
       const data = event.data as {
         type?: string;
         payload?: {
@@ -254,6 +257,7 @@ function WechatLoginPanel({
     >
       <p className="text-xs">或使用微信扫码登录</p>
       <iframe
+        ref={iframeRef}
         title="微信扫码登录"
         src={qrConnectUrl}
         style={{ width: 240, height: 240, border: "none", marginTop: 12 }}

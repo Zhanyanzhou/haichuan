@@ -107,7 +107,7 @@ export const navigationConfig: NavDomain[] = [
           {
             key: "quick-inquiries",
             label: "预约咨询",
-            route: "/admin/inquiries",
+            route: "/admin/leads?type=inquiry",
           },
           {
             key: "quick-homepage",
@@ -239,6 +239,11 @@ export const navigationConfig: NavDomain[] = [
             label: "属性字典",
             route: "/admin/attributes",
           },
+          {
+            key: "tags",
+            label: "标签字典",
+            route: "/admin/tags",
+          },
         ],
       },
       {
@@ -265,6 +270,11 @@ export const navigationConfig: NavDomain[] = [
             label: "库存管理",
             route: "/admin/inventory",
           },
+          {
+            key: "warehouse-page",
+            label: "仓库管理",
+            route: "/admin/warehouses",
+          },
         ],
       },
       {
@@ -284,7 +294,8 @@ export const navigationConfig: NavDomain[] = [
         items: [
           {
             key: "ai-classify",
-            label: "智能分类",            route: "/admin/ai-classify",
+            label: "智能分类",
+            route: "/admin/ai-classify",
           },
         ],
       },
@@ -321,6 +332,19 @@ export const navigationConfig: NavDomain[] = [
             key: "coupons-list",
             label: "优惠券",
             route: "/admin/marketing?tab=coupons",
+          },
+        ],
+      },
+      {
+        key: "analytics",
+        label: "行为分析",
+        collapsible: false,
+        defaultOpen: false,
+        items: [
+          {
+            key: "analytics-view",
+            label: "行为事件",
+            route: "/admin/analytics",
           },
         ],
       },
@@ -464,10 +488,10 @@ export const navigationConfig: NavDomain[] = [
     groups: [
       {
         key: "user-mgmt",
-        label: "用户与权限",
+        label: "员工与权限",
         collapsible: false,
         defaultOpen: true,
-        items: [{ key: "user-list", label: "用户管理", route: "/admin/users" }],
+        items: [{ key: "user-list", label: "后台员工", route: "/admin/users" }],
       },
       {
         key: "audit",

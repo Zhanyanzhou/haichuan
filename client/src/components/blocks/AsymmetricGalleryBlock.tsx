@@ -143,9 +143,9 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
           .hc-gallery__item.is-p1 { grid-column: span 4; margin-top: clamp(32px, 8%, 96px); }
           .hc-gallery__item.is-p1 .hc-gallery__frame { aspect-ratio: ${GALLERY_CONTRACT.canvas.primaryMediaAspectRatio}; }
           .hc-gallery__item.is-p2 { grid-column: span 4; }
-          .hc-gallery__item.is-p2 .hc-gallery__frame { aspect-ratio: 1 / 1; }
+          .hc-gallery__item.is-p2 .hc-gallery__frame { aspect-ratio: ${GALLERY_CONTRACT.canvas.primaryMediaAspectRatio}; }
           .hc-gallery__item.is-p3 { grid-column: span 8; }
-          .hc-gallery__item.is-p3 .hc-gallery__frame { aspect-ratio: 3 / 2; }
+          .hc-gallery__item.is-p3 .hc-gallery__frame { aspect-ratio: ${GALLERY_CONTRACT.canvas.primaryMediaAspectRatio}; }
           @media (min-width: 768px) {
             .hc-gallery__item.is-p3 { grid-column: 5 / span 8; }
           }
@@ -155,7 +155,9 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
             .hc-gallery__item.is-p0,
             .hc-gallery__item.is-p3 { grid-column: 1 / -1; margin-top: 0; }
             .hc-gallery__item.is-p0 .hc-gallery__frame,
-            .hc-gallery__item.is-p3 .hc-gallery__frame { aspect-ratio: 4 / 5; }
+            .hc-gallery__item.is-p1 .hc-gallery__frame,
+            .hc-gallery__item.is-p2 .hc-gallery__frame,
+            .hc-gallery__item.is-p3 .hc-gallery__frame { aspect-ratio: ${GALLERY_CONTRACT.canvas.primaryMediaAspectRatio}; }
             .hc-gallery__item.is-p1,
             .hc-gallery__item.is-p2 { grid-column: span 6; }
             .hc-gallery__item.is-p1 { margin-top: 0; }

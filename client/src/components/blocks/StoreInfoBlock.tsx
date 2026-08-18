@@ -2,6 +2,7 @@ import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceho
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
+import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
 
 interface StoreInfoBlockProps {
   module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
@@ -11,6 +12,8 @@ interface StoreInfoBlockProps {
 const GOLD = "#B8944E";
 const INK = "#28231F";
 const MUTED = "rgba(40,35,31,0.58)";
+const STORE_RATIO_DESKTOP = getContractRoleRatio("storeInfo", "store", "desktop");
+const STORE_RATIO_MOBILE = getContractRoleRatio("storeInfo", "store", "mobile");
 
 /**
  * 门店与到访 — Editorial Split 母版(信息变体)
@@ -38,7 +41,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
             gap: clamp(28px, 4vw, 56px);
             align-items: stretch;
           }
-          .hc-store-info__media { aspect-ratio: 3 / 2; overflow: hidden; background: #E6DED2; }
+          .hc-store-info__media { aspect-ratio: ${STORE_RATIO_DESKTOP}; overflow: hidden; background: #E5E5E2; }
           .hc-store-info__media img { width: 100%; height: 100%; object-fit: cover; display: block; }
           .hc-store-info__copy {
             min-width: 0; display: flex; flex-direction: column;
@@ -46,7 +49,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
           }
           @media (max-width: 767px) {
             .hc-store-info { grid-template-columns: minmax(0, 1fr); gap: 28px; }
-            .hc-store-info__media { order: 0; aspect-ratio: 4 / 5; }
+            .hc-store-info__media { order: 0; aspect-ratio: ${STORE_RATIO_MOBILE}; }
             .hc-store-info__copy { order: 1; gap: 18px; }
           }
         `}</style>

@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { Spin, message } from 'antd';
-import { customerApi } from '@/services/api';
-import { unwrapResponse } from '@/utils/unwrap';
-import AccountExperience from './AccountExperience';
-import MyAccountDashboard from './MyAccountDashboard';
+import { useState, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Spin, message } from "antd";
+import { customerApi, partnerApi } from "@/services/api";
+import { unwrapResponse } from "@/utils/unwrap";
+import AccountExperience from "./AccountExperience";
+import MyAccountDashboard from "./MyAccountDashboard";
 
 type CustomerOrder = {
   id: number;
@@ -22,6 +22,7 @@ export default function CustomerCenter() {
   const [inquiries, setInquiries] = useState<any[]>([]);
   const [addresses, setAddresses] = useState<any[]>([]);
   const [profile, setProfile] = useState<any>(null);
+  const [partner, setPartner] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -32,61 +33,78 @@ export default function CustomerCenter() {
   const consumeReturnTo = (): string | null => {
     const raw =
       (location.state as any)?.returnTo ||
-      new URLSearchParams(location.search).get('returnTo');
-    if (typeof raw === 'string' && raw.startsWith('/') && !raw.startsWith('//')) {
+      new URLSearchParams(location.search).get("returnTo");
+    if (
+      typeof raw === "string" &&
+      raw.startsWith("/") &&
+      !raw.startsWith("//")
+    ) {
       return raw;
     }
     return null;
   };
 
   const load = async () => {
-    if (!localStorage.getItem('customerToken')) {
+    if (!localStorage.getItem("customerToken")) {
       setLoading(false);
       return;
     }
     try {
-      const [ordersRes, addressesRes, profileRes, selectionsRes, inquiriesRes] = await Promise.all([
-        customerApi.getOrders(),
-        customerApi.getAddresses(),
-        customerApi.getProfile(),
-        customerApi.getSelectionInquiries(),
-        customerApi.getInquiries(),
-      ]);
+      const [ordersRes, addressesRes, profileRes, selectionsRes, inquiriesRes] =
+        await Promise.all([
+          customerApi.getOrders(),
+          customerApi.getAddresses(),
+          customerApi.getProfile(),
+          customerApi.getSelectionInquiries(),
+          customerApi.getInquiries(),
+        ]);
       setOrders(unwrapResponse<CustomerOrder[]>(ordersRes) || []);
       setAddresses(unwrapResponse<any[]>(addressesRes) || []);
       setProfile(unwrapResponse<any>(profileRes));
       setSelectionInquiries(unwrapResponse<any[]>(selectionsRes) || []);
       setInquiries(unwrapResponse<any[]>(inquiriesRes) || []);
+      // 合作商家状态独立容错：接口不可用（如后端未部署）时不影响账号页整体加载
+      try {
+        const partnerRes = await partnerApi.getMine();
+        setPartner(unwrapResponse<any>(partnerRes) || null);
+      } catch {
+        setPartner(null);
+      }
     } catch {
-      localStorage.removeItem('customerToken');
+      localStorage.removeItem("customerToken");
       setOrders([]);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const signOut = () => {
-    localStorage.removeItem('customerToken');
-    localStorage.removeItem('customer');
+    localStorage.removeItem("customerToken");
+    localStorage.removeItem("customer");
     setOrders([]);
     setSelectionInquiries([]);
     setInquiries([]);
     setAddresses([]);
     setProfile(null);
+    setPartner(null);
   };
 
   const completeAuth = async (request: Promise<unknown>) => {
     setAuthLoading(true);
     try {
-      const result = unwrapResponse<{ accessToken: string; customer: unknown }>(await request);
-      if (!result?.accessToken) throw new Error('账户认证失败');
-      localStorage.setItem('customerToken', result.accessToken);
-      localStorage.setItem('customer', JSON.stringify(result.customer));
+      const result = unwrapResponse<{ accessToken: string; customer: unknown }>(
+        await request,
+      );
+      if (!result?.accessToken) throw new Error("账户认证失败");
+      localStorage.setItem("customerToken", result.accessToken);
+      localStorage.setItem("customer", JSON.stringify(result.customer));
       setLoading(true);
       await load();
-      message.success('已登录您的会员账户');
+      message.success("已登录您的会员账户");
       // 登录/注册成功后恢复来源路径（安全：仅内部路径）
       const returnTo = consumeReturnTo();
       if (returnTo) {
@@ -94,37 +112,46 @@ export default function CustomerCenter() {
         return;
       }
     } catch (error: any) {
-      message.error(error?.message || '账户认证失败，请稍后重试');
+      message.error(error?.message || "账户认证失败，请稍后重试");
     } finally {
       setAuthLoading(false);
     }
   };
 
   // 微信扫码登录：postMessage 回传的结果已是业务数据（无需 unwrap），直接落本地并刷新
-  const applyWechatAuth = (result: { accessToken: string; customer: unknown }) => {
-    localStorage.setItem('customerToken', result.accessToken);
-    localStorage.setItem('customer', JSON.stringify(result.customer));
+  const applyWechatAuth = (result: {
+    accessToken: string;
+    customer: unknown;
+  }) => {
+    localStorage.setItem("customerToken", result.accessToken);
+    localStorage.setItem("customer", JSON.stringify(result.customer));
     setLoading(true);
     void load();
-    message.success('已通过微信登录您的会员账户');
+    message.success("已通过微信登录您的会员账户");
     const returnTo = consumeReturnTo();
     if (returnTo) navigate(returnTo, { replace: true });
   };
 
-  if (loading) return <div className="min-h-screen bg-brand-bg flex items-center justify-center"><Spin size="large" /></div>;
+  if (loading)
+    return (
+      <div className="min-h-screen bg-brand-bg flex items-center justify-center">
+        <Spin size="large" />
+      </div>
+    );
 
-  const isSignedIn = Boolean(localStorage.getItem('customerToken'));
+  const isSignedIn = Boolean(localStorage.getItem("customerToken"));
 
   if (isSignedIn) {
     return (
       <MyAccountDashboard
-      profile={profile}
-      orders={orders}
-      addresses={addresses}
-      selectionInquiries={selectionInquiries}
-      inquiries={inquiries}
-      onSignOut={signOut}
-      onRefresh={load}
+        profile={profile}
+        partner={partner}
+        orders={orders}
+        addresses={addresses}
+        selectionInquiries={selectionInquiries}
+        inquiries={inquiries}
+        onSignOut={signOut}
+        onRefresh={load}
       />
     );
   }

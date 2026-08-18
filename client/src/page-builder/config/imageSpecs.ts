@@ -1,3 +1,5 @@
+import { CONTENT_TEMPLATE_CONTRACTS } from "../generated/contentTemplates.generated";
+
 /**
  * 图片尺寸规格目录 — 各模块上传素材的推荐尺寸(建议值,8% 容差内提示"尺寸合适",不阻断)。
  *
@@ -14,13 +16,13 @@ export const IMAGE_SPECS = {
     desktop: {
       width: 3360,
       height: 1470,
-      ratio: "16:7",
+      ratio: CONTENT_TEMPLATE_CONTRACTS.hero.media[0].desktopRatio!,
       label: "桌面端主视觉（建议 3360×1470，16:7，2K+）",
     },
     mobile: {
       width: 1500,
       height: 1875,
-      ratio: "4:5",
+      ratio: CONTENT_TEMPLATE_CONTRACTS.hero.media[1].mobileRatio!,
       label: "移动端主视觉（建议 1500×1875，4:5）",
     },
   },
@@ -28,13 +30,13 @@ export const IMAGE_SPECS = {
     image: {
       width: 1600,
       height: 2000,
-      ratio: "4:5",
+      ratio: CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[0].desktopRatio!,
       label: "海报主图（建议 1600×2000，4:5）",
     },
     mobile: {
       width: 1500,
       height: 2000,
-      ratio: "3:4",
+      ratio: CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[1].mobileRatio!,
       label: "移动端单海报（建议 1500×2000，3:4）",
     },
   },
@@ -42,13 +44,13 @@ export const IMAGE_SPECS = {
     main: {
       width: 2400,
       height: 1600,
-      ratio: "3:2",
+      ratio: CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[0].desktopRatio!,
       label: "主海报（建议 2400×1600，3:2）",
     },
     detail: {
       width: 1280,
       height: 1600,
-      ratio: "4:5",
+      ratio: CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[1].desktopRatio!,
       label: "细节海报（建议 1280×1600，4:5）",
     },
   },
@@ -64,13 +66,13 @@ export const IMAGE_SPECS = {
     desktop: {
       width: 3360,
       height: 960,
-      ratio: "21:6",
+      ratio: CONTENT_TEMPLATE_CONTRACTS.fullBleed.media[0].desktopRatio!,
       label: "通栏桌面图（建议 3360×960，21:6，超宽）",
     },
     mobile: {
       width: 1500,
       height: 1875,
-      ratio: "4:5",
+      ratio: CONTENT_TEMPLATE_CONTRACTS.fullBleed.media[1].mobileRatio!,
       label: "通栏移动图（建议 1500×1875，4:5）",
     },
   },
@@ -85,10 +87,10 @@ export const IMAGE_SPECS = {
   /* ═══ 2026-08-16 归口新增：此前以 adapter 内联对象散落 ═══ */
   certificate: {
     image: {
-      width: 2000,
+      width: 3000,
       height: 2000,
-      ratio: "1:1",
-      label: "证书图（建议 2000×2000，1:1）",
+      ratio: "3:2",
+      label: "证书图（建议 3000×2000，3:2）",
     },
   },
   customProcess: {
@@ -101,10 +103,10 @@ export const IMAGE_SPECS = {
   },
   testimonial: {
     image: {
-      width: 1200,
-      height: 900,
-      ratio: "4:3",
-      label: "实拍图（建议 1200×900，4:3）",
+      width: 1600,
+      height: 2000,
+      ratio: "4:5",
+      label: "实拍图（建议 1600×2000，4:5）",
     },
   },
   cardGrid: {
@@ -219,6 +221,14 @@ export const IMAGE_SPECS = {
       height: 2160,
       ratio: "16:9",
       label: "视频封面（建议 3840×2160，16:9，4K）",
+    },
+  },
+  limitedOffer: {
+    event: {
+      width: 3360,
+      height: 1470,
+      ratio: CONTENT_TEMPLATE_CONTRACTS.limitedEvent.media[0].desktopRatio!,
+      label: "活动视觉（建议 3360×1470，16:7，超宽）",
     },
   },
 } as const;

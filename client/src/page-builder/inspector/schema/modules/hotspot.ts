@@ -1,5 +1,5 @@
 /**
- * schema/modules/hotspot.ts — 「热区图(场景导购图)」编辑区 Schema。
+ * schema/modules/hotspot.ts — 「热区图(图片热区)」编辑区 Schema。
  * Commerce Campaign 母版:双端底图 + 双端热区;仅电商页使用。
  */
 import {
@@ -27,10 +27,11 @@ const hotspotArrayFields = [
 
 export const hotspotSchema: ModuleInspectorSchema = {
   moduleType: "热区图",
-  displayName: "场景导购图",
+  displayName: "图片热区",
   purpose: HOTSPOT_CONTRACT.purpose,
   evaluate: evaluateHotspotContract,
   defaults: { ...hotspotPuckConfig.defaultProps },
+  groupTitles: { media: "热区底图" },
   sections: [
     {
       id: "hotspot-media",
@@ -38,7 +39,7 @@ export const hotspotSchema: ModuleInspectorSchema = {
       layer: "media",
       description: "桌面 16:9 / 手机 3:4 底图；热区坐标按各自底图计算",
       fields: [
-        moduleNameField("场景导购图"),
+        moduleNameField("图片热区"),
         {
           key: "image",
           label: "桌面端底图",
@@ -62,8 +63,8 @@ export const hotspotSchema: ModuleInspectorSchema = {
     },
     {
       id: "hotspot-content",
-      title: "内容",
-      layer: "content",
+      title: "模板专属功能",
+      layer: "feature",
       description: "热区在画布上可直接拖拽定位；此处可精确核对数值",
       fields: [
         {

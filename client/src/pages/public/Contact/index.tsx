@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { inquiriesApi, settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackPageView, trackSubmitInquiry } from "@/hooks/useAnalytics";
@@ -64,7 +64,7 @@ const FAQS = [
   },
   {
     q: "是否支持到店咨询？",
-    a: '您可在需求中说明希望到店咨询，是否可提供接待、时间与地点以实际沟通为准。',
+    a: "您可在需求中说明希望到店咨询，是否可提供接待、时间与地点以实际沟通为准。",
   },
   {
     q: "是否可以线上沟通？",
@@ -126,8 +126,6 @@ function useSiteSettings() {
 }
 
 export default function Contact() {
-  const [searchParams] = useSearchParams();
-  const isCommerceRedirect = searchParams.get("reason") === "commerce-unavailable";
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
   // SEO：联系页独立标题与描述
@@ -163,7 +161,11 @@ export default function Contact() {
 
   const savedCustomer = (() => {
     try {
-      return JSON.parse(localStorage.getItem("customer") || "null") as { name?: string; phone?: string; email?: string } | null;
+      return JSON.parse(localStorage.getItem("customer") || "null") as {
+        name?: string;
+        phone?: string;
+        email?: string;
+      } | null;
     } catch {
       return null;
     }
@@ -224,7 +226,7 @@ export default function Contact() {
         preferredTime: form.preferredTime,
         budgetRange: form.budgetRange || undefined,
         message: form.message.trim(),
-        privacyConsent: true,
+        privacyConsent: form.privacyConsent,
       });
       trackSubmitInquiry();
       setSubmitted(true);
@@ -326,22 +328,6 @@ export default function Contact() {
         }}
       >
         <div style={{ maxWidth: MW, marginInline: "auto", paddingInline: PX }}>
-          {isCommerceRedirect && (
-            <p
-              role="status"
-              style={{
-                margin: "0 0 18px",
-                padding: "12px 16px",
-                border: `1px solid ${T.gold}`,
-                background: "#FBF7EE",
-                color: T.txt,
-                fontSize: 13,
-                lineHeight: 1.6,
-              }}
-            >
-              线上购物与支付暂未开放。您可以在此提交需求，具体沟通与后续安排以实际沟通为准。
-            </p>
-          )}
           <p
             style={{
               fontSize: 10,
@@ -645,7 +631,9 @@ export default function Contact() {
                   )}
                 </div>
                 <div>
-                  <label style={lblS} htmlFor="cf-contact">希望的联系方式</label>
+                  <label style={lblS} htmlFor="cf-contact">
+                    希望的联系方式
+                  </label>
                   <select
                     id="cf-contact"
                     style={selS}
@@ -704,7 +692,9 @@ export default function Contact() {
                   )}
                 </div>
                 <div>
-                  <label style={lblS} htmlFor="cf-budget">预算范围（选填）</label>
+                  <label style={lblS} htmlFor="cf-budget">
+                    预算范围（选填）
+                  </label>
                   <select
                     id="cf-budget"
                     style={selS}
@@ -765,7 +755,9 @@ export default function Contact() {
                     onChange={(e) => set("privacyConsent", e.target.checked)}
                     aria-invalid={errors.privacyConsent ? true : undefined}
                     aria-describedby={
-                      errors.privacyConsent ? "cf-privacy-consent-error" : undefined
+                      errors.privacyConsent
+                        ? "cf-privacy-consent-error"
+                        : undefined
                     }
                     style={{ marginTop: 2, accentColor: T.gold }}
                   />

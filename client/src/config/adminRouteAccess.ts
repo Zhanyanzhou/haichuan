@@ -61,6 +61,7 @@ const ROUTE_RULES: RouteRule[] = [
   { prefix: "/admin/gold-price", roles: ADMIN_ONLY },
   { prefix: "/admin/finance", roles: ADMIN_ONLY },
   { prefix: "/admin/inventory", roles: WAREHOUSE },
+  { prefix: "/admin/warehouses", roles: WAREHOUSE },
   // 交易域：订单中心对所有交易角色可见（查看）；EDITOR 无权限
   { prefix: "/admin/orders", roles: TRADE_VIEW },
   // 交易域子页面（放于 orders 之后，避免前缀误匹配——它们以 /admin/trade/ 开头，互不冲突）
@@ -75,6 +76,7 @@ const ROUTE_RULES: RouteRule[] = [
   { prefix: "/admin/products", roles: CONTENT_EDITORS },
   { prefix: "/admin/categories", roles: CONTENT_EDITORS },
   { prefix: "/admin/attributes", roles: CONTENT_EDITORS },
+  { prefix: "/admin/tags", roles: CONTENT_EDITORS },
   // 评价管理：客服可看列表跟进，审核写操作由后端 @Roles 限定 ADMIN（与服务端 reviews.controller 同口径）
   { prefix: "/admin/reviews", roles: CUSTOMER_SERVICE },
   { prefix: "/admin/editor", roles: CONTENT_EDITORS },

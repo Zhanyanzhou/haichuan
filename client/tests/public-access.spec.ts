@@ -1,6 +1,16 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Page,
+} from "@playwright/test";
 
-const publicRoutes = ["/products", "/products/2147483647", "/catalog", "/search"];
+const publicRoutes = [
+  "/products",
+  "/products/2147483647",
+  "/catalog",
+  "/search",
+];
 const apiBaseURL = process.env.PLAYWRIGHT_API_BASE_URL?.replace(/\/$/, "");
 const useMock = process.env.VITE_USE_MOCK === "true";
 
@@ -36,7 +46,8 @@ function unwrap(body: any) {
 }
 
 function expectSafeProduct(product: Record<string, any>) {
-  for (const field of forbiddenProductFields) expect(product).not.toHaveProperty(field);
+  for (const field of forbiddenProductFields)
+    expect(product).not.toHaveProperty(field);
 
   const images = [
     ...(Array.isArray(product.images) ? product.images : []),
@@ -44,8 +55,11 @@ function expectSafeProduct(product: Record<string, any>) {
     product.listingImage,
   ].filter(Boolean);
   for (const image of images) {
-    for (const field of forbiddenImageFields) expect(image).not.toHaveProperty(field);
-    expect(image.mediaUrl).toMatch(/^\/products\/(public|catalog)\/\d+\/media\/\d+$/);
+    for (const field of forbiddenImageFields)
+      expect(image).not.toHaveProperty(field);
+    expect(image.mediaUrl).toMatch(
+      /^\/products\/(public|catalog)\/\d+\/media\/\d+$/,
+    );
   }
 
   for (const sku of Array.isArray(product.skus) ? product.skus : []) {
@@ -60,7 +74,9 @@ async function expectNoHorizontalOverflow(page: Page) {
   await expect
     .poll(() =>
       page.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
       ),
     )
     .toBe(true);
@@ -83,23 +99,24 @@ test.describe("游客公开浏览", () => {
   }
 
   for (const path of ["/cart", "/checkout"]) {
-    test(`${path} 在交易冻结期统一引导至顾问咨询`, async ({ page }) => {
+    test(`${path} 在交易关闭时降级至咨询页`, async ({ page }) => {
       await page.goto(path);
-      await expect(page).toHaveURL(/\/contact\?reason=commerce-unavailable$/);
-      await expect(page.getByRole("heading", { level: 1 })).toContainText("提交咨询需求");
-      await expect(page.getByRole("status")).toContainText("线上购物与支付暂未开放");
+      await expect(page).toHaveURL(/\/contact/);
+      await expect(page.getByRole("banner")).toBeVisible();
       await expectNoHorizontalOverflow(page);
     });
   }
 
-  test("移动端交易入口可键盘访问且没有横向溢出", async ({ page }) => {
+  test("移动端交易关闭时跳转咨询页且没有横向溢出", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/cart");
-    await expect(page).toHaveURL(/\/contact\?reason=commerce-unavailable$/);
+    await expect(page).toHaveURL(/\/contact/);
     await expectNoHorizontalOverflow(page);
 
     await page.keyboard.press("Tab");
-    await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.tagName))
+      .not.toBe("BODY");
   });
 
   test("390 像素下公开选款页没有横向溢出", async ({ page }) => {
@@ -124,7 +141,10 @@ test.describe("游客公开浏览", () => {
   test("存在客户令牌时优先请求会员目录", async ({ page }) => {
     test.skip(useMock, "模拟数据模式不发送商品网络请求");
     await page.addInitScript(() => {
-      localStorage.setItem("customerToken", "public-access-contract-test-token");
+      localStorage.setItem(
+        "customerToken",
+        "public-access-contract-test-token",
+      );
     });
     const requestPromise = page.waitForRequest((request) =>
       request.url().includes("/api/products/catalog"),
@@ -158,12 +178,8 @@ test.describe("真实接口公开数据契约", () => {
     expect(media.status()).toBe(401);
   });
 
-  test("交易冻结时购物车、结算和付款凭证入口均返回 503", async ({ request }) => {
+  test("交易接口需客户登录（未登录返回 401）", async ({ request }) => {
     const responses = await Promise.all([
-      request.get(apiUrl("/cart")),
-      request.post(apiUrl("/cart"), {
-        data: { productId: 1, skuId: 1, quantity: 1 },
-      }),
       request.post(apiUrl("/customers/checkout"), {
         data: { address: "测试地址", items: [{ skuId: 1, quantity: 1 }] },
       }),
@@ -174,9 +190,7 @@ test.describe("真实接口公开数据契约", () => {
     ]);
 
     for (const response of responses) {
-      expect(response.status()).toBe(503);
-      const body = await response.json();
-      expect(body.message).toContain("线上购物与支付暂未开放");
+      expect(response.status()).toBe(401);
     }
   });
 
@@ -204,7 +218,9 @@ test.describe("真实接口公开数据契约", () => {
     if (firstImage?.mediaUrl) {
       const mediaResponse = await request.get(apiUrl(firstImage.mediaUrl));
       expect(mediaResponse.status()).toBe(200);
-      expect(mediaResponse.headers()["content-type"]).toMatch(/^(image|video)\//);
+      expect(mediaResponse.headers()["content-type"]).toMatch(
+        /^(image|video)\//,
+      );
       expect(mediaResponse.headers()["x-content-type-options"]).toBe("nosniff");
     }
   });

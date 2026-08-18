@@ -1,5 +1,5 @@
 /**
- * schema/modules/video.ts — 「视频区块(品牌影片)」编辑区 Schema。
+ * schema/modules/video.ts — 「视频区块(视频)」编辑区 Schema。
  * Cinematic Hero 母版(视频变体):16:9 / 16:7 / 3:4 规范比例。
  */
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
@@ -9,16 +9,17 @@ import type { ModuleInspectorSchema } from "../types";
 
 export const videoSchema: ModuleInspectorSchema = {
   moduleType: "视频区块",
-  displayName: "品牌影片",
+  displayName: "视频",
   purpose: "以动态影像呈现工艺细节与品牌质感，画面比例仅允许规范比例。",
   defaults: { ...videoPuckConfig.defaultProps },
+  groupTitles: { media: "视频封面" },
   sections: [
     {
       id: "video-content",
       title: "内容",
       layer: "content",
       fields: [
-        moduleNameField("品牌影片"),
+        moduleNameField("视频"),
         {
           key: "videoUrl",
           label: "视频地址",
@@ -64,8 +65,8 @@ export const videoSchema: ModuleInspectorSchema = {
     },
     {
       id: "video-advanced",
-      title: "高级设置",
-      layer: "style",
+      title: "模板专属功能",
+      layer: "feature",
       fields: [
         { key: "autoPlay", label: "自动播放", control: "switch" },
         { key: "loop", label: "循环播放", control: "switch" },

@@ -2,7 +2,7 @@
   --product-editor-workspace-width: 1240px;
   min-height: 100%;
   background: #f4f6fb;
-  color: #1f2937;
+  color: var(--adm-ink);
   padding-bottom: 88px;
   margin: calc(-1 * var(--adm-content-gutter, 0px));
 }
@@ -40,7 +40,7 @@
   display: flex;
   align-items: center;
   padding: 0 18px;
-  color: #303847;
+  color: var(--adm-text-strong);
   font-size: 14px;
   text-decoration: none;
   border-bottom: 2px solid transparent;
@@ -48,15 +48,15 @@
 }
 
 .product-editor__tab:hover {
-  color: #286ef6;
+  color: var(--adm-action);
   background: #f5f8ff;
 }
 
 .product-editor__tab.is-active {
-  color: #286ef6;
+  color: var(--adm-action);
   font-weight: 600;
   background: #eff4ff;
-  border-bottom-color: #3b7cff;
+  border-bottom-color: var(--adm-action);
 }
 
 .product-editor__header-actions {
@@ -100,20 +100,20 @@
 
 .product-editor__section-title h2 {
   margin: 0;
-  color: #1f2937;
+  color: var(--adm-ink);
   font-size: 18px;
   font-weight: 600;
 }
 
 .product-editor__section-title span {
-  color: #8a94a6;
+  color: var(--adm-muted);
   font-size: 13px;
 }
 
 .product-editor__subsection-title {
   padding: 13px 16px;
   margin: 20px 0 16px;
-  color: #273346;
+  color: var(--adm-text-strong);
   font-size: 14px;
   font-weight: 600;
   background: #f6f8fc;
@@ -139,18 +139,18 @@
 
 .product-editor__field-label {
   padding-top: 5px;
-  color: #273346;
+  color: var(--adm-text-strong);
   font-size: 14px;
   font-weight: 500;
 }
 
 .product-editor__field-label em {
-  color: #ff4d4f;
+  color: var(--adm-error);
   font-style: normal;
 }
 
 .product-editor__field-label span {
-  color: #8b95a6;
+  color: var(--adm-muted);
   font-weight: 400;
 }
 
@@ -164,7 +164,7 @@
 
 .product-editor__field-tip {
   margin-bottom: 12px;
-  color: #8490a2;
+  color: var(--adm-muted);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -193,7 +193,7 @@
   width: 90px;
   aspect-ratio: 1;
   overflow: hidden;
-  color: #778398;
+  color: var(--adm-muted);
   font-size: 13px;
   background: #fff;
   border: 1px dashed #cfd8e6;
@@ -203,13 +203,13 @@
 }
 
 .product-editor__upload-tile .anticon {
-  color: #8a96a8;
+  color: var(--adm-muted);
   font-size: 17px;
 }
 
 .product-editor__upload-tile:hover {
   background: #f8fbff;
-  border-color: #6d9cff;
+  border-color: var(--adm-action);
   box-shadow: 0 0 0 2px rgb(62 124 255 / 10%);
 }
 
@@ -236,7 +236,7 @@
 }
 
 .product-editor__card .ant-form-item-label > label {
-  color: #273346;
+  color: var(--adm-text-strong);
   font-size: 14px;
   font-weight: 500;
 }
@@ -264,7 +264,7 @@
 }
 
 .product-editor__card .ant-table-thead > tr > th {
-  color: #1f2937 !important;
+  color: var(--adm-ink) !important;
   background: #ffffff !important;
   border-bottom: 1px solid #e8ecf3 !important;
 }
@@ -276,7 +276,7 @@
 .product-editor__card .ant-input:hover,
 .product-editor__card .ant-input-number:hover,
 .product-editor__card .ant-select:hover .ant-select-selector {
-  border-color: #8eafff;
+  border-color: var(--adm-action);
 }
 
 .product-editor__footer {
@@ -307,19 +307,19 @@
 }
 
 .product-editor__footer .ant-btn-primary {
-  background: #3b7cff !important;
-  border-color: #3b7cff !important;
+  background: var(--adm-action) !important;
+  border-color: var(--adm-action) !important;
   box-shadow: none;
 }
 
 .product-editor__footer .ant-btn-primary:hover {
-  background: #286ef6 !important;
-  border-color: #286ef6 !important;
+  background: #5f492a !important;
+  border-color: #5f492a !important;
 }
 
 .product-editor__save-state {
   margin-left: 8px;
-  color: #53a46f;
+  color: var(--adm-success);
   font-size: 13px;
 }
 
@@ -335,7 +335,7 @@
 }
 
 .product-editor__save-state.is-dirty {
-  color: #d9912b;
+  color: var(--adm-warning);
 }
 
 @media (max-width: 900px) {

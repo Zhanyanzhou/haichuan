@@ -501,11 +501,27 @@ export default function Search() {
           background: T.bg,
           minHeight: "60vh",
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
+          gap: 16,
+          paddingInline: PX,
         }}
       >
-        <p style={{ fontSize: 14, color: T.light }}>正在加载珠宝作品…</p>
+        <h1
+          style={{
+            fontSize: "clamp(22px,2.8vw,32px)",
+            fontWeight: 400,
+            color: T.txt,
+            margin: 0,
+            letterSpacing: "0.04em",
+          }}
+        >
+          搜索珠宝作品
+        </h1>
+        <p style={{ fontSize: 14, color: T.light, margin: 0 }}>
+          正在加载珠宝作品…
+        </p>
       </div>
     );
   }
@@ -521,8 +537,20 @@ export default function Search() {
           justifyContent: "center",
           flexDirection: "column",
           gap: 12,
+          paddingInline: PX,
         }}
       >
+        <h1
+          style={{
+            fontSize: "clamp(22px,2.8vw,32px)",
+            fontWeight: 400,
+            color: T.txt,
+            margin: 0,
+            letterSpacing: "0.04em",
+          }}
+        >
+          搜索珠宝作品
+        </h1>
         <p style={{ fontSize: 15, color: T.txt }}>产品加载失败，请稍后重试</p>
         <button
           onClick={() => window.location.reload()}
@@ -546,6 +574,17 @@ export default function Search() {
       {/* ═══════ 标题 + 搜索 ═══════ */}
       <section style={{ paddingBlock: "clamp(36px,5vh,60px)" }}>
         <div style={{ maxWidth: MW, marginInline: "auto", paddingInline: PX }}>
+          <h1
+            style={{
+              fontSize: "clamp(22px,2.8vw,32px)",
+              fontWeight: 400,
+              color: T.txt,
+              margin: "0 0 20px",
+              letterSpacing: "0.04em",
+            }}
+          >
+            搜索珠宝作品
+          </h1>
           {/* 搜索框 */}
           <div style={{ position: "relative" }}>
             <svg
@@ -996,7 +1035,10 @@ export default function Search() {
                     style={{
                       background: "none",
                       border: `1px solid ${T.line}`,
-                      padding: "5px 14px",
+                      padding: "0 14px",
+                      minHeight: 44,
+                      display: "inline-flex",
+                      alignItems: "center",
                       cursor: "pointer",
                       fontSize: 12,
                       color: T.sec,

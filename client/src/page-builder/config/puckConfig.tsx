@@ -4,6 +4,7 @@
  */
 
 import type { Config } from "@puckeditor/core";
+import type { ReactNode } from "react";
 import { getCategoryComponents } from "./blockMeta";
 import { heroPuckConfig } from "../adapters/hero.puck";
 import type { HeroPuckProps } from "../adapters/hero.puck";
@@ -51,9 +52,7 @@ import { limitedOfferPuckConfig } from "../adapters/limitedOffer.puck";
 import type { LimitedOfferPuckProps } from "../adapters/limitedOffer.puck";
 import { testimonialPuckConfig } from "../adapters/testimonial.puck";
 import type { TestimonialPuckProps } from "../adapters/testimonial.puck";
-import CardGridBlock from "@/components/blocks/CardGridBlock";
-import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
-import { convertPuckProps } from "../utils/puckPropsToModule";
+import ContentTemplateContractFrame from "../runtime/ContentTemplateContractFrame";
 
 type MyComponents = {
   首屏主视觉: HeroPuckProps;
@@ -83,6 +82,26 @@ type MyComponents = {
   按场景选购: CategoryCardsPuckProps;
 };
 
+type RenderableConfig<Props> = {
+  render: (props: Props) => ReactNode;
+} & Record<string, unknown>;
+
+/** 保留 adapter 的真实 render 与 props，只在外层附加 schema v2 根合同。 */
+function withContractRenderer<Props>(
+  moduleType: string,
+  config: RenderableConfig<Props>,
+) {
+  const render = config.render;
+  return {
+    ...config,
+    render: (props: Props) => (
+      <ContentTemplateContractFrame moduleType={moduleType} mode="editor">
+        {render(props)}
+      </ContentTemplateContractFrame>
+    ),
+  };
+}
+
 /**
  * 注册全部 Block — 中文 Key 即 Puck 侧栏显示名称。
  * 旧类型「图文混排 / 分割面板 / 礼赠指南」已从注册表移除(2026-08 模板收敛):
@@ -91,27 +110,26 @@ type MyComponents = {
  */
 export const puckConfig: Config<MyComponents> = {
   components: {
-    首屏主视觉: heroPuckConfig,
-    单图海报: singlePosterPuckConfig,
-    双图海报: doublePosterPuckConfig,
-    全屏出血图: fullBleedPuckConfig,
-    文字横幅: textBannerPuckConfig,
-    作品画廊: galleryPuckConfig,
-    改款对比: beforeAfterPuckConfig,
-    产品展示行: productRowPuckConfig,
-    分类卡片: categoryCardsPuckConfig,
-    卡片网格: cardGridPuckConfig,
-    轮播图: carouselPuckConfig,
-    视频区块: videoPuckConfig,
-    热区图: hotspotPuckConfig,
+    首屏主视觉: withContractRenderer("首屏主视觉", heroPuckConfig),
+    单图海报: withContractRenderer("单图海报", singlePosterPuckConfig),
+    双图海报: withContractRenderer("双图海报", doublePosterPuckConfig),
+    全屏出血图: withContractRenderer("全屏出血图", fullBleedPuckConfig),
+    文字横幅: withContractRenderer("文字横幅", textBannerPuckConfig),
+    作品画廊: withContractRenderer("作品画廊", galleryPuckConfig),
+    改款对比: withContractRenderer("改款对比", beforeAfterPuckConfig),
+    产品展示行: withContractRenderer("产品展示行", productRowPuckConfig),
+    分类卡片: withContractRenderer("分类卡片", categoryCardsPuckConfig),
+    卡片网格: withContractRenderer("卡片网格", cardGridPuckConfig),
+    轮播图: withContractRenderer("轮播图", carouselPuckConfig),
+    视频区块: withContractRenderer("视频区块", videoPuckConfig),
+    热区图: withContractRenderer("热区图", hotspotPuckConfig),
     网站全局设置: siteConfigPuckConfig,
     业务功能区: businessRegionPuckConfig,
-    预约入口: appointmentPuckConfig,
-    资质证书: certificatePuckConfig,
-    定制流程: customProcessPuckConfig,
-    服务承诺: {
+    预约入口: withContractRenderer("预约入口", appointmentPuckConfig),
+    资质证书: withContractRenderer("资质证书", certificatePuckConfig),
+    定制流程: withContractRenderer("定制流程", customProcessPuckConfig),
+    服务承诺: withContractRenderer("服务承诺", {
       ...cardGridPuckConfig,
-      render: (props: any) => <CardGridBlock module={convertPuckProps("服务承诺", props) as any} />,
       defaultProps: {
         title: "服务信息",
         subtitle: "请在发布前填写已确认的服务信息。",
@@ -125,15 +143,14 @@ export const puckConfig: Config<MyComponents> = {
         bgColor: "#FCFCFB",
         locked: false,
       },
-    },
-    门店信息: storeInfoPuckConfig,
-    单品焦点推荐: featuredProductPuckConfig,
-    佩戴灵感: lookbookPuckConfig,
-    限时活动: limitedOfferPuckConfig,
-    真实评价与实拍: testimonialPuckConfig,
-    按场景选购: {
+    }),
+    门店信息: withContractRenderer("门店信息", storeInfoPuckConfig),
+    单品焦点推荐: withContractRenderer("单品焦点推荐", featuredProductPuckConfig),
+    佩戴灵感: withContractRenderer("佩戴灵感", lookbookPuckConfig),
+    限时活动: withContractRenderer("限时活动", limitedOfferPuckConfig),
+    真实评价与实拍: withContractRenderer("真实评价与实拍", testimonialPuckConfig),
+    按场景选购: withContractRenderer("按场景选购", {
       ...categoryCardsPuckConfig,
-      render: (props: CategoryCardsPuckProps) => <CategoryCardsBlock module={convertPuckProps("按场景选购", props as any) as any} />,
       defaultProps: {
         title: "场景选款",
         subtitle: "从重要时刻出发，挑选一件恰到好处的珠宝。",
@@ -147,7 +164,7 @@ export const puckConfig: Config<MyComponents> = {
         bgColor: "#FBF9F6",
         locked: false,
       },
-    },
+    }),
   },
   /** 与区块模板库保持一致：按页面经营目标分类，而非技术组件类型。 */
   categories: getCategoryComponents() as any,

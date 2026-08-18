@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import AppointmentBlock from "@/components/blocks/AppointmentBlock";
 import StoreInfoBlock from "@/components/blocks/StoreInfoBlock";
@@ -29,6 +29,8 @@ import type { Product } from "@/types";
 import { getListingImage } from "@/utils/productImage";
 import { unwrapResponse } from "@/utils/unwrap";
 import { convertPuckProps } from "@/page-builder/utils/puckPropsToModule";
+import { getContentTemplateIssues } from "@/page-builder/generated/contentTemplates.generated";
+import ContentTemplateContractFrame from "@/page-builder/runtime/ContentTemplateContractFrame";
 
 type PuckBlock = {
   type?: string;
@@ -109,6 +111,37 @@ function MissingMediaState({ type }: { type?: string }) {
         <p style={{ margin: "0 0 8px", fontSize: 15 }}>图片暂时不可用</p>
         <p style={{ margin: 0, fontSize: 13, color: "#9A9288" }}>
           请在店铺装修中重新上传{type ? `「${type}」` : "该区块"}的图片后再发布。
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function UnsupportedContentTemplateState({
+  type,
+  message,
+}: {
+  type?: string;
+  message: string;
+}) {
+  return (
+    <section
+      role="alert"
+      style={{
+        minHeight: 180,
+        display: "grid",
+        placeItems: "center",
+        padding: "32px 24px",
+        background: "#F8F5F1",
+        border: "1px solid #B8944E",
+        color: "#5D4727",
+        textAlign: "center",
+      }}
+    >
+      <div>
+        <p style={{ margin: "0 0 8px", fontSize: 15 }}>模板版本无法渲染</p>
+        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7 }}>
+          {type ? `「${type}」` : "该区块"}{message}
         </p>
       </div>
     </section>
@@ -431,17 +464,38 @@ function ResolvedLookbookBlock({ props }: { props: Record<string, any> }) {
 function renderBlock(block: PuckBlock, index: number) {
   const props = block.props || {};
   const key = props.id || `${block.type || "block"}-${index}`;
+  const wrap = (node: ReactNode) => (
+    <ContentTemplateContractFrame key={key} moduleType={block.type || ""} mode="public">
+      {node}
+    </ContentTemplateContractFrame>
+  );
 
   if (props.isVisible === false) return null;
 
+  const templateIssue = getContentTemplateIssues({
+    moduleType: block.type,
+    props,
+    blockId: props.id,
+    path: `content[${index}].props.__contentTemplate`,
+  }).find((issue) => issue.severity === "error");
+  if (templateIssue) {
+    return (
+      <UnsupportedContentTemplateState
+        key={key}
+        type={block.type}
+        message={templateIssue.message}
+      />
+    );
+  }
+
   if (block.type === "产品展示行") {
-    return <ResolvedProductRowBlock key={key} props={props} />;
+    return wrap(<ResolvedProductRowBlock props={props} />);
   }
   if (block.type === "单品焦点推荐") {
-    return <ResolvedFeaturedProductBlock key={key} props={props} />;
+    return wrap(<ResolvedFeaturedProductBlock props={props} />);
   }
   if (block.type === "佩戴灵感") {
-    return <ResolvedLookbookBlock key={key} props={props} />;
+    return wrap(<ResolvedLookbookBlock props={props} />);
   }
 
   const module = convertPuckProps(block.type || "", props);
@@ -449,52 +503,54 @@ function renderBlock(block: PuckBlock, index: number) {
 
   switch (block.type) {
     case "首屏主视觉":
-      return <HeroSection key={key} module={module} />;
+      return wrap(<HeroSection module={module} />);
     case "单图海报":
-      return <SinglePosterSection key={key} module={module} />;
+      return wrap(<SinglePosterSection module={module} />);
     case "双图海报":
-      return <DoublePosterSection key={key} module={module} />;
+      return wrap(<DoublePosterSection module={module} />);
     // 旧类型(分割面板/图文混排/礼赠指南)分支保留:
     // 已发布历史版本(revision)仍含这些类型,公开渲染永久兼容;
     // 编辑器侧已由 migratePuckData 转为新类型,模板库不再提供添加。
     case "图文混排":
       return <ImageTextBlock key={key} module={module} />;
     case "全屏出血图":
-      return <FullBleedBlock key={key} module={module} />;
+      return wrap(<FullBleedBlock module={module} />);
     case "文字横幅":
-      return <TextBannerBlock key={key} module={module} />;
+      return wrap(<TextBannerBlock module={module} />);
     case "作品画廊":
-      return <AsymmetricGalleryBlock key={key} module={module} />;
+      return wrap(<AsymmetricGalleryBlock module={module} />);
     case "改款对比":
-      return <BeforeAfterBlock key={key} module={module} />;
+      return wrap(<BeforeAfterBlock module={module} />);
     case "分类卡片":
     case "按场景选购":
     case "礼赠指南":
-      return <CategoryCardsBlock key={key} module={module} />;
+      return block.type === "礼赠指南"
+        ? <CategoryCardsBlock key={key} module={module} />
+        : wrap(<CategoryCardsBlock module={module} />);
     case "卡片网格":
-      return <CardGridBlock key={key} module={module} />;
+      return wrap(<CardGridBlock module={module} />);
     case "分割面板":
       return <SplitPanelBlock key={key} module={module} />;
     case "轮播图":
-      return <CarouselBlock key={key} module={module} />;
+      return wrap(<CarouselBlock module={module} />);
     case "视频区块":
-      return <VideoBlock key={key} module={module} />;
+      return wrap(<VideoBlock module={module} />);
     case "热区图":
-      return <HotspotBlock key={key} module={module} />;
+      return wrap(<HotspotBlock module={module} />);
     case "预约入口":
-      return <AppointmentBlock key={key} module={module} />;
+      return wrap(<AppointmentBlock module={module} />);
     case "资质证书":
-      return <CertificateBlock key={key} module={module} />;
+      return wrap(<CertificateBlock module={module} />);
     case "定制流程":
-      return <CustomProcessBlock key={key} module={module} />;
+      return wrap(<CustomProcessBlock module={module} />);
     case "服务承诺":
-      return <CardGridBlock key={key} module={module} />;
+      return wrap(<CardGridBlock module={module} />);
     case "门店信息":
-      return <StoreInfoBlock key={key} module={module} />;
+      return wrap(<StoreInfoBlock module={module} />);
     case "限时活动":
-      return <LimitedOfferBlock key={key} module={module} />;
+      return wrap(<LimitedOfferBlock module={module} />);
     case "真实评价与实拍":
-      return <TestimonialBlock key={key} module={module} />;
+      return wrap(<TestimonialBlock module={module} />);
     default:
       return null;
   }

@@ -18,15 +18,15 @@ import {
   LockOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
-import ScifiButton from "@/components/ui/ScifiButton";
 import { userApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import type { User, PaginatedResult } from "@/types";
 
 const rm: Record<string, { c: string; t: string }> = {
   SUPER_ADMIN: { c: "red", t: "超级管理员" },
   ADMIN: { c: "blue", t: "管理员" },
-  EDITOR: { c: "green", t: "编辑" },
+  EDITOR: { c: "green", t: "内容编辑" },
   CUSTOMER_SERVICE: { c: "gold", t: "客服" },
   WAREHOUSE: { c: "purple", t: "仓库管理" },
   SALES_CONSULTANT: { c: "cyan", t: "销售顾问" },
@@ -42,15 +42,24 @@ export default function UserManage() {
   const [resetPwdOpen, setResetPwdOpen] = useState(false);
   const [resetPwdUser, setResetPwdUser] = useState<User | null>(null);
   const [resetPwdForm] = Form.useForm();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [keyword, setKeyword] = useState("");
+  const [keywordInput, setKeywordInput] = useState("");
+  const [roleCounts, setRoleCounts] = useState<Record<string, number>>({});
 
   const load = async () => {
     setLoading(true);
     try {
-      const res = await userApi.getList({ pageSize: 50 });
-      const data = unwrapResponse<PaginatedResult<User>>(res);
+      const res = await userApi.getList({ page, pageSize, keyword: keyword || undefined });
+      const data = unwrapResponse<any>(res);
       setUsers(data?.list || []);
+      setTotal(data?.total || 0);
+      setRoleCounts(data?.roleCounts || {});
     } catch {
       setUsers([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
@@ -58,7 +67,7 @@ export default function UserManage() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [page, pageSize, keyword]);
 
   const openCreate = () => {
     setEditing(null);
@@ -81,21 +90,21 @@ export default function UserManage() {
       } else {
         await userApi.create(values);
       }
-      message.success(editing ? "已更新" : "已创建");
+      message.success(editing ? "后台员工信息已更新" : "后台员工已创建");
       setModalOpen(false);
       load();
     } catch (e: any) {
-      message.error(e?.message || "保存失败");
+      message.error(getSafeAdminErrorMessage(e, "后台员工信息保存失败，请检查填写内容后重试。"));
     }
   };
 
   const handleDelete = async (id: number) => {
     try {
       await userApi.delete(id);
-      message.success("已删除");
+      message.success("后台员工已删除");
       load();
     } catch (e: any) {
-      message.error(e?.message || "删除失败");
+      message.error(getSafeAdminErrorMessage(e, "后台员工删除失败，请重新加载后确认当前状态。"));
     }
   };
 
@@ -109,7 +118,7 @@ export default function UserManage() {
       setResetPwdUser(null);
       resetPwdForm.resetFields();
     } catch (e: any) {
-      message.error(e?.message || "重置失败");
+      message.error(getSafeAdminErrorMessage(e, "密码重置失败，请确认权限后重试。"));
     }
   };
 
@@ -117,14 +126,14 @@ export default function UserManage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-display font-semibold text-brand-text">
-            用户管理
+          <h1 className="font-semibold text-brand-text">
+            后台员工
           </h1>
           <p className="text-sm text-brand-muted mt-1">RBAC 七角色权限</p>
         </div>
-        <ScifiButton variant="gold" onClick={openCreate}>
-          <PlusOutlined /> 新增用户
-        </ScifiButton>
+        <Button type="primary" onClick={openCreate}>
+          <PlusOutlined /> 新建员工
+        </Button>
       </div>
       <div className="grid grid-cols-7 gap-3">
         {Object.entries(rm).map(([k, v]) => (
@@ -132,26 +141,43 @@ export default function UserManage() {
             key={k}
             className="bg-white border border-brand-line p-3 text-center"
           >
-            <p className="text-lg font-sans font-bold" style={{ color: v.c }}>
-              {users.filter((u) => u.role === k).length}
+            <p className="text-lg font-sans font-bold" style={{ color: "var(--adm-ink)" }}>
+              {roleCounts[k] ?? 0}
             </p>
-            <p className="text-[10px] text-brand-muted mt-1">{v.t}</p>
+            <p className="text-xs leading-[18px] text-brand-muted mt-1">{v.t}</p>
           </div>
         ))}
       </div>
       <Card className="!bg-white !border-brand-line">
+        <div style={{ marginBottom: 16 }}>
+          <Input.Search
+            allowClear
+            placeholder="搜索用户名 / 姓名 / 手机号"
+            value={keywordInput}
+            onChange={(e) => setKeywordInput(e.target.value)}
+            onSearch={(v) => { setKeyword(v); setPage(1); }}
+            style={{ width: 280 }}
+          />
+        </div>
         <Table
           dataSource={users}
           rowKey="id"
           loading={loading}
-          pagination={false}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 人`,
+            onChange: (p, ps) => { setPage(p); setPageSize(ps); },
+          }}
           size="middle"
           columns={[
             {
               title: "用户名",
               dataIndex: "username",
               render: (v: string) => (
-                <code className="text-brand-gold">{v}</code>
+                <code style={{ color: "var(--adm-text-strong)" }}>{v}</code>
               ),
             },
             { title: "姓名", dataIndex: "realName" },
@@ -197,7 +223,10 @@ export default function UserManage() {
                     重置密码
                   </Button>
                   <Popconfirm
-                    title="确定删除？"
+                    title="删除该后台员工？"
+                    description="删除后该员工将无法继续登录后台。"
+                    okText="删除员工"
+                    cancelText="取消"
                     onConfirm={() => handleDelete(r.id)}
                   >
                     <Button
@@ -217,15 +246,12 @@ export default function UserManage() {
       </Card>
 
       <Modal
-        title={editing ? "编辑用户" : "新增用户"}
+        title={editing ? "编辑后台员工" : "新建后台员工"}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={handleSave}
         okText="保存"
         cancelText="取消"
-        okButtonProps={{
-          style: { background: "#B8944E", borderColor: "#B8944E" },
-        }}
       >
         <Form form={form} layout="vertical" className="mt-4">
           <Form.Item
@@ -276,7 +302,7 @@ export default function UserManage() {
           setResetPwdOpen(false);
           setResetPwdUser(null);
         }}
-        okText="确认重置"
+        okText="重置密码"
       >
         <Form form={resetPwdForm} layout="vertical">
           <Form.Item

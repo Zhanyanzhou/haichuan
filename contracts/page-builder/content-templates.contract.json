@@ -1,0 +1,3475 @@
+{
+  "contractSchemaVersion": 2,
+  "registryVersion": 2,
+  "expectedTemplateCount": 23,
+  "activeTemplateCount": 5,
+  "pageRules": [],
+  "templates": [
+    {
+      "key": "hero",
+      "moduleType": "首屏主视觉",
+      "displayName": "首屏",
+      "category": "视觉展示",
+      "implementationStatus": "active",
+      "version": 1,
+      "master": "cinematic-hero",
+      "visualRole": "primary-stage",
+      "visualWeight": "primary-stage",
+      "width": "full",
+      "flow": "bleed",
+      "heightModeByViewport": {
+        "desktop": "viewport",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "overlay",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "desktopImage",
+          "role": "media",
+          "kind": "media",
+          "required": true,
+          "defaultRatioByViewport": {
+            "desktop": "16 / 7",
+            "tablet": "16 / 7"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["16 / 7"],
+            "tablet": ["16 / 7"]
+          },
+          "appliesTo": ["desktop", "tablet"]
+        },
+        {
+          "id": "mobileImage",
+          "role": "media",
+          "kind": "media",
+          "required": false,
+          "defaultRatioByViewport": {
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "mobile": ["4 / 5"]
+          },
+          "appliesTo": ["mobile"],
+          "fallbackRoleId": "desktopImage"
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "action",
+          "role": "action",
+          "kind": "action",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["desktopImage", "copy", "action"],
+        "tablet": ["desktopImage", "copy", "action"],
+        "mobile": ["mobileImage", "copy", "action"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {
+          "title": 24,
+          "subtitle": 48,
+          "actionText": 12,
+          "altText": 80
+        },
+        "requiredText": [],
+        "maxCtas": 1
+      },
+      "allowedControls": ["alignment"],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "品牌首屏与最高视觉权重舞台",
+        "visualRole": "primary-stage",
+        "desktop": {
+          "tone": "dark",
+          "order": ["desktopImage", "copy", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 8,
+              "roleId": "desktopImage"
+            },
+            {
+              "role": "copy",
+              "column": 2,
+              "span": 5,
+              "row": 5,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 2,
+              "span": 3,
+              "row": 7,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "action"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["mobileImage", "copy", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 4,
+              "roleId": "mobileImage"
+            },
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 2,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 1,
+              "span": 5,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "fullBleed",
+      "moduleType": "全屏出血图",
+      "displayName": "通栏图",
+      "category": "视觉展示",
+      "implementationStatus": "active",
+      "version": 1,
+      "master": "immersive-image",
+      "visualRole": "support-stage",
+      "visualWeight": "support-stage",
+      "width": "full",
+      "flow": "bleed",
+      "heightModeByViewport": {
+        "desktop": "ratio",
+        "tablet": "ratio",
+        "mobile": "ratio"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "image",
+          "role": "media",
+          "kind": "media",
+          "required": true,
+          "defaultRatioByViewport": {
+            "desktop": "21 / 6",
+            "tablet": "16 / 7"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["21 / 6"],
+            "tablet": ["16 / 7"]
+          },
+          "appliesTo": ["desktop", "tablet"]
+        },
+        {
+          "id": "mobileImage",
+          "role": "media",
+          "kind": "media",
+          "required": false,
+          "defaultRatioByViewport": {
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "mobile": ["4 / 5"]
+          },
+          "appliesTo": ["mobile"],
+          "fallbackRoleId": "image"
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "action",
+          "role": "action",
+          "kind": "action",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["image", "copy", "action"],
+        "tablet": ["image", "copy", "action"],
+        "mobile": ["mobileImage", "copy", "action"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {
+          "title": 24,
+          "subtitle": 48,
+          "buttonText": 12,
+          "altText": 80
+        },
+        "requiredText": [],
+        "maxCtas": 1
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "低于首屏的通栏章节影像",
+        "visualRole": "support-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["image", "copy", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 4,
+              "roleId": "image"
+            },
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 8,
+              "row": 5,
+              "rowSpan": 2,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 10,
+              "span": 3,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["mobileImage", "copy", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 4,
+              "roleId": "mobileImage"
+            },
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 2,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 1,
+              "span": 5,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "video",
+      "moduleType": "视频区块",
+      "displayName": "视频",
+      "category": "视觉展示",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "cinematic-video",
+      "visualRole": "feature-stage",
+      "visualWeight": "feature-stage",
+      "width": "full",
+      "flow": "bleed",
+      "heightModeByViewport": {
+        "desktop": "ratio",
+        "tablet": "ratio",
+        "mobile": "ratio"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "overlay",
+        "tablet": "overlay",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "coverImage",
+          "role": "media",
+          "kind": "media",
+          "required": true,
+          "defaultRatioByViewport": {
+            "desktop": "16 / 9",
+            "tablet": "16 / 9",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["16 / 9", "16 / 7", "3 / 4"],
+            "tablet": ["16 / 9", "16 / 7"],
+            "mobile": ["4 / 5", "3 / 4"]
+          }
+        },
+        {
+          "id": "playControl",
+          "role": "marker",
+          "kind": "marker",
+          "required": false,
+          "semantic": "play-control"
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "action",
+          "role": "action",
+          "kind": "action",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["coverImage", "playControl", "copy", "action"],
+        "tablet": ["coverImage", "playControl", "copy", "action"],
+        "mobile": ["coverImage", "playControl", "copy", "action"]
+      },
+      "presets": ["aspectRatio", "playbackControl"],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 1
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "封面舞台与播放入口",
+        "visualRole": "feature-stage",
+        "desktop": {
+          "tone": "dark",
+          "order": ["coverImage", "playControl", "copy", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 7,
+              "roleId": "coverImage"
+            },
+            {
+              "role": "marker",
+              "kind": "play",
+              "column": 6,
+              "span": 2,
+              "row": 3,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "playControl"
+            },
+            {
+              "role": "copy",
+              "column": 2,
+              "span": 5,
+              "row": 5,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 2,
+              "span": 3,
+              "row": 7,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "action"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["coverImage", "playControl", "copy", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 4,
+              "roleId": "coverImage"
+            },
+            {
+              "role": "marker",
+              "kind": "play",
+              "column": 6,
+              "span": 2,
+              "row": 2,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "playControl"
+            },
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 2,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 1,
+              "span": 5,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "carousel",
+      "moduleType": "轮播图",
+      "displayName": "轮播",
+      "category": "视觉展示",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "sequence-stage",
+      "visualRole": "feature-stage",
+      "visualWeight": "feature-stage",
+      "width": "full",
+      "flow": "bleed",
+      "heightModeByViewport": {
+        "desktop": "ratio",
+        "tablet": "ratio",
+        "mobile": "ratio"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "overlay",
+        "tablet": "overlay",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "frames",
+          "role": "media",
+          "kind": "media",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "16 / 7",
+            "tablet": "16 / 7",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["16 / 7"],
+            "tablet": ["16 / 7"],
+            "mobile": ["4 / 5"]
+          },
+          "quantity": {
+            "default": 3,
+            "min": 2,
+            "max": 5
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "pagination",
+          "role": "marker",
+          "kind": "marker",
+          "required": false,
+          "semantic": "pagination-control"
+        }
+      ],
+      "order": {
+        "desktop": ["frames", "copy", "pagination"],
+        "tablet": ["frames", "copy", "pagination"],
+        "mobile": ["frames", "copy", "pagination"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 0
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "多帧主视觉与分页切换",
+        "visualRole": "feature-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["frames", "copy", "pagination"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 6,
+              "roleId": "frames"
+            },
+            {
+              "role": "copy",
+              "column": 2,
+              "span": 5,
+              "row": 4,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "copy"
+            },
+            {
+              "role": "marker",
+              "kind": "pagination",
+              "column": 9,
+              "span": 3,
+              "row": 6,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "pagination"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["frames", "copy", "pagination"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 4,
+              "roleId": "frames"
+            },
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 2,
+              "roleId": "copy"
+            },
+            {
+              "role": "marker",
+              "kind": "pagination",
+              "column": 1,
+              "span": 4,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "pagination"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "singlePoster",
+      "moduleType": "单图海报",
+      "displayName": "单图文",
+      "category": "图文内容",
+      "implementationStatus": "active",
+      "version": 1,
+      "master": "editorial-split",
+      "visualRole": "feature-stage",
+      "visualWeight": "feature-stage",
+      "width": "standard",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "split",
+        "tablet": "split",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "desktopImage",
+          "role": "media",
+          "kind": "media",
+          "required": true,
+          "defaultRatioByViewport": {
+            "desktop": "4 / 5",
+            "tablet": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["4 / 5"],
+            "tablet": ["4 / 5"]
+          },
+          "appliesTo": ["desktop", "tablet"]
+        },
+        {
+          "id": "mobileImage",
+          "role": "media",
+          "kind": "media",
+          "required": false,
+          "defaultRatioByViewport": {
+            "mobile": "3 / 4"
+          },
+          "allowedRatioPresetsByViewport": {
+            "mobile": ["3 / 4"]
+          },
+          "appliesTo": ["mobile"],
+          "fallbackRoleId": "desktopImage"
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "action",
+          "role": "action",
+          "kind": "action",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["copy", "action", "desktopImage"],
+        "tablet": ["copy", "action", "desktopImage"],
+        "mobile": ["mobileImage", "copy", "action"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {
+          "number": 4,
+          "label": 16,
+          "title": 24,
+          "subtitle": 48,
+          "actionText": 12,
+          "altText": 80
+        },
+        "requiredText": [],
+        "maxCtas": 1
+      },
+      "allowedControls": ["template"],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "单一主图与编辑式章节叙事",
+        "visualRole": "feature-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["copy", "action", "desktopImage"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 1,
+              "span": 3,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "action"
+            },
+            {
+              "role": "media",
+              "column": 6,
+              "span": 7,
+              "row": 1,
+              "rowSpan": 8,
+              "roleId": "desktopImage"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["mobileImage", "copy", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 4,
+              "roleId": "mobileImage"
+            },
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 2,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 1,
+              "span": 5,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "doublePoster",
+      "moduleType": "双图海报",
+      "displayName": "双图文",
+      "category": "图文内容",
+      "implementationStatus": "active",
+      "version": 1,
+      "master": "editorial-story",
+      "visualRole": "feature-stage",
+      "visualWeight": "feature-stage",
+      "width": "wide",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "split",
+        "tablet": "split",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "mainImage",
+          "role": "mainMedia",
+          "kind": "media",
+          "required": true,
+          "defaultRatioByViewport": {
+            "desktop": "3 / 2",
+            "tablet": "3 / 2",
+            "mobile": "3 / 2"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["3 / 2"],
+            "tablet": ["3 / 2"],
+            "mobile": ["3 / 2"]
+          }
+        },
+        {
+          "id": "detailImage",
+          "role": "detailMedia",
+          "kind": "media",
+          "required": true,
+          "defaultRatioByViewport": {
+            "desktop": "4 / 5",
+            "tablet": "4 / 5",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["4 / 5"],
+            "tablet": ["4 / 5"],
+            "mobile": ["4 / 5"]
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "action",
+          "role": "action",
+          "kind": "action",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["mainImage", "detailImage", "copy", "action"],
+        "tablet": ["mainImage", "detailImage", "copy", "action"],
+        "mobile": ["mainImage", "copy", "detailImage", "action"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {
+          "number": 4,
+          "label": 16,
+          "title": 24,
+          "description": 100,
+          "actionText": 12,
+          "mainAltText": 80,
+          "detailAltText": 80
+        },
+        "requiredText": [],
+        "maxCtas": 1
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "主图、细节图与说明的章节节奏",
+        "visualRole": "feature-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["mainImage", "detailImage", "copy", "action"],
+          "zones": [
+            {
+              "role": "mainMedia",
+              "column": 1,
+              "span": 8,
+              "row": 1,
+              "rowSpan": 6,
+              "roleId": "mainImage"
+            },
+            {
+              "role": "detailMedia",
+              "column": 9,
+              "span": 4,
+              "row": 2,
+              "rowSpan": 3,
+              "roleId": "detailImage"
+            },
+            {
+              "role": "copy",
+              "column": 9,
+              "span": 4,
+              "row": 5,
+              "rowSpan": 2,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 9,
+              "span": 3,
+              "row": 8,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["mainImage", "copy", "detailImage", "action"],
+          "zones": [
+            {
+              "role": "mainMedia",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 3,
+              "roleId": "mainImage"
+            },
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 4,
+              "rowSpan": 2,
+              "roleId": "copy"
+            },
+            {
+              "role": "detailMedia",
+              "column": 5,
+              "span": 8,
+              "row": 6,
+              "rowSpan": 2,
+              "roleId": "detailImage"
+            },
+            {
+              "role": "action",
+              "column": 1,
+              "span": 5,
+              "row": 8,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "textBanner",
+      "moduleType": "文字横幅",
+      "displayName": "纯文字",
+      "category": "图文内容",
+      "implementationStatus": "active",
+      "version": 1,
+      "master": "editorial-text",
+      "visualRole": "support-stage",
+      "visualWeight": "support-stage",
+      "width": "editorial",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal", "spacious"],
+      "roles": [
+        {
+          "id": "bgImage",
+          "role": "media",
+          "kind": "media",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "21 / 6",
+            "tablet": "21 / 6"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["21 / 6"],
+            "tablet": ["21 / 6"]
+          },
+          "appliesTo": ["desktop", "tablet"]
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "action",
+          "role": "action",
+          "kind": "action",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["bgImage", "copy", "action"],
+        "tablet": ["bgImage", "copy", "action"],
+        "mobile": ["bgImage", "copy", "action"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {
+          "eyebrow": 16,
+          "title": 32,
+          "body": 180,
+          "buttonText": 12
+        },
+        "requiredText": [],
+        "maxCtas": 1
+      },
+      "allowedControls": ["template", "spacing"],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "纯文字章节与单一行动位",
+        "visualRole": "support-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["copy", "action"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 3,
+              "span": 8,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 5,
+              "span": 4,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["copy", "action"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 2,
+              "rowSpan": 3,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 1,
+              "span": 5,
+              "row": 6,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "journey",
+      "moduleType": "定制流程",
+      "displayName": "内容流程",
+      "category": "图文内容",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "editorial-journey",
+      "visualRole": "support-stage",
+      "visualWeight": "support-stage",
+      "width": "wide",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "steps",
+          "role": "timeline",
+          "kind": "collection",
+          "required": false,
+          "defaultRatioByViewport": {},
+          "allowedRatioPresetsByViewport": {},
+          "quantity": {
+            "default": 5,
+            "min": 3,
+            "max": 5
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["copy", "steps"],
+        "tablet": ["copy", "steps"],
+        "mobile": ["copy", "steps"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 0
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "01–05 编号叙事流程",
+        "visualRole": "support-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["copy", "steps"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 5,
+              "row": 1,
+              "rowSpan": 2,
+              "roleId": "copy"
+            },
+            {
+              "role": "timeline",
+              "kind": "steps-5",
+              "column": 1,
+              "span": 12,
+              "row": 4,
+              "rowSpan": 3,
+              "roleId": "steps"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["copy", "steps"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 2,
+              "roleId": "copy"
+            },
+            {
+              "role": "timeline",
+              "kind": "steps-5",
+              "column": 1,
+              "span": 12,
+              "row": 3,
+              "rowSpan": 5,
+              "roleId": "steps"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "comparison",
+      "moduleType": "改款对比",
+      "displayName": "前后对比",
+      "category": "图文内容",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "comparison-stage",
+      "visualRole": "feature-stage",
+      "visualWeight": "feature-stage",
+      "width": "wide",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "ratio",
+        "tablet": "ratio",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "before",
+          "role": "mainMedia",
+          "kind": "media",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "1 / 1",
+            "tablet": "1 / 1",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["1 / 1"],
+            "tablet": ["1 / 1"],
+            "mobile": ["4 / 5"]
+          }
+        },
+        {
+          "id": "after",
+          "role": "detailMedia",
+          "kind": "media",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "1 / 1",
+            "tablet": "1 / 1",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["1 / 1"],
+            "tablet": ["1 / 1"],
+            "mobile": ["4 / 5"]
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "comparisonHandle",
+          "role": "marker",
+          "kind": "marker",
+          "required": false,
+          "semantic": "comparison-handle"
+        }
+      ],
+      "order": {
+        "desktop": ["copy", "before", "after", "comparisonHandle"],
+        "tablet": ["copy", "before", "after", "comparisonHandle"],
+        "mobile": ["copy", "before", "after", "comparisonHandle"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 0
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "同尺寸前后画面与分割手柄",
+        "visualRole": "feature-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["copy", "before", "after", "comparisonHandle"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "mainMedia",
+              "column": 1,
+              "span": 6,
+              "row": 3,
+              "rowSpan": 4,
+              "roleId": "before"
+            },
+            {
+              "role": "detailMedia",
+              "column": 7,
+              "span": 6,
+              "row": 3,
+              "rowSpan": 4,
+              "roleId": "after"
+            },
+            {
+              "role": "marker",
+              "kind": "handle",
+              "column": 6,
+              "span": 2,
+              "row": 4,
+              "rowSpan": 2,
+              "overlay": true,
+              "roleId": "comparisonHandle"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["copy", "before", "after", "comparisonHandle"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "mainMedia",
+              "column": 1,
+              "span": 12,
+              "row": 2,
+              "rowSpan": 3,
+              "roleId": "before"
+            },
+            {
+              "role": "detailMedia",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 3,
+              "roleId": "after"
+            },
+            {
+              "role": "marker",
+              "kind": "handle",
+              "column": 6,
+              "span": 2,
+              "row": 4,
+              "rowSpan": 2,
+              "overlay": true,
+              "roleId": "comparisonHandle"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "featuredProduct",
+      "moduleType": "单品焦点推荐",
+      "displayName": "单品展示",
+      "category": "商品展示",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "product-focus",
+      "visualRole": "feature-stage",
+      "visualWeight": "feature-stage",
+      "width": "wide",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "product",
+          "role": "media",
+          "kind": "media",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "4 / 5",
+            "tablet": "4 / 5",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["4 / 5"],
+            "tablet": ["4 / 5"],
+            "mobile": ["4 / 5"]
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "list",
+          "role": "list",
+          "kind": "collection",
+          "required": false
+        },
+        {
+          "id": "action",
+          "role": "action",
+          "kind": "action",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["product", "copy", "list", "action"],
+        "tablet": ["product", "copy", "list", "action"],
+        "mobile": ["product", "copy", "list", "action"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 1
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "单件主推商品与关键信息",
+        "visualRole": "feature-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["product", "copy", "list", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 7,
+              "row": 1,
+              "rowSpan": 7,
+              "roleId": "product"
+            },
+            {
+              "role": "copy",
+              "column": 9,
+              "span": 4,
+              "row": 2,
+              "rowSpan": 2,
+              "roleId": "copy"
+            },
+            {
+              "role": "list",
+              "column": 9,
+              "span": 3,
+              "row": 5,
+              "rowSpan": 1,
+              "roleId": "list"
+            },
+            {
+              "role": "action",
+              "column": 9,
+              "span": 2,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["product", "copy", "list", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 4,
+              "roleId": "product"
+            },
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "list",
+              "column": 1,
+              "span": 12,
+              "row": 6,
+              "rowSpan": 1,
+              "roleId": "list"
+            },
+            {
+              "role": "action",
+              "column": 1,
+              "span": 5,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "productRow",
+      "moduleType": "产品展示行",
+      "displayName": "商品列表",
+      "category": "商品展示",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "product-grid",
+      "visualRole": "feature-stage",
+      "visualWeight": "feature-stage",
+      "width": "full",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "productCards",
+          "role": "card",
+          "kind": "business",
+          "required": true,
+          "defaultRatioByViewport": {
+            "desktop": "3 / 4",
+            "tablet": "3 / 4",
+            "mobile": "3 / 4"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["3 / 4"],
+            "tablet": ["3 / 4"],
+            "mobile": ["3 / 4"]
+          },
+          "quantity": {
+            "default": 3,
+            "min": 2,
+            "max": 4
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["copy", "productCards"],
+        "tablet": ["copy", "productCards"],
+        "mobile": ["copy", "productCards"]
+      },
+      "presets": ["columnPreset", "ordering", "productSelection"],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 0
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "默认三列商品浏览与标题",
+        "visualRole": "support-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["copy", "productCards"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 5,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 4,
+              "roleId": "productCards"
+            },
+            {
+              "role": "card",
+              "column": 5,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 4,
+              "roleId": "productCards"
+            },
+            {
+              "role": "card",
+              "column": 9,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 4,
+              "roleId": "productCards"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["copy", "productCards"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 2,
+              "rowSpan": 2,
+              "roleId": "productCards"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 4,
+              "rowSpan": 2,
+              "roleId": "productCards"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 6,
+              "rowSpan": 2,
+              "roleId": "productCards"
+            }
+          ]
+        }
+      },
+      "presetValues": {
+        "columns": {
+          "defaultByViewport": {
+            "desktop": 3,
+            "tablet": 2,
+            "mobile": 2
+          },
+          "allowedByViewport": {
+            "desktop": [2, 3, 4],
+            "tablet": [2, 3],
+            "mobile": [1, 2]
+          }
+        }
+      }
+    },
+    {
+      "key": "gallery",
+      "moduleType": "作品画廊",
+      "displayName": "作品画廊",
+      "category": "商品展示",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "asymmetric-gallery",
+      "visualRole": "feature-stage",
+      "visualWeight": "feature-stage",
+      "width": "full",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "works",
+          "role": "media",
+          "kind": "collection",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "4 / 5",
+            "tablet": "4 / 5",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["4 / 5"],
+            "tablet": ["4 / 5"],
+            "mobile": ["4 / 5"]
+          },
+          "semantic": "gallery-media-collection",
+          "previewRoles": ["media", "mainMedia", "detailMedia"],
+          "quantity": {
+            "default": 5,
+            "min": 3,
+            "max": 7
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["copy", "works"],
+        "tablet": ["copy", "works"],
+        "mobile": ["copy", "works"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 0
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "大图→双图→大图的作品节奏",
+        "visualRole": "feature-stage",
+        "desktop": {
+          "tone": "light",
+          "rows": 10,
+          "order": ["copy", "works"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 5,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "mainMedia",
+              "column": 1,
+              "span": 7,
+              "row": 3,
+              "rowSpan": 4,
+              "roleId": "works"
+            },
+            {
+              "role": "detailMedia",
+              "column": 8,
+              "span": 5,
+              "row": 3,
+              "rowSpan": 2,
+              "roleId": "works"
+            },
+            {
+              "role": "media",
+              "column": 8,
+              "span": 5,
+              "row": 5,
+              "rowSpan": 2,
+              "roleId": "works"
+            },
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 8,
+              "rowSpan": 2,
+              "roleId": "works"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "rows": 10,
+          "order": ["copy", "works"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "mainMedia",
+              "column": 1,
+              "span": 12,
+              "row": 2,
+              "rowSpan": 3,
+              "roleId": "works"
+            },
+            {
+              "role": "detailMedia",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 2,
+              "roleId": "works"
+            },
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 7,
+              "rowSpan": 2,
+              "roleId": "works"
+            },
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 9,
+              "rowSpan": 2,
+              "roleId": "works"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "wearingInspiration",
+      "moduleType": "佩戴灵感",
+      "displayName": "佩戴展示",
+      "category": "商品展示",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "wearing-story",
+      "visualRole": "feature-stage",
+      "visualWeight": "feature-stage",
+      "width": "wide",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "wearingImage",
+          "role": "mainMedia",
+          "kind": "media",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "3 / 4",
+            "tablet": "3 / 4",
+            "mobile": "3 / 4"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["3 / 4"],
+            "tablet": ["3 / 4"],
+            "mobile": ["3 / 4"]
+          },
+          "semantic": "wearing-primary-image"
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "relatedProducts",
+          "role": "detailMedia",
+          "kind": "business",
+          "required": false,
+          "semantic": "related-product-collection"
+        },
+        {
+          "id": "action",
+          "role": "action",
+          "kind": "action",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["wearingImage", "copy", "relatedProducts", "action"],
+        "tablet": ["wearingImage", "copy", "relatedProducts", "action"],
+        "mobile": ["wearingImage", "copy", "relatedProducts", "action"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 1
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "佩戴主画面、说明与细节补充",
+        "visualRole": "feature-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["wearingImage", "copy", "relatedProducts", "action"],
+          "zones": [
+            {
+              "role": "mainMedia",
+              "column": 1,
+              "span": 7,
+              "row": 1,
+              "rowSpan": 7,
+              "roleId": "wearingImage"
+            },
+            {
+              "role": "copy",
+              "column": 9,
+              "span": 4,
+              "row": 2,
+              "rowSpan": 2,
+              "roleId": "copy"
+            },
+            {
+              "role": "detailMedia",
+              "column": 10,
+              "span": 3,
+              "row": 5,
+              "rowSpan": 2,
+              "roleId": "relatedProducts"
+            },
+            {
+              "role": "action",
+              "column": 9,
+              "span": 2,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["wearingImage", "copy", "relatedProducts", "action"],
+          "zones": [
+            {
+              "role": "mainMedia",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 4,
+              "roleId": "wearingImage"
+            },
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "detailMedia",
+              "column": 5,
+              "span": 8,
+              "row": 6,
+              "rowSpan": 2,
+              "roleId": "relatedProducts"
+            },
+            {
+              "role": "action",
+              "column": 1,
+              "span": 5,
+              "row": 8,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "categoryCards",
+      "moduleType": "分类卡片",
+      "displayName": "品类入口",
+      "category": "导航入口",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "category-navigation",
+      "visualRole": "support-stage",
+      "visualWeight": "support-stage",
+      "width": "full",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "categories",
+          "role": "card",
+          "kind": "collection",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "4 / 5",
+            "tablet": "4 / 5",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["4 / 5"],
+            "tablet": ["4 / 5"],
+            "mobile": ["4 / 5"]
+          },
+          "quantity": {
+            "default": 3,
+            "min": 2,
+            "max": 4
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["copy", "categories"],
+        "tablet": ["copy", "categories"],
+        "mobile": ["copy", "categories"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 0
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "三张品类入口卡",
+        "visualRole": "support-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["copy", "categories"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 4,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 4,
+              "roleId": "categories"
+            },
+            {
+              "role": "card",
+              "column": 5,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 4,
+              "roleId": "categories"
+            },
+            {
+              "role": "card",
+              "column": 9,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 4,
+              "roleId": "categories"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["copy", "categories"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 2,
+              "rowSpan": 2,
+              "roleId": "categories"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 4,
+              "rowSpan": 2,
+              "roleId": "categories"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 6,
+              "rowSpan": 2,
+              "roleId": "categories"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "sceneShopping",
+      "moduleType": "按场景选购",
+      "displayName": "场景入口",
+      "category": "导航入口",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "scene-navigation",
+      "visualRole": "support-stage",
+      "visualWeight": "support-stage",
+      "width": "wide",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "scenes",
+          "role": "card",
+          "kind": "collection",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "1 / 1",
+            "tablet": "1 / 1",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["1 / 1"],
+            "tablet": ["1 / 1"],
+            "mobile": ["4 / 5"]
+          },
+          "quantity": {
+            "default": 3,
+            "min": 2,
+            "max": 4
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["copy", "scenes"],
+        "tablet": ["copy", "scenes"],
+        "mobile": ["copy", "scenes"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 0
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "四个选购场景入口",
+        "visualRole": "support-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["copy", "scenes"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 3,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "scenes"
+            },
+            {
+              "role": "card",
+              "column": 4,
+              "span": 3,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "scenes"
+            },
+            {
+              "role": "card",
+              "column": 7,
+              "span": 3,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "scenes"
+            },
+            {
+              "role": "card",
+              "column": 10,
+              "span": 3,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "scenes"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["copy", "scenes"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 2,
+              "rowSpan": 1,
+              "roleId": "scenes"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 3,
+              "rowSpan": 1,
+              "roleId": "scenes"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 4,
+              "rowSpan": 1,
+              "roleId": "scenes"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 1,
+              "roleId": "scenes"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "hotspot",
+      "moduleType": "热区图",
+      "displayName": "图片热区",
+      "category": "导航入口",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "hotspot-stage",
+      "visualRole": "feature-stage",
+      "visualWeight": "feature-stage",
+      "width": "full",
+      "flow": "bleed",
+      "heightModeByViewport": {
+        "desktop": "ratio",
+        "tablet": "ratio",
+        "mobile": "ratio"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "sceneImage",
+          "role": "media",
+          "kind": "media",
+          "required": true,
+          "defaultRatioByViewport": {
+            "desktop": "16 / 8",
+            "tablet": "4 / 3",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["16 / 8"],
+            "tablet": ["4 / 3"],
+            "mobile": ["4 / 5"]
+          }
+        },
+        {
+          "id": "hotspots",
+          "role": "marker",
+          "kind": "marker",
+          "required": true,
+          "defaultRatioByViewport": {},
+          "allowedRatioPresetsByViewport": {},
+          "parentRole": "sceneImage",
+          "positioning": "relative-to-media",
+          "quantity": {
+            "default": 3,
+            "min": 1,
+            "max": 6
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["sceneImage", "hotspots", "copy"],
+        "tablet": ["sceneImage", "hotspots", "copy"],
+        "mobile": ["sceneImage", "hotspots", "copy"]
+      },
+      "presets": ["hotspotEditor"],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 0
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "底图内热点与导览说明",
+        "visualRole": "feature-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["sceneImage", "hotspots", "copy"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 6,
+              "roleId": "sceneImage"
+            },
+            {
+              "role": "marker",
+              "kind": "hotspot",
+              "column": 3,
+              "span": 1,
+              "row": 3,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "hotspots"
+            },
+            {
+              "role": "marker",
+              "kind": "hotspot",
+              "column": 7,
+              "span": 1,
+              "row": 4,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "hotspots"
+            },
+            {
+              "role": "marker",
+              "kind": "hotspot",
+              "column": 10,
+              "span": 1,
+              "row": 2,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "hotspots"
+            },
+            {
+              "role": "copy",
+              "column": 2,
+              "span": 5,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "copy"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["sceneImage", "hotspots", "copy"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 6,
+              "roleId": "sceneImage"
+            },
+            {
+              "role": "marker",
+              "kind": "hotspot",
+              "column": 3,
+              "span": 1,
+              "row": 2,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "hotspots"
+            },
+            {
+              "role": "marker",
+              "kind": "hotspot",
+              "column": 8,
+              "span": 1,
+              "row": 4,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "hotspots"
+            },
+            {
+              "role": "marker",
+              "kind": "hotspot",
+              "column": 6,
+              "span": 1,
+              "row": 5,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "hotspots"
+            },
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "copy"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "brandPoints",
+      "moduleType": "卡片网格",
+      "displayName": "品牌要点",
+      "category": "服务信息",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "brand-points",
+      "visualRole": "support-stage",
+      "visualWeight": "support-stage",
+      "width": "standard",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "points",
+          "role": "card",
+          "kind": "collection",
+          "required": false,
+          "defaultRatioByViewport": {},
+          "allowedRatioPresetsByViewport": {},
+          "quantity": {
+            "default": 3,
+            "min": 3,
+            "max": 4
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["copy", "points"],
+        "tablet": ["copy", "points"],
+        "mobile": ["copy", "points"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 0
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "三个品牌能力要点",
+        "visualRole": "support-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["copy", "points"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 3,
+              "span": 8,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "points"
+            },
+            {
+              "role": "card",
+              "column": 5,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "points"
+            },
+            {
+              "role": "card",
+              "column": 9,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "points"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["copy", "points"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 2,
+              "rowSpan": 2,
+              "roleId": "points"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 4,
+              "rowSpan": 2,
+              "roleId": "points"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 6,
+              "rowSpan": 2,
+              "roleId": "points"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "servicePromises",
+      "moduleType": "服务承诺",
+      "displayName": "服务承诺",
+      "category": "服务信息",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "service-policy",
+      "visualRole": "support-stage",
+      "visualWeight": "support-stage",
+      "width": "full",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "promises",
+          "role": "list",
+          "kind": "collection",
+          "required": false,
+          "defaultRatioByViewport": {},
+          "allowedRatioPresetsByViewport": {},
+          "quantity": {
+            "default": 4,
+            "min": 3,
+            "max": 4
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["copy", "promises"],
+        "tablet": ["copy", "promises"],
+        "mobile": ["copy", "promises"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 0
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "四项服务承诺清单",
+        "visualRole": "support-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["copy", "promises"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 5,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "list",
+              "column": 1,
+              "span": 3,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "promises"
+            },
+            {
+              "role": "list",
+              "column": 4,
+              "span": 3,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "promises"
+            },
+            {
+              "role": "list",
+              "column": 7,
+              "span": 3,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "promises"
+            },
+            {
+              "role": "list",
+              "column": 10,
+              "span": 3,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "promises"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["copy", "promises"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "list",
+              "column": 1,
+              "span": 12,
+              "row": 2,
+              "rowSpan": 1,
+              "roleId": "promises"
+            },
+            {
+              "role": "list",
+              "column": 1,
+              "span": 12,
+              "row": 3,
+              "rowSpan": 1,
+              "roleId": "promises"
+            },
+            {
+              "role": "list",
+              "column": 1,
+              "span": 12,
+              "row": 4,
+              "rowSpan": 1,
+              "roleId": "promises"
+            },
+            {
+              "role": "list",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 1,
+              "roleId": "promises"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "certificates",
+      "moduleType": "资质证书",
+      "displayName": "证书展示",
+      "category": "服务信息",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "trust-gallery",
+      "visualRole": "support-stage",
+      "visualWeight": "support-stage",
+      "width": "wide",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "certificates",
+          "role": "card",
+          "kind": "collection",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "3 / 2",
+            "tablet": "3 / 2",
+            "mobile": "3 / 2"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["3 / 2"],
+            "tablet": ["3 / 2"],
+            "mobile": ["3 / 2"]
+          },
+          "quantity": {
+            "default": 3,
+            "min": 2,
+            "max": 6
+          }
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["copy", "certificates"],
+        "tablet": ["copy", "certificates"],
+        "mobile": ["copy", "certificates"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 0
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "三张横向资质证书",
+        "visualRole": "support-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["copy", "certificates"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 4,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "certificates"
+            },
+            {
+              "role": "card",
+              "column": 5,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "certificates"
+            },
+            {
+              "role": "card",
+              "column": 9,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 3,
+              "roleId": "certificates"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["copy", "certificates"],
+          "zones": [
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 2,
+              "rowSpan": 2,
+              "roleId": "certificates"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 4,
+              "rowSpan": 2,
+              "roleId": "certificates"
+            },
+            {
+              "role": "card",
+              "column": 1,
+              "span": 12,
+              "row": 6,
+              "rowSpan": 2,
+              "roleId": "certificates"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "storeInfo",
+      "moduleType": "门店信息",
+      "displayName": "门店信息",
+      "category": "服务信息",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "store-visit",
+      "visualRole": "feature-stage",
+      "visualWeight": "feature-stage",
+      "width": "full",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "store",
+          "role": "media",
+          "kind": "media",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "16 / 8",
+            "tablet": "4 / 3",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["16 / 8"],
+            "tablet": ["4 / 3"],
+            "mobile": ["4 / 5"]
+          }
+        },
+        {
+          "id": "details",
+          "role": "list",
+          "kind": "collection",
+          "required": false,
+          "defaultRatioByViewport": {},
+          "allowedRatioPresetsByViewport": {}
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "action",
+          "role": "action",
+          "kind": "action",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["store", "copy", "details", "action"],
+        "tablet": ["store", "copy", "details", "action"],
+        "mobile": ["store", "copy", "details", "action"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 1
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "门店影像、地址服务与到店行动",
+        "visualRole": "feature-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["store", "copy", "details", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 7,
+              "row": 1,
+              "rowSpan": 6,
+              "roleId": "store"
+            },
+            {
+              "role": "copy",
+              "column": 9,
+              "span": 4,
+              "row": 1,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "list",
+              "column": 9,
+              "span": 4,
+              "row": 3,
+              "rowSpan": 2,
+              "roleId": "details"
+            },
+            {
+              "role": "action",
+              "column": 9,
+              "span": 3,
+              "row": 6,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["store", "copy", "details", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 4,
+              "roleId": "store"
+            },
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "list",
+              "column": 1,
+              "span": 12,
+              "row": 6,
+              "rowSpan": 1,
+              "roleId": "details"
+            },
+            {
+              "role": "action",
+              "column": 1,
+              "span": 5,
+              "row": 7,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "testimonials",
+      "moduleType": "真实评价与实拍",
+      "displayName": "顾客分享",
+      "category": "服务信息",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "testimonial-proof",
+      "visualRole": "support-stage",
+      "visualWeight": "support-stage",
+      "width": "wide",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "authorizedPhoto",
+          "role": "media",
+          "kind": "media",
+          "required": true,
+          "defaultRatioByViewport": {
+            "desktop": "4 / 5",
+            "tablet": "4 / 5",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["4 / 5"],
+            "tablet": ["4 / 5"],
+            "mobile": ["4 / 5"]
+          },
+          "proof": "authorized-customer-photo",
+          "semantic": "authorized-customer-photo",
+          "quantity": {
+            "default": 1,
+            "min": 1,
+            "max": 3
+          }
+        },
+        {
+          "id": "mainQuote",
+          "role": "quote",
+          "kind": "text",
+          "required": true,
+          "relation": "pairs-with:authorizedPhoto",
+          "semantic": "primary-quote"
+        },
+        {
+          "id": "attribution",
+          "role": "quote",
+          "kind": "text",
+          "required": false,
+          "relation": "attribution-for:mainQuote",
+          "semantic": "quote-attribution"
+        }
+      ],
+      "order": {
+        "desktop": ["authorizedPhoto", "mainQuote", "attribution"],
+        "tablet": ["authorizedPhoto", "mainQuote", "attribution"],
+        "mobile": ["authorizedPhoto", "mainQuote", "attribution"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 0
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "授权实拍图片与主引语关系",
+        "visualRole": "support-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["authorizedPhoto", "mainQuote", "attribution"],
+          "zones": [
+            {
+              "roleId": "authorizedPhoto",
+              "role": "media",
+              "column": 1,
+              "span": 5,
+              "row": 2,
+              "rowSpan": 6
+            },
+            {
+              "roleId": "mainQuote",
+              "role": "quote",
+              "column": 7,
+              "span": 6,
+              "row": 3,
+              "rowSpan": 3
+            },
+            {
+              "roleId": "attribution",
+              "role": "quote",
+              "column": 7,
+              "span": 4,
+              "row": 6,
+              "rowSpan": 1
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["authorizedPhoto", "mainQuote", "attribution"],
+          "zones": [
+            {
+              "roleId": "authorizedPhoto",
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 4
+            },
+            {
+              "roleId": "mainQuote",
+              "role": "quote",
+              "column": 1,
+              "span": 12,
+              "row": 5,
+              "rowSpan": 2
+            },
+            {
+              "roleId": "attribution",
+              "role": "quote",
+              "column": 1,
+              "span": 8,
+              "row": 7,
+              "rowSpan": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "booking",
+      "moduleType": "预约入口",
+      "displayName": "预约入口",
+      "category": "服务信息",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "booking-epilogue",
+      "visualRole": "support-stage",
+      "visualWeight": "support-stage",
+      "width": "standard",
+      "flow": "flow",
+      "heightModeByViewport": {
+        "desktop": "content",
+        "tablet": "content",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "stacked",
+        "tablet": "stacked",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "primaryAction",
+          "role": "action",
+          "kind": "action",
+          "required": true,
+          "defaultRatioByViewport": {},
+          "allowedRatioPresetsByViewport": {},
+          "emphasis": "primary",
+          "semantic": "primary-booking-action"
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "secondaryContact",
+          "role": "marker",
+          "kind": "contact",
+          "required": false,
+          "emphasis": "secondary",
+          "semantic": "optional-secondary-contact"
+        }
+      ],
+      "order": {
+        "desktop": ["copy", "primaryAction", "secondaryContact"],
+        "tablet": ["copy", "primaryAction", "secondaryContact"],
+        "mobile": ["copy", "primaryAction", "secondaryContact"]
+      },
+      "presets": ["locationData"],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 1
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "页面尾章的预约主行动与次级联系方式",
+        "visualRole": "feature-stage",
+        "desktop": {
+          "tone": "light",
+          "order": ["copy", "primaryAction", "secondaryContact"],
+          "zones": [
+            {
+              "roleId": "copy",
+              "role": "copy",
+              "column": 2,
+              "span": 6,
+              "row": 2,
+              "rowSpan": 3
+            },
+            {
+              "roleId": "primaryAction",
+              "role": "action",
+              "column": 9,
+              "span": 3,
+              "row": 3,
+              "rowSpan": 1
+            },
+            {
+              "roleId": "secondaryContact",
+              "role": "marker",
+              "column": 9,
+              "span": 3,
+              "row": 5,
+              "rowSpan": 1
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["copy", "primaryAction", "secondaryContact"],
+          "zones": [
+            {
+              "roleId": "copy",
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 3
+            },
+            {
+              "roleId": "primaryAction",
+              "role": "action",
+              "column": 1,
+              "span": 8,
+              "row": 5,
+              "rowSpan": 1
+            },
+            {
+              "roleId": "secondaryContact",
+              "role": "marker",
+              "column": 1,
+              "span": 8,
+              "row": 7,
+              "rowSpan": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "limitedEvent",
+      "moduleType": "限时活动",
+      "displayName": "限时活动",
+      "category": "活动内容",
+      "implementationStatus": "planned",
+      "version": 1,
+      "master": "event-stage",
+      "visualRole": "feature-stage",
+      "visualWeight": "feature-stage",
+      "width": "full",
+      "flow": "bleed",
+      "heightModeByViewport": {
+        "desktop": "ratio",
+        "tablet": "ratio",
+        "mobile": "content"
+      },
+      "copyPlacementByViewport": {
+        "desktop": "overlay",
+        "tablet": "overlay",
+        "mobile": "stacked"
+      },
+      "spacingPolicy": ["normal"],
+      "roles": [
+        {
+          "id": "event",
+          "role": "media",
+          "kind": "media",
+          "required": false,
+          "defaultRatioByViewport": {
+            "desktop": "16 / 7",
+            "tablet": "16 / 7",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["16 / 7"],
+            "tablet": ["16 / 7"],
+            "mobile": ["4 / 5"]
+          }
+        },
+        {
+          "id": "time",
+          "role": "marker",
+          "kind": "marker",
+          "required": false,
+          "defaultRatioByViewport": {},
+          "allowedRatioPresetsByViewport": {}
+        },
+        {
+          "id": "copy",
+          "role": "copy",
+          "kind": "text",
+          "required": false
+        },
+        {
+          "id": "action",
+          "role": "action",
+          "kind": "action",
+          "required": false
+        }
+      ],
+      "order": {
+        "desktop": ["event", "time", "copy", "action"],
+        "tablet": ["event", "time", "copy", "action"],
+        "mobile": ["event", "time", "copy", "action"]
+      },
+      "presets": [],
+      "contentBudget": {
+        "limits": {},
+        "requiredText": [],
+        "maxCtas": 1
+      },
+      "allowedControls": [],
+      "supportsLinkTarget": true,
+      "preview": {
+        "purpose": "活动影像、时间状态、权益文字与行动",
+        "visualRole": "feature-stage",
+        "desktop": {
+          "tone": "dark",
+          "order": ["event", "time", "copy", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 7,
+              "roleId": "event"
+            },
+            {
+              "role": "marker",
+              "kind": "countdown",
+              "column": 2,
+              "span": 3,
+              "row": 2,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "time"
+            },
+            {
+              "role": "copy",
+              "column": 2,
+              "span": 6,
+              "row": 4,
+              "rowSpan": 2,
+              "overlay": true,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 2,
+              "span": 3,
+              "row": 7,
+              "rowSpan": 1,
+              "overlay": true,
+              "roleId": "action"
+            }
+          ]
+        },
+        "mobile": {
+          "tone": "light",
+          "order": ["event", "time", "copy", "action"],
+          "zones": [
+            {
+              "role": "media",
+              "column": 1,
+              "span": 12,
+              "row": 1,
+              "rowSpan": 4,
+              "roleId": "event"
+            },
+            {
+              "role": "marker",
+              "kind": "countdown",
+              "column": 1,
+              "span": 4,
+              "row": 5,
+              "rowSpan": 1,
+              "roleId": "time"
+            },
+            {
+              "role": "copy",
+              "column": 1,
+              "span": 12,
+              "row": 6,
+              "rowSpan": 1,
+              "roleId": "copy"
+            },
+            {
+              "role": "action",
+              "column": 1,
+              "span": 5,
+              "row": 8,
+              "rowSpan": 1,
+              "roleId": "action"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

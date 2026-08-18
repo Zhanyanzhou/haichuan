@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
+import type { CSSProperties } from "react";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { SecureImage } from "@/components/common/SecureImage";
-import { CATEGORY_CARDS_CONTRACT, getCategoryCardsMediaAspectRatio, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
+import { CATEGORY_CARDS_CONTRACT, getCategoryCardsMediaAspectRatio, getContractRoleRatio, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { isSafeInternalPath } from "@/page-builder/utils/linkTarget";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
@@ -28,7 +29,13 @@ export default function CategoryCardsBlock({
   const layout = module.layoutConfig?.template || content.layout || "grid-3";
   const bg = styleConfig.bgColor || "#FBF9F6";
   const cols = layout === "grid-2" ? 2 : layout === "grid-4" ? 4 : 3;
-  const mediaAspectRatio = getCategoryCardsMediaAspectRatio(layout);
+  const isSceneShopping = content.templateType === "按场景选购";
+  const mediaAspectRatio = isSceneShopping
+    ? getContractRoleRatio("sceneShopping", "scenes", "desktop")
+    : getCategoryCardsMediaAspectRatio(layout);
+  const mobileMediaAspectRatio = isSceneShopping
+    ? getContractRoleRatio("sceneShopping", "scenes", "mobile")
+    : getContractRoleRatio("categoryCards", "categories", "mobile");
   const normalizedCategories = Array.isArray(categories) ? categories.slice(0, CATEGORY_CARDS_CONTRACT.content.maxItems) : [];
   const visibleCategories = editMode
     ? normalizedCategories
@@ -59,7 +66,9 @@ export default function CategoryCardsBlock({
           display: "grid",
           gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
           gap: cols === 2 ? 24 : 16,
-        }}
+          "--hc-entry-ratio-desktop": mediaAspectRatio,
+          "--hc-entry-ratio-mobile": mobileMediaAspectRatio,
+        } as CSSProperties}
         className="homepage-category-cards__grid"
       >
           {visibleCategories.map((c: any, i: number) => {
@@ -75,8 +84,8 @@ export default function CategoryCardsBlock({
               className="group"
             >
               <div
+                className="homepage-category-cards__media"
                 style={{
-                  aspectRatio: mediaAspectRatio,
                   overflow: "hidden",
                   background: "#EDE9E2",
                 }}
@@ -167,12 +176,14 @@ export default function CategoryCardsBlock({
           })}
       </div>
       <style>{`
+        .homepage-category-cards__media { aspect-ratio: var(--hc-entry-ratio-desktop); }
         @media ${RESPONSIVE_CANVAS.tabletMediaQuery} {
           .homepage-category-cards__grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 20px !important; }
         }
         /* Mobile 两列(入口卡组母版规则) */
         @media (max-width: 767px) {
           .homepage-category-cards__grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 12px !important; }
+          .homepage-category-cards__media { aspect-ratio: var(--hc-entry-ratio-mobile); }
         }
       `}</style>
     </DecorSection>

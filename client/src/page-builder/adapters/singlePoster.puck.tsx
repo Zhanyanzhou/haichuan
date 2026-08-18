@@ -6,6 +6,11 @@ import SinglePosterSection from "@/components/blocks/SinglePosterSection";
 import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import MediaPickerField from "../fields/MediaPickerField";
+import type { LinkTargetType } from "../utils/linkTarget";
+import {
+  createContentTemplateMarker,
+  type ContentTemplateMarker,
+} from "../generated/contentTemplates.generated";
 
 export interface SinglePosterPuckProps {
   number: string;
@@ -16,11 +21,16 @@ export interface SinglePosterPuckProps {
   mobileImage: string;
   linkUrl: string;
   actionText: string;
+  targetType: LinkTargetType;
+  productId: number;
+  altText: string;
   template: string;
   desktopFocusX: number;
   desktopFocusY: number;
   mobileFocusX: number;
   mobileFocusY: number;
+  /** 系统保留：区块级内容模板合同印记，不在 Inspector 中展示。 */
+  __contentTemplate?: ContentTemplateMarker;
   locked?: boolean;
 }
 
@@ -29,19 +39,23 @@ export const singlePosterPuckConfig = {
     <SinglePosterSection module={convertPuckProps("单图海报", props as any)!} editMode />
   ),
   defaultProps: {
-    number: "01",
-    label: "SIGNATURE",
-    title: "经典系列",
+    number: "",
+    label: "",
+    title: "",
     subtitle: "",
     desktopImage: "",
     mobileImage: "",
     linkUrl: "",
-    actionText: "查看系列",
+    actionText: "",
+    targetType: "none",
+    productId: 0,
+    altText: "",
     template: "leftTextRightImage",
     desktopFocusX: 50,
     desktopFocusY: 50,
     mobileFocusX: 50,
     mobileFocusY: 50,
+    __contentTemplate: createContentTemplateMarker("单图海报"),
     locked: false,
   } satisfies SinglePosterPuckProps,
   fields: {
@@ -71,6 +85,17 @@ export const singlePosterPuckConfig = {
     },
     linkUrl: { type: "text" as const, label: "链接" },
     actionText: { type: "text" as const, label: "引导文字" },
+    targetType: {
+      type: "radio" as const,
+      label: "点击跳转",
+      options: [
+        { label: "不跳转", value: "none" },
+        { label: "商品详情", value: "product" },
+        { label: "站内页面", value: "page" },
+      ],
+    },
+    productId: { type: "number" as const, label: "商品 ID" },
+    altText: { type: "text" as const, label: "图片替代文字" },
     template: {
       type: "radio" as const,
       label: "布局",

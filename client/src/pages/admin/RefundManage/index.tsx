@@ -3,6 +3,7 @@ import { Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal,
 import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import { refundApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
+import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
 import type { PaginatedResult, Refund, RefundStatus } from '@/types';
 
 const STATUS_META: Record<RefundStatus, { color: string; label: string }> = {
@@ -104,7 +105,7 @@ export default function RefundManage() {
       createForm.resetFields();
       void load();
     } catch (e: any) {
-      message.error(e?.message || '创建失败');
+      message.error(getSafeAdminErrorMessage(e, '退款申请创建失败，请检查订单和退款信息后重试。'));
     } finally {
       setCreating(false);
     }
@@ -123,7 +124,7 @@ export default function RefundManage() {
           message.success(action === 'APPROVED' ? '已审核通过' : '已拒绝');
           void load();
         } catch (e: any) {
-          message.error(e?.message || '操作失败');
+          message.error(getSafeAdminErrorMessage(e, '退款审核未完成，请重新加载后确认当前状态。'));
         }
       },
     });
@@ -147,7 +148,7 @@ export default function RefundManage() {
           message.success(action === 'COMPLETED' ? '退款已完成' : '已标记失败');
           void load();
         } catch (e: any) {
-          message.error(e?.message || '操作失败');
+          message.error(getSafeAdminErrorMessage(e, '退款执行状态更新失败，请重新加载后重试。'));
         }
       },
     });
@@ -157,7 +158,7 @@ export default function RefundManage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-display font-semibold text-brand-text">退款中心</h1>
+          <h1 className="font-semibold text-brand-text">退款中心</h1>
           <p className="text-sm text-brand-muted mt-1">退款申请 · 审核 · 人工执行（累计退款不超过已收款）</p>
         </div>
         <Space>

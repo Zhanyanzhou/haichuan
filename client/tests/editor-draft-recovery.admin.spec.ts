@@ -1,0 +1,152 @@
+import { expect, test, type Page } from "@playwright/test";
+
+/**
+ * 店铺装修 —— 草稿恢复与继续编辑回归测试
+ *
+ * 覆盖：保存草稿后重新进入编辑器默认加载最新草稿（而非线上版本）；
+ * 「查看线上版本 / 继续编辑草稿 / 放弃草稿」的完整状态流转。
+ *
+ * 运行方式（需预先录制已登录的 admin 会话快照）：
+ *   $env:PLAYWRIGHT_ADMIN_STORAGE_STATE="tests/.auth/admin.json"
+ *   npx playwright test editor-draft-recovery --project=admin-chromium
+ *
+ * 说明：本测试通过 page.route 注入「已发布版本 P + 与 P 不同的草稿 D」，
+ * 断言编辑器的草稿状态机，不依赖真实业务数据；仅为前端流程回归。
+ */
+
+const useMock = process.env.VITE_USE_MOCK === "true";
+const API_PREFIX = "**/api/page-modules/document";
+
+const heroBlock = {
+  type: "首屏主视觉",
+  props: {
+    id: "draft-hero",
+    title: "草稿标题",
+    subtitle: "草稿副标题",
+    desktopImage: "/svg/template-hero.svg",
+    mobileImage: "/svg/template-hero.svg",
+    altText: "草稿测试图",
+  },
+};
+
+const publishedDoc = {
+  id: 9001,
+  pageKey: "home",
+  puckData: { content: [], root: { props: {} } },
+  metadata: { seoTitle: "线上版本" },
+  editorVersion: "0.22.4",
+  status: "PUBLISHED",
+  version: 1,
+  publishedAt: "2026-08-14T00:00:00.000Z",
+  updatedAt: "2026-08-14T00:00:00.000Z",
+};
+
+const draftDoc = {
+  id: 9002,
+  pageKey: "home",
+  puckData: { content: [heroBlock], root: { props: {} } },
+  metadata: { seoTitle: "草稿版本" },
+  editorVersion: "0.22.4",
+  status: "DRAFT",
+  version: 1,
+  publishedAt: null,
+  updatedAt: "2026-08-14T01:00:00.000Z",
+};
+
+function json(data: unknown) {
+  return {
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ code: 200, data, message: "success" }),
+  };
+}
+
+async function mockEditorApis(page: Page) {
+  let saved = { ...draftDoc };
+  await page.route(`${API_PREFIX}*`, async (route) => {
+    const url = route.request().url();
+    const method = route.request().method();
+
+    if (url.includes("/validate")) {
+      return route.fulfill(json({ valid: true, errors: [] }));
+    }
+    if (url.includes("/revisions")) {
+      return route.fulfill(json([]));
+    }
+    if (url.includes("/publish")) {
+      saved = {
+        ...saved,
+        status: "PUBLISHED",
+        publishedAt: "2026-08-14T02:00:00.000Z",
+      };
+      return route.fulfill(json(saved));
+    }
+    if (url.includes("/published")) {
+      return route.fulfill(json(publishedDoc));
+    }
+    if (url.includes("/admin")) {
+      return route.fulfill(json(saved));
+    }
+    if (method === "PUT") {
+      const body = route.request().postDataJSON() as {
+        puckData?: unknown;
+        metadata?: unknown;
+      };
+      saved = {
+        ...saved,
+        puckData: (body.puckData ?? saved.puckData) as any,
+        metadata: (body.metadata ?? saved.metadata) as any,
+        updatedAt: "2026-08-14T01:30:00.000Z",
+      };
+      return route.fulfill(json(saved));
+    }
+    return route.continue();
+  });
+}
+
+test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
+  test.skip(useMock, "依赖 HTTP 拦截夹具，mock 模式由手动验收覆盖");
+
+  test.beforeEach(async ({ page }) => {
+    await mockEditorApis(page);
+  });
+
+  test("存在未发布草稿时，重新进入编辑器默认加载草稿", async ({ page }) => {
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const status = page.locator(".homepage-editor__pending-draft");
+    await expect(status).toContainText("正在编辑草稿", { timeout: 10000 });
+    await expect(status).toContainText("最后保存");
+  });
+
+  test("查看线上版本后，可无损回到草稿", async ({ page }) => {
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const status = page.locator(".homepage-editor__pending-draft");
+    await expect(status).toContainText("正在编辑草稿", { timeout: 10000 });
+
+    await page.getByRole("button", { name: "查看线上版本" }).click();
+    await expect(status).toContainText("正在查看线上版本");
+
+    await page.getByRole("button", { name: "继续编辑草稿" }).first().click();
+    await expect(status).toContainText("正在编辑草稿");
+  });
+
+  test("放弃草稿需二次确认，取消后草稿不变", async ({ page }) => {
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const status = page.locator(".homepage-editor__pending-draft");
+    await expect(status).toContainText("正在编辑草稿", { timeout: 10000 });
+
+    await page.getByRole("button", { name: "放弃草稿" }).click();
+    const dialog = page.getByRole("dialog", {
+      name: "放弃当前草稿并恢复线上版本？",
+    });
+    await expect(dialog).toBeVisible();
+
+    await dialog.getByRole("button", { name: "取消" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(status).toContainText("正在编辑草稿");
+  });
+});

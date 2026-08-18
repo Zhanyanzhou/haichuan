@@ -24,14 +24,15 @@ export function makeCategoryCardsSchema(
 ): ModuleInspectorSchema {
   const defaults =
     variant.defaults ??
-    (puckConfig.components[variant.moduleType]?.defaultProps ??
-      categoryCardsPuckConfig.defaultProps);
+    puckConfig.components[variant.moduleType]?.defaultProps ??
+    categoryCardsPuckConfig.defaultProps;
   return {
     moduleType: variant.moduleType,
     displayName: variant.displayName,
     purpose: variant.purpose,
     evaluate: evaluateCategoryCardsContract,
     defaults: { ...defaults },
+    groupTitles: { media: "卡片素材" },
     sections: [
       {
         id: `${variant.moduleType}-content`,
@@ -45,7 +46,10 @@ export function makeCategoryCardsSchema(
             control: "text",
             required: true,
             maxLength: CATEGORY_CARDS_CONTRACT.content.limits.title,
-            placeholder: variant.moduleType === "分类卡片" ? "如 按品类探索" : "如 按场景选款",
+            placeholder:
+              variant.moduleType === "分类卡片"
+                ? "如 按品类探索"
+                : "如 按场景选购",
           },
           {
             key: "subtitle",
@@ -54,6 +58,13 @@ export function makeCategoryCardsSchema(
             maxLength: CATEGORY_CARDS_CONTRACT.content.limits.subtitle,
             hint: "留空不显示",
           },
+        ],
+      },
+      {
+        id: `${variant.moduleType}-media`,
+        title: "素材",
+        layer: "media",
+        fields: [
           {
             key: "categories",
             label: "入口卡片",
@@ -98,7 +109,12 @@ export function makeCategoryCardsSchema(
                 maxLength: CATEGORY_CARDS_CONTRACT.content.limits.description,
                 hint: "显示在名称下方",
               },
-              { key: "link", label: "跳转链接", control: "text", hint: "站内路径" },
+              {
+                key: "link",
+                label: "跳转链接",
+                control: "text",
+                hint: "站内路径",
+              },
               {
                 key: "altText",
                 label: "替代文字",
@@ -143,9 +159,9 @@ export const categoryCardsSchema = makeCategoryCardsSchema({
   purpose: CATEGORY_CARDS_CONTRACT.purpose,
 });
 
-/** 按场景选购（场景选款,含礼赠等运营预设） */
+/** 按场景选购（场景入口,含礼赠等运营预设） */
 export const occasionGuideSchema = makeCategoryCardsSchema({
   moduleType: "按场景选购",
-  displayName: "场景选款",
+  displayName: "场景入口",
   purpose: "按佩戴场景或送礼对象快速进入选购；卡片承担导航不承载商品信息。",
 });
