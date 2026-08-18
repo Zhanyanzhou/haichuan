@@ -109,6 +109,15 @@ const INITIAL_EDITOR_UI: Partial<UiState> = {
 
 let blockIdSequence = 0;
 
+/**
+ * 脏标记比较签名:只取 content 的规范化形态(忽略 block id 与键序、不含 zones/ui)。
+ * JSON 全等比较会让 Puck 首帧 normalize(补默认键/重排)被误判为用户修改,
+ * 导致每次进入编辑器都显示"有未保存修改"并触发离开拦截(2026-08-18 实测修复)。
+ */
+function dataSignature(data: unknown): string {
+  return canonicalizePuckContent(data);
+}
+
 function createBlockContent(type: string) {
   const component = (
     puckConfig.components as Record<
@@ -2865,8 +2874,7 @@ export default function HomepageConfig({
   const latestData = useRef<any>(data);
   const pageSessionCacheRef = useRef<Record<string, PageSessionCache>>({});
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const dataSignatureRef = useRef("");
-  const [metadata, setMetadata] = useState<Record<string, any>>({});
+  const dataSignatureRef = useRef("");  const [metadata, setMetadata] = useState<Record<string, any>>({});
   const latestMetadata = useRef<Record<string, any>>({});
   const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
   // 是否存在尚未发布的草稿修改。
@@ -3008,13 +3016,13 @@ export default function HomepageConfig({
           serverData = cachedPage.data;
           setData(cachedPage.data);
           latestData.current = cachedPage.data;
-          dataSignatureRef.current = JSON.stringify(cachedPage.data);
+          dataSignatureRef.current = dataSignature(cachedPage.data);
           setMetadata(cachedPage.metadata);
           latestMetadata.current = cachedPage.metadata;
         } else if (!hasInitializedEditorRef.current) {
           setData(serverData);
           latestData.current = serverData;
-          dataSignatureRef.current = JSON.stringify(serverData);
+          dataSignatureRef.current = dataSignature(serverData);
           setMetadata({});
           latestMetadata.current = {};
         }
@@ -3056,7 +3064,7 @@ export default function HomepageConfig({
           const draftMetadata = adminDoc?.metadata || {};
           setData(serverData);
           latestData.current = serverData;
-          dataSignatureRef.current = JSON.stringify(serverData);
+          dataSignatureRef.current = dataSignature(serverData);
           setMetadata(draftMetadata);
           latestMetadata.current = draftMetadata;
           // 乐观锁与“上次保存时间”仍以草稿文档为准，保证后续保存/发布能正确串行。
@@ -3071,7 +3079,7 @@ export default function HomepageConfig({
           // 新页面没有服务端数据时，仅此处一次性落入该页面的正确默认结构。
           setData(serverData);
           latestData.current = serverData;
-          dataSignatureRef.current = JSON.stringify(serverData);
+          dataSignatureRef.current = dataSignature(serverData);
           pageSessionCacheRef.current[pageKey] = {
             data: serverData,
             metadata: {},
@@ -3118,12 +3126,14 @@ export default function HomepageConfig({
   }, [loadAttempt, pageKey]);
 
   useEffect(() => {
-    dataSignatureRef.current = JSON.stringify(data);
+    dataSignatureRef.current = dataSignature(data);
   }, [data]);
 
   const trackEditorData = useCallback((nextData: unknown) => {
     latestData.current = nextData;
-    const changed = JSON.stringify(nextData) !== dataSignatureRef.current;
+    // 规范化比较(忽略 block id/键序/非 content 字段):
+    // Puck 首帧会 normalize 画布数据,JSON 全等会让每次进入编辑器都误报"有未保存修改"
+    const changed = dataSignature(nextData) !== dataSignatureRef.current;
     setHasUnsavedChanges(changed);
   }, []);
 
@@ -3304,7 +3314,7 @@ export default function HomepageConfig({
       );
       setData(structured);
       latestData.current = structured;
-      dataSignatureRef.current = JSON.stringify(structured);
+      dataSignatureRef.current = dataSignature(structured);
       if (draftMetadata) {
         setMetadata(draftMetadata);
         latestMetadata.current = draftMetadata;
@@ -3357,7 +3367,7 @@ export default function HomepageConfig({
     if (!publishedDataRef.current) return;
     setData(publishedDataRef.current);
     latestData.current = publishedDataRef.current;
-    dataSignatureRef.current = JSON.stringify(publishedDataRef.current);
+    dataSignatureRef.current = dataSignature(publishedDataRef.current);
     setMetadata(publishedMetadataRef.current);
     latestMetadata.current = publishedMetadataRef.current;
     setHasUnsavedChanges(false);
@@ -3405,7 +3415,7 @@ export default function HomepageConfig({
         }
         setData(publishedDataRef.current);
         latestData.current = publishedDataRef.current;
-        dataSignatureRef.current = JSON.stringify(publishedDataRef.current);
+        dataSignatureRef.current = dataSignature(publishedDataRef.current);
         setMetadata(publishedMetadataRef.current);
         latestMetadata.current = publishedMetadataRef.current;
         setHasUnsavedChanges(false);
