@@ -6,7 +6,6 @@
 import type { ReactNode } from "react";
 import { BLOCK_META } from "@/page-builder/config/blockMeta";
 import { isMobileCanvasWidth } from "@/page-builder/config/blockContracts";
-import { focusCanvasBlock } from "./editor-store";
 
 export type ViewportPreset = {
   label: string;
@@ -99,47 +98,4 @@ export function getInspectorDevice(viewport: {
   width: number | "100%";
 }): InspectorDevice {
   return isMobileCanvasWidth(viewport.width) ? "mobile" : "desktop";
-}
-
-export function getFieldDevice(
-  type: string,
-  field: string,
-): "desktop" | "mobile" | "shared" {
-  if (field === "mobileImage" || field === "mobileUrl") return "mobile";
-  if (
-    (type === "首屏主视觉" || type === "单图海报") &&
-    field === "desktopImage"
-  )
-    return "desktop";
-  if (type === "全屏出血图" && field === "image") return "desktop";
-  if (type === "轮播图" && field === "url") return "desktop";
-  return "shared";
-}
-
-export function createCropPreview(
-  aspectRatio: string,
-  focusX = 50,
-  focusY = 50,
-) {
-  return {
-    previewAspectRatio: aspectRatio,
-    previewFocus: { x: focusX, y: focusY },
-  };
-}
-
-/** 定位右侧面板中的字段控件并联动画布滚动到对应模块。 */
-export function focusInspectorField(field: string, blockId?: string) {
-  window.requestAnimationFrame(() => {
-    const target = document.querySelector<HTMLElement>(
-      `[name="${field}"], [id*="${field}"], [data-media-field="${field}"]`,
-    );
-    target?.scrollIntoView({ block: "center", behavior: "smooth" });
-    const focusable = target?.matches("input, textarea, select, button")
-      ? target
-      : target?.querySelector<HTMLElement>("button, input, textarea, select") ||
-        target;
-    focusable?.focus();
-
-    focusCanvasBlock(blockId, field);
-  });
 }
