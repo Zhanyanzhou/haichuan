@@ -61,7 +61,7 @@ import {
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import ContentTemplateSkeletonPreview from "@/page-builder/preview/ContentTemplateSkeletonPreview";
 import ContentTemplateFrameworkOverview from "@/page-builder/preview/ContentTemplateFrameworkOverview";
-import { getContentTemplatePreview } from "@/page-builder/generated/contentTemplates.generated";
+import { getContentTemplatePreview, createContentTemplateMarker } from "@/page-builder/generated/contentTemplates.generated";
 import "./editor.css";
 import EditorToolbar, { VIEWPORT_PRESETS } from "./components/EditorToolbar";
 import UnsavedChangesGuard from "./components/UnsavedChangesGuard";
@@ -116,10 +116,14 @@ function createBlockContent(type: string) {
       { defaultProps?: Record<string, unknown> }
     >
   )[type];
+  // 统一注入合同印记(2026-08-18 P2):所有新插入块带显式 key/version,
+  // 历史无印记块的 legacy-0 兼容只出现在旧数据上。
+  const templateMarker = createContentTemplateMarker(type);
   return {
     type,
     props: {
       ...component?.defaultProps,
+      ...(templateMarker ? { __contentTemplate: templateMarker } : {}),
       id: `homepage-block-${Date.now()}-${blockIdSequence++}`,
       locked: false,
     },
@@ -2707,6 +2711,7 @@ function EditorBody({
             </button>
             <LayerRail
               onSaveAsTemplate={onSaveAsTemplate}
+              pageKey={pageKey}
               navigationPreviewOpen={navigationPreviewOpen}
               onToggleNavigationPreview={toggleNavigationPreview}
               scrollSpyIndex={scrollSpyIndex}

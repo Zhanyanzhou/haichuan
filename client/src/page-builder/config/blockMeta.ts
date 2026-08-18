@@ -403,9 +403,3 @@ export function getSubTypes(primary: BlockCategory | "全部"): string[] {
     .map((meta) => meta.type);
   return [...new Set(types)];
 }
-
-/** 取区块的默认预览图（按 BLOCK_PREVIEW_KIND 派生 SVG 路径） */
-export function getDefaultPreviewImage(name: string): string {
-  const kind = BLOCK_PREVIEW_KIND[name] ?? "hero";
-  return `/svg/template-${kind}.svg`;
-}

@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" fill="none">
-  <!-- 作品画廊微缩预览:大图 + 双图 + 大图的非对称节奏 -->
-  <rect width="120" height="80" fill="#F7F4EE"/>
-  <rect x="8" y="10" width="52" height="46" fill="#E7DDCE"/>
-  <rect x="64" y="26" width="22" height="30" fill="#EAE0CE"/>
-  <rect x="8" y="60" width="10" height="2" fill="#B8944E"/>
-  <rect x="90" y="8" width="22" height="22" fill="#EFE8DA"/>
-  <rect x="90" y="34" width="22" height="34" fill="#E7DDCE"/>
-</svg>

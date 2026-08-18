@@ -5004,3 +5004,23 @@ body:has(.homepage-editor__storefront-frame) {
   color: #98948D;
   line-height: 1.5;
 }
+
+/* ═══ 图层栏配方完成度提示(2026-08-18 P2) ═══ */
+.homepage-editor__recipe-hint {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #98948D;
+  border-bottom: 1px solid #E4E3DF;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.homepage-editor__recipe-hint[data-tone="required"] {
+  color: #8C5A2B;
+  background: #FCF8F1;
+}
+.homepage-editor__recipe-hint[data-tone="done"] {
+  color: #66645F;
+}
