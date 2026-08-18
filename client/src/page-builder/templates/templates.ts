@@ -82,7 +82,7 @@ export const jewelryHomeTemplate: TemplateDefinition = {
           linkUrl: "",
           targetType: "none",
           productId: 0,
-          backgroundImage: "",
+
           template: "center",
           bgColor: "#FBF9F6",
           textColor: "#2C2C2C",
@@ -333,7 +333,7 @@ const rawPageTemplates: TemplateDefinition[] = [
             linkUrl: "",
             targetType: "none",
             productId: 0,
-            backgroundImage: "",
+
             template: "center",
             bgColor: "#FBF9F6",
             textColor: "#2C2C2C",
@@ -860,7 +860,7 @@ const rawPageTemplates: TemplateDefinition[] = [
             linkUrl: "",
             targetType: "none",
             productId: 0,
-            backgroundImage: "",
+
             template: "center",
             bgColor: "#FBF9F6",
             textColor: "#2C2C2C",
@@ -949,7 +949,7 @@ const rawPageTemplates: TemplateDefinition[] = [
             linkUrl: "",
             targetType: "none",
             productId: 0,
-            backgroundImage: "",
+
             template: "center",
             bgColor: "#FBF9F6",
             textColor: "#2C2C2C",

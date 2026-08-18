@@ -3388,6 +3388,9 @@ export default function HomepageConfig({
       cancelText: "取消",
       onOk: async () => {
         if (!publishedDataRef.current) return;
+        // 排空在途保存(如页面设置触发的静默保存):
+        // 否则 in-flight 保存会在丢弃完成后回写草稿,让被丢弃的修改"复活"。
+        await Promise.resolve(saveQueueRef.current).catch(() => {});
         // 真丢弃:服务端用最新发布版覆盖草稿(无发布版则删除文档),
         // 乐观锁防并发覆盖其他编辑者的修改。
         const expectedUpdatedAt =

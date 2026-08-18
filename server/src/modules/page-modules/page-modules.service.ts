@@ -70,6 +70,8 @@ const PUCK_IMAGE_FIELDS = [
   "posterUrl",
   "url",
   "backgroundImage",
+  // 文字横幅背景图(与 appointment 的 backgroundImage 是不同键)
+  "bgImage",
   "beforeImage",
   "afterImage",
 ];
@@ -543,8 +545,14 @@ export class PageModulesService {
           } else {
             productIds.add(productId);
           }
-        } else if (targetType === "page" && !linkUrl) {
-          errors.push(`${label}：站内页面跳转必须填写 linkUrl`);
+        } else if (targetType === "page") {
+          if (!linkUrl) {
+            errors.push(`${label}：站内页面跳转必须填写 linkUrl`);
+          } else if (!linkUrl.startsWith("/") || linkUrl.startsWith("//")) {
+            // 三件套 page 态是受控通道(UI 明确"不开放外部链接"),
+            // 收紧到站内路径,防止外链通过发布后在前台被静默丢弃成死链
+            errors.push(`${label}：站内页面跳转仅支持站内路径，不开放外部链接`);
+          }
         } else if (targetType && !["none", "product", "page"].includes(targetType)) {
           errors.push(`${label}：targetType 不合法`);
         }
@@ -1072,8 +1080,8 @@ export class PageModulesService {
     return { deleted: true };
   }
 
-  /** 删除草稿：有已发布版本则回到线上数据（线上零感知），否则整行删除（编辑器回落默认结构） */
-  /** 放弃草稿:恢复为最新发布版(无发布版则删除文档)。expectedUpdatedAt 为乐观锁,防并发覆盖他人修改。 */
+  /** 放弃草稿:有已发布版本则恢复为线上数据(线上零感知),无则整行删除(编辑器回落默认结构);
+   *  expectedUpdatedAt 为乐观锁,防止并发覆盖其他编辑者的修改。 */
   async discardPageDocumentDraft(
     pageKey: string,
     expectedUpdatedAt?: string,

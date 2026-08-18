@@ -81,7 +81,7 @@ export const appointmentSchema: ModuleInspectorSchema = {
           control: "media",
           spec: IMAGE_SPECS.fullBleed.desktop,
           focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
-          placeholder: "上传背景图（留空用纯色）",
+          placeholder: "上传背景图，留空用纯色",
           showSpecCheck: true,
         },
         {

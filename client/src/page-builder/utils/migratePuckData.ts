@@ -121,7 +121,6 @@ function migrateBlock(block: PuckBlock): PuckBlock {
             body: p.body || "",
             buttonText: clampText(p.buttonText, 30),
             linkUrl,
-            backgroundImage: "",
             template: "center",
             bgColor: "#FBF9F6",
             textColor: "#2C2C2C",
@@ -140,7 +139,9 @@ function migrateBlock(block: PuckBlock): PuckBlock {
             subtitle: clampText(p.body, 48),
             buttonText: clampText(p.buttonText, 12),
             linkUrl,
-            targetType: p.targetType || "none",
+            // 旧数据无 targetType 时按 linkUrl 推断,不能写死 none:
+            // 服务端发布校验拒绝 none+linkUrl 组合,写死会让迁移后的旧草稿无法发布。
+            targetType: p.targetType || (linkUrl ? "page" : "none"),
             productId: Number(p.productId) || 0,
             template: "textCenter",
             overlayPreset: "soft",

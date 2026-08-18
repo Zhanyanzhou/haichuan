@@ -1,8 +1,9 @@
 /**
  * schema/registry.ts — 模块编辑区 Schema 注册表(全量)。
  *
- * 23 个内容模板 + 2 个系统区块全部 Schema 化:InspectorPanel 命中本表即渲染
- * SchemaInspectorPanel;index.tsx 的 Puck.Fields fallback 已不可达,待清理。
+ * 全部 25 个组件(23 内容模板 + 2 系统区块)Schema 化;InspectorPanel 命中本表
+ * 即渲染 SchemaInspectorPanel。旧专属面板(R4b)与 Puck.Fields fallback(P1-2,
+ * 2026-08-18)均已物理删除,git 历史可查。
  */
 import type { ModuleInspectorSchema } from "./types";
 import { BLOCK_META } from "../../config/blockMeta";

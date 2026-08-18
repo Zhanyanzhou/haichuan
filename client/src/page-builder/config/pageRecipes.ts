@@ -10,6 +10,7 @@
  * 构图评审(P0-R)后如需调整某页节奏,只改本表。
  */
 import type { EditorPageKey } from "./editorPages";
+import { BLOCK_META } from "./blockMeta";
 
 export type RecipeNecessity = "required" | "recommended" | "optional";
 
@@ -101,3 +102,19 @@ export const RECIPE_NECESSITY_LABEL: Record<RecipeNecessity, string> = {
   recommended: "推荐",
   optional: "可选",
 };
+
+/* 开发期防漂移断言:配方引用的 moduleType 必须存在于 BLOCK_META,
+ * 否则模板库推荐序列会被静默过滤缺项、图层栏提示永远判定"缺章节"。 */
+if (import.meta.env.DEV) {
+  const knownTypes = new Set(Object.keys(BLOCK_META));
+  const drift = Object.values(PAGE_RECIPES).flatMap((recipe) =>
+    recipe.sections
+      .filter((section) => !knownTypes.has(section.moduleType))
+      .map((section) => section.moduleType),
+  );
+  if (drift.length > 0) {
+    throw new Error(
+      `[pageRecipes] 引用了 BLOCK_META 不存在的模块类型: ${[...new Set(drift)].join("、")}`,
+    );
+  }
+}

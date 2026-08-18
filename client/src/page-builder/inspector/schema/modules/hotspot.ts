@@ -65,7 +65,7 @@ export const hotspotSchema: ModuleInspectorSchema = {
       id: "hotspot-content",
       title: "模板专属功能",
       layer: "feature",
-      description: "热区在画布上可直接拖拽定位；此处可精确核对数值",
+      description: "在面板输入百分比坐标定位热区;画布中可点选热区核对位置(画布拖拽回写为后续功能)",
       fields: [
         {
           key: "hotspots",
@@ -73,6 +73,8 @@ export const hotspotSchema: ModuleInspectorSchema = {
           control: "array",
           itemLabel: "热区",
           maxItems: HOTSPOT_CONTRACT.content.maxHotspots,
+          // 默认居中热区:空对象条目会被画布 width>0 过滤不可见且摘要显示 undefined%
+          defaultItem: { label: "", targetType: "none", x: 50, y: 50, width: 20, height: 12 },
           itemSummary: (item) =>
             typeof item.label === "string" && item.label.trim()
               ? item.label
@@ -85,6 +87,7 @@ export const hotspotSchema: ModuleInspectorSchema = {
           control: "array",
           itemLabel: "热区",
           maxItems: HOTSPOT_CONTRACT.content.maxHotspots,
+          defaultItem: { label: "", targetType: "none", x: 50, y: 50, width: 30, height: 10 },
           itemSummary: (item) =>
             typeof item.label === "string" && item.label.trim()
               ? item.label

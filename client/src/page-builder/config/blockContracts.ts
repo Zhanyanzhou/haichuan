@@ -9,6 +9,7 @@ import {
   normalizeLinkTargetType,
   resolveItemLinkUrl,
   resolveLinkTargetUrl,
+  resolvePrefixedLinkTarget,
   type LinkTargetValue,
 } from "../utils/linkTarget";
 import { CONTENT_TEMPLATE_CONTRACTS } from "../generated/contentTemplates.generated";
@@ -590,12 +591,8 @@ export function evaluateFeaturedProductContract(
   if (!hasText(props.primaryText)) errors.push("请填写商品详情入口文字");
   if (!hasText(props.summary))
     warnings.push("建议补充作品材质、工艺或设计卖点");
-  const secondaryUrl =
-    resolveLinkTargetUrl({
-      targetType: props.secondaryTargetType,
-      productId: props.secondaryProductId,
-      linkUrl: props.secondaryLinkUrl,
-    }) || (isSafeInternalPath(props.secondaryLink) ? props.secondaryLink : "");
+  // 次行动三件套:有三件套痕迹即不回退旧裸 secondaryLink(防切回不跳转后复活)
+  const secondaryUrl = resolvePrefixedLinkTarget(props as Record<string, any>, "secondary", "secondaryLink");
   if (hasText(props.secondaryText) && !secondaryUrl) {
     errors.push("次要行动已显示，请选择站内页面");
   }

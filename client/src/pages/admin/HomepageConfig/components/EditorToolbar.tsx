@@ -205,8 +205,14 @@ export default function EditorToolbar({
           message.error("导入失败：文件中未找到有效的页面内容（content）");
           return;
         }
-        // 未知模块类型直接拒绝,避免画布出现未注册坏块
-        const knownTypes = new Set(Object.keys(BLOCK_META));
+        // 未知模块类型直接拒绝,避免画布出现未注册坏块。
+        // 系统区块(业务功能区由动态页 ensureEditorPageStructure 固定附加,
+        // 网站全局设置随画布结构)不在 BLOCK_META,但导出 JSON 含它们,须一并放行
+        const knownTypes = new Set([
+          ...Object.keys(BLOCK_META),
+          "网站全局设置",
+          "业务功能区",
+        ]);
         const unknownTypes = [
           ...new Set(
             puck.content

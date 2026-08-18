@@ -47,6 +47,10 @@ export default function VideoField({
   }, [value]);
 
   const handleUpload = async (file: File) => {
+    if (file.type && !file.type.startsWith("video/")) {
+      message.error("仅支持视频文件");
+      return;
+    }
     if (file.size > MAX_VIDEO_MB * 1024 * 1024) {
       message.error(`视频不能超过 ${MAX_VIDEO_MB}MB`);
       return;
@@ -60,9 +64,18 @@ export default function VideoField({
         message.success("视频上传成功");
         setReplaceOpen(false);
         setUrlMode(false);
+      } else {
+        message.error("上传返回缺少视频地址，请重试");
       }
     } catch (error) {
-      message.error("视频上传失败，请重试");
+      // 透传服务端具体原因(如"不支持的文件类型"),与编辑器错误提取一致
+      const responseMessage = (error as { response?: { data?: { message?: unknown } } })
+        ?.response?.data?.message;
+      message.error(
+        typeof responseMessage === "string" && responseMessage.trim()
+          ? responseMessage
+          : "视频上传失败，请重试",
+      );
     } finally {
       setUploading(false);
     }

@@ -2,8 +2,10 @@
  * specCheck.ts — 图片规格检查的单一来源(2026-08-18 P1-5)。
  *
  * 尺寸探测 hook 与比例容差此前散落三处(MediaPickerField/MediaField/ImageStatus),
- * 各自 8% / 8% / 8%/24% 不一;统一为同源常量与同一探测实现,
- * 同一张图在同一 URL 下只探测一次(由各组件自身缓存,勿重复挂载)。
+ * 各自 8% / 8% / 8%/24% 不一;统一为同源常量与同一探测实现。
+ * 注:MediaField 与其内部 MediaPickerField 仍各自挂载一个探测 hook
+ * (同 URL 双探测由浏览器 HTTP 缓存缓解);后续若要真正单次探测,
+ * 需提升为共享 context,此处先收敛容差与实现。
  */
 import { useEffect, useState } from "react";
 import type { MediaSpec } from "./MediaPickerField";

@@ -6,7 +6,7 @@ import {
   CATEGORY_CARDS_CONTRACT,
   evaluateCategoryCardsContract,
 } from "../../../config/blockContracts";
-import { IMAGE_SPECS, ratioLabelOf } from "../../../config/imageSpecs";
+import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { categoryCardsPuckConfig } from "../../../adapters/categoryCards.puck";
 import { puckConfig } from "../../../config/puckConfig";
 import { bgColorPresetField, moduleNameField } from "../shared";
@@ -27,11 +27,9 @@ export function makeCategoryCardsSchema(
     puckConfig.components[variant.moduleType]?.defaultProps ??
     categoryCardsPuckConfig.defaultProps;
   // 分类卡片与按场景选购同用本 schema,素材比例按契约分形态派生(1:1 / 4:5)
-  const isScene = variant.moduleType === "按场景选购";
-  const entrySpec = isScene
+  const entrySpec = variant.moduleType === "按场景选购"
     ? IMAGE_SPECS.sceneShopping.image
     : IMAGE_SPECS.categoryCards.image;
-  const entryRatioLabel = ratioLabelOf(entrySpec);
   return {
     moduleType: variant.moduleType,
     displayName: variant.displayName,
@@ -80,7 +78,8 @@ export function makeCategoryCardsSchema(
             defaultItem: {
               name: "新入口",
               image: "",
-              link: "/products",
+              // 不预置裸 link:面板显示"不跳转"而裸 link 兜底会实际跳转,两者矛盾
+              targetType: "none",
               count: "",
               description: "",
               altText: "",
@@ -105,7 +104,7 @@ export function makeCategoryCardsSchema(
                 control: "media",
                 spec: entrySpec,
                 required: true,
-                placeholder: `上传入口图（${entryRatioLabel}）`,
+                placeholder: "上传入口图",
                 showSpecCheck: true,
               },
               {

@@ -45,3 +45,26 @@ export function resolveItemLinkUrl(
   }
   return isSafeInternalPath(item.link) ? item.link : "";
 }
+
+/**
+ * 前缀三件套解析(如 secondary*):与条目级同构的防复活语义——
+ * 有三件套痕迹(用户在新面板操作过)完全信任,仅旧数据(无三件套)回退裸字段。
+ */
+export function resolvePrefixedLinkTarget(
+  props: Record<string, any>,
+  prefix: string,
+  legacyKey?: string,
+): string {
+  const targetType = props[`${prefix}TargetType`];
+  const productId = props[`${prefix}ProductId`];
+  if (targetType != null || productId != null) {
+    return resolveLinkTargetUrl({
+      targetType,
+      productId,
+      linkUrl: props[`${prefix}LinkUrl`],
+    });
+  }
+  return legacyKey && isSafeInternalPath(props[legacyKey])
+    ? props[legacyKey]
+    : "";
+}

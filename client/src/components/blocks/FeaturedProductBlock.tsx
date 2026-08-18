@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { FEATURED_PRODUCT_CONTRACT } from "@/page-builder/config/blockContracts";
-import { isSafeInternalPath, resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
+import { resolvePrefixedLinkTarget, isSafeInternalPath } from "@/page-builder/utils/linkTarget";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 
@@ -22,13 +22,9 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
   const showPrice = content.showPrice === true;
   const bgColor = styleConfig.bgColor || "#F5F2ED";
   const productLink = isSafeInternalPath(product.link) ? product.link : "";
-  // 次行动三件套(secondary 前缀)优先,旧草稿裸 secondaryLink 字段兜底
-  const secondaryUrl =
-    resolveLinkTargetUrl({
-      targetType: content.secondaryTargetType,
-      productId: content.secondaryProductId,
-      linkUrl: content.secondaryLinkUrl,
-    }) || (isSafeInternalPath(content.secondaryLink) ? content.secondaryLink : "");
+  // 次行动三件套(secondary 前缀):有三件套痕迹即不回退旧裸 secondaryLink,
+  // 防"切回不跳转"后残留旧字段让链接复活(与条目级 resolveItemLinkUrl 同构)
+  const secondaryUrl = resolvePrefixedLinkTarget(content, "secondary", "secondaryLink");
   const imageRight = layoutConfig.template === "imageRight";
 
   if (!product.name) {

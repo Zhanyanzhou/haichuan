@@ -62,7 +62,7 @@ export const customProcessSchema: ModuleInspectorSchema = {
               label: "节点图（可选）",
               control: "media",
               spec: IMAGE_SPECS.customProcess.node,
-              placeholder: "上传节点图（可选）",
+              placeholder: "上传节点图，可选",
             },
           ],
         },
