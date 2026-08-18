@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>海川 · 前三屏串联（首屏 + 宣言 + 单图文）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Noto+Serif+SC:wght@400;500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:#FFF; --gray:#F5F5F5; --ink:#1A1A1A; --text:#383838; --muted:#9B9B9B; --line:#E5E5E5;
+    --studio:#F2F2F2;
+    --serif:'Cormorant Garamond','Noto Serif SC',Georgia,serif;
+    --sans:'Inter',system-ui,sans-serif;
+    --kicker: clamp(11px,0.65vw,17px);
+    --h1: clamp(40px,3.2vw,96px);
+    --h2: clamp(28px,1.9vw,54px);
+    --body: clamp(13px,0.8vw,22px);
+    --cta: clamp(11px,0.68vw,18px);
+    --px: clamp(24px,4vw,120px);
+    --vpad: clamp(72px,8vw,190px);
+  }
+  body { background:#111; font-family:var(--sans); }
+  .pg { background:var(--bg); }
+
+  .kicker { font-size:var(--kicker); letter-spacing:.24em; text-transform:uppercase; color:var(--muted); }
+  .title { font-family:var(--serif); font-weight:400; line-height:1.3; letter-spacing:-0.2px; color:var(--ink); }
+  .body { font-size:var(--body); line-height:2.0; color:var(--text); }
+  .cta { display:inline-block; font-size:var(--cta); letter-spacing:.16em; text-transform:uppercase; color:var(--ink);
+    padding-bottom:.6em; border-bottom:1px solid var(--ink); text-decoration:none; }
+  .hair { width:32px; height:1px; background:var(--ink); }
+  .ctr { text-align:center; }
+
+  .ph { position:relative; background:var(--studio);
+    background-image:radial-gradient(ellipse 62% 52% at 50% 44%,rgba(255,255,255,.55),transparent 70%); }
+  .ph .spec { position:absolute; right:clamp(10px,1vw,24px); bottom:clamp(8px,.8vw,20px);
+    font-size:clamp(9px,.55vw,14px); letter-spacing:.2em; color:#ADADAD; text-transform:uppercase; }
+
+  .nav { display:flex; align-items:center; justify-content:space-between;
+    padding:clamp(18px,1.8vw,40px) var(--px); background:var(--bg); }
+  .nav .logo { font-family:var(--serif); font-size:clamp(17px,1.15vw,30px); letter-spacing:.34em; color:var(--ink); text-decoration:none; }
+  .nav .menu { display:flex; gap:clamp(24px,2.4vw,64px); }
+  .nav .menu a { font-size:var(--kicker); letter-spacing:.18em; text-transform:uppercase; color:var(--text); text-decoration:none; }
+  .nav .menu a.on { color:var(--ink); border-bottom:1px solid var(--ink); padding-bottom:4px; }
+  .nav .book { font-size:var(--cta); letter-spacing:.16em; text-transform:uppercase; color:var(--ink);
+    text-decoration:none; padding-bottom:6px; border-bottom:1px solid var(--ink); }
+
+  /* ① 首屏 hero（已确认：21:9 全宽 + 居中束） */
+  .hero { position:relative; }
+  .hero .ph { aspect-ratio:21/9; min-height:clamp(560px,82vh,1500px); }
+  .hero .copy { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; z-index:2; }
+  .hero .copy .title { font-size:var(--h1); margin-top:clamp(14px,1.6vw,40px); }
+  .hero .copy .body { color:#4A4A4A; margin-top:clamp(10px,1vw,26px); }
+  .hero .copy .cta { margin-top:clamp(24px,2.6vw,64px); }
+  .hero .scroll { position:absolute; bottom:clamp(16px,1.6vw,36px); left:50%; transform:translateX(-50%);
+    font-size:var(--kicker); letter-spacing:.3em; color:var(--muted); text-transform:uppercase; }
+
+  /* ② 宣言 textBanner（已确认：居中 + 双细线） */
+  .manifesto { padding:calc(var(--vpad)*1.35) var(--px); text-align:center; }
+  .manifesto .title { font-size:var(--h2); margin-top:clamp(18px,2vw,48px); }
+  .manifesto .hair.b { margin:clamp(28px,3vw,72px) auto 0; }
+
+  /* ③ 单图文 singlePoster（已确认：画廊海报式 P1） */
+  .poster { padding:var(--vpad) var(--px); max-width:1800px; margin-inline:auto; }
+  .poster .inner { position:relative; padding-left:clamp(0px,6vw,180px); }
+  .poster .ph { aspect-ratio:4/5; width:min(78%,100%); margin-left:auto; }
+  .poster .sign { position:absolute; left:0; bottom:clamp(24px,3vw,72px); max-width:clamp(160px,16vw,320px); }
+  .poster .sign .title { font-size:clamp(26px,1.9vw,52px); margin-top:14px; }
+  .poster .sign .info { font-family:var(--serif); font-style:italic; font-weight:300;
+    font-size:clamp(12px,0.8vw,20px); color:var(--muted); margin-top:14px; line-height:1.7; }
+  .poster .sign .cta { margin-top:clamp(20px,2vw,48px); }
+
+  .foot { display:flex; justify-content:space-between; padding:clamp(28px,2.6vw,64px) var(--px); border-top:1px solid var(--line); }
+  .foot span { font-size:var(--kicker); letter-spacing:.18em; color:var(--muted); text-transform:uppercase; }
+</style>
+</head>
+<body>
+
+<div class="lbl" style="max-width:1800px;margin:48px auto 16px;padding:0 var(--px);display:flex;gap:16px;align-items:baseline;font-family:var(--sans);">
+  <span style="font-family:var(--serif);font-weight:300;font-size:26px;color:#FFF;">前三屏串联</span>
+  <span style="font-size:10px;letter-spacing:.2em;color:#D8B86D;text-transform:uppercase;">① 首屏 → ② 宣言 → ③ 单图文（画廊海报式）· 占位状态</span>
+</div>
+
+<div class="pg">
+
+  <nav class="nav">
+    <a class="logo" href="#">HAICHUAN</a>
+    <div class="menu"><a href="#" class="on">Home</a><a href="#">High Jewelry</a><a href="#">Collections</a><a href="#">The Atelier</a></div>
+    <a class="book" href="#">Appointment</a>
+  </nav>
+
+  <!-- ① 首屏 -->
+  <section class="hero">
+    <div class="ph"><span class="spec">① hero · 21:9 全宽 · 亮调 · 中央留亮承字</span></div>
+    <div class="copy">
+      <div class="kicker">Haichuan High Jewelry — Est. 1996</div>
+      <h1 class="title">缄默的诗</h1>
+      <p class="body">以金与光，写一首安静的诗。</p>
+      <a class="cta" href="#">Discover the Collection</a>
+    </div>
+    <span class="scroll">Scroll</span>
+  </section>
+
+  <!-- ② 宣言 -->
+  <section class="manifesto">
+    <div class="hair" style="margin:0 auto;"></div>
+    <div class="kicker" style="margin-top:clamp(24px,2.4vw,58px);">Manifesto</div>
+    <h2 class="title">珠宝不必喧哗，<br>时间自会说话。</h2>
+    <div class="hair b"></div>
+  </section>
+
+  <!-- ③ 单图文 · 画廊海报式 -->
+  <section class="poster">
+    <div class="inner">
+      <div class="ph"><span class="spec">③ singlePoster · 4:5 佩戴氛围图 · 亮调</span></div>
+      <div class="sign">
+        <div class="kicker">N°01</div>
+        <h2 class="title">初雪系列</h2>
+        <p class="info">First Snow<br>九件作品 · 2026 冬</p>
+        <a class="cta" href="#">Discover</a>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <div style="max-width:1800px;margin-inline:auto;display:flex;justify-content:space-between;width:100%;">
+      <span>© 2026 Haichuan High Jewelry</span>
+      <span>沪 ICP 备 XXXXXXXX 号</span>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

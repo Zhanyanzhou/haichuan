@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>首屏 hero · 实施稿效果图</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Noto+Serif+SC:wght@400;500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --ink:#1A1A1A; --text:#383838; --muted:#9B9B9B; --studio:#F2F2F2; --line:#E5E5E5;
+    --serif:'Cormorant Garamond','Noto Serif SC',Georgia,serif;
+    --sans:'Inter',system-ui,sans-serif;
+    --kicker: clamp(11px,0.65vw,17px);
+    --h1: clamp(40px,3.2vw,96px);
+    --body: clamp(13px,0.8vw,22px);
+    --cta: clamp(11px,0.68vw,18px);
+    --px: clamp(24px,4vw,120px);
+  }
+  body { background:#141210; font-family:var(--sans); }
+  .lbl { max-width:1800px; margin:56px auto 16px; padding:0 var(--px); display:flex; gap:14px; align-items:baseline; }
+  .lbl .t { font-family:var(--serif); font-weight:300; font-size:26px; color:#FFF; }
+  .lbl .d { font-size:10px; letter-spacing:.2em; color:#D8B86D; text-transform:uppercase; }
+
+  .kicker { font-size:var(--kicker); letter-spacing:.24em; text-transform:uppercase; color:#5A5A5A; }
+  .title { font-family:var(--serif); font-weight:400; font-size:var(--h1); line-height:1.25; letter-spacing:-0.2px; color:var(--ink); }
+  .body { font-size:var(--body); line-height:2.0; color:var(--text); }
+  .cta { display:inline-block; font-size:var(--cta); letter-spacing:.16em; text-transform:uppercase; color:var(--ink);
+    padding-bottom:.6em; border-bottom:1px solid var(--ink); text-decoration:none; }
+
+  .ph { position:relative; background:var(--studio);
+    background-image:radial-gradient(ellipse 58% 48% at 50% 42%,rgba(255,255,255,.65),rgba(255,255,255,0) 72%); }
+  .ph .spec { position:absolute; right:clamp(10px,1vw,24px); bottom:clamp(8px,.8vw,20px);
+    font-size:clamp(9px,.55vw,14px); letter-spacing:.2em; color:#ADADAD; text-transform:uppercase; }
+
+  .nav { display:flex; align-items:center; justify-content:space-between; padding:clamp(18px,1.8vw,40px) var(--px); background:#FFF; }
+  .nav .logo { font-family:var(--serif); font-size:clamp(17px,1.15vw,30px); letter-spacing:.34em; color:var(--ink); text-decoration:none; }
+  .nav .menu { display:flex; gap:clamp(24px,2.4vw,64px); }
+  .nav .menu a { font-size:var(--kicker); letter-spacing:.18em; text-transform:uppercase; color:var(--text); text-decoration:none; }
+  .nav .menu a.on { color:var(--ink); border-bottom:1px solid var(--ink); padding-bottom:4px; }
+  .nav .book { font-size:var(--cta); letter-spacing:.16em; text-transform:uppercase; color:var(--ink);
+    text-decoration:none; padding-bottom:6px; border-bottom:1px solid var(--ink); }
+
+  /* V1 居中（默认档） */
+  .v1 { position:relative; }
+  .v1 .ph { aspect-ratio:21/9; min-height:clamp(560px,82vh,1500px); }
+  .v1 .copy { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; z-index:2; }
+  .v1 .copy .title { margin-top:clamp(14px,1.6vw,40px); }
+  .v1 .copy .body { margin-top:clamp(10px,1vw,26px); }
+  .v1 .copy .cta { margin-top:clamp(24px,2.6vw,64px); }
+  .v1 .scroll { position:absolute; bottom:clamp(16px,1.6vw,36px); left:50%; transform:translateX(-50%);
+    font-size:var(--kicker); letter-spacing:.3em; color:var(--muted); text-transform:uppercase; }
+
+  /* V2 左下（受控备选档） */
+  .v2 { position:relative; }
+  .v2 .ph { aspect-ratio:21/9; min-height:clamp(560px,82vh,1500px); }
+  .v2 .copy { position:absolute; left:var(--px); bottom:clamp(40px,5vw,110px); z-index:2; max-width:min(560px,44%); }
+  .v2 .copy .title { margin-top:clamp(12px,1.4vw,34px); }
+  .v2 .copy .cta { margin-top:clamp(20px,2.2vw,54px); }
+
+  /* 移动 390 */
+  .m { width:390px; margin:0 auto; background:#FFF; }
+  .m .hero { position:relative; }
+  .m .ph { aspect-ratio:4/5; }
+  .m .copy { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; z-index:2; padding:0 28px; }
+  .m .copy .title { font-size:44px; margin-top:16px; }
+  .m .copy .body { font-size:13px; margin-top:12px; }
+  .m .copy .cta { font-size:11px; margin-top:26px; }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="logo" href="#">HAICHUAN</a>
+  <div class="menu"><a href="#" class="on">Home</a><a href="#">High Jewelry</a><a href="#">Collections</a><a href="#">The Atelier</a></div>
+  <a class="book" href="#">Appointment</a>
+</nav>
+
+<div class="lbl"><span class="t">V1 · 居中束（默认档）</span><span class="d">Center · 21:9 · 全宽出血</span></div>
+<section class="v1">
+  <div class="ph"><span class="spec">21:9 · 亮调摄影 · 中央留亮承字</span></div>
+  <div class="copy">
+    <div class="kicker">Haichuan High Jewelry — Est. 1996</div>
+    <h1 class="title">缄默的诗</h1>
+    <p class="body">以金与光，写一首安静的诗。</p>
+    <a class="cta" href="#">Discover the Collection</a>
+  </div>
+  <span class="scroll">Scroll</span>
+</section>
+
+<div class="lbl"><span class="t">V2 · 左下束（受控备选档）</span><span class="d">Left-Bottom · 同一模板的可选对齐</span></div>
+<section class="v2">
+  <div class="ph"><span class="spec">21:9 · 亮调摄影 · 左下留亮承字</span></div>
+  <div class="copy">
+    <div class="kicker">Haichuan High Jewelry — Est. 1996</div>
+    <h1 class="title">缄默的诗</h1>
+    <a class="cta" href="#">Discover</a>
+  </div>
+</section>
+
+<div class="lbl"><span class="t">移动端 · 390</span><span class="d">4:5 全屏 · 叠字保持同构（不分离）</span></div>
+<section class="m">
+  <div class="hero">
+    <div class="ph"><span class="spec">4:5</span></div>
+    <div class="copy">
+      <div class="kicker">Est. 1996</div>
+      <h1 class="title">缄默的诗</h1>
+      <p class="body">以金与光，写一首安静的诗。</p>
+      <a class="cta" href="#">Discover</a>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

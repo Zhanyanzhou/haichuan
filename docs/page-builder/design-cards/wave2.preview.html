@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>海川 · 第二波：新变体 + 完整首页编排</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Noto+Serif+SC:wght@400;500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:#FFF; --ink:#1A1A1A; --text:#383838; --muted:#9B9B9B; --line:#E5E5E5;
+    --studio:#F2F2F2; --gray:#F5F5F5;
+    --serif:'Cormorant Garamond','Noto Serif SC',Georgia,serif;
+    --sans:'Inter',system-ui,sans-serif;
+  }
+  body { background:#141210; font-family:var(--sans); }
+  .lbl { max-width:1520px; margin:56px auto 16px; padding:0 72px; display:flex; gap:14px; align-items:baseline; }
+  .lbl .no { font-family:var(--serif); font-weight:300; font-size:26px; color:#FFF; }
+  .lbl .nm { font-size:13px; color:#FFF; }
+  .lbl .v { font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:#D8B86D; }
+  .lbl .rl { font-size:10px; letter-spacing:.18em; color:rgba(255,255,255,.35); text-transform:uppercase; }
+  .lbl.big { margin-top:88px; border-top:1px solid rgba(255,255,255,.15); padding-top:36px; }
+  .lbl.big .no { font-size:38px; }
+
+  .sec { max-width:1520px; margin:0 auto; background:var(--bg); padding:88px 72px; }
+  .sec.gray { background:var(--gray); }
+  .g { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:24px; }
+  .kicker { font-size:11px; letter-spacing:.22em; text-transform:uppercase; color:var(--muted); }
+  .title { font-family:var(--serif); font-weight:400; font-size:32px; line-height:1.4; letter-spacing:-.2px; color:var(--ink); }
+  .title.sm { font-size:24px; } .title.xl { font-size:44px; }
+  .body { font-size:14px; line-height:2.0; color:var(--text); }
+  .cta { display:inline-block; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink); padding-bottom:7px; border-bottom:1px solid var(--ink); text-decoration:none; }
+  .ctr { text-align:center; } .ctr .cta { margin-top:36px; }
+  .r216{aspect-ratio:21/6}.r219{aspect-ratio:21/9}.r169{aspect-ratio:16/9}.r32{aspect-ratio:3/2}
+  .r45{aspect-ratio:4/5}.r11{aspect-ratio:1/1}.r34{aspect-ratio:3/4}.r43{aspect-ratio:4/3}
+  .ph { position:relative; background:var(--studio);
+    background-image:radial-gradient(ellipse 62% 52% at 50% 44%,rgba(255,255,255,.5),transparent 70%); }
+  .ph .spec { position:absolute; right:14px; bottom:11px; font-size:9px; letter-spacing:.2em; color:#ADADAD; text-transform:uppercase; }
+  .ovl { position:relative; }
+  .ovl .copy { position:absolute; left:72px; bottom:64px; z-index:2; max-width:520px; }
+  .ovl .copy.c { left:0; right:0; text-align:center; }
+  .ovl .copy .kicker { color:var(--muted); }
+  .ovl .copy .title { margin-top:16px; }
+  .ovl .copy .cta { margin-top:30px; }
+  .card .nm2 { font-size:13px; color:var(--ink); margin-top:14px; letter-spacing:.04em; }
+  .card .mt2 { font-size:11px; color:var(--muted); margin-top:5px; }
+  .ec { position:relative; }
+  .ec .cap { position:absolute; left:0; right:0; bottom:0; padding:18px; background:linear-gradient(to top,rgba(0,0,0,.32),transparent); }
+  .ec .t { color:#FFF; font-size:13px; letter-spacing:.08em; }
+  .ec .e { color:rgba(255,255,255,.7); font-size:10px; letter-spacing:.16em; text-transform:uppercase; margin-top:4px; }
+  .pgap { height:0; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════ Part 1 · 核心模板新变体 ═══════════ -->
+
+<div class="lbl"><span class="no">01</span><span class="nm">首屏</span><span class="v">V4 画廊挂画式 · 白墙 + 中央主图 + 左上展签</span></div>
+<section class="sec" style="padding:130px 72px 150px;">
+<div class="kicker">Haichuan High Jewelry — Est. 1996</div>
+<div class="g" style="margin-top:48px;align-items:end;">
+<div class="ph r45" style="grid-column:3/span 8;"><span class="spec">4:5 · 主影像居中</span></div>
+<div style="grid-column:3/span 8;display:flex;justify-content:space-between;align-items:baseline;padding-top:28px;">
+<div><h1 class="title">缄默的诗</h1><p class="body" style="margin-top:10px;">以金与光，写一首安静的诗。</p></div>
+<a class="cta" href="#">Discover</a></div></div></section>
+
+<div class="lbl"><span class="no">01</span><span class="nm">首屏</span><span class="v">V5 展墙式 · 左展签列 + 大图右挂</span></div>
+<section class="sec" style="padding:120px 72px;">
+<div class="g" style="align-items:start;">
+<div style="grid-column:1/span 3;padding-top:56px;">
+<div class="kicker">Haichuan<br>High Jewelry</div>
+<h1 class="title" style="font-size:38px;margin-top:28px;">缄默<br>的诗</h1>
+<p class="body" style="margin-top:24px;">以金与光，写一首安静的诗。</p>
+<a class="cta" href="#" style="margin-top:36px;">Discover</a></div>
+<div class="ph r45" style="grid-column:5/span 8;"><span class="spec">4:5 · 通高主影像</span></div></div></section>
+
+<div class="lbl"><span class="no">05</span><span class="nm">单图文</span><span class="v">V4 底对齐 · 文字落在基线</span></div>
+<section class="sec"><div class="g" style="align-items:end;">
+<div class="ph r45" style="grid-column:1/span 7;"><span class="spec">4:5</span></div>
+<div style="grid-column:9/span 4;padding-bottom:8%;">
+<div class="kicker">N°01 — Collection</div><h2 class="title" style="margin-top:18px;">初雪系列</h2>
+<p class="body" style="margin-top:16px;">落雪成形的一刻，被留在金属里。</p>
+<a class="cta" href="#" style="margin-top:36px;">Discover</a></div></div></section>
+
+<div class="lbl"><span class="no">06</span><span class="nm">双图文</span><span class="v">V4 双图并置 · 文字叠左图</span></div>
+<section class="sec"><div class="g">
+<div class="ph r45 ovl" style="grid-column:1/span 6;">
+<div class="copy" style="left:40px;bottom:48px;"><div class="kicker">N°02 — The Craft</div>
+<h2 class="title" style="font-size:28px;margin-top:14px;">一件作品的<br>两次诞生</h2>
+<a class="cta" href="#">Discover</a></div>
+<span class="spec">4:5 · 主（亮调承字）</span></div>
+<div class="ph r45" style="grid-column:7/span 6;"><span class="spec">4:5 · 细节</span></div></div></section>
+
+<div class="lbl"><span class="no">12</span><span class="nm">作品画廊</span><span class="v">V4 横向错位带 · 大缝四列</span></div>
+<section class="sec"><div class="g" style="gap:56px 40px;">
+<div class="ph r45" style="grid-column:1/span 3;"><span class="spec">4:5</span></div>
+<div class="ph r45" style="grid-column:4/span 3;margin-top:12%;"><span class="spec">4:5</span></div>
+<div class="ph r45" style="grid-column:7/span 3;margin-top:3%;"><span class="spec">4:5</span></div>
+<div class="ph r45" style="grid-column:10/span 3;margin-top:15%;"><span class="spec">4:5</span></div></div></section>
+
+<div class="lbl"><span class="no">13</span><span class="nm">佩戴展示</span><span class="v">V4 方图大画 + 右列关联</span></div>
+<section class="sec"><div class="g">
+<div class="ph r11" style="grid-column:1/span 7;"><span class="spec">1:1 · 佩戴</span></div>
+<div style="grid-column:9/span 4;align-self:center;">
+<div class="kicker">Editorial</div><h2 class="title sm" style="margin-top:14px;">工作中的月光</h2>
+<p class="body" style="margin-top:14px;">耳坠与戒指来自初雪系列。</p>
+<div class="g" style="margin-top:32px;gap:20px;">
+<div class="card"><div class="ph r11"></div><div class="nm2" style="margin-top:10px;">月影耳坠</div></div>
+<div class="card"><div class="ph r11"></div><div class="nm2" style="margin-top:10px;">初雪戒指</div></div></div>
+<a class="cta" href="#" style="margin-top:32px;">Shop the Look</a></div></div></section>
+
+<!-- ═══════════ Part 2 · 完整首页编排 · 版本一「画册页」 ═══════════ -->
+
+<div class="lbl big"><span class="no">首页编排 A</span><span class="nm">「画册页」— 居中仪式 · 对称呼吸</span><span class="rl">9 屏 · 已认可变体串联</span></div>
+
+<section class="sec" style="padding:0;"><div class="ovl"><div class="ph r219"><span class="spec">01 首屏 · 亮调叠字</span></div>
+<div class="copy c"><div class="kicker">Haichuan High Jewelry</div><h1 class="title xl">缄默的诗</h1>
+<p class="body" style="margin-top:12px;">以金与光，写一首安静的诗。</p><a class="cta" href="#">Discover</a></div></div></section>
+
+<section class="sec ctr" style="padding:170px 72px;">
+<div style="width:32px;height:1px;background:var(--ink);margin:0 auto 40px;"></div>
+<div class="kicker">Manifesto</div>
+<h2 class="title" style="font-size:38px;margin-top:24px;">珠宝不必喧哗，<br>时间自会说话。</h2>
+<div style="width:32px;height:1px;background:var(--ink);margin:48px auto 0;"></div></section>
+
+<section class="sec"><div class="g">
+<div style="grid-column:1/span 5;padding-top:6%;"><div class="kicker">N°01 — Collection</div>
+<h2 class="title" style="margin-top:18px;">初雪系列</h2>
+<p class="body" style="margin-top:16px;">落雪成形的一刻，被留在金属里。</p>
+<a class="cta" href="#" style="margin-top:36px;">Discover</a></div>
+<div class="ph r45" style="grid-column:7/span 6;"><span class="spec">05 单图文 V1 · 4:5</span></div></div></section>
+
+<section class="sec gray"><div class="g">
+<div class="ph r45" style="grid-column:1/span 7;"><span class="spec">12 画廊 V1 · 4:5 大</span></div>
+<div style="grid-column:9/span 4;display:grid;gap:24px;">
+<div class="ph r11"><span class="spec">1:1</span></div><div class="ph r11"><span class="spec">1:1</span></div></div></div></section>
+
+<section class="sec ctr"><div class="ph r34" style="width:min(440px,40%);"><span class="spec">10 单品 V1 · 3:4</span></div>
+<div class="kicker" style="margin-top:44px;">N°03 — Signature</div>
+<h2 class="title" style="margin-top:16px;">缄默的诗 · 主石项链</h2>
+<p class="body" style="margin-top:12px;">18K 金 · 缅甸红宝石 · 9.2ct</p>
+<a class="cta" href="#">Reserve a Viewing</a></section>
+
+<section class="sec"><h2 class="title sm">为什么把重要的事交给海川</h2>
+<div class="g" style="margin-top:64px;">
+<div style="border-left:1px solid var(--line);padding-left:32px;"><div style="font-size:13px;color:var(--ink);letter-spacing:.08em;">三十年工坊</div><p class="body" style="font-size:12.5px;margin-top:12px;">1996 年创立，从未离开过这条街。</p></div>
+<div style="border-left:1px solid var(--line);padding-left:32px;"><div style="font-size:13px;color:var(--ink);letter-spacing:.08em;">一物一证</div><p class="body" style="font-size:12.5px;margin-top:12px;">每件作品附独立鉴定证书。</p></div>
+<div style="border-left:1px solid var(--line);padding-left:32px;"><div style="font-size:13px;color:var(--ink);letter-spacing:.08em;">终身保养</div><p class="body" style="font-size:12.5px;margin-top:12px;">免费清洗、检修与翻新。</p></div>
+<div style="border-left:1px solid var(--line);padding-left:32px;"><div style="font-size:13px;color:var(--ink);letter-spacing:.08em;">可溯源</div><p class="body" style="font-size:12.5px;margin-top:12px;">主石来源可查，责任开采。</p></div></div></section>
+
+<section class="sec ctr"><div class="kicker">Voices</div>
+<div style="font-family:var(--serif);font-size:30px;line-height:1.65;letter-spacing:-.2px;color:var(--ink);margin:32px auto 0;max-width:700px;">"她打开盒子的那三秒钟，<br>我知道这三个月的等待是对的。"</div>
+<div style="font-size:12px;color:var(--ink);margin-top:36px;">王先生 · 定制婚戒</div>
+<div style="font-size:11px;color:var(--muted);margin-top:5px;">经授权分享</div></section>
+
+<section class="sec"><div class="g"><div class="ph r32" style="grid-column:1/span 7;"><span class="spec">20 门店 V1 · 3:2</span></div>
+<div style="grid-column:9/span 4;padding-top:4%;"><div class="kicker">The Atelier</div>
+<h2 class="title sm" style="margin-top:14px;">海川 · 外滩工坊</h2>
+<p class="body" style="margin-top:16px;">上海市黄浦区中山东一路 XX 号<br>周二至周日 10:00 – 19:00</p>
+<a class="cta" href="#" style="margin-top:32px;">Plan Your Visit</a></div></div></section>
+
+<section class="sec gray ctr" style="padding:150px 72px;"><div class="kicker">Appointment</div>
+<h2 class="title" style="font-size:36px;margin-top:20px;">来店里，喝杯茶，<br>聊聊那件尚未诞生的作品。</h2>
+<a class="cta" href="#" style="margin-top:44px;">Book an Appointment</a>
+<span style="display:block;font-size:11px;letter-spacing:.18em;color:var(--muted);margin-top:24px;">OR CALL 021-XXXX-XXXX</span></section>
+
+<!-- ═══════════ Part 3 · 完整首页编排 · 版本二「横向画廊」 ═══════════ -->
+
+<div class="lbl big"><span class="no">首页编排 B</span><span class="nm">「横向画廊」— 全程并置 · 非对称流</span><span class="rl">8 屏 · 已认可变体串联</span></div>
+
+<section class="sec" style="padding:110px 72px;"><div class="g" style="align-items:start;">
+<div style="grid-column:1/span 3;padding-top:56px;">
+<div class="kicker">Haichuan<br>High Jewelry</div>
+<h1 class="title" style="font-size:38px;margin-top:28px;">缄默<br>的诗</h1>
+<p class="body" style="margin-top:24px;">以金与光，写一首安静的诗。</p>
+<a class="cta" href="#" style="margin-top:36px;">Discover</a></div>
+<div class="ph r45" style="grid-column:5/span 8;"><span class="spec">01 首屏 V5 · 展墙式</span></div></div></section>
+
+<section class="sec" style="padding:0;"><div class="ph r216"><span class="spec">02 通栏 V1 · 纯图无字 · 章节呼吸</span></div></section>
+
+<section class="sec"><div class="g"><div class="ph r45" style="grid-column:1/span 8;grid-row:1/span 2;"><span class="spec">06 双图文 V2 · 4:5 通高</span></div>
+<div style="grid-column:9/span 4;"><div class="kicker">N°02 — The Craft</div>
+<h2 class="title" style="font-size:28px;margin-top:16px;">一件作品的两次诞生</h2>
+<p class="body" style="margin-top:14px;">先由匠人之手赋形。</p>
+<a class="cta" href="#" style="margin-top:32px;">Discover</a></div>
+<div class="ph r45" style="grid-column:9/span 4;align-self:end;margin-top:56px;"><span class="spec">4:5 · 细节</span></div></div></section>
+
+<section class="sec"><div class="g">
+<div style="grid-column:1/span 4;align-self:center;">
+<div class="kicker">Editorial</div><h2 class="title sm" style="margin-top:14px;">工作中的月光</h2>
+<p class="body" style="margin-top:14px;">耳坠与戒指来自初雪系列。</p>
+<div class="g" style="margin-top:32px;gap:20px;">
+<div class="card"><div class="ph r11"></div><div class="nm2" style="margin-top:10px;">月影耳坠</div></div>
+<div class="card"><div class="ph r11"></div><div class="nm2" style="margin-top:10px;">初雪戒指</div></div></div>
+<a class="cta" href="#" style="margin-top:32px;">Shop the Look</a></div>
+<div class="ph r45" style="grid-column:6/span 7;height:620px;aspect-ratio:auto;"><span class="spec">13 佩戴 V2 · 通高</span></div></div></section>
+
+<section class="sec"><div class="g"><div style="grid-column:1/span 6;"><h2 class="title sm">本月新作</h2></div>
+<div style="grid-column:10/span 3;text-align:right;align-self:end;"><a class="cta" href="#">View All</a></div></div>
+<div class="g" style="margin-top:64px;gap:72px 48px;">
+<div class="card ctr"><div class="ph r11"></div><div class="nm2" style="margin-top:20px;">月影耳坠</div><div class="mt2" style="margin-top:6px;">18K 金 · 珍珠</div></div>
+<div class="card ctr"><div class="ph r11"></div><div class="nm2" style="margin-top:20px;">初雪戒指</div><div class="mt2" style="margin-top:6px;">铂金 · 钻石</div></div>
+<div class="card ctr"><div class="ph r11"></div><div class="nm2" style="margin-top:20px;">长河手链</div><div class="mt2" style="margin-top:6px;">18K 金 · 蓝宝石</div></div></div></section>
+
+<section class="sec">
+<div style="display:flex;align-items:center;gap:28px;padding:26px 0;border-bottom:1px solid var(--line);">
+<div class="ph r11" style="width:88px;"></div>
+<div style="font-family:var(--serif);font-size:19px;color:var(--ink);">高级珠宝</div>
+<div class="kicker" style="letter-spacing:.18em;">High Jewelry</div>
+<div style="margin-left:auto;font-family:var(--serif);font-size:16px;color:var(--muted);">→</div></div>
+<div style="display:flex;align-items:center;gap:28px;padding:26px 0;border-bottom:1px solid var(--line);">
+<div class="ph r11" style="width:88px;"></div>
+<div style="font-family:var(--serif);font-size:19px;color:var(--ink);">婚嫁系列</div>
+<div class="kicker" style="letter-spacing:.18em;">Bridal</div>
+<div style="margin-left:auto;font-family:var(--serif);font-size:16px;color:var(--muted);">→</div></div>
+<div style="display:flex;align-items:center;gap:28px;padding:26px 0;">
+<div class="ph r11" style="width:88px;"></div>
+<div style="font-family:var(--serif);font-size:19px;color:var(--ink);">日常佩戴</div>
+<div class="kicker" style="letter-spacing:.18em;">Everyday</div>
+<div style="margin-left:auto;font-family:var(--serif);font-size:16px;color:var(--muted);">→</div></div></section>
+
+<section class="sec"><h2 class="title sm">证书与鉴定</h2>
+<div class="g" style="margin-top:56px;">
+<div class="ph r34" style="grid-column:1/span 5;"><span class="spec">19 证书 V2 · 主证</span></div>
+<div style="grid-column:7/span 5;align-self:center;">
+<div style="font-family:var(--serif);font-size:20px;">GIA · 缅甸红宝石 9.2ct</div>
+<div class="mt2" style="margin-top:8px;">证书编号 2231-8847 · 可验证</div>
+<div class="g" style="margin-top:40px;gap:20px;">
+<div class="ph r11" style="grid-column:1/span 2;"></div><div class="ph r11" style="grid-column:3/span 2;"></div></div></div></div></section>
+
+<section class="sec"><div class="g">
+<div style="grid-column:1/span 5;align-self:center;padding:40px 0;"><div class="kicker">Appointment</div>
+<h2 class="title" style="font-size:34px;margin-top:18px;">聊聊那件<br>尚未诞生的作品。</h2>
+<a class="cta" href="#" style="margin-top:36px;">Book an Appointment</a></div>
+<div class="ph r43" style="grid-column:7/span 6;height:460px;aspect-ratio:auto;"><span class="spec">22 预约 V3 · 门店影像</span></div></div></section>
+
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>宣言 textBanner · 实施稿效果图</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Noto+Serif+SC:wght@400;500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --ink:#1A1A1A; --text:#383838; --muted:#9B9B9B;
+    --serif:'Cormorant Garamond','Noto Serif SC',Georgia,serif;
+    --sans:'Inter',system-ui,sans-serif;
+    --kicker: clamp(11px,0.65vw,17px);
+    --h2: clamp(28px,1.9vw,54px);
+    --px: clamp(24px,4vw,120px);
+    --vpad: clamp(72px,8vw,190px);
+  }
+  body { background:#141210; font-family:var(--sans); }
+  .lbl { max-width:1800px; margin:56px auto 16px; padding:0 var(--px); display:flex; gap:14px; align-items:baseline; }
+  .lbl .t { font-family:var(--serif); font-weight:300; font-size:26px; color:#FFF; }
+  .lbl .d { font-size:10px; letter-spacing:.2em; color:#D8B86D; text-transform:uppercase; }
+
+  .kicker { font-size:var(--kicker); letter-spacing:.24em; text-transform:uppercase; color:var(--muted); }
+  .title { font-family:var(--serif); font-weight:400; font-size:var(--h2); line-height:1.5; letter-spacing:-0.2px; color:var(--ink); }
+  .hair { width:32px; height:1px; background:var(--ink); }
+
+  /* V1 居中 · 双细线仪式（默认档） */
+  .v1 { background:#FFF; text-align:center; padding:calc(var(--vpad)*1.35) var(--px); }
+  .v1 .hair.b { margin: clamp(28px,3vw,72px) auto 0; }
+  .v1 .title { margin-top: clamp(18px,2vw,48px); }
+
+  /* V2 左对齐（受控备选档） */
+  .v2 { background:#FFF; padding:calc(var(--vpad)*1.35) var(--px); }
+  .v2 .inner { max-width:760px; }
+  .v2 .title { margin-top: clamp(18px,2vw,48px); }
+
+  /* 移动 390 */
+  .m { width:390px; margin:0 auto; background:#FFF; text-align:center; padding:120px 28px; }
+  .m .title { font-size:26px; margin-top:16px; }
+  .m .hair.b { margin:36px auto 0; }
+</style>
+</head>
+<body>
+
+<div class="lbl"><span class="t">V1 · 居中 · 双细线仪式（默认档）</span><span class="d">Center · 留白 ≥70%</span></div>
+<section class="v1">
+  <div class="hair" style="margin:0 auto;"></div>
+  <div class="kicker" style="margin-top:clamp(24px,2.4vw,58px);">Manifesto</div>
+  <h2 class="title">珠宝不必喧哗，<br>时间自会说话。</h2>
+  <div class="hair b"></div>
+</section>
+
+<div class="lbl"><span class="t">V2 · 左对齐（受控备选档）</span><span class="d">Left · 同一双细线语言</span></div>
+<section class="v2">
+  <div class="inner">
+    <div class="hair"></div>
+    <div class="kicker" style="margin-top:clamp(24px,2.4vw,58px);">Manifesto</div>
+    <h2 class="title">珠宝不必喧哗，<br>时间自会说话。</h2>
+    <div class="hair" style="margin-top:clamp(28px,3vw,72px);"></div>
+  </div>
+</section>
+
+<div class="lbl"><span class="t">移动端 · 390</span><span class="d">同构 · 无重排</span></div>
+<section class="m">
+  <div class="hair" style="margin:0 auto;"></div>
+  <div class="kicker" style="margin-top:24px;">Manifesto</div>
+  <h2 class="title">珠宝不必喧哗，<br>时间自会说话。</h2>
+  <div class="hair b"></div>
+</section>
+
+</body>
+</html>

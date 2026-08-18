@@ -51,7 +51,7 @@
 ### 单套渲染层 + 声明式编辑体系(2026-08 重构后)
 
 - **渲染层唯一**:`blocks/` 下 23 个区块组件(含新建 AsymmetricGalleryBlock 作品画廊),`editMode` prop 区分编辑画布与公开页;admin 适配器与公开渲染器(PuckDocumentRenderer)共用同一批组件。
-- **编辑区**:全部 25 个组件(23 内容模板 + 网站全局设置/业务功能区)由 `page-builder/inspector/schema/modules/` 声明式 Schema 驱动(五任务分区:图片素材→文字内容→行动关联→构图→模板专属),registry 全量注册;旧 10 个专属 Inspector(R4b)与 Puck.Fields fallback(P1-2,2026-08-18)均已退役,git 历史可查。
+- **编辑区**:全部 25 个组件(23 内容模板 + 网站全局设置/业务功能区)由 `page-builder/inspector/schema/modules/` 声明式 Schema 驱动(七任务分区:图片素材→文字内容→商品关联→行动关联→构图与设备→颜色与文字→模板专属功能),registry 全量注册;旧 10 个专属 Inspector(R4b)与 Puck.Fields fallback(P1-2,2026-08-18)均已退役,git 历史可查。
 - **设计系统**:`page-builder/designSystem/`(tokens 8 规范比例/4 档宽度/双模式节奏、12 母版 masters、DecorSection 外壳、rhythm 页面节奏引擎)。
 - **旧类型兼容**:分割面板/图文混排/礼赠指南已从注册表移除;编辑器经 `migratePuckData` 自动转换,公开渲染器保留旧类型分支,已发布历史版本永久可渲染。
 

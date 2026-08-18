@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>单图文 singlePoster · 实施稿效果图</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Noto+Serif+SC:wght@400;500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --ink:#1A1A1A; --text:#383838; --muted:#9B9B9B; --studio:#F2F2F2;
+    --serif:'Cormorant Garamond','Noto Serif SC',Georgia,serif;
+    --sans:'Inter',system-ui,sans-serif;
+    --kicker: clamp(11px,0.65vw,17px);
+    --h2: clamp(28px,1.9vw,54px);
+    --body: clamp(13px,0.8vw,22px);
+    --cta: clamp(11px,0.68vw,18px);
+    --px: clamp(24px,4vw,120px);
+    --vpad: clamp(72px,8vw,190px);
+  }
+  body { background:#141210; font-family:var(--sans); }
+  .lbl { max-width:1800px; margin:56px auto 16px; padding:0 var(--px); display:flex; gap:14px; align-items:baseline; }
+  .lbl .t { font-family:var(--serif); font-weight:300; font-size:26px; color:#FFF; }
+  .lbl .d { font-size:10px; letter-spacing:.2em; color:#D8B86D; text-transform:uppercase; }
+
+  .kicker { font-size:var(--kicker); letter-spacing:.24em; text-transform:uppercase; color:var(--muted); }
+  .title { font-family:var(--serif); font-weight:400; font-size:var(--h2); line-height:1.35; letter-spacing:-0.2px; color:var(--ink); }
+  .body { font-size:var(--body); line-height:2.0; color:var(--text); }
+  .cta { display:inline-block; font-size:var(--cta); letter-spacing:.16em; text-transform:uppercase; color:var(--ink);
+    padding-bottom:.6em; border-bottom:1px solid var(--ink); text-decoration:none; }
+
+  .ph { position:relative; background:var(--studio);
+    background-image:radial-gradient(ellipse 62% 52% at 50% 44%,rgba(255,255,255,.55),transparent 70%); }
+  .ph .spec { position:absolute; right:clamp(10px,1vw,24px); bottom:clamp(8px,.8vw,20px);
+    font-size:clamp(9px,.55vw,14px); letter-spacing:.2em; color:#ADADAD; text-transform:uppercase; }
+
+  .sec { background:#FFF; padding:var(--vpad) var(--px); max-width:1800px; margin-inline:auto; }
+  .g { display:grid; grid-template-columns:repeat(12,1fr); gap:clamp(16px,1.6vw,40px); align-items:center; }
+
+  .m { width:390px; margin:0 auto; background:#FFF; padding:0 0 48px; }
+  .m .copy { padding:36px 28px 0; }
+  .m .title { font-size:27px; margin-top:14px; }
+  .m .body { font-size:13.5px; margin-top:14px; }
+  .m .cta { font-size:11px; margin-top:26px; }
+</style>
+</head>
+<body>
+
+<div class="lbl"><span class="t">P1 · 画廊海报式（默认档）</span><span class="d">大幅 4:5 居中 · 左下墙签</span></div>
+<section class="sec">
+  <div style="position:relative; padding-left:clamp(0px,6vw,180px);">
+    <div class="ph" style="aspect-ratio:4/5; width:min(78%,100%); margin-left:auto;"><span class="spec">4:5 · 佩戴氛围图 · 亮调</span></div>
+    <div style="position:absolute; left:0; bottom:clamp(24px,3vw,72px); max-width:clamp(160px,16vw,320px);">
+      <div class="kicker">N°01</div>
+      <h2 class="title" style="font-size:clamp(26px,1.9vw,52px); margin-top:14px;">初雪系列</h2>
+      <p style="font-family:var(--serif); font-style:italic; font-weight:300; font-size:clamp(12px,0.8vw,20px); color:var(--muted); margin-top:14px;">First Snow<br>九件作品 · 2026 冬</p>
+      <a class="cta" href="#" style="margin-top:clamp(20px,2vw,48px);">Discover</a>
+    </div>
+  </div>
+</section>
+
+<div class="lbl"><span class="t">P2 · 边缘签名式</span><span class="d">图右通高出血 · 左墙底对齐签名</span></div>
+<section class="sec" style="padding-right:0;">
+  <div class="g" style="align-items:end;">
+    <div style="grid-column:1/span 3; padding-bottom:clamp(16px,2vw,48px); padding-right:clamp(20px,2.4vw,64px);">
+      <div class="kicker">N°01 — Collection</div>
+      <h2 class="title" style="font-size:clamp(26px,1.9vw,52px); margin-top:14px;">初雪系列</h2>
+      <p style="font-family:var(--serif); font-style:italic; font-weight:300; font-size:clamp(12px,0.8vw,20px); color:var(--muted); margin-top:14px;">First Snow · 2026 冬</p>
+      <a class="cta" href="#" style="margin-top:clamp(20px,2vw,48px);">Discover</a>
+    </div>
+    <div class="ph" style="grid-column:4/span 9; height:clamp(480px,64vh,1200px); aspect-ratio:auto;"><span class="spec">4:5 · 通高出血至右缘</span></div>
+  </div>
+</section>
+
+<div class="lbl"><span class="t">P3 · 图上签名式</span><span class="d">大图中央 · 签名束叠于左下亮部</span></div>
+<section class="sec" style="position:relative;">
+  <div class="ph" style="aspect-ratio:3/2;"><span class="spec">3:2 · 亮调 · 左下留亮承字</span></div>
+  <div style="position:absolute; left:clamp(32px,4vw,110px); bottom:clamp(32px,4vw,110px); max-width:min(420px,40%); z-index:2;">
+    <div class="kicker" style="color:#5A5A5A;">N°01 — Collection</div>
+    <h2 class="title" style="font-size:clamp(28px,2vw,56px); margin-top:12px;">初雪系列</h2>
+    <p style="font-family:var(--serif); font-style:italic; font-weight:300; font-size:clamp(12px,0.8vw,20px); color:#5A5A5A; margin-top:12px;">First Snow · 九件作品 · 2026 冬</p>
+    <a class="cta" href="#" style="margin-top:clamp(18px,1.8vw,44px);">Discover</a>
+  </div>
+</section>
+
+<div class="lbl"><span class="t">移动端 · 390</span><span class="d">叠字同构 · 亮图深字 · 不做上下分离</span></div>
+<section class="m">
+  <div style="position:relative;">
+    <div class="ph" style="aspect-ratio:4/5;"><span class="spec">4:5</span></div>
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;z-index:2;padding:0 28px;">
+      <div class="kicker" style="color:#5A5A5A;">N°01 — Collection</div>
+      <h2 class="title" style="font-size:38px;margin-top:14px;">初雪系列</h2>
+      <a class="cta" href="#" style="font-size:11px;margin-top:24px;">Discover</a>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>
