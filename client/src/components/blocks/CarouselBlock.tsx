@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
+import { resolveItemLinkUrl } from "@/page-builder/utils/linkTarget";
 import {
   getCarouselAspectRatio,
   RESPONSIVE_CANVAS,
@@ -124,7 +125,10 @@ export default function CarouselBlock({
         }
         .homepage-carousel picture { display: block; width: 100%; height: 100%; }
       `}</style>
-      {img.link ? <Link to={img.link}>{imageContent}</Link> : imageContent}
+      {(() => {
+        const itemUrl = resolveItemLinkUrl(img);
+        return itemUrl ? <Link to={itemUrl}>{imageContent}</Link> : imageContent;
+      })()}
       {showArrows && validImages.length > 1 && (
         <>
           <button

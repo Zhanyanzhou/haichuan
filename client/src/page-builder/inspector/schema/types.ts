@@ -107,13 +107,20 @@ export interface MediaFieldDef extends FieldBase {
   inheritFrom?: { key: string; label: string };
 }
 
-/** 链接三件套：一次写入 { targetType, productId?, linkUrl? } */
+/** 链接字段（紧凑一行式）：一次写入 { targetType, productId?, linkUrl? } */
 export interface LinkTargetFieldDef extends FieldBase {
   control: "linkTarget";
   /** 覆盖默认 label（“点击后跳转”） */
   linkLabel?: string;
   /** 覆盖默认说明 */
   linkDescription?: string;
+  /**
+   * 属性键前缀（如 "secondary" → secondaryTargetType/secondaryProductId/secondaryLinkUrl）。
+   * 条目级链接（轮播/图库等 arrayFields 内）不需要前缀——键直接落在条目对象上。
+   */
+  keyPrefix?: string;
+  /** 条目内嵌的紧凑形态：省略标题与说明行 */
+  compact?: boolean;
 }
 
 /** 设计预设：一次写入多个键（patch），如配色方案同时写 bgColor+textColor */

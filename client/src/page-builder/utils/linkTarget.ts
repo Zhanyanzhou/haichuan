@@ -30,3 +30,18 @@ export function resolveLinkTargetUrl(value: LinkTargetValue): string {
   if (targetType === "page" && isSafeInternalPath(value.linkUrl)) return value.linkUrl;
   return "";
 }
+
+/**
+ * 条目级链接解析(轮播/图库/分类卡/热区条目):
+ * 新数据为三件套(targetType/productId/linkUrl),旧草稿为裸 link 站内路径字段。
+ * 仅当条目完全没有三件套痕迹(旧数据特征)时才回退裸 link,
+ * 避免"切回不跳转"后残留的旧 link 字段让链接复活。
+ */
+export function resolveItemLinkUrl(
+  item: LinkTargetValue & { link?: unknown },
+): string {
+  if (item.targetType != null || item.productId != null) {
+    return resolveLinkTargetUrl(item);
+  }
+  return isSafeInternalPath(item.link) ? item.link : "";
+}

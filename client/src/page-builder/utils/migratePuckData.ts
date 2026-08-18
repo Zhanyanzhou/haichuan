@@ -42,6 +42,52 @@ function focusFallback(props: Record<string, any>) {
   };
 }
 
+/**
+ * 条目级链接归一(2026-08-18 P1-3):
+ * 旧条目的裸 link 站内路径在编辑器载入时补写跳转三件套,
+ * 让统一链接字段的面板正确回显;原 link 字段保留不删,旧渲染兼容无忧。
+ * 幂等:已有三件套痕迹(targetType/productId)的条目不动。
+ */
+const ITEM_LINK_ARRAYS: Record<string, string[]> = {
+  轮播图: ["images"],
+  作品画廊: ["items"],
+  分类卡片: ["categories"],
+  按场景选购: ["categories"],
+  热区图: ["desktopHotspots", "mobileHotspots", "hotspots"],
+};
+
+function normalizeItemLinkTarget(item: Record<string, any>) {
+  if (item?.targetType != null || item?.productId != null) return item;
+  const link = isSafeInternalPath(item?.link) ? item.link : "";
+  if (!link) return item;
+  const productMatch = /^\/products\/(\d+)$/.exec(link);
+  return {
+    ...item,
+    targetType: productMatch ? "product" : "page",
+    productId: productMatch ? Number(productMatch[1]) : 0,
+    linkUrl: productMatch ? "" : link,
+  };
+}
+
+function normalizeItemLinks(block: PuckBlock): PuckBlock {
+  const arrayKeys = ITEM_LINK_ARRAYS[block?.type ?? ""];
+  if (!arrayKeys || !block?.props) return block;
+  const nextProps = { ...block.props };
+  let touched = false;
+  for (const key of arrayKeys) {
+    const list = nextProps[key];
+    if (!Array.isArray(list)) continue;
+    const nextList = list.map((item) =>
+      item && typeof item === "object" ? normalizeItemLinkTarget(item) : item,
+    );
+    if (nextList.some((item, i) => item !== list[i])) {
+      nextProps[key] = nextList;
+      touched = true;
+    }
+  }
+  return touched ? { ...block, props: nextProps } : block;
+}
+
 function migrateBlock(block: PuckBlock): PuckBlock {
   const p = block?.props ?? {};
   switch (block?.type) {
@@ -149,13 +195,17 @@ export function migratePuckData<T extends PuckDocument>(data: T): T {
     return block;
   };
   if (Array.isArray(next.content)) {
-    next.content = next.content.map((block) => unlock(migrateBlock(block)));
+    next.content = next.content.map((block) =>
+      normalizeItemLinks(unlock(migrateBlock(block))),
+    );
   }
   if (next.zones && typeof next.zones === "object") {
     next.zones = Object.fromEntries(
       Object.entries(next.zones).map(([zoneKey, blocks]) => [
         zoneKey,
-        Array.isArray(blocks) ? blocks.map((block) => unlock(migrateBlock(block))) : blocks,
+        Array.isArray(blocks)
+          ? blocks.map((block) => normalizeItemLinks(unlock(migrateBlock(block))))
+          : blocks,
       ]),
     );
   }

@@ -116,10 +116,10 @@ export function makeCategoryCardsSchema(
                 hint: "显示在名称下方",
               },
               {
-                key: "link",
+                key: "linkTarget",
                 label: "跳转链接",
-                control: "text",
-                hint: "站内路径",
+                control: "linkTarget",
+                compact: true,
               },
               {
                 key: "altText",

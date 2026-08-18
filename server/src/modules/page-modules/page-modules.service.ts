@@ -74,7 +74,7 @@ const PUCK_IMAGE_FIELDS = [
   "afterImage",
 ];
 
-const PUCK_LINK_FIELDS = ["linkUrl", "link", "mapUrl"];
+const PUCK_LINK_FIELDS = ["linkUrl", "link", "mapUrl", "secondaryLinkUrl"];
 
 /**
  * 发布校验：单页可见组件总数上限。
@@ -651,11 +651,17 @@ export class PageModulesService {
               item?.mobileUrl,
               `${label}：第 ${index + 1} 张轮播图移动端图片`,
             );
-            if (
-              this.isNonEmptyString(item?.link) &&
-              !this.isSafeLink(item.link)
-            ) {
-              errors.push(`${label}：第 ${index + 1} 张轮播链接不合法`);
+            // 条目级跳转:新三件套 linkUrl 与旧裸 link 都做安全校验
+            for (const itemLinkField of ["link", "linkUrl"]) {
+              if (
+                this.isNonEmptyString(item?.[itemLinkField]) &&
+                !this.isSafeLink(item[itemLinkField])
+              ) {
+                errors.push(
+                  `${label}：第 ${index + 1} 张轮播链接不合法`,
+                );
+                break;
+              }
             }
           });
         }
@@ -694,11 +700,35 @@ export class PageModulesService {
 
       if (type === "热区图" && Array.isArray(props.hotspots)) {
         props.hotspots.forEach((item: any, index: number) => {
-          if (
-            this.isNonEmptyString(item?.link) &&
-            !this.isSafeLink(item.link)
-          ) {
-            errors.push(`${label}：第 ${index + 1} 个热区链接不合法`);
+          for (const itemLinkField of ["link", "linkUrl"]) {
+            if (
+              this.isNonEmptyString(item?.[itemLinkField]) &&
+              !this.isSafeLink(item[itemLinkField])
+            ) {
+              errors.push(
+                `${label}：第 ${index + 1} 个热区链接不合法`,
+              );
+              break;
+            }
+          }
+        });
+      }
+      // 分类入口(分类卡片/按场景选购)条目级跳转安全校验
+      if (
+        (type === "分类卡片" || type === "按场景选购") &&
+        Array.isArray(props.categories)
+      ) {
+        props.categories.forEach((item: any, index: number) => {
+          for (const itemLinkField of ["link", "linkUrl"]) {
+            if (
+              this.isNonEmptyString(item?.[itemLinkField]) &&
+              !this.isSafeLink(item[itemLinkField])
+            ) {
+              errors.push(
+                `${label}：第 ${index + 1} 个分类入口链接不合法`,
+              );
+              break;
+            }
           }
         });
       }

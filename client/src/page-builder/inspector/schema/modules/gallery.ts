@@ -81,7 +81,12 @@ export const gallerySchema: ModuleInspectorSchema = {
               control: "text",
               maxLength: GALLERY_CONTRACT.content.limits.altText,
             },
-            { key: "link", label: "跳转链接（可选）", control: "text" },
+            {
+              key: "linkTarget",
+              label: "跳转链接",
+              control: "linkTarget",
+              compact: true,
+            },
           ],
         },
       ],

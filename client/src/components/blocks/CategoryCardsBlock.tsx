@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { SecureImage } from "@/components/common/SecureImage";
 import { CATEGORY_CARDS_CONTRACT, getCategoryCardsMediaAspectRatio, getContractRoleRatio, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
-import { isSafeInternalPath } from "@/page-builder/utils/linkTarget";
+import { isSafeInternalPath, resolveItemLinkUrl } from "@/page-builder/utils/linkTarget";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 
@@ -39,7 +39,7 @@ export default function CategoryCardsBlock({
   const normalizedCategories = Array.isArray(categories) ? categories.slice(0, CATEGORY_CARDS_CONTRACT.content.maxItems) : [];
   const visibleCategories = editMode
     ? normalizedCategories
-    : normalizedCategories.filter((item: any) => item?.name && item?.image && isSafeInternalPath(item?.link));
+    : normalizedCategories.filter((item: any) => item?.name && item?.image && resolveItemLinkUrl(item));
 
   if (!visibleCategories.length) {
     if (!editMode) return null;
@@ -169,10 +169,11 @@ export default function CategoryCardsBlock({
               </div>
               </div>
             );
-            return editMode || !isSafeInternalPath(c.link) ? (
+            const cardLinkUrl = resolveItemLinkUrl(c);
+            return editMode || !cardLinkUrl ? (
               <div key={c.id || `${c.name}-${i}`}>{card}</div>
             ) : (
-              <Link key={c.id || `${c.name}-${i}`} to={c.link} style={{ display: "block", textDecoration: "none" }}>{card}</Link>
+              <Link key={c.id || `${c.name}-${i}`} to={cardLinkUrl} style={{ display: "block", textDecoration: "none" }}>{card}</Link>
             );
           })}
       </div>

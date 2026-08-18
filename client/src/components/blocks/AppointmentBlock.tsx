@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { SecureImage } from '@/components/common/SecureImage';
-import { isSafeInternalPath } from '@/page-builder/utils/linkTarget';
+import { isSafeInternalPath, resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
 import { DesignSystemStyles } from '@/page-builder/designSystem/sectionShell';
 import { FONT_DISPLAY, FONT_SANS } from '@/page-builder/designSystem/tokens';
 
@@ -16,7 +16,7 @@ interface AppointmentBlockProps {
  */
 export default function AppointmentBlock({ module, editMode }: AppointmentBlockProps) {
   const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
-  const { backgroundImage, title, subtitle, buttonText, linkUrl, phone, altText } = content;
+  const { backgroundImage, title, subtitle, buttonText, phone, altText } = content;
   const tone = layoutConfig.template === 'ivory' ? 'ivory' : 'dark';
   const bgColor = tone === 'ivory' ? '#FCFCFB' : styleConfig.bgColor || '#171717';
   const textColor = tone === 'ivory' ? '#222222' : '#FFFFFF';
@@ -26,7 +26,13 @@ export default function AppointmentBlock({ module, editMode }: AppointmentBlockP
   const desktopFocusY = Math.min(100, Math.max(0, Number(styleConfig.desktopFocusY ?? styleConfig.focusY ?? 50)));
   const mobileFocusX = Math.min(100, Math.max(0, Number(styleConfig.mobileFocusX ?? styleConfig.focusX ?? 50)));
   const mobileFocusY = Math.min(100, Math.max(0, Number(styleConfig.mobileFocusY ?? styleConfig.focusY ?? 50)));
-  const targetUrl = isSafeInternalPath(linkUrl) ? linkUrl : '';
+  // 跳转三件套优先,旧草稿裸 linkUrl 字段兜底
+  const targetUrl =
+    resolveLinkTargetUrl({
+      targetType: content.targetType,
+      productId: content.productId,
+      linkUrl: content.linkUrl,
+    }) || (isSafeInternalPath(content.linkUrl) ? content.linkUrl : '');
   const phoneHref = typeof phone === 'string' ? phone.replace(/[^\d+]/g, '') : '';
 
   if (!title && !editMode) return null;

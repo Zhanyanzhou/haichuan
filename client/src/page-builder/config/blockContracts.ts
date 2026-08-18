@@ -7,6 +7,7 @@
 import {
   isSafeInternalPath,
   normalizeLinkTargetType,
+  resolveItemLinkUrl,
   resolveLinkTargetUrl,
   type LinkTargetValue,
 } from "../utils/linkTarget";
@@ -147,13 +148,23 @@ export interface FeaturedProductContractProps {
   summary?: string;
   primaryText?: string;
   secondaryText?: string;
+  /** 旧字段:下拉白名单值,双读兜底 */
   secondaryLink?: string;
+  /** 次行动跳转三件套(secondary 前缀,2026-08-18 P1-3) */
+  secondaryTargetType?: string;
+  secondaryProductId?: number | string;
+  secondaryLinkUrl?: string;
 }
 
 export interface CategoryCardContractItem {
   name?: string;
   image?: string;
+  /** 旧字段:裸站内路径,双读兜底 */
   link?: string;
+  /** 跳转三件套(2026-08-18 P1-3) */
+  targetType?: string;
+  productId?: number | string;
+  linkUrl?: string;
   description?: string;
 }
 
@@ -167,7 +178,11 @@ export interface AppointmentContractProps {
   title?: string;
   subtitle?: string;
   buttonText?: string;
+  /** 旧字段:下拉白名单值,双读兜底 */
   linkUrl?: string;
+  /** 跳转三件套(2026-08-18 P1-3) */
+  targetType?: string;
+  productId?: number | string;
   phone?: string;
   backgroundImage?: string;
   altText?: string;
@@ -575,10 +590,13 @@ export function evaluateFeaturedProductContract(
   if (!hasText(props.primaryText)) errors.push("请填写商品详情入口文字");
   if (!hasText(props.summary))
     warnings.push("建议补充作品材质、工艺或设计卖点");
-  if (
-    hasText(props.secondaryText) &&
-    !isSafeInternalPath(props.secondaryLink)
-  ) {
+  const secondaryUrl =
+    resolveLinkTargetUrl({
+      targetType: props.secondaryTargetType,
+      productId: props.secondaryProductId,
+      linkUrl: props.secondaryLinkUrl,
+    }) || (isSafeInternalPath(props.secondaryLink) ? props.secondaryLink : "");
+  if (hasText(props.secondaryText) && !secondaryUrl) {
     errors.push("次要行动已显示，请选择站内页面");
   }
   return {
@@ -597,11 +615,10 @@ export function evaluateCategoryCardsContract(
   props: CategoryCardsContractProps,
 ): ModuleContractStatus {
   const cards = normalizeCategoryCards(props.categories);
+  const cardLinkOk = (item: CategoryCardContractItem) =>
+    Boolean(resolveItemLinkUrl(item));
   const completeCards = cards.filter(
-    (item) =>
-      hasText(item.name) &&
-      hasText(item.image) &&
-      isSafeInternalPath(item.link),
+    (item) => hasText(item.name) && hasText(item.image) && cardLinkOk(item),
   );
   const enoughItems = cards.length >= CATEGORY_CARDS_CONTRACT.content.minItems;
   const checks = [
@@ -625,7 +642,7 @@ export function evaluateCategoryCardsContract(
     errors.push("每个分类都必须填写名称");
   if (cards.some((item) => !hasText(item.image)))
     errors.push("每个分类都必须上传图片");
-  if (cards.some((item) => !isSafeInternalPath(item.link)))
+  if (cards.some((item) => !cardLinkOk(item)))
     errors.push("每个分类都必须设置安全的站内路径");
   if (cards.some((item) => !hasText(item.description)))
     warnings.push("建议为分类补充一句选择提示");
@@ -640,16 +657,19 @@ export function evaluateCategoryCardsContract(
 export function evaluateAppointmentContract(
   props: AppointmentContractProps,
 ): ModuleContractStatus {
-  const checks = [
-    hasText(props.title),
-    hasText(props.buttonText),
-    isSafeInternalPath(props.linkUrl),
-  ];
+  // 跳转三件套优先,旧 linkUrl 下拉值兜底
+  const targetUrl =
+    resolveLinkTargetUrl({
+      targetType: props.targetType,
+      productId: props.productId,
+      linkUrl: props.linkUrl,
+    }) || (isSafeInternalPath(props.linkUrl) ? props.linkUrl : "");
+  const checks = [hasText(props.title), hasText(props.buttonText), Boolean(targetUrl)];
   const errors: string[] = [];
   const warnings: string[] = [];
   if (!hasText(props.title)) errors.push("请填写预约标题");
   if (!hasText(props.buttonText)) errors.push("请填写预约按钮文字");
-  if (!isSafeInternalPath(props.linkUrl)) errors.push("请选择预约咨询站内页面");
+  if (!targetUrl) errors.push("请选择预约咨询站内页面");
   if (hasText(props.phone) && !/^\+?[\d\s-]{6,20}$/.test(String(props.phone)))
     errors.push("咨询电话格式不正确");
   if (!hasText(props.subtitle)) warnings.push("建议说明服务方式或响应时间");

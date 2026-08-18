@@ -5,6 +5,7 @@ import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
+import { isSafeInternalPath, resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 
 interface LimitedOfferBlockProps {
   module: { content: Record<string, any>; styleConfig?: Record<string, any> };
@@ -50,9 +51,15 @@ export default function LimitedOfferBlock({
     body,
     targetDate,
     buttonText,
-    linkUrl,
     benefits = [],
   } = content;
+  // 跳转三件套优先,旧草稿裸 linkUrl 字段兜底
+  const targetUrl =
+    resolveLinkTargetUrl({
+      targetType: content.targetType,
+      productId: content.productId,
+      linkUrl: content.linkUrl,
+    }) || (isSafeInternalPath(content.linkUrl) ? content.linkUrl : "");
   const benefitLabels = Array.isArray(benefits)
     ? benefits
         .map((benefit) =>
@@ -194,9 +201,9 @@ export default function LimitedOfferBlock({
           )}
         </div>
         <div data-content-role="action">
-          {buttonText && linkUrl && !isExpired && (
+          {buttonText && targetUrl && !isExpired && (
             <Link data-editor-field="buttonText linkUrl"
-              to={linkUrl}
+              to={targetUrl}
               style={{
                 display: "inline-block",
                 padding: "12px 30px",

@@ -56,13 +56,9 @@ export const appointmentSchema: ModuleInspectorSchema = {
           placeholder: "如 立即预约",
         },
         {
-          key: "linkUrl",
-          label: "主按钮链接",
-          control: "select",
-          options: [
-            { label: "预约咨询页 /contact", value: "/contact" },
-            { label: "珠宝定制 /custom", value: "/custom" },
-          ],
+          key: "linkTarget",
+          label: "主按钮点击后",
+          control: "linkTarget",
         },
         {
           key: "phone",

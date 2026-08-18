@@ -85,10 +85,9 @@ export const limitedOfferSchema: ModuleInspectorSchema = {
       fields: [
         { key: "buttonText", label: "按钮文字", control: "text" },
         {
-          key: "linkUrl",
-          label: "按钮链接",
-          control: "text",
-          hint: "站内路径",
+          key: "linkTarget",
+          label: "按钮点击后",
+          control: "linkTarget",
         },
       ],
     },

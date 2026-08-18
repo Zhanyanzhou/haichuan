@@ -3,6 +3,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { HOTSPOT_CONTRACT } from "@/page-builder/config/blockContracts";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
+import { resolveItemLinkUrl } from "@/page-builder/utils/linkTarget";
 
 interface HotspotItem {
   x: number; // 左边距百分比
@@ -69,7 +70,7 @@ export default function HotspotBlock({
       [item?.x, item?.y, item?.width, item?.height].every(Number.isFinite)
       && item.width > 0
       && item.height > 0
-      && (editMode || Boolean(item.link))
+      && (editMode || Boolean(resolveItemLinkUrl(item)))
     ));
 
   /* ── 编辑模式：选中与拖拽状态 ── */
@@ -216,7 +217,7 @@ export default function HotspotBlock({
         <Link
           key={sourceIndex}
           data-content-role="hotspots"
-          to={editMode ? "#" : h.link || "#"}
+          to={editMode ? "#" : resolveItemLinkUrl(h) || "#"}
           onClick={(e) => {
             if (editMode) {
               e.preventDefault();

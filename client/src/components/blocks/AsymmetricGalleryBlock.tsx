@@ -3,7 +3,7 @@ import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceho
 import { GALLERY_CONTRACT } from "@/page-builder/config/blockContracts";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
-import { isSafeInternalPath } from "@/page-builder/utils/linkTarget";
+import { resolveItemLinkUrl } from "@/page-builder/utils/linkTarget";
 
 interface GalleryItem {
   image?: string;
@@ -77,11 +77,12 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
         ) : null}
       </>
     );
-    const linked = Boolean(item.link) && isSafeInternalPath(item.link) && !editMode;
+    const itemLinkUrl = resolveItemLinkUrl(item);
+    const linked = Boolean(itemLinkUrl) && !editMode;
     return linked ? (
       <Link
         key={index}
-        to={item.link as string}
+        to={itemLinkUrl}
         data-editor-field={`items.${index}.image`}
         className={`hc-gallery__item is-p${pattern}`}
       >

@@ -48,7 +48,12 @@ export const carouselSchema: ModuleInspectorSchema = {
               showSpecCheck: true,
             },
             { key: "alt", label: "替代文字", control: "text" },
-            { key: "link", label: "跳转链接（可选）", control: "text" },
+            {
+              key: "linkTarget",
+              label: "跳转链接",
+              control: "linkTarget",
+              compact: true,
+            },
           ],
         },
       ],

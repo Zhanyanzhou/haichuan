@@ -129,20 +129,29 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
       );
     }
 
-    case "linkTarget":
+    case "linkTarget": {
+      // keyPrefix(如 "secondary")把读写切到 secondaryTargetType/secondaryProductId/secondaryLinkUrl
+      const prefix = def.keyPrefix ?? "";
+      const readKey = (suffix: "TargetType" | "ProductId" | "LinkUrl") =>
+        prefix
+          ? ctx.props[`${prefix}${suffix}`]
+          : ctx.props[suffix.toLowerCase()];
       return (
         <LinkTargetField
           id={String(ctx.props.id ?? def.key)}
-          targetType={ctx.props.targetType}
-          productId={ctx.props.productId}
-          linkUrl={ctx.props.linkUrl}
+          targetType={readKey("TargetType")}
+          productId={readKey("ProductId")}
+          linkUrl={readKey("LinkUrl")}
           onChange={update}
           label={def.linkLabel ?? def.label}
           description={
             def.linkDescription ?? def.hint ?? "一个模块只设置一个明确去向"
           }
+          compact={def.compact}
+          keyPrefix={prefix || undefined}
         />
       );
+    }
 
     case "preset":
       return (

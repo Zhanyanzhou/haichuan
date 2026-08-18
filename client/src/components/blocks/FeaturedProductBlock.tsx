@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { FEATURED_PRODUCT_CONTRACT } from "@/page-builder/config/blockContracts";
-import { isSafeInternalPath } from "@/page-builder/utils/linkTarget";
+import { isSafeInternalPath, resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 
@@ -18,11 +18,17 @@ interface FeaturedProductBlockProps {
 /** 代表作品(Hero Piece):一件作品获得极大视觉权重;价格默认隐藏,仅电商场景开启。 */
 export default function FeaturedProductBlock({ module, editMode }: FeaturedProductBlockProps) {
   const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
-  const { eyebrow, title, summary, product = {}, primaryText, secondaryText, secondaryLink } = content;
+  const { eyebrow, title, summary, product = {}, primaryText, secondaryText } = content;
   const showPrice = content.showPrice === true;
   const bgColor = styleConfig.bgColor || "#F5F2ED";
   const productLink = isSafeInternalPath(product.link) ? product.link : "";
-  const secondaryUrl = isSafeInternalPath(secondaryLink) ? secondaryLink : "";
+  // 次行动三件套(secondary 前缀)优先,旧草稿裸 secondaryLink 字段兜底
+  const secondaryUrl =
+    resolveLinkTargetUrl({
+      targetType: content.secondaryTargetType,
+      productId: content.secondaryProductId,
+      linkUrl: content.secondaryLinkUrl,
+    }) || (isSafeInternalPath(content.secondaryLink) ? content.secondaryLink : "");
   const imageRight = layoutConfig.template === "imageRight";
 
   if (!product.name) {

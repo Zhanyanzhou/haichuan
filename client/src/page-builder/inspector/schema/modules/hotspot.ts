@@ -14,10 +14,10 @@ import type { ModuleInspectorSchema } from "../types";
 const hotspotArrayFields = [
   { key: "label", label: "标签（可选）", control: "text" as const },
   {
-    key: "link",
+    key: "linkTarget",
     label: "跳转链接",
-    control: "text" as const,
-    hint: "站内路径，如 /products",
+    control: "linkTarget" as const,
+    compact: true,
   },
   { key: "x", label: "左边距 %", control: "text" as const },
   { key: "y", label: "上边距 %", control: "text" as const },
