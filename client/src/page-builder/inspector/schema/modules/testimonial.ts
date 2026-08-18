@@ -54,6 +54,13 @@ export const testimonialSchema: ModuleInspectorSchema = {
               ? item.name
               : "未署名引语",
           itemFields: [
+            {
+              key: "image",
+              label: "实拍图（可选 4:5）",
+              control: "media",
+              spec: IMAGE_SPECS.testimonial.image,
+              placeholder: "上传顾客授权实拍图",
+            },
             { key: "name", label: "顾客称呼", control: "text", required: true },
             {
               key: "meta",
@@ -67,13 +74,6 @@ export const testimonialSchema: ModuleInspectorSchema = {
               control: "textarea",
               rows: 2,
               required: true,
-            },
-            {
-              key: "image",
-              label: "实拍图（可选 4:5）",
-              control: "media",
-              spec: IMAGE_SPECS.testimonial.image,
-              placeholder: "上传顾客授权实拍图",
             },
           ],
         },

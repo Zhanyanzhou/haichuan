@@ -122,8 +122,8 @@ function migrateBlock(block: PuckBlock): PuckBlock {
             buttonText: clampText(p.buttonText, 30),
             linkUrl,
             template: "center",
-            bgColor: "#FBF9F6",
-            textColor: "#2C2C2C",
+            bgColor: "#FFFFFF",
+            textColor: "#1A1A1A",
             spacing: p.spacing === "spacious" ? "spacious" : p.spacing === "compact" ? "compact" : "normal",
           },
         };

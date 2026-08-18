@@ -8,7 +8,7 @@ import {
 } from "../../../config/blockContracts";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { beforeAfterPuckConfig } from "../../../adapters/beforeAfter.puck";
-import { bgColorPresetField, moduleNameField } from "../shared";
+import { bgColorPresetField, linkTargetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 export const beforeAfterSchema: ModuleInspectorSchema = {
@@ -94,6 +94,22 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
           control: "text",
           maxLength: BEFORE_AFTER_CONTRACT.content.limits.altText,
         },
+      ],
+    },
+    {
+      id: "before-after-action",
+      title: "行动与关联",
+      layer: "interaction",
+      fields: [
+        {
+          key: "actionText",
+          label: "行动入口文字",
+          control: "text",
+          maxLength: 12,
+          hint: "留空不显示",
+          placeholder: "如 预约改款",
+        },
+        linkTargetField("行动入口点击后"),
       ],
     },
     {

@@ -4,6 +4,7 @@ import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
 import { isSafeInternalPath, resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 
@@ -70,7 +71,7 @@ export default function LimitedOfferBlock({
   const [remaining, setRemaining] = useState(() =>
     getRemainingTime(targetDate),
   );
-  const bgColor = styleConfig.bgColor || "#211D19";
+  const bgColor = styleConfig.bgColor || "#FFFFFF";
   const desktopEventRatio = getContractRoleRatio("limitedEvent", "event", "desktop");
   const mobileEventRatio = getContractRoleRatio("limitedEvent", "event", "mobile");
 
@@ -107,11 +108,11 @@ export default function LimitedOfferBlock({
     : [];
 
   return (
-    <DecorSection master="commerce-campaign" width="standard" flow="flow" background={bgColor} style={{ color: "#fff" }}>
+    <DecorSection master="commerce-campaign" width="standard" flow="flow" background={bgColor} style={{ color: "#1A1A1A" }}>
       <div className="hc-limited-event">
         <style>{`
           .hc-limited-event { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: clamp(28px, 5vw, 64px); align-items: center; }
-          .hc-limited-event__media { grid-row: 1 / span 3; aspect-ratio: ${desktopEventRatio}; overflow: hidden; background: #30302F; }
+          .hc-limited-event__media { grid-row: 1 / span 3; aspect-ratio: ${desktopEventRatio}; overflow: hidden; background: #F3F1EE; }
           .hc-limited-event__media img { width: 100%; height: 100%; object-fit: cover; display: block; }
           .hc-limited-event__time { display: flex; flex-wrap: wrap; gap: 10px; }
           @media (max-width: 767px) {
@@ -129,31 +130,33 @@ export default function LimitedOfferBlock({
         <div className="hc-limited-event__time" data-content-role="time" data-editor-field="targetDate">
           {units.length > 0 && !isExpired ? units.map(([label, value]) => (
             <div key={label as string}>
-              <strong style={{ display: "block", minWidth: 48, padding: "10px 8px", border: "1px solid rgba(184,148,78,.65)", color: "#F7F7F5", fontSize: 24, fontWeight: 500, textAlign: "center" }}>{value}</strong>
-              <small style={{ display: "block", marginTop: 6, color: "rgba(255,255,255,.68)", fontSize: 11, textAlign: "center" }}>{label}</small>
+              <strong style={{ display: "block", minWidth: 48, padding: "10px 8px", border: "1px solid rgba(0,0,0,0.15)", color: "#1A1A1A", fontSize: 24, fontWeight: 500, textAlign: "center" }}>{value}</strong>
+              <small style={{ display: "block", marginTop: 6, color: "#8C8C8C", fontSize: 11, textAlign: "center" }}>{label}</small>
             </div>
           )) : (
-            <p style={{ margin: 0, color: "rgba(255,255,255,.72)", fontSize: 14 }}>{targetDate ? "活动已结束" : "请设置活动结束时间"}</p>
+            <p style={{ margin: 0, color: "#8C8C8C", fontSize: 14 }}>{targetDate ? "活动已结束" : "请设置活动结束时间"}</p>
           )}
         </div>
         <div data-content-role="copy">
-          {eyebrow && (
+          {eyebrow ? (
             <p data-editor-field="eyebrow"
               style={{
                 margin: "0 0 12px",
-                color: "#B8944E",
+                color: "#8C8C8C",
                 fontSize: 12,
                 letterSpacing: "0.16em",
               }}
             >
               {eyebrow}
             </p>
-          )}
-          {title && (
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="eyebrow" label="眉题" />
+          ) : null}
+          {title ? (
             <h2 data-editor-field="title"
               style={{
                 margin: "0 0 14px",
-                color: "#fff",
+                color: "#1A1A1A",
                 fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
                 fontSize: "var(--hc-type-h2, clamp(28px, 3.5vw, 44px))",
                 fontWeight: 500,
@@ -161,20 +164,24 @@ export default function LimitedOfferBlock({
             >
               {title}
             </h2>
-          )}
-          {body && (
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="title" label="标题" block />
+          ) : null}
+          {body ? (
             <p data-editor-field="body"
               style={{
                 margin: 0,
                 maxWidth: 480,
-                color: "rgba(255,255,255,0.72)",
+                color: "#8C8C8C",
                 fontSize: 14,
                 lineHeight: 1.8,
               }}
             >
               {body}
             </p>
-          )}
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="body" label="说明" block />
+          ) : null}
           {benefitLabels.length > 0 && (
             <div
               style={{
@@ -188,8 +195,8 @@ export default function LimitedOfferBlock({
                 <span
                   key={`${benefit}-${index}`}
                   style={{
-                    border: "1px solid rgba(184,148,78,0.6)",
-                    color: "#F2F1EE",
+                    border: "1px solid rgba(0,0,0,0.2)",
+                    color: "#5A5A5A",
                     padding: "6px 10px",
                     fontSize: 12,
                   }}
@@ -206,9 +213,9 @@ export default function LimitedOfferBlock({
               to={targetUrl}
               style={{
                 display: "inline-block",
-                padding: "12px 30px",
-                background: "#B8944E",
-                color: "#fff",
+                paddingBottom: 6,
+                borderBottom: "1px solid #1A1A1A",
+                color: "#1A1A1A",
                 textDecoration: "none",
                 fontSize: 13,
                 letterSpacing: "0.1em",

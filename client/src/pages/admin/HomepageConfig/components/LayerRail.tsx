@@ -11,6 +11,25 @@ import { getModuleDisplayName } from "../editor-utils";
 import type { EditorPageKey } from "@/page-builder/config/editorPages";
 import { PAGE_RECIPES } from "@/page-builder/config/pageRecipes";
 
+/** 需要区分桌面/移动端素材的模块：有桌面图却未配移动图时移动端会复用并可能裁切。 */
+const MOBILE_IMAGE_TYPES = new Set([
+  "首屏主视觉",
+  "单图海报",
+  "全屏出血图",
+  "热区图",
+]);
+
+function needsMobileImage(item: {
+  type: string;
+  props: Record<string, any>;
+}) {
+  return (
+    MOBILE_IMAGE_TYPES.has(item.type) &&
+    Boolean(item.props?.desktopImage || item.props?.image) &&
+    !item.props?.mobileImage
+  );
+}
+
 export default function LayerRail({
   onSaveAsTemplate,
   pageKey,
@@ -260,6 +279,14 @@ export default function LayerRail({
                 onClick={(event) => handleLayerClick(index, event)}
               >
                 <span>{numberedNames[index]}</span>
+                {needsMobileImage(item) && (
+                  <span
+                    className="homepage-editor__layer-mobile-hint"
+                    title="未上传移动端图片，移动端将复用桌面图并可能裁切"
+                  >
+                    缺移动图
+                  </span>
+                )}
                 <DragOutlined />
               </button>
             </div>

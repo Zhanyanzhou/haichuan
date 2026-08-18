@@ -8,7 +8,7 @@ interface TestimonialBlockProps {
   editMode?: boolean;
 }
 
-const GOLD = "#B8944E";
+const GOLD = "#8C8C8C";
 const TESTIMONIAL_RATIO = getContractRoleRatio("testimonials", "authorizedPhoto", "desktop");
 
 /**
@@ -18,7 +18,7 @@ const TESTIMONIAL_RATIO = getContractRoleRatio("testimonials", "authorizedPhoto"
  */
 export default function TestimonialBlock({ module, editMode }: TestimonialBlockProps) {
   const { content = {}, styleConfig = {} } = module;
-  const bgColor = styleConfig.bgColor || "#FBF9F6";
+  const bgColor = styleConfig.bgColor || "#FFFFFF";
   const list = Array.isArray(content.testimonials) ? content.testimonials : [];
   const visibleList = editMode
     ? list
@@ -49,11 +49,11 @@ export default function TestimonialBlock({ module, editMode }: TestimonialBlockP
             font-family: var(--hc-font-display, ${FONT_DISPLAY});
             font-size: clamp(22px, 2.6vw, 34px);
             line-height: 1.5;
-            color: #222222;
+            color: #1A1A1A;
             font-weight: 400;
             margin: 0 0 18px;
           }
-          .hc-voices__image { aspect-ratio: ${TESTIMONIAL_RATIO}; overflow: hidden; background: #E5E5E2; }
+          .hc-voices__image { aspect-ratio: ${TESTIMONIAL_RATIO}; overflow: hidden; background: #F3F1EE; }
           .hc-voices__image img { width: 100%; height: 100%; object-fit: cover; display: block; }
           @media (max-width: 767px) {
             .hc-voices { row-gap: 48px; }

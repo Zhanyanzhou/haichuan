@@ -1,7 +1,12 @@
+import { useState } from "react";
+import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
+import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { getContentTemplateContract } from "@/page-builder/generated/contentTemplates.generated";
+import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 
 interface VideoBlockProps {
   module: {
@@ -32,6 +37,12 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
   const {
     videoUrl,
     posterUrl,
+    title,
+    subtitle,
+    actionText,
+    linkUrl,
+    targetType,
+    productId,
     autoPlay,
     loop,
     muted,
@@ -52,6 +63,14 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
   const mobileRatio = desktopRatio === "3 / 4"
     ? "3 / 4"
     : coverRole?.defaultRatioByViewport?.mobile || "4 / 5";
+
+  const targetUrl = resolveLinkTargetUrl({ targetType, productId, linkUrl });
+  const showCopy = Boolean(title || subtitle || (actionText && targetUrl));
+  // 封面图焦点（0-100）：poster 作为 video 属性无法设置 objectPosition，
+  // 改为独立封面层渲染，才能让「裁切与焦点」真正作用于封面图。
+  const coverFocusX = Math.min(100, Math.max(0, Number(focusX ?? 50)));
+  const coverFocusY = Math.min(100, Math.max(0, Number(focusY ?? 50)));
+  const [playing, setPlaying] = useState(false);
 
   if (!videoUrl) {
     if (!editMode) return null;
@@ -80,23 +99,114 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
         <style>{`
           .hc-video-frame { aspect-ratio: ${desktopRatio}; }
           @media (max-width: 767px) { .hc-video-frame { aspect-ratio: ${mobileRatio}; } }
+          .hc-video__copy {
+            position: absolute;
+            inset: auto 0 0 0;
+            z-index: 2;
+            padding: clamp(24px, 4vw, 56px);
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 12px;
+            color: #ffffff;
+            text-shadow: 0 1px 24px rgba(0, 0, 0, 0.35);
+          }
+          .hc-video__copy h2 {
+            margin: 0;
+            color: inherit;
+            font-family: var(--hc-font-display, ${FONT_DISPLAY});
+            font-size: var(--hc-type-h2, clamp(26px, 3.2vw, 40px));
+            font-weight: 500;
+            line-height: 1.2;
+          }
+          .hc-video__copy p {
+            margin: 0;
+            color: rgba(255, 255, 255, 0.86);
+            font-size: var(--hc-type-body, 14px);
+            line-height: 1.8;
+            max-width: 34em;
+          }
+          .hc-video__copy .hc-video__action {
+            color: #ffffff;
+            text-decoration: none;
+            font-family: var(--hc-font-sans, ${FONT_SANS});
+            font-size: 13px;
+            letter-spacing: 0.04em;
+          }
+          @media (max-width: 767px) {
+            .hc-video__copy {
+              position: static;
+              padding: 20px 0 0;
+              gap: 10px;
+              color: #1A1A1A;
+              text-shadow: none;
+            }
+            .hc-video__copy p { color: #8C8C8C; }
+            .hc-video__copy .hc-video__action { color: #1A1A1A; }
+          }
         `}</style>
         <video
           src={videoUrl}
-          poster={posterUrl || undefined}
           autoPlay={autoPlay}
           loop={loop}
           muted={muted || autoPlay}
           controls={showControls}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => setPlaying(false)}
           style={{
             position: "absolute",
             inset: 0,
             width: "100%",
             height: "100%",
             objectFit: "cover",
-            objectPosition: `${Number(focusX ?? 50)}% ${Number(focusY ?? 50)}%`,
+            zIndex: 0,
           }}
         />
+        {posterUrl && !playing ? (
+          <div
+            aria-hidden
+            data-editor-field="posterUrl"
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 1,
+              backgroundImage: `url(${posterUrl})`,
+              backgroundSize: "cover",
+              backgroundPosition: `${coverFocusX}% ${coverFocusY}%`,
+              pointerEvents: "none",
+            }}
+          />
+        ) : null}
+        {showCopy ? (
+          <div className="hc-video__copy" data-content-role="copy">
+            {title ? (
+              <h2 data-editor-field="title">{title}</h2>
+            ) : editMode ? (
+              <EditCopyPlaceholder variant="title" label="标题" block />
+            ) : null}
+            {subtitle ? (
+              <p data-editor-field="subtitle">{subtitle}</p>
+            ) : editMode ? (
+              <EditCopyPlaceholder variant="body" label="说明" block />
+            ) : null}
+            {actionText && targetUrl ? (
+              editMode ? (
+                <span className="hc-video__action" data-editor-field="actionText linkUrl productId">
+                  {actionText} <span>→</span>
+                </span>
+              ) : (
+                <Link
+                  to={targetUrl}
+                  className="hc-video__action transition-opacity duration-300 hover:opacity-70"
+                  data-editor-field="actionText linkUrl productId"
+                >
+                  {actionText} <span>→</span>
+                </Link>
+              )
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </DecorSection>
   );

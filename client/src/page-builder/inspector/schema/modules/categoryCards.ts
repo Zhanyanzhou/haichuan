@@ -92,13 +92,6 @@ export function makeCategoryCardsSchema(
                 : "未命名入口",
             itemFields: [
               {
-                key: "name",
-                label: "名称",
-                control: "text",
-                required: true,
-                maxLength: CATEGORY_CARDS_CONTRACT.content.limits.name,
-              },
-              {
                 key: "image",
                 label: "卡片图片",
                 control: "media",
@@ -106,6 +99,19 @@ export function makeCategoryCardsSchema(
                 required: true,
                 placeholder: "上传入口图",
                 showSpecCheck: true,
+              },
+              {
+                key: "altText",
+                label: "替代文字",
+                control: "text",
+                maxLength: CATEGORY_CARDS_CONTRACT.content.limits.altText,
+              },
+              {
+                key: "name",
+                label: "名称",
+                control: "text",
+                required: true,
+                maxLength: CATEGORY_CARDS_CONTRACT.content.limits.name,
               },
               {
                 key: "description",
@@ -119,12 +125,6 @@ export function makeCategoryCardsSchema(
                 label: "跳转链接",
                 control: "linkTarget",
                 compact: true,
-              },
-              {
-                key: "altText",
-                label: "替代文字",
-                control: "text",
-                maxLength: CATEGORY_CARDS_CONTRACT.content.limits.altText,
               },
             ],
           },

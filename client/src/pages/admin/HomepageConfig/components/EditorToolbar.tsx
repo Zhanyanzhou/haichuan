@@ -44,8 +44,9 @@ function getDraftStatusMode(options: {
   hasUnsavedChanges: boolean;
   hasPendingDraft: boolean;
 }): DraftStatusMode {
-  if (options.viewingPublished) return "published";
+  // 未保存修改优先于“查看线上版本”，避免线上查看态下改动画布却看不到脏提示。
   if (options.hasUnsavedChanges) return "dirty";
+  if (options.viewingPublished) return "published";
   if (options.hasPendingDraft) return "pending";
   return "clean";
 }
@@ -54,15 +55,18 @@ function getDraftStatusMode(options: {
 function DraftStatusBadge({
   mode,
   draftSavedAtLabel,
+  hasPendingDraft,
 }: {
   mode: DraftStatusMode;
   draftSavedAtLabel: string | null;
+  hasPendingDraft: boolean;
 }) {
   let content: ReactNode;
   if (mode === "published") {
     content = (
       <>
         <EyeOutlined /> 正在查看线上版本
+        {hasPendingDraft ? <small>草稿有未发布修改</small> : null}
       </>
     );
   } else if (mode === "dirty") {
@@ -104,6 +108,7 @@ export default function EditorToolbar({
   draftSavedAtLabel,
   onPublish,
   onSaveDraft,
+  onExitViewing,
   onEditPendingDraft,
   onViewPublishedVersion,
   onDiscardDraft,
@@ -122,6 +127,7 @@ export default function EditorToolbar({
   draftSavedAtLabel: string | null;
   onPublish: (data: unknown, locateBlock: (blockIndex: number) => void) => void;
   onSaveDraft: (data: unknown) => void;
+  onExitViewing: () => void;
   onEditPendingDraft: () => void;
   onViewPublishedVersion: () => void;
   onDiscardDraft: () => void;
@@ -267,14 +273,16 @@ export default function EditorToolbar({
   }, [dispatch, pageKey]);
 
   const draftMenuItems = viewingPublished
-    ? [
-        {
-          key: "edit-draft",
-          icon: <EditOutlined />,
-          label: "继续编辑草稿",
-          onClick: onEditPendingDraft,
-        },
-      ]
+    ? hasPendingDraft
+      ? [
+          {
+            key: "edit-draft",
+            icon: <EditOutlined />,
+            label: "继续编辑草稿",
+            onClick: onEditPendingDraft,
+          },
+        ]
+      : []
     : hasPendingDraft
       ? [
           {
@@ -405,19 +413,31 @@ export default function EditorToolbar({
           hasPendingDraft,
         })}
         draftSavedAtLabel={draftSavedAtLabel}
+        hasPendingDraft={hasPendingDraft}
       />
 
       <div className="homepage-editor__toolbar-actions">
         <div className="homepage-editor__toolbar-secondary-actions">
-          <Button
-            size="small"
-            icon={<SaveOutlined />}
-            loading={saving}
-            onClick={() => onSaveDraft(appData)}
-            title="立即保存当前装修草稿"
-          >
-            保存草稿
-          </Button>
+          {viewingPublished ? (
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              onClick={onExitViewing}
+              title="返回编辑模式"
+            >
+              返回编辑
+            </Button>
+          ) : (
+            <Button
+              size="small"
+              icon={<SaveOutlined />}
+              loading={saving}
+              onClick={() => onSaveDraft(appData)}
+              title="立即保存当前装修草稿"
+            >
+              保存草稿
+            </Button>
+          )}
         </div>
         <Dropdown
           trigger={["click"]}
@@ -440,8 +460,9 @@ export default function EditorToolbar({
           icon={<SendOutlined />}
           aria-label="发布到前台网站"
           loading={publishing}
+          disabled={viewingPublished}
           onClick={publishCurrentPage}
-          title="发布到前台网站"
+          title={viewingPublished ? "正在查看线上版本，无需重复发布" : "发布到前台网站"}
         >
           发布
         </Button>

@@ -82,7 +82,7 @@ export const MASTERS: Record<MasterId, MasterDefinition> = {
       dualFocus: true,
     },
     rules: [
-      "全宽定比:尾章 21:6 / 工艺变体 16:9,禁止其他比例",
+      "尾章素材建议 21:6 / 工艺变体 16:9（默认参照，设计卡可偏离须写理由）",
       "文字位四选一(居中/左/右/左下),CTA≤1",
       "整图可点击",
     ],
@@ -101,7 +101,7 @@ export const MASTERS: Record<MasterId, MasterDefinition> = {
       dualFocus: true,
     },
     rules: [
-      "桌面 38/62 或 62/38 镜像,禁止 50/50",
+      "桌面默认 38/62 或 62/38 镜像（默认参照，设计卡可偏离须写理由），避免 50/50 等分",
       "Mobile 自动转上下排列,图在前",
       "文字列宽≤440px",
     ],
@@ -165,13 +165,13 @@ export const MASTERS: Record<MasterId, MasterDefinition> = {
     width: "standard",
     flow: "flow",
     media: {
-      desktopRatio: "4:5",
+      desktopRatio: "3:4",
       mobileRatio: "3:4",
       independentMobileImage: false,
       dualFocus: true,
     },
     rules: [
-      "图占 55–60% 非对称,极少文字",
+      "作品对称居中,庄严经典,四周大留白",
       "Brand 模式隐藏价格,CTA 仅限查看/预约类",
       "Mobile 图在前",
     ],
@@ -209,7 +209,7 @@ export const MASTERS: Record<MasterId, MasterDefinition> = {
       dualFocus: true,
     },
     rules: [
-      "21:6 背景(或纯色),Mobile 4:3/1:1 独立视觉",
+      "21:6 背景(或纯色),Mobile 4:5/1:1 独立视觉",
       "1 主 CTA(+可选电话),文案≤2 行",
       "深色典藏 / 象牙留白两种预设",
     ],

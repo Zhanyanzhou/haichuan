@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import { RESPONSIVE_CANVAS, SINGLE_POSTER_CONTRACT } from '@/page-builder/config/blockContracts';
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
+import { SINGLE_POSTER_CONTRACT } from '@/page-builder/config/blockContracts';
 import { IMAGE_SPECS } from '@/page-builder/config/imageSpecs';
 import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
 import { DesignSystemStyles } from '@/page-builder/designSystem/sectionShell';
@@ -12,13 +13,14 @@ import {
 } from '@/page-builder/layout/contentTemplateLayouts';
 import type { PageModule } from '@/types/pageModule';
 
-const LG = '#F3F0E9';
-const TX = '#28231F';
-const MU = 'rgba(40,35,31,0.58)';
+/** 白盒画册冷调(2026-08-19):纯白底、近黑字、冷灰;金色废除。 */
+const BG = '#FFFFFF';
+const TX = '#1A1A1A';
+const MU = '#8C8C8C';
 
 interface Props { module?: PageModule; editMode?: boolean; }
 
-/** 单图文 — 受控镜像的 38/62 编辑式分栏，移动端固定图上文下。 */
+/** 单图文 · 画廊海报式(P1) — 图 ≥75% 主导偏右,签名束贴左下;移动端 4:5 叠字同构。 */
 export default function SinglePosterSection({ module, editMode }: Props) {
   const c = module?.content as (PageModule['content'] & Record<string, any>) | undefined;
   const l = module?.layoutConfig;
@@ -70,13 +72,26 @@ export default function SinglePosterSection({ module, editMode }: Props) {
   const copyColumn = (
     <div className="hc-content-template__copy hc-phase1-single__copy">
       {(number || label) ? (
-        <p data-editor-field="number label" className="hc-content-template__eyebrow" style={{ color: MU, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>{[number, label].filter(Boolean).join(" / ")}</p>
+        <div data-editor-field="number label" style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 16 }}>
+          {number ? (
+            <span style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "clamp(13px, 0.75vw, 19px)", color: TX, letterSpacing: "0.08em" }}>{number}</span>
+          ) : null}
+          {label ? (
+            <span className="hc-content-template__eyebrow" style={{ color: MU, fontFamily: `var(--hc-font-sans, ${FONT_SANS})`, margin: 0 }}>{label}</span>
+          ) : null}
+        </div>
+      ) : editMode ? (
+        <EditCopyPlaceholder variant="label" label="编号展签 N°01 — Collection" />
       ) : null}
       {title ? (
         <h2 data-editor-field="title" className="hc-content-template__title"
-          style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: 'var(--hc-type-h2, clamp(26px,2.8vw,40px))', color: TX }}>{title}</h2>
+          style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: 'var(--hc-type-display, clamp(28px,2vw,56px))', color: TX }}>{title}</h2>
+      ) : editMode ? (
+        <EditCopyPlaceholder variant="title" label="系列名" block />
       ) : null}
-      {subtitle ? <p data-editor-field="subtitle" className="hc-content-template__body" style={{ color: MU }}>{subtitle}</p> : null}
+      {subtitle ? <p data-editor-field="subtitle" className="hc-content-template__body" style={{ color: MU, marginTop: 14 }}>{subtitle}</p> : editMode ? (
+        <EditCopyPlaceholder variant="body" label="信息行 · 九件作品 · 2026 冬" block />
+      ) : null}
       {actionText && targetUrl ? (
         editMode ? (
           <span data-editor-field="actionText targetType productId linkUrl" className="hc-content-template__action mt-5" style={{ color: TX, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
@@ -87,6 +102,8 @@ export default function SinglePosterSection({ module, editMode }: Props) {
             {actionText} <span>→</span>
           </Link>
         )
+      ) : editMode ? (
+        <EditCopyPlaceholder variant="action" label="行动链接" />
       ) : null}
     </div>
   );
@@ -104,7 +121,7 @@ export default function SinglePosterSection({ module, editMode }: Props) {
       data-spacing="normal"
       data-flow={CONTENT_TEMPLATE_LAYOUTS.singlePoster.flow}
       style={{
-        background: s?.bgColor || LG,
+        background: s?.bgColor || BG,
         '--sp-focus-d': `${desktopFocusX}% ${desktopFocusY}%`,
         '--sp-focus-m': `${mobileFocusX}% ${mobileFocusY}%`,
         ...templateLayoutVars(CONTENT_TEMPLATE_LAYOUTS.singlePoster),

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import type { CSSProperties } from "react";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { SecureImage } from "@/components/common/SecureImage";
 import { CATEGORY_CARDS_CONTRACT, getCategoryCardsMediaAspectRatio, getContractRoleRatio, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { isSafeInternalPath, resolveItemLinkUrl } from "@/page-builder/utils/linkTarget";
@@ -27,7 +28,7 @@ export default function CategoryCardsBlock({
   const { content = {}, styleConfig = {} } = module;
   const { title, subtitle, categories = [] } = content;
   const layout = module.layoutConfig?.template || content.layout || "grid-3";
-  const bg = styleConfig.bgColor || "#FBF9F6";
+  const bg = styleConfig.bgColor || "#FFFFFF";
   const cols = layout === "grid-2" ? 2 : layout === "grid-4" ? 4 : 3;
   const isSceneShopping = content.templateType === "按场景选购";
   const mediaAspectRatio = isSceneShopping
@@ -56,10 +57,10 @@ export default function CategoryCardsBlock({
 
   return (
     <DecorSection master="commerce-entry" background={bg}>
-      {(title || subtitle) && (
+      {(title || subtitle || editMode) && (
         <div style={{ textAlign: "center", maxWidth: 560, margin: "0 auto 40px" }}>
-          {title && <h2 style={{ fontSize: 'var(--hc-type-h2, clamp(22px,2.5vw,34px))', fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, color: "#2C2C2C", margin: "0 0 10px", lineHeight: 1.2 }}>{title}</h2>}
-          {subtitle && <p style={{ margin: 0, color: "#8A7F72", fontSize: 13, lineHeight: 1.7 }}>{subtitle}</p>}
+          {title ? <h2 style={{ fontSize: 'var(--hc-type-h2, clamp(22px,2.5vw,34px))', fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, color: "#1A1A1A", margin: "0 0 10px", lineHeight: 1.2 }}>{title}</h2> : editMode ? <EditCopyPlaceholder variant="title" label="标题" block /> : null}
+          {subtitle ? <p style={{ margin: 0, color: "#8C8C8C", fontSize: 13, lineHeight: 1.7 }}>{subtitle}</p> : editMode ? <EditCopyPlaceholder variant="body" label="副文" block /> : null}
         </div>
       )}
       <div

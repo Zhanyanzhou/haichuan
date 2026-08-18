@@ -35,7 +35,7 @@ import {
   TEMPLATE_MEDIA_HINT,
   type BlockMeta,
 } from "@/page-builder/config/blockMeta";
-import { pageDocumentApi } from "@/services/api";
+import { pageDocumentApi, settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
@@ -93,6 +93,7 @@ import {
   getEditorErrorMessage,
   getEditorHttpStatus,
   canonicalizePuckContent,
+  canonicalizePageContent,
 } from "./editor-utils";
 
 // 固定由顶部设备切换器控制预览尺寸，避免 Puck 根据浏览器窗口宽度回写为桌面端。
@@ -139,52 +140,72 @@ function createBlockContent(type: string) {
   };
 }
 
-function EditorCanvasFooter() {
+function EditorCanvasFooter({ isHome }: { isHome: boolean }) {
+  const [siteSettings, setSiteSettings] = useState<any>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    settingsApi
+      .getPublicSettings()
+      .then((res) => {
+        if (!cancelled) setSiteSettings(unwrapResponse<any>(res));
+      })
+      .catch(() => {
+        // 画布页脚仅作预览，接口不可用时回落品牌默认值，不阻断编辑。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 与真实前台一致：首页不渲染页脚（PublicLayout 仅非首页展示 site-footer）。
+  if (isHome) return null;
+
+  const siteName = siteSettings?.siteName || "海川珠宝";
+  const contactPhone = siteSettings?.contactPhone?.trim() || "";
+  const contactEmail = siteSettings?.contactEmail?.trim() || "";
+
   return (
-    <footer
-      aria-label="全局页脚预览"
-      style={{
-        padding: "44px clamp(24px, 5vw, 72px)",
-        background: "#24211E",
-        color: "rgba(255,255,255,.78)",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: 1280,
-          margin: "0 auto",
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 24,
-          flexWrap: "wrap",
-        }}
-      >
+    <footer className="site-footer" aria-label="页脚预览">
+      <div className="site-footer__inner">
         <div>
-          <p
-            style={{
-              margin: 0,
-              color: "#D4B77A",
-              fontSize: 11,
-              letterSpacing: ".2em",
-            }}
-          >
-            HAICHUAN JEWELRY
-          </p>
-          <p style={{ margin: "10px 0 0", fontSize: 13 }}>
-            全局页脚 · 联系方式与导航由店铺资料统一管理
-          </p>
+          <p className="site-footer__brand-label">HAICHUAN JEWELRY</p>
+          <p className="site-footer__brand-name">{siteName}</p>
+          <p className="site-footer__brand-desc">黄金珠宝作品与选款服务</p>
         </div>
-        <p
-          style={{
-            margin: 0,
-            alignSelf: "end",
-            color: "rgba(255,255,255,.46)",
-            fontSize: 11,
-          }}
-        >
-          此区同步应用于所有前台页面
-        </p>
+        <div>
+          <p className="site-footer__col-title">探索</p>
+          <nav>
+            {["珠宝作品", "选款中心", "定制服务", "品牌故事", "预约咨询"].map(
+              (label) => (
+                <a
+                  key={label}
+                  href="#"
+                  onClick={(e) => e.preventDefault()}
+                  title="画布预览，点击不跳转"
+                >
+                  {label}
+                </a>
+              ),
+            )}
+          </nav>
+        </div>
+        <div>
+          <p className="site-footer__col-title">联系</p>
+          {contactPhone && (
+            <span className="site-footer__link">☎ {contactPhone}</span>
+          )}
+          {contactEmail && (
+            <span className="site-footer__link">✉ {contactEmail}</span>
+          )}
+          {!contactPhone && !contactEmail && (
+            <span className="site-footer__link">联系方式待完善</span>
+          )}
+        </div>
       </div>
+      <p className="site-footer__copyright">
+        © {new Date().getFullYear()} {siteName}
+      </p>
     </footer>
   );
 }
@@ -266,7 +287,7 @@ function EditorCanvasShell({
         }}
       />
       {children}
-      <EditorCanvasFooter />
+      <EditorCanvasFooter isHome={isHome} />
     </div>
   );
 }
@@ -2884,6 +2905,8 @@ export default function HomepageConfig({
   const publishedDataRef = useRef<any>(null);
   // 当前画布是否展示线上已发布版本（“查看线上版本”模式）。
   const [viewingPublished, setViewingPublished] = useState(false);
+  // 供画布编辑回调读取最新“查看线上版本”状态，避免闭包过期。
+  const viewingPublishedRef = useRef(false);
   // 草稿最后保存时间（仅用于“正在编辑草稿”状态展示）。
   const [draftSavedAtLabel, setDraftSavedAtLabel] = useState<string | null>(
     null,
@@ -2894,6 +2917,10 @@ export default function HomepageConfig({
   useEffect(() => {
     activePageKeyRef.current = pageKey;
   }, [pageKey]);
+
+  useEffect(() => {
+    viewingPublishedRef.current = viewingPublished;
+  }, [viewingPublished]);
 
   const [myTemplates, setMyTemplates] = useState<BlockTemplate[]>(() =>
     blockTemplateStore.getAll(),
@@ -3042,36 +3069,44 @@ export default function HomepageConfig({
         const draftPuck = adminDoc?.puckData ?? null;
 
         const nextHasPublished = Boolean(publishedPuck);
+        // 草稿差异判定须同时比较 content 与 metadata：
+        // 仅改 SEO 等 metadata 而未动内容的草稿，此前会被误判为“与线上一致”，
+        // 导致刷新后既不提示草稿、也不提供“继续编辑草稿”入口。
         const nextHasPendingDraft =
           nextHasPublished &&
           Boolean(draftPuck) &&
-          canonicalizePuckContent(draftPuck) !==
-            canonicalizePuckContent(publishedPuck);
+          canonicalizePageContent(draftPuck, adminDoc?.metadata) !==
+            canonicalizePageContent(publishedPuck, publishedDoc?.metadata);
 
         publishedMetadataRef.current = publishedDoc?.metadata || {};
 
-        // 展示基准：存在未发布草稿时默认进入草稿继续编辑；否则展示线上版本。
+        // 展示基准（2026-08-19 用户决策）：刷新后始终优先展示线上已发布版本，
+        // 让模板/页面更新第一时间可见；存在未发布草稿时通过徽标与
+        // 「继续编辑草稿」入口提示，仅在从未发布过时回退到草稿继续编辑。
         if (publishedPuck || draftPuck) {
-          const displayPuck = nextHasPendingDraft
-            ? draftPuck
-            : publishedPuck || draftPuck;
+          const viewingPublishedNow = Boolean(publishedPuck);
+          const displayPuck = publishedPuck || draftPuck;
           // 旧模板类型(分割面板/图文混排/礼赠指南)在此迁移为新体系类型;
           // 公开渲染器仍保留旧类型分支,已发布历史版本不受影响。
           serverData = ensureEditorPageStructure(
             pageKey,
             migratePuckData(displayPuck),
           );
-          const draftMetadata = adminDoc?.metadata || {};
+          // 查看线上版本时 metadata 以线上文档为准；草稿文档仅作乐观锁与保存基准。
+          const displayMetadata = viewingPublishedNow
+            ? publishedDoc?.metadata || {}
+            : adminDoc?.metadata || {};
           setData(serverData);
           latestData.current = serverData;
           dataSignatureRef.current = dataSignature(serverData);
-          setMetadata(draftMetadata);
-          latestMetadata.current = draftMetadata;
+          setMetadata(displayMetadata);
+          latestMetadata.current = displayMetadata;
+          setViewingPublished(viewingPublishedNow);
           // 乐观锁与“上次保存时间”仍以草稿文档为准，保证后续保存/发布能正确串行。
           const draftUpdatedAt = adminDoc?.updatedAt || null;
           pageSessionCacheRef.current[pageKey] = {
             data: serverData,
-            metadata: draftMetadata,
+            metadata: displayMetadata,
             lastSaved: draftUpdatedAt ? formatEditorTime(draftUpdatedAt) : null,
             updatedAt: draftUpdatedAt,
           };
@@ -3098,7 +3133,7 @@ export default function HomepageConfig({
           ? ensureEditorPageStructure(pageKey, migratePuckData(draftPuck))
           : null;
         publishedBaselineRef.current = nextHasPublished
-          ? canonicalizePuckContent(publishedPuck)
+          ? canonicalizePageContent(publishedPuck, publishedDoc?.metadata)
           : null;
         publishedDataRef.current = nextHasPublished
           ? ensureEditorPageStructure(pageKey, migratePuckData(publishedPuck))
@@ -3135,6 +3170,12 @@ export default function HomepageConfig({
     // Puck 首帧会 normalize 画布数据,JSON 全等会让每次进入编辑器都误报"有未保存修改"
     const changed = dataSignature(nextData) !== dataSignatureRef.current;
     setHasUnsavedChanges(changed);
+    // 查看线上版本时画布被编辑:自动切回编辑草稿并提示,避免“看着线上却在改草稿”的状态错乱。
+    if (changed && viewingPublishedRef.current) {
+      viewingPublishedRef.current = false;
+      setViewingPublished(false);
+      message.info("已切换到编辑模式，当前修改将保存为草稿");
+    }
   }, []);
 
   const saveDraft = useCallback(
@@ -3188,7 +3229,7 @@ export default function HomepageConfig({
           }
           setHasPendingDraft(
             publishedBaselineRef.current != null &&
-              canonicalizePuckContent(editableData) !==
+              canonicalizePageContent(editableData, requestedMetadata) !==
                 publishedBaselineRef.current,
           );
           setViewingPublished(false);
@@ -3281,10 +3322,11 @@ export default function HomepageConfig({
       const draftPuck = adminDoc?.puckData ?? null;
       const hasDraft = Boolean(draftPuck);
       const latestPublishedPuck = revisionList[0]?.puckData ?? null;
+      const latestPublishedMetadata = revisionList[0]?.metadata ?? null;
       const hasPublished = latestPublishedPuck != null;
       const hasPendingDraft =
-        canonicalizePuckContent(draftPuck) !==
-        canonicalizePuckContent(latestPublishedPuck);
+        canonicalizePageContent(draftPuck, adminDoc?.metadata) !==
+        canonicalizePageContent(latestPublishedPuck, latestPublishedMetadata);
       // 草稿条目：只要存在草稿就展示；已发布且草稿与线上一致（刚发布）时不再单独展示。
       const showDraftEntry = hasDraft && (!hasPublished || hasPendingDraft);
       setDraftSnapshot(
@@ -3486,7 +3528,7 @@ export default function HomepageConfig({
               setHasUnsavedChanges(false);
               setHasPendingDraft(
                 publishedBaselineRef.current != null &&
-                  canonicalizePuckContent(document.puckData) !==
+                  canonicalizePageContent(document.puckData, restoredMetadata) !==
                     publishedBaselineRef.current,
               );
               setViewingPublished(false);
@@ -3766,6 +3808,10 @@ export default function HomepageConfig({
             onOpenRevisions={openRevisions}
             onOpenPageSettings={() => setPageSettingsOpen(true)}
             onDataChange={trackEditorData}
+            onExitViewing={() => {
+              viewingPublishedRef.current = false;
+              setViewingPublished(false);
+            }}
           />
           <EditorBody
             onSaveAsTemplate={saveBlockAsTemplate}

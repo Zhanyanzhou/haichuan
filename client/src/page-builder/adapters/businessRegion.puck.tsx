@@ -45,26 +45,6 @@ function BusinessRegionPreview({ title, description, items }: BusinessRegionPuck
   );
 }
 
-const readOnlyField = (label: string) => ({
-  type: "custom" as const,
-  label,
-  render: ({ value }: { value?: unknown }) => (
-    <div
-      style={{
-        padding: "8px 10px",
-        border: "1px solid #E2DBD0",
-        borderRadius: 4,
-        background: "#F7F4EE",
-        color: "#756D62",
-        fontSize: 12,
-        lineHeight: 1.5,
-      }}
-    >
-      {String(value ?? "")}
-    </div>
-  ),
-});
-
 export const businessRegionPuckConfig = {
   render: (props: BusinessRegionPuckProps) => <BusinessRegionPreview {...props} />,
   defaultProps: {
@@ -74,12 +54,5 @@ export const businessRegionPuckConfig = {
     items: "商品卡片|分类筛选|排序|分页",
     locked: true,
   } satisfies BusinessRegionPuckProps,
-  fields: {
-    pageKey: readOnlyField("页面标识"),
-    title: readOnlyField("业务区域"),
-    description: readOnlyField("数据说明"),
-    items: readOnlyField("包含功能"),
-    locked: readOnlyField("固定区域"),
-  },
   resolvePermissions: () => ({ delete: false, drag: false, duplicate: false }),
 };

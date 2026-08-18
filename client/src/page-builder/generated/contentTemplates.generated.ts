@@ -1,7 +1,7 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：26c776b7cd3826fc2329e1360f187692a93784adc7deb5d7c632f9b94f58bb39
+ * SHA-256：83f8b8afd62e0c4ce395825012e872c7c793b8c8319d7b1a27261c0b4717a2e1
  */
 
 export const CONTENT_TEMPLATE_REGISTRY_VERSION = 2;
@@ -31,7 +31,7 @@ export type ContentTemplateContract = {
   width: "full" | "standard" | "wide" | "editorial";
   flow: "bleed" | "flow";
   copyPlacementByViewport: Record<"desktop" | "tablet" | "mobile", "overlay" | "stacked" | "split">;
-  spacingPolicy: readonly ("compact" | "normal" | "spacious")[];
+  spacingPolicy: readonly ("compact" | "normal" | "spacious" | "grand")[];
   media: readonly MediaSlot[];
   roles: readonly {
     id: string;
@@ -80,7 +80,8 @@ export type ContentTemplateMarker = {
 
 export type ContentTemplateSkeletonRole =
   | "media" | "mainMedia" | "detailMedia" | "copy" | "action" | "marker"
-  | "timeline" | "list" | "card" | "quote" | "form";
+  | "timeline" | "list" | "card" | "quote" | "form"
+  | "eyebrow" | "title" | "subtitle";
 
 export type ContentTemplateSkeletonZone = {
   role: ContentTemplateSkeletonRole;
@@ -1641,11 +1642,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "master": "product-focus",
     "media": [
       {
-        "desktopRatio": "4 / 5",
+        "desktopRatio": "3 / 4",
         "key": "product",
-        "mobileRatio": "4 / 5",
+        "mobileRatio": "3 / 4",
         "required": false,
-        "tabletRatio": "4 / 5"
+        "tabletRatio": "3 / 4"
       }
     ],
     "moduleType": "单品焦点推荐",
@@ -1681,36 +1682,36 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 3,
             "role": "media",
             "roleId": "product",
             "row": 1,
-            "rowSpan": 7,
-            "span": 7
+            "rowSpan": 5,
+            "span": 8
           },
           {
-            "column": 9,
+            "column": 3,
             "role": "copy",
             "roleId": "copy",
-            "row": 2,
-            "rowSpan": 2,
-            "span": 4
+            "row": 6,
+            "rowSpan": 1,
+            "span": 8
           },
           {
-            "column": 9,
+            "column": 4,
             "role": "list",
             "roleId": "list",
-            "row": 5,
-            "rowSpan": 1,
-            "span": 3
-          },
-          {
-            "column": 9,
-            "role": "action",
-            "roleId": "action",
             "row": 7,
             "rowSpan": 1,
-            "span": 2
+            "span": 6
+          },
+          {
+            "column": 4,
+            "role": "action",
+            "roleId": "action",
+            "row": 8,
+            "rowSpan": 1,
+            "span": 6
           }
         ]
       },
@@ -1764,19 +1765,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "allowedRatioPresetsByViewport": {
           "desktop": [
-            "4 / 5"
+            "3 / 4"
           ],
           "mobile": [
-            "4 / 5"
+            "3 / 4"
           ],
           "tablet": [
-            "4 / 5"
+            "3 / 4"
           ]
         },
         "defaultRatioByViewport": {
-          "desktop": "4 / 5",
-          "mobile": "4 / 5",
-          "tablet": "4 / 5"
+          "desktop": "3 / 4",
+          "mobile": "3 / 4",
+          "tablet": "3 / 4"
         },
         "id": "product",
         "kind": "media",
@@ -1817,6 +1818,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "limits": {
         "altText": 80,
         "buttonText": 12,
+        "eyebrow": 60,
         "subtitle": 48,
         "title": 24
       },
@@ -2204,6 +2206,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "limits": {
         "actionText": 12,
         "altText": 80,
+        "eyebrow": 60,
         "subtitle": 48,
         "title": 24
       },
@@ -2226,10 +2229,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "master": "cinematic-hero",
     "media": [
       {
-        "desktopRatio": "16 / 7",
+        "desktopRatio": "16 / 9",
         "key": "desktopImage",
         "required": true,
-        "tabletRatio": "16 / 7"
+        "tabletRatio": "16 / 9"
       },
       {
         "key": "mobileImage",
@@ -2263,7 +2266,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "copy",
           "action"
         ],
-        "tone": "dark",
+        "tone": "light",
         "zones": [
           {
             "column": 1,
@@ -2274,21 +2277,39 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 2,
+            "column": 5,
             "overlay": true,
-            "role": "copy",
+            "role": "eyebrow",
+            "roleId": "copy",
+            "row": 4.2,
+            "rowSpan": 0.7,
+            "span": 4
+          },
+          {
+            "column": 4,
+            "overlay": true,
+            "role": "title",
             "roleId": "copy",
             "row": 5,
-            "rowSpan": 1,
+            "rowSpan": 1.3,
+            "span": 6
+          },
+          {
+            "column": 4.5,
+            "overlay": true,
+            "role": "subtitle",
+            "roleId": "copy",
+            "row": 6.4,
+            "rowSpan": 0.7,
             "span": 5
           },
           {
-            "column": 2,
+            "column": 5,
             "overlay": true,
             "role": "action",
             "roleId": "action",
-            "row": 7,
-            "rowSpan": 1,
+            "row": 7.4,
+            "rowSpan": 0.7,
             "span": 3
           }
         ]
@@ -2334,10 +2355,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "allowedRatioPresetsByViewport": {
           "desktop": [
-            "16 / 7"
+            "16 / 9"
           ],
           "tablet": [
-            "16 / 7"
+            "16 / 9"
           ]
         },
         "appliesTo": [
@@ -2345,8 +2366,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "tablet"
         ],
         "defaultRatioByViewport": {
-          "desktop": "16 / 7",
-          "tablet": "16 / 7"
+          "desktop": "16 / 9",
+          "tablet": "16 / 9"
         },
         "id": "desktopImage",
         "kind": "media",
@@ -2374,6 +2395,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "id": "copy",
         "kind": "text",
+        "previewRoles": [
+          "copy",
+          "eyebrow",
+          "title",
+          "subtitle"
+        ],
         "required": false,
         "role": "copy"
       },
@@ -3541,7 +3568,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       },
       {
         "key": "mobileImage",
-        "mobileRatio": "3 / 4",
+        "mobileRatio": "4 / 5",
         "required": false
       }
     ],
@@ -3567,35 +3594,51 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "preview": {
       "desktop": {
         "order": [
+          "desktopImage",
           "copy",
-          "action",
-          "desktopImage"
+          "action"
         ],
         "tone": "light",
         "zones": [
           {
+            "column": 4,
+            "role": "media",
+            "roleId": "desktopImage",
+            "row": 1,
+            "rowSpan": 8,
+            "span": 9
+          },
+          {
             "column": 1,
-            "role": "copy",
+            "role": "eyebrow",
             "roleId": "copy",
-            "row": 3,
-            "rowSpan": 3,
-            "span": 4
+            "row": 4.8,
+            "rowSpan": 0.7,
+            "span": 2.5
+          },
+          {
+            "column": 1,
+            "role": "title",
+            "roleId": "copy",
+            "row": 5.5,
+            "rowSpan": 1.6,
+            "span": 2.5
+          },
+          {
+            "column": 1,
+            "role": "subtitle",
+            "roleId": "copy",
+            "row": 7.1,
+            "rowSpan": 0.7,
+            "span": 2.5
           },
           {
             "column": 1,
             "role": "action",
             "roleId": "action",
-            "row": 7,
-            "rowSpan": 1,
-            "span": 3
-          },
-          {
-            "column": 6,
-            "role": "media",
-            "roleId": "desktopImage",
-            "row": 1,
-            "rowSpan": 8,
-            "span": 7
+            "row": 7.8,
+            "rowSpan": 0.6,
+            "span": 2
           }
         ]
       },
@@ -3612,22 +3655,24 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "role": "media",
             "roleId": "mobileImage",
             "row": 1,
-            "rowSpan": 4,
+            "rowSpan": 5,
             "span": 12
           },
           {
-            "column": 1,
+            "column": 2,
+            "overlay": true,
             "role": "copy",
             "roleId": "copy",
-            "row": 5,
+            "row": 2,
             "rowSpan": 2,
-            "span": 12
+            "span": 10
           },
           {
-            "column": 1,
+            "column": 4,
+            "overlay": true,
             "role": "action",
             "roleId": "action",
-            "row": 7,
+            "row": 4,
             "rowSpan": 1,
             "span": 5
           }
@@ -3662,14 +3707,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "allowedRatioPresetsByViewport": {
           "mobile": [
-            "3 / 4"
+            "4 / 5"
           ]
         },
         "appliesTo": [
           "mobile"
         ],
         "defaultRatioByViewport": {
-          "mobile": "3 / 4"
+          "mobile": "4 / 5"
         },
         "fallbackRoleId": "desktopImage",
         "id": "mobileImage",
@@ -3680,6 +3725,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "id": "copy",
         "kind": "text",
+        "previewRoles": [
+          "copy",
+          "eyebrow",
+          "title",
+          "subtitle"
+        ],
         "required": false,
         "role": "copy"
       },
@@ -4136,19 +4187,35 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 3,
-            "role": "copy",
+            "column": 5,
+            "role": "eyebrow",
             "roleId": "copy",
-            "row": 3,
-            "rowSpan": 3,
+            "row": 3.6,
+            "rowSpan": 0.7,
+            "span": 4
+          },
+          {
+            "column": 3,
+            "role": "title",
+            "roleId": "copy",
+            "row": 4.3,
+            "rowSpan": 2,
             "span": 8
+          },
+          {
+            "column": 4,
+            "role": "subtitle",
+            "roleId": "copy",
+            "row": 6.3,
+            "rowSpan": 0.7,
+            "span": 6
           },
           {
             "column": 5,
             "role": "action",
             "roleId": "action",
-            "row": 7,
-            "rowSpan": 1,
+            "row": 7.4,
+            "rowSpan": 0.7,
             "span": 4
           }
         ]
@@ -4207,6 +4274,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "id": "copy",
         "kind": "text",
+        "previewRoles": [
+          "copy",
+          "eyebrow",
+          "title",
+          "subtitle"
+        ],
         "required": false,
         "role": "copy"
       },
@@ -4219,7 +4292,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     ],
     "spacingPolicy": [
       "normal",
-      "spacious"
+      "spacious",
+      "grand"
     ],
     "supportsLinkTarget": true,
     "version": 1,
@@ -4457,11 +4531,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "master": "wearing-story",
     "media": [
       {
-        "desktopRatio": "4 / 5",
+        "desktopRatio": "2 / 3",
         "key": "wearingImage",
-        "mobileRatio": "3 / 4",
+        "mobileRatio": "2 / 3",
         "required": false,
-        "tabletRatio": "4 / 5"
+        "tabletRatio": "2 / 3"
       }
     ],
     "moduleType": "佩戴灵感",
@@ -4490,43 +4564,25 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "desktop": {
         "order": [
           "wearingImage",
-          "copy",
-          "relatedProducts",
-          "action"
+          "copy"
         ],
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 4,
             "role": "mainMedia",
             "roleId": "wearingImage",
             "row": 1,
             "rowSpan": 7,
-            "span": 7
+            "span": 5
           },
           {
-            "column": 9,
+            "column": 4,
             "role": "copy",
             "roleId": "copy",
-            "row": 2,
-            "rowSpan": 2,
-            "span": 4
-          },
-          {
-            "column": 10,
-            "role": "detailMedia",
-            "roleId": "relatedProducts",
-            "row": 5,
-            "rowSpan": 2,
-            "span": 3
-          },
-          {
-            "column": 9,
-            "role": "action",
-            "roleId": "action",
-            "row": 7,
+            "row": 8,
             "rowSpan": 1,
-            "span": 2
+            "span": 5
           }
         ]
       },
@@ -4580,19 +4636,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "allowedRatioPresetsByViewport": {
           "desktop": [
-            "4 / 5"
+            "2 / 3"
           ],
           "mobile": [
-            "3 / 4"
+            "2 / 3"
           ],
           "tablet": [
-            "4 / 5"
+            "2 / 3"
           ]
         },
         "defaultRatioByViewport": {
-          "desktop": "4 / 5",
-          "mobile": "3 / 4",
-          "tablet": "4 / 5"
+          "desktop": "2 / 3",
+          "mobile": "2 / 3",
+          "tablet": "2 / 3"
         },
         "id": "wearingImage",
         "kind": "media",
@@ -5137,43 +5193,43 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 1,
+          "column": 3,
           "role": "media",
           "row": 1,
-          "rowSpan": 7,
-          "span": 7
+          "rowSpan": 5,
+          "span": 8
         },
         {
-          "column": 9,
+          "column": 3,
           "role": "copy",
-          "row": 2,
-          "rowSpan": 2,
-          "span": 4
-        },
-        {
-          "column": 9,
-          "role": "list",
-          "row": 5,
+          "row": 6,
           "rowSpan": 1,
-          "span": 3
+          "span": 8
         },
         {
-          "column": 9,
-          "role": "action",
+          "column": 4,
+          "role": "list",
           "row": 7,
           "rowSpan": 1,
-          "span": 2
+          "span": 6
+        },
+        {
+          "column": 4,
+          "role": "action",
+          "row": 8,
+          "rowSpan": 1,
+          "span": 6
         }
       ],
       "tone": "light"
     },
     "slots": [
       {
-        "desktopRatio": "4 / 5",
+        "desktopRatio": "3 / 4",
         "key": "product",
-        "mobileRatio": "4 / 5",
+        "mobileRatio": "3 / 4",
         "role": "media",
-        "tabletRatio": "4 / 5"
+        "tabletRatio": "3 / 4"
       },
       {
         "key": "copy",
@@ -6040,43 +6096,29 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 1,
+          "column": 4,
           "role": "mainMedia",
           "row": 1,
           "rowSpan": 7,
-          "span": 7
+          "span": 5
         },
         {
-          "column": 9,
+          "column": 4,
           "role": "copy",
-          "row": 2,
-          "rowSpan": 2,
-          "span": 4
-        },
-        {
-          "column": 10,
-          "role": "detailMedia",
-          "row": 5,
-          "rowSpan": 2,
-          "span": 3
-        },
-        {
-          "column": 9,
-          "role": "action",
-          "row": 7,
+          "row": 8,
           "rowSpan": 1,
-          "span": 2
+          "span": 5
         }
       ],
       "tone": "light"
     },
     "slots": [
       {
-        "desktopRatio": "4 / 5",
+        "desktopRatio": "2 / 3",
         "key": "wearingImage",
-        "mobileRatio": "3 / 4",
+        "mobileRatio": "2 / 3",
         "role": "mainMedia",
-        "tabletRatio": "4 / 5"
+        "tabletRatio": "2 / 3"
       },
       {
         "key": "copy",
@@ -6668,32 +6710,32 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 3,
           "role": "media",
           "row": 1,
-          "rowSpan": 7,
-          "span": 7
+          "rowSpan": 5,
+          "span": 8
         },
         {
-          "column": 9,
+          "column": 3,
           "role": "copy",
-          "row": 2,
-          "rowSpan": 2,
-          "span": 4
-        },
-        {
-          "column": 9,
-          "role": "list",
-          "row": 5,
+          "row": 6,
           "rowSpan": 1,
-          "span": 3
+          "span": 8
         },
         {
-          "column": 9,
-          "role": "action",
+          "column": 4,
+          "role": "list",
           "row": 7,
           "rowSpan": 1,
-          "span": 2
+          "span": 6
+        },
+        {
+          "column": 4,
+          "role": "action",
+          "row": 8,
+          "rowSpan": 1,
+          "span": 6
         }
       ]
     },
@@ -6915,7 +6957,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
         "copy",
         "action"
       ],
-      "tone": "dark",
+      "tone": "light",
       "zones": [
         {
           "column": 1,
@@ -6925,19 +6967,35 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 2,
+          "column": 5,
           "overlay": true,
-          "role": "copy",
+          "role": "eyebrow",
+          "row": 4.2,
+          "rowSpan": 0.7,
+          "span": 4
+        },
+        {
+          "column": 4,
+          "overlay": true,
+          "role": "title",
           "row": 5,
-          "rowSpan": 1,
+          "rowSpan": 1.3,
+          "span": 6
+        },
+        {
+          "column": 4.5,
+          "overlay": true,
+          "role": "subtitle",
+          "row": 6.4,
+          "rowSpan": 0.7,
           "span": 5
         },
         {
-          "column": 2,
+          "column": 5,
           "overlay": true,
           "role": "action",
-          "row": 7,
-          "rowSpan": 1,
+          "row": 7.4,
+          "rowSpan": 0.7,
           "span": 3
         }
       ]
@@ -7507,32 +7565,46 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
   "singlePoster": {
     "desktop": {
       "order": [
+        "media",
         "copy",
-        "action",
-        "media"
+        "action"
       ],
       "tone": "light",
       "zones": [
         {
+          "column": 4,
+          "role": "media",
+          "row": 1,
+          "rowSpan": 8,
+          "span": 9
+        },
+        {
           "column": 1,
-          "role": "copy",
-          "row": 3,
-          "rowSpan": 3,
-          "span": 4
+          "role": "eyebrow",
+          "row": 4.8,
+          "rowSpan": 0.7,
+          "span": 2.5
+        },
+        {
+          "column": 1,
+          "role": "title",
+          "row": 5.5,
+          "rowSpan": 1.6,
+          "span": 2.5
+        },
+        {
+          "column": 1,
+          "role": "subtitle",
+          "row": 7.1,
+          "rowSpan": 0.7,
+          "span": 2.5
         },
         {
           "column": 1,
           "role": "action",
-          "row": 7,
-          "rowSpan": 1,
-          "span": 3
-        },
-        {
-          "column": 6,
-          "role": "media",
-          "row": 1,
-          "rowSpan": 8,
-          "span": 7
+          "row": 7.8,
+          "rowSpan": 0.6,
+          "span": 2
         }
       ]
     },
@@ -7550,20 +7622,22 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "column": 1,
           "role": "media",
           "row": 1,
-          "rowSpan": 4,
+          "rowSpan": 5,
           "span": 12
         },
         {
-          "column": 1,
+          "column": 2,
+          "overlay": true,
           "role": "copy",
-          "row": 5,
+          "row": 2,
           "rowSpan": 2,
-          "span": 12
+          "span": 10
         },
         {
-          "column": 1,
+          "column": 4,
+          "overlay": true,
           "role": "action",
-          "row": 7,
+          "row": 4,
           "rowSpan": 1,
           "span": 5
         }
@@ -7736,17 +7810,31 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
+          "column": 5,
+          "role": "eyebrow",
+          "row": 3.6,
+          "rowSpan": 0.7,
+          "span": 4
+        },
+        {
           "column": 3,
-          "role": "copy",
-          "row": 3,
-          "rowSpan": 3,
+          "role": "title",
+          "row": 4.3,
+          "rowSpan": 2,
           "span": 8
+        },
+        {
+          "column": 4,
+          "role": "subtitle",
+          "row": 6.3,
+          "rowSpan": 0.7,
+          "span": 6
         },
         {
           "column": 5,
           "role": "action",
-          "row": 7,
-          "rowSpan": 1,
+          "row": 7.4,
+          "rowSpan": 0.7,
           "span": 4
         }
       ]
@@ -7875,39 +7963,23 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "desktop": {
       "order": [
         "mainMedia",
-        "copy",
-        "detailMedia",
-        "action"
+        "copy"
       ],
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 4,
           "role": "mainMedia",
           "row": 1,
           "rowSpan": 7,
-          "span": 7
+          "span": 5
         },
         {
-          "column": 9,
+          "column": 4,
           "role": "copy",
-          "row": 2,
-          "rowSpan": 2,
-          "span": 4
-        },
-        {
-          "column": 10,
-          "role": "detailMedia",
-          "row": 5,
-          "rowSpan": 2,
-          "span": 3
-        },
-        {
-          "column": 9,
-          "role": "action",
-          "row": 7,
+          "row": 8,
           "rowSpan": 1,
-          "span": 2
+          "span": 5
         }
       ]
     },

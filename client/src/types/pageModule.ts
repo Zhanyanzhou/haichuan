@@ -19,6 +19,7 @@ export interface PageModuleContent {
 
 export interface PageModuleLayout {
   template: string;       // "leftTextRightImage" | "rightTextLeftImage" | "stacked" | ...
+  alignment?: string;     // "center" | "left" — 首屏等舞台模板的文字位置受控档
   desktopColumns?: string; // "8-4" | "6-6" | "4-8"
   textPosition?: string;  // "left" | "right" | "overlay"
 }

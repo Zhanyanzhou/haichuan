@@ -2,10 +2,8 @@
  * beforeAfter.puck.ts — 改款前后对比的 Puck 适配器
  */
 import BeforeAfterBlock from "@/components/blocks/BeforeAfterBlock";
-import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
-import MediaPickerField from "../fields/MediaPickerField";
-import { colorPuckField } from "../fields/ColorField";
+import type { LinkTargetType } from "../utils/linkTarget";
 
 export interface BeforeAfterPuckProps {
   title: string;
@@ -20,6 +18,10 @@ export interface BeforeAfterPuckProps {
   beforeFocusY: number;
   afterFocusX: number;
   afterFocusY: number;
+  actionText: string;
+  linkUrl: string;
+  targetType: LinkTargetType;
+  productId: number;
   bgColor: string;
   locked?: boolean;
 }
@@ -44,68 +46,13 @@ export const beforeAfterPuckConfig = {
     beforeFocusY: 50,
     afterFocusX: 50,
     afterFocusY: 50,
-    bgColor: "#F7F4EE",
+    actionText: "",
+    linkUrl: "",
+    targetType: "none",
+    productId: 0,
+    bgColor: "#FFFFFF",
     locked: false,
   } satisfies BeforeAfterPuckProps,
-  fields: {
-    title: { type: "text" as const, label: "标题" },
-    subtitle: { type: "text" as const, label: "副标题（可选）" },
-    beforeImage: {
-      type: "custom" as const,
-      label: "改款前图片",
-      render: ({
-        value,
-        onChange,
-        readOnly,
-      }: {
-        value?: string;
-        onChange: (v: string) => void;
-        readOnly?: boolean;
-      }) => (
-        <MediaPickerField
-          fieldKey="beforeImage"
-          device="shared"
-          value={value}
-          onChange={onChange}
-          readOnly={readOnly}
-          spec={IMAGE_SPECS.beforeAfter.image}
-          placeholder="上传改款前图片"
-        />
-      ),
-    },
-    afterImage: {
-      type: "custom" as const,
-      label: "改款后图片",
-      render: ({
-        value,
-        onChange,
-        readOnly,
-      }: {
-        value?: string;
-        onChange: (v: string) => void;
-        readOnly?: boolean;
-      }) => (
-        <MediaPickerField
-          fieldKey="afterImage"
-          device="shared"
-          value={value}
-          onChange={onChange}
-          readOnly={readOnly}
-          spec={IMAGE_SPECS.beforeAfter.image}
-          placeholder="上传改款后图片"
-        />
-      ),
-    },
-    beforeLabel: { type: "text" as const, label: "改款前标签" },
-    afterLabel: { type: "text" as const, label: "改款后标签" },
-    beforeAltText: { type: "text" as const, label: "改款前替代文字" },
-    afterAltText: { type: "text" as const, label: "改款后替代文字" },
-    beforeFocusX: { type: "number" as const, label: "改款前焦点 X" },
-    beforeFocusY: { type: "number" as const, label: "改款前焦点 Y" },
-    afterFocusX: { type: "number" as const, label: "改款后焦点 X" },
-    afterFocusY: { type: "number" as const, label: "改款后焦点 Y" },
-    bgColor: colorPuckField("背景色"),
-  },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};

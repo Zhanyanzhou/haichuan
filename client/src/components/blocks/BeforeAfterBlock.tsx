@@ -1,18 +1,21 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { BEFORE_AFTER_CONTRACT } from "@/page-builder/config/blockContracts";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
+import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 
 interface BeforeAfterBlockProps {
   module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
   editMode?: boolean;
 }
 
-const INK = "#28231F";
-const MUTED = "rgba(40,35,31,0.58)";
-const GOLD = "#B8944E";
+const INK = "#1A1A1A";
+const MUTED = "#8C8C8C";
+const GOLD = "#8C8C8C";
 
 /**
  * 改款前后对比 — Editorial Story 母版(改款叙事变体)
@@ -30,8 +33,13 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
     afterLabel,
     beforeAltText,
     afterAltText,
+    actionText,
+    linkUrl,
+    targetType,
+    productId,
   } = content;
-  const bgColor = styleConfig.bgColor || "#F7F4EE";
+  const bgColor = styleConfig.bgColor || "#FFFFFF";
+  const targetUrl = resolveLinkTargetUrl({ targetType, productId, linkUrl });
   const beforeFocusX = Math.min(100, Math.max(0, Number(styleConfig.beforeFocusX ?? 50)));
   const beforeFocusY = Math.min(100, Math.max(0, Number(styleConfig.beforeFocusY ?? 50)));
   const afterFocusX = Math.min(100, Math.max(0, Number(styleConfig.afterFocusX ?? 50)));
@@ -64,6 +72,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
         <BlockEmptyPlaceholder
           hint="改款前后对比"
           spec={`请上传改款前/后两张同比例图 · ${IMAGE_SPECS.beforeAfter.image.label}`}
+          ratio={BEFORE_AFTER_CONTRACT.canvas.desktopMediaAspectRatio}
         />
       </DecorSection>
     );
@@ -107,7 +116,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
           height: 40px;
           border-radius: 50%;
           border: 2px solid #FFFFFF;
-          background: rgba(184,148,78,.92);
+          background: rgba(26,26,26,.92);
           color: #fff;
           display: grid;
           place-items: center;
@@ -133,9 +142,9 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
           .hc-before-after__track { aspect-ratio: ${BEFORE_AFTER_CONTRACT.canvas.mobileMediaAspectRatio}; }
         }
       `}</style>
-      {(title || subtitle) && (
+      {(title || subtitle || editMode) && (
         <header style={{ maxWidth: 640, margin: "0 auto 40px", textAlign: "center" }}>
-          {title && (
+          {title ? (
             <h2 data-editor-field="title"
               style={{
                 margin: "0 0 12px",
@@ -148,12 +157,16 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
             >
               {title}
             </h2>
-          )}
-          {subtitle && (
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="title" label="标题" block />
+          ) : null}
+          {subtitle ? (
             <p data-editor-field="subtitle" style={{ margin: 0, fontSize: "var(--hc-type-body, 15px)", color: MUTED, lineHeight: 1.8 }}>
               {subtitle}
             </p>
-          )}
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="body" label="副文" block />
+          ) : null}
         </header>
       )}
       <div
@@ -206,6 +219,19 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
       >
         拖动分割线对比改款前后
       </p>
+      {actionText && targetUrl ? (
+        <div style={{ marginTop: 20, textAlign: "center" }}>
+          {editMode ? (
+            <span data-editor-field="actionText linkUrl productId" style={{ color: INK, fontSize: 13, letterSpacing: "0.04em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+              {actionText} <span>→</span>
+            </span>
+          ) : (
+            <Link to={targetUrl} data-editor-field="actionText linkUrl productId" style={{ color: INK, textDecoration: "none", fontSize: 13, letterSpacing: "0.04em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+              {actionText} <span>→</span>
+            </Link>
+          )}
+        </div>
+      ) : null}
     </DecorSection>
   );
 }

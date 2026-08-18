@@ -12,6 +12,7 @@ import { fromEvent, interval, map, merge, Observable, startWith } from "rxjs";
 import {
   CONTENT_TEMPLATE_BY_MODULE_TYPE,
   getContentTemplateIssues,
+  getContentTemplateCompletion,
   type ContentTemplateIssue,
 } from "./content-template-contract";
 
@@ -496,13 +497,16 @@ export class PageModulesService {
         }
       }
 
-      const requiredImageFields = contentTemplate
-        ? contentTemplate.media.filter((slot) => slot.required).map((slot) => slot.key)
-        : PUCK_REQUIRED_IMAGE_FIELDS[type] || [];
+      // 必填媒体检查统一走生成文件的权威实现：
+      // getContentTemplateCompletion 内部用 getCompatibilityRoleValue 做
+      // 合同 role id → Puck props 字段名的兼容映射（如 视频区块 coverImage→posterUrl），
+      // 避免服务端直接读 props[coverImage] 读不到前端存的 posterUrl 而误报缺图。
+      const completion = getContentTemplateCompletion(type, props);
+      const requiredImageFields = completion
+        ? completion.material.missing
+        : (PUCK_REQUIRED_IMAGE_FIELDS[type] || []).filter((field) => !this.isNonEmptyString(props[field]));
       for (const field of requiredImageFields) {
-        if (!this.isNonEmptyString(props[field])) {
-          errors.push(`${label}：${field} 图片不能为空`);
-        }
+        errors.push(`${label}：${field} 图片不能为空`);
       }
 
       const validateAsset = (value: unknown, assetLabel: string) => {

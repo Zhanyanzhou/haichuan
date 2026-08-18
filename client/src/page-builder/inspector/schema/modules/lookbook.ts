@@ -6,7 +6,7 @@ import { createElement } from "react";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { lookbookPuckConfig } from "../../../adapters/lookbook.puck";
 import ProductIdsField from "../../../fields/ProductIdsField";
-import { altTextField, bgColorPresetField, moduleNameField } from "../shared";
+import { altTextField, bgColorPresetField, linkTargetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 export const lookbookSchema: ModuleInspectorSchema = {
@@ -14,7 +14,7 @@ export const lookbookSchema: ModuleInspectorSchema = {
   displayName: "佩戴展示",
   purpose: "以 4:5 佩戴大片串联可直接查看的关联作品。",
   defaults: { ...lookbookPuckConfig.defaultProps },
-  groupTitles: { media: "佩戴素材与关联作品" },
+  groupTitles: { media: "佩戴素材", product: "关联作品" },
   sections: [
     {
       id: "lookbook-content",
@@ -39,10 +39,10 @@ export const lookbookSchema: ModuleInspectorSchema = {
       ],
     },
     {
-      id: "lookbook-media",
-      title: "媒体",
-      layer: "media",
-      description: "桌面 4:5 大片占 58% 分栏；手机全宽",
+      id: "lookbook-product",
+      title: "商品关联",
+      layer: "product",
+      description: "关联可直接查看的站内作品",
       fields: [
         {
           key: "productIds",
@@ -54,6 +54,14 @@ export const lookbookSchema: ModuleInspectorSchema = {
               onChange: (ids: number[]) => update({ productIds: ids }),
             }),
         },
+      ],
+    },
+    {
+      id: "lookbook-media",
+      title: "媒体",
+      layer: "media",
+      description: "桌面 4:5 大片占 58% 分栏；手机全宽",
+      fields: [
         {
           key: "image",
           label: "佩戴大片",
@@ -65,6 +73,22 @@ export const lookbookSchema: ModuleInspectorSchema = {
           showSpecCheck: true,
         },
         altTextField(),
+      ],
+    },
+    {
+      id: "lookbook-action",
+      title: "行动与关联",
+      layer: "interaction",
+      fields: [
+        {
+          key: "actionText",
+          label: "行动入口文字",
+          control: "text",
+          maxLength: 12,
+          hint: "留空不显示",
+          placeholder: "如 查看全部佩戴灵感",
+        },
+        linkTargetField("行动入口点击后"),
       ],
     },
     {

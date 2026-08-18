@@ -3,10 +3,7 @@
  */
 
 import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
-import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
-import { colorPuckField } from "../fields/ColorField";
-import MediaPickerField from "../fields/MediaPickerField";
 
 export interface CategoryCardItem {
   name: string;
@@ -46,54 +43,9 @@ export const categoryCardsPuckConfig = {
       { name: "戒指", image: "", link: "/products", count: "" },
     ],
     layout: "grid-3",
-    bgColor: "#FBF9F6",
+    bgColor: "#FFFFFF",
     locked: false,
   } satisfies CategoryCardsPuckProps,
-  fields: {
-    title: { type: "text" as const, label: "标题" },
-    subtitle: { type: "textarea" as const, label: "副标题（可选）" },
-    categories: {
-      type: "array" as const,
-      label: "分类卡片",
-      arrayFields: {
-        name: { type: "text" as const, label: "名称" },
-        image: {
-          type: "custom" as const,
-          label: "卡片图片",
-          render: ({
-            value, onChange, readOnly,
-          }: { value?: string; onChange: (value: string) => void; readOnly?: boolean }) => (
-            <MediaPickerField
-              fieldKey="image"
-              device="shared"
-              value={value}
-              onChange={onChange}
-              readOnly={readOnly}
-              spec={IMAGE_SPECS.categoryCards.image}
-              placeholder="上传分类卡片图片"
-            />
-          ),
-        },
-        link: { type: "text" as const, label: "跳转链接" },
-        count: { type: "text" as const, label: "作品数量（可选）" },
-        description: { type: "text" as const, label: "辅助文案（可选）" },
-        altText: { type: "text" as const, label: "图片替代文字" },
-        focusX: { type: "number" as const, label: "焦点 X", min: 0, max: 100 },
-        focusY: { type: "number" as const, label: "焦点 Y", min: 0, max: 100 },
-      },
-      defaultItemProps: { name: "新分类", image: "", link: "/products", count: "", description: "", altText: "", focusX: 50, focusY: 50 },
-    },
-    layout: {
-      type: "radio" as const,
-      label: "列数",
-      options: [
-        { label: "2 列", value: "grid-2" },
-        { label: "3 列", value: "grid-3" },
-        { label: "4 列", value: "grid-4" },
-      ],
-    },
-    bgColor: colorPuckField("背景色"),
-  },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};

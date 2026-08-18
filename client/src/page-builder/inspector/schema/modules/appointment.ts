@@ -84,28 +84,6 @@ export const appointmentSchema: ModuleInspectorSchema = {
           placeholder: "上传背景图，留空用纯色",
           showSpecCheck: true,
         },
-        {
-          key: "altText",
-          label: "背景图替代文字",
-          control: "text",
-          maxLength: APPOINTMENT_CONTRACT.content.limits.altText,
-        },
-      ],
-    },
-    {
-      id: "appointment-style",
-      title: "样式",
-      layer: "style",
-      fields: [
-        {
-          key: "tone",
-          label: "视觉预设",
-          control: "segmented",
-          options: [
-            { label: "深色典藏", value: "dark" },
-            { label: "象牙留白", value: "ivory" },
-          ],
-        },
         // 手机端独立裁切焦点(百分比);背景图为 shared 单字段,focusKeys 仅承载桌面端对
         {
           key: "mobileFocusX",
@@ -123,6 +101,19 @@ export const appointmentSchema: ModuleInspectorSchema = {
           max: 100,
           unit: "%",
         },
+        {
+          key: "altText",
+          label: "背景图替代文字",
+          control: "text",
+          maxLength: APPOINTMENT_CONTRACT.content.limits.altText,
+        },
+      ],
+    },
+    {
+      id: "appointment-style",
+      title: "样式",
+      layer: "style",
+      fields: [
         ADVANCED_BG_COLOR_FIELD,
       ],
     },

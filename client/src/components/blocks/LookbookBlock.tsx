@@ -1,19 +1,21 @@
 import { Link } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
+import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 
 interface LookbookBlockProps {
   module: { content: Record<string, any>; styleConfig?: Record<string, any> };
   editMode?: boolean;
 }
 
-const INK = "#28231F";
-const MUTED = "rgba(40,35,31,0.58)";
-const GOLD = "#B8944E";
+const INK = "#1A1A1A";
+const MUTED = "#8C8C8C";
+const GOLD = "#8C8C8C";
 const WEARING_RATIO_DESKTOP = getContractRoleRatio("wearingInspiration", "wearingImage", "desktop");
 const WEARING_RATIO_MOBILE = getContractRoleRatio("wearingInspiration", "wearingImage", "mobile");
 /** 关联作品缩略与商品行同源,比例取 productRow 契约 */
@@ -27,15 +29,21 @@ const PRODUCT_THUMB_RATIO = getContractRoleRatio("productRow", "productCards", "
  */
 export default function LookbookBlock({ module, editMode }: LookbookBlockProps) {
   const { content = {}, styleConfig = {} } = module;
-  const { title, subtitle, image, imageAlt, products = [] } = content;
-  const bgColor = styleConfig.bgColor || "#FCFCFB";
+  const { title, subtitle, image, imageAlt, products = [], actionText, linkUrl, targetType, productId } = content;
+  const bgColor = styleConfig.bgColor || "#FFFFFF";
+  // 佩戴大片的视觉焦点（0-100）；与 Schema focusKeys 对应，驱动画布裁切预览
+  const focusX = Math.min(100, Math.max(0, Number(styleConfig.focusX ?? 50)));
+  const focusY = Math.min(100, Math.max(0, Number(styleConfig.focusY ?? 50)));
   const hasProducts = Array.isArray(products) && products.length > 0;
+  const targetUrl = resolveLinkTargetUrl({ targetType, productId, linkUrl });
+  // 纯氛围模式：无关联作品时，第 6 页「大片」只保留竖幅氛围影像，零文字零商品
+  const pureAtmosphere = !hasProducts;
 
   if (!image && !hasProducts && !editMode) return null;
 
   return (
     <DecorSection master="hero-piece" background={bgColor}>
-      <div className="hc-lookbook">
+      <div className={pureAtmosphere ? "hc-lookbook hc-lookbook--pure" : "hc-lookbook"}>
         <style>{`
           .hc-lookbook {
             display: grid;
@@ -47,6 +55,13 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
           }
           .hc-lookbook__scene { grid-row: 1 / span 2; aspect-ratio: ${WEARING_RATIO_DESKTOP}; overflow: hidden; background: #E5E5E2; }
           .hc-lookbook__scene img { width: 100%; height: 100%; object-fit: cover; display: block; }
+          /* 纯氛围大片：竖幅 2:3 居中，高度不超过 88vh，移动端全宽 */
+          .hc-lookbook--pure { display: block; }
+          .hc-lookbook--pure .hc-lookbook__scene {
+            width: min(100%, calc(88vh * 2 / 3));
+            aspect-ratio: ${WEARING_RATIO_DESKTOP};
+            margin: 0 auto;
+          }
           .hc-lookbook__products {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -64,24 +79,48 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
         `}</style>
         <div data-editor-field="image" className="hc-lookbook__scene">
           {image ? (
-            <img src={image} alt={imageAlt || title || "佩戴大片"} loading="lazy" decoding="async" />
+            <img
+              src={image}
+              alt={imageAlt || title || "佩戴大片"}
+              loading="lazy"
+              decoding="async"
+              style={{ objectPosition: `${focusX}% ${focusY}%` }}
+            />
           ) : (
             <BlockEmptyPlaceholder hint="佩戴大片" spec={`请上传佩戴大片 · ${IMAGE_SPECS.lookbook.image.label}`} height="100%" />
           )}
         </div>
-        {(title || subtitle) && (
+        {!pureAtmosphere && (title || subtitle || (actionText && targetUrl) || editMode) && (
           <div className="hc-lookbook__copy" data-content-role="copy">
-            {title && (
+            {title ? (
               <h2 data-editor-field="title" style={{ margin: "0 0 12px", color: INK, fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-type-h2, clamp(28px,3.4vw,42px))", fontWeight: 500, lineHeight: 1.2 }}>
                 {title}
               </h2>
-            )}
-            {subtitle && (
+            ) : editMode ? (
+              <EditCopyPlaceholder variant="title" label="标题" block />
+            ) : null}
+            {subtitle ? (
               <p data-editor-field="subtitle" style={{ margin: 0, color: MUTED, fontSize: "var(--hc-type-body, 14px)", lineHeight: 1.8 }}>{subtitle}</p>
-            )}
+            ) : editMode ? (
+              <EditCopyPlaceholder variant="body" label="说明" block />
+            ) : null}
+            {actionText && targetUrl ? (
+              editMode ? (
+                <span data-editor-field="actionText linkUrl productId" style={{ display: "inline-block", marginTop: 20, color: INK, fontSize: 13, letterSpacing: "0.04em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+                  {actionText} <span>→</span>
+                </span>
+              ) : (
+                <Link to={targetUrl} data-editor-field="actionText linkUrl productId" style={{ display: "inline-block", marginTop: 20, color: INK, textDecoration: "none", fontSize: 13, letterSpacing: "0.04em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+                  {actionText} <span>→</span>
+                </Link>
+              )
+            ) : editMode ? (
+              <EditCopyPlaceholder variant="action" label="行动链接" />
+            ) : null}
           </div>
         )}
-        <div className="hc-lookbook__products">
+        {!pureAtmosphere && (
+          <div className="hc-lookbook__products">
           {hasProducts ? products.map((product: any, index: number) => (
             <Link
               key={`${product.id || product.name}-${index}`}
@@ -101,7 +140,8 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
           )) : (
             <p style={{ margin: 0, color: MUTED, fontSize: 13, gridColumn: "1 / -1" }}>请选择关联的珠宝作品</p>
           )}
-        </div>
+          </div>
+        )}
       </div>
     </DecorSection>
   );

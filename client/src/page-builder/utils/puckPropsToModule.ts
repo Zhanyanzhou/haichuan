@@ -98,6 +98,7 @@ export function convertPuckProps(
         {
           desktopImage: props.desktopImage,
           mobileImage: props.mobileImage,
+          eyebrow: props.eyebrow,
           title: props.title,
           subtitle: props.subtitle,
           actionText: props.actionText,
@@ -207,8 +208,7 @@ export function convertPuckProps(
         },
         { template: props.template || "captionBelow" },
         {
-          bgColor: props.overlay || "rgba(15,13,12,0.2)",
-          overlayPreset: props.overlayPreset || "soft",
+          overlayPreset: props.overlayPreset || "none",
           desktopFocusX: props.desktopFocusX ?? 50,
           desktopFocusY: props.desktopFocusY ?? 50,
           mobileFocusX: props.mobileFocusX ?? props.desktopFocusX ?? 50,
@@ -231,8 +231,8 @@ export function convertPuckProps(
         },
         { template: props.template || "center" },
         {
-          bgColor: props.bgColor || "#FBF9F6",
-          textColor: props.textColor || "#2C2C2C",
+          bgColor: props.bgColor || "#FFFFFF",
+          textColor: props.textColor || "#1A1A1A",
           spacing: props.spacing || "normal",
         },
       );
@@ -251,7 +251,7 @@ export function convertPuckProps(
           linkUrl: props.linkUrl,
         },
         {},
-        { bgColor: props.bgColor || "#211D19" },
+        { bgColor: props.bgColor || "#FFFFFF" },
       );
 
     case "产品展示行":
@@ -276,7 +276,7 @@ export function convertPuckProps(
           titleSize: props.titleSize || "medium",
         },
         {},
-        { bgColor: props.bgColor || "#FCFCFB" },
+        { bgColor: props.bgColor || "#FFFFFF" },
       );
 
     case "单品焦点推荐":
@@ -295,7 +295,7 @@ export function convertPuckProps(
           showPrice: props.showPrice === true,
         },
         { template: props.layout || "imageLeft" },
-        { bgColor: props.bgColor || "#F5F2ED" },
+        { bgColor: props.bgColor || "#FFFFFF" },
       );
 
     case "佩戴灵感":
@@ -308,9 +308,19 @@ export function convertPuckProps(
           imageAlt: props.imageAlt,
           productIds: props.productIds || [],
           products: [],
+          actionText: props.actionText,
+          targetType: props.targetType,
+          productId: Number(props.productId) || 0,
+          linkUrl: props.linkUrl,
         },
         {},
-        { bgColor: props.bgColor || "#FCFCFB" },
+        {
+          bgColor: props.bgColor || "#FFFFFF",
+          // 佩戴大片的视觉焦点（与 Schema focusKeys 对应），
+          // 缺失映射会导致 FocusPicker 拖拽后画布不同步。
+          focusX: props.focusX ?? 50,
+          focusY: props.focusY ?? 50,
+        },
       );
 
     case "作品画廊":
@@ -322,7 +332,7 @@ export function convertPuckProps(
           items: props.items || [],
         },
         {},
-        { bgColor: props.bgColor || "#F7F4EE" },
+        { bgColor: props.bgColor || "#FFFFFF" },
       );
 
     case "改款对比":
@@ -340,7 +350,7 @@ export function convertPuckProps(
         },
         {},
         {
-          bgColor: props.bgColor || "#F7F4EE",
+          bgColor: props.bgColor || "#FFFFFF",
           beforeFocusX: props.beforeFocusX ?? 50,
           beforeFocusY: props.beforeFocusY ?? 50,
           afterFocusX: props.afterFocusX ?? 50,
@@ -361,7 +371,7 @@ export function convertPuckProps(
           templateType: type,
         },
         { template: props.layout || "grid-3" },
-        { bgColor: props.bgColor || "#FBF9F6" },
+        { bgColor: props.bgColor || "#FFFFFF" },
       );
 
     case "卡片网格":
@@ -374,7 +384,7 @@ export function convertPuckProps(
           layout: props.layout,
         },
         {},
-        { bgColor: props.bgColor || "#FCFCFB" },
+        { bgColor: props.bgColor || "#FFFFFF" },
       );
 
     case "真实评价与实拍":
@@ -386,7 +396,7 @@ export function convertPuckProps(
           testimonials: props.testimonials || [],
         },
         {},
-        { bgColor: props.bgColor || "#FBF9F6" },
+        { bgColor: props.bgColor || "#FFFFFF" },
       );
 
     case "分割面板":
@@ -406,8 +416,8 @@ export function convertPuckProps(
           split: props.split || "50-50",
         },
         {
-          bgColor: props.bgColor || "#FCFCFB",
-          textColor: props.textBg || "#fff",
+          bgColor: props.bgColor || "#FFFFFF",
+          textColor: props.textBg || "#FFFFFF",
         },
       );
 
@@ -464,9 +474,9 @@ export function convertPuckProps(
           phone: props.phone,
           altText: props.altText,
         },
-        { template: props.tone || "dark" },
+        { template: props.tone || "ivory" },
         {
-          bgColor: props.bgColor || "#1A1714",
+          bgColor: props.bgColor || "#FFFFFF",
           // 双端独立焦点;旧数据共享 focusX/Y 自动回退
           desktopFocusX: props.desktopFocusX ?? props.focusX ?? 50,
           desktopFocusY: props.desktopFocusY ?? props.focusY ?? 50,
@@ -484,7 +494,7 @@ export function convertPuckProps(
           certificates: props.certificates || [],
         },
         {},
-        { bgColor: props.bgColor || "#FBF9F6" },
+        { bgColor: props.bgColor || "#FFFFFF" },
       );
 
     case "定制流程":
@@ -496,7 +506,7 @@ export function convertPuckProps(
           steps: props.steps || [],
         },
         {},
-        { bgColor: props.bgColor || "#FBF9F6" },
+        { bgColor: props.bgColor || "#FFFFFF" },
       );
 
     case "服务承诺":
@@ -509,7 +519,7 @@ export function convertPuckProps(
           layout: props.layout,
         },
         {},
-        { bgColor: props.bgColor || "#FCFCFB" },
+        { bgColor: props.bgColor || "#FFFFFF" },
       );
 
     case "门店信息":
@@ -524,7 +534,7 @@ export function convertPuckProps(
           image: props.image,
         },
         {},
-        { bgColor: props.bgColor || "#FBF9F6" },
+        { bgColor: props.bgColor || "#FFFFFF" },
       );
 
     default:

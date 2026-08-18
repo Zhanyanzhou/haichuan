@@ -193,7 +193,7 @@ export default function HotspotBlock({
         margin: "0 auto",
         aspectRatio: HOTSPOT_CONTRACT.canvas.desktopMediaAspectRatio,
         overflow: "hidden",
-        background: "#F5F2ED",
+        background: "#F3F1EE",
       }}
     >
       <style>{`

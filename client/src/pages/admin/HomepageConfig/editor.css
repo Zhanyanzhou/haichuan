@@ -1787,6 +1787,16 @@ body:has(.homepage-editor__storefront-frame) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.homepage-editor__layer-mobile-hint {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #f6ead8;
+  color: #b0712f;
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
 .homepage-editor__layer-order {
   color: #a38b5b;
   font-family: ui-monospace, monospace;
@@ -4450,15 +4460,19 @@ body:has(.homepage-editor__storefront-frame) {
   height: 28px;
 }
 
-/* 桌面端保留三块侧栏；右栏宽度固定，不再因选中模块而伸缩，避免画布抖动缩放。 */
-.homepage-editor__body {
-  --editor-library-width: 240px;
-  --editor-structure-width: 184px;
-  --editor-inspector-width: 420px;
-}
-.homepage-editor__body.is-inspecting {
-  --editor-structure-width: 184px;
-  --editor-inspector-width: 420px;
+/* 桌面端保留三块侧栏；右栏宽度固定，不再因选中模块而伸缩，避免画布抖动缩放。
+ * 注意：此固定值仅限桌面端。≤1199px 时必须交还 3669/3693/3725 的响应式
+ * 归零规则（库/结构/Inspector 转为覆盖面板），否则窄视口下空列占位会把画布挤到 0。 */
+@media (min-width: 1200px) {
+  .homepage-editor__body {
+    --editor-library-width: 240px;
+    --editor-structure-width: 184px;
+    --editor-inspector-width: 420px;
+  }
+  .homepage-editor__body.is-inspecting {
+    --editor-structure-width: 184px;
+    --editor-inspector-width: 420px;
+  }
 }
 .homepage-editor__stage {
   padding: 20px 20px 72px;

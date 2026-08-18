@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
@@ -31,9 +32,28 @@ export default function TextBannerBlock({
     linkUrl: content.linkUrl,
   });
   const template = layoutConfig.template || "center";
-  const bg = styleConfig.bgColor || "#FBF9F6";
-  const textColor = styleConfig.textColor || "#2C2C2C";
-  const spacing = styleConfig.spacing === "spacious" ? "spacious" : "normal";
+  // 白盒画册(2026-08-19):纯白底、近黑字;金色废除
+  const bg = styleConfig.bgColor || "#FFFFFF";
+  const textColor = styleConfig.textColor || "#1A1A1A";
+  const spacing =
+    styleConfig.spacing === "spacious" || styleConfig.spacing === "grand"
+      ? styleConfig.spacing
+      : "normal";
+  const centered = template !== "left";
+  // 双细线仪式(宣言屏标志性语言):上下两根 32px 发丝线
+  const renderHair = (margin: React.CSSProperties) => (
+    <div
+      aria-hidden="true"
+      style={{
+        width: 32,
+        height: 1,
+        background: textColor,
+        marginLeft: centered ? "auto" : 0,
+        marginRight: centered ? "auto" : 0,
+        ...margin,
+      }}
+    />
+  );
 
   if (!title && !body) {
     if (!editMode) return null;
@@ -91,14 +111,15 @@ export default function TextBannerBlock({
           zIndex: 1,
         }}
       >
+        {renderHair({ marginBottom: "clamp(28px, 3vw, 58px)" })}
         {eyebrow && (
           <p
             data-editor-field="eyebrow"
             style={{
               fontSize: "var(--hc-type-caption, 12px)",
-              letterSpacing: "0.28em",
+              letterSpacing: "0.24em",
               textTransform: "uppercase",
-              color: "var(--hc-gold, #B8944E)",
+              color: "var(--hc-muted, #9B9B9B)",
               marginBottom: 16,
               fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
             }}
@@ -106,48 +127,52 @@ export default function TextBannerBlock({
             {eyebrow}
           </p>
         )}
-        {title && (
+        {title ? (
           <h2
             data-editor-field="title"
             className="hc-content-template__title"
             style={{
-              fontSize: "var(--hc-type-display, clamp(28px,3.5vw,48px))",
-              lineHeight: 1.15,
+              fontSize: "var(--hc-type-h2, clamp(28px,1.9vw,54px))",
+              lineHeight: 1.4,
               marginBottom: 20,
               fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
-              color: "var(--hc-ink, #2C2C2C)",
-              maxWidth: 600,
-              marginLeft: template === "left" ? 0 : "auto",
-              marginRight: template === "left" ? 0 : "auto",
+              color: "var(--hc-ink, #1A1A1A)",
+              maxWidth: 680,
+              marginLeft: centered ? "auto" : 0,
+              marginRight: centered ? "auto" : 0,
             }}
           >
             {title}
           </h2>
-        )}
-        {body && (
+        ) : editMode ? (
+          <EditCopyPlaceholder variant="title" label="标题" block />
+        ) : null}
+        {body ? (
           <p
             data-editor-field="body"
             className="hc-content-template__body"
             style={{
               fontSize: "var(--hc-type-body, 15px)",
-              color: "var(--hc-muted, #5C5C5C)",
+              color: "var(--hc-muted, #8C8C8C)",
               lineHeight: 1.9,
               marginBottom: 28,
               maxWidth: template === "left" ? 520 : 480,
-              marginLeft: template === "left" ? 0 : "auto",
-              marginRight: template === "left" ? 0 : "auto",
+              marginLeft: centered ? "auto" : 0,
+              marginRight: centered ? "auto" : 0,
             }}
           >
             {body}
           </p>
-        )}
+        ) : editMode ? (
+          <EditCopyPlaceholder variant="body" label="正文" block />
+        ) : null}
         {buttonText &&
           targetUrl &&
           (editMode ? (
             <span
               data-editor-field="buttonText targetType productId linkUrl"
               className="hc-content-template__action"
-              style={{ color: "var(--hc-ink, #2C2C2C)" }}
+              style={{ color: "var(--hc-ink, #1A1A1A)" }}
             >
               {buttonText}
             </span>
@@ -156,11 +181,15 @@ export default function TextBannerBlock({
               data-editor-field="buttonText targetType productId linkUrl"
               className="hc-content-template__action"
               to={targetUrl}
-              style={{ color: "var(--hc-ink, #2C2C2C)" }}
+              style={{ color: "var(--hc-ink, #1A1A1A)" }}
             >
               {buttonText}
             </Link>
           ))}
+        {!buttonText && editMode ? (
+          <EditCopyPlaceholder variant="action" label="行动链接" />
+        ) : null}
+        {renderHair({ marginTop: "clamp(36px, 4vw, 76px)" })}
       </div>
     </DecorSection>
   );

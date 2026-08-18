@@ -4,9 +4,6 @@
 
 import CertificateBlock from "@/components/blocks/CertificateBlock";
 import { convertPuckProps } from "../utils/puckPropsToModule";
-import { colorPuckField } from "../fields/ColorField";
-import MediaPickerField from "../fields/MediaPickerField";
-import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 
 export interface CertificateItem {
   name: string;
@@ -36,36 +33,9 @@ export const certificatePuckConfig = {
       { name: "IGI 国际证书", desc: "国际宝石学院认证", imageUrl: "" },
       { name: "足金 999", desc: "材质成色权威检测", imageUrl: "" },
     ],
-    bgColor: "#FBF9F6",
+    bgColor: "#FFFFFF",
     locked: false,
   } satisfies CertificatePuckProps,
-  fields: {
-    title: { type: "text" as const, label: "标题" },
-    subtitle: { type: "text" as const, label: "副标题" },
-    certificates: {
-      type: "array" as const,
-      label: "证书列表",
-      arrayFields: {
-        name: { type: "text" as const, label: "证书名称" },
-        desc: { type: "textarea" as const, label: "说明" },
-        imageUrl: {
-          type: "custom" as const,
-          label: "证书图",
-          render: ({
-            value, onChange, readOnly,
-          }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-            <MediaPickerField fieldKey="imageUrl" device="shared" value={value} onChange={onChange} readOnly={readOnly}
-              spec={IMAGE_SPECS.certificate.image}
-              placeholder="上传证书图（可选）" />
-          ),
-        },
-        focusX: { type: "number" as const, label: "焦点 X", min: 0, max: 100 },
-        focusY: { type: "number" as const, label: "焦点 Y", min: 0, max: 100 },
-      },
-      defaultItemProps: { name: "", desc: "", imageUrl: "", focusX: 50, focusY: 50 },
-    } as any,
-    bgColor: colorPuckField("背景色"),
-  },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};

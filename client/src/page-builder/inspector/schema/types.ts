@@ -1,36 +1,38 @@
 /**
  * schema/types.ts — 模块编辑区（Inspector）的声明式 Schema 类型。
  *
- * 五层信息架构：内容(content) → 媒体(media) → 布局(layout) → 样式(style) → 交互(interaction)。
- * media 层集中管理双端图片/焦点/alt；interaction 仅保留跳转类字段（新 Schema 建议并入 content）。
+ * 七层信息架构：媒体(media) → 商品(product) → 内容(content) → 交互(interaction) → 布局(layout) → 样式(style) → 专属(feature)。
+ * 面板分组顺序与展示名由 SchemaInspectorPanel 的 TASK_GROUP_ORDER / TASK_GROUP_META 单一决定。
+ * media 层集中管理双端图片/焦点/alt；product 层仅商品选择；interaction 仅保留跳转类字段。
  * Schema 是纯 TS 常量：类型安全、可跳转定义、无运行时表单引擎依赖。
  * 字段的 key 即 Puck props 键名（持久化格式），面板只负责呈现与写入。
+ *
+ * ── 编写约定（新增模板必读，2026-08-19 定） ────────────────────────────────
+ * 1. 分组的显示顺序与名称由 SchemaInspectorPanel 唯一决定，不依赖这里的书写顺序；
+ *    section 的 `title` 仅作源码可读性标注，不参与面板渲染。因此：
+ *    - sections 建议按七层顺序书写（media → product → content → interaction → layout → style → feature），
+ *      同一层只保留一个 section，字段顺序即同组内字段的展示顺序；
+ *    - 若某层无字段则整节省略，不要保留空 section。
+ * 2. 字段归属由 layer + control 双重决定（getTaskGroup），layer 为主、control 兜底；
+ *    因此 linkTarget 字段无论放在哪个 section，都会被归入「行动与关联」组。
+ *    写 schema 时 layer 必须与字段语义一致，不得依赖 control 兜底来掩盖 layer 标错。
+ * 3. groupTitles 用于「模板专属分组命名」（如商品模板把「图片素材」改为「选择商品」）；
+ *    仅在默认分组名会误导运营时才覆盖，能用默认名就不要覆盖。
+ * 4. 通用字段一律从 shared.ts 取构造器（moduleName/altText/linkTarget/spacing/bgColor/media），
+ *    不要在本文件内重复手写同语义字段，保证跨模板表现一致。
  */
 import type { ReactNode } from "react";
 import type { MediaSpec } from "../../fields/MediaPickerField";
 import type { ModuleContractStatus } from "../../config/blockContracts";
 
 export type InspectorLayer =
-  "content" | "media" | "layout" | "style" | "interaction" | "feature";
-
-/** 层的固定排序（渲染顺序）与业务展示名 */
-export const INSPECTOR_LAYER_ORDER: InspectorLayer[] = [
-  "media",
-  "content",
-  "interaction",
-  "layout",
-  "style",
-  "feature",
-];
-
-export const INSPECTOR_LAYER_TITLES: Record<InspectorLayer, string> = {
-  content: "内容",
-  media: "媒体",
-  layout: "布局",
-  style: "样式",
-  interaction: "交互",
-  feature: "模板专属功能",
-};
+  | "content"
+  | "media"
+  | "product"
+  | "layout"
+  | "style"
+  | "interaction"
+  | "feature";
 
 export type InspectorDevice = "desktop" | "mobile";
 
@@ -217,7 +219,16 @@ export interface ModuleInspectorSchema {
   defaults?: Record<string, any>;
   /** 分组标题覆盖（如商品模板把「图片素材」改为「选择商品」），未覆盖时用默认标题 */
   groupTitles?: Partial<
-    Record<"content" | "media" | "link" | "composition" | "feature", string>
+    Record<
+      | "content"
+      | "media"
+      | "product"
+      | "link"
+      | "composition"
+      | "style"
+      | "feature",
+      string
+    >
   >;
   sections: SectionDef[];
 }

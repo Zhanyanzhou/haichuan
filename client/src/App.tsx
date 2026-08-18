@@ -45,6 +45,8 @@ const Search = lazy(() => import("@/pages/public/Search"));
 const PartnerApplication = lazy(
   () => import("@/pages/public/PartnerApplication"),
 );
+// dev-only 模板台架:真实组件的占位状态设计视图(非公开页面)
+const TemplateGallery = lazy(() => import("@/pages/dev/TemplateGallery"));
 
 const Login = lazy(() => import("@/pages/admin/Login"));
 const Dashboard = lazy(() => import("@/pages/admin/Dashboard"));
@@ -247,6 +249,7 @@ function App() {
             <Route path="about" element={<About />} />
             <Route path="contact" element={<Contact />} />
             <Route path="privacy" element={<Privacy />} />
+            <Route path="__templates" element={<TemplateGallery />} />
             <Route
               path="preview/home"
               element={

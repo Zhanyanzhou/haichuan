@@ -2,7 +2,7 @@
  * SchemaInspectorPanel.tsx — 由模块 Schema 驱动的统一编辑面板。
  *
  * 结构：TopBar（当前实例）→
- *       连续任务分区（素材→内容→跳转→构图，全部直接展示）→
+ *       连续任务分区（素材→内容→商品→跳转→构图→颜色→专属功能，全部直接展示）→
  *       FooterBar（手动保存整页草稿）。
  * 与 InspectorPanel 的三级分派配合：仅在 registry 命中时渲染。
  */
@@ -34,7 +34,13 @@ interface SchemaInspectorPanelProps {
 }
 
 type InspectorTaskGroup =
-  "content" | "media" | "link" | "composition" | "feature";
+  | "content"
+  | "media"
+  | "product"
+  | "link"
+  | "composition"
+  | "style"
+  | "feature";
 
 interface VisibleFieldEntry {
   sectionId: string;
@@ -44,8 +50,10 @@ interface VisibleFieldEntry {
 const TASK_GROUP_ORDER: InspectorTaskGroup[] = [
   "media",
   "content",
+  "product",
   "link",
   "composition",
+  "style",
   "feature",
 ];
 
@@ -61,13 +69,21 @@ const TASK_GROUP_META: Record<
     label: "文字内容",
     description: "先完成页面上真正展示的文字，修改会立即同步到画布。",
   },
+  product: {
+    label: "商品关联",
+    description: "关联站内商品，优先引用商品系统的单一事实来源。",
+  },
   link: {
     label: "行动与关联",
     description: "设置当前区块的行动入口与站内去向。",
   },
   composition: {
-    label: "构图与设备素材",
-    description: "仅使用模板允许的布局、留白和视觉预设。",
+    label: "构图与设备",
+    description: "仅使用模板允许的布局、留白和构图预设。",
+  },
+  style: {
+    label: "颜色与文字",
+    description: "配色方案与文字相关的受控预设。",
   },
   feature: {
     label: "模板专属功能",
@@ -82,6 +98,9 @@ function getTaskGroup(
   if (layer === "feature") {
     return "feature";
   }
+  if (layer === "product") {
+    return "product";
+  }
   if (
     field.control === "media" ||
     layer === "media" ||
@@ -92,8 +111,11 @@ function getTaskGroup(
   if (field.control === "linkTarget" || layer === "interaction") {
     return "link";
   }
-  if (layer === "layout" || layer === "style") {
+  if (layer === "layout") {
     return "composition";
+  }
+  if (layer === "style") {
+    return "style";
   }
   return "content";
 }

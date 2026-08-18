@@ -4,9 +4,6 @@
 
 import CustomProcessBlock from "@/components/blocks/CustomProcessBlock";
 import { convertPuckProps } from "../utils/puckPropsToModule";
-import { colorPuckField } from "../fields/ColorField";
-import MediaPickerField from "../fields/MediaPickerField";
-import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 
 export interface CustomProcessStep {
   number: string;
@@ -38,37 +35,9 @@ export const customProcessPuckConfig = {
       { number: "04", en: "CRAFT", name: "匠心制作", desc: "从起版到镶嵌与表面处理,工坊逐步完成作品。", image: "" },
       { number: "05", en: "DELIVERY", name: "作品交付", desc: "整理作品资料,与您确认交付与后续保养安排。", image: "" },
     ],
-    bgColor: "#FBF9F6",
+    bgColor: "#FFFFFF",
     locked: false,
   } satisfies CustomProcessPuckProps,
-  fields: {
-    title: { type: "text" as const, label: "标题" },
-    subtitle: { type: "text" as const, label: "副标题" },
-    steps: {
-      type: "array" as const,
-      label: "旅程节点",
-      getItemSummary: (item: any) => `${item.number || ""} ${item.name || item.en || ""}`.trim() || "新节点",
-      arrayFields: {
-        number: { type: "text" as const, label: "编号（如 01）" },
-        en: { type: "text" as const, label: "英文题（如 DISCOVERY）" },
-        name: { type: "text" as const, label: "中文题" },
-        desc: { type: "textarea" as const, label: "一句话说明" },
-        image: {
-          type: "custom" as const,
-          label: "节点图（可选）",
-          render: ({
-            value, onChange, readOnly,
-          }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-            <MediaPickerField fieldKey="image" device="shared" value={value} onChange={onChange} readOnly={readOnly}
-              spec={IMAGE_SPECS.customProcess.node}
-              placeholder="上传节点图（可选）" />
-          ),
-        },
-      },
-      defaultItemProps: { number: "", en: "", name: "", desc: "", image: "" },
-    } as any,
-    bgColor: colorPuckField("背景色"),
-  },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};

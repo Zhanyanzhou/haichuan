@@ -18,7 +18,7 @@
     "contracts:check": "node scripts/generate-content-template-contract.mjs --check",
     "test": "npm run test:contracts",
     "test:contracts": "node scripts/verify-page-builder-contract.mjs && node scripts/verify-wechat-callback-origin.mjs",
-    "test:content-templates": "npm run contracts:check && node scripts/verify-content-template-contract.mjs && node scripts/verify-content-template-skeletons.mjs && node scripts/verify-content-template-image-specs.mjs",
+    "test:content-templates": "npm run contracts:check && node scripts/verify-content-template-contract.mjs && node scripts/verify-content-template-skeletons.mjs && node scripts/verify-content-template-image-specs.mjs && node scripts/verify-inspector-schema.mjs",
     "test:page-builder-publish": "node scripts/verify-page-builder-publish.mjs",
     "test:selection-inquiry": "node scripts/verify-selection-inquiry-security.mjs && node scripts/verify-selection-inquiry-validation.mjs",
     "test:trade": "npm run test:trade-state && npm run test:trade-concurrency && npm run test:trade-contract",

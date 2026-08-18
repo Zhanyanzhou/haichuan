@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import type { CSSProperties } from "react";
 import { SecureImage } from "@/components/common/SecureImage";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { PRODUCT_ROW_CONTRACT } from "@/page-builder/config/blockContracts";
 
 interface ProductRowBlockProps {
@@ -62,8 +63,8 @@ export default function ProductRowBlock({
     titleSize = "medium",
   } = content;
   const layout = content.layout || "grid-3";
-  const bg = styleConfig.bgColor || "#FCFCFB";
-  const headingColor = styleConfig.textColor || "#2C2C2C";
+  const bg = styleConfig.bgColor || "#FFFFFF";
+  const headingColor = styleConfig.textColor || "#1A1A1A";
   const gap = styleConfig.gap;
   const actionStyle = displayMode === "album"
     ? "none"
@@ -94,10 +95,10 @@ export default function ProductRowBlock({
         .homepage-product-row__card { min-width: 0; }
         .homepage-product-row__media img { transition: transform .6s ease; }
         .homepage-product-row__card:hover .homepage-product-row__media img { transform: scale(1.035); }
-        .homepage-product-row__action { display: inline-flex; align-items: center; min-height: 30px; color: #6B5735; font-size: 12px; letter-spacing: .04em; text-decoration: none; transition: color .2s ease, border-color .2s ease, background .2s ease; }
-        .homepage-product-row__action:hover { color: #9F7941; }
-        .homepage-product-row__action.is-button { padding: 6px 16px; border: 1px solid #B8944E; border-radius: 3px; color: #9F7941; }
-        .homepage-product-row__action.is-button:hover { color: #FFFFFF; background: #B8944E; }
+        .homepage-product-row__action { display: inline-flex; align-items: center; min-height: 30px; color: #5A5A5A; font-size: 12px; letter-spacing: .04em; text-decoration: none; transition: color .2s ease, border-color .2s ease, background .2s ease; }
+        .homepage-product-row__action:hover { color: #1A1A1A; }
+        .homepage-product-row__action.is-button { padding: 6px 0; border-bottom: 1px solid #1A1A1A; border-radius: 0; color: #1A1A1A; }
+        .homepage-product-row__action.is-button:hover { color: #FFFFFF; background: #1A1A1A; }
         @media (max-width: 767px) {
           .homepage-product-row__grid { grid-template-columns: repeat(var(--product-row-mobile-columns), minmax(0, 1fr)) !important; gap: 24px 12px !important; }
           .homepage-product-row__heading { margin-bottom: 32px !important; }
@@ -108,9 +109,9 @@ export default function ProductRowBlock({
         }
       `}</style>
       {/* ── 标题区 ── */}
-      {(title || subtitle) && (
+      {(title || subtitle || editMode) && (
         <div className="homepage-product-row__heading" style={{ textAlign: "center", marginBottom: 48 }}>
-          {title && (
+          {title ? (
             <h2
               style={{
                 fontSize: `var(--hc-type-h2, ${titleFontSize})`,
@@ -122,12 +123,14 @@ export default function ProductRowBlock({
             >
               {title}
             </h2>
-          )}
-          {subtitle && (
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="title" label="标题" block />
+          ) : null}
+          {subtitle ? (
             <p
               style={{
                 fontSize: 13,
-                color: "#8A7F72",
+                color: "#8C8C8C",
                 maxWidth: 480,
                 margin: "0 auto",
                 lineHeight: 1.6,
@@ -135,7 +138,9 @@ export default function ProductRowBlock({
             >
               {subtitle}
             </p>
-          )}
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="body" label="副文" block />
+          ) : null}
         </div>
       )}
 
@@ -177,7 +182,7 @@ export default function ProductRowBlock({
                   overflow: "hidden",
                   marginBottom: 16,
                   aspectRatio: ratio,
-                  background: "#F5F2ED",
+                  background: "#F3F1EE",
                 }}
               >
                 {p.image ? (
@@ -212,7 +217,7 @@ export default function ProductRowBlock({
                 style={{
                   fontSize: 14,
                   fontWeight: 500,
-                  color: "#2C2C2C",
+                  color: "#1A1A1A",
                   marginBottom: 4,
                 }}
               >
@@ -222,7 +227,7 @@ export default function ProductRowBlock({
 
             {/* 价格（可单独隐藏） */}
             {resolvedShowPrice && p.price && (
-              <p style={{ fontSize: 13, color: "#B8944E", marginBottom: actionStyle !== "none" ? 10 : 0 }}>
+              <p style={{ fontSize: 13, color: "#8C8C8C", marginBottom: actionStyle !== "none" ? 10 : 0 }}>
                 {p.price}
               </p>
             )}

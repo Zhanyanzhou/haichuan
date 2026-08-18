@@ -1,4 +1,5 @@
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
@@ -9,9 +10,9 @@ interface StoreInfoBlockProps {
   editMode?: boolean;
 }
 
-const GOLD = "#B8944E";
-const INK = "#28231F";
-const MUTED = "rgba(40,35,31,0.58)";
+const GOLD = "#8C8C8C";
+const INK = "#1A1A1A";
+const MUTED = "#8C8C8C";
 const STORE_RATIO_DESKTOP = getContractRoleRatio("storeInfo", "store", "desktop");
 const STORE_RATIO_MOBILE = getContractRoleRatio("storeInfo", "store", "mobile");
 
@@ -23,7 +24,7 @@ const STORE_RATIO_MOBILE = getContractRoleRatio("storeInfo", "store", "mobile");
 export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps) {
   const { content = {}, styleConfig = {} } = module;
   const { storeName, address, hours, phone, mapUrl, image } = content;
-  const bgColor = styleConfig.bgColor || '#FBF9F6';
+  const bgColor = styleConfig.bgColor || '#FFFFFF';
 
   const infoRows: Array<{ label: string; value?: string }> = [
     { label: "ADDRESS", value: address },
@@ -41,7 +42,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
             gap: clamp(28px, 4vw, 56px);
             align-items: stretch;
           }
-          .hc-store-info__media { aspect-ratio: ${STORE_RATIO_DESKTOP}; overflow: hidden; background: #E5E5E2; }
+          .hc-store-info__media { aspect-ratio: ${STORE_RATIO_DESKTOP}; overflow: hidden; background: #F3F1EE; }
           .hc-store-info__media img { width: 100%; height: 100%; object-fit: cover; display: block; }
           .hc-store-info__copy {
             min-width: 0; display: flex; flex-direction: column;
@@ -65,7 +66,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
           )}
         </div>
         <div className="hc-store-info__copy">
-          {storeName && (
+          {storeName ? (
             <h2 data-editor-field="storeName"
               style={{
                 margin: 0,
@@ -78,7 +79,9 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
             >
               {storeName}
             </h2>
-          )}
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="title" label="门店名" block />
+          ) : null}
           <div style={{ display: "grid", gap: 14 }}>
             {infoRows.filter((row) => row.value).map((row) => (
               <p key={row.label}
@@ -106,9 +109,9 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
               style={{
                 alignSelf: "flex-start",
                 display: "inline-block",
-                padding: "10px 30px",
-                border: `1px solid ${GOLD}`,
-                color: GOLD,
+                paddingBottom: 6,
+                borderBottom: `1px solid ${INK}`,
+                color: INK,
                 fontSize: "var(--hc-type-caption, 12px)",
                 letterSpacing: "0.12em",
                 textDecoration: "none",

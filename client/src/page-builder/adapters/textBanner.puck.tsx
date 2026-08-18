@@ -48,40 +48,6 @@ export const textBannerPuckConfig = {
     __contentTemplate: createContentTemplateMarker("文字横幅"),
     locked: false,
   } satisfies TextBannerPuckProps,
-  fields: {
-    eyebrow: { type: "text" as const, label: "眉题" },
-    title: { type: "text" as const, label: "标题" },
-    body: { type: "textarea" as const, label: "正文" },
-    buttonText: { type: "text" as const, label: "按钮文字" },
-    linkUrl: { type: "text" as const, label: "按钮跳转链接" },
-    targetType: {
-      type: "radio" as const,
-      label: "按钮跳转",
-      options: [
-        { label: "不跳转", value: "none" },
-        { label: "商品详情", value: "product" },
-        { label: "站内页面", value: "page" },
-      ],
-    },
-    productId: { type: "number" as const, label: "商品 ID" },
-    template: {
-      type: "radio" as const,
-      label: "对齐",
-      options: [
-        { label: "居中", value: "center" },
-        { label: "左对齐", value: "left" },
-      ],
-    },
-    spacing: {
-      type: "radio" as const,
-      label: "间距",
-      options: [
-        { label: "标准", value: "normal" },
-        { label: "宽松", value: "spacious" },
-      ],
-    },
-    bgImage: { type: "text" as const, label: "背景图 URL" },
-  },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { FEATURED_PRODUCT_CONTRACT } from "@/page-builder/config/blockContracts";
 import { resolvePrefixedLinkTarget, isSafeInternalPath } from "@/page-builder/utils/linkTarget";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
@@ -20,21 +21,23 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
   const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
   const { eyebrow, title, summary, product = {}, primaryText, secondaryText } = content;
   const showPrice = content.showPrice === true;
-  const bgColor = styleConfig.bgColor || "#F5F2ED";
+  const bgColor = styleConfig.bgColor || "#FFFFFF";
   const productLink = isSafeInternalPath(product.link) ? product.link : "";
   // 次行动三件套(secondary 前缀):有三件套痕迹即不回退旧裸 secondaryLink,
   // 防"切回不跳转"后残留旧字段让链接复活(与条目级 resolveItemLinkUrl 同构)
   const secondaryUrl = resolvePrefixedLinkTarget(content, "secondary", "secondaryLink");
-  const imageRight = layoutConfig.template === "imageRight";
 
   if (!product.name) {
     if (!editMode) return null;
     return (
       <DecorSection master="hero-piece" background={bgColor}>
-        <BlockEmptyPlaceholder
-          hint="代表作品"
-          spec="请选择 1 件作品 · 作品图固定 4:5"
-        />
+        <div style={{ maxWidth: 640, margin: "0 auto", width: "100%" }}>
+          <BlockEmptyPlaceholder
+            hint="代表作品"
+            spec={`请选择 1 件作品 · 作品图固定 ${FEATURED_PRODUCT_CONTRACT.canvas.mediaAspectRatio.replace(" / ", ":")}`}
+            ratio={FEATURED_PRODUCT_CONTRACT.canvas.mediaAspectRatio}
+          />
+        </div>
       </DecorSection>
     );
   }
@@ -43,7 +46,7 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
     <div
       data-editor-field="productId"
       className="homepage-featured-product__media"
-      style={{ aspectRatio: FEATURED_PRODUCT_CONTRACT.canvas.mediaAspectRatio, overflow: "hidden", background: "#E6DED2", order: imageRight ? 2 : 1 }}
+      style={{ aspectRatio: FEATURED_PRODUCT_CONTRACT.canvas.mediaAspectRatio, overflow: "hidden", background: "#F3F1EE", width: "100%", maxWidth: 640, margin: "0 auto" }}
     >
       <SecureImage
         src={product.image}
@@ -54,26 +57,30 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
   );
 
   const copy = (
-    <div className="homepage-featured-product__copy" style={{ maxWidth: 480, order: imageRight ? 1 : 2, justifySelf: imageRight ? "end" : undefined }}>
-      {eyebrow ? <p data-editor-field="eyebrow" style={{ margin: "0 0 14px", color: "#9A753E", fontSize: 11, letterSpacing: "0.2em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>{eyebrow}</p> : null}
-      {title ? <h2 data-editor-field="title" style={{ margin: "0 0 22px", color: "#28231F", fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-type-display, clamp(32px, 4vw, 50px))", fontWeight: 500, lineHeight: 1.1 }}>{title}</h2> : null}
-      <p style={{ margin: "0 0 8px", color: "#28231F", fontSize: 17, fontWeight: 600 }}>{product.name}</p>
-      {showPrice && product.price ? <p style={{ margin: "0 0 22px", color: "#8E6A35", fontSize: 14 }}>{product.price}</p> : null}
-      {summary ? <p data-editor-field="summary" style={{ margin: "0 0 32px", color: "#776D63", fontSize: "var(--hc-type-body, 14px)", lineHeight: 1.9 }}>{summary}</p> : null}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+    <div className="homepage-featured-product__copy" style={{ maxWidth: 640, margin: "0 auto", textAlign: "center", width: "100%" }}>
+      {eyebrow ? <p data-editor-field="eyebrow" style={{ margin: "0 0 14px", color: "#8C8C8C", fontSize: 11, letterSpacing: "0.2em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>{eyebrow}</p> : editMode ? <EditCopyPlaceholder variant="eyebrow" label="眉题" /> : null}
+      {title ? <h2 data-editor-field="title" style={{ margin: "0 0 22px", color: "#1A1A1A", fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-type-display, clamp(32px, 4vw, 50px))", fontWeight: 500, lineHeight: 1.1 }}>{title}</h2> : editMode ? <EditCopyPlaceholder variant="title" label="标题" block /> : null}
+      <p style={{ margin: "0 0 8px", color: "#1A1A1A", fontSize: 17, fontWeight: 600 }}>{product.name}</p>
+      {showPrice && product.price ? <p style={{ margin: "0 0 22px", color: "#8C8C8C", fontSize: 14 }}>{product.price}</p> : null}
+      {summary ? <p data-editor-field="summary" style={{ margin: "0 0 32px", color: "#5A5A5A", fontSize: "var(--hc-type-body, 14px)", lineHeight: 1.9 }}>{summary}</p> : editMode ? <EditCopyPlaceholder variant="body" label="材质说明" block /> : null}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center" }}>
         {primaryText && productLink ? (
           editMode ? (
-            <span data-editor-field="primaryText productId" style={{ padding: "12px 26px", background: "#B8944E", color: "#fff", fontSize: 12, letterSpacing: "0.1em" }}>{primaryText}</span>
+            <span data-editor-field="primaryText productId" style={{ color: "#1A1A1A", fontSize: 13, letterSpacing: "0.08em", borderBottom: "1px solid #1A1A1A", paddingBottom: 4 }}>{primaryText}</span>
           ) : (
-            <Link data-editor-field="primaryText productId" to={productLink} style={{ padding: "12px 26px", background: "#B8944E", color: "#fff", fontSize: 12, textDecoration: "none", letterSpacing: "0.1em" }}>{primaryText}</Link>
+            <Link data-editor-field="primaryText productId" to={productLink} style={{ color: "#1A1A1A", fontSize: 13, textDecoration: "none", letterSpacing: "0.08em", borderBottom: "1px solid #1A1A1A", paddingBottom: 4 }}>{primaryText}</Link>
           )
+        ) : editMode ? (
+          <EditCopyPlaceholder variant="action" label="主行动" />
         ) : null}
         {secondaryText && secondaryUrl ? (
           editMode ? (
-            <span data-editor-field="secondaryText secondaryLink" style={{ padding: "11px 25px", border: "1px solid #B8944E", color: "#8E6A35", fontSize: 12, letterSpacing: "0.1em" }}>{secondaryText}</span>
+            <span data-editor-field="secondaryText secondaryLink" style={{ color: "#5A5A5A", fontSize: 13, letterSpacing: "0.08em", borderBottom: "1px solid #5A5A5A", paddingBottom: 4 }}>{secondaryText}</span>
           ) : (
-            <Link data-editor-field="secondaryText secondaryLink" to={secondaryUrl} style={{ padding: "11px 25px", border: "1px solid #B8944E", color: "#8E6A35", fontSize: 12, textDecoration: "none", letterSpacing: "0.1em" }}>{secondaryText}</Link>
+            <Link data-editor-field="secondaryText secondaryLink" to={secondaryUrl} style={{ color: "#5A5A5A", fontSize: 13, textDecoration: "none", letterSpacing: "0.08em", borderBottom: "1px solid #5A5A5A", paddingBottom: 4 }}>{secondaryText}</Link>
           )
+        ) : editMode ? (
+          <EditCopyPlaceholder variant="action" label="次行动" />
         ) : null}
       </div>
     </div>
@@ -84,9 +91,9 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
       <style>{`
         .homepage-featured-product__grid {
           display: grid;
-          grid-template-columns: minmax(0, 1fr) minmax(300px, .82fr);
-          align-items: center;
-          gap: clamp(40px, 7vw, 96px);
+          grid-template-columns: minmax(0, 1fr);
+          justify-items: center;
+          gap: clamp(32px, 5vw, 56px);
         }
         @media (max-width: 767px) {
           .homepage-featured-product__grid { grid-template-columns: minmax(0, 1fr); gap: 34px; }

@@ -153,6 +153,8 @@ const copyPlacements = new Set(["overlay", "stacked", "split"]);
 const skeletonRoles = new Set([
   "media", "mainMedia", "detailMedia", "copy", "action", "marker",
   "timeline", "list", "card", "quote", "form",
+  // 文字槽位细分(2026-08-19):copy 聚合区可拆为三级文字槽,缩略图逐槽可见
+  "eyebrow", "title", "subtitle",
 ]);
 const previewKinds = new Set(["play", "pagination", "steps-5", "handle", "hotspot", "countdown"]);
 
@@ -306,7 +308,7 @@ export type ContentTemplateContract = {
   width: "full" | "standard" | "wide" | "editorial";
   flow: "bleed" | "flow";
   copyPlacementByViewport: Record<"desktop" | "tablet" | "mobile", "overlay" | "stacked" | "split">;
-  spacingPolicy: readonly ("compact" | "normal" | "spacious")[];
+  spacingPolicy: readonly ("compact" | "normal" | "spacious" | "grand")[];
   media: readonly MediaSlot[];
   roles: readonly {
     id: string;
@@ -355,7 +357,8 @@ export type ContentTemplateMarker = {
 
 export type ContentTemplateSkeletonRole =
   | "media" | "mainMedia" | "detailMedia" | "copy" | "action" | "marker"
-  | "timeline" | "list" | "card" | "quote" | "form";
+  | "timeline" | "list" | "card" | "quote" | "form"
+  | "eyebrow" | "title" | "subtitle";
 
 export type ContentTemplateSkeletonZone = {
   role: ContentTemplateSkeletonRole;

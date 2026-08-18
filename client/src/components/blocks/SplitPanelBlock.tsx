@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 
 interface SplitPanelBlockProps {
@@ -25,7 +26,7 @@ export default function SplitPanelBlock({
   const { image, title, subtitle, body, buttonText, linkUrl } = content;
   const template = layoutConfig.template || "imageLeft";
   const split = layoutConfig.split || "50-50";
-  const bg = styleConfig.bgColor || "#FCFCFB";
+  const bg = styleConfig.bgColor || "#FFFFFF";
   const textBg = styleConfig.textColor || "#fff";
 
   const [leftPct, rightPct] =
@@ -82,53 +83,59 @@ export default function SplitPanelBlock({
       }}
     >
       <div style={{ maxWidth: 440 }}>
-        {subtitle && (
+        {subtitle ? (
           <p data-editor-field="subtitle"
             style={{
               fontSize: 10,
               letterSpacing: "0.25em",
               textTransform: "uppercase",
-              color: "#B8944E",
+              color: "#8C8C8C",
               marginBottom: 16,
               fontFamily: "Inter,system-ui,sans-serif",
             }}
           >
             {subtitle}
           </p>
-        )}
-        {title && (
+        ) : editMode ? (
+          <EditCopyPlaceholder variant="eyebrow" label="眉题" />
+        ) : null}
+        {title ? (
           <h2 data-editor-field="title"
             style={{
               fontSize: "clamp(24px,2.8vw,40px)",
               fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
-              color: "#2C2C2C",
+              color: "#1A1A1A",
               lineHeight: 1.15,
               marginBottom: 20,
             }}
           >
             {title}
           </h2>
-        )}
-        {body && (
+        ) : editMode ? (
+          <EditCopyPlaceholder variant="title" label="标题" block />
+        ) : null}
+        {body ? (
           <p data-editor-field="body"
             style={{
               fontSize: 14,
-              color: "#8A7F72",
+              color: "#8C8C8C",
               lineHeight: 1.8,
               marginBottom: 28,
             }}
           >
             {body}
           </p>
-        )}
-        {buttonText && linkUrl && (
+        ) : editMode ? (
+          <EditCopyPlaceholder variant="body" label="正文" block />
+        ) : null}
+        {buttonText && linkUrl ? (
           <Link data-editor-field="buttonText linkUrl"
             to={linkUrl}
             style={{
               display: "inline-block",
-              padding: "10px 36px",
-              border: "1px solid #B8944E",
-              color: "#B8944E",
+              paddingBottom: 6,
+              borderBottom: "1px solid #1A1A1A",
+              color: "#1A1A1A",
               fontSize: 12,
               letterSpacing: "0.12em",
               textTransform: "uppercase",
@@ -138,7 +145,9 @@ export default function SplitPanelBlock({
           >
             {buttonText}
           </Link>
-        )}
+        ) : editMode ? (
+          <EditCopyPlaceholder variant="action" label="行动链接" />
+        ) : null}
       </div>
     </div>
   );

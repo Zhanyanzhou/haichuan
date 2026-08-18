@@ -18,12 +18,12 @@ export const featuredProductSchema: ModuleInspectorSchema = {
   purpose: FEATURED_PRODUCT_CONTRACT.purpose,
   evaluate: evaluateFeaturedProductContract,
   defaults: { ...featuredProductPuckConfig.defaultProps },
-  groupTitles: { media: "选择作品" },
+  groupTitles: { product: "选择作品" },
   sections: [
     {
       id: "featured-product",
-      title: "素材",
-      layer: "media",
+      title: "商品关联",
+      layer: "product",
       description: "从商品系统选择主推作品，作品图固定 4:5，不重复上传",
       fields: [
         {

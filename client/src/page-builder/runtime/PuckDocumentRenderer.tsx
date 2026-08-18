@@ -179,7 +179,7 @@ function ProductRowState({
     <section
       style={{
         padding: "clamp(60px,8vh,120px) 0",
-        background: bgColor || "#FCFCFB",
+        background: bgColor || "#FFFFFF",
       }}
     >
       <div
@@ -196,7 +196,7 @@ function ProductRowState({
               <h2
                 style={{
                   margin: "0 0 12px",
-                  color: "#2C2C2C",
+                  color: "#1A1A1A",
                   fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
                   fontSize: "clamp(24px,2.8vw,38px)",
                   lineHeight: 1.2,

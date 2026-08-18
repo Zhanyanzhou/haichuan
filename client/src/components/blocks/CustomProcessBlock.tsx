@@ -1,15 +1,16 @@
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 
 interface CustomProcessBlockProps {
   module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
   editMode?: boolean;
 }
 
-const INK = "#28231F";
-const MUTED = "rgba(40,35,31,0.58)";
-const GOLD = "#B8944E";
+const INK = "#1A1A1A";
+const MUTED = "#8C8C8C";
+const GOLD = "#8C8C8C";
 
 /**
  * 定制旅程 — Journey 母版
@@ -19,7 +20,7 @@ const GOLD = "#B8944E";
 export default function CustomProcessBlock({ module, editMode }: CustomProcessBlockProps) {
   const { content = {}, styleConfig = {} } = module;
   const { title, subtitle } = content;
-  const bgColor = styleConfig.bgColor || '#FBF9F6';
+  const bgColor = styleConfig.bgColor || '#FFFFFF';
   const list = Array.isArray(content.steps) ? content.steps : [];
 
   if (list.length === 0) {
@@ -33,9 +34,9 @@ export default function CustomProcessBlock({ module, editMode }: CustomProcessBl
 
   return (
     <DecorSection master="journey" background={bgColor}>
-      {(title || subtitle) && (
+      {(title || subtitle || editMode) && (
         <header style={{ maxWidth: 640, margin: "0 auto 56px", textAlign: "center" }}>
-          {title && (
+          {title ? (
             <h2 data-editor-field="title"
               style={{
                 margin: "0 0 12px",
@@ -48,12 +49,16 @@ export default function CustomProcessBlock({ module, editMode }: CustomProcessBl
             >
               {title}
             </h2>
-          )}
-          {subtitle && (
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="title" label="标题" block />
+          ) : null}
+          {subtitle ? (
             <p data-editor-field="subtitle" style={{ margin: 0, fontSize: "var(--hc-type-body, 15px)", color: MUTED, lineHeight: 1.8 }}>
               {subtitle}
             </p>
-          )}
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="body" label="副文" block />
+          ) : null}
         </header>
       )}
       <ol className="hc-journey" style={{ listStyle: "none", margin: 0, padding: 0 }}>
@@ -73,7 +78,7 @@ export default function CustomProcessBlock({ module, editMode }: CustomProcessBl
             font-weight: 400;
             margin: 0 0 14px;
           }
-          .hc-journey__num--ghost { color: rgba(184,148,78,0.32); }
+          .hc-journey__num--ghost { color: rgba(0,0,0,0.18); }
           .hc-journey__en {
             font-size: 11px;
             letter-spacing: 0.22em;

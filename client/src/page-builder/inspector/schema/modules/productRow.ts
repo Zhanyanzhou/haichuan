@@ -18,12 +18,12 @@ export const productRowSchema: ModuleInspectorSchema = {
   purpose: PRODUCT_ROW_CONTRACT.purpose,
   evaluate: evaluateProductRowContract,
   defaults: { ...productRowPuckConfig.defaultProps },
-  groupTitles: { media: "选择商品" },
+  groupTitles: { product: "选择商品" },
   sections: [
     {
-      id: "product-row-media",
-      title: "素材",
-      layer: "media",
+      id: "product-row-product",
+      title: "商品关联",
+      layer: "product",
       description: "从商品系统选择商品，商品图统一 4:5，不重复上传",
       fields: [
         {
@@ -105,21 +105,19 @@ export const productRowSchema: ModuleInspectorSchema = {
             { label: "描边按钮", value: "button" },
           ],
         },
-      ],
-    },
-    {
-      id: "product-row-style",
-      title: "样式",
-      layer: "style",
-      fields: [
         {
           key: "showPrice",
           label: "显示价格",
           control: "switch",
           visibleWhen: (ctx) => ctx.props.displayMode !== "album",
         },
-        bgColorPresetField(),
       ],
+    },
+    {
+      id: "product-row-style",
+      title: "样式",
+      layer: "style",
+      fields: [bgColorPresetField()],
     },
   ],
 };

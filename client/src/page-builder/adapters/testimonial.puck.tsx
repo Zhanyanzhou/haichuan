@@ -1,7 +1,4 @@
 import TestimonialBlock from "@/components/blocks/TestimonialBlock";
-import MediaPickerField from "../fields/MediaPickerField";
-import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
-import { colorPuckField } from "../fields/ColorField";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 
 export interface TestimonialPuckProps {
@@ -21,19 +18,8 @@ export const testimonialPuckConfig = {
     title: "",
     subtitle: "",
     testimonials: [],
-    bgColor: "#FCFCFB",
+    bgColor: "#FFFFFF",
     locked: false,
   } satisfies TestimonialPuckProps,
-  fields: {
-    title: { type: "text" as const, label: "标题" },
-    subtitle: { type: "textarea" as const, label: "副标题" },
-    testimonials: { type: "array" as const, label: "评价列表", arrayFields: {
-      name: { type: "text" as const, label: "顾客称呼" },
-      meta: { type: "text" as const, label: "购买信息" },
-      content: { type: "textarea" as const, label: "评价内容" },
-      image: { type: "custom" as const, label: "实拍图（可选）", render: ({ value, onChange, readOnly }: { value?: string; onChange: (value: string) => void; readOnly?: boolean }) => <MediaPickerField fieldKey="image" device="shared" value={value} onChange={onChange} readOnly={readOnly} spec={IMAGE_SPECS.testimonial.image} placeholder="上传顾客实拍图" /> },
-    } } as any,
-    bgColor: colorPuckField("背景色"),
-  },
   resolvePermissions: (data: any) => data.props?.locked ? { delete: false, drag: false } : {},
 };

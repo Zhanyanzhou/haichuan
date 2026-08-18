@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import LookbookBlock from "@/components/blocks/LookbookBlock";
-import { IMAGE_SPECS } from "../config/imageSpecs";
 import { fetchProductsByIds, type ProductRow } from "../data-sources/productSource";
-import ProductIdsField from "../fields/ProductIdsField";
-import MediaPickerField from "../fields/MediaPickerField";
-import { colorPuckField } from "../fields/ColorField";
 import { convertPuckProps } from "../utils/puckPropsToModule";
+import type { LinkTargetType } from "../utils/linkTarget";
 
 export interface LookbookPuckProps {
   title: string;
@@ -13,6 +10,10 @@ export interface LookbookPuckProps {
   image: string;
   imageAlt: string;
   productIds: number[];
+  actionText: string;
+  linkUrl: string;
+  targetType: LinkTargetType;
+  productId: number;
   bgColor: string;
   locked?: boolean;
 }
@@ -49,16 +50,12 @@ export const lookbookPuckConfig = {
     image: "",
     imageAlt: "珠宝佩戴灵感",
     productIds: [],
-    bgColor: "#FCFCFB",
+    actionText: "",
+    linkUrl: "",
+    targetType: "none",
+    productId: 0,
+    bgColor: "#FFFFFF",
     locked: false,
   } satisfies LookbookPuckProps,
-  fields: {
-    title: { type: "text" as const, label: "标题" },
-    subtitle: { type: "textarea" as const, label: "副标题" },
-    image: { type: "custom" as const, label: "佩戴场景图", render: ({ value, onChange, readOnly }: { value?: string; onChange: (value: string) => void; readOnly?: boolean }) => <MediaPickerField fieldKey="image" device="shared" value={value} onChange={onChange} readOnly={readOnly} spec={IMAGE_SPECS.lookbook.image} placeholder="上传佩戴场景图" /> },
-    imageAlt: { type: "text" as const, label: "图片替代文本" },
-    productIds: { type: "custom" as const, label: "关联商品（建议 2–3 件）", render: ({ value, onChange, readOnly }: { value?: number[]; onChange: (value: number[]) => void; readOnly?: boolean }) => <ProductIdsField value={value || []} onChange={onChange} readOnly={readOnly} /> } as any,
-    bgColor: colorPuckField("背景色"),
-  },
   resolvePermissions: (data: any) => data.props?.locked ? { delete: false, drag: false } : {},
 };

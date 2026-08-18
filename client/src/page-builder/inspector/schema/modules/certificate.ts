@@ -55,8 +55,6 @@ export const certificateSchema: ModuleInspectorSchema = {
               ? item.name
               : "未命名证书",
           itemFields: [
-            { key: "name", label: "证书名称", control: "text", required: true },
-            { key: "desc", label: "一句话说明", control: "text" },
             {
               key: "imageUrl",
               label: "证书图（可选）",
@@ -66,6 +64,8 @@ export const certificateSchema: ModuleInspectorSchema = {
               placeholder: "上传证书图",
               showSpecCheck: true,
             },
+            { key: "name", label: "证书名称", control: "text", required: true },
+            { key: "desc", label: "一句话说明", control: "text" },
           ],
         },
       ],

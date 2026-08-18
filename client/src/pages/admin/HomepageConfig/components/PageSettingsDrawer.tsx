@@ -104,6 +104,12 @@ export default function PageSettingsDrawer({
           分享到微信 / 微博 / Twitter 等平台时显示的封面图，建议
           1200×630。留空则使用页面中的第一张图片。
         </p>
+        <p
+          className="homepage-editor__page-settings-hint"
+          style={{ marginTop: 12, color: "#B8944E" }}
+        >
+          保存后仅写入草稿，需点击顶部「发布」才会更新前台页面。
+        </p>
       </div>
     </Drawer>
   );

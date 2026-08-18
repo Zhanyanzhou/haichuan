@@ -92,6 +92,7 @@ export type PageDocumentRevision = {
   id: number;
   version: number;
   puckData: unknown;
+  metadata?: Record<string, any>;
   status?: string;
   publishedAt?: string | null;
   publishedBy?: number | null;

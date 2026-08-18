@@ -31,6 +31,14 @@ export const heroSchema: ModuleInspectorSchema = {
       fields: [
         moduleNameField("首屏"),
         {
+          key: "eyebrow",
+          label: "眉题",
+          control: "text",
+          maxLength: HERO_CONTRACT.content.limits.eyebrow,
+          hint: "标题上方的小字引导，留空不显示",
+          placeholder: "如 THE HOUSE OF HAICHUAN",
+        },
+        {
           key: "title",
           label: "主标题",
           control: "text",
@@ -40,11 +48,11 @@ export const heroSchema: ModuleInspectorSchema = {
         },
         {
           key: "subtitle",
-          label: "眉题",
+          label: "副标题",
           control: "text",
           maxLength: HERO_CONTRACT.content.limits.subtitle,
-          hint: "标题上方的小字引导，留空不显示",
-          placeholder: "如 CAMPAIGN / NEW COLLECTION",
+          hint: "标题下方的一句话主张，留空不显示",
+          placeholder: "如 以东方美学，铸当代珠宝",
         },
       ],
     },
@@ -103,12 +111,12 @@ export const heroSchema: ModuleInspectorSchema = {
           label: "文字位置",
           control: "segmented",
           options: [
+            { label: "居中（默认）", value: "center", diagram: "textCenter" },
             {
               label: "左下（电影式）",
               value: "left",
               diagram: "textBottomLeft",
             },
-            { label: "居中", value: "center", diagram: "textCenter" },
           ],
         },
       ],

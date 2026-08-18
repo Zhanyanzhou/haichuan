@@ -1,6 +1,6 @@
 /**
  * schema/modules/fullBleed.ts — 「全屏出血图(沉浸视觉)」编辑区 Schema。
- * Immersive Image 母版:全宽定比 21:6 / 4:5,双端素材与双焦点。
+ * Immersive Image 母版:全宽定比 21:9 / 4:5,双端素材与双焦点。
  */
 import {
   FULL_BLEED_CONTRACT,
@@ -30,6 +30,14 @@ export const fullBleedSchema: ModuleInspectorSchema = {
       layer: "content",
       fields: [
         moduleNameField("通栏图"),
+        {
+          key: "eyebrow",
+          label: "眉题",
+          control: "text",
+          maxLength: FULL_BLEED_CONTRACT.content.limits.eyebrow,
+          hint: "标题上方的小字引导，留空不显示",
+          placeholder: "如 COLLECTION",
+        },
         {
           key: "title",
           label: "标题",
@@ -89,14 +97,8 @@ export const fullBleedSchema: ModuleInspectorSchema = {
             placeholder: "上传手机端海报",
           },
         ),
+        altTextField(FULL_BLEED_CONTRACT.content.limits.altText),
       ],
-    },
-    {
-      id: "full-bleed-advanced",
-      title: "高级设置",
-      layer: "style",
-      description: "SEO 与无障碍用，不在页面显示",
-      fields: [altTextField(FULL_BLEED_CONTRACT.content.limits.altText)],
     },
   ],
 };

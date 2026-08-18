@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
@@ -30,6 +31,7 @@ export default function FullBleedBlock({
   const {
     image,
     mobileImage,
+    eyebrow,
     title,
     subtitle,
     buttonText,
@@ -110,25 +112,36 @@ export default function FullBleedBlock({
       )}
       </div>
 
-      {(title || subtitle || (buttonText && targetUrl)) ? (
+      {(title || subtitle || (buttonText && targetUrl) || editMode) ? (
       <div className="hc-content-template__container hc-phase1-full-bleed__caption">
         <div className="hc-content-template__copy hc-phase1-full-bleed__copy">
-          {title && (
+          {eyebrow ? (
+            <p data-editor-field="eyebrow" className="hc-content-template__eyebrow">
+              {eyebrow}
+            </p>
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="eyebrow" label="眉题" />
+          ) : null}
+          {title ? (
             <h2 data-editor-field="title" className="hc-content-template__title"
               style={{
-                fontSize: "var(--hc-type-h2, clamp(24px,3vw,34px))",
+                fontSize: "var(--hc-type-h2, clamp(28px,3.4vw,44px))",
                 fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
               }}
             >
               {title}
             </h2>
-          )}
-          {subtitle && (
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="title" label="标题" block />
+          ) : null}
+          {subtitle ? (
             <p data-editor-field="subtitle" className="hc-content-template__body"
             >
               {subtitle}
             </p>
-          )}
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="body" label="说明" block />
+          ) : null}
         </div>
         {buttonText && targetUrl ? (
           editMode ? (
@@ -140,6 +153,8 @@ export default function FullBleedBlock({
               {buttonText}<span aria-hidden>→</span>
             </Link>
           )
+        ) : editMode ? (
+          <EditCopyPlaceholder variant="action" label="行动链接" />
         ) : null}
       </div>
       ) : null}

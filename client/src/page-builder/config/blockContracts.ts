@@ -359,7 +359,7 @@ export const APPOINTMENT_CONTRACT = {
   content: {
     limits: { title: 24, subtitle: 72, buttonText: 10, altText: 80, phone: 30 },
   },
-  defaults: { linkUrl: "/contact", tone: "dark" },
+  defaults: { linkUrl: "/contact", tone: "ivory" },
 } as const;
 
 export const IMAGE_TEXT_CONTRACT = {
@@ -518,7 +518,7 @@ export function evaluateHeroContract(
   const errors: string[] = [];
   const warnings: string[] = [];
   if (!hasText(props.desktopImage)) errors.push("请上传桌面端主视觉");
-  if (!hasText(props.title)) errors.push("请填写首屏标题");
+  if (!hasText(props.title)) errors.push("请填写主标题");
   if (target.error) errors.push(target.error);
   if (!hasText(props.mobileImage))
     warnings.push("建议上传移动端4:5竖图并单独调整焦点");

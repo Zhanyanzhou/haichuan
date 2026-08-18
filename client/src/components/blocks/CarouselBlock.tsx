@@ -205,7 +205,7 @@ export default function CarouselBlock({
                 borderRadius: 4,
                 border: "none",
                 cursor: "pointer",
-                background: i === current ? "#B8944E" : "rgba(255,255,255,0.5)",
+                background: i === current ? "#1A1A1A" : "rgba(255,255,255,0.5)",
                 transition: "all 0.3s",
               }}
             />

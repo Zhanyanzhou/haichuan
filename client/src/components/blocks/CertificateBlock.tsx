@@ -3,15 +3,16 @@ import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 
 interface CertificateBlockProps {
   module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
   editMode?: boolean;
 }
 
-const INK = "#28231F";
-const MUTED = "rgba(40,35,31,0.58)";
-const GOLD = "#B8944E";
+const INK = "#1A1A1A";
+const MUTED = "#8C8C8C";
+const GOLD = "#8C8C8C";
 const CERTIFICATE_RATIO_DESKTOP = getContractRoleRatio("certificates", "certificates", "desktop");
 const CERTIFICATE_RATIO_MOBILE = getContractRoleRatio("certificates", "certificates", "mobile");
 
@@ -23,7 +24,7 @@ const CERTIFICATE_RATIO_MOBILE = getContractRoleRatio("certificates", "certifica
 export default function CertificateBlock({ module, editMode }: CertificateBlockProps) {
   const { content = {}, styleConfig = {} } = module;
   const { title, subtitle } = content;
-  const bgColor = styleConfig.bgColor || '#FBF9F6';
+  const bgColor = styleConfig.bgColor || '#FFFFFF';
   const list = Array.isArray(content.certificates) ? content.certificates : [];
 
   if (list.length === 0) {
@@ -37,9 +38,9 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
 
   return (
     <DecorSection master="asymmetric-gallery" background={bgColor}>
-      {(title || subtitle) && (
+      {(title || subtitle || editMode) && (
         <header style={{ maxWidth: 640, margin: "0 auto 48px", textAlign: "center" }}>
-          {title && (
+          {title ? (
             <h2 data-editor-field="title"
               style={{
                 margin: "0 0 12px",
@@ -52,12 +53,16 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
             >
               {title}
             </h2>
-          )}
-          {subtitle && (
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="title" label="标题" block />
+          ) : null}
+          {subtitle ? (
             <p data-editor-field="subtitle" style={{ margin: 0, fontSize: "var(--hc-type-body, 15px)", color: MUTED, lineHeight: 1.8 }}>
               {subtitle}
             </p>
-          )}
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="body" label="副文" block />
+          ) : null}
         </header>
       )}
       <div className="hc-cert-gallery">
@@ -79,7 +84,7 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
           .hc-cert-gallery__mark {
             font-family: var(--hc-font-display, ${FONT_DISPLAY});
             font-size: clamp(40px, 5vw, 64px);
-            color: rgba(184,148,78,0.4);
+            color: rgba(0,0,0,0.18);
             line-height: 1;
           }
           @media (max-width: 767px) {

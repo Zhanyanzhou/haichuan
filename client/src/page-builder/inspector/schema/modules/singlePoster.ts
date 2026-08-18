@@ -1,6 +1,6 @@
 /**
  * schema/modules/singlePoster.ts — 「单图海报(品牌故事)」编辑区 Schema。
- * Editorial Split 母版:38/62 编辑式分栏,双端独立素材与焦点。
+ * 画廊海报式(P1):图 ≥75% 主导偏右,签名束贴左下;手机 4:5 叠字同构。
  */
 import {
   SINGLE_POSTER_CONTRACT,
@@ -84,7 +84,7 @@ export const singlePosterSchema: ModuleInspectorSchema = {
       id: "single-poster-media",
       title: "媒体",
       layer: "media",
-      description: "桌面 4:5 竖图占 62% 分栏；手机独立 3:4 竖图",
+      description: "桌面 4:5 海报主图占约 78% 偏右；手机独立 4:5 竖图",
       fields: [
         desktopMediaField(
           "desktopImage",
@@ -106,13 +106,14 @@ export const singlePosterSchema: ModuleInspectorSchema = {
             placeholder: "上传手机端海报",
           },
         ),
+        altTextField(),
       ],
     },
     {
       id: "single-poster-layout",
       title: "布局",
       layer: "layout",
-      description: "桌面固定 38/62 编辑式分栏（可镜像），手机自动转为图上文下",
+      description: "桌面画廊海报式：大图偏右 + 签名束贴左下（可镜像）；手机图上叠字",
       fields: [
         {
           key: "template",
@@ -132,13 +133,6 @@ export const singlePosterSchema: ModuleInspectorSchema = {
           ],
         },
       ],
-    },
-    {
-      id: "single-poster-advanced",
-      title: "高级设置",
-      layer: "style",
-      description: "SEO 与无障碍用，不在页面显示",
-      fields: [altTextField()],
     },
   ],
 };

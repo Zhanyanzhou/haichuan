@@ -53,10 +53,6 @@ export const customProcessSchema: ModuleInspectorSchema = {
             `${item.number || ""} ${item.name || item.en || ""}`.trim() ||
             "新节点",
           itemFields: [
-            { key: "number", label: "编号（如 01）", control: "text" },
-            { key: "en", label: "英文题（如 DISCOVERY）", control: "text" },
-            { key: "name", label: "中文题", control: "text", required: true },
-            { key: "desc", label: "一句话说明", control: "textarea", rows: 2 },
             {
               key: "image",
               label: "节点图（可选）",
@@ -64,6 +60,10 @@ export const customProcessSchema: ModuleInspectorSchema = {
               spec: IMAGE_SPECS.customProcess.node,
               placeholder: "上传节点图，可选",
             },
+            { key: "number", label: "编号（如 01）", control: "text" },
+            { key: "en", label: "英文题（如 DISCOVERY）", control: "text" },
+            { key: "name", label: "中文题", control: "text", required: true },
+            { key: "desc", label: "一句话说明", control: "textarea", rows: 2 },
           ],
         },
       ],

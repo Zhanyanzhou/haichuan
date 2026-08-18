@@ -54,6 +54,22 @@ export function canonicalizePuckContent(puck: unknown): string {
   );
 }
 
+/**
+ * 页面完整语义签名：content 指纹 + metadata 规范化签名。
+ * 用于判定“草稿是否与线上已发布内容存在实质差异”（含 SEO 等 metadata 差异）。
+ * canonicalizePuckContent 仅比较 content，无法识别仅 metadata 不同的未发布草稿。
+ */
+export function canonicalizePageContent(
+  puck: unknown,
+  metadata?: unknown,
+): string {
+  const metadataSig =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? JSON.stringify(sortObjectKeys(metadata))
+      : "{}";
+  return `${canonicalizePuckContent(puck)}||${metadataSig}`;
+}
+
 export function getModuleDisplayName(
   type: string,
   props?: Record<string, any>,
@@ -64,12 +80,26 @@ export function getModuleDisplayName(
 
 export function formatEditorTime(value?: string | Date | null) {
   if (!value) return "";
-  return new Date(value).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const date = new Date(value);
+  // 跨年时补年份，避免版本历史/草稿时间跨年混淆。
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleString(
+    "zh-CN",
+    sameYear
+      ? {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        }
+      : {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        },
+  );
 }
 
 export function getEditorErrorMessage(error: unknown, fallback: string) {

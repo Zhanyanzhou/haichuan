@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import type { PageModule } from "@/types/pageModule";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
@@ -45,6 +46,7 @@ export default function HeroSection({ module, editMode }: Props) {
   const desktopImg = c?.desktopImage || c?.mobileImage || "";
   const mobileImg = c?.mobileImage || c?.desktopImage || "";
   // 文案不再回退营销默认值:未填写即为空,公开态对应节点不渲染(编辑态有占位引导)
+  const eyebrow = typeof c?.eyebrow === "string" ? c.eyebrow : "";
   const title = typeof c?.title === "string" ? c.title : "";
   const subtitle = typeof c?.subtitle === "string" ? c.subtitle : "";
   const actionText = typeof c?.actionText === "string" ? c.actionText : "";
@@ -60,9 +62,14 @@ export default function HeroSection({ module, editMode }: Props) {
   const desktopFocusY = s?.desktopFocusY ?? legacyFocusY;
   const mobileFocusX = s?.mobileFocusX ?? legacyFocusX;
   const mobileFocusY = s?.mobileFocusY ?? legacyFocusY;
-  const alignment = l?.template === "center" ? "center" : "left";
+  // 白盒画册(2026-08-19):默认居中束,左下为受控备选
+  // 链路修复:编辑器字段为 alignment(旧数据为 template),统一兼容读取
+  const rawAlign = l?.alignment || l?.template || "center";
+  const alignment = rawAlign === "left" ? "left" : "center";
+  // 白盒画册(2026-08-19):全站禁黑色背景,废除暗调图浅字档,统一亮图深字
+  const textTone = "dark";
   const heroStyle = {
-    background: "#E4E3DF",
+    background: "#FFFFFF",
     outline: editMode ? "2px solid rgba(184,148,78,0.6)" : undefined,
     outlineOffset: -2,
     position: "relative",
@@ -157,10 +164,10 @@ export default function HeroSection({ module, editMode }: Props) {
         {desktopImg ? (
           <div
             className="absolute inset-0 pointer-events-none"
-            style={{
-              background:
-                "linear-gradient(to top, rgba(15,13,12,0.32), rgba(15,13,12,0.02) 44%, rgba(15,13,12,0.06))",
-            }}
+            style={
+              // 亮调图:中央极轻提白承深字
+              { background: "radial-gradient(ellipse 70% 60% at 50% 48%, rgba(255,255,255,0.40), rgba(255,255,255,0) 70%)" }
+            }
           />
         ) : null}
       </div>
@@ -171,10 +178,11 @@ export default function HeroSection({ module, editMode }: Props) {
           <div
             className="hc-content-template__copy hc-phase1-hero__copy"
             data-align={alignment}
+            data-tone={textTone}
           >
-            {subtitle ? (
+            {eyebrow ? (
               <p
-                data-editor-field="subtitle"
+                data-editor-field="eyebrow"
                 className="hc-content-template__eyebrow hc-hero__reveal"
                 style={{
                   fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
@@ -185,8 +193,10 @@ export default function HeroSection({ module, editMode }: Props) {
                     : "hcHeroFadeUp 0.7s 0.18s cubic-bezier(0.22,1,0.36,1) both",
                 }}
               >
-                {subtitle}
+                {eyebrow}
               </p>
+            ) : editMode ? (
+              <EditCopyPlaceholder variant="eyebrow" label="眉题" />
             ) : null}
             {title ? (
               <h1
@@ -204,6 +214,26 @@ export default function HeroSection({ module, editMode }: Props) {
               >
                 {title}
               </h1>
+            ) : editMode ? (
+              <EditCopyPlaceholder variant="title" label="标题" block />
+            ) : null}
+            {subtitle ? (
+              <p
+                data-editor-field="subtitle"
+                className="hc-content-template__body hc-hero__reveal"
+                style={{
+                  fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
+                  opacity: 1,
+                  transform: "none",
+                  animation: rm
+                    ? "none"
+                    : "hcHeroFadeUp 0.7s 0.34s cubic-bezier(0.22,1,0.36,1) both",
+                }}
+              >
+                {subtitle}
+              </p>
+            ) : editMode ? (
+              <EditCopyPlaceholder variant="body" label="副文" block />
             ) : null}
             {actionText && targetUrl ? (
               editMode ? (
@@ -233,6 +263,8 @@ export default function HeroSection({ module, editMode }: Props) {
                   {actionText} <span>→</span>
                 </Link>
               )
+            ) : editMode ? (
+              <EditCopyPlaceholder variant="action" label="行动链接" />
             ) : null}
           </div>
         </div>

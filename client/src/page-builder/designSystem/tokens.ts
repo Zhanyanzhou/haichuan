@@ -42,7 +42,7 @@ export type RatioToken = keyof typeof RATIOS;
 
 /* ═══ 双模式密度与留白档位 ═══ */
 export type DensityMode = "brand" | "commerce";
-export type SpacingLevel = "compact" | "normal" | "spacious";
+export type SpacingLevel = "compact" | "normal" | "spacious" | "grand";
 
 /* ═══ 字体(品牌字串唯一来源,区块不再各自拼写) ═══ */
 export const FONT_DISPLAY = '"Cormorant Garamond","Noto Serif SC",serif';
@@ -122,17 +122,20 @@ export const DESIGN_SYSTEM_BASE_CSS = `
     --hc-px: clamp(48px, 6vw, 96px);
     --hc-py-brand: clamp(96px, 12vh, 160px);
     --hc-py-commerce: clamp(56px, 7vh, 96px);
-    --hc-type-hero: clamp(40px, 5vw, 68px);
-    --hc-type-display: clamp(42px, 5vw, 56px);
-    --hc-type-h2: clamp(28px, 3vw, 36px);
+    /* 响应式刻度(白盒画册):4K 视口下排印同比例放大,上限依 03 第八节实证基线 */
+    --hc-type-hero: clamp(40px, 3.2vw, 96px);
+    --hc-type-display: clamp(28px, 2vw, 56px);
+    --hc-type-h2: clamp(28px, 1.9vw, 54px);
     --hc-type-h3: clamp(22px, 2.2vw, 26px);
-    --hc-type-body: 16px;
-    --hc-type-caption: 13px;
+    --hc-type-body: clamp(15px, 0.8vw, 22px);
+    --hc-type-caption: clamp(12px, 0.68vw, 17px);
   }
 }
-/* 节奏与留白档位:密度决定基准,三档留白做乘数,bleed 通栏不吃纵向节奏 */
+/* 节奏与留白档位:密度决定基准,四档留白做乘数,bleed 通栏不吃纵向节奏 */
 .hc-section { padding-block: var(--hc-py-base, 0px); }
 .hc-section[data-spacing="compact"] { padding-block: calc(var(--hc-py-base, 0px) * 0.66); }
 .hc-section[data-spacing="spacious"] { padding-block: calc(var(--hc-py-base, 0px) * 1.32); }
+/* grand(2026-08-19 新增,宣言/仪式专用):全站最大留白档 */
+.hc-section[data-spacing="grand"] { padding-block: calc(var(--hc-py-base, 0px) * 1.8); }
 .hc-section[data-flow="bleed"] { padding-block: 0; }
 `;

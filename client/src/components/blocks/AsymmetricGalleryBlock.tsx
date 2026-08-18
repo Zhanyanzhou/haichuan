@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { GALLERY_CONTRACT } from "@/page-builder/config/blockContracts";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
@@ -19,8 +20,8 @@ interface GalleryBlockProps {
   editMode?: boolean;
 }
 
-const INK = "#28231F";
-const MUTED = "rgba(40,35,31,0.58)";
+const INK = "#1A1A1A";
+const MUTED = "#8C8C8C";
 
 /**
  * 作品画廊 — Asymmetric Gallery 母版
@@ -35,7 +36,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
   const items: GalleryItem[] = Array.isArray(content.items)
     ? content.items.slice(0, GALLERY_CONTRACT.content.maxItems)
     : [];
-  const bgColor = styleConfig.bgColor || "#F7F4EE";
+  const bgColor = styleConfig.bgColor || "#FFFFFF";
 
   if (items.length === 0) {
     if (!editMode) return null;
@@ -44,6 +45,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
         <BlockEmptyPlaceholder
           hint="作品画廊"
           spec="请添加 3–5 张图片,形成「大图 + 双图 + 大图」的画廊节奏"
+          ratio={GALLERY_CONTRACT.canvas.primaryMediaAspectRatio}
         />
       </DecorSection>
     );
@@ -106,9 +108,9 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
 
   return (
     <DecorSection master="asymmetric-gallery" background={bgColor}>
-      {(title || subtitle) && (
+      {(title || subtitle || editMode) && (
         <header style={{ maxWidth: 640, margin: "0 auto 48px", textAlign: "center" }}>
-          {title && (
+          {title ? (
             <h2
               data-editor-field="title"
               style={{
@@ -122,12 +124,16 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
             >
               {title}
             </h2>
-          )}
-          {subtitle && (
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="title" label="标题" block />
+          ) : null}
+          {subtitle ? (
             <p data-editor-field="subtitle" style={{ margin: 0, fontSize: "var(--hc-type-body, 15px)", color: MUTED, lineHeight: 1.8 }}>
               {subtitle}
             </p>
-          )}
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="body" label="副文" block />
+          ) : null}
         </header>
       )}
       <div className="hc-gallery">

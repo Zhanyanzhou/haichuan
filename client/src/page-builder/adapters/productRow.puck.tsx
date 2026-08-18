@@ -6,8 +6,6 @@ import { useEffect, useMemo, useState } from "react";
 import ProductRowBlock from "@/components/blocks/ProductRowBlock";
 import { fetchProductsByIds, type ProductRow } from "../data-sources/productSource";
 import { convertPuckProps } from "../utils/puckPropsToModule";
-import ProductIdsField from "../fields/ProductIdsField";
-import { colorPuckField } from "../fields/ColorField";
 
 export interface ProductRowPuckProps {
   title: string;
@@ -81,7 +79,7 @@ function ProductRowPreview(props: ProductRowPuckProps) {
 
   if (loading) {
     return (
-      <section style={{ padding: "56px 0", background: props.bgColor || "#FCFCFB", textAlign: "center" }}>
+      <section style={{ padding: "56px 0", background: props.bgColor || "#FFFFFF", textAlign: "center" }}>
         <p style={{ margin: 0, color: "#9A8A6B", fontSize: 13 }}>正在加载商品预览</p>
       </section>
     );
@@ -89,7 +87,7 @@ function ProductRowPreview(props: ProductRowPuckProps) {
 
   if (error) {
     return (
-      <section style={{ padding: "56px 0", background: props.bgColor || "#FCFCFB", textAlign: "center" }}>
+      <section style={{ padding: "56px 0", background: props.bgColor || "#FFFFFF", textAlign: "center" }}>
         <p style={{ margin: 0, color: "#B45332", fontSize: 13 }}>商品预览加载失败，请稍后重试</p>
       </section>
     );
@@ -116,83 +114,12 @@ export const productRowPuckConfig = {
     mobileColumns: 2,
     displayMode: "standard",
     actionStyle: "text",
-    bgColor: "#FCFCFB",
+    bgColor: "#FFFFFF",
     showPrice: true,
     showButton: false,
     buttonText: "查看详情",
     locked: false,
   } satisfies ProductRowPuckProps,
-  fields: {
-    title: { type: "text" as const, label: "标题" },
-    subtitle: { type: "text" as const, label: "副标题" },
-    productIds: {
-      type: "custom" as const,
-      label: "选择商品",
-      render: ({
-        value,
-        onChange,
-        readOnly,
-      }: {
-        value?: number[];
-        onChange: (value: number[]) => void;
-        readOnly?: boolean;
-      }) => (
-        <ProductIdsField value={value || []} onChange={onChange} readOnly={readOnly} />
-      ),
-    } as any,
-    layout: {
-      type: "radio" as const,
-      label: "列数",
-      options: [
-        { label: "2 列", value: "grid-2" },
-        { label: "3 列", value: "grid-3" },
-        { label: "4 列", value: "grid-4" },
-      ],
-    },
-    mobileColumns: {
-      type: "radio" as const,
-      label: "移动端列数",
-      options: [
-        { label: "1 列", value: 1 },
-        { label: "2 列", value: 2 },
-      ],
-    },
-    displayMode: {
-      type: "radio" as const,
-      label: "展示模式",
-      options: [
-        { label: "画册展示", value: "album" },
-        { label: "标准选款", value: "standard" },
-      ],
-    },
-    actionStyle: {
-      type: "radio" as const,
-      label: "操作样式",
-      options: [
-        { label: "整卡点击", value: "none" },
-        { label: "文字链接", value: "text" },
-        { label: "描边按钮", value: "button" },
-      ],
-    },
-    showPrice: {
-      type: "radio" as const,
-      label: "显示价格",
-      options: [
-        { label: "显示", value: true },
-        { label: "隐藏", value: false },
-      ],
-    },
-    showButton: {
-      type: "radio" as const,
-      label: "显示按钮",
-      options: [
-        { label: "显示", value: true },
-        { label: "隐藏", value: false },
-      ],
-    },
-    buttonText: { type: "text" as const, label: "按钮文字" },
-    bgColor: colorPuckField("背景色"),
-  },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};

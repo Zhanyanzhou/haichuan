@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { SecureImage } from '@/components/common/SecureImage';
 import { isSafeInternalPath, resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
 import { DesignSystemStyles } from '@/page-builder/designSystem/sectionShell';
+import EditCopyPlaceholder from '@/components/blocks/_shared/EditCopyPlaceholder';
 import { FONT_DISPLAY, FONT_SANS } from '@/page-builder/designSystem/tokens';
 
 interface AppointmentBlockProps {
@@ -17,8 +18,8 @@ interface AppointmentBlockProps {
 export default function AppointmentBlock({ module, editMode }: AppointmentBlockProps) {
   const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
   const { backgroundImage, title, subtitle, buttonText, phone, altText } = content;
-  const tone = layoutConfig.template === 'ivory' ? 'ivory' : 'dark';
-  const bgColor = tone === 'ivory' ? '#FCFCFB' : styleConfig.bgColor || '#171717';
+  const tone = 'ivory'; // 白盒画册(2026-08-19):废除 dark 深色档,统一亮调
+  const bgColor = '#FFFFFF';
   const textColor = tone === 'ivory' ? '#222222' : '#FFFFFF';
   const mutedColor = tone === 'ivory' ? '#66645F' : 'rgba(255,255,255,0.78)';
   // 双端独立焦点;旧数据共享 focusX/Y 自动回退
@@ -85,21 +86,25 @@ export default function AppointmentBlock({ module, editMode }: AppointmentBlockP
         <div className="hc-appointment__veil" style={{ background: tone === 'ivory' ? 'rgba(244,239,231,.55)' : 'rgba(15,13,12,.24)' }} />
       ) : null}
       <div className="hc-appointment__content" data-content-role="copy">
-        {title && (
+        {title ? (
           <h2 data-editor-field="title" style={{ fontSize: 'var(--hc-type-h2, clamp(30px,3.2vw,44px))', fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, color: textColor, marginBottom: 14, lineHeight: 1.2, fontWeight: 500 }}>
             {title}
           </h2>
-        )}
-        {subtitle && (
+        ) : editMode ? (
+          <EditCopyPlaceholder variant="title" label="标题" block />
+        ) : null}
+        {subtitle ? (
           <p data-editor-field="subtitle" style={{ fontSize: 'var(--hc-type-body, 14px)', color: mutedColor, lineHeight: 1.8, marginBottom: 28 }}>
             {subtitle}
           </p>
-        )}
+        ) : editMode ? (
+          <EditCopyPlaceholder variant="body" label="副文" block />
+        ) : null}
         <div className="hc-appointment__actions">
           {buttonText && targetUrl ? editMode ? (
-            <span data-content-role="primaryAction" data-editor-field="buttonText linkUrl" style={{ display: 'inline-block', padding: '12px 36px', background: '#B8944E', color: '#FFFFFF', fontSize: 'var(--hc-type-caption, 12px)', letterSpacing: '0.14em' }}>{buttonText}</span>
+            <span data-content-role="primaryAction" data-editor-field="buttonText linkUrl" style={{ display: 'inline-block', paddingBottom: 6, borderBottom: '1px solid #1A1A1A', color: '#1A1A1A', fontSize: 'var(--hc-type-caption, 12px)', letterSpacing: '0.14em' }}>{buttonText}</span>
           ) : (
-            <Link data-content-role="primaryAction" data-editor-field="buttonText linkUrl" to={targetUrl} style={{ display: 'inline-block', padding: '12px 36px', background: '#B8944E', color: '#FFFFFF', fontSize: 'var(--hc-type-caption, 12px)', textDecoration: 'none', letterSpacing: '0.14em' }}>{buttonText}</Link>
+            <Link data-content-role="primaryAction" data-editor-field="buttonText linkUrl" to={targetUrl} style={{ display: 'inline-block', paddingBottom: 6, borderBottom: '1px solid #1A1A1A', color: '#1A1A1A', fontSize: 'var(--hc-type-caption, 12px)', textDecoration: 'none', letterSpacing: '0.14em' }}>{buttonText}</Link>
           ) : null}
           {phone && phoneHref ? editMode ? (
             <span className="hc-appointment__contact" data-content-role="secondaryContact" data-editor-field="phone" style={{ fontSize: 'var(--hc-type-caption, 12px)', letterSpacing: '0.08em' }}>{phone}</span>

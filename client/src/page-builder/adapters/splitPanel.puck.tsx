@@ -3,10 +3,7 @@
  */
 
 import SplitPanelBlock from "@/components/blocks/SplitPanelBlock";
-import { IMAGE_SPECS } from "../config/imageSpecs";
 import { convertPuckProps } from "../utils/puckPropsToModule";
-import MediaPickerField from "../fields/MediaPickerField";
-import { colorPuckField } from "../fields/ColorField";
 
 export interface SplitPanelPuckProps {
   image: string;
@@ -35,46 +32,10 @@ export const splitPanelPuckConfig = {
     linkUrl: "",
     template: "imageLeft",
     split: "50-50",
-    bgColor: "#FCFCFB",
+    bgColor: "#FFFFFF",
     textBg: "#fff",
     locked: false,
   } satisfies SplitPanelPuckProps,
-  fields: {
-    image: {
-      type: "custom" as const,
-      label: "图片分栏 · 配图",
-      render: ({
-        value, onChange, readOnly,
-      }: { value?: string; onChange: (v: string) => void; readOnly?: boolean }) => (
-        <MediaPickerField fieldKey="image" device="shared" value={value} onChange={onChange} readOnly={readOnly}
-          spec={IMAGE_SPECS.splitPanel.image} placeholder="上传分栏配图" />
-      ),
-    },
-    title: { type: "text" as const, label: "标题" },
-    subtitle: { type: "text" as const, label: "副标题" },
-    body: { type: "textarea" as const, label: "正文" },
-    buttonText: { type: "text" as const, label: "按钮文字" },
-    linkUrl: { type: "text" as const, label: "按钮跳转链接" },
-    template: {
-      type: "radio" as const,
-      label: "图片位置",
-      options: [
-        { label: "图左文右", value: "imageLeft" },
-        { label: "图右文左", value: "imageRight" },
-      ],
-    },
-    split: {
-      type: "radio" as const,
-      label: "分割比例",
-      options: [
-        { label: "50:50", value: "50-50" },
-        { label: "60:40", value: "60-40" },
-        { label: "40:60", value: "40-60" },
-      ],
-    },
-    bgColor: colorPuckField("背景色"),
-    textBg: colorPuckField("文字区背景"),
-  },
   resolvePermissions: (data: any) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};

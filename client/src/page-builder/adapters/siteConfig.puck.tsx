@@ -73,14 +73,4 @@ export const siteConfigPuckConfig = {
   defaultProps: {
     visible: true,
   } satisfies SiteConfigPuckProps,
-  fields: {
-    visible: {
-      type: "radio" as const,
-      label: "在画布中显示",
-      options: [
-        { label: "显示", value: true },
-        { label: "隐藏", value: false },
-      ],
-    },
-  },
 };

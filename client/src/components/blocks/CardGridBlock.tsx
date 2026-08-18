@@ -1,4 +1,5 @@
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 
@@ -22,7 +23,7 @@ export default function CardGridBlock({
   const { content = {}, styleConfig = {} } = module;
   const { title, subtitle, cards = [] } = content;
   const layout = content.layout || "grid-3";
-  const bg = styleConfig.bgColor || "#FCFCFB";
+  const bg = styleConfig.bgColor || "#FFFFFF";
   const cols = layout === "grid-2" ? 2 : layout === "grid-4" ? 4 : 3;
 
   if (!cards.length) {
@@ -39,14 +40,14 @@ export default function CardGridBlock({
 
   return (
     <DecorSection master="commerce-grid" background={bg} spacing="compact">
-      {(title || subtitle) && (
+      {(title || subtitle || editMode) && (
         <div style={{ textAlign: "center", marginBottom: 48 }}>
-          {title && (
+          {title ? (
             <h2
               style={{
                 fontSize: "var(--hc-type-h3, clamp(22px,2.6vw,32px))",
                 fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
-                color: "#2C2C2C",
+                color: "#1A1A1A",
                 marginBottom: 12,
                 lineHeight: 1.2,
                 fontWeight: 500,
@@ -54,12 +55,14 @@ export default function CardGridBlock({
             >
               {title}
             </h2>
-          )}
-            {subtitle && (
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="title" label="标题" block />
+          ) : null}
+            {subtitle ? (
               <p
                 style={{
                   fontSize: 13,
-                  color: "#8A7F72",
+                  color: "#8C8C8C",
                   maxWidth: 480,
                   margin: "0 auto",
                   lineHeight: 1.6,
@@ -67,7 +70,9 @@ export default function CardGridBlock({
               >
                 {subtitle}
               </p>
-            )}
+            ) : editMode ? (
+              <EditCopyPlaceholder variant="body" label="副文" block />
+            ) : null}
           </div>
         )}
 
@@ -82,7 +87,7 @@ export default function CardGridBlock({
             <div key={i} style={{ textAlign: "center", padding: "16px 12px" }}>
               {card.icon && (
                 <div
-                  style={{ fontSize: 13, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 14, color: "#B8944E" }}
+                  style={{ fontSize: 13, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 14, color: "#8C8C8C" }}
                 >
                   {card.icon}
                 </div>
@@ -92,7 +97,7 @@ export default function CardGridBlock({
                   style={{
                     fontSize: 16,
                     fontWeight: 500,
-                    color: "#2C2C2C",
+                    color: "#1A1A1A",
                     marginBottom: 8,
                     fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
                   }}
@@ -104,7 +109,7 @@ export default function CardGridBlock({
                 <p
                   style={{
                     fontSize: 13,
-                    color: "#8A7F72",
+                    color: "#8C8C8C",
                     lineHeight: 1.7,
                     maxWidth: 260,
                     margin: "0 auto",

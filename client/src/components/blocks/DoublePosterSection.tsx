@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useReducedMotion } from 'framer-motion';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import type { PageModule } from '@/types/pageModule';
 import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
@@ -13,9 +14,9 @@ import {
   templateLayoutVars,
 } from '@/page-builder/layout/contentTemplateLayouts';
 
-const SF = '#F8F6F1';
-const TX = '#28231F';
-const MU = 'rgba(40,35,31,0.58)';
+const SF = '#FFFFFF';
+const TX = '#1A1A1A';
+const MU = '#8C8C8C';
 
 interface Props { module?: PageModule; editMode?: boolean; }
 
@@ -138,7 +139,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
       )}
       <div className="hc-content-template__container hc-phase1-double">
         <div data-editor-field="mainImage" className="hc-content-template__media hc-phase1-double__main" style={{
-            background: '#E4E3DF',
+            background: '#F3F1EE',
             opacity: rm || visible ? 1 : 0,
             transform: rm || visible ? 'translateY(0)' : 'translateY(18px)',
             transition: 'opacity 0.9s 0.05s ease, transform 0.9s 0.05s ease',
@@ -153,7 +154,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
           <div
             data-editor-field="detailImage"
             className="hc-content-template__media hc-phase1-double__detail"
-            style={{ background: '#E4E3DF' }}
+            style={{ background: '#F3F1EE' }}
           >
             {detailImg ? (
               <EditorialImage src={detailImg} alt={c?.detailAltText || ""} focusX={s?.detailFocusX ?? 50} focusY={s?.detailFocusY ?? 50} />
@@ -167,13 +168,19 @@ export default function DoublePosterSection({ module, editMode }: Props) {
             <p data-editor-field="number label" className="hc-content-template__eyebrow" style={{ color: MU, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
               {[number, label].filter(Boolean).join(" / ")}
             </p>
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="eyebrow" label="编号 / 展签" />
           ) : null}
           {title ? (
             <h2 data-editor-field="title" className="hc-content-template__title"
               style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: 'var(--hc-type-h3, clamp(22px,2.2vw,32px))', color: TX }}>{title}</h2>
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="title" label="标题" block />
           ) : null}
           {description ? (
             <p data-editor-field="description" className="hc-content-template__body" style={{ color: MU }}>{description}</p>
+          ) : editMode ? (
+            <EditCopyPlaceholder variant="body" label="说明" block />
           ) : null}
         </div>
         {actionText && targetUrl ? (
@@ -186,6 +193,8 @@ export default function DoublePosterSection({ module, editMode }: Props) {
               {actionText} <span>→</span>
             </Link>
           )
+        ) : editMode ? (
+          <EditCopyPlaceholder variant="action" label="行动链接" />
         ) : null}
       </div>
     </section>

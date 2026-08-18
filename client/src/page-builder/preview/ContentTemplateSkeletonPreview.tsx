@@ -92,8 +92,27 @@ function Quote({ zone, frame, inverse }: { zone: ContentTemplatePreviewZone; fra
   return <g data-preview-role="quote"><text x={box.x} y={box.y + 20} fill={PREVIEW_TOKENS.accent} fontSize="24" fontFamily="serif">“</text><rect x={box.x + 17} y={box.y + 14} width={Math.max(20, box.width - 22)} height="4" rx="2" fill={ink} /><rect x={box.x + 4} y={box.y + 29} width={Math.max(18, box.width - 30)} height="4" rx="2" fill={inverse ? "rgba(247,248,249,.42)" : PREVIEW_TOKENS.line} /></g>;
 }
 
+function Eyebrow({ zone, frame, inverse }: { zone: ContentTemplatePreviewZone; frame: Metrics; inverse: boolean }) {
+  const box = rect(zone, frame);
+  return <g data-preview-role="eyebrow"><rect x={box.x} y={box.y + 2} width={Math.max(16, box.width * .55)} height="3" rx="1.5" fill={PREVIEW_TOKENS.accent} /></g>;
+}
+
+function TitleBlock({ zone, frame, inverse }: { zone: ContentTemplatePreviewZone; frame: Metrics; inverse: boolean }) {
+  const box = rect(zone, frame); const ink = inverse ? PREVIEW_TOKENS.inverse : PREVIEW_TOKENS.graphite;
+  const tall = box.height >= 26;
+  return <g data-preview-role="title"><rect x={box.x} y={box.y + 2} width={Math.max(24, box.width * .92)} height={tall ? 8 : 6} rx="2" fill={ink} />{tall ? <rect x={box.x} y={box.y + 15} width={Math.max(18, box.width * .6)} height="8" rx="2" fill={ink} /> : null}</g>;
+}
+
+function Subtitle({ zone, frame, inverse }: { zone: ContentTemplatePreviewZone; frame: Metrics; inverse: boolean }) {
+  const box = rect(zone, frame); const muted = inverse ? "rgba(247,248,249,.56)" : PREVIEW_TOKENS.muted;
+  return <g data-preview-role="subtitle"><rect x={box.x} y={box.y + 1} width={Math.max(20, box.width * .82)} height="3" rx="1.5" fill={muted} /><rect x={box.x} y={box.y + 9} width={Math.max(14, box.width * .55)} height="3" rx="1.5" fill={muted} /></g>;
+}
+
 function Zone({ zone, frame, inverse }: { zone: ContentTemplatePreviewZone; frame: Metrics; inverse: boolean }) {
   if (["media", "mainMedia", "detailMedia", "card"].includes(zone.role)) return <Media zone={zone} frame={frame} inverse={inverse} />;
+  if (zone.role === "eyebrow") return <Eyebrow zone={zone} frame={frame} inverse={inverse} />;
+  if (zone.role === "title") return <TitleBlock zone={zone} frame={frame} inverse={inverse} />;
+  if (zone.role === "subtitle") return <Subtitle zone={zone} frame={frame} inverse={inverse} />;
   if (zone.role === "copy") return <Copy zone={zone} frame={frame} inverse={inverse} />;
   if (zone.role === "action") { const box = rect(zone, frame); return <g data-preview-role="action"><rect x={box.x} y={box.y + Math.min(12, box.height / 2)} width={Math.max(20, Math.min(70, box.width))} height="3" rx="1.5" fill={inverse ? PREVIEW_TOKENS.inverse : PREVIEW_TOKENS.graphite} /><rect x={box.x} y={box.y + Math.min(19, box.height / 2 + 7)} width={Math.max(20, Math.min(70, box.width))} height="1" fill={PREVIEW_TOKENS.accent} /></g>; }
   if (zone.role === "marker") return <Marker zone={zone} frame={frame} inverse={inverse} />;

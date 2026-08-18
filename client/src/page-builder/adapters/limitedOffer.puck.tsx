@@ -1,5 +1,4 @@
 import LimitedOfferBlock from "@/components/blocks/LimitedOfferBlock";
-import { colorPuckField } from "../fields/ColorField";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 
 export interface LimitedOfferPuckProps {
@@ -29,19 +28,8 @@ export const limitedOfferPuckConfig = {
     benefits: [],
     buttonText: "",
     linkUrl: "",
-    bgColor: "#211D19",
+    bgColor: "#FFFFFF",
     locked: false,
   } satisfies LimitedOfferPuckProps,
-  fields: {
-    eventImage: { type: "text" as const, label: "活动视觉 URL" },
-    eyebrow: { type: "text" as const, label: "眉题" },
-    title: { type: "text" as const, label: "活动标题" },
-    body: { type: "textarea" as const, label: "活动说明" },
-    targetDate: { type: "text" as const, label: "结束时间（发布前按实际活动填写）" },
-    benefits: { type: "array" as const, label: "已确认活动权益", arrayFields: { value: { type: "text" as const, label: "权益文案" } }, defaultItemProps: { value: "待确认权益" } } as any,
-    buttonText: { type: "text" as const, label: "按钮文字" },
-    linkUrl: { type: "text" as const, label: "按钮链接" },
-    bgColor: colorPuckField("背景色"),
-  },
   resolvePermissions: (data: any) => data.props?.locked ? { delete: false, drag: false } : {},
 };
