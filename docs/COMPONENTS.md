@@ -51,7 +51,7 @@
 ### 单套渲染层 + 声明式编辑体系(2026-08 重构后)
 
 - **渲染层唯一**:`blocks/` 下 23 个区块组件(含新建 AsymmetricGalleryBlock 作品画廊),`editMode` prop 区分编辑画布与公开页;admin 适配器与公开渲染器(PuckDocumentRenderer)共用同一批组件。
-- **编辑区**:22 个模块全部由 `page-builder/inspector/schema/modules/` 声明式 Schema 驱动(五层信息架构:内容→媒体→布局→样式→高级折叠),registry 全量注册;旧 10 个专属 Inspector 已于 R4b 退役(git 历史可查)。
+- **编辑区**:全部 25 个组件(23 内容模板 + 网站全局设置/业务功能区)由 `page-builder/inspector/schema/modules/` 声明式 Schema 驱动(五任务分区:图片素材→文字内容→行动关联→构图→模板专属),registry 全量注册;旧 10 个专属 Inspector(R4b)与 Puck.Fields fallback(P1-2,2026-08-18)均已退役,git 历史可查。
 - **设计系统**:`page-builder/designSystem/`(tokens 8 规范比例/4 档宽度/双模式节奏、12 母版 masters、DecorSection 外壳、rhythm 页面节奏引擎)。
 - **旧类型兼容**:分割面板/图文混排/礼赠指南已从注册表移除;编辑器经 `migratePuckData` 自动转换,公开渲染器保留旧类型分支,已发布历史版本永久可渲染。
 
@@ -74,7 +74,7 @@
 | --- | --- | --- |
 | blocks/ 渲染层 | 25 文件 | ✅ 全部使用中(24 业务区块 + _shared/BlockEmptyPlaceholder) |
 | page-builder/adapters | 25 | 23 注册使用中;imageText/splitPanel 2 个仅作旧类型 Props 类型源(遗留) |
-| page-builder/inspector/schema/modules | 22 | 21 活跃 + splitPanel.ts 墓碑(待物理删除) |
+| page-builder/inspector/schema/modules | 23 | ✅ 25 组件全量注册(23 模板 schema,cardGrid/categoryCards 各含变体;2 系统区块) |
 | page-builder/designSystem | 5 | ✅ tokens/masters/sectionShell/rhythm/index |
 | components/common | 17 | ✅ 11 使用中(含 ProtectedRoute/AntdProvider 动态导入、FilterPanel 批次D 转正);⚠️ 6 未引用:EmptyState/PageHeader/ImageUpload/AdminConfirm/Logo/LinkSelector(LinkSelector 职责已被 page-builder LinkTargetField 取代,顶部表"使用中"记载有误已撤销) |
 | components/admin | 1 | ⚠️ ImageCropper 未被引用 |

@@ -30,7 +30,7 @@
 
 - **双模式(Brand/Commerce)**:页面与母版保留 mode 元数据,用于节奏参考与视觉语言归档;**不做强制限制**(2026-08-15 用户决策:模板全页面通用,运营自行取舍)。
 - **12 母版**:Brand 9(Cinematic Hero / Immersive Image / Editorial Split / Editorial Story / Asymmetric Gallery / Editorial Text / Hero Piece / Journey / Conversion)+ Commerce 3(Commerce Grid / Entry / Campaign);23 个运营语义命名模板挂靠其上(含作品画廊与改款前后)。
-- **规范比例**:21:9 / 21:6 / 16:7 / 16:9 / 3:2 / 4:5 / 3:4 / 1:1(RATIOS 单一来源);模板契约定义各自双端比例,运营不可自选。
+- **规范比例**:21:6 / 16:7 / 16:9 / 3:2 / 4:5 / 3:4 / 1:1 共 7 个(RATIOS 单一来源,21:9 已于 2026-08-16 清退);模板契约定义各自双端比例,运营不可自选,给人看的上传规格一律经 imageSpecs 从契约派生(2026-08-18 比例派生管道)。
 - **焦点**:desktopFocusX/Y + mobileFocusX/Y 双端独立(旧共享 focusX/Y 读取回退)。
 - **旧类型迁移**:分割面板/图文混排/礼赠指南已从注册表移除;编辑器载入经 `utils/migratePuckData` 自动转换;公开渲染器保留旧类型分支,已发布历史版本永久可渲染。
 
