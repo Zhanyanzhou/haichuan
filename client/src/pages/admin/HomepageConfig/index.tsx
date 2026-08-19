@@ -1497,7 +1497,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
 
   return (
     <svg
-      className="homepage-editor__template-preview-img homepage-editor__template-layout-preview"
+      className="homepage-editor__template-preview-img"
       viewBox="0 0 300 400"
       role="img"
       aria-label={`${name}的内容框架预览`}
@@ -2050,7 +2050,7 @@ function InspectorPanel({
   if (!selectedItem) {
     return (
       <section
-        className="homepage-editor__properties homepage-editor__properties--empty"
+        className="homepage-editor__properties"
         aria-label="属性面板"
       >
         <strong className="homepage-editor__properties-hint">

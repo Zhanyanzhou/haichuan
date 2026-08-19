@@ -88,8 +88,8 @@ export default function UnsavedChangesGuard({
           style={{
             border: 0,
             borderRadius: 4,
-            background: "var(--adm-action)",
-            color: "var(--ed-on-accent)",
+            background: "#6f5733",
+            color: "#fff",
             padding: "5px 14px",
             cursor: "pointer",
             fontSize: 13,

@@ -23,6 +23,13 @@
   --puck-color-focus-ring: #6f5733;
   --adm-gold: #6f5733;
   --adm-gold-soft: #f1ece4;
+  /* 2026-08-19 断链变量修复:
+   * --ed-paper(20 处 background 引用)与 --ed-on-accent(8 处 color 引用)全项目从未定义,
+   * 一直按未定义回退渲染(paper→transparent、on-accent→继承色)。
+   * 此处固化:paper 用 transparent 保持现状视觉(纸色视觉增强另立项);
+   * on-accent 定白字,修复深色 accent 底(#6F5733)上的低对比(属缺陷修复,非视觉增强)。 */
+  --ed-paper: transparent;
+  --ed-on-accent: #fff;
   --puck-font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
   height: 100%;
   min-height: 0;
@@ -3885,4 +3892,85 @@ body:has(.homepage-editor__storefront-frame) {
 .homepage-editor output:focus-visible {
   outline: 2px solid var(--adm-focus);
   outline-offset: 2px;
+}
+
+/* ═══ 2026-08-19 占位类名接线(10 个无样式类逐个补样式或删冗余) ═══
+ * 删类名的冗余包装(__media-preview/__media-replace/__media-match/
+ * __properties--empty/__template-layout-preview)已在对应 JSX 移除;
+ * 下列高频媒体/数值/库空态类在此补上金调视觉语言,与 adminLuxury 一致。 ═══ */
+
+/* 视频字段动作条(更换/链接/删除) */
+.homepage-editor__media-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* 媒体字段备用动作(粘贴链接/改用链接/确认/取消) */
+.homepage-editor__media-alt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.homepage-editor__media-alt-actions button {
+  padding: 4px 10px;
+  border: 1px solid var(--adm-line);
+  border-radius: 3px;
+  color: var(--adm-action);
+  background: var(--adm-content-bg);
+  cursor: pointer;
+  font-size: 12px;
+}
+.homepage-editor__media-alt-actions button:hover {
+  border-color: var(--adm-gold);
+}
+
+/* 媒体字段规格提示(推荐比例 + 匹配状态) */
+.homepage-editor__media-spec-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--adm-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 数值字段(原生 input 对齐 inspector 字段输入框) */
+.homepage-editor__number-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.homepage-editor__number-input input {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--adm-neutral-border);
+  border-radius: 3px;
+  color: var(--adm-text);
+  background: var(--adm-content-bg);
+  font-size: 13px;
+}
+.homepage-editor__number-input input:focus {
+  border-color: var(--adm-gold);
+}
+
+/* 模块库空态清除搜索按钮 */
+.homepage-editor__library-empty-action {
+  margin-top: 12px;
+  padding: 5px 14px;
+  border: 1px solid var(--adm-neutral-border);
+  border-radius: 4px;
+  color: var(--adm-action);
+  background: var(--adm-content-bg);
+  cursor: pointer;
+  font-size: 12px;
+}
+.homepage-editor__library-empty-action:hover {
+  border-color: var(--adm-gold);
 }

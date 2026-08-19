@@ -127,7 +127,7 @@ export default function VideoField({
       </label>
 
       {value && !urlMode && !replaceOpen ? (
-        <div className="homepage-editor__media-preview">
+        <div>
           <video
             src={value}
             controls={false}
@@ -150,7 +150,7 @@ export default function VideoField({
       ) : null}
 
       {(replaceOpen || !value) && !urlMode ? (
-        <div className="homepage-editor__media-replace">
+        <div>
           <Upload.Dragger
             accept="video/*"
             showUploadList={false}
@@ -160,7 +160,7 @@ export default function VideoField({
             }}
             disabled={uploading}
           >
-            <VideoCameraOutlined style={{ color: "#B8944E", fontSize: 22 }} />
+            <VideoCameraOutlined style={{ color: "var(--adm-action, #B8944E)", fontSize: 22 }} />
             <div style={{ marginTop: 8, color: "#4A4239", fontSize: 13 }}>
               {uploading ? "视频上传中…" : "拖入视频或点击上传"}
             </div>
@@ -180,7 +180,7 @@ export default function VideoField({
       ) : null}
 
       {urlMode ? (
-        <div className="homepage-editor__media-replace">
+        <div>
           <Input
             value={urlInput}
             onChange={(event) => setUrlInput(event.target.value)}

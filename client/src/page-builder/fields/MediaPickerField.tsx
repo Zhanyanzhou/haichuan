@@ -169,7 +169,7 @@ export default function MediaPickerField({
     >
       {/* ═══ 预览（有图时的默认态） ═══ */}
       {hasValue && (
-        <div className="homepage-editor__media-preview">
+        <div>
           <div
             className={`homepage-editor__media-preview-img${hasCropPreview ? " is-crop-preview" : ""}`}
             style={hasCropPreview ? { aspectRatio: previewAspectRatio } : undefined}
@@ -241,7 +241,7 @@ export default function MediaPickerField({
 
       {/* ═══ 更换面板（预览下方内嵌展开） ═══ */}
       {hasValue && !readOnly && replaceOpen && !urlMode && (
-        <div className="homepage-editor__media-replace" style={{ marginTop: 8 }}>
+        <div style={{ marginTop: 8 }}>
           <Upload.Dragger
             accept="image/*"
             showUploadList={false}
@@ -258,7 +258,7 @@ export default function MediaPickerField({
               background: "#FCFAF5",
             }}
           >
-            <InboxOutlined style={{ color: "#B8944E", fontSize: 20 }} />
+            <InboxOutlined style={{ color: "var(--adm-action, #B8944E)", fontSize: 20 }} />
             <div style={{ marginTop: 6, color: "#4A4239", fontSize: 12 }}>
               {uploading ? "图片上传中…" : "拖入新图或点击上传（替换当前图片）"}
             </div>
@@ -324,7 +324,7 @@ export default function MediaPickerField({
               background: "#FCFAF5",
             }}
           >
-            <InboxOutlined style={{ color: "#B8944E", fontSize: 22 }} />
+            <InboxOutlined style={{ color: "var(--adm-action, #B8944E)", fontSize: 22 }} />
             <div style={{ marginTop: 8, color: "#4A4239", fontSize: 13 }}>
               {uploading
                 ? "图片上传中…"
@@ -364,7 +364,6 @@ export default function MediaPickerField({
           {imgSize.loaded && (
             <span
               style={{ color: statusColor[matchStatus || "good"] }}
-              className="homepage-editor__media-match"
             >
               {matchStatus === "good" && <CheckCircleOutlined />}
               {matchStatus === "watch" && <ExclamationCircleOutlined />}

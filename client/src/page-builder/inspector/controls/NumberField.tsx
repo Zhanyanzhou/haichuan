@@ -32,7 +32,7 @@ export default function NumberField({
           <span className="homepage-editor__inspector-hint">{hint}</span>
         ) : null}
       </label>
-      <div className="homepage-editor__number-input" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div className="homepage-editor__number-input">
         <input
           type="number"
           value={Number.isFinite(numeric) ? numeric : ""}
