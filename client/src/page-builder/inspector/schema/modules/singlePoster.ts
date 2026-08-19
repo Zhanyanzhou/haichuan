@@ -14,8 +14,12 @@ import {
   linkTargetField,
   mobileMediaField,
   moduleNameField,
+  ratioField,
 } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
+
+/** 槽位比例选项(契约派生):两端预设一致,各自按端校验回退 */
+const singlePosterRatioControl = ratioField("singlePoster", "desktopImage", { label: "画面比例" });
 
 export const singlePosterSchema: ModuleInspectorSchema = {
   moduleType: "单图海报",
@@ -132,6 +136,7 @@ export const singlePosterSchema: ModuleInspectorSchema = {
             },
           ],
         },
+        ...(singlePosterRatioControl ? [singlePosterRatioControl] : []),
       ],
     },
   ],

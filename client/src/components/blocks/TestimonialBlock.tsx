@@ -1,7 +1,7 @@
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
+import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 
 interface TestimonialBlockProps {
   module: { content: Record<string, any>; styleConfig?: Record<string, any> };
@@ -9,7 +9,6 @@ interface TestimonialBlockProps {
 }
 
 const GOLD = "#8C8C8C";
-const TESTIMONIAL_RATIO = getContractRoleRatio("testimonials", "authorizedPhoto", "desktop");
 
 /**
  * 顾客之声 — Editorial Story 母版(口碑变体)
@@ -20,6 +19,8 @@ export default function TestimonialBlock({ module, editMode }: TestimonialBlockP
   const { content = {}, styleConfig = {} } = module;
   const bgColor = styleConfig.bgColor || "#FFFFFF";
   const list = Array.isArray(content.testimonials) ? content.testimonials : [];
+  // 槽位比例选项(契约派生)
+  const TESTIMONIAL_RATIO = resolveContractAspectRatio("testimonials", "authorizedPhoto", content.aspectRatio, "desktop");
   const visibleList = editMode
     ? list
     : list.filter((item: any) => Boolean(item?.image && item?.content));

@@ -1,6 +1,6 @@
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
-import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
+import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 
@@ -12,8 +12,6 @@ interface CertificateBlockProps {
 const INK = "#1A1A1A";
 const MUTED = "#8C8C8C";
 const GOLD = "#8C8C8C";
-const CERTIFICATE_RATIO_DESKTOP = getContractRoleRatio("certificates", "certificates", "desktop");
-const CERTIFICATE_RATIO_MOBILE = getContractRoleRatio("certificates", "certificates", "mobile");
 
 /**
  * 权威认证 — Asymmetric Gallery 母版(信任变体)
@@ -25,6 +23,9 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
   const { title, subtitle } = content;
   const bgColor = styleConfig.bgColor || '#FFFFFF';
   const list = Array.isArray(content.certificates) ? content.certificates : [];
+  // 槽位比例选项(契约派生)
+  const CERTIFICATE_RATIO_DESKTOP = resolveContractAspectRatio("certificates", "certificates", content.aspectRatio, "desktop");
+  const CERTIFICATE_RATIO_MOBILE = resolveContractAspectRatio("certificates", "certificates", content.aspectRatio, "mobile");
 
   if (list.length === 0) {
     if (!editMode) return null;

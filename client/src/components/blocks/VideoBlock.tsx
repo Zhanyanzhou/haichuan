@@ -4,7 +4,7 @@ import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceho
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
-import { getContentTemplateContract } from "@/page-builder/generated/contentTemplates.generated";
+import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 
 interface VideoBlockProps {
@@ -18,18 +18,21 @@ interface VideoBlockProps {
 
 /**
  * 品牌影片模块 — Cinematic Hero 母版(视频变体)
- * 画面比例仅允许规范比例:16:9 / 16:7(宽幕) / 3:4(竖屏);
- * 旧数据中的 4:3、9:16 仍可渲染(历史兼容),但新建不可再选。
+ * 画面比例仅允许规范比例:16:9(横屏) / 21:6(宽幕);移动端另有 9:16 全屏竖版。
+ * 旧数据中的 16:7、3:4、4:3 仍可渲染(历史兼容),但新建不可再选;
+ * 9:16 已转正为移动端合法预设(2026-08-19),桌面自动回退 16:9。
  * content: { videoUrl, posterUrl, autoPlay, loop, muted, showControls, aspectRatio, focusX, focusY }
  */
 const RATIO_MAP: Record<string, string> = {
   "16:9": "16 / 9",
+  "21:6": "21 / 6",
+  "9:16": "9 / 16",
+  // 旧数据兼容:已保存的 16:7 / 3:4 / 4:3 区块继续按原比例渲染
   "16:7": "16 / 7",
   "3:4": "3 / 4",
-  // 旧数据兼容:已保存的 4:3 / 9:16 区块继续按原比例渲染
   "4:3": "4 / 3",
-  "9:16": "9 / 16",
 };
+const LEGACY_RATIOS = new Set(["16 / 7", "3 / 4", "4 / 3"]);
 
 export default function VideoBlock({ module, editMode }: VideoBlockProps) {
   const { content = {}, layoutConfig = {} } = module;
@@ -51,17 +54,15 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
     focusY,
   } = content;
   const maxHeight = layoutConfig.maxHeight || 760;
-  const contract = getContentTemplateContract("视频区块");
-  const coverRole = contract?.roles.find((role) => role.id === "coverImage");
-  const defaultDesktopRatio = coverRole?.defaultRatioByViewport?.desktop || "16 / 9";
-  const allowedDesktopRatios = coverRole?.allowedRatioPresetsByViewport?.desktop || [defaultDesktopRatio];
-  const requestedRatio = RATIO_MAP[aspectRatio];
-  const desktopRatio = requestedRatio && allowedDesktopRatios.includes(requestedRatio)
+  const requestedRatio = RATIO_MAP[aspectRatio] ?? "";
+  // 历史比例原样渲染;规范比例经契约白名单校验,越界值回退契约默认
+  const desktopRatio = LEGACY_RATIOS.has(requestedRatio)
     ? requestedRatio
-    : defaultDesktopRatio;
-  const mobileRatio = desktopRatio === "3 / 4"
-    ? "3 / 4"
-    : coverRole?.defaultRatioByViewport?.mobile || "4 / 5";
+    : resolveContractAspectRatio("video", "coverImage", aspectRatio, "desktop");
+  const mobileRatio =
+    requestedRatio === "3 / 4"
+      ? "3 / 4"
+      : resolveContractAspectRatio("video", "coverImage", aspectRatio, "mobile");
 
   const targetUrl = resolveLinkTargetUrl({ targetType, productId, linkUrl });
   const showCopy = Boolean(title || subtitle || (actionText && targetUrl));
@@ -92,12 +93,16 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
           maxHeight,
           width: "100%",
           overflow: "hidden",
-          background: "#0F0D0C",
+          background: "#FFFFFF",
         }}
       >
         <style>{`
           .hc-video-frame { aspect-ratio: ${desktopRatio}; }
-          @media (max-width: 767px) { .hc-video-frame { aspect-ratio: ${mobileRatio}; } }
+          /* maxHeight 只为防桌面超宽屏撑高;移动端放开(inline style 优先,须 !important),
+             让 9:16 全屏竖版完整呈现 */
+          @media (max-width: 767px) {
+            .hc-video-frame { aspect-ratio: ${mobileRatio}; max-height: none !important; }
+          }
           .hc-video__copy {
             position: absolute;
             inset: auto 0 0 0;

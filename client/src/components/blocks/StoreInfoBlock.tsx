@@ -2,7 +2,7 @@ import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceho
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
-import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
+import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 
 interface StoreInfoBlockProps {
   module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
@@ -12,18 +12,19 @@ interface StoreInfoBlockProps {
 const GOLD = "#8C8C8C";
 const INK = "#1A1A1A";
 const MUTED = "#8C8C8C";
-const STORE_RATIO_DESKTOP = getContractRoleRatio("storeInfo", "store", "desktop");
-const STORE_RATIO_MOBILE = getContractRoleRatio("storeInfo", "store", "mobile");
 
 /**
  * 门店与到访 — Editorial Split 母版(信息变体)
- * 桌面:门店空间图 3:2(62%) + 到访信息(38%),Mobile 图上文下。
+ * 桌面:门店空间图(默认 3:2,可选项)占 62% + 到访信息占 38%,Mobile 图上文下。
  * 信息行用极简文字标签,不再使用 emoji 图标。
  */
 export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps) {
   const { content = {}, styleConfig = {} } = module;
   const { storeName, address, hours, phone, mapUrl, image } = content;
   const bgColor = styleConfig.bgColor || '#FFFFFF';
+  // 槽位比例选项(契约派生):门店空间图属横构图物性,预设不含纯竖版
+  const STORE_RATIO_DESKTOP = resolveContractAspectRatio("storeInfo", "store", content.imageRatio, "desktop");
+  const STORE_RATIO_MOBILE = resolveContractAspectRatio("storeInfo", "store", content.imageRatio, "mobile");
 
   const infoRows: Array<{ label: string; value?: string }> = [
     { label: "ADDRESS", value: address },

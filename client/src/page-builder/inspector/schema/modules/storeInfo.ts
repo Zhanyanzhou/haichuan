@@ -4,8 +4,11 @@
  */
 import { IMAGE_SPECS, ratioLabelOf } from "../../../config/imageSpecs";
 import { storeInfoPuckConfig } from "../../../adapters/storeInfo.puck";
-import { bgColorPresetField, moduleNameField } from "../shared";
+import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
+
+/** 槽位比例选项(契约派生):门店空间横构图,移动端可选竖版近景 */
+const storeInfoRatioControl = ratioField("storeInfo", "store", { key: "imageRatio", label: "门店图比例" });
 
 export const storeInfoSchema: ModuleInspectorSchema = {
   moduleType: "门店信息",
@@ -61,6 +64,12 @@ export const storeInfoSchema: ModuleInspectorSchema = {
         },
       ],
     },
+    ...(storeInfoRatioControl ? [{
+      id: "store-info-layout",
+      title: "布局",
+      layer: "layout" as const,
+      fields: [storeInfoRatioControl],
+    }] : []),
     {
       id: "store-info-style",
       title: "样式",

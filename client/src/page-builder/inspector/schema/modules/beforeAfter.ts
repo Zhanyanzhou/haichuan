@@ -1,6 +1,6 @@
 /**
  * schema/modules/beforeAfter.ts — 「改款对比(前后对比)」编辑区 Schema。
- * Editorial Story 母版(改款叙事变体):4:5 同比例双图滑动对比,两图独立焦点。
+ * Editorial Story 母版(改款叙事变体):同比例双图滑动对比(默认 4:5,可选项),两图独立焦点。
  */
 import {
   BEFORE_AFTER_CONTRACT,
@@ -8,8 +8,14 @@ import {
 } from "../../../config/blockContracts";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { beforeAfterPuckConfig } from "../../../adapters/beforeAfter.puck";
-import { bgColorPresetField, linkTargetField, moduleNameField } from "../shared";
+import { bgColorPresetField, linkTargetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
+
+/** 槽位比例选项(契约派生):改款前后两图同步应用 */
+const beforeAfterRatioControl = ratioField("comparison", "before", {
+  label: "对比图比例",
+  hint: "改款前后两图同步应用，建议同机位素材",
+});
 
 export const beforeAfterSchema: ModuleInspectorSchema = {
   moduleType: "改款对比",
@@ -112,6 +118,12 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
         linkTargetField("行动入口点击后"),
       ],
     },
+    ...(beforeAfterRatioControl ? [{
+      id: "before-after-layout",
+      title: "布局",
+      layer: "layout" as const,
+      fields: [beforeAfterRatioControl],
+    }] : []),
     {
       id: "before-after-style",
       title: "样式",

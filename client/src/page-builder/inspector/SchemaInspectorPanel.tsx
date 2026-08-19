@@ -253,7 +253,7 @@ export default function SchemaInspectorPanel({
       className="homepage-editor__inspector"
       data-active-device={editor.device}
       data-module-type={editor.moduleType}
-      aria-label="模块设置"
+      aria-label="属性面板"
     >
       <InspectorTopBar
         displayName={schema.displayName}

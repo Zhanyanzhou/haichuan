@@ -1,6 +1,6 @@
 /**
  * schema/modules/productRow.ts — 「产品展示行(商品列表)」编辑区 Schema。
- * Commerce Grid 母版:商品图统一 4:5,不再开放比例与标题字号选项。
+ * Commerce Grid 母版:商品图默认竖版 4:5,比例可在竖版/方形间切换(契约派生)。
  */
 import {
   PRODUCT_ROW_CONTRACT,
@@ -9,8 +9,15 @@ import {
 import { createElement } from "react";
 import { productRowPuckConfig } from "../../../adapters/productRow.puck";
 import ProductIdsField from "../../../fields/ProductIdsField";
-import { bgColorPresetField, moduleNameField } from "../shared";
+import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
+
+/** 商品图比例选项由契约预设派生;锁定时控件自动消失 */
+const productRowRatioControl = ratioField("productRow", "productCards", {
+  key: "imageRatio",
+  label: "商品图比例",
+  hint: "商品图从商品系统读取，按所选比例自动焦点裁切",
+});
 
 export const productRowSchema: ModuleInspectorSchema = {
   moduleType: "产品展示行",
@@ -24,7 +31,7 @@ export const productRowSchema: ModuleInspectorSchema = {
       id: "product-row-product",
       title: "商品关联",
       layer: "product",
-      description: "从商品系统选择商品，商品图统一 4:5，不重复上传",
+      description: "从商品系统选择商品，商品图默认竖版 4:5，不重复上传",
       fields: [
         {
           key: "productIds",
@@ -42,7 +49,7 @@ export const productRowSchema: ModuleInspectorSchema = {
       id: "product-row-content",
       title: "内容",
       layer: "content",
-      description: "商品图统一 4:5，请在商品管理维护作品图片",
+      description: "商品图默认竖版 4:5，请在商品管理维护作品图片",
       fields: [
         moduleNameField("商品列表"),
         {
@@ -95,6 +102,7 @@ export const productRowSchema: ModuleInspectorSchema = {
             { label: "画册展示", value: "album" },
           ],
         },
+        ...(productRowRatioControl ? [productRowRatioControl] : []),
         {
           key: "actionStyle",
           label: "操作样式",

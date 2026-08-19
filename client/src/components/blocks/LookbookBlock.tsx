@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
-import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
+import { getContractRoleRatio, resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
@@ -15,21 +15,24 @@ interface LookbookBlockProps {
 const INK = "#1A1A1A";
 const MUTED = "#8C8C8C";
 const GOLD = "#8C8C8C";
-const WEARING_RATIO_DESKTOP = getContractRoleRatio("wearingInspiration", "wearingImage", "desktop");
-const WEARING_RATIO_MOBILE = getContractRoleRatio("wearingInspiration", "wearingImage", "mobile");
 /** 关联作品缩略与商品行同源,比例取 productRow 契约 */
 const PRODUCT_THUMB_RATIO = getContractRoleRatio("productRow", "productCards", "desktop");
 
 /**
  * 佩戴大片 — Hero Piece 母版(场景变体)
- * 桌面:4:5 佩戴大片(58%) + 关联作品纵列(42%,3:4 缩略);
- * Mobile:大片全宽 3:4 → 关联作品两列。
+ * 桌面:佩戴大片(默认 4:5,可选项)占 58% + 关联作品纵列(42%,4:5 缩略);
+ * Mobile:大片全宽 → 关联作品两列。
  * 品牌叙事场景,关联作品不显示价格。
  */
 export default function LookbookBlock({ module, editMode }: LookbookBlockProps) {
   const { content = {}, styleConfig = {} } = module;
   const { title, subtitle, image, imageAlt, products = [], actionText, linkUrl, targetType, productId } = content;
   const bgColor = styleConfig.bgColor || "#FFFFFF";
+  // 槽位比例选项(契约派生)
+  const WEARING_RATIO_DESKTOP = resolveContractAspectRatio("wearingInspiration", "wearingImage", content.aspectRatio, "desktop");
+  const WEARING_RATIO_MOBILE = resolveContractAspectRatio("wearingInspiration", "wearingImage", content.aspectRatio, "mobile");
+  // 纯氛围模式宽度随所选比例缩放(此前硬编码旧 2:3 数值)
+  const [wearingW, wearingH] = WEARING_RATIO_DESKTOP.split("/").map((part) => Number(part.trim()));
   // 佩戴大片的视觉焦点（0-100）；与 Schema focusKeys 对应，驱动画布裁切预览
   const focusX = Math.min(100, Math.max(0, Number(styleConfig.focusX ?? 50)));
   const focusY = Math.min(100, Math.max(0, Number(styleConfig.focusY ?? 50)));
@@ -54,10 +57,10 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
           }
           .hc-lookbook__scene { grid-row: 1 / span 2; aspect-ratio: ${WEARING_RATIO_DESKTOP}; overflow: hidden; background: #E5E5E2; }
           .hc-lookbook__scene img { width: 100%; height: 100%; object-fit: cover; display: block; }
-          /* 纯氛围大片：竖幅 2:3 居中，高度不超过 88vh，移动端全宽 */
+          /* 纯氛围大片：竖幅按所选比例居中，高度不超过 88vh，移动端全宽 */
           .hc-lookbook--pure { display: block; }
           .hc-lookbook--pure .hc-lookbook__scene {
-            width: min(100%, calc(88vh * 2 / 3));
+            width: min(100%, calc(88vh * ${wearingW} / ${wearingH}));
             aspect-ratio: ${WEARING_RATIO_DESKTOP};
             margin: 0 auto;
           }

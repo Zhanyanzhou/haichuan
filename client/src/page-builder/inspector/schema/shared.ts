@@ -8,6 +8,10 @@
  */
 import { TONE_PRESETS } from "../../designSystem/tokens";
 import { SPACING_OPTIONS } from "../../config/layoutFields";
+import {
+  getContractRoleRatioPresets,
+  type ContractKey,
+} from "../../config/blockContracts";
 import type {
   FieldDef,
   LinkTargetFieldDef,
@@ -61,6 +65,42 @@ export function spacingField(): SegmentedFieldDef {
     label: "上下留白",
     control: "segmented",
     options: SPACING_OPTIONS,
+  };
+}
+
+/** 规范比例调色板(2026-08-19 收敛 8→5)的形态标签 */
+const RATIO_SHAPE_LABELS: Record<string, string> = {
+  "1 / 1": "方形",
+  "4 / 5": "竖版",
+  "3 / 2": "横版",
+  "16 / 9": "宽屏",
+  "21 / 6": "超宽",
+  // 2026-08-19 视频域专属:手机竖屏素材的全屏形态,仅视频移动端预设开放
+  "9 / 16": "竖屏",
+};
+
+/**
+ * 比例选择字段 — 选项由契约 allowedRatioPresetsByViewport(桌面端)派生,
+ * 契约改选项后面板自动跟随,禁止手写比例字面值。
+ * 预设 ≤1(构图承重锁定)时返回 null,调用方不渲染该控件。
+ * 写入冒号格式(如 "4:5"),渲染端经 resolveContractAspectRatio 白名单校验。
+ */
+export function ratioField(
+  template: ContractKey,
+  role: string,
+  opts: { key?: string; label?: string; hint?: string } = {},
+): SegmentedFieldDef | null {
+  const presets = getContractRoleRatioPresets(template, role, "desktop");
+  if (presets.length <= 1) return null;
+  return {
+    key: opts.key ?? "aspectRatio",
+    label: opts.label ?? "画面比例",
+    control: "segmented",
+    hint: opts.hint ?? "选择与素材形态最接近的比例，焦点裁切自动跟随",
+    options: presets.map((ratio) => ({
+      label: `${RATIO_SHAPE_LABELS[ratio] ?? ratio} ${ratio.split("/").map((part) => part.trim()).join(":")}`,
+      value: ratio.split("/").map((part) => part.trim()).join(":"),
+    })),
   };
 }
 

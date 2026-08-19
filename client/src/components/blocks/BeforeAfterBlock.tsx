@@ -1,7 +1,7 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import { BEFORE_AFTER_CONTRACT } from "@/page-builder/config/blockContracts";
+import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
@@ -18,7 +18,7 @@ const GOLD = "#8C8C8C";
 
 /**
  * 改款前后对比 — Editorial Story 母版(改款叙事变体)
- * 拖动分割线对比改款前/后两张同比例图(4:5);PC 与手机均为滑动交互,
+ * 拖动分割线对比改款前/后两张同比例图(默认 4:5,可选项);PC 与手机均为滑动交互,
  * 两图各自独立焦点;编辑态同样可拖,不影响数据。
  */
 export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockProps) {
@@ -39,6 +39,9 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
   } = content;
   const bgColor = styleConfig.bgColor || "#FFFFFF";
   const targetUrl = resolveLinkTargetUrl({ targetType, productId, linkUrl });
+  // 对比图比例选项(契约派生):前后两图共用同一比例
+  const trackRatioDesktop = resolveContractAspectRatio("comparison", "before", content.aspectRatio, "desktop");
+  const trackRatioMobile = resolveContractAspectRatio("comparison", "before", content.aspectRatio, "mobile");
   const beforeFocusX = Math.min(100, Math.max(0, Number(styleConfig.beforeFocusX ?? 50)));
   const beforeFocusY = Math.min(100, Math.max(0, Number(styleConfig.beforeFocusY ?? 50)));
   const afterFocusX = Math.min(100, Math.max(0, Number(styleConfig.afterFocusX ?? 50)));
@@ -71,7 +74,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
         <BlockEmptyPlaceholder
           hint="改款前后对比"
           spec={`请上传改款前/后两张同比例图 · ${IMAGE_SPECS.beforeAfter.image.label}`}
-          ratio={BEFORE_AFTER_CONTRACT.canvas.desktopMediaAspectRatio}
+          ratio={trackRatioDesktop}
         />
       </DecorSection>
     );
@@ -82,7 +85,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
       <style>{`
         .hc-before-after__track {
           position: relative;
-          aspect-ratio: ${BEFORE_AFTER_CONTRACT.canvas.desktopMediaAspectRatio};
+          aspect-ratio: ${trackRatioDesktop};
           overflow: hidden;
           background: #E4E3DF;
           touch-action: none;
@@ -138,7 +141,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
         .hc-before-after__tag--before { left: 14px; }
         .hc-before-after__tag--after { right: 14px; }
         @media (max-width: 767px) {
-          .hc-before-after__track { aspect-ratio: ${BEFORE_AFTER_CONTRACT.canvas.mobileMediaAspectRatio}; }
+          .hc-before-after__track { aspect-ratio: ${trackRatioMobile}; }
         }
       `}</style>
       {(title || subtitle || editMode) && (

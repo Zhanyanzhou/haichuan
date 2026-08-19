@@ -8,8 +8,6 @@ import { message, Modal } from "antd";
 import { DragOutlined } from "@ant-design/icons";
 import { ROOT_ZONE, focusCanvasBlock, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
-import type { EditorPageKey } from "@/page-builder/config/editorPages";
-import { PAGE_RECIPES } from "@/page-builder/config/pageRecipes";
 
 /** 需要区分桌面/移动端素材的模块：有桌面图却未配移动图时移动端会复用并可能裁切。 */
 const MOBILE_IMAGE_TYPES = new Set([
@@ -32,13 +30,11 @@ function needsMobileImage(item: {
 
 export default function LayerRail({
   onSaveAsTemplate,
-  pageKey,
   navigationPreviewOpen,
   onToggleNavigationPreview,
   scrollSpyIndex,
 }: {
   onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
-  pageKey: EditorPageKey;
   navigationPreviewOpen: boolean;
   onToggleNavigationPreview: () => void;
   scrollSpyIndex: number | null;
@@ -70,26 +66,6 @@ export default function LayerRail({
       return (totals.get(item.type) || 0) > 1 ? `${base} ${ordinal}/${totals.get(item.type)}` : base;
     });
   }, [content]);
-
-  /* 配方完成度:纯展示提示,不阻断(缺必需→建议补充→已完成) */
-  const recipeHint = useMemo(() => {
-    const recipe = PAGE_RECIPES[pageKey];
-    if (!recipe) return null;
-    const types = new Set(content.map((item) => item.type));
-    const labelOf = (sections: typeof recipe.sections) =>
-      sections.map((s) => getModuleDisplayName(s.moduleType)).join("、");
-    const missingRequired = recipe.sections.filter(
-      (s) => s.necessity === "required" && !types.has(s.moduleType),
-    );
-    if (missingRequired.length > 0)
-      return { tone: "required" as const, text: `缺必需章节：${labelOf(missingRequired)}` };
-    const recommended = recipe.sections.filter(
-      (s) => s.necessity === "recommended" && !types.has(s.moduleType),
-    );
-    if (recommended.length > 0)
-      return { tone: "recommended" as const, text: `建议补充：${labelOf(recommended)}` };
-    return { tone: "done" as const, text: "本页配方已完成" };
-  }, [content, pageKey]);
 
   const layerScrollRef = useRef<HTMLDivElement>(null);
 
@@ -204,16 +180,7 @@ export default function LayerRail({
   };
 
   return (
-    <section className="homepage-editor__layer-rail" aria-label="页面图层">
-      {recipeHint ? (
-        <p
-          className="homepage-editor__recipe-hint"
-          data-tone={recipeHint.tone}
-          title={recipeHint.text}
-        >
-          {recipeHint.text}
-        </p>
-      ) : null}
+    <section className="homepage-editor__layer-rail">
       <div className="homepage-editor__layer-scroll" ref={layerScrollRef}>
         <div className="homepage-editor__layer-frame homepage-editor__layer-global">
           <button

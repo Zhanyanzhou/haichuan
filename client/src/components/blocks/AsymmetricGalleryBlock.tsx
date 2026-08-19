@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import { GALLERY_CONTRACT } from "@/page-builder/config/blockContracts";
+import { GALLERY_CONTRACT, resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { resolveItemLinkUrl } from "@/page-builder/utils/linkTarget";
@@ -24,9 +24,10 @@ const MUTED = "#8C8C8C";
 
 /**
  * 作品画廊 — Asymmetric Gallery 母版
- * 桌面 12 栅非对称节奏:p0 大图 4:5(8列) → p1 小图 4:5(4列,下移错位) →
- * p2 小图 1:1(4列) → p3 宽图 3:2(8列,右对齐),按索引循环;
- * Mobile 重排:大图全宽 4:5 → 成对小图双列 1:1 → 大图全宽。
+ * 桌面 12 栅非对称节奏:p0 大图(8列) → p1 小图(4列,下移错位) →
+ * p2 小图(4列) → p3 宽图(8列,右对齐),按索引循环;
+ * 非对称来自列宽跨度,四个位置帧共用槽位所选统一比例;
+ * Mobile 重排:大图全宽 → 成对小图双列 → 大图全宽。
  * 构图红线:禁止均分 2×2 / 3×1 / 4×1。
  */
 export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBlockProps) {
@@ -36,6 +37,9 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
     ? content.items.slice(0, GALLERY_CONTRACT.content.maxItems)
     : [];
   const bgColor = styleConfig.bgColor || "#FFFFFF";
+  // 槽位比例选项(契约派生)
+  const galleryRatio = resolveContractAspectRatio("gallery", "works", content.aspectRatio, "desktop");
+  const galleryRatioMobile = resolveContractAspectRatio("gallery", "works", content.aspectRatio, "mobile");
 
   if (items.length === 0) {
     if (!editMode) return null;
@@ -44,7 +48,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
         <BlockEmptyPlaceholder
           hint="作品画廊"
           spec="请添加 3–5 张图片,形成「大图 + 双图 + 大图」的画廊节奏"
-          ratio={GALLERY_CONTRACT.canvas.primaryMediaAspectRatio}
+          ratio={galleryRatio}
         />
       </DecorSection>
     );
@@ -146,17 +150,17 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
           .hc-gallery__item:hover .hc-gallery__img { transform: scale(1.02); }
           /* 桌面非对称节奏 */
           .hc-gallery__item.is-p0 { grid-column: span 8; }
-          .hc-gallery__item.is-p0 .hc-gallery__frame { aspect-ratio: ${GALLERY_CONTRACT.canvas.primaryMediaAspectRatio}; }
+          .hc-gallery__item.is-p0 .hc-gallery__frame { aspect-ratio: ${galleryRatio}; }
           .hc-gallery__item.is-p1 { grid-column: span 4; margin-top: clamp(32px, 8%, 96px); }
-          .hc-gallery__item.is-p1 .hc-gallery__frame { aspect-ratio: ${GALLERY_CONTRACT.canvas.primaryMediaAspectRatio}; }
+          .hc-gallery__item.is-p1 .hc-gallery__frame { aspect-ratio: ${galleryRatio}; }
           .hc-gallery__item.is-p2 { grid-column: span 4; }
-          .hc-gallery__item.is-p2 .hc-gallery__frame { aspect-ratio: ${GALLERY_CONTRACT.canvas.primaryMediaAspectRatio}; }
+          .hc-gallery__item.is-p2 .hc-gallery__frame { aspect-ratio: ${galleryRatio}; }
           .hc-gallery__item.is-p3 { grid-column: span 8; }
-          .hc-gallery__item.is-p3 .hc-gallery__frame { aspect-ratio: ${GALLERY_CONTRACT.canvas.primaryMediaAspectRatio}; }
+          .hc-gallery__item.is-p3 .hc-gallery__frame { aspect-ratio: ${galleryRatio}; }
           @media (min-width: 768px) {
             .hc-gallery__item.is-p3 { grid-column: 5 / span 8; }
           }
-          /* Mobile 重排:大图全宽 4:5,成对小图双列 1:1 */
+          /* Mobile 重排:大图全宽,成对小图双列 */
           @media (max-width: 767px) {
             .hc-gallery { row-gap: 32px; }
             .hc-gallery__item.is-p0,
@@ -164,7 +168,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
             .hc-gallery__item.is-p0 .hc-gallery__frame,
             .hc-gallery__item.is-p1 .hc-gallery__frame,
             .hc-gallery__item.is-p2 .hc-gallery__frame,
-            .hc-gallery__item.is-p3 .hc-gallery__frame { aspect-ratio: ${GALLERY_CONTRACT.canvas.primaryMediaAspectRatio}; }
+            .hc-gallery__item.is-p3 .hc-gallery__frame { aspect-ratio: ${galleryRatioMobile}; }
             .hc-gallery__item.is-p1,
             .hc-gallery__item.is-p2 { grid-column: span 6; }
             .hc-gallery__item.is-p1 { margin-top: 0; }

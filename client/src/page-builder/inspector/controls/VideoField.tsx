@@ -149,7 +149,7 @@ export default function VideoField({
         </div>
       ) : null}
 
-      {replaceOpen && !urlMode ? (
+      {(replaceOpen || !value) && !urlMode ? (
         <div className="homepage-editor__media-replace">
           <Upload.Dragger
             accept="video/*"
@@ -169,9 +169,12 @@ export default function VideoField({
             <button type="button" onClick={() => setUrlMode(true)}>
               改用视频链接
             </button>
-            <button type="button" onClick={() => setReplaceOpen(false)}>
-              取消
-            </button>
+            {/* 取消仅在「更换」场景（已有视频）有意义；空值初始即上传态，无需取消 */}
+            {value ? (
+              <button type="button" onClick={() => setReplaceOpen(false)}>
+                取消
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}

@@ -8,8 +8,11 @@ import {
 } from "../../../config/blockContracts";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { galleryPuckConfig } from "../../../adapters/gallery.puck";
-import { bgColorPresetField, moduleNameField } from "../shared";
+import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
+
+/** 槽位比例选项(契约派生):统一四个位置帧的画面比例,非对称节奏来自列宽跨度 */
+const galleryRatioControl = ratioField("gallery", "works");
 
 export const gallerySchema: ModuleInspectorSchema = {
   moduleType: "作品画廊",
@@ -92,6 +95,12 @@ export const gallerySchema: ModuleInspectorSchema = {
         },
       ],
     },
+    ...(galleryRatioControl ? [{
+      id: "gallery-layout",
+      title: "布局",
+      layer: "layout" as const,
+      fields: [galleryRatioControl],
+    }] : []),
     {
       id: "gallery-style",
       title: "样式",

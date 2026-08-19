@@ -1,11 +1,14 @@
 /**
  * schema/modules/video.ts — 「视频区块(视频)」编辑区 Schema。
- * Cinematic Hero 母版(视频变体):16:9 / 16:7 / 3:4 规范比例。
+ * Cinematic Hero 母版(视频变体):比例选项由契约派生(横屏 16:9 / 宽幕 21:6;移动端另有全屏竖版 9:16)。
  */
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { videoPuckConfig } from "../../../adapters/video.puck";
-import { linkTargetField, moduleNameField } from "../shared";
+import { linkTargetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
+
+/** 契约锁定为单一比例时,布局区自动消失 */
+const videoRatioControl = ratioField("video", "coverImage");
 
 export const videoSchema: ModuleInspectorSchema = {
   moduleType: "视频区块",
@@ -31,8 +34,8 @@ export const videoSchema: ModuleInspectorSchema = {
           control: "media",
           spec: IMAGE_SPECS.video.poster,
           focusKeys: { x: "focusX", y: "focusY" },
-          hint: "未播放时显示的封面",
-          placeholder: "上传视频封面",
+          hint: "未播放时显示的封面（可选，留空直接显示视频首帧）",
+          placeholder: "上传视频封面（可选）",
           showSpecCheck: true,
         },
       ],
@@ -77,23 +80,16 @@ export const videoSchema: ModuleInspectorSchema = {
         linkTargetField("行动入口点击后"),
       ],
     },
-    {
-      id: "video-layout",
-      title: "布局",
-      layer: "layout",
-      fields: [
-        {
-          key: "aspectRatio",
-          label: "画面比例",
-          control: "segmented",
-          options: [
-            { label: "16:9 横屏", value: "16:9" },
-            { label: "16:7 宽幕", value: "16:7" },
-            { label: "3:4 竖屏", value: "3:4" },
-          ],
-        },
-      ],
-    },
+    ...(videoRatioControl
+      ? [
+          {
+            id: "video-layout",
+            title: "布局",
+            layer: "layout" as const,
+            fields: [videoRatioControl],
+          },
+        ]
+      : []),
     {
       id: "video-advanced",
       title: "模板专属功能",

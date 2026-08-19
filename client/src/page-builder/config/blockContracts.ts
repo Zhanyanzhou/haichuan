@@ -25,7 +25,7 @@ export type ImageTextTemplate =
 
 export type ModuleDensity = "compact" | "normal" | "spacious";
 
-type ContractKey = keyof typeof CONTENT_TEMPLATE_CONTRACTS;
+export type ContractKey = keyof typeof CONTENT_TEMPLATE_CONTRACTS;
 type ContractViewport = "desktop" | "tablet" | "mobile";
 
 /** 所有真实 Renderer 的素材比例只从 schema v2 生成产物读取。 */
@@ -42,6 +42,38 @@ export function getContractRoleRatio(
   const ratio = ratioMap?.[viewport];
   if (!ratio) throw new Error(`内容模板 ${String(key)}.${roleId}.${viewport} 缺少默认比例`);
   return ratio;
+}
+
+/** 槽位在指定端允许的比例预设(含默认);契约未声明预设时回退为仅默认值。 */
+export function getContractRoleRatioPresets(
+  key: ContractKey,
+  roleId: string,
+  viewport: ContractViewport,
+): readonly string[] {
+  const role = CONTENT_TEMPLATE_CONTRACTS[key].roles.find((item) => item.id === roleId);
+  const presetMap: Partial<Record<ContractViewport, readonly string[]>> | undefined =
+    role && "allowedRatioPresetsByViewport" in role
+      ? role.allowedRatioPresetsByViewport
+      : undefined;
+  const list = presetMap?.[viewport];
+  return list?.length ? list : [getContractRoleRatio(key, roleId, viewport)];
+}
+
+/**
+ * 内容区块保存的比例覆盖值(冒号格式如 "4:5")解析为契约比例:
+ * 经本端白名单校验,越界/旧值一律回退契约默认,渲染层不会带出非规范比例。
+ */
+export function resolveContractAspectRatio(
+  key: ContractKey,
+  roleId: string,
+  requested: string | undefined,
+  viewport: ContractViewport,
+): string {
+  const presets = getContractRoleRatioPresets(key, roleId, viewport);
+  const normalized = requested?.trim().replace(":", " / ");
+  return normalized && presets.includes(normalized)
+    ? normalized
+    : getContractRoleRatio(key, roleId, viewport);
 }
 
 /**
@@ -272,11 +304,6 @@ export const CATEGORY_CARDS_CONTRACT = {
   },
   defaults: { layout: "grid-3" },
 } as const;
-
-export function getCategoryCardsMediaAspectRatio(layout?: string): string {
-  void layout;
-  return getContractRoleRatio("categoryCards", "categories", "desktop");
-}
 
 /* ═══════ 作品画廊(Asymmetric Gallery)契约 ═══════ */
 

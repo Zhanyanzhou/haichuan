@@ -57,7 +57,7 @@ export const MASTERS: Record<MasterId, MasterDefinition> = {
     width: "full",
     flow: "bleed",
     media: {
-      desktopRatio: "16:7",
+      desktopRatio: "16:9",
       mobileRatio: "4:5",
       independentMobileImage: true,
       dualFocus: true,
@@ -96,7 +96,7 @@ export const MASTERS: Record<MasterId, MasterDefinition> = {
     flow: "flow",
     media: {
       desktopRatio: "4:5",
-      mobileRatio: "3:4",
+      mobileRatio: "4:5",
       independentMobileImage: true,
       dualFocus: true,
     },
@@ -165,8 +165,8 @@ export const MASTERS: Record<MasterId, MasterDefinition> = {
     width: "standard",
     flow: "flow",
     media: {
-      desktopRatio: "3:4",
-      mobileRatio: "3:4",
+      desktopRatio: "4:5",
+      mobileRatio: "4:5",
       independentMobileImage: false,
       dualFocus: true,
     },
@@ -261,7 +261,7 @@ export const MASTERS: Record<MasterId, MasterDefinition> = {
     flow: "bleed",
     media: {
       desktopRatio: "21:6",
-      mobileRatio: "3:4",
+      mobileRatio: "4:5",
       independentMobileImage: true,
       dualFocus: false,
     },

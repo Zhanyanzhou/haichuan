@@ -13,8 +13,10 @@ import {
 import { Button, Input, Modal, Spin, message } from "antd";
 import {
   AppstoreOutlined,
+  BlockOutlined,
   CheckCircleOutlined,
   CloseOutlined,
+  ControlOutlined,
   DeleteOutlined,
   DragOutlined,
   ExclamationCircleOutlined,
@@ -53,11 +55,6 @@ import {
   getEditorPageByPath,
   type EditorPageKey,
 } from "@/page-builder/config/editorPages";
-import {
-  PAGE_RECIPES,
-  RECIPE_NECESSITY_LABEL,
-  type PageRecipeSection,
-} from "@/page-builder/config/pageRecipes";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import ContentTemplateSkeletonPreview from "@/page-builder/preview/ContentTemplateSkeletonPreview";
 import ContentTemplateFrameworkOverview from "@/page-builder/preview/ContentTemplateFrameworkOverview";
@@ -1762,21 +1759,6 @@ function TemplateLibrary({
     [entries],
   );
 
-  /* 本页推荐序列:配方置顶引导(搜索时让位;其余分类不清失——配方是引导不是门禁) */
-  const recipe = keyword.trim() ? null : PAGE_RECIPES[pageKey] ?? null;
-  const recipeEntries = useMemo(() => {
-    if (!recipe) return [];
-    return recipe.sections
-      .map((section) => ({
-        section,
-        entry: entries.find(([name]) => name === section.moduleType),
-      }))
-      .filter((item): item is {
-        section: PageRecipeSection;
-        entry: [string, (typeof BLOCK_META)[string]];
-      } => Boolean(item.entry));
-  }, [recipe, entries]);
-
   /* 左栏收缩（2026-08-16 用户需求）：收起为窄条，画布最大化；偏好记入 sessionStorage */
   const [libraryCollapsed, setLibraryCollapsed] = useState(() => {
     try {
@@ -1806,29 +1788,39 @@ function TemplateLibrary({
     return (
       <aside
         className="homepage-editor__library homepage-editor__library--collapsed"
-        aria-label="内容模块库（已收起）"
+        aria-label="模板组件库（已收起）"
       >
         <button
           type="button"
           className="homepage-editor__library-expand-btn"
           onClick={toggleLibrary}
-          title="展开模块库"
-          aria-label="展开模块库"
+          title="展开模板组件库"
+          aria-label="展开模板组件库"
         >
           <AppstoreOutlined />
-          <span>模块库</span>
+          <span>模板组件库</span>
         </button>
       </aside>
     );
   }
 
   return (
-    <aside className="homepage-editor__library" aria-label="内容模块库">
+    <aside className="homepage-editor__library" aria-label="模板组件库">
       <div className="homepage-editor__library-tools">
-        <div className="homepage-editor__library-title">
-          <AppstoreOutlined />
-          <span>内容模块</span>
-          <small>{`显示 ${entries.length} / 共 ${Object.keys(BLOCK_META).length} 个`}</small>
+        <div className="homepage-editor__panel-header">
+          <button
+            type="button"
+            className="homepage-editor__library-collapse-btn"
+            onClick={toggleLibrary}
+            title="收起模板组件库"
+            aria-label="收起模板组件库"
+          >
+            ‹
+          </button>
+          <span className="homepage-editor__region-title">
+            <AppstoreOutlined />
+            模板组件库
+          </span>
           <button
             type="button"
             className="homepage-editor__library-overview-btn"
@@ -1837,15 +1829,6 @@ function TemplateLibrary({
             aria-label="查看 23 个内容模板结构总览"
           >
             <InfoCircleOutlined />
-          </button>
-          <button
-            type="button"
-            className="homepage-editor__library-collapse-btn"
-            onClick={toggleLibrary}
-            title="收起模块库"
-            aria-label="收起模块库"
-          >
-            ‹
           </button>
         </div>
         <div className="homepage-editor__library-search-row">
@@ -1885,6 +1868,10 @@ function TemplateLibrary({
         </div>
         <div className="homepage-editor__library-drag-tip">
           <DragOutlined /> 拖动模块添加至画布
+          <span
+            className="homepage-editor__library-count"
+            title={`显示 ${entries.length} / 共 ${Object.keys(BLOCK_META).length} 个`}
+          >{`${entries.length} / ${Object.keys(BLOCK_META).length}`}</span>
         </div>
       </div>
 
@@ -1997,43 +1984,6 @@ function TemplateLibrary({
                 </div>
               </section>
             ) : null}
-            {recipeEntries.length > 0 && recipe ? (
-              <section
-                className="homepage-editor__template-group homepage-editor__recipe-group"
-                aria-labelledby="template-group-recipe"
-              >
-                <h3 id="template-group-recipe">本页推荐序列</h3>
-                <p className="homepage-editor__recipe-narrative">
-                  {recipe.narrative}
-                </p>
-                <div className="homepage-editor__template-group-grid">
-                  {recipeEntries.map(({ section, entry }) => (
-                    <div
-                      className="homepage-editor__recipe-item"
-                      key={`recipe-${section.moduleType}`}
-                    >
-                      <span className="homepage-editor__recipe-phase">
-                        {section.phase} ·{" "}
-                        <em data-necessity={section.necessity}>
-                          {RECIPE_NECESSITY_LABEL[section.necessity]}
-                        </em>
-                      </span>
-                      <TemplateCard
-                        name={entry[0]}
-                        meta={entry[1]}
-                        viewMode={viewMode}
-                        previewViewport={previewViewport}
-                        onPointerDragMove={onTemplatePointerDragMove}
-                        onPointerDragEnd={onTemplatePointerDragEnd}
-                      />
-                      <span className="homepage-editor__recipe-note">
-                        {section.note}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ) : null}
             {groupedEntries.map(({ group, entries: groupItems }) => (
               <section
                 className="homepage-editor__template-group"
@@ -2101,14 +2051,11 @@ function InspectorPanel({
     return (
       <section
         className="homepage-editor__properties homepage-editor__properties--empty"
-        aria-label="模块属性"
+        aria-label="属性面板"
       >
-        <div className="homepage-editor__properties-heading">
-          <div>
-            <span>模块设置</span>
-            <strong>点选画布或图层中的模块开始编辑</strong>
-          </div>
-        </div>
+        <strong className="homepage-editor__properties-hint">
+          点选画布或图层中的模块开始编辑
+        </strong>
         <div className="homepage-editor__properties-scroll">
           <div className="homepage-editor__properties-empty-state">
             <AppstoreOutlined />
@@ -2209,7 +2156,7 @@ function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
   );
 }
 
-/** 画布侧边的当前模块快捷操作，与页面结构栏保持互补。 */
+/** 画布侧边的当前模块快捷操作，与图层面板保持互补。 */
 function CanvasBlockActionDock({
   frameRef,
   canvasRef,
@@ -2413,7 +2360,7 @@ function EditorBody({
   const [navigationPreviewOpen, setNavigationPreviewOpen] = useState(false);
   // 画布滚动时定位到的当前模块下标（scroll-spy），仅用于左侧图层栏跟随滚动，不改变选中态。
   const [scrollSpyIndex, setScrollSpyIndex] = useState<number | null>(null);
-  // 右侧模块设置面板手动收起（2026-08-16）：点选模块仍自动弹出(is-inspecting)，手动收起后保持收起
+  // 右侧属性面板手动收起（2026-08-16）：点选模块仍自动弹出(is-inspecting)，手动收起后保持收起
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() => {
     try {
       return (
@@ -2715,33 +2662,38 @@ function EditorBody({
 
       <aside
         className={`homepage-editor__structure-workspace${structureCollapsed ? " is-collapsed" : ""}`}
-        aria-label="页面结构"
+        aria-label="图层面板"
       >
         {structureCollapsed ? (
           <button
             type="button"
             className="homepage-editor__structure-expand-btn"
             onClick={() => setStructureCollapsed(false)}
-            title="展开页面结构"
-            aria-label="展开页面结构"
+            title="展开图层面板"
+            aria-label="展开图层面板"
           >
-            <MenuOutlined />
-            <span>页面结构</span>
+            <BlockOutlined />
+            <span>图层面板</span>
           </button>
         ) : (
           <>
-            <button
-              type="button"
-              className="homepage-editor__structure-collapse-btn"
-              onClick={() => setStructureCollapsed(true)}
-              title="收起页面结构"
-              aria-label="收起页面结构"
-            >
-              <CloseOutlined />
-            </button>
+            <div className="homepage-editor__panel-header">
+              <span className="homepage-editor__region-title">
+                <BlockOutlined />
+                图层面板
+              </span>
+              <button
+                type="button"
+                className="homepage-editor__structure-collapse-btn"
+                onClick={() => setStructureCollapsed(true)}
+                title="收起图层面板"
+                aria-label="收起图层面板"
+              >
+                <CloseOutlined />
+              </button>
+            </div>
             <LayerRail
               onSaveAsTemplate={onSaveAsTemplate}
-              pageKey={pageKey}
               navigationPreviewOpen={navigationPreviewOpen}
               onToggleNavigationPreview={toggleNavigationPreview}
               scrollSpyIndex={scrollSpyIndex}
@@ -2836,28 +2788,35 @@ function EditorBody({
 
       <div
         className={`homepage-editor__right-workspace${inspectorCollapsed ? " is-inspector-collapsed" : ""}`}
+        aria-label="属性面板"
       >
         {inspectorCollapsed ? (
           <button
             type="button"
             className="homepage-editor__inspector-expand-btn"
             onClick={() => setInspectorCollapsed(false)}
-            title="展开模块设置"
-            aria-label="展开模块设置"
+            title="展开属性面板"
+            aria-label="展开属性面板"
           >
-            <span>模块设置</span>
+            <span>属性面板</span>
           </button>
         ) : (
           <div className="homepage-editor__inspector-holder">
-            <button
-              type="button"
-              className="homepage-editor__inspector-collapse-btn"
-              onClick={() => setInspectorCollapsed(true)}
-              title="收起模块设置"
-              aria-label="收起模块设置"
-            >
-              ›
-            </button>
+            <div className="homepage-editor__panel-header">
+              <span className="homepage-editor__region-title">
+                <ControlOutlined />
+                属性面板
+              </span>
+              <button
+                type="button"
+                className="homepage-editor__inspector-collapse-btn"
+                onClick={() => setInspectorCollapsed(true)}
+                title="收起属性面板"
+                aria-label="收起属性面板"
+              >
+                ›
+              </button>
+            </div>
             <InspectorPanel
               hasUnsavedChanges={hasUnsavedChanges}
               saving={saving}
@@ -2937,10 +2896,10 @@ export default function HomepageConfig({
         title: "保存为常用方案",
         content: (
           <div style={{ marginTop: 8 }}>
-            <p style={{ margin: "0 0 8px", color: "#6B6259", fontSize: 12 }}>
+            <p style={{ margin: "0 0 8px", color: "var(--adm-text)", fontSize: 12 }}>
               将当前模块的内容与版式保存为可复用的常用方案。
             </p>
-            <label style={{ fontSize: 12, color: "#4A4239" }}>
+            <label style={{ fontSize: 12, color: "var(--adm-text-strong)" }}>
               方案名称
               <input
                 id="block-template-name-input"
@@ -3387,7 +3346,8 @@ export default function HomepageConfig({
       applyDraftToCanvas(draftPuck, adminDoc?.metadata || {});
       message.success("已加载未发布草稿，可继续编辑或重新发布");
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "草稿加载失败");
+      console.error("[homepage-editor] 草稿加载失败", error);
+      message.error("草稿加载失败，请刷新后重试");
     }
   }, [pageKey, applyDraftToCanvas]);
 

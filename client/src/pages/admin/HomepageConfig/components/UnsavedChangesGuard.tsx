@@ -57,7 +57,7 @@ export default function UnsavedChangesGuard({
           style={{
             border: 0,
             background: "transparent",
-            color: "#B15645",
+            color: "var(--adm-error)",
             cursor: "pointer",
             fontSize: 13,
             marginRight: "auto",
@@ -88,8 +88,8 @@ export default function UnsavedChangesGuard({
           style={{
             border: 0,
             borderRadius: 4,
-            background: "#B8944E",
-            color: "#FFF",
+            background: "var(--adm-action)",
+            color: "var(--ed-on-accent)",
             padding: "5px 14px",
             cursor: "pointer",
             fontSize: 13,

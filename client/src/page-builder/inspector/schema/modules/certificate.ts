@@ -1,13 +1,16 @@
 /**
  * schema/modules/certificate.ts — 「资质证书(证书展示·画廊)」编辑区 Schema。
- * Asymmetric Gallery 母版(信任变体):1:1 图墙,无卡片边框。
+ * Asymmetric Gallery 母版(信任变体):3:2 图墙(可选),无卡片边框。
  */
 import { certificatePuckConfig } from "../../../adapters/certificate.puck";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
-import { bgColorPresetField, moduleNameField } from "../shared";
+import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 const CERT_IMAGE_SPEC = IMAGE_SPECS.certificate.image;
+
+/** 槽位比例选项(契约派生):证书图默认 3:2,信任物证偏横构图 */
+const certificateRatioControl = ratioField("certificates", "certificates", { label: "证书图比例" });
 
 export const certificateSchema: ModuleInspectorSchema = {
   moduleType: "资质证书",
@@ -70,6 +73,12 @@ export const certificateSchema: ModuleInspectorSchema = {
         },
       ],
     },
+    ...(certificateRatioControl ? [{
+      id: "certificate-layout",
+      title: "布局",
+      layer: "layout" as const,
+      fields: [certificateRatioControl],
+    }] : []),
     {
       id: "certificate-style",
       title: "样式",

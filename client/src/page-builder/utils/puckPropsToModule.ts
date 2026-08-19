@@ -133,6 +133,8 @@ export function convertPuckProps(
           targetType: props.targetType,
           productId: Number(props.productId) || 0,
           altText: props.altText,
+          // 槽位比例选项:契约预设白名单,渲染端校验回退
+          aspectRatio: props.aspectRatio || "4:5",
         },
         { template: props.template || "leftTextRightImage" },
         {
@@ -160,6 +162,9 @@ export function convertPuckProps(
           linkUrl: props.linkUrl,
           mainAltText: props.mainAltText,
           detailAltText: props.detailAltText,
+          // 槽位比例选项:两槽预设各自独立
+          mainImageRatio: props.mainImageRatio || "3:2",
+          detailImageRatio: props.detailImageRatio || "4:5",
         },
         {},
         {
@@ -268,8 +273,8 @@ export function convertPuckProps(
           displayMode: props.displayMode || "standard",
           actionStyle:
             props.actionStyle || (props.showButton ? "button" : "none"),
-          // schema v2 商品卡三端统一 3:4；旧数据的显式比例仍兼容读取。
-          imageRatio: props.imageRatio || "3:4",
+          // 2026-08-19 比例调色板:商品卡默认竖版 4:5(旧默认 3:4 由渲染层映射到契约默认);显式比例仍兼容读取。
+          imageRatio: props.imageRatio || "4:5",
           showPrice: props.showPrice ?? true,
           showButton: props.showButton ?? false,
           buttonText: props.buttonText || "查看详情",
@@ -293,6 +298,8 @@ export function convertPuckProps(
           secondaryLink: props.secondaryLink,
           // 价格默认隐藏,仅电商场景显式开启(品牌保护)
           showPrice: props.showPrice === true,
+          // 槽位比例选项:契约预设白名单,渲染端校验回退
+          aspectRatio: props.aspectRatio || "4:5",
         },
         { template: props.layout || "imageLeft" },
         { bgColor: props.bgColor || "#FFFFFF" },
@@ -312,6 +319,8 @@ export function convertPuckProps(
           targetType: props.targetType,
           productId: Number(props.productId) || 0,
           linkUrl: props.linkUrl,
+          // 槽位比例选项:契约预设白名单,渲染端校验回退
+          aspectRatio: props.aspectRatio || "4:5",
         },
         {},
         {
@@ -330,6 +339,8 @@ export function convertPuckProps(
           title: props.title,
           subtitle: props.subtitle,
           items: props.items || [],
+          // 槽位比例选项:契约预设白名单,渲染端校验回退
+          aspectRatio: props.aspectRatio || "4:5",
         },
         {},
         { bgColor: props.bgColor || "#FFFFFF" },
@@ -347,6 +358,8 @@ export function convertPuckProps(
           afterLabel: props.afterLabel || "改款后",
           beforeAltText: props.beforeAltText,
           afterAltText: props.afterAltText,
+          // 槽位比例选项:前后两图同步,渲染端校验回退
+          aspectRatio: props.aspectRatio || "4:5",
         },
         {},
         {
@@ -369,6 +382,8 @@ export function convertPuckProps(
           categoryId: props.categoryId,
           categories: props.categories || [],
           templateType: type,
+          // 槽位比例选项:按变体取契约默认(品类 1:1 / 场景 4:5),渲染端校验回退
+          imageRatio: props.imageRatio || (type === "按场景选购" ? "4:5" : "1:1"),
         },
         { template: props.layout || "grid-3" },
         { bgColor: props.bgColor || "#FFFFFF" },
@@ -394,6 +409,8 @@ export function convertPuckProps(
           title: props.title,
           subtitle: props.subtitle,
           testimonials: props.testimonials || [],
+          // 槽位比例选项:契约预设白名单,渲染端校验回退
+          aspectRatio: props.aspectRatio || "4:5",
         },
         {},
         { bgColor: props.bgColor || "#FFFFFF" },
@@ -443,6 +460,12 @@ export function convertPuckProps(
         {
           videoUrl: props.videoUrl,
           posterUrl: props.posterUrl,
+          title: props.title,
+          subtitle: props.subtitle,
+          actionText: props.actionText,
+          linkUrl: props.linkUrl,
+          targetType: props.targetType,
+          productId: Number(props.productId) || 0,
           autoPlay: props.autoPlay,
           loop: props.loop,
           muted: props.muted,
@@ -492,6 +515,8 @@ export function convertPuckProps(
           title: props.title,
           subtitle: props.subtitle,
           certificates: props.certificates || [],
+          // 槽位比例选项:契约预设白名单,渲染端校验回退
+          aspectRatio: props.aspectRatio || "3:2",
         },
         {},
         { bgColor: props.bgColor || "#FFFFFF" },
@@ -532,6 +557,8 @@ export function convertPuckProps(
           phone: props.phone,
           mapUrl: props.mapUrl,
           image: props.image,
+          // 槽位比例选项:门店空间横构图,渲染端校验回退
+          imageRatio: props.imageRatio || "3:2",
         },
         {},
         { bgColor: props.bgColor || "#FFFFFF" },

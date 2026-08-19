@@ -9,7 +9,7 @@ import {
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { categoryCardsPuckConfig } from "../../../adapters/categoryCards.puck";
 import { puckConfig } from "../../../config/puckConfig";
-import { bgColorPresetField, moduleNameField } from "../shared";
+import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 interface CategoryCardsVariant {
@@ -30,6 +30,10 @@ export function makeCategoryCardsSchema(
   const entrySpec = variant.moduleType === "按场景选购"
     ? IMAGE_SPECS.sceneShopping.image
     : IMAGE_SPECS.categoryCards.image;
+  // 槽位比例选项(契约派生):分类卡与按场景选购的预设白名单各取其契约
+  const entryRatioControl = variant.moduleType === "按场景选购"
+    ? ratioField("sceneShopping", "scenes", { key: "imageRatio", label: "卡片图比例" })
+    : ratioField("categoryCards", "categories", { key: "imageRatio", label: "卡片图比例" });
   return {
     moduleType: variant.moduleType,
     displayName: variant.displayName,
@@ -140,11 +144,12 @@ export function makeCategoryCardsSchema(
             label: "电脑端列数",
             control: "segmented",
             options: [
-              { label: "2 列（3:2 横幅）", value: "grid-2" },
+              { label: "2 列", value: "grid-2" },
               { label: "3 列", value: "grid-3" },
               { label: "4 列", value: "grid-4" },
             ],
           },
+          ...(entryRatioControl ? [entryRatioControl] : []),
         ],
       },
       {

@@ -278,14 +278,22 @@ type TemplateStyle = CSSProperties & Record<`--hc-${string}`, string | number>;
 
 export function templateLayoutVars(
   layout: ContentTemplateLayout,
+  /**
+   * 槽位比例覆盖(2026-08-19 选项机制):区块编辑者选择的比例经
+   * resolveContractAspectRatio 白名单解析后传入,逐端覆盖布局默认值。
+   */
+  overrides?: {
+    mediaRatio?: Partial<Record<"desktop" | "tablet" | "mobile", string>>;
+    detailRatio?: Partial<Record<"desktop" | "tablet" | "mobile", string>>;
+  },
 ): TemplateStyle {
   return {
-    "--hc-template-media-desktop": layout.desktop.mediaRatio ?? "auto",
-    "--hc-template-media-tablet": layout.tablet.mediaRatio ?? "auto",
-    "--hc-template-media-mobile": layout.mobile.mediaRatio ?? "auto",
-    "--hc-template-detail-desktop": layout.desktop.detailRatio ?? "auto",
-    "--hc-template-detail-tablet": layout.tablet.detailRatio ?? "auto",
-    "--hc-template-detail-mobile": layout.mobile.detailRatio ?? "auto",
+    "--hc-template-media-desktop": overrides?.mediaRatio?.desktop ?? layout.desktop.mediaRatio ?? "auto",
+    "--hc-template-media-tablet": overrides?.mediaRatio?.tablet ?? layout.tablet.mediaRatio ?? "auto",
+    "--hc-template-media-mobile": overrides?.mediaRatio?.mobile ?? layout.mobile.mediaRatio ?? "auto",
+    "--hc-template-detail-desktop": overrides?.detailRatio?.desktop ?? layout.desktop.detailRatio ?? "auto",
+    "--hc-template-detail-tablet": overrides?.detailRatio?.tablet ?? layout.tablet.detailRatio ?? "auto",
+    "--hc-template-detail-mobile": overrides?.detailRatio?.mobile ?? layout.mobile.detailRatio ?? "auto",
   };
 }
 

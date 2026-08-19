@@ -8,8 +8,14 @@ import {
 } from "../../../config/blockContracts";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { doublePosterPuckConfig } from "../../../adapters/doublePoster.puck";
-import { linkTargetField, moduleNameField } from "../shared";
+import { linkTargetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
+
+/** 槽位比例选项(契约派生):主图偏横/细节图偏竖的对话结构,两槽预设各自独立 */
+const doublePosterRatioControls = [
+  ratioField("doublePoster", "mainImage", { key: "mainImageRatio", label: "主图比例" }),
+  ratioField("doublePoster", "detailImage", { key: "detailImageRatio", label: "细节图比例" }),
+].flatMap((control) => (control ? [control] : []));
 
 export const doublePosterSchema: ModuleInspectorSchema = {
   moduleType: "双图海报",
@@ -80,7 +86,7 @@ export const doublePosterSchema: ModuleInspectorSchema = {
       title: "媒体",
       layer: "media",
       description:
-        "主图 3:2（约 2/3 宽）+ 细节图 4:5（细节下移错位）；手机上下排列",
+        "主图默认 3:2（约 2/3 宽）+ 细节图默认 4:5（细节下移错位），比例可在「布局」区调整；手机上下排列",
       fields: [
         {
           key: "mainImage",
@@ -116,5 +122,11 @@ export const doublePosterSchema: ModuleInspectorSchema = {
         },
       ],
     },
+    ...(doublePosterRatioControls.length > 0 ? [{
+      id: "double-poster-layout",
+      title: "布局",
+      layer: "layout" as const,
+      fields: doublePosterRatioControls,
+    }] : []),
   ],
 };

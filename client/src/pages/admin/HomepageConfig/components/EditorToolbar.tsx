@@ -36,7 +36,7 @@ export const VIEWPORT_PRESETS: ViewportPreset[] = [
   { label: "移动端", icon: <MobileOutlined />, ...RESPONSIVE_CANVAS.mobile },
 ];
 
-/** 草稿状态机的展示态:查看线上 > 未保存 > 未发布差异 > 与线上一致 */
+/** 草稿状态机的展示态:查看线上(不渲染) > 未保存 > 未发布差异 > 与线上一致 */
 type DraftStatusMode = "published" | "dirty" | "pending" | "clean";
 
 function getDraftStatusMode(options: {
@@ -51,25 +51,18 @@ function getDraftStatusMode(options: {
   return "clean";
 }
 
-/** 草稿状态徽标(六态可视化的常显部分;查看线上/放弃草稿入口在「更多」菜单) */
+/** 草稿状态徽标(常显部分;查看线上态不渲染——2026-08-19 用户决策删
+ * "正在查看线上版本"字样,此时工具栏已有「返回编辑」按钮与禁用的发布钮,状态不迷失) */
 function DraftStatusBadge({
   mode,
   draftSavedAtLabel,
-  hasPendingDraft,
 }: {
   mode: DraftStatusMode;
   draftSavedAtLabel: string | null;
-  hasPendingDraft: boolean;
 }) {
+  if (mode === "published") return null;
   let content: ReactNode;
-  if (mode === "published") {
-    content = (
-      <>
-        <EyeOutlined /> 正在查看线上版本
-        {hasPendingDraft ? <small>草稿有未发布修改</small> : null}
-      </>
-    );
-  } else if (mode === "dirty") {
+  if (mode === "dirty") {
     content = (
       <>
         <i className="homepage-editor__draft-status-dot" aria-hidden="true" />
@@ -405,7 +398,7 @@ export default function EditorToolbar({
         ))}
       </div>
 
-      {/* 草稿状态徽标:编辑草稿/未保存/未发布差异/查看线上 四态常显,编辑不迷失 */}
+      {/* 草稿状态徽标:未保存/未发布差异/与线上一致 常显;查看线上态不渲染(2026-08-19 用户决策) */}
       <DraftStatusBadge
         mode={getDraftStatusMode({
           viewingPublished,
@@ -413,7 +406,6 @@ export default function EditorToolbar({
           hasPendingDraft,
         })}
         draftSavedAtLabel={draftSavedAtLabel}
-        hasPendingDraft={hasPendingDraft}
       />
 
       <div className="homepage-editor__toolbar-actions">

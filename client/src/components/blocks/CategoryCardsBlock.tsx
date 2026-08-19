@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import type { CSSProperties } from "react";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { SecureImage } from "@/components/common/SecureImage";
-import { CATEGORY_CARDS_CONTRACT, getCategoryCardsMediaAspectRatio, getContractRoleRatio, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
+import { CATEGORY_CARDS_CONTRACT, RESPONSIVE_CANVAS, resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 import { isSafeInternalPath, resolveItemLinkUrl } from "@/page-builder/utils/linkTarget";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
@@ -30,12 +30,13 @@ export default function CategoryCardsBlock({
   const bg = styleConfig.bgColor || "#FFFFFF";
   const cols = layout === "grid-2" ? 2 : layout === "grid-4" ? 4 : 3;
   const isSceneShopping = content.templateType === "按场景选购";
+  // 槽位比例选项(契约派生):分类卡与按场景选购各自的预设白名单,键名同为 imageRatio
   const mediaAspectRatio = isSceneShopping
-    ? getContractRoleRatio("sceneShopping", "scenes", "desktop")
-    : getCategoryCardsMediaAspectRatio(layout);
+    ? resolveContractAspectRatio("sceneShopping", "scenes", content.imageRatio, "desktop")
+    : resolveContractAspectRatio("categoryCards", "categories", content.imageRatio, "desktop");
   const mobileMediaAspectRatio = isSceneShopping
-    ? getContractRoleRatio("sceneShopping", "scenes", "mobile")
-    : getContractRoleRatio("categoryCards", "categories", "mobile");
+    ? resolveContractAspectRatio("sceneShopping", "scenes", content.imageRatio, "mobile")
+    : resolveContractAspectRatio("categoryCards", "categories", content.imageRatio, "mobile");
   const normalizedCategories = Array.isArray(categories) ? categories.slice(0, CATEGORY_CARDS_CONTRACT.content.maxItems) : [];
   const visibleCategories = editMode
     ? normalizedCategories

@@ -6,7 +6,7 @@
  * 采集静默失败：不阻塞页面、不向用户报错、失败不重试。
  */
 
-const ANALYTICS_ENABLED = import.meta.env.VITE_ANALYTICS_ENABLED !== "false";
+const ANALYTICS_ENABLED = (import.meta as any).env?.VITE_ANALYTICS_ENABLED !== "false";
 
 // 匿名会话标识：仅用于区分会话，不关联任何个人信息
 let sessionId = "";
@@ -40,7 +40,7 @@ function shouldSend(key: string, throttleMs = 1000): boolean {
 
 async function send(event: Record<string, unknown>) {
   try {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api";
+    const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || "/api";
     await fetch(`${baseUrl}/analytics/track`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

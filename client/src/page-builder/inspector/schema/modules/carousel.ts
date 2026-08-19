@@ -76,7 +76,7 @@ export const carouselSchema: ModuleInspectorSchema = {
           label: "手机端比例",
           control: "segmented",
           options: [
-            { label: "竖幅 3:4", value: "portrait" },
+            { label: "竖幅 4:5", value: "portrait" },
           ],
         },
       ],

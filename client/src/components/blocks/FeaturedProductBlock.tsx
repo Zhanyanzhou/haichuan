@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import { FEATURED_PRODUCT_CONTRACT } from "@/page-builder/config/blockContracts";
+import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 import { resolvePrefixedLinkTarget, isSafeInternalPath } from "@/page-builder/utils/linkTarget";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
@@ -21,6 +21,8 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
   const { eyebrow, title, summary, product = {}, primaryText, secondaryText } = content;
   const showPrice = content.showPrice === true;
   const bgColor = styleConfig.bgColor || "#FFFFFF";
+  // 槽位比例选项(契约派生):一件作品的展示比例,全端一致
+  const productRatio = resolveContractAspectRatio("featuredProduct", "product", content.aspectRatio, "desktop");
   const productLink = isSafeInternalPath(product.link) ? product.link : "";
   // 次行动三件套(secondary 前缀):有三件套痕迹即不回退旧裸 secondaryLink,
   // 防"切回不跳转"后残留旧字段让链接复活(与条目级 resolveItemLinkUrl 同构)
@@ -33,8 +35,8 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
         <div style={{ maxWidth: 640, margin: "0 auto", width: "100%" }}>
           <BlockEmptyPlaceholder
             hint="代表作品"
-            spec={`请选择 1 件作品 · 作品图固定 ${FEATURED_PRODUCT_CONTRACT.canvas.mediaAspectRatio.replace(" / ", ":")}`}
-            ratio={FEATURED_PRODUCT_CONTRACT.canvas.mediaAspectRatio}
+            spec={`请选择 1 件作品 · 作品图默认 ${productRatio.replace(" / ", ":")}`}
+            ratio={productRatio}
           />
         </div>
       </DecorSection>
@@ -45,7 +47,7 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
     <div
       data-editor-field="productId"
       className="homepage-featured-product__media"
-      style={{ aspectRatio: FEATURED_PRODUCT_CONTRACT.canvas.mediaAspectRatio, overflow: "hidden", background: "#F3F1EE", width: "100%", maxWidth: 640, margin: "0 auto" }}
+      style={{ aspectRatio: productRatio, overflow: "hidden", background: "#F3F1EE", width: "100%", maxWidth: 640, margin: "0 auto" }}
     >
       <SecureImage
         src={product.image}

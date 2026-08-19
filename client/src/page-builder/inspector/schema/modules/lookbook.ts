@@ -6,8 +6,11 @@ import { createElement } from "react";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { lookbookPuckConfig } from "../../../adapters/lookbook.puck";
 import ProductIdsField from "../../../fields/ProductIdsField";
-import { altTextField, bgColorPresetField, linkTargetField, moduleNameField } from "../shared";
+import { altTextField, bgColorPresetField, linkTargetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
+
+/** 槽位比例选项(契约派生):佩戴大片全端统一 */
+const wearingRatioControl = ratioField("wearingInspiration", "wearingImage", { label: "大片比例" });
 
 export const lookbookSchema: ModuleInspectorSchema = {
   moduleType: "佩戴灵感",
@@ -60,7 +63,7 @@ export const lookbookSchema: ModuleInspectorSchema = {
       id: "lookbook-media",
       title: "媒体",
       layer: "media",
-      description: "桌面 4:5 大片占 58% 分栏；手机全宽",
+      description: "桌面大片占 58% 分栏；手机全宽；比例可在「布局」区调整",
       fields: [
         {
           key: "image",
@@ -91,6 +94,12 @@ export const lookbookSchema: ModuleInspectorSchema = {
         linkTargetField("行动入口点击后"),
       ],
     },
+    ...(wearingRatioControl ? [{
+      id: "lookbook-layout",
+      title: "布局",
+      layer: "layout" as const,
+      fields: [wearingRatioControl],
+    }] : []),
     {
       id: "lookbook-style",
       title: "样式",

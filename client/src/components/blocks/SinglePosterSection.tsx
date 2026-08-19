@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import { SINGLE_POSTER_CONTRACT } from '@/page-builder/config/blockContracts';
+import { SINGLE_POSTER_CONTRACT, resolveContractAspectRatio } from '@/page-builder/config/blockContracts';
 import { IMAGE_SPECS } from '@/page-builder/config/imageSpecs';
 import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
 import { DesignSystemStyles } from '@/page-builder/designSystem/sectionShell';
@@ -46,6 +46,15 @@ export default function SinglePosterSection({ module, editMode }: Props) {
   const desktopFocusY = s?.desktopFocusY ?? s?.focusY ?? 50;
   const mobileFocusX = s?.mobileFocusX ?? s?.focusX ?? 50;
   const mobileFocusY = s?.mobileFocusY ?? s?.focusY ?? 50;
+  // 比例选项(契约派生):桌面/平板走 desktopImage 角色,手机走 mobileImage 角色
+  const posterRatio = {
+    desktop: resolveContractAspectRatio("singlePoster", "desktopImage", c?.aspectRatio, "desktop"),
+    tablet: resolveContractAspectRatio("singlePoster", "desktopImage", c?.aspectRatio, "tablet"),
+    mobile: resolveContractAspectRatio("singlePoster", "mobileImage", c?.aspectRatio, "mobile"),
+  };
+  const [posterRatioW, posterRatioH] = posterRatio.desktop
+    .split("/")
+    .map((part) => Number(part.trim()));
 
   const imageColumn = (
     <div data-editor-field="desktopImage mobileImage" className="hc-content-template__media hc-phase1-single__media">
@@ -59,7 +68,7 @@ export default function SinglePosterSection({ module, editMode }: Props) {
             loading="lazy"
             decoding="async"
             width={1600}
-            height={2000}
+            height={Math.round((1600 * posterRatioH) / posterRatioW)}
           />
         </picture>
       ) : (
@@ -115,7 +124,7 @@ export default function SinglePosterSection({ module, editMode }: Props) {
         background: s?.bgColor || BG,
         '--sp-focus-d': `${desktopFocusX}% ${desktopFocusY}%`,
         '--sp-focus-m': `${mobileFocusX}% ${mobileFocusY}%`,
-        ...templateLayoutVars(CONTENT_TEMPLATE_LAYOUTS.singlePoster),
+        ...templateLayoutVars(CONTENT_TEMPLATE_LAYOUTS.singlePoster, { mediaRatio: posterRatio }),
       } as React.CSSProperties}
     >
       <DesignSystemStyles />

@@ -106,7 +106,7 @@ export default function PageSettingsDrawer({
         </p>
         <p
           className="homepage-editor__page-settings-hint"
-          style={{ marginTop: 12, color: "#B8944E" }}
+          style={{ marginTop: 12, color: "var(--adm-action)" }}
         >
           保存后仅写入草稿，需点击顶部「发布」才会更新前台页面。
         </p>

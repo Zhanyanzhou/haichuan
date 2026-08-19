@@ -9,8 +9,11 @@ import {
 import { createElement } from "react";
 import { featuredProductPuckConfig } from "../../../adapters/featuredProduct.puck";
 import ProductIdsField from "../../../fields/ProductIdsField";
-import { bgColorPresetField, moduleNameField } from "../shared";
+import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
+
+/** 槽位比例选项(契约派生):作品图全端一致 */
+const featuredProductRatioControl = ratioField("featuredProduct", "product", { label: "作品图比例" });
 
 export const featuredProductSchema: ModuleInspectorSchema = {
   moduleType: "单品焦点推荐",
@@ -105,7 +108,7 @@ export const featuredProductSchema: ModuleInspectorSchema = {
       id: "featured-layout",
       title: "布局",
       layer: "layout",
-      description: "作品图固定 4:5，请在商品管理维护作品图片",
+      description: "作品图默认 4:5，可在下方调整；请在商品管理维护作品图片",
       fields: [
         {
           key: "layout",
@@ -124,6 +127,7 @@ export const featuredProductSchema: ModuleInspectorSchema = {
             },
           ],
         },
+        ...(featuredProductRatioControl ? [featuredProductRatioControl] : []),
       ],
     },
     {

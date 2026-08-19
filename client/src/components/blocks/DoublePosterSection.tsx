@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useReducedMotion } from 'framer-motion';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
+import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 import type { PageModule } from '@/types/pageModule';
 import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
 import { DesignSystemStyles } from '@/page-builder/designSystem/sectionShell';
@@ -92,6 +93,17 @@ export default function DoublePosterSection({ module, editMode }: Props) {
   const defaults = { number: "", label: "", title: "", description: "", href: "" };
   const c = module?.content as (PageModule['content'] & Record<string, any>) | undefined;
   const s = module?.styleConfig as (PageModule['styleConfig'] & Record<string, any>) | undefined;
+  // 槽位比例选项(契约派生):主图/细节图各自独立选择,保持"主横副竖"对话结构
+  const mainRatio = {
+    desktop: resolveContractAspectRatio("doublePoster", "mainImage", c?.mainImageRatio, "desktop"),
+    tablet: resolveContractAspectRatio("doublePoster", "mainImage", c?.mainImageRatio, "tablet"),
+    mobile: resolveContractAspectRatio("doublePoster", "mainImage", c?.mainImageRatio, "mobile"),
+  };
+  const detailRatio = {
+    desktop: resolveContractAspectRatio("doublePoster", "detailImage", c?.detailImageRatio, "desktop"),
+    tablet: resolveContractAspectRatio("doublePoster", "detailImage", c?.detailImageRatio, "tablet"),
+    mobile: resolveContractAspectRatio("doublePoster", "detailImage", c?.detailImageRatio, "mobile"),
+  };
 
   // 双图海报的两个字段表达固定版式角色，绝不再借用桌面/移动端字段。
   const mainImage = c?.mainImage;
@@ -126,7 +138,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
         outline: editMode ? '2px solid rgba(184,148,78,0.6)' : undefined,
         outlineOffset: -2,
         position: 'relative' as const,
-        ...templateLayoutVars(CONTENT_TEMPLATE_LAYOUTS.doublePoster),
+        ...templateLayoutVars(CONTENT_TEMPLATE_LAYOUTS.doublePoster, { mediaRatio: mainRatio, detailRatio }),
       }}
     >
       <DesignSystemStyles />

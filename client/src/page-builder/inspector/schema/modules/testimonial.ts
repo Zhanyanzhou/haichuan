@@ -4,8 +4,11 @@
  */
 import { testimonialPuckConfig } from "../../../adapters/testimonial.puck";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
-import { bgColorPresetField, moduleNameField } from "../shared";
+import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
+
+/** 槽位比例选项(契约派生):授权实拍图统一比例 */
+const testimonialRatioControl = ratioField("testimonials", "authorizedPhoto", { label: "实拍图比例" });
 
 export const testimonialSchema: ModuleInspectorSchema = {
   moduleType: "真实评价与实拍",
@@ -79,6 +82,12 @@ export const testimonialSchema: ModuleInspectorSchema = {
         },
       ],
     },
+    ...(testimonialRatioControl ? [{
+      id: "testimonial-layout",
+      title: "布局",
+      layer: "layout" as const,
+      fields: [testimonialRatioControl],
+    }] : []),
     {
       id: "testimonial-style",
       title: "样式",

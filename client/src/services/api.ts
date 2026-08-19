@@ -1,5 +1,5 @@
 // 前端 API 层：customer(认证/收藏/找回/SMS/合规)/marketing(含可用券)/reviews/recommendation 等
-import axios from "axios";
+import axios, { getAdapter } from "axios";
 import { notifyRequestError } from "@/services/requestErrorEvents";
 import type { ApiResponse, CategoryInput, CategorySortItem } from "@/types";
 import { useAuthStore } from "@/store/authStore";
@@ -17,10 +17,30 @@ import {
 } from "./mockData";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
+  baseURL: (import.meta as any).env?.VITE_API_BASE_URL || "/api",
   timeout: 30000,
   headers: { "Content-Type": "application/json" },
 });
+
+// In-flight 去重（2026-08-19）：并发中的相同幂等 GET 共享同一请求，完成后即忘。
+// 不做 TTL 缓存——发布/保存后立刻回读必须拿到新数据，只合并"同时在场"的重复。
+// 动机：StrictMode dev 双挂载与多组件并发拉 settings/public 等场景曾各发一份。
+// 注意：共享的是同一 response 对象，消费方须只读（unwrapResponse 即如此）。
+const inflightGets = new Map<string, Promise<unknown>>();
+const baseAdapter = getAdapter(api.defaults.adapter);
+api.defaults.adapter = async (config) => {
+  if ((config.method || "get").toLowerCase() !== "get") {
+    return baseAdapter(config);
+  }
+  const key = `${config.url}|${JSON.stringify(config.params ?? {})}`;
+  const hit = inflightGets.get(key);
+  if (hit) return hit as never;
+  const pending = Promise.resolve(baseAdapter(config)).finally(() =>
+    inflightGets.delete(key),
+  );
+  inflightGets.set(key, pending);
+  return pending as never;
+};
 
 type NormalizedRequestError = Error & { status?: number };
 type LifecycleMockProduct = {
@@ -46,8 +66,8 @@ function mockRequestError(message: string, status: number): NormalizedRequestErr
 }
 
 // 受控目录 SSE：仅发变更信号（不返回商品数据），前端收到信号后用鉴权 catalog 接口重拉
-export const publicProductStreamUrl = `${(import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "")}/products/catalog/stream`;
-export const publicPageDocumentStreamUrl = `${(import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "")}/page-modules/document/stream`;
+export const publicProductStreamUrl = `${((import.meta as any).env?.VITE_API_BASE_URL || "/api").replace(/\/$/, "")}/products/catalog/stream`;
+export const publicPageDocumentStreamUrl = `${((import.meta as any).env?.VITE_API_BASE_URL || "/api").replace(/\/$/, "")}/page-modules/document/stream`;
 
 // Request interceptor - attach token
 api.interceptors.request.use((config) => {
@@ -127,8 +147,8 @@ export const authApi = {
     if (USE_MOCK) {
       await mockDelay();
       if (
-        data.username === import.meta.env.VITE_MOCK_ADMIN_USERNAME &&
-        data.password === import.meta.env.VITE_MOCK_ADMIN_PASSWORD
+        data.username === (import.meta as any).env?.VITE_MOCK_ADMIN_USERNAME &&
+        data.password === (import.meta as any).env?.VITE_MOCK_ADMIN_PASSWORD
       ) {
         return mockRes({ accessToken: "mock-jwt-token", user: mockUsers[0] });
       }

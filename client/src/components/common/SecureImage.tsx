@@ -13,7 +13,8 @@ interface SecureImageProps {
   tokenKind?: "auto" | "customer" | "staff";
 }
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api").replace(
+// 防御式读取:非 Vite 运行环境(测试/SSR)下 import.meta.env 不存在,不使模块加载即崩
+const API_BASE = ((import.meta as any).env?.VITE_API_BASE_URL || "/api").replace(
   /\/$/,
   "",
 );
