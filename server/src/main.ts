@@ -65,6 +65,9 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
 
   const port = Number(process.env.PORT) || 3000;
+  // 默认全接口：容器内 nginx 需经内网访问 server。
+  // 宿主机直跑时应设 HOST=127.0.0.1 收敛局域网暴露（裸 API 无 nginx 防护层，2026-08-19 实测 192.168.1.x 可直达 /api/ready）。
+  const host = process.env.HOST || "0.0.0.0";
 
   // Swagger API 文档（仅开发环境暴露）
   if (process.env.NODE_ENV !== "production") {
@@ -79,7 +82,7 @@ async function bootstrap() {
     logger.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
   }
 
-  await app.listen(port);
+  await app.listen(port, host);
   logger.log(`🚀 Jewelry Server running on http://localhost:${port}`);
 }
 bootstrap();

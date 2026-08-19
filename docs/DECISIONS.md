@@ -172,6 +172,21 @@
 - **决议 1（rhythm.ts 退役）**：页面节奏提示引擎上线两周零 UI 消费，删除；页面级引导职责由配方与完成度提示承接。
 - **决议 2（母版词汇不强行映射）**：BLOCK_META.master（12 视觉母版）在 rhythm 退役后无运行时消费者，转为归档元数据；运行时构图由各区块 DecorSection master 决定，合同侧母版词汇以契约 master（23 模板专属 id）为准，两套词汇不再建映射表。
 - **决议 3（implementationStatus 语义澄清，不改动）**：该字段零逻辑消费（仅生成产物数据）；"planned" 的准确语义是「受控能力门禁（allowedControls 执行，P3 范围）未实施」，而非「渲染未真实化」——渲染真实性由 PLANNED_TEMPLATE_LAYOUTS 的 isSkeleton:false 保证。待 P3 实施门禁时随批次重估。
+
+### D.13 ✅ 比例调色板收敛与槽位选项机制（2026-08-19）
+- **调色板 8→5**：1/1 方形、4/5 竖版、3/2 横版、16/9 宽屏、21/6 超宽。3/4、2/3、16/7 撤编；旧数据（含 video 已保存的 16:7/3:4）由渲染层按原比例兼容渲染，新建不可再选。RATIOS 设计令牌同步收敛为 5 档。
+- **归一化与物性修正**：wearingInspiration 2/3→4/5；featuredProduct/productRow/carousel/hotspot 3/4→4/5；storeInfo 移动端竖裁→3/2（门店照片天然横构图）；fullBleed(平板)/limitedEvent 16/7→16/9。
+- **槽位选项机制（受控自由度）**：选项唯一来源是契约 `roles[].allowedRatioPresetsByViewport`，编辑器经 `ratioField()`（shared.ts）派生 segmented 控件，渲染端经 `resolveContractAspectRatio()` 白名单校验、越界回退默认；一次选择全端校验（不在本端预设内则回退本端默认）。每槽位 ≤3 项且必须跨形态类别（竖/方/横），构图承重位（hero/通栏/轮播/热区/横幅带/旅程节点）锁定无控件。锁定=控件不出现，非置灰。
+- **全量接线（11+2 模块）**：video（桌面 16:9/21:6，移动 4:5/16:9/9:16）与 productRow（4:5/1:1）先行；第二批 11 个模板已全链路接完——singlePoster/doublePoster（主图 3:2 或 16:9 + 细节图 4:5 或 1:1，两槽独立）/featuredProduct/gallery/comparison(改款对比)/lookbook(佩戴灵感)/certificates(3:2 或 16:9)/storeInfo(3:2、16:9 或移动竖版 4:5)/testimonials/categoryCards·sceneShopping(品类 1:1/4:5、场景 4:5/1:1)。渲染端统一走 `resolveContractAspectRatio` 覆盖值模式；singlePoster/doublePoster 经 `templateLayoutVars` 新增 overrides 参数逐端注入 CSS 变量；内容键名：媒体单槽 `aspectRatio`（双图海报 `mainImageRatio/detailImageRatio`），卡片与门店 `imageRatio`。随批修复：lookbook 纯氛围宽度硬编码旧 2:3 改为随所选比例动态计算；删除零消费的 `getCategoryCardsMediaAspectRatio`。
+- **与 2026-08-18「8 比例骨架判废」追记的关系**：方向一致——比例从"素材骨架"降级为"槽位职能派生 + 素材建议"，本次在契约与选项机制层落地该方法论。verify-content-template-contract.mjs 的视频预设断言已同步。
+- **9:16 竖屏（视频域专属，2026-08-19 追记）**：仅视频移动端预设新增 9/16，标签「竖屏」；桌面不在白名单内，选 9:16 的内容在桌面视口经白名单自动回退 16:9（横屏/宽幕仍是桌面仅有的两档，桌面上没有全屏竖版视频是设计意图）。动因：手机竖屏点全屏播放横版素材时系统 letterbox 产生大片黑边，9:16 让竖版素材在移动端画布内即贴合全屏形态。配套：VideoBlock 移动端媒体查询放开 `max-height: none !important`（inline style 优先于媒体查询，防桌面超宽屏撑高的 maxHeight 在移动端钳死 9:16）；"9 / 16" 从 LEGACY_RATIOS 转正。已实测：移动端 9:16 → 0.5625 精确命中，桌面回退 → 1.7778。
+
+### D.14 ✅ 编辑器配方引导与冗余提示删除（2026-08-19）
+
+- **用户决策一（模板库推荐序列）**：内容模块库置顶的"本页推荐序列"分组无用，删除；`RECIPE_NECESSITY_LABEL` 随之失去消费者。
+- **用户决策二（图层栏完成度提示）**：页面导航栏上方的"缺必需章节：xxx / 建议补充：xxx"提示无用，删除。至此配方引导全链路退役：`config/pageRecipes.ts` 整文件删除（`PAGE_RECIPES` 零残留）；rhythm.ts（2026-08-18 退役）与配方两级页面引导均已不存在。
+- **用户决策三（线上版本徽章）**：设备切换器右侧"正在查看线上版本"字样无用，查看线上态草稿状态徽章不再渲染（`data-mode="published"` 样式同步删除）；退出闭环由工具栏「返回编辑」按钮与禁用的发布钮承接。
+
 ### D.10 🟡 金价 AUTO 采集
 - **现状**：`@Cron` `fetchAndUpdateGoldPrice` 是空壳（只打 warn），未接行情源；调价系数 `1.05` 硬编码；调价绕过 `ProductsService`（不触发前台 SSE）。
 - **待定**：是否接入自动行情源、调价系数参数化、SSE 通知补齐。

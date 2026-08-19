@@ -27,8 +27,8 @@
 | 入口 | 适配文件 | 项目级 MCP 配置 | 已发现 MCP | 说明 |
 | --- | --- | --- | --- | --- |
 | Codex（OpenAI） | `AGENTS.md` | `.codex/config.toml` | playwright、chrome-devtools、context7 | Codex 的项目指令以 `AGENTS.md` 为入口；仍须按其中顺序读取共同规则。 |
-| Claude Code | `CLAUDE.md` | `.mcp.json` | playwright、context7 | `.claude/agents/` 有审查代理；仅在当前会话确实提供该能力时使用。 |
-| VS Code 智能体 | `.github/copilot-instructions.md` | `.vscode/mcp.json` | github、figma、tavily、playwright、chrome-devtools、context7、prisma | 是否加载该指令、实际模型和可用 MCP 取决于用户安装的扩展与当前会话，需以运行界面为准。 |
+| Claude Code | `CLAUDE.md` | `.mcp.json` | playwright、context7 | `.claude/agents/` 有审查代理；仅在当前会话确实提供该能力时使用。chrome-devtools 原经用户级 `~/.claude.json` 挂载（历史会话高频使用），2026-08-19 用户级清理后**项目级挂载待批准**（见 DECISIONS A.11）。 |
+| VS Code 智能体 | `.github/copilot-instructions.md` | `.vscode/mcp.json` | playwright、context7 | 是否加载该指令、实际模型和可用 MCP 取决于用户安装的扩展与当前会话，需以运行界面为准。2026-08-19 起 github/figma/tavily/chrome-devtools/prisma 移除（VS Code 会话全量注入 MCP schema，多服务器是上下文开销大头；figma/tavily/github 历史引用各仅 3 处，近乎未用）；恢复须按第 3 节流程批准。 |
 
 `.agents/skills/` 是项目内技能内容的唯一维护位置；如某工具通过链接或扩展加载它，只能视为该工具的适配机制，不改变共同规则。
 
@@ -47,7 +47,7 @@
 - 实际启动验证结果与日期；
 - 失败时的回退版本或禁用方式。
 
-当前 `.vscode/mcp.json` 的 Prisma 配置与项目文档历史描述存在冲突；在未完成独立版本与启动核验前，不把它视为可用数据库能力，也不得以它替代直接阅读 `server/prisma/schema.prisma`。
+`.vscode/mcp.json` 的 Prisma 配置（曾与项目文档存在版本冲突）已于 2026-08-19 移除；数据库结构一律以直接阅读 `server/prisma/schema.prisma` 为准。
 
 ## 4. 用户级配置与数据边界
 

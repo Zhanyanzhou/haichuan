@@ -68,8 +68,11 @@ for (const template of contract.templates) {
 }
 
 const cover = byKey.video.roles.find((role) => role.id === "coverImage");
+// 2026-08-19 比例调色板收敛:8→5(1/1、4/5、3/2、16/9、21/6),视频桌面横屏/宽幕两档
 assert.equal(cover.defaultRatioByViewport.desktop, "16 / 9", "视频桌面默认比例必须为 16:9");
-assert.deepEqual(cover.allowedRatioPresetsByViewport.desktop, ["16 / 9", "16 / 7", "3 / 4"], "视频桌面比例预设不正确");
+assert.deepEqual(cover.allowedRatioPresetsByViewport.desktop, ["16 / 9", "21 / 6"], "视频桌面比例预设不正确");
+// 2026-08-19 移动端补 9:16 全屏竖版(手机竖屏素材的物理形态),桌面保持横屏两档
+assert.deepEqual(cover.allowedRatioPresetsByViewport.mobile, ["4 / 5", "16 / 9", "9 / 16"], "视频移动端比例预设不正确");
 assert.equal(byKey.productRow.presetValues.columns.defaultByViewport.desktop, 3, "商品列表桌面默认必须为三列");
 assert.ok(byKey.hotspot.roles.some((role) => role.id === "hotspots" && role.parentRole === "sceneImage" && role.positioning === "relative-to-media"), "热点必须从属于媒体槽");
 assert.deepEqual(byKey.testimonials.roles.map((role) => role.id).sort(), ["attribution", "authorizedPhoto", "mainQuote"].sort(), "顾客分享只能保留授权实拍、主引语和署名角色");

@@ -1,36 +1,14 @@
 {
   "servers": {
-    "github": {
-      "type": "http",
-      "url": "https://api.githubcopilot.com/mcp/"
-    },
-    "figma": {
-      "type": "http",
-      "url": "https://mcp.figma.com/mcp"
-    },
-    "tavily": {
-      "type": "http",
-      "url": "https://mcp.tavily.com/mcp"
-    },
     "playwright": {
       "type": "stdio",
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest"]
     },
-    "chrome-devtools": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest"]
-    },
     "context7": {
       "type": "stdio",
       "command": "npx",
       "args": ["-y", "@upstash/context7-mcp"]
-    },
-    "prisma": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "prisma", "mcp", "--schema", "server/prisma/schema.prisma"]
     }
   }
 }

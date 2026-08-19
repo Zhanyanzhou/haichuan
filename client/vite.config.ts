@@ -13,7 +13,12 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5174,
+    // 固定 5173（Vite 默认、后端 CORS_ORIGIN 已放行）：strictPort 被占时直接报错，
+    // 避免端口静默顺延导致旧地址全部"拒绝连接"；host: true 双栈绑定 127.0.0.1 与 ::1，
+    // 否则 Windows 下 Node 解析 localhost 只绑 IPv6，IPv4 访问打不开。
+    port: 5173,
+    strictPort: true,
+    host: true,
     watch: {
       // Windows 中文路径 + Node.js 文件监视器 = EBUSY，改用轮询
       usePolling: true,

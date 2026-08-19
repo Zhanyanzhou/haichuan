@@ -4,3 +4,6 @@ dist-verify
 dist-verify-inventory-reservation
 .env
 .env.*
+# 测试报告不进构建上下文（2026-08-19 收编）
+playwright-report
+test-results

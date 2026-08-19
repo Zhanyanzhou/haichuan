@@ -24,9 +24,9 @@ function collectAdminFiles(directory, prefix) {
 }
 
 // 临时所有权排除：并发任务完成后应删除，不得扩大为永久豁免。
+// HomepageConfig 豁免已于 2026-08-19 回收：editor.css 完成 --adm-* 令牌迁移与字号下限整改。
 const ownershipExclusions = [
   /^client\/src\/pages\/admin\/ProductManage\//,
-  /^client\/src\/pages\/admin\/HomepageConfig\//,
 ];
 const guardedAdminFiles = collectAdminFiles(
   resolve(root, "client/src/pages/admin"),

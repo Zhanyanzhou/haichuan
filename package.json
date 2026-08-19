@@ -16,7 +16,7 @@
     "typecheck:client": "cd client && npx tsc --noEmit -p tsconfig.json",
     "contracts:generate": "node scripts/generate-content-template-contract.mjs",
     "contracts:check": "node scripts/generate-content-template-contract.mjs --check",
-    "test": "npm run test:contracts",
+    "test": "npm run test:contracts && npm run test:public-assets",
     "test:contracts": "node scripts/verify-page-builder-contract.mjs && node scripts/verify-wechat-callback-origin.mjs",
     "test:content-templates": "npm run contracts:check && node scripts/verify-content-template-contract.mjs && node scripts/verify-content-template-skeletons.mjs && node scripts/verify-content-template-image-specs.mjs && node scripts/verify-inspector-schema.mjs",
     "test:page-builder-publish": "node scripts/verify-page-builder-publish.mjs",
@@ -30,7 +30,8 @@
     "db:studio": "cd server && npx prisma studio",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test:public-assets": "node scripts/verify-public-assets.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.2",

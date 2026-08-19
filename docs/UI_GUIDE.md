@@ -290,6 +290,18 @@
 - 新组件先证明现有组件无法覆盖，再新增可复用变体；禁止为单页创建第二套按钮、卡片、导航或表单语言。
 - 设计规范与代码令牌不一致时，先记录差异与迁移范围；未经品牌系统审批，不自动以任一方覆盖另一方。
 
+**店铺装修编辑器区域术语（2026-08-19 定稿，官方对照）**——文档、代码注释与 UI 文案统一使用以下名称，不再使用"内容模块库/页面结构/模块设置"等旧称：
+
+| 区域 | 官方英文 | Puck 官方 | 业界参照 |
+| --- | --- | --- | --- |
+| 模板组件库 | Component Library | Component Drawer | Webflow Add Panel、古腾堡 Block Inserter |
+| 图层面板 | Layers Panel | Outline | Figma Layers、Webflow Navigator |
+| 画布 | Canvas | Canvas | 通用；Sketch 称 Artboard |
+| 属性面板 | Inspector / Properties Panel | Inspector | Figma Properties、Xcode Inspector |
+
+- 画布不在 UI 上展示区域名称（2026-08-19 用户决策）；模板组件库、图层面板、属性面板三栏标题统一走 `homepage-editor__panel-header`（高度 44px、顶部同一水平线、标题绝对居中，文字规格 `homepage-editor__region-title`：16 / 24px / 600 / #27231e，取 A.2 Card/Table title 层级；三栏各配图标——模板组件库 Appstore、图层面板 Block、属性面板 Control，图标品牌金）。新增面板标题必须复用，不得另立样式。
+- "页面导航栏"一词仅指网站页头导航在图层栏中的预览开关，不得用于指代图层面板。
+
 ---
 
 ## 标准七 · 动效与节奏
@@ -481,4 +493,3 @@ Ant Design 以 `8px` 为布局基础单位；海川采用 `4px` 子网格与 `8p
 - 主题、共享壳层和状态组件先迁移；业务页面按访问频率和风险分批处理。禁止仓库级机械替换，禁止在一次文案任务中横扫全部后台页面。
 - `scripts/verify-admin-ui-standards.mjs` 对共享后台文件检查第二套品牌金、低于功能字号下限、英文三点加载、泛化危险确认及 1px 焦点线。确有装饰性例外时必须在脚本白名单中写明选择器与理由。
 - 每次令牌变更记录受影响组件、预期视觉差异和浏览器证据。当前附录建立规范，不代表尚未迁移的业务页面已经合规。
-
