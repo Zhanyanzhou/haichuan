@@ -3,7 +3,7 @@ import { join, relative, resolve, sep, extname } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { readFile, stat, writeFile } from 'fs/promises';
 import { randomUUID } from 'crypto';
-import * as dayjs from 'dayjs';
+import dayjs from 'dayjs';
 import { PrismaService } from '../../common/prisma/prisma.service';
 const sharp = require('sharp');
 
