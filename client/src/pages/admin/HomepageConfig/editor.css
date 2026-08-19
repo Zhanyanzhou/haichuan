@@ -1,5 +1,14 @@
 /**
- * editor.css — 店铺装修编辑器全量样式，自 HomepageConfig/index.tsx 内联 <style> 平移，类名与规则零变更。 * 注意：Puck 挂载开启 iframe.syncHostStyles，本文件样式会同步进画布 iframe。 */
+ * editor.css — 店铺装修编辑器全量样式，自 HomepageConfig/index.tsx 内联 <style> 平移，类名与规则零变更。 * 注意：Puck 挂载开启 iframe.syncHostStyles，本文件样式会同步进画布 iframe。
+ *
+ * ── 地层地图（改布局前必读，2026-08-19 勘定）──
+ * 本文件是多轮改版的地层堆积，同属性可能有多处声明，生效规则=特异性优先、同特异性看源顺序。
+ * 现行有效层只有三处，其余为历史地层（勿在其上"再补一条覆盖"，直接改对应有效层）：
+ *   1. body grid 变量意图层：搜 `--editor-library-width`（三栏列宽唯一定义点，含 :has 收起态 40px）。
+ *   2. 响应式覆盖层：≤1599 库抽屉化 / ≤1199 面板覆盖化 / ≤767 手机层（搜 `@media (max-width: 1599px)`）。
+ *   3. 桌面收敛层：搜 `@media (min-width: 1200px)`（240/200/420 固定三栏，防选中抖动；含 is-inspecting 同值对偶）。
+ * 历史教训：不要在 `.is-inspecting` 等更高特异性选择器下重复声明 body grid/宽度（会压过意图层引发整页抖动）；
+ * 2026-08-19 已清 10 处 is-inspecting grid 残留与 inspector 440/520/480 三个被收敛层压死的旧值。 */
 .homepage-editor {
   --puck-color-interactive: #b8944e;
   --puck-color-interactive-hover: #9c793b;
@@ -1662,12 +1671,9 @@ body:has(.homepage-editor__storefront-frame) {
   border-radius: 5px;
   background: var(--adm-neutral-bg);
 }
-.homepage-editor__layer-frame > span {
-  color: var(--adm-muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-}
+/* 旧卡片地层死样式已随 2026-08-19 图层栏收敛删除（frame 标题/副文本、
+   layer-order 序号列、layer-actions 悬浮操作组、layer-group-label 分组标签，
+   JSX 均已无对应元素）；需要找回请查 git 历史。 */
 .homepage-editor__layer-frame button {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -1804,38 +1810,6 @@ body:has(.homepage-editor__storefront-frame) {
   font-size: 12px;
   line-height: 18px;
   white-space: nowrap;
-}
-.homepage-editor__layer-order {
-  color: var(--adm-action);
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-}
-.homepage-editor__layer-actions {
-  display: none;
-  align-items: center;
-  gap: 1px;
-}
-.homepage-editor__layer-item:hover .homepage-editor__layer-actions,
-.homepage-editor__layer-item.is-active .homepage-editor__layer-actions {
-  display: inline-flex;
-}
-.homepage-editor__layer-actions button {
-  width: 24px;
-  height: 24px;
-  border: 0;
-  border-radius: 3px;
-  color: var(--adm-muted);
-  background: transparent;
-  cursor: pointer;
-}
-.homepage-editor__layer-actions button:hover:not(:disabled),
-.homepage-editor__layer-actions button:focus-visible {
-  color: var(--adm-action);
-  background: var(--adm-gold-soft);
-}
-.homepage-editor__layer-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.35;
 }
 .homepage-editor__layer-empty {
   padding: 28px 8px;
@@ -2462,9 +2436,6 @@ body:has(.homepage-editor__storefront-frame) {
   .homepage-editor__body.is-inspecting .homepage-editor__layer-scroll {
     padding-inline: 7px;
   }
-  .homepage-editor__body.is-inspecting .homepage-editor__layer-frame {
-    padding: 7px;
-  }
   .homepage-editor__toolbar-secondary-actions {
     display: none;
   }
@@ -3026,17 +2997,6 @@ body:has(.homepage-editor__storefront-frame) {
   padding: 14px 12px 30px;
   background: var(--adm-neutral-bg);
 }
-.homepage-editor__layer-group-label {
-  display: block;
-  margin: 0 2px 7px;
-  color: var(--adm-muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-}
-.homepage-editor__layer-global + .homepage-editor__layer-group-label {
-  margin-top: 3px;
-}
 .homepage-editor__layer-frame {
   display: block;
   margin-bottom: 14px;
@@ -3110,11 +3070,6 @@ body:has(.homepage-editor__storefront-frame) {
   padding: 0 10px;
   font-size: 12px;
 }
-.homepage-editor__layer-order {
-  min-width: 20px;
-  color: var(--adm-muted);
-  font-size: 12px;
-}
 .homepage-editor__layer-select > span:last-child {
   order: 2;
   min-width: 0;
@@ -3138,31 +3093,6 @@ body:has(.homepage-editor__storefront-frame) {
   .homepage-editor__layer-select
   > .anticon {
   color: var(--adm-action);
-}
-.homepage-editor__layer-actions {
-  position: absolute;
-  z-index: 2;
-  top: calc(100% + 5px);
-  right: 6px;
-  display: none;
-  padding: 3px;
-  border: 1px solid var(--adm-line);
-  border-radius: 6px;
-  background: var(--adm-content-bg);
-  box-shadow: 0 8px 18px rgba(46, 63, 91, 0.14);
-}
-.homepage-editor__layer-item:hover .homepage-editor__layer-actions,
-.homepage-editor__layer-item.is-active .homepage-editor__layer-actions,
-.homepage-editor__layer-actions:focus-within {
-  display: inline-flex;
-}
-.homepage-editor__layer-actions button {
-  color: var(--adm-muted);
-}
-.homepage-editor__layer-actions button:hover:not(:disabled),
-.homepage-editor__layer-actions button:focus-visible {
-  color: var(--adm-info);
-  background: var(--adm-info-bg);
 }
 
 /* 参考图比例：无标题的窄排序列，首张为固定导航栏 */
@@ -3220,9 +3150,6 @@ body:has(.homepage-editor__storefront-frame) {
   flex: 0 0 auto;
   margin-left: auto !important;
 }
-.homepage-editor__layer-actions {
-  display: none !important;
-}
 
 /* 重新设计：让图层列成为可读的页面结构导航，而不是悬空的小卡片堆。 */
 .homepage-editor__body {
@@ -3255,16 +3182,8 @@ body:has(.homepage-editor__storefront-frame) {
   background: var(--adm-neutral-bg);
   box-shadow: 0 1px 2px rgba(73, 56, 30, 0.035);
 }
-.homepage-editor__layer-frame button::before {
-  position: absolute;
-  top: 12px;
-  bottom: 12px;
-  left: 0;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--adm-gold);
-  content: "";
-}
+/* 常显金竖条已退役（2026-08-19）：与模块条目统一，导航栏不再永久挂竖条，
+   开启预览时改用与模块选中态一致的金边+纸底+左竖条（见工作台收敛层）。 */
 .homepage-editor__layer-frame button:hover,
 .homepage-editor__layer-frame button[aria-pressed="true"] {
   border-color: var(--adm-neutral-border);
@@ -3274,7 +3193,7 @@ body:has(.homepage-editor__storefront-frame) {
 }
 .homepage-editor__layer-frame button span {
   color: inherit;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.01em;
 }
 .homepage-editor__layer-item {
@@ -3434,6 +3353,14 @@ body:has(.homepage-editor__storefront-frame) {
   box-shadow: none;
   transform: none;
 }
+/* 开启导航栏预览时，与模块选中态同一套金色语言（金边+纸底+左竖条）。
+   需声明在上方 hover 组之后：同特异性，后声明覆盖 pressed 的 gold-soft。 */
+.homepage-editor__layer-frame button[aria-pressed="true"] {
+  border-color: var(--adm-gold);
+  color: var(--adm-action);
+  background: var(--ed-paper);
+  box-shadow: inset 3px 0 0 #b8944e;
+}
 .homepage-editor__layer-item.is-active {
   border-color: var(--adm-gold);
   color: var(--adm-action);
@@ -3443,6 +3370,20 @@ body:has(.homepage-editor__storefront-frame) {
 .homepage-editor__layer-select {
   min-height: 42px;
   padding-inline: 12px 10px;
+}
+/* 名称截断改锚 first-child：DragOutlined 加入后名称 span 不再是 last-child，
+   历史 `> span:last-child` 的 ellipsis 全部失配，长名称换行后被条目裁半截。 */
+.homepage-editor__layer-select > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 徽章警示色被第三层 `> span`（0-2-1）特异性压成 text-strong，此处 0-3-0 找回；
+   同时补边框，避免 hover 条目同为 gold-soft 底时徽章融入背景。 */
+.homepage-editor__layer-select > .homepage-editor__layer-mobile-hint {
+  color: var(--adm-warning);
+  border: 1px solid var(--adm-warning-border);
 }
 .homepage-editor__properties,
 .homepage-editor__inspector {
@@ -3627,13 +3568,16 @@ body:has(.homepage-editor__storefront-frame) {
   min-height: 0;
 }
 
-/* 中等桌面：模板库成为覆盖式抽屉，不再持续挤压画布。 */
-@media (max-width: 1599px) {
+/* 窄桌面/平板：模板库成为覆盖式抽屉，不再持续挤压画布。
+ * 2026-08-19 修正：条件由 max-1599 收窄为 max-1199——1200-1599 区间此层的
+ * is-inspecting 分支(0-2-0)会压过桌面收敛层(0-1-0)的 240px，点选模块时
+ * library 列 240→0 突跳 240px（笔记本宽度点选抖动的病灶）。≥1200 一律由
+ * 桌面收敛层管三栏固定列，抽屉化只在 ≤1199 生效。 */
+@media (max-width: 1199px) {
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
     --editor-library-width: 0px;
     --editor-structure-width: 208px;
-    --editor-inspector-width: 440px;
   }
   .homepage-editor__body:has(.homepage-editor__library--collapsed) {
     --editor-library-width: 40px;
@@ -3714,21 +3658,6 @@ body:has(.homepage-editor__storefront-frame) {
   }
   .homepage-editor__stage {
     padding-inline: 16px;
-  }
-}
-
-/* ═══ 右侧模板编辑栏（参考图对齐 2026-08-17）═══ * 白底连续表单、紧凑基础信息、清晰分区和固定保存栏。 * 仅作用于最右侧 Inspector，不改变模板库、结构栏或画布组件。 */
-@media (min-width: 1600px) {
-  .homepage-editor__body,
-  .homepage-editor__body.is-inspecting {
-    --editor-inspector-width: 520px;
-  }
-}
-
-@media (min-width: 1200px) and (max-width: 1599px) {
-  .homepage-editor__body,
-  .homepage-editor__body.is-inspecting {
-    --editor-inspector-width: 480px;
   }
 }
 
@@ -4387,8 +4316,8 @@ body:has(.homepage-editor__storefront-frame) {
   height: 28px;
 }
 
-/* 桌面端保留三块侧栏；右栏宽度固定，不再因选中模块而伸缩，避免画布抖动缩放。 * 注意：此固定值仅限桌面端。≤1199px 时必须交给 3669/3693/3725 的响应式
- * 归零规则（库/结构/Inspector 转为覆盖面板），否则窄视口下空列占位会把画布挤到 0。 */
+/* 桌面端保留三块侧栏；右栏宽度固定，不再因选中模块而伸缩，避免画布抖动缩放。 * 注意：此固定值仅限桌面端。≤1199px 时必须交给上方"中等桌面/平板/手机"三层
+ * @media 中的响应式归零规则（库/结构/Inspector 转为覆盖面板），否则窄视口下空列占位会把画布挤到 0。 */
 @media (min-width: 1200px) {
   .homepage-editor__body {
     --editor-library-width: 240px;
