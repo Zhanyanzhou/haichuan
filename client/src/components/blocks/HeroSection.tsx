@@ -2,7 +2,6 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import type { PageModule } from "@/types/pageModule";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
@@ -195,8 +194,6 @@ export default function HeroSection({ module, editMode }: Props) {
               >
                 {eyebrow}
               </p>
-            ) : editMode ? (
-              <EditCopyPlaceholder variant="eyebrow" label="眉题" />
             ) : null}
             {title ? (
               <h1
@@ -214,8 +211,6 @@ export default function HeroSection({ module, editMode }: Props) {
               >
                 {title}
               </h1>
-            ) : editMode ? (
-              <EditCopyPlaceholder variant="title" label="标题" block />
             ) : null}
             {subtitle ? (
               <p
@@ -232,8 +227,6 @@ export default function HeroSection({ module, editMode }: Props) {
               >
                 {subtitle}
               </p>
-            ) : editMode ? (
-              <EditCopyPlaceholder variant="body" label="副文" block />
             ) : null}
             {actionText && targetUrl ? (
               editMode ? (
@@ -263,8 +256,6 @@ export default function HeroSection({ module, editMode }: Props) {
                   {actionText} <span>→</span>
                 </Link>
               )
-            ) : editMode ? (
-              <EditCopyPlaceholder variant="action" label="行动链接" />
             ) : null}
           </div>
         </div>

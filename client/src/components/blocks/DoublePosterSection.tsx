@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useReducedMotion } from 'framer-motion';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import type { PageModule } from '@/types/pageModule';
 import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
@@ -168,19 +167,13 @@ export default function DoublePosterSection({ module, editMode }: Props) {
             <p data-editor-field="number label" className="hc-content-template__eyebrow" style={{ color: MU, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
               {[number, label].filter(Boolean).join(" / ")}
             </p>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="eyebrow" label="编号 / 展签" />
           ) : null}
           {title ? (
             <h2 data-editor-field="title" className="hc-content-template__title"
               style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: 'var(--hc-type-h3, clamp(22px,2.2vw,32px))', color: TX }}>{title}</h2>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="title" label="标题" block />
           ) : null}
           {description ? (
             <p data-editor-field="description" className="hc-content-template__body" style={{ color: MU }}>{description}</p>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="body" label="说明" block />
           ) : null}
         </div>
         {actionText && targetUrl ? (
@@ -193,8 +186,6 @@ export default function DoublePosterSection({ module, editMode }: Props) {
               {actionText} <span>→</span>
             </Link>
           )
-        ) : editMode ? (
-          <EditCopyPlaceholder variant="action" label="行动链接" />
         ) : null}
       </div>
     </section>

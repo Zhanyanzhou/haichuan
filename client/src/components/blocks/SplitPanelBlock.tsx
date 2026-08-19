@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 
 interface SplitPanelBlockProps {
@@ -96,8 +95,6 @@ export default function SplitPanelBlock({
           >
             {subtitle}
           </p>
-        ) : editMode ? (
-          <EditCopyPlaceholder variant="eyebrow" label="眉题" />
         ) : null}
         {title ? (
           <h2 data-editor-field="title"
@@ -111,8 +108,6 @@ export default function SplitPanelBlock({
           >
             {title}
           </h2>
-        ) : editMode ? (
-          <EditCopyPlaceholder variant="title" label="标题" block />
         ) : null}
         {body ? (
           <p data-editor-field="body"
@@ -125,8 +120,6 @@ export default function SplitPanelBlock({
           >
             {body}
           </p>
-        ) : editMode ? (
-          <EditCopyPlaceholder variant="body" label="正文" block />
         ) : null}
         {buttonText && linkUrl ? (
           <Link data-editor-field="buttonText linkUrl"
@@ -145,8 +138,6 @@ export default function SplitPanelBlock({
           >
             {buttonText}
           </Link>
-        ) : editMode ? (
-          <EditCopyPlaceholder variant="action" label="行动链接" />
         ) : null}
       </div>
     </div>

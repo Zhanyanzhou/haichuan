@@ -1,5 +1,4 @@
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 
@@ -55,8 +54,6 @@ export default function CardGridBlock({
             >
               {title}
             </h2>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="title" label="标题" block />
           ) : null}
             {subtitle ? (
               <p
@@ -70,8 +67,6 @@ export default function CardGridBlock({
               >
                 {subtitle}
               </p>
-            ) : editMode ? (
-              <EditCopyPlaceholder variant="body" label="副文" block />
             ) : null}
           </div>
         )}

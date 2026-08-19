@@ -2,7 +2,6 @@ import { Link } from "react-router-dom";
 import type { CSSProperties } from "react";
 import { SecureImage } from "@/components/common/SecureImage";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { PRODUCT_ROW_CONTRACT } from "@/page-builder/config/blockContracts";
 
 interface ProductRowBlockProps {
@@ -123,8 +122,6 @@ export default function ProductRowBlock({
             >
               {title}
             </h2>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="title" label="标题" block />
           ) : null}
           {subtitle ? (
             <p
@@ -138,8 +135,6 @@ export default function ProductRowBlock({
             >
               {subtitle}
             </p>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="body" label="副文" block />
           ) : null}
         </div>
       )}

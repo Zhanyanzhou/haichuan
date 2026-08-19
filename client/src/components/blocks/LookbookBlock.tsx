@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
@@ -96,13 +95,9 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
               <h2 data-editor-field="title" style={{ margin: "0 0 12px", color: INK, fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-type-h2, clamp(28px,3.4vw,42px))", fontWeight: 500, lineHeight: 1.2 }}>
                 {title}
               </h2>
-            ) : editMode ? (
-              <EditCopyPlaceholder variant="title" label="标题" block />
             ) : null}
             {subtitle ? (
               <p data-editor-field="subtitle" style={{ margin: 0, color: MUTED, fontSize: "var(--hc-type-body, 14px)", lineHeight: 1.8 }}>{subtitle}</p>
-            ) : editMode ? (
-              <EditCopyPlaceholder variant="body" label="说明" block />
             ) : null}
             {actionText && targetUrl ? (
               editMode ? (
@@ -114,8 +109,6 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
                   {actionText} <span>→</span>
                 </Link>
               )
-            ) : editMode ? (
-              <EditCopyPlaceholder variant="action" label="行动链接" />
             ) : null}
           </div>
         )}

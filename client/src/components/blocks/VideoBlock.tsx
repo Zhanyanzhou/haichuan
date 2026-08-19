@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
@@ -182,13 +181,9 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
           <div className="hc-video__copy" data-content-role="copy">
             {title ? (
               <h2 data-editor-field="title">{title}</h2>
-            ) : editMode ? (
-              <EditCopyPlaceholder variant="title" label="标题" block />
             ) : null}
             {subtitle ? (
               <p data-editor-field="subtitle">{subtitle}</p>
-            ) : editMode ? (
-              <EditCopyPlaceholder variant="body" label="说明" block />
             ) : null}
             {actionText && targetUrl ? (
               editMode ? (

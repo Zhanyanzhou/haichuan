@@ -1,7 +1,6 @@
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 
 interface CustomProcessBlockProps {
   module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
@@ -49,15 +48,11 @@ export default function CustomProcessBlock({ module, editMode }: CustomProcessBl
             >
               {title}
             </h2>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="title" label="标题" block />
           ) : null}
           {subtitle ? (
             <p data-editor-field="subtitle" style={{ margin: 0, fontSize: "var(--hc-type-body, 15px)", color: MUTED, lineHeight: 1.8 }}>
               {subtitle}
             </p>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="body" label="副文" block />
           ) : null}
         </header>
       )}

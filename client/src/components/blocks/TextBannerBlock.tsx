@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
@@ -144,8 +143,6 @@ export default function TextBannerBlock({
           >
             {title}
           </h2>
-        ) : editMode ? (
-          <EditCopyPlaceholder variant="title" label="标题" block />
         ) : null}
         {body ? (
           <p
@@ -163,8 +160,6 @@ export default function TextBannerBlock({
           >
             {body}
           </p>
-        ) : editMode ? (
-          <EditCopyPlaceholder variant="body" label="正文" block />
         ) : null}
         {buttonText &&
           targetUrl &&
@@ -186,9 +181,6 @@ export default function TextBannerBlock({
               {buttonText}
             </Link>
           ))}
-        {!buttonText && editMode ? (
-          <EditCopyPlaceholder variant="action" label="行动链接" />
-        ) : null}
         {renderHair({ marginTop: "clamp(36px, 4vw, 76px)" })}
       </div>
     </DecorSection>

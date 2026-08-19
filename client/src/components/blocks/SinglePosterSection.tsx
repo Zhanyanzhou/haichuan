@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { SINGLE_POSTER_CONTRACT } from '@/page-builder/config/blockContracts';
 import { IMAGE_SPECS } from '@/page-builder/config/imageSpecs';
 import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
@@ -80,18 +79,12 @@ export default function SinglePosterSection({ module, editMode }: Props) {
             <span className="hc-content-template__eyebrow" style={{ color: MU, fontFamily: `var(--hc-font-sans, ${FONT_SANS})`, margin: 0 }}>{label}</span>
           ) : null}
         </div>
-      ) : editMode ? (
-        <EditCopyPlaceholder variant="label" label="编号展签 N°01 — Collection" />
       ) : null}
       {title ? (
         <h2 data-editor-field="title" className="hc-content-template__title"
           style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: 'var(--hc-type-display, clamp(28px,2vw,56px))', color: TX }}>{title}</h2>
-      ) : editMode ? (
-        <EditCopyPlaceholder variant="title" label="系列名" block />
       ) : null}
-      {subtitle ? <p data-editor-field="subtitle" className="hc-content-template__body" style={{ color: MU, marginTop: 14 }}>{subtitle}</p> : editMode ? (
-        <EditCopyPlaceholder variant="body" label="信息行 · 九件作品 · 2026 冬" block />
-      ) : null}
+      {subtitle ? <p data-editor-field="subtitle" className="hc-content-template__body" style={{ color: MU, marginTop: 14 }}>{subtitle}</p> : null}
       {actionText && targetUrl ? (
         editMode ? (
           <span data-editor-field="actionText targetType productId linkUrl" className="hc-content-template__action mt-5" style={{ color: TX, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
@@ -102,8 +95,6 @@ export default function SinglePosterSection({ module, editMode }: Props) {
             {actionText} <span>→</span>
           </Link>
         )
-      ) : editMode ? (
-        <EditCopyPlaceholder variant="action" label="行动链接" />
       ) : null}
     </div>
   );

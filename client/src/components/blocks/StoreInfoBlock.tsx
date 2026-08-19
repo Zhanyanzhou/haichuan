@@ -1,5 +1,4 @@
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
@@ -79,8 +78,6 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
             >
               {storeName}
             </h2>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="title" label="门店名" block />
           ) : null}
           <div style={{ display: "grid", gap: 14 }}>
             {infoRows.filter((row) => row.value).map((row) => (

@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { FEATURED_PRODUCT_CONTRACT } from "@/page-builder/config/blockContracts";
 import { resolvePrefixedLinkTarget, isSafeInternalPath } from "@/page-builder/utils/linkTarget";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
@@ -58,11 +57,11 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
 
   const copy = (
     <div className="homepage-featured-product__copy" style={{ maxWidth: 640, margin: "0 auto", textAlign: "center", width: "100%" }}>
-      {eyebrow ? <p data-editor-field="eyebrow" style={{ margin: "0 0 14px", color: "#8C8C8C", fontSize: 11, letterSpacing: "0.2em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>{eyebrow}</p> : editMode ? <EditCopyPlaceholder variant="eyebrow" label="眉题" /> : null}
-      {title ? <h2 data-editor-field="title" style={{ margin: "0 0 22px", color: "#1A1A1A", fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-type-display, clamp(32px, 4vw, 50px))", fontWeight: 500, lineHeight: 1.1 }}>{title}</h2> : editMode ? <EditCopyPlaceholder variant="title" label="标题" block /> : null}
+      {eyebrow ? <p data-editor-field="eyebrow" style={{ margin: "0 0 14px", color: "#8C8C8C", fontSize: 11, letterSpacing: "0.2em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>{eyebrow}</p> : null}
+      {title ? <h2 data-editor-field="title" style={{ margin: "0 0 22px", color: "#1A1A1A", fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-type-display, clamp(32px, 4vw, 50px))", fontWeight: 500, lineHeight: 1.1 }}>{title}</h2> : null}
       <p style={{ margin: "0 0 8px", color: "#1A1A1A", fontSize: 17, fontWeight: 600 }}>{product.name}</p>
       {showPrice && product.price ? <p style={{ margin: "0 0 22px", color: "#8C8C8C", fontSize: 14 }}>{product.price}</p> : null}
-      {summary ? <p data-editor-field="summary" style={{ margin: "0 0 32px", color: "#5A5A5A", fontSize: "var(--hc-type-body, 14px)", lineHeight: 1.9 }}>{summary}</p> : editMode ? <EditCopyPlaceholder variant="body" label="材质说明" block /> : null}
+      {summary ? <p data-editor-field="summary" style={{ margin: "0 0 32px", color: "#5A5A5A", fontSize: "var(--hc-type-body, 14px)", lineHeight: 1.9 }}>{summary}</p> : null}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center" }}>
         {primaryText && productLink ? (
           editMode ? (
@@ -70,8 +69,6 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
           ) : (
             <Link data-editor-field="primaryText productId" to={productLink} style={{ color: "#1A1A1A", fontSize: 13, textDecoration: "none", letterSpacing: "0.08em", borderBottom: "1px solid #1A1A1A", paddingBottom: 4 }}>{primaryText}</Link>
           )
-        ) : editMode ? (
-          <EditCopyPlaceholder variant="action" label="主行动" />
         ) : null}
         {secondaryText && secondaryUrl ? (
           editMode ? (
@@ -79,8 +76,6 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
           ) : (
             <Link data-editor-field="secondaryText secondaryLink" to={secondaryUrl} style={{ color: "#5A5A5A", fontSize: 13, textDecoration: "none", letterSpacing: "0.08em", borderBottom: "1px solid #5A5A5A", paddingBottom: 4 }}>{secondaryText}</Link>
           )
-        ) : editMode ? (
-          <EditCopyPlaceholder variant="action" label="次行动" />
         ) : null}
       </div>
     </div>

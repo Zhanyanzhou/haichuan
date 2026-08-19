@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom';
 import { SecureImage } from '@/components/common/SecureImage';
 import { isSafeInternalPath, resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
 import { DesignSystemStyles } from '@/page-builder/designSystem/sectionShell';
-import EditCopyPlaceholder from '@/components/blocks/_shared/EditCopyPlaceholder';
 import { FONT_DISPLAY, FONT_SANS } from '@/page-builder/designSystem/tokens';
 
 interface AppointmentBlockProps {
@@ -90,15 +89,11 @@ export default function AppointmentBlock({ module, editMode }: AppointmentBlockP
           <h2 data-editor-field="title" style={{ fontSize: 'var(--hc-type-h2, clamp(30px,3.2vw,44px))', fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, color: textColor, marginBottom: 14, lineHeight: 1.2, fontWeight: 500 }}>
             {title}
           </h2>
-        ) : editMode ? (
-          <EditCopyPlaceholder variant="title" label="标题" block />
         ) : null}
         {subtitle ? (
           <p data-editor-field="subtitle" style={{ fontSize: 'var(--hc-type-body, 14px)', color: mutedColor, lineHeight: 1.8, marginBottom: 28 }}>
             {subtitle}
           </p>
-        ) : editMode ? (
-          <EditCopyPlaceholder variant="body" label="副文" block />
         ) : null}
         <div className="hc-appointment__actions">
           {buttonText && targetUrl ? editMode ? (

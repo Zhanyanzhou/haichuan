@@ -1,7 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
@@ -119,8 +118,6 @@ export default function FullBleedBlock({
             <p data-editor-field="eyebrow" className="hc-content-template__eyebrow">
               {eyebrow}
             </p>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="eyebrow" label="眉题" />
           ) : null}
           {title ? (
             <h2 data-editor-field="title" className="hc-content-template__title"
@@ -131,16 +128,12 @@ export default function FullBleedBlock({
             >
               {title}
             </h2>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="title" label="标题" block />
           ) : null}
           {subtitle ? (
             <p data-editor-field="subtitle" className="hc-content-template__body"
             >
               {subtitle}
             </p>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="body" label="说明" block />
           ) : null}
         </div>
         {buttonText && targetUrl ? (
@@ -153,8 +146,6 @@ export default function FullBleedBlock({
               {buttonText}<span aria-hidden>→</span>
             </Link>
           )
-        ) : editMode ? (
-          <EditCopyPlaceholder variant="action" label="行动链接" />
         ) : null}
       </div>
       ) : null}

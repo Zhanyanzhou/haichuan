@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import type { CSSProperties } from "react";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { SecureImage } from "@/components/common/SecureImage";
 import { CATEGORY_CARDS_CONTRACT, getCategoryCardsMediaAspectRatio, getContractRoleRatio, RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { isSafeInternalPath, resolveItemLinkUrl } from "@/page-builder/utils/linkTarget";
@@ -59,8 +58,8 @@ export default function CategoryCardsBlock({
     <DecorSection master="commerce-entry" background={bg}>
       {(title || subtitle || editMode) && (
         <div style={{ textAlign: "center", maxWidth: 560, margin: "0 auto 40px" }}>
-          {title ? <h2 style={{ fontSize: 'var(--hc-type-h2, clamp(22px,2.5vw,34px))', fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, color: "#1A1A1A", margin: "0 0 10px", lineHeight: 1.2 }}>{title}</h2> : editMode ? <EditCopyPlaceholder variant="title" label="标题" block /> : null}
-          {subtitle ? <p style={{ margin: 0, color: "#8C8C8C", fontSize: 13, lineHeight: 1.7 }}>{subtitle}</p> : editMode ? <EditCopyPlaceholder variant="body" label="副文" block /> : null}
+          {title ? <h2 style={{ fontSize: 'var(--hc-type-h2, clamp(22px,2.5vw,34px))', fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, color: "#1A1A1A", margin: "0 0 10px", lineHeight: 1.2 }}>{title}</h2> : null}
+          {subtitle ? <p style={{ margin: 0, color: "#8C8C8C", fontSize: 13, lineHeight: 1.7 }}>{subtitle}</p> : null}
         </div>
       )}
       <div

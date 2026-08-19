@@ -4,7 +4,6 @@ import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import EditCopyPlaceholder from "@/components/blocks/_shared/EditCopyPlaceholder";
 import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
 import { isSafeInternalPath, resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 
@@ -149,8 +148,6 @@ export default function LimitedOfferBlock({
             >
               {eyebrow}
             </p>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="eyebrow" label="眉题" />
           ) : null}
           {title ? (
             <h2 data-editor-field="title"
@@ -164,8 +161,6 @@ export default function LimitedOfferBlock({
             >
               {title}
             </h2>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="title" label="标题" block />
           ) : null}
           {body ? (
             <p data-editor-field="body"
@@ -179,8 +174,6 @@ export default function LimitedOfferBlock({
             >
               {body}
             </p>
-          ) : editMode ? (
-            <EditCopyPlaceholder variant="body" label="说明" block />
           ) : null}
           {benefitLabels.length > 0 && (
             <div
