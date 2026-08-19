@@ -63,3 +63,18 @@ server/scripts/tmp-*.cjs
 
 # Playwright MCP 浏览器工具的快照/日志产物
 /.playwright-mcp/
+
+# 根目录设计 QA 截图与模板预览页（AI 验收产物；根目录不收 PNG 交付物，入库资源放 docs/ 或 client/public/ 下正常命名）
+/*.png
+client/public/*.preview.html
+
+# 配置修改前的本地备份（bak-日期后缀，仅本机留存）
+*.bak-*
+
+# 微信原图/原视频素材（处理方案未定；若确认入库先移除本规则并规范化文件名）
+client/public/images/editorial/high-jewelry-garden/微信图片_*.png
+client/public/images/editorial/high-jewelry-garden/微信视频*.mp4
+
+# 外部技能调研 clone 已移至项目外（G:\网站搭建2-外部资料\skill-research）；puck-poc 属于交付物保留跟踪，未来新 clone 勿入搜索面
+/experiments/*
+!/experiments/puck-poc/

@@ -75,6 +75,23 @@
 - **2026-08-18 追记**：用户判定 luxury-visual/templates/ 图片模板规则（8 比例骨架 + 7 类模板）错误——比例先行、缺编辑性设计——已物理删除并清理 SKILL.md 引用；替代方法论落盘 `design-library/06-jewelry-template-system.md`（角色 → 构图 → 槽位 → 比例仅作素材建议）。
 - **2026-08-18 追记二**：模板设计框架规则定稿于 `docs/page-builder/template-design-framework.md`（三硬边界 + 九层必答 + 分级设计卡 + 操作流程），经法庭审校与四角色合议庭裁定；实例级版本快照为已知能力缺口，契约改动须先做改前影响盘点。
 
+### A.11 多智能体 MCP 矩阵收敛与 token 治理 ✅
+
+- **决策日期**：2026-08-19；背景：token 消耗审计发现 MCP 多处重复注册（用户级 `~/.claude.json` 与项目级并存、大小写重复项目键），以及 VS Code 侧无按需加载机制导致的全量 schema 注入开销。Claude Code 经 `ENABLE_TOOL_SEARCH=true` 按需加载工具 schema，两侧成本模型不同，收敛策略分面处理。
+- **矩阵调整**：`.mcp.json`（Claude Code）拟补 chrome-devtools（历史会话实测高频使用：178 处引用、2026-08-19 当日仍在用）——**待项目负责人批准后执行**（2026-08-19 Claude 会话尝试修改 `.mcp.json` 被权限分类器按 CLAUDE.md 供应链规则拦停；批准后由集成者添加并完成启动验证）；`.vscode/mcp.json`（VS Code 智能体）收敛为 playwright、context7，移除 github/figma/tavily/chrome-devtools/prisma（figma/tavily/github 历史引用各仅 3 处，近乎未用）；`.codex/config.toml`（Codex）不变。用户级 `~/.claude.json` 删除 `G:/网站搭建2` 大小写重复键及其下 github docker MCP、删除与项目级重复的 playwright/context7/chrome-devtools 用户级注册，保留 prisma（备份 `~/.claude.json.bak-20260819`）。
+- **变更记录（AI_TOOLING 第 3 节要求）**：chrome-devtools-mcp 经 `npx -y chrome-devtools-mcp@latest` 启动，与 Codex 侧 `.codex/config.toml` 同款命令；启动验证状态：**待下次 Claude Code 会话确认**；回退方式：删除 `.mcp.json` 中该条目。
+- **EFFORT 同步**：`CLAUDE_CODE_EFFORT_LEVEL` max→high，除 `~/.claude/settings.json` 外已同步 cc-switch 数据库 providers（当前 claude 行）+ proxy_live_backup（备份 `cc-switch.db.bak-effort-high-20260819`），避免代理下次重生成 settings.json 时回滚；下次 cc-switch 重启或切换 provider 生效。
+- **2026-08-19 追记（零操作自动护栏，脚本已实测）**：项目 `.claude/settings.json` 落地三层自动防护——① `autoCompactWindow: 200000`：上下文 200K 原生自动压缩（官方设置项，解决 `[1M]` 窗口下默认压缩阈值形同虚设的问题）；② PostToolUse/Stop hook（`.claude/hooks/token-guard.cjs`）：快照/截图每 3 次、读取/搜索第 25 次向模型注入节制提醒，会话转录 >2MB 或工具调用 >40 次时回合末建议 /clear（走 `hookSpecificOutput.additionalContext` 非阻塞路径，每会话最多 3 次，`stop_hook_active` 时静默防循环）；③ statusline（`.claude/hooks/statusline.cjs`）：状态栏常驻显示 模型·上下文%·输入token·成本估算。注入通道经官方文档核实（PostToolUse/Stop 的 exit-0 纯 stdout 不入模型上下文，必须走 additionalContext）。脚本全路径模拟测试通过（快照第 3 次触发/读取第 25 次/Stop 3MB/statusline 渲染/BOM 与异常静默兜底）；真实会话加载验证待下次启动确认。
+- **2026-08-19 追记二（纪律扩散与水位口径）**：Token 纪律行为版扩散至 `AGENTS.md` 第 12 节与 `.github/copilot-instructions.md`（Codex/Copilot 无 hook/自动压缩机制，仅纪律文本可共享，自动化护栏仍为 Claude Code 专属）；水位口径统一为 200K 预算百分比——60%（120K）收尾、80%（160K）红线——statusline 显示 `XK/200K` 分档，Stop hook 从转录尾解析最近 usage 实算水位（嵌套 usage 对象须花括号配对截取），取不到时回退转录体积启发。合成与真实转录测试通过。
+
+### A.12 开发端口所有权：3000 永远归宿主机后端 ✅
+- **决策日期**：2026-08-19；项目负责人批准结构性解耦方案并已执行验证。
+- **决策**：本地开发拓扑固定为「`3000` = 宿主机后端（vite 5173 的 `/api` 代理目标，开发唯一 API 归属）」；容器 server 改映射 `127.0.0.1:3002`（仅供验收时直连对比）；完整容器栈经 `:80` 自包含访问——任何人执行 `docker compose up` 都不再影响开发 API 归属。
+- **背景事故**：容器/宿主机后端曾互抢 3000。2026-08-19 上午宿主机后端上传的媒体写入 `server\uploads`/`server\private-media`，13:50 容器栈接管 3000 后，DB 记录共享但文件在宿主机目录，后台图片全部 404（媒体存储分裂症状）。当日已 docker cp 双向补齐两套存储并验证。
+- **否决方案（bind mount 共享媒体目录）**：会绕开 backup 服务挂载的命名卷（备份链路对新上传失明）、造成 dev/prod 存储语义分叉、Windows bind mount 存在 IO/权限/大小写语义差异。原则：异构环境（Windows 宿主机 + Linux 容器）之间选「确定性的隔离」，不选「共享可变状态」；端口是所有权边界。
+- **配套**：`docker-compose.override.yml` 已改（3000→3002，含注释）；`AGENTS.md` §1 已加端口归属规则；宿主机后端运行方式沿用 `node dist/main.js`（cwd=`server/`，`nest dev` 本机 hang 约束不变）。
+- **边界**：开发栈（宿主机目录）与验收栈（docker 卷）媒体仍为两份存储，跨环境做内容上传时需知晓归属；生产部署不受影响（override 仅本机生效，生产仍用命名卷）。
+
 ---
 
 ## B. 已失效记录索引（⚠️ 不具执行力）
