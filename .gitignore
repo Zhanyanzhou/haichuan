@@ -24,6 +24,8 @@ nav-audit-assets/
 to-upload/
 .vite/
 server/migration-output/
+# 迁移源原图（836 张/2.09GB 原始字节，gitignore 收编；备份责任见 docs/IMAGE_MIGRATION.md）
+server/migration-source/
 # 持续集成工作流属于仓库交付物，必须纳入版本控制。
 client/dist-verify/
 client/dist-verify-inventory-reservation/
@@ -74,6 +76,9 @@ client/public/*.preview.html
 # 微信原图/原视频素材（处理方案未定；若确认入库先移除本规则并规范化文件名）
 client/public/images/editorial/high-jewelry-garden/微信图片_*.png
 client/public/images/editorial/high-jewelry-garden/微信视频*.mp4
+
+# 本地图片素材隔离区（2026-08-19 从 public/images 清出的未引用商品图/微信原图；含回填清单，不入库）
+.image-archive/
 
 # 外部技能调研 clone 已移至项目外（G:\网站搭建2-外部资料\skill-research）；puck-poc 属于交付物保留跟踪，未来新 clone 勿入搜索面
 /experiments/*

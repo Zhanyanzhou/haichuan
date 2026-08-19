@@ -36,7 +36,7 @@ const privateRoot = resolve(
 const uploadsRoot = resolve(process.cwd(), 'uploads');
 const legacyRoot = resolve(
   process.env.PRODUCT_MEDIA_ROOT_LEGACY ||
-    join(process.cwd(), '..', 'client', 'public', 'images', 'products'),
+    join(process.cwd(), 'migration-source', 'product-images'),
 );
 
 interface Stats {

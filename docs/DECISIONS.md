@@ -92,6 +92,15 @@
 - **配套**：`docker-compose.override.yml` 已改（3000→3002，含注释）；`AGENTS.md` §1 已加端口归属规则；宿主机后端运行方式沿用 `node dist/main.js`（cwd=`server/`，`nest dev` 本机 hang 约束不变）。
 - **边界**：开发栈（宿主机目录）与验收栈（docker 卷）媒体仍为两份存储，跨环境做内容上传时需知晓归属；生产部署不受影响（override 仅本机生效，生产仍用命名卷）。
 
+### A.13 ✅ public 静态资产边界与素材堆清理（2026-08-19）
+- **决策**：`client/public/` 只承载 UI 资产（logo/placeholder/工艺图/editorial 品牌图/模板默认图）；商品图终局走后端媒体管道；未引用大体积素材一律移入 `.image-archive/` 隔离区（gitignore 收编、manifest 留档可回填），不得留在构建链。
+- **触发**：rebuild-client 脚本首跑暴露构建上下文 2.2GB——`public/images/products` 836 个文件中 **793 个（2,024MB，95%）从未被任何代码/契约/DB 引用**；43 张活图 109.5MB 均为相机原图（单张 2.5MB+）直出给浏览器。
+- **执行与实测**：793 孤儿移入隔离区（`orphan-manifest-20260819.tsv` 留档）；43 张活图备份原图后 Sharp 无损降采样 1600px（**109.5MB→2.7MB**，png 无损、仅去过度分辨率）；public 总量 2,355→110.6MB；**client 镜像 2.73GB→309MB（-89%）**；重建上下文 2.2GB→68.5MB（150 秒→5 秒）；80 首页滚动全量加载零 broken 图。
+- **防复发**：`scripts/verify-public-assets.mjs` 守卫（200MB 警告/500MB 红线）挂入主 `test` 链；`.dockerignore` 收编 playwright-report/test-results；素材正确入口=商品图走 `/uploads` 媒体管道、设计素材走 design-library/。
+- **引用判定纪律**：判孤儿前必须全维扫描（client/src + contracts + server 脚本 + DB `product_images` + `page_documents.puckData`）；PowerShell 5.1 读 UTF-8 无 BOM 源码会产出编码双胞胎字符串，**含中文文件名的判定必须用 ripgrep/字节比对**，当日已实际踩中（Test-Path 假阴性）。
+- **待决（C-2）**：Home 静态兜底分支（`Home/index.tsx` 的 `puckData ? <PuckDocumentRenderer/> : 静态兜底` 双轨）存废——拍板后决定 43 张活图与 productFocus 硬编码数据的终局；媒体迁移基建已备（`server/scripts/migrate-product-media.ts` 支持两类来源）。
+- **2026-08-19 追记三（迁移源治理修复，B 方案）**：A.13 执行隔离时未同步 `docs/IMAGE_MIGRATION.md` 第 31 条（"原图目录保持不变"），迁移源治理线断裂。修复：836 张完整原图（793 孤儿 + 43 活图原图，自 `.image-archive/`）经 SHA-256 基线 → 复制 → 逐文件复验（836/836 文件名+大小+SHA-256 全匹配）→ 删源，迁入 `server/migration-source/product-images/`（gitignore 收编）；`generate-product-image-manifest.js`、`product-media.service.ts`、`migrate-product-media.ts` 三处 legacy 指向更新；三方互证（基线 CSV、迁移后目录、新 manifest）SHA-256 集合一致。备份缺口如实记录：backup 容器不覆盖该目录，冷快照在 `backups/migration-source-snapshot-20260819/`，正式备份收编待拍板（详见 IMAGE_MIGRATION.md）。教训固化：**动任何治理文档管辖的资产前先读该文档；变更落地后必须同步更新对应治理文档**。
+
 ---
 
 ## B. 已失效记录索引（⚠️ 不具执行力）

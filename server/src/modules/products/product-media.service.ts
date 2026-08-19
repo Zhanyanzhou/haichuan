@@ -32,9 +32,9 @@ export class ProductMediaService {
   private readonly privateRoot = resolve(
     process.env.PRODUCT_MEDIA_ROOT || join(process.cwd(), 'private-media', 'products'),
   );
-  // 兼容旧公开来源的存在性检查（迁移期 / 后台管理路径仍可能引用）
+  // 迁移源根目录：836 张原始字节（DECISIONS A.13，2026-08-19 起由 public 迁入 server/migration-source）
   private readonly legacyProductImageRoot = resolve(
-    process.env.PRODUCT_MEDIA_ROOT_LEGACY || join(process.cwd(), '..', 'client', 'public', 'images', 'products'),
+    process.env.PRODUCT_MEDIA_ROOT_LEGACY || join(process.cwd(), 'migration-source', 'product-images'),
   );
   private readonly uploadsRoot = resolve(process.cwd(), 'uploads');
 

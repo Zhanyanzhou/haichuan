@@ -1,8 +1,9 @@
 /**
  * 商品图片迁移清单生成器。
  *
- * 只读取 client/public/images/products 中的原图，并生成可供后续上传到对象存储的清单。
+ * 只读取 server/migration-source/product-images 中的迁移源原图，并生成可供后续上传到对象存储的清单。
  * 不会移动、改名、删除、压缩图片，也不会连接数据库。
+ * 迁移源与线上运行态分离：public 中的压缩活图不参与本清单，原始字节以本目录为准（DECISIONS A.13）。
  *
  * 用法：
  *   node scripts/generate-product-image-manifest.js
@@ -15,7 +16,7 @@ const fs = require('fs/promises');
 const path = require('path');
 
 const workspaceRoot = path.resolve(__dirname, '..', '..');
-const sourceDir = path.join(workspaceRoot, 'client', 'public', 'images', 'products');
+const sourceDir = path.join(workspaceRoot, 'server', 'migration-source', 'product-images');
 const outputDir = path.join(workspaceRoot, 'server', 'migration-output');
 const outputFile = path.join(outputDir, 'product-images-manifest.json');
 const shouldHash = process.argv.includes('--hash');
@@ -96,7 +97,7 @@ async function main() {
     totalBytes += stat.size;
 
     images.push({
-      sourcePath: `client/public/images/products/${relativePath}`,
+      sourcePath: `server/migration-source/product-images/${relativePath}`,
       currentPublicUrl: `/images/products/${relativePath}`,
       contentType: contentTypes.get(extension),
       extension,
@@ -117,7 +118,7 @@ async function main() {
     version: 1,
     generatedAt: new Date().toISOString(),
     hashIncluded: shouldHash,
-    sourceDirectory: 'client/public/images/products',
+    sourceDirectory: 'server/migration-source/product-images',
     imageCount: images.length,
     totalBytes,
     images,
