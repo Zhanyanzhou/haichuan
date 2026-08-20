@@ -3,10 +3,20 @@ import {
   BadRequestException,
   NotFoundException,
   ConflictException,
+  UnprocessableEntityException,
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
-import { CreateProductDto, UpdateProductDto } from "./dto";
-import { Prisma, ProductVisibility } from "@prisma/client";
+import {
+  CreateProductDto,
+  PublicProductQueryDto,
+  UpdateProductDto,
+} from "./dto";
+import {
+  MaterialType,
+  Prisma,
+  ProductVisibility,
+  SalesMode,
+} from "@prisma/client";
 import { EventEmitter } from "events";
 import { fromEvent, map, Observable, startWith } from "rxjs";
 import { MessageEvent } from "@nestjs/common";
@@ -33,6 +43,7 @@ const CUSTOMER_FACING_LIST_SELECT = {
   price: true,
   weight: true,
   size: true,
+  craftTechnique: true,
   salesMode: true,
   isHot: true,
   isNew: true,
@@ -103,6 +114,47 @@ const CUSTOMER_SALES_MODES = new Set([
   "DIRECT_PURCHASE",
   "CUSTOM_INQUIRY",
 ]);
+
+const CUSTOMER_MATERIAL_LABELS: Record<string, string> = {
+  GOLD_999: "足金999",
+  GOLD_9999: "足金9999",
+  AU750: "18K金",
+  PT950: "铂金950",
+  S925: "银925",
+  DIAMOND: "镶钻",
+  JADE: "玉石",
+  PEARL: "珍珠",
+  COLOR_GEM: "彩宝",
+  OTHER: "其他",
+};
+
+function csvValues(value: string | undefined): string[] {
+  if (!value) return [];
+  return Array.from(
+    new Set(value.split(",").map((item) => item.trim()).filter(Boolean)),
+  );
+}
+
+function csvPositiveIds(value: string | undefined): number[] {
+  return csvValues(value)
+    .map(Number)
+    .filter((id) => Number.isInteger(id) && id > 0);
+}
+
+function weightRanges(
+  value: string | undefined,
+): Array<{ min: number; max?: number }> {
+  const parsed: Array<{ min: number; max?: number }> = [];
+  for (const range of csvValues(value)) {
+    const [minRaw, maxRaw] = range.split(":");
+    const min = Number(minRaw);
+    const max = maxRaw ? Number(maxRaw) : undefined;
+    if (!Number.isFinite(min) || min < 0) continue;
+    if (max !== undefined && (!Number.isFinite(max) || max <= min)) continue;
+    parsed.push(max === undefined ? { min } : { min, max });
+  }
+  return parsed;
+}
 
 /** 从 DTO 提取 Prisma create 数据，过滤关系字段和系统字段 */
 function mapCreateDto(dto: CreateProductDto): Prisma.ProductCreateInput {
@@ -340,7 +392,7 @@ export class ProductsService {
   }
 
   /** 游客公开列表：只返回 PUBLIC + PUBLISHED，并使用独立字段白名单。 */
-  async findPublic(params: Record<string, unknown> = {}) {
+  async findPublic(params: PublicProductQueryDto = {}) {
     return this.findCustomerFacingList(params, ["PUBLIC"], "public");
   }
 
@@ -358,7 +410,7 @@ export class ProductsService {
   }
 
   /** 会员目录：按客户可见范围过滤，并使用与游客一致的安全字段白名单。 */
-  async findCatalog(params: any, customer: any) {
+  async findCatalog(params: PublicProductQueryDto, customer: any) {
     const visibilities = this.resolveVisibleVisibilities(customer);
     return this.findCustomerFacingList(params, visibilities, "catalog");
   }
@@ -367,52 +419,68 @@ export class ProductsService {
    * 前台列表查询。这里不复用后台 findAll，防止后台新增字段后被对象展开意外带到前台。
    */
   private async findCustomerFacingList(
-    params: Record<string, unknown>,
+    params: PublicProductQueryDto,
     visibilities: ProductVisibility[],
     mediaScope: "public" | "catalog",
   ) {
     const page = this.toBoundedPositiveInt(params.page, 1, 1_000_000);
     const pageSize = this.toBoundedPositiveInt(params.pageSize, 20, 2_000);
-    const where: Prisma.ProductWhereInput = {
+    const baseWhere: Prisma.ProductWhereInput = {
       deletedAt: null,
       status: "PUBLISHED",
       visibility: { in: visibilities },
     };
+    const where: Prisma.ProductWhereInput = { ...baseWhere };
+    const andFilters: Prisma.ProductWhereInput[] = [];
 
     if (params.ids !== undefined) {
-      const idList = String(params.ids)
-        .split(",")
-        .map((value) => Number(value.trim()))
-        .filter((value) => Number.isInteger(value) && value > 0);
+      const idList = csvPositiveIds(params.ids);
       where.id = { in: idList };
     }
 
-    const categoryId = Number(params.categoryId);
-    if (Number.isInteger(categoryId) && categoryId > 0)
-      where.categoryId = categoryId;
+    const categoryIds = csvPositiveIds(params.categoryIds);
+    if (categoryIds.length > 0) {
+      where.categoryId = { in: categoryIds };
+    } else if (params.categoryId) {
+      where.categoryId = params.categoryId;
+    }
+
+    if (params.exactCode) where.code = params.exactCode.trim();
 
     const keyword =
       typeof params.keyword === "string"
         ? params.keyword.trim().slice(0, 100)
         : "";
     if (keyword) {
-      where.OR = [
+      const keywordMaterialTypes = Object.entries(CUSTOMER_MATERIAL_LABELS)
+        .filter(([, label]) => label.toLowerCase().includes(keyword.toLowerCase()))
+        .map(([type]) => type);
+      const keywordFilters: Prisma.ProductWhereInput[] = [
         { name: { contains: keyword } },
         { code: { contains: keyword } },
+        { category: { name: { contains: keyword } } },
       ];
+      if (keywordMaterialTypes.length > 0) {
+        keywordFilters.push({
+          materialType: { in: keywordMaterialTypes as MaterialType[] },
+        });
+      }
+      andFilters.push({ OR: keywordFilters });
     }
 
-    if (
-      typeof params.materialType === "string" &&
-      CUSTOMER_MATERIAL_TYPES.has(params.materialType)
-    ) {
-      where.materialType = params.materialType as any;
+    const materialTypes = csvValues(params.materialTypes).filter((type) =>
+      CUSTOMER_MATERIAL_TYPES.has(type),
+    );
+    if (materialTypes.length > 0) {
+      where.materialType = { in: materialTypes as MaterialType[] };
+    } else if (params.materialType && CUSTOMER_MATERIAL_TYPES.has(params.materialType)) {
+      where.materialType = params.materialType as MaterialType;
     }
     if (
       typeof params.salesMode === "string" &&
       CUSTOMER_SALES_MODES.has(params.salesMode)
     ) {
-      where.salesMode = params.salesMode as any;
+      where.salesMode = params.salesMode as SalesMode;
     }
     if (params.isHot === "true" || params.isHot === "false")
       where.isHot = params.isHot === "true";
@@ -421,15 +489,53 @@ export class ProductsService {
     }
     // 按属性值筛选（前台属性字典多选，逗号分隔 attributeValueId）
     if (typeof params.attributeValueIds === "string") {
-      const attrIds = params.attributeValueIds
-        .split(",")
-        .map((v) => Number(v))
-        .filter((n) => Number.isInteger(n) && n > 0);
+      const attrIds = csvPositiveIds(params.attributeValueIds);
       if (attrIds.length) {
         where.productAttributes = {
           some: { attributeValueId: { in: attrIds } },
         };
       }
+    }
+
+    const crafts = csvValues(params.craftTechniques);
+    if (crafts.length > 0) {
+      andFilters.push({
+        OR: crafts.flatMap((craft) => [
+          { craftTechnique: { array_contains: craft } },
+          { craftTechnique: { string_contains: craft } },
+        ]),
+      });
+    }
+
+    const sizes = csvValues(params.sizes);
+    if (sizes.length > 0) where.size = { in: sizes };
+
+    const ranges = weightRanges(params.weightRanges);
+    if (ranges.length > 0) {
+      andFilters.push({
+        OR: ranges.map(({ min, max }) => {
+          const numericRange: Prisma.DecimalNullableFilter = {
+            gte: min,
+            ...(max === undefined ? {} : { lt: max }),
+          };
+          return {
+            OR: [
+              {
+                goldWeight: {
+                  ...numericRange,
+                  gt: 0,
+                },
+              },
+              {
+                AND: [
+                  { OR: [{ goldWeight: null }, { goldWeight: { lte: 0 } }] },
+                  { weight: numericRange },
+                ],
+              },
+            ],
+          };
+        }),
+      });
     }
 
     // 价格区间过滤（元，含边界；非法输入静默忽略）。基准为 Product.price（min 活跃 SKU 价）
@@ -442,16 +548,37 @@ export class ProductsService {
       where.price = priceFilter;
     }
 
-    // 排序：sortOrder（运营定制序）/ 价格升降（选购场景）/ 默认最近更新
-    const orderBy: Prisma.ProductOrderByWithRelationInput =
+    if (andFilters.length > 0) where.AND = andFilters;
+
+    // 排序：运营序 / 价格 / 最近更新 / 货号；追加稳定次序，避免翻页间抖动。
+    const orderBy: Prisma.ProductOrderByWithRelationInput[] =
       params.sortBy === "sortOrder"
-        ? { sortOrder: "asc" }
+        ? [{ sortOrder: "asc" }, { updatedAt: "desc" }, { id: "desc" }]
         : params.sortBy === "price_asc"
-          ? { price: "asc" }
+          ? [{ price: "asc" }, { id: "desc" }]
           : params.sortBy === "price_desc"
-            ? { price: "desc" }
-            : { updatedAt: "desc" };
-    const [list, total] = await Promise.all([
+            ? [{ price: "desc" }, { id: "desc" }]
+            : params.sortBy === "code_asc"
+              ? [{ code: "asc" }, { id: "asc" }]
+              : [{ updatedAt: "desc" }, { id: "desc" }];
+
+    const facetWhere: Prisma.ProductWhereInput = { ...baseWhere };
+    if (categoryIds.length > 0) {
+      facetWhere.categoryId = { in: categoryIds };
+    } else if (params.categoryId) {
+      facetWhere.categoryId = params.categoryId;
+    }
+
+    const facetsPromise =
+      params.includeFacets === "true"
+        ? this.prisma.product.findMany({
+            where: facetWhere,
+            distinct: ["size"],
+            select: { size: true },
+            orderBy: { size: "asc" },
+          })
+        : Promise.resolve([] as Array<{ size: string | null }>);
+    const [list, total, facetRows] = await Promise.all([
       this.prisma.product.findMany({
         where,
         skip: (page - 1) * pageSize,
@@ -460,6 +587,7 @@ export class ProductsService {
         select: CUSTOMER_FACING_LIST_SELECT,
       }),
       this.prisma.product.count({ where }),
+      facetsPromise,
     ]);
 
     return {
@@ -469,6 +597,9 @@ export class ProductsService {
       total,
       page,
       pageSize,
+      facets: {
+        sizes: facetRows.map((row) => row.size).filter(Boolean),
+      },
     };
   }
 
@@ -517,6 +648,7 @@ export class ProductsService {
       price: canShowPrice && Number(product.price) > 0 ? product.price : null,
       weight: product.weight,
       size: product.size,
+      craftTechnique: product.craftTechnique,
       salesMode: product.salesMode,
       isHot: product.isHot,
       isNew: product.isNew,
@@ -934,7 +1066,10 @@ export class ProductsService {
       // 事务：创建商品 + SKU + Inventory。
       // 多规格：传入 skus 则不建默认 SKU，商品起价 = 启用 SKU 最低价；单规格：自动建默认 SKU（价格=一口价）。
       const product = await this.prisma.$transaction(async (tx) => {
-        const created = await tx.product.create({ data });
+        const wantsPublished = data.status === "PUBLISHED";
+        let created = await tx.product.create({
+          data: wantsPublished ? { ...data, status: "DRAFT" } : data,
+        });
         const warehouseId = await this.ensureDefaultWarehouseId(tx);
 
         if (skus.length > 0) {
@@ -986,6 +1121,22 @@ export class ProductsService {
             },
           });
         }
+
+        if (wantsPublished) {
+          try {
+            // 创建接口尚不接收媒体；先暂存草稿，门禁通过后才在事务内写为已发布。
+            await this.canPublish(created.id, tx);
+          } catch (error) {
+            if (error instanceof BadRequestException) {
+              throw new UnprocessableEntityException(error.message);
+            }
+            throw error;
+          }
+          created = await tx.product.update({
+            where: { id: created.id },
+            data: { status: "PUBLISHED" },
+          });
+        }
         return created;
       });
       this.notifyPublicChange(product.id);
@@ -1005,8 +1156,11 @@ export class ProductsService {
   }
 
   /** 上架门禁:起价>0 + 有主图(或任意图) + 至少 1 个有价的活跃 SKU */
-  async canPublish(productId: number) {
-    const product = await this.prisma.product.findFirst({
+  async canPublish(
+    productId: number,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    const product = await db.product.findFirst({
       where: { id: productId, deletedAt: null },
       select: {
         price: true,

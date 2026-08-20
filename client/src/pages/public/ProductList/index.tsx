@@ -297,7 +297,7 @@ export default function ProductList() {
         filters.sortBy === "updatedAt_desc"
           ? undefined
           : (filters.sortBy as NonNullable<ProductQuery["sortBy"]>),
-      ids: categoryIds || undefined,
+      categoryIds: categoryIds || undefined,
       attributeValueIds: selectedAttributeIds.length
         ? selectedAttributeIds.join(",")
         : undefined,

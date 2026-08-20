@@ -44,14 +44,16 @@ function mapApiProduct(
     secondaryCategoryId: String(secondaryCategory?.id || p.categoryId || ""),
     material: getMaterialLabel(p.materialType),
     craft: Array.isArray(p.craftTechnique)
-      ? p.craftTechnique.join("、")
-      : p.craftTechnique || "",
+      ? p.craftTechnique.filter((item: unknown) => typeof item === "string").join("、")
+      : typeof p.craftTechnique === "string"
+        ? p.craftTechnique
+        : "",
     weight: p.goldWeight ? `${p.goldWeight}g` : p.weight ? `${p.weight}g` : "",
     size: p.size || "",
     series: "",
     scene: p.salesMode || "",
     images: (p.images || []).map((img: any) => img.mediaUrl || img.url || ""),
-    categoryName: categoryById.get(p.categoryId)?.name || "",
+    categoryName: categoryById.get(p.categoryId)?.name || p.category?.name || "",
     price: Number(p.price) || 0,
   };
 }
@@ -61,85 +63,173 @@ function mapApiProduct(
  * — 调用真实 API 获取产品和分类
  * — 返回 loading / error / products / categories
  *
- * 两种模式：
- * — 无参（全量兼容）：拉取 pageSize 上限全量列表，供选款中心/搜索页本地筛选；
- * — 传入 query（服务端查询）：keyword/ids/materialType/价格区间/排序/分页透传服务端，
- *   返回 total 供分页判断。商品量上千后应逐步将页面迁移到本模式。
+ * 只接受显式服务端查询；null 用于等待分类树等前置条件。
+ * 禁止恢复无参全量模式，公开列表必须通过筛选与分页取数。
  */
 export interface ProductQuery {
   /** 关键词（服务端按名称/编码 contains 匹配） */
   keyword?: string;
-  /** 精确 ID 集合，逗号分隔（分类树展开后代时使用） */
+  /** 精确商品 ID 集合，逗号分隔。 */
   ids?: string;
+  /** 分类 ID 集合；绝不能传入 ids（ids 是商品 ID）。 */
+  categoryIds?: string;
+  /** 精确货号；Catalog 的货号直达语义会忽略其他筛选。 */
+  exactCode?: string;
   /** 材质（服务端白名单校验，非法值静默忽略） */
   materialType?: string;
+  materialTypes?: string;
   /** 销售模式 */
   salesMode?: string;
   /** 价格区间（元，含边界） */
   minPrice?: number;
   maxPrice?: number;
-  /** 排序：运营序 / 价格升降；缺省为最近更新 */
-  sortBy?: "sortOrder" | "price_asc" | "price_desc";
   /** 属性值 ID 集合，逗号分隔（前台属性字典多选） */
   attributeValueIds?: string;
+  craftTechniques?: string;
+  sizes?: string;
+  /** 半开重量区间 min:max，多段逗号分隔。 */
+  weightRanges?: string;
+  includeFacets?: "true";
   page?: number;
   pageSize?: number;
+  sortBy?:
+    | "sortOrder"
+    | "price_asc"
+    | "price_desc"
+    | "updated_desc"
+    | "code_asc";
 }
 
-export function useProductData(query?: ProductQuery | null) {
-  const [apiProducts, setApiProducts] = useState<CatalogProduct[] | null>(null);
-  const [total, setTotal] = useState(0);
+interface ProductFacets {
+  sizes: string[];
+}
+
+interface ProductDataOptions {
+  /** 选款盘的定向补取复用主目录 SSE，不再建立第二条连接。 */
+  subscribe?: boolean;
+  /** 定向按商品 ID 补取无需再次请求分类树。 */
+  loadCategories?: boolean;
+}
+
+export function useProductCategories() {
   const [categories, setCategories] = useState<RealCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    void categoryApi
+      .getTree()
+      .then((response) => {
+        const data = unwrapResponse<unknown>(response);
+        if (!cancelled) {
+          setCategories(Array.isArray(data) ? (data as RealCategory[]) : []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [revision]);
+
+  return {
+    categories,
+    loading,
+    error,
+    reload: () => setRevision((value) => value + 1),
+  };
+}
+
+export function useProductData(
+  query: ProductQuery | null,
+  options: ProductDataOptions = {},
+) {
+  const [apiProducts, setApiProducts] = useState<CatalogProduct[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [facets, setFacets] = useState<ProductFacets>({ sizes: [] });
+  const [categories, setCategories] = useState<RealCategory[]>([]);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [dataQueryKey, setDataQueryKey] = useState("");
+  const subscribe = options.subscribe !== false;
+  const loadCategories = options.loadCategories !== false;
   // query 引用不稳定会导致无限重拉，按值序列化作为 effect 依赖
-  const queryKey =
-    query === null ? "__paused__" : query === undefined ? "" : JSON.stringify(query);
+  const queryKey = query === null ? "__paused__" : JSON.stringify(query);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // null = 显式暂停（如等待分类树就绪后再发起带分类筛选的查询）
+      // null = 暂停商品请求；主目录仍可先取分类树，供 URL 分类展开后代。
       if (query === null) {
-        // 清空上一查询的结果，避免暂停态读到陈旧数据
         setApiProducts(null);
         setTotal(0);
-        setLoading(false);
+        setFacets({ sizes: [] });
         setError(false);
+        setDataQueryKey("");
+        if (!loadCategories) {
+          setLoading(false);
+          return;
+        }
+        setLoading(true);
+        try {
+          const catRes = await categoryApi.getTree();
+          const cats = unwrapResponse<unknown>(catRes);
+          if (!cancelled) {
+            setCategories(Array.isArray(cats) ? (cats as RealCategory[]) : []);
+            setCategoriesLoaded(true);
+          }
+        } catch {
+          if (!cancelled) setError(true);
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
         return;
       }
       setLoading(true);
       setError(false);
       try {
-        // query 模式：过滤 undefined 后透传服务端；全量模式：拉 pageSize 上限
-        const params: Record<string, unknown> = query
-          ? Object.fromEntries(
-              Object.entries({
-                page: query.page ?? 1,
-                pageSize: query.pageSize ?? 24,
-                keyword: query.keyword?.trim() || undefined,
-                ids: query.ids || undefined,
-                materialType: query.materialType || undefined,
-                salesMode: query.salesMode || undefined,
-                minPrice: query.minPrice,
-                maxPrice: query.maxPrice,
-                sortBy: query.sortBy,
-                attributeValueIds: query.attributeValueIds || undefined,
-              }).filter(([, v]) => v !== undefined),
-            )
-          : { pageSize: 2000 };
-        // 分类树与商品并行拉取：映射 primaryCategoryId/categoryName 需要
+        const params: Record<string, unknown> = Object.fromEntries(
+          Object.entries({
+            page: query.page ?? 1,
+            pageSize: query.pageSize ?? 24,
+            keyword: query.keyword?.trim() || undefined,
+            exactCode: query.exactCode?.trim() || undefined,
+            ids: query.ids || undefined,
+            categoryIds: query.categoryIds || undefined,
+            materialType: query.materialType || undefined,
+            materialTypes: query.materialTypes || undefined,
+            salesMode: query.salesMode || undefined,
+            minPrice: query.minPrice,
+            maxPrice: query.maxPrice,
+            sortBy: query.sortBy,
+            attributeValueIds: query.attributeValueIds || undefined,
+            craftTechniques: query.craftTechniques || undefined,
+            sizes: query.sizes || undefined,
+            weightRanges: query.weightRanges || undefined,
+            includeFacets: query.includeFacets,
+          }).filter(([, value]) => value !== undefined),
+        );
         const [prodRes, catRes] = await Promise.all([
           productApi.getPublicList(params),
-          categoryApi.getTree(),
+          loadCategories ? categoryApi.getTree() : Promise.resolve(null),
         ]);
         const data = unwrapResponse<any>(prodRes);
         const list: any[] = data?.list || data || [];
 
         // 构建分类映射: categoryId → name
         const categoryById = new Map<number, RealCategory>();
-        const cats = unwrapResponse<any[]>(catRes) || [];
+        const catData = catRes ? unwrapResponse<unknown>(catRes) : [];
+        const cats = Array.isArray(catData) ? (catData as RealCategory[]) : [];
         const walkCats = (nodes: any[]) => {
           for (const n of nodes) {
             if (n.id) categoryById.set(n.id, n);
@@ -152,7 +242,16 @@ export function useProductData(query?: ProductQuery | null) {
         if (!cancelled) {
           setApiProducts(mapped);
           setTotal(typeof data?.total === "number" ? data.total : mapped.length);
-          setCategories(Array.isArray(cats) ? cats : []);
+          setFacets({
+            sizes: Array.isArray(data?.facets?.sizes)
+              ? data.facets.sizes.filter((size: unknown) => typeof size === "string")
+              : [],
+          });
+          if (loadCategories) {
+            setCategories(cats);
+            setCategoriesLoaded(true);
+          }
+          setDataQueryKey(queryKey);
         }
       } catch {
         if (!cancelled) setError(true);
@@ -164,28 +263,38 @@ export function useProductData(query?: ProductQuery | null) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revision, queryKey]);
+  }, [revision, queryKey, loadCategories]);
 
   // P1-35：带自动重连 + debounce 的 SSE（断线重连；消息风暴合并为一次重拉）
   useReconnectingEventSource(
-    USE_MOCK ? null : publicProductStreamUrl,
+    USE_MOCK || !subscribe ? null : publicProductStreamUrl,
     () => setRevision((value) => value + 1),
     { debounceMs: 500 },
   );
 
   const products = useMemo(() => {
-    if (loading) return [];
-    if (error) return [];
     if (!apiProducts) return [];
     return apiProducts;
-  }, [apiProducts, loading, error]);
+  }, [apiProducts]);
 
   const reload = () => setRevision((v) => v + 1);
 
-  return { products, total, loading, error, categories, reload, revision };
+  return {
+    products,
+    total,
+    facets,
+    loading,
+    error,
+    categories,
+    categoriesLoaded,
+    reload,
+    revision,
+    queryKey,
+    dataQueryKey,
+  };
 }
 
-/** 将分类 ID 展开为"自身 + 全部后代"的逗号分隔串（服务端 ids 精确匹配用） */
+/** 将分类 ID 展开为“自身 + 全部后代”的 categoryIds 参数。 */
 export function expandCategoryIds(
   categories: RealCategory[],
   targetId: number | null,

@@ -38,6 +38,7 @@ import {
   UpdateCertificateDto,
   CreateSkuDto,
   UpdateSkuDto,
+  PublicProductQueryDto,
 } from "./dto";
 import { join } from "path";
 import { stat } from "node:fs/promises";
@@ -72,7 +73,7 @@ export class ProductsController {
   @Public()
   @Get("public")
   @ApiOperation({ summary: "公开商品列表（仅 PUBLIC + PUBLISHED 安全字段）" })
-  findPublic(@Query() query: Record<string, unknown>) {
+  findPublic(@Query() query: PublicProductQueryDto) {
     return this.productsService.findPublic(query);
   }
 
@@ -130,7 +131,7 @@ export class ProductsController {
     required: false,
     description: "按 id 集合拉取（首页/区块用）",
   })
-  findCatalog(@Req() request: any, @Query() query: Record<string, unknown>) {
+  findCatalog(@Req() request: any, @Query() query: PublicProductQueryDto) {
     return this.productsService.findCatalog(query, request.customer);
   }
 

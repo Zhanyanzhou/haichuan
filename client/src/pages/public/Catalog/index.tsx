@@ -5,10 +5,17 @@ import { motion, AnimatePresence } from "framer-motion";
 import { message } from "antd";
 import { useSelectionStore } from "@/store/selectionStore";
 import { WEIGHT_RANGES, type CatalogProduct } from "@/data/catalogData";
-import { useProductData, type RealCategory } from "@/hooks/useProductData";
+import {
+  expandCategoryIds,
+  useProductData,
+  useProductCategories,
+  type ProductQuery,
+  type RealCategory,
+} from "@/hooks/useProductData";
 import { useAttributeDictionary } from "@/hooks/useAttributeDictionary";
 import { getListingImage } from "@/utils/productImage";
 import { SecureImage } from "@/components/common/SecureImage";
+import { getMaterialCode } from "@/utils/material";
 import { selectionInquiryApi } from "@/services/api";
 import {
   trackPageView,
@@ -78,6 +85,7 @@ interface URLParams {
 function useURLParams() {
   const [p, setP] = useState<URLParams>(() => {
     const u = new URL(window.location.href);
+    const rawPage = Number.parseInt(u.searchParams.get("page") || "1", 10);
     return {
       category: u.searchParams.get("category") || "",
       subcategory: u.searchParams.get("subcategory") || "",
@@ -88,7 +96,7 @@ function useURLParams() {
       weights: u.searchParams.get("weight")?.split(",").filter(Boolean) || [],
       sizes: u.searchParams.get("size")?.split(",").filter(Boolean) || [],
       sort: u.searchParams.get("sort") || "recommended",
-      page: parseInt(u.searchParams.get("page") || "1", 10),
+      page: Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1,
     };
   });
 
@@ -112,6 +120,13 @@ function useURLParams() {
     (key: string, val: string | string[]) => {
       setP((prev) => {
         const next = { ...prev } as Record<string, unknown>;
+        const stateKey =
+          ({
+            material: "materials",
+            craft: "crafts",
+            weight: "weights",
+            size: "sizes",
+          } as Record<string, string>)[key] || key;
         if (key === "category") {
           next.category = val;
           next.subcategory = "";
@@ -119,10 +134,10 @@ function useURLParams() {
         } else if (key === "page") {
           next.page = Number(val);
         } else if (Array.isArray(val)) {
-          next[key] = val;
+          next[stateKey] = val;
           next.page = 1;
         } else {
-          next[key] = val;
+          next[stateKey] = val;
           next.page = 1;
         }
         syncURL(next as unknown as URLParams);
@@ -135,64 +150,18 @@ function useURLParams() {
   return { params: p, update };
 }
 
-/* ══════════════════════════════════════
-   数据过滤与排序
-   ══════════════════════════════════════ */
-function useFiltered(p: URLParams, products: CatalogProduct[]) {
-  return useMemo(() => {
-    let list = [...products];
-    const q = p.query.trim();
-    const isSku = SKU_RE.test(q);
-
-    if (q && isSku) {
-      const ql = q.toLowerCase();
-      list = list.filter((x) => x.sku.toLowerCase() === ql);
-    } else {
-      if (p.category)
-        list = list.filter((x) => x.primaryCategoryId === p.category);
-      if (p.subcategory)
-        list = list.filter((x) => x.secondaryCategoryId === p.subcategory);
-      if (q) {
-        const ql = q.toLowerCase();
-        list = list.filter(
-          (x) =>
-            x.sku.toLowerCase().includes(ql) ||
-            (x.name && x.name.includes(ql)) ||
-            (x.categoryName && x.categoryName.includes(ql)) ||
-            x.material.includes(ql),
-        );
-      }
-    }
-    if (p.materials.length)
-      list = list.filter((x) => p.materials.includes(x.material));
-    if (p.crafts.length)
-      list = list.filter((x) =>
-        p.crafts.some((craft) => x.craft.includes(craft)),
-      );
-    if (p.sizes.length) list = list.filter((x) => p.sizes.includes(x.size));
-    if (p.weights.length) {
-      list = list.filter((x) => {
-        const weight = Number.parseFloat(x.weight);
-        if (!Number.isFinite(weight)) return false;
-        return p.weights.some((range) => {
-          const bounds = range.match(/\d+(?:\.\d+)?/g)?.map(Number) || [];
-          if (bounds.length >= 2)
-            return weight >= bounds[0] && weight < bounds[1];
-          return bounds.length === 1 && weight >= bounds[0];
-        });
-      });
-    }
-    return list;
-  }, [p, products]);
+function serializeWeightRanges(ranges: string[]): string | undefined {
+  const serialized = ranges
+    .map((range) => range.match(/\d+(?:\.\d+)?/g)?.map(Number) || [])
+    .filter((bounds) => bounds.length > 0)
+    .map((bounds) => `${bounds[0]}:${bounds[1] ?? ""}`);
+  return serialized.length > 0 ? serialized.join(",") : undefined;
 }
 
-function useSorted(list: CatalogProduct[], sort: string) {
-  return useMemo(() => {
-    const s = [...list];
-    if (sort === "newest") s.reverse();
-    else if (sort === "sku") s.sort((a, b) => a.sku.localeCompare(b.sku));
-    return s;
-  }, [list, sort]);
+function catalogSort(sort: string): NonNullable<ProductQuery["sortBy"]> {
+  if (sort === "newest") return "updated_desc";
+  if (sort === "sku") return "code_asc";
+  return "sortOrder";
 }
 
 /* ══════════════════════════════════════
@@ -969,7 +938,6 @@ function ProductCard({
       ? product.images.filter(Boolean)
       : [getListingImage(product as any)];
   const currentImg = allImages[imgIdx] || allImages[0] || "";
-  const hasMultiple = allImages.length > 1;
 
   // 鼠标左右半区切换图片
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -1000,31 +968,41 @@ function ProductCard({
     <div style={{ background: T.bg }}>
       {/* 图片区：1:1 */}
       <div
-        onClick={() => onQuickView(product)}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
         style={{
           aspectRatio: "1/1",
           background: T.imgBg,
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
           overflow: "hidden",
           position: "relative",
         }}
       >
-        <SecureImage
-          src={currentImg}
-          alt={product.name || product.sku}
-          className="catalog-img"
+        <button
+          type="button"
+          className="catalog-image-trigger"
+          aria-label={`快速预览 ${product.name || product.sku}`}
+          onClick={() => onQuickView(product)}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
           style={{
             width: "100%",
             height: "100%",
-            objectFit: "cover",
-            transition: "transform 0.6s cubic-bezier(0.22,1,0.36,1)",
+            border: 0,
+            padding: 0,
+            background: "none",
+            cursor: "pointer",
           }}
-        />
+        >
+          <SecureImage
+            src={currentImg}
+            alt={product.name || product.sku}
+            className="catalog-img"
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              transition: "transform 0.6s cubic-bezier(0.22,1,0.36,1)",
+            }}
+          />
+        </button>
         {/* 图片切换指示器 — 极简细线（全部商品默认显示） */}
         <div
           style={{
@@ -1034,13 +1012,16 @@ function ProductCard({
             transform: "translateX(-50%)",
             display: "flex",
             gap: 4,
+            zIndex: 1,
           }}
         >
           {allImages.map((_, i) => (
             <button
               key={i}
-              onClick={(e) => {
-                e.stopPropagation();
+              type="button"
+              aria-label={`查看第 ${i + 1} 张图片`}
+              aria-pressed={i === imgIdx}
+              onClick={() => {
                 setImgIdx(i);
               }}
               style={{
@@ -1131,16 +1112,11 @@ function ProductCard({
    ══════════════════════════════════════ */
 function ProductGrid({
   products,
-  page,
   onQuickView,
 }: {
   products: CatalogProduct[];
-  page: number;
   onQuickView: (p: CatalogProduct) => void;
 }) {
-  const start = (page - 1) * PAGE_SIZE;
-  const items = products.slice(start, start + PAGE_SIZE);
-
   return (
     <>
       <style>{`
@@ -1177,7 +1153,7 @@ function ProductGrid({
         className="catalog-matrix"
         style={{ maxWidth: "1560px", margin: "0 auto" }}
       >
-        {items.map((p) => (
+        {products.map((p) => (
           <div key={p.id} className="catalog-cell">
             <ProductCard product={p} onQuickView={onQuickView} />
           </div>
@@ -1185,6 +1161,7 @@ function ProductGrid({
       </div>
       {/* 底部全宽横线：独立 div，width:100% 确保铺满整行 */}
       <div
+        aria-hidden="true"
         style={{
           width: "100%",
           maxWidth: "1560px",
@@ -1215,6 +1192,9 @@ function QuickView({
   return (
     <>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="catalog-quick-view-title"
         style={{
           position: "fixed",
           inset: 0,
@@ -1238,6 +1218,9 @@ function QuickView({
         }}
       >
         <button
+          type="button"
+          autoFocus
+          aria-label="关闭快速预览"
           onClick={onClose}
           style={{
             position: "absolute",
@@ -1271,6 +1254,7 @@ function QuickView({
           />
         </div>
         <h2
+          id="catalog-quick-view-title"
           style={{
             fontSize: 18,
             fontWeight: 400,
@@ -1456,6 +1440,15 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
     localStorage.getItem("customerToken") && account?.phone,
   );
 
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
   if (!ids.size) return null;
 
   const selected = products.filter((p) => ids.has(p.id));
@@ -1530,7 +1523,9 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
   return (
     <>
       {/* 底部托盘 */}
-      <div
+      <button
+        type="button"
+        aria-label={`查看已选 ${ids.size} 款并提交选款咨询`}
         onClick={() => setOpen(true)}
         style={{
           position: "fixed",
@@ -1547,6 +1542,9 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
           maxWidth: "calc(100vw - 32px)",
           cursor: "pointer",
           borderRadius: 4,
+          border: 0,
+          textAlign: "left",
+          fontFamily: "inherit",
         }}
       >
         <div
@@ -1579,12 +1577,13 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
         <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
           提交选款咨询 →
         </span>
-      </div>
+      </button>
 
       {/* 提交弹窗 */}
       {open && (
         <>
           <div
+            aria-hidden="true"
             onClick={() => setOpen(false)}
             style={{
               position: "fixed",
@@ -1594,6 +1593,9 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
             }}
           />
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="selection-inquiry-title"
             style={{
               position: "fixed",
               top: "50%",
@@ -1607,6 +1609,9 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
             }}
           >
             <button
+              type="button"
+              autoFocus
+              aria-label="关闭选款咨询"
               onClick={() => setOpen(false)}
               style={{
                 position: "absolute",
@@ -1626,6 +1631,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
             </button>
 
             <h2
+              id="selection-inquiry-title"
               style={{
                 fontSize: 16,
                 fontWeight: 400,
@@ -1974,40 +1980,110 @@ export default function Catalog() {
   const { params, update } = useURLParams();
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickView, setQuickView] = useState<CatalogProduct | null>(null);
-  const selCount = useSelectionStore((s) => s.selectedIds.size);
+  const selectedIds = useSelectionStore((s) => s.selectedIds);
+  const selCount = selectedIds.size;
   const { materialOptions, craftOptions } = useAttributeDictionary();
 
-  /* ═══ API 产品数据（共享 Hook） ═══ */
+  const {
+    categories,
+    loading: categoriesLoading,
+    error: categoriesError,
+  } = useProductCategories();
+  const categoryTarget = params.subcategory || params.category;
+  const categoryIds = useMemo(
+    () =>
+      categoryTarget
+        ? expandCategoryIds(categories, Number(categoryTarget)) || categoryTarget
+        : "",
+    [categories, categoryTarget],
+  );
+  const materialTypes = useMemo(
+    () =>
+      params.materials
+        .map(getMaterialCode)
+        .filter((code): code is string => Boolean(code))
+        .join(","),
+    [params.materials],
+  );
+  const catalogQuery = useMemo<ProductQuery | null>(() => {
+    if (categoryTarget && categoriesLoading) return null;
+    const keyword = params.query.trim();
+    const exactCode = keyword && SKU_RE.test(keyword) ? keyword : undefined;
+    return {
+      page: params.page,
+      pageSize: PAGE_SIZE,
+      sortBy: catalogSort(params.sort),
+      includeFacets: "true",
+      exactCode,
+      keyword: exactCode ? undefined : keyword || undefined,
+      categoryIds: exactCode ? undefined : categoryIds || undefined,
+      materialTypes: exactCode ? undefined : materialTypes || undefined,
+      craftTechniques:
+        !exactCode && params.crafts.length > 0
+          ? params.crafts.join(",")
+          : undefined,
+      sizes:
+        !exactCode && params.sizes.length > 0
+          ? params.sizes.join(",")
+          : undefined,
+      weightRanges: exactCode
+        ? undefined
+        : serializeWeightRanges(params.weights),
+    };
+  }, [
+    categoriesLoading,
+    categoryIds,
+    categoryTarget,
+    materialTypes,
+    params,
+  ]);
+
+  /* ═══ API 产品数据（服务端筛选 + URL 分页） ═══ */
   const {
     products: mergedProducts,
-    loading: apiLoading,
-    error: apiError,
-    categories,
-  } = useProductData();
+    total,
+    facets,
+    loading: productsLoading,
+    error: productsError,
+  } = useProductData(catalogQuery, {
+    loadCategories: false,
+  });
+  const apiLoading = productsLoading || (Boolean(categoryTarget) && categoriesLoading);
+  const apiError = productsError || categoriesError;
+  const tp = Math.ceil(total / PAGE_SIZE);
+  const sizeOptions = facets.sizes;
 
-  const filtered = useFiltered(params, mergedProducts);
-  const sorted = useSorted(filtered, params.sort);
-  const tp = Math.ceil(sorted.length / PAGE_SIZE);
-  const sizeOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          mergedProducts
-            .filter(
-              (product) =>
-                !params.category ||
-                product.primaryCategoryId === params.category,
-            )
-            .map((product) => product.size)
-            .filter(Boolean),
-        ),
-      ).sort(),
-    [mergedProducts, params.category],
+  const selectedIdsKey = useMemo(
+    () => Array.from(selectedIds).sort((a, b) => a - b).join(","),
+    [selectedIds],
   );
+  const selectedQuery = useMemo<ProductQuery | null>(
+    () =>
+      selectedIdsKey
+        ? {
+            ids: selectedIdsKey,
+            page: 1,
+            pageSize: Math.min(2_000, selectedIds.size),
+            sortBy: "sortOrder",
+          }
+        : null,
+    [selectedIds.size, selectedIdsKey],
+  );
+  const { products: selectedProducts } = useProductData(selectedQuery, {
+    subscribe: false,
+    loadCategories: false,
+  });
+  const selectionProducts = useMemo(() => {
+    const byId = new Map<number, CatalogProduct>();
+    for (const product of [...selectedProducts, ...mergedProducts]) {
+      byId.set(product.id, product);
+    }
+    return Array.from(byId.values());
+  }, [mergedProducts, selectedProducts]);
 
   useEffect(() => {
-    if (params.page > tp && tp > 0) update("page", String(tp));
-  }, [tp, params.page, update]);
+    if (!apiLoading && params.page > tp && tp > 0) update("page", String(tp));
+  }, [apiLoading, tp, params.page, update]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -2048,7 +2124,7 @@ export default function Catalog() {
       params.sizes.length,
   );
   const showCatalogTools =
-    apiLoading || mergedProducts.length > 0 || hasActiveFilters;
+    apiLoading || total > 0 || hasActiveFilters;
   const toggleArray = (key: string, arr: string[], val: string) => {
     const newArr = arr.includes(val)
       ? arr.filter((x) => x !== val)
@@ -2063,6 +2139,7 @@ export default function Catalog() {
 
   return (
     <div
+      className="catalog-page"
       style={{
         background: T.bg,
         minHeight: "100vh",
@@ -2070,6 +2147,13 @@ export default function Catalog() {
         overflowX: "hidden",
       }}
     >
+      <style>{`
+        .catalog-page :is(button, a, input, select):focus-visible {
+          outline: 2px solid #6F5733 !important;
+          outline-offset: 3px;
+        }
+      `}</style>
+      <h1 className="sr-only">选款中心</h1>
       {showCatalogTools ? (
         <>
           <PrimaryNav
@@ -2088,7 +2172,7 @@ export default function Catalog() {
           <div ref={sentinelRef}>
             <Toolbar
               category={params.category}
-              total={sorted.length}
+              total={total}
               materials={params.materials}
               materialOptions={materialOptions}
               sort={params.sort}
@@ -2104,7 +2188,7 @@ export default function Catalog() {
           {stickyVisible ? (
             <StickyBar
               category={params.category}
-              total={sorted.length}
+              total={total}
               sort={params.sort}
               selCount={selCount}
               onSort={(s) => update("sort", s)}
@@ -2200,7 +2284,7 @@ export default function Catalog() {
             </Link>
           </div>
         </div>
-      ) : sorted.length === 0 ? (
+      ) : mergedProducts.length === 0 ? (
         <div
           style={{
             textAlign: "center",
@@ -2266,13 +2350,12 @@ export default function Catalog() {
         </div>
       ) : (
         <ProductGrid
-          products={sorted}
-          page={params.page}
+          products={mergedProducts}
           onQuickView={setQuickView}
         />
       )}
       <Pagination
-        total={sorted.length}
+        total={total}
         page={params.page}
         onPage={(p) => update("page", String(p))}
       />
@@ -2299,10 +2382,10 @@ export default function Catalog() {
             update("size", []);
           }}
           onClose={() => setFilterOpen(false)}
-          total={sorted.length}
+          total={total}
         />
       )}
-      <SelectionTray products={mergedProducts} />
+      <SelectionTray products={selectionProducts} />
     </div>
   );
 }

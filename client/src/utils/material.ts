@@ -12,6 +12,14 @@ export const materialLabels: Record<string, string> = {
   COLOR_GEM: '彩宝',
 };
 
+const materialCodesByLabel = new Map(
+  Object.entries(materialLabels).map(([code, label]) => [label, code]),
+);
+
 export function getMaterialLabel(code: string): string {
   return materialLabels[code] || code;
+}
+
+export function getMaterialCode(label: string): string | undefined {
+  return materialCodesByLabel.get(label);
 }

@@ -227,9 +227,14 @@ export const productApi = {
           (!idSet || idSet.has(product.id)) &&
           (params?.status ? true : product.status !== "ARCHIVED"),
       );
-      return mockRes(
-        paginate(filtered, params.page || 1, params.pageSize || 20),
-      );
+      return mockRes({
+        ...paginate(filtered, params.page || 1, params.pageSize || 20),
+        facets: {
+          sizes: Array.from(
+            new Set(filtered.map((product) => product.size).filter(Boolean)),
+          ).sort(),
+        },
+      });
     }
     return api.get("/products", { params });
   },
@@ -266,9 +271,19 @@ export const productApi = {
         ...params,
         status: "PUBLISHED",
       }).filter((product) => !idSet || idSet.has(product.id));
-      return mockRes(
-        paginate(filtered, params.page || 1, params.pageSize || 20),
-      );
+      const facetProducts = filterProducts(getMockProducts(), {
+        status: "PUBLISHED",
+        categoryId: params.categoryId,
+        categoryIds: params.categoryIds,
+      });
+      return mockRes({
+        ...paginate(filtered, params.page || 1, params.pageSize || 20),
+        facets: {
+          sizes: Array.from(
+            new Set(facetProducts.map((product) => product.size).filter(Boolean)),
+          ).sort(),
+        },
+      });
     }
     if (!localStorage.getItem("customerToken")) {
       return api.get("/products/public", { params });

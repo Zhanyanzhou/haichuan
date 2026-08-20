@@ -4,10 +4,17 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "react-router-dom";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { MATERIALS, type CatalogProduct } from "@/data/catalogData";
-import { useProductData, type RealCategory } from "@/hooks/useProductData";
+import {
+  expandCategoryIds,
+  useProductCategories,
+  useProductData,
+  type ProductQuery,
+  type RealCategory,
+} from "@/hooks/useProductData";
 import { getListingImage } from "@/utils/productImage";
 import { SecureImage } from "@/components/common/SecureImage";
 import { trackPageView, trackSearch } from "@/hooks/useAnalytics";
+import { getMaterialCode } from "@/utils/material";
 
 const T = {
   bg: "#FFFFFF",
@@ -20,6 +27,8 @@ const T = {
 const PX = "clamp(32px,5vw,80px)";
 const MW = 1320;
 const HOT = ["戒指", "吊坠", "平安扣", "古法金", "婚嫁", "日常佩戴"];
+const PAGE_SIZE = 24;
+const FEATURED_SIZE = 6;
 
 /* ═══════ 类型 ═══════ */
 interface Filters {
@@ -27,34 +36,14 @@ interface Filters {
   material: string;
 }
 
-/* ═══════ 搜索+筛选 ═══════ */
-function useResults(
-  query: string,
-  filters: Filters,
-  products: CatalogProduct[],
-) {
-  return useMemo(() => {
-    let list = [...products];
-    const q = query.trim().toLowerCase();
-    if (q) {
-      list = list.filter(
-        (p) =>
-          p.sku.toLowerCase().includes(q) ||
-          (p.name && p.name.includes(q)) ||
-          p.material.includes(q) ||
-          (p.categoryName && p.categoryName.includes(q)),
-      );
-    }
-    if (filters.category)
-      list = list.filter((p) => p.primaryCategoryId === filters.category);
-    if (filters.material)
-      list = list.filter((p) => p.material === filters.material);
-    return list;
-  }, [query, filters, products]);
-}
-
 function filterCount(f: Filters) {
   return [f.category, f.material].filter(Boolean).length;
+}
+
+function searchSort(sort: string): NonNullable<ProductQuery["sortBy"]> {
+  if (sort === "newest") return "updated_desc";
+  if (sort === "sku") return "code_asc";
+  return "sortOrder";
 }
 
 /* ═══════ 搜索建议 ═══════ */
@@ -422,6 +411,11 @@ export default function Search() {
     material: "",
   });
   const [sort, setSort] = useState("recommended");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [accumulatedProducts, setAccumulatedProducts] = useState<
+    CatalogProduct[]
+  >([]);
   const [focused, setFocused] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -436,35 +430,113 @@ export default function Search() {
     trackPageView();
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPage(1);
+      setDebouncedQuery(query.trim());
+      setAccumulatedProducts([]);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
   const {
-    products: allProducts,
+    categories,
+    loading: categoriesLoading,
+    error: categoriesError,
+  } = useProductCategories();
+  const categoryIds = useMemo(
+    () =>
+      filters.category
+        ? expandCategoryIds(categories, Number(filters.category)) ||
+          filters.category
+        : "",
+    [categories, filters.category],
+  );
+  const serverHasQuery = debouncedQuery.length > 0;
+  const serverHasFilters = filterCount(filters) > 0;
+  const serverShowingResults = serverHasQuery || serverHasFilters;
+  const productQuery = useMemo<ProductQuery | null>(() => {
+    if (filters.category && categoriesLoading) return null;
+    return {
+      keyword: debouncedQuery || undefined,
+      categoryIds: categoryIds || undefined,
+      materialType: filters.material
+        ? getMaterialCode(filters.material)
+        : undefined,
+      sortBy: searchSort(sort),
+      page,
+      pageSize: serverShowingResults ? PAGE_SIZE : FEATURED_SIZE,
+    };
+  }, [
+    categoriesLoading,
+    categoryIds,
+    debouncedQuery,
+    filters.category,
+    filters.material,
+    page,
+    serverShowingResults,
+    sort,
+  ]);
+
+  const {
+    products: pageProducts,
+    total,
     loading: apiLoading,
     error: apiError,
-    categories,
-  } = useProductData();
+    reload,
+    queryKey,
+    dataQueryKey,
+  } = useProductData(productQuery, { loadCategories: false });
 
-  const results = useResults(query, filters, allProducts);
+  useEffect(() => {
+    if (
+      apiLoading ||
+      apiError ||
+      dataQueryKey !== queryKey ||
+      !serverShowingResults
+    ) {
+      return;
+    }
+    setAccumulatedProducts((current) => {
+      if (page === 1) return pageProducts;
+      const byId = new Map(current.map((product) => [product.id, product]));
+      for (const product of pageProducts) byId.set(product.id, product);
+      return Array.from(byId.values());
+    });
+  }, [
+    apiError,
+    apiLoading,
+    dataQueryKey,
+    page,
+    pageProducts,
+    queryKey,
+    serverShowingResults,
+  ]);
+
   const suggestions = useMemo(
-    () => getSuggestions(query, allProducts, categories),
-    [query, allProducts, categories],
+    () => getSuggestions(query, pageProducts, categories),
+    [query, pageProducts, categories],
   );
   const hasQuery = query.trim().length > 0;
   const hasFilters = filterCount(filters) > 0;
   const showHistory = focused && !hasQuery && history.length > 0;
   const showSuggestions = focused && hasQuery && suggestions.length > 0;
   const isShowingResults = hasQuery || hasFilters;
-
-  const sorted = useMemo(() => {
-    const s = [...results];
-    if (sort === "newest") s.reverse();
-    else if (sort === "sku") s.sort((a, b) => a.sku.localeCompare(b.sku));
-    return s;
-  }, [results, sort]);
+  const searchPending = query.trim() !== debouncedQuery;
+  const resultProducts =
+    accumulatedProducts.length > 0
+      ? accumulatedProducts
+      : !apiLoading && !apiError && dataQueryKey === queryKey
+        ? pageProducts
+        : [];
 
   const doSearch = useCallback(
     (q: string) => {
       const clean = q.trim();
       if (!clean) return;
+      setPage(1);
+      setAccumulatedProducts([]);
+      setDebouncedQuery(clean);
       setQuery(clean);
       addToHistory(clean);
       trackSearch(clean);
@@ -473,16 +545,20 @@ export default function Search() {
     [addToHistory],
   );
 
-  const clearFilters = useCallback(
-    () => setFilters({ category: "", material: "" }),
-    [],
-  );
+  const clearFilters = useCallback(() => {
+    setPage(1);
+    setAccumulatedProducts([]);
+    setFilters({ category: "", material: "" });
+  }, []);
   const clearAll = useCallback(() => {
     setQuery("");
     clearFilters();
   }, [clearFilters]);
   const selectSuggestion = useCallback(
     (s: string) => {
+      setPage(1);
+      setAccumulatedProducts([]);
+      setDebouncedQuery(s.trim());
       setQuery(s);
       addToHistory(s);
       setFocused(false);
@@ -491,10 +567,18 @@ export default function Search() {
     [addToHistory],
   );
 
-  const featured = useMemo(() => allProducts.slice(0, 6), [allProducts]);
+  const featured = useMemo(
+    () => pageProducts.slice(0, FEATURED_SIZE),
+    [pageProducts],
+  );
 
   /* ═══ 加载/错误状态 ═══ */
-  if (apiLoading) {
+  if (
+    apiLoading &&
+    dataQueryKey === "" &&
+    pageProducts.length === 0 &&
+    !isShowingResults
+  ) {
     return (
       <div
         style={{
@@ -526,7 +610,12 @@ export default function Search() {
     );
   }
 
-  if (apiError) {
+  if (
+    (apiError || categoriesError) &&
+    accumulatedProducts.length === 0 &&
+    pageProducts.length === 0 &&
+    !isShowingResults
+  ) {
     return (
       <div
         style={{
@@ -871,7 +960,7 @@ export default function Search() {
                 <span style={{ fontSize: 13, color: T.sec }}>
                   共找到{" "}
                   <span style={{ color: T.txt, fontWeight: 500 }}>
-                    {sorted.length}
+                    {total}
                   </span>{" "}
                   件作品
                 </span>
@@ -895,7 +984,11 @@ export default function Search() {
               </div>
               <select
                 value={sort}
-                onChange={(e) => setSort(e.target.value)}
+                onChange={(e) => {
+                  setPage(1);
+                  setAccumulatedProducts([]);
+                  setSort(e.target.value);
+                }}
                 style={{
                   background: "transparent",
                   border: 0,
@@ -921,7 +1014,33 @@ export default function Search() {
             />
 
             {/* 结果/空状态 */}
-            {sorted.length === 0 ? (
+            {searchPending || (apiLoading && resultProducts.length === 0) ? (
+              <div
+                aria-live="polite"
+                style={{ textAlign: "center", paddingBlock: 72 }}
+              >
+                <p style={{ fontSize: 14, color: T.sec }}>正在筛选珠宝作品…</p>
+              </div>
+            ) : apiError && resultProducts.length === 0 ? (
+              <div role="alert" style={{ textAlign: "center", paddingBlock: 72 }}>
+                <p style={{ fontSize: 15, color: T.txt, marginBottom: 16 }}>
+                  搜索结果暂时无法加载
+                </p>
+                <button
+                  onClick={reload}
+                  style={{
+                    background: "none",
+                    border: `1px solid ${T.line}`,
+                    padding: "10px 24px",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    color: T.txt,
+                  }}
+                >
+                  重试
+                </button>
+              </div>
+            ) : resultProducts.length === 0 ? (
               <div style={{ textAlign: "center", paddingBlock: 72 }}>
                 <p style={{ fontSize: 20, color: T.light, marginBottom: 8 }}>
                   暂未找到符合条件的珠宝作品
@@ -996,9 +1115,52 @@ export default function Search() {
                   marginTop: hasFilters ? 16 : 0,
                 }}
               >
-                {sorted.map((p) => (
+                {resultProducts.map((p) => (
                   <ProductCard key={p.id} product={p} />
                 ))}
+              </div>
+            )}
+            {!apiError &&
+              !apiLoading &&
+              resultProducts.length > 0 &&
+              resultProducts.length < total && (
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 48 }}>
+                  <button
+                    onClick={() => setPage((current) => current + 1)}
+                    style={{
+                      minHeight: 44,
+                      background: "none",
+                      border: `1px solid ${T.line}`,
+                      paddingInline: 28,
+                      cursor: "pointer",
+                      fontSize: 12,
+                      color: T.txt,
+                      letterSpacing: "0.06em",
+                    }}
+                  >
+                    加载更多
+                  </button>
+                </div>
+              )}
+            {apiError && resultProducts.length > 0 && (
+              <div role="alert" style={{ textAlign: "center", marginTop: 40 }}>
+                <p style={{ fontSize: 13, color: T.sec, marginBottom: 12 }}>
+                  更多作品加载失败，已保留当前结果
+                </p>
+                <button
+                  onClick={reload}
+                  style={{
+                    minHeight: 40,
+                    background: "none",
+                    border: `1px solid ${T.line}`,
+                    paddingInline: 24,
+                    cursor: "pointer",
+                    fontSize: 12,
+                    color: T.txt,
+                  }}
+                >
+                  重试加载
+                </button>
               </div>
             )}
           </div>
@@ -1088,10 +1250,14 @@ export default function Search() {
       {filterOpen && (
         <FilterDrawer
           filters={filters}
-          onFilter={(k, v) => setFilters((prev) => ({ ...prev, [k]: v }))}
+          onFilter={(k, v) => {
+            setPage(1);
+            setAccumulatedProducts([]);
+            setFilters((prev) => ({ ...prev, [k]: v }));
+          }}
           onClear={clearFilters}
           onClose={() => setFilterOpen(false)}
-          count={sorted.length}
+          count={total}
           categories={categories}
         />
       )}
