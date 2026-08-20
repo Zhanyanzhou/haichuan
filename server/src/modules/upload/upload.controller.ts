@@ -57,7 +57,7 @@ export class UploadController {
   }
 
   @Public()
-  @UseGuards(CustomerCommerceGuard, CustomerAuthGuard)
+  @UseGuards(CustomerAuthGuard, CustomerCommerceGuard)
   // 公开上传接口收紧行为限流(全局 60/min 偏宽),降低并发 10MB 内存存储的 DoS 风险
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('payment-proof')

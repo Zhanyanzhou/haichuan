@@ -10,6 +10,15 @@ import { Throttle } from '@nestjs/throttler';
 import { CheckoutDto } from './dto/checkout.dto';
 import { CustomerAddressDto, SubmitPaymentProofDto } from './dto/customer-address.dto';
 import { CustomerCommerceGuard } from '../../common/guards/customer-commerce.guard';
+import {
+  CloseCustomerAccountDto,
+  CustomerLoginDto,
+  CustomerRegisterDto,
+  ForgotPasswordDto,
+  RequestSmsCodeDto,
+  ResetPasswordDto,
+  UpdateCustomerProfileDto,
+} from './dto/customer-auth.dto';
 
 // 交易域认证说明（P0 修复）：
 // JwtAuthGuard 已被注册为全局守卫（见 app.module.ts APP_GUARD），
@@ -27,7 +36,7 @@ export class CustomersController {
 
   // 游客下单已关闭（DECISIONS D.7）：checkout 必须先 login/register，不再签发 access token
   @Public()
-  @UseGuards(CustomerCommerceGuard, CustomerAuthGuard)
+  @UseGuards(CustomerAuthGuard, CustomerCommerceGuard)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('checkout')
   checkout(@Req() request: any, @Body() dto: CheckoutDto) {
@@ -37,30 +46,30 @@ export class CustomersController {
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('register')
-  register(@Body() body: { phone: string; password: string; name?: string; email?: string; smsCode?: string }) {
-    return this.customersService.register(body);
+  register(@Body() dto: CustomerRegisterDto) {
+    return this.customersService.register(dto);
   }
 
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login')
-  login(@Body() body: { phone: string; password: string }) {
-    return this.customersService.login(body);
+  login(@Body() dto: CustomerLoginDto) {
+    return this.customersService.login(dto);
   }
 
   // 密码找回：3/min 收紧——防止用找回流程轰炸他人邮箱
   @Public()
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post('forgot-password')
-  forgotPassword(@Body() body: { email: string }) {
-    return this.customersService.requestPasswordReset(body.email);
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.customersService.requestPasswordReset(dto.email);
   }
 
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('reset-password')
-  resetPassword(@Body() body: { token: string; password: string }) {
-    return this.customersService.resetPassword(body.token, body.password);
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.customersService.resetPassword(dto.token, dto.password);
   }
 
   // ===== 手机验真（短信验证码，开关式强制）=====
@@ -76,8 +85,8 @@ export class CustomersController {
   @Public()
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post('sms-code')
-  requestSmsCode(@Body() body: { phone: string }) {
-    return this.customersService.requestSmsCode(body.phone);
+  requestSmsCode(@Body() dto: RequestSmsCodeDto) {
+    return this.customersService.requestSmsCode(dto.phone);
   }
 
   @Public()
@@ -90,8 +99,8 @@ export class CustomersController {
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Put('me')
-  updateProfile(@Req() request: any, @Body() body: any) {
-    return this.customersService.updateProfile(request.customer.id, body);
+  updateProfile(@Req() request: any, @Body() dto: UpdateCustomerProfileDto) {
+    return this.customersService.updateProfile(request.customer.id, dto);
   }
 
   @Public()
@@ -124,7 +133,7 @@ export class CustomersController {
   }
 
   @Public()
-  @UseGuards(CustomerCommerceGuard, CustomerAuthGuard)
+  @UseGuards(CustomerAuthGuard, CustomerCommerceGuard)
   @Post('me/orders/:id/payment-proof')
   submitPaymentProof(@Req() request: any, @Param('id') id: string, @Body() dto: SubmitPaymentProofDto) {
     return this.ordersService.submitOfflinePaymentProof(request.customer.id, +id, dto.proofKey, {
@@ -191,8 +200,8 @@ export class CustomersController {
   @UseGuards(CustomerAuthGuard)
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post('me/close')
-  closeAccount(@Req() request: any, @Body() body: { password: string }) {
-    return this.customersService.closeAccount(request.customer.id, body.password);
+  closeAccount(@Req() request: any, @Body() dto: CloseCustomerAccountDto) {
+    return this.customersService.closeAccount(request.customer.id, dto.password);
   }
 
   // ===== 后台客户档案（只读运营视图）=====
