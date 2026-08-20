@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Spin, message } from "antd";
+import { Alert, Button, Spin, message } from "antd";
 import { customerApi, partnerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import AccountExperience from "./AccountExperience";
@@ -16,6 +16,15 @@ type CustomerOrder = {
   payments?: Array<{ id: number; status: string; proofUrl?: string | null }>;
 };
 
+function getRequestStatus(error: unknown): number | undefined {
+  const candidate = error as {
+    response?: { status?: unknown };
+    status?: unknown;
+  };
+  const status = candidate.response?.status ?? candidate.status;
+  return typeof status === "number" ? status : undefined;
+}
+
 export default function CustomerCenter() {
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [selectionInquiries, setSelectionInquiries] = useState<any[]>([]);
@@ -25,6 +34,7 @@ export default function CustomerCenter() {
   const [partner, setPartner] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -44,11 +54,24 @@ export default function CustomerCenter() {
     return null;
   };
 
+  const clearSession = () => {
+    localStorage.removeItem("customerToken");
+    localStorage.removeItem("customer");
+    setOrders([]);
+    setSelectionInquiries([]);
+    setInquiries([]);
+    setAddresses([]);
+    setProfile(null);
+    setPartner(null);
+  };
+
   const load = async () => {
     if (!localStorage.getItem("customerToken")) {
+      setLoadError(null);
       setLoading(false);
       return;
     }
+    setLoadError(null);
     try {
       const [ordersRes, addressesRes, profileRes, selectionsRes, inquiriesRes] =
         await Promise.all([
@@ -70,9 +93,12 @@ export default function CustomerCenter() {
       } catch {
         setPartner(null);
       }
-    } catch {
-      localStorage.removeItem("customerToken");
-      setOrders([]);
+    } catch (error) {
+      if (getRequestStatus(error) === 401) {
+        clearSession();
+      } else {
+        setLoadError("账户数据暂时无法加载，请稍后重试。");
+      }
     } finally {
       setLoading(false);
     }
@@ -83,14 +109,7 @@ export default function CustomerCenter() {
   }, []);
 
   const signOut = () => {
-    localStorage.removeItem("customerToken");
-    localStorage.removeItem("customer");
-    setOrders([]);
-    setSelectionInquiries([]);
-    setInquiries([]);
-    setAddresses([]);
-    setProfile(null);
-    setPartner(null);
+    clearSession();
   };
 
   const completeAuth = async (request: Promise<unknown>) => {
@@ -143,16 +162,32 @@ export default function CustomerCenter() {
 
   if (isSignedIn) {
     return (
-      <MyAccountDashboard
-        profile={profile}
-        partner={partner}
-        orders={orders}
-        addresses={addresses}
-        selectionInquiries={selectionInquiries}
-        inquiries={inquiries}
-        onSignOut={signOut}
-        onRefresh={load}
-      />
+      <>
+        {loadError && (
+          <div className="mx-auto max-w-[1200px] px-4 pt-6">
+            <Alert
+              showIcon
+              type="error"
+              message={loadError}
+              action={
+                <Button size="small" onClick={() => void load()}>
+                  重新加载
+                </Button>
+              }
+            />
+          </div>
+        )}
+        <MyAccountDashboard
+          profile={profile}
+          partner={partner}
+          orders={orders}
+          addresses={addresses}
+          selectionInquiries={selectionInquiries}
+          inquiries={inquiries}
+          onSignOut={signOut}
+          onRefresh={load}
+        />
+      </>
     );
   }
 
