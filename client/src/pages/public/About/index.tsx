@@ -69,7 +69,7 @@ export default function About() {
   if (published !== false) return null;
 
   return (
-    <main className="about-page" style={{ background: LIGHT }}>
+    <div className="about-page" style={{ background: LIGHT }}>
       {/* ═══ Scene 01 — 品牌开场 ═══ */}
       <section className="relative overflow-hidden" style={{ minHeight: 'clamp(680px, calc(100svh - 64px), 860px)', background: '#F3F0EA' }}>
         <div className="h-full max-w-[1280px] mx-auto px-[22px] md:px-[40px] lg:px-[72px]">
@@ -117,11 +117,11 @@ export default function About() {
           </div>
           <div className="relative mt-20 md:mt-28">
             <div className="w-[62%] aspect-[3/2] overflow-hidden" style={{ background: '#E8E3D9' }}>
-              <img src="/images/设计.png" alt="" className="w-full h-full object-cover" loading="lazy" />
+              <img src="/images/设计.png" alt="珠宝纹理研究" className="w-full h-full object-cover" loading="lazy" />
               <p className="text-[10px] tracking-[.15em] uppercase mt-2" style={{ color: '#777067' }}>FIG. 02 &nbsp; TEXTURE STUDY</p>
             </div>
             <div className="absolute right-0 w-[28%] aspect-[3/4] overflow-hidden" style={{ top: '-100px', background: '#E8E3D9' }}>
-              <img src="/images/錾刻.png" alt="" className="w-full h-full object-cover" loading="lazy" />
+              <img src="/images/錾刻.png" alt="金属錾刻细节" className="w-full h-full object-cover" loading="lazy" />
               <p className="text-[10px] tracking-[.15em] uppercase mt-2" style={{ color: '#777067' }}>FIG. 03 &nbsp; METAL DETAIL</p>
             </div>
           </div>
@@ -180,7 +180,7 @@ export default function About() {
 
       {/* ═══ Scene 05 — 作品入口 ═══ */}
       <div className="w-full overflow-hidden" style={{ height: 'clamp(360px, 60vw, 640px)', background: '#E8E3D9' }}>
-        <img src="/images/设计.png" alt="" className="w-full h-full object-cover" loading="lazy" style={{ objectPosition: '50% 35%' }} />
+        <img src="/images/设计.png" alt="海川珠宝作品陈列" className="w-full h-full object-cover" loading="lazy" style={{ objectPosition: '50% 35%' }} />
       </div>
       <section style={{ background: '#FAF8F4', padding: '160px 0' }}>
         <div className="max-w-[1280px] mx-auto px-[22px] md:px-[40px] lg:px-[72px]">
@@ -199,6 +199,6 @@ export default function About() {
           </div>
         </div>
       </section>
-    </main>
+    </div>
   );
 }

@@ -4,9 +4,11 @@ const publicPages = ["/", "/about", "/contact", "/custom", "/customer", "/privac
 const viewports = [
   { name: "desktop", width: 1440, height: 900 },
   { name: "compact-desktop", width: 960, height: 900 },
-  { name: "tablet", width: 720, height: 900 },
+  { name: "large-mobile", width: 720, height: 900 },
   { name: "high-zoom", width: 360, height: 900 },
 ];
+
+const responsiveBoundaryWidths = [767, 768, 1023, 1024];
 
 async function expectNoHorizontalOverflow(page: import("@playwright/test").Page) {
   await expect
@@ -20,6 +22,7 @@ async function expectInteractiveElementsWithinViewport(page: import("@playwright
       .filter((element) => {
         const style = window.getComputedStyle(element);
         const rect = element.getBoundingClientRect();
+        if (element.matches(".sr-only:not(:focus)")) return false;
         return style.display !== "none"
           && style.visibility !== "hidden"
           && rect.width > 0
@@ -28,6 +31,18 @@ async function expectInteractiveElementsWithinViewport(page: import("@playwright
       .map((element) => element.getAttribute("aria-label") || element.textContent?.trim() || element.tagName)))
     .toEqual([]);
 }
+
+test.describe("公开页面响应式边界", () => {
+  for (const width of responsiveBoundaryWidths) {
+    test(`首页在 ${width}px 没有边界裁切`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+      await expect(page.getByRole("banner")).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+      await expectInteractiveElementsWithinViewport(page);
+    });
+  }
+});
 
 for (const viewport of viewports) {
   test.describe(`公开页面 @ ${viewport.name} (${viewport.width}px)`, () => {
@@ -62,5 +77,17 @@ test.describe("公开菜单键盘交互", () => {
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     await expect(openTrigger).toBeFocused();
+  });
+
+  test("跳至主内容链接获得焦点后进入视口", async ({ page }) => {
+    await page.goto("/");
+    const skipLink = page.getByRole("link", { name: "跳至主内容" });
+
+    await skipLink.focus();
+    await expect(skipLink).toBeFocused();
+    await expect.poll(() => skipLink.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= window.innerWidth;
+    })).toBe(true);
   });
 });
