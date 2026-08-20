@@ -1091,6 +1091,10 @@ export const goldPriceApi = {
     }
     return api.get("/gold-price/history", { params });
   },
+  getAutomationStatus: async () => {
+    if (USE_MOCK) return mockRes({ autoFetchConfigured: false });
+    return api.get("/gold-price/automation-status");
+  },
   updateManually: async (data: any) => {
     if (USE_MOCK) {
       await mockDelay(200);

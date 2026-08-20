@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Tag, Button, InputNumber, Modal, message } from 'antd';
+import { Alert, Card, Table, Tag, Button, InputNumber, Modal, message } from 'antd';
 import { ArrowUpOutlined, EditOutlined } from '@ant-design/icons';
 import { goldPriceApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
@@ -9,19 +9,25 @@ export default function GoldPrice() {
   const [loading, setLoading] = useState(true);
   const [currentPrice, setCurrentPrice] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [autoFetchConfigured, setAutoFetchConfigured] = useState<boolean | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [newPrice, setNewPrice] = useState<number>(0);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [latest, hist] = await Promise.all([
+      const [latest, hist, automationStatus] = await Promise.all([
         goldPriceApi.getLatest(),
         goldPriceApi.getHistory({}),
+        goldPriceApi.getAutomationStatus(),
       ]);
       setCurrentPrice(unwrapResponse(latest));
       const h = unwrapResponse(hist);
       setHistory(Array.isArray(h) ? h : h?.list || []);
+      setAutoFetchConfigured(
+        unwrapResponse<{ autoFetchConfigured?: boolean }>(automationStatus)
+          ?.autoFetchConfigured === true,
+      );
     } catch { /* fallback */ }
     finally { setLoading(false); }
   };
@@ -48,6 +54,14 @@ export default function GoldPrice() {
           手动调价
         </Button>
       </div>
+      {autoFetchConfigured === false && (
+        <Alert
+          showIcon
+          type="warning"
+          message="自动抓取未配置，当前金价需手动维护"
+          description="系统不会生成模拟报价。手动更新后仍会按现有规则同步关联商品价格。"
+        />
+      )}
       <div className="grid grid-cols-4 gap-4">
         {[
           { t: '当前金价', v: currentPrice?.price?.toFixed(2) || '--', u: '元/克' },

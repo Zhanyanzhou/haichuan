@@ -29,6 +29,12 @@ export class GoldPriceController {
     return this.goldPriceService.getHistory(query);
   }
 
+  @Get('automation-status')
+  @ApiOperation({ summary: '获取自动金价采集配置状态' })
+  getAutomationStatus() {
+    return this.goldPriceService.getAutomationStatus();
+  }
+
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('manual')

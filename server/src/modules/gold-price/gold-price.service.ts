@@ -68,6 +68,13 @@ export class GoldPriceService {
     }));
   }
 
+  /** 仅供后台提示自动行情能力，绝不返回行情源地址或其他配置值。 */
+  getAutomationStatus() {
+    return {
+      autoFetchConfigured: Boolean(process.env.GOLD_PRICE_API_URL?.trim()),
+    };
+  }
+
   /**
    * Manually update gold price
    */
