@@ -70,9 +70,9 @@ export default function LeadManage() {
   const [staffLoading, setStaffLoading] = useState(false);
   const [assignTo, setAssignTo] = useState<number | undefined>(undefined);
   const [assigning, setAssigning] = useState(false);
-  // 指派仅对管理员开放：客服无 GET /users 权限（最小权限，零服务端改动）
   const role = useAuthStore((s) => s.user?.role);
-  const canAssign = role === "SUPER_ADMIN" || role === "ADMIN";
+  const canAssign =
+    role === "SUPER_ADMIN" || role === "ADMIN" || role === "CUSTOMER_SERVICE";
   const requestedStatus = searchParams.get("status") || "";
   const requestedType = searchParams.get("type") || "";
 
@@ -190,11 +190,11 @@ export default function LeadManage() {
   const loadStaff = async () => {
     setStaffLoading(true);
     try {
-      const res = await api.get("/users", { params: { pageSize: 200 } });
-      const data = unwrapResponse<{ list: any[] }>(res);
-      setStaff((data?.list || []).filter((u: any) => u.status === "ACTIVE"));
-    } catch {
+      const res = await api.get("/users/assignable");
+      setStaff(unwrapResponse<any[]>(res) || []);
+    } catch (error) {
       setStaff([]);
+      message.error(getSafeAdminErrorMessage(error, "人员列表加载失败，请刷新后重试。"));
     } finally {
       setStaffLoading(false);
     }
@@ -508,7 +508,7 @@ export default function LeadManage() {
                     loading={staffLoading}
                     options={staff.map((u: any) => ({
                       value: u.id,
-                      label: u.realName || u.username,
+                      label: u.name,
                     }))}
                     onDropdownVisibleChange={(open) => {
                       if (open && staff.length === 0) void loadStaff();

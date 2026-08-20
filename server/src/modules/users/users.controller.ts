@@ -20,6 +20,13 @@ export class UsersController {
     return this.usersService.findAll(query);
   }
 
+  @Get('assignable')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE')
+  @ApiOperation({ summary: '获取可分配员工轻量列表' })
+  findAssignable() {
+    return this.usersService.findAssignable();
+  }
+
   @Get(':id')
   @Roles('SUPER_ADMIN', 'ADMIN')
   @ApiOperation({ summary: '获取用户详情' })
@@ -42,7 +49,7 @@ export class UsersController {
 
   @Delete(':id')
   @Roles('SUPER_ADMIN')
-  delete(@Param('id') id: string) {
-    return this.usersService.delete(+id);
+  delete(@Param('id') id: string, @Request() req: any) {
+    return this.usersService.delete(+id, req.user);
   }
 }
