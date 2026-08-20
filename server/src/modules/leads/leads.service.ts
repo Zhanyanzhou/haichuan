@@ -1,4 +1,8 @@
-import { Injectable } from "@nestjs/common";
+import {
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 
 const LEAD_STATUSES = [
@@ -8,6 +12,14 @@ const LEAD_STATUSES = [
   "COMPLETED",
   "INVALID",
 ];
+
+const LEAD_STATUS_TRANSITIONS: Record<string, readonly string[]> = {
+  PENDING: ["CONTACTED", "INVALID"],
+  CONTACTED: ["FOLLOWING", "COMPLETED", "INVALID"],
+  FOLLOWING: ["COMPLETED", "INVALID"],
+  COMPLETED: [],
+  INVALID: [],
+};
 
 @Injectable()
 export class LeadsService {
@@ -205,9 +217,36 @@ export class LeadsService {
       nextFollowUpAt?: string;
     },
   ) {
+    if (leadType !== "inquiry" && leadType !== "selection") {
+      throw new UnprocessableEntityException("线索类型不合法");
+    }
+    if (!Number.isInteger(leadId) || leadId <= 0) {
+      throw new UnprocessableEntityException("线索编号不合法");
+    }
+    const current = leadType === "inquiry"
+      ? await this.prisma.inquiry.findUnique({
+          where: { id: leadId },
+          select: { status: true },
+        })
+      : await this.prisma.selectionInquiry.findUnique({
+          where: { id: leadId },
+          select: { status: true },
+        });
+    if (!current) throw new NotFoundException("线索不存在");
+
     const idField = leadType === "inquiry" ? "assignedTo" : "handledBy";
     const payload: any = {};
-    if (data.status) payload.status = data.status;
+    if (data.status !== undefined) {
+      if (!LEAD_STATUSES.includes(data.status)) {
+        throw new UnprocessableEntityException("线索状态不合法");
+      }
+      if (!LEAD_STATUS_TRANSITIONS[current.status]?.includes(data.status)) {
+        throw new UnprocessableEntityException(
+          `当前状态「${current.status}」不能流转到「${data.status}」`,
+        );
+      }
+      payload.status = data.status;
+    }
     if (data.internalNote !== undefined)
       payload.internalNote = data.internalNote;
     if (data.assignedTo !== undefined) payload[idField] = data.assignedTo;

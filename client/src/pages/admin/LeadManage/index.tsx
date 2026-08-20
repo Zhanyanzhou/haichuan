@@ -33,9 +33,18 @@ import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
 const STATUS_MAP: Record<string, { color: string; label: string }> = {
   PENDING: { color: "warning", label: "待处理" },
-  PROCESSING: { color: "processing", label: "处理中" },
-  REPLIED: { color: "success", label: "已回复" },
-  CLOSED: { color: "default", label: "已关闭" },
+  CONTACTED: { color: "processing", label: "已联系" },
+  FOLLOWING: { color: "processing", label: "跟进中" },
+  COMPLETED: { color: "success", label: "已完成" },
+  INVALID: { color: "default", label: "无效" },
+};
+
+const STATUS_TRANSITIONS: Record<string, string[]> = {
+  PENDING: ["CONTACTED", "INVALID"],
+  CONTACTED: ["FOLLOWING", "COMPLETED", "INVALID"],
+  FOLLOWING: ["COMPLETED", "INVALID"],
+  COMPLETED: [],
+  INVALID: [],
 };
 
 const LEAD_TYPES = { inquiry: "预约咨询", selection: "选款咨询" } as const;
@@ -520,29 +529,19 @@ export default function LeadManage() {
             <div style={{ marginTop: 16 }}>
               <Space>
                 <span>状态流转：</span>
-                {["PENDING", "CONTACTED", "FOLLOWING", "COMPLETED"].map(
-                  (s) =>
-                    detail.status !== s && (
-                      <Button
-                        key={s}
-                        size="small"
-                        loading={saving}
-                        onClick={() => updateStatus(s)}
-                      >
-                        {STATUS_MAP[s].label}
-                      </Button>
-                    ),
-                )}
-                {detail.status !== "INVALID" && (
+                {(STATUS_TRANSITIONS[detail.status] ?? []).map((nextStatus) => (
                   <Button
+                    key={nextStatus}
                     size="small"
-                    danger
+                    danger={nextStatus === "INVALID"}
                     loading={saving}
-                    onClick={() => updateStatus("INVALID")}
+                    onClick={() => updateStatus(nextStatus)}
                   >
-                    标记无效
+                    {nextStatus === "INVALID"
+                      ? "标记无效"
+                      : STATUS_MAP[nextStatus].label}
                   </Button>
-                )}
+                ))}
               </Space>
             </div>
           </>
