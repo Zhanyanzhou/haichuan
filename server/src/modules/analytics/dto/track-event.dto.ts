@@ -4,15 +4,32 @@ import {
   IsOptional,
   IsInt,
   IsObject,
+  IsIn,
   MaxLength,
 } from 'class-validator';
+
+export const PUBLIC_ANALYTICS_EVENT_NAMES = [
+  'page_view',
+  'product_view',
+  'search',
+  'filter',
+  'add_to_selection',
+  'remove_from_selection',
+  'submit_selection',
+  'submit_inquiry',
+  'cta_click',
+  'add_to_cart',
+  'begin_checkout',
+  'order_created',
+] as const;
 
 /** 公开埋点上报：限制字段长度，防止超长字符串撑爆 DB 列或 metadata */
 export class TrackEventDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  eventName!: string;
+  @IsIn(PUBLIC_ANALYTICS_EVENT_NAMES)
+  eventName!: (typeof PUBLIC_ANALYTICS_EVENT_NAMES)[number];
 
   @IsOptional()
   @IsString()
@@ -42,10 +59,6 @@ export class TrackEventDto {
   @IsString()
   @MaxLength(100)
   sessionId?: string;
-
-  @IsOptional()
-  @IsInt()
-  customerId?: number;
 
   @IsOptional()
   @IsObject()

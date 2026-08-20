@@ -13,8 +13,8 @@ import { Throttle } from '@nestjs/throttler';
 export class AnalyticsController {
   constructor(private service: AnalyticsService) {}
 
-  // P0-6：公开埋点收紧限流（30/min，比写库端点宽松但仍防刷）
-  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  // 公开端点仅接受前台事件白名单；15/min 覆盖正常浏览与筛选，同时压低灌入成本。
+  @Throttle({ default: { limit: 15, ttl: 60000 } })
   @Public()
   @Post('track')
   async track(@Body() body: TrackEventDto) {

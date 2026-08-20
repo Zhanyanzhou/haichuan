@@ -2,6 +2,31 @@ import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 
 const MAX_METADATA_BYTES = 2048;
+const METADATA_FIELDS_BY_EVENT: Record<string, string[]> = {
+  filter: ["filterType", "value"],
+  add_to_cart: ["quantity"],
+  begin_checkout: ["itemCount", "amount"],
+  order_created: ["orderId", "amount"],
+  submit_selection: ["count"],
+  cta_click: ["label"],
+};
+
+function sanitizeMetadata(
+  eventName: string,
+  metadata: Record<string, unknown> | undefined,
+) {
+  if (!metadata) return undefined;
+  const allowedFields = METADATA_FIELDS_BY_EVENT[eventName] || [];
+  const sanitized: Record<string, string | number> = {};
+
+  for (const field of allowedFields) {
+    const value = metadata[field];
+    if (typeof value === "string") sanitized[field] = value.slice(0, 100);
+    if (typeof value === "number" && Number.isFinite(value)) sanitized[field] = value;
+  }
+
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
 
 @Injectable()
 export class AnalyticsService {
@@ -15,16 +40,11 @@ export class AnalyticsService {
     source?: string;
     deviceType?: string;
     sessionId?: string;
-    customerId?: number;
     metadata?: Record<string, unknown>;
   }) {
-    // 限制 metadata 大小
-    let safeMeta = event.metadata || undefined;
-    if (safeMeta) {
-      const str = JSON.stringify(safeMeta);
-      if (Buffer.byteLength(str) > MAX_METADATA_BYTES) {
-        safeMeta = { _truncated: true };
-      }
+    const safeMeta = sanitizeMetadata(event.eventName, event.metadata);
+    if (safeMeta && Buffer.byteLength(JSON.stringify(safeMeta)) > MAX_METADATA_BYTES) {
+      return;
     }
 
     // fire-and-forget: 不阻塞调用方
@@ -38,7 +58,7 @@ export class AnalyticsService {
           source: event.source || null,
           deviceType: event.deviceType || null,
           sessionId: event.sessionId || null,
-          customerId: event.customerId || null,
+          customerId: null,
           metadata: safeMeta as any,
           occurredAt: new Date(),
         },
