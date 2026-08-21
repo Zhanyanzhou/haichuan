@@ -3,8 +3,9 @@
  * Journey 母版:01–05 大字叙事,不用步骤圆/连线流程图。
  */
 import { customProcessPuckConfig } from "../../../adapters/customProcess.puck";
-import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
-import { bgColorPresetField, moduleNameField } from "../shared";
+import { getContractRoleQuantity } from "../../../config/blockContracts";
+import { IMAGE_SPECS } from "../../../config/imageSpecs";
+import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 export const customProcessSchema: ModuleInspectorSchema = {
@@ -48,6 +49,8 @@ export const customProcessSchema: ModuleInspectorSchema = {
           label: "旅程节点",
           control: "array",
           itemLabel: "节点",
+          minItems: getContractRoleQuantity("journey", "steps").min,
+          maxItems: getContractRoleQuantity("journey", "steps").max,
           defaultItem: { number: "", en: "", name: "", desc: "", image: "" },
           itemSummary: (item) =>
             `${item.number || ""} ${item.name || item.en || ""}`.trim() ||
@@ -72,7 +75,7 @@ export const customProcessSchema: ModuleInspectorSchema = {
       id: "custom-process-style",
       title: "样式",
       layer: "style",
-      fields: [bgColorPresetField()],
+      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
     },
   ],
 };

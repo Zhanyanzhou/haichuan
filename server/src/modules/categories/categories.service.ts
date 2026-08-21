@@ -25,7 +25,7 @@ export class CategoriesService {
         status: 'PUBLISHED',
         visibility: 'PUBLIC',
         deletedAt: null,
-        category: { isActive: true },
+        category: { isActive: true, deletedAt: null },
       },
       select: { categoryId: true },
       distinct: ['categoryId'],
@@ -36,11 +36,11 @@ export class CategoriesService {
   async findAll() {
     const [categories, directPublicIds] = await Promise.all([
       this.prisma.category.findMany({
-        where: { isActive: true },
+        where: { isActive: true, deletedAt: null },
         orderBy: { sortOrder: 'asc' },
         include: {
           children: {
-            where: { isActive: true },
+            where: { isActive: true, deletedAt: null },
             orderBy: { sortOrder: 'asc' },
           },
         },
@@ -67,19 +67,19 @@ export class CategoriesService {
   async findTree() {
     const [categories, publicCategoryIds] = await Promise.all([
       this.prisma.category.findMany({
-        where: { level: 1, isActive: true },
+        where: { level: 1, isActive: true, deletedAt: null },
         orderBy: { sortOrder: 'asc' },
         include: {
           children: {
-            where: { isActive: true },
+            where: { isActive: true, deletedAt: null },
             orderBy: { sortOrder: 'asc' },
             include: {
               children: {
-                where: { isActive: true },
+                where: { isActive: true, deletedAt: null },
                 orderBy: { sortOrder: 'asc' },
                 include: {
                   children: {
-                    where: { isActive: true },
+                    where: { isActive: true, deletedAt: null },
                     orderBy: { sortOrder: 'asc' },
                   },
                 },
@@ -95,21 +95,106 @@ export class CategoriesService {
 
   /** 管理端分类树：保留已停用的二、三级类目，便于重新启用。 */
   async findManageTree() {
-    return this.prisma.category.findMany({
+    const publicProducts = {
+      where: { deletedAt: null, status: 'PUBLISHED' as const, visibility: 'PUBLIC' as const },
+      take: 1,
+      select: { id: true },
+    };
+    const categories = await this.prisma.category.findMany({
       where: { level: 1 },
       orderBy: { sortOrder: 'asc' },
       include: {
+        products: publicProducts,
         children: {
           orderBy: { sortOrder: 'asc' },
           include: {
+            products: publicProducts,
             _count: { select: { children: true, products: true } },
             children: {
               orderBy: { sortOrder: 'asc' },
-              include: { _count: { select: { children: true, products: true } } },
+              include: {
+                products: publicProducts,
+                _count: { select: { children: true, products: true } },
+              },
             },
           },
         },
       },
+    });
+    const annotate = (node: any): any => {
+      const children = (node.children ?? []).map(annotate);
+      const hasPublicProduct =
+        (node.products?.length ?? 0) > 0 ||
+        children.some((child: any) => child.hasPublicProduct);
+      const { products: _products, ...rest } = node;
+      return { ...rest, children, hasPublicProduct };
+    };
+    return categories.map(annotate);
+  }
+
+  async resolveReferences(inputSlugs: string[]) {
+    const slugs = inputSlugs
+      .map((slug) => slug.trim())
+      .filter(Boolean)
+      .slice(0, 20);
+    if (slugs.length === 0) return [];
+
+    const categories = await this.prisma.category.findMany({
+      select: {
+        id: true,
+        parentId: true,
+        slug: true,
+        name: true,
+        level: true,
+        coverImage: true,
+        isActive: true,
+        deletedAt: true,
+        products: {
+          where: {
+            deletedAt: null,
+            status: 'PUBLISHED',
+            visibility: 'PUBLIC',
+          },
+          take: 1,
+          select: { id: true },
+        },
+      },
+    });
+    const byId = new Map(categories.map((category) => [category.id, category]));
+    const publicBranchIds = new Set<number>();
+    for (const category of categories) {
+      if (category.deletedAt || !category.isActive || category.products.length === 0) continue;
+      let current: (typeof categories)[number] | undefined = category;
+      while (current) {
+        publicBranchIds.add(current.id);
+        current = current.parentId ? byId.get(current.parentId) : undefined;
+      }
+    }
+    const bySlug = new Map(categories.map((category) => [category.slug, category]));
+
+    return slugs.map((slug) => {
+      const category = bySlug.get(slug);
+      if (!category) {
+        return { slug, eligible: false, reason: 'NOT_FOUND' as const };
+      }
+      const reason = category.deletedAt
+        ? 'DELETED'
+        : !category.isActive
+          ? 'INACTIVE'
+          : !publicBranchIds.has(category.id)
+            ? 'NO_PUBLIC_PRODUCT'
+            : !category.coverImage
+              ? 'MISSING_COVER'
+              : 'AVAILABLE';
+      return {
+        slug,
+        id: category.id,
+        name: category.name,
+        level: category.level,
+        coverImage: category.coverImage,
+        eligible: reason === 'AVAILABLE',
+        reason,
+      };
     });
   }
 

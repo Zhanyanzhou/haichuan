@@ -140,6 +140,21 @@ export interface LinkTargetFieldDef extends FieldBase {
   compact?: boolean;
 }
 
+export interface ProductReferencesFieldDef extends FieldBase {
+  control: "productReferences";
+  legacyKey?: string;
+  multiple?: boolean;
+  minItems: number;
+  maxItems: number;
+}
+
+export interface CategoryReferencesFieldDef extends FieldBase {
+  control: "categoryReferences";
+  legacyKey?: string;
+  minItems: number;
+  maxItems: number;
+}
+
 /** 设计预设：一次写入多个键（patch），如配色方案同时写 bgColor+textColor */
 export interface PresetFieldDef extends FieldBase {
   control: "preset";
@@ -170,6 +185,8 @@ export interface ArrayFieldDef extends FieldBase {
   itemLabel: string;
   /** 新增条目的初始值 */
   defaultItem?: Record<string, any>;
+  /** 合同允许的最少条目数；删除按钮与发布提示共同遵守 */
+  minItems?: number;
   maxItems?: number;
   /** 条目字段（复用 FieldDef；条目内不可再嵌套 array） */
   itemFields: FieldDef[];
@@ -187,6 +204,8 @@ export type FieldDef =
   | MediaFieldDef
   | VideoFieldDef
   | LinkTargetFieldDef
+  | ProductReferencesFieldDef
+  | CategoryReferencesFieldDef
   | PresetFieldDef
   | CustomFieldDef
   | ArrayFieldDef;

@@ -39,7 +39,8 @@ export function RequestErrorNotice() {
     <div
       role="alert"
       aria-live="assertive"
-      className="fixed right-4 top-4 z-[1000] max-w-sm rounded border border-red-200 bg-white px-4 py-3 text-sm text-red-700 shadow-lg"
+      className="fixed right-4 top-4 z-[1000] max-w-sm rounded border px-4 py-3 text-sm shadow-lg"
+      style={{ color: "#8C3F3B", background: "#FAF0EF", borderColor: "#D7B6B4" }}
     >
       {message}
     </div>

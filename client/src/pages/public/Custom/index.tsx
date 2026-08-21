@@ -5,12 +5,11 @@ import { productPlaceholder } from '@/utils/placeholder';
 import { usePageMetaStore } from '@/store/pageMetaStore';
 
 /* ═══════ 设计常量 ═══════ */
-const DARK = '#1a1a1a';
-const GOLD = '#B8944E';
-const GOLD_LIGHT = 'rgba(184,148,78,0.15)';
-const BODY = '#2C2C2C';
-const MUTED = '#8A7F72';
-const BG = '#FAF9F6';
+const DARK = '#181A1B';
+const ACCENT = '#6E7477';
+const BODY = '#181A1B';
+const MUTED = '#6E7477';
+const BG = '#F4F5F5';
 const FONT_SERIF = '"Cormorant Garamond","Noto Serif SC",serif';
 const FONT_SANS = 'Inter, system-ui, -apple-system, sans-serif';
 
@@ -26,9 +25,9 @@ const fadeIn = {
 function IconDesign() {
   return (
     <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M24 4L44 24L24 44L4 24Z" stroke={GOLD} strokeWidth="1.2" strokeOpacity="0.7" />
-      <path d="M24 12L32 24L24 36L16 24Z" stroke={GOLD} strokeWidth="0.8" strokeOpacity="0.4" />
-      <circle cx="24" cy="24" r="2" fill={GOLD} fillOpacity="0.5" />
+      <path d="M24 4L44 24L24 44L4 24Z" stroke={ACCENT} strokeWidth="1.2" strokeOpacity="0.7" />
+      <path d="M24 12L32 24L24 36L16 24Z" stroke={ACCENT} strokeWidth="0.8" strokeOpacity="0.4" />
+      <circle cx="24" cy="24" r="2" fill={ACCENT} fillOpacity="0.5" />
     </svg>
   );
 }
@@ -37,10 +36,10 @@ function IconDesign() {
 function IconRemodel() {
   return (
     <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="24" cy="24" r="18" stroke={GOLD} strokeWidth="1.2" strokeOpacity="0.7" />
-      <circle cx="24" cy="24" r="12" stroke={GOLD} strokeWidth="0.8" strokeOpacity="0.4" />
-      <path d="M24 6C28 10 32 16 32 24C32 32 28 38 24 42" stroke={GOLD} strokeWidth="1" strokeOpacity="0.5" />
-      <circle cx="24" cy="24" r="2" fill={GOLD} fillOpacity="0.5" />
+      <circle cx="24" cy="24" r="18" stroke={ACCENT} strokeWidth="1.2" strokeOpacity="0.7" />
+      <circle cx="24" cy="24" r="12" stroke={ACCENT} strokeWidth="0.8" strokeOpacity="0.4" />
+      <path d="M24 6C28 10 32 16 32 24C32 32 28 38 24 42" stroke={ACCENT} strokeWidth="1" strokeOpacity="0.5" />
+      <circle cx="24" cy="24" r="2" fill={ACCENT} fillOpacity="0.5" />
     </svg>
   );
 }
@@ -49,12 +48,12 @@ function IconRemodel() {
 function IconSizing() {
   return (
     <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="24" cy="24" r="16" stroke={GOLD} strokeWidth="1.2" strokeOpacity="0.7" />
-      <line x1="24" y1="6" x2="24" y2="14" stroke={GOLD} strokeWidth="0.8" strokeOpacity="0.5" />
-      <line x1="24" y1="34" x2="24" y2="42" stroke={GOLD} strokeWidth="0.8" strokeOpacity="0.5" />
-      <line x1="6" y1="24" x2="14" y2="24" stroke={GOLD} strokeWidth="0.8" strokeOpacity="0.5" />
-      <line x1="34" y1="24" x2="42" y2="24" stroke={GOLD} strokeWidth="0.8" strokeOpacity="0.5" />
-      <circle cx="24" cy="24" r="3" fill={GOLD} fillOpacity="0.4" />
+      <circle cx="24" cy="24" r="16" stroke={ACCENT} strokeWidth="1.2" strokeOpacity="0.7" />
+      <line x1="24" y1="6" x2="24" y2="14" stroke={ACCENT} strokeWidth="0.8" strokeOpacity="0.5" />
+      <line x1="24" y1="34" x2="24" y2="42" stroke={ACCENT} strokeWidth="0.8" strokeOpacity="0.5" />
+      <line x1="6" y1="24" x2="14" y2="24" stroke={ACCENT} strokeWidth="0.8" strokeOpacity="0.5" />
+      <line x1="34" y1="24" x2="42" y2="24" stroke={ACCENT} strokeWidth="0.8" strokeOpacity="0.5" />
+      <circle cx="24" cy="24" r="3" fill={ACCENT} fillOpacity="0.4" />
     </svg>
   );
 }
@@ -89,32 +88,32 @@ const craftItems = [
  */
 
 /* ═══════ 流程步骤数据 ═══════ */
-const processSteps = [
+  const processSteps = [
   {
     num: '01',
     title: '灵感沟通',
-    desc: '与专属顾问一对一交流，倾听您的故事、喜好与佩戴场景，共同梳理创作方向。您可携带参考图、旧物或任何灵感碎片参与沟通。',
+    desc: '说明佩戴场景、偏好与已有材料，顾问将与您共同梳理需求和可继续确认的方向。',
     imgId: 9905,
     imgAlt: '灵感沟通 — 一对一顾问咨询场景',
   },
   {
     num: '02',
     title: '设计提案',
-    desc: '设计师根据沟通成果呈现设计方向、材质搭配建议与工艺可实现性分析，并与您反复对齐直至方案明确。',
+    desc: '根据沟通结果形成方案与材质建议；具体设计范围、调整方式和费用在推进前确认。',
     imgId: 9906,
     imgAlt: '设计提案 — 设计方向与材质建议',
   },
   {
     num: '03',
     title: '工艺制作',
-    desc: '方案确认后进入工坊制作。从蜡模、铸造到镶嵌与表面处理，逐步完成作品。具体进度由顾问与您同步。',
+    desc: '方案确认后进入制作与质量检查；实际采用的工艺、进度和变更方式以确认内容为准。',
     imgId: 9907,
     imgAlt: '工艺制作 — 工坊制作过程',
   },
   {
     num: '04',
     title: '作品交付',
-    desc: '完成后为您整理作品资料，并就交付方式与后续保养安排与您确认。',
+    desc: '完成后确认作品、相关资料、交付方式与后续可提供的服务说明。',
     imgId: 9908,
     imgAlt: '作品交付 — 作品资料与交付确认',
   },
@@ -140,10 +139,32 @@ export default function Custom() {
   return (
     <main style={{ background: BG, fontFamily: FONT_SANS }}>
 
+      <section style={{
+        position: 'relative',
+        minHeight: 'clamp(640px, 88svh, 900px)',
+        overflow: 'hidden',
+        background: DARK,
+        display: 'flex',
+        alignItems: 'flex-end',
+      }}>
+        <img
+          src="/images/錾刻.png"
+          alt="珠宝制作细节"
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 58%' }}
+        />
+        <div aria-hidden="true" style={{ position: 'absolute', inset: 0, background: 'rgba(17,19,21,.38)' }} />
+        <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 1280, margin: '0 auto', padding: 'clamp(120px,18vh,190px) clamp(24px,6vw,80px) clamp(72px,10vh,112px)' }}>
+          <p style={{ margin: '0 0 20px', color: 'rgba(247,248,248,.66)', fontSize: 11, letterSpacing: '.22em' }}>BESPOKE SERVICE</p>
+          <h1 style={{ margin: '0 0 22px', maxWidth: 620, color: '#F7F8F8', fontFamily: FONT_SERIF, fontWeight: 400, fontSize: 'clamp(44px,6vw,78px)', lineHeight: 1.14 }}>珠宝定制</h1>
+          <p style={{ margin: '0 0 34px', maxWidth: 520, color: 'rgba(247,248,248,.76)', fontSize: 'clamp(14px,1.2vw,17px)', lineHeight: 1.9 }}>从一次沟通开始，逐步确认设计、材质、制作与交付安排。</p>
+          <a href="#custom-services" style={{ display: 'inline-flex', alignItems: 'center', minHeight: 44, color: '#F7F8F8', textDecoration: 'none', borderBottom: '1px solid rgba(247,248,248,.52)', fontSize: 13, letterSpacing: '.08em' }}>了解定制服务</a>
+        </div>
+      </section>
+
       {/* ═══════════════════════════════════════════
           1. 定制服务价值（三列）
           ═══════════════════════════════════════════ */}
-      <section style={{
+      <section id="custom-services" style={{
         maxWidth: 1100,
         margin: '0 auto',
         padding: 'clamp(60px, 8vw, 100px) 24px',
@@ -157,7 +178,7 @@ export default function Custom() {
           <p style={{
             fontSize: 11,
             letterSpacing: '0.22em',
-            color: GOLD,
+            color: ACCENT,
             textTransform: 'uppercase',
             textAlign: 'center',
             marginBottom: 12,
@@ -182,9 +203,9 @@ export default function Custom() {
           gap: 'clamp(32px, 4vw, 56px)',
         }}>
           {[
-            { icon: <IconDesign />, title: '专属设计', desc: '从零到一，为您量身打造独一无二的珠宝作品。无论是婚嫁套装、纪念礼物还是个人收藏，设计师将您的故事转化为可佩戴的艺术。' },
-            { icon: <IconRemodel />, title: '珠宝改款', desc: '让旧款珠宝焕发新生。我们提供款式翻新、结构改造、材质升级服务。保留经典元素的同时，融入当代审美与您的个人风格。' },
-            { icon: <IconSizing />, title: '尺寸定制', desc: '精准测量，完美贴合。提供圈口调整、链长定制、佩戴舒适度优化。每一毫米都经过反复确认，确保作品与您的身体和谐共生。' },
+            { icon: <IconDesign />, title: '专属设计', desc: '说明佩戴场景、审美偏好与重要信息，在沟通后确认可以继续推进的设计范围。' },
+            { icon: <IconRemodel />, title: '珠宝改款', desc: '针对已有珠宝的状态、结构与材料进行评估，再确认是否适合翻新、改造或重新设计。' },
+            { icon: <IconSizing />, title: '尺寸调整', desc: '围绕圈口、链长与佩戴舒适度提出需求，具体可调整范围以作品结构评估为准。' },
           ].map((item, i) => (
             <motion.div
               key={item.title}
@@ -195,11 +216,11 @@ export default function Custom() {
               style={{
                 display: 'flex',
                 flexDirection: 'column',
-                alignItems: 'center',
-                textAlign: 'center',
-                padding: '40px 24px',
-                border: '1px solid rgba(138,127,114,0.12)',
-                background: 'rgba(255,255,255,0.3)',
+                alignItems: 'flex-start',
+                textAlign: 'left',
+                padding: '28px 0 0',
+                borderTop: '1px solid rgba(24,26,27,0.18)',
+                background: 'transparent',
               }}
             >
               <div style={{ marginBottom: 24 }}>{item.icon}</div>
@@ -231,7 +252,7 @@ export default function Custom() {
           3. 四步定制流程（交错图文）
           ═══════════════════════════════════════════ */}
       <section id="process" style={{
-        background: '#F3F0EA',
+        background: '#DDE1E2',
         padding: 'clamp(60px, 8vw, 100px) 24px',
       }}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
@@ -242,7 +263,7 @@ export default function Custom() {
             variants={fadeIn}
             style={{ textAlign: 'center', marginBottom: 64 }}
           >
-            <p style={{ fontSize: 11, letterSpacing: '0.22em', color: GOLD, textTransform: 'uppercase', marginBottom: 12 }}>
+            <p style={{ fontSize: 11, letterSpacing: '0.22em', color: ACCENT, textTransform: 'uppercase', marginBottom: 12 }}>
               OUR PROCESS
             </p>
             <h2 style={{
@@ -297,7 +318,7 @@ export default function Custom() {
                     fontFamily: FONT_SANS,
                     fontSize: 'clamp(48px, 6vw, 72px)',
                     fontWeight: 300,
-                    color: GOLD,
+                    color: ACCENT,
                     lineHeight: 1,
                     opacity: 0.3,
                     display: 'block',
@@ -346,7 +367,7 @@ export default function Custom() {
           variants={fadeIn}
           style={{ textAlign: 'center', marginBottom: 56 }}
         >
-          <p style={{ fontSize: 11, letterSpacing: '0.22em', color: GOLD, textTransform: 'uppercase', marginBottom: 12 }}>
+          <p style={{ fontSize: 11, letterSpacing: '0.22em', color: ACCENT, textTransform: 'uppercase', marginBottom: 12 }}>
             MATERIALS & CRAFT
           </p>
           <h2 style={{
@@ -376,7 +397,7 @@ export default function Custom() {
                 position: 'relative',
                 aspectRatio: '4 / 5',
                 overflow: 'hidden',
-                background: '#E8E3D9',
+                background: '#DDE1E2',
               }}
             >
               {/* TODO: 替换为真实材质与工艺摄影，建议 4:5 竖版 */}
@@ -385,20 +406,20 @@ export default function Custom() {
                 alt={`海川珠宝工艺 — ${item.title}`}
                 style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
               />
-              {/* 底部渐变遮罩 + 标题 */}
+              {/* 实色标题带，避免图片亮部影响可读性。 */}
               <div style={{
                 position: 'absolute',
                 bottom: 0,
                 left: 0,
                 right: 0,
-                padding: '32px 20px 20px',
-                background: 'linear-gradient(to top, rgba(26,26,26,0.7) 0%, transparent 100%)',
+                padding: '14px 20px',
+                background: 'rgba(24,26,27,0.78)',
               }}>
                 <h4 style={{
                   fontFamily: FONT_SERIF,
                   fontSize: 18,
                   fontWeight: 400,
-                  color: '#F3F0EA',
+                  color: '#F4F5F5',
                   margin: 0,
                 }}>
                   {item.title}
@@ -425,7 +446,7 @@ export default function Custom() {
           variants={fadeIn}
           style={{ textAlign: 'center', marginBottom: 48 }}
         >
-          <p style={{ fontSize: 11, letterSpacing: '0.22em', color: GOLD, textTransform: 'uppercase', marginBottom: 12 }}>
+          <p style={{ fontSize: 11, letterSpacing: '0.22em', color: ACCENT, textTransform: 'uppercase', marginBottom: 12 }}>
             FAQ
           </p>
           <h2 style={{
@@ -444,7 +465,7 @@ export default function Custom() {
             <div
               key={i}
               style={{
-                borderBottom: '1px solid rgba(138,127,114,0.15)',
+                borderBottom: '1px solid rgba(24,26,27,0.12)',
               }}
             >
               <button
@@ -465,7 +486,7 @@ export default function Custom() {
                 <span style={{
                   fontSize: 'clamp(13px, 1vw, 15px)',
                   fontWeight: 400,
-                  color: openFaq === i ? GOLD : BODY,
+                  color: openFaq === i ? ACCENT : BODY,
                   transition: 'color 0.3s',
                   paddingRight: 24,
                 }}>
@@ -474,7 +495,7 @@ export default function Custom() {
                 <span style={{
                   flexShrink: 0,
                   fontSize: 20,
-                  color: openFaq === i ? GOLD : 'rgba(138,127,114,0.5)',
+                  color: openFaq === i ? ACCENT : 'rgba(24,26,27,0.45)',
                   transition: 'transform 0.35s, color 0.3s',
                   transform: openFaq === i ? 'rotate(45deg)' : 'rotate(0deg)',
                   lineHeight: 1,
@@ -523,7 +544,7 @@ export default function Custom() {
             fontFamily: FONT_SERIF,
             fontSize: 'clamp(28px, 3.6vw, 42px)',
             fontWeight: 400,
-            color: '#F3F0EA',
+            color: '#F4F5F5',
             lineHeight: 1.3,
             margin: '0 0 16px',
           }}>
@@ -531,7 +552,7 @@ export default function Custom() {
           </h2>
           <p style={{
             fontSize: 'clamp(13px, 1vw, 15px)',
-            color: 'rgba(243,240,234,0.55)',
+            color: 'rgba(247,248,248,0.62)',
             lineHeight: 1.8,
             margin: '0 0 40px',
           }}>
@@ -547,8 +568,8 @@ export default function Custom() {
             <Link to="/contact" style={{
               display: 'inline-block',
               padding: '14px 40px',
-              background: GOLD,
-              color: '#fff',
+              background: '#F4F5F5',
+              color: DARK,
               fontSize: 13,
               letterSpacing: '0.18em',
               textTransform: 'uppercase',
@@ -557,8 +578,8 @@ export default function Custom() {
               fontWeight: 500,
               transition: 'background 0.4s',
             }}
-              onMouseEnter={e => (e.currentTarget.style.background = '#A07D3A')}
-              onMouseLeave={e => (e.currentTarget.style.background = GOLD)}
+              onMouseEnter={e => (e.currentTarget.style.background = '#FFFFFF')}
+              onMouseLeave={e => (e.currentTarget.style.background = '#F4F5F5')}
             >
               预约私人顾问
             </Link>
@@ -566,18 +587,18 @@ export default function Custom() {
               display: 'inline-block',
               padding: '14px 40px',
               background: 'transparent',
-              color: 'rgba(243,240,234,0.7)',
+              color: 'rgba(247,248,248,0.78)',
               fontSize: 13,
               letterSpacing: '0.18em',
               textTransform: 'uppercase',
               textDecoration: 'none',
               fontFamily: FONT_SANS,
               fontWeight: 400,
-              border: '1px solid rgba(243,240,234,0.2)',
+              border: '1px solid rgba(247,248,248,0.32)',
               transition: 'border-color 0.4s, color 0.4s',
             }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = GOLD; e.currentTarget.style.color = GOLD; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(243,240,234,0.2)'; e.currentTarget.style.color = 'rgba(243,240,234,0.7)'; }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = ACCENT; e.currentTarget.style.color = ACCENT; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(247,248,248,0.32)'; e.currentTarget.style.color = 'rgba(247,248,248,0.78)'; }}
             >
               联系客服
             </Link>

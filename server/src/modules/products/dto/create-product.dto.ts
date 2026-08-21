@@ -1,10 +1,34 @@
 import {
   IsString, IsOptional, IsInt, IsBoolean, IsEnum, IsNumber,
-  Min, MaxLength, IsNotEmpty, ValidateNested,
+  Min, MaxLength, IsNotEmpty, ValidateNested, IsArray, ArrayMaxSize,
+  IsIn, IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { MaterialType, ProductStatus, ProductVisibility, SalesMode } from '@prisma/client';
+import {
+  MaterialType, ProductStatus, ProductVisibility, SalesMode,
+  ProductPurchaseRegion, ProductPublishMode, ProductFulfillmentType,
+  ProductDispatchTime,
+} from '@prisma/client';
 import { CreateSkuDto } from './sku.dto';
+
+export class ProductDetailBlockDto {
+  @IsIn(['TEXT', 'IMAGE'], { message: '详情模块类型不正确' })
+  type!: 'TEXT' | 'IMAGE';
+
+  @IsOptional()
+  @IsString()
+  text?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: '详情图片标识不正确' })
+  imageId?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  alt?: string;
+}
 
 /**
  * 创建商品 DTO
@@ -74,6 +98,13 @@ export class CreateProductDto {
   craftTechnique?: any;
 
   @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50, { message: '详情模块不能超过50个' })
+  @ValidateNested({ each: true })
+  @Type(() => ProductDetailBlockDto)
+  detailContent?: ProductDetailBlockDto[];
+
+  @IsOptional()
   @IsEnum(ProductStatus, { message: '商品状态不正确，请重新选择' })
   status?: ProductStatus;
 
@@ -84,6 +115,62 @@ export class CreateProductDto {
   @IsOptional()
   @IsEnum(SalesMode, { message: '销售模式不正确，请重新选择' })
   salesMode?: SalesMode;
+
+  @IsOptional()
+  @IsEnum(ProductPurchaseRegion)
+  purchaseRegion?: ProductPurchaseRegion;
+
+  @IsOptional()
+  @IsEnum(ProductPublishMode)
+  publishMode?: ProductPublishMode;
+
+  @IsOptional()
+  @IsDateString({}, { message: '定时上架时间格式不正确' })
+  scheduledPublishAt?: string | null;
+
+  @IsOptional()
+  @IsEnum(ProductFulfillmentType)
+  fulfillmentType?: ProductFulfillmentType;
+
+  @IsOptional()
+  @IsEnum(ProductDispatchTime)
+  dispatchTime?: ProductDispatchTime;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  shippingTemplateId?: number | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsString({ each: true })
+  deliveryMethods?: string[];
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  requiresInsuredShipping?: boolean;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  requiresSignature?: boolean;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  includesCertificate?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  packageType?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  customLeadTime?: string;
 
   @IsOptional()
   @Type(() => Number)

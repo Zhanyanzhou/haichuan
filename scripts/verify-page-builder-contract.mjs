@@ -4,10 +4,13 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const [clientSource, serverSource, rendererSource] = await Promise.all([
+const [clientSource, serverSource, rendererSource, blockMetaSource, homepageConfigSource, schemaInspectorSource] = await Promise.all([
   readFile(path.join(root, "client/src/page-builder/config/puckConfig.tsx"), "utf8"),
   readFile(path.join(root, "server/src/modules/page-modules/page-modules.service.ts"), "utf8"),
   readFile(path.join(root, "client/src/page-builder/runtime/PuckDocumentRenderer.tsx"), "utf8"),
+  readFile(path.join(root, "client/src/page-builder/config/blockMeta.ts"), "utf8"),
+  readFile(path.join(root, "client/src/pages/admin/HomepageConfig/index.tsx"), "utf8"),
+  readFile(path.join(root, "client/src/page-builder/inspector/SchemaInspectorPanel.tsx"), "utf8"),
 ]);
 
 function clientBlockTypes(source) {
@@ -38,6 +41,34 @@ const missingOnRenderer = clientTypes.filter(
 );
 assert.deepEqual(missingOnRenderer, [], `前台渲染器缺少区块类型：${missingOnRenderer.join("、")}`);
 
+// 生命周期只限制“新增入口”，不能影响存量 Renderer。模板库必须消费生成合同的状态，
+// 不能再把所有已注册组件直接暴露给运营人员。
+assert.match(
+  blockMetaSource,
+  /CONTENT_TEMPLATE_REGISTRY[\s\S]*isContentTemplateInsertable/,
+  "模块元数据必须从生成合同读取模板实施状态",
+);
+assert.match(
+  homepageConfigSource,
+  /isContentTemplateInsertable\(name\)/,
+  "模板库必须按合同实施状态限制新增入口",
+);
+assert.match(
+  homepageConfigSource,
+  /<SchemaInspectorPanel[\s\S]*publishIssues=\{publishIssues\}/,
+  "当前模块的发布问题必须传入属性面板",
+);
+assert.match(
+  schemaInspectorSource,
+  /BUSINESS_TASK_GROUP_ORDER[\s\S]*"product"[\s\S]*"media"/,
+  "业务对象模块必须先选择业务事实，再编辑表现内容",
+);
+assert.match(
+  schemaInspectorSource,
+  /issue\.blockId === editor\.props\.id/,
+  "属性面板必须只显示当前模块的发布问题",
+);
+
 const publishProductCheck = serverSource.match(
   /if \(productIds\.size > 0\) \{([\s\S]*?)\n    \}/,
 );
@@ -51,7 +82,7 @@ assert.match(
 assert.match(
   publishProductSource,
   /status:\s*["']PUBLISHED["']/,
-  "页面发布必须拒绝引用草稿商品",
+  "页面发布必须拒绝引用未上架商品",
 );
 assert.match(
   publishProductSource,
@@ -62,6 +93,7 @@ assert.match(
 const productVisibilityCases = [
   { name: "public", status: "PUBLISHED", visibility: "PUBLIC", deletedAt: null, allowed: true },
   { name: "draft", status: "DRAFT", visibility: "PUBLIC", deletedAt: null, allowed: false },
+  { name: "member", status: "PUBLISHED", visibility: "MEMBER", deletedAt: null, allowed: false },
   { name: "internal", status: "PUBLISHED", visibility: "INTERNAL", deletedAt: null, allowed: false },
   { name: "deleted", status: "PUBLISHED", visibility: "PUBLIC", deletedAt: new Date(), allowed: false },
 ];

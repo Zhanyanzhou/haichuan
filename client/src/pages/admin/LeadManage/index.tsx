@@ -303,7 +303,7 @@ export default function LeadManage() {
       <Card
         style={{
           borderRadius: 10,
-          border: "1px solid #E7E6E2",
+          border: "1px solid var(--adm-line)",
           marginBottom: 16,
         }}
       >

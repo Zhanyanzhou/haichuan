@@ -7,7 +7,10 @@
  * 提供 props 读取、patch 写入、设备档、dirty 判断、撤销与整页草稿保存。
  */
 import { useEffect, useMemo, useRef } from "react";
-import { useHomepagePuck } from "../../pages/admin/HomepageConfig/editor-store";
+import {
+  ROOT_ZONE,
+  useHomepagePuck,
+} from "../../pages/admin/HomepageConfig/editor-store";
 import {
   cloneModuleProps,
   getInspectorDevice,
@@ -40,7 +43,7 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
   const selectedKey = props.id || moduleType;
   const content = appData.content as Array<{
     type: string;
-    props: Record<string, any>;
+    props: { id: string; [key: string]: any };
   }>;
   const index = useMemo(
     () => content.findIndex((item) => item.props?.id === props.id),
@@ -66,17 +69,33 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
 
   const update = (patch: Record<string, any>) => {
     if (index < 0) return;
-    const next = [...content];
-    next[index] = { ...next[index], props: { ...next[index].props, ...patch } };
-    dispatch({ type: "setData", data: { ...appData, content: next } });
+    const nextItem = {
+      ...content[index],
+      props: { ...content[index].props, ...patch },
+    };
+    dispatch({
+      type: "replace",
+      destinationIndex: index,
+      destinationZone: ROOT_ZONE,
+      data: nextItem,
+    });
   };
 
   const revert = () => {
     const baseline = baselineRef.current.get(selectedKey);
     if (!baseline || index < 0) return;
-    const next = [...content];
-    next[index] = { ...next[index], props: cloneModuleProps(baseline) };
-    dispatch({ type: "setData", data: { ...appData, content: next } });
+    dispatch({
+      type: "replace",
+      destinationIndex: index,
+      destinationZone: ROOT_ZONE,
+      data: {
+        ...content[index],
+        props: {
+          ...cloneModuleProps(baseline),
+          id: content[index].props.id,
+        },
+      },
+    });
   };
 
   const close = () =>

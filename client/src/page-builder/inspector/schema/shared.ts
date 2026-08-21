@@ -73,8 +73,9 @@ const RATIO_SHAPE_LABELS: Record<string, string> = {
   "1 / 1": "方形",
   "4 / 5": "竖版",
   "3 / 2": "横版",
+  "4 / 3": "经典横版",
   "16 / 9": "宽屏",
-  "21 / 6": "超宽",
+  "21 / 9": "电影宽幕",
   // 2026-08-19 视频域专属:手机竖屏素材的全屏形态,仅视频移动端预设开放
   "9 / 16": "竖屏",
 };
@@ -110,7 +111,7 @@ export function bgColorPresetField(): FieldDef {
     key: "bgColor",
     label: "配色方案",
     control: "preset",
-    hint: "品牌调性预设；精确色值可在下方直接输入",
+    hint: "从受控品牌预设和色板中选择，仅影响当前页面实例",
     options: Object.entries(TONE_PRESETS).map(([key, preset]) => ({
       label: preset.label,
       value: key,

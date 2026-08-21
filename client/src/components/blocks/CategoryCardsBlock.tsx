@@ -58,12 +58,13 @@ export default function CategoryCardsBlock({
   return (
     <DecorSection master="commerce-entry" background={bg}>
       {(title || subtitle || editMode) && (
-        <div style={{ textAlign: "center", maxWidth: 560, margin: "0 auto 40px" }}>
-          {title ? <h2 style={{ fontSize: 'var(--hc-type-h2, clamp(22px,2.5vw,34px))', fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, color: "#1A1A1A", margin: "0 0 10px", lineHeight: 1.2 }}>{title}</h2> : null}
-          {subtitle ? <p style={{ margin: 0, color: "#8C8C8C", fontSize: 13, lineHeight: 1.7 }}>{subtitle}</p> : null}
+        <div data-content-role="copy" style={{ textAlign: "center", maxWidth: 560, margin: "0 auto 40px" }}>
+          {title ? <h2 style={{ fontSize: 'var(--hc-type-h2, clamp(22px,2.5vw,34px))', fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, color: "#181A1B", margin: "0 0 10px", lineHeight: 1.2 }}>{title}</h2> : null}
+          {subtitle ? <p style={{ margin: 0, color: "#6E7477", fontSize: 13, lineHeight: 1.7 }}>{subtitle}</p> : null}
         </div>
       )}
       <div
+        data-content-role={isSceneShopping ? "scenes" : "categories"}
         style={{
           display: "grid",
           gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
@@ -89,7 +90,7 @@ export default function CategoryCardsBlock({
                 className="homepage-category-cards__media"
                 style={{
                   overflow: "hidden",
-                  background: "#EDE9E2",
+                  background: "#F4F5F5",
                 }}
               >
                 {c.image ? (
@@ -113,7 +114,7 @@ export default function CategoryCardsBlock({
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      color: "#C4BFB5",
+                      color: "#B8BEC1",
                       fontSize: editMode ? 0 : 28,
                       backgroundImage: editMode
                         ? "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='118' height='84' viewBox='0 0 118 84' fill='none'%3E%3Cpath d='M16 28.5c0-4.6 3.7-8.3 8.3-8.3 3.6 0 6.7 2.3 7.8 5.6a7.7 7.7 0 0111.3 6.8c0 4.3-3.5 7.8-7.8 7.8H17.8A8.2 8.2 0 0116 28.5zM82 49.6c0-3.9 3.1-7 7-7 3.1 0 5.8 2 6.7 4.8a6.6 6.6 0 019.7 5.8c0 3.7-3 6.7-6.7 6.7H83.6A7 7 0 0182 49.6z' stroke='%23D9E0E9' stroke-width='1.5'/%3E%3Crect x='43' y='27' width='38' height='31' rx='3.5' stroke='%233687F5' stroke-width='2'/%3E%3Cpath d='M46.5 53l8.6-8.2 7.2 6 5.8-5.2 9.5 8.4' stroke='%233687F5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='71.2' cy='36.8' r='3.6' stroke='%233687F5' stroke-width='2'/%3E%3Cpath d='M32 68.5h54' stroke='%23E7EBF1' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E\")"
@@ -126,19 +127,21 @@ export default function CategoryCardsBlock({
                   </div>
                 )}
               </div>
-              {/* 底部渐变 + 文字叠加 */}
+              {/* 合同允许的实色安全文字带：避免依赖图片本身证明对比度。 */}
               <div
                 style={{
                   position: "absolute",
-                  inset: 0,
-                  background:
-                    "linear-gradient(to top, rgba(15,13,12,0.45) 0%, rgba(15,13,12,0.02) 55%, transparent 100%)",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  minHeight: "34%",
+                  background: "#181A1B",
                 }}
               />
               <div
                 style={{
                   position: "absolute",
-                  bottom: 20,
+                  bottom: 16,
                   left: 20,
                   right: 20,
                 }}
@@ -155,11 +158,11 @@ export default function CategoryCardsBlock({
                   {c.name || "分类名称"}
                 </p>
                 {c.description ? (
-                  <p style={{ color: "rgba(255,255,255,0.72)", fontSize: 11, margin: "4px 0 0", lineHeight: 1.45 }}>{c.description}</p>
+                  <p style={{ color: "#DDE1E2", fontSize: 11, margin: "4px 0 0", lineHeight: 1.45 }}>{c.description}</p>
                 ) : c.count && (
                   <p
                     style={{
-                      color: "rgba(255,255,255,0.65)",
+                      color: "#DDE1E2",
                       fontSize: 11,
                       margin: "4px 0 0",
                     }}
@@ -180,7 +183,7 @@ export default function CategoryCardsBlock({
       </div>
       <style>{`
         .homepage-category-cards__media { aspect-ratio: var(--hc-entry-ratio-desktop); }
-        @media ${RESPONSIVE_CANVAS.tabletMediaQuery} {
+        @media ${RESPONSIVE_CANVAS.compactDesktopMediaQuery} {
           .homepage-category-cards__grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 20px !important; }
         }
         /* Mobile 两列(入口卡组母版规则) */

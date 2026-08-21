@@ -172,7 +172,7 @@ export default function AIClassify() {
           columns={[
             { title: 'ID', dataIndex: 'id', width: 60 },
             { title: '预测分类', dataIndex: 'predictedCategoryName', width: 120, render: (v: string) => <Tag color="blue">{v}</Tag> },
-            { title: '置信度', dataIndex: 'confidence', width: 100, render: (v: number) => <span className={`font-sans font-bold ${v > 90 ? 'text-green-500' : v > 70 ? 'text-brand-gold' : 'text-red-400'}`}>{v}%</span> },
+            { title: '置信度', dataIndex: 'confidence', width: 100, render: (v: number) => <span className="font-sans font-bold" style={{ color: v > 90 ? "var(--adm-success)" : v > 70 ? "var(--adm-warning)" : "var(--adm-error)" }}>{v}%</span> },
             { title: '状态', dataIndex: 'status', width: 120, render: (v: string) => { const s = sm[v]; return <Tag color={s?.c}>{s?.t}</Tag>; } },
             { title: '时间', dataIndex: 'createdAt', width: 150 },
             { title: '操作', width: 168, render: (_: any, r: any) => r.status === 'pending_confirm' ? <Space><Button size="small" type="primary" onClick={() => handleConfirm(r)}>确认结果</Button><Button size="small" onClick={() => handleReject(r.id)}>驳回结果</Button></Space> : null },

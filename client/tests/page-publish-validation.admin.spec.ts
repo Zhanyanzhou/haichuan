@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
  * 店铺装修 —— 发布前校验与边界约束（D3）回归测试
  *
  * 覆盖：发布预检（前端调用后端 /document/validate，单一校验源）的边界反馈。
- *   - 超长文本 / 过多组件 / 必填缺失 → 弹出可定位的问题列表
+ *   - 超长文本 / 过多组件 / 必填缺失 → 后台校验完成后直接禁用发布入口
  *   - 合法数据 → 预检通过并完成发布
  *
  * 运行方式（需已登录 admin 会话快照，非 mock 模式）：
@@ -100,7 +100,7 @@ function json(data: unknown) {
 test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () => {
   test.skip(useMock, "发布预检闭环依赖 HTTP 拦截夹具，mock 模式下由手动验收覆盖");
 
-  test("超长文本 / 过多组件 / SEO 超限等校验失败时，弹出可定位的问题列表", async ({ page }) => {
+  test("超长文本 / 过多组件 / SEO 超限时，最新服务端门禁直接禁用发布入口", async ({ page }) => {
     await mockEditorApis(page, {
       valid: false,
       errors: [
@@ -113,18 +113,20 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
 
-    // 点击发布 → 先走发布预检（validate），失败时直接弹问题列表
-    await page.locator(".homepage-editor__toolbar-publish").click();
-
-    const errorDialog = page.getByRole("dialog").filter({ hasText: "发布前需修复" });
-    await expect(errorDialog).toBeVisible();
-    await expect(errorDialog).toContainText("发布前需修复 3 个问题");
-    // 三类规则（文本长度 / 组件总数 / SEO）的错误都应展示
-    await expect(errorDialog).toContainText("title 文本过长");
-    await expect(errorDialog).toContainText("可见模块过多");
-    await expect(errorDialog).toContainText("seoTitle 过长");
-    // 区块级错误应提供「定位此模块」入口，便于跳到对应组件
-    await expect(errorDialog.getByRole("button", { name: "定位此模块" })).toBeVisible();
+    const publishButton = page.locator(".homepage-editor__toolbar-publish");
+    // checking / stale 期间也必须先保持禁用，不能短暂闪现为可发布。
+    await expect(publishButton).toBeDisabled();
+    await expect(publishButton).toHaveAttribute(
+      "aria-label",
+      /发布到前台网站（.+发布资格.+）/,
+    );
+    // 服务端返回三个阻断问题后，按钮继续禁用并说明真实原因。
+    await expect(publishButton).toHaveAttribute(
+      "title",
+      "还有 3 项发布问题需要处理",
+    );
+    await expect(publishButton).toBeDisabled();
+    await expect(page.getByRole("dialog").filter({ hasText: "发布前需修复" })).toHaveCount(0);
   });
 
   test("合法数据通过预检并完成发布", async ({ page }) => {

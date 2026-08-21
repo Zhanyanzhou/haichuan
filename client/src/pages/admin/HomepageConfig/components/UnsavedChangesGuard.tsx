@@ -4,7 +4,7 @@
  * 三选项：保存并离开（主）/ 直接离开（放弃修改）/ 继续编辑。
  * 仅拦截 pathname 变化（编辑器状态按路径隔离，search 变化无需拦截）。
  */
-import { Modal, message } from "antd";
+import { Button, Modal, message } from "antd";
 import { useBlocker } from "react-router-dom";
 
 interface UnsavedChangesGuardProps {
@@ -14,13 +14,20 @@ interface UnsavedChangesGuardProps {
   disabled?: boolean;
   /** 保存当前草稿；返回是否成功（失败则留在当前页） */
   onSaveAndLeave: () => Promise<boolean>;
+  /** 弹窗中说明正在编辑的对象，避免复用时出现错误业务文案 */
+  subject?: string;
+  /** 供具体编辑器校准弹窗视觉，不改变共享默认主题 */
+  rootClassName?: string;
 }
 
 export default function UnsavedChangesGuard({
   hasUnsavedChanges,
   disabled,
   onSaveAndLeave,
+  subject = "当前页面",
+  rootClassName,
 }: UnsavedChangesGuardProps) {
+  const [messageApi, messageContext] = message.useMessage();
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
       hasUnsavedChanges &&
@@ -28,78 +35,36 @@ export default function UnsavedChangesGuard({
       currentLocation.pathname !== nextLocation.pathname,
   );
 
-  if (blocker.state !== "blocked") return null;
+  if (blocker.state !== "blocked") return messageContext;
 
   const handleSaveAndLeave = async () => {
     const ok = await onSaveAndLeave();
     if (ok) {
       blocker.proceed();
     } else {
-      message.error("草稿保存失败，已留在当前页面");
+      messageApi.error("修改未保存，已留在当前页面");
       blocker.reset();
     }
   };
 
   return (
-    <Modal
-      open
-      title="有未保存的修改"
-      okText="保存并离开"
-      cancelText="继续编辑"
-      onOk={handleSaveAndLeave}
-      onCancel={blocker.reset}
-      footer={[
-        <button
-          key="discard"
-          type="button"
-          className="unsaved-guard__discard"
-          onClick={blocker.proceed}
-          style={{
-            border: 0,
-            background: "transparent",
-            color: "var(--adm-error)",
-            cursor: "pointer",
-            fontSize: 13,
-            marginRight: "auto",
-            padding: "4px 8px",
-          }}
-        >
-          直接离开（放弃修改）
-        </button>,
-        <button
-          key="cancel"
-          type="button"
-          onClick={blocker.reset}
-          style={{
-            border: "1px solid #E3DDD4",
-            borderRadius: 4,
-            background: "#FFF",
-            padding: "5px 14px",
-            cursor: "pointer",
-            fontSize: 13,
-          }}
-        >
-          继续编辑
-        </button>,
-        <button
-          key="save"
-          type="button"
-          onClick={() => void handleSaveAndLeave()}
-          style={{
-            border: 0,
-            borderRadius: 4,
-            background: "#6f5733",
-            color: "#fff",
-            padding: "5px 14px",
-            cursor: "pointer",
-            fontSize: 13,
-          }}
-        >
-          保存并离开
-        </button>,
-      ]}
-    >
-      离开前是否保存当前页面的装修草稿？直接离开将丢失未保存的修改。
-    </Modal>
+    <>
+      {messageContext}
+      <Modal
+        open
+        rootClassName={rootClassName}
+        title="有未保存的修改"
+        onCancel={blocker.reset}
+        footer={[
+          <Button key="discard" type="text" danger className="unsaved-guard__discard" onClick={blocker.proceed} style={{ marginRight: "auto" }}>
+            直接离开（放弃修改）
+          </Button>,
+          <Button key="cancel" onClick={blocker.reset}>继续编辑</Button>,
+          <Button key="save" type="primary" onClick={() => void handleSaveAndLeave()}>保存并离开</Button>,
+        ]}
+      >
+        离开前是否保存{subject}的修改？直接离开将丢失未保存的修改。
+      </Modal>
+    </>
   );
 }

@@ -18,11 +18,11 @@ import { getMaterialCode } from "@/utils/material";
 
 const T = {
   bg: "#FFFFFF",
-  txt: "#29241F",
-  sec: "rgba(41,36,31,0.58)",
-  light: "rgba(41,36,31,0.38)",
-  line: "#E8E7E3",
-  imgBg: "#FAF9F7",
+  txt: "#181A1B",
+  sec: "rgba(24,26,27,0.62)",
+  light: "rgba(24,26,27,0.42)",
+  line: "#DDE1E2",
+  imgBg: "#F4F5F5",
 };
 const PX = "clamp(32px,5vw,80px)";
 const MW = 1320;
@@ -711,7 +711,7 @@ export default function Search() {
                 height: 44,
                 paddingLeft: 38,
                 paddingRight: query ? 70 : 16,
-                border: `1px solid ${focused ? "rgba(41,36,31,0.40)" : T.line}`,
+                border: `1px solid ${focused ? "rgba(24,26,27,0.40)" : T.line}`,
                 borderRadius: 0,
                 background: T.bg,
                 fontSize: 15,
@@ -810,7 +810,7 @@ export default function Search() {
                         cursor: "pointer",
                       }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.background = "#F9F9F7";
+                        e.currentTarget.style.background = "#F4F5F5";
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.background = "none";

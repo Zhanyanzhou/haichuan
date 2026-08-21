@@ -6,10 +6,8 @@ import {
   FEATURED_PRODUCT_CONTRACT,
   evaluateFeaturedProductContract,
 } from "../../../config/blockContracts";
-import { createElement } from "react";
 import { featuredProductPuckConfig } from "../../../adapters/featuredProduct.puck";
-import ProductIdsField from "../../../fields/ProductIdsField";
-import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
+import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 /** 槽位比例选项(契约派生):作品图全端一致 */
@@ -30,16 +28,13 @@ export const featuredProductSchema: ModuleInspectorSchema = {
       description: "从商品系统选择主推作品，作品图固定 4:5，不重复上传",
       fields: [
         {
-          key: "productId",
+          key: "productCode",
           label: "选择作品",
-          control: "custom",
-          render: ({ props, update }) =>
-            createElement(ProductIdsField, {
-              value:
-                Number(props.productId) > 0 ? [Number(props.productId)] : [],
-              onChange: (ids: number[]) => update({ productId: ids[0] ?? 0 }),
-              maxProducts: 1,
-            }),
+          control: "productReferences",
+          legacyKey: "productId",
+          multiple: false,
+          minItems: 1,
+          maxItems: 1,
         },
       ],
     },
@@ -134,7 +129,7 @@ export const featuredProductSchema: ModuleInspectorSchema = {
       id: "featured-style",
       title: "样式",
       layer: "style",
-      fields: [bgColorPresetField()],
+      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
     },
     {
       id: "featured-feature",

@@ -575,9 +575,21 @@ export default function AdminLayout() {
               </button>
             </>
           ) : null}
-          <Link to="/" target="_blank" className="admin-header__link">
-            预览网站
-          </Link>
+          {isEditorWorkspace ? (
+            <Link
+              to="/"
+              target="_blank"
+              className="admin-header__icon-btn"
+              title="预览网站"
+              aria-label="预览网站"
+            >
+              <GlobalOutlined />
+            </Link>
+          ) : (
+            <Link to="/" target="_blank" className="admin-header__link">
+              预览网站
+            </Link>
+          )}
           <Dropdown
             menu={{
               items: userMenuItems,

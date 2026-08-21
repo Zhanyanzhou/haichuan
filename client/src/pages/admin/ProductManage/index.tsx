@@ -12,6 +12,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   message,
   Modal,
 } from "antd";
@@ -21,7 +22,11 @@ import {
   PlusOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { categoryApi, productApi } from "@/services/api";
+import {
+  categoryApi,
+  productApi,
+  type ProductAdminQuery,
+} from "@/services/api";
 import { getMaterialLabel } from "@/utils/material";
 import { formatPrice } from "@/utils/format";
 import { getThumbnailImage } from "@/utils/productImage";
@@ -38,6 +43,7 @@ type ProductListItem = Product & {
   completeness?: {
     score: number;
     isComplete: boolean;
+    missingFields: string[];
   };
 };
 
@@ -64,12 +70,33 @@ function getProductActionErrorMessage(error: unknown, action: string): string {
 
 const statusMeta: Record<ProductStatus, { label: string; color: string }> = {
   DRAFT: { label: "草稿", color: "default" },
-  PUBLISHED: { label: "出售中", color: "green" },
+  PUBLISHED: { label: "已上架", color: "green" },
   OFFLINE: { label: "仓库中", color: "gold" },
   ARCHIVED: { label: "回收站", color: "default" },
 };
 
 const statuses: ProductStatus[] = ["PUBLISHED", "OFFLINE", "DRAFT", "ARCHIVED"];
+const salesModeLabels: Record<string, string> = {
+  DISPLAY_ONLY: "仅展示",
+  SELECTION: "选款咨询",
+  APPOINTMENT: "预约到店",
+  DIRECT_PURCHASE: "直接购买",
+  CUSTOM_INQUIRY: "定制咨询",
+};
+const completenessFieldLabels: Record<string, string> = {
+  name: "商品标题",
+  code: "货号",
+  categoryId: "类目",
+  primaryImage: "商品主图",
+  salesMode: "销售方式",
+  materialType: "主要材质",
+  visibility: "可见范围",
+  detailContent: "商品详情",
+  price: "有效价格",
+  activeSku: "可售 SKU",
+  stock: "可售库存",
+  deliveryMethods: "提取方式",
+};
 
 function formatDate(value?: string) {
   if (!value) return "—";
@@ -108,12 +135,9 @@ export default function ProductManage() {
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
-  const [qualityScope, setQualityScope] = useState<
-    "all" | "incomplete" | "complete"
-  >("all");
-  const [sortBy, setSortBy] = useState<"updatedAt" | "sortOrder">(
-    "updatedAt",
-  );
+  const [sortBy, setSortBy] = useState<
+    NonNullable<ProductAdminQuery["sortBy"]>
+  >("updated_desc");
 
   const keyword = titleKeyword || codeKeyword || merchantCodeKeyword;
   // 必须用 useMemo 稳定引用：productIdSearch 被放进 loadProducts 的 useCallback 依赖，
@@ -131,9 +155,7 @@ export default function ProductManage() {
   const hasFilters = Boolean(
     titleKeyword || codeKeyword || merchantCodeKeyword || categoryId || activeStatus,
   );
-  // 质量分为后端计算字段（非 DB 列），无法在 findAll 做 where 过滤；
-  // 前端对当前页 filter 会导致 total/分页计数不一致（误导）。
-  // 因此 qualityScope 不再作为列表过滤，仅用于「质量分统计」徽标展示（统计当前页）。
+  // 资料完整度为后端计算字段（非 DB 列）；这里只展示当前页统计，不伪装成全量筛选。
   const visibleProducts = products;
   const qualityIssueCount = useMemo(
     () =>
@@ -192,7 +214,7 @@ export default function ProductManage() {
       setError(null);
       try {
         const p = targetPage ?? page;
-        const params: Record<string, unknown> = { page: p, pageSize, sortBy };
+        const params: ProductAdminQuery = { page: p, pageSize, sortBy };
         const s = overrides?.status ?? activeStatus;
         if (s) params.status = s;
         const cid = overrides?.categoryId ?? categoryId;
@@ -261,8 +283,7 @@ export default function ProductManage() {
     setMerchantCodeKeyword("");
     setCategoryId(undefined);
     setActiveStatus(undefined);
-    setQualityScope("all");
-    setSortBy("updatedAt");
+    setSortBy("updated_desc");
     setPage(1);
   };
 
@@ -609,18 +630,21 @@ export default function ProductManage() {
         ),
       },
       {
-        title: "质量分",
+        title: "资料完整度",
         key: "completeness",
         width: 130,
         render: (_: unknown, product: ProductListItem) => {
           const c = product.completeness;
+          const missing = c?.missingFields?.map((field) => completenessFieldLabels[field] || field) || [];
           return c ? (
-            <Progress
-              size="small"
-              percent={c.score}
-              status={c.isComplete ? "success" : "active"}
-              format={() => `${c.score}%`}
-            />
+            <Tooltip title={c.isComplete ? "资料已完整" : missing.length ? `待补充：${missing.join("、")}` : "仍有资料待补充"}>
+              <Progress
+                size="small"
+                percent={c.score}
+                status={c.isComplete ? "success" : "active"}
+                format={() => `${c.score}%`}
+              />
+            </Tooltip>
           ) : (
             "—"
           );
@@ -639,10 +663,10 @@ export default function ProductManage() {
         render: (_: unknown, product: ProductListItem) => product.salesCount || 0,
       },
       {
-        title: "30日销量",
-        key: "monthlySales",
+        title: "销售方式",
+        key: "salesMode",
         width: 108,
-        render: () => <span className="product-manage__muted-value">—</span>,
+        render: (_: unknown, product: ProductListItem) => salesModeLabels[product.salesMode || ""] || "—",
       },
       {
         title: "创建时间",
@@ -824,16 +848,9 @@ export default function ProductManage() {
         </Dropdown>
       </div>
 
-      <button
-        type="button"
-        className="product-manage__quality-notice"
-        onClick={() => {
-          setQualityScope("incomplete");
-          setIsAdvancedOpen(true);
-        }}
-      >
-        质量分/属性问题商品（{qualityIssueCount}） <InfoCircleOutlined aria-hidden="true" />
-      </button>
+      <div className="product-manage__quality-notice">
+        当前页资料不完整商品（{qualityIssueCount}） <InfoCircleOutlined aria-hidden="true" />
+      </div>
 
       <div className="product-manage__filters">
         <div className="product-manage__filter-fields">
@@ -851,17 +868,6 @@ export default function ProductManage() {
             onChange={(event) => setCodeKeyword(event.target.value)}
             onPressEnter={search}
           />
-          <Select
-            placeholder="质量分统计（本页）"
-            value={qualityScope}
-            onChange={setQualityScope}
-            popupClassName="product-manage__quality-dropdown"
-            options={[
-              { value: "all", label: "全部（本页统计）" },
-              { value: "incomplete", label: "待完善 · 本页 N 项" },
-              { value: "complete", label: "完整 · 本页 N 项" },
-            ]}
-          />
         </div>
         <div className="product-manage__filter-actions">
           <Space size={8}>
@@ -877,11 +883,13 @@ export default function ProductManage() {
                 selectable: true,
                 selectedKeys: [sortBy],
                 items: [
-                  { key: "updatedAt", label: "按最近更新排序" },
+                  { key: "updated_desc", label: "按最近更新排序" },
                   { key: "sortOrder", label: "按自定义排序" },
                 ],
                 onClick: ({ key }) => {
-                  setSortBy(key as "updatedAt" | "sortOrder");
+                  setSortBy(
+                    key as NonNullable<ProductAdminQuery["sortBy"]>,
+                  );
                   setPage(1);
                 },
               }}
@@ -915,7 +923,7 @@ export default function ProductManage() {
             optionFilterProp="label"
             options={categoryOptions}
           />
-          <span>质量分筛选基于当前列表返回的商品资料完整度。</span>
+          <span>资料完整度按当前页返回的商品信息展示；直接购买商品还会检查 SKU、库存和提取方式。</span>
         </div>
       )}
 
@@ -930,20 +938,6 @@ export default function ProductManage() {
             disabled={!categoriesLoaded}
           >
             新建商品
-          </Button>
-          <Button className="product-manage__secondary-button" onClick={() => message.info("商品装修功能将接入商品编辑页")}>商品装修</Button>
-          <Button
-            className="product-manage__secondary-button"
-            onClick={() => {
-              if (selectedIds.length !== 1) {
-                message.info("请选择一件商品后进入编辑页管理 SKU");
-                return;
-              }
-              const selected = products.find((product) => product.id === Number(selectedIds[0]));
-              if (selected) openEdit(selected);
-            }}
-          >
-            SKU 管理
           </Button>
           <Dropdown
             overlayClassName="product-manage__dropdown"
@@ -977,7 +971,7 @@ export default function ProductManage() {
           </Dropdown>
           <span className="product-manage__selected-count">已选 {selectedIds.length} 件</span>
         </Space>
-        <span className="product-manage__total-count">共 {qualityScope === "all" ? total : visibleProducts.length} 件商品</span>
+        <span className="product-manage__total-count">共 {total} 件商品</span>
       </div>
 
       {error ? (

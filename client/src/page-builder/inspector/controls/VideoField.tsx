@@ -7,7 +7,7 @@
  * 3. value 外部变化(撤销/载入方案)自动收起临时面板。
  * 上传走 uploadApi.uploadVideo(/upload/video,服务端 ≤100MB,120s 超时)。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Upload, Button, Input, message } from "antd";
 import {
   VideoCameraOutlined,
@@ -17,6 +17,7 @@ import {
 } from "@ant-design/icons";
 import { uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { useHomepagePuck } from "@/pages/admin/HomepageConfig/editor-store";
 
 interface VideoFieldProps {
   fieldKey?: string;
@@ -27,6 +28,21 @@ interface VideoFieldProps {
 }
 
 const MAX_VIDEO_MB = 100;
+const sessionUploadedVideos = new Set<string>();
+
+function collectPageVideos(value: unknown, key = "", result = new Set<string>()) {
+  if (typeof value === "string") {
+    if (/video/i.test(key) && /^(https?:|\/uploads\/)/i.test(value)) result.add(value);
+    return result;
+  }
+  if (Array.isArray(value)) value.forEach((item) => collectPageVideos(item, key, result));
+  else if (value && typeof value === "object") {
+    Object.entries(value as Record<string, unknown>).forEach(([childKey, child]) =>
+      collectPageVideos(child, childKey, result),
+    );
+  }
+  return result;
+}
 
 export default function VideoField({
   fieldKey,
@@ -35,6 +51,12 @@ export default function VideoField({
   readOnly,
   required,
 }: VideoFieldProps) {
+  const pageData = useHomepagePuck((state) => state.appState.data);
+  const [sessionRevision, setSessionRevision] = useState(0);
+  const currentPageVideos = useMemo(
+    () => [...new Set([...collectPageVideos(pageData), ...sessionUploadedVideos])],
+    [pageData, sessionRevision],
+  );
   const [replaceOpen, setReplaceOpen] = useState(false);
   const [urlMode, setUrlMode] = useState(false);
   const [urlInput, setUrlInput] = useState(value || "");
@@ -60,6 +82,8 @@ export default function VideoField({
       const response = await uploadApi.uploadVideo(file);
       const data = unwrapResponse<{ url: string }>(response);
       if (data?.url) {
+        sessionUploadedVideos.add(data.url);
+        setSessionRevision((revision) => revision + 1);
         onChange?.(data.url);
         message.success("视频上传成功");
         setReplaceOpen(false);
@@ -133,7 +157,7 @@ export default function VideoField({
             controls={false}
             muted
             preload="metadata"
-            style={{ width: "100%", borderRadius: 4, background: "#171717" }}
+            style={{ width: "100%", borderRadius: 4, background: "#181A1B" }}
           />
           <div className="homepage-editor__media-actions">
             <Button size="small" icon={<SwapOutlined />} onClick={() => setReplaceOpen(true)}>
@@ -160,8 +184,8 @@ export default function VideoField({
             }}
             disabled={uploading}
           >
-            <VideoCameraOutlined style={{ color: "var(--adm-action, #B8944E)", fontSize: 22 }} />
-            <div style={{ marginTop: 8, color: "#4A4239", fontSize: 13 }}>
+            <VideoCameraOutlined style={{ color: "var(--adm-action, #5F6568)", fontSize: 22 }} />
+            <div style={{ marginTop: 8, color: "#181A1B", fontSize: 13 }}>
               {uploading ? "视频上传中…" : "拖入视频或点击上传"}
             </div>
           </Upload.Dragger>
@@ -207,6 +231,26 @@ export default function VideoField({
           </span>
         </div>
       ) : null}
+      <details className="homepage-editor__current-page-media">
+        <summary>本页与本次会话视频 · {currentPageVideos.length}</summary>
+        {currentPageVideos.length ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 4 }}>
+            {currentPageVideos.map((url) => (
+              <button
+                key={url}
+                type="button"
+                className={url === value ? "is-current" : ""}
+                style={{ aspectRatio: "auto", padding: 6, textAlign: "left" }}
+                onClick={() => onChange?.(url)}
+              >
+                {url === value ? "当前视频 · " : "使用 · "}{url}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p>当前页面还没有可复用视频。</p>
+        )}
+      </details>
     </div>
   );
 }

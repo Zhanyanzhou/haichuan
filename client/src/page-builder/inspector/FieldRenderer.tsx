@@ -13,18 +13,24 @@ import VideoField from "./controls/VideoField";
 import ArrayField from "./controls/ArrayField";
 import ColorField from "../fields/ColorField";
 import LinkTargetField from "./LinkTargetField";
+import ProductReferencesField from "../fields/ProductReferencesField";
+import CategoryReferencesField from "../fields/CategoryReferencesField";
 import type {
   FieldDef,
   InspectorContext,
 } from "./schema/types";
+import { getContentTemplateContract } from "../generated/contentTemplates.generated";
+import { resolveVisualNode } from "../runtime/visualLayout";
 
 interface FieldRendererProps {
   def: FieldDef;
   ctx: InspectorContext;
   update: (patch: Record<string, any>) => void;
+  moduleType?: string;
+  onRequestVisualEdit?: (nodeId: string) => void;
 }
 
-export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) {
+export default function FieldRenderer({ def, ctx, update, moduleType, onRequestVisualEdit }: FieldRendererProps) {
   const value = ctx.props[def.key];
 
   switch (def.control) {
@@ -113,10 +119,23 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
 
     case "media": {
       const device = def.device ?? "shared";
+      const slotCapabilities = moduleType
+        ? getContentTemplateContract(moduleType)?.editorCapabilities.layoutOverrides?.slots
+        : undefined;
+      const slotRole =
+        slotCapabilities?.find((slot) => slot.roleId === def.key || slot.fieldKey === def.key)?.roleId ??
+        (slotCapabilities?.length === 1 ? slotCapabilities[0].roleId : def.key);
+      const viewportKey = device === "mobile" ? "mobile" : "desktop";
+      const visualNode = resolveVisualNode(ctx.props, slotRole, viewportKey);
+      const effectivePreviewRatio =
+        Number.isFinite(visualNode.ratio)
+          ? `${visualNode.ratio} / 1`
+          : def.previewAspectRatio;
+      const slotCapability = slotCapabilities?.find((slot) => slot.roleId === slotRole);
       const focus = def.focusKeys
         ? {
-            x: Number(ctx.props[def.focusKeys.x] ?? 50),
-            y: Number(ctx.props[def.focusKeys.y] ?? 50),
+            x: Number(visualNode.focus?.x ?? ctx.props[def.focusKeys.x] ?? 50),
+            y: Number(visualNode.focus?.y ?? ctx.props[def.focusKeys.y] ?? 50),
           }
         : undefined;
       let inheritBaseValue: string | undefined;
@@ -126,18 +145,20 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
       }
       return (
         <MediaField
-          def={def}
+          def={{ ...def, previewAspectRatio: effectivePreviewRatio }}
           device={device}
           value={typeof value === "string" ? value : ""}
           focus={focus}
+          previewFit={
+            visualNode.fit
+          }
+          previewZoom={
+            visualNode.zoom
+          }
           onChange={(next) => update({ [def.key]: next })}
-          onFocusChange={
-            def.focusKeys
-              ? (x, y) =>
-                  update({
-                    [def.focusKeys!.x]: x,
-                    [def.focusKeys!.y]: y,
-                  })
+          onAdjustComposition={
+            slotCapability && onRequestVisualEdit
+              ? () => onRequestVisualEdit(slotRole)
               : undefined
           }
           inheritBaseValue={inheritBaseValue}
@@ -159,7 +180,7 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
       // keyPrefix(如 "secondary")把读写切到 secondaryTargetType/secondaryProductId/secondaryLinkUrl;
       // 无前缀时首字母小写驼峰,与持久化键一致
       const prefix = def.keyPrefix ?? "";
-      const readKey = (suffix: "TargetType" | "ProductId" | "LinkUrl") =>
+      const readKey = (suffix: "TargetType" | "ProductCode" | "ProductId" | "LinkUrl") =>
         prefix
           ? ctx.props[`${prefix}${suffix}`]
           : ctx.props[suffix.charAt(0).toLowerCase() + suffix.slice(1)];
@@ -167,6 +188,7 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
         <LinkTargetField
           id={String(ctx.props.id ?? def.key)}
           targetType={readKey("TargetType")}
+          productCode={readKey("ProductCode")}
           productId={readKey("ProductId")}
           linkUrl={readKey("LinkUrl")}
           onChange={update}
@@ -179,6 +201,51 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
         />
       );
     }
+
+    case "productReferences":
+      return (
+        <ProductReferencesField
+          value={
+            Array.isArray(value)
+              ? value
+              : typeof value === "string" && value
+                ? [value]
+                : []
+          }
+          legacyIds={
+            def.legacyKey
+              ? Array.isArray(ctx.props[def.legacyKey])
+                ? ctx.props[def.legacyKey]
+                : Number(ctx.props[def.legacyKey]) > 0
+                  ? [Number(ctx.props[def.legacyKey])]
+                  : []
+              : []
+          }
+          minProducts={def.minItems}
+          maxProducts={def.maxItems}
+          onChange={(codes, legacyIds) =>
+            update({
+              [def.key]: def.multiple === false ? codes[0] ?? "" : codes,
+              ...(def.legacyKey
+                ? {
+                    [def.legacyKey]:
+                      def.multiple === false ? legacyIds[0] ?? 0 : legacyIds,
+                  }
+                : {}),
+            })
+          }
+        />
+      );
+
+    case "categoryReferences":
+      return (
+        <CategoryReferencesField
+          value={Array.isArray(value) ? value : []}
+          minItems={def.minItems}
+          maxItems={def.maxItems}
+          onChange={(slugs) => update({ [def.key]: slugs })}
+        />
+      );
 
     case "preset":
       return (
@@ -202,6 +269,7 @@ export default function FieldRenderer({ def, ctx, update }: FieldRendererProps) 
           value={value}
           ctx={ctx}
           onChange={(next) => update({ [def.key]: next })}
+          moduleType={moduleType}
         />
       );
 

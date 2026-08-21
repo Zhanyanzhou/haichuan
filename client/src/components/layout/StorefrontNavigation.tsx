@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { RefObject } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 
@@ -13,6 +13,7 @@ type PublicSiteSettings = {
 
 type StorefrontNavigationProps = {
   isHome?: boolean;
+  headerMode?: "overlay-light" | "solid";
   siteSettings?: PublicSiteSettings | null;
   /** 装修器中只预览交互，链接不会离开当前草稿。 */
   preview?: boolean;
@@ -54,12 +55,17 @@ export function resolveSiteLogo(logo?: string | null) {
 }
 
 export const storefrontMenuLinks = [
-  { label: "关于海川", description: "认识海川珠宝与东方工艺", href: "/about" },
   { label: "珠宝作品", description: "浏览黄金珠宝作品", href: "/products" },
   { label: "选款中心", description: "按品类与货号快速选款", href: "/catalog" },
   { label: "珠宝定制", description: "了解专属定制流程", href: "/custom" },
-  { label: "预约咨询", description: "一对一顾问服务", href: "/contact" },
+  { label: "关于海川", description: "认识海川珠宝与东方工艺", href: "/about" },
 ];
+
+const storefrontServiceLink = {
+  label: "预约私人珠宝顾问",
+  description: "一对一顾问服务",
+  href: "/contact",
+} as const;
 
 const MenuIcon = () => (
   <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
@@ -105,10 +111,10 @@ const AccountIcon = () => (
   </svg>
 );
 
-const ContactSearchIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true">
-    <circle cx="6.5" cy="6.5" r="5" />
-    <line x1="10" y1="10" x2="15" y2="15" />
+const MenuArrowIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 9h11" />
+    <path d="m10 5 4 4-4 4" />
   </svg>
 );
 
@@ -137,6 +143,19 @@ export function StorefrontMenuDrawer({
   returnFocusRef,
 }: StorefrontMenuDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const { pathname } = useLocation();
+
+  const restoreTriggerFocus = useCallback(() => {
+    const ownerWindow = drawerRef.current?.ownerDocument.defaultView;
+    if (!ownerWindow) {
+      returnFocusRef?.current?.focus();
+      return;
+    }
+    ownerWindow.setTimeout(() => {
+      returnFocusRef?.current?.focus({ preventScroll: true });
+    }, 0);
+  }, [returnFocusRef]);
 
   useEffect(() => {
     const drawer = drawerRef.current;
@@ -145,11 +164,16 @@ export function StorefrontMenuDrawer({
     if (!ownerDocument || !ownerWindow) return;
 
     ownerDocument.body.classList.toggle("nav-locked", open);
+    const focusTimer = open
+      ? ownerWindow.setTimeout(() => {
+          closeButtonRef.current?.focus({ preventScroll: true });
+        }, 80)
+      : null;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
         onOpenChange(false);
-        returnFocusRef?.current?.focus();
+        restoreTriggerFocus();
         return;
       }
       if (event.key !== "Tab" || !open) return;
@@ -170,27 +194,41 @@ export function StorefrontMenuDrawer({
     };
     ownerWindow.addEventListener("keydown", onKeyDown);
     return () => {
+      if (focusTimer !== null) ownerWindow.clearTimeout(focusTimer);
       ownerDocument.body.classList.remove("nav-locked");
       ownerWindow.removeEventListener("keydown", onKeyDown);
     };
-  }, [onOpenChange, open, returnFocusRef]);
+  }, [onOpenChange, open, restoreTriggerFocus]);
 
   const handleLink = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (!preview) return;
+    if (!preview) {
+      onOpenChange(false);
+      return;
+    }
     event.preventDefault();
     onPreviewNavigate?.(event.currentTarget.getAttribute("href") || "/");
     onOpenChange(false);
-    returnFocusRef?.current?.focus();
+    restoreTriggerFocus();
   };
 
   const handleBackdropClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) onOpenChange(false);
+    if (event.target !== event.currentTarget) return;
+    onOpenChange(false);
+    restoreTriggerFocus();
   };
+
+  const handleClose = () => {
+    onOpenChange(false);
+    restoreTriggerFocus();
+  };
+
+  const isActive = (href: string) =>
+    pathname === href || pathname.startsWith(`${href}/`);
 
   const handlePhoneLink = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (preview) {
       event.preventDefault();
-      returnFocusRef?.current?.focus();
+      restoreTriggerFocus();
     }
     onOpenChange(false);
   };
@@ -203,16 +241,81 @@ export function StorefrontMenuDrawer({
       onClick={handleBackdropClick}
     >
       <div ref={drawerRef} className="brand-menu__inner" role="dialog" aria-modal="true" aria-label="品牌菜单">
+        <div className="brand-menu__top">
+          <button
+            ref={closeButtonRef}
+            type="button"
+            data-menu-close
+            tabIndex={open ? 0 : -1}
+            className="brand-menu__top-action"
+            aria-label="关闭菜单"
+            onClick={handleClose}
+          >
+            <CloseIcon />
+            <span>关闭</span>
+          </button>
+          <Link
+            to="/search"
+            tabIndex={open ? 0 : -1}
+            className="brand-menu__top-action"
+            onClick={handleLink}
+          >
+            <SearchIcon />
+            <span>搜索</span>
+          </Link>
+        </div>
+
+        <p className="brand-menu__eyebrow">Explore · 探索</p>
         <nav className="brand-menu__primary" aria-label="品牌菜单">
-          {storefrontMenuLinks.map((item) => (
-            <Link key={item.href} to={item.href} tabIndex={open ? 0 : -1} onClick={handleLink}>
-              {item.label}
+          {storefrontMenuLinks.map((item, index) => (
+            <Link
+              key={item.href}
+              to={item.href}
+              tabIndex={open ? 0 : -1}
+              aria-current={isActive(item.href) ? "page" : undefined}
+              className={isActive(item.href) ? "is-active" : undefined}
+              onClick={handleLink}
+            >
+              <span className="brand-menu__index" aria-hidden="true">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <span className="brand-menu__copy">
+                <span className="brand-menu__label">{item.label}</span>
+                <span className="brand-menu__description">{item.description}</span>
+              </span>
+              <span className="brand-menu__arrow" aria-hidden="true">
+                <MenuArrowIcon />
+              </span>
             </Link>
           ))}
         </nav>
+
+        <div className="brand-menu__service">
+          <p>Private service</p>
+          <Link
+            to={storefrontServiceLink.href}
+            tabIndex={open ? 0 : -1}
+            aria-current={isActive(storefrontServiceLink.href) ? "page" : undefined}
+            onClick={handleLink}
+          >
+            <span>
+              <strong>{storefrontServiceLink.label}</strong>
+              <small>{storefrontServiceLink.description}</small>
+            </span>
+            <MenuArrowIcon />
+          </Link>
+        </div>
+
         <div className="brand-menu__footer">
+          <nav className="brand-menu__utility" aria-label="辅助信息">
+            <Link to="/privacy" tabIndex={open ? 0 : -1} onClick={handleLink}>
+              隐私说明
+            </Link>
+            <Link to="/business-info" tabIndex={open ? 0 : -1} onClick={handleLink}>
+              经营主体信息
+            </Link>
+          </nav>
           <div className="brand-menu__contact">
-            <Link to="/search" tabIndex={open ? 0 : -1} onClick={handleLink}><ContactSearchIcon />货号搜索</Link>
             {contactPhone && (
               <a href={`tel:${contactPhone}`} tabIndex={open ? 0 : -1} onClick={handlePhoneLink}><PhoneIcon />{contactPhone}</a>
             )}
@@ -226,6 +329,7 @@ export function StorefrontMenuDrawer({
 
 export default function StorefrontNavigation({
   isHome = false,
+  headerMode = isHome ? "overlay-light" : "solid",
   siteSettings,
   preview = false,
   menuOpen,
@@ -245,8 +349,7 @@ export default function StorefrontNavigation({
   const contactPhone = resolvedSettings?.contactPhone?.trim() || "";
   const contactAddress = resolvedSettings?.contactAddress?.trim() || "";
   const logoUrl = resolveSiteLogo(resolvedSettings?.logo);
-  const navColor = "rgba(41,36,31,0.78)";
-  const isTransparent = isHome && !scrolled && !isMenuOpen;
+  const isTransparent = headerMode === "overlay-light" && !scrolled && !isMenuOpen;
 
   const setMenuOpen = useCallback((open: boolean) => {
     if (!isControlled) setUncontrolledMenuOpen(open);
@@ -292,7 +395,7 @@ export default function StorefrontNavigation({
         className={`site-header${isTransparent ? " is-transparent" : ""}`}
         style={{
           background: isTransparent ? "transparent" : "rgba(255,255,255,0.92)",
-          borderBottomColor: isTransparent ? "transparent" : "rgba(41,36,31,0.06)",
+          borderBottomColor: isTransparent ? "transparent" : "rgba(24,26,27,0.06)",
           backdropFilter: isTransparent ? "none" : "blur(8px)",
           WebkitBackdropFilter: isTransparent ? "none" : "blur(8px)",
         }}
@@ -313,20 +416,20 @@ export default function StorefrontNavigation({
             <span className="site-header__brand-text">{siteName}</span>
           </Link>
           <div className="site-header__right">
-            <Link to="/catalog" aria-label="选款中心" className="site-header__nav-item" style={{ color: navColor }} onClick={handlePreviewLink}>
+            <Link to="/catalog" aria-label="选款中心" className="site-header__nav-item" onClick={handlePreviewLink}>
               <DiamondIcon /><span className="site-header__nav-label hidden sm:inline">选款</span>
             </Link>
-            <Link to="/contact" aria-label="预约咨询" className="site-header__nav-item" style={{ color: navColor }} onClick={handlePreviewLink}>
+            <Link to="/contact" aria-label="预约咨询" className="site-header__nav-item" onClick={handlePreviewLink}>
               <CalendarIcon /><span className="site-header__nav-label hidden sm:inline">预约</span>
             </Link>
-            <Link to="/customer" aria-label="我的账户" className="site-header__nav-item" style={{ color: navColor }} onClick={handlePreviewLink}>
+            <Link to="/customer" aria-label="我的账户" className="site-header__nav-item" onClick={handlePreviewLink}>
               <AccountIcon /><span className="site-header__nav-label hidden sm:inline">我的账户</span>
             </Link>
           </div>
         </div>
       </header>
 
-      <div className="site-header__left-group">
+      <div className={`site-header__left-group${isTransparent ? " is-transparent" : ""}`}>
         <button
           ref={menuToggleRef}
           type="button"
@@ -338,7 +441,7 @@ export default function StorefrontNavigation({
         >
           {isMenuOpen ? <><CloseIcon /><span className="site-menu-toggle__label">关闭</span></> : <><MenuIcon /><span className="site-menu-toggle__label">菜单</span></>}
         </button>
-        <Link to="/search" aria-label="搜索" className="site-header__nav-item" style={{ color: navColor }} onClick={handlePreviewLink}>
+        <Link to="/search" aria-label="搜索" className="site-header__nav-item" onClick={handlePreviewLink}>
           <SearchIcon /><span className="site-header__nav-label hidden sm:inline">搜索</span>
         </Link>
       </div>

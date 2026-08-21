@@ -14,8 +14,8 @@ import type { PageModule } from '@/types/pageModule';
 
 /** 白盒画册冷调(2026-08-19):纯白底、近黑字、冷灰;金色废除。 */
 const BG = '#FFFFFF';
-const TX = '#1A1A1A';
-const MU = '#8C8C8C';
+const TX = '#181A1B';
+const MU = '#6E7477';
 
 interface Props { module?: PageModule; editMode?: boolean; }
 
@@ -37,6 +37,7 @@ export default function SinglePosterSection({ module, editMode }: Props) {
   const actionText = typeof c?.actionText === "string" ? c.actionText : "";
   const targetUrl = resolveLinkTargetUrl({
     targetType: c?.targetType,
+    productCode: c?.productCode,
     productId: c?.productId,
     linkUrl: c?.linkUrl,
   });
@@ -46,10 +47,9 @@ export default function SinglePosterSection({ module, editMode }: Props) {
   const desktopFocusY = s?.desktopFocusY ?? s?.focusY ?? 50;
   const mobileFocusX = s?.mobileFocusX ?? s?.focusX ?? 50;
   const mobileFocusY = s?.mobileFocusY ?? s?.focusY ?? 50;
-  // 比例选项(契约派生):桌面/平板走 desktopImage 角色,手机走 mobileImage 角色
+  // 比例选项(契约派生):桌面走 desktopImage 角色(平板沿用桌面档),手机走 mobileImage 角色
   const posterRatio = {
     desktop: resolveContractAspectRatio("singlePoster", "desktopImage", c?.aspectRatio, "desktop"),
-    tablet: resolveContractAspectRatio("singlePoster", "desktopImage", c?.aspectRatio, "tablet"),
     mobile: resolveContractAspectRatio("singlePoster", "mobileImage", c?.aspectRatio, "mobile"),
   };
   const [posterRatioW, posterRatioH] = posterRatio.desktop
@@ -57,7 +57,12 @@ export default function SinglePosterSection({ module, editMode }: Props) {
     .map((part) => Number(part.trim()));
 
   const imageColumn = (
-    <div data-editor-field="desktopImage mobileImage" className="hc-content-template__media hc-phase1-single__media">
+    <div
+      data-editor-field="desktopImage mobileImage"
+      data-content-role-desktop="desktopImage"
+      data-content-role-mobile="mobileImage"
+      className="hc-content-template__media hc-phase1-single__media"
+    >
       {desktopImg ? (
         <picture className="block w-full h-full">
           <source media={`(max-width:${SINGLE_POSTER_CONTRACT.canvas.mobileBreakpoint}px)`} srcSet={mobileImg} />
@@ -78,7 +83,7 @@ export default function SinglePosterSection({ module, editMode }: Props) {
   );
 
   const copyColumn = (
-    <div className="hc-content-template__copy hc-phase1-single__copy">
+    <div className="hc-content-template__copy hc-phase1-single__copy" data-content-role="copy">
       {(number || label) ? (
         <div data-editor-field="number label" style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 16 }}>
           {number ? (
@@ -96,11 +101,11 @@ export default function SinglePosterSection({ module, editMode }: Props) {
       {subtitle ? <p data-editor-field="subtitle" className="hc-content-template__body" style={{ color: MU, marginTop: 14 }}>{subtitle}</p> : null}
       {actionText && targetUrl ? (
         editMode ? (
-          <span data-editor-field="actionText targetType productId linkUrl" className="hc-content-template__action mt-5" style={{ color: TX, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+          <span data-content-role="action" data-editor-field="actionText targetType productId linkUrl" className="hc-content-template__action mt-5" style={{ color: TX, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
             {actionText} <span>→</span>
           </span>
         ) : (
-          <Link data-editor-field="actionText targetType productId linkUrl" to={targetUrl} className="hc-content-template__action mt-5 transition-opacity hover:opacity-55" style={{ color: TX, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+          <Link data-content-role="action" data-editor-field="actionText targetType productId linkUrl" to={targetUrl} className="hc-content-template__action mt-5 transition-opacity hover:opacity-55" style={{ color: TX, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
             {actionText} <span>→</span>
           </Link>
         )
@@ -114,7 +119,6 @@ export default function SinglePosterSection({ module, editMode }: Props) {
       data-content-template={CONTENT_TEMPLATE_LAYOUTS.singlePoster.key}
       data-visual-role={CONTENT_TEMPLATE_LAYOUTS.singlePoster.visualRole}
       data-height-mode-desktop={CONTENT_TEMPLATE_LAYOUTS.singlePoster.heightModeByViewport.desktop}
-      data-height-mode-tablet={CONTENT_TEMPLATE_LAYOUTS.singlePoster.heightModeByViewport.tablet}
       data-height-mode-mobile={CONTENT_TEMPLATE_LAYOUTS.singlePoster.heightModeByViewport.mobile}
       data-mobile-order={CONTENT_TEMPLATE_LAYOUTS.singlePoster.mobile.order.join(",")}
       data-density="brand"

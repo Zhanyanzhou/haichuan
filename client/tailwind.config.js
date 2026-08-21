@@ -4,24 +4,24 @@ export default {
   theme: {
     extend: {
       colors: {
-        // 品牌色系
+        // 全站中性底盘；gold 键仅为历史工具类兼容，不再表示金色。
         'brand': {
-          'bg':      '#F5F2ED',
+          'bg':      '#F4F5F5',
           'surface': '#FFFFFF',
-          'text':    '#1A1A1A',
-          'muted':   '#8A7F72',
-          'gold':    '#B8944E',
-          'goldL':   '#D4C5A2',
-          'goldD':   '#9A7B3E',
-          'line':    'rgba(0,0,0,0.06)',
-          'lineA':   'rgba(0,0,0,0.12)',
+          'text':    '#181A1B',
+          'muted':   '#5F6568',
+          'gold':    '#181A1B',
+          'goldL':   '#ECEEEF',
+          'goldD':   '#101213',
+          'line':    '#DDE1E2',
+          'lineA':   '#B8BEC1',
         },
         // 语义色
         'semantic': {
-          'success': '#52C41A',
-          'warning': '#FAAD14',
-          'error':   '#FF4D4F',
-          'info':    '#1677FF',
+          'success': '#356348',
+          'warning': '#7A531A',
+          'error':   '#8C3F3B',
+          'info':    '#335F7D',
         },
       },
       fontFamily: {
@@ -58,7 +58,7 @@ export default {
         'card': '0 2px 8px rgba(0,0,0,0.06)',
         'card-hover': '0 4px 16px rgba(0,0,0,0.1)',
         'modal': '0 8px 32px rgba(0,0,0,0.12)',
-        'gold': '0 2px 12px rgba(184,148,78,0.3)',
+        'gold': '0 0 0 2px rgba(24,26,27,0.14)',
       },
       // 动画
       animation: {

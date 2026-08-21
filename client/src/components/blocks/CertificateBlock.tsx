@@ -9,9 +9,9 @@ interface CertificateBlockProps {
   editMode?: boolean;
 }
 
-const INK = "#1A1A1A";
-const MUTED = "#8C8C8C";
-const GOLD = "#8C8C8C";
+const INK = "#181A1B";
+const MUTED = "#6E7477";
+const GOLD = "#6E7477";
 
 /**
  * 权威认证 — Asymmetric Gallery 母版(信任变体)
@@ -39,7 +39,7 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
   return (
     <DecorSection master="asymmetric-gallery" background={bgColor}>
       {(title || subtitle || editMode) && (
-        <header style={{ maxWidth: 640, margin: "0 auto 48px", textAlign: "center" }}>
+        <header data-content-role="copy" style={{ maxWidth: 640, margin: "0 auto 48px", textAlign: "center" }}>
           {title ? (
             <h2 data-editor-field="title"
               style={{
@@ -61,7 +61,7 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
           ) : null}
         </header>
       )}
-      <div className="hc-cert-gallery">
+      <div data-content-role="certificates" className="hc-cert-gallery">
         <style>{`
           .hc-cert-gallery {
             display: grid;
@@ -72,7 +72,7 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
           .hc-cert-gallery__frame {
             aspect-ratio: ${CERTIFICATE_RATIO_DESKTOP};
             overflow: hidden;
-            background: #EFEAE0;
+            background: #F4F5F5;
             display: grid;
             place-items: center;
           }

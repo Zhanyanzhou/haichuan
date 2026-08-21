@@ -63,7 +63,7 @@ export default function ProductRowBlock({
   } = content;
   const layout = content.layout || "grid-3";
   const bg = styleConfig.bgColor || "#FFFFFF";
-  const headingColor = styleConfig.textColor || "#1A1A1A";
+  const headingColor = styleConfig.textColor || "#181A1B";
   const gap = styleConfig.gap;
   const actionStyle = displayMode === "album"
     ? "none"
@@ -94,10 +94,10 @@ export default function ProductRowBlock({
         .homepage-product-row__card { min-width: 0; }
         .homepage-product-row__media img { transition: transform .6s ease; }
         .homepage-product-row__card:hover .homepage-product-row__media img { transform: scale(1.035); }
-        .homepage-product-row__action { display: inline-flex; align-items: center; min-height: 30px; color: #5A5A5A; font-size: 12px; letter-spacing: .04em; text-decoration: none; transition: color .2s ease, border-color .2s ease, background .2s ease; }
-        .homepage-product-row__action:hover { color: #1A1A1A; }
-        .homepage-product-row__action.is-button { padding: 6px 0; border-bottom: 1px solid #1A1A1A; border-radius: 0; color: #1A1A1A; }
-        .homepage-product-row__action.is-button:hover { color: #FFFFFF; background: #1A1A1A; }
+        .homepage-product-row__action { display: inline-flex; align-items: center; min-height: 30px; color: #5F6568; font-size: 12px; letter-spacing: .04em; text-decoration: none; transition: color .2s ease, border-color .2s ease, background .2s ease; }
+        .homepage-product-row__action:hover { color: #181A1B; }
+        .homepage-product-row__action.is-button { padding: 6px 0; border-bottom: 1px solid #181A1B; border-radius: 0; color: #181A1B; }
+        .homepage-product-row__action.is-button:hover { color: #FFFFFF; background: #181A1B; }
         @media (max-width: 767px) {
           .homepage-product-row__grid { grid-template-columns: repeat(var(--product-row-mobile-columns), minmax(0, 1fr)) !important; gap: 24px 12px !important; }
           .homepage-product-row__heading { margin-bottom: 32px !important; }
@@ -109,7 +109,7 @@ export default function ProductRowBlock({
       `}</style>
       {/* ── 标题区 ── */}
       {(title || subtitle || editMode) && (
-        <div className="homepage-product-row__heading" style={{ textAlign: "center", marginBottom: 48 }}>
+        <div data-content-role="copy" className="homepage-product-row__heading" style={{ textAlign: "center", marginBottom: 48 }}>
           {title ? (
             <h2
               style={{
@@ -127,7 +127,7 @@ export default function ProductRowBlock({
             <p
               style={{
                 fontSize: 13,
-                color: "#8C8C8C",
+                color: "#6E7477",
                 maxWidth: 480,
                 margin: "0 auto",
                 lineHeight: 1.6,
@@ -141,6 +141,7 @@ export default function ProductRowBlock({
 
       {/* ── 产品网格 ── */}
       <div
+        data-content-role="productCards"
         className="homepage-product-row__grid"
         style={{
           display: "grid",
@@ -151,14 +152,14 @@ export default function ProductRowBlock({
       >
         {displayProducts.map((p: any, i: number) => p.__empty ? (
           <div key={p.id} className="homepage-product-row__empty-card" aria-label={`待选择商品 ${i + 1}`}>
-            <div style={{ aspectRatio: ratio, display: "grid", placeItems: "center", marginBottom: 16, border: "1px solid #E8E7E3", background: "#F8F7F4" }}>
-              <div style={{ textAlign: "center", color: "#A49B90" }}>
+            <div style={{ aspectRatio: ratio, display: "grid", placeItems: "center", marginBottom: 16, border: "1px solid #DDE1E2", background: "#F7F8F8" }}>
+              <div style={{ textAlign: "center", color: "#6E7477" }}>
                 <strong style={{ display: "block", fontSize: 12, fontWeight: 500 }}>选择商品</strong>
                 <small style={{ display: "block", marginTop: 4, fontSize: 10 }}>右侧商品列表</small>
               </div>
             </div>
-            <div style={{ width: "68%", height: 8, borderRadius: 2, background: "#E9E6E0" }} />
-            <div style={{ width: "42%", height: 7, marginTop: 8, borderRadius: 2, background: "#F0EDE8" }} />
+            <div style={{ width: "68%", height: 8, borderRadius: 2, background: "#DDE1E2" }} />
+            <div style={{ width: "42%", height: 7, marginTop: 8, borderRadius: 2, background: "#F4F5F5" }} />
           </div>
         ) : (
           <article key={p.id || p.link || i} className="homepage-product-row__card">
@@ -177,7 +178,7 @@ export default function ProductRowBlock({
                   overflow: "hidden",
                   marginBottom: 16,
                   aspectRatio: ratio,
-                  background: "#F3F1EE",
+                  background: "#F4F5F5",
                 }}
               >
                 {p.image ? (
@@ -198,7 +199,7 @@ export default function ProductRowBlock({
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      color: "#D1CDC5",
+                      color: "#B8BEC1",
                       fontSize: 32,
                     }}
                   >
@@ -212,7 +213,7 @@ export default function ProductRowBlock({
                 style={{
                   fontSize: 14,
                   fontWeight: 500,
-                  color: "#1A1A1A",
+                  color: "#181A1B",
                   marginBottom: 4,
                 }}
               >
@@ -222,7 +223,7 @@ export default function ProductRowBlock({
 
             {/* 价格（可单独隐藏） */}
             {resolvedShowPrice && p.price && (
-              <p style={{ fontSize: 13, color: "#8C8C8C", marginBottom: actionStyle !== "none" ? 10 : 0 }}>
+              <p style={{ fontSize: 13, color: "#6E7477", marginBottom: actionStyle !== "none" ? 10 : 0 }}>
                 {p.price}
               </p>
             )}

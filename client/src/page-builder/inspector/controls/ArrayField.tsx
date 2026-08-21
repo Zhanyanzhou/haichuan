@@ -17,6 +17,7 @@ interface ArrayFieldProps {
   value: unknown;
   ctx: InspectorContext;
   onChange: (next: Array<Record<string, any>>) => void;
+  moduleType?: string;
 }
 
 export default function ArrayField({
@@ -24,6 +25,7 @@ export default function ArrayField({
   value,
   ctx,
   onChange,
+  moduleType,
 }: ArrayFieldProps) {
   const items: Array<Record<string, any>> = Array.isArray(value)
     ? (value as Array<Record<string, any>>)
@@ -49,7 +51,7 @@ export default function ArrayField({
   };
 
   const removeItem = (index: number) => {
-    if (items.length <= 1) return;
+    if (items.length <= (def.minItems ?? 1)) return;
     onChange(items.filter((_, i) => i !== index));
     setActiveIndex(Math.max(0, Math.min(index, items.length - 2)));
   };
@@ -82,6 +84,8 @@ export default function ArrayField({
             key={index}
             type="button"
             className={`homepage-editor__item-nav-button${index === safeIndex ? " is-active" : ""}`}
+            aria-current={index === safeIndex ? "true" : undefined}
+            aria-label={`编辑${def.itemLabel} ${index + 1}${def.itemSummary ? `：${def.itemSummary(item)}` : ""}`}
             onClick={() => setActiveIndex(index)}
           >
             <span className="homepage-editor__item-nav-index">{index + 1}</span>
@@ -97,7 +101,7 @@ export default function ArrayField({
           {def.itemFields
             .filter(
               (field) =>
-                (!field.visibleWhen || field.visibleWhen(ctx)) &&
+                (!field.visibleWhen || field.visibleWhen({ ...ctx, props: activeItem })) &&
                 (!field.device ||
                   field.device === "shared" ||
                   field.device === ctx.device),
@@ -108,19 +112,21 @@ export default function ArrayField({
                 def={field}
                 ctx={{ ...ctx, props: activeItem }}
                 update={updateItem}
+                moduleType={moduleType}
               />
             ))}
 
           <div className="homepage-editor__carousel-item-actions">
-            <button type="button" onClick={() => moveItem(safeIndex, -1)}>
+            <button type="button" aria-label={`上移${def.itemLabel} ${safeIndex + 1}`} disabled={safeIndex === 0} onClick={() => moveItem(safeIndex, -1)}>
               上移
             </button>
-            <button type="button" onClick={() => moveItem(safeIndex, 1)}>
+            <button type="button" aria-label={`下移${def.itemLabel} ${safeIndex + 1}`} disabled={safeIndex === items.length - 1} onClick={() => moveItem(safeIndex, 1)}>
               下移
             </button>
             <button
               type="button"
-              disabled={items.length <= 1}
+              aria-label={`删除${def.itemLabel} ${safeIndex + 1}`}
+              disabled={items.length <= (def.minItems ?? 1)}
               onClick={() => removeItem(safeIndex)}
             >
               删除
@@ -129,7 +135,7 @@ export default function ArrayField({
         </div>
       ) : null}
 
-      <div className="homepage-editor__carousel-add">
+      <div className="homepage-editor__carousel-add" role="status" aria-live="polite">
         <button type="button" disabled={atMax} onClick={addItem}>
           添加{def.itemLabel}
         </button>

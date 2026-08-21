@@ -4,7 +4,7 @@
  */
 import { limitedOfferPuckConfig } from "../../../adapters/limitedOffer.puck";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
-import { bgColorPresetField, moduleNameField } from "../shared";
+import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 export const limitedOfferSchema: ModuleInspectorSchema = {
@@ -95,7 +95,7 @@ export const limitedOfferSchema: ModuleInspectorSchema = {
       id: "limited-offer-style",
       title: "样式",
       layer: "style",
-      fields: [bgColorPresetField()],
+      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
     },
   ],
 };

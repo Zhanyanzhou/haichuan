@@ -137,7 +137,7 @@ export default function Cart() {
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="price">¥{(getItemPrice(item) * item.quantity).toLocaleString()}</span>
-                      <button type="button" onClick={() => void removeItem(item)} disabled={mutatingId === item.id} aria-label={`移除${item.product.name}`} className="text-brand-muted hover:text-red-500 transition-colors disabled:opacity-40"><DeleteOutlined /></button>
+                      <button type="button" onClick={() => void removeItem(item)} disabled={mutatingId === item.id} aria-label={`移除${item.product.name}`} className="text-brand-muted hover:text-[#8C3F3B] transition-colors disabled:opacity-40"><DeleteOutlined /></button>
                     </div>
                   </div>
                 </div>

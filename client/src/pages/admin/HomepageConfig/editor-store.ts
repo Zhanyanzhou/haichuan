@@ -66,6 +66,41 @@ export function focusCanvasBlock(blockId?: string, field?: string) {
       } satisfies CanvasFocusMessage,
       "*",
     );
+
+    // 设计画布 iframe 会随 1920 基准宽度等比缩放，实际滚动容器在宿主 stage。
+    // iframe 内 scrollIntoView 只负责字段自身定位，不能可靠推动宿主滚动，因此在
+    // 同源编辑器中用真实几何位置把目标模块带到可视区上缘。
+    const scrollContainer =
+      frame?.closest<HTMLElement>(".homepage-editor__canvas-scroll") ??
+      frame?.closest<HTMLElement>(".homepage-editor__stage");
+    const documentElement = frame?.contentDocument?.documentElement;
+    if (!frame || !scrollContainer || !documentElement) return;
+    const targetBlock = Array.from(
+      frame.contentDocument?.querySelectorAll<HTMLElement>(
+        "[data-editor-block-id]",
+      ) ?? [],
+    ).find((element) => element.dataset.editorBlockId === blockId);
+    const targetField = field && targetBlock
+      ? Array.from(
+          targetBlock.querySelectorAll<HTMLElement>("[data-editor-field]"),
+        ).find((element) =>
+          element.dataset.editorField?.split(/\s+/).includes(field),
+        )
+      : null;
+    const target = targetField ?? targetBlock;
+    if (!target) return;
+    const iframeRect = frame.getBoundingClientRect();
+    const scrollRect = scrollContainer.getBoundingClientRect();
+    const scale = iframeRect.width / Math.max(1, documentElement.clientWidth);
+    const targetRect = target.getBoundingClientRect();
+    const targetTop = iframeRect.top + targetRect.top * scale;
+    const desiredTop = scrollRect.top + (targetField ? 24 : 12);
+    scrollContainer.scrollBy({
+      top: targetTop - desiredTop,
+      // 图层选择、排序和属性更新可能在很短时间内连续发生；平滑滚动会把
+      // 多个旧目标排队，导致用户停止操作后画布才跳到先前模块。
+      behavior: "auto",
+    });
   });
 }
 

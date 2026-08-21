@@ -237,7 +237,7 @@ export function convertPuckProps(
         { template: props.template || "center" },
         {
           bgColor: props.bgColor || "#FFFFFF",
-          textColor: props.textColor || "#1A1A1A",
+          textColor: props.textColor || "#181A1B",
           spacing: props.spacing || "normal",
         },
       );
@@ -268,6 +268,7 @@ export function convertPuckProps(
           subtitle: props.subtitle,
           products: [],
           productIds: props.productIds || [],
+          productCodes: props.productCodes || [],
           layout: props.layout,
           mobileColumns: props.mobileColumns === 1 ? 1 : 2,
           displayMode: props.displayMode || "standard",
@@ -292,6 +293,7 @@ export function convertPuckProps(
           title: props.title,
           summary: props.summary,
           productId: props.productId || 0,
+          productCode: props.productCode || "",
           product: {},
           primaryText: props.primaryText || "查看作品",
           secondaryText: props.secondaryText,
@@ -314,6 +316,7 @@ export function convertPuckProps(
           image: props.image,
           imageAlt: props.imageAlt,
           productIds: props.productIds || [],
+          productCodes: props.productCodes || [],
           products: [],
           actionText: props.actionText,
           targetType: props.targetType,
@@ -380,6 +383,7 @@ export function convertPuckProps(
           title: props.title,
           subtitle: props.subtitle,
           categoryId: props.categoryId,
+          categorySlugs: props.categorySlugs || [],
           categories: props.categories || [],
           templateType: type,
           // 槽位比例选项:按变体取契约默认(品类 1:1 / 场景 4:5),渲染端校验回退
@@ -474,7 +478,13 @@ export function convertPuckProps(
           focusX: props.focusX ?? 50,
           focusY: props.focusY ?? 50,
         },
-        { maxHeight: props.maxHeight || 720 },
+        {
+          maxHeight: props.maxHeight || 720,
+          videoWidth: props.videoWidth || "standard",
+        },
+        {
+          bgColor: props.bgColor || "#FFFFFF",
+        },
       );
 
     case "热区图":

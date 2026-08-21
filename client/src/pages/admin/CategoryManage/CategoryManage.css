@@ -328,8 +328,8 @@
   border-color: var(--adm-action);
 }
 .cat-modal .ant-modal-footer .ant-btn-primary:hover {
-  background: #5f492a;
-  border-color: #5f492a;
+  background: #101213;
+  border-color: #101213;
 }
 
 /* ───── 响应式 ───── */

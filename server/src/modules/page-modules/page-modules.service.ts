@@ -368,9 +368,7 @@ export class PageModulesService {
   ): Promise<{ valid: boolean; errors: string[]; issues: ContentTemplateIssue[] }> {
     const issues = [
       ...this.collectContentTemplateIssues(puckData),
-      ...(await this.collectPuckDataErrors(db, puckData, pageKey)).map(
-        (message) => this.createServerValidationIssue(message),
-      ),
+      ...(await this.collectPuckDataErrors(db, puckData, pageKey)),
       ...this.collectMetadataErrors(metadata).map((message) =>
         this.createServerValidationIssue(message, "metadata"),
       ),
@@ -422,11 +420,17 @@ export class PageModulesService {
   private createServerValidationIssue(
     message: string,
     path = "puckData",
+    blockId?: string,
+    field?: string,
+    index?: number,
   ): ContentTemplateIssue {
     return {
-      code: "page-validation",
+      code: field ? `page-validation-${field}` : "page-validation",
       severity: "error",
       layer: "page",
+      ...(blockId ? { blockId } : {}),
+      ...(field ? { field } : {}),
+      ...(index !== undefined ? { index } : {}),
       path,
       message,
     };
@@ -436,25 +440,50 @@ export class PageModulesService {
     db: any,
     puckData: any,
     pageKey = "",
-  ): Promise<string[]> {
+  ): Promise<ContentTemplateIssue[]> {
     const errors: string[] = [];
+    const errorContexts: Array<
+      { blockId?: string; path?: string; field?: string; index?: number } | undefined
+    > = [];
     const productIds = new Set<number>();
+    const productCodes = new Set<string>();
+    const productReferences = new Map<
+      number,
+      Array<{ blockId?: string; path: string; label: string; field: string; index?: number }>
+    >();
+    const productCodeReferences = new Map<
+      string,
+      Array<{ blockId?: string; path: string; label: string; field: string; index?: number }>
+    >();
+    const categorySlugs = new Set<string>();
+    const categoryReferences = new Map<
+      string,
+      Array<{ blockId?: string; path: string; label: string; field: string; index: number }>
+    >();
     const missingUploadUrls = new Set<string>();
     if (!/^[a-z0-9-]{1,50}$/i.test(pageKey)) {
       errors.push("页面标识不合法");
     }
 
     if (!puckData || typeof puckData !== "object") {
-      return ["页面数据为空或格式不正确"];
+      return [this.createServerValidationIssue("页面数据为空或格式不正确")];
     }
 
     if (!Array.isArray(puckData.content)) {
       errors.push("页面内容 content 必须是数组");
     }
 
-    const validateBlock = (block: any, path: string) => {
+    const validateBlock = (block: any, path: string, displayPath: string) => {
+      const errorStartIndex = errors.length;
+      const attachBlockContext = (props?: Record<string, unknown>) => {
+        const blockId = this.isNonEmptyString(props?.id) ? props.id : undefined;
+        for (let index = errorStartIndex; index < errors.length; index += 1) {
+          errorContexts[index] ??= { blockId, path };
+        }
+      };
       if (!block || typeof block !== "object") {
-        errors.push(`${path}：区块格式不正确`);
+        errors.push(`${displayPath}：区块格式不正确`);
+        attachBlockContext();
         return;
       }
 
@@ -462,12 +491,14 @@ export class PageModulesService {
       const props = block.props;
 
       if (!type || !PUCK_COMPONENT_SET.has(type)) {
-        errors.push(`${path}：未知区块类型「${type || "空"}」`);
+        errors.push(`${displayPath}：未知区块类型「${type || "空"}」`);
+        attachBlockContext();
         return;
       }
 
       if (!props || typeof props !== "object") {
-        errors.push(`${path}「${type}」：配置 props 不能为空`);
+        errors.push(`${displayPath}「${type}」：配置 props 不能为空`);
+        attachBlockContext();
         return;
       }
 
@@ -476,14 +507,17 @@ export class PageModulesService {
         : this.isNonEmptyString(props.title)
           ? props.title.trim()
           : type;
-      const label = `${path}「${displayName}」`;
+      const label = `${displayPath}「${displayName}」`;
 
       if (!this.isNonEmptyString(props.id)) {
         errors.push(`${label}：区块 ID 不能为空`);
       }
 
       // 编辑器说明区不会进入前台；隐藏区块也不应因未完成内容阻断其他模块发布。
-      if (EDITOR_ONLY_COMPONENTS.has(type) || props.isVisible === false) return;
+      if (EDITOR_ONLY_COMPONENTS.has(type) || props.isVisible === false) {
+        attachBlockContext(props);
+        return;
+      }
 
       // 文本长度兜底：防止异常超长输入（如整篇文章误填入标题）发布到前台
       const contentTemplate = CONTENT_TEMPLATE_BY_MODULE_TYPE[type];
@@ -539,15 +573,34 @@ export class PageModulesService {
       if (contentTemplate?.supportsLinkTarget) {
         const targetType = typeof props.targetType === "string" ? props.targetType : "";
         const linkUrl = typeof props.linkUrl === "string" ? props.linkUrl.trim() : "";
+        const productCode = this.isNonEmptyString(props.productCode) ? props.productCode.trim() : "";
         const productId = Number(props.productId);
         // 老版本没有 targetType 时保持旧 linkUrl 行为，任何新合同状态都必须完整。
         if (targetType === "none" && linkUrl) {
           errors.push(`${label}：不跳转时不能保留 linkUrl`);
         } else if (targetType === "product") {
-          if (!Number.isInteger(productId) || productId <= 0) {
+          if (productCode) {
+            productCodes.add(productCode);
+            const references = productCodeReferences.get(productCode) ?? [];
+            references.push({
+              blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+              path: `${path}.productCode`,
+              label,
+              field: "productCode",
+            });
+            productCodeReferences.set(productCode, references);
+          } else if (!Number.isInteger(productId) || productId <= 0) {
             errors.push(`${label}：商品跳转必须选择有效商品`);
           } else {
             productIds.add(productId);
+            const references = productReferences.get(productId) ?? [];
+            references.push({
+              blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+              path: `${path}.productId`,
+              label,
+              field: "productId",
+            });
+            productReferences.set(productId, references);
           }
         } else if (targetType === "page") {
           if (!linkUrl) {
@@ -564,6 +617,80 @@ export class PageModulesService {
 
       if (type === "视频区块" && !this.isNonEmptyString(props.videoUrl)) {
         errors.push(`${label}：videoUrl 视频地址不能为空`);
+      }
+
+      if (type === "预约入口") {
+        const legacyLink = this.isNonEmptyString(props.linkUrl)
+          ? props.linkUrl.trim()
+          : "";
+        const hasPrimaryTarget =
+          (props.targetType === "page" && legacyLink.startsWith("/") && !legacyLink.startsWith("//")) ||
+          props.targetType === "product" ||
+          (!props.targetType && legacyLink.startsWith("/") && !legacyLink.startsWith("//"));
+        if (!hasPrimaryTarget) {
+          const errorIndex = errors.push(`${label}：主行动必须设置有效的站内去向`) - 1;
+          errorContexts[errorIndex] = {
+            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+            path: `${path}.props.linkUrl`,
+            field: "linkUrl",
+          };
+        }
+        if (
+          this.isNonEmptyString(props.phone) &&
+          !/^\+?[\d\s-]{6,20}$/.test(props.phone.trim())
+        ) {
+          const errorIndex = errors.push(`${label}：咨询电话格式不正确`) - 1;
+          errorContexts[errorIndex] = {
+            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+            path: `${path}.props.phone`,
+            field: "phone",
+          };
+        }
+      }
+
+      if (type === "首屏主视觉") {
+        const instanceOverrides = props.__instanceOverrides;
+        const legacyCopyOverride = instanceOverrides?.textRoles?.copy;
+        if (
+          instanceOverrides?.version === 1 &&
+          legacyCopyOverride?.enabled === true &&
+          ![props.eyebrow, props.title, props.subtitle].some((value) =>
+            this.isNonEmptyString(value),
+          )
+        ) {
+          const errorIndex = errors.push(
+            `${label}：已启用文字角色，请至少填写眉题、标题或副标题之一`,
+          ) - 1;
+          errorContexts[errorIndex] = {
+            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+            path: `${path}.props.title`,
+            field: "title",
+          };
+        }
+
+        if (instanceOverrides?.version === 2) {
+          const roleLabels: Record<string, string> = {
+            eyebrow: "眉题",
+            title: "标题",
+            subtitle: "副标题",
+            actionText: "行动文字",
+          };
+          for (const [roleId, roleLabel] of Object.entries(roleLabels)) {
+            if (
+              instanceOverrides?.nodes?.[roleId]?.enabled === true &&
+              !this.isNonEmptyString(props[roleId])
+            ) {
+              const errorIndex = errors.push(
+                `${label}：已启用${roleLabel}角色，请填写${roleLabel}内容`,
+              ) - 1;
+              errorContexts[errorIndex] = {
+                blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+                path: `${path}.props.${roleId}`,
+                field: roleId,
+              };
+            }
+          }
+        }
       }
 
       // 图文混排的“纯文字”布局无需配图；其余布局必须提供图片。
@@ -604,39 +731,107 @@ export class PageModulesService {
       }
 
       if (type === "产品展示行") {
-        if (!Array.isArray(props.productIds)) {
-          errors.push(`${label}：productIds 必须是商品 ID 数组`);
+        const codes = Array.isArray(props.productCodes)
+          ? props.productCodes.map((code: unknown) => String(code).trim()).filter(Boolean)
+          : [];
+        if (codes.length > 0) {
+          if (codes.length < 2 || codes.length > 8 || new Set(codes).size !== codes.length) {
+            const errorIndex = errors.push(`${label}：请选择 2–8 件不重复的商品`) - 1;
+            errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.productCodes`, field: "productCodes" };
+          }
+          codes.forEach((code: string, index: number) => {
+            productCodes.add(code);
+            const references = productCodeReferences.get(code) ?? [];
+            references.push({ blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productCodes[${index}]`, label, field: "productCodes", index });
+            productCodeReferences.set(code, references);
+          });
+        } else if (!Array.isArray(props.productIds)) {
+          errors.push(`${label}：productCodes 或兼容 productIds 必须是商品引用数组`);
         } else {
-          for (const id of props.productIds) {
+          if (props.productIds.length < 2 || props.productIds.length > 8 || new Set(props.productIds.map(Number)).size !== props.productIds.length) {
+            const errorIndex = errors.push(`${label}：请选择 2–8 件不重复的商品`) - 1;
+            errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.productIds`, field: "productIds" };
+          }
+          for (const [index, id] of props.productIds.entries()) {
             const numericId = Number(id);
             if (!Number.isInteger(numericId) || numericId <= 0) {
               errors.push(`${label}：商品 ID「${id}」格式不正确`);
             } else {
               productIds.add(numericId);
+              const references = productReferences.get(numericId) ?? [];
+              references.push({
+                blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+                path: `${path}.props.productIds[${index}]`,
+                label,
+                field: "productIds",
+                index,
+              });
+              productReferences.set(numericId, references);
             }
           }
         }
       }
 
       if (type === "单品焦点推荐") {
+        const productCode = this.isNonEmptyString(props.productCode) ? props.productCode.trim() : "";
+        if (productCode) {
+          productCodes.add(productCode);
+          productCodeReferences.set(productCode, [{ blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productCode`, label, field: "productCode" }]);
+        } else {
         const productId = Number(props.productId);
         if (!Number.isInteger(productId) || productId <= 0) {
           errors.push(`${label}：请选择 1 件有效的主推商品`);
         } else {
           productIds.add(productId);
+          const references = productReferences.get(productId) ?? [];
+          references.push({
+            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+            path: `${path}.props.productId`,
+            label,
+            field: "productId",
+          });
+          productReferences.set(productId, references);
+        }
         }
       }
 
       if (type === "佩戴灵感") {
-        if (!Array.isArray(props.productIds)) {
-          errors.push(`${label}：productIds 必须是商品 ID 数组`);
+        const codes = Array.isArray(props.productCodes)
+          ? props.productCodes.map((code: unknown) => String(code).trim()).filter(Boolean)
+          : [];
+        if (codes.length > 0) {
+          if (codes.length > 4 || new Set(codes).size !== codes.length) {
+            const errorIndex = errors.push(`${label}：关联商品必须是不重复的 1–4 件商品`) - 1;
+            errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.productCodes`, field: "productCodes" };
+          }
+          codes.forEach((code: string, index: number) => {
+            productCodes.add(code);
+            const references = productCodeReferences.get(code) ?? [];
+            references.push({ blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productCodes[${index}]`, label, field: "productCodes", index });
+            productCodeReferences.set(code, references);
+          });
+        } else if (!Array.isArray(props.productIds)) {
+          errors.push(`${label}：productCodes 或兼容 productIds 必须是商品引用数组`);
         } else {
-          for (const id of props.productIds) {
+          if (props.productIds.length < 1 || props.productIds.length > 4 || new Set(props.productIds.map(Number)).size !== props.productIds.length) {
+            const errorIndex = errors.push(`${label}：关联商品必须是不重复的 1–4 件商品`) - 1;
+            errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.productIds`, field: "productIds" };
+          }
+          for (const [index, id] of props.productIds.entries()) {
             const numericId = Number(id);
             if (!Number.isInteger(numericId) || numericId <= 0) {
               errors.push(`${label}：商品 ID「${id}」格式不正确`);
             } else {
               productIds.add(numericId);
+              const references = productReferences.get(numericId) ?? [];
+              references.push({
+                blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+                path: `${path}.props.productIds[${index}]`,
+                label,
+                field: "productIds",
+                index,
+              });
+              productReferences.set(numericId, references);
             }
           }
         }
@@ -695,7 +890,13 @@ export class PageModulesService {
         });
       };
 
-      validateNestedAssets(props.categories, "分类卡片的", ["image"]);
+      const usesCategoryReferences =
+        type === "分类卡片" &&
+        Array.isArray(props.categorySlugs) &&
+        props.categorySlugs.length > 0;
+      if (!usesCategoryReferences) {
+        validateNestedAssets(props.categories, "分类卡片的", ["image"]);
+      }
       validateNestedAssets(props.items, "画廊图片的", ["image"]);
       validateNestedAssets(props.certificates, "证书的", ["imageUrl"]);
       validateNestedAssets(props.steps, "定制步骤的", ["image"]);
@@ -727,7 +928,7 @@ export class PageModulesService {
       }
       // 分类入口(分类卡片/按场景选购)条目级跳转安全校验
       if (
-        (type === "分类卡片" || type === "按场景选购") &&
+        (type === "按场景选购" || (type === "分类卡片" && !usesCategoryReferences)) &&
         Array.isArray(props.categories)
       ) {
         props.categories.forEach((item: any, index: number) => {
@@ -744,6 +945,22 @@ export class PageModulesService {
           }
         });
       }
+      if (usesCategoryReferences) {
+        const slugs = props.categorySlugs
+          .map((slug: unknown) => String(slug).trim())
+          .filter(Boolean);
+        if (slugs.length < 2 || slugs.length > 4 || new Set(slugs).size !== slugs.length) {
+          const errorIndex = errors.push(`${label}：请选择 2–4 个不重复的真实分类`) - 1;
+          errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.categorySlugs`, field: "categorySlugs" };
+        }
+        slugs.forEach((slug: string, index: number) => {
+          categorySlugs.add(slug);
+          const references = categoryReferences.get(slug) ?? [];
+          references.push({ blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.categorySlugs[${index}]`, label, field: "categorySlugs", index });
+          categoryReferences.set(slug, references);
+        });
+      }
+      attachBlockContext(props);
     };
 
     const visibleContentCount = Array.isArray(puckData.content)
@@ -811,7 +1028,7 @@ export class PageModulesService {
 
     if (Array.isArray(puckData.content)) {
       puckData.content.forEach((block: any, index: number) => {
-        validateBlock(block, `第 ${index + 1} 个区块`);
+        validateBlock(block, `content[${index}]`, `第 ${index + 1} 个区块`);
       });
     }
 
@@ -822,35 +1039,151 @@ export class PageModulesService {
           return;
         }
         zoneBlocks.forEach((block: any, index: number) => {
-          validateBlock(block, `插槽 ${zoneKey} 第 ${index + 1} 个区块`);
+          validateBlock(
+            block,
+            `zones[${JSON.stringify(zoneKey)}][${index}]`,
+            `插槽 ${zoneKey} 第 ${index + 1} 个区块`,
+          );
         });
       });
     }
 
     if (productIds.size > 0) {
+      // 发布文档对游客公开，关联商品必须与游客公开目录保持一致。
       const products = await db.product.findMany({
-        // 页面一经发布会被游客直接读取，因此商品可见性必须与公开商品接口保持一致。
         where: {
           id: { in: [...productIds] },
           deletedAt: null,
           status: "PUBLISHED",
           visibility: "PUBLIC",
         },
-        select: { id: true },
+        select: {
+          id: true,
+          listingImageId: true,
+          primaryImageId: true,
+          images: { take: 1, select: { id: true } },
+        },
       });
       const publicProductIds = new Set(
-        products.map((item: { id: number }) => item.id),
+        products
+          .filter((item: { listingImageId: number | null; primaryImageId: number | null; images: Array<{ id: number }> }) => Boolean(item.listingImageId || item.primaryImageId || item.images.length))
+          .map((item: { id: number }) => item.id),
       );
       for (const id of productIds) {
         if (!publicProductIds.has(id)) {
-          errors.push(
-            `页面引用的商品 ID ${id} 未满足公开发布条件（需已发布、公开可见且未删除）`,
-          );
+          const references = productReferences.get(id);
+          if (references?.length) {
+            for (const reference of references) {
+              const errorIndex = errors.push(
+                `${reference.label}：商品 ID ${id} 未满足公开发布条件（需已发布、公开可见且未删除）`,
+              ) - 1;
+              errorContexts[errorIndex] = {
+                blockId: reference.blockId,
+                path: reference.path,
+                field: reference.field,
+                index: reference.index,
+              };
+            }
+          } else {
+            errors.push(
+              `页面引用的商品 ID ${id} 未满足公开发布条件（需已发布、公开可见且未删除）`,
+            );
+          }
         }
       }
     }
 
-    return errors;
+    if (productCodes.size > 0) {
+      const products = await db.product.findMany({
+        where: {
+          code: { in: [...productCodes] },
+          deletedAt: null,
+          status: "PUBLISHED",
+          visibility: "PUBLIC",
+        },
+        select: {
+          code: true,
+          listingImageId: true,
+          primaryImageId: true,
+          images: { take: 1, select: { id: true } },
+        },
+      });
+      const publicProductCodes = new Set(
+        products
+          .filter((item: { listingImageId: number | null; primaryImageId: number | null; images: Array<{ id: number }> }) => Boolean(item.listingImageId || item.primaryImageId || item.images.length))
+          .map((item: { code: string }) => item.code),
+      );
+      for (const code of productCodes) {
+        if (publicProductCodes.has(code)) continue;
+        for (const reference of productCodeReferences.get(code) ?? []) {
+          const errorIndex = errors.push(
+            `${reference.label}：商品 ${code} 未满足公开发布条件（需已发布、公开可见、未删除且有展示图）`,
+          ) - 1;
+          errorContexts[errorIndex] = {
+            blockId: reference.blockId,
+            path: reference.path,
+            field: reference.field,
+            index: reference.index,
+          };
+        }
+      }
+    }
+
+    if (categorySlugs.size > 0) {
+      const categories = await db.category.findMany({
+        where: { isActive: true, deletedAt: null },
+        select: {
+          id: true,
+          parentId: true,
+          slug: true,
+          coverImage: true,
+          products: {
+            where: { deletedAt: null, status: "PUBLISHED", visibility: "PUBLIC" },
+            take: 1,
+            select: { id: true },
+          },
+        },
+      });
+      const byId = new Map(categories.map((category: { id: number }) => [category.id, category]));
+      const publicBranchIds = new Set<number>();
+      for (const category of categories) {
+        if (!category.products.length) continue;
+        let current: typeof category | undefined = category;
+        while (current) {
+          publicBranchIds.add(current.id);
+          current = current.parentId ? byId.get(current.parentId) : undefined;
+        }
+      }
+      const eligibleSlugs = new Set(
+        categories
+          .filter((category: { id: number; coverImage: string | null }) => publicBranchIds.has(category.id) && Boolean(category.coverImage))
+          .map((category: { slug: string }) => category.slug),
+      );
+      for (const slug of categorySlugs) {
+        if (eligibleSlugs.has(slug)) continue;
+        for (const reference of categoryReferences.get(slug) ?? []) {
+          const errorIndex = errors.push(
+            `${reference.label}：分类 ${slug} 未满足公开发布条件（需启用、未删除、有公开商品且有封面）`,
+          ) - 1;
+          errorContexts[errorIndex] = {
+            blockId: reference.blockId,
+            path: reference.path,
+            field: reference.field,
+            index: reference.index,
+          };
+        }
+      }
+    }
+
+    return errors.map((message, index) =>
+      this.createServerValidationIssue(
+        message,
+        errorContexts[index]?.path ?? "puckData",
+        errorContexts[index]?.blockId,
+        errorContexts[index]?.field,
+        errorContexts[index]?.index,
+      )
+    );
   }
 
   private isNonEmptyString(value: unknown): value is string {

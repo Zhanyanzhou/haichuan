@@ -1,6 +1,7 @@
 # 海川珠宝 — 开发工作流
 
-> 最后更新：2026-08-13
+> 最后更新：2026-08-20
+> 本文件只提供开发命令与运行拓扑，不授予 AI 安装依赖、迁移数据库、修改环境或操作生产的权限；授权统一以根目录 `AGENTS.md` 为准。
 
 ## 环境搭建
 
@@ -13,7 +14,7 @@
 ### 首次启动
 
 ```bash
-# 1. 安装依赖
+# 1. 首次安装依赖（人工执行，或 AI 获明确批准后执行）
 cd client && npm install
 cd ../server && npm install
 cd ..
@@ -21,7 +22,7 @@ cd ..
 # 2. 仅启动本地开发所需的数据库与缓存
 docker-compose up -d mysql redis
 
-# 3. 数据库迁移
+# 3. 数据库迁移（仅在已确认目标环境并获批准后）
 cd server && npx prisma migrate dev
 
 # 4. (可选) 填充种子数据
@@ -35,9 +36,10 @@ npm run dev
 
 | 端口 | 服务           |
 | ---- | -------------- |
-| 80   | Docker 前端（Nginx） |
-| 5174 | Vite 开发前端  |
-| 3000 | NestJS 后端    |
+| 80   | 完整 Docker 栈入口（Nginx） |
+| 5173 | Vite 开发前端（`strictPort`） |
+| 3000 | 宿主机 NestJS 后端（开发唯一归属） |
+| 3002 | 容器后端映射（仅验收直连） |
 | 3306 | MySQL (Docker) |
 | 6379 | Redis (Docker) |
 
@@ -61,9 +63,9 @@ npm run dev
 ## 注意事项
 
 1. **服务端必须从 `server/` 目录启动**：`process.cwd()` 用于解析 `uploads/` 路径
-2. **修改 schema.prisma 后**：运行 `prisma migrate dev` → `prisma generate`
-3. **修改 api.ts**：影响 26 个文件，需全局检查
-4. **Feature Flags** 在 `client/src/store/featureFlags.ts` 管理
+2. **修改 schema.prisma 后**：先获批准，再运行 `prisma migrate dev` → `prisma generate`；仅生成或验证不等于可迁移目标数据库
+3. **修改 HTTP 传输层**：检查所有领域服务、拦截器、解包与错误路径；不依赖固定消费者数量
+4. **Feature Flags**：从当前代码和 `docs/CURRENT_STATE.md` 复核入口，不凭旧路径推断
 
 ## Mock 模式
 
@@ -71,7 +73,7 @@ npm run dev
 
 ## 数据库迁移
 
-`server/prisma/migrations/20260813090000_add_site_settings/` 新增了站点设置持久化表。代码合入后，请在**明确指定的目标环境**执行 `npx prisma migrate deploy`；不要在不明环境下执行迁移。
+只在明确指定的目标环境、已核对迁移记录并获得批准后执行 `npx prisma migrate deploy`；不要在不明环境下执行迁移。历史迁移是否已部署必须从目标数据库和部署记录核验，不能凭目录存在推断。
 
 ## 健康检查
 
@@ -81,7 +83,7 @@ npm run dev
 ## 端口与启动说明
 
 - Docker 整站通过 `docker-compose up -d` 启动，前台入口为 `http://localhost/`，后台登录为 `http://localhost/admin/login`。
-- 本地开发通过 `npm run dev` 启动，前台入口为 `http://localhost:5174/`，后台登录为 `http://localhost:5174/admin/login`。
-- 不要同时启动整套 Docker 服务与 `npm run dev`，两者都会使用后端 `3000` 端口；本地开发只启动 `mysql redis` 两个 Docker 服务。
+- 本地开发通过 `npm run dev` 启动，前台入口为 `http://localhost:5173/`，后台登录为 `http://localhost:5173/admin/login`。
+- 整套 Docker 与宿主机开发可以同时存在：宿主机后端固定占用 `3000`，容器后端通过 override 映射 `127.0.0.1:3002`，完整容器栈经 `:80` 自包含访问。不得改回容器抢占宿主机 `3000`。
 - PowerShell 若阻止 `npm.ps1`，请使用 `npm.cmd run dev` 或 `npm.cmd run dev:client`。
-- 后端默认使用 `3000`；若该端口已被现有后端服务占用，可在启动前同时设置 `PORT` 与 `VITE_API_PROXY_TARGET`，例如 PowerShell 中：`$env:PORT='3001'; $env:VITE_API_PROXY_TARGET='http://localhost:3001'; npm.cmd run dev`。
+- 后端默认使用 `3000`。若该端口已被不明进程占用，先识别并停止错误实例；不要通过临时改端口掩盖 API 所有权冲突。需要改变端口拓扑时按基础设施决策处理。

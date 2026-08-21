@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { plainToInstance } from "class-transformer";
 import { validate } from "class-validator";
 import { PrismaService } from "../../common/prisma/prisma.service";
-import { PublicProductQueryDto } from "./dto";
+import { PublicProductQueryDto, ResolveProductReferencesDto } from "./dto";
 import { ProductsService } from "./products.service";
 
 interface FindManyCall {
@@ -111,5 +111,108 @@ test("公开目录查询 DTO：非法分页、ID 列表、材质与重量区间�
   assert.deepEqual(
     fields,
     new Set(["page", "pageSize", "ids", "materialTypes", "weightRanges"]),
+  );
+});
+
+test("装修商品引用解析：保持输入顺序并区分删除、下架、缺图和不存在", async () => {
+  const products = [
+    {
+      id: 11,
+      code: "PUBLIC-11",
+      name: "公开商品",
+      price: 1100,
+      status: "PUBLISHED",
+      visibility: "PUBLIC",
+      deletedAt: null,
+      category: { id: 1, name: "戒指" },
+      listingImage: { id: 101 },
+      primaryImage: null,
+      images: [],
+    },
+    {
+      id: 12,
+      code: "DELETED-12",
+      name: "已删除商品",
+      price: 1200,
+      status: "PUBLISHED",
+      visibility: "PUBLIC",
+      deletedAt: new Date("2026-08-01T00:00:00.000Z"),
+      category: { id: 1, name: "戒指" },
+      listingImage: { id: 102 },
+      primaryImage: null,
+      images: [],
+    },
+    {
+      id: 13,
+      code: "MISSING-13",
+      name: "缺图商品",
+      price: 1300,
+      status: "PUBLISHED",
+      visibility: "PUBLIC",
+      deletedAt: null,
+      category: { id: 2, name: "项链" },
+      listingImage: null,
+      primaryImage: null,
+      images: [],
+    },
+    {
+      id: 22,
+      code: "LEGACY-22",
+      name: "旧引用下架商品",
+      price: 2200,
+      status: "OFFLINE",
+      visibility: "PUBLIC",
+      deletedAt: null,
+      category: { id: 3, name: "耳饰" },
+      listingImage: { id: 202 },
+      primaryImage: null,
+      images: [],
+    },
+  ];
+  const prisma = {
+    product: {
+      findMany: async () => products,
+    },
+  };
+  const service = new ProductsService(
+    prisma as unknown as PrismaService,
+    {} as never,
+    {} as never,
+  );
+
+  const result = await service.resolveReferences({
+    codes: ["PUBLIC-11", "DELETED-12", "MISSING-13", "UNKNOWN-99"],
+    legacyIds: [22],
+  });
+
+  assert.deepEqual(result.map((item) => item.code || `legacy:${item.legacyId}`), [
+    "PUBLIC-11",
+    "DELETED-12",
+    "MISSING-13",
+    "UNKNOWN-99",
+    "LEGACY-22",
+  ]);
+  assert.deepEqual(result.map((item) => item.reason), [
+    "AVAILABLE",
+    "DELETED",
+    "MISSING_IMAGE",
+    "NOT_FOUND",
+    "OFFLINE",
+  ]);
+  if (!("thumbnail" in result[0])) assert.fail("公开商品引用应返回缩略图字段");
+  assert.equal(result[0].thumbnail, "/products/catalog/11/media/101?width=480");
+  assert.equal(result[3].eligible, false);
+  assert.equal(result[4].legacyId, 22);
+});
+
+test("装修商品引用 DTO：拒绝超长 code 和非法旧 ID", async () => {
+  const dto = plainToInstance(ResolveProductReferencesDto, {
+    codes: ["X".repeat(51)],
+    legacyIds: [0],
+  });
+  const errors = await validate(dto);
+  assert.deepEqual(
+    new Set(errors.map((error) => error.property)),
+    new Set(["codes", "legacyIds"]),
   );
 });

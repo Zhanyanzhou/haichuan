@@ -1,11 +1,11 @@
 .hc-template-overview {
   --ct-preview-canvas: #FFFFFF;
-  --ct-preview-surface: #FCFCFD;
-  --ct-preview-ink: #1E2024;
-  --ct-preview-muted: #737982;
-  --ct-preview-line: #D4D8DD;
-  --ct-preview-line-strong: #C8CDD3;
-  --ct-preview-accent: #B49768;
+  --ct-preview-surface: #FFFFFF;
+  --ct-preview-ink: #181A1B;
+  --ct-preview-muted: #6E7477;
+  --ct-preview-line: #DDE1E2;
+  --ct-preview-line-strong: #B8BEC1;
+  --ct-preview-accent: #181A1B;
   color: var(--ct-preview-ink);
 }
 .hc-template-overview__header { margin-bottom: 32px; }

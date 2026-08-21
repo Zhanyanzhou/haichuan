@@ -90,7 +90,22 @@ export interface Product {
   sortOrder?: number;
   gemInfo?: GemInfo;
   craftTechnique?: string[];
+  detailContent?: ProductDetailBlock[];
   status: ProductStatus;
+  visibility?: "PUBLIC" | "MEMBER" | "PARTNER" | "INTERNAL";
+  purchaseRegion?: "MAINLAND" | "CROSS_BORDER";
+  publishMode?: "IMMEDIATE" | "SCHEDULED" | "WAREHOUSE";
+  scheduledPublishAt?: string | null;
+  scheduledPublishError?: string | null;
+  fulfillmentType?: "IN_STOCK" | "PREORDER" | "CUSTOM";
+  dispatchTime?: "SAME_DAY" | "WITHIN_24_HOURS" | "WITHIN_48_HOURS" | "OVER_48_HOURS" | "CUSTOM";
+  shippingTemplateId?: number | null;
+  deliveryMethods?: string[];
+  requiresInsuredShipping?: boolean;
+  requiresSignature?: boolean;
+  includesCertificate?: boolean;
+  packageType?: string;
+  customLeadTime?: string;
   isHot: boolean;
   isNew: boolean;
   isRecommended: boolean;
@@ -130,6 +145,28 @@ export interface GemInfo {
   color?: string;
   cut?: string;
   quantity?: number;
+}
+
+export interface ProductDetailBlock {
+  type: "TEXT" | "IMAGE";
+  text?: string;
+  imageId?: number;
+  alt?: string;
+}
+
+export interface ShippingTemplate {
+  id: number;
+  name: string;
+  carrier?: string;
+  feeMode: "FREE" | "FIXED" | "CONDITIONAL";
+  baseFee: number;
+  remoteSurcharge: number;
+  freeShippingThreshold?: number | null;
+  excludedRegions?: string[];
+  insured: boolean;
+  signatureRequired: boolean;
+  isDefault: boolean;
+  isActive: boolean;
 }
 
 export interface ProductImage {

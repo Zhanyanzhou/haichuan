@@ -1,11 +1,11 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：9ef2d0a36f4919e9898205353231bd83901946640f4c0fb53080a3039f223374
+ * SHA-256：b827a810412ee767fcb641fbeb938594e30918e0b522eca04157db92d0d6e573
  */
 
-export const CONTENT_TEMPLATE_REGISTRY_VERSION = 2;
-export const CONTENT_TEMPLATE_CONTRACT_VERSION = 1;
+export const CONTENT_TEMPLATE_REGISTRY_VERSION = 3;
+export const CONTENT_TEMPLATE_CONTRACT_VERSION = 2;
 
 export type RegisteredContentTemplateKey = "hero" | "fullBleed" | "video" | "carousel" | "singlePoster" | "doublePoster" | "textBanner" | "journey" | "comparison" | "featuredProduct" | "productRow" | "gallery" | "wearingInspiration" | "categoryCards" | "sceneShopping" | "hotspot" | "brandPoints" | "servicePromises" | "certificates" | "storeInfo" | "testimonials" | "booking" | "limitedEvent";
 export type ContentTemplateKey = RegisteredContentTemplateKey;
@@ -15,7 +15,6 @@ export type MediaSlot = {
   key: string;
   required: boolean;
   desktopRatio?: string;
-  tabletRatio?: string;
   mobileRatio?: string;
 };
 
@@ -27,10 +26,10 @@ export type ContentTemplateContract = {
   master: ContentTemplateMaster;
   visualRole: "primary-stage" | "feature-stage" | "support-stage";
   visualWeight: "primary-stage" | "feature-stage" | "support-stage";
-  heightModeByViewport: Record<"desktop" | "tablet" | "mobile", "viewport" | "ratio" | "content">;
+  heightModeByViewport: Record<"desktop" | "mobile", "viewport" | "ratio" | "content">;
   width: "full" | "standard" | "wide" | "editorial";
   flow: "bleed" | "flow";
-  copyPlacementByViewport: Record<"desktop" | "tablet" | "mobile", "overlay" | "stacked" | "split">;
+  copyPlacementByViewport: Record<"desktop" | "mobile", "overlay" | "stacked" | "split">;
   spacingPolicy: readonly ("compact" | "normal" | "spacious" | "grand")[];
   media: readonly MediaSlot[];
   roles: readonly {
@@ -40,7 +39,7 @@ export type ContentTemplateContract = {
     required: boolean;
     semantic?: string;
     previewRoles?: readonly ContentTemplateSkeletonRole[];
-    appliesTo?: readonly ("desktop" | "tablet" | "mobile")[];
+    appliesTo?: readonly ("desktop" | "mobile")[];
     fallbackRoleId?: string;
     parentRole?: string;
     positioning?: string;
@@ -48,10 +47,10 @@ export type ContentTemplateContract = {
     relation?: string;
     emphasis?: string;
     quantity?: { default: number; min: number; max: number };
-    defaultRatioByViewport?: Partial<Record<"desktop" | "tablet" | "mobile", string>>;
-    allowedRatioPresetsByViewport?: Partial<Record<"desktop" | "tablet" | "mobile", readonly string[]>>;
+    defaultRatioByViewport?: Partial<Record<"desktop" | "mobile", string>>;
+    allowedRatioPresetsByViewport?: Partial<Record<"desktop" | "mobile", readonly string[]>>;
   }[];
-  order: Record<"desktop" | "tablet" | "mobile", readonly string[]>;
+  order: Record<"desktop" | "mobile", readonly string[]>;
   preview: {
     purpose: string;
     visualRole: "primary-stage" | "feature-stage" | "support-stage";
@@ -67,16 +66,119 @@ export type ContentTemplateContract = {
   };
   allowedControls: readonly string[];
   supportsLinkTarget: boolean;
+  editorCapabilities: {
+    primaryTask: "media" | "product" | "category" | "structured" | "text" | "action";
+    referenceFields?: readonly {
+      kind: "product" | "category";
+      key: string;
+      legacyKey?: string;
+      min: number;
+      max: number;
+    }[];
+    layoutOverrides?: {
+      framePresets?: readonly string[];
+      frameRatioPresets?: readonly string[];
+      frameRatioRange?: { min: number; max: number; step: number };
+      compositionPresets?: readonly string[];
+      slots?: readonly {
+        roleId: string;
+        fieldKey?: string;
+        ratioPresets?: readonly string[];
+        sizePresets?: readonly string[];
+        positionPresets?: readonly string[];
+        fit?: readonly ("cover" | "contain")[];
+        zoom?: { min: number; max: number; step: number };
+        focusByViewport?: boolean;
+      }[];
+      textRoles?: readonly {
+        roleId: string;
+        placementPresets?: readonly string[];
+        widthPresets?: readonly string[];
+        sizePresets?: readonly string[];
+        align?: readonly ("left" | "center" | "right")[];
+        colorTokens?: readonly string[];
+        requiresSafeBand?: boolean;
+        maxLines?: number;
+      }[];
+    };
+  };
   desktopCopyRatio?: number;
   desktopMediaRatio?: number;
-  tabletCopyRatio?: number;
-  tabletMediaRatio?: number;
 };
 
 export type ContentTemplateMarker = {
   key: ContentTemplateKey;
   version: number;
 };
+
+export type ContentTemplateInstanceOverridesV1 = {
+  version: 1;
+  layout?: {
+    framePreset?: string;
+    compositionPreset?: string;
+  };
+  slots?: Record<string, {
+    ratioPreset?: string;
+    sizePreset?: string;
+    positionPreset?: string;
+    fit?: "cover" | "contain";
+    zoom?: number;
+    focusByViewport?: Partial<Record<"desktop" | "mobile", { x: number; y: number }>>;
+  }>;
+  textRoles?: Record<string, {
+    enabled?: boolean;
+    placementPreset?: string;
+    widthPreset?: string;
+    sizePreset?: string;
+    align?: "left" | "center" | "right";
+    colorToken?: string;
+    safeBand?: "light" | "dark";
+  }>;
+};
+
+export type ContentTemplateVisualRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type ContentTemplateInstanceOverridesV2 = {
+  version: 2;
+  frame?: {
+    aspectRatio?: number;
+    aspectRatioByViewport?: Partial<Record<"desktop" | "mobile", number>>;
+    heightPreset?: string;
+    compositionPreset?: string;
+    colorPreset?: string;
+    customColors?: {
+      background?: string;
+      text?: string;
+      accent?: string;
+    };
+  };
+  nodes?: Record<string, {
+    enabled?: boolean;
+    rectByViewport?: Partial<Record<"desktop" | "mobile", ContentTemplateVisualRect>>;
+    ratio?: number;
+    mediaView?: {
+      fit?: "cover" | "contain";
+      zoom?: number;
+      focusByViewport?: Partial<Record<"desktop" | "mobile", { x: number; y: number }>>;
+    };
+    typography?: {
+      sizeLevel?: "xs" | "sm" | "md" | "lg" | "xl";
+      align?: "left" | "center" | "right";
+      color?: string;
+      maxLines?: number;
+      safeBand?: "none" | "light" | "dark";
+    };
+  }>;
+};
+
+export type ContentTemplateInstanceOverrides =
+  | ContentTemplateInstanceOverridesV1
+  | ContentTemplateInstanceOverridesV2;
 
 export type ContentTemplateSkeletonRole =
   | "media" | "mainMedia" | "detailMedia" | "copy" | "action" | "marker"
@@ -106,11 +208,11 @@ export type ContentTemplateSkeleton = {
   displayName: string;
   category: string;
   visualRole: "primary-stage" | "feature-stage" | "support-stage";
-  heightModeByViewport: Record<"desktop" | "tablet" | "mobile", "viewport" | "ratio" | "content">;
+  heightModeByViewport: Record<"desktop" | "mobile", "viewport" | "ratio" | "content">;
   width: "full" | "standard" | "wide" | "editorial";
   flow: "bleed" | "flow";
-  slots: readonly { key: string; role: ContentTemplateSkeletonRole; desktopRatio?: string; tabletRatio?: string; mobileRatio?: string }[];
-  order: Record<"desktop" | "tablet" | "mobile", readonly ContentTemplateSkeletonRole[]>;
+  slots: readonly { key: string; role: ContentTemplateSkeletonRole; desktopRatio?: string; mobileRatio?: string }[];
+  order: Record<"desktop" | "mobile", readonly ContentTemplateSkeletonRole[]>;
   preview: { tone: "light" | "dark"; desktopZones: readonly ContentTemplateSkeletonZone[] };
 };
 
@@ -143,11 +245,14 @@ export type ContentTemplateIssue = {
     | "content-template-marker-invalid"
     | "content-template-key-mismatch"
     | "content-template-version-unsupported"
-    | "page-validation";
+    | "page-validation"
+    | `page-validation-${string}`;
   severity: ContentTemplateIssueSeverity;
   layer: "contract" | "page";
   blockId?: string;
   moduleType?: string;
+  field?: string;
+  index?: number;
   path: string;
   message: string;
 };
@@ -176,14 +281,14 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   {
     "category": "视觉展示",
     "displayName": "视频",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "video",
     "moduleType": "视频区块"
   },
   {
     "category": "视觉展示",
     "displayName": "轮播",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "carousel",
     "moduleType": "轮播图"
   },
@@ -211,137 +316,259 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   {
     "category": "图文内容",
     "displayName": "内容流程",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "journey",
     "moduleType": "定制流程"
   },
   {
     "category": "图文内容",
     "displayName": "前后对比",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "comparison",
     "moduleType": "改款对比"
   },
   {
     "category": "商品展示",
     "displayName": "单品展示",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "featuredProduct",
     "moduleType": "单品焦点推荐"
   },
   {
     "category": "商品展示",
     "displayName": "商品列表",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "productRow",
     "moduleType": "产品展示行"
   },
   {
     "category": "商品展示",
     "displayName": "作品画廊",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "gallery",
     "moduleType": "作品画廊"
   },
   {
     "category": "商品展示",
     "displayName": "佩戴展示",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "wearingInspiration",
     "moduleType": "佩戴灵感"
   },
   {
     "category": "导航入口",
     "displayName": "品类入口",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "categoryCards",
     "moduleType": "分类卡片"
   },
   {
     "category": "导航入口",
     "displayName": "场景入口",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "sceneShopping",
     "moduleType": "按场景选购"
   },
   {
     "category": "导航入口",
     "displayName": "图片热区",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "hotspot",
     "moduleType": "热区图"
   },
   {
     "category": "服务信息",
     "displayName": "品牌要点",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "brandPoints",
     "moduleType": "卡片网格"
   },
   {
     "category": "服务信息",
     "displayName": "服务承诺",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "servicePromises",
     "moduleType": "服务承诺"
   },
   {
     "category": "服务信息",
     "displayName": "证书展示",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "certificates",
     "moduleType": "资质证书"
   },
   {
     "category": "服务信息",
     "displayName": "门店信息",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "storeInfo",
     "moduleType": "门店信息"
   },
   {
     "category": "服务信息",
     "displayName": "顾客分享",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "testimonials",
     "moduleType": "真实评价与实拍"
   },
   {
     "category": "服务信息",
     "displayName": "预约入口",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "booking",
     "moduleType": "预约入口"
   },
   {
     "category": "活动内容",
     "displayName": "限时活动",
-    "implementationStatus": "planned",
+    "implementationStatus": "active",
     "key": "limitedEvent",
     "moduleType": "限时活动"
   }
 ] as const;
 
-/** 23 个真实 Renderer 的完整 schema v2 合同；implementationStatus 不再决定可否渲染。 */
+/** 23 个真实 Renderer 的完整 schema v3 合同；implementationStatus 不再决定可否渲染。 */
 export const CONTENT_TEMPLATE_CONTRACTS = {
   "booking": {
     "allowedControls": [],
     "contentBudget": {
-      "limits": {},
+      "limits": {
+        "altText": 80,
+        "buttonText": 12,
+        "phone": 24,
+        "subtitle": 90,
+        "title": 32
+      },
       "maxCtas": 1,
-      "requiredText": []
+      "requiredText": [
+        "title",
+        "buttonText"
+      ]
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "预约入口",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "framePresets": [
+          "compact",
+          "standard",
+          "spacious"
+        ],
+        "frameRatioPresets": [
+          "21 / 6",
+          "16 / 9",
+          "3 / 2",
+          "4 / 5"
+        ],
+        "frameRatioRange": {
+          "max": 3.5,
+          "min": 0.8,
+          "step": 0.05
+        },
+        "slots": [
+          {
+            "fieldKey": "backgroundImage",
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "roleId": "bgImage",
+            "zoom": {
+              "max": 1.4,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center"
+            ],
+            "colorTokens": [
+              "ink",
+              "ivory"
+            ],
+            "maxLines": 2,
+            "placementPresets": [
+              "left",
+              "center"
+            ],
+            "requiresSafeBand": true,
+            "roleId": "title",
+            "sizePresets": [
+              "small",
+              "standard",
+              "large"
+            ],
+            "widthPresets": [
+              "narrow",
+              "standard"
+            ]
+          },
+          {
+            "align": [
+              "left",
+              "center"
+            ],
+            "colorTokens": [
+              "ink",
+              "ivory"
+            ],
+            "maxLines": 3,
+            "placementPresets": [
+              "left",
+              "center"
+            ],
+            "requiresSafeBand": true,
+            "roleId": "subtitle",
+            "sizePresets": [
+              "small",
+              "standard"
+            ],
+            "widthPresets": [
+              "narrow",
+              "standard"
+            ]
+          },
+          {
+            "align": [
+              "left",
+              "center"
+            ],
+            "colorTokens": [
+              "ink",
+              "ivory"
+            ],
+            "maxLines": 1,
+            "placementPresets": [
+              "left",
+              "center"
+            ],
+            "requiresSafeBand": true,
+            "roleId": "buttonText",
+            "sizePresets": [
+              "small",
+              "standard"
+            ],
+            "widthPresets": [
+              "narrow",
+              "standard"
+            ]
+          }
+        ]
+      },
+      "primaryTask": "action"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "booking",
     "master": "booking-epilogue",
@@ -350,8 +577,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "desktopRatio": "21 / 6",
         "key": "bgImage",
         "mobileRatio": "4 / 5",
-        "required": false,
-        "tabletRatio": "21 / 6"
+        "required": false
       }
     ],
     "moduleType": "预约入口",
@@ -363,12 +589,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "secondaryContact"
       ],
       "mobile": [
-        "bgImage",
-        "copy",
-        "primaryAction",
-        "secondaryContact"
-      ],
-      "tablet": [
         "bgImage",
         "copy",
         "primaryAction",
@@ -468,15 +688,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "mobile": [
             "4 / 5"
-          ],
-          "tablet": [
-            "21 / 6"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "21 / 6",
-          "mobile": "4 / 5",
-          "tablet": "21 / 6"
+          "mobile": "4 / 5"
         },
         "id": "bgImage",
         "kind": "media",
@@ -503,7 +719,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "standard"
@@ -517,15 +733,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "品牌要点",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "compositionPresets": [
+          "grid-2",
+          "grid-3",
+          "grid-4"
+        ],
+        "framePresets": [
+          "compact",
+          "standard",
+          "spacious"
+        ]
+      },
+      "primaryTask": "structured"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "brandPoints",
     "master": "brand-points",
@@ -537,10 +766,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "points"
       ],
       "mobile": [
-        "copy",
-        "points"
-      ],
-      "tablet": [
         "copy",
         "points"
       ]
@@ -657,7 +882,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "standard"
@@ -671,15 +896,41 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "overlay",
-      "mobile": "stacked",
-      "tablet": "overlay"
+      "mobile": "stacked"
     },
     "displayName": "轮播",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "framePresets": [
+          "standard",
+          "wide"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover"
+            ],
+            "focusByViewport": true,
+            "ratioPresets": [
+              "16 / 9",
+              "3 / 2",
+              "4 / 5"
+            ],
+            "roleId": "frames",
+            "zoom": {
+              "max": 1.4,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ]
+      },
+      "primaryTask": "media"
+    },
     "flow": "bleed",
     "heightModeByViewport": {
       "desktop": "ratio",
-      "mobile": "ratio",
-      "tablet": "ratio"
+      "mobile": "ratio"
     },
     "key": "carousel",
     "master": "sequence-stage",
@@ -688,8 +939,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "desktopRatio": "21 / 6",
         "key": "frames",
         "mobileRatio": "4 / 5",
-        "required": false,
-        "tabletRatio": "21 / 6"
+        "required": false
       }
     ],
     "moduleType": "轮播图",
@@ -700,11 +950,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "pagination"
       ],
       "mobile": [
-        "frames",
-        "copy",
-        "pagination"
-      ],
-      "tablet": [
         "frames",
         "copy",
         "pagination"
@@ -795,15 +1040,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "mobile": [
             "4 / 5"
-          ],
-          "tablet": [
-            "21 / 6"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "21 / 6",
-          "mobile": "4 / 5",
-          "tablet": "21 / 6"
+          "mobile": "4 / 5"
         },
         "id": "frames",
         "kind": "media",
@@ -833,7 +1074,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -847,15 +1088,44 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "品类入口",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "compositionPresets": [
+          "grid-2",
+          "grid-3",
+          "grid-4"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover"
+            ],
+            "ratioPresets": [
+              "1 / 1",
+              "4 / 5"
+            ],
+            "roleId": "categories"
+          }
+        ]
+      },
+      "primaryTask": "category",
+      "referenceFields": [
+        {
+          "key": "categorySlugs",
+          "kind": "category",
+          "legacyKey": "categories",
+          "max": 4,
+          "min": 2
+        }
+      ]
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "categoryCards",
     "master": "category-navigation",
@@ -867,10 +1137,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "categories"
       ],
       "mobile": [
-        "copy",
-        "categories"
-      ],
-      "tablet": [
         "copy",
         "categories"
       ]
@@ -972,16 +1238,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "mobile": [
             "4 / 5",
             "1 / 1"
-          ],
-          "tablet": [
-            "1 / 1",
-            "4 / 5"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "1 / 1",
-          "mobile": "4 / 5",
-          "tablet": "1 / 1"
+          "mobile": "4 / 5"
         },
         "id": "categories",
         "kind": "collection",
@@ -1004,7 +1265,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "full"
@@ -1018,15 +1279,35 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "证书展示",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "compositionPresets": [
+          "grid-2",
+          "grid-3"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "contain",
+              "cover"
+            ],
+            "ratioPresets": [
+              "3 / 2",
+              "4 / 5"
+            ],
+            "roleId": "certificates"
+          }
+        ]
+      },
+      "primaryTask": "media"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "certificates",
     "master": "trust-gallery",
@@ -1038,10 +1319,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "certificates"
       ],
       "mobile": [
-        "copy",
-        "certificates"
-      ],
-      "tablet": [
         "copy",
         "certificates"
       ]
@@ -1143,16 +1420,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "mobile": [
             "3 / 2",
             "16 / 9"
-          ],
-          "tablet": [
-            "3 / 2",
-            "16 / 9"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "3 / 2",
-          "mobile": "3 / 2",
-          "tablet": "3 / 2"
+          "mobile": "3 / 2"
         },
         "id": "certificates",
         "kind": "collection",
@@ -1175,7 +1447,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
@@ -1189,15 +1461,50 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "前后对比",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "slots": [
+          {
+            "fit": [
+              "cover"
+            ],
+            "ratioPresets": [
+              "4 / 5",
+              "1 / 1"
+            ],
+            "roleId": "before",
+            "zoom": {
+              "max": 1.4,
+              "min": 1,
+              "step": 0.05
+            }
+          },
+          {
+            "fit": [
+              "cover"
+            ],
+            "ratioPresets": [
+              "4 / 5",
+              "1 / 1"
+            ],
+            "roleId": "after",
+            "zoom": {
+              "max": 1.4,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ]
+      },
+      "primaryTask": "media"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "ratio",
-      "mobile": "content",
-      "tablet": "ratio"
+      "mobile": "content"
     },
     "key": "comparison",
     "master": "comparison-stage",
@@ -1206,15 +1513,13 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "desktopRatio": "4 / 5",
         "key": "before",
         "mobileRatio": "4 / 5",
-        "required": false,
-        "tabletRatio": "4 / 5"
+        "required": false
       },
       {
         "desktopRatio": "4 / 5",
         "key": "after",
         "mobileRatio": "4 / 5",
-        "required": false,
-        "tabletRatio": "4 / 5"
+        "required": false
       }
     ],
     "moduleType": "改款对比",
@@ -1226,12 +1531,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "comparisonHandle"
       ],
       "mobile": [
-        "copy",
-        "before",
-        "after",
-        "comparisonHandle"
-      ],
-      "tablet": [
         "copy",
         "before",
         "after",
@@ -1343,16 +1642,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "mobile": [
             "4 / 5",
             "3 / 2"
-          ],
-          "tablet": [
-            "4 / 5",
-            "3 / 2"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
-          "mobile": "4 / 5",
-          "tablet": "4 / 5"
+          "mobile": "4 / 5"
         },
         "id": "before",
         "kind": "media",
@@ -1368,16 +1662,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "mobile": [
             "4 / 5",
             "3 / 2"
-          ],
-          "tablet": [
-            "4 / 5",
-            "3 / 2"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
-          "mobile": "4 / 5",
-          "tablet": "4 / 5"
+          "mobile": "4 / 5"
         },
         "id": "after",
         "kind": "media",
@@ -1402,7 +1691,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
@@ -1424,15 +1713,77 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "split",
-      "mobile": "stacked",
-      "tablet": "split"
+      "mobile": "stacked"
     },
     "displayName": "双图文",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "compositionPresets": [
+          "balanced",
+          "main-led",
+          "detail-led"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "positionPresets": [
+              "start",
+              "center"
+            ],
+            "ratioPresets": [
+              "3 / 2",
+              "4 / 5",
+              "1 / 1"
+            ],
+            "roleId": "mainImage",
+            "sizePresets": [
+              "standard",
+              "large"
+            ],
+            "zoom": {
+              "max": 1.5,
+              "min": 1,
+              "step": 0.05
+            }
+          },
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "positionPresets": [
+              "center",
+              "end"
+            ],
+            "ratioPresets": [
+              "4 / 5",
+              "3 / 4",
+              "1 / 1"
+            ],
+            "roleId": "detailImage",
+            "sizePresets": [
+              "small",
+              "standard"
+            ],
+            "zoom": {
+              "max": 1.5,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ]
+      },
+      "primaryTask": "media"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "doublePoster",
     "master": "editorial-story",
@@ -1441,15 +1792,13 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "desktopRatio": "3 / 2",
         "key": "mainImage",
         "mobileRatio": "3 / 2",
-        "required": true,
-        "tabletRatio": "3 / 2"
+        "required": true
       },
       {
         "desktopRatio": "4 / 5",
         "key": "detailImage",
         "mobileRatio": "4 / 5",
-        "required": true,
-        "tabletRatio": "4 / 5"
+        "required": true
       }
     ],
     "moduleType": "双图海报",
@@ -1464,12 +1813,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "mainImage",
         "copy",
         "detailImage",
-        "action"
-      ],
-      "tablet": [
-        "mainImage",
-        "detailImage",
-        "copy",
         "action"
       ]
     },
@@ -1574,16 +1917,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "mobile": [
             "3 / 2",
             "16 / 9"
-          ],
-          "tablet": [
-            "3 / 2",
-            "16 / 9"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "3 / 2",
-          "mobile": "3 / 2",
-          "tablet": "3 / 2"
+          "mobile": "3 / 2"
         },
         "id": "mainImage",
         "kind": "media",
@@ -1599,16 +1937,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "mobile": [
             "4 / 5",
             "1 / 1"
-          ],
-          "tablet": [
-            "4 / 5",
-            "1 / 1"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
-          "mobile": "4 / 5",
-          "tablet": "4 / 5"
+          "mobile": "4 / 5"
         },
         "id": "detailImage",
         "kind": "media",
@@ -1632,7 +1965,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
@@ -1646,15 +1979,48 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "单品展示",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "compositionPresets": [
+          "image-left",
+          "image-right"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "ratioPresets": [
+              "4 / 5",
+              "1 / 1"
+            ],
+            "roleId": "product",
+            "sizePresets": [
+              "standard",
+              "large"
+            ]
+          }
+        ]
+      },
+      "primaryTask": "product",
+      "referenceFields": [
+        {
+          "key": "productCode",
+          "kind": "product",
+          "legacyKey": "productId",
+          "max": 1,
+          "min": 1
+        }
+      ]
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "featuredProduct",
     "master": "product-focus",
@@ -1663,8 +2029,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "desktopRatio": "4 / 5",
         "key": "product",
         "mobileRatio": "4 / 5",
-        "required": false,
-        "tabletRatio": "4 / 5"
+        "required": false
       }
     ],
     "moduleType": "单品焦点推荐",
@@ -1676,12 +2041,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "action"
       ],
       "mobile": [
-        "product",
-        "copy",
-        "list",
-        "action"
-      ],
-      "tablet": [
         "product",
         "copy",
         "list",
@@ -1789,16 +2148,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "mobile": [
             "4 / 5",
             "1 / 1"
-          ],
-          "tablet": [
-            "4 / 5",
-            "1 / 1"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
-          "mobile": "4 / 5",
-          "tablet": "4 / 5"
+          "mobile": "4 / 5"
         },
         "id": "product",
         "kind": "media",
@@ -1828,7 +2182,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
@@ -1848,15 +2202,86 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "通栏图",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "framePresets": [
+          "standard",
+          "immersive"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "ratioPresets": [
+              "16 / 9",
+              "3 / 2"
+            ],
+            "roleId": "image",
+            "zoom": {
+              "max": 1.5,
+              "min": 1,
+              "step": 0.05
+            }
+          },
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "ratioPresets": [
+              "4 / 5",
+              "3 / 4"
+            ],
+            "roleId": "mobileImage",
+            "zoom": {
+              "max": 1.5,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center"
+            ],
+            "colorTokens": [
+              "ink",
+              "ivory"
+            ],
+            "maxLines": 4,
+            "placementPresets": [
+              "overlay",
+              "below"
+            ],
+            "requiresSafeBand": true,
+            "roleId": "copy",
+            "sizePresets": [
+              "small",
+              "standard",
+              "large"
+            ],
+            "widthPresets": [
+              "narrow",
+              "standard"
+            ]
+          }
+        ]
+      },
+      "primaryTask": "media"
+    },
     "flow": "bleed",
     "heightModeByViewport": {
       "desktop": "ratio",
-      "mobile": "ratio",
-      "tablet": "ratio"
+      "mobile": "ratio"
     },
     "key": "fullBleed",
     "master": "immersive-image",
@@ -1864,8 +2289,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "desktopRatio": "21 / 6",
         "key": "image",
-        "required": true,
-        "tabletRatio": "16 / 9"
+        "required": true
       },
       {
         "key": "mobileImage",
@@ -1882,11 +2306,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       ],
       "mobile": [
         "mobileImage",
-        "copy",
-        "action"
-      ],
-      "tablet": [
-        "image",
         "copy",
         "action"
       ]
@@ -1969,18 +2388,13 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "allowedRatioPresetsByViewport": {
           "desktop": [
             "21 / 6"
-          ],
-          "tablet": [
-            "16 / 9"
           ]
         },
         "appliesTo": [
-          "desktop",
-          "tablet"
+          "desktop"
         ],
         "defaultRatioByViewport": {
-          "desktop": "21 / 6",
-          "tablet": "16 / 9"
+          "desktop": "21 / 6"
         },
         "id": "image",
         "kind": "media",
@@ -2022,7 +2436,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "full"
@@ -2036,15 +2450,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "作品画廊",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "compositionPresets": [
+          "editorial",
+          "balanced"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover"
+            ],
+            "ratioPresets": [
+              "4 / 5",
+              "1 / 1",
+              "3 / 2"
+            ],
+            "roleId": "works",
+            "zoom": {
+              "max": 1.4,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ]
+      },
+      "primaryTask": "media"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "gallery",
     "master": "asymmetric-gallery",
@@ -2056,10 +2495,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "works"
       ],
       "mobile": [
-        "copy",
-        "works"
-      ],
-      "tablet": [
         "copy",
         "works"
       ]
@@ -2181,17 +2616,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "4 / 5",
             "1 / 1",
             "3 / 2"
-          ],
-          "tablet": [
-            "4 / 5",
-            "1 / 1",
-            "3 / 2"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
-          "mobile": "4 / 5",
-          "tablet": "4 / 5"
+          "mobile": "4 / 5"
         },
         "id": "works",
         "kind": "collection",
@@ -2220,7 +2649,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -2242,15 +2671,184 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "overlay",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "首屏",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "framePresets": [
+          "compact",
+          "standard",
+          "immersive"
+        ],
+        "frameRatioPresets": [
+          "21 / 9",
+          "16 / 9",
+          "3 / 2",
+          "4 / 5"
+        ],
+        "frameRatioRange": {
+          "max": 2.4,
+          "min": 0.8,
+          "step": 0.05
+        },
+        "slots": [
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "ratioPresets": [
+              "16 / 9",
+              "3 / 2"
+            ],
+            "roleId": "desktopImage",
+            "zoom": {
+              "max": 2.5,
+              "min": 1,
+              "step": 0.05
+            }
+          },
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "ratioPresets": [
+              "4 / 5",
+              "3 / 4"
+            ],
+            "roleId": "mobileImage",
+            "zoom": {
+              "max": 2.5,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "ivory"
+            ],
+            "maxLines": 2,
+            "placementPresets": [
+              "left",
+              "center",
+              "right"
+            ],
+            "requiresSafeBand": true,
+            "roleId": "eyebrow",
+            "sizePresets": [
+              "small",
+              "standard"
+            ],
+            "widthPresets": [
+              "narrow",
+              "standard"
+            ]
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "ivory"
+            ],
+            "maxLines": 3,
+            "placementPresets": [
+              "left",
+              "center",
+              "right"
+            ],
+            "requiresSafeBand": true,
+            "roleId": "title",
+            "sizePresets": [
+              "small",
+              "standard",
+              "large"
+            ],
+            "widthPresets": [
+              "narrow",
+              "standard",
+              "wide"
+            ]
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "ivory"
+            ],
+            "maxLines": 4,
+            "placementPresets": [
+              "left",
+              "center",
+              "right"
+            ],
+            "requiresSafeBand": true,
+            "roleId": "subtitle",
+            "sizePresets": [
+              "small",
+              "standard",
+              "large"
+            ],
+            "widthPresets": [
+              "narrow",
+              "standard",
+              "wide"
+            ]
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "ivory"
+            ],
+            "maxLines": 1,
+            "placementPresets": [
+              "left",
+              "center",
+              "right"
+            ],
+            "requiresSafeBand": true,
+            "roleId": "actionText",
+            "sizePresets": [
+              "small",
+              "standard"
+            ],
+            "widthPresets": [
+              "narrow",
+              "standard"
+            ]
+          }
+        ]
+      },
+      "primaryTask": "media"
+    },
     "flow": "bleed",
     "heightModeByViewport": {
       "desktop": "viewport",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "hero",
     "master": "cinematic-hero",
@@ -2258,8 +2856,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "desktopRatio": "16 / 9",
         "key": "desktopImage",
-        "required": true,
-        "tabletRatio": "16 / 9"
+        "required": true
       },
       {
         "key": "mobileImage",
@@ -2276,11 +2873,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       ],
       "mobile": [
         "mobileImage",
-        "copy",
-        "action"
-      ],
-      "tablet": [
-        "desktopImage",
         "copy",
         "action"
       ]
@@ -2383,18 +2975,13 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "allowedRatioPresetsByViewport": {
           "desktop": [
             "16 / 9"
-          ],
-          "tablet": [
-            "16 / 9"
           ]
         },
         "appliesTo": [
-          "desktop",
-          "tablet"
+          "desktop"
         ],
         "defaultRatioByViewport": {
-          "desktop": "16 / 9",
-          "tablet": "16 / 9"
+          "desktop": "16 / 9"
         },
         "id": "desktopImage",
         "kind": "media",
@@ -2442,7 +3029,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "primary-stage",
     "visualWeight": "primary-stage",
     "width": "full"
@@ -2456,15 +3043,38 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "图片热区",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "slots": [
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "ratioPresets": [
+              "16 / 9",
+              "3 / 2",
+              "4 / 5"
+            ],
+            "roleId": "sceneImage",
+            "zoom": {
+              "max": 1.4,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ]
+      },
+      "primaryTask": "media"
+    },
     "flow": "bleed",
     "heightModeByViewport": {
       "desktop": "ratio",
-      "mobile": "ratio",
-      "tablet": "ratio"
+      "mobile": "ratio"
     },
     "key": "hotspot",
     "master": "hotspot-stage",
@@ -2473,8 +3083,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "desktopRatio": "16 / 9",
         "key": "sceneImage",
         "mobileRatio": "4 / 5",
-        "required": true,
-        "tabletRatio": "16 / 9"
+        "required": true
       }
     ],
     "moduleType": "热区图",
@@ -2485,11 +3094,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "copy"
       ],
       "mobile": [
-        "sceneImage",
-        "hotspots",
-        "copy"
-      ],
-      "tablet": [
         "sceneImage",
         "hotspots",
         "copy"
@@ -2622,15 +3226,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "mobile": [
             "4 / 5"
-          ],
-          "tablet": [
-            "16 / 9"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "16 / 9",
-          "mobile": "4 / 5",
-          "tablet": "16 / 9"
+          "mobile": "4 / 5"
         },
         "id": "sceneImage",
         "kind": "media",
@@ -2638,8 +3238,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "role": "media"
       },
       {
-        "allowedRatioPresetsByViewport": {},
-        "defaultRatioByViewport": {},
+        "allowedRatioPresetsByViewport": {
+          "desktop": [
+            "21 / 6"
+          ],
+          "mobile": [
+            "4 / 5"
+          ]
+        },
+        "defaultRatioByViewport": {
+          "desktop": "21 / 6",
+          "mobile": "4 / 5"
+        },
         "id": "hotspots",
         "kind": "marker",
         "parentRole": "sceneImage",
@@ -2663,7 +3273,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -2677,15 +3287,22 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "内容流程",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "framePresets": [
+          "standard",
+          "spacious"
+        ]
+      },
+      "primaryTask": "structured"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "journey",
     "master": "editorial-journey",
@@ -2697,10 +3314,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "steps"
       ],
       "mobile": [
-        "copy",
-        "steps"
-      ],
-      "tablet": [
         "copy",
         "steps"
       ]
@@ -2770,15 +3383,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "mobile": [
             "1 / 1"
-          ],
-          "tablet": [
-            "1 / 1"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "1 / 1",
-          "mobile": "1 / 1",
-          "tablet": "1 / 1"
+          "mobile": "1 / 1"
         },
         "id": "steps",
         "kind": "collection",
@@ -2801,7 +3410,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
@@ -2815,15 +3424,69 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "overlay",
-      "mobile": "stacked",
-      "tablet": "overlay"
+      "mobile": "stacked"
     },
     "displayName": "限时活动",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "framePresets": [
+          "standard",
+          "immersive"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "ratioPresets": [
+              "16 / 9",
+              "3 / 2",
+              "4 / 5"
+            ],
+            "roleId": "event",
+            "zoom": {
+              "max": 1.4,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center"
+            ],
+            "colorTokens": [
+              "ink",
+              "ivory"
+            ],
+            "maxLines": 5,
+            "placementPresets": [
+              "overlay",
+              "below"
+            ],
+            "requiresSafeBand": true,
+            "roleId": "copy",
+            "sizePresets": [
+              "small",
+              "standard",
+              "large"
+            ],
+            "widthPresets": [
+              "narrow",
+              "standard"
+            ]
+          }
+        ]
+      },
+      "primaryTask": "media"
+    },
     "flow": "bleed",
     "heightModeByViewport": {
       "desktop": "ratio",
-      "mobile": "content",
-      "tablet": "ratio"
+      "mobile": "content"
     },
     "key": "limitedEvent",
     "master": "event-stage",
@@ -2832,8 +3495,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "desktopRatio": "16 / 9",
         "key": "event",
         "mobileRatio": "4 / 5",
-        "required": false,
-        "tabletRatio": "16 / 9"
+        "required": false
       }
     ],
     "moduleType": "限时活动",
@@ -2845,12 +3507,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "action"
       ],
       "mobile": [
-        "event",
-        "time",
-        "copy",
-        "action"
-      ],
-      "tablet": [
         "event",
         "time",
         "copy",
@@ -2961,15 +3617,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "mobile": [
             "4 / 5"
-          ],
-          "tablet": [
-            "16 / 9"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "16 / 9",
-          "mobile": "4 / 5",
-          "tablet": "16 / 9"
+          "mobile": "4 / 5"
         },
         "id": "event",
         "kind": "media",
@@ -3001,7 +3653,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -3015,15 +3667,46 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "商品列表",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "compositionPresets": [
+          "grid-2",
+          "grid-3",
+          "grid-4"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "ratioPresets": [
+              "4 / 5",
+              "1 / 1",
+              "3 / 4"
+            ],
+            "roleId": "productCards"
+          }
+        ]
+      },
+      "primaryTask": "product",
+      "referenceFields": [
+        {
+          "key": "productCodes",
+          "kind": "product",
+          "legacyKey": "productIds",
+          "max": 8,
+          "min": 2
+        }
+      ]
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "productRow",
     "master": "product-grid",
@@ -3035,10 +3718,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "productCards"
       ],
       "mobile": [
-        "copy",
-        "productCards"
-      ],
-      "tablet": [
         "copy",
         "productCards"
       ]
@@ -3054,16 +3733,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "mobile": [
             1,
             2
-          ],
-          "tablet": [
-            2,
-            3
           ]
         },
         "defaultByViewport": {
           "desktop": 3,
-          "mobile": 2,
-          "tablet": 2
+          "mobile": 2
         }
       }
     },
@@ -3168,22 +3842,17 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "mobile": [
             "4 / 5",
             "1 / 1"
-          ],
-          "tablet": [
-            "4 / 5",
-            "1 / 1"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
-          "mobile": "4 / 5",
-          "tablet": "4 / 5"
+          "mobile": "4 / 5"
         },
         "id": "productCards",
         "kind": "business",
         "quantity": {
           "default": 3,
-          "max": 4,
+          "max": 8,
           "min": 2
         },
         "required": true,
@@ -3200,7 +3869,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -3214,15 +3883,35 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "场景入口",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "compositionPresets": [
+          "grid-2",
+          "grid-3",
+          "grid-4"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover"
+            ],
+            "ratioPresets": [
+              "4 / 5",
+              "1 / 1"
+            ],
+            "roleId": "scenes"
+          }
+        ]
+      },
+      "primaryTask": "structured"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "sceneShopping",
     "master": "scene-navigation",
@@ -3234,10 +3923,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "scenes"
       ],
       "mobile": [
-        "copy",
-        "scenes"
-      ],
-      "tablet": [
         "copy",
         "scenes"
       ]
@@ -3355,16 +4040,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "mobile": [
             "4 / 5",
             "1 / 1"
-          ],
-          "tablet": [
-            "4 / 5",
-            "1 / 1"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
-          "mobile": "4 / 5",
-          "tablet": "4 / 5"
+          "mobile": "4 / 5"
         },
         "id": "scenes",
         "kind": "collection",
@@ -3387,7 +4067,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
@@ -3401,15 +4081,26 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "服务承诺",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "compositionPresets": [
+          "grid-2",
+          "grid-4"
+        ],
+        "framePresets": [
+          "compact",
+          "standard"
+        ]
+      },
+      "primaryTask": "structured"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "servicePromises",
     "master": "service-policy",
@@ -3421,10 +4112,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "promises"
       ],
       "mobile": [
-        "copy",
-        "promises"
-      ],
-      "tablet": [
         "copy",
         "promises"
       ]
@@ -3557,7 +4244,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "full"
@@ -3580,15 +4267,90 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "split",
-      "mobile": "stacked",
-      "tablet": "split"
+      "mobile": "stacked"
     },
     "displayName": "单图文",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "framePresets": [
+          "compact",
+          "standard",
+          "tall"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "ratioPresets": [
+              "4 / 5",
+              "3 / 4",
+              "1 / 1"
+            ],
+            "roleId": "desktopImage",
+            "zoom": {
+              "max": 1.6,
+              "min": 1,
+              "step": 0.05
+            }
+          },
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "ratioPresets": [
+              "4 / 5",
+              "3 / 4"
+            ],
+            "roleId": "mobileImage",
+            "zoom": {
+              "max": 1.6,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "ivory"
+            ],
+            "maxLines": 4,
+            "placementPresets": [
+              "left",
+              "center",
+              "right"
+            ],
+            "requiresSafeBand": true,
+            "roleId": "copy",
+            "sizePresets": [
+              "small",
+              "standard",
+              "large"
+            ],
+            "widthPresets": [
+              "narrow",
+              "standard"
+            ]
+          }
+        ]
+      },
+      "primaryTask": "media"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "singlePoster",
     "master": "editorial-split",
@@ -3596,8 +4358,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "desktopRatio": "4 / 5",
         "key": "desktopImage",
-        "required": true,
-        "tabletRatio": "4 / 5"
+        "required": true
       },
       {
         "key": "mobileImage",
@@ -3616,11 +4377,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "mobileImage",
         "copy",
         "action"
-      ],
-      "tablet": [
-        "copy",
-        "action",
-        "desktopImage"
       ]
     },
     "presets": [],
@@ -3721,20 +4477,13 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "4 / 5",
             "1 / 1",
             "3 / 2"
-          ],
-          "tablet": [
-            "4 / 5",
-            "1 / 1",
-            "3 / 2"
           ]
         },
         "appliesTo": [
-          "desktop",
-          "tablet"
+          "desktop"
         ],
         "defaultRatioByViewport": {
-          "desktop": "4 / 5",
-          "tablet": "4 / 5"
+          "desktop": "4 / 5"
         },
         "id": "desktopImage",
         "kind": "media",
@@ -3784,7 +4533,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "standard"
@@ -3798,15 +4547,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "门店信息",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "compositionPresets": [
+          "image-left",
+          "image-right"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "ratioPresets": [
+              "3 / 2",
+              "4 / 5"
+            ],
+            "roleId": "store",
+            "zoom": {
+              "max": 1.4,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ]
+      },
+      "primaryTask": "structured"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "storeInfo",
     "master": "store-visit",
@@ -3815,8 +4589,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "desktopRatio": "3 / 2",
         "key": "store",
         "mobileRatio": "3 / 2",
-        "required": false,
-        "tabletRatio": "3 / 2"
+        "required": false
       }
     ],
     "moduleType": "门店信息",
@@ -3828,12 +4601,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "action"
       ],
       "mobile": [
-        "store",
-        "copy",
-        "details",
-        "action"
-      ],
-      "tablet": [
         "store",
         "copy",
         "details",
@@ -3941,16 +4708,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "mobile": [
             "3 / 2",
             "4 / 5"
-          ],
-          "tablet": [
-            "3 / 2",
-            "16 / 9"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "3 / 2",
-          "mobile": "3 / 2",
-          "tablet": "3 / 2"
+          "mobile": "3 / 2"
         },
         "id": "store",
         "kind": "media",
@@ -3982,7 +4744,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -3996,15 +4758,39 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "顾客分享",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "compositionPresets": [
+          "editorial",
+          "balanced"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover"
+            ],
+            "ratioPresets": [
+              "4 / 5",
+              "1 / 1"
+            ],
+            "roleId": "authorizedPhoto",
+            "zoom": {
+              "max": 1.4,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ]
+      },
+      "primaryTask": "structured"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "testimonials",
     "master": "testimonial-proof",
@@ -4013,8 +4799,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "desktopRatio": "4 / 5",
         "key": "authorizedPhoto",
         "mobileRatio": "4 / 5",
-        "required": true,
-        "tabletRatio": "4 / 5"
+        "required": true
       }
     ],
     "moduleType": "真实评价与实拍",
@@ -4025,11 +4810,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "attribution"
       ],
       "mobile": [
-        "authorizedPhoto",
-        "mainQuote",
-        "attribution"
-      ],
-      "tablet": [
         "authorizedPhoto",
         "mainQuote",
         "attribution"
@@ -4120,17 +4900,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "4 / 5",
             "1 / 1",
             "3 / 2"
-          ],
-          "tablet": [
-            "4 / 5",
-            "1 / 1",
-            "3 / 2"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
-          "mobile": "4 / 5",
-          "tablet": "4 / 5"
+          "mobile": "4 / 5"
         },
         "id": "authorizedPhoto",
         "kind": "media",
@@ -4165,7 +4939,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
@@ -4187,15 +4961,52 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "纯文字",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "framePresets": [
+          "compact",
+          "standard",
+          "spacious"
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [
+              "left",
+              "center"
+            ],
+            "roleId": "copy",
+            "sizePresets": [
+              "small",
+              "standard",
+              "large"
+            ],
+            "widthPresets": [
+              "narrow",
+              "standard",
+              "wide"
+            ]
+          }
+        ]
+      },
+      "primaryTask": "text"
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "textBanner",
     "master": "editorial-text",
@@ -4203,8 +5014,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "desktopRatio": "21 / 6",
         "key": "bgImage",
-        "required": false,
-        "tabletRatio": "21 / 6"
+        "required": false
       }
     ],
     "moduleType": "文字横幅",
@@ -4215,11 +5025,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "action"
       ],
       "mobile": [
-        "bgImage",
-        "copy",
-        "action"
-      ],
-      "tablet": [
         "bgImage",
         "copy",
         "action"
@@ -4301,18 +5106,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "allowedRatioPresetsByViewport": {
           "desktop": [
             "21 / 6"
-          ],
-          "tablet": [
-            "21 / 6"
           ]
         },
-        "appliesTo": [
-          "desktop",
-          "tablet"
-        ],
         "defaultRatioByViewport": {
-          "desktop": "21 / 6",
-          "tablet": "21 / 6"
+          "desktop": "21 / 6"
         },
         "id": "bgImage",
         "kind": "media",
@@ -4344,13 +5141,15 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "grand"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "editorial"
   },
   "video": {
-    "allowedControls": [],
+    "allowedControls": [
+      "videoWidth"
+    ],
     "contentBudget": {
       "limits": {},
       "maxCtas": 1,
@@ -4358,15 +5157,41 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "overlay",
-      "mobile": "stacked",
-      "tablet": "overlay"
+      "mobile": "stacked"
     },
     "displayName": "视频",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "framePresets": [
+          "standard",
+          "wide"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "ratioPresets": [
+              "16 / 9",
+              "3 / 2"
+            ],
+            "roleId": "coverImage",
+            "zoom": {
+              "max": 1.4,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ]
+      },
+      "primaryTask": "media"
+    },
     "flow": "bleed",
     "heightModeByViewport": {
       "desktop": "ratio",
-      "mobile": "ratio",
-      "tablet": "ratio"
+      "mobile": "ratio"
     },
     "key": "video",
     "master": "cinematic-video",
@@ -4375,8 +5200,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "desktopRatio": "16 / 9",
         "key": "coverImage",
         "mobileRatio": "4 / 5",
-        "required": false,
-        "tabletRatio": "16 / 9"
+        "required": false
       }
     ],
     "moduleType": "视频区块",
@@ -4388,12 +5212,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "action"
       ],
       "mobile": [
-        "coverImage",
-        "playControl",
-        "copy",
-        "action"
-      ],
-      "tablet": [
         "coverImage",
         "playControl",
         "copy",
@@ -4511,16 +5329,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "4 / 5",
             "16 / 9",
             "9 / 16"
-          ],
-          "tablet": [
-            "16 / 9",
-            "21 / 6"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "16 / 9",
-          "mobile": "4 / 5",
-          "tablet": "16 / 9"
+          "mobile": "4 / 5"
         },
         "id": "coverImage",
         "kind": "media",
@@ -4551,7 +5364,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -4565,15 +5378,46 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
-      "mobile": "stacked",
-      "tablet": "stacked"
+      "mobile": "stacked"
     },
     "displayName": "佩戴展示",
+    "editorCapabilities": {
+      "layoutOverrides": {
+        "slots": [
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "ratioPresets": [
+              "4 / 5",
+              "3 / 4"
+            ],
+            "roleId": "wearingImage",
+            "zoom": {
+              "max": 1.5,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ]
+      },
+      "primaryTask": "product",
+      "referenceFields": [
+        {
+          "key": "productCodes",
+          "kind": "product",
+          "legacyKey": "productIds",
+          "max": 4,
+          "min": 1
+        }
+      ]
+    },
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "wearingInspiration",
     "master": "wearing-story",
@@ -4582,8 +5426,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "desktopRatio": "4 / 5",
         "key": "wearingImage",
         "mobileRatio": "4 / 5",
-        "required": false,
-        "tabletRatio": "4 / 5"
+        "required": false
       }
     ],
     "moduleType": "佩戴灵感",
@@ -4595,12 +5438,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "action"
       ],
       "mobile": [
-        "wearingImage",
-        "copy",
-        "relatedProducts",
-        "action"
-      ],
-      "tablet": [
         "wearingImage",
         "copy",
         "relatedProducts",
@@ -4690,16 +5527,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "mobile": [
             "4 / 5",
             "3 / 2"
-          ],
-          "tablet": [
-            "4 / 5",
-            "3 / 2"
           ]
         },
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
-          "mobile": "4 / 5",
-          "tablet": "4 / 5"
+          "mobile": "4 / 5"
         },
         "id": "wearingImage",
         "kind": "media",
@@ -4731,14 +5563,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 1,
+    "version": 2,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
   }
 } as const satisfies Record<ContentTemplateKey, ContentTemplateContract>;
 
-/** 仅表达 planned 模板的可见基础框架；不承担业务、发布或 Inspector 完整合同。 */
+/** 全部 23 个模板的中性结构预览；不承担业务、发布或 Inspector 完整合同。 */
 export const CONTENT_TEMPLATE_SKELETONS = {
   "booking": {
     "category": "服务信息",
@@ -4746,8 +5578,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "booking",
     "moduleType": "预约入口",
@@ -4759,12 +5590,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "marker"
       ],
       "mobile": [
-        "media",
-        "copy",
-        "action",
-        "marker"
-      ],
-      "tablet": [
         "media",
         "copy",
         "action",
@@ -4806,8 +5631,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "21 / 6",
         "key": "bgImage",
         "mobileRatio": "4 / 5",
-        "role": "media",
-        "tabletRatio": "21 / 6"
+        "role": "media"
       },
       {
         "key": "copy",
@@ -4827,8 +5651,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "brandPoints",
     "moduleType": "卡片网格",
@@ -4838,10 +5661,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "card"
       ],
       "mobile": [
-        "copy",
-        "card"
-      ],
-      "tablet": [
         "copy",
         "card"
       ]
@@ -4898,8 +5717,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "bleed",
     "heightModeByViewport": {
       "desktop": "ratio",
-      "mobile": "ratio",
-      "tablet": "ratio"
+      "mobile": "ratio"
     },
     "key": "carousel",
     "moduleType": "轮播图",
@@ -4910,11 +5728,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "marker"
       ],
       "mobile": [
-        "media",
-        "copy",
-        "marker"
-      ],
-      "tablet": [
         "media",
         "copy",
         "marker"
@@ -4954,8 +5767,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "21 / 6",
         "key": "frames",
         "mobileRatio": "4 / 5",
-        "role": "media",
-        "tabletRatio": "21 / 6"
+        "role": "media"
       },
       {
         "key": "copy",
@@ -4975,8 +5787,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "categoryCards",
     "moduleType": "分类卡片",
@@ -4986,10 +5797,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "card"
       ],
       "mobile": [
-        "copy",
-        "card"
-      ],
-      "tablet": [
         "copy",
         "card"
       ]
@@ -5032,8 +5839,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "1 / 1",
         "key": "categories",
         "mobileRatio": "4 / 5",
-        "role": "card",
-        "tabletRatio": "1 / 1"
+        "role": "card"
       },
       {
         "key": "copy",
@@ -5049,8 +5855,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "certificates",
     "moduleType": "资质证书",
@@ -5060,10 +5865,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "card"
       ],
       "mobile": [
-        "copy",
-        "card"
-      ],
-      "tablet": [
         "copy",
         "card"
       ]
@@ -5106,8 +5907,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "3 / 2",
         "key": "certificates",
         "mobileRatio": "3 / 2",
-        "role": "card",
-        "tabletRatio": "3 / 2"
+        "role": "card"
       },
       {
         "key": "copy",
@@ -5123,8 +5923,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "ratio",
-      "mobile": "content",
-      "tablet": "ratio"
+      "mobile": "content"
     },
     "key": "comparison",
     "moduleType": "改款对比",
@@ -5136,12 +5935,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "marker"
       ],
       "mobile": [
-        "copy",
-        "mainMedia",
-        "detailMedia",
-        "marker"
-      ],
-      "tablet": [
         "copy",
         "mainMedia",
         "detailMedia",
@@ -5188,15 +5981,13 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "4 / 5",
         "key": "before",
         "mobileRatio": "4 / 5",
-        "role": "mainMedia",
-        "tabletRatio": "4 / 5"
+        "role": "mainMedia"
       },
       {
         "desktopRatio": "4 / 5",
         "key": "after",
         "mobileRatio": "4 / 5",
-        "role": "detailMedia",
-        "tabletRatio": "4 / 5"
+        "role": "detailMedia"
       },
       {
         "key": "copy",
@@ -5210,14 +6001,95 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "visualRole": "feature-stage",
     "width": "wide"
   },
+  "doublePoster": {
+    "category": "图文内容",
+    "displayName": "双图文",
+    "flow": "flow",
+    "heightModeByViewport": {
+      "desktop": "content",
+      "mobile": "content"
+    },
+    "key": "doublePoster",
+    "moduleType": "双图海报",
+    "order": {
+      "desktop": [
+        "mainMedia",
+        "detailMedia",
+        "copy",
+        "action"
+      ],
+      "mobile": [
+        "mainMedia",
+        "copy",
+        "detailMedia",
+        "action"
+      ]
+    },
+    "preview": {
+      "desktopZones": [
+        {
+          "column": 1,
+          "role": "mainMedia",
+          "row": 1,
+          "rowSpan": 6,
+          "span": 8
+        },
+        {
+          "column": 9,
+          "role": "detailMedia",
+          "row": 2,
+          "rowSpan": 3,
+          "span": 4
+        },
+        {
+          "column": 9,
+          "role": "copy",
+          "row": 5,
+          "rowSpan": 2,
+          "span": 4
+        },
+        {
+          "column": 9,
+          "role": "action",
+          "row": 8,
+          "rowSpan": 1,
+          "span": 3
+        }
+      ],
+      "tone": "light"
+    },
+    "slots": [
+      {
+        "desktopRatio": "3 / 2",
+        "key": "mainImage",
+        "mobileRatio": "3 / 2",
+        "role": "mainMedia"
+      },
+      {
+        "desktopRatio": "4 / 5",
+        "key": "detailImage",
+        "mobileRatio": "4 / 5",
+        "role": "detailMedia"
+      },
+      {
+        "key": "copy",
+        "role": "copy"
+      },
+      {
+        "key": "action",
+        "role": "action"
+      }
+    ],
+    "visualRole": "feature-stage",
+    "width": "wide"
+  },
   "featuredProduct": {
     "category": "商品展示",
     "displayName": "单品展示",
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "featuredProduct",
     "moduleType": "单品焦点推荐",
@@ -5229,12 +6101,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "action"
       ],
       "mobile": [
-        "media",
-        "copy",
-        "list",
-        "action"
-      ],
-      "tablet": [
         "media",
         "copy",
         "list",
@@ -5279,8 +6145,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "4 / 5",
         "key": "product",
         "mobileRatio": "4 / 5",
-        "role": "media",
-        "tabletRatio": "4 / 5"
+        "role": "media"
       },
       {
         "key": "copy",
@@ -5298,14 +6163,84 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "visualRole": "feature-stage",
     "width": "wide"
   },
+  "fullBleed": {
+    "category": "视觉展示",
+    "displayName": "通栏图",
+    "flow": "bleed",
+    "heightModeByViewport": {
+      "desktop": "ratio",
+      "mobile": "ratio"
+    },
+    "key": "fullBleed",
+    "moduleType": "全屏出血图",
+    "order": {
+      "desktop": [
+        "media",
+        "copy",
+        "action"
+      ],
+      "mobile": [
+        "media",
+        "copy",
+        "action"
+      ]
+    },
+    "preview": {
+      "desktopZones": [
+        {
+          "column": 1,
+          "role": "media",
+          "row": 1,
+          "rowSpan": 4,
+          "span": 12
+        },
+        {
+          "column": 1,
+          "role": "copy",
+          "row": 5,
+          "rowSpan": 2,
+          "span": 8
+        },
+        {
+          "column": 10,
+          "role": "action",
+          "row": 7,
+          "rowSpan": 1,
+          "span": 3
+        }
+      ],
+      "tone": "light"
+    },
+    "slots": [
+      {
+        "desktopRatio": "21 / 6",
+        "key": "image",
+        "role": "media"
+      },
+      {
+        "key": "mobileImage",
+        "mobileRatio": "4 / 5",
+        "role": "media"
+      },
+      {
+        "key": "copy",
+        "role": "copy"
+      },
+      {
+        "key": "action",
+        "role": "action"
+      }
+    ],
+    "visualRole": "support-stage",
+    "width": "full"
+  },
   "gallery": {
     "category": "商品展示",
     "displayName": "作品画廊",
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "gallery",
     "moduleType": "作品画廊",
@@ -5315,10 +6250,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "media"
       ],
       "mobile": [
-        "copy",
-        "media"
-      ],
-      "tablet": [
         "copy",
         "media"
       ]
@@ -5368,8 +6299,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "4 / 5",
         "key": "works",
         "mobileRatio": "4 / 5",
-        "role": "media",
-        "tabletRatio": "4 / 5"
+        "role": "media"
       },
       {
         "key": "copy",
@@ -5379,14 +6309,102 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "visualRole": "feature-stage",
     "width": "full"
   },
+  "hero": {
+    "category": "视觉展示",
+    "displayName": "首屏",
+    "flow": "bleed",
+    "heightModeByViewport": {
+      "desktop": "viewport",
+      "mobile": "content"
+    },
+    "key": "hero",
+    "moduleType": "首屏主视觉",
+    "order": {
+      "desktop": [
+        "media",
+        "copy",
+        "action"
+      ],
+      "mobile": [
+        "media",
+        "copy",
+        "action"
+      ]
+    },
+    "preview": {
+      "desktopZones": [
+        {
+          "column": 1,
+          "role": "media",
+          "row": 1,
+          "rowSpan": 8,
+          "span": 12
+        },
+        {
+          "column": 5,
+          "overlay": true,
+          "role": "eyebrow",
+          "row": 4.2,
+          "rowSpan": 0.7,
+          "span": 4
+        },
+        {
+          "column": 4,
+          "overlay": true,
+          "role": "title",
+          "row": 5,
+          "rowSpan": 1.3,
+          "span": 6
+        },
+        {
+          "column": 4.5,
+          "overlay": true,
+          "role": "subtitle",
+          "row": 6.4,
+          "rowSpan": 0.7,
+          "span": 5
+        },
+        {
+          "column": 5,
+          "overlay": true,
+          "role": "action",
+          "row": 7.4,
+          "rowSpan": 0.7,
+          "span": 3
+        }
+      ],
+      "tone": "light"
+    },
+    "slots": [
+      {
+        "desktopRatio": "16 / 9",
+        "key": "desktopImage",
+        "role": "media"
+      },
+      {
+        "key": "mobileImage",
+        "mobileRatio": "4 / 5",
+        "role": "media"
+      },
+      {
+        "key": "copy",
+        "role": "copy"
+      },
+      {
+        "key": "action",
+        "role": "action"
+      }
+    ],
+    "visualRole": "primary-stage",
+    "width": "full"
+  },
   "hotspot": {
     "category": "导航入口",
     "displayName": "图片热区",
     "flow": "bleed",
     "heightModeByViewport": {
       "desktop": "ratio",
-      "mobile": "ratio",
-      "tablet": "ratio"
+      "mobile": "ratio"
     },
     "key": "hotspot",
     "moduleType": "热区图",
@@ -5397,11 +6415,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "copy"
       ],
       "mobile": [
-        "media",
-        "marker",
-        "copy"
-      ],
-      "tablet": [
         "media",
         "marker",
         "copy"
@@ -5458,11 +6471,12 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "16 / 9",
         "key": "sceneImage",
         "mobileRatio": "4 / 5",
-        "role": "media",
-        "tabletRatio": "16 / 9"
+        "role": "media"
       },
       {
+        "desktopRatio": "21 / 6",
         "key": "hotspots",
+        "mobileRatio": "4 / 5",
         "role": "marker"
       },
       {
@@ -5479,8 +6493,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "journey",
     "moduleType": "定制流程",
@@ -5490,10 +6503,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "timeline"
       ],
       "mobile": [
-        "copy",
-        "timeline"
-      ],
-      "tablet": [
         "copy",
         "timeline"
       ]
@@ -5523,8 +6532,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "1 / 1",
         "key": "steps",
         "mobileRatio": "1 / 1",
-        "role": "timeline",
-        "tabletRatio": "1 / 1"
+        "role": "timeline"
       },
       {
         "key": "copy",
@@ -5540,8 +6548,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "bleed",
     "heightModeByViewport": {
       "desktop": "ratio",
-      "mobile": "content",
-      "tablet": "ratio"
+      "mobile": "content"
     },
     "key": "limitedEvent",
     "moduleType": "限时活动",
@@ -5553,12 +6560,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "action"
       ],
       "mobile": [
-        "media",
-        "marker",
-        "copy",
-        "action"
-      ],
-      "tablet": [
         "media",
         "marker",
         "copy",
@@ -5607,8 +6608,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "16 / 9",
         "key": "event",
         "mobileRatio": "4 / 5",
-        "role": "media",
-        "tabletRatio": "16 / 9"
+        "role": "media"
       },
       {
         "key": "time",
@@ -5632,8 +6632,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "productRow",
     "moduleType": "产品展示行",
@@ -5643,10 +6642,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "card"
       ],
       "mobile": [
-        "copy",
-        "card"
-      ],
-      "tablet": [
         "copy",
         "card"
       ]
@@ -5689,8 +6684,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "4 / 5",
         "key": "productCards",
         "mobileRatio": "4 / 5",
-        "role": "card",
-        "tabletRatio": "4 / 5"
+        "role": "card"
       },
       {
         "key": "copy",
@@ -5706,8 +6700,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "sceneShopping",
     "moduleType": "按场景选购",
@@ -5717,10 +6710,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "card"
       ],
       "mobile": [
-        "copy",
-        "card"
-      ],
-      "tablet": [
         "copy",
         "card"
       ]
@@ -5770,8 +6759,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "4 / 5",
         "key": "scenes",
         "mobileRatio": "4 / 5",
-        "role": "card",
-        "tabletRatio": "4 / 5"
+        "role": "card"
       },
       {
         "key": "copy",
@@ -5787,8 +6775,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "servicePromises",
     "moduleType": "服务承诺",
@@ -5798,10 +6785,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "list"
       ],
       "mobile": [
-        "copy",
-        "list"
-      ],
-      "tablet": [
         "copy",
         "list"
       ]
@@ -5859,14 +6842,98 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "visualRole": "support-stage",
     "width": "full"
   },
+  "singlePoster": {
+    "category": "图文内容",
+    "displayName": "单图文",
+    "flow": "flow",
+    "heightModeByViewport": {
+      "desktop": "content",
+      "mobile": "content"
+    },
+    "key": "singlePoster",
+    "moduleType": "单图海报",
+    "order": {
+      "desktop": [
+        "copy",
+        "action",
+        "media"
+      ],
+      "mobile": [
+        "media",
+        "copy",
+        "action"
+      ]
+    },
+    "preview": {
+      "desktopZones": [
+        {
+          "column": 4,
+          "role": "media",
+          "row": 1,
+          "rowSpan": 8,
+          "span": 9
+        },
+        {
+          "column": 1,
+          "role": "eyebrow",
+          "row": 4.8,
+          "rowSpan": 0.7,
+          "span": 2.5
+        },
+        {
+          "column": 1,
+          "role": "title",
+          "row": 5.5,
+          "rowSpan": 1.6,
+          "span": 2.5
+        },
+        {
+          "column": 1,
+          "role": "subtitle",
+          "row": 7.1,
+          "rowSpan": 0.7,
+          "span": 2.5
+        },
+        {
+          "column": 1,
+          "role": "action",
+          "row": 7.8,
+          "rowSpan": 0.6,
+          "span": 2
+        }
+      ],
+      "tone": "light"
+    },
+    "slots": [
+      {
+        "desktopRatio": "4 / 5",
+        "key": "desktopImage",
+        "role": "media"
+      },
+      {
+        "key": "mobileImage",
+        "mobileRatio": "4 / 5",
+        "role": "media"
+      },
+      {
+        "key": "copy",
+        "role": "copy"
+      },
+      {
+        "key": "action",
+        "role": "action"
+      }
+    ],
+    "visualRole": "feature-stage",
+    "width": "standard"
+  },
   "storeInfo": {
     "category": "服务信息",
     "displayName": "门店信息",
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "storeInfo",
     "moduleType": "门店信息",
@@ -5878,12 +6945,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "action"
       ],
       "mobile": [
-        "media",
-        "copy",
-        "list",
-        "action"
-      ],
-      "tablet": [
         "media",
         "copy",
         "list",
@@ -5928,8 +6989,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "3 / 2",
         "key": "store",
         "mobileRatio": "3 / 2",
-        "role": "media",
-        "tabletRatio": "3 / 2"
+        "role": "media"
       },
       {
         "key": "details",
@@ -5953,8 +7013,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "testimonials",
     "moduleType": "真实评价与实拍",
@@ -5965,11 +7024,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "quote"
       ],
       "mobile": [
-        "media",
-        "quote",
-        "quote"
-      ],
-      "tablet": [
         "media",
         "quote",
         "quote"
@@ -6006,8 +7060,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "4 / 5",
         "key": "authorizedPhoto",
         "mobileRatio": "4 / 5",
-        "role": "media",
-        "tabletRatio": "4 / 5"
+        "role": "media"
       },
       {
         "key": "mainQuote",
@@ -6021,14 +7074,86 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "visualRole": "support-stage",
     "width": "wide"
   },
+  "textBanner": {
+    "category": "图文内容",
+    "displayName": "纯文字",
+    "flow": "flow",
+    "heightModeByViewport": {
+      "desktop": "content",
+      "mobile": "content"
+    },
+    "key": "textBanner",
+    "moduleType": "文字横幅",
+    "order": {
+      "desktop": [
+        "media",
+        "copy",
+        "action"
+      ],
+      "mobile": [
+        "media",
+        "copy",
+        "action"
+      ]
+    },
+    "preview": {
+      "desktopZones": [
+        {
+          "column": 5,
+          "role": "eyebrow",
+          "row": 3.6,
+          "rowSpan": 0.7,
+          "span": 4
+        },
+        {
+          "column": 3,
+          "role": "title",
+          "row": 4.3,
+          "rowSpan": 2,
+          "span": 8
+        },
+        {
+          "column": 4,
+          "role": "subtitle",
+          "row": 6.3,
+          "rowSpan": 0.7,
+          "span": 6
+        },
+        {
+          "column": 5,
+          "role": "action",
+          "row": 7.4,
+          "rowSpan": 0.7,
+          "span": 4
+        }
+      ],
+      "tone": "light"
+    },
+    "slots": [
+      {
+        "desktopRatio": "21 / 6",
+        "key": "bgImage",
+        "role": "media"
+      },
+      {
+        "key": "copy",
+        "role": "copy"
+      },
+      {
+        "key": "action",
+        "role": "action"
+      }
+    ],
+    "visualRole": "support-stage",
+    "width": "editorial"
+  },
   "video": {
     "category": "视觉展示",
     "displayName": "视频",
     "flow": "bleed",
     "heightModeByViewport": {
       "desktop": "ratio",
-      "mobile": "ratio",
-      "tablet": "ratio"
+      "mobile": "ratio"
     },
     "key": "video",
     "moduleType": "视频区块",
@@ -6040,12 +7165,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "action"
       ],
       "mobile": [
-        "media",
-        "marker",
-        "copy",
-        "action"
-      ],
-      "tablet": [
         "media",
         "marker",
         "copy",
@@ -6094,8 +7213,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "16 / 9",
         "key": "coverImage",
         "mobileRatio": "4 / 5",
-        "role": "media",
-        "tabletRatio": "16 / 9"
+        "role": "media"
       },
       {
         "key": "playControl",
@@ -6119,8 +7237,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "flow": "flow",
     "heightModeByViewport": {
       "desktop": "content",
-      "mobile": "content",
-      "tablet": "content"
+      "mobile": "content"
     },
     "key": "wearingInspiration",
     "moduleType": "佩戴灵感",
@@ -6132,12 +7249,6 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "action"
       ],
       "mobile": [
-        "mainMedia",
-        "copy",
-        "detailMedia",
-        "action"
-      ],
-      "tablet": [
         "mainMedia",
         "copy",
         "detailMedia",
@@ -6168,8 +7279,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "desktopRatio": "4 / 5",
         "key": "wearingImage",
         "mobileRatio": "4 / 5",
-        "role": "mainMedia",
-        "tabletRatio": "4 / 5"
+        "role": "mainMedia"
       },
       {
         "key": "copy",
@@ -8151,6 +9261,323 @@ export function createContentTemplateMarker(
   return contract ? { key: contract.key, version: contract.version } : undefined;
 }
 
+function getInstanceOverrideIssues(input: {
+  contract: ContentTemplateContract;
+  props: Record<string, unknown>;
+  blockId?: string;
+  moduleType: string;
+  basePath?: string;
+}): ContentTemplateIssue[] {
+  const overrides = input.props.__instanceOverrides;
+  if (overrides === undefined) return [];
+  const basePath = input.basePath ?? "props.__instanceOverrides";
+  const issue = (message: string, path = basePath, field?: string): ContentTemplateIssue => ({
+    code: "page-validation",
+    severity: "error",
+    layer: "contract",
+    blockId: input.blockId,
+    moduleType: input.moduleType,
+    field,
+    path,
+    message,
+  });
+  if (!isRecord(overrides)) {
+    return [issue("实例覆盖格式或版本无效，无法安全应用。")];
+  }
+  if (overrides.version === 2) {
+    const issues: ContentTemplateIssue[] = [];
+    const finiteInRange = (value: unknown, min: number, max: number) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) && numeric >= min && numeric <= max;
+    };
+    const brandInstanceColors = new Set([
+      "#181A1B", "#5F6568", "#DDE1E2", "#F7F8F8", "#FFFFFF",
+      "#222222", "#66645F", "#E4E3DF", "#F8F7F4", "#FCFCFB",
+    ]);
+    const isSafeColor = (value: unknown) =>
+      typeof value === "string" && brandInstanceColors.has(value.toUpperCase());
+    const frame = isRecord(overrides.frame) ? overrides.frame : undefined;
+    const frameCapabilities = input.contract.editorCapabilities.layoutOverrides ?? {};
+    const frameRatioRange = frameCapabilities.frameRatioRange;
+    const ratioMin = frameRatioRange?.min ?? 0.25;
+    const ratioMax = frameRatioRange?.max ?? 4;
+    if (frame?.aspectRatio !== undefined && (!frameRatioRange || !finiteInRange(frame.aspectRatio, ratioMin, ratioMax))) {
+      issues.push(issue("当前模板未开放整体比例，或比例超出 " + ratioMin + "–" + ratioMax + " 的安全范围。", basePath + ".frame.aspectRatio", "aspectRatio"));
+    }
+    if (frame?.aspectRatioByViewport !== undefined) {
+      if (!isRecord(frame.aspectRatioByViewport)) {
+        issues.push(issue("响应式画面比例格式无效。", basePath + ".frame.aspectRatioByViewport", "aspectRatioByViewport"));
+      } else {
+        for (const [viewport, ratio] of Object.entries(frame.aspectRatioByViewport)) {
+          const ratioPath = basePath + ".frame.aspectRatioByViewport." + viewport;
+          if (!frameRatioRange || !["desktop", "mobile"].includes(viewport) || !finiteInRange(ratio, ratioMin, ratioMax)) {
+            issues.push(issue("当前模板的设备画面比例必须位于 " + ratioMin + "–" + ratioMax + " 的允许范围。", ratioPath, "aspectRatioByViewport"));
+          }
+        }
+      }
+    }
+    if (frame?.heightPreset !== undefined && !frameCapabilities.framePresets?.includes(String(frame.heightPreset))) {
+      issues.push(issue("当前模板不允许该整体高度预设。", basePath + ".frame.heightPreset", "heightPreset"));
+    }
+    if (frame?.compositionPreset !== undefined && !frameCapabilities.compositionPresets?.includes(String(frame.compositionPreset))) {
+      issues.push(issue("当前模板不允许该构图预设。", basePath + ".frame.compositionPreset", "compositionPreset"));
+    }
+    if (frame?.customColors !== undefined) {
+      if (!isRecord(frame.customColors)) {
+        issues.push(issue("实例配色格式无效。", basePath + ".frame.customColors", "customColors"));
+      } else {
+        for (const colorKey of ["background", "text", "accent"] as const) {
+          const color = frame.customColors[colorKey];
+          if (color !== undefined && !isSafeColor(color)) {
+            issues.push(issue("实例颜色只允许使用受控品牌色板。", basePath + ".frame.customColors." + colorKey, colorKey));
+          }
+        }
+      }
+    }
+    const nodes = isRecord(overrides.nodes) ? overrides.nodes : {};
+    for (const [nodeId, rawNode] of Object.entries(nodes)) {
+      const path = basePath + ".nodes." + nodeId;
+      if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(nodeId) || !isRecord(rawNode)) {
+        issues.push(issue("可视化节点标识或格式无效。", path, nodeId));
+        continue;
+      }
+      const slotCapability = frameCapabilities.slots?.find((slot) => slot.roleId === nodeId);
+      const textCapability = frameCapabilities.textRoles?.find((role) => role.roleId === nodeId);
+      if (!slotCapability && !textCapability) {
+        issues.push(issue("当前模板未声明该可视化节点的实例编辑能力。", path, nodeId));
+        continue;
+      }
+      if (rawNode.enabled !== undefined && !textCapability) {
+        issues.push(issue("当前节点不允许启用或隐藏文字角色。", path + ".enabled", nodeId));
+      }
+      if (rawNode.ratio !== undefined && !finiteInRange(rawNode.ratio, 0.25, 4)) {
+        issues.push(issue("节点比例必须位于 0.25–4 的安全范围。", path + ".ratio", nodeId));
+      }
+      if (rawNode.ratio !== undefined && !slotCapability) {
+        issues.push(issue("当前节点不允许图片槽位比例覆盖。", path + ".ratio", nodeId));
+      }
+      if (rawNode.ratio !== undefined && slotCapability?.ratioPresets?.length) {
+        const numericRatio = Number(rawNode.ratio);
+        const allowedRatios = slotCapability.ratioPresets.map((preset) => {
+          const [width, height] = String(preset).split("/").map(Number);
+          return width / height;
+        });
+        if (!allowedRatios.some((allowedRatio) => Math.abs(allowedRatio - numericRatio) < 0.001)) {
+          issues.push(issue("当前模板不允许该图片槽位比例。", path + ".ratio", nodeId));
+        }
+      }
+      if (rawNode.rectByViewport !== undefined) {
+        if (!isRecord(rawNode.rectByViewport)) {
+          issues.push(issue("节点响应式位置格式无效。", path + ".rectByViewport", nodeId));
+        } else {
+          for (const [viewport, rawRect] of Object.entries(rawNode.rectByViewport)) {
+            const rectPath = path + ".rectByViewport." + viewport;
+            if (!["desktop", "mobile"].includes(viewport) || !isRecord(rawRect)) {
+              issues.push(issue("节点设备位置格式无效。", rectPath, nodeId));
+              continue;
+            }
+            const x = Number(rawRect.x);
+            const y = Number(rawRect.y);
+            const width = Number(rawRect.width);
+            const height = Number(rawRect.height);
+            if (![x, y, width, height].every((value) => Number.isFinite(value)) || x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.0001 || y + height > 1.0001) {
+              issues.push(issue("节点必须完整位于画面 0–1 的归一化范围内。", rectPath, nodeId));
+            }
+          }
+        }
+      }
+      if (rawNode.mediaView !== undefined) {
+        if (!slotCapability) {
+          issues.push(issue("当前节点不允许图片观看窗覆盖。", path + ".mediaView", nodeId));
+        } else if (!isRecord(rawNode.mediaView)) {
+          issues.push(issue("图片观看窗格式无效。", path + ".mediaView", nodeId));
+        } else {
+          const mediaView = rawNode.mediaView;
+          if (mediaView.fit !== undefined && !slotCapability.fit?.some((fit) => fit === String(mediaView.fit))) {
+            issues.push(issue("图片适配方式无效。", path + ".mediaView.fit", nodeId));
+          }
+          if (
+            mediaView.zoom !== undefined &&
+            (!slotCapability.zoom || !finiteInRange(mediaView.zoom, slotCapability.zoom.min, slotCapability.zoom.max))
+          ) {
+            issues.push(issue("图片缩放超出当前模板槽位允许范围。", path + ".mediaView.zoom", nodeId));
+          }
+          const focusByViewport = mediaView.focusByViewport;
+          if (focusByViewport !== undefined) {
+            if (!isRecord(focusByViewport)) {
+              issues.push(issue("图片焦点格式无效。", path + ".mediaView.focusByViewport", nodeId));
+            } else {
+              for (const [viewport, rawFocus] of Object.entries(focusByViewport)) {
+                const focusPath = path + ".mediaView.focusByViewport." + viewport;
+                if (!slotCapability.focusByViewport || !["desktop", "mobile"].includes(viewport) || !isRecord(rawFocus) || !finiteInRange(rawFocus.x, 0, 100) || !finiteInRange(rawFocus.y, 0, 100)) {
+                  issues.push(issue("图片焦点必须位于 0–100 的归一化范围。", focusPath, nodeId));
+                }
+              }
+            }
+          }
+        }
+      }
+      if (rawNode.typography !== undefined) {
+        if (!textCapability) {
+          issues.push(issue("当前节点不允许文字排版覆盖。", path + ".typography", nodeId));
+        } else if (!isRecord(rawNode.typography)) {
+          issues.push(issue("文字布局格式无效。", path + ".typography", nodeId));
+        } else {
+          const typography = rawNode.typography;
+          const sizeLevelToPreset: Record<string, string> = { xs: "small", sm: "small", md: "standard", lg: "large", xl: "large" };
+          if (
+            typography.sizeLevel !== undefined &&
+            !textCapability.sizePresets?.includes(sizeLevelToPreset[String(typography.sizeLevel)])
+          ) {
+            issues.push(issue("字号级别无效。", path + ".typography.sizeLevel", nodeId));
+          }
+          if (typography.align !== undefined && !textCapability.align?.some((align) => align === String(typography.align))) {
+            issues.push(issue("文字对齐方式无效。", path + ".typography.align", nodeId));
+          }
+          const tokenColors: Record<string, string[]> = {
+            ink: ["#181A1B", "#222222"],
+            mineral: ["#5F6568", "#66645F"],
+            ivory: ["#FFFFFF", "#F7F8F8", "#FCFCFB", "#F8F7F4"],
+          };
+          const allowedColors = (textCapability.colorTokens ?? []).flatMap((token) => tokenColors[token] ?? []);
+          if (
+            typography.color !== undefined &&
+            (!isSafeColor(typography.color) || !allowedColors.some((color) => color.toLowerCase() === String(typography.color).toLowerCase()))
+          ) {
+            issues.push(issue("当前模板不允许该文字颜色。", path + ".typography.color", nodeId));
+          }
+          if (
+            typography.maxLines !== undefined &&
+            (!Number.isInteger(Number(typography.maxLines)) || !finiteInRange(typography.maxLines, 1, textCapability.maxLines ?? 12))
+          ) {
+            issues.push(issue("文字最大行数超出当前角色允许范围。", path + ".typography.maxLines", nodeId));
+          }
+          if (typography.safeBand !== undefined && !["none", "light", "dark"].includes(String(typography.safeBand))) {
+            issues.push(issue("安全文字带值无效。", path + ".typography.safeBand", nodeId));
+          }
+        }
+      }
+      const textValue = input.props[nodeId];
+      const roleHasContent = typeof textValue === "string" && textValue.trim().length > 0;
+      const roleVisible = rawNode.enabled === true || (rawNode.enabled !== false && roleHasContent);
+      const roleHasVisualOverride = rawNode.enabled !== undefined || rawNode.rectByViewport !== undefined || rawNode.typography !== undefined;
+      if (rawNode.enabled === true && textCapability && !roleHasContent) {
+        const contentPath = basePath.endsWith(".__instanceOverrides")
+          ? basePath.slice(0, -".__instanceOverrides".length) + "." + nodeId
+          : "props." + nodeId;
+        issues.push(issue("已启用的文字角色必须填写内容。", contentPath, nodeId));
+      }
+      if (roleVisible && roleHasVisualOverride && textCapability?.requiresSafeBand) {
+        const typography = isRecord(rawNode.typography) ? rawNode.typography : {};
+        if (typography.safeBand !== "light" && typography.safeBand !== "dark") {
+          issues.push(issue(
+            "图片叠字需选择浅色或深色安全文字带后才能发布。",
+            path + ".typography.safeBand",
+            nodeId,
+          ));
+        }
+      }
+    }
+    return issues;
+  }
+  if (overrides.version !== 1) {
+    return [issue("实例覆盖格式或版本无效，无法安全应用。")];
+  }
+  const capabilities = input.contract.editorCapabilities.layoutOverrides ?? {};
+  const issues: ContentTemplateIssue[] = [];
+  const layout = isRecord(overrides.layout) ? overrides.layout : undefined;
+  if (layout) {
+    const framePreset = layout.framePreset;
+    if (framePreset !== undefined && !capabilities.framePresets?.includes(String(framePreset))) {
+      issues.push(issue("当前模板不允许该整体画面预设。", basePath + ".layout.framePreset", "framePreset"));
+    }
+    const compositionPreset = layout.compositionPreset;
+    if (compositionPreset !== undefined && !capabilities.compositionPresets?.includes(String(compositionPreset))) {
+      issues.push(issue("当前模板不允许该构图预设。", basePath + ".layout.compositionPreset", "compositionPreset"));
+    }
+  }
+  const slots = isRecord(overrides.slots) ? overrides.slots : {};
+  for (const [roleId, value] of Object.entries(slots)) {
+    const capability = capabilities.slots?.find((slot) => slot.roleId === roleId);
+    const path = basePath + ".slots." + roleId;
+    if (!capability || !isRecord(value)) {
+      issues.push(issue("当前模板不允许该图片槽位覆盖。", path, roleId));
+      continue;
+    }
+    const checks: Array<[unknown, readonly string[] | undefined, string, string]> = [
+      [value.ratioPreset, capability.ratioPresets, "ratioPreset", "图片槽位比例"],
+      [value.sizePreset, capability.sizePresets, "sizePreset", "图片槽位尺寸"],
+      [value.positionPreset, capability.positionPresets, "positionPreset", "图片槽位位置"],
+      [value.fit, capability.fit, "fit", "图片适配方式"],
+    ];
+    for (const [selected, allowed, key, label] of checks) {
+      if (selected !== undefined && !allowed?.includes(String(selected))) {
+        issues.push(issue("当前模板不允许该" + label + "。", path + "." + key, roleId));
+      }
+    }
+    if (value.zoom !== undefined) {
+      const zoom = Number(value.zoom);
+      if (!capability.zoom || !Number.isFinite(zoom) || zoom < capability.zoom.min || zoom > capability.zoom.max) {
+        issues.push(issue("图片缩放超出当前模板允许范围。", path + ".zoom", roleId));
+      }
+    }
+    if (value.focusByViewport !== undefined) {
+      if (!capability.focusByViewport || !isRecord(value.focusByViewport)) {
+        issues.push(issue("当前模板不允许该设备焦点覆盖。", path + ".focusByViewport", roleId));
+      } else {
+        for (const [viewport, focus] of Object.entries(value.focusByViewport)) {
+          if (!["desktop", "mobile"].includes(viewport) || !isRecord(focus)) {
+            issues.push(issue("设备焦点格式无效。", path + ".focusByViewport." + viewport, roleId));
+            continue;
+          }
+          const x = Number(focus.x);
+          const y = Number(focus.y);
+          if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 100 || y < 0 || y > 100) {
+            issues.push(issue("设备焦点必须位于 0–100 的归一化范围。", path + ".focusByViewport." + viewport, roleId));
+          }
+        }
+      }
+    }
+  }
+  const textRoles = isRecord(overrides.textRoles) ? overrides.textRoles : {};
+  for (const [roleId, value] of Object.entries(textRoles)) {
+    const capability = capabilities.textRoles?.find((role) => role.roleId === roleId) ??
+      (input.contract.key === "hero" && roleId === "copy"
+        ? {
+            roleId: "copy",
+            placementPresets: ["overlay"],
+            widthPresets: ["narrow", "standard", "wide"],
+            sizePresets: ["small", "standard", "large"],
+            align: ["left", "center", "right"],
+            colorTokens: ["ink", "ivory"],
+            requiresSafeBand: true,
+            maxLines: 4,
+          }
+        : undefined);
+    const path = basePath + ".textRoles." + roleId;
+    if (!capability || !isRecord(value)) {
+      issues.push(issue("当前模板不允许该文字角色覆盖。", path, roleId));
+      continue;
+    }
+    const checks: Array<[unknown, readonly string[] | undefined, string, string]> = [
+      [value.placementPreset, capability.placementPresets, "placementPreset", "文字位置"],
+      [value.widthPreset, capability.widthPresets, "widthPreset", "文字宽度"],
+      [value.sizePreset, capability.sizePresets, "sizePreset", "字号级别"],
+      [value.align, capability.align, "align", "文字对齐"],
+      [value.colorToken, capability.colorTokens, "colorToken", "文字颜色"],
+    ];
+    for (const [selected, allowed, key, label] of checks) {
+      if (selected !== undefined && !allowed?.includes(String(selected))) {
+        issues.push(issue("当前模板不允许该" + label + "。", path + "." + key, roleId));
+      }
+    }
+    if (value.enabled === true && capability.requiresSafeBand && value.safeBand !== "light" && value.safeBand !== "dark") {
+      issues.push(issue("图片叠字需选择浅色或深色安全文字带后才能发布。", path + ".safeBand", roleId));
+    }
+  }
+  return issues;
+}
+
 export function getContentTemplateIssues(input: {
   moduleType?: unknown;
   props?: unknown;
@@ -8170,14 +9597,31 @@ export function getContentTemplateIssues(input: {
   const path = input.path || "props.__contentTemplate";
   const marker = props.__contentTemplate;
   const base = { layer: "contract" as const, blockId, moduleType, path };
+  const overrideIssues = getInstanceOverrideIssues({
+    contract,
+    props,
+    blockId,
+    moduleType,
+    basePath: path.endsWith(".__contentTemplate")
+      ? path.slice(0, -".__contentTemplate".length) + ".__instanceOverrides"
+      : "props.__instanceOverrides",
+  });
 
   if (marker === undefined) {
+    if (props.__instanceOverrides !== undefined) {
+      return [{
+        ...base,
+        code: "content-template-marker-invalid",
+        severity: "error",
+        message: "实例覆盖缺少当前内容模板版本印记，不能按旧合同猜测渲染。",
+      }, ...overrideIssues];
+    }
     return [{
       ...base,
       code: "content-template-legacy",
       severity: "info",
       message: "历史区块未携带内容模板版本印记，按 legacy-0 兼容读取；普通保存不会自动升级。",
-    }];
+    }, ...overrideIssues];
   }
   if (!isRecord(marker)) {
     return [{
@@ -8206,6 +9650,14 @@ export function getContentTemplateIssues(input: {
     }];
   }
   if (markerVersion !== contract.version) {
+    if (markerVersion === 1 && contract.version === 2 && props.__instanceOverrides === undefined) {
+      return [{
+        ...base,
+        code: "content-template-legacy",
+        severity: "info",
+        message: "内容模板版本 1 按原构图兼容读取；普通保存不会自动升级到实例覆盖合同。",
+      }];
+    }
     return [{
       ...base,
       code: "content-template-version-unsupported",
@@ -8213,7 +9665,7 @@ export function getContentTemplateIssues(input: {
       message: "内容模板版本暂不受支持，无法猜测为当前版本。",
     }];
   }
-  return [];
+  return overrideIssues;
 }
 
 export function getContentTemplateCompletion(

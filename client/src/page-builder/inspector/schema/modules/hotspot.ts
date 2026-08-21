@@ -5,6 +5,7 @@
 import {
   HOTSPOT_CONTRACT,
   evaluateHotspotContract,
+  getContractRoleQuantity,
 } from "../../../config/blockContracts";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { hotspotPuckConfig } from "../../../adapters/hotspot.puck";
@@ -71,7 +72,9 @@ export const hotspotSchema: ModuleInspectorSchema = {
           key: "hotspots",
           label: "桌面端热区",
           control: "array",
+          device: "desktop",
           itemLabel: "热区",
+          minItems: getContractRoleQuantity("hotspot", "hotspots").min,
           maxItems: HOTSPOT_CONTRACT.content.maxHotspots,
           // 默认居中热区:空对象条目会被画布 width>0 过滤不可见且摘要显示 undefined%
           defaultItem: { label: "", targetType: "none", x: 50, y: 50, width: 20, height: 12 },
@@ -85,7 +88,9 @@ export const hotspotSchema: ModuleInspectorSchema = {
           key: "mobileHotspots",
           label: "手机端热区",
           control: "array",
+          device: "mobile",
           itemLabel: "热区",
+          minItems: getContractRoleQuantity("hotspot", "hotspots").min,
           maxItems: HOTSPOT_CONTRACT.content.maxHotspots,
           defaultItem: { label: "", targetType: "none", x: 50, y: 50, width: 30, height: 10 },
           itemSummary: (item) =>

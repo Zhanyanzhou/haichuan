@@ -10,19 +10,18 @@ import { ADMIN_COLORS } from '@/styles/antdTheme';
 
 /* ═══════ 局部视觉令牌 — 仅作用于登录页 ═══════ */
 const TOKENS = {
-  bg: '#F2EFEA',
-  bgLight: '#F8F6F2',
-  card: 'rgba(255,255,255,0.88)',
+  bg: ADMIN_COLORS.canvasSubtle,
+  bgLight: '#F4F5F5',
+  card: '#FFFFFF',
   title: ADMIN_COLORS.ink,
   text: ADMIN_COLORS.textStrong,
   muted: ADMIN_COLORS.muted,
-  border: '#DCD6CF',
-  brandGold: ADMIN_COLORS.brandGold,
+  border: ADMIN_COLORS.line,
   accent: ADMIN_COLORS.action,
   accentHover: ADMIN_COLORS.actionHover,
   accentActive: ADMIN_COLORS.actionActive,
-  accentDisabled: '#D8C7AC',
-  inputBg: '#FBFAF8',
+  accentDisabled: '#B8BEC1',
+  inputBg: '#F7F8F8',
   placeholder: ADMIN_COLORS.muted,
   error: ADMIN_COLORS.error,
   hint: ADMIN_COLORS.muted,
@@ -80,8 +79,8 @@ export default function Login() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-5 overflow-y-auto py-8"
-      style={{ background: `radial-gradient(ellipse at 50% 40%, ${TOKENS.bgLight} 0%, ${TOKENS.bg} 60%, #EBE6DF 100%)` }}
+      className="admin-login-page min-h-screen flex items-center justify-center px-5 overflow-y-auto py-8"
+      style={{ background: TOKENS.bg }}
     >
       {/* 卡片 */}
       <div
@@ -89,9 +88,9 @@ export default function Login() {
         style={{
           maxWidth: 520,
           background: TOKENS.card,
-          borderRadius: 18,
-          border: `1px solid rgba(182,170,158,0.22)`,
-          boxShadow: '0 18px 50px rgba(77,65,54,0.10), 0 2px 8px rgba(77,65,54,0.04)',
+          borderRadius: 4,
+          border: `1px solid ${TOKENS.border}`,
+          boxShadow: 'none',
           padding: '56px 52px 44px',
         }}
       >
@@ -105,7 +104,7 @@ export default function Login() {
           </h1>
           <div
             className="mx-auto mt-4"
-            style={{ width: 30, height: 2, background: TOKENS.brandGold, borderRadius: 1 }}
+            style={{ width: 30, height: 2, background: TOKENS.accent }}
           />
         </div>
 
@@ -262,7 +261,7 @@ export default function Login() {
         .ant-input:focus,
         .ant-input:hover {
           border-color: ${TOKENS.accent} !important;
-          box-shadow: 0 0 0 3px rgba(111,87,51,0.18) !important;
+          box-shadow: 0 0 0 3px rgba(24,26,27,0.16) !important;
         }
         /* 密码输入框 */
         .ant-input-affix-wrapper {
@@ -275,6 +274,14 @@ export default function Login() {
           background: transparent !important;
           color: ${TOKENS.text} !important;
           font-size: 15px !important;
+        }
+        .ant-input-affix-wrapper input:-webkit-autofill,
+        .ant-input-affix-wrapper input:-webkit-autofill:hover,
+        .ant-input-affix-wrapper input:-webkit-autofill:focus {
+          -webkit-text-fill-color: ${TOKENS.text} !important;
+          box-shadow: 0 0 0 1000px ${TOKENS.inputBg} inset !important;
+          caret-color: ${TOKENS.text};
+          transition: background-color 9999s ease-out 0s;
         }
         .ant-input-affix-wrapper .ant-input-prefix {
           margin-right: 10px;

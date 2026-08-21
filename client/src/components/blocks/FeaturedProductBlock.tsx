@@ -45,9 +45,10 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
 
   const media = (
     <div
+      data-content-role="product"
       data-editor-field="productId"
       className="homepage-featured-product__media"
-      style={{ aspectRatio: productRatio, overflow: "hidden", background: "#F3F1EE", width: "100%", maxWidth: 640, margin: "0 auto" }}
+      style={{ aspectRatio: productRatio, overflow: "hidden", background: "#F4F5F5", width: "100%", maxWidth: 640, margin: "0 auto" }}
     >
       <SecureImage
         src={product.image}
@@ -58,25 +59,27 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
   );
 
   const copy = (
-    <div className="homepage-featured-product__copy" style={{ maxWidth: 640, margin: "0 auto", textAlign: "center", width: "100%" }}>
-      {eyebrow ? <p data-editor-field="eyebrow" style={{ margin: "0 0 14px", color: "#8C8C8C", fontSize: 11, letterSpacing: "0.2em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>{eyebrow}</p> : null}
-      {title ? <h2 data-editor-field="title" style={{ margin: "0 0 22px", color: "#1A1A1A", fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-type-display, clamp(32px, 4vw, 50px))", fontWeight: 500, lineHeight: 1.1 }}>{title}</h2> : null}
-      <p style={{ margin: "0 0 8px", color: "#1A1A1A", fontSize: 17, fontWeight: 600 }}>{product.name}</p>
-      {showPrice && product.price ? <p style={{ margin: "0 0 22px", color: "#8C8C8C", fontSize: 14 }}>{product.price}</p> : null}
-      {summary ? <p data-editor-field="summary" style={{ margin: "0 0 32px", color: "#5A5A5A", fontSize: "var(--hc-type-body, 14px)", lineHeight: 1.9 }}>{summary}</p> : null}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center" }}>
+    <div data-content-role="copy" className="homepage-featured-product__copy" style={{ maxWidth: 640, margin: "0 auto", textAlign: "center", width: "100%" }}>
+      {eyebrow ? <p data-editor-field="eyebrow" style={{ margin: "0 0 14px", color: "#6E7477", fontSize: 11, letterSpacing: "0.2em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>{eyebrow}</p> : null}
+      {title ? <h2 data-editor-field="title" style={{ margin: "0 0 22px", color: "#181A1B", fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-type-display, clamp(32px, 4vw, 50px))", fontWeight: 500, lineHeight: 1.1 }}>{title}</h2> : null}
+      <div data-content-role="list">
+        <p style={{ margin: "0 0 8px", color: "#181A1B", fontSize: 17, fontWeight: 600 }}>{product.name}</p>
+        {showPrice && product.price ? <p style={{ margin: "0 0 22px", color: "#6E7477", fontSize: 14 }}>{product.price}</p> : null}
+      </div>
+      {summary ? <p data-editor-field="summary" style={{ margin: "0 0 32px", color: "#5F6568", fontSize: "var(--hc-type-body, 14px)", lineHeight: 1.9 }}>{summary}</p> : null}
+      <div data-content-role="action" style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center" }}>
         {primaryText && productLink ? (
           editMode ? (
-            <span data-editor-field="primaryText productId" style={{ color: "#1A1A1A", fontSize: 13, letterSpacing: "0.08em", borderBottom: "1px solid #1A1A1A", paddingBottom: 4 }}>{primaryText}</span>
+            <span data-editor-field="primaryText productId" style={{ color: "#181A1B", fontSize: 13, letterSpacing: "0.08em", borderBottom: "1px solid #181A1B", paddingBottom: 4 }}>{primaryText}</span>
           ) : (
-            <Link data-editor-field="primaryText productId" to={productLink} style={{ color: "#1A1A1A", fontSize: 13, textDecoration: "none", letterSpacing: "0.08em", borderBottom: "1px solid #1A1A1A", paddingBottom: 4 }}>{primaryText}</Link>
+            <Link data-editor-field="primaryText productId" to={productLink} style={{ color: "#181A1B", fontSize: 13, textDecoration: "none", letterSpacing: "0.08em", borderBottom: "1px solid #181A1B", paddingBottom: 4 }}>{primaryText}</Link>
           )
         ) : null}
         {secondaryText && secondaryUrl ? (
           editMode ? (
-            <span data-editor-field="secondaryText secondaryLink" style={{ color: "#5A5A5A", fontSize: 13, letterSpacing: "0.08em", borderBottom: "1px solid #5A5A5A", paddingBottom: 4 }}>{secondaryText}</span>
+            <span data-editor-field="secondaryText secondaryLink" style={{ color: "#5F6568", fontSize: 13, letterSpacing: "0.08em", borderBottom: "1px solid #5F6568", paddingBottom: 4 }}>{secondaryText}</span>
           ) : (
-            <Link data-editor-field="secondaryText secondaryLink" to={secondaryUrl} style={{ color: "#5A5A5A", fontSize: 13, textDecoration: "none", letterSpacing: "0.08em", borderBottom: "1px solid #5A5A5A", paddingBottom: 4 }}>{secondaryText}</Link>
+            <Link data-editor-field="secondaryText secondaryLink" to={secondaryUrl} style={{ color: "#5F6568", fontSize: 13, textDecoration: "none", letterSpacing: "0.08em", borderBottom: "1px solid #5F6568", paddingBottom: 4 }}>{secondaryText}</Link>
           )
         ) : null}
       </div>

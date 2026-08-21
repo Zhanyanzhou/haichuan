@@ -554,7 +554,7 @@ export default function MyAccountDashboard({
                         width: 72,
                         height: 72,
                         flexShrink: 0,
-                        background: "#f4f1ec",
+                        background: "#f4f5f5",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -572,7 +572,7 @@ export default function MyAccountDashboard({
                           }}
                         />
                       ) : (
-                        <span style={{ color: "#c9b78c", fontSize: 24 }}>
+                        <span style={{ color: "#6e7477", fontSize: 24 }}>
                           ◆
                         </span>
                       )}
@@ -585,7 +585,7 @@ export default function MyAccountDashboard({
                         <p
                           style={{
                             fontSize: 12,
-                            color: "#8a8177",
+                            color: "#5f6568",
                             margin: "4px 0 0",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
@@ -600,7 +600,7 @@ export default function MyAccountDashboard({
                           style={{
                             fontSize: 13,
                             margin: "6px 0 0",
-                            color: "#b8944e",
+                            color: "#181a1b",
                           }}
                         >
                           ¥{Number(fav.price).toLocaleString("zh-CN")}
@@ -612,7 +612,7 @@ export default function MyAccountDashboard({
                     >
                       <Link
                         to={`/products/${fav.productId}`}
-                        style={{ fontSize: 12, color: "#b8944e" }}
+                        style={{ fontSize: 12, color: "#181a1b" }}
                       >
                         查看作品
                       </Link>
@@ -621,7 +621,7 @@ export default function MyAccountDashboard({
                         onClick={() => removeFavorite(fav.productId)}
                         style={{
                           fontSize: 12,
-                          color: "#9b938a",
+                          color: "#6E7477",
                           background: "none",
                           border: "none",
                           cursor: "pointer",
@@ -685,7 +685,7 @@ export default function MyAccountDashboard({
                         aria-label="订单进度"
                       >
                         {cancelled ? (
-                          <span style={{ fontSize: 11, color: "#a06a5a" }}>
+                          <span style={{ fontSize: 11, color: "#8C3F3B" }}>
                             ✕ 订单已取消
                           </span>
                         ) : (
@@ -697,7 +697,7 @@ export default function MyAccountDashboard({
                                 alignItems: "center",
                                 gap: 4,
                                 fontSize: 11,
-                                color: step.done ? "#b8944e" : "#b6ada2",
+                                color: step.done ? "#181a1b" : "#6e7477",
                               }}
                             >
                               {index > 0 && (
@@ -706,8 +706,8 @@ export default function MyAccountDashboard({
                                     width: 18,
                                     height: 1,
                                     background: step.done
-                                      ? "#b8944e"
-                                      : "#e3ddd3",
+                                      ? "#181a1b"
+                                      : "#dde1e2",
                                     display: "inline-block",
                                   }}
                                 />
@@ -717,7 +717,7 @@ export default function MyAccountDashboard({
                                   width: 7,
                                   height: 7,
                                   borderRadius: "50%",
-                                  background: step.done ? "#b8944e" : "#e3ddd3",
+                                  background: step.done ? "#181a1b" : "#dde1e2",
                                   display: "inline-block",
                                 }}
                               />
@@ -730,7 +730,7 @@ export default function MyAccountDashboard({
                         <p
                           style={{
                             fontSize: 11,
-                            color: "#8a8177",
+                            color: "#5f6568",
                             margin: "0 0 6px",
                             display: "flex",
                             gap: 8,
@@ -746,7 +746,7 @@ export default function MyAccountDashboard({
                             onClick={() => toggleTracking(order.id)}
                             style={{
                               fontSize: 11,
-                              color: "#b8944e",
+                              color: "#181a1b",
                               background: "none",
                               border: "none",
                               cursor: "pointer",
@@ -762,20 +762,20 @@ export default function MyAccountDashboard({
                       {trackingOrderId === order.id && (
                         <div
                           style={{
-                            background: "#f9f7f4",
+                            background: "#f4f5f5",
                             padding: 12,
                             marginBottom: 8,
                             fontSize: 12,
                           }}
                         >
                           {trackingLoading ? (
-                            <p style={{ color: "#8a8177", margin: 0 }}>
+                            <p style={{ color: "#5f6568", margin: 0 }}>
                               轨迹查询中…
                             </p>
                           ) : trackingData && trackingData.events.length ? (
                             <>
                               <p
-                                style={{ color: "#b8944e", margin: "0 0 8px" }}
+                                style={{ color: "#335f7d", margin: "0 0 8px" }}
                               >
                                 {TRACK_STATE[trackingData.state] || "运输中"}
                                 {trackingData.carrier
@@ -787,7 +787,7 @@ export default function MyAccountDashboard({
                                   key={i}
                                   style={{
                                     margin: "0 0 6px",
-                                    color: i === 0 ? "#4a443d" : "#8a8177",
+                                    color: i === 0 ? "#5f6568" : "#5f6568",
                                   }}
                                 >
                                   <span style={{ marginRight: 8 }}>
@@ -798,7 +798,7 @@ export default function MyAccountDashboard({
                               ))}
                             </>
                           ) : (
-                            <p style={{ color: "#8a8177", margin: 0 }}>
+                            <p style={{ color: "#5f6568", margin: 0 }}>
                               暂无轨迹数据（物流查询服务可能未接入，请联系顾问）
                             </p>
                           )}
@@ -831,7 +831,7 @@ export default function MyAccountDashboard({
                         {order.status === "PENDING_PAYMENT" &&
                           (commerceEnabled ? (
                             hasPendingProof(order.id) ? (
-                              <span style={{ fontSize: 11, color: "#b8944e" }}>
+                              <span style={{ fontSize: 11, color: "#7a531a" }}>
                                 凭证已提交·待审核
                               </span>
                             ) : (
@@ -850,7 +850,7 @@ export default function MyAccountDashboard({
                               </button>
                             )
                           ) : (
-                            <span style={{ fontSize: 11, color: "#766f66" }}>
+                            <span style={{ fontSize: 11, color: "#5f6568" }}>
                               线上付款暂未开放·顾问将联系您
                             </span>
                           ))}
@@ -892,14 +892,14 @@ export default function MyAccountDashboard({
             </dl>
             {/* 申请合作：申请入口 + 当前状态（协议未落地前，入口指向说明页，不开放表单提交） */}
             <div style={{ marginBottom: 12 }}>
-              <p style={{ fontSize: 12, color: "#8a8177", margin: "0 0 8px" }}>
+              <p style={{ fontSize: 12, color: "#5f6568", margin: "0 0 8px" }}>
                 申请合作
               </p>
               <div
                 style={{
                   padding: "12px 14px",
                   background:
-                    partnerStatus === "APPROVED" ? "#f7f4ee" : "#f9f7f4",
+                    partnerStatus === "APPROVED" ? "#eff5f1" : "#f4f5f5",
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
@@ -907,7 +907,7 @@ export default function MyAccountDashboard({
                 }}
               >
                 <div style={{ minWidth: 0 }}>
-                  <span style={{ fontSize: 13, color: "#4a443d" }}>
+                  <span style={{ fontSize: 13, color: "#5f6568" }}>
                     {partnerStatus === "APPROVED"
                       ? "✓ 已认证合作商家"
                       : PARTNER_STATUS_LABEL[partnerStatus] ||
@@ -921,7 +921,7 @@ export default function MyAccountDashboard({
                     <p
                       style={{
                         fontSize: 12,
-                        color: "#8a8177",
+                        color: "#5f6568",
                         margin: "6px 0 0",
                       }}
                     >
@@ -931,7 +931,7 @@ export default function MyAccountDashboard({
                 </div>
                 <Link
                   to={PARTNER_ACTION[partnerStatus]?.to || "/partner"}
-                  style={{ fontSize: 12, color: "#b8944e", flexShrink: 0 }}
+                  style={{ fontSize: 12, color: "#181a1b", flexShrink: 0 }}
                 >
                   {PARTNER_ACTION[partnerStatus]?.label || "了解详情"} →
                 </Link>
@@ -956,11 +956,11 @@ export default function MyAccountDashboard({
                 justifyContent: "space-between",
                 alignItems: "center",
                 padding: "10px 12px",
-                background: "#f9f7f4",
+                background: "#f4f5f5",
                 marginBottom: 12,
               }}
             >
-              <span style={{ fontSize: 12, color: "#8a8177" }}>
+              <span style={{ fontSize: 12, color: "#5f6568" }}>
                 我的个人数据（资料/订单/收藏等）可随时导出或注销账户
               </span>
               <span style={{ display: "flex", gap: 8 }}>
@@ -1023,7 +1023,7 @@ export default function MyAccountDashboard({
           footer={null}
           destroyOnClose
         >
-          <p style={{ color: "#766f66", fontSize: 13, marginBottom: 16 }}>
+          <p style={{ color: "#5f6568", fontSize: 13, marginBottom: 16 }}>
             请上传转账截图或凭证图片（JPG/PNG/WebP，≤10MB）。审核通过后订单进入发货流程。
           </p>
           <Upload
@@ -1042,7 +1042,7 @@ export default function MyAccountDashboard({
               disabled={uploading}
               style={{
                 padding: "10px 16px",
-                background: "#b8944e",
+                background: "#181a1b",
                 color: "#fff",
                 border: 0,
                 cursor: "pointer",
@@ -1065,7 +1065,7 @@ export default function MyAccountDashboard({
         cancelText="取消"
         destroyOnClose
       >
-        <p style={{ color: "#766f66", fontSize: 13, marginBottom: 16 }}>
+        <p style={{ color: "#5f6568", fontSize: 13, marginBottom: 16 }}>
           评价提交后经审核将在作品页展示，感谢您分享佩戴体验。
         </p>
         <div style={{ marginBottom: 16 }}>
@@ -1108,7 +1108,7 @@ export default function MyAccountDashboard({
             disabled={reviewImages.length >= 6}
           >
             {reviewImages.length >= 6 ? null : (
-              <span style={{ fontSize: 20, color: "#b8944e" }}>+</span>
+              <span style={{ fontSize: 20, color: "#181a1b" }}>+</span>
             )}
           </Upload>
           {reviewImages.length > 0 ? (
@@ -1172,10 +1172,10 @@ export default function MyAccountDashboard({
         destroyOnClose
       >
         <div className="space-y-3">
-          <p style={{ color: "#a06a5a", fontSize: 13 }}>
+          <p style={{ color: "#8C3F3B", fontSize: 13 }}>
             注销后您的姓名、邮箱、地址与收藏将被清除，账户将永久无法登录，此操作不可恢复。
           </p>
-          <p style={{ color: "#8a8177", fontSize: 13 }}>
+          <p style={{ color: "#5f6568", fontSize: 13 }}>
             依据法律要求，历史订单与收款记录将留存；您发布且已公开展示的评价将继续匿名展示。建议先"导出我的数据"留档。
           </p>
           <Input.Password
@@ -1266,5 +1266,9 @@ export default function MyAccountDashboard({
 }
 
 const styles = `
-.my-account{--ink:#29241f;--soft:#766f66;--line:#e8e3da;--gold:#b8944e;max-width:1240px;margin:auto;padding:clamp(42px,7vw,96px) clamp(20px,5vw,64px) 112px;color:var(--ink)}.my-account__intro{display:flex;align-items:end;justify-content:space-between;gap:28px;padding-bottom:34px;border-bottom:1px solid var(--line)}.my-account__eyebrow,.my-account__panel-head p,.my-account__panel--collection>p{margin:0 0 12px;color:var(--gold);font:12px/1.2 "Cormorant Garamond","Noto Serif SC",serif;letter-spacing:.18em}.my-account h1,.my-account h2{margin:0;font-family:"Cormorant Garamond","Noto Serif SC",serif;font-weight:500;letter-spacing:.04em}.my-account h1{font-size:clamp(44px,6vw,68px);line-height:1}.my-account__greeting{margin:16px 0 0;color:var(--soft);font-size:14px}.my-account__sign-out{padding:0;border:0;background:none;color:var(--soft);font-size:13px;cursor:pointer}.my-account__sign-out:hover{color:var(--ink)}.my-account__shortcuts{display:flex;gap:26px;padding:18px 0;border-bottom:1px solid var(--line);overflow:auto}.my-account__shortcuts a{flex:none;color:var(--ink);font-size:13px;text-decoration:none}.my-account__shortcuts span{margin-right:7px;color:var(--gold);font:13px "Cormorant Garamond",serif}.my-account__summary{display:grid;grid-template-columns:repeat(3,1fr) minmax(150px,.8fr);margin:32px 0 18px;border:1px solid var(--line)}.my-account__summary>div,.my-account__summary-action{min-height:106px;padding:21px 24px;border-right:1px solid var(--line);display:grid;align-content:center;gap:6px}.my-account__summary strong{font:34px/1 "Cormorant Garamond",serif}.my-account__summary span{color:var(--soft);font-size:12px}.my-account__summary-action{background:#f7f4ee;color:var(--ink);font-size:13px;text-decoration:none}.my-account__summary-action b{color:var(--gold);font-size:17px;font-weight:400}.my-account__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.my-account__panel{min-height:250px;padding:30px;border:1px solid var(--line);background:#fff}.my-account__panel--wide{grid-column:span 2;min-height:auto}.my-account__panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.my-account__panel-head h2,.my-account__panel--collection h2{font-size:28px}.my-account__panel-head>a{color:var(--soft);font-size:12px;text-decoration:none}.my-account__panel-head>a:hover{color:var(--ink)}.my-account__records{margin-top:22px}.my-account__records article{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 0;border-top:1px solid var(--line)}.my-account__records small{display:block;color:var(--soft);font-size:11px}.my-account__records h3{margin:6px 0 0;font-size:14px;font-weight:500}.my-account__records em{font-style:normal;color:var(--gold);font-size:12px;white-space:nowrap}.my-account__order-meta{display:grid;justify-items:end;gap:8px}.my-account__order-meta strong{font:22px "Cormorant Garamond",serif}.my-account-empty{margin:44px 0 0;color:var(--soft);font-size:13px;line-height:1.8}.my-account-empty a{display:block;width:max-content;margin-top:10px;color:var(--ink);text-decoration:none;border-bottom:1px solid var(--gold)}.my-account__panel--collection{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;background:#b8944e;border-color:#b8944e;color:#fff}.my-account__panel--collection>p{color:#fff}.my-account__panel--collection>span{margin:15px 0 24px;max-width:280px;font-size:13px;line-height:1.8}.my-account__button{padding:12px 18px;background:#fff;color:#8c6b2d;text-decoration:none;font-size:13px}.my-account__panel--profile{display:grid;grid-template-columns:1.1fr 1fr;column-gap:32px}.my-account__panel--profile .my-account__panel-head{grid-column:span 2}.my-account dl{margin:22px 0 0}.my-account dl div{padding:11px 0;border-top:1px solid var(--line)}.my-account dt{color:var(--soft);font-size:11px}.my-account dd{margin:5px 0 0;font-size:14px}.my-account__address{margin-top:22px;padding-top:11px;border-top:1px solid var(--line);font-size:13px;line-height:1.8}.my-account__address p{margin:0 0 6px;color:var(--soft);font-size:11px}@media(max-width:720px){.my-account__intro{align-items:flex-start;flex-direction:column}.my-account__summary{grid-template-columns:repeat(2,1fr)}.my-account__summary-action{border-top:1px solid var(--line)}.my-account__grid{grid-template-columns:1fr}.my-account__panel--wide{grid-column:auto}.my-account__panel--profile{grid-template-columns:1fr}.my-account__panel--profile .my-account__panel-head{grid-column:auto}.my-account__shortcuts{gap:18px}.my-account__panel{min-height:0;padding:25px}}@media(max-width:420px){.my-account__summary>div,.my-account__summary-action{padding:18px}.my-account__summary strong{font-size:29px}.my-account__panel-head{display:block}.my-account__panel-head>a{display:inline-block;margin-top:12px}.my-account__records article{align-items:flex-start;flex-direction:column}.my-account__order-meta{justify-items:start}}
+.my-account{--ink:#181a1b!important;--soft:#5f6568!important;--line:#dde1e2!important;--gold:#181a1b!important}
+.my-account__summary-action{background:#f4f5f5!important}
+.my-account__panel--collection{background:#111315!important;border-color:#111315!important}
+.my-account__button{color:#181a1b!important}
+.my-account{--ink:#181a1b;--soft:#5f6568;--line:#dde1e2;--gold:#181a1b;max-width:1240px;margin:auto;padding:clamp(42px,7vw,96px) clamp(20px,5vw,64px) 112px;color:var(--ink)}.my-account__intro{display:flex;align-items:end;justify-content:space-between;gap:28px;padding-bottom:34px;border-bottom:1px solid var(--line)}.my-account__eyebrow,.my-account__panel-head p,.my-account__panel--collection>p{margin:0 0 12px;color:var(--gold);font:12px/1.2 "Cormorant Garamond","Noto Serif SC",serif;letter-spacing:.18em}.my-account h1,.my-account h2{margin:0;font-family:"Cormorant Garamond","Noto Serif SC",serif;font-weight:500;letter-spacing:.04em}.my-account h1{font-size:clamp(44px,6vw,68px);line-height:1}.my-account__greeting{margin:16px 0 0;color:var(--soft);font-size:14px}.my-account__sign-out{padding:0;border:0;background:none;color:var(--soft);font-size:13px;cursor:pointer}.my-account__sign-out:hover{color:var(--ink)}.my-account__shortcuts{display:flex;gap:26px;padding:18px 0;border-bottom:1px solid var(--line);overflow:auto}.my-account__shortcuts a{flex:none;color:var(--ink);font-size:13px;text-decoration:none}.my-account__shortcuts span{margin-right:7px;color:var(--gold);font:13px "Cormorant Garamond",serif}.my-account__summary{display:grid;grid-template-columns:repeat(3,1fr) minmax(150px,.8fr);margin:32px 0 18px;border:1px solid var(--line)}.my-account__summary>div,.my-account__summary-action{min-height:106px;padding:21px 24px;border-right:1px solid var(--line);display:grid;align-content:center;gap:6px}.my-account__summary strong{font:34px/1 "Cormorant Garamond",serif}.my-account__summary span{color:var(--soft);font-size:12px}.my-account__summary-action{background:#f4f5f5;color:var(--ink);font-size:13px;text-decoration:none}.my-account__summary-action b{color:var(--gold);font-size:17px;font-weight:400}.my-account__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.my-account__panel{min-height:250px;padding:30px;border:1px solid var(--line);background:#fff}.my-account__panel--wide{grid-column:span 2;min-height:auto}.my-account__panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.my-account__panel-head h2,.my-account__panel--collection h2{font-size:28px}.my-account__panel-head>a{color:var(--soft);font-size:12px;text-decoration:none}.my-account__panel-head>a:hover{color:var(--ink)}.my-account__records{margin-top:22px}.my-account__records article{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 0;border-top:1px solid var(--line)}.my-account__records small{display:block;color:var(--soft);font-size:11px}.my-account__records h3{margin:6px 0 0;font-size:14px;font-weight:500}.my-account__records em{font-style:normal;color:var(--gold);font-size:12px;white-space:nowrap}.my-account__order-meta{display:grid;justify-items:end;gap:8px}.my-account__order-meta strong{font:22px "Cormorant Garamond",serif}.my-account-empty{margin:44px 0 0;color:var(--soft);font-size:13px;line-height:1.8}.my-account-empty a{display:block;width:max-content;margin-top:10px;color:var(--ink);text-decoration:none;border-bottom:1px solid var(--gold)}.my-account__panel--collection{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;background:#181a1b;border-color:#181a1b;color:#fff}.my-account__panel--collection>p{color:#fff}.my-account__panel--collection>span{margin:15px 0 24px;max-width:280px;font-size:13px;line-height:1.8}.my-account__button{padding:12px 18px;background:#fff;color:#181a1b;text-decoration:none;font-size:13px}.my-account__panel--profile{display:grid;grid-template-columns:1.1fr 1fr;column-gap:32px}.my-account__panel--profile .my-account__panel-head{grid-column:span 2}.my-account dl{margin:22px 0 0}.my-account dl div{padding:11px 0;border-top:1px solid var(--line)}.my-account dt{color:var(--soft);font-size:11px}.my-account dd{margin:5px 0 0;font-size:14px}.my-account__address{margin-top:22px;padding-top:11px;border-top:1px solid var(--line);font-size:13px;line-height:1.8}.my-account__address p{margin:0 0 6px;color:var(--soft);font-size:11px}@media(max-width:720px){.my-account__intro{align-items:flex-start;flex-direction:column}.my-account__summary{grid-template-columns:repeat(2,1fr)}.my-account__summary-action{border-top:1px solid var(--line)}.my-account__grid{grid-template-columns:1fr}.my-account__panel--wide{grid-column:auto}.my-account__panel--profile{grid-template-columns:1fr}.my-account__panel--profile .my-account__panel-head{grid-column:auto}.my-account__shortcuts{gap:18px}.my-account__panel{min-height:0;padding:25px}}@media(max-width:420px){.my-account__summary>div,.my-account__summary-action{padding:18px}.my-account__summary strong{font-size:29px}.my-account__panel-head{display:block}.my-account__panel-head>a{display:inline-block;margin-top:12px}.my-account__records article{align-items:flex-start;flex-direction:column}.my-account__order-meta{justify-items:start}}
 `;

@@ -1,9 +1,9 @@
 /**
  * FocusPicker — 视觉焦点拖拽器
  * 在图片缩略图上拖拽圆点 → 回写 focusX/focusY（0-100）。
- * 下方折叠「快速定位」九宫格。所见即所得，不暴露数字。
+ * 下方直接展示「快速定位」九宫格。所见即所得，不暴露数字。
  */
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 interface FocusPickerProps {
   src: string;
@@ -44,6 +44,20 @@ export default function FocusPicker({ src, focusX, focusY, onChange, aspectRatio
     if (dragging) update(e.clientX, e.clientY);
   };
   const onUp = () => setDragging(false);
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 10 : 2;
+    const next = { x: focusX, y: focusY };
+    if (event.key === "ArrowLeft") next.x -= step;
+    else if (event.key === "ArrowRight") next.x += step;
+    else if (event.key === "ArrowUp") next.y -= step;
+    else if (event.key === "ArrowDown") next.y += step;
+    else if (event.key === "Home") {
+      next.x = 50;
+      next.y = 50;
+    } else return;
+    event.preventDefault();
+    onChange(Math.min(100, Math.max(0, next.x)), Math.min(100, Math.max(0, next.y)));
+  };
 
   return (
     <div className="homepage-editor__focus-picker">
@@ -54,13 +68,17 @@ export default function FocusPicker({ src, focusX, focusY, onChange, aspectRatio
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
+        tabIndex={0}
+        role="img"
+        aria-label={`图片焦点 ${Math.round(focusX)}% × ${Math.round(focusY)}%；方向键微调，Shift 加方向键大幅调整，Home 居中`}
+        onKeyDown={onKeyDown}
       >
         <img src={src} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: `${focusX}% ${focusY}%`, pointerEvents: "none" }} />
         <span className="homepage-editor__focus-point" style={{ left: `${focusX}%`, top: `${focusY}%` }} aria-hidden />
         {safeArea && <span className="homepage-editor__safe-area" aria-hidden />}
       </div>
-      <details className="homepage-editor__focus-quick">
-        <summary>快速定位</summary>
+      <div className="homepage-editor__focus-quick">
+        <span>快速定位</span>
         <div className="homepage-editor__focus-grid">
           {QUICK.map((q) => (
             <button
@@ -73,7 +91,7 @@ export default function FocusPicker({ src, focusX, focusY, onChange, aspectRatio
             />
           ))}
         </div>
-      </details>
+      </div>
     </div>
   );
 }

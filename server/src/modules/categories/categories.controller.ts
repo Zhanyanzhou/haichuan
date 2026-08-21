@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nes
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CategoriesService } from './categories.service';
 import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
+import { ResolveCategoryReferencesDto } from './dto/resolve-category-references.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -33,6 +34,15 @@ export class CategoriesController {
   @ApiOperation({ summary: '获取管理端一级/二级分类树' })
   findManageTree() {
     return this.categoriesService.findManageTree();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles('SUPER_ADMIN', 'ADMIN', 'EDITOR')
+  @Post('admin/resolve-references')
+  @ApiOperation({ summary: '按稳定 slug 解析店铺装修分类引用' })
+  resolveReferences(@Body() dto: ResolveCategoryReferencesDto) {
+    return this.categoriesService.resolveReferences(dto.slugs ?? []);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

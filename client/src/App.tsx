@@ -37,6 +37,7 @@ const PaymentReview = lazy(() => import("@/pages/admin/PaymentReview"));
 const About = lazy(() => import("@/pages/public/About"));
 const Contact = lazy(() => import("@/pages/public/Contact"));
 const Privacy = lazy(() => import("@/pages/public/Privacy"));
+const BusinessInfo = lazy(() => import("@/pages/public/BusinessInfo"));
 const Cart = lazy(() => import("@/pages/public/Cart"));
 const Checkout = lazy(() => import("@/pages/public/Checkout"));
 const Catalog = lazy(() => import("@/pages/public/Catalog"));
@@ -51,7 +52,7 @@ const TemplateGallery = lazy(() => import("@/pages/dev/TemplateGallery"));
 const Login = lazy(() => import("@/pages/admin/Login"));
 const Dashboard = lazy(() => import("@/pages/admin/Dashboard"));
 const ProductManage = lazy(() => import("@/pages/admin/ProductManage"));
-const ProductEditor = lazy(() => import("@/pages/admin/ProductEditor"));
+const ProductEditor = lazy(() => import("@/pages/admin/ProductEditor/ProfessionalProductEditor"));
 const CategoryManage = lazy(() => import("@/pages/admin/CategoryManage"));
 const AttributeManage = lazy(() => import("@/pages/admin/AttributeManage"));
 const TagManage = lazy(() => import("@/pages/admin/TagManage"));
@@ -249,6 +250,7 @@ function App() {
             <Route path="about" element={<About />} />
             <Route path="contact" element={<Contact />} />
             <Route path="privacy" element={<Privacy />} />
+            <Route path="business-info" element={<BusinessInfo />} />
             <Route path="__templates" element={<TemplateGallery />} />
             <Route
               path="preview/home"

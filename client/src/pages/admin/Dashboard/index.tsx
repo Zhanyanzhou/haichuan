@@ -497,10 +497,10 @@ export default function Dashboard() {
                     x2="0"
                     y2="1"
                   >
-                    <stop offset="0%" stopColor="var(--adm-brand-gold)" stopOpacity={0.28} />
+                    <stop offset="0%" stopColor="var(--adm-action)" stopOpacity={0.28} />
                     <stop
                       offset="100%"
-                      stopColor="var(--adm-brand-gold)"
+                      stopColor="var(--adm-action)"
                       stopOpacity={0.02}
                     />
                   </linearGradient>
@@ -544,7 +544,7 @@ export default function Dashboard() {
                   type="monotone"
                   dataKey="count"
                   name="数值"
-                  stroke="var(--adm-brand-gold)"
+                  stroke="var(--adm-action)"
                   strokeWidth={2}
                   fill="url(#adminTrendFill)"
                   dot={false}

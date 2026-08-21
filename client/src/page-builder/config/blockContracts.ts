@@ -15,7 +15,7 @@ import {
 import { CONTENT_TEMPLATE_CONTRACTS } from "../generated/contentTemplates.generated";
 
 /**
- * 比例单一来源:schema v2 生成契约的 roles[].defaultRatioByViewport。
+ * 比例单一来源:schema v3 生成契约的 roles[].defaultRatioByViewport。
  * 给人看的规格(imageSpecs/上传提示)也一律经 getContractRoleRatio 派生,
  * 不再手写字面值(2026-08-18 比例派生管道)。
  */
@@ -26,9 +26,9 @@ export type ImageTextTemplate =
 export type ModuleDensity = "compact" | "normal" | "spacious";
 
 export type ContractKey = keyof typeof CONTENT_TEMPLATE_CONTRACTS;
-type ContractViewport = "desktop" | "tablet" | "mobile";
+type ContractViewport = "desktop" | "mobile";
 
-/** 所有真实 Renderer 的素材比例只从 schema v2 生成产物读取。 */
+/** 所有真实 Renderer 的素材比例只从 schema v3 生成产物读取。 */
 export function getContractRoleRatio(
   key: ContractKey,
   roleId: string,
@@ -59,6 +59,20 @@ export function getContractRoleRatioPresets(
   return list?.length ? list : [getContractRoleRatio(key, roleId, viewport)];
 }
 
+/** 数组/集合条目上下限只从机器合同 roles[].quantity 派生，避免 Inspector 另建规则表。 */
+export function getContractRoleQuantity(
+  key: ContractKey,
+  roleId: string,
+): { default: number; min: number; max: number } {
+  const role = CONTENT_TEMPLATE_CONTRACTS[key].roles.find((item) => item.id === roleId);
+  const quantity =
+    role && "quantity" in role
+      ? (role.quantity as { default: number; min: number; max: number } | undefined)
+      : undefined;
+  if (!quantity) throw new Error(`内容模板 ${String(key)}.${roleId} 缺少条目数量合同`);
+  return quantity;
+}
+
 /**
  * 内容区块保存的比例覆盖值(冒号格式如 "4:5")解析为契约比例:
  * 经本端白名单校验,越界/旧值一律回退契约默认,渲染层不会带出非规范比例。
@@ -77,19 +91,15 @@ export function resolveContractAspectRatio(
 }
 
 /**
- * 装修响应式规则：电脑是基础布局，平板继承电脑；只有手机进入独立覆写层。
- * 画布、运行时区块和素材校验共用这份边界，避免分别判断设备。
+ * 内容合同只有 desktop / mobile 两端。768–1023px 仍可做纯 CSS 几何适配，
+ * 但素材、比例与阅读顺序继续继承 desktop，不能形成第三个合同设备源。
  */
 export const RESPONSIVE_CANVAS = {
   // 桌面画布 1920（2026-08-16）：wide 内容档 1520 在 1440 画布下被压至 ~1267px，
   // 观感失真约 20%；1920 视口下 wide 档（1520+两侧留白）可完整呈现。
   desktop: { width: 1920, height: 1200 },
-  // Puck iframe 有 2px 边框；外层 770px 才能得到真实的 768px CSS 画布宽度。
-  tablet: { width: 770, height: 1024, displayWidth: 768 },
   mobile: { width: 390, height: 844 },
-  tabletMinWidth: 768,
-  tabletMaxWidth: 1023,
-  tabletMediaQuery: "(min-width: 768px) and (max-width: 1023px)",
+  compactDesktopMediaQuery: "(min-width: 768px) and (max-width: 1023px)",
   mobileMaxWidth: 767,
   mobileMediaQuery: "(max-width: 767px)",
 } as const;
@@ -428,8 +438,6 @@ export const SINGLE_POSTER_CONTRACT = {
     // Editorial Split 构图红线:38/62(镜像 62/38),禁止 50/50
     desktopColumns: "38fr 62fr",
     desktopImageLeftColumns: "62fr 38fr",
-    tabletColumns: "1fr 1.4fr",
-    tabletImageLeftColumns: "1.4fr 1fr",
     desktopMediaAspectRatio: CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[0].desktopRatio,
     mobileMediaAspectRatio: CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[1].mobileRatio,
     mobileBreakpoint: 767,
@@ -539,13 +547,11 @@ export function evaluateHeroContract(
   const target = evaluateLinkTarget(props);
   const checks = [
     hasText(props.desktopImage),
-    hasText(props.title),
     target.ready,
   ];
   const errors: string[] = [];
   const warnings: string[] = [];
   if (!hasText(props.desktopImage)) errors.push("请上传桌面端主视觉");
-  if (!hasText(props.title)) errors.push("请填写主标题");
   if (target.error) errors.push(target.error);
   if (!hasText(props.mobileImage))
     warnings.push("建议上传移动端4:5竖图并单独调整焦点");

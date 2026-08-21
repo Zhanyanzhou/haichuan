@@ -3,20 +3,21 @@ import { Link } from "react-router-dom";
 import { settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { usePageMetaStore } from "@/store/pageMetaStore";
+import { LEGAL_ENTITY } from "@/config/legalEntity";
 
 const T = {
   bg: "#FFFFFF",
-  warmBg: "#FAF9F7",
-  txt: "#29241F",
-  sec: "rgba(41,36,31,0.58)",
-  light: "rgba(41,36,31,0.38)",
-  line: "#E8E7E3",
-  gold: "#B8944E",
+  warmBg: "#F4F5F5",
+  txt: "#181A1B",
+  sec: "#5F6568",
+  light: "#6E7477",
+  line: "#DDE1E2",
+  gold: "#181A1B",
 };
 const MW = 1120;
 const PX = "clamp(24px,5vw,64px)";
 
-// 隐私说明各章节：依据当前代码真实收集行为编写，不编造运营主体和联系方式。
+// 隐私说明各章节：依据当前代码真实收集行为编写；运营主体统一读取法定信息配置。
 const SECTIONS = [
   {
     title: "我们收集哪些信息",
@@ -143,7 +144,7 @@ export default function Privacy() {
             隐私说明
           </h1>
           <p style={{ fontSize: 14, color: T.sec, margin: 0, maxWidth: 560, lineHeight: 1.6 }}>
-            本说明基于网站当前真实的代码行为编写，描述我们收集的信息、用途与您的权利。正式上线前，运营主体与合规细节仍需实际运营方或专业人员复核。
+            本说明由{LEGAL_ENTITY.name}制定，用于说明我们在提供海川珠宝网站服务时收集的信息、使用方式与您的权利。
           </p>
         </div>
       </section>
@@ -227,6 +228,15 @@ export default function Privacy() {
             >
               联系我们
             </p>
+            <p style={{ fontSize: 13, color: T.sec, lineHeight: 1.7, margin: "0 0 12px" }}>
+              信息处理者：{LEGAL_ENTITY.name}
+              <Link
+                to="/business-info"
+                style={{ color: T.gold, textDecoration: "underline", marginLeft: 8 }}
+              >
+                查看经营主体信息
+              </Link>
+            </p>
             {hasContact ? (
               <div style={{ display: "grid", gap: 6, fontSize: 14, color: T.txt }}>
                 {contact.phone && (
@@ -268,7 +278,7 @@ export default function Privacy() {
               lineHeight: 1.7,
             }}
           >
-            隐私说明版本：privacy-v1；最后更新于 2026-08-16。如本说明与实际代码行为不一致，以实际代码行为为准；我们会及时更新本说明。
+            隐私说明版本：privacy-v1.1；最后更新于 2026-08-21。如本说明与实际代码行为不一致，以实际代码行为为准；我们会及时更新本说明。
           </p>
         </div>
       </section>

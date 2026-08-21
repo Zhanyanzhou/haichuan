@@ -12,9 +12,9 @@ interface BeforeAfterBlockProps {
   editMode?: boolean;
 }
 
-const INK = "#1A1A1A";
-const MUTED = "#8C8C8C";
-const GOLD = "#8C8C8C";
+const INK = "#181A1B";
+const MUTED = "#6E7477";
+const GOLD = "#6E7477";
 
 /**
  * 改款前后对比 — Editorial Story 母版(改款叙事变体)
@@ -38,7 +38,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
     productId,
   } = content;
   const bgColor = styleConfig.bgColor || "#FFFFFF";
-  const targetUrl = resolveLinkTargetUrl({ targetType, productId, linkUrl });
+  const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, linkUrl });
   // 对比图比例选项(契约派生):前后两图共用同一比例
   const trackRatioDesktop = resolveContractAspectRatio("comparison", "before", content.aspectRatio, "desktop");
   const trackRatioMobile = resolveContractAspectRatio("comparison", "before", content.aspectRatio, "mobile");
@@ -87,7 +87,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
           position: relative;
           aspect-ratio: ${trackRatioDesktop};
           overflow: hidden;
-          background: #E4E3DF;
+          background: #DDE1E2;
           touch-action: none;
           cursor: ${dragging ? "grabbing" : "ew-resize"};
         }
@@ -118,7 +118,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
           height: 40px;
           border-radius: 50%;
           border: 2px solid #FFFFFF;
-          background: rgba(26,26,26,.92);
+          background: rgba(24,26,27,.92);
           color: #fff;
           display: grid;
           place-items: center;
@@ -135,7 +135,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
           font-size: 11px;
           letter-spacing: 0.14em;
           color: #fff;
-          background: rgba(15,13,12,.5);
+      background: rgba(17,19,21,.5);
           pointer-events: none;
         }
         .hc-before-after__tag--before { left: 14px; }
@@ -145,7 +145,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
         }
       `}</style>
       {(title || subtitle || editMode) && (
-        <header style={{ maxWidth: 640, margin: "0 auto 40px", textAlign: "center" }}>
+        <header data-content-role="copy" style={{ maxWidth: 640, margin: "0 auto 40px", textAlign: "center" }}>
           {title ? (
             <h2 data-editor-field="title"
               style={{
@@ -177,18 +177,20 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
       >
         {beforeImage ? (
           <img
+            data-content-role="before"
             className="hc-before-after__img"
             src={beforeImage}
             alt={beforeAltText || beforeLabel || "改款前"}
             style={{ objectPosition: `${beforeFocusX}% ${beforeFocusY}%` }}
           />
         ) : (
-          <div className="hc-before-after__img" style={{ display: "grid", placeItems: "center", color: "#A89A87", fontSize: 13, background: "#EFE9E0" }}>
+          <div data-content-role="before" className="hc-before-after__img" style={{ display: "grid", placeItems: "center", color: "#6E7477", fontSize: 13, background: "#F4F5F5" }}>
             改款前图片待上传
           </div>
         )}
         {afterImage ? (
           <img
+            data-content-role="after"
             className="hc-before-after__img"
             src={afterImage}
             alt={afterAltText || afterLabel || "改款后"}
@@ -199,7 +201,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
           />
         ) : null}
         <div className="hc-before-after__divider" style={{ left: `${position}%` }} />
-        <div className="hc-before-after__handle" style={{ left: `${position}%` }} aria-hidden>
+        <div data-content-role="comparisonHandle" className="hc-before-after__handle" style={{ left: `${position}%` }} aria-hidden>
           ◀▶
         </div>
         {beforeLabel ? <span className="hc-before-after__tag hc-before-after__tag--before" data-editor-field="beforeLabel">{beforeLabel}</span> : null}

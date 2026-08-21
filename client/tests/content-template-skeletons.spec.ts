@@ -155,8 +155,8 @@ async function expectNoHorizontalOverflow(page: Page) {
 
 async function expectRatio(locator: Locator, ratio: number, tolerance = 0.04) {
   const value = await box(locator);
-  expect(value.width / value.height).toBeGreaterThan(ratio - tolerance);
-  expect(value.width / value.height).toBeLessThan(ratio + tolerance);
+  expect(value.width / value.height).toBeGreaterThanOrEqual(ratio - tolerance);
+  expect(value.width / value.height).toBeLessThanOrEqual(ratio + tolerance);
 }
 
 test.describe("第一批内容模板公共 Renderer 三端骨架", () => {
@@ -188,7 +188,8 @@ test.describe("第一批内容模板公共 Renderer 三端骨架", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/");
 
-    await expectRatio(page.locator(".hc-phase1-hero__media"), 16 / 7);
+    const heroMedia = await box(page.locator(".hc-phase1-hero__media"));
+    expect(heroMedia.height).toBeGreaterThanOrEqual(899);
     await expectRatio(page.locator(".hc-phase1-full-bleed__media"), 21 / 6);
     await expectRatio(page.locator(".hc-phase1-single__media"), 4 / 5);
     await expectRatio(page.locator(".hc-phase1-double__main"), 3 / 2);
@@ -207,12 +208,12 @@ test.describe("第一批内容模板公共 Renderer 三端骨架", () => {
     expect(text.width).toBeLessThanOrEqual(721);
   });
 
-  test("768 图片先行并保持 8 列错位关系", async ({ page }) => {
+  test("768 沿用桌面比例并保持 8 列错位关系", async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 900 });
     await page.goto("/");
 
-    await expectRatio(page.locator(".hc-phase1-hero__media"), 16 / 7);
-    await expectRatio(page.locator(".hc-phase1-full-bleed__media"), 16 / 7);
+    await expectRatio(page.locator(".hc-phase1-hero__media"), 16 / 9);
+    await expectRatio(page.locator(".hc-phase1-full-bleed__media"), 21 / 6);
 
     const heroMedia = await box(page.locator(".hc-phase1-hero__media"));
     const heroCopy = await box(page.locator(".hc-phase1-hero__copy-band"));
@@ -220,7 +221,8 @@ test.describe("第一批内容模板公共 Renderer 三端骨架", () => {
 
     const singleMedia = await box(page.locator(".hc-phase1-single__media"));
     const singleCopy = await box(page.locator(".hc-phase1-single__copy"));
-    expect(singleMedia.y + singleMedia.height).toBeLessThanOrEqual(singleCopy.y + 1);
+    expect(singleCopy.y).toBeGreaterThanOrEqual(singleMedia.y);
+    expect(singleCopy.y + singleCopy.height).toBeLessThanOrEqual(singleMedia.y + singleMedia.height + 1);
     expect(singleMedia.x).toBeGreaterThan(singleCopy.x);
 
     const doubleMain = await box(page.locator(".hc-phase1-double__main"));
@@ -231,8 +233,8 @@ test.describe("第一批内容模板公共 Renderer 三端骨架", () => {
     expect(doubleDetail.x).toBeGreaterThan(doubleCopy.x);
 
     const text = await box(page.locator(".hc-phase1-text"));
-    expect(text.width / 712).toBeGreaterThan(0.73);
-    expect(text.width / 712).toBeLessThan(0.77);
+    expect(text.width).toBeGreaterThanOrEqual(440);
+    expect(text.width).toBeLessThanOrEqual(720);
   });
 
   test("390 固定阅读顺序、手机比例和 58% 从属细节图", async ({ page }) => {
@@ -241,7 +243,7 @@ test.describe("第一批内容模板公共 Renderer 三端骨架", () => {
 
     await expectRatio(page.locator(".hc-phase1-hero__media"), 4 / 5);
     await expectRatio(page.locator(".hc-phase1-full-bleed__media"), 4 / 5);
-    await expectRatio(page.locator(".hc-phase1-single__media"), 3 / 4);
+    await expectRatio(page.locator(".hc-phase1-single__media"), 4 / 5);
     await expectRatio(page.locator(".hc-phase1-double__main"), 3 / 2);
     await expectRatio(page.locator(".hc-phase1-double__detail"), 4 / 5);
 

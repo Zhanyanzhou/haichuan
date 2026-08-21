@@ -1078,13 +1078,13 @@ export default function OrderManage() {
                 </div>
                 <div>
                   <Text type="secondary">已收金额：</Text>
-                  <span className="text-green-600">
+                  <span style={{ color: "var(--adm-success)" }}>
                     ¥{Number(detail.paidAmount || 0).toLocaleString()}
                   </span>
                 </div>
                 <div>
                   <Text type="secondary">待收金额：</Text>
-                  <span className="text-orange-500">
+                  <span style={{ color: "var(--adm-warning)" }}>
                     ¥
                     {Math.max(
                       0,
@@ -1111,7 +1111,7 @@ export default function OrderManage() {
                 </div>
                 <div>
                   <Text type="secondary">已退款：</Text>
-                  <span className="text-red-500">
+                  <span style={{ color: "var(--adm-error)" }}>
                     ¥{Number(detail.refundedAmount || 0).toLocaleString()}
                   </span>
                 </div>

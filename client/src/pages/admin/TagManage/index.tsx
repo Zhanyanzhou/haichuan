@@ -106,7 +106,7 @@ export default function TagManage() {
   return (
     <div>
       <AdminPageHeader title="标签字典" subtitle="统一管理商品标签（工艺/寓意/场景等分组），商品编辑器可从字典选择" />
-      <Card style={{ borderRadius: 10, border: "1px solid #E7E6E2", boxShadow: "0 6px 20px rgba(40,36,30,0.035)" }}>
+      <Card style={{ borderRadius: 10, border: "1px solid var(--adm-line)", boxShadow: "0 6px 20px rgba(24,26,27,0.035)" }}>
         <div style={{ marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
           <Space>
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>

@@ -1,17 +1,18 @@
 {
-  "contractSchemaVersion": 2,
-  "registryVersion": 2,
+  "contractSchemaVersion": 3,
+  "registryVersion": 3,
   "expectedTemplateCount": 23,
-  "activeTemplateCount": 5,
+  "activeTemplateCount": 23,
   "pageRules": [],
   "templates": [
     {
       "key": "hero",
+      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "framePresets": ["compact", "standard", "immersive"], "frameRatioPresets": ["21 / 9", "16 / 9", "3 / 2", "4 / 5"], "frameRatioRange": { "min": 0.8, "max": 2.4, "step": 0.05 }, "slots": [{ "roleId": "desktopImage", "ratioPresets": ["16 / 9", "3 / 2"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 2.5, "step": 0.05 }, "focusByViewport": true }, { "roleId": "mobileImage", "ratioPresets": ["4 / 5", "3 / 4"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 2.5, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "eyebrow", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 2 }, { "roleId": "title", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard", "wide"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 3 }, { "roleId": "subtitle", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard", "wide"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 4 }, { "roleId": "actionText", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 1 }] } },
       "moduleType": "首屏主视觉",
       "displayName": "首屏",
       "category": "视觉展示",
       "implementationStatus": "active",
-      "version": 1,
+      "version": 2,
       "master": "cinematic-hero",
       "visualRole": "primary-stage",
       "visualWeight": "primary-stage",
@@ -19,12 +20,10 @@
       "flow": "bleed",
       "heightModeByViewport": {
         "desktop": "viewport",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "overlay",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -35,14 +34,12 @@
           "kind": "media",
           "required": true,
           "defaultRatioByViewport": {
-            "desktop": "16 / 9",
-            "tablet": "16 / 9"
+            "desktop": "16 / 9"
           },
           "allowedRatioPresetsByViewport": {
-            "desktop": ["16 / 9"],
-            "tablet": ["16 / 9"]
+            "desktop": ["16 / 9"]
           },
-          "appliesTo": ["desktop", "tablet"]
+          "appliesTo": ["desktop"]
         },
         {
           "id": "mobileImage",
@@ -74,7 +71,6 @@
       ],
       "order": {
         "desktop": ["desktopImage", "copy", "action"],
-        "tablet": ["desktopImage", "copy", "action"],
         "mobile": ["mobileImage", "copy", "action"]
       },
       "presets": [],
@@ -178,11 +174,12 @@
     },
     {
       "key": "fullBleed",
+      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "framePresets": ["standard", "immersive"], "slots": [{ "roleId": "image", "ratioPresets": ["16 / 9", "3 / 2"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }, { "roleId": "mobileImage", "ratioPresets": ["4 / 5", "3 / 4"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "copy", "placementPresets": ["overlay", "below"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 4 }] } },
       "moduleType": "全屏出血图",
       "displayName": "通栏图",
       "category": "视觉展示",
       "implementationStatus": "active",
-      "version": 1,
+      "version": 2,
       "master": "immersive-image",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -190,12 +187,10 @@
       "flow": "bleed",
       "heightModeByViewport": {
         "desktop": "ratio",
-        "tablet": "ratio",
         "mobile": "ratio"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -206,14 +201,12 @@
           "kind": "media",
           "required": true,
           "defaultRatioByViewport": {
-            "desktop": "21 / 6",
-            "tablet": "16 / 9"
+            "desktop": "21 / 6"
           },
           "allowedRatioPresetsByViewport": {
-            "desktop": ["21 / 6"],
-            "tablet": ["16 / 9"]
+            "desktop": ["21 / 6"]
           },
-          "appliesTo": ["desktop", "tablet"]
+          "appliesTo": ["desktop"]
         },
         {
           "id": "mobileImage",
@@ -244,7 +237,6 @@
       ],
       "order": {
         "desktop": ["image", "copy", "action"],
-        "tablet": ["image", "copy", "action"],
         "mobile": ["mobileImage", "copy", "action"]
       },
       "presets": [],
@@ -328,11 +320,12 @@
     },
     {
       "key": "video",
+      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "framePresets": ["standard", "wide"], "slots": [{ "roleId": "coverImage", "ratioPresets": ["16 / 9", "3 / 2"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 }, "focusByViewport": true }] } },
       "moduleType": "视频区块",
       "displayName": "视频",
       "category": "视觉展示",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "cinematic-video",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -340,12 +333,10 @@
       "flow": "bleed",
       "heightModeByViewport": {
         "desktop": "ratio",
-        "tablet": "ratio",
         "mobile": "ratio"
       },
       "copyPlacementByViewport": {
         "desktop": "overlay",
-        "tablet": "overlay",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -357,12 +348,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "16 / 9",
-            "tablet": "16 / 9",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["16 / 9", "21 / 6"],
-            "tablet": ["16 / 9", "21 / 6"],
             "mobile": ["4 / 5", "16 / 9", "9 / 16"]
           }
         },
@@ -388,7 +377,6 @@
       ],
       "order": {
         "desktop": ["coverImage", "playControl", "copy", "action"],
-        "tablet": ["coverImage", "playControl", "copy", "action"],
         "mobile": ["coverImage", "playControl", "copy", "action"]
       },
       "presets": ["aspectRatio", "playbackControl"],
@@ -397,7 +385,7 @@
         "requiredText": [],
         "maxCtas": 1
       },
-      "allowedControls": [],
+      "allowedControls": ["videoWidth"],
       "supportsLinkTarget": true,
       "preview": {
         "purpose": "封面舞台与播放入口",
@@ -488,11 +476,12 @@
     },
     {
       "key": "carousel",
+      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "framePresets": ["standard", "wide"], "slots": [{ "roleId": "frames", "ratioPresets": ["16 / 9", "3 / 2", "4 / 5"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 }, "focusByViewport": true }] } },
       "moduleType": "轮播图",
       "displayName": "轮播",
       "category": "视觉展示",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "sequence-stage",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -500,12 +489,10 @@
       "flow": "bleed",
       "heightModeByViewport": {
         "desktop": "ratio",
-        "tablet": "ratio",
         "mobile": "ratio"
       },
       "copyPlacementByViewport": {
         "desktop": "overlay",
-        "tablet": "overlay",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -517,12 +504,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "21 / 6",
-            "tablet": "21 / 6",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["21 / 6"],
-            "tablet": ["21 / 6"],
             "mobile": ["4 / 5"]
           },
           "quantity": {
@@ -547,7 +532,6 @@
       ],
       "order": {
         "desktop": ["frames", "copy", "pagination"],
-        "tablet": ["frames", "copy", "pagination"],
         "mobile": ["frames", "copy", "pagination"]
       },
       "presets": [],
@@ -629,11 +613,12 @@
     },
     {
       "key": "singlePoster",
+      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "framePresets": ["compact", "standard", "tall"], "slots": [{ "roleId": "desktopImage", "ratioPresets": ["4 / 5", "3 / 4", "1 / 1"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.6, "step": 0.05 }, "focusByViewport": true }, { "roleId": "mobileImage", "ratioPresets": ["4 / 5", "3 / 4"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.6, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "copy", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 4 }] } },
       "moduleType": "单图海报",
       "displayName": "单图文",
       "category": "图文内容",
       "implementationStatus": "active",
-      "version": 1,
+      "version": 2,
       "master": "editorial-split",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -641,12 +626,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "split",
-        "tablet": "split",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -657,14 +640,12 @@
           "kind": "media",
           "required": true,
           "defaultRatioByViewport": {
-            "desktop": "4 / 5",
-            "tablet": "4 / 5"
+            "desktop": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
-            "desktop": ["4 / 5", "1 / 1", "3 / 2"],
-            "tablet": ["4 / 5", "1 / 1", "3 / 2"]
+            "desktop": ["4 / 5", "1 / 1", "3 / 2"]
           },
-          "appliesTo": ["desktop", "tablet"]
+          "appliesTo": ["desktop"]
         },
         {
           "id": "mobileImage",
@@ -696,7 +677,6 @@
       ],
       "order": {
         "desktop": ["copy", "action", "desktopImage"],
-        "tablet": ["copy", "action", "desktopImage"],
         "mobile": ["mobileImage", "copy", "action"]
       },
       "presets": [],
@@ -799,11 +779,12 @@
     },
     {
       "key": "doublePoster",
+      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "compositionPresets": ["balanced", "main-led", "detail-led"], "slots": [{ "roleId": "mainImage", "ratioPresets": ["3 / 2", "4 / 5", "1 / 1"], "sizePresets": ["standard", "large"], "positionPresets": ["start", "center"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }, { "roleId": "detailImage", "ratioPresets": ["4 / 5", "3 / 4", "1 / 1"], "sizePresets": ["small", "standard"], "positionPresets": ["center", "end"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }] } },
       "moduleType": "双图海报",
       "displayName": "双图文",
       "category": "图文内容",
       "implementationStatus": "active",
-      "version": 1,
+      "version": 2,
       "master": "editorial-story",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -811,12 +792,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "split",
-        "tablet": "split",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -828,12 +807,10 @@
           "required": true,
           "defaultRatioByViewport": {
             "desktop": "3 / 2",
-            "tablet": "3 / 2",
             "mobile": "3 / 2"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["3 / 2", "16 / 9"],
-            "tablet": ["3 / 2", "16 / 9"],
             "mobile": ["3 / 2", "16 / 9"]
           }
         },
@@ -844,12 +821,10 @@
           "required": true,
           "defaultRatioByViewport": {
             "desktop": "4 / 5",
-            "tablet": "4 / 5",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["4 / 5", "1 / 1"],
-            "tablet": ["4 / 5", "1 / 1"],
             "mobile": ["4 / 5", "1 / 1"]
           }
         },
@@ -868,7 +843,6 @@
       ],
       "order": {
         "desktop": ["mainImage", "detailImage", "copy", "action"],
-        "tablet": ["mainImage", "detailImage", "copy", "action"],
         "mobile": ["mainImage", "copy", "detailImage", "action"]
       },
       "presets": [],
@@ -970,11 +944,12 @@
     },
     {
       "key": "textBanner",
+      "editorCapabilities": { "primaryTask": "text", "layoutOverrides": { "framePresets": ["compact", "standard", "spacious"], "textRoles": [{ "roleId": "copy", "placementPresets": ["left", "center"], "widthPresets": ["narrow", "standard", "wide"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "mineral", "ivory"], "maxLines": 6 }] } },
       "moduleType": "文字横幅",
       "displayName": "纯文字",
       "category": "图文内容",
       "implementationStatus": "active",
-      "version": 1,
+      "version": 2,
       "master": "editorial-text",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -982,12 +957,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal", "spacious", "grand"],
@@ -998,14 +971,11 @@
           "kind": "media",
           "required": false,
           "defaultRatioByViewport": {
-            "desktop": "21 / 6",
-            "tablet": "21 / 6"
+            "desktop": "21 / 6"
           },
           "allowedRatioPresetsByViewport": {
-            "desktop": ["21 / 6"],
-            "tablet": ["21 / 6"]
-          },
-          "appliesTo": ["desktop", "tablet"]
+            "desktop": ["21 / 6"]
+          }
         },
         {
           "id": "copy",
@@ -1023,7 +993,6 @@
       ],
       "order": {
         "desktop": ["bgImage", "copy", "action"],
-        "tablet": ["bgImage", "copy", "action"],
         "mobile": ["bgImage", "copy", "action"]
       },
       "presets": [],
@@ -1106,11 +1075,12 @@
     },
     {
       "key": "journey",
+      "editorCapabilities": { "primaryTask": "structured", "layoutOverrides": { "framePresets": ["standard", "spacious"] } },
       "moduleType": "定制流程",
       "displayName": "内容流程",
       "category": "图文内容",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "editorial-journey",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -1118,12 +1088,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -1135,12 +1103,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "1 / 1",
-            "tablet": "1 / 1",
             "mobile": "1 / 1"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["1 / 1"],
-            "tablet": ["1 / 1"],
             "mobile": ["1 / 1"]
           },
           "quantity": {
@@ -1158,7 +1124,6 @@
       ],
       "order": {
         "desktop": ["copy", "steps"],
-        "tablet": ["copy", "steps"],
         "mobile": ["copy", "steps"]
       },
       "presets": [],
@@ -1222,11 +1187,12 @@
     },
     {
       "key": "comparison",
+      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "slots": [{ "roleId": "before", "ratioPresets": ["4 / 5", "1 / 1"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }, { "roleId": "after", "ratioPresets": ["4 / 5", "1 / 1"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }] } },
       "moduleType": "改款对比",
       "displayName": "前后对比",
       "category": "图文内容",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "comparison-stage",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -1234,12 +1200,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "ratio",
-        "tablet": "ratio",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -1251,12 +1215,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "4 / 5",
-            "tablet": "4 / 5",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["4 / 5", "3 / 2"],
-            "tablet": ["4 / 5", "3 / 2"],
             "mobile": ["4 / 5", "3 / 2"]
           }
         },
@@ -1267,12 +1229,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "4 / 5",
-            "tablet": "4 / 5",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["4 / 5", "3 / 2"],
-            "tablet": ["4 / 5", "3 / 2"],
             "mobile": ["4 / 5", "3 / 2"]
           }
         },
@@ -1292,7 +1252,6 @@
       ],
       "order": {
         "desktop": ["copy", "before", "after", "comparisonHandle"],
-        "tablet": ["copy", "before", "after", "comparisonHandle"],
         "mobile": ["copy", "before", "after", "comparisonHandle"]
       },
       "presets": [],
@@ -1390,11 +1349,12 @@
     },
     {
       "key": "featuredProduct",
+      "editorCapabilities": { "primaryTask": "product", "referenceFields": [{ "kind": "product", "key": "productCode", "legacyKey": "productId", "min": 1, "max": 1 }], "layoutOverrides": { "compositionPresets": ["image-left", "image-right"], "slots": [{ "roleId": "product", "ratioPresets": ["4 / 5", "1 / 1"], "sizePresets": ["standard", "large"], "fit": ["cover", "contain"] }] } },
       "moduleType": "单品焦点推荐",
       "displayName": "单品展示",
       "category": "商品展示",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "product-focus",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -1402,12 +1362,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -1419,12 +1377,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "4 / 5",
-            "tablet": "4 / 5",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["4 / 5", "1 / 1"],
-            "tablet": ["4 / 5", "1 / 1"],
             "mobile": ["4 / 5", "1 / 1"]
           }
         },
@@ -1449,7 +1405,6 @@
       ],
       "order": {
         "desktop": ["product", "copy", "list", "action"],
-        "tablet": ["product", "copy", "list", "action"],
         "mobile": ["product", "copy", "list", "action"]
       },
       "presets": [],
@@ -1543,11 +1498,12 @@
     },
     {
       "key": "productRow",
+      "editorCapabilities": { "primaryTask": "product", "referenceFields": [{ "kind": "product", "key": "productCodes", "legacyKey": "productIds", "min": 2, "max": 8 }], "layoutOverrides": { "compositionPresets": ["grid-2", "grid-3", "grid-4"], "slots": [{ "roleId": "productCards", "ratioPresets": ["4 / 5", "1 / 1", "3 / 4"], "fit": ["cover", "contain"] }] } },
       "moduleType": "产品展示行",
       "displayName": "商品列表",
       "category": "商品展示",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "product-grid",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -1555,12 +1511,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -1572,18 +1526,16 @@
           "required": true,
           "defaultRatioByViewport": {
             "desktop": "4 / 5",
-            "tablet": "4 / 5",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["4 / 5", "1 / 1"],
-            "tablet": ["4 / 5", "1 / 1"],
             "mobile": ["4 / 5", "1 / 1"]
           },
           "quantity": {
             "default": 3,
             "min": 2,
-            "max": 4
+            "max": 8
           }
         },
         {
@@ -1595,7 +1547,6 @@
       ],
       "order": {
         "desktop": ["copy", "productCards"],
-        "tablet": ["copy", "productCards"],
         "mobile": ["copy", "productCards"]
       },
       "presets": ["columnPreset", "ordering", "productSelection"],
@@ -1690,12 +1641,10 @@
         "columns": {
           "defaultByViewport": {
             "desktop": 3,
-            "tablet": 2,
             "mobile": 2
           },
           "allowedByViewport": {
             "desktop": [2, 3, 4],
-            "tablet": [2, 3],
             "mobile": [1, 2]
           }
         }
@@ -1703,11 +1652,12 @@
     },
     {
       "key": "gallery",
+      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "compositionPresets": ["editorial", "balanced"], "slots": [{ "roleId": "works", "ratioPresets": ["4 / 5", "1 / 1", "3 / 2"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }] } },
       "moduleType": "作品画廊",
       "displayName": "作品画廊",
       "category": "商品展示",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "asymmetric-gallery",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -1715,12 +1665,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -1732,12 +1680,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "4 / 5",
-            "tablet": "4 / 5",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["4 / 5", "1 / 1", "3 / 2"],
-            "tablet": ["4 / 5", "1 / 1", "3 / 2"],
             "mobile": ["4 / 5", "1 / 1", "3 / 2"]
           },
           "semantic": "gallery-media-collection",
@@ -1757,7 +1703,6 @@
       ],
       "order": {
         "desktop": ["copy", "works"],
-        "tablet": ["copy", "works"],
         "mobile": ["copy", "works"]
       },
       "presets": [],
@@ -1869,11 +1814,12 @@
     },
     {
       "key": "wearingInspiration",
+      "editorCapabilities": { "primaryTask": "product", "referenceFields": [{ "kind": "product", "key": "productCodes", "legacyKey": "productIds", "min": 1, "max": 4 }], "layoutOverrides": { "slots": [{ "roleId": "wearingImage", "ratioPresets": ["4 / 5", "3 / 4"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }] } },
       "moduleType": "佩戴灵感",
       "displayName": "佩戴展示",
       "category": "商品展示",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "wearing-story",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -1881,12 +1827,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -1898,12 +1842,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "4 / 5",
-            "tablet": "4 / 5",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["4 / 5", "3 / 2"],
-            "tablet": ["4 / 5", "3 / 2"],
             "mobile": ["4 / 5", "3 / 2"]
           },
           "semantic": "wearing-primary-image"
@@ -1930,7 +1872,6 @@
       ],
       "order": {
         "desktop": ["wearingImage", "copy", "relatedProducts", "action"],
-        "tablet": ["wearingImage", "copy", "relatedProducts", "action"],
         "mobile": ["wearingImage", "copy", "relatedProducts", "action"]
       },
       "presets": [],
@@ -2008,11 +1949,12 @@
     },
     {
       "key": "categoryCards",
+      "editorCapabilities": { "primaryTask": "category", "referenceFields": [{ "kind": "category", "key": "categorySlugs", "legacyKey": "categories", "min": 2, "max": 4 }], "layoutOverrides": { "compositionPresets": ["grid-2", "grid-3", "grid-4"], "slots": [{ "roleId": "categories", "ratioPresets": ["1 / 1", "4 / 5"], "fit": ["cover"] }] } },
       "moduleType": "分类卡片",
       "displayName": "品类入口",
       "category": "导航入口",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "category-navigation",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -2020,12 +1962,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -2037,12 +1977,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "1 / 1",
-            "tablet": "1 / 1",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["1 / 1", "4 / 5"],
-            "tablet": ["1 / 1", "4 / 5"],
             "mobile": ["4 / 5", "1 / 1"]
           },
           "quantity": {
@@ -2060,7 +1998,6 @@
       ],
       "order": {
         "desktop": ["copy", "categories"],
-        "tablet": ["copy", "categories"],
         "mobile": ["copy", "categories"]
       },
       "presets": [],
@@ -2154,11 +2091,12 @@
     },
     {
       "key": "sceneShopping",
+      "editorCapabilities": { "primaryTask": "structured", "layoutOverrides": { "compositionPresets": ["grid-2", "grid-3", "grid-4"], "slots": [{ "roleId": "scenes", "ratioPresets": ["4 / 5", "1 / 1"], "fit": ["cover"] }] } },
       "moduleType": "按场景选购",
       "displayName": "场景入口",
       "category": "导航入口",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "scene-navigation",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -2166,12 +2104,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -2183,12 +2119,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "4 / 5",
-            "tablet": "4 / 5",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["4 / 5", "1 / 1"],
-            "tablet": ["4 / 5", "1 / 1"],
             "mobile": ["4 / 5", "1 / 1"]
           },
           "quantity": {
@@ -2206,7 +2140,6 @@
       ],
       "order": {
         "desktop": ["copy", "scenes"],
-        "tablet": ["copy", "scenes"],
         "mobile": ["copy", "scenes"]
       },
       "presets": [],
@@ -2316,11 +2249,12 @@
     },
     {
       "key": "hotspot",
+      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "slots": [{ "roleId": "sceneImage", "ratioPresets": ["16 / 9", "3 / 2", "4 / 5"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 }, "focusByViewport": true }] } },
       "moduleType": "热区图",
       "displayName": "图片热区",
       "category": "导航入口",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "hotspot-stage",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -2328,12 +2262,10 @@
       "flow": "bleed",
       "heightModeByViewport": {
         "desktop": "ratio",
-        "tablet": "ratio",
         "mobile": "ratio"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -2345,12 +2277,10 @@
           "required": true,
           "defaultRatioByViewport": {
             "desktop": "16 / 9",
-            "tablet": "16 / 9",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["16 / 9"],
-            "tablet": ["16 / 9"],
             "mobile": ["4 / 5"]
           }
         },
@@ -2359,8 +2289,14 @@
           "role": "marker",
           "kind": "marker",
           "required": true,
-          "defaultRatioByViewport": {},
-          "allowedRatioPresetsByViewport": {},
+          "defaultRatioByViewport": {
+            "desktop": "21 / 6",
+            "mobile": "4 / 5"
+          },
+          "allowedRatioPresetsByViewport": {
+            "desktop": ["21 / 6"],
+            "mobile": ["4 / 5"]
+          },
           "parentRole": "sceneImage",
           "positioning": "relative-to-media",
           "quantity": {
@@ -2378,7 +2314,6 @@
       ],
       "order": {
         "desktop": ["sceneImage", "hotspots", "copy"],
-        "tablet": ["sceneImage", "hotspots", "copy"],
         "mobile": ["sceneImage", "hotspots", "copy"]
       },
       "presets": ["hotspotEditor"],
@@ -2500,11 +2435,12 @@
     },
     {
       "key": "brandPoints",
+      "editorCapabilities": { "primaryTask": "structured", "layoutOverrides": { "framePresets": ["compact", "standard", "spacious"], "compositionPresets": ["grid-2", "grid-3", "grid-4"] } },
       "moduleType": "卡片网格",
       "displayName": "品牌要点",
       "category": "服务信息",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "brand-points",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -2512,12 +2448,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -2544,7 +2478,6 @@
       ],
       "order": {
         "desktop": ["copy", "points"],
-        "tablet": ["copy", "points"],
         "mobile": ["copy", "points"]
       },
       "presets": [],
@@ -2638,11 +2571,12 @@
     },
     {
       "key": "servicePromises",
+      "editorCapabilities": { "primaryTask": "structured", "layoutOverrides": { "framePresets": ["compact", "standard"], "compositionPresets": ["grid-2", "grid-4"] } },
       "moduleType": "服务承诺",
       "displayName": "服务承诺",
       "category": "服务信息",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "service-policy",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -2650,12 +2584,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -2682,7 +2614,6 @@
       ],
       "order": {
         "desktop": ["copy", "promises"],
-        "tablet": ["copy", "promises"],
         "mobile": ["copy", "promises"]
       },
       "presets": [],
@@ -2792,11 +2723,12 @@
     },
     {
       "key": "certificates",
+      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "compositionPresets": ["grid-2", "grid-3"], "slots": [{ "roleId": "certificates", "ratioPresets": ["3 / 2", "4 / 5"], "fit": ["contain", "cover"] }] } },
       "moduleType": "资质证书",
       "displayName": "证书展示",
       "category": "服务信息",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "trust-gallery",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -2804,12 +2736,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -2821,12 +2751,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "3 / 2",
-            "tablet": "3 / 2",
             "mobile": "3 / 2"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["3 / 2", "16 / 9"],
-            "tablet": ["3 / 2", "16 / 9"],
             "mobile": ["3 / 2", "16 / 9"]
           },
           "quantity": {
@@ -2844,7 +2772,6 @@
       ],
       "order": {
         "desktop": ["copy", "certificates"],
-        "tablet": ["copy", "certificates"],
         "mobile": ["copy", "certificates"]
       },
       "presets": [],
@@ -2938,11 +2865,12 @@
     },
     {
       "key": "storeInfo",
+      "editorCapabilities": { "primaryTask": "structured", "layoutOverrides": { "compositionPresets": ["image-left", "image-right"], "slots": [{ "roleId": "store", "ratioPresets": ["3 / 2", "4 / 5"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }] } },
       "moduleType": "门店信息",
       "displayName": "门店信息",
       "category": "服务信息",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "store-visit",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -2950,12 +2878,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -2967,12 +2893,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "3 / 2",
-            "tablet": "3 / 2",
             "mobile": "3 / 2"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["3 / 2", "16 / 9"],
-            "tablet": ["3 / 2", "16 / 9"],
             "mobile": ["3 / 2", "4 / 5"]
           }
         },
@@ -2999,7 +2923,6 @@
       ],
       "order": {
         "desktop": ["store", "copy", "details", "action"],
-        "tablet": ["store", "copy", "details", "action"],
         "mobile": ["store", "copy", "details", "action"]
       },
       "presets": [],
@@ -3093,11 +3016,12 @@
     },
     {
       "key": "testimonials",
+      "editorCapabilities": { "primaryTask": "structured", "layoutOverrides": { "compositionPresets": ["editorial", "balanced"], "slots": [{ "roleId": "authorizedPhoto", "ratioPresets": ["4 / 5", "1 / 1"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }] } },
       "moduleType": "真实评价与实拍",
       "displayName": "顾客分享",
       "category": "服务信息",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "testimonial-proof",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -3105,12 +3029,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -3122,12 +3044,10 @@
           "required": true,
           "defaultRatioByViewport": {
             "desktop": "4 / 5",
-            "tablet": "4 / 5",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["4 / 5", "1 / 1", "3 / 2"],
-            "tablet": ["4 / 5", "1 / 1", "3 / 2"],
             "mobile": ["4 / 5", "1 / 1", "3 / 2"]
           },
           "proof": "authorized-customer-photo",
@@ -3157,7 +3077,6 @@
       ],
       "order": {
         "desktop": ["authorizedPhoto", "mainQuote", "attribution"],
-        "tablet": ["authorizedPhoto", "mainQuote", "attribution"],
         "mobile": ["authorizedPhoto", "mainQuote", "attribution"]
       },
       "presets": [],
@@ -3235,11 +3154,12 @@
     },
     {
       "key": "booking",
+      "editorCapabilities": { "primaryTask": "action", "layoutOverrides": { "framePresets": ["compact", "standard", "spacious"], "frameRatioPresets": ["21 / 6", "16 / 9", "3 / 2", "4 / 5"], "frameRatioRange": { "min": 0.8, "max": 3.5, "step": 0.05 }, "slots": [{ "roleId": "bgImage", "fieldKey": "backgroundImage", "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "title", "placementPresets": ["left", "center"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 2 }, { "roleId": "subtitle", "placementPresets": ["left", "center"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 3 }, { "roleId": "buttonText", "placementPresets": ["left", "center"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 1 }] } },
       "moduleType": "预约入口",
       "displayName": "预约入口",
       "category": "服务信息",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "booking-epilogue",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -3247,12 +3167,10 @@
       "flow": "flow",
       "heightModeByViewport": {
         "desktop": "content",
-        "tablet": "content",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "stacked",
-        "tablet": "stacked",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -3274,12 +3192,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "21 / 6",
-            "tablet": "21 / 6",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["21 / 6"],
-            "tablet": ["21 / 6"],
             "mobile": ["4 / 5"]
           },
           "semantic": "atmosphere-background"
@@ -3301,13 +3217,18 @@
       ],
       "order": {
         "desktop": ["bgImage", "copy", "primaryAction", "secondaryContact"],
-        "tablet": ["bgImage", "copy", "primaryAction", "secondaryContact"],
         "mobile": ["bgImage", "copy", "primaryAction", "secondaryContact"]
       },
       "presets": ["locationData"],
       "contentBudget": {
-        "limits": {},
-        "requiredText": [],
+        "limits": {
+          "title": 32,
+          "subtitle": 90,
+          "buttonText": 12,
+          "phone": 24,
+          "altText": 80
+        },
+        "requiredText": ["title", "buttonText"],
         "maxCtas": 1
       },
       "allowedControls": [],
@@ -3379,11 +3300,12 @@
     },
     {
       "key": "limitedEvent",
+      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "framePresets": ["standard", "immersive"], "slots": [{ "roleId": "event", "ratioPresets": ["16 / 9", "3 / 2", "4 / 5"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }], "textRoles": [{ "roleId": "copy", "placementPresets": ["overlay", "below"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 5 }] } },
       "moduleType": "限时活动",
       "displayName": "限时活动",
       "category": "活动内容",
-      "implementationStatus": "planned",
-      "version": 1,
+      "implementationStatus": "active",
+      "version": 2,
       "master": "event-stage",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -3391,12 +3313,10 @@
       "flow": "bleed",
       "heightModeByViewport": {
         "desktop": "ratio",
-        "tablet": "ratio",
         "mobile": "content"
       },
       "copyPlacementByViewport": {
         "desktop": "overlay",
-        "tablet": "overlay",
         "mobile": "stacked"
       },
       "spacingPolicy": ["normal"],
@@ -3408,12 +3328,10 @@
           "required": false,
           "defaultRatioByViewport": {
             "desktop": "16 / 9",
-            "tablet": "16 / 9",
             "mobile": "4 / 5"
           },
           "allowedRatioPresetsByViewport": {
             "desktop": ["16 / 9"],
-            "tablet": ["16 / 9"],
             "mobile": ["4 / 5"]
           }
         },
@@ -3440,7 +3358,6 @@
       ],
       "order": {
         "desktop": ["event", "time", "copy", "action"],
-        "tablet": ["event", "time", "copy", "action"],
         "mobile": ["event", "time", "copy", "action"]
       },
       "presets": [],

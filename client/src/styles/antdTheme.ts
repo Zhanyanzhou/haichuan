@@ -5,41 +5,45 @@ import type { ThemeConfig } from "antd";
  * 详细数值与使用边界见 docs/UI_GUIDE.md「附录 A · 管理后台排版、密度与无障碍」。
  */
 export const ADMIN_COLORS = {
-  brandGold: "#B8944E",
-  action: "#6F5733",
-  actionHover: "#5F492A",
-  actionActive: "#4F3C22",
-  onAction: "#FFFFFF",
-  ink: "#191918",
-  textStrong: "#4C4945",
-  text: "#5F5B55",
-  muted: "#76716A",
-  success: "#3E6E4F",
-  successBg: "#F0F5F1",
-  successBorder: "#B7C8BB",
-  warning: "#8A5A1F",
-  warningBg: "#FBF4E9",
-  warningBorder: "#D8C3A4",
-  error: "#9A4A45",
+  canvas: "#FFFFFF",
+  canvasSubtle: "#F4F5F5",
+  action: "#181A1B",
+  actionHover: "#101213",
+  actionActive: "#000000",
+  actionSoft: "#ECEEEF",
+  onAction: "#F7F8F8",
+  ink: "#181A1B",
+  textStrong: "#181A1B",
+  text: "#5F6568",
+  muted: "#6E7477",
+  line: "#DDE1E2",
+  lineStrong: "#B8BEC1",
+  success: "#356348",
+  successBg: "#EFF5F1",
+  successBorder: "#ACC4B4",
+  warning: "#7A531A",
+  warningBg: "#FBF4E8",
+  warningBorder: "#D4BD96",
+  error: "#8C3F3B",
   errorBg: "#FAF0EF",
-  errorBorder: "#D8BBB8",
-  info: "#3D668A",
-  infoBg: "#EEF3F7",
-  infoBorder: "#B7C6D1",
-  neutralBg: "#F5F4F1",
-  neutralBorder: "#D9D3C8",
+  errorBorder: "#D7B6B4",
+  info: "#335F7D",
+  infoBg: "#EEF4F7",
+  infoBorder: "#ADC3D0",
+  neutralBg: "#F4F5F5",
+  neutralBorder: "#DDE1E2",
 } as const;
 
-export const ADMIN_BRAND_GOLD = ADMIN_COLORS.brandGold;
 export const ADMIN_ACTION_COLOR = ADMIN_COLORS.action;
 
 const antdTheme: ThemeConfig = {
   token: {
-    // 品牌金只作装饰；交互主色需保证白字对比度。
+    // 全站共享中性底盘；后台主操作使用高对比近黑。
     colorPrimary: ADMIN_ACTION_COLOR,
-    colorPrimaryBg: "#F1ECE4",
-    colorPrimaryBgHover: "#E8DFD2",
+    colorPrimaryBg: ADMIN_COLORS.actionSoft,
+    colorPrimaryBgHover: "#DDE1E2",
     colorPrimaryBorder: ADMIN_ACTION_COLOR,
+    colorPrimaryBorderHover: ADMIN_ACTION_COLOR,
     colorPrimaryHover: ADMIN_COLORS.actionHover,
     colorPrimaryActive: ADMIN_COLORS.actionActive,
 
@@ -64,12 +68,12 @@ const antdTheme: ThemeConfig = {
     colorTextQuaternary: ADMIN_COLORS.muted,
 
     // 背景色
-    colorBgContainer: "#FAF9F6",
-    colorBgLayout: "#F5F3EF",
+    colorBgContainer: ADMIN_COLORS.canvas,
+    colorBgLayout: ADMIN_COLORS.canvasSubtle,
 
     // 边框 — 极浅
-    colorBorder: "#E5E1DA",
-    colorBorderSecondary: "#D9D3C8",
+    colorBorder: ADMIN_COLORS.lineStrong,
+    colorBorderSecondary: ADMIN_COLORS.line,
 
     // 圆角 — 极小
     borderRadius: 4,
@@ -105,14 +109,22 @@ const antdTheme: ThemeConfig = {
       borderRadius: 4,
       controlHeight: 36,
       fontWeight: 500,
+      defaultShadow: "none",
+      primaryShadow: "none",
+      dangerShadow: "none",
+    },
+    Input: {
+      activeBorderColor: ADMIN_COLORS.action,
+      hoverBorderColor: ADMIN_COLORS.action,
+      activeShadow: "0 0 0 2px rgba(24,26,27,0.10)",
     },
     Card: {
       borderRadiusLG: 4,
     },
     Table: {
-      headerBg: "#F5F3EF",
+      headerBg: ADMIN_COLORS.canvasSubtle,
       headerColor: ADMIN_COLORS.text,
-      rowHoverBg: "#FAFAF8",
+      rowHoverBg: "#F7F8F8",
       cellFontSize: 14,
       cellFontSizeMD: 14,
       cellFontSizeSM: 14,

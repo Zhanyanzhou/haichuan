@@ -1,4 +1,5 @@
-import ProductIdsField from "@/page-builder/fields/ProductIdsField";
+import { useEffect, useRef } from "react";
+import ProductReferencesField from "@/page-builder/fields/ProductReferencesField";
 import { editorPages } from "@/page-builder/config/editorPages";
 import {
   isSafeInternalPath,
@@ -30,6 +31,7 @@ interface LinkTargetFieldProps extends LinkTargetValue {
 export default function LinkTargetField({
   id,
   targetType,
+  productCode,
   productId,
   linkUrl,
   onChange,
@@ -38,12 +40,48 @@ export default function LinkTargetField({
   compact = false,
   keyPrefix = "",
 }: LinkTargetFieldProps) {
-  const normalizedTargetType = normalizeLinkTargetType({ targetType, productId, linkUrl });
+  const normalizedTargetType = normalizeLinkTargetType({ targetType, productCode, productId, linkUrl });
+  const normalizedProductCode = typeof productCode === "string" ? productCode.trim() : "";
   const normalizedProductId = Number(productId) || 0;
+  const detailRef = useRef<HTMLDivElement | null>(null);
+  const previousTargetTypeRef = useRef(normalizedTargetType);
+
+  useEffect(() => {
+    const previousTargetType = previousTargetTypeRef.current;
+    previousTargetTypeRef.current = normalizedTargetType;
+    if (
+      previousTargetType === normalizedTargetType ||
+      normalizedTargetType === "none"
+    ) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const detail = detailRef.current;
+      const scrollContainer = detail?.closest<HTMLElement>(
+        ".homepage-editor__inspector-scroll",
+      );
+      if (!detail || !scrollContainer) return;
+      const detailRect = detail.getBoundingClientRect();
+      const containerRect = scrollContainer.getBoundingClientRect();
+      if (detailRect.bottom > containerRect.bottom - 12) {
+        scrollContainer.scrollBy({
+          top: detailRect.bottom - containerRect.bottom + 12,
+          behavior: "smooth",
+        });
+      } else if (detailRect.top < containerRect.top + 12) {
+        scrollContainer.scrollBy({
+          top: detailRect.top - containerRect.top - 12,
+          behavior: "smooth",
+        });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [normalizedTargetType]);
   // 前缀键遵循 camelCase:targetType / secondaryTargetType。
   // 无前缀时仅首字母小写(TargetType→targetType),不能整词 toLowerCase——
   // 否则写入 targettype 键,渲染端/发布校验读驼峰键会静默失联(2026-08-18 实测抓出)。
-  const key = (suffix: "TargetType" | "ProductId" | "LinkUrl") =>
+  const key = (suffix: "TargetType" | "ProductCode" | "ProductId" | "LinkUrl") =>
     keyPrefix
       ? `${keyPrefix}${suffix}`
       : suffix.charAt(0).toLowerCase() + suffix.slice(1);
@@ -55,11 +93,13 @@ export default function LinkTargetField({
       [key("TargetType")]: nextTargetType,
     };
     if (nextTargetType === "none") {
+      patch[key("ProductCode")] = "";
       patch[key("ProductId")] = 0;
       patch[key("LinkUrl")] = "";
     } else if (nextTargetType === "product") {
       patch[key("LinkUrl")] = "";
     } else {
+      patch[key("ProductCode")] = "";
       patch[key("ProductId")] = 0;
     }
     onChange(patch);
@@ -100,18 +140,29 @@ export default function LinkTargetField({
       </div>
 
       {normalizedTargetType === "product" ? (
-        <div className="homepage-editor__inspector-field">
+        <div
+          ref={detailRef}
+          className="homepage-editor__inspector-field homepage-editor__link-target-detail"
+        >
           <label>关联商品 <em>必填</em></label>
-          <ProductIdsField
-            value={normalizedProductId > 0 ? [normalizedProductId] : []}
-            onChange={(ids) => onChange({ [key("ProductId")]: Number(ids[0]) || 0 })}
+          <ProductReferencesField
+            value={normalizedProductCode ? [normalizedProductCode] : []}
+            legacyIds={normalizedProductId > 0 ? [normalizedProductId] : []}
+            onChange={(codes, legacyIds) => onChange({
+              [key("ProductCode")]: codes[0] || "",
+              [key("ProductId")]: Number(legacyIds[0]) || 0,
+            })}
+            minProducts={1}
             maxProducts={1}
           />
         </div>
       ) : null}
 
       {normalizedTargetType === "page" ? (
-        <div className="homepage-editor__inspector-field">
+        <div
+          ref={detailRef}
+          className="homepage-editor__inspector-field homepage-editor__link-target-detail"
+        >
           <label htmlFor={`link-target-page-${id}`}>
             站内页面 <em>必填</em>
           </label>

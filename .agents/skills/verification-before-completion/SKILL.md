@@ -1,120 +1,50 @@
 ---
 name: verification-before-completion
-description: Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always
+description: >
+  在声称工作完成、问题修复、测试通过或准备提交/发布前使用。要求用当前任务阶段的新鲜、与风险相称的证据限定结论；不以全仓命令、原始大输出或固定红绿仪式替代对真实用户结果的验证。
 ---
 
-# Verification Before Completion
+# 完成前验证
 
-## Overview
+## 核心原则
 
-**Core principle:** Evidence before claims, always.
+证据先于结论，结论不得大于证据。
 
-**Violating the letter of this rule is violating the spirit of this rule.**
+“代码已修改”“类型检查通过”“浏览器看起来正常”“子代理说完成”分别只能证明有限事实，不能互相替代。
 
-## The Iron Law
+## 权限边界
 
-```
-NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
-```
+- 验证命令、目标环境和任何写操作仍受 `AGENTS.md` 约束。
+- 本技能不授予 Git、部署、数据库、真实交易、文件删除或项目外写入权限。
+- 不为验证擅自改变生产状态、真实数据或环境变量。
 
-If you haven't run the verification command in this message, you cannot claim it passes.
+## 验证步骤
 
-## The Gate Function
+1. **定义声明**：准备对用户说什么，用户可观察结果是什么。
+2. **选择证据**：按 `WORKFLOW.md` 的风险矩阵选择最能证明该声明的最小检查集合。
+3. **运行并读取**：使用当前任务阶段的新鲜结果，检查退出码、失败数、关键警告和目标行为。
+4. **限定结论**：通过则写清已验证范围；失败、未运行或环境缺失则如实说明影响。
+5. **检查差异**：确认没有混入无关改动、覆盖用户资产或扩大授权范围。
 
-```
-BEFORE claiming any status or expressing satisfaction:
+## 相称验证
 
-1. IDENTIFY: What command proves this claim?
-2. RUN: Execute the FULL command (fresh, complete)
-3. READ: Full output, check exit code, count failures
-4. VERIFY: Does output confirm the claim?
-   - If NO: State actual status with evidence
-   - If YES: State claim WITH evidence
-5. ONLY THEN: Make the claim
+- 文档、规则和提示词：引用、重复、冲突、过时事实、场景推演和 `git diff --check`；不要求完整业务构建。
+- 小型纯逻辑：目标测试、类型检查或可重复断言，选择能捕获原问题的证据。
+- 前端行为：相关检查加真实页面状态；构建不能证明视觉和交互。
+- API：成功、失败、权限与边界路径；静态合同不能独自证明真实联调。
+- 视觉与响应式：只检查受影响维度，并按改动影响选择真实浏览器、关键视口、键盘、对比度或溢出检查；全局改动再执行完整矩阵。
+- 数据库、权限、交易和生产：严格执行获批方案中的目标环境、失败、并发与回退门禁。
 
-Skip any step = lying, not verifying
-```
+## 回归证据
 
-## Common Failures
+修复 Bug 时优先留下能复现原症状并在修复后通过的检查。只有当安全、可逆且能显著增加置信度时才做完整红绿验证；不要为了证明测试会失败而回退用户工作、触碰真实数据或制造破坏性状态。
 
-| Claim | Requires | Not Sufficient |
-|-------|----------|----------------|
-| Tests pass | Test command output: 0 failures | Previous run, "should pass" |
-| Linter clean | Linter output: 0 errors | Partial check, extrapolation |
-| Build succeeds | Build command: exit 0 | Linter passing, logs look good |
-| Bug fixed | Test original symptom: passes | Code changed, assumed fixed |
-| Regression test works | Red-green cycle verified | Test passes once |
-| Agent completed | VCS diff shows changes | Agent reports "success" |
-| Requirements met | Line-by-line checklist | Tests passing |
+## 多智能体证据
 
-## Red Flags - STOP
+子代理、CI 或其他工具的成功报告是线索，不是最终事实。主执行者至少核对相关 diff、命令结果或产物；不必机械重跑昂贵检查，但必须说明复用的证据来源、时间和覆盖范围。
 
-- Using "should", "probably", "seems to"
-- Expressing satisfaction before verification ("Great!", "Perfect!", "Done!", etc.)
-- About to commit/push/PR without verification
-- Trusting agent success reports
-- Relying on partial verification
-- Thinking "just this once"
-- Tired and wanting work over
-- **ANY wording implying success without having run verification**
+## 输出
 
-## Rationalization Prevention
+报告实际命令或检查、退出结果、环境、覆盖范围和未验证项。大日志只摘要关键证据并保留可定位信息，不把整段原始输出反复带入会话。
 
-| Excuse | Reality |
-|--------|---------|
-| "Should work now" | RUN the verification |
-| "I'm confident" | Confidence ≠ evidence |
-| "Just this once" | No exceptions |
-| "Linter passed" | Linter ≠ compiler |
-| "Agent said success" | Verify independently |
-| "I'm tired" | Exhaustion ≠ excuse |
-| "Partial check is enough" | Partial proves nothing |
-| "Different words so rule doesn't apply" | Spirit over letter |
-
-## Key Patterns
-
-**Tests:**
-```
-✅ [Run test command] [See: 34/34 pass] "All tests pass"
-❌ "Should pass now" / "Looks correct"
-```
-
-**Regression tests (TDD Red-Green):**
-```
-✅ Write → Run (pass) → Revert fix → Run (MUST FAIL) → Restore → Run (pass)
-❌ "I've written a regression test" (without red-green verification)
-```
-
-**Build:**
-```
-✅ [Run build] [See: exit 0] "Build passes"
-❌ "Linter passed" (linter doesn't check compilation)
-```
-
-**Requirements:**
-```
-✅ Re-read plan → Create checklist → Verify each → Report gaps or completion
-❌ "Tests pass, phase complete"
-```
-
-**Agent delegation:**
-```
-✅ Agent reports success → Check VCS diff → Verify changes → Report actual state
-❌ Trust agent report
-```
-
-## When To Apply
-
-**ALWAYS before:**
-- ANY variation of success/completion claims
-- ANY expression of satisfaction
-- ANY positive statement about work state
-- Committing, PR creation, task completion
-- Moving to next task
-- Delegating to agents
-
-**Rule applies to:**
-- Exact phrases
-- Paraphrases and synonyms
-- Implications of success
-- ANY communication suggesting completion/correctness
+禁止使用“应该、可能、看起来已经”暗示完成；不确定时直接写“已修改，以下验收尚未完成”。

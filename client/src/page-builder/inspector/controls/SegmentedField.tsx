@@ -13,12 +13,12 @@ interface SegmentedFieldProps {
   ariaLabel?: string;
 }
 
-const IMG_FILL = "#E8E2D6";
-const IMG_STROKE = "#C9C2B8";
-const LINE_FILL = "#B9B1A5";
-const DOT_FILL = "#B8944E";
+const IMG_FILL = "#DDE1E2";
+const IMG_STROKE = "#B8BEC1";
+const LINE_FILL = "#6E7477";
+const DOT_FILL = "#181A1B";
 
-/** 布局选项的微缩构图示意（26×18）：图=灰块、文字=横线、文字位=金点 */
+/** 布局选项的微缩构图示意（26×18）：图=灰块、文字=横线、文字位=深色点 */
 export function OptionDiagram({ kind }: { kind: string }) {
   const lines = (xs: number[]) =>
     xs.map((y) => (

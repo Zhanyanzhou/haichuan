@@ -4,14 +4,16 @@
  * 配置 focusKeys 且已有图片时内嵌 FocusPicker 可视化焦点拖拽(回写双端焦点键);
  * mobile 档配置 inheritFrom 时渲染 DeviceOverrideBadge（空值即继承模型）。
  */
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AimOutlined } from "@ant-design/icons";
 import MediaPickerField from "../../fields/MediaPickerField";
-import ImageStatus from "../ImageStatus";
-import FocusPicker from "../FocusPicker";
 import DeviceOverrideBadge from "./DeviceOverrideBadge";
-import { useImageNaturalSize } from "../../fields/specCheck";
 import type { MediaFieldDef } from "../schema/types";
+import { useHomepagePuck } from "@/pages/admin/HomepageConfig/editor-store";
+import {
+  SESSION_MEDIA_UPLOADED_EVENT,
+  sessionUploadedMedia,
+} from "../../fields/MediaPickerField";
 
 interface MediaFieldProps {
   def: MediaFieldDef;
@@ -19,10 +21,30 @@ interface MediaFieldProps {
   focus?: { x: number; y: number };
   device: "desktop" | "mobile" | "shared";
   onChange: (value: string) => void;
-  /** 焦点拖拽回调(focusKeys 配置时由 FieldRenderer 传入,写回对应焦点键) */
-  onFocusChange?: (x: number, y: number) => void;
+  onAdjustComposition?: () => void;
   /** 继承来源键的当前值（inheritFrom 配置时由 FieldRenderer 传入） */
   inheritBaseValue?: string;
+  previewFit?: "cover" | "contain";
+  previewZoom?: number;
+}
+
+const MEDIA_KEY = /(image|media|poster|cover|avatar|logo|thumbnail)/i;
+
+function collectPageMedia(value: unknown, key = "", result = new Set<string>()) {
+  if (typeof value === "string") {
+    if (MEDIA_KEY.test(key) && /^(https?:|\/uploads\/|data:image\/)/i.test(value)) result.add(value);
+    return result;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectPageMedia(item, key, result));
+    return result;
+  }
+  if (value && typeof value === "object") {
+    Object.entries(value as Record<string, unknown>).forEach(([childKey, child]) =>
+      collectPageMedia(child, childKey, result),
+    );
+  }
+  return result;
 }
 
 export default function MediaField({
@@ -31,18 +53,36 @@ export default function MediaField({
   focus,
   device,
   onChange,
-  onFocusChange,
+  onAdjustComposition,
   inheritBaseValue,
+  previewFit,
+  previewZoom,
 }: MediaFieldProps) {
-  const natural = useImageNaturalSize(value);
-  const [focusOpen, setFocusOpen] = useState(false);
-  const format =
-    (value || "").match(/\.(webp|avif|jpe?g|png|gif)/i)?.[1]?.toLowerCase() ||
-    "";
+  const pageData = useHomepagePuck((state) => state.appState.data);
+  const [sessionMediaRevision, setSessionMediaRevision] = useState(0);
+  useEffect(() => {
+    const refresh = () => setSessionMediaRevision((revision) => revision + 1);
+    window.addEventListener(SESSION_MEDIA_UPLOADED_EVENT, refresh);
+    return () => window.removeEventListener(SESSION_MEDIA_UPLOADED_EVENT, refresh);
+  }, []);
+  const currentPageMedia = useMemo(
+    () => {
+      // 会话上传集合本身可变，revision 仅用于通知此处重新计算。
+      void sessionMediaRevision;
+      return [...new Set([...collectPageMedia(pageData), ...sessionUploadedMedia])];
+    },
+    [pageData, sessionMediaRevision],
+  );
+  const recentPageMedia = useMemo(
+    () => [value, ...currentPageMedia.filter((url) => url !== value)]
+      .filter(Boolean)
+      .slice(0, 5),
+    [currentPageMedia, value],
+  );
+  const [replaceOpen, setReplaceOpen] = useState(false);
   const showOverrideBadge = Boolean(def.inheritFrom && device === "mobile");
   const overridden = showOverrideBadge && Boolean(value && value.trim());
-  const canPickFocus =
-    Boolean(def.focusKeys && onFocusChange && value && value.trim());
+  const canAdjustComposition = Boolean(onAdjustComposition && value && value.trim());
   return (
     <div className="homepage-editor__inspector-field">
       <label>
@@ -80,51 +120,52 @@ export default function MediaField({
             def.previewAspectRatio ?? `${def.spec.width} / ${def.spec.height}`
           }
           previewFocus={focus}
+          previewFit={previewFit}
+          previewZoom={previewZoom}
+          onReplaceOpenChange={setReplaceOpen}
         />
       ) : null}
-      {canPickFocus ? (
-        <div className="homepage-editor__inspector-subsection homepage-editor__media-focus-editor">
+      {!showOverrideBadge || overridden ? (
+        replaceOpen && currentPageMedia.length > 1 ? (
+          <div
+            className="homepage-editor__current-page-media"
+            aria-label="最近使用的图片"
+          >
+            <div className="homepage-editor__current-page-media-heading">
+              <strong>最近使用</strong>
+              <span>{currentPageMedia.length} 张</span>
+            </div>
+            <div>
+              {recentPageMedia.map((url) => (
+                <button
+                  key={url}
+                  type="button"
+                  className={url === value ? "is-current" : ""}
+                  onClick={() => onChange(url)}
+                  aria-label={url === value ? "当前使用的素材" : "使用本页素材"}
+                >
+                  <img src={url} alt="" loading="lazy" />
+                </button>
+              ))}
+              {currentPageMedia.length > recentPageMedia.length ? (
+                <span className="homepage-editor__current-page-media-more">
+                  +{currentPageMedia.length - recentPageMedia.length}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ) : null
+      ) : null}
+      {canAdjustComposition ? (
+        <div className="homepage-editor__inspector-subsection homepage-editor__media-design-entry">
           <button
             type="button"
             className="homepage-editor__media-focus-toggle"
-            onClick={() => setFocusOpen((open) => !open)}
-            aria-expanded={focusOpen}
+            onClick={onAdjustComposition}
           >
             <AimOutlined />
-            <span>{focusOpen ? "完成裁切设置" : "裁切与焦点"}</span>
-            {focus ? (
-              <small>{Math.round(focus.x)}% × {Math.round(focus.y)}%</small>
-            ) : null}
+            <span>在画布中调整构图</span>
           </button>
-          {focusOpen ? (
-            <>
-              <p className="homepage-editor__media-focus-note">
-                拖拽焦点或使用快速定位，画布会同步显示裁切结果
-                {device === "mobile" ? "；手机端与桌面端独立保存" : ""}
-              </p>
-              <FocusPicker
-                src={value}
-                focusX={focus?.x ?? 50}
-                focusY={focus?.y ?? 50}
-                aspectRatio={
-                  def.previewAspectRatio ??
-                  `${def.spec.width} / ${def.spec.height}`
-                }
-                onChange={onFocusChange!}
-              />
-            </>
-          ) : null}
-        </div>
-      ) : null}
-      {def.showSpecCheck && natural.width && (!showOverrideBadge || overridden) ? (
-        <div className="homepage-editor__media-information">
-          <strong>素材信息</strong>
-          <ImageStatus
-            width={natural.width}
-            height={natural.height}
-            format={format}
-            spec={def.spec}
-          />
         </div>
       ) : null}
     </div>

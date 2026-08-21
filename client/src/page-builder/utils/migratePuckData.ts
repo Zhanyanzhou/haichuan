@@ -123,7 +123,7 @@ function migrateBlock(block: PuckBlock): PuckBlock {
             linkUrl,
             template: "center",
             bgColor: "#FFFFFF",
-            textColor: "#1A1A1A",
+            textColor: "#181A1B",
             spacing: p.spacing === "spacious" ? "spacious" : p.spacing === "compact" ? "compact" : "normal",
           },
         };

@@ -154,11 +154,13 @@ check("强制每项带有效 productId：缺省 / 非正整数即整批拒绝（
   }
 });
 
-check("复核时机：在 prisma.selectionInquiry.create 之前调用 resolveVisibleProductSnapshots", () => {
+check("复核时机：在 selectionInquiry.create 之前调用 resolveVisibleProductSnapshots", () => {
   const validateIdx = selectionService.indexOf("resolveVisibleProductSnapshots");
-  const createIdx = selectionService.indexOf("this.prisma.selectionInquiry.create");
+  const createIdx = selectionService.search(
+    /(?:this\.prisma|transaction)\.selectionInquiry\.create/,
+  );
   assert.ok(validateIdx !== -1, "未调用 resolveVisibleProductSnapshots");
-  assert.ok(createIdx !== -1, "未找到 prisma.selectionInquiry.create");
+  assert.ok(createIdx !== -1, "未找到 selectionInquiry.create");
   assert.ok(validateIdx < createIdx, "可见性复核必须在写入之前执行");
 });
 
@@ -185,19 +187,20 @@ check("不泄露内部信息：拒绝错误不含 INTERNAL/PARTNER/visibility/st
 });
 
 check("快照由服务端规范覆盖：写入用 snap.name / snap.mediaUrl，不接受客户端名称/图片作为快照真相", () => {
-  const createBlock = selectionService.match(/this\.prisma\.selectionInquiry\.create\(\{[\s\S]*?\}\);\n  \}/);
-  assert.ok(createBlock, "未定位 selectionInquiry.create 写入块");
-  assert.ok(/productNameSnapshot:\s*snap\.name/.test(createBlock[0]), "productNameSnapshot 应以服务端 snap.name 落库");
-  assert.ok(/productImageSnapshot:\s*snap\.mediaUrl/.test(createBlock[0]), "productImageSnapshot 应以服务端 snap.mediaUrl 落库");
+  const snapshotBlock = selectionService.match(/const createItems = distinctIds\.map\([\s\S]*?\n    \}\);/);
+  assert.ok(snapshotBlock, "未定位服务端快照到 createItems 的映射");
+  assert.ok(/productNameSnapshot:\s*snap\.name/.test(snapshotBlock[0]), "productNameSnapshot 应以服务端 snap.name 覆盖客户端值");
+  assert.ok(/productImageSnapshot:\s*snap\.mediaUrl/.test(snapshotBlock[0]), "productImageSnapshot 应以服务端 snap.mediaUrl 覆盖客户端值");
   // 客户端名称/图片不得直接作为快照真相写入（即便 productId 合法也不允许覆盖服务端规范）
-  assert.ok(!/productNameSnapshot:\s*item\.productNameSnapshot/.test(createBlock[0]), "不得直接落库客户端 productNameSnapshot");
-  assert.ok(!/productImageSnapshot:\s*item\.productImageSnapshot/.test(createBlock[0]), "不得直接落库客户端 productImageSnapshot");
+  assert.ok(!/productNameSnapshot:\s*item\.productNameSnapshot/.test(snapshotBlock[0]), "不得直接落库客户端 productNameSnapshot");
+  assert.ok(!/productImageSnapshot:\s*item\.productImageSnapshot/.test(snapshotBlock[0]), "不得直接落库客户端 productImageSnapshot");
+  assert.ok(/items:\s*\{\s*create:\s*createItems\s*\}/.test(selectionService), "写入必须使用已复核的 createItems");
 });
 
 check("productSkuSnapshot 保留为客户端展示文本（trim 后落库，不作为可见性或安全依据）", () => {
-  const createBlock = selectionService.match(/this\.prisma\.selectionInquiry\.create\(\{[\s\S]*?\}\);\n  \}/);
-  assert.ok(createBlock, "未定位 selectionInquiry.create 写入块");
-  assert.ok(/productSkuSnapshot:\s*item\.productSkuSnapshot\?\.trim\(\)/.test(createBlock[0]), "productSkuSnapshot 作为展示性文本保留客户端值");
+  const snapshotBlock = selectionService.match(/const createItems = distinctIds\.map\([\s\S]*?\n    \}\);/);
+  assert.ok(snapshotBlock, "未定位服务端快照到 createItems 的映射");
+  assert.ok(/productSkuSnapshot:\s*item\.productSkuSnapshot\?\.trim\(\)/.test(snapshotBlock[0]), "productSkuSnapshot 作为展示性文本保留客户端值");
 });
 
 check("访客/客户身份保留：create 仍把 request.customer 透传给 service", () => {

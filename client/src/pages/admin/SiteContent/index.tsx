@@ -87,8 +87,8 @@ export default function SiteContent() {
           title="品牌基础信息"
           style={{
             borderRadius: 10,
-            border: "1px solid #E7E6E2",
-            boxShadow: "0 6px 20px rgba(40,36,30,0.035)",
+            border: "1px solid var(--adm-line)",
+            boxShadow: "0 6px 20px rgba(24,26,27,0.035)",
             marginBottom: 20,
           }}
         >
@@ -119,8 +119,8 @@ export default function SiteContent() {
           title="联系方式"
           style={{
             borderRadius: 10,
-            border: "1px solid #E7E6E2",
-            boxShadow: "0 6px 20px rgba(40,36,30,0.035)",
+            border: "1px solid var(--adm-line)",
+            boxShadow: "0 6px 20px rgba(24,26,27,0.035)",
             marginBottom: 20,
           }}
         >
@@ -139,8 +139,8 @@ export default function SiteContent() {
           title="营业信息"
           style={{
             borderRadius: 10,
-            border: "1px solid #E7E6E2",
-            boxShadow: "0 6px 20px rgba(40,36,30,0.035)",
+            border: "1px solid var(--adm-line)",
+            boxShadow: "0 6px 20px rgba(24,26,27,0.035)",
             marginBottom: 20,
           }}
         >
@@ -153,8 +153,8 @@ export default function SiteContent() {
           title="SEO 默认设置"
           style={{
             borderRadius: 10,
-            border: "1px solid #E7E6E2",
-            boxShadow: "0 6px 20px rgba(40,36,30,0.035)",
+            border: "1px solid var(--adm-line)",
+            boxShadow: "0 6px 20px rgba(24,26,27,0.035)",
             marginBottom: 20,
           }}
         >

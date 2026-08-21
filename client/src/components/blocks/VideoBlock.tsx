@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
-import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
+import { FONT_DISPLAY, FONT_SANS, type WidthToken } from "@/page-builder/designSystem/tokens";
 import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 
@@ -18,24 +18,25 @@ interface VideoBlockProps {
 
 /**
  * 品牌影片模块 — Cinematic Hero 母版(视频变体)
- * 画面比例仅允许规范比例:16:9(横屏) / 21:6(宽幕);移动端另有 9:16 全屏竖版。
- * 旧数据中的 16:7、3:4、4:3 仍可渲染(历史兼容),但新建不可再选;
- * 9:16 已转正为移动端合法预设(2026-08-19),桌面自动回退 16:9。
+ * 画面比例仅允许合同规范比例:16:9(宽屏) / 21:6(宽幕);移动端另有 4:5、9:16。
+ * 历史数据中的 16:7、3:4、21:9、4:3 仍可渲染，但新建不可再选；
+ * 9:16 是仅移动端合法预设，桌面自动回退 16:9。
  * content: { videoUrl, posterUrl, autoPlay, loop, muted, showControls, aspectRatio, focusX, focusY }
  */
 const RATIO_MAP: Record<string, string> = {
   "16:9": "16 / 9",
-  "21:6": "21 / 6",
+  "21:9": "21 / 9",
   "9:16": "9 / 16",
-  // 旧数据兼容:已保存的 16:7 / 3:4 / 4:3 区块继续按原比例渲染
+  "4:3": "4 / 3",
+  // 旧数据兼容：已保存的退役比例继续按原比例渲染
   "16:7": "16 / 7",
   "3:4": "3 / 4",
-  "4:3": "4 / 3",
+  "21:6": "21 / 6",
 };
-const LEGACY_RATIOS = new Set(["16 / 7", "3 / 4", "4 / 3"]);
+const LEGACY_RATIOS = new Set(["16 / 7", "3 / 4", "21 / 9", "4 / 3"]);
 
 export default function VideoBlock({ module, editMode }: VideoBlockProps) {
-  const { content = {}, layoutConfig = {} } = module;
+  const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
   const {
     videoUrl,
     posterUrl,
@@ -54,6 +55,8 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
     focusY,
   } = content;
   const maxHeight = layoutConfig.maxHeight || 760;
+  const videoWidth = (layoutConfig.videoWidth || "standard") as WidthToken;
+  const bgColor = styleConfig.bgColor || "#FFFFFF";
   const requestedRatio = RATIO_MAP[aspectRatio] ?? "";
   // 历史比例原样渲染;规范比例经契约白名单校验,越界值回退契约默认
   const desktopRatio = LEGACY_RATIOS.has(requestedRatio)
@@ -64,7 +67,7 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
       ? "3 / 4"
       : resolveContractAspectRatio("video", "coverImage", aspectRatio, "mobile");
 
-  const targetUrl = resolveLinkTargetUrl({ targetType, productId, linkUrl });
+  const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, linkUrl });
   const showCopy = Boolean(title || subtitle || (actionText && targetUrl));
   // 封面图焦点（0-100）：poster 作为 video 属性无法设置 objectPosition，
   // 改为独立封面层渲染，才能让「裁切与焦点」真正作用于封面图。
@@ -74,7 +77,7 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
 
   if (!videoUrl) {
     if (!editMode) return null;
-    return <div className="hc-video-frame is-empty" data-content-role="coverImage">
+    return <div className="hc-video-frame is-empty" data-content-role="coverImage" style={{ background: bgColor }}>
       <style>{`
         .hc-video-frame { aspect-ratio: ${desktopRatio}; }
         @media (max-width: 767px) { .hc-video-frame { aspect-ratio: ${mobileRatio}; } }
@@ -84,16 +87,17 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
   }
 
   return (
-    <DecorSection master="cinematic-hero" width="standard" flow="flow">
+    <DecorSection master="cinematic-hero" width={videoWidth} flow={videoWidth === "full" ? "bleed" : "flow"} background={bgColor}>
       <div
         className="hc-video-frame"
         data-content-role="coverImage"
         style={{
           position: "relative",
-          maxHeight,
+          // 铺满(full)时放开最大高度,让画面按比例通栏撑满;其余宽度档保留 maxHeight 防超宽屏撑高
+          maxHeight: videoWidth === "full" ? undefined : maxHeight,
           width: "100%",
           overflow: "hidden",
-          background: "#FFFFFF",
+          background: bgColor,
         }}
       >
         <style>{`
@@ -142,14 +146,15 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
               position: static;
               padding: 20px 0 0;
               gap: 10px;
-              color: #1A1A1A;
+              color: #181A1B;
               text-shadow: none;
             }
-            .hc-video__copy p { color: #8C8C8C; }
-            .hc-video__copy .hc-video__action { color: #1A1A1A; }
+            .hc-video__copy p { color: #6E7477; }
+            .hc-video__copy .hc-video__action { color: #181A1B; }
           }
         `}</style>
         <video
+          data-content-role="playControl"
           src={videoUrl}
           autoPlay={autoPlay}
           loop={loop}
@@ -192,11 +197,12 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
             ) : null}
             {actionText && targetUrl ? (
               editMode ? (
-                <span className="hc-video__action" data-editor-field="actionText linkUrl productId">
+                <span data-content-role="action" className="hc-video__action" data-editor-field="actionText linkUrl productId">
                   {actionText} <span>→</span>
                 </span>
               ) : (
                 <Link
+                  data-content-role="action"
                   to={targetUrl}
                   className="hc-video__action transition-opacity duration-300 hover:opacity-70"
                   data-editor-field="actionText linkUrl productId"

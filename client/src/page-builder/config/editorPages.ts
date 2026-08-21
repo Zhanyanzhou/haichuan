@@ -1,6 +1,6 @@
 import {
+  createPageDocumentSeed,
   jewelryHomeTemplate,
-  pageTemplates,
 } from "@/page-builder/templates/templates";
 import type { DesignMode } from "@/page-builder/designSystem/masters";
 import { createContentTemplateMarker } from "@/page-builder/generated/contentTemplates.generated";
@@ -16,11 +16,15 @@ export const EDITOR_PAGE_KEYS = [
 
 export type EditorPageKey = (typeof EDITOR_PAGE_KEYS)[number];
 
+export type PageHeaderMode = "overlay-light" | "solid";
+
 export type EditorPageDefinition = {
   key: EditorPageKey;
   label: string;
   description: string;
   publicPath: string;
+  /** 首屏导航语境：只有具备深色首屏画面的品牌页使用白字覆盖模式。 */
+  headerMode: PageHeaderMode;
   /** 页面视觉模式:Brand=奢侈品牌体验 / Commerce=高端电商体验(选款中心)。 */
   mode: DesignMode;
   /** 动态业务页仍由业务数据驱动，装修器只编辑其视觉框架。 */
@@ -35,6 +39,7 @@ export const editorPages: EditorPageDefinition[] = [
     description: "品牌首屏与首页内容",
     publicPath: "/",
     mode: "brand",
+    headerMode: "overlay-light",
   },
   {
     key: "about",
@@ -42,6 +47,7 @@ export const editorPages: EditorPageDefinition[] = [
     description: "品牌故事、工艺与价值表达",
     publicPath: "/about",
     mode: "brand",
+    headerMode: "overlay-light",
   },
   {
     key: "products",
@@ -49,6 +55,7 @@ export const editorPages: EditorPageDefinition[] = [
     description: "视觉页头 + 固定商品列表；商品资料来自商品管理",
     publicPath: "/products",
     mode: "brand",
+    headerMode: "solid",
     dynamic: true,
     businessRegion: {
       title: "商品列表与筛选",
@@ -62,6 +69,7 @@ export const editorPages: EditorPageDefinition[] = [
     description: "视觉页头 + 固定选款工具；筛选数据来自商品配置",
     publicPath: "/catalog",
     mode: "commerce",
+    headerMode: "solid",
     dynamic: true,
     businessRegion: {
       title: "选款工具与商品结果",
@@ -75,6 +83,7 @@ export const editorPages: EditorPageDefinition[] = [
     description: "定制服务说明与案例内容",
     publicPath: "/custom",
     mode: "brand",
+    headerMode: "overlay-light",
   },
   {
     key: "contact",
@@ -82,6 +91,7 @@ export const editorPages: EditorPageDefinition[] = [
     description: "视觉页头 + 固定预约表单与联系信息",
     publicPath: "/contact",
     mode: "brand",
+    headerMode: "solid",
     dynamic: true,
     businessRegion: {
       title: "预约表单与联系信息",
@@ -102,6 +112,11 @@ const templateIdByPage: Record<EditorPageKey, string> = {
   contact: "jewelry-contact-v1",
 };
 
+const LEGACY_ABOUT_VISUALS: Record<string, string> = {
+  "/uploads/2026/08/12/021a4e7e-5533-4f69-b232-bda3827c55fc.png": "/images/镶嵌.png",
+  "/uploads/2026/08/12/762c29cb-9b9c-4d5f-90ab-e7f9d77f12e5.png": "/images/设计.png",
+};
+
 export function isEditorPageKey(
   value: string | undefined,
 ): value is EditorPageKey {
@@ -118,9 +133,8 @@ export function getEditorPageByPath(path: string) {
 
 /** 为尚未保存的页面提供可立即编辑、且彼此可区分的初始画布（即该页面的推荐结构）。 */
 export function createEditorPageDefault(key: EditorPageKey) {
-  const template = pageTemplates.find((t) => t.id === templateIdByPage[key]);
-  const data = JSON.parse(
-    JSON.stringify(template?.puckData ?? jewelryHomeTemplate.puckData),
+  const data = createPageDocumentSeed(templateIdByPage[key]) ?? JSON.parse(
+    JSON.stringify(jewelryHomeTemplate.puckData),
   );
   // 仅新建整页方案时写入印记；已有草稿、导入内容和历史 revision 保持 legacy-0，
   // 普通读取与保存均不会借此补写或升级。
@@ -133,40 +147,7 @@ export function createEditorPageDefault(key: EditorPageKey) {
   const page = getEditorPage(key);
   if (!page.businessRegion) return data;
 
-  // 动态业务页：公开渲染把装修模块全部置于业务内容之前（PublishedPageDecoration），
-  // 故业务功能区固定排在视觉模块之后，画布顺序与线上顺序一致。
-  data.content = [
-    ...(data.content ?? []),
-    {
-      type: "业务功能区",
-      props: {
-        id: `${key}-business-region`,
-        pageKey: key,
-        ...page.businessRegion,
-        locked: true,
-      },
-    },
-  ];
-  return data;
-}
-
-/** 为既有草稿补齐固定业务区，不改写已编辑的视觉内容。 */
-export function ensureEditorPageStructure(key: EditorPageKey, data: any) {
-  const page = getEditorPage(key);
-  if (!page.businessRegion) return data;
-  const content = Array.isArray(data?.content) ? data.content : [];
-  const existingBusinessRegion = content.find(
-    (block: any) => block.type === "业务功能区",
-  );
-
-  // 已有业务功能区：原样保留全部内容，绝不裁剪用户已保存的装修模块。
-  if (existingBusinessRegion) return data;
-
-  // 旧草稿迁移：仅在缺少业务功能区时，在首屏主视觉之后补入固定业务区，其余内容全部保留。
-  const heroIndex = content.findIndex(
-    (block: any) => block.type === "首屏主视觉",
-  );
-  const businessRegionBlock = {
+  data.content = placeBusinessRegion(key, data.content ?? [], {
     type: "业务功能区",
     props: {
       id: `${key}-business-region`,
@@ -174,12 +155,81 @@ export function ensureEditorPageStructure(key: EditorPageKey, data: any) {
       ...page.businessRegion,
       locked: true,
     },
+  });
+  return data;
+}
+
+function placeBusinessRegion(
+  key: EditorPageKey,
+  content: any[],
+  businessRegionBlock: any,
+) {
+  const visualBlocks = content.filter(
+    (block: any) => block?.type !== "业务功能区",
+  );
+  const heroIndex = visualBlocks.findIndex(
+    (block: any) => block?.type === "首屏主视觉",
+  );
+  // 商品、选款和预约的核心任务必须在简短首屏后立即出现；没有首屏时直接置顶。
+  const insertionIndex = heroIndex >= 0 ? heroIndex + 1 : 0;
+  const nextContent = [...visualBlocks];
+  nextContent.splice(insertionIndex, 0, businessRegionBlock);
+  return nextContent;
+}
+
+/**
+ * 已发布的旧「关于海川」曾使用大面积金黄色山水与室内图。
+ * 仅迁移这两个已知资源地址；新上传或重新发布的视觉不会被改写。
+ */
+function migrateLegacyAboutVisuals(key: EditorPageKey, data: any) {
+  if (key !== "about" || !Array.isArray(data?.content)) return data;
+
+  let changed = false;
+  const content = data.content.map((block: any) => {
+    const desktopImage = block?.props?.desktopImage;
+    const replacement = typeof desktopImage === "string"
+      ? LEGACY_ABOUT_VISUALS[desktopImage]
+      : undefined;
+    if (!replacement) return block;
+
+    changed = true;
+    return {
+      ...block,
+      props: {
+        ...block.props,
+        desktopImage: replacement,
+        mobileImage: replacement,
+      },
+    };
+  });
+
+  return changed ? { ...data, content } : data;
+}
+
+/** 规范化已知旧视觉，并为既有草稿补齐固定业务区。 */
+export function ensureEditorPageStructure(key: EditorPageKey, data: any) {
+  const normalizedData = migrateLegacyAboutVisuals(key, data);
+  const page = getEditorPage(key);
+  if (!page.businessRegion) return normalizedData;
+  const content = Array.isArray(normalizedData?.content)
+    ? normalizedData.content
+    : [];
+  const existingBusinessRegion = content.find(
+    (block: any) => block.type === "业务功能区",
+  );
+
+  const businessRegionBlock = {
+    type: "业务功能区",
+    props: {
+      id: `${key}-business-region`,
+      pageKey: key,
+      ...page.businessRegion,
+      ...(existingBusinessRegion?.props ?? {}),
+      locked: true,
+    },
   };
-  const nextContent = [...content];
-  if (heroIndex >= 0) {
-    nextContent.splice(heroIndex + 1, 0, businessRegionBlock);
-  } else {
-    nextContent.unshift(businessRegionBlock);
-  }
-  return { ...data, content: nextContent };
+  return {
+    ...normalizedData,
+    content: placeBusinessRegion(key, content, businessRegionBlock),
+  };
 }

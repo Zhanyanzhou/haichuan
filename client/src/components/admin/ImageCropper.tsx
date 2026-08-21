@@ -94,7 +94,7 @@ export default function ImageCropper({
           onCropComplete={onCropComplete}
           onZoomChange={setZoom}
           style={{
-            containerStyle: { background: '#1a1a1a' },
+            containerStyle: { background: '#181A1B' },
             cropAreaStyle: { border: '1px solid rgba(255,255,255,0.5)' },
           }}
         />

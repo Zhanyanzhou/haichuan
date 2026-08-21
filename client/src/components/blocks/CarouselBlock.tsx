@@ -108,13 +108,14 @@ export default function CarouselBlock({
   return (
     <section
       className="homepage-carousel"
+      data-content-role="frames"
       style={
         {
           position: "relative",
           "--homepage-carousel-ratio": desktopRatio,
           "--homepage-carousel-mobile-ratio": mobileRatio,
           overflow: "hidden",
-          background: "#E4E3DF",
+          background: "#DDE1E2",
         } as CSSProperties
       }
     >
@@ -183,6 +184,7 @@ export default function CarouselBlock({
       )}
       {showDots && validImages.length > 1 && (
         <div
+          data-content-role="pagination"
           style={{
             position: "absolute",
             bottom: 16,
@@ -205,7 +207,7 @@ export default function CarouselBlock({
                 borderRadius: 4,
                 border: "none",
                 cursor: "pointer",
-                background: i === current ? "#1A1A1A" : "rgba(255,255,255,0.5)",
+                background: i === current ? "#181A1B" : "rgba(255,255,255,0.5)",
                 transition: "all 0.3s",
               }}
             />

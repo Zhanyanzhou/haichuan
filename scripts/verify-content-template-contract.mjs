@@ -15,10 +15,12 @@ const [text, client, server, previewSource] = await Promise.all([
 const contract = JSON.parse(text);
 const byKey = Object.fromEntries(contract.templates.map((template) => [template.key, template]));
 const categories = ["视觉展示", "图文内容", "商品展示", "导航入口", "服务信息", "活动内容"];
-const devices = ["desktop", "tablet", "mobile"];
+const devices = ["desktop", "mobile"];
 
-assert.equal(contract.contractSchemaVersion, 2, "必须使用统一根构图合同 schema v2");
+assert.equal(contract.contractSchemaVersion, 3, "必须使用统一根构图合同 schema v3(桌面+移动双端)");
 assert.equal(contract.templates.length, 23, "必须保留 23 个运营模板");
+assert.equal(contract.activeTemplateCount, 23, "23 个运营模板必须全部处于 active 状态");
+assert.equal(contract.templates.filter((template) => template.implementationStatus === "active").length, 23, "不得错误隐藏可运营模板");
 assert.deepEqual(categories.map((category) => contract.templates.filter((template) => template.category === category).length), [4, 5, 4, 3, 6, 1], "六类数量必须保持 4/5/4/3/6/1");
 
 for (const template of contract.templates) {
@@ -50,6 +52,16 @@ for (const template of contract.templates) {
   }
   const actionCount = template.roles.filter((role) => role.kind === "action").length;
   assert.ok(actionCount <= template.contentBudget.maxCtas, `${template.key}: 行动角色数超过 maxCtas`);
+  assert.ok(template.editorCapabilities?.primaryTask, `${template.key}: 属性面板主要运营任务缺失`);
+  for (const reference of template.editorCapabilities.referenceFields ?? []) {
+    assert.ok(["product", "category"].includes(reference.kind), `${template.key}.${reference.key}: 引用类型不合法`);
+    assert.ok(reference.min >= 0 && reference.max >= reference.min, `${template.key}.${reference.key}: 引用数量边界不合法`);
+  }
+  for (const slot of template.editorCapabilities.layoutOverrides?.slots ?? []) {
+    assert.ok(roleIds.includes(slot.roleId), `${template.key}.${slot.roleId}: 实例图片槽位必须引用模板既有角色`);
+    assert.ok((slot.ratioPresets ?? []).length <= 6, `${template.key}.${slot.roleId}: 比例预设必须保持受控`);
+    assert.ok(!slot.zoom || (slot.zoom.min >= 1 && slot.zoom.max <= 3), `${template.key}.${slot.roleId}: zoom 必须处于受控非破坏范围`);
+  }
   for (const device of ["desktop", "mobile"]) {
     const viewport = template.preview[device];
     const zoneRoleIds = new Set();
@@ -68,11 +80,12 @@ for (const template of contract.templates) {
 }
 
 const cover = byKey.video.roles.find((role) => role.id === "coverImage");
-// 2026-08-19 比例调色板收敛:8→5(1/1、4/5、3/2、16/9、21/6),视频桌面横屏/宽幕两档
+// 2026-08-19 比例调色板收敛:8→5(1/1、4/5、3/2、16/9、21/6);视频横屏仅保留已批准的常规与超宽两档。
 assert.equal(cover.defaultRatioByViewport.desktop, "16 / 9", "视频桌面默认比例必须为 16:9");
 assert.deepEqual(cover.allowedRatioPresetsByViewport.desktop, ["16 / 9", "21 / 6"], "视频桌面比例预设不正确");
-// 2026-08-19 移动端补 9:16 全屏竖版(手机竖屏素材的物理形态),桌面保持横屏两档
+// 2026-08-19 移动端补 9:16 全屏竖版(手机竖屏素材的物理形态),桌面保持横屏两档;平板按桌面档回落渲染
 assert.deepEqual(cover.allowedRatioPresetsByViewport.mobile, ["4 / 5", "16 / 9", "9 / 16"], "视频移动端比例预设不正确");
+assert.deepEqual(byKey.video.allowedControls, ["videoWidth"], "视频宽度必须由合同显式声明；背景色仍是共享样式能力");
 assert.equal(byKey.productRow.presetValues.columns.defaultByViewport.desktop, 3, "商品列表桌面默认必须为三列");
 assert.ok(byKey.hotspot.roles.some((role) => role.id === "hotspots" && role.parentRole === "sceneImage" && role.positioning === "relative-to-media"), "热点必须从属于媒体槽");
 assert.deepEqual(byKey.testimonials.roles.map((role) => role.id).sort(), ["attribution", "authorizedPhoto", "mainQuote"].sort(), "顾客分享只能保留授权实拍、主引语和署名角色");
@@ -84,6 +97,15 @@ assert.equal(byKey.booking.roles.filter((role) => role.kind === "action").length
 assert.equal(byKey.booking.roles.some((role) => role.kind === "form" || role.role === "form"), false, "预约入口禁止 form 角色");
 assert.equal(byKey.booking.roles.find((role) => role.id === "bgImage")?.required, false, "预约入口背景必须是可选角色");
 for (const device of ["desktop", "mobile"]) assert.deepEqual(byKey.booking.preview[device].order, ["copy", "primaryAction", "secondaryContact"], `预约入口 ${device} 预览顺序不一致(背景不进结构预览)`);
+assert.deepEqual(byKey.productRow.editorCapabilities.referenceFields, [{ kind: "product", key: "productCodes", legacyKey: "productIds", min: 2, max: 8 }], "商品列表必须保存稳定 code 并双读旧 numeric id");
+assert.deepEqual(byKey.categoryCards.editorCapabilities.referenceFields, [{ kind: "category", key: "categorySlugs", legacyKey: "categories", min: 2, max: 4 }], "分类卡必须保存真实 Category.slug");
+assert.equal(byKey.hero.contentBudget.requiredText.length, 0, "无文字 Hero 必须是合同允许状态");
+assert.deepEqual(
+  byKey.hero.editorCapabilities.layoutOverrides.textRoles.map((role) => role.roleId),
+  ["eyebrow", "title", "subtitle", "actionText"],
+  "Hero 必须以语义文字角色开放实例编辑，不能退回笼统 copy 开关",
+);
+assert.ok(byKey.hero.editorCapabilities.layoutOverrides.textRoles.every((role) => role.requiresSafeBand), "Hero 图片叠字必须为每个语义角色声明实色安全文字带门禁");
 
 const sortReplacer = (_key, value) =>
   value && typeof value === "object" && !Array.isArray(value)

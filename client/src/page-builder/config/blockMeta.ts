@@ -9,7 +9,37 @@
  */
 
 import type { DesignMode, MasterId } from "../designSystem/masters";
-import { CONTENT_TEMPLATE_CONTRACTS } from "../generated/contentTemplates.generated";
+import {
+  CONTENT_TEMPLATE_CONTRACTS,
+  CONTENT_TEMPLATE_REGISTRY,
+} from "../generated/contentTemplates.generated";
+
+/**
+ * 模板是否可从模块库新建，只由机器合同的实施状态决定。
+ * 当前 23 个运营模板均为 active；状态不会影响存量页面的公开渲染。
+ */
+export type ContentTemplateImplementationStatus =
+  (typeof CONTENT_TEMPLATE_REGISTRY)[number]["implementationStatus"];
+
+const CONTENT_TEMPLATE_STATUS_BY_MODULE_TYPE = new Map<
+  string,
+  ContentTemplateImplementationStatus
+>(
+  CONTENT_TEMPLATE_REGISTRY.map(
+    (template) =>
+      [template.moduleType, template.implementationStatus] as const,
+  ),
+);
+
+export function getContentTemplateImplementationStatus(
+  moduleType: string,
+): ContentTemplateImplementationStatus | undefined {
+  return CONTENT_TEMPLATE_STATUS_BY_MODULE_TYPE.get(moduleType);
+}
+
+export function isContentTemplateInsertable(moduleType: string): boolean {
+  return getContentTemplateImplementationStatus(moduleType) === "active";
+}
 
 /* ═══════ 区块分类 ═══════ */
 export type BlockCategory =
@@ -74,7 +104,7 @@ export const TEMPLATE_MEDIA_HINT: Record<string, string> = {
   卡片网格: "文字条目，无需图片",
   文字横幅: "纯文字，无需图片",
   视频区块: `封面 桌面 ${CONTENT_TEMPLATE_CONTRACTS.video.media[0].desktopRatio} + 手机 ${CONTENT_TEMPLATE_CONTRACTS.video.media[0].mobileRatio}`,
-  预约入口: "预约表单，无需图片",
+  预约入口: "可选背景图 + 单一主行动，电话为次级联系信息",
   资质证书: "证书图 3/2",
   定制流程: "01–05 文字编号，无需图片",
   服务承诺: "文字承诺条目，无需图片",

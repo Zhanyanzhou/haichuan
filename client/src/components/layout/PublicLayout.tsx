@@ -128,9 +128,8 @@ const AccountIcon = () => (
 export default function PublicLayout() {
   const location = useLocation();
   const isHome = location.pathname === "/";
-  const decorationPage = isHome
-    ? undefined
-    : getEditorPageByPath(location.pathname);
+  const pageDefinition = getEditorPageByPath(location.pathname);
+  const decorationPage = isHome ? undefined : pageDefinition;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const [scrolled, setScrolled] = useState(false);
@@ -199,7 +198,6 @@ export default function PublicLayout() {
 
   const siteName = siteSettings?.siteName || "海川珠宝";
   const contactPhone = siteSettings?.contactPhone?.trim() || "";
-  const contactEmail = siteSettings?.contactEmail?.trim() || "";
   const contactAddress = siteSettings?.contactAddress?.trim() || "";
   const logoUrl = resolveSiteLogo(siteSettings?.logo);
 
@@ -238,13 +236,16 @@ export default function PublicLayout() {
     document.head.appendChild(robots);
   }, [location.pathname]);
 
-  const isTransparent = isHome && !scrolled && !menuOpen;
+  const isOverlayHeader = pageDefinition?.headerMode === "overlay-light";
+  const isTransparent = isOverlayHeader && !scrolled && !menuOpen;
   const headerBg = isTransparent ? "transparent" : "rgba(255,255,255,0.92)";
-  const headerBorder = isTransparent ? "transparent" : "rgba(41,36,31,0.06)";
-  const navColor = "rgba(41,36,31,0.78)";
+  const headerBorder = isTransparent ? "transparent" : "rgba(24,26,27,0.06)";
 
   return (
-    <div className={isHome ? "editorial-shell" : "site-shell"}>
+    <div
+      className={isHome ? "editorial-shell" : `site-shell${isOverlayHeader ? " site-shell--overlay" : ""}`}
+      data-page-header-mode={pageDefinition?.headerMode || "solid"}
+    >
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:bg-white focus:px-4 focus:py-3 focus:text-brand-text focus:shadow-lg"
@@ -289,9 +290,6 @@ export default function PublicLayout() {
               to="/catalog"
               aria-label="选款中心"
               className="site-header__nav-item"
-              style={{ color: navColor }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = "#211E1A")}
-              onMouseLeave={(e) => (e.currentTarget.style.color = navColor)}
             >
               <DiamondIcon />
               <span className="site-header__nav-label hidden sm:inline">
@@ -302,9 +300,6 @@ export default function PublicLayout() {
               to="/contact"
               aria-label="预约咨询"
               className="site-header__nav-item"
-              style={{ color: navColor }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = "#211E1A")}
-              onMouseLeave={(e) => (e.currentTarget.style.color = navColor)}
             >
               <CalendarIcon />
               <span className="site-header__nav-label hidden sm:inline">
@@ -315,9 +310,6 @@ export default function PublicLayout() {
               to="/customer"
               aria-label="我的账号"
               className="site-header__nav-item"
-              style={{ color: navColor }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = "#211E1A")}
-              onMouseLeave={(e) => (e.currentTarget.style.color = navColor)}
             >
               <AccountIcon />
               <span className="site-header__nav-label hidden sm:inline">
@@ -329,7 +321,9 @@ export default function PublicLayout() {
       </header>
 
       {/* ═══════ 左侧组合：菜单 + 搜索 ═══════ */}
-      <div className="site-header__left-group">
+      <div
+        className={`site-header__left-group${isTransparent ? " is-transparent" : ""}`}
+      >
         <button
           ref={menuToggleRef}
           type="button"
@@ -355,9 +349,6 @@ export default function PublicLayout() {
           to="/search"
           aria-label="搜索"
           className="site-header__nav-item"
-          style={{ color: navColor }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = "#211E1A")}
-          onMouseLeave={(e) => (e.currentTarget.style.color = navColor)}
         >
           <SearchIcon />
           <span className="site-header__nav-label hidden sm:inline">搜索</span>
@@ -377,11 +368,12 @@ export default function PublicLayout() {
       {/* ═══════ Main ═══════ */}
       <main
         id="main-content"
-        className={isHome ? "editorial-main" : "site-main"}
+        className={isHome ? "editorial-main" : `site-main${isOverlayHeader ? " site-main--overlay" : ""}`}
       >
         <PublishedPageDecoration
           pageKey={decorationPage?.key}
           pageLabel={decorationPage?.label}
+          replaceChildren={Boolean(decorationPage && !decorationPage.dynamic)}
         >
           <Outlet />
         </PublishedPageDecoration>
@@ -389,68 +381,41 @@ export default function PublicLayout() {
 
       {/* ═══════ Footer ═══════ */}
       <footer className="site-footer">
-          <div className="site-footer__inner">
-            {/* 第一列：品牌 */}
-            <div>
-              <p className="site-footer__brand-label">HAICHUAN JEWELRY</p>
-              <p className="site-footer__brand-name">{siteName}</p>
-              <p className="site-footer__brand-desc">黄金珠宝作品与选款服务</p>
-            </div>
-            {/* 第二列：导航 */}
-            <div>
-              <p className="site-footer__col-title">探索</p>
-              <nav>
-                <Link to="/products">珠宝作品</Link>
-                <Link to="/catalog">选款中心</Link>
-                <Link to="/custom">定制服务</Link>
-                <Link to="/about">品牌故事</Link>
-                <Link to="/contact">预约咨询</Link>
-              </nav>
-            </div>
-            {/* 第三列：服务入口 */}
-            <div>
-              <p className="site-footer__col-title">联系</p>
-              {contactPhone && (
-                <a href={`tel:${contactPhone}`} className="site-footer__link">
-                  ☎ {contactPhone}
-                </a>
-              )}
-              {contactEmail && (
-                <a
-                  href={`mailto:${contactEmail}`}
-                  className="site-footer__link"
-                >
-                  ✉ {contactEmail}
-                </a>
-              )}
-              {!contactPhone && !contactEmail && (
-                <span className="site-footer__link">联系方式待完善</span>
-              )}
-              <Link to="/privacy" className="site-footer__link">
-                隐私说明
-              </Link>
-            </div>
-          </div>
-          <p className="site-footer__copyright">
-            © {new Date().getFullYear()} {siteName}
-            <Link to="/privacy" className="site-footer__copyright-link">
-              隐私说明
+        <div className="site-footer__inner">
+          <div className="site-footer__service">
+            <p className="site-footer__service-label">PRIVATE APPOINTMENT</p>
+            <Link to="/contact" className="site-footer__service-link">
+              <span>预约私人珠宝顾问</span>
+              <span aria-hidden="true">→</span>
             </Link>
-          </p>
-          {/* ICP 备案号占位（P1：OR 盘点 2026-08-15）。
-              国内公网上线前须完成备案并在下常量填入真实号码；未填写时不渲染（不显示假号）。 */}
+          </div>
+
+          <nav className="site-footer__links" aria-label="页脚导航">
+            <Link to="/products">珠宝作品</Link>
+            <Link to="/custom">定制服务</Link>
+            <Link to="/about">品牌故事</Link>
+            <Link to="/privacy">隐私说明</Link>
+            <Link to="/business-info">经营主体信息</Link>
+          </nav>
+
+          <div className="site-footer__signature">
+            <span className="site-footer__brandmark">HAICHUAN JEWELRY</span>
+            <span aria-hidden="true" className="site-footer__signature-divider" />
+            <span>© {new Date().getFullYear()} {siteName}</span>
+          </div>
+
+          {/* 国内公网上线前完成 ICP 备案后填入真实号码；空值时不渲染。 */}
           {FOOTER_ICP_NUMBER && (
-            <p className="site-footer__copyright">
-              <a
-                href="https://beian.miit.gov.cn/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="site-footer__copyright-link"
-              >
-                {FOOTER_ICP_NUMBER}
-              </a>
-            </p>
+            <a
+              href="https://beian.miit.gov.cn/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="site-footer__filing"
+            >
+              {FOOTER_ICP_NUMBER}
+            </a>
           )}
+        </div>
       </footer>
     </div>
   );

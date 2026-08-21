@@ -144,13 +144,13 @@ test("不存在商品与错误状态分别返回 NotFound 和 Conflict", async (
   await assert.rejects(() => service.delete(1), ConflictException);
 });
 
-test("回收站商品不能通过通用编辑接口绕过恢复操作", async () => {
+test("回收站商品不能通过状态接口绕过恢复操作", async () => {
   const { service } = createService([
     { id: 1, status: "ARCHIVED", deletedAt: null },
   ]);
 
   await assert.rejects(
-    () => service.update(1, { status: "OFFLINE" } as never),
+    () => service.updateStatus(1, "OFFLINE"),
     ConflictException,
   );
 });

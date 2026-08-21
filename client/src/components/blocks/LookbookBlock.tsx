@@ -12,9 +12,9 @@ interface LookbookBlockProps {
   editMode?: boolean;
 }
 
-const INK = "#1A1A1A";
-const MUTED = "#8C8C8C";
-const GOLD = "#8C8C8C";
+const INK = "#181A1B";
+const MUTED = "#6E7477";
+const GOLD = "#6E7477";
 /** 关联作品缩略与商品行同源,比例取 productRow 契约 */
 const PRODUCT_THUMB_RATIO = getContractRoleRatio("productRow", "productCards", "desktop");
 
@@ -37,7 +37,7 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
   const focusX = Math.min(100, Math.max(0, Number(styleConfig.focusX ?? 50)));
   const focusY = Math.min(100, Math.max(0, Number(styleConfig.focusY ?? 50)));
   const hasProducts = Array.isArray(products) && products.length > 0;
-  const targetUrl = resolveLinkTargetUrl({ targetType, productId, linkUrl });
+  const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, linkUrl });
   // 纯氛围模式：无关联作品时，第 6 页「大片」只保留竖幅氛围影像，零文字零商品
   const pureAtmosphere = !hasProducts;
 
@@ -55,7 +55,7 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
             row-gap: 28px;
             align-items: start;
           }
-          .hc-lookbook__scene { grid-row: 1 / span 2; aspect-ratio: ${WEARING_RATIO_DESKTOP}; overflow: hidden; background: #E5E5E2; }
+          .hc-lookbook__scene { grid-row: 1 / span 2; aspect-ratio: ${WEARING_RATIO_DESKTOP}; overflow: hidden; background: #DDE1E2; }
           .hc-lookbook__scene img { width: 100%; height: 100%; object-fit: cover; display: block; }
           /* 纯氛围大片：竖幅按所选比例居中，高度不超过 88vh，移动端全宽 */
           .hc-lookbook--pure { display: block; }
@@ -69,17 +69,19 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 20px 16px;
           }
+          .hc-lookbook__action { grid-column: 2; justify-self: start; }
           .hc-lookbook__product-link { color: inherit; text-decoration: none; min-width: 0; }
-          .hc-lookbook__thumb { aspect-ratio: ${PRODUCT_THUMB_RATIO}; overflow: hidden; background: #F0ECE5; margin-bottom: 10px; }
+          .hc-lookbook__thumb { aspect-ratio: ${PRODUCT_THUMB_RATIO}; overflow: hidden; background: #F4F5F5; margin-bottom: 10px; }
           .hc-lookbook__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
           @media (max-width: 767px) {
             .hc-lookbook { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; row-gap: 28px; }
             .hc-lookbook__scene { grid-row: auto; }
             .hc-lookbook__scene { aspect-ratio: ${WEARING_RATIO_MOBILE}; }
             .hc-lookbook__products { gap: 24px 12px; }
+            .hc-lookbook__action { grid-column: auto; }
           }
         `}</style>
-        <div data-editor-field="image" className="hc-lookbook__scene">
+        <div data-content-role="wearingImage" data-editor-field="image" className="hc-lookbook__scene">
           {image ? (
             <img
               src={image}
@@ -92,7 +94,7 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
             <BlockEmptyPlaceholder hint="佩戴大片" spec={`请上传佩戴大片 · ${IMAGE_SPECS.lookbook.image.label}`} height="100%" />
           )}
         </div>
-        {!pureAtmosphere && (title || subtitle || (actionText && targetUrl) || editMode) && (
+        {!pureAtmosphere && (title || subtitle || editMode) && (
           <div className="hc-lookbook__copy" data-content-role="copy">
             {title ? (
               <h2 data-editor-field="title" style={{ margin: "0 0 12px", color: INK, fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-type-h2, clamp(28px,3.4vw,42px))", fontWeight: 500, lineHeight: 1.2 }}>
@@ -102,21 +104,10 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
             {subtitle ? (
               <p data-editor-field="subtitle" style={{ margin: 0, color: MUTED, fontSize: "var(--hc-type-body, 14px)", lineHeight: 1.8 }}>{subtitle}</p>
             ) : null}
-            {actionText && targetUrl ? (
-              editMode ? (
-                <span data-editor-field="actionText linkUrl productId" style={{ display: "inline-block", marginTop: 20, color: INK, fontSize: 13, letterSpacing: "0.04em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
-                  {actionText} <span>→</span>
-                </span>
-              ) : (
-                <Link to={targetUrl} data-editor-field="actionText linkUrl productId" style={{ display: "inline-block", marginTop: 20, color: INK, textDecoration: "none", fontSize: 13, letterSpacing: "0.04em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
-                  {actionText} <span>→</span>
-                </Link>
-              )
-            ) : null}
           </div>
         )}
         {!pureAtmosphere && (
-          <div className="hc-lookbook__products">
+          <div data-content-role="relatedProducts" className="hc-lookbook__products">
           {hasProducts ? products.map((product: any, index: number) => (
             <Link
               key={`${product.id || product.name}-${index}`}
@@ -127,7 +118,7 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
                 {product.image ? (
                   <SecureImage src={product.image} alt={product.name || ""} />
                 ) : (
-                  <div style={{ height: "100%", display: "grid", placeItems: "center", color: "#B8ADA0", fontSize: 12 }}>作品</div>
+                  <div style={{ height: "100%", display: "grid", placeItems: "center", color: "#6E7477", fontSize: 12 }}>作品</div>
                 )}
               </div>
               <p style={{ margin: 0, color: INK, fontSize: 13, fontWeight: 500, letterSpacing: "0.02em" }}>{product.name}</p>
@@ -138,6 +129,17 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
           )}
           </div>
         )}
+        {!pureAtmosphere && actionText && targetUrl ? (
+          editMode ? (
+            <span data-content-role="action" data-editor-field="actionText linkUrl productId" className="hc-lookbook__action" style={{ display: "inline-block", color: INK, fontSize: 13, letterSpacing: "0.04em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+              {actionText} <span>→</span>
+            </span>
+          ) : (
+            <Link data-content-role="action" to={targetUrl} data-editor-field="actionText linkUrl productId" className="hc-lookbook__action" style={{ display: "inline-block", color: INK, textDecoration: "none", fontSize: 13, letterSpacing: "0.04em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+              {actionText} <span>→</span>
+            </Link>
+          )
+        ) : null}
       </div>
     </DecorSection>
   );

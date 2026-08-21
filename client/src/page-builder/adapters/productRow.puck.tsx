@@ -4,13 +4,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ProductRowBlock from "@/components/blocks/ProductRowBlock";
-import { fetchProductsByIds, type ProductRow } from "../data-sources/productSource";
+import { resolveProductReferences, type ProductRow } from "../data-sources/productSource";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 
 export interface ProductRowPuckProps {
   title: string;
   subtitle: string;
   productIds: number[];
+  productCodes: string[];
   layout: string;
   mobileColumns: number;
   displayMode: string;
@@ -35,12 +36,16 @@ function toCards(products: ProductRow[]) {
     name: product.name,
     image: product.image,
     price: product.priceLabel,
-    link: `/products/${product.id}`,
+    link: `/products/${encodeURIComponent(product.code || String(product.id))}`,
   }));
 }
 
 function ProductRowPreview(props: ProductRowPuckProps) {
   const productIds = useMemo(() => normalizeIds(props.productIds), [props.productIds]);
+  const productCodes = useMemo(
+    () => Array.isArray(props.productCodes) ? props.productCodes.map(String).filter(Boolean) : [],
+    [props.productCodes],
+  );
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -49,7 +54,7 @@ function ProductRowPreview(props: ProductRowPuckProps) {
     let cancelled = false;
     setError(false);
 
-    if (productIds.length === 0) {
+    if (productIds.length === 0 && productCodes.length === 0) {
       setProducts([]);
       setLoading(false);
       return () => {
@@ -58,13 +63,16 @@ function ProductRowPreview(props: ProductRowPuckProps) {
     }
 
     setLoading(true);
-    fetchProductsByIds(productIds)
+    const controller = new AbortController();
+    resolveProductReferences({
+      codes: productCodes.length ? productCodes : undefined,
+      legacyIds: productIds.length ? productIds : undefined,
+    }, controller.signal)
       .then((rows) => {
         if (!cancelled) setProducts(rows);
       })
       .catch(() => {
         if (!cancelled) {
-          setProducts([]);
           setError(true);
         }
       })
@@ -74,21 +82,22 @@ function ProductRowPreview(props: ProductRowPuckProps) {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [productIds]);
+  }, [productCodes, productIds]);
 
-  if (loading) {
+  if (loading && products.length === 0) {
     return (
       <section style={{ padding: "56px 0", background: props.bgColor || "#FFFFFF", textAlign: "center" }}>
-        <p style={{ margin: 0, color: "#9A8A6B", fontSize: 13 }}>正在加载商品预览</p>
+        <p style={{ margin: 0, color: "#6E7477", fontSize: 13 }}>正在加载商品预览</p>
       </section>
     );
   }
 
-  if (error) {
+  if (error && products.length === 0) {
     return (
       <section style={{ padding: "56px 0", background: props.bgColor || "#FFFFFF", textAlign: "center" }}>
-        <p style={{ margin: 0, color: "#B45332", fontSize: 13 }}>商品预览加载失败，请稍后重试</p>
+        <p style={{ margin: 0, color: "#8C3F3B", fontSize: 13 }}>商品预览加载失败，请稍后重试</p>
       </section>
     );
   }
@@ -96,12 +105,26 @@ function ProductRowPreview(props: ProductRowPuckProps) {
   // P1-32：原 `convertPuckProps(...) as any || toModule(...) as any` 因 `as any` 优先级高于 `||`、
   // 且 convertPuckProps 恒返回 truthy 基础结构，导致右侧 toModule（含已拉取的 products）被短路，
   // 编辑预览恒显示空占位。改为显式合并：把预览商品注入 module.content.products。
-  const merged = convertPuckProps("产品展示行", { ...props, productIds });
+  const merged = convertPuckProps("产品展示行", { ...props, productIds, productCodes });
   if (merged && products.length > 0) {
     // PageModuleContent 类型未声明 products（产品展示行专用扩展字段），用 as any 赋值
     merged.content = { ...merged.content, products: toCards(products) } as any;
   }
-  return <ProductRowBlock module={merged as any} editMode />;
+  return (
+    <>
+      {loading ? (
+        <p role="status" style={{ margin: 0, padding: "10px 20px", color: "#5F6568", background: "#F4F5F5", fontSize: 12 }}>
+          正在刷新商品预览，当前画面暂时保留
+        </p>
+      ) : null}
+      {error ? (
+        <p role="alert" style={{ margin: 0, padding: "10px 20px", color: "#8C3F3B", background: "#FAF0EF", fontSize: 12 }}>
+          商品预览刷新失败，已保留上次成功结果
+        </p>
+      ) : null}
+      <ProductRowBlock module={merged as any} editMode />
+    </>
+  );
 }
 
 export const productRowPuckConfig = {
@@ -110,6 +133,7 @@ export const productRowPuckConfig = {
     title: "精选商品",
     subtitle: "",
     productIds: [],
+    productCodes: [],
     layout: "grid-3",
     mobileColumns: 2,
     displayMode: "standard",

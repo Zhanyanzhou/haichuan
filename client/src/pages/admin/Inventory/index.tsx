@@ -202,7 +202,8 @@ export default function Inventory() {
               dataIndex: "quantity",
               render: (v: number, r: any) => (
                 <span
-                  className={`font-sans font-bold ${r.status === "out" ? "text-red-400" : r.status === "low" ? "text-brand-gold" : "text-brand-text"}`}
+                  className="font-sans font-bold"
+                  style={{ color: r.status === "out" ? "var(--adm-error)" : r.status === "low" ? "var(--adm-warning)" : "var(--adm-ink)" }}
                 >
                   {v}
                 </span>

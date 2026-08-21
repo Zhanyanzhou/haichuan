@@ -51,7 +51,7 @@ function Label({ no, name, note }: { no: string; name: string; note: string }) {
           fontSize: 10,
           letterSpacing: "0.2em",
           textTransform: "uppercase",
-          color: "#D8B86D",
+          color: "#F7F8F8",
           fontFamily: "Inter,system-ui,sans-serif",
         }}
       >
@@ -63,7 +63,7 @@ function Label({ no, name, note }: { no: string; name: string; note: string }) {
 
 export default function TemplateGallery() {
   return (
-    <div style={{ background: "#141210", minHeight: "100vh" }}>
+    <div style={{ background: "#111315", minHeight: "100vh" }}>
       <div
         style={{
           maxWidth: 1800,
@@ -81,7 +81,7 @@ export default function TemplateGallery() {
           { moduleType: "单图海报", name: "单图文" },
         ].map((t) => (
           <div key={t.moduleType} style={{ width: 300 }}>
-            <div style={{ fontSize: 12, color: "#D8B86D", letterSpacing: "0.18em", marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: "#F7F8F8", letterSpacing: "0.18em", marginBottom: 8 }}>
               {t.name} · 编辑器缩略图
             </div>
             <ContentTemplateSkeletonPreview moduleType={t.moduleType} viewport="desktop" density="overview" />

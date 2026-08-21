@@ -193,7 +193,7 @@ export default function HotspotBlock({
         margin: "0 auto",
         aspectRatio: HOTSPOT_CONTRACT.canvas.desktopMediaAspectRatio,
         overflow: "hidden",
-        background: "#F3F1EE",
+        background: "#F4F5F5",
       }}
     >
       <style>{`
@@ -213,10 +213,10 @@ export default function HotspotBlock({
       </picture>
 
       {/* 热区叠加层 */}
+      <div data-content-role="hotspots" style={{ display: "contents" }}>
           {visibleHotspots.map(({ item: h, sourceIndex }) => (
         <Link
           key={sourceIndex}
-          data-content-role="hotspots"
           to={editMode ? "#" : resolveItemLinkUrl(h) || "#"}
           onClick={(e) => {
             if (editMode) {
@@ -237,11 +237,11 @@ export default function HotspotBlock({
             cursor: editMode ? "move" : "pointer",
             outline:
               editMode && selectedIndex === sourceIndex
-                ? "2px solid #B8944E"
-                : "1px dashed rgba(184,148,78,0.4)",
+                ? "2px solid #181A1B"
+                : "1px dashed rgba(24,26,27,0.4)",
             background:
               editMode && selectedIndex === sourceIndex
-                ? "rgba(184,148,78,0.10)"
+                ? "rgba(24,26,27,0.08)"
                 : "transparent",
             transition: editMode ? "none" : "background 0.2s",
           }}
@@ -249,7 +249,7 @@ export default function HotspotBlock({
             editMode ? (e) => onPointerDown(sourceIndex, "move", e) : undefined
           }
           onMouseEnter={(e) => {
-            if (!editMode) e.currentTarget.style.background = "rgba(184,148,78,0.15)";
+            if (!editMode) e.currentTarget.style.background = "rgba(24,26,27,0.12)";
           }}
           onMouseLeave={(e) => {
             if (!editMode) e.currentTarget.style.background = "transparent";
@@ -287,7 +287,7 @@ export default function HotspotBlock({
                       width: 10,
                       height: 10,
                       borderRadius: "50%",
-                      background: "#B8944E",
+                      background: "#181A1B",
                       border: "2px solid #fff",
                       boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
                       cursor: `${pos}-resize`,
@@ -302,6 +302,7 @@ export default function HotspotBlock({
           )}
         </Link>
       ))}
+      </div>
 
       {/* 编辑模式空状态 */}
       {editMode && visibleHotspots.length === 0 && (

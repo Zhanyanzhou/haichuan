@@ -8,7 +8,7 @@ const contract = JSON.parse(await readFile(path.join(root, "contracts/page-build
 for (const template of contract.templates) {
   assert.ok(Array.isArray(template.roles) && template.roles.length > 0, `${template.key} 缺少根构图角色`);
   assert.ok(template.preview.desktop.zones.length && template.preview.mobile.zones.length, `${template.key} 缺少同源中性预览`);
-  for (const device of ["desktop", "tablet", "mobile"]) assert.ok(template.order[device].length, `${template.key} 缺少 ${device} 阅读顺序`);
+  for (const device of ["desktop", "mobile"]) assert.ok(template.order[device].length, `${template.key} 缺少 ${device} 阅读顺序`);
 }
 const [preview, puckConfig, runtime, frame] = await Promise.all([
   readFile(path.join(root, "client/src/page-builder/preview/ContentTemplateSkeletonPreview.tsx"), "utf8"),

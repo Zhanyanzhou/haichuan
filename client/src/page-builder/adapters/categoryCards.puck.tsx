@@ -2,7 +2,10 @@
  * categoryCards.puck.ts — CategoryCardsBlock 适配器
  */
 
+import { useEffect, useMemo, useState } from "react";
 import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
+import { categoryApi, type CategoryReferenceResult } from "@/services/api";
+import { unwrapResponse } from "@/utils/unwrap";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 
 export interface CategoryCardItem {
@@ -25,14 +28,54 @@ export interface CategoryCardsPuckProps {
    * 每项均独立维护名称、图片、跳转与辅助信息。）
    */
   categories: CategoryCardItem[];
+  categorySlugs: string[];
   layout: string;
   bgColor: string;
   locked?: boolean;
 }
 
+function CategoryCardsPreview(props: CategoryCardsPuckProps) {
+  const slugs = useMemo(
+    () => Array.isArray(props.categorySlugs) ? props.categorySlugs.map(String).filter(Boolean) : [],
+    [props.categorySlugs],
+  );
+  const [resolved, setResolved] = useState<CategoryCardItem[]>([]);
+  const [loading, setLoading] = useState(slugs.length > 0);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!slugs.length) { setResolved([]); setLoading(false); setError(false); return; }
+    const controller = new AbortController();
+    setLoading(true);
+    setError(false);
+    void categoryApi.resolveReferences(slugs, controller.signal)
+      .then((response) => {
+        const data = unwrapResponse<CategoryReferenceResult[]>(response);
+        if (!controller.signal.aborted) setResolved((Array.isArray(data) ? data : []).map((node) => ({
+          name: node.name || node.slug,
+          image: node.coverImage || "",
+          link: node.id ? `/products?categoryId=${node.id}` : "",
+          altText: node.name || node.slug,
+          description: node.eligible ? "" : "当前不可发布，请在属性面板处理",
+        })));
+      })
+      .catch(() => { if (!controller.signal.aborted) setError(true); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [slugs]);
+
+  if (loading) return <section role="status" aria-live="polite" style={{ padding: 56, textAlign: "center", background: props.bgColor }}>正在加载分类预览</section>;
+  if (error) return <section role="alert" style={{ padding: 56, textAlign: "center", background: props.bgColor }}>分类预览加载失败，已保留当前引用</section>;
+  const module = convertPuckProps("分类卡片", {
+    ...props,
+    categories: slugs.length ? resolved : props.categories,
+  });
+  return module ? <CategoryCardsBlock module={module as any} editMode /> : null;
+}
+
 export const categoryCardsPuckConfig = {
   render: (props: CategoryCardsPuckProps) => (
-    <CategoryCardsBlock module={convertPuckProps("分类卡片", props as any) as any} editMode />
+    <CategoryCardsPreview {...props} />
   ),
   defaultProps: {
     title: "探索分类",
@@ -42,6 +85,7 @@ export const categoryCardsPuckConfig = {
       { name: "吊坠", image: "", link: "/products", count: "" },
       { name: "戒指", image: "", link: "/products", count: "" },
     ],
+    categorySlugs: [],
     layout: "grid-3",
     bgColor: "#FFFFFF",
     locked: false,

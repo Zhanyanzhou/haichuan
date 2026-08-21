@@ -9,7 +9,7 @@ import {
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { categoryCardsPuckConfig } from "../../../adapters/categoryCards.puck";
 import { puckConfig } from "../../../config/puckConfig";
-import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
+import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 interface CategoryCardsVariant {
@@ -40,8 +40,24 @@ export function makeCategoryCardsSchema(
     purpose: variant.purpose,
     evaluate: evaluateCategoryCardsContract,
     defaults: { ...defaults },
-    groupTitles: { media: "卡片素材" },
+    groupTitles: variant.moduleType === "分类卡片"
+      ? { product: "选择分类" }
+      : { media: "卡片素材" },
     sections: [
+      ...(variant.moduleType === "分类卡片" ? [{
+        id: "分类卡片-reference",
+        title: "分类关联",
+        layer: "product" as const,
+        description: "名称、封面和链接始终从真实分类系统读取",
+        fields: [{
+          key: "categorySlugs",
+          label: "选择分类",
+          control: "categoryReferences" as const,
+          legacyKey: "categories",
+          minItems: 2,
+          maxItems: 4,
+        }],
+      }] : []),
       {
         id: `${variant.moduleType}-content`,
         title: "内容",
@@ -72,12 +88,14 @@ export function makeCategoryCardsSchema(
         id: `${variant.moduleType}-media`,
         title: "素材",
         layer: "media",
+        visibleWhen: () => variant.moduleType === "按场景选购",
         fields: [
           {
             key: "categories",
             label: "入口卡片",
             control: "array",
             itemLabel: "入口",
+            minItems: CATEGORY_CARDS_CONTRACT.content.minItems,
             maxItems: CATEGORY_CARDS_CONTRACT.content.maxItems,
             defaultItem: {
               name: "新入口",
@@ -156,7 +174,7 @@ export function makeCategoryCardsSchema(
         id: `${variant.moduleType}-style`,
         title: "样式",
         layer: "style",
-        fields: [bgColorPresetField()],
+        fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
       },
     ],
   };

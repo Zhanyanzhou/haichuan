@@ -8,7 +8,7 @@ interface TestimonialBlockProps {
   editMode?: boolean;
 }
 
-const GOLD = "#8C8C8C";
+const GOLD = "#6E7477";
 
 /**
  * 顾客之声 — Editorial Story 母版(口碑变体)
@@ -50,11 +50,11 @@ export default function TestimonialBlock({ module, editMode }: TestimonialBlockP
             font-family: var(--hc-font-display, ${FONT_DISPLAY});
             font-size: clamp(22px, 2.6vw, 34px);
             line-height: 1.5;
-            color: #1A1A1A;
+            color: #181A1B;
             font-weight: 400;
             margin: 0 0 18px;
           }
-          .hc-voices__image { aspect-ratio: ${TESTIMONIAL_RATIO}; overflow: hidden; background: #F3F1EE; }
+          .hc-voices__image { aspect-ratio: ${TESTIMONIAL_RATIO}; overflow: hidden; background: #F4F5F5; }
           .hc-voices__image img { width: 100%; height: 100%; object-fit: cover; display: block; }
           @media (max-width: 767px) {
             .hc-voices { row-gap: 48px; }

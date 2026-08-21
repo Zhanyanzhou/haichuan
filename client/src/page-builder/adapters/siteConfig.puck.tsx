@@ -24,9 +24,9 @@ function SiteConfigPreview(_props: SiteConfigPuckProps) {
     <section
       style={{
         padding: "48px 0",
-        background: "#F9F8F6",
-        borderTop: "1px solid #E8E4DC",
-        borderBottom: "1px solid #E8E4DC",
+        background: "#F4F5F5",
+        borderTop: "1px solid #DDE1E2",
+        borderBottom: "1px solid #DDE1E2",
       }}
     >
       <div
@@ -52,15 +52,15 @@ function SiteConfigPreview(_props: SiteConfigPuckProps) {
               type="primary"
               icon={<SettingOutlined />}
               onClick={() => navigate("/admin/site-content")}
-              style={{ background: "#B8944E", borderColor: "#B8944E" }}
+              style={{ background: "#181A1B", borderColor: "#181A1B" }}
             >
               编辑店铺资料
             </Button>
           }
           style={{
-            border: "1px solid #E0D5C2",
+            border: "1px solid #DDE1E2",
             borderRadius: 6,
-            background: "#FFFEFB",
+            background: "#FFFFFF",
           }}
         />
       </div>

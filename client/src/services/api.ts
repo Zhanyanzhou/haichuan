@@ -204,8 +204,64 @@ function persistMockProducts() {
   }
 }
 
+export interface ProductAdminQuery {
+  page?: number;
+  pageSize?: number;
+  keyword?: string;
+  categoryId?: number;
+  status?: string;
+  visibility?: string;
+  sortBy?: "updated_desc" | "code_asc" | "sortOrder";
+  materialType?: string;
+  salesMode?: string;
+  isHot?: string;
+  isRecommended?: string;
+  ids?: string;
+  codes?: string;
+}
+
+export interface ProductReferenceResult {
+  code?: string;
+  legacyId?: number;
+  id?: number;
+  name?: string;
+  price?: number | string | null;
+  status?: string;
+  visibility?: string;
+  category?: { id: number; name: string };
+  thumbnail?: string;
+  eligible: boolean;
+  reason:
+    | "AVAILABLE"
+    | "DELETED"
+    | "OFFLINE"
+    | "DRAFT"
+    | "ARCHIVED"
+    | "NON_PUBLIC"
+    | "MISSING_IMAGE"
+    | "NOT_FOUND"
+    | "FORBIDDEN"
+    | "RESOLVE_FAILED";
+}
+
+export interface CategoryReferenceResult {
+  slug: string;
+  id?: number;
+  name?: string;
+  level?: number;
+  coverImage?: string | null;
+  eligible: boolean;
+  reason:
+    | "AVAILABLE"
+    | "DELETED"
+    | "INACTIVE"
+    | "NO_PUBLIC_PRODUCT"
+    | "MISSING_COVER"
+    | "NOT_FOUND";
+}
+
 export const productApi = {
-  getList: async (params: any) => {
+  getList: async (params: ProductAdminQuery, signal?: AbortSignal) => {
     if (USE_MOCK) {
       await mockDelay();
       const idSet = params?.ids
@@ -216,6 +272,9 @@ export const productApi = {
               .filter((id) => Number.isInteger(id) && id > 0),
           )
         : null;
+      const codeSet = params?.codes
+        ? new Set(String(params.codes).split(",").map((code) => code.trim()).filter(Boolean))
+        : null;
       const availableProducts = (
         getMockProducts() as unknown as LifecycleMockProduct[]
       ).filter((product) => !product.deletedAt);
@@ -225,6 +284,7 @@ export const productApi = {
       ).filter(
         (product) =>
           (!idSet || idSet.has(product.id)) &&
+          (!codeSet || codeSet.has(typeof product.code === "string" ? product.code : "")) &&
           (params?.status ? true : product.status !== "ARCHIVED"),
       );
       return mockRes({
@@ -236,7 +296,53 @@ export const productApi = {
         },
       });
     }
-    return api.get("/products", { params });
+    return api.get("/products", { params, signal });
+  },
+  resolveReferences: async (input: { codes?: string[]; legacyIds?: number[] }, signal?: AbortSignal) => {
+    if (USE_MOCK) {
+      await mockDelay();
+      const products = getMockProducts() as unknown as LifecycleMockProduct[];
+      const mapProduct = (product: LifecycleMockProduct | undefined, reference: { code?: string; legacyId?: number }): ProductReferenceResult => {
+        if (!product) return { ...reference, eligible: false, reason: "NOT_FOUND" };
+        const image = (product as any).listingImage || (product as any).primaryImage || (product as any).images?.[0];
+        const reason: ProductReferenceResult["reason"] = product.deletedAt
+          ? "DELETED"
+          : product.status === "OFFLINE"
+            ? "OFFLINE"
+            : product.status === "DRAFT"
+              ? "DRAFT"
+              : product.status === "ARCHIVED"
+                ? "ARCHIVED"
+                : (product as any).visibility && (product as any).visibility !== "PUBLIC"
+                  ? "NON_PUBLIC"
+                  : !image
+                    ? "MISSING_IMAGE"
+                    : "AVAILABLE";
+        return {
+          ...reference,
+          id: typeof product.id === "number" ? product.id : undefined,
+          code: typeof product.code === "string" ? product.code : undefined,
+          name: typeof product.name === "string" ? product.name : undefined,
+          price:
+            typeof product.price === "number" || typeof product.price === "string"
+              ? product.price
+              : product.price === null
+                ? null
+                : undefined,
+          status: product.status,
+          visibility: (product as any).visibility,
+          category: (product as any).category,
+          thumbnail: typeof image === "string" ? image : image?.mediaUrl || image?.url || "",
+          eligible: reason === "AVAILABLE",
+          reason,
+        };
+      };
+      return mockRes([
+        ...(input.codes ?? []).map((code) => mapProduct(products.find((product) => product.code === code), { code })),
+        ...(input.legacyIds ?? []).map((legacyId) => mapProduct(products.find((product) => product.id === legacyId), { legacyId })),
+      ]);
+    }
+    return api.post("/products/admin/resolve-references", input, { signal });
   },
   getCounts: async () => {
     if (USE_MOCK) {
@@ -256,7 +362,7 @@ export const productApi = {
     }
     return api.get("/products/counts");
   },
-  getPublicList: async (params: any = {}) => {
+  getPublicList: async (params: any = {}, signal?: AbortSignal) => {
     if (USE_MOCK) {
       await mockDelay();
       const idSet = params.ids
@@ -286,18 +392,19 @@ export const productApi = {
       });
     }
     if (!localStorage.getItem("customerToken")) {
-      return api.get("/products/public", { params });
+      return api.get("/products/public", { params, signal });
     }
     try {
       return await api.get("/products/catalog", {
         params,
+        signal,
         headers: customerAuthHeaders(),
       });
     } catch (error) {
       if (requestStatus(error) !== 401) throw error;
       // 客户令牌失效时不把公开浏览变成登录墙，清理旧会话后降级到游客目录。
       clearCustomerSession();
-      return api.get("/products/public", { params });
+      return api.get("/products/public", { params, signal });
     }
   },
   getById: async (id: number) => {
@@ -323,11 +430,11 @@ export const productApi = {
     }
     return api.put(`/products/${id}/attributes`, { attributeValueIds });
   },
-  getPublicById: async (id: number) => {
+  getPublicById: async (id: string | number) => {
     if (USE_MOCK) {
       await mockDelay();
       const product = getMockProducts().find(
-        (item) => item.id === id && item.status === "PUBLISHED",
+        (item) => (item.code === String(id) || item.id === Number(id)) && item.status === "PUBLISHED",
       );
       if (!product) throw new Error("商品当前不可浏览");
       return mockRes(product);
@@ -406,7 +513,7 @@ export const productApi = {
       if (product.status !== "ARCHIVED") {
         throw mockRequestError("商品已不在回收站，请刷新列表确认最新状态", 409);
       }
-      product.status = "OFFLINE";
+      product.status = "DRAFT";
       persistMockProducts();
       return mockRes(product);
     }
@@ -674,14 +781,52 @@ export const productApi = {
   },
 };
 
+// ===== Shipping templates API =====
+export const shippingTemplateApi = {
+  list: async () => {
+    if (USE_MOCK) {
+      await mockDelay();
+      return mockRes([
+        {
+          id: 1,
+          name: "系统模板-珠宝默认模板",
+          carrier: "顺丰速运",
+          feeMode: "FREE",
+          baseFee: 0,
+          remoteSurcharge: 0,
+          insured: true,
+          signatureRequired: true,
+          isDefault: true,
+          isActive: true,
+        },
+      ]);
+    }
+    return api.get("/shipping-templates");
+  },
+  create: async (data: any) => {
+    if (USE_MOCK) {
+      await mockDelay(120);
+      return mockRes({ id: Date.now(), ...data, isDefault: false, isActive: true });
+    }
+    return api.post("/shipping-templates", data);
+  },
+  update: async (id: number, data: any) => {
+    if (USE_MOCK) {
+      await mockDelay(120);
+      return mockRes({ id, ...data });
+    }
+    return api.put(`/shipping-templates/${id}`, data);
+  },
+};
+
 // ===== Categories API =====
 export const categoryApi = {
-  getTree: async () => {
+  getTree: async (signal?: AbortSignal) => {
     if (USE_MOCK) {
       await mockDelay();
       return mockRes(mockCategories);
     }
-    return api.get("/categories/tree");
+    return api.get("/categories/tree", { signal });
   },
   getList: async () => {
     if (USE_MOCK) {
@@ -690,12 +835,44 @@ export const categoryApi = {
     }
     return api.get("/categories");
   },
-  getManageTree: async () => {
+  getManageTree: async (signal?: AbortSignal) => {
     if (USE_MOCK) {
       await mockDelay();
       return mockRes(mockCategories);
     }
-    return api.get("/categories/admin/tree");
+    return api.get("/categories/admin/tree", { signal });
+  },
+  resolveReferences: async (slugs: string[], signal?: AbortSignal) => {
+    if (USE_MOCK) {
+      await mockDelay();
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      const flatten = (nodes: any[]): any[] =>
+        nodes.flatMap((node) => [node, ...flatten(node.children ?? [])]);
+      const bySlug = new Map(flatten(mockCategories as any[]).map((node) => [node.slug, node]));
+      return mockRes(slugs.map((slug): CategoryReferenceResult => {
+        const category = bySlug.get(slug);
+        if (!category) return { slug, eligible: false, reason: "NOT_FOUND" };
+        const reason: CategoryReferenceResult["reason"] = category.deletedAt
+          ? "DELETED"
+          : category.isActive === false
+            ? "INACTIVE"
+            : category.hasPublicProduct === false
+              ? "NO_PUBLIC_PRODUCT"
+              : !category.coverImage
+                ? "MISSING_COVER"
+                : "AVAILABLE";
+        return {
+          slug,
+          id: Number(category.id),
+          name: String(category.name || slug),
+          level: Number(category.level || 1),
+          coverImage: category.coverImage || null,
+          eligible: reason === "AVAILABLE",
+          reason,
+        };
+      }));
+    }
+    return api.post("/categories/admin/resolve-references", { slugs }, { signal });
   },
   create: async (data: CategoryInput) => {
     if (USE_MOCK) {
@@ -1681,16 +1858,21 @@ export const pageDocumentApi = {
       expectedUpdatedAt,
     });
   },
-  validate: async (pageKey = "home", puckData?: any, metadata?: any) => {
+  validate: async (
+    pageKey = "home",
+    puckData?: any,
+    metadata?: any,
+    signal?: AbortSignal,
+  ) => {
     if (USE_MOCK) {
       await mockDelay(100);
       return mockRes({ valid: true, errors: [], issues: [] });
     }
-    return api.post("/page-modules/document/validate", {
-      pageKey,
-      puckData,
-      metadata,
-    });
+    return api.post(
+      "/page-modules/document/validate",
+      { pageKey, puckData, metadata },
+      { signal },
+    );
   },
   getRevisions: async (pageKey = "home") => {
     if (USE_MOCK) {

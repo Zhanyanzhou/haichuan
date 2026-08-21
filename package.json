@@ -31,7 +31,8 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "prepare": "husky",
-    "test:public-assets": "node scripts/verify-public-assets.mjs"
+    "test:public-assets": "node scripts/verify-public-assets.mjs",
+    "test:ui-colors": "node scripts/verify-ui-color-standards.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.2",

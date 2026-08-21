@@ -115,7 +115,7 @@ export default function WarehouseManage() {
   return (
     <div>
       <AdminPageHeader title="仓库管理" subtitle="管理多仓（展厅/工厂/门店），库存按仓库维度维护" />
-      <Card style={{ borderRadius: 10, border: "1px solid #E7E6E2", boxShadow: "0 6px 20px rgba(40,36,30,0.035)" }}>
+      <Card style={{ borderRadius: 10, border: "1px solid var(--adm-line)", boxShadow: "0 6px 20px rgba(24,26,27,0.035)" }}>
         <div style={{ marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
           <Space>
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>

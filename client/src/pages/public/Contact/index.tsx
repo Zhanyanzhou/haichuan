@@ -4,15 +4,16 @@ import { inquiriesApi, settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackPageView, trackSubmitInquiry } from "@/hooks/useAnalytics";
 import { usePageMetaStore } from "@/store/pageMetaStore";
+import { usePageDecorationState } from "@/page-builder/runtime/PublishedPageDecoration";
 
 const T = {
   bg: "#FFFFFF",
-  txt: "#29241F",
-  sec: "rgba(41,36,31,0.58)",
-  light: "rgba(41,36,31,0.38)",
-  line: "#E8E7E3",
-  gold: "#B8944E",
-  warmBg: "#FAF9F7",
+  txt: "#181A1B",
+  sec: "rgba(24,26,27,0.62)",
+  light: "rgba(24,26,27,0.42)",
+  line: "#DDE1E2",
+  gold: "#6E7477",
+  warmBg: "#F4F5F5",
 };
 const MW = 1120;
 const PX = "clamp(24px,5vw,64px)";
@@ -126,6 +127,7 @@ function useSiteSettings() {
 }
 
 export default function Contact() {
+  const { active: hasPageDecoration } = usePageDecorationState();
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
   // SEO：联系页独立标题与描述
@@ -321,7 +323,7 @@ export default function Contact() {
   return (
     <div style={{ background: T.bg }}>
       {/* ═══ 标题区（紧凑） ═══ */}
-      <section
+      {!hasPageDecoration && <section
         style={{
           padding: "clamp(32px,5vh,56px) 0 clamp(20px,3vh,32px)",
           borderBottom: `1px solid ${T.line}`,
@@ -354,7 +356,7 @@ export default function Contact() {
             您可提交选款、定制或旧款相关需求；具体服务内容与安排以实际沟通为准。
           </p>
         </div>
-      </section>
+      </section>}
 
       {/* ═══ 主体：左40% 右60% ═══ */}
       <section style={{ paddingBlock: "clamp(36px,5vh,64px)" }}>
@@ -540,7 +542,7 @@ export default function Contact() {
                     id="cf-name"
                     style={{
                       ...inputS,
-                      borderColor: errors.name ? "#c0392b" : T.line,
+                      borderColor: errors.name ? "#8C3F3B" : T.line,
                     }}
                     value={form.name}
                     onChange={(e) => set("name", e.target.value)}
@@ -550,7 +552,7 @@ export default function Contact() {
                     <p
                       style={{
                         fontSize: 11,
-                        color: "#c0392b",
+                        color: "#8C3F3B",
                         margin: "2px 0 0",
                       }}
                     >
@@ -566,7 +568,7 @@ export default function Contact() {
                     id="cf-phone"
                     style={{
                       ...inputS,
-                      borderColor: errors.phone ? "#c0392b" : T.line,
+                      borderColor: errors.phone ? "#8C3F3B" : T.line,
                     }}
                     value={form.phone}
                     onChange={(e) => set("phone", e.target.value)}
@@ -578,7 +580,7 @@ export default function Contact() {
                     <p
                       style={{
                         fontSize: 11,
-                        color: "#c0392b",
+                        color: "#8C3F3B",
                         margin: "2px 0 0",
                       }}
                     >
@@ -604,7 +606,7 @@ export default function Contact() {
                     id="cf-type"
                     style={{
                       ...selS,
-                      borderColor: errors.consultationType ? "#c0392b" : T.line,
+                      borderColor: errors.consultationType ? "#8C3F3B" : T.line,
                     }}
                     value={form.consultationType}
                     onChange={(e) => set("consultationType", e.target.value)}
@@ -622,7 +624,7 @@ export default function Contact() {
                     <p
                       style={{
                         fontSize: 11,
-                        color: "#c0392b",
+                        color: "#8C3F3B",
                         margin: "2px 0 0",
                       }}
                     >
@@ -665,7 +667,7 @@ export default function Contact() {
                     id="cf-time"
                     style={{
                       ...selS,
-                      borderColor: errors.preferredTime ? "#c0392b" : T.line,
+                      borderColor: errors.preferredTime ? "#8C3F3B" : T.line,
                     }}
                     value={form.preferredTime}
                     onChange={(e) => set("preferredTime", e.target.value)}
@@ -683,7 +685,7 @@ export default function Contact() {
                     <p
                       style={{
                         fontSize: 11,
-                        color: "#c0392b",
+                        color: "#8C3F3B",
                         margin: "2px 0 0",
                       }}
                     >
@@ -720,7 +722,7 @@ export default function Contact() {
                     height: 100,
                     paddingBlock: 10,
                     resize: "vertical",
-                    borderColor: errors.message ? "#c0392b" : T.line,
+                    borderColor: errors.message ? "#8C3F3B" : T.line,
                   }}
                   value={form.message}
                   onChange={(e) => set("message", e.target.value)}
@@ -730,7 +732,7 @@ export default function Contact() {
                   <p
                     style={{
                       fontSize: 11,
-                      color: "#c0392b",
+                      color: "#8C3F3B",
                       margin: "2px 0 0",
                     }}
                   >
@@ -746,7 +748,7 @@ export default function Contact() {
                     gap: 8,
                     cursor: "pointer",
                     fontSize: 12,
-                    color: errors.privacyConsent ? "#c0392b" : T.sec,
+                    color: errors.privacyConsent ? "#8C3F3B" : T.sec,
                   }}
                 >
                   <input
@@ -779,7 +781,7 @@ export default function Contact() {
                     role="alert"
                     style={{
                       fontSize: 11,
-                      color: "#c0392b",
+                      color: "#8C3F3B",
                       margin: "4px 0 0",
                     }}
                   >
@@ -788,7 +790,7 @@ export default function Contact() {
                 )}
               </div>
               {submitError && (
-                <p style={{ fontSize: 12, color: "#c0392b", marginBottom: 12 }}>
+                <p style={{ fontSize: 12, color: "#8C3F3B", marginBottom: 12 }}>
                   {submitError}
                 </p>
               )}

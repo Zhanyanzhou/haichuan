@@ -22,33 +22,33 @@ const emptyConfig: Record<EmptyType, {
   actionPath?: string;
 }> = {
   cart: {
-    icon: <ShoppingCartOutlined style={{ fontSize: 64, color: '#B8944E' }} />,
+    icon: <ShoppingCartOutlined style={{ fontSize: 64, color: 'var(--adm-action, #181A1B)' }} />,
     title: '购物车是空的',
     description: '快去挑选心仪的珠宝吧~',
     actionText: '去选购',
     actionPath: '/products',
   },
   search: {
-    icon: <SearchOutlined style={{ fontSize: 64, color: '#B8944E' }} />,
+    icon: <SearchOutlined style={{ fontSize: 64, color: 'var(--adm-action, #181A1B)' }} />,
     title: '未找到相关商品',
     description: '试试其他关键词，或浏览全部分类',
     actionText: '浏览分类',
     actionPath: '/catalog',
   },
   order: {
-    icon: <InboxOutlined style={{ fontSize: 64, color: '#B8944E' }} />,
+    icon: <InboxOutlined style={{ fontSize: 64, color: 'var(--adm-action, #181A1B)' }} />,
     title: '暂无订单',
     description: '选购心仪的珠宝，您的第一个订单即将诞生',
     actionText: '去选购',
     actionPath: '/products',
   },
   product: {
-    icon: <AppstoreOutlined style={{ fontSize: 64, color: '#B8944E' }} />,
+    icon: <AppstoreOutlined style={{ fontSize: 64, color: 'var(--adm-action, #181A1B)' }} />,
     title: '暂无商品',
     description: '此分类下暂无商品，敬请期待新品上架',
   },
   default: {
-    icon: <InboxOutlined style={{ fontSize: 64, color: '#B8944E' }} />,
+    icon: <InboxOutlined style={{ fontSize: 64, color: 'var(--adm-action, #181A1B)' }} />,
     title: '暂无数据',
     description: '',
   },

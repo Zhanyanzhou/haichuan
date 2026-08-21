@@ -4,7 +4,7 @@
  */
 import { IMAGE_SPECS, ratioLabelOf } from "../../../config/imageSpecs";
 import { storeInfoPuckConfig } from "../../../adapters/storeInfo.puck";
-import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
+import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 /** 槽位比例选项(契约派生):门店空间横构图,移动端可选竖版近景 */
@@ -74,7 +74,7 @@ export const storeInfoSchema: ModuleInspectorSchema = {
       id: "store-info-style",
       title: "样式",
       layer: "style",
-      fields: [bgColorPresetField()],
+      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
     },
   ],
 };

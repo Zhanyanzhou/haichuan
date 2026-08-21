@@ -60,7 +60,7 @@ export default function ForYouRecommendations() {
           style={{
             fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
             fontSize: 24,
-            color: "#2c2822",
+            color: "#181a1b",
             margin: 0,
           }}
         >
@@ -70,7 +70,7 @@ export default function ForYouRecommendations() {
           style={{
             fontSize: 11,
             letterSpacing: ".18em",
-            color: "#b8944e",
+            color: "#5f6568",
             textTransform: "uppercase",
           }}
         >
@@ -78,7 +78,7 @@ export default function ForYouRecommendations() {
         </span>
       </div>
       {loading ? (
-        <div style={{ color: "#96928a", fontSize: 13, padding: "24px 0" }}>
+        <div style={{ color: "#6E7477", fontSize: 13, padding: "24px 0" }}>
           正在为您挑选作品…
         </div>
       ) : (
@@ -98,7 +98,7 @@ export default function ForYouRecommendations() {
               <div
                 style={{
                   aspectRatio: "1 / 1",
-                  background: "#f3f0ea",
+                  background: "#f4f5f5",
                   overflow: "hidden",
                   borderRadius: 8,
                 }}
@@ -112,7 +112,7 @@ export default function ForYouRecommendations() {
               <p
                 style={{
                   fontSize: 14,
-                  color: "#2c2822",
+                  color: "#181a1b",
                   margin: "10px 0 4px",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
@@ -123,7 +123,7 @@ export default function ForYouRecommendations() {
                 {item.name}
               </p>
               {item.price != null && Number(item.price) > 0 ? (
-                <p style={{ fontSize: 13, color: "#b8944e", margin: 0 }}>
+                <p style={{ fontSize: 13, color: "#181a1b", margin: 0 }}>
                   ¥{Number(item.price).toLocaleString()}
                 </p>
               ) : null}

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
 import { PRIVACY_CONSENT_VERSION } from "../../common/privacy/privacy-consent";
@@ -10,6 +11,23 @@ export class SelectionInquiryService {
     private prisma: PrismaService,
     private productsService: ProductsService,
   ) {}
+
+  private hasSameProductSet(
+    items: Array<{ productId: number | null }>,
+    expectedProductIds: number[],
+  ) {
+    const actualProductIds = Array.from(
+      new Set(
+        items.flatMap((item) =>
+          typeof item.productId === "number" ? [item.productId] : [],
+        ),
+      ),
+    ).sort((left, right) => left - right);
+    return (
+      actualProductIds.length === expectedProductIds.length &&
+      actualProductIds.every((productId, index) => productId === expectedProductIds[index])
+    );
+  }
 
   async findAll(params: {
     status?: string;
@@ -84,7 +102,7 @@ export class SelectionInquiryService {
     }
     const distinctIds = Array.from(
       new Set(validItems.map((item) => item.productId)),
-    );
+    ).sort((left, right) => left - right);
     const snapshots =
       await this.productsService.resolveVisibleProductSnapshots(
         distinctIds,
@@ -96,39 +114,62 @@ export class SelectionInquiryService {
       );
     }
 
-    // 写入时以服务端规范名称与受控媒体地址覆盖客户端快照；
-    // productSkuSnapshot 为展示性描述文本，保留客户端值（已 trim），不作为可见性或安全依据。
-    return this.prisma.selectionInquiry.create({
-      data: {
-        customerName,
-        phone,
-        customerId: data.customer?.id || null,
-        email: data.customer?.email || data.email?.trim() || null,
-        wechat: data.wechat?.trim() || null,
-        message: data.message?.trim() || null,
-        privacyConsent: true,
-        privacyConsentVersion: PRIVACY_CONSENT_VERSION,
-        privacyConsentedAt: new Date(),
-        status: "PENDING",
-        items: {
-          create: validItems.map((item) => {
-            const snap = snapshots.get(item.productId);
-            if (!snap) {
-              throw new BadRequestException(
-                "所选作品中有不存在或暂不可选的款式，请刷新页面后重新选择",
-              );
-            }
-            return {
-              productId: item.productId,
-              productNameSnapshot: snap.name,
-              productSkuSnapshot: item.productSkuSnapshot?.trim() || null,
-              productImageSnapshot: snap.mediaUrl,
-            };
-          }),
-        },
-      },
-      include: { items: true },
+    const itemByProductId = new Map(
+      validItems.map((item) => [item.productId, item]),
+    );
+    const createItems = distinctIds.map((productId) => {
+      const item = itemByProductId.get(productId);
+      const snap = snapshots.get(productId);
+      if (!item || !snap) {
+        throw new BadRequestException(
+          "所选作品中有不存在或暂不可选的款式，请刷新页面后重新选择",
+        );
+      }
+      return {
+        productId,
+        productNameSnapshot: snap.name,
+        productSkuSnapshot: item.productSkuSnapshot?.trim() || null,
+        productImageSnapshot: snap.mediaUrl,
+      };
     });
+    const privacyConsentedAt = new Date();
+    const recentSince = new Date(privacyConsentedAt.getTime() - 10 * 60 * 1000);
+
+    // 同一手机号与同一商品集合在短时间内的重复请求复用原记录。
+    // Serializable 事务覆盖同一数据库中的并发重试；不引入 Schema 或迁移变更。
+    return this.prisma.$transaction(
+      async (transaction) => {
+        const recentInquiries = await transaction.selectionInquiry.findMany({
+          where: { phone, createdAt: { gte: recentSince } },
+          include: { items: true },
+          orderBy: { createdAt: "desc" },
+        });
+        const existingInquiry = recentInquiries.find((inquiry) =>
+          this.hasSameProductSet(inquiry.items, distinctIds),
+        );
+        if (existingInquiry) return existingInquiry;
+
+        // 写入时以服务端规范名称与受控媒体地址覆盖客户端快照；
+        // productSkuSnapshot 为展示性描述文本，保留客户端值（已 trim），不作为可见性或安全依据。
+        return transaction.selectionInquiry.create({
+          data: {
+            customerName,
+            phone,
+            customerId: data.customer?.id || null,
+            email: data.customer?.email || data.email?.trim() || null,
+            wechat: data.wechat?.trim() || null,
+            message: data.message?.trim() || null,
+            privacyConsent: true,
+            privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+            privacyConsentedAt,
+            status: "PENDING",
+            items: { create: createItems },
+          },
+          include: { items: true },
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
 
   async update(id: number, data: { status?: string; handlerId?: number }) {

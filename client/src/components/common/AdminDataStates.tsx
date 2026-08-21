@@ -37,7 +37,7 @@ export function AdminLoadingState({ subject = '数据', message, compact = false
     <div className={`flex items-center justify-center ${compact ? 'py-6' : 'py-20'}`} role="status" aria-live="polite">
       <div className="text-center">
         <div
-          className="inline-block w-8 h-8 border-2 border-[#E7E6E2] border-t-[#6F5733] rounded-full animate-spin"
+          className="inline-block w-8 h-8 border-2 border-[#DDE1E2] border-t-[#181A1B] rounded-full animate-spin"
           aria-hidden="true"
         />
         <p style={{ marginTop: 16, color: 'var(--adm-text)', fontSize: 13 }}>{text}</p>

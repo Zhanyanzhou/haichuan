@@ -8,12 +8,15 @@ import {
 import { PrismaService } from "../../common/prisma/prisma.service";
 import {
   CreateProductDto,
+  AdminProductQueryDto,
   PublicProductQueryDto,
+  ResolveProductReferencesDto,
   UpdateProductDto,
 } from "./dto";
 import {
   MaterialType,
   Prisma,
+  ProductStatus,
   ProductVisibility,
   SalesMode,
 } from "@prisma/client";
@@ -22,6 +25,7 @@ import { fromEvent, map, Observable, startWith } from "rxjs";
 import { MessageEvent } from "@nestjs/common";
 import { ProductMediaService } from "./product-media.service";
 import { ProductAccessService } from "./product-access.service";
+import { Cron, CronExpression } from "@nestjs/schedule";
 
 const CUSTOMER_FACING_IMAGE_SELECT = {
   id: true,
@@ -74,6 +78,15 @@ const CUSTOMER_FACING_LIST_SELECT = {
 const CUSTOMER_FACING_DETAIL_SELECT = {
   ...CUSTOMER_FACING_LIST_SELECT,
   description: true,
+  detailContent: true,
+  fulfillmentType: true,
+  dispatchTime: true,
+  deliveryMethods: true,
+  requiresInsuredShipping: true,
+  requiresSignature: true,
+  includesCertificate: true,
+  packageType: true,
+  customLeadTime: true,
   gemInfo: true,
   craftTechnique: true,
   images: {
@@ -172,9 +185,22 @@ function mapCreateDto(dto: CreateProductDto): Prisma.ProductCreateInput {
     size,
     gemInfo,
     craftTechnique,
+    detailContent,
     status,
     visibility,
     salesMode,
+    purchaseRegion,
+    publishMode,
+    scheduledPublishAt,
+    fulfillmentType,
+    dispatchTime,
+    shippingTemplateId,
+    deliveryMethods,
+    requiresInsuredShipping,
+    requiresSignature,
+    includesCertificate,
+    packageType,
+    customLeadTime,
     sortOrder,
     isHot,
     isNew,
@@ -198,9 +224,22 @@ function mapCreateDto(dto: CreateProductDto): Prisma.ProductCreateInput {
     size: size ?? null,
     gemInfo: gemInfo ?? undefined,
     craftTechnique: craftTechnique ?? undefined,
+    detailContent: (detailContent ?? undefined) as any,
     status: status ?? "DRAFT",
     visibility: visibility ?? "MEMBER",
     salesMode: salesMode ?? "DISPLAY_ONLY",
+    purchaseRegion: purchaseRegion ?? "MAINLAND",
+    publishMode: publishMode ?? "WAREHOUSE",
+    scheduledPublishAt: scheduledPublishAt ? new Date(scheduledPublishAt) : null,
+    fulfillmentType: fulfillmentType ?? "IN_STOCK",
+    dispatchTime: dispatchTime ?? "WITHIN_48_HOURS",
+    shippingTemplate: shippingTemplateId ? { connect: { id: shippingTemplateId } } : undefined,
+    deliveryMethods: deliveryMethods ?? ["EXPRESS"],
+    requiresInsuredShipping: requiresInsuredShipping ?? true,
+    requiresSignature: requiresSignature ?? true,
+    includesCertificate: includesCertificate ?? true,
+    packageType: packageType ?? null,
+    customLeadTime: customLeadTime ?? null,
     sortOrder: sortOrder ?? 0,
     isHot: isHot ?? false,
     isNew: isNew ?? false,
@@ -233,9 +272,28 @@ function mapUpdateDto(dto: UpdateProductDto): Prisma.ProductUpdateInput {
   if (dto.gemInfo !== undefined) data.gemInfo = dto.gemInfo;
   if (dto.craftTechnique !== undefined)
     data.craftTechnique = dto.craftTechnique;
-  if (dto.status !== undefined) data.status = dto.status;
+  if (dto.detailContent !== undefined) data.detailContent = dto.detailContent as any;
   if (dto.visibility !== undefined) data.visibility = dto.visibility;
   if (dto.salesMode !== undefined) data.salesMode = dto.salesMode;
+  if (dto.purchaseRegion !== undefined) data.purchaseRegion = dto.purchaseRegion;
+  if (dto.publishMode !== undefined) data.publishMode = dto.publishMode;
+  if (dto.scheduledPublishAt !== undefined)
+    data.scheduledPublishAt = dto.scheduledPublishAt ? new Date(dto.scheduledPublishAt) : null;
+  if (dto.fulfillmentType !== undefined) data.fulfillmentType = dto.fulfillmentType;
+  if (dto.dispatchTime !== undefined) data.dispatchTime = dto.dispatchTime;
+  if (dto.shippingTemplateId !== undefined) {
+    data.shippingTemplate = dto.shippingTemplateId
+      ? { connect: { id: dto.shippingTemplateId } }
+      : { disconnect: true };
+  }
+  if (dto.deliveryMethods !== undefined) data.deliveryMethods = dto.deliveryMethods;
+  if (dto.requiresInsuredShipping !== undefined)
+    data.requiresInsuredShipping = dto.requiresInsuredShipping;
+  if (dto.requiresSignature !== undefined) data.requiresSignature = dto.requiresSignature;
+  if (dto.includesCertificate !== undefined)
+    data.includesCertificate = dto.includesCertificate;
+  if (dto.packageType !== undefined) data.packageType = dto.packageType;
+  if (dto.customLeadTime !== undefined) data.customLeadTime = dto.customLeadTime;
   if (dto.sortOrder !== undefined) data.sortOrder = dto.sortOrder;
   if (dto.isHot !== undefined) data.isHot = dto.isHot;
   if (dto.isNew !== undefined) data.isNew = dto.isNew;
@@ -258,7 +316,47 @@ export class ProductsService {
     private productAccess: ProductAccessService,
   ) {}
 
-  async findAll(params: any) {
+  @Cron(CronExpression.EVERY_MINUTE)
+  async publishScheduledProducts() {
+    const due = await this.prisma.product.findMany({
+      where: {
+        deletedAt: null,
+        publishMode: "SCHEDULED",
+        status: { in: ["DRAFT", "OFFLINE"] },
+        scheduledPublishAt: { lte: new Date() },
+      },
+      select: { id: true },
+      take: 50,
+    });
+    for (const item of due) {
+      try {
+        await this.canPublish(item.id);
+        await this.prisma.product.update({
+          where: { id: item.id },
+          data: {
+            status: "PUBLISHED",
+            publishedAt: new Date(),
+            publishMode: "IMMEDIATE",
+            scheduledPublishAt: null,
+            scheduledPublishError: null,
+          },
+        });
+        this.notifyPublicChange(item.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "定时上架校验失败";
+        await this.prisma.product.update({
+          where: { id: item.id },
+          data: {
+            publishMode: "WAREHOUSE",
+            scheduledPublishAt: null,
+            scheduledPublishError: message.slice(0, 500),
+          },
+        });
+      }
+    }
+  }
+
+  async findAll(params: AdminProductQueryDto) {
     const {
       page = 1,
       pageSize = 20,
@@ -271,6 +369,7 @@ export class ProductsService {
       isRecommended,
       sortBy,
       ids,
+      codes,
       visibility,
     } = params;
     const where: any = { deletedAt: null };
@@ -280,6 +379,14 @@ export class ProductsService {
         .map((id) => Number(id.trim()))
         .filter((id) => Number.isInteger(id) && id > 0);
       if (idList.length > 0) where.id = { in: idList };
+    }
+    if (codes) {
+      const codeList = String(codes)
+        .split(",")
+        .map((code) => code.trim())
+        .filter(Boolean)
+        .slice(0, 50);
+      if (codeList.length > 0) where.code = { in: codeList };
     }
     if (categoryId) where.categoryId = +categoryId;
     // 后台默认工作列表不包含回收站；回收站通过显式 ARCHIVED 状态单独查询。
@@ -306,7 +413,11 @@ export class ProductsService {
     const _page = +page,
       _pageSize = +pageSize;
     const orderBy: any =
-      sortBy === "sortOrder" ? { sortOrder: "asc" } : { updatedAt: "desc" };
+      sortBy === "sortOrder"
+        ? { sortOrder: "asc" }
+        : sortBy === "code_asc"
+          ? { code: "asc" }
+          : { updatedAt: "desc" };
 
     try {
       const [list, total] = await Promise.all([
@@ -337,6 +448,9 @@ export class ProductsService {
             isCustom: true,
             multiDiscount: true,
             visibility: true,
+            detailContent: true,
+            fulfillmentType: true,
+            deliveryMethods: true,
             viewCount: true,
             salesCount: true,
             publishedAt: true,
@@ -348,7 +462,7 @@ export class ProductsService {
             listingImage: true,
             skus: {
               where: { isActive: true },
-              select: { id: true, inventories: { select: { quantity: true } } },
+              select: { id: true, price: true, inventories: { select: { quantity: true } } },
             },
           },
         }),
@@ -389,6 +503,93 @@ export class ProductsService {
       });
       throw error;
     }
+  }
+
+  async resolveReferences(input: ResolveProductReferencesDto) {
+    const codes = (input.codes ?? []).map((code) => code.trim()).filter(Boolean);
+    const legacyIds = (input.legacyIds ?? []).filter(
+      (id) => Number.isInteger(id) && id > 0,
+    );
+    if (codes.length === 0 && legacyIds.length === 0) return [];
+    const products = await this.prisma.product.findMany({
+      where: {
+        OR: [
+          ...(codes.length ? [{ code: { in: [...new Set(codes)] } }] : []),
+          ...(legacyIds.length ? [{ id: { in: [...new Set(legacyIds)] } }] : []),
+        ],
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        price: true,
+        status: true,
+        visibility: true,
+        deletedAt: true,
+        category: { select: { id: true, name: true } },
+        listingImage: { select: { id: true } },
+        primaryImage: { select: { id: true } },
+        images: {
+          orderBy: { sortOrder: "asc" },
+          take: 1,
+          select: { id: true },
+        },
+      },
+    });
+    const byCode = new Map(products.map((product) => [product.code, product]));
+    const byId = new Map(products.map((product) => [product.id, product]));
+
+    const mapReference = (
+      product: (typeof products)[number] | undefined,
+      reference: { code?: string; legacyId?: number },
+    ) => {
+      if (!product) {
+        return {
+          ...reference,
+          eligible: false,
+          reason: "NOT_FOUND" as const,
+        };
+      }
+      const imageId =
+        product.listingImage?.id ??
+        product.primaryImage?.id ??
+        product.images[0]?.id;
+      const reason = product.deletedAt
+        ? "DELETED"
+        : product.status === "OFFLINE"
+          ? "OFFLINE"
+          : product.status === "DRAFT"
+            ? "DRAFT"
+            : product.status === "ARCHIVED"
+              ? "ARCHIVED"
+              : product.visibility !== "PUBLIC"
+                ? "NON_PUBLIC"
+                : !imageId
+                  ? "MISSING_IMAGE"
+                  : "AVAILABLE";
+      return {
+        ...reference,
+        id: product.id,
+        code: product.code,
+        name: product.name,
+        price: product.price,
+        status: product.status,
+        visibility: product.visibility,
+        category: product.category,
+        thumbnail: imageId
+          ? `/products/catalog/${product.id}/media/${imageId}?width=480`
+          : "",
+        eligible: reason === "AVAILABLE",
+        reason,
+      };
+    };
+
+    return [
+      ...codes.map((code) => mapReference(byCode.get(code), { code })),
+      ...legacyIds.map((legacyId) =>
+        mapReference(byId.get(legacyId), { legacyId }),
+      ),
+    ];
   }
 
   /** 游客公开列表：只返回 PUBLIC + PUBLISHED，并使用独立字段白名单。 */
@@ -436,6 +637,14 @@ export class ProductsService {
     if (params.ids !== undefined) {
       const idList = csvPositiveIds(params.ids);
       where.id = { in: idList };
+    }
+    if (typeof params.codes === "string") {
+      const codes = params.codes
+        .split(",")
+        .map((code) => code.trim())
+        .filter(Boolean)
+        .slice(0, 50);
+      where.code = { in: codes };
     }
 
     const categoryIds = csvPositiveIds(params.categoryIds);
@@ -676,8 +885,17 @@ export class ProductsService {
 
     if (Object.prototype.hasOwnProperty.call(product, "description")) {
       response.description = product.description;
+      response.detailContent = product.detailContent;
       response.gemInfo = product.gemInfo;
       response.craftTechnique = product.craftTechnique;
+      response.fulfillmentType = product.fulfillmentType;
+      response.dispatchTime = product.dispatchTime;
+      response.deliveryMethods = product.deliveryMethods;
+      response.requiresInsuredShipping = product.requiresInsuredShipping;
+      response.requiresSignature = product.requiresSignature;
+      response.includesCertificate = product.includesCertificate;
+      response.packageType = product.packageType;
+      response.customLeadTime = product.customLeadTime;
       response.skus = (product.skus || []).map((sku: any) => ({
         id: sku.id,
         material: sku.material,
@@ -866,40 +1084,62 @@ export class ProductsService {
     };
   }
 
-  async findPublicById(id: number) {
-    if (!Number.isInteger(id) || id <= 0) return null;
+  async findPublicById(reference: string | number) {
+    const value = String(reference).trim();
+    if (!value) return null;
     // 游客详情：仅返回列表级字段（不含 description/gemInfo/craftTechnique/skus），
     // 防止未登录抓取工艺细节、价格与规格；完整详情需登录后走 catalog/:id。
-    const product = await this.prisma.product.findFirst({
+    const publicWhere = {
+      deletedAt: null,
+      status: "PUBLISHED" as const,
+      visibility: "PUBLIC" as const,
+    };
+    let product = await this.prisma.product.findFirst({
       where: {
-        id,
-        deletedAt: null,
-        status: "PUBLISHED",
-        visibility: "PUBLIC",
+        ...publicWhere,
+        code: value,
       },
       select: CUSTOMER_FACING_LIST_SELECT,
     });
+    const legacyId = Number(value);
+    if (!product && Number.isInteger(legacyId) && legacyId > 0) {
+      product = await this.prisma.product.findFirst({
+        where: { ...publicWhere, id: legacyId },
+        select: CUSTOMER_FACING_LIST_SELECT,
+      });
+    }
     return product ? this.toCustomerFacingProduct(product, "public") : null;
   }
 
   /** 会员目录详情：查询本身完成越权过滤，不再调用返回后台字段的 findById。 */
-  async findCatalogById(id: number, customer: any) {
-    if (!Number.isInteger(id) || id <= 0) return null;
+  async findCatalogById(reference: string | number, customer: any) {
+    const value = String(reference).trim();
+    if (!value) return null;
     const visibilities = this.resolveVisibleVisibilities(customer);
-    const product = await this.prisma.product.findFirst({
+    const catalogWhere = {
+      deletedAt: null,
+      status: "PUBLISHED" as const,
+      visibility: { in: visibilities },
+    };
+    let product = await this.prisma.product.findFirst({
       where: {
-        id,
-        deletedAt: null,
-        status: "PUBLISHED",
-        visibility: { in: visibilities },
+        ...catalogWhere,
+        code: value,
       },
       select: CUSTOMER_FACING_DETAIL_SELECT,
     });
+    const legacyId = Number(value);
+    if (!product && Number.isInteger(legacyId) && legacyId > 0) {
+      product = await this.prisma.product.findFirst({
+        where: { ...catalogWhere, id: legacyId },
+        select: CUSTOMER_FACING_DETAIL_SELECT,
+      });
+    }
     if (!product) return null;
     // 记录有效浏览（30 分钟去重 + viewCount 原子 +1）
     await this.productAccess.recordDetailView(
       customer.id,
-      id,
+      product.id,
       "product_detail",
     );
     return this.toCustomerFacingProduct(product, "catalog");
@@ -997,16 +1237,26 @@ export class ProductsService {
     missingFields: string[];
     score: number;
   } {
-    const missing: string[] = [];
-    if (!product.name) missing.push("name");
-    if (!product.code) missing.push("code");
-    if (!product.categoryId) missing.push("categoryId");
-    if (!product.images || product.images.length === 0)
-      missing.push("primaryImage");
-    if (!product.salesMode) missing.push("salesMode");
-    if (!product.materialType) missing.push("materialType");
-    if (!product.price || Number(product.price) <= 0) missing.push("price");
-    const total = 7;
+    const requirements: Array<[string, boolean]> = [
+      ["name", Boolean(product.name?.trim?.() || product.name)],
+      ["code", Boolean(product.code?.trim?.() || product.code)],
+      ["categoryId", Boolean(product.categoryId)],
+      ["primaryImage", Boolean(product.images?.length)],
+      ["salesMode", Boolean(product.salesMode)],
+      ["materialType", Boolean(product.materialType)],
+      ["visibility", Boolean(product.visibility)],
+      ["detailContent", Boolean(product.detailContent?.length)],
+      ["price", Number(product.price) > 0],
+    ];
+    if (product.salesMode === "DIRECT_PURCHASE") {
+      requirements.push(
+        ["activeSku", Boolean(product.skus?.some((sku: any) => Number(sku.price) > 0))],
+        ["stock", Boolean(product.skus?.some((sku: any) => sku.inventories?.some((inventory: any) => Number(inventory.quantity) > 0)))],
+        ["deliveryMethods", Boolean(product.deliveryMethods?.length)],
+      );
+    }
+    const missing = requirements.filter(([, complete]) => !complete).map(([field]) => field);
+    const total = requirements.length;
     const score = Math.round(((total - missing.length) / total) * 100);
     return { isComplete: missing.length === 0, missingFields: missing, score };
   }
@@ -1025,6 +1275,7 @@ export class ProductsService {
         skus: { orderBy: { createdAt: "asc" } },
         certificates: true,
         tags: { include: { tag: true } },
+        shippingTemplate: true,
       },
     });
     if (!product) return null;
@@ -1057,6 +1308,22 @@ export class ProductsService {
     });
     if (!category) {
       throw new BadRequestException("所选商品分类不存在，请重新选择");
+    }
+
+    if (dto.shippingTemplateId) {
+      const template = await this.prisma.shippingTemplate.findFirst({
+        where: { id: dto.shippingTemplateId, isActive: true },
+        select: { id: true },
+      });
+      if (!template) throw new BadRequestException("所选运费模板不存在或已停用");
+    }
+    if (dto.publishMode === "SCHEDULED") {
+      if (!dto.scheduledPublishAt || new Date(dto.scheduledPublishAt).getTime() <= Date.now()) {
+        throw new BadRequestException("定时上架时间必须晚于当前时间");
+      }
+      dto.status = "DRAFT";
+    } else if (dto.publishMode === "WAREHOUSE" && dto.status === "PUBLISHED") {
+      dto.status = "DRAFT";
     }
 
     const data = mapCreateDto(dto);
@@ -1222,30 +1489,25 @@ export class ProductsService {
       }
     }
 
-    // status 单独抽出:先写其余字段(价格/图片等),再走上架门禁,确保门禁读到的是最新值
-    const { status: targetStatus, ...rest } = dto as any;
-    const data = mapUpdateDto(rest);
+    if (dto.shippingTemplateId) {
+      const template = await this.prisma.shippingTemplate.findFirst({
+        where: { id: dto.shippingTemplateId, isActive: true },
+        select: { id: true },
+      });
+      if (!template) throw new BadRequestException("所选运费模板不存在或已停用");
+    }
+    if (dto.publishMode === "SCHEDULED") {
+      if (!dto.scheduledPublishAt || new Date(dto.scheduledPublishAt).getTime() <= Date.now()) {
+        throw new BadRequestException("定时上架时间必须晚于当前时间");
+      }
+    }
+
+    const data = mapUpdateDto(dto);
 
     try {
-      let product: any = Object.keys(data).length
+      const product: any = Object.keys(data).length
         ? await this.prisma.product.update({ where: { id }, data })
         : await this.prisma.product.findUnique({ where: { id } });
-
-      if (targetStatus !== undefined) {
-        if (targetStatus === "PUBLISHED") {
-          // 统一上架门禁(封堵 PUT /:id 直写 status 绕过 /status 端点)
-          await this.canPublish(id);
-          product = await this.prisma.product.update({
-            where: { id },
-            data: { status: "PUBLISHED", publishedAt: new Date() },
-          });
-        } else {
-          product = await this.prisma.product.update({
-            where: { id },
-            data: { status: targetStatus },
-          });
-        }
-      }
 
       this.notifyPublicChange(product.id);
       return product;
@@ -1261,10 +1523,46 @@ export class ProductsService {
       throw error;
     }
   }
+
+  async updateStatus(id: number, status: ProductStatus) {
+    const existing = await this.findLifecycleProduct(id);
+    if (existing.status === "ARCHIVED") {
+      throw new ConflictException("商品位于回收站，请先恢复为草稿后再操作");
+    }
+    if (status === "ARCHIVED") return this.archive(id);
+
+    let data: Prisma.ProductUpdateInput;
+    if (status === "PUBLISHED") {
+      await this.canPublish(id);
+      data = {
+        status: "PUBLISHED",
+        ...(existing.status === "PUBLISHED" ? {} : { publishedAt: new Date() }),
+        publishMode: "IMMEDIATE",
+        scheduledPublishAt: null,
+        scheduledPublishError: null,
+      };
+    } else if (status === "OFFLINE") {
+      data = {
+        status: "OFFLINE",
+        publishMode: "WAREHOUSE",
+        scheduledPublishAt: null,
+      };
+    } else {
+      data = {
+        status: "DRAFT",
+        publishMode: "WAREHOUSE",
+        scheduledPublishAt: null,
+      };
+    }
+
+    const product = await this.prisma.product.update({ where: { id }, data });
+    this.notifyPublicChange(product.id);
+    return product;
+  }
   async checkCompleteness(id: number) {
     const product = await this.prisma.product.findFirst({
       where: { id, deletedAt: null },
-      include: { images: true },
+      include: { images: true, skus: { include: { inventories: true } } },
     });
     if (!product) throw new NotFoundException("商品不存在或已删除");
     return this.calcCompleteness(product);

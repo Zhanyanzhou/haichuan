@@ -2,22 +2,25 @@
  * ColorField.tsx — Puck 颜色自定义字段（品牌色板约束）
  *
  * 设计原则：结构化自由——默认给品牌预设色板（锁住调性，防运营改乱），
- * 下方保留一个「高级」文本框，供 rgba / 渐变等特殊值手动输入。
- * 去掉了任意取色器（ColorPicker），避免品牌色被随意发挥。
+ * 仅允许受审品牌色板，不接受 rgba、渐变或任意 CSS 色值。
  */
-import { Input } from "antd";
 
 /** 品牌预设色板（珠宝调性，全站统一） */
 const BRAND_PALETTE: { name: string; value: string }[] = [
-  { name: "墨黑", value: "#1A1714" },
-  { name: "深棕", value: "#3A322A" },
-  { name: "品牌金", value: "#B8944E" },
-  { name: "米白", value: "#FBF9F6" },
-  { name: "暖白", value: "#FCFCFB" },
-  { name: "浅米", value: "#F6F2EC" },
-  { name: "中灰", value: "#9A9187" },
-  { name: "纯白", value: "#FFFFFF" },
+  { name: "石墨黑", value: "#181A1B" },
+  { name: "矿物灰", value: "#5F6568" },
+  { name: "钻石灰", value: "#DDE1E2" },
+  { name: "反白", value: "#F7F8F8" },
+  { name: "画布白", value: "#FFFFFF" },
 ];
+
+const LEGACY_PALETTE_MAP: Record<string, string> = {
+  "#222222": "#181a1b",
+  "#66645f": "#5f6568",
+  "#e4e3df": "#dde1e2",
+  "#f8f7f4": "#f7f8f8",
+  "#fcfcfb": "#ffffff",
+};
 
 interface ColorFieldProps {
   value?: string;
@@ -26,7 +29,8 @@ interface ColorFieldProps {
 }
 
 export default function ColorField({ value, onChange, readOnly }: ColorFieldProps) {
-  const current = (value || "").toLowerCase();
+  const rawCurrent = (value || "").toLowerCase();
+  const current = LEGACY_PALETTE_MAP[rawCurrent] ?? rawCurrent;
   return (
     <div>
       <div
@@ -49,36 +53,18 @@ export default function ColorField({ value, onChange, readOnly }: ColorFieldProp
               style={{
                 height: 28,
                 padding: 0,
-                borderRadius: 4,
+                borderRadius: 0,
                 cursor: readOnly ? "not-allowed" : "pointer",
-                border: active ? "2px solid #B8944E" : "1px solid #ECE5DA",
+                border: active ? "2px solid #181A1B" : "1px solid #DDE1E2",
                 background: c.value,
               }}
             />
           );
         })}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-        <span
-          aria-hidden
-          style={{
-            width: 16,
-            height: 16,
-            borderRadius: 3,
-            border: "1px solid #ECE5DA",
-            background: value || "transparent",
-            flexShrink: 0,
-          }}
-        />
-        <Input
-          size="small"
-          style={{ flex: 1, minWidth: 0 }}
-          value={value || ""}
-          readOnly={readOnly}
-          onChange={(e) => onChange?.(e.target.value)}
-          placeholder="高级：自定义色值 / rgba"
-        />
-      </div>
+      <p style={{ margin: "6px 0 0", color: "#6E7477", fontSize: 11 }}>
+        颜色仅影响当前页面实例，不会修改全局品牌令牌。
+      </p>
     </div>
   );
 }

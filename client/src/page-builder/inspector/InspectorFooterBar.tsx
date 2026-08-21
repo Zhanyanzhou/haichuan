@@ -23,22 +23,37 @@ export default function InspectorFooterBar({
   saving,
   onSaveDraft,
 }: InspectorFooterBarProps) {
+  const status = saving ? "saving" : hasUnsavedChanges ? "dirty" : "saved";
+  const statusTitle = saving
+    ? "正在保存草稿…"
+    : hasUnsavedChanges
+      ? "有未保存修改"
+      : "草稿已保存";
+  const statusDescription = hasUnsavedChanges
+    ? "修改已同步到画布"
+    : "当前页面无待保存修改";
+
   return (
     <footer className="homepage-editor__properties-actions">
-      <span role="status" aria-live="polite">
-        {saving
-          ? "正在保存页面草稿…"
-          : hasUnsavedChanges
-            ? "已同步到画布，尚未保存草稿"
-            : "页面草稿已保存"}
-      </span>
+      <div
+        className="homepage-editor__properties-status"
+        data-status={status}
+        role="status"
+        aria-live="polite"
+      >
+        <span aria-hidden="true" />
+        <div>
+          <strong>{statusTitle}</strong>
+          <small>{statusDescription}</small>
+        </div>
+      </div>
       <Button
         type="primary"
         loading={saving}
         disabled={!hasUnsavedChanges}
         onClick={onSaveDraft}
       >
-        保存草稿
+        保存整页草稿
       </Button>
     </footer>
   );

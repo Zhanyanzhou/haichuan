@@ -9,6 +9,7 @@ interface CardGridBlockProps {
     styleConfig?: Record<string, any>;
   };
   editMode?: boolean;
+  contentTemplateKey?: "brandPoints" | "servicePromises";
 }
 
 /**
@@ -18,6 +19,7 @@ interface CardGridBlockProps {
 export default function CardGridBlock({
   module,
   editMode,
+  contentTemplateKey,
 }: CardGridBlockProps) {
   const { content = {}, styleConfig = {} } = module;
   const { title, subtitle, cards = [] } = content;
@@ -40,13 +42,13 @@ export default function CardGridBlock({
   return (
     <DecorSection master="commerce-grid" background={bg} spacing="compact">
       {(title || subtitle || editMode) && (
-        <div style={{ textAlign: "center", marginBottom: 48 }}>
+        <div data-content-role="copy" style={{ textAlign: "center", marginBottom: 48 }}>
           {title ? (
             <h2
               style={{
                 fontSize: "var(--hc-type-h3, clamp(22px,2.6vw,32px))",
                 fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
-                color: "#1A1A1A",
+                color: "#181A1B",
                 marginBottom: 12,
                 lineHeight: 1.2,
                 fontWeight: 500,
@@ -59,7 +61,7 @@ export default function CardGridBlock({
               <p
                 style={{
                   fontSize: 13,
-                  color: "#8C8C8C",
+                  color: "#6E7477",
                   maxWidth: 480,
                   margin: "0 auto",
                   lineHeight: 1.6,
@@ -72,6 +74,7 @@ export default function CardGridBlock({
         )}
 
         <div
+          data-content-role={contentTemplateKey === "servicePromises" ? "promises" : "points"}
           style={{
             display: "grid",
             gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${cols === 2 ? 340 : cols === 3 ? 230 : 180}px), 1fr))`,
@@ -82,7 +85,7 @@ export default function CardGridBlock({
             <div key={i} style={{ textAlign: "center", padding: "16px 12px" }}>
               {card.icon && (
                 <div
-                  style={{ fontSize: 13, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 14, color: "#8C8C8C" }}
+                  style={{ fontSize: 13, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 14, color: "#6E7477" }}
                 >
                   {card.icon}
                 </div>
@@ -92,7 +95,7 @@ export default function CardGridBlock({
                   style={{
                     fontSize: 16,
                     fontWeight: 500,
-                    color: "#1A1A1A",
+                    color: "#181A1B",
                     marginBottom: 8,
                     fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
                   }}
@@ -104,7 +107,7 @@ export default function CardGridBlock({
                 <p
                   style={{
                     fontSize: 13,
-                    color: "#8C8C8C",
+                    color: "#6E7477",
                     lineHeight: 1.7,
                     maxWidth: 260,
                     margin: "0 auto",

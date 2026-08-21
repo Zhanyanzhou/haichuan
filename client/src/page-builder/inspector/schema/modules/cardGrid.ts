@@ -8,9 +8,11 @@
 import {
   CARD_GRID_CONTRACT,
   evaluateCardGridContract,
+  getContractRoleQuantity,
 } from "../../../config/blockContracts";
 import { cardGridPuckConfig } from "../../../adapters/cardGrid.puck";
 import { puckConfig } from "../../../config/puckConfig";
+import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 interface CardGridSchemaVariant {
@@ -24,6 +26,9 @@ interface CardGridSchemaVariant {
 export function makeCardGridSchema(
   variant: CardGridSchemaVariant,
 ): ModuleInspectorSchema {
+  const quantityContract = variant.moduleType === "服务承诺"
+    ? getContractRoleQuantity("servicePromises", "promises")
+    : getContractRoleQuantity("brandPoints", "points");
   const defaults =
     variant.defaults ??
     puckConfig.components[variant.moduleType]?.defaultProps ??
@@ -41,13 +46,7 @@ export function makeCardGridSchema(
         title: "内容",
         layer: "content",
         fields: [
-          {
-            key: "moduleName",
-            label: "图层名称",
-            control: "text",
-            maxLength: 24,
-            hint: "仅用于页面结构识别",
-          },
+          moduleNameField(variant.displayName),
           {
             key: "title",
             label: "标题",
@@ -75,6 +74,8 @@ export function makeCardGridSchema(
             label: "卡片列表",
             control: "array",
             itemLabel: "卡片",
+            minItems: quantityContract.min,
+            maxItems: quantityContract.max,
             defaultItem: { icon: "", title: "", body: "" },
             itemSummary: (item) =>
               typeof item.title === "string" && item.title.trim()
@@ -127,13 +128,7 @@ export function makeCardGridSchema(
         id: `${variant.moduleType}-style`,
         title: "样式",
         layer: "style",
-        fields: [
-          {
-            key: "bgColor",
-            label: "背景色",
-            control: "color",
-          },
-        ],
+        fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
       },
     ],
   };

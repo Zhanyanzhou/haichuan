@@ -143,7 +143,10 @@ check("场景1 正常：全部可见时放行 prisma.create", () => {
     /snapshots\.size\s*!==\s*distinctIds\.length/.test(serviceSrc),
     "缺少基于 snapshots.size 的放行/拒绝判定",
   );
-  assert.ok(/prisma\.selectionInquiry\.create/.test(serviceSrc), "缺少写入调用");
+  assert.ok(
+    /(?:this\.prisma|transaction)\.selectionInquiry\.create/.test(serviceSrc),
+    "缺少通过 Prisma 客户端或事务客户端的写入调用",
+  );
 });
 
 // ── 场景 2：不可见商品 — 越权商品导致整次拒绝 ──

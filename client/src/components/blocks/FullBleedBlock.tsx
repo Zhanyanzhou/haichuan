@@ -43,7 +43,7 @@ export default function FullBleedBlock({
   const desktopFocusY = Math.min(100, Math.max(0, Number(styleConfig.desktopFocusY ?? 50)));
   const mobileFocusX = Math.min(100, Math.max(0, Number(styleConfig.mobileFocusX ?? desktopFocusX)));
   const mobileFocusY = Math.min(100, Math.max(0, Number(styleConfig.mobileFocusY ?? desktopFocusY)));
-  const targetUrl = resolveLinkTargetUrl({ targetType, productId, linkUrl });
+  const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, linkUrl });
   const [imageFailed, setImageFailed] = useState(false);
 
   const desktopImg = image || mobileImage;
@@ -67,7 +67,6 @@ export default function FullBleedBlock({
       data-content-template={CONTENT_TEMPLATE_LAYOUTS.fullBleed.key}
       data-visual-role={CONTENT_TEMPLATE_LAYOUTS.fullBleed.visualRole}
       data-height-mode-desktop={CONTENT_TEMPLATE_LAYOUTS.fullBleed.heightModeByViewport.desktop}
-      data-height-mode-tablet={CONTENT_TEMPLATE_LAYOUTS.fullBleed.heightModeByViewport.tablet}
       data-height-mode-mobile={CONTENT_TEMPLATE_LAYOUTS.fullBleed.heightModeByViewport.mobile}
       data-mobile-order={CONTENT_TEMPLATE_LAYOUTS.fullBleed.mobile.order.join(",")}
       data-flow={CONTENT_TEMPLATE_LAYOUTS.fullBleed.flow}
@@ -83,7 +82,11 @@ export default function FullBleedBlock({
     >
       <DesignSystemStyles />
       <ContentTemplateLayoutStyles />
-      <div className="hc-content-template__media hc-phase1-full-bleed__media">
+      <div
+        className="hc-content-template__media hc-phase1-full-bleed__media"
+        data-content-role-desktop="image"
+        data-content-role-mobile="mobileImage"
+      >
       {!desktopImg ? (
         <BlockEmptyPlaceholder
           hint={CONTENT_TEMPLATE_LAYOUTS.fullBleed.displayName}
@@ -113,7 +116,7 @@ export default function FullBleedBlock({
 
       {(title || subtitle || (buttonText && targetUrl) || editMode) ? (
       <div className="hc-content-template__container hc-phase1-full-bleed__caption">
-        <div className="hc-content-template__copy hc-phase1-full-bleed__copy">
+        <div className="hc-content-template__copy hc-phase1-full-bleed__copy" data-content-role="copy">
           {eyebrow ? (
             <p data-editor-field="eyebrow" className="hc-content-template__eyebrow">
               {eyebrow}
@@ -138,11 +141,11 @@ export default function FullBleedBlock({
         </div>
         {buttonText && targetUrl ? (
           editMode ? (
-            <span className="hc-content-template__action hc-phase1-full-bleed__action" data-editor-field="buttonText linkUrl productId">
+            <span data-content-role="action" className="hc-content-template__action hc-phase1-full-bleed__action" data-editor-field="buttonText linkUrl productId">
               {buttonText}<span aria-hidden>→</span>
             </span>
           ) : (
-            <Link className="hc-content-template__action hc-phase1-full-bleed__action" data-editor-field="buttonText linkUrl productId" to={targetUrl}>
+            <Link data-content-role="action" className="hc-content-template__action hc-phase1-full-bleed__action" data-editor-field="buttonText linkUrl productId" to={targetUrl}>
               {buttonText}<span aria-hidden>→</span>
             </Link>
           )
@@ -162,8 +165,8 @@ export default function FullBleedBlock({
         .hc-full-bleed__image-error {
           display: grid;
           place-items: center;
-          color: #7E7468;
-          background: #F5F5F5;
+          color: #5F6568;
+          background: #F4F5F5;
           font-size: 13px;
           letter-spacing: .08em;
         }

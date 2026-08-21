@@ -66,31 +66,30 @@ export default function ProductIdsField({
   useEffect(() => {
     let cancelled = false;
     const normalizedQuery = query.trim();
-    if (!normalizedQuery) {
-      setResults([]);
-      setLoading(false);
-      setError(false);
-      return () => {
-        cancelled = true;
-      };
-    }
-    const timer = window.setTimeout(() => {
-      setLoading(true);
-      setError(false);
-      fetchProductList({ query: normalizedQuery })
-        .then((rows) => {
-          if (!cancelled) setResults(rows);
+    // 空关键词拉取全量商品列表（点开即展示全部商品）；有关键词时防抖搜索
+    const timer = window.setTimeout(
+      () => {
+        setLoading(true);
+        setError(false);
+        fetchProductList({
+          query: normalizedQuery,
+          pageSize: normalizedQuery ? 20 : 200,
         })
-        .catch(() => {
-          if (!cancelled) {
-            setResults([]);
-            setError(true);
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    }, 220);
+          .then((rows) => {
+            if (!cancelled) setResults(rows);
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setResults([]);
+              setError(true);
+            }
+          })
+          .finally(() => {
+            if (!cancelled) setLoading(false);
+          });
+      },
+      normalizedQuery ? 220 : 0,
+    );
 
     return () => {
       cancelled = true;
@@ -131,7 +130,7 @@ export default function ProductIdsField({
         <span aria-hidden="true" />
         <div>
           <strong>手动选择商品</strong>
-          <small>通过商品名称或货号搜索，按当前顺序展示。</small>
+          <small>默认展示全部商品，可输入名称或货号搜索；按当前顺序展示。</small>
         </div>
       </div>
       <div className="homepage-editor__product-picker-search">
@@ -145,14 +144,10 @@ export default function ProductIdsField({
 
       <div className="homepage-editor__product-picker-results">
         {loading ? (
-          <div className="homepage-editor__product-picker-note">正在搜索商品</div>
+          <div className="homepage-editor__product-picker-note">正在加载商品</div>
         ) : error ? (
           <div className="homepage-editor__product-picker-note is-error">
-            商品搜索失败
-          </div>
-        ) : !query.trim() ? (
-          <div className="homepage-editor__product-picker-note">
-            输入商品名称或货号开始搜索
+            商品加载失败
           </div>
         ) : results.length > 0 ? (
           results.map((product) => {
@@ -176,7 +171,7 @@ export default function ProductIdsField({
           })
         ) : (
           <div className="homepage-editor__product-picker-note">
-            没有找到匹配商品
+            {query.trim() ? "没有找到匹配商品" : "暂无商品，请先在「商品管理」上传商品"}
           </div>
         )}
       </div>

@@ -14,19 +14,23 @@ import { unwrapResponse } from "@/utils/unwrap";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { trackPageView } from "@/hooks/useAnalytics";
 import { SecureImage } from "@/components/common/SecureImage";
+import {
+  createEditorPageDefault,
+  isEditorPageKey,
+} from "@/page-builder/config/editorPages";
 
 // 首页基础内容与装修渲染器分离，只有取得已发布的 Puck 数据时才加载编辑器运行时。
 const PuckDocumentRenderer = lazy(
   () => import("@/page-builder/runtime/PuckDocumentRenderer"),
 );
 
-const LG = "#F7F3EC";
+const LG = "#F4F5F5";
 const SF = "#FFFFFF";
-const DK = "#1F1A15";
-const TX = "#25201B";
-const MU = "rgba(37,32,27,0.62)";
-const LT = "#FBF7EF";
-const LM = "rgba(251,247,239,0.72)";
+const DK = "#111315";
+const TX = "#181A1B";
+const MU = "rgba(24,26,27,0.62)";
+const LT = "#F7F8F8";
+const LM = "rgba(247,248,248,0.72)";
 const PAD = "clamp(20px,4.8vw,76px)";
 
 function useInView(threshold = 0.12) {
@@ -260,9 +264,7 @@ const homeCss = `
     position: relative;
     min-height: 100svh;
     overflow: hidden;
-    background:
-      radial-gradient(circle at 72% 22%, rgba(219,185,121,0.42), transparent 24%),
-      linear-gradient(115deg, #f3c9cb 0%, #efd9ce 45%, #e8efe8 100%);
+    background: #111315;
   }
 
   .vca-hero__stage {
@@ -282,7 +284,7 @@ const homeCss = `
     aspect-ratio: 1 / 1;
     border-radius: 50%;
     background: rgba(255,255,255,0.38);
-    box-shadow: inset 0 0 0 52px rgba(32,49,108,0.72);
+    box-shadow: inset 0 0 0 52px rgba(95,101,104,0.64);
   }
 
   .vca-hero__stage img {
@@ -291,7 +293,7 @@ const homeCss = `
     width: min(40vw, 520px);
     height: min(40vw, 520px);
     object-fit: contain;
-    filter: drop-shadow(0 34px 34px rgba(87,62,31,0.2));
+    filter: drop-shadow(0 34px 34px rgba(24,26,27,0.18));
     mix-blend-mode: multiply;
   }
 
@@ -327,9 +329,7 @@ const homeCss = `
   .vca-hero__veil {
     position: absolute;
     inset: 0;
-    background:
-      linear-gradient(90deg, rgba(222,171,171,0.68) 0%, rgba(222,171,171,0.28) 42%, rgba(222,171,171,0.06) 100%),
-      linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 28%);
+    background: rgba(17,19,21,0.42);
   }
 
   .vca-hero__copy {
@@ -429,11 +429,11 @@ const homeCss = `
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: rgba(37,32,27,0.24);
+    background: rgba(24,26,27,0.24);
   }
 
   .vca-product__dots span:first-child {
-    background: rgba(37,32,27,0.78);
+    background: rgba(24,26,27,0.78);
   }
 
   .vca-product__portrait {
@@ -441,8 +441,7 @@ const homeCss = `
     display: flex;
     align-items: center;
     justify-content: center;
-    background:
-      linear-gradient(140deg, #16223c, #f3d5c9 100%);
+    background: #dde1e2;
     padding: clamp(48px, 8vw, 96px);
   }
 
@@ -456,7 +455,7 @@ const homeCss = `
 
   .vca-rail {
     padding: clamp(76px, 10vw, 128px) ${PAD};
-    background: #f6f0e7;
+    background: #f4f5f5;
   }
 
   .vca-rail__head {
@@ -490,7 +489,7 @@ const homeCss = `
     grid-template-columns: repeat(4, 1fr);
     gap: 1px;
     margin: 0 auto;
-    background: rgba(37,32,27,0.08);
+    background: rgba(24,26,27,0.08);
   }
 
   .vca-rail-card {
@@ -524,7 +523,7 @@ const homeCss = `
     min-height: 604px;
     overflow: hidden;
     color: #fff;
-    background: #c8a66d;
+    background: #111315;
   }
 
   .vca-band__image {
@@ -539,9 +538,7 @@ const homeCss = `
     position: absolute;
     inset: 0;
     overflow: hidden;
-    background:
-      radial-gradient(circle at 70% 45%, rgba(217,179,108,0.18), transparent 24%),
-      linear-gradient(112deg, #efe7d8 0%, #efd8d9 48%, #e6efe7 100%);
+    background: #dde1e2;
   }
 
   .vca-band__product-scene::before {
@@ -551,7 +548,7 @@ const homeCss = `
     width: clamp(520px, 54vw, 820px);
     aspect-ratio: 1 / 1;
     border-radius: 50%;
-    background: rgba(32,49,108,0.68);
+    background: rgba(95,101,104,0.68);
     content: "";
     transform: translateY(-50%);
   }
@@ -575,7 +572,7 @@ const homeCss = `
     width: clamp(280px, 34vw, 520px);
     height: clamp(280px, 34vw, 520px);
     object-fit: contain;
-    filter: drop-shadow(0 32px 34px rgba(82,58,30,0.24));
+    filter: drop-shadow(0 32px 34px rgba(24,26,27,0.2));
     mix-blend-mode: multiply;
     transform: translateY(-50%);
   }
@@ -643,7 +640,7 @@ const homeCss = `
     aspect-ratio: 2 / 1;
     margin: 0 auto 38px;
     overflow: hidden;
-    background: #e7eee2;
+    background: #f4f5f5;
   }
 
   .vca-gift__image img {
@@ -662,7 +659,7 @@ const homeCss = `
 
   .vca-occasion {
     padding: clamp(76px, 10vw, 126px) ${PAD};
-    background: #eef2e9;
+    background: #f4f5f5;
     text-align: center;
   }
 
@@ -725,11 +722,11 @@ const homeCss = `
     grid-template-columns: repeat(3, 1fr);
     gap: 1px;
     margin: 0 auto;
-    background: rgba(251,247,239,0.16);
+    background: rgba(247,248,248,0.16);
   }
 
   .vca-craft-card {
-    background: #2a231d;
+    background: #111315;
     text-align: left;
   }
 
@@ -777,7 +774,7 @@ const homeCss = `
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     background: #fff;
-    border-top: 1px solid rgba(37,32,27,0.08);
+    border-top: 1px solid rgba(24,26,27,0.08);
   }
 
   .vca-category {
@@ -786,15 +783,15 @@ const homeCss = `
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    border-right: 1px solid rgba(37,32,27,0.08);
-    border-bottom: 1px solid rgba(37,32,27,0.08);
+    border-right: 1px solid rgba(24,26,27,0.08);
+    border-bottom: 1px solid rgba(24,26,27,0.08);
     padding: 42px 28px;
     text-align: center;
     transition: background 180ms ease;
   }
 
   .vca-category:hover {
-    background: #faf8f4;
+    background: #f4f5f5;
   }
 
   .vca-category img {
@@ -834,7 +831,7 @@ const homeCss = `
     width: 100%;
     aspect-ratio: 16 / 9;
     object-fit: cover;
-    background: #eee;
+      background: #dde1e2;
   }
 
   .vca-news-card time {
@@ -860,7 +857,7 @@ const homeCss = `
   .vca-service {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    border-top: 1px solid rgba(37,32,27,0.08);
+    border-top: 1px solid rgba(24,26,27,0.08);
     background: #fff;
   }
 
@@ -1363,7 +1360,7 @@ function usePublishedPageDocument(pageKey = "home") {
 function HomeDocumentLoading() {
   return (
     <main aria-busy="true" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center" }}>
-      <span style={{ color: "#8C785C", fontSize: 12, letterSpacing: ".16em" }}>正在载入首页</span>
+      <span style={{ color: "#5F6568", fontSize: 12, letterSpacing: ".16em" }}>正在载入首页</span>
     </main>
   );
 }
@@ -1373,7 +1370,7 @@ function PuckDocumentLoading() {
     <div
       role="status"
       aria-live="polite"
-      style={{ minHeight: 180, display: "grid", placeItems: "center", color: "#8C785C", fontSize: 12, letterSpacing: ".12em" }}
+      style={{ minHeight: 180, display: "grid", placeItems: "center", color: "#5F6568", fontSize: 12, letterSpacing: ".12em" }}
     >
       正在渲染首页内容
     </div>
@@ -1384,8 +1381,8 @@ function HomeDocumentError({ onRetry }: { onRetry: () => void }) {
   return (
     <main role="status" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center", textAlign: "center", padding: 24 }}>
       <div>
-        <p style={{ color: "#4A4137", margin: "0 0 10px" }}>首页内容暂时无法载入</p>
-        <button type="button" onClick={onRetry} style={{ border: "1px solid #B8944E", background: "transparent", color: "#785E31", padding: "8px 16px", cursor: "pointer" }}>重新载入</button>
+        <p style={{ color: "#181A1B", margin: "0 0 10px" }}>首页内容暂时无法载入</p>
+        <button type="button" onClick={onRetry} style={{ border: "1px solid #181A1B", background: "transparent", color: "#181A1B", padding: "8px 16px", cursor: "pointer" }}>重新载入</button>
       </div>
     </main>
   );
@@ -1451,7 +1448,9 @@ export default function Home() {
           <PuckDocumentRenderer data={pageDocument.puckData} />
         </Suspense>
       ) : (
-        <FallbackHome />
+        <Suspense fallback={<PuckDocumentLoading />}>
+          <PuckDocumentRenderer data={createEditorPageDefault("home")} />
+        </Suspense>
       )}
     </main>
   );
@@ -1511,7 +1510,13 @@ export function PagePreview({ pageKey: pageKeyProp }: { pageKey?: string }) {
           <PuckDocumentRenderer data={pageDocument.puckData} />
         </Suspense>
       ) : (
-        <FallbackHome />
+        <Suspense fallback={<PuckDocumentLoading />}>
+          <PuckDocumentRenderer data={
+            isEditorPageKey(pageKey)
+              ? createEditorPageDefault(pageKey)
+              : createEditorPageDefault("home")
+          } />
+        </Suspense>
       )}
     </main>
   );

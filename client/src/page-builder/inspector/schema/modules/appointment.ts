@@ -8,7 +8,7 @@ import {
 } from "../../../config/blockContracts";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { appointmentPuckConfig } from "../../../adapters/appointment.puck";
-import { moduleNameField, ADVANCED_BG_COLOR_FIELD } from "../shared";
+import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 export const appointmentSchema: ModuleInspectorSchema = {
@@ -84,23 +84,6 @@ export const appointmentSchema: ModuleInspectorSchema = {
           placeholder: "上传背景图，留空用纯色",
           showSpecCheck: true,
         },
-        // 手机端独立裁切焦点(百分比);背景图为 shared 单字段,focusKeys 仅承载桌面端对
-        {
-          key: "mobileFocusX",
-          label: "手机端焦点 X",
-          control: "number",
-          min: 0,
-          max: 100,
-          unit: "%",
-        },
-        {
-          key: "mobileFocusY",
-          label: "手机端焦点 Y",
-          control: "number",
-          min: 0,
-          max: 100,
-          unit: "%",
-        },
         {
           key: "altText",
           label: "背景图替代文字",
@@ -114,6 +97,7 @@ export const appointmentSchema: ModuleInspectorSchema = {
       title: "样式",
       layer: "style",
       fields: [
+        bgColorPresetField(),
         ADVANCED_BG_COLOR_FIELD,
       ],
     },

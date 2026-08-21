@@ -7,9 +7,9 @@ interface CustomProcessBlockProps {
   editMode?: boolean;
 }
 
-const INK = "#1A1A1A";
-const MUTED = "#8C8C8C";
-const GOLD = "#8C8C8C";
+const INK = "#181A1B";
+const MUTED = "#6E7477";
+const GOLD = "#6E7477";
 
 /**
  * 定制旅程 — Journey 母版
@@ -34,7 +34,7 @@ export default function CustomProcessBlock({ module, editMode }: CustomProcessBl
   return (
     <DecorSection master="journey" background={bgColor}>
       {(title || subtitle || editMode) && (
-        <header style={{ maxWidth: 640, margin: "0 auto 56px", textAlign: "center" }}>
+        <header data-content-role="copy" style={{ maxWidth: 640, margin: "0 auto 56px", textAlign: "center" }}>
           {title ? (
             <h2 data-editor-field="title"
               style={{
@@ -56,7 +56,7 @@ export default function CustomProcessBlock({ module, editMode }: CustomProcessBl
           ) : null}
         </header>
       )}
-      <ol className="hc-journey" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+      <ol data-content-role="steps" className="hc-journey" style={{ listStyle: "none", margin: 0, padding: 0 }}>
         <style>{`
           .hc-journey {
             display: grid;

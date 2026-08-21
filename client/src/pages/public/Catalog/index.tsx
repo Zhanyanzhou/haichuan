@@ -30,12 +30,12 @@ import {
    ══════════════════════════════════════ */
 const T = {
   bg: "#FFFFFF",
-  bgWarm: "#FAF9F7",
-  txt: "#29241F",
-  sec: "rgba(41,36,31,0.68)",
-  light: "rgba(41,36,31,0.48)",
-  line: "#E8E7E3",
-  imgBg: "#FAF9F7",
+  bgWarm: "#F4F5F5",
+  txt: "#181A1B",
+  sec: "rgba(24,26,27,0.68)",
+  light: "rgba(24,26,27,0.48)",
+  line: "#DDE1E2",
+  imgBg: "#F4F5F5",
 };
 
 const HEADER_H = 84;
@@ -1031,7 +1031,7 @@ function ProductCard({
                 padding: 0,
                 cursor: "pointer",
                 background:
-                  i === imgIdx ? "rgba(41,36,31,0.55)" : "rgba(41,36,31,0.18)",
+                  i === imgIdx ? "rgba(24,26,27,0.55)" : "rgba(24,26,27,0.18)",
                 transition: "all 0.25s",
               }}
             />
@@ -1190,22 +1190,22 @@ function QuickView({
   const sel = isSelected(product.id);
 
   return (
-    <>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="catalog-quick-view-title"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 95,
+        background: "rgba(0,0,0,0.15)",
+      }}
+      onClick={onClose}
+    >
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="catalog-quick-view-title"
+        onClick={(event) => event.stopPropagation()}
         style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 95,
-          background: "rgba(0,0,0,0.15)",
-        }}
-        onClick={onClose}
-      />
-      <div
-        style={{
-          position: "fixed",
+          position: "absolute",
           top: 0,
           right: 0,
           bottom: 0,
@@ -1310,7 +1310,7 @@ function QuickView({
           {sel ? "✓ 已选" : "+ 加入选款"}
         </button>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -1402,7 +1402,7 @@ function PBtn({
         background: active ? T.txt : "transparent",
         cursor: disabled ? "default" : "pointer",
         fontSize: 12,
-        color: active ? "#FFFFFF" : disabled ? "rgba(41,36,31,0.3)" : T.txt,
+        color: active ? "#FFFFFF" : disabled ? "rgba(24,26,27,0.3)" : T.txt,
       }}
     >
       {children}
@@ -1692,7 +1692,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
                 <div
                   style={{
                     padding: "12px 14px",
-                    background: "#f6f3ed",
+                    background: T.bgWarm,
                     fontSize: 12,
                     color: T.sec,
                     lineHeight: 1.7,
@@ -1713,7 +1713,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
                         marginBottom: 4,
                       }}
                     >
-                      称呼 <span style={{ color: "#c00" }}>*</span>
+                      称呼 <span style={{ color: "#8C3F3B" }}>*</span>
                     </label>
                     <input
                       id="sel-name"
@@ -1735,7 +1735,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
                         marginBottom: 4,
                       }}
                     >
-                      手机号 <span style={{ color: "#c00" }}>*</span>
+                      手机号 <span style={{ color: "#8C3F3B" }}>*</span>
                     </label>
                     <input
                       id="sel-phone"
@@ -2149,7 +2149,7 @@ export default function Catalog() {
     >
       <style>{`
         .catalog-page :is(button, a, input, select):focus-visible {
-          outline: 2px solid #6F5733 !important;
+          outline: 2px solid #5F6568 !important;
           outline-offset: 3px;
         }
       `}</style>

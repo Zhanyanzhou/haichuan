@@ -9,9 +9,9 @@ interface StoreInfoBlockProps {
   editMode?: boolean;
 }
 
-const GOLD = "#8C8C8C";
-const INK = "#1A1A1A";
-const MUTED = "#8C8C8C";
+const GOLD = "#6E7477";
+const INK = "#181A1B";
+const MUTED = "#6E7477";
 
 /**
  * 门店与到访 — Editorial Split 母版(信息变体)
@@ -42,7 +42,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
             gap: clamp(28px, 4vw, 56px);
             align-items: stretch;
           }
-          .hc-store-info__media { aspect-ratio: ${STORE_RATIO_DESKTOP}; overflow: hidden; background: #F3F1EE; }
+          .hc-store-info__media { aspect-ratio: ${STORE_RATIO_DESKTOP}; overflow: hidden; background: #F4F5F5; }
           .hc-store-info__media img { width: 100%; height: 100%; object-fit: cover; display: block; }
           .hc-store-info__copy {
             min-width: 0; display: flex; flex-direction: column;
@@ -54,7 +54,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
             .hc-store-info__copy { order: 1; gap: 18px; }
           }
         `}</style>
-        <div data-editor-field="image" className="hc-store-info__media">
+        <div data-content-role="store" data-editor-field="image" className="hc-store-info__media">
           {image ? (
             <img src={image} alt={storeName || "门店空间"} loading="lazy" decoding="async" />
           ) : (
@@ -65,7 +65,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
             />
           )}
         </div>
-        <div className="hc-store-info__copy">
+        <div className="hc-store-info__copy" data-content-role="copy">
           {storeName ? (
             <h2 data-editor-field="storeName"
               style={{
@@ -80,7 +80,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
               {storeName}
             </h2>
           ) : null}
-          <div style={{ display: "grid", gap: 14 }}>
+          <div data-content-role="details" style={{ display: "grid", gap: 14 }}>
             {infoRows.filter((row) => row.value).map((row) => (
               <p key={row.label}
                 data-editor-field={row.label === "ADDRESS" ? "address" : row.label === "HOURS" ? "hours" : "phone"}
@@ -103,7 +103,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
             ))}
           </div>
           {mapUrl && (
-            <a data-editor-field="mapUrl" href={mapUrl} target="_blank" rel="noreferrer"
+            <a data-content-role="action" data-editor-field="mapUrl" href={mapUrl} target="_blank" rel="noreferrer"
               style={{
                 alignSelf: "flex-start",
                 display: "inline-block",

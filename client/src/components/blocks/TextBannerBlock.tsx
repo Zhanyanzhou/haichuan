@@ -27,13 +27,14 @@ export default function TextBannerBlock({
   const { eyebrow, title, body, buttonText, bgImage } = content;
   const targetUrl = resolveLinkTargetUrl({
     targetType: content.targetType,
+    productCode: content.productCode,
     productId: content.productId,
     linkUrl: content.linkUrl,
   });
   const template = layoutConfig.template || "center";
   // 白盒画册(2026-08-19):纯白底、近黑字;金色废除
   const bg = styleConfig.bgColor || "#FFFFFF";
-  const textColor = styleConfig.textColor || "#1A1A1A";
+  const textColor = styleConfig.textColor || "#181A1B";
   const spacing =
     styleConfig.spacing === "spacious" || styleConfig.spacing === "grand"
       ? styleConfig.spacing
@@ -79,9 +80,6 @@ export default function TextBannerBlock({
       data-height-mode-desktop={
         CONTENT_TEMPLATE_LAYOUTS.textBanner.heightModeByViewport.desktop
       }
-      data-height-mode-tablet={
-        CONTENT_TEMPLATE_LAYOUTS.textBanner.heightModeByViewport.tablet
-      }
       data-height-mode-mobile={
         CONTENT_TEMPLATE_LAYOUTS.textBanner.heightModeByViewport.mobile
       }
@@ -103,6 +101,7 @@ export default function TextBannerBlock({
       <ContentTemplateLayoutStyles />
       <div
         className="hc-content-template__copy hc-phase1-text"
+        data-content-role="copy"
         data-align={template === "left" ? "left" : "center"}
         data-spacing={spacing}
         style={{
@@ -118,7 +117,7 @@ export default function TextBannerBlock({
               fontSize: "var(--hc-type-caption, 12px)",
               letterSpacing: "0.24em",
               textTransform: "uppercase",
-              color: "var(--hc-muted, #9B9B9B)",
+              color: "var(--hc-muted, #6E7477)",
               marginBottom: 16,
               fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
             }}
@@ -135,7 +134,7 @@ export default function TextBannerBlock({
               lineHeight: 1.4,
               marginBottom: 20,
               fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
-              color: "var(--hc-ink, #1A1A1A)",
+              color: "var(--hc-ink, #181A1B)",
               maxWidth: 680,
               marginLeft: centered ? "auto" : 0,
               marginRight: centered ? "auto" : 0,
@@ -150,7 +149,7 @@ export default function TextBannerBlock({
             className="hc-content-template__body"
             style={{
               fontSize: "var(--hc-type-body, 15px)",
-              color: "var(--hc-muted, #8C8C8C)",
+              color: "var(--hc-muted, #6E7477)",
               lineHeight: 1.9,
               marginBottom: 28,
               maxWidth: template === "left" ? 520 : 480,
@@ -165,18 +164,20 @@ export default function TextBannerBlock({
           targetUrl &&
           (editMode ? (
             <span
+              data-content-role="action"
               data-editor-field="buttonText targetType productId linkUrl"
               className="hc-content-template__action"
-              style={{ color: "var(--hc-ink, #1A1A1A)" }}
+              style={{ color: "var(--hc-ink, #181A1B)" }}
             >
               {buttonText}
             </span>
           ) : (
             <Link
+              data-content-role="action"
               data-editor-field="buttonText targetType productId linkUrl"
               className="hc-content-template__action"
               to={targetUrl}
-              style={{ color: "var(--hc-ink, #1A1A1A)" }}
+              style={{ color: "var(--hc-ink, #181A1B)" }}
             >
               {buttonText}
             </Link>

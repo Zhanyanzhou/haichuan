@@ -6,7 +6,7 @@
  * - DesignSystemStyles 幂等注入基础 token(公开页与编辑器 iframe 均可用);
  * - 区块自身只负责内容构图,不再自定 maxWidth / 纵向 padding / 字体串 / 色值。
  */
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, HTMLAttributes, ReactNode } from "react";
 import {
   DESIGN_SYSTEM_BASE_CSS,
   TONE_PRESETS,
@@ -31,7 +31,8 @@ export function DesignSystemStyles() {
   return <style data-hc-ds-base>{DESIGN_SYSTEM_BASE_CSS}</style>;
 }
 
-export interface DecorSectionProps {
+export interface DecorSectionProps
+  extends Omit<HTMLAttributes<HTMLElement>, "children" | "color"> {
   master: MasterId;
   /** 内容宽度档;缺省取母版定义 */
   width?: WidthToken;
@@ -64,6 +65,7 @@ export function DecorSection({
   className,
   style,
   children,
+  ...sectionProps
 }: DecorSectionProps) {
   const master = MASTERS[masterId];
   const widthToken: WidthToken = width ?? master.width;
@@ -92,6 +94,7 @@ export function DecorSection({
 
   return (
     <section
+      {...sectionProps}
       className={`hc-section${className ? ` ${className}` : ""}`}
       data-density={densityMode}
       data-spacing={spacing}

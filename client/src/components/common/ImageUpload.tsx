@@ -44,7 +44,8 @@ export default function ImageUpload({ value, onChange, onUploaded }: Props) {
           <img src={previewUrl} alt="预览" className="w-full max-w-[200px] aspect-square object-cover border border-brand-line" />
           <button
             onClick={() => { onChange?.(''); setFileList([]); }}
-            className="text-xs text-red-400 mt-2 hover:text-red-500"
+            className="text-xs mt-2"
+            style={{ color: "#8C3F3B" }}
           >
             移除图片
           </button>

@@ -6,10 +6,8 @@ import {
   PRODUCT_ROW_CONTRACT,
   evaluateProductRowContract,
 } from "../../../config/blockContracts";
-import { createElement } from "react";
 import { productRowPuckConfig } from "../../../adapters/productRow.puck";
-import ProductIdsField from "../../../fields/ProductIdsField";
-import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
+import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 /** 商品图比例选项由契约预设派生;锁定时控件自动消失 */
@@ -34,14 +32,12 @@ export const productRowSchema: ModuleInspectorSchema = {
       description: "从商品系统选择商品，商品图默认竖版 4:5，不重复上传",
       fields: [
         {
-          key: "productIds",
+          key: "productCodes",
           label: "选择商品",
-          control: "custom",
-          render: ({ props, update }) =>
-            createElement(ProductIdsField, {
-              value: Array.isArray(props.productIds) ? props.productIds : [],
-              onChange: (ids: number[]) => update({ productIds: ids }),
-            }),
+          control: "productReferences",
+          legacyKey: "productIds",
+          minItems: 2,
+          maxItems: 8,
         },
       ],
     },
@@ -125,7 +121,7 @@ export const productRowSchema: ModuleInspectorSchema = {
       id: "product-row-style",
       title: "样式",
       layer: "style",
-      fields: [bgColorPresetField()],
+      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
     },
   ],
 };

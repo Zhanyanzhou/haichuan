@@ -2,6 +2,7 @@ export type LinkTargetType = "none" | "product" | "page";
 
 export interface LinkTargetValue {
   targetType?: LinkTargetType | string;
+  productCode?: string;
   productId?: number | string;
   linkUrl?: string;
 }
@@ -10,6 +11,7 @@ export function normalizeLinkTargetType(value: LinkTargetValue): LinkTargetType 
   if (value.targetType === "none" || value.targetType === "product" || value.targetType === "page") {
     return value.targetType;
   }
+  if (typeof value.productCode === "string" && value.productCode.trim()) return "product";
   const productId = Number(value.productId);
   if (Number.isInteger(productId) && productId > 0) return "product";
   if (isSafeInternalPath(value.linkUrl)) return "page";
@@ -23,6 +25,10 @@ export function isSafeInternalPath(value: unknown): value is string {
 /** 统一解析装修模板的点击目标；旧草稿未保存 targetType 时仍兼容 productId/linkUrl。 */
 export function resolveLinkTargetUrl(value: LinkTargetValue): string {
   const targetType = normalizeLinkTargetType(value);
+  const productCode = typeof value.productCode === "string" ? value.productCode.trim() : "";
+  if (targetType === "product" && productCode) {
+    return `/products/${encodeURIComponent(productCode)}`;
+  }
   const productId = Number(value.productId);
   if (targetType === "product" && Number.isInteger(productId) && productId > 0) {
     return `/products/${productId}`;
@@ -40,7 +46,7 @@ export function resolveLinkTargetUrl(value: LinkTargetValue): string {
 export function resolveItemLinkUrl(
   item: LinkTargetValue & { link?: unknown },
 ): string {
-  if (item.targetType != null || item.productId != null) {
+  if (item.targetType != null || item.productCode != null || item.productId != null) {
     return resolveLinkTargetUrl(item);
   }
   return isSafeInternalPath(item.link) ? item.link : "";
@@ -56,10 +62,12 @@ export function resolvePrefixedLinkTarget(
   legacyKey?: string,
 ): string {
   const targetType = props[`${prefix}TargetType`];
+  const productCode = props[`${prefix}ProductCode`];
   const productId = props[`${prefix}ProductId`];
-  if (targetType != null || productId != null) {
+  if (targetType != null || productCode != null || productId != null) {
     return resolveLinkTargetUrl({
       targetType,
+      productCode,
       productId,
       linkUrl: props[`${prefix}LinkUrl`],
     });

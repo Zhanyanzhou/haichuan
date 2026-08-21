@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
  * P0-C 公开信息真实性与隐私 测试
  * - 联系信息空设置 / 加载失败 / 真实设置三态
  * - /privacy 匿名可访问 + 隐私链接
- * - 行为分析默认关闭（无 _asid、无 /analytics/track）
+ * - 行为分析按当前负责人决策默认开启，并使用匿名会话标识
  * - 不出现假电话 / 假邮箱 / 假地址
  * - 桌面与移动端无横向溢出 + 键盘可操作
  */
@@ -160,32 +160,25 @@ test.describe("隐私页面", () => {
   });
 });
 
-test.describe("行为分析默认关闭", () => {
-  test("不创建 _asid 追踪标识", async ({ page }) => {
+test.describe("匿名行为分析", () => {
+  test("创建匿名会话标识", async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.removeItem("_asid");
     });
     await page.goto("/products");
-    await page.goto("/contact");
-    await page.goto("/privacy");
-    const asid = await page.evaluate(() => localStorage.getItem("_asid"));
-    expect(asid).toBeNull();
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("_asid"))).toMatch(/^s_[a-z0-9]+$/);
   });
 
-  test("不发送 /analytics/track 请求", async ({ page }) => {
+  test("发送匿名 /analytics/track 请求", async ({ page }) => {
     const analyticsRequests: string[] = [];
+    await page.route("**/api/analytics/track", (route) => route.fulfill({ status: 204, body: "" }));
     page.on("request", (req) => {
       if (req.url().includes("/analytics/track")) {
         analyticsRequests.push(req.url());
       }
     });
     await page.goto("/products");
-    await page.goto("/contact");
-    // 触发表单交互（若分析启用会发送 page_view / submit_inquiry）
-    await page.getByRole("button", { name: "提交需求" }).click();
-    // 固定等待：验证"无请求"需要给潜在请求一个触发窗口，没有可观察条件可同步
-    await expect(page.getByText("请输入姓名")).toBeVisible();
-    expect(analyticsRequests).toHaveLength(0);
+    await expect.poll(() => analyticsRequests.length).toBeGreaterThan(0);
   });
 });
 
@@ -208,7 +201,7 @@ test.describe("响应式与键盘", () => {
     await page.goto("/privacy");
     await page.getByRole("button", { name: "打开菜单" }).press("Enter");
     await expect(page.getByRole("button", { name: "关闭菜单" })).toBeVisible();
-    await page.getByRole("button", { name: "关闭菜单" }).press("Escape");
+    await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "打开菜单" })).toBeVisible();
   });
 

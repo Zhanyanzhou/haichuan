@@ -22,19 +22,19 @@ interface Props {
 const SURFACE = {
   neutral: {
     canvas: "#FFFFFF",
-    line: "#D7D5D0",
-    ink: "#66645F",
-    muted: "#98948D",
-    sketch: "#E4E3DF",
-    accent: "#B8944E",
+    line: "#DDE1E2",
+    ink: "#5F6568",
+    muted: "#6E7477",
+    sketch: "#DDE1E2",
+    accent: "#181A1B",
   },
   dark: {
-    canvas: "#242424",
-    line: "#55524D",
-    ink: "#C5C3BE",
-    muted: "#8F8C86",
-    sketch: "#3A3936",
-    accent: "#B8944E",
+    canvas: "#181A1B",
+    line: "#5F6568",
+    ink: "#DDE1E2",
+    muted: "#6E7477",
+    sketch: "#181A1B",
+    accent: "#F7F8F8",
   },
 } as const;
 

@@ -80,9 +80,9 @@ export default function AuditLogs() {
   return (
     <div>
       <AdminPageHeader title="操作日志" subtitle="管理员操作记录" extra={
-        <Button icon={<ReloadOutlined />} onClick={() => load(1)} style={{ borderColor: '#E7E6E2', color: 'var(--adm-text)' }}>刷新</Button>
+        <Button icon={<ReloadOutlined />} onClick={() => load(1)} style={{ borderColor: 'var(--adm-line)', color: 'var(--adm-text)' }}>刷新</Button>
       } />
-      <Card style={{ borderRadius: 10, border: '1px solid #E7E6E2', boxShadow: '0 6px 20px rgba(40,36,30,0.035)' }}>
+      <Card style={{ borderRadius: 10, border: '1px solid var(--adm-line)', boxShadow: '0 6px 20px rgba(24,26,27,0.035)' }}>
         <Space style={{ marginBottom: 16 }}>
           <Input.Search
             allowClear

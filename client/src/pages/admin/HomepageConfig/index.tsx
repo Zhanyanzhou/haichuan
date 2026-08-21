@@ -23,8 +23,6 @@ import {
   InfoCircleOutlined,
   MenuOutlined,
   SearchOutlined,
-  UpOutlined,
-  DownOutlined,
 } from "@ant-design/icons";
 import { Puck, type UiState } from "@puckeditor/core";
 import { useNavigate } from "react-router-dom";
@@ -35,6 +33,7 @@ import {
   BLOCK_PREVIEW_KIND,
   BLOCK_CATEGORIES,
   TEMPLATE_MEDIA_HINT,
+  isContentTemplateInsertable,
   type BlockMeta,
 } from "@/page-builder/config/blockMeta";
 import { pageDocumentApi, settingsApi } from "@/services/api";
@@ -59,12 +58,18 @@ import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import ContentTemplateSkeletonPreview from "@/page-builder/preview/ContentTemplateSkeletonPreview";
 import ContentTemplateFrameworkOverview from "@/page-builder/preview/ContentTemplateFrameworkOverview";
 import { getContentTemplatePreview, createContentTemplateMarker } from "@/page-builder/generated/contentTemplates.generated";
+import { isVisualRecord } from "@/page-builder/runtime/visualLayout";
+import {
+  CANVAS_VISUAL_EDIT_MESSAGE,
+  type CanvasVisualEditMessage,
+} from "@/page-builder/visual-editor/visualEditorSession";
 import "./editor.css";
 import EditorToolbar, { VIEWPORT_PRESETS } from "./components/EditorToolbar";
 import UnsavedChangesGuard from "./components/UnsavedChangesGuard";
 import LayerRail from "./components/LayerRail";
 import RevisionDrawer from "./components/RevisionDrawer";
 import PageSettingsDrawer from "./components/PageSettingsDrawer";
+import CanvasBlockInteractionBoundary from "./components/CanvasBlockInteractionBoundary";
 import {
   ROOT_ZONE,
   useHomepagePuck,
@@ -105,6 +110,12 @@ const INITIAL_EDITOR_UI: Partial<UiState> = {
   },
 };
 
+/**
+ * 图层定位与画布滚动共用的安全距离：避开画布内固定缩放控件后，
+ * 以内容可视区上缘作为当前浏览模块的判定线。
+ */
+const CANVAS_SCROLL_SPY_TOP_OFFSET = 24;
+
 let blockIdSequence = 0;
 
 /**
@@ -137,7 +148,7 @@ function createBlockContent(type: string) {
   };
 }
 
-function EditorCanvasFooter({ isHome }: { isHome: boolean }) {
+function EditorCanvasFooter() {
   const [siteSettings, setSiteSettings] = useState<any>(null);
 
   useEffect(() => {
@@ -154,9 +165,6 @@ function EditorCanvasFooter({ isHome }: { isHome: boolean }) {
       cancelled = true;
     };
   }, []);
-
-  // 与真实前台一致：首页不渲染页脚（PublicLayout 仅非首页展示 site-footer）。
-  if (isHome) return null;
 
   const siteName = siteSettings?.siteName || "海川珠宝";
   const contactPhone = siteSettings?.contactPhone?.trim() || "";
@@ -210,9 +218,11 @@ function EditorCanvasFooter({ isHome }: { isHome: boolean }) {
 function EditorCanvasShell({
   children,
   isHome,
+  headerMode,
 }: {
   children: ReactNode;
   isHome: boolean;
+  headerMode: "overlay-light" | "solid";
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -269,6 +279,7 @@ function EditorCanvasShell({
     >
       <StorefrontNavigation
         isHome={isHome}
+        headerMode={headerMode}
         preview
         menuOpen={menuOpen}
         onMenuOpenChange={setMenuOpen}
@@ -284,7 +295,7 @@ function EditorCanvasShell({
         }}
       />
       {children}
-      <EditorCanvasFooter isHome={isHome} />
+      <EditorCanvasFooter />
     </div>
   );
 }
@@ -323,15 +334,9 @@ function CanvasBlockAnchor({
       if (detail?.type !== CANVAS_FOCUS_MESSAGE || detail.blockId !== blockId)
         return;
 
-      const fieldTarget = detail.field
-        ? anchor.querySelector<HTMLElement>(
-            `[data-editor-field~="${detail.field}"]`,
-          )
-        : null;
-      (fieldTarget || anchor).scrollIntoView({
-        block: "center",
-        behavior: "smooth",
-      });
+      // 宿主层的 focusCanvasBlock 已在唯一画布滚动容器内完成定位。
+      // iframe 内再次 scrollIntoView 会跨浏览上下文触发第二次滚动，属性更新
+      // 或缩放画布时容易把当前模块错误地推离视口，因此这里只显示定位反馈。
       setIsFocused(true);
       if (clearFocusTimer.current)
         frameWindow.clearTimeout(clearFocusTimer.current);
@@ -457,6 +462,9 @@ function CanvasBlockAnchor({
         "[data-puck-component]",
       ),
     ).indexOf(puckBlock);
+    // Puck 会在当前 pointerdown/click 收尾时同步自身的 itemSelector；
+    // 因此模块选择必须等它完成后再落位。视觉节点选择由独立 store 保留，
+    // 新 Inspector 挂载后会直接读取同一 blockId 的节点上下文。
     window.setTimeout(() => {
       if (blockIndex < 0) return;
       dispatch({
@@ -467,44 +475,17 @@ function CanvasBlockAnchor({
   };
 
   return (
-    <div
+    <CanvasBlockInteractionBoundary
       ref={anchorRef}
-      data-editor-block-id={blockId}
-      data-editor-block-type={blockType}
-      style={{
-        position: "relative",
-        ...(isFocused
-          ? {
-              zIndex: 2,
-              outline: "3px solid #B8944E",
-              outlineOffset: "-3px",
-              boxShadow: "0 0 0 7px rgba(184, 148, 78, .20)",
-            }
-          : {}),
-      }}
+      blockId={blockId}
+      blockType={blockType}
+      blockLabel={BLOCK_META[blockType]?.name ?? blockType}
+      focused={isFocused}
+      scrollMarginTop={CANVAS_SCROLL_SPY_TOP_OFFSET * 2 + 32}
+      onSelect={requestCanvasSelection}
     >
-      <div
-        data-editor-select-overlay={blockType}
-        aria-hidden="true"
-        onPointerDownCapture={requestCanvasSelection}
-        onClick={(event) => {
-          event.preventDefault();
-          requestCanvasSelection();
-        }}
-        style={{
-          position: "absolute",
-          inset: 0,
-          zIndex: 20,
-          width: "100%",
-          height: "100%",
-          padding: 0,
-          border: 0,
-          background: "transparent",
-          cursor: "pointer",
-        }}
-      />
       {children}
-    </div>
+    </CanvasBlockInteractionBoundary>
   );
 }
 
@@ -517,16 +498,24 @@ function CanvasPageDataSynchronizer({
   pageKey: EditorPageKey;
 }) {
   const dispatch = useHomepagePuck((state) => state.dispatch);
+  const currentData = useHomepagePuck((state) => state.appState.data);
   const appliedSignatureRef = useRef<string | null>(null);
   const dataSignature = useMemo(() => JSON.stringify(data), [data]);
+  const currentDataSignature = useMemo(
+    () => JSON.stringify(currentData),
+    [currentData],
+  );
 
   useEffect(() => {
     const signature = `${pageKey}:${dataSignature}`;
     if (appliedSignatureRef.current === signature) return;
     appliedSignatureRef.current = signature;
+    // Puck 已以同一份数据挂载时不重复执行昂贵的整页替换；页面切换时
+    // currentDataSignature 与目标签名不同，仍会走 setData 完成必要同步。
+    if (currentDataSignature === dataSignature) return;
     dispatch({ type: "setData", data });
     dispatch({ type: "setUi", ui: { itemSelector: null } });
-  }, [data, dataSignature, dispatch, pageKey]);
+  }, [currentDataSignature, data, dataSignature, dispatch, pageKey]);
 
   return null;
 }
@@ -536,14 +525,14 @@ function CanvasPageDataSynchronizer({
  * 这让用户先理解版式和内容层级，再决定是否添加。
  */
 const PREVIEW_COLORS = {
-  surface: "#FBFAF7",
-  ink: "#3F372F",
-  muted: "#A89E92",
-  line: "#DED6CA",
-  media: "#E5DDD1",
-  mediaDeep: "#B9A994",
-  accent: "#B8944E",
-  dark: "#342D27",
+  surface: "#FFFFFF",
+  ink: "#181A1B",
+  muted: "#6E7477",
+  line: "#DDE1E2",
+  media: "#DDE1E2",
+  mediaDeep: "#B8BEC1",
+  accent: "#181A1B",
+  dark: "#111315",
   light: "#FFFFFF",
 };
 
@@ -598,8 +587,8 @@ function PreviewMedia({
   dark?: boolean;
   label?: string;
 }) {
-  const base = dark ? "#6C5A4A" : PREVIEW_COLORS.media;
-  const detail = dark ? "#95816C" : PREVIEW_COLORS.mediaDeep;
+  const base = dark ? "#5F6568" : PREVIEW_COLORS.media;
+  const detail = dark ? "#6E7477" : PREVIEW_COLORS.mediaDeep;
   return (
     <g aria-hidden="true">
       <rect x={x} y={y} width={width} height={height} rx="4" fill={base} />
@@ -614,7 +603,7 @@ function PreviewMedia({
       />
       <path
         d={`M${x + 10} ${y + height - 10} L${x + width - 10} ${y + 10}`}
-        stroke={dark ? "rgba(255,255,255,.36)" : "rgba(63,55,47,.16)"}
+        stroke={dark ? "rgba(255,255,255,.36)" : "rgba(24,26,27,.16)"}
         strokeWidth="1"
       />
     </g>
@@ -653,7 +642,7 @@ function PreviewCard({
             cx={x + width / 2}
             cy={y + 19}
             r="10"
-            fill="#F2E9DA"
+            fill="#F4F5F5"
             stroke={PREVIEW_COLORS.accent}
           />
           <circle
@@ -776,7 +765,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
             width="78"
             height="139"
             rx="4"
-            fill="#665649"
+            fill="#5f6568"
             opacity=".58"
           />
           <rect
@@ -785,7 +774,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
             width="58"
             height="103"
             rx="3"
-            fill="#8D7A66"
+            fill="#6E7477"
             opacity=".52"
           />
         </>
@@ -805,7 +794,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
             stroke={PREVIEW_COLORS.accent}
           />
           <PreviewMedia x={110} y={42} width={171} height={114} />
-          <rect x="17" y="192" width="266" height="177" rx="4" fill="#F2EEE7" />
+          <rect x="17" y="192" width="266" height="177" rx="4" fill="#ECEEEF" />
           <PreviewMedia x={30} y={211} width={140} height={93} />
           <PreviewText x={190} y={233} width={66} lines={2} />
         </>
@@ -885,7 +874,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
             width="88"
             height="106"
             rx="4"
-            fill="#665649"
+            fill="#5f6568"
             opacity=".72"
           />
           <PreviewText x={198} y={246} width={62} lines={2} inverse />
@@ -1005,7 +994,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
       background = PREVIEW_COLORS.dark;
       content = (
         <>
-          <rect x="16" y="159" width="268" height="56" rx="4" fill="#584838" />
+          <rect x="16" y="159" width="268" height="56" rx="4" fill="#181A1B" />
           <PreviewText x={91} y={173} width={118} lines={2} inverse />
           <rect
             x="126"
@@ -1060,7 +1049,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
       content = (
         <>
           <PreviewMedia x={16} y={91} width={120} height={160} />
-          <rect x="151" y="91" width="133" height="160" rx="4" fill="#F2EEE7" />
+          <rect x="151" y="91" width="133" height="160" rx="4" fill="#ECEEEF" />
           <PreviewText x={168} y={134} width={96} lines={3} />
           <rect
             x={168}
@@ -1111,7 +1100,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
             width="118"
             height="11"
             rx="2"
-            fill="#F0E6D5"
+            fill="#F4F5F5"
             stroke={PREVIEW_COLORS.accent}
           />
           <rect
@@ -1160,7 +1149,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
                 cx={61 + index * 88}
                 cy="164"
                 r="16"
-                fill="#F4ECDE"
+                fill="#F4F5F5"
                 stroke={PREVIEW_COLORS.accent}
               />
             </g>
@@ -1361,7 +1350,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
                 width="15"
                 height="5"
                 rx="2"
-                fill="#F3DEAE"
+                fill="#DDE1E2"
               />
             </g>
           ))}
@@ -1380,7 +1369,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
             height="18"
             rx="2"
             fill="none"
-            stroke="rgba(243,222,174,.72)"
+            stroke="rgba(221,225,226,.72)"
           />
         </>
       );
@@ -1458,7 +1447,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
             width={34}
             height={9}
             rx={2}
-            fill="rgba(15,13,12,.45)"
+            fill="rgba(17,19,21,.45)"
           />
           <rect
             x={240}
@@ -1466,7 +1455,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
             width={34}
             height={9}
             rx={2}
-            fill="rgba(15,13,12,.45)"
+            fill="rgba(17,19,21,.45)"
           />
         </>
       );
@@ -1514,7 +1503,7 @@ function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; vie
         stroke={
           background === PREVIEW_COLORS.dark
             ? "rgba(255,255,255,.16)"
-            : "#E5DED3"
+            : "#DDE1E2"
         }
       />
       {content}
@@ -1667,11 +1656,15 @@ function TemplateCard({
         </span>
       </button>
       <div className="homepage-editor__template-footer">
-        <span>
+        <span
+          className={`homepage-editor__template-usage${unavailable ? " is-limit" : ""}`}
+        >
           已添加 {usedCount} / {limit}
         </span>
         {viewMode === "single" && (
-          <span>{TEMPLATE_MEDIA_HINT[name] ?? meta.tags[0]}</span>
+          <span className="homepage-editor__template-media-hint">
+            {TEMPLATE_MEDIA_HINT[name] ?? meta.tags[0]}
+          </span>
         )}
       </div>
     </article>
@@ -1710,11 +1703,11 @@ function TemplateLibrary({
     try {
       return window.localStorage.getItem(
         "homepage-editor-template-view-mode",
-      ) === "double"
-        ? "double"
-        : "single";
+      ) === "single"
+        ? "single"
+        : "double";
     } catch {
-      return "single";
+      return "double";
     }
   });
   const [myTemplates, setMyTemplates] = useState<BlockTemplate[]>(() =>
@@ -1730,12 +1723,13 @@ function TemplateLibrary({
     setMyTemplates(blockTemplateStore.getAll());
   }, []);
 
-  // 「保存为常用方案」弹窗逻辑由主编辑器组件定义并经 props 传入,此处不重复实现。
+  // 「保存为个人常用方案」弹窗逻辑由主编辑器组件定义并经 props 传入,此处不重复实现。
 
   const entries = useMemo(
     () =>
       Object.entries(BLOCK_META)
         .filter(([name, meta]) => {
+          if (!isContentTemplateInsertable(name)) return false;
           const matchKeyword =
             `${name}${meta.name}${meta.description}${meta.tags.join("")}`.includes(
               keyword.trim(),
@@ -1750,6 +1744,13 @@ function TemplateLibrary({
         }),
     [keyword],
   );
+  const insertableTemplateCount = useMemo(
+    () =>
+      Object.keys(BLOCK_META).filter((name) =>
+        isContentTemplateInsertable(name),
+      ).length,
+    [],
+  );
   const groupedEntries = useMemo(
     () =>
       BLOCK_CATEGORIES.map((group) => ({
@@ -1762,13 +1763,22 @@ function TemplateLibrary({
   /* 左栏收缩（2026-08-16 用户需求）：收起为窄条，画布最大化；偏好记入 sessionStorage */
   const [libraryCollapsed, setLibraryCollapsed] = useState(() => {
     try {
-      return (
-        sessionStorage.getItem("homepage-editor-library-collapsed") === "1"
-      );
+      return window.matchMedia("(max-width: 900px)").matches ||
+        sessionStorage.getItem("homepage-editor-library-collapsed") === "1";
     } catch {
       return false;
     }
   });
+  useEffect(() => {
+    const mobileWorkspace = window.matchMedia("(max-width: 900px)");
+    const collapseForMobile = (event: MediaQueryListEvent) => {
+      if (event.matches) setLibraryCollapsed(true);
+    };
+    mobileWorkspace.addEventListener("change", collapseForMobile);
+    return () => {
+      mobileWorkspace.removeEventListener("change", collapseForMobile);
+    };
+  }, []);
   const toggleLibrary = () => {
     setLibraryCollapsed((prev) => {
       const next = !prev;
@@ -1870,8 +1880,8 @@ function TemplateLibrary({
           <DragOutlined /> 拖动模块添加至画布
           <span
             className="homepage-editor__library-count"
-            title={`显示 ${entries.length} / 共 ${Object.keys(BLOCK_META).length} 个`}
-          >{`${entries.length} / ${Object.keys(BLOCK_META).length}`}</span>
+            title={`显示 ${entries.length} / 已开放 ${insertableTemplateCount} 个；其余模板仍在完成结构验收`}
+          >{`${entries.length} / ${insertableTemplateCount}`}</span>
         </div>
       </div>
 
@@ -1896,7 +1906,7 @@ function TemplateLibrary({
                 className="homepage-editor__template-group"
                 aria-labelledby="template-group-saved"
               >
-                <h3 id="template-group-saved">常用方案</h3>
+                <h3 id="template-group-saved">个人常用方案</h3>
                 <div className="homepage-editor__template-group-grid">
                   {myTemplates.map((tpl) => (
                     <article
@@ -1907,7 +1917,7 @@ function TemplateLibrary({
                         type="button"
                         className="homepage-editor__template-card-main"
                         onClick={() => {
-                          // 常用方案可能保存于模板收敛之前(图文混排/分割面板/礼赠指南),
+                          // 个人常用方案可能保存于模板收敛之前(图文混排/分割面板/礼赠指南),
                           // 插入前经 migratePuckData 转为新类型,避免画布出现未注册坏块
                           const migratedBlock = migratePuckData({
                             content: [
@@ -1952,7 +1962,7 @@ function TemplateLibrary({
                           <BlockTemplateVisual name={tpl.type} viewport={previewViewport} />
                           <span
                             className="homepage-editor__template-badge"
-                            style={{ background: "#6C5CE7" }}
+                            style={{ background: "#181A1B" }}
                           >
                             我的
                           </span>
@@ -1975,7 +1985,7 @@ function TemplateLibrary({
                           blockTemplateStore.remove(tpl.id);
                           refreshMyTemplates();
                         }}
-                        title="删除此常用方案"
+                        title="删除此个人常用方案"
                       >
                         <DeleteOutlined />
                       </button>
@@ -2041,10 +2051,14 @@ function InspectorPanel({
   hasUnsavedChanges,
   saving,
   onSaveDraft,
+  publishIssues,
+  validationState,
 }: {
   hasUnsavedChanges: boolean;
   saving: boolean;
   onSaveDraft: () => void;
+  publishIssues: PublishValidationIssue[];
+  validationState: PublishValidationState;
 }) {
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   if (!selectedItem) {
@@ -2076,6 +2090,8 @@ function InspectorPanel({
         hasUnsavedChanges={hasUnsavedChanges}
         saving={saving}
         onSaveDraft={onSaveDraft}
+        publishIssues={publishIssues}
+        validationState={validationState}
       />
     );
   }
@@ -2156,178 +2172,17 @@ function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
   );
 }
 
-/** 画布侧边的当前模块快捷操作，与图层面板保持互补。 */
-function CanvasBlockActionDock({
-  frameRef,
-  canvasRef,
-}: {
-  frameRef: RefObject<HTMLDivElement>;
-  canvasRef: RefObject<HTMLDivElement>;
-}) {
-  const appData = useHomepagePuck((state) => state.appState.data);
-  const dispatch = useHomepagePuck((state) => state.dispatch);
-  const selectedItem = useHomepagePuck((state) => state.selectedItem);
-  const selectedId = selectedItem?.props?.id;
-  const content = appData.content as Array<{
-    type: string;
-    props: Record<string, any>;
-  }>;
-  const selectedIndex = content.findIndex(
-    (item) => item.props?.id === selectedId,
-  );
-  const [position, setPosition] = useState<{
-    top: number;
-    left: number;
-  } | null>(null);
+type PublishValidationIssue = {
+  blockId?: string;
+  field?: string;
+  index?: number;
+  code?: string;
+  message: string;
+  severity: "error" | "warning" | "info";
+  path?: string;
+};
 
-  const updatePosition = useCallback(() => {
-    if (selectedIndex < 0) {
-      setPosition(null);
-      return;
-    }
-    const canvas = canvasRef.current;
-    const iframe = frameRef.current?.querySelector("iframe");
-    const block = iframe?.contentDocument?.querySelectorAll<HTMLElement>(
-      "[data-puck-component]",
-    )[selectedIndex];
-    if (!canvas || !iframe || !block || iframe.clientWidth <= 0) {
-      setPosition(null);
-      return;
-    }
-    const canvasRect = canvas.getBoundingClientRect();
-    const iframeRect = iframe.getBoundingClientRect();
-    const stageRect = canvas
-      .closest(".homepage-editor__stage")
-      ?.getBoundingClientRect();
-    const scale = iframeRect.width / iframe.clientWidth;
-    const nextPosition = {
-      top: iframeRect.top - canvasRect.top + block.offsetTop * scale,
-      left: Math.min(
-        iframeRect.right - canvasRect.left + 12,
-        (stageRect?.right ?? iframeRect.right) - canvasRect.left - 42,
-      ),
-    };
-    setPosition((current) =>
-      current &&
-      Math.abs(current.top - nextPosition.top) < 1 &&
-      Math.abs(current.left - nextPosition.left) < 1
-        ? current
-        : nextPosition,
-    );
-  }, [canvasRef, frameRef, selectedIndex]);
-
-  useLayoutEffect(() => {
-    updatePosition();
-    const initialFrame = requestAnimationFrame(updatePosition);
-    const settledFrame = requestAnimationFrame(() =>
-      requestAnimationFrame(updatePosition),
-    );
-    const observer = new ResizeObserver(updatePosition);
-    if (frameRef.current) observer.observe(frameRef.current);
-    window.addEventListener("resize", updatePosition);
-    return () => {
-      cancelAnimationFrame(initialFrame);
-      cancelAnimationFrame(settledFrame);
-      observer.disconnect();
-      window.removeEventListener("resize", updatePosition);
-    };
-  }, [frameRef, updatePosition]);
-
-  if (selectedIndex < 0 || !position) return null;
-
-  const selectedModule = content[selectedIndex];
-  const isLocked = Boolean(selectedModule.props?.locked);
-  const move = (direction: -1 | 1) => {
-    const targetIndex = selectedIndex + direction;
-    if (
-      isLocked ||
-      targetIndex < 0 ||
-      targetIndex >= content.length ||
-      content[targetIndex]?.props?.locked
-    )
-      return;
-    const nextContent = [...content];
-    [nextContent[selectedIndex], nextContent[targetIndex]] = [
-      nextContent[targetIndex],
-      nextContent[selectedIndex],
-    ];
-    dispatch({ type: "setData", data: { ...appData, content: nextContent } });
-    dispatch({
-      type: "setUi",
-      ui: { itemSelector: { index: targetIndex, zone: ROOT_ZONE } },
-    });
-    focusCanvasBlock(selectedId);
-  };
-  const remove = () => {
-    if (isLocked) {
-      message.info("此模块已锁定，不能删除");
-      return;
-    }
-    Modal.confirm({
-      title: `删除“${getModuleDisplayName(selectedModule.type, selectedModule.props)}”？`,
-      content: "删除后可从模块库重新添加；尚未发布的修改可通过版本记录恢复。",
-      okText: "删除模块",
-      okButtonProps: { danger: true },
-      cancelText: "取消",
-      onOk: () => {
-        dispatch({
-          type: "setData",
-          data: {
-            ...appData,
-            content: content.filter((_, index) => index !== selectedIndex),
-          },
-        });
-        dispatch({ type: "setUi", ui: { itemSelector: null } });
-      },
-    });
-  };
-
-  return (
-    <div
-      className="homepage-editor__canvas-action-dock"
-      style={{ top: `${position.top}px`, left: `${position.left}px` }}
-      role="group"
-      aria-label={`“${getModuleDisplayName(selectedModule.type, selectedModule.props)}”快捷操作`}
-    >
-      <button
-        type="button"
-        onClick={() => move(-1)}
-        disabled={
-          isLocked ||
-          selectedIndex === 0 ||
-          content[selectedIndex - 1]?.props?.locked
-        }
-        aria-label="上移模块"
-        title="上移"
-      >
-        <UpOutlined />
-      </button>
-      <button
-        type="button"
-        onClick={() => move(1)}
-        disabled={
-          isLocked ||
-          selectedIndex === content.length - 1 ||
-          content[selectedIndex + 1]?.props?.locked
-        }
-        aria-label="下移模块"
-        title="下移"
-      >
-        <DownOutlined />
-      </button>
-      <button
-        type="button"
-        className="is-danger"
-        onClick={remove}
-        disabled={isLocked}
-        aria-label="删除模块"
-        title="删除模块"
-      >
-        <DeleteOutlined />
-      </button>
-    </div>
-  );
-}
+type PublishValidationState = "checking" | "current" | "stale" | "error";
 
 function EditorBody({
   onSaveAsTemplate,
@@ -2337,6 +2192,8 @@ function EditorBody({
   hasUnsavedChanges,
   saving,
   onSaveDraft,
+  publishIssues,
+  validationState,
 }: {
   onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
   pageKey: EditorPageKey;
@@ -2345,6 +2202,8 @@ function EditorBody({
   hasUnsavedChanges: boolean;
   saving: boolean;
   onSaveDraft: (data: unknown) => void;
+  publishIssues: PublishValidationIssue[];
+  validationState: PublishValidationState;
 }) {
   const appData = useHomepagePuck((state) => state.appState.data);
   const currentViewport = useHomepagePuck(
@@ -2395,11 +2254,63 @@ function EditorBody({
       compactWorkspace.removeEventListener("change", syncStructureRail);
     };
   }, []);
+  useEffect(() => {
+    // 窄平板从图层选择模块后立即把图层收回入口，给画布与属性面板留出
+    // 可对照空间；用户仍可随时从 40px 图层入口再次展开。
+    if (isInspecting && window.matchMedia("(max-width: 900px)").matches) {
+      setStructureCollapsed(true);
+    }
+  }, [isInspecting]);
   // 默认完整展示画布；仅在用户主动缩放时退出自适应模式。
   const [isFitView, setIsFitView] = useState(true);
-  const stageRef = useRef<HTMLElement>(null);
+  // 滚动层与工具栏分离：工具栏占据固定布局高度，画布内容单独滚动。
+  const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const previewFrameRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handleVisualEdit = (event: MessageEvent<CanvasVisualEditMessage>) => {
+      const detail = event.data;
+      const iframe = previewFrameRef.current?.querySelector<HTMLIFrameElement>("iframe");
+      if (
+        event.origin !== window.location.origin ||
+        event.source !== iframe?.contentWindow ||
+        detail?.type !== CANVAS_VISUAL_EDIT_MESSAGE ||
+        typeof detail.blockId !== "string" ||
+        typeof detail.moduleType !== "string" ||
+        (detail.overrides !== undefined &&
+          (!isVisualRecord(detail.overrides) || detail.overrides.version !== 2))
+      ) {
+        return;
+      }
+      const contentIndex = appData.content.findIndex(
+        (item: { type?: string; props?: Record<string, unknown> }) =>
+          item.type === detail.moduleType && item.props?.id === detail.blockId,
+      );
+      if (contentIndex < 0) return;
+      const current = appData.content[contentIndex] as {
+        type: string;
+        props: { id: string; [key: string]: any };
+      };
+      const nextItem = {
+        ...current,
+        props: {
+          ...current.props,
+          __instanceOverrides: detail.overrides,
+          ...(current.props?.__contentTemplate
+            ? {}
+            : { __contentTemplate: createContentTemplateMarker(detail.moduleType) }),
+        },
+      };
+      dispatch({
+        type: "replace",
+        destinationIndex: contentIndex,
+        destinationZone: ROOT_ZONE,
+        data: nextItem,
+      });
+    };
+    window.addEventListener("message", handleVisualEdit);
+    return () => window.removeEventListener("message", handleVisualEdit);
+  }, [appData, dispatch]);
   const viewportWidth =
     currentViewport.width === "100%"
       ? RESPONSIVE_CANVAS.desktop.width
@@ -2439,16 +2350,21 @@ function EditorBody({
     setCanvasNavigationPreview(next);
   }, [navigationPreviewOpen]);
 
-  // 画布滚动时定位当前可见模块：以工作区视口中心为基准，仅用于左侧图层栏跟随滚动。
+  // 画布滚动时定位当前可见模块：以内容可视区上缘为基准，仅用于左侧图层栏跟随滚动。
   const computeScrollSpyIndex = useCallback(() => {
     const stage = stageRef.current;
     const frame = previewFrameRef.current;
     if (!stage || !frame) return;
     const iframe = frame.querySelector<HTMLIFrameElement>("iframe");
     const blockNodes = iframe?.contentDocument?.querySelectorAll<HTMLElement>(
-      "[data-puck-component]",
+      "[data-editor-block-id]",
     );
-    if (!iframe || !blockNodes || blockNodes.length === 0) {
+    if (
+      !iframe ||
+      !blockNodes ||
+      blockNodes.length === 0 ||
+      blockNodes.length !== appData.content.length
+    ) {
       setScrollSpyIndex(null);
       return;
     }
@@ -2456,11 +2372,21 @@ function EditorBody({
     const scale = iframeRect.width / canvasBaseWidth;
     if (scale <= 0) return;
     const stageRect = stage.getBoundingClientRect();
-    const viewportCenterY = stageRect.top + stage.clientHeight * 0.5;
-    let current = -1;
+    const controlsBottom = stage
+      .querySelector<HTMLElement>(".homepage-editor__canvas-controls")
+      ?.getBoundingClientRect().bottom;
+    const viewportAnchorY = Math.min(
+      stageRect.bottom - CANVAS_SCROLL_SPY_TOP_OFFSET,
+      Math.max(
+        stageRect.top + CANVAS_SCROLL_SPY_TOP_OFFSET,
+        (controlsBottom ?? stageRect.top) + CANVAS_SCROLL_SPY_TOP_OFFSET,
+      ),
+    );
+    let current = 0;
     Array.from(blockNodes).forEach((block, index) => {
-      const blockTop = iframeRect.top + block.offsetTop * scale;
-      if (blockTop <= viewportCenterY) current = index;
+      const blockTop =
+        iframeRect.top + block.getBoundingClientRect().top * scale;
+      if (blockTop <= viewportAnchorY) current = index;
     });
     setScrollSpyIndex((previous) => (previous === current ? previous : current));
   }, [canvasBaseWidth, appData.content.length]);
@@ -2697,13 +2623,14 @@ function EditorBody({
               navigationPreviewOpen={navigationPreviewOpen}
               onToggleNavigationPreview={toggleNavigationPreview}
               scrollSpyIndex={scrollSpyIndex}
+              publishIssues={publishIssues}
+              validationState={validationState}
             />
           </>
         )}
       </aside>
 
       <section
-        ref={stageRef}
         className="homepage-editor__stage"
         aria-label={`${pageLabel}画布`}
       >
@@ -2749,40 +2676,38 @@ function EditorBody({
             +
           </button>
         </div>
-        <div
-          ref={canvasRef}
-          className={`homepage-editor__canvas-document${draggingTemplate ? " is-dragging" : ""}`}
-          style={{
-            width: `${canvasBaseWidth * canvasZoom}px`,
-            height: canvasHeight ? `${canvasHeight}px` : undefined,
-          }}
-        >
+        <div ref={stageRef} className="homepage-editor__canvas-scroll">
           <div
-            className="homepage-editor__canvas-scale"
+            ref={canvasRef}
+            className={`homepage-editor__canvas-document${draggingTemplate ? " is-dragging" : ""}`}
             style={{
-              width: `${canvasBaseWidth}px`,
-              transform: `scale(${canvasZoom})`,
+              width: `${canvasBaseWidth * canvasZoom}px`,
+              height: canvasHeight ? `${canvasHeight}px` : undefined,
             }}
           >
-            <CanvasPreview frameRef={previewFrameRef} />
+            <div
+              className="homepage-editor__canvas-scale"
+              style={{
+                width: `${canvasBaseWidth}px`,
+                transform: `scale(${canvasZoom})`,
+              }}
+            >
+              <CanvasPreview frameRef={previewFrameRef} />
+            </div>
+            {draggingTemplate && (
+              <>
+                <div className="homepage-editor__drop-scrim">
+                  <span>拖放“{draggingTemplate}”到目标位置</span>
+                </div>
+                <div
+                  className="homepage-editor__drop-indicator"
+                  style={{ top: `${dropPosition}%` }}
+                >
+                  <span>在此插入</span>
+                </div>
+              </>
+            )}
           </div>
-          <CanvasBlockActionDock
-            frameRef={previewFrameRef}
-            canvasRef={canvasRef}
-          />
-          {draggingTemplate && (
-            <>
-              <div className="homepage-editor__drop-scrim">
-                <span>拖放“{draggingTemplate}”到目标位置</span>
-              </div>
-              <div
-                className="homepage-editor__drop-indicator"
-                style={{ top: `${dropPosition}%` }}
-              >
-                <span>在此插入</span>
-              </div>
-            </>
-          )}
         </div>
       </section>
 
@@ -2821,6 +2746,8 @@ function EditorBody({
               hasUnsavedChanges={hasUnsavedChanges}
               saving={saving}
               onSaveDraft={() => onSaveDraft(appData)}
+              publishIssues={publishIssues}
+              validationState={validationState}
             />
           </div>
         )}
@@ -2838,6 +2765,13 @@ export default function HomepageConfig({
   const [data, setData] = useState<any>(() => createEditorPageDefault(pageKey));
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [publishIssues, setPublishIssues] = useState<PublishValidationIssue[]>(
+    [],
+  );
+  const [publishValidationState, setPublishValidationState] =
+    useState<PublishValidationState>("stale");
+  const [validationRevision, setValidationRevision] = useState(0);
+  const validationRequestRef = useRef(0);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [revisionsLoading, setRevisionsLoading] = useState(false);
@@ -2893,11 +2827,11 @@ export default function HomepageConfig({
     (blockType: string, blockProps: Record<string, any>) => {
       const moduleDisplayName = getModuleDisplayName(blockType);
       Modal.confirm({
-        title: "保存为常用方案",
+        title: "保存为个人常用方案",
         content: (
           <div style={{ marginTop: 8 }}>
             <p style={{ margin: "0 0 8px", color: "var(--adm-text)", fontSize: 12 }}>
-              将当前模块的内容与版式保存为可复用的常用方案。
+              仅在当前浏览器中保存当前模块的内容与受控预设，不会同步给其他账号或成员。
             </p>
             <label style={{ fontSize: 12, color: "var(--adm-text-strong)" }}>
               方案名称
@@ -2910,7 +2844,7 @@ export default function HomepageConfig({
                   width: "100%",
                   marginTop: 4,
                   padding: "6px 10px",
-                  border: "1px solid #DED8CE",
+                  border: "1px solid var(--adm-line)",
                   borderRadius: 3,
                   fontSize: 13,
                   boxSizing: "border-box",
@@ -2928,7 +2862,7 @@ export default function HomepageConfig({
           const name = input?.value?.trim() || `我的${moduleDisplayName}`;
           blockTemplateStore.save(name, blockType, blockProps);
           refreshMyTemplates();
-          message.success(`「${name}」已保存为常用方案`);
+          message.success(`「${name}」已保存为个人常用方案`);
         },
       });
     },
@@ -2941,7 +2875,10 @@ export default function HomepageConfig({
         root: {
           ...puckConfig.root,
           render: ({ children }: { children: ReactNode }) => (
-            <EditorCanvasShell isHome={pageKey === "home"}>
+            <EditorCanvasShell
+              isHome={pageKey === "home"}
+              headerMode={getEditorPage(pageKey).headerMode}
+            >
               {children}
             </EditorCanvasShell>
           ),
@@ -3129,6 +3066,8 @@ export default function HomepageConfig({
     // Puck 首帧会 normalize 画布数据,JSON 全等会让每次进入编辑器都误报"有未保存修改"
     const changed = dataSignature(nextData) !== dataSignatureRef.current;
     setHasUnsavedChanges(changed);
+    setPublishValidationState("stale");
+    setValidationRevision((revision) => revision + 1);
     // 查看线上版本时画布被编辑:自动切回编辑草稿并提示,避免“看着线上却在改草稿”的状态错乱。
     if (changed && viewingPublishedRef.current) {
       viewingPublishedRef.current = false;
@@ -3136,6 +3075,55 @@ export default function HomepageConfig({
       message.info("已切换到编辑模式，当前修改将保存为草稿");
     }
   }, []);
+
+  useEffect(() => {
+    if (initialLoading || loadError) return;
+    const controller = new AbortController();
+    const requestId = ++validationRequestRef.current;
+    const expectedSignature = canonicalizePageContent(
+      latestData.current,
+      latestMetadata.current,
+    );
+    setPublishValidationState("checking");
+    const timer = window.setTimeout(() => {
+      void pageDocumentApi
+        .validate(
+          pageKey,
+          latestData.current,
+          latestMetadata.current,
+          controller.signal,
+        )
+        .then((response) => {
+          if (
+            controller.signal.aborted ||
+            requestId !== validationRequestRef.current ||
+            expectedSignature !==
+              canonicalizePageContent(latestData.current, latestMetadata.current)
+          ) {
+            return;
+          }
+          const result = unwrapResponse<{
+            valid: boolean;
+            errors: string[];
+            issues?: PublishValidationIssue[];
+          }>(response);
+          setPublishIssues(
+            result.issues ??
+              result.errors.map((message) => ({ message, severity: "error" as const })),
+          );
+          setPublishValidationState("current");
+        })
+        .catch((error) => {
+          if (controller.signal.aborted || requestId !== validationRequestRef.current) return;
+          setPublishValidationState("error");
+          if (import.meta.env.DEV) console.warn("[PageDocument validate]", error);
+        });
+    }, 650);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [initialLoading, loadError, metadata, pageKey, validationRevision]);
 
   const saveDraft = useCallback(
     async (
@@ -3198,9 +3186,15 @@ export default function HomepageConfig({
           if (!isActivePage()) return false;
           const isConflict = getEditorHttpStatus(error) === 409;
           if (isConflict) {
-            message.error(
-              "保存冲突，请刷新页面后重试（当前修改仍保留在画布中）",
-            );
+            Modal.confirm({
+              title: "检测到其他人更新了这份页面草稿",
+              content:
+                "当前画布修改仍完整保留。你可以继续留在本地核对，或明确放弃本地修改并重新加载远端草稿。",
+              okText: "重新加载远端草稿",
+              cancelText: "保留本地修改",
+              okButtonProps: { danger: true },
+              onOk: () => setLoadAttempt((attempt) => attempt + 1),
+            });
           } else if (!options.silent) {
             message.error(getEditorErrorMessage(error, "保存失败，请重试"));
           }
@@ -3530,11 +3524,7 @@ export default function HomepageConfig({
     let validation: {
       valid: boolean;
       errors: string[];
-      issues?: Array<{
-        blockId?: string;
-        message: string;
-        severity: "error" | "warning" | "info";
-      }>;
+      issues?: PublishValidationIssue[];
     } | null = null;
     try {
       const response = await pageDocumentApi.validate(
@@ -3545,11 +3535,7 @@ export default function HomepageConfig({
       validation = unwrapResponse<{
         valid: boolean;
         errors: string[];
-        issues?: Array<{
-          blockId?: string;
-          message: string;
-          severity: "error" | "warning" | "info";
-        }>;
+        issues?: PublishValidationIssue[];
       }>(
         response,
       );
@@ -3570,60 +3556,28 @@ export default function HomepageConfig({
       )?.content ?? [];
 
     if (validation && !validation.valid && validation.errors?.length) {
-      const validationModal = Modal.error({
-        title: `发布前需修复 ${validation.errors.length} 个问题`,
-        content: (
-          <ul
-            style={{
-              paddingLeft: 20,
-              margin: 0,
-              maxHeight: 320,
-              overflowY: "auto",
-            }}
-          >
-            {validation.errors.map((err, idx) => {
-              const blockMatch = err.match(/^第\s*(\d+)\s*个区块/);
-              const issue = validation.issues?.find(
-                (item) => item.severity === "error" && item.message === err,
-              );
-              const issueBlockIndex = issue?.blockId
-                ? blocks.findIndex(
-                    (block) => block.props?.id === issue.blockId,
-                  )
-                : -1;
-              const blockIndex = issueBlockIndex >= 0
-                ? issueBlockIndex
-                : blockMatch
-                  ? Number(blockMatch[1]) - 1
-                  : null;
-              return (
-                <li
-                  key={`${err}-${idx}`}
-                  style={{ fontSize: 13, lineHeight: 1.8, marginBottom: 6 }}
-                >
-                  <span>{err}</span>
-                  {blockIndex !== null && blockIndex >= 0 && locateBlock ? (
-                    <Button
-                      type="link"
-                      size="small"
-                      style={{ paddingInline: 8 }}
-                      onClick={() => {
-                        validationModal.destroy();
-                        locateBlock(blockIndex);
-                      }}
-                    >
-                      定位此模块
-                    </Button>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        ),
-        okText: "去修复",
-      });
+      const errorIssues: PublishValidationIssue[] = validation.issues?.filter(
+        (issue) => issue.severity === "error",
+      ) ?? validation.errors.map<PublishValidationIssue>((message) => ({
+        message,
+        severity: "error",
+      }));
+      setPublishIssues(errorIssues);
+      const firstIssue = errorIssues.find((issue) => issue.blockId);
+      const firstBlockIndex = firstIssue?.blockId
+        ? blocks.findIndex((block) => block.props?.id === firstIssue.blockId)
+        : -1;
+      if (firstBlockIndex >= 0 && locateBlock) {
+        locateBlock(firstBlockIndex);
+      }
+      message.warning(
+        firstBlockIndex >= 0
+          ? `还有 ${validation.errors.length} 处内容待完善，已定位到第一处`
+          : `还有 ${validation.errors.length} 处内容待完善，请检查图层栏标出的模块`,
+      );
       return;
     }
+    setPublishIssues([]);
 
     const usesMobileFallback = blocks.some(
       (block) =>
@@ -3739,6 +3693,7 @@ export default function HomepageConfig({
           data={data}
           ui={INITIAL_EDITOR_UI}
           viewports={VIEWPORT_PRESETS}
+          permissions={{ drag: false }}
           iframe={{ enabled: true, waitForStyles: true, syncHostStyles: true }}
           onPublish={(nextData) => {
             setData(nextData);
@@ -3747,6 +3702,9 @@ export default function HomepageConfig({
           overrides={{
             header: () => <span style={{ display: "none" }} />,
             headerActions: () => <span style={{ display: "none" }} />,
+            // 画布只保留 Puck 的选择轮廓；排序与删除统一回到图层面板，
+            // 避免常驻操作浮岛覆盖真实图片、标题和前台交互热区。
+            componentOverlay: ({ children }) => <>{children}</>,
           }}
         >
           <CanvasPageDataSynchronizer data={data} pageKey={pageKey} />
@@ -3757,6 +3715,10 @@ export default function HomepageConfig({
             hasPendingDraft={hasPendingDraft}
             viewingPublished={viewingPublished}
             hasUnsavedChanges={hasUnsavedChanges}
+            publishValidationState={publishValidationState}
+            publishErrorCount={publishIssues.filter(
+              (issue) => issue.severity === "error",
+            ).length}
             draftSavedAtLabel={draftSavedAtLabel}
             onPublish={publishHome}
             onSaveDraft={(nextData) => {
@@ -3783,6 +3745,8 @@ export default function HomepageConfig({
             onSaveDraft={(nextData) => {
               void saveDraft(nextData);
             }}
+            publishIssues={publishIssues}
+            validationState={publishValidationState}
           />
         </Puck>
       )}

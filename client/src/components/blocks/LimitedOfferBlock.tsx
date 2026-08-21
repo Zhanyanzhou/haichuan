@@ -57,6 +57,7 @@ export default function LimitedOfferBlock({
   const targetUrl =
     resolveLinkTargetUrl({
       targetType: content.targetType,
+      productCode: content.productCode,
       productId: content.productId,
       linkUrl: content.linkUrl,
     }) || (isSafeInternalPath(content.linkUrl) ? content.linkUrl : "");
@@ -107,11 +108,11 @@ export default function LimitedOfferBlock({
     : [];
 
   return (
-    <DecorSection master="commerce-campaign" width="standard" flow="flow" background={bgColor} style={{ color: "#1A1A1A" }}>
+    <DecorSection master="commerce-campaign" width="standard" flow="flow" background={bgColor} style={{ color: "#181A1B" }}>
       <div className="hc-limited-event">
         <style>{`
           .hc-limited-event { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: clamp(28px, 5vw, 64px); align-items: center; }
-          .hc-limited-event__media { grid-row: 1 / span 3; aspect-ratio: ${desktopEventRatio}; overflow: hidden; background: #F3F1EE; }
+          .hc-limited-event__media { grid-row: 1 / span 3; aspect-ratio: ${desktopEventRatio}; overflow: hidden; background: #F4F5F5; }
           .hc-limited-event__media img { width: 100%; height: 100%; object-fit: cover; display: block; }
           .hc-limited-event__time { display: flex; flex-wrap: wrap; gap: 10px; }
           @media (max-width: 767px) {
@@ -129,11 +130,11 @@ export default function LimitedOfferBlock({
         <div className="hc-limited-event__time" data-content-role="time" data-editor-field="targetDate">
           {units.length > 0 && !isExpired ? units.map(([label, value]) => (
             <div key={label as string}>
-              <strong style={{ display: "block", minWidth: 48, padding: "10px 8px", border: "1px solid rgba(0,0,0,0.15)", color: "#1A1A1A", fontSize: 24, fontWeight: 500, textAlign: "center" }}>{value}</strong>
-              <small style={{ display: "block", marginTop: 6, color: "#8C8C8C", fontSize: 11, textAlign: "center" }}>{label}</small>
+              <strong style={{ display: "block", minWidth: 48, padding: "10px 8px", border: "1px solid rgba(0,0,0,0.15)", color: "#181A1B", fontSize: 24, fontWeight: 500, textAlign: "center" }}>{value}</strong>
+              <small style={{ display: "block", marginTop: 6, color: "#6E7477", fontSize: 11, textAlign: "center" }}>{label}</small>
             </div>
           )) : (
-            <p style={{ margin: 0, color: "#8C8C8C", fontSize: 14 }}>{targetDate ? "活动已结束" : "请设置活动结束时间"}</p>
+            <p style={{ margin: 0, color: "#6E7477", fontSize: 14 }}>{targetDate ? "活动已结束" : "请设置活动结束时间"}</p>
           )}
         </div>
         <div data-content-role="copy">
@@ -141,7 +142,7 @@ export default function LimitedOfferBlock({
             <p data-editor-field="eyebrow"
               style={{
                 margin: "0 0 12px",
-                color: "#8C8C8C",
+                color: "#6E7477",
                 fontSize: 12,
                 letterSpacing: "0.16em",
               }}
@@ -153,7 +154,7 @@ export default function LimitedOfferBlock({
             <h2 data-editor-field="title"
               style={{
                 margin: "0 0 14px",
-                color: "#1A1A1A",
+                color: "#181A1B",
                 fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
                 fontSize: "var(--hc-type-h2, clamp(28px, 3.5vw, 44px))",
                 fontWeight: 500,
@@ -167,7 +168,7 @@ export default function LimitedOfferBlock({
               style={{
                 margin: 0,
                 maxWidth: 480,
-                color: "#8C8C8C",
+                color: "#6E7477",
                 fontSize: 14,
                 lineHeight: 1.8,
               }}
@@ -189,7 +190,7 @@ export default function LimitedOfferBlock({
                   key={`${benefit}-${index}`}
                   style={{
                     border: "1px solid rgba(0,0,0,0.2)",
-                    color: "#5A5A5A",
+                    color: "#5F6568",
                     padding: "6px 10px",
                     fontSize: 12,
                   }}
@@ -207,8 +208,8 @@ export default function LimitedOfferBlock({
               style={{
                 display: "inline-block",
                 paddingBottom: 6,
-                borderBottom: "1px solid #1A1A1A",
-                color: "#1A1A1A",
+                borderBottom: "1px solid #181A1B",
+                color: "#181A1B",
                 textDecoration: "none",
                 fontSize: 13,
                 letterSpacing: "0.1em",

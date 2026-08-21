@@ -120,7 +120,7 @@ export default function MediaLibrary() {
   return (
     <div>
       <AdminPageHeader title="页面素材" subtitle="为首页装修准备图片与视频；商品图片请在商品模块维护" />
-      <Card style={{ borderRadius: 10, border: '1px solid #E7E6E2', boxShadow: '0 6px 20px rgba(40,36,30,0.035)' }}>
+      <Card style={{ borderRadius: 10, border: '1px solid var(--adm-line)', boxShadow: '0 6px 20px rgba(24,26,27,0.035)' }}>
         <Tabs activeKey={tab} onChange={setTab} items={[
           {
             key: 'pages', label: <span><FileImageOutlined /> 页面素材</span>,
@@ -159,7 +159,7 @@ export default function MediaLibrary() {
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
                     {filteredMedia.map((m) => (
-                      <div key={m.url} style={{ border: '1px solid #E7E6E2', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+                      <div key={m.url} style={{ border: '1px solid var(--adm-line)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
                         {m.type === 'image' ? (
                           <Image src={m.url} width="100%" height={120} style={{ objectFit: 'cover', cursor: 'pointer' }} preview={false} onClick={() => setPreview(m)} />
                         ) : (

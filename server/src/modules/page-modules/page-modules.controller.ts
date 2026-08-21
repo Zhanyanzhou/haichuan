@@ -19,6 +19,11 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { Public } from "../../common/decorators/public.decorator";
 import { Observable } from "rxjs";
+import {
+  PublishPageDocumentDto,
+  SavePageDocumentDto,
+  ValidatePageDocumentDto,
+} from "./dto";
 
 @ApiTags("页面模块")
 @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
@@ -54,14 +59,7 @@ export class PageModulesController {
   @Put("document")
   @ApiOperation({ summary: "保存页面文档草稿" })
   saveDocument(
-    @Body()
-    body: {
-      pageKey: string;
-      puckData: any;
-      metadata?: any;
-      editorVersion?: string;
-      expectedUpdatedAt?: string;
-    },
+    @Body() body: SavePageDocumentDto,
   ) {
     return this.service.savePageDocument(
       body.pageKey,
@@ -77,7 +75,7 @@ export class PageModulesController {
   @Put("document/publish")
   @ApiOperation({ summary: "发布页面文档" })
   publishDocument(
-    @Body() body: { pageKey?: string; expectedUpdatedAt?: string },
+    @Body() body: PublishPageDocumentDto,
     @Req() req: any,
   ) {
     return this.service.publishPageDocument(
@@ -105,7 +103,7 @@ export class PageModulesController {
   @ApiBearerAuth()
   @Post("document/validate")
   @ApiOperation({ summary: "预检页面文档是否可发布（发布前校验）" })
-  validateDocument(@Body() body: { pageKey?: string; puckData?: any; metadata?: any }) {
+  validateDocument(@Body() body: ValidatePageDocumentDto) {
     return this.service.validatePageDocument(
       body?.pageKey || "home",
       body?.puckData,

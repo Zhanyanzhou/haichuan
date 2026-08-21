@@ -3,8 +3,9 @@
  * Asymmetric Gallery 母版(信任变体):3:2 图墙(可选),无卡片边框。
  */
 import { certificatePuckConfig } from "../../../adapters/certificate.puck";
-import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
-import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
+import { getContractRoleQuantity } from "../../../config/blockContracts";
+import { IMAGE_SPECS } from "../../../config/imageSpecs";
+import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 const CERT_IMAGE_SPEC = IMAGE_SPECS.certificate.image;
@@ -52,6 +53,8 @@ export const certificateSchema: ModuleInspectorSchema = {
           label: "证书条目",
           control: "array",
           itemLabel: "证书",
+          minItems: getContractRoleQuantity("certificates", "certificates").min,
+          maxItems: getContractRoleQuantity("certificates", "certificates").max,
           defaultItem: { name: "", desc: "", imageUrl: "", focusX: 50, focusY: 50 },
           itemSummary: (item) =>
             typeof item.name === "string" && item.name.trim()
@@ -83,7 +86,7 @@ export const certificateSchema: ModuleInspectorSchema = {
       id: "certificate-style",
       title: "样式",
       layer: "style",
-      fields: [bgColorPresetField()],
+      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
     },
   ],
 };

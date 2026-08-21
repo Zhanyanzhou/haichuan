@@ -5,10 +5,11 @@
 import {
   GALLERY_CONTRACT,
   evaluateGalleryContract,
+  getContractRoleQuantity,
 } from "../../../config/blockContracts";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { galleryPuckConfig } from "../../../adapters/gallery.puck";
-import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
+import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 /** 槽位比例选项(契约派生):统一四个位置帧的画面比例,非对称节奏来自列宽跨度 */
@@ -55,6 +56,7 @@ export const gallerySchema: ModuleInspectorSchema = {
           label: "画廊图片",
           control: "array",
           itemLabel: "图片",
+          minItems: getContractRoleQuantity("gallery", "works").min,
           maxItems: GALLERY_CONTRACT.content.maxItems,
           defaultItem: { image: "", altText: "", caption: "", link: "", focusX: 50, focusY: 50 },
           itemSummary: (item) =>
@@ -105,7 +107,7 @@ export const gallerySchema: ModuleInspectorSchema = {
       id: "gallery-style",
       title: "样式",
       layer: "style",
-      fields: [bgColorPresetField()],
+      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
     },
   ],
 };

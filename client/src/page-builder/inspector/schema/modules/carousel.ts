@@ -3,6 +3,7 @@
  * Commerce Campaign 母版:仅电商/活动页使用;条目级双端图。
  */
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
+import { getContractRoleQuantity } from "../../../config/blockContracts";
 import { carouselPuckConfig } from "../../../adapters/carousel.puck";
 import type { ModuleInspectorSchema } from "../types";
 
@@ -23,6 +24,8 @@ export const carouselSchema: ModuleInspectorSchema = {
           label: "轮播图片",
           control: "array",
           itemLabel: "图片",
+          minItems: getContractRoleQuantity("carousel", "frames").min,
+          maxItems: getContractRoleQuantity("carousel", "frames").max,
           itemSummary: (item) =>
             typeof item.alt === "string" && item.alt.trim()
               ? item.alt
@@ -54,29 +57,6 @@ export const carouselSchema: ModuleInspectorSchema = {
               control: "linkTarget",
               compact: true,
             },
-          ],
-        },
-      ],
-    },
-    {
-      id: "carousel-layout",
-      title: "布局",
-      layer: "layout",
-      fields: [
-        {
-          key: "desktopRatio",
-          label: "电脑端比例",
-          control: "segmented",
-          options: [
-            { label: "宽幕 21:6", value: "wide" },
-          ],
-        },
-        {
-          key: "mobileRatio",
-          label: "手机端比例",
-          control: "segmented",
-          options: [
-            { label: "竖幅 4:5", value: "portrait" },
           ],
         },
       ],

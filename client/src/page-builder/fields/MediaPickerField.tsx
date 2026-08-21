@@ -14,7 +14,6 @@ import {
   InboxOutlined,
   LinkOutlined,
   DeleteOutlined,
-  CheckCircleOutlined,
   ExclamationCircleOutlined,
   SwapOutlined,
 } from "@ant-design/icons";
@@ -22,6 +21,9 @@ import { uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { ratioLabelOf } from "@/page-builder/config/imageSpecs";
 import { sizeMatchStatus, useImageNaturalSize } from "./specCheck";
+
+export const SESSION_MEDIA_UPLOADED_EVENT = "page-builder:media-uploaded";
+export const sessionUploadedMedia = new Set<string>();
 
 export interface MediaSpec {
   width: number;
@@ -51,6 +53,10 @@ interface MediaPickerFieldProps {
   previewAspectRatio?: string;
   /** 与画布相同的图片焦点坐标（百分比） */
   previewFocus?: { x: number; y: number };
+  previewFit?: "cover" | "contain";
+  previewZoom?: number;
+  /** 更换区开合状态，用于让上层只在换图任务中显示可复用素材。 */
+  onReplaceOpenChange?: (open: boolean) => void;
 }
 
 export default function MediaPickerField({
@@ -64,6 +70,9 @@ export default function MediaPickerField({
   placeholder,
   previewAspectRatio,
   previewFocus,
+  previewFit,
+  previewZoom,
+  onReplaceOpenChange,
 }: MediaPickerFieldProps) {
   /** 更换面板：在预览下方内嵌展开，预览保持可见 */
   const [replaceOpen, setReplaceOpen] = useState(false);
@@ -75,6 +84,13 @@ export default function MediaPickerField({
   const [uploading, setUploading] = useState(false);
   const imgSize = useImageNaturalSize(value);
   const matchStatus = sizeMatchStatus(spec, imgSize.width, imgSize.height);
+  const resolutionTooSmall = Boolean(
+    spec && imgSize.loaded &&
+      (imgSize.width < spec.width * 0.75 || imgSize.height < spec.height * 0.75),
+  );
+  const hasQualityWarning = Boolean(
+    imgSize.loaded && (resolutionTooSmall || matchStatus === "watch" || matchStatus === "risk"),
+  );
   const inputRef = useRef<HTMLInputElement>(null);
 
   const hasValue = Boolean(value && value.trim().length > 0);
@@ -89,6 +105,10 @@ export default function MediaPickerField({
     setUrlMode(false);
     setUrlInput(value || "");
   }, [value]);
+
+  useEffect(() => {
+    onReplaceOpenChange?.(replaceOpen);
+  }, [onReplaceOpenChange, replaceOpen]);
 
   /* ── 上传 ── */
   const handleUpload = async (file: File) => {
@@ -108,6 +128,8 @@ export default function MediaPickerField({
       const data = unwrapResponse<{ url: string }>(result);
       const finalUrl = data?.url || (result as any)?.data?.url;
       if (finalUrl) {
+        sessionUploadedMedia.add(finalUrl);
+        window.dispatchEvent(new CustomEvent(SESSION_MEDIA_UPLOADED_EVENT));
         onChange?.(finalUrl);
         message.success("上传成功");
       } else {
@@ -148,18 +170,6 @@ export default function MediaPickerField({
     }
   };
 
-  /* ── 尺寸状态指示 ── */
-  const statusLabel: Record<string, string> = {
-    good: "尺寸合适",
-    watch: "比例略有偏差",
-    risk: "建议更换图片",
-  };
-  const statusColor: Record<string, string> = {
-    good: "#5C8C5F",
-    watch: "#9A792E",
-    risk: "#B15645",
-  };
-
   return (
     <div
       className="homepage-editor__media-picker"
@@ -179,10 +189,13 @@ export default function MediaPickerField({
               alt="预览"
               style={{
                 objectFit: hasCropPreview ? "cover" : "contain",
+                ...(previewFit ? { objectFit: previewFit } : {}),
                 objectPosition: `${focusX}% ${focusY}%`,
+                transform: `scale(${Math.min(2, Math.max(1, previewZoom ?? 1))})`,
+                transformOrigin: `${focusX}% ${focusY}%`,
                 width: "100%",
                 height: "100%",
-                background: "#F5F2ED",
+                background: "#F4F5F5",
               }}
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = "none";
@@ -199,11 +212,6 @@ export default function MediaPickerField({
               </div>
             ) : null}
           </div>
-          {hasCropPreview ? (
-            <p className="homepage-editor__media-preview-note">
-              画布裁切预览 · 焦点 {Math.round(focusX)}% × {Math.round(focusY)}%
-            </p>
-          ) : null}
           {!readOnly && (
             <div className="homepage-editor__media-preview-actions">
               <Button
@@ -225,15 +233,19 @@ export default function MediaPickerField({
               >
                 图片链接
               </Button>
-              <Button
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={handleClear}
-                title="清除图片"
-              >
-                删除
-              </Button>
+              <details className="homepage-editor__media-more-actions">
+                <summary aria-label="更多图片操作">更多</summary>
+                <div>
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={handleClear}
+                  >
+                    删除图片
+                  </Button>
+                </div>
+              </details>
             </div>
           )}
         </div>
@@ -253,13 +265,13 @@ export default function MediaPickerField({
             style={{
               minHeight: 96,
               padding: "12px",
-              border: "1px dashed #CDB981",
+              border: "1px dashed #B8BEC1",
               borderRadius: 5,
-              background: "#FCFAF5",
+              background: "#FFFFFF",
             }}
           >
-            <InboxOutlined style={{ color: "var(--adm-action, #B8944E)", fontSize: 20 }} />
-            <div style={{ marginTop: 6, color: "#4A4239", fontSize: 12 }}>
+            <InboxOutlined style={{ color: "var(--adm-action, #5F6568)", fontSize: 20 }} />
+            <div style={{ marginTop: 6, color: "#181A1B", fontSize: 12 }}>
               {uploading ? "图片上传中…" : "拖入新图或点击上传（替换当前图片）"}
             </div>
           </Upload.Dragger>
@@ -319,18 +331,18 @@ export default function MediaPickerField({
             style={{
               minHeight: 116,
               padding: "16px 12px",
-              border: "1px dashed #CDB981",
+              border: "1px dashed #B8BEC1",
               borderRadius: 5,
-              background: "#FCFAF5",
+              background: "#FFFFFF",
             }}
           >
-            <InboxOutlined style={{ color: "var(--adm-action, #B8944E)", fontSize: 22 }} />
-            <div style={{ marginTop: 8, color: "#4A4239", fontSize: 13 }}>
+            <InboxOutlined style={{ color: "var(--adm-action, #5F6568)", fontSize: 22 }} />
+            <div style={{ marginTop: 8, color: "#181A1B", fontSize: 13 }}>
               {uploading
                 ? "图片上传中…"
                 : `${placeholder || "拖入图片或点击上传"}${ratioSuffix}`}
             </div>
-            <div style={{ marginTop: 4, color: "#91877A", fontSize: 11 }}>
+            <div style={{ marginTop: 4, color: "#6E7477", fontSize: 11 }}>
               仅图片，单张 ≤ 10MB
             </div>
           </Upload.Dragger>
@@ -344,7 +356,7 @@ export default function MediaPickerField({
               style={{
                 border: 0,
                 background: "transparent",
-                color: "#8E867C",
+                color: "#6E7477",
                 cursor: "pointer",
                 fontSize: 11,
                 textDecoration: "underline",
@@ -357,40 +369,22 @@ export default function MediaPickerField({
         </>
       )}
 
-      {/* 推荐比例紧跟图片操作区，便于先选图、再核对素材是否适合当前模板。 */}
-      {spec && (
-        <div className="homepage-editor__media-spec-hint">
-          <span>{spec.label}</span>
-          {imgSize.loaded && (
-            <span
-              style={{ color: statusColor[matchStatus || "good"] }}
-            >
-              {matchStatus === "good" && <CheckCircleOutlined />}
-              {matchStatus === "watch" && <ExclamationCircleOutlined />}
-              {matchStatus === "risk" && <ExclamationCircleOutlined />}
-              {imgSize.width}×{imgSize.height} — {statusLabel[matchStatus || "good"]}
-            </span>
-          )}
+      {spec && hasQualityWarning && !imgSize.error ? (
+        <div className="homepage-editor__media-warning" role="alert">
+          <ExclamationCircleOutlined aria-hidden="true" />
+          <span>
+            {resolutionTooSmall
+              ? "图片清晰度不足，建议更换更大的图片。"
+              : matchStatus === "risk"
+                ? "图片比例不适合，建议更换图片或进入设计调整构图。"
+                : "图片比例略有偏差，请检查画布裁切结果。"}
+          </span>
+          <details>
+            <summary>查看图片信息</summary>
+            <p>当前 {imgSize.width} × {imgSize.height}；建议 {spec.width} × {spec.height}（{spec.ratio}）。</p>
+          </details>
         </div>
-      )}
-
-      {/* ═══ 匹配状态底部提示 ═══ */}
-      {imgSize.loaded && matchStatus === "risk" && (
-        <div
-          style={{
-            marginTop: 5,
-            padding: "6px 8px",
-            borderRadius: 3,
-            background: "#FFF8F5",
-            border: "1px solid #F0D8CE",
-            color: "#A24324",
-            fontSize: 11,
-            lineHeight: 1.4,
-          }}
-        >
-          当前图片比例与推荐比例偏差较大，可能被裁切或留白。
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }

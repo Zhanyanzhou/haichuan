@@ -1,171 +1,50 @@
 ---
 name: writing-plans
-description: Use when you have a spec or requirements for a multi-step task, before touching code
+description: >
+  用户明确要求实施计划，或任务存在多个相互依赖阶段、实质产品取舍或高风险门禁，且书面计划能提高交接与验收质量时使用。普通已授权局部实现、明确 Bug 修复和仅需简短方案的任务不触发；不把计划仪式、自动提交或子代理编排当成完成条件。
 ---
 
-# Writing Plans
+# 实施计划
 
-## Overview
+## 目的
 
-Write comprehensive implementation plans assuming the engineer has zero context for our codebase and questionable taste. Document everything they need to know: which files to touch for each task, code, testing, docs they might need to check, how to test it. Give them the whole plan as bite-sized tasks. DRY. YAGNI. TDD. Frequent commits.
+把尚未实施的复杂工作收敛为可执行、可验收的边界与步骤。计划服务于用户结果和后续协作，不替代实现、验证或用户授权。
 
-Assume they are a skilled developer, but know almost nothing about our toolset or problem domain. Assume they don't know good test design very well.
+## 权限与边界
 
-**Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
+- 权限、审批、Git 写入、删除、依赖、数据库和项目外操作只认 `AGENTS.md`。
+- 用户已明确要求且不命中审批项的普通任务，直接按 `WORKFLOW.md` 实施；不要为了“有计划”重复请求批准。
+- 默认在对话中给出计划。只有用户明确要求持久化计划、项目交接确有需要，或已批准流程明确要求时，才创建 `docs/plans/` 文档。
+- 计划不得自动包含 `git add`、`git commit`、`git push`、删除、安装依赖或子代理调度；这些操作分别按当前授权判断。
 
-**Context:** If working in an isolated worktree, it should have been created via the `superpowers:using-git-worktrees` skill at execution time.
+## 何时需要计划
 
-**Save plans to:** `docs/plans/YYYY-MM-DD-<feature-name>.md`
-- (User preferences for plan location override this default)
+先判断书面计划是否能改变结果：
 
-## Scope Check
+- **直接实施**：目标、验收与现有实现路径清楚；改动局部、可逆且无实质产品取舍。
+- **简短方案**：存在一个会影响用户行为、数据语义、兼容性或长期维护的真实选择。说明证据、单一推荐、影响、验收和待批准项即可。
+- **完整实施计划**：多个相互依赖阶段、跨模块契约变更、迁移、发布门禁，或用户要求团队交接与持久记录时使用。
 
-If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during brainstorming. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.
+## 计划内容
 
-## File Structure
+按任务复杂度选择，不为格式填空：
 
-Before defining tasks, map out which files will be created or modified and what each one is responsible for. This is where decomposition decisions get locked in.
+1. 目标、可观察验收和明确不改范围；
+2. 当前证据、关键约束与待确认事实；
+3. 推荐方案及必要时的最强替代方案；
+4. 修改或新增的文件、契约、数据流与兼容性影响；
+5. 按可独立验收结果组织的实施批次，而不是固定分钟数或固定红绿步骤；
+6. 与 `WORKFLOW.md` 风险矩阵相称的验证、回退和未覆盖风险；
+7. 必须由用户批准的操作、业务取舍或外部协调。
 
-- Design units with clear boundaries and well-defined interfaces. Each file should have one clear responsibility.
-- You reason best about code you can hold in context at once, and your edits are more reliable when files are focused. Prefer smaller, focused files over large ones that do too much.
-- Files that change together should live together. Split by responsibility, not by technical layer.
-- In existing codebases, follow established patterns. If the codebase uses large files, don't unilaterally restructure - but if a file you're modifying has grown unwieldy, including a split in the plan is reasonable.
+## 质量要求
 
-This structure informs the task decomposition. Each task should produce self-contained changes that make sense independently.
+- 从当前代码、合同、Schema、配置和已批准决定出发；不把旧文档或猜测写成事实。
+- 任务边界按可独立验收的结果划分。测试、文档和配置仅在该结果确有需要时纳入同一批次。
+- 不为每个步骤强制测试驱动开发。Bug 优先保留能证明原症状已消失的检查；静态映射或文档调整使用更相称的可重复验证。
+- 不预设未安装的工具、子技能、工作树或子代理。当前环境提供且授权允许时，才将它们列为可选执行方式。
+- 计划应足够精确以供执行，但不复制大段实现代码、制造空泛 TODO，或为了显得完整而扩大范围。
 
-## Task Right-Sizing
+## 输出
 
-A task is the smallest unit that carries its own test cycle and is worth a
-fresh reviewer's gate. When drawing task boundaries: fold setup,
-configuration, scaffolding, and documentation steps into the task whose
-deliverable needs them; split only where a reviewer could meaningfully
-reject one task while approving its neighbor. Each task ends with an
-independently testable deliverable.
-
-## Bite-Sized Task Granularity
-
-**Each step is one action (2-5 minutes):**
-- "Write the failing test" - step
-- "Run it to make sure it fails" - step
-- "Implement the minimal code to make the test pass" - step
-- "Run the tests and make sure they pass" - step
-- "Commit" - step
-
-## Plan Document Header
-
-**Every plan MUST start with this header:**
-
-```markdown
-# [Feature Name] Implementation Plan
-
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
-**Goal:** [One sentence describing what this builds]
-
-**Architecture:** [2-3 sentences about approach]
-
-**Tech Stack:** [Key technologies/libraries]
-
-**Spec:** [path to the spec/design doc this plan implements — the plan
-argues from the spec, so the spec travels with it; executors read both]
-
-## Global Constraints
-
-[The spec's project-wide requirements — version floors, dependency limits,
-naming and copy rules, platform requirements — one line each, with exact
-values copied verbatim from the spec. Every task's requirements implicitly
-include this section.]
-
----
-```
-
-## Task Structure
-
-````markdown
-### Task N: [Component Name]
-
-**Files:**
-- Create: `exact/path/to/file.py`
-- Modify: `exact/path/to/existing.py:123-145`
-- Test: `tests/exact/path/to/test.py`
-
-**Interfaces:**
-- Consumes: [what this task uses from earlier tasks — exact signatures]
-- Produces: [what later tasks rely on — exact function names, parameter
-  and return types. A task's implementer sees only their own task; this
-  block is how they learn the names and types neighboring tasks use.]
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-def test_specific_behavior():
-    result = function(input)
-    assert result == expected
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: FAIL with "function not defined"
-
-- [ ] **Step 3: Write minimal implementation**
-
-```python
-def function(input):
-    return expected
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add tests/path/test.py src/path/file.py
-git commit -m "feat: add specific feature"
-```
-````
-
-## No Placeholders
-
-Every step must contain the actual content an engineer needs. These are **plan failures** — never write them:
-- "TBD", "TODO", "implement later", "fill in details"
-- "Add appropriate error handling" / "add validation" / "handle edge cases"
-- "Write tests for the above" (without actual test code)
-- "Similar to Task N" (repeat the code — the engineer may be reading tasks out of order)
-- Steps that describe what to do without showing how (code blocks required for code steps)
-- References to types, functions, or methods not defined in any task
-
-## Self-Review
-
-After writing the complete plan, look at the spec with fresh eyes and check the plan against it. This is a checklist you run yourself — not a subagent dispatch.
-
-**1. Spec coverage:** Skim each section/requirement in the spec. Can you point to a task that implements it? List any gaps.
-
-**2. Placeholder scan:** Search your plan for red flags — any of the patterns from the "No Placeholders" section above. Fix them.
-
-**3. Type consistency:** Do the types, method signatures, and property names you used in later tasks match what you defined in earlier tasks? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
-
-If you find issues, fix them inline. No need to re-review — just fix and move on. If you find a spec requirement with no task, add the task.
-
-## Execution Handoff
-
-After saving the plan, offer execution choice:
-
-**"Plan complete and saved to `docs/plans/<filename>.md`. Two execution options:**
-
-**1. Subagent-Driven (recommended)** - I dispatch a fresh subagent per task, review between tasks, fast iteration
-
-**2. Inline Execution** - Execute tasks in this session using executing-plans, batch execution with checkpoints
-
-**Which approach?"**
-
-**If Subagent-Driven chosen:**
-- **REQUIRED SUB-SKILL:** Use superpowers:subagent-driven-development
-- Fresh subagent per task + two-stage review
-
-**If Inline Execution chosen:**
-- **REQUIRED SUB-SKILL:** Use superpowers:executing-plans
-- Batch execution with checkpoints for review
+先给结论和推荐。需要计划时，按实际存在的内容给出：目标与验收、证据与约束、实施批次、验证与回退、待批准项。用户已授权直接实施时，计划可缩为简短行动说明，不另建文档或要求执行方式选择。

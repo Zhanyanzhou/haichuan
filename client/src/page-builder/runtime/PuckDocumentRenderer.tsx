@@ -23,7 +23,7 @@ import SinglePosterSection from "@/components/blocks/SinglePosterSection";
 import SplitPanelBlock from "@/components/blocks/SplitPanelBlock";
 import TextBannerBlock from "@/components/blocks/TextBannerBlock";
 import VideoBlock from "@/components/blocks/VideoBlock";
-import { productApi, publicProductStreamUrl } from "@/services/api";
+import { categoryApi, productApi, publicProductStreamUrl } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
 import type { Product } from "@/types";
 import { getListingImage } from "@/utils/productImage";
@@ -56,6 +56,30 @@ const BLOCK_ASSET_FIELDS = [
   "beforeImage",
   "afterImage",
 ];
+
+const LEGACY_RENDER_COLOR_MAP: Record<string, string> = {
+  "#1A1A1A": "#181A1B",
+  "#222222": "#181A1B",
+  "#66645F": "#5F6568",
+  "#8C8C8C": "#6E7477",
+  "#E4E3DF": "#DDE1E2",
+  "#F5F5F5": "#F4F5F5",
+  "#F8F7F4": "#F7F8F8",
+  "#FCFCFB": "#FFFFFF",
+};
+
+function normalizeLegacyRenderColors(value: unknown): unknown {
+  if (typeof value === "string") {
+    return LEGACY_RENDER_COLOR_MAP[value.toUpperCase()] ?? value;
+  }
+  if (Array.isArray(value)) return value.map(normalizeLegacyRenderColors);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, normalizeLegacyRenderColors(item)]),
+    );
+  }
+  return value;
+}
 
 function getLocalUploadUrls(props: Record<string, any>): string[] {
   const urls = new Set<string>();
@@ -101,16 +125,16 @@ function MissingMediaState({ type }: { type?: string }) {
         display: "grid",
         placeItems: "center",
         padding: "48px 24px",
-        background: "#F3F0E9",
-        border: "1px dashed #B8944E",
-        color: "#7D6440",
+        background: "#F4F5F5",
+        border: "1px solid #DDE1E2",
+        color: "#181A1B",
         textAlign: "center",
       }}
     >
       <div>
-        <p style={{ margin: "0 0 8px", fontSize: 15 }}>图片暂时不可用</p>
-        <p style={{ margin: 0, fontSize: 13, color: "#9A9288" }}>
-          请在店铺装修中重新上传{type ? `「${type}」` : "该区块"}的图片后再发布。
+        <p style={{ margin: "0 0 8px", fontSize: 15 }}>该内容暂不可展示</p>
+        <p style={{ margin: 0, fontSize: 13, color: "#5F6568" }}>
+          {type ? `「${type}」相关素材` : "相关素材"}暂时不可用，请稍后再试。
         </p>
       </div>
     </section>
@@ -132,9 +156,9 @@ function UnsupportedContentTemplateState({
         display: "grid",
         placeItems: "center",
         padding: "32px 24px",
-        background: "#F8F5F1",
-        border: "1px solid #B8944E",
-        color: "#5D4727",
+        background: "#F4F5F5",
+        border: "1px solid #B8BEC1",
+        color: "#181A1B",
         textAlign: "center",
       }}
     >
@@ -160,7 +184,7 @@ function toProductRowItem(product: Product) {
     name: product.name,
     image: getListingImage(product),
     price: formatProductPrice(product),
-    link: `/products/${product.id}`,
+    link: `/products/${encodeURIComponent(product.code || String(product.id))}`,
   };
 }
 
@@ -196,7 +220,7 @@ function ProductRowState({
               <h2
                 style={{
                   margin: "0 0 12px",
-                  color: "#1A1A1A",
+                  color: "#181A1B",
                   fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
                   fontSize: "clamp(24px,2.8vw,38px)",
                   lineHeight: 1.2,
@@ -210,7 +234,7 @@ function ProductRowState({
                 style={{
                   margin: "0 auto",
                   maxWidth: 480,
-                  color: "#8A7F72",
+                  color: "#5F6568",
                   fontSize: 13,
                   lineHeight: 1.6,
                 }}
@@ -220,7 +244,7 @@ function ProductRowState({
             )}
           </div>
         )}
-        <p style={{ color: "#9A9288", fontSize: 13 }}>{message}</p>
+        <p style={{ color: "#6E7477", fontSize: 13 }}>{message}</p>
       </div>
     </section>
   );
@@ -287,14 +311,21 @@ function ResolvedProductRowBlock({
         : [],
     [props.productIds],
   );
+  const productCodes = useMemo(
+    () => Array.isArray(props.productCodes)
+      ? props.productCodes.map(String).map((code: string) => code.trim()).filter(Boolean)
+      : [],
+    [props.productCodes],
+  );
   const idsKey = productIds.join(",");
+  const codesKey = productCodes.join(",");
   const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(productIds.length > 0);
+  const [loading, setLoading] = useState(productCodes.length + productIds.length > 0);
   const [error, setError] = useState(false);
   const [revision, setRevision] = useState(0);
 
   useEffect(() => {
-    if (productIds.length === 0) {
+    if (productCodes.length === 0 && productIds.length === 0) {
       setProducts([]);
       setLoading(false);
       setError(false);
@@ -302,22 +333,23 @@ function ResolvedProductRowBlock({
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setError(false);
 
     (async () => {
       try {
         const response = await productApi.getPublicList({
-          ids: idsKey,
-          pageSize: productIds.length,
+          ...(productCodes.length ? { codes: codesKey } : { ids: idsKey }),
+          pageSize: productCodes.length || productIds.length,
           sortBy: "sortOrder",
-        });
+        }, controller.signal);
         const data = unwrapResponse<any>(response);
         const list: Product[] = data?.list || data || [];
-        const byId = new Map(list.map((product) => [product.id, product]));
-        const ordered = productIds
-          .map((id) => byId.get(id))
-          .filter((product): product is Product => Boolean(product));
+        const byReference = new Map(list.map((product) => [productCodes.length ? product.code : product.id, product]));
+        const ordered = (productCodes.length ? productCodes : productIds)
+          .map((reference) => byReference.get(reference))
+          .filter((product): product is Product => Boolean(product && getListingImage(product)));
         if (!cancelled) setProducts(ordered);
       } catch {
         if (!cancelled) setError(true);
@@ -328,15 +360,16 @@ function ResolvedProductRowBlock({
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [idsKey, productIds, revision]);
+  }, [codesKey, idsKey, productCodes, productIds, revision]);
 
   useEffect(() => {
-    if (USE_MOCK || productIds.length === 0) return;
+    if (USE_MOCK || productCodes.length + productIds.length === 0) return;
     return subscribeProductStream(() => setRevision((value) => value + 1));
-  }, [productIds.length]);
+  }, [productCodes.length, productIds.length]);
 
-  if (productIds.length === 0) return null;
+  if (productCodes.length === 0 && productIds.length === 0) return null;
   if (loading) {
     return (
       <ProductRowState
@@ -377,25 +410,30 @@ function ResolvedProductRowBlock({
 
 function ResolvedFeaturedProductBlock({ props }: { props: Record<string, any> }) {
   const productId = Number(props.productId);
-  const hasValidProductId = Number.isInteger(productId) && productId > 0;
+  const productCode = String(props.productCode || "").trim();
+  const hasValidProductId = Boolean(productCode) || (Number.isInteger(productId) && productId > 0);
   const [product, setProduct] = useState<Product | null>(null);
-  const [loading, setLoading] = useState(productId > 0);
+  const [loading, setLoading] = useState(Boolean(productCode) || productId > 0);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    if (!Number.isInteger(productId) || productId <= 0) {
+    if (!productCode && (!Number.isInteger(productId) || productId <= 0)) {
       setProduct(null);
       setLoading(false);
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setError(false);
-    void productApi.getPublicList({ ids: String(productId), pageSize: 1 })
+    void productApi.getPublicList(productCode ? { codes: productCode, pageSize: 1 } : { ids: String(productId), pageSize: 1 }, controller.signal)
       .then((response) => {
         const result = unwrapResponse<any>(response);
         const list: Product[] = result?.list || result || [];
-        if (!cancelled) setProduct(list.find((item) => item.id === productId) || null);
+        if (!cancelled) {
+          const resolved = list.find((item) => productCode ? item.code === productCode : item.id === productId);
+          setProduct(resolved && getListingImage(resolved) ? resolved : null);
+        }
       })
       .catch(() => {
         if (!cancelled) setError(true);
@@ -403,8 +441,8 @@ function ResolvedFeaturedProductBlock({ props }: { props: Record<string, any> })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
-  }, [productId]);
+    return () => { cancelled = true; controller.abort(); };
+  }, [productCode, productId]);
 
   if (!hasValidProductId) return null;
   if (loading) return <ProductRowState title={props.title} bgColor={props.bgColor} message="正在加载主推商品" />;
@@ -423,26 +461,35 @@ function ResolvedLookbookBlock({ props }: { props: Record<string, any> }) {
       : [],
     [props.productIds],
   );
+  const productCodes = useMemo(
+    () => Array.isArray(props.productCodes) ? props.productCodes.map(String).filter(Boolean) : [],
+    [props.productCodes],
+  );
   const idsKey = productIds.join(",");
+  const codesKey = productCodes.join(",");
   const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(productIds.length > 0);
+  const [loading, setLoading] = useState(productCodes.length + productIds.length > 0);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    if (!idsKey) {
+    if (!idsKey && !codesKey) {
       setProducts([]);
       setLoading(false);
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setError(false);
-    void productApi.getPublicList({ ids: idsKey, pageSize: productIds.length, sortBy: "sortOrder" })
+    void productApi.getPublicList(productCodes.length
+      ? { codes: codesKey, pageSize: productCodes.length, sortBy: "sortOrder" }
+      : { ids: idsKey, pageSize: productIds.length, sortBy: "sortOrder" }, controller.signal)
       .then((response) => {
         const result = unwrapResponse<any>(response);
         const list: Product[] = result?.list || result || [];
-        const byId = new Map(list.map((item) => [item.id, item]));
-        if (!cancelled) setProducts(productIds.map((id) => byId.get(id)).filter((item): item is Product => Boolean(item)));
+        const byReference = new Map(list.map((item) => [productCodes.length ? item.code : item.id, item]));
+        const references = productCodes.length ? productCodes : productIds;
+        if (!cancelled) setProducts(references.map((reference) => byReference.get(reference)).filter((item): item is Product => Boolean(item && getListingImage(item))));
       })
       .catch(() => {
         if (!cancelled) setError(true);
@@ -450,8 +497,8 @@ function ResolvedLookbookBlock({ props }: { props: Record<string, any> }) {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
-  }, [idsKey, productIds]);
+    return () => { cancelled = true; controller.abort(); };
+  }, [codesKey, idsKey, productCodes, productIds]);
 
   if (loading) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="正在加载关联商品" />;
   if (error) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="关联商品暂时加载失败" />;
@@ -461,11 +508,63 @@ function ResolvedLookbookBlock({ props }: { props: Record<string, any> }) {
   return <LookbookBlock module={module} />;
 }
 
+interface PublicCategoryNode {
+  id: number;
+  slug: string;
+  name: string;
+  coverImage?: string | null;
+  children?: PublicCategoryNode[];
+}
+
+function flattenCategoryNodes(nodes: PublicCategoryNode[]): PublicCategoryNode[] {
+  return nodes.flatMap((node) => [node, ...flattenCategoryNodes(node.children ?? [])]);
+}
+
+function ResolvedCategoryCardsBlock({ props }: { props: Record<string, any> }) {
+  const slugs = useMemo(
+    () => Array.isArray(props.categorySlugs) ? props.categorySlugs.map(String).filter(Boolean) : [],
+    [props.categorySlugs],
+  );
+  const [categories, setCategories] = useState<Array<Record<string, unknown>>>([]);
+  const [loading, setLoading] = useState(slugs.length > 0);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!slugs.length) { setCategories([]); setLoading(false); return; }
+    const controller = new AbortController();
+    setLoading(true);
+    setError(false);
+    void categoryApi.getTree(controller.signal)
+      .then((response) => {
+        const data = unwrapResponse<PublicCategoryNode[]>(response);
+        const bySlug = new Map(flattenCategoryNodes(Array.isArray(data) ? data : []).map((node) => [node.slug, node]));
+        if (!controller.signal.aborted) setCategories(slugs.flatMap((slug) => {
+          const node = bySlug.get(slug);
+          return node?.coverImage ? [{ name: node.name, image: node.coverImage, link: `/products?categoryId=${node.id}`, altText: node.name }] : [];
+        }));
+      })
+      .catch(() => { if (!controller.signal.aborted) setError(true); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [slugs]);
+
+  if (loading) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="正在加载分类导航" />;
+  if (error) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="分类导航暂时加载失败" />;
+  if (categories.length === 0) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="所选分类当前不可展示" />;
+  const module = convertPuckProps("分类卡片", { ...props, categories });
+  return module ? <CategoryCardsBlock module={module} /> : null;
+}
+
 function renderBlock(block: PuckBlock, index: number) {
-  const props = block.props || {};
+  const props = normalizeLegacyRenderColors(block.props || {}) as Record<string, any>;
   const key = props.id || `${block.type || "block"}-${index}`;
   const wrap = (node: ReactNode) => (
-    <ContentTemplateContractFrame key={key} moduleType={block.type || ""} mode="public">
+    <ContentTemplateContractFrame
+      key={key}
+      moduleType={block.type || ""}
+      mode="public"
+      props={props}
+    >
       {node}
     </ContentTemplateContractFrame>
   );
@@ -496,6 +595,9 @@ function renderBlock(block: PuckBlock, index: number) {
   }
   if (block.type === "佩戴灵感") {
     return wrap(<ResolvedLookbookBlock props={props} />);
+  }
+  if (block.type === "分类卡片" && Array.isArray(props.categorySlugs) && props.categorySlugs.length > 0) {
+    return wrap(<ResolvedCategoryCardsBlock props={props} />);
   }
 
   const module = convertPuckProps(block.type || "", props);
@@ -598,7 +700,14 @@ export default function PuckDocumentRenderer({ data }: { data: PuckDocument }) {
   // 区块级兜底：单个 block 运行时抛错只跳过该区块，避免整页白屏
   const render = (block: PuckBlock, index: number) => {
     return (
-      <ErrorBoundary key={`eb-${block.props?.id || index}`} fallback={null}>
+      <ErrorBoundary
+        key={`eb-${block.props?.id || index}`}
+        fallback={
+          <section role="status" style={{ padding: "48px 24px", textAlign: "center", color: "#5F6568" }}>
+            该内容暂不可展示
+          </section>
+        }
+      >
         <GuardedBlock block={block} index={index} />
       </ErrorBoundary>
     );

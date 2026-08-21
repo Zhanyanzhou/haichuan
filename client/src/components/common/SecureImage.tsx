@@ -96,11 +96,11 @@ export function SecureImage({
   }, [src, tokenKind]);
 
   const placeholderStyle: CSSProperties = {
-    background: "#f3f4f6",
+    background: "#F4F5F5",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    color: "#9ca3af",
+    color: "#6E7477",
     fontSize: 12,
     textAlign: "center",
     padding: 8,

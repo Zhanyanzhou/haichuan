@@ -1,51 +1,54 @@
 /* ═══════════════════════════════════════════════
-   adminLuxury.css — 海川珠宝 后台 Design System v7.1
-   Quiet Luxury · Editorial Operations
+   adminLuxury.css — 海川珠宝 后台 Design System v8
+   Neutral Foundation · Functional Operations
    ═══════════════════════════════════════════════ */
 
 /* ═══ Design Tokens ═══ */
 .admin-shell-v7 {
   /* 背景 */
-  --adm-sidebar-bg: #fbfbfa;
+  --adm-sidebar-bg: #f4f5f5;
   --adm-content-bg: #ffffff;
   --adm-header-bg: #ffffff;
 
-  /* 品牌 */
-  --adm-brand-gold: #b8944e;
-  --adm-gold: var(--adm-brand-gold);
-  --adm-gold-soft: #f3efe7;
-  --adm-action: #6f5733;
-  --adm-focus: #6f5733;
+  /* 全站共享中性底盘；gold 变量仅作旧选择器兼容，不再表示金色。 */
+  --adm-action: #181a1b;
+  --adm-action-hover: #101213;
+  --adm-focus: #181a1b;
+  --adm-action-soft: #eceeef;
+  --adm-brand-gold: var(--adm-action);
+  --adm-gold: var(--adm-action);
+  --adm-gold-soft: var(--adm-action-soft);
 
   /* 文字 */
-  --adm-ink: #191918;
-  --adm-text-strong: #4c4945;
-  --adm-text: #5f5b55;
-  --adm-muted: #76716a;
-  --adm-subtle: #aaa39a;
+  --adm-ink: #181a1b;
+  --adm-text-strong: #181A1B;
+  --adm-text: #5f6568;
+  --adm-muted: #6e7477;
+  --adm-subtle: #6E7477;
 
   /* 语义状态 */
-  --adm-success: #3e6e4f;
-  --adm-success-bg: #f0f5f1;
-  --adm-success-border: #b7c8bb;
-  --adm-warning: #8a5a1f;
-  --adm-warning-bg: #fbf4e9;
-  --adm-warning-border: #d8c3a4;
-  --adm-error: #9a4a45;
+  --adm-success: #356348;
+  --adm-success-bg: #eff5f1;
+  --adm-success-border: #acc4b4;
+  --adm-warning: #7a531a;
+  --adm-warning-bg: #fbf4e8;
+  --adm-warning-border: #d4bd96;
+  --adm-error: #8c3f3b;
   --adm-error-bg: #faf0ef;
-  --adm-error-border: #d8bbb8;
-  --adm-info: #3d668a;
-  --adm-info-bg: #eef3f7;
-  --adm-info-border: #b7c6d1;
-  --adm-neutral-bg: #f5f4f1;
-  --adm-neutral-border: #d9d3c8;
+  --adm-error-border: #d7b6b4;
+  --adm-info: #335f7d;
+  --adm-info-bg: #eef4f7;
+  --adm-info-border: #adc3d0;
+  --adm-neutral-bg: #F4F5F5;
+  --adm-neutral-border: #DDE1E2;
 
   /* 边框 */
-  --adm-line: #e9e5de;
+  --adm-line: #dde1e2;
+  --adm-line-strong: #b8bec1;
 
   /* 选中态 */
-  --adm-active-bg: #f0f0ef;
-  --adm-active-border: #1a1a1a;
+  --adm-active-bg: #eceeef;
+  --adm-active-border: #181a1b;
 
   /* 布局 */
   --adm-header-h: 48px;
@@ -116,6 +119,18 @@
   letter-spacing: 0;
 }
 
+.admin-shell-v7 .ant-btn {
+  box-shadow: none !important;
+}
+
+.admin-shell-v7 .ant-empty-image ellipse {
+  fill: #F4F5F5 !important;
+}
+
+.admin-shell-v7 .ant-empty-image path {
+  fill: #DDE1E2 !important;
+}
+
 /* Ant 预设色统一收敛到后台五类语义色；状态含义仍由页面文字提供。 */
 .admin-shell-v7 .ant-tag-green,
 .admin-shell-v7 .ant-tag-success {
@@ -154,6 +169,14 @@
   color: var(--adm-text);
   background: var(--adm-neutral-bg);
   border-color: var(--adm-neutral-border);
+}
+
+.admin-shell-v7 .ant-table-cell-fix-right-first::after {
+  box-shadow: inset -10px 0 8px -8px rgba(24, 26, 27, 0.14) !important;
+}
+
+.admin-shell-v7 .ant-table-cell-fix-left-last::after {
+  box-shadow: inset 10px 0 8px -8px rgba(24, 26, 27, 0.14) !important;
 }
 
 /* 后台历史 Tailwind 文字色统一映射到语义令牌，避免页面继续继承前台色盘。 */
@@ -208,7 +231,7 @@
 
 /* Ant Design 确认框挂载在后台壳层之外，需单独提供键盘焦点。 */
 .ant-modal-confirm .ant-btn:focus-visible {
-  outline: 2px solid #6f5733;
+  outline: 2px solid #181a1b;
   outline-offset: 2px;
   box-shadow: none;
 }
@@ -357,7 +380,7 @@
   border-radius: 0 8px 8px 0;
   color: var(--adm-muted);
   background: rgb(255 255 255 / 96%);
-  box-shadow: 3px 0 10px rgb(54 44 28 / 6%);
+  box-shadow: 3px 0 10px rgb(24 26 27 / 6%);
   cursor: pointer;
   transform: translateY(-50%);
   transition:
@@ -370,7 +393,7 @@
 .admin-sidebar__collapse-handle:hover {
   color: var(--adm-ink);
   background: #fff;
-  box-shadow: 4px 0 14px rgb(54 44 28 / 10%);
+  box-shadow: 4px 0 14px rgb(24 26 27 / 10%);
 }
 
 .admin-sidebar__collapse-handle:focus-visible {
@@ -751,15 +774,15 @@
 
 .admin-shell-v7--workspace {
   --adm-sidebar-w: 180px;
-  --adm-sidebar-bg: #fbfbfa;
-  --adm-text: #343a40;
-  --adm-muted: #8e9194;
-  --adm-subtle: #c7c9ca;
-  --adm-line: #e4e4e1;
-  --adm-gold: #1b1b1b;
-  --adm-gold-soft: #efefec;
-  --adm-active-bg: #eeeeed;
-  --adm-active-border: #1b1b1b;
+  --adm-sidebar-bg: #f4f5f5;
+  --adm-text: #5f6568;
+  --adm-muted: #6e7477;
+  --adm-subtle: #6E7477;
+  --adm-line: #dde1e2;
+  --adm-gold: #181a1b;
+  --adm-gold-soft: #eceeef;
+  --adm-active-bg: #eceeef;
+  --adm-active-border: #181a1b;
 }
 
 .admin-shell-v7--workspace > .admin-header {
@@ -797,7 +820,7 @@
 }
 
 .admin-shell-v7--workspace .admin-sidebar__domain-row.is-active {
-  box-shadow: inset 3px 0 0 #171717;
+  box-shadow: inset 3px 0 0 #181A1B;
 }
 
 .admin-shell-v7--workspace .admin-sidebar__domain-label {
@@ -939,11 +962,11 @@
 }
 .admin-dashboard__refresh.is-done {
   color: var(--adm-success);
-  border-color: #cdd9d0;
+  border-color: #ACC4B4;
 }
 .admin-dashboard__refresh.is-error {
   color: var(--adm-error);
-  border-color: #e3c9c6;
+  border-color: #D7B6B4;
 }
 .admin-dashboard__refresh .is-spinning {
   animation: admin-dashboard-spin 0.9s linear infinite;
@@ -1002,7 +1025,7 @@
 .admin-dashboard__card:hover {
   border-color: var(--adm-subtle);
   transform: translateY(-2px);
-  box-shadow: 0 4px 14px rgba(26, 26, 26, 0.06);
+  box-shadow: 0 4px 14px rgba(24, 26, 27, 0.06);
 }
 .admin-dashboard__card-icon {
   display: inline-flex;
@@ -1044,11 +1067,11 @@
 }
 .admin-dashboard__card-change.is-up {
   color: var(--adm-success);
-  background: #eaf2ec;
+  background: #EFF5F1;
 }
 .admin-dashboard__card-change.is-down {
   color: var(--adm-error);
-  background: #f4e7e5;
+  background: #FAF0EF;
 }
 .admin-dashboard__card-change.is-neutral {
   color: var(--adm-muted);
@@ -1058,7 +1081,7 @@
 }
 .admin-dashboard__card.is-skeleton {
   pointer-events: none;
-  background: linear-gradient(90deg, #faf9f6 25%, #f3efe7 37%, #faf9f6 63%);
+  background: linear-gradient(90deg, #f7f8f8 25%, #eceeef 37%, #f7f8f8 63%);
   background-size: 400% 100%;
   animation: admin-dashboard-skel 1.4s ease infinite;
 }
@@ -1115,7 +1138,7 @@
 .admin-dashboard__segmented button.is-active {
   background: #fff;
   color: var(--adm-ink);
-  box-shadow: 0 1px 2px rgba(26, 26, 26, 0.06);
+  box-shadow: 0 1px 2px rgba(24, 26, 27, 0.06);
 }
 .admin-dashboard__trend-chart {
   width: 100%;
@@ -1130,7 +1153,7 @@
   border: 1px solid var(--adm-line);
   border-radius: 3px;
   background: #fff;
-  box-shadow: 0 4px 14px rgba(26, 26, 26, 0.08);
+  box-shadow: 0 4px 14px rgba(24, 26, 27, 0.08);
   font-size: 12px;
 }
 .admin-dashboard__trend-tooltip span {
@@ -1180,7 +1203,7 @@
 }
 .admin-dashboard__alert-item:hover {
   border-color: var(--adm-subtle);
-  background: #fafaf8;
+  background: var(--adm-surface-muted);
 }
 .admin-dashboard__alert-count {
   color: var(--adm-action);
@@ -1267,24 +1290,24 @@
    ═══════════════════════════════════════════════ */
 .admin-shell {
   --admin-bg: #ffffff;
-  --admin-line: #ebe8e3;
-  --admin-accent: #b8944e;
-  --admin-ink: #191918;
-  --admin-muted: #76716a;
-  --admin-subtle: #aaa39a;
-  --admin-gold: #b8944e;
-  --admin-gold-soft: #f2ede5;
-  --admin-action: #6f5733;
-  --admin-text-strong: #4c4945;
-  --admin-text: #5f5b55;
-  --admin-success: #3e6e4f;
-  --admin-success-bg: #f0f5f1;
-  --admin-warning: #8a5a1f;
-  --admin-warning-bg: #fbf4e9;
-  --admin-error: #9a4a45;
+  --admin-line: #dde1e2;
+  --admin-accent: #181a1b;
+  --admin-ink: #181a1b;
+  --admin-muted: #6e7477;
+  --admin-subtle: #6E7477;
+  --admin-gold: #181a1b;
+  --admin-gold-soft: #eceeef;
+  --admin-action: #181a1b;
+  --admin-text-strong: #181A1B;
+  --admin-text: #5f6568;
+  --admin-success: #356348;
+  --admin-success-bg: #eff5f1;
+  --admin-warning: #7a531a;
+  --admin-warning-bg: #fbf4e8;
+  --admin-error: #8c3f3b;
   --admin-error-bg: #faf0ef;
-  --admin-info: #3d668a;
-  --admin-info-bg: #eef3f7;
+  --admin-info: #335f7d;
+  --admin-info-bg: #eef4f7;
 }
 .admin-shell .lux-empty {
   color: var(--admin-muted);

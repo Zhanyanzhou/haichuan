@@ -34,7 +34,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <p className="text-5xl mb-4">⚠️</p>
             <h2
               className="text-2xl font-medium mb-2"
-              style={{ color: "#2C2C2C" }}
+              style={{ color: "#181A1B" }}
             >
               页面加载异常
             </h2>
@@ -47,7 +47,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 this.setState({ hasError: false });
                 window.location.reload();
               }}
-              className="rounded bg-[#B8944E] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#a6803f] focus:outline-none focus:ring-2 focus:ring-[#B8944E] focus:ring-offset-2"
+              className="rounded bg-[#181A1B] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#101213] focus:outline-none focus:ring-2 focus:ring-[#181A1B] focus:ring-offset-2"
             >
               刷新页面
             </button>

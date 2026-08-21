@@ -52,6 +52,14 @@ async function mockCatalogApi(page: Page) {
     localStorage.removeItem("hc_selection_tray");
   });
   await page.route("**/api/products/catalog/stream", (route) => route.abort());
+  await page.route("**/api/page-modules/document/stream", (route) => route.abort());
+  await page.route("**/api/page-modules/document/published?*", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(wrapped(null)),
+    }),
+  );
   await page.route("**/api/categories/tree", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(wrapped(categories)) }),
   );
@@ -123,10 +131,13 @@ test("Catalog 使用服务端分页并保持 URL、快速预览与跨页选款�
   await expect(page.getByRole("button", { name: "2", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "快速预览 作品 01" }).press("Enter");
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByRole("button", { name: "关闭快速预览" })).toBeFocused();
-  await expect(page.getByRole("heading", { name: "作品 01" }).last()).toBeVisible();
-  await page.getByRole("button", { name: "+ 加入选款" }).click();
+  const quickView = page.getByRole("dialog");
+  await expect(quickView).toBeVisible();
+  await expect(quickView).toHaveAccessibleName("HC-TEST-001");
+  await expect(quickView.getByRole("button", { name: "关闭快速预览" })).toBeFocused();
+  await expect(quickView.getByRole("heading", { name: "HC-TEST-001" })).toBeVisible();
+  await expect(quickView.getByText("作品 01", { exact: true })).toBeVisible();
+  await quickView.getByRole("button", { name: "+ 加入选款" }).click();
   await page.keyboard.press("Escape");
   await expect(page.getByText("已选 1 款")).toBeVisible();
 

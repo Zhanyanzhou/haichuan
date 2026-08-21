@@ -96,5 +96,5 @@ npx playwright test tests
 
 - 本地裸跑 server（非容器）时设置页显示"备份目录未挂载"——诚实降级
 - 快递100/短信/SMTP 未配置时对应功能 503 + 明确提示——诚实降级
-- CUSTOMER_COMMERCE_ENABLED 默认 true：加购/结算/付款凭证入口正常渲染；显式设为 false 时按开关隐藏（安全兜底）
+- CUSTOMER_COMMERCE_ENABLED 默认 false：加购/结算/付款凭证入口按开关隐藏（安全兜底）；仅获 D.2 批准的环境显式设为 true 后才正常渲染
 - ProductList SSE 商品变更后回到第一页——服务端分页模式的既定行为

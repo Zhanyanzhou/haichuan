@@ -84,6 +84,13 @@ export class PublicProductQueryDto {
   @Matches(POSITIVE_ID_CSV, { message: "ids 必须是正整数逗号列表" })
   ids?: string;
 
+  /** 新 PageDocument 使用的稳定商品 code 集合。 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(10_000)
+  @Matches(NON_EMPTY_CSV, { message: "codes 必须是非空逗号列表" })
+  codes?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(100)

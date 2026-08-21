@@ -2,11 +2,9 @@
  * schema/modules/lookbook.ts — 「佩戴灵感(佩戴展示)」编辑区 Schema。
  * Hero Piece 母版(场景变体):4:5 佩戴大片 + 关联作品。
  */
-import { createElement } from "react";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { lookbookPuckConfig } from "../../../adapters/lookbook.puck";
-import ProductIdsField from "../../../fields/ProductIdsField";
-import { altTextField, bgColorPresetField, linkTargetField, moduleNameField, ratioField } from "../shared";
+import { ADVANCED_BG_COLOR_FIELD, altTextField, bgColorPresetField, linkTargetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 /** 槽位比例选项(契约派生):佩戴大片全端统一 */
@@ -48,14 +46,12 @@ export const lookbookSchema: ModuleInspectorSchema = {
       description: "关联可直接查看的站内作品",
       fields: [
         {
-          key: "productIds",
+          key: "productCodes",
           label: "关联作品（建议 2–4 件）",
-          control: "custom",
-          render: ({ props, update }) =>
-            createElement(ProductIdsField, {
-              value: Array.isArray(props.productIds) ? props.productIds : [],
-              onChange: (ids: number[]) => update({ productIds: ids }),
-            }),
+          control: "productReferences",
+          legacyKey: "productIds",
+          minItems: 1,
+          maxItems: 4,
         },
       ],
     },
@@ -104,7 +100,7 @@ export const lookbookSchema: ModuleInspectorSchema = {
       id: "lookbook-style",
       title: "样式",
       layer: "style",
-      fields: [bgColorPresetField()],
+      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
     },
   ],
 };

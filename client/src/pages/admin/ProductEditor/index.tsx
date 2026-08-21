@@ -36,6 +36,7 @@ import { SecureImage } from "@/components/common/SecureImage";
 import { unwrapResponse } from "@/utils/unwrap";
 import ScifiButton from "@/components/ui/ScifiButton";
 import { formatPrice } from "@/utils/format";
+import UnsavedChangesGuard from "../HomepageConfig/components/UnsavedChangesGuard";
 import "./ProductEditor.css";
 
 const { TextArea } = Input;
@@ -265,7 +266,7 @@ export default function ProductEditor() {
 
   const certDebounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const redirectedRef = useRef(false);
-  const saveRef = useRef<((asDraft?: boolean) => Promise<void>) | null>(null);
+  const saveRef = useRef<((asDraft?: boolean) => Promise<boolean>) | null>(null);
 
   /* 导航联动 */
   const [activeSection, setActiveSection] = useState("media");
@@ -504,13 +505,17 @@ export default function ProductEditor() {
     setIsDirty(true);
   };
 
-  const save = async (asDraft = false) => {
+  const save = async (asDraft = false): Promise<boolean> => {
     // 验证必填字段
-    await form.validateFields(
-      asDraft
-        ? ["name", "code", "categoryId", "materialType"]
-        : ["name", "code", "categoryId", "materialType", "price"],
-    );
+    try {
+      await form.validateFields(
+        asDraft
+          ? ["name", "code", "categoryId", "materialType"]
+          : ["name", "code", "categoryId", "materialType", "price"],
+      );
+    } catch {
+      return false;
+    }
     // 关键：validateFields 只返回命名字段，必须用 getFieldsValue 获取全部表单值
     const values = form.getFieldsValue();
     // 发布前预校验(与后端 canPublish 同口径:价/图/SKU,避免填完一堆信息提交后才收 400)
@@ -525,7 +530,7 @@ export default function ProductEditor() {
       if (problems.length) {
         if (!pricedSkuExists && !(Number(values.price) > 0)) form.setFields([{ name: "price", errors: ["请填写大于 0 的起价，或添加有价格的 SKU"] }]);
         message.warning(`发布前请补全: ${problems.join("、")}`);
-        return;
+        return false;
       }
     }
     setSaving(true);
@@ -568,9 +573,11 @@ export default function ProductEditor() {
           // 商品资料已存（不回滚），但标签未存：保持 dirty 提示重试，不弹 success 以免误判已全存
           message.warning("商品资料已保存，但标签保存失败（单条≤50字），请重新保存");
           setIsDirty(true);
+          return false;
         } else {
           message.success(asDraft ? "草稿已保存" : "商品基础资料已保存");
           setIsDirty(false);
+          return true;
         }
       } else {
         const result = await productApi.create({ ...payload, code: values.code, skus: pendingSkus.map(({ key, ...sku }) => sku) });
@@ -628,10 +635,12 @@ export default function ProductEditor() {
         setIsDirty(false);
         setPendingSkus([]);
         navigate(`/admin/products/${created.id}/edit`, { replace: true });
+        return true;
       }
     } catch (error: any) {
       console.error("保存失败:", error);
       message.error(getSafeAdminErrorMessage(error, "商品保存失败，请检查必填信息后重试。"));
+      return false;
     } finally { setSaving(false); }
   };
   saveRef.current = save;
@@ -1218,7 +1227,7 @@ export default function ProductEditor() {
             </Form.Item>
 
             {/* 宝石信息 — 可折叠 */}
-            <div style={{ marginTop: 20, borderTop: "1px solid #ebe8e3", paddingTop: 4 }}>
+            <div style={{ marginTop: 20, borderTop: "1px solid #dde1e2", paddingTop: 4 }}>
               <CollapseHeader expanded={gemExpanded} onToggle={() => setGemExpanded(!gemExpanded)}
                 title="宝石信息" hint="（钻石/彩宝类商品填写）" />
               {gemExpanded && (
@@ -1325,18 +1334,25 @@ export default function ProductEditor() {
           <section id="publish" className="product-editor__card">
             <SectionTitle title="上架设置" />
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 20px" }}>
-              <Form.Item name="status" label="上架状态">
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <Form.Item
+                name="status"
+                label="上架状态"
+                style={{ marginBottom: 0 }}
+                extra={<span style={{ color: "var(--adm-muted)", fontSize: 12 }}>优先设置：选「出售中」即上架，商品才会进入前台</span>}
+              >
                 <Select options={statuses.map((s) => ({ value: s, label: statusMeta[s].label }))} />
               </Form.Item>
               <Form.Item
                 name="visibility"
                 label="可见范围"
-                tooltip="INTERNAL 不会出现在任何前台目录或推荐中；PARTNER 仅审核通过的合作商家可见"
+                style={{ marginBottom: 0 }}
+                tooltip="上架后生效：决定哪些访客能在前台看到此商品。INTERNAL 前台永不展示；PARTNER 仅审核通过的合作商家可见"
+                extra={<span style={{ color: "var(--adm-muted)", fontSize: 12 }}>默认仅登录会员可见；如需游客浏览，请选择公开宣传款</span>}
               >
                 <Select
                   options={[
-                    { value: "PUBLIC", label: "公开宣传款" },
+                    { value: "PUBLIC", label: "公开宣传款（游客可见）" },
                     { value: "MEMBER", label: "登录会员可见（默认）" },
                     { value: "PARTNER", label: "合作商家专属" },
                     { value: "INTERNAL", label: "内部不可见（前台永不展示）" },
@@ -1344,6 +1360,7 @@ export default function ProductEditor() {
                 />
               </Form.Item>
               <Form.Item name="salesMode" label="销售方式"
+                style={{ marginBottom: 0 }}
                 tooltip="仅「直接购买」支持前台加购下单；其余方式将引导客户到对应咨询入口（选款/预约/定制）"
                 extra={<span style={{ color: "var(--adm-muted)", fontSize: 12 }}>仅「直接购买」可直接下单，其余引导咨询</span>}>
                 <Select options={[
@@ -1397,7 +1414,7 @@ export default function ProductEditor() {
               </div>
             )}
 
-            <div style={{ marginTop: 20, padding: "10px 14px", border: "1px solid #ebe8e3", borderRadius: 6 }}>
+            <div style={{ marginTop: 20, padding: "10px 14px", border: "1px solid #dde1e2", borderRadius: 6 }}>
               <Space align="start">
                 <Form.Item name="multiDiscount" valuePropName="checked" noStyle>
                   <Checkbox disabled>启用多件优惠</Checkbox>
@@ -1407,7 +1424,7 @@ export default function ProductEditor() {
             </div>
 
             {/* 证书管理 — 可折叠 */}
-            <div style={{ marginTop: 20, borderTop: "1px solid #ebe8e3", paddingTop: 4 }}>
+            <div style={{ marginTop: 20, borderTop: "1px solid #dde1e2", paddingTop: 4 }}>
               <CollapseHeader expanded={certExpanded} onToggle={() => setCertExpanded(!certExpanded)}
                 title="证书管理" hint={certRows.length > 0 ? `（${certRows.length} 份）` : ""} />
               {certExpanded && (
@@ -1418,11 +1435,11 @@ export default function ProductEditor() {
                     certRows.map((cert) => (
                       <div key={cert.key}
                         style={{
-                          border: "1px solid #f0f0f0", borderRadius: 8, padding: 14, marginBottom: 10,
+                          border: "1px solid #DDE1E2", borderRadius: 8, padding: 14, marginBottom: 10,
                           transition: "border-color 0.2s, box-shadow 0.2s",
                         }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "#d9d0bd"; (e.currentTarget as HTMLElement).style.boxShadow = "0 2px 6px rgba(0,0,0,0.04)"; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "#f0f0f0"; (e.currentTarget as HTMLElement).style.boxShadow = "none"; }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "#b8bec1"; (e.currentTarget as HTMLElement).style.boxShadow = "0 2px 6px rgba(0,0,0,0.04)"; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "#DDE1E2"; (e.currentTarget as HTMLElement).style.boxShadow = "none"; }}
                       >
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                           <Select value={cert.certType} style={{ width: 160 }}
@@ -1509,6 +1526,11 @@ export default function ProductEditor() {
           </span>
         </div>
       </footer>
+      <UnsavedChangesGuard
+        hasUnsavedChanges={isDirty}
+        disabled={loading || Boolean(loadError) || saving}
+        onSaveAndLeave={async () => saveRef.current?.() ?? false}
+      />
     </div>
   );
 }

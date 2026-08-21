@@ -4,11 +4,30 @@
  */
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { videoPuckConfig } from "../../../adapters/video.puck";
-import { linkTargetField, moduleNameField, ratioField } from "../shared";
+import {
+  ADVANCED_BG_COLOR_FIELD,
+  bgColorPresetField,
+  linkTargetField,
+  moduleNameField,
+  ratioField,
+} from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 /** 契约锁定为单一比例时,布局区自动消失 */
 const videoRatioControl = ratioField("video", "coverImage");
+
+/** 视频窗口宽度档(槽位大小):通栏全宽 / 宽 / 标准,默认标准保持既有观感 */
+const videoWidthControl = {
+  key: "videoWidth",
+  label: "视频宽度",
+  control: "segmented" as const,
+  hint: "视频窗口在页面中的宽度大小",
+  options: [
+    { label: "铺满", value: "full" },
+    { label: "宽", value: "wide" },
+    { label: "标准", value: "standard" },
+  ],
+};
 
 export const videoSchema: ModuleInspectorSchema = {
   moduleType: "视频区块",
@@ -80,16 +99,21 @@ export const videoSchema: ModuleInspectorSchema = {
         linkTargetField("行动入口点击后"),
       ],
     },
-    ...(videoRatioControl
-      ? [
-          {
-            id: "video-layout",
-            title: "布局",
-            layer: "layout" as const,
-            fields: [videoRatioControl],
-          },
-        ]
-      : []),
+    {
+      id: "video-layout",
+      title: "布局",
+      layer: "layout" as const,
+      fields: [
+        videoWidthControl,
+        ...(videoRatioControl ? [videoRatioControl] : []),
+      ],
+    },
+    {
+      id: "video-style",
+      title: "样式",
+      layer: "style",
+      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
+    },
     {
       id: "video-advanced",
       title: "模板专属功能",

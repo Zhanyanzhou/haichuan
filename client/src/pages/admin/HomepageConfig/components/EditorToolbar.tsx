@@ -98,6 +98,8 @@ export default function EditorToolbar({
   hasPendingDraft,
   viewingPublished,
   hasUnsavedChanges,
+  publishValidationState,
+  publishErrorCount,
   draftSavedAtLabel,
   onPublish,
   onSaveDraft,
@@ -116,6 +118,10 @@ export default function EditorToolbar({
   viewingPublished: boolean;
   /** 画布存在未保存修改 */
   hasUnsavedChanges: boolean;
+  /** 最新服务端发布门禁状态；非 current 时不得把页面表现为可发布。 */
+  publishValidationState: "checking" | "current" | "stale" | "error";
+  /** 最新服务端门禁中的阻断级问题数量。 */
+  publishErrorCount: number;
   /** 草稿最后保存时间标签(如 "14:32") */
   draftSavedAtLabel: string | null;
   onPublish: (data: unknown, locateBlock: (blockIndex: number) => void) => void;
@@ -133,6 +139,17 @@ export default function EditorToolbar({
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const currentViewport = viewports.current;
+  const publishUnavailableReason = viewingPublished
+    ? "正在查看线上版本，无需重复发布"
+    : publishValidationState === "checking"
+      ? "正在核对发布资格"
+      : publishValidationState === "stale"
+        ? "内容已变化，等待重新核对发布资格"
+        : publishValidationState === "error"
+          ? "发布资格暂时无法核对，请稍后重试"
+          : publishErrorCount > 0
+            ? `还有 ${publishErrorCount} 项发布问题需要处理`
+            : null;
 
   useEffect(() => {
     onDataChange(appData);
@@ -450,11 +467,13 @@ export default function EditorToolbar({
           size="small"
           type="primary"
           icon={<SendOutlined />}
-          aria-label="发布到前台网站"
+          aria-label={publishUnavailableReason
+            ? `发布到前台网站（${publishUnavailableReason}）`
+            : "发布到前台网站"}
           loading={publishing}
-          disabled={viewingPublished}
+          disabled={Boolean(publishUnavailableReason)}
           onClick={publishCurrentPage}
-          title={viewingPublished ? "正在查看线上版本，无需重复发布" : "发布到前台网站"}
+          title={publishUnavailableReason ?? "发布到前台网站"}
         >
           发布
         </Button>

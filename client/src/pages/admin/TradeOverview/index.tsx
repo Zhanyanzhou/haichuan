@@ -19,11 +19,11 @@ const ORDER_TYPE_LABEL: Record<string, string> = {
 };
 
 function StatCard({ title, value, hint, accent }: { title: string; value: string | number; hint?: string; accent?: "gold" | "green" | "red" | "orange" }) {
-  const accentClass = accent === "green" ? "text-green-600" : accent === "red" ? "text-red-500" : accent === "orange" ? "text-orange-500" : "text-brand-gold";
+  const accentColor = accent === "green" ? "var(--adm-success)" : accent === "red" ? "var(--adm-error)" : accent === "orange" ? "var(--adm-warning)" : "var(--adm-ink)";
   return (
     <Card className="!bg-white !border-brand-line" size="small">
       <p className="text-xs text-brand-muted">{title}</p>
-      <p className={`admin-type-kpi mt-1 ${accentClass}`}>{value}</p>
+      <p className="admin-type-kpi mt-1" style={{ color: accentColor }}>{value}</p>
       {hint && <p className="text-xs text-brand-muted mt-1">{hint}</p>}
     </Card>
   );

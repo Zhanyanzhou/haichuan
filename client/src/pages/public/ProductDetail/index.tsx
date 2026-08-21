@@ -232,7 +232,7 @@ export default function ProductDetail() {
       if (!id) return;
       setLoading(true);
       try {
-        const res = await productApi.getPublicById(Number(id));
+        const res = await productApi.getPublicById(id || "");
         const data = unwrapResponse<Product>(res);
         setProduct(data);
         if (data?.skus?.length)
@@ -321,6 +321,7 @@ export default function ProductDetail() {
   const displayPrice = selectedSku ? Number(selectedSku.price) : startingPrice;
   const commerceOk = isCommerceAllowed(product.salesMode, commerceEnabled);
   const displayGoldWeight = selectedSku?.goldWeight ?? product.goldWeight;
+  const detailBlocks = product.detailContent ?? [];
 
   const handleAddToCart = async () => {
     if (!selectedSku) {
@@ -665,6 +666,24 @@ export default function ProductDetail() {
             <SimilarProducts productId={product.id} />
           </motion.div>
         </div>
+        {detailBlocks.length > 0 && (
+          <section className="mx-auto mt-20 max-w-5xl border-t border-brand-line pt-14" aria-label="商品详情">
+            {detailBlocks.map((block, index) => {
+              if (block.type === "TEXT") {
+                return block.text ? (
+                  <p key={`detail-text-${index}`} className="mx-auto max-w-3xl whitespace-pre-wrap py-8 text-base leading-8 text-brand-muted">
+                    {block.text}
+                  </p>
+                ) : null;
+              }
+              const image = product.images?.find((item) => item.id === block.imageId) as any;
+              const src = image?.mediaUrl || image?.url;
+              return src ? (
+                <img key={`detail-image-${index}`} src={src} alt={block.alt || `${product.name} 详情图 ${index + 1}`} className="mx-auto block h-auto w-full" loading="lazy" />
+              ) : null;
+            })}
+          </section>
+        )}
       </div>
     </div>
   );

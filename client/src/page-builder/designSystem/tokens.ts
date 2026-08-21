@@ -47,7 +47,7 @@ export type SpacingLevel = "compact" | "normal" | "spacious" | "grand";
 export const FONT_DISPLAY = '"Cormorant Garamond","Noto Serif SC",serif';
 export const FONT_SANS = "Inter,system-ui,-apple-system,sans-serif";
 
-/* ═══ 品牌色板(配色预设的唯一色值来源;消灭 #B8944E/#a9854d/#8E6A35 漂移) ═══ */
+/* ═══ 中性色板（保留历史键名以兼容已保存文档） ═══ */
 export type ToneKey = "ivory" | "champagne" | "ink" | "brand";
 
 export interface TonePreset {
@@ -61,36 +61,36 @@ export interface TonePreset {
 
 export const TONE_PRESETS: Record<ToneKey, TonePreset> = {
   ivory: {
-    label: "米白经典",
-    bg: "#FBF9F6",
-    ink: "#2C2C2C",
-    muted: "#8A7F72",
-    gold: "#B8944E",
-    line: "rgba(0,0,0,0.08)",
+    label: "纯白经典",
+    bg: "#FFFFFF",
+    ink: "#181A1B",
+    muted: "#5F6568",
+    gold: "#181A1B",
+    line: "#DDE1E2",
   },
   champagne: {
-    label: "暖金高级",
-    bg: "#F5EDE0",
-    ink: "#2C2C2C",
-    muted: "#8A7F72",
-    gold: "#9A7B3E",
-    line: "rgba(0,0,0,0.08)",
+    label: "矿物浅灰",
+    bg: "#F4F5F5",
+    ink: "#181A1B",
+    muted: "#5F6568",
+    gold: "#181A1B",
+    line: "#DDE1E2",
   },
   ink: {
-    label: "深色典雅",
-    bg: "#211D19",
-    ink: "#FFFFFF",
+    label: "曜石深色",
+    bg: "#111315",
+    ink: "#F7F8F8",
     muted: "rgba(255,255,255,0.78)",
-    gold: "#D8B86D",
+    gold: "#F7F8F8",
     line: "rgba(255,255,255,0.14)",
   },
   brand: {
-    label: "品牌米金",
-    bg: "#FCFCFB",
-    ink: "#28231F",
-    muted: "rgba(40,35,31,0.58)",
-    gold: "#B8944E",
-    line: "rgba(0,0,0,0.08)",
+    label: "品牌中性",
+    bg: "#FFFFFF",
+    ink: "#181A1B",
+    muted: "#5F6568",
+    gold: "#181A1B",
+    line: "#DDE1E2",
   },
 };
 

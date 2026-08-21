@@ -1,17 +1,15 @@
 import { Link } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { usePageMetaStore } from '@/store/pageMetaStore';
-import { pageDocumentApi } from '@/services/api';
-import { unwrapResponse } from '@/utils/unwrap';
 
 /* ═══════ 设计常量 ═══════ */
-const DARK = '#24211E';
-const LIGHT = '#F3F0EA';
+const DARK = '#111315';
+const LIGHT = '#F4F5F5';
 
 function SectionLabel({ number, label }: { number: string; label: string }) {
   return (
     <p className="text-[11px] md:text-[12px] tracking-[.2em] uppercase mb-8 md:mb-10 font-sans"
-      style={{ color: '#9B8264', fontFamily: 'Inter, system-ui, sans-serif' }}>
+      style={{ color: '#5F6568', fontFamily: 'Inter, system-ui, sans-serif' }}>
       {number} / {label}
     </p>
   );
@@ -26,31 +24,13 @@ const designChapters = [
 export default function About() {
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
-  // 检测 about 装修内容：已发布则由 PublishedPageDecoration 渲染，本页不重复硬编码；未发布才兑底
-  const [published, setPublished] = useState<boolean | null>(null);
   useEffect(() => {
     setPageMeta({
       title: '品牌故事 | 海川珠宝',
-      description: '海川珠宝的品牌理念、设计哲学与东方工艺传承。',
+      description: '了解海川珠宝的品牌理念、设计视角与珠宝作品。',
     });
     return () => clearPageMeta();
   }, [setPageMeta, clearPageMeta]);
-
-  useEffect(() => {
-    let cancelled = false;
-    pageDocumentApi
-      .getPublished("about")
-      .then((res) => {
-        const data = unwrapResponse<any>(res);
-        if (!cancelled) setPublished(Boolean(data?.puckData?.content?.length));
-      })
-      .catch(() => {
-        if (!cancelled) setPublished(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const [activeDesign, setActiveDesign] = useState(0);
   const designRefs = useRef<(HTMLElement | null)[]>([]);
@@ -65,34 +45,31 @@ export default function About() {
     return () => obs.disconnect();
   }, []);
 
-  // 检测中或已有装修内容：交由 PublishedPageDecoration 渲染，本页不重复
-  if (published !== false) return null;
-
   return (
     <div className="about-page" style={{ background: LIGHT }}>
       {/* ═══ Scene 01 — 品牌开场 ═══ */}
-      <section className="relative overflow-hidden" style={{ minHeight: 'clamp(680px, calc(100svh - 64px), 860px)', background: '#F3F0EA' }}>
+      <section className="relative overflow-hidden" style={{ minHeight: 'clamp(680px, 100svh, 920px)', background: DARK }}>
         <div className="h-full max-w-[1280px] mx-auto px-[22px] md:px-[40px] lg:px-[72px]">
           <div className="grid grid-cols-12 gap-x-6 h-full items-center">
-            <div className="col-span-12 md:col-span-5 pt-10 md:pt-0">
+            <div className="col-span-12 md:col-span-5 pt-28 md:pt-16">
               <hgroup>
-                <p className="text-[11px] tracking-[.22em] uppercase mb-6 font-sans" style={{ color: '#9B8264', fontFamily: 'Inter, system-ui, sans-serif' }}>01 / THE HOUSE OF HAICHUAN</p>
-                <h1 className="text-[clamp(42px,5.4vw,72px)] leading-[1.15] tracking-[.02em] mb-8" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#27231F' }}>珠宝，<br />沿着时间生长。</h1>
+                <p className="text-[11px] tracking-[.22em] uppercase mb-6 font-sans" style={{ color: 'rgba(247,248,248,.62)', fontFamily: 'Inter, system-ui, sans-serif' }}>01 / ABOUT HAICHUAN</p>
+                <h1 className="text-[clamp(42px,5.4vw,72px)] leading-[1.15] tracking-[.02em] mb-8" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#F7F8F8' }}>从作品开始，<br />认识海川。</h1>
               </hgroup>
-              <div className="max-w-[420px] space-y-3 mb-10 text-[15px] md:text-[16px] leading-[1.9]" style={{ color: '#777067' }}>
-                <p>我们从材质的纹理、光的变化与佩戴的关系出发，让每一件作品在日常之中，慢慢形成属于佩戴者自己的意义。</p>
+              <div className="max-w-[420px] space-y-3 mb-10 text-[15px] md:text-[16px] leading-[1.9]" style={{ color: 'rgba(247,248,248,.72)' }}>
+                <p>从材质、比例、光与佩戴关系出发，了解海川如何观看并呈现一件珠宝作品。</p>
               </div>
-              <p className="text-[12px] tracking-[.15em]" style={{ color: '#9B8264' }}>HAICHUAN JEWELRY</p>
+              <p className="text-[12px] tracking-[.15em]" style={{ color: 'rgba(247,248,248,.62)' }}>HAICHUAN JEWELRY</p>
               <div className="hidden md:flex items-center gap-3 mt-16">
-                <span className="w-10 h-px" style={{ background: 'rgba(39,35,31,0.2)' }} />
-                <span className="text-[10px] tracking-[.25em] uppercase" style={{ color: '#777067' }}>SCROLL TO DISCOVER</span>
+                <span className="w-10 h-px" style={{ background: 'rgba(247,248,248,.32)' }} />
+                <span className="text-[10px] tracking-[.25em] uppercase" style={{ color: 'rgba(247,248,248,.54)' }}>SCROLL TO DISCOVER</span>
               </div>
             </div>
-            <div className="col-span-12 md:col-span-7 mt-8 md:mt-16 md:mb-0 h-[320px] md:h-[72%] max-h-[560px]" style={{ background: '#E8E3D9' }}>
-              <img src="/images/设计.png" alt="珠宝材质与光影" className="w-full h-full object-cover" style={{ objectPosition: '50% 40%' }} />
+            <div className="col-span-12 md:col-span-7 mt-8 md:mt-16 md:mb-0 h-[320px] md:h-[72%] max-h-[560px]" style={{ background: '#DDE1E2' }}>
+              <img src="/images/錾刻.png" alt="珠宝制作细节" className="w-full h-full object-cover" style={{ objectPosition: '50% 58%' }} />
               <div className="flex items-center gap-3 mt-3">
-                <span className="w-8 h-px" style={{ background: 'rgba(39,35,31,0.2)' }} />
-                <span className="text-[10px] tracking-[.15em] uppercase" style={{ color: '#777067' }}>FIG. 01 &nbsp; LIGHT, MATERIAL AND FORM</span>
+                <span className="w-8 h-px" style={{ background: 'rgba(247,248,248,.32)' }} />
+                <span className="text-[10px] tracking-[.15em] uppercase" style={{ color: 'rgba(247,248,248,.54)' }}>FIG. 01 &nbsp; MATERIAL AND FORM</span>
               </div>
             </div>
           </div>
@@ -100,29 +77,29 @@ export default function About() {
       </section>
 
       {/* ═══ Scene 02 — 品牌序言 ═══ */}
-      <section style={{ padding: '160px 0', background: '#FAF8F4' }}>
+      <section style={{ padding: '160px 0', background: '#F4F5F5' }}>
         <div className="max-w-[1280px] mx-auto px-[22px] md:px-[40px] lg:px-[72px]">
           <SectionLabel number="02" label="A POINT OF VIEW" />
           <div className="grid grid-cols-12 gap-x-6 gap-y-12">
             <div className="col-span-12 md:col-start-2 md:col-span-7">
-              <p className="text-[clamp(36px,4.2vw,60px)] leading-[1.2] tracking-[.02em]" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#27231F' }}>
+              <p className="text-[clamp(36px,4.2vw,60px)] leading-[1.2] tracking-[.02em]" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#181A1B' }}>
                 海川不是一种固定的风格，<br />而是一种观看珠宝的方式。
               </p>
             </div>
             <div className="col-span-12 md:col-start-9 md:col-span-4 md:pt-[120px]">
-              <div className="max-w-[380px] text-[15px] leading-[1.95] space-y-3" style={{ color: '#777067' }}>
+              <div className="max-w-[380px] text-[15px] leading-[1.95] space-y-3" style={{ color: '#5F6568' }}>
                 <p>我们关注一件珠宝与身体、光线和时间之间的关系。材质本身的纹理、轮廓的轻重与佩戴后的变化，共同决定了一件作品最终呈现出的状态。</p>
               </div>
             </div>
           </div>
           <div className="relative mt-20 md:mt-28">
-            <div className="w-[62%] aspect-[3/2] overflow-hidden" style={{ background: '#E8E3D9' }}>
+            <div className="w-[62%] aspect-[3/2] overflow-hidden" style={{ background: '#DDE1E2' }}>
               <img src="/images/设计.png" alt="珠宝纹理研究" className="w-full h-full object-cover" loading="lazy" />
-              <p className="text-[10px] tracking-[.15em] uppercase mt-2" style={{ color: '#777067' }}>FIG. 02 &nbsp; TEXTURE STUDY</p>
+              <p className="text-[10px] tracking-[.15em] uppercase mt-2" style={{ color: '#5F6568' }}>FIG. 02 &nbsp; TEXTURE STUDY</p>
             </div>
-            <div className="absolute right-0 w-[28%] aspect-[3/4] overflow-hidden" style={{ top: '-100px', background: '#E8E3D9' }}>
+            <div className="absolute right-0 w-[28%] aspect-[3/4] overflow-hidden" style={{ top: '-100px', background: '#DDE1E2' }}>
               <img src="/images/錾刻.png" alt="金属錾刻细节" className="w-full h-full object-cover" loading="lazy" />
-              <p className="text-[10px] tracking-[.15em] uppercase mt-2" style={{ color: '#777067' }}>FIG. 03 &nbsp; METAL DETAIL</p>
+              <p className="text-[10px] tracking-[.15em] uppercase mt-2" style={{ color: '#5F6568' }}>FIG. 03 &nbsp; METAL DETAIL</p>
             </div>
           </div>
         </div>
@@ -130,25 +107,25 @@ export default function About() {
 
       {/* ═══ Scene 03 — 品牌理念（深色） ═══ */}
       <section className="relative overflow-hidden flex items-center" style={{ minHeight: 'clamp(620px, 82svh, 900px)', background: DARK }}>
-        <span className="absolute left-[-8%] top-[10%] text-[min(42vw,520px)] leading-none font-black select-none pointer-events-none whitespace-nowrap opacity-[0.03]" style={{ fontFamily: '"Noto Serif SC",serif', color: '#F3EEE6' }}>海</span>
-        <span className="absolute right-[-8%] bottom-[5%] text-[min(42vw,520px)] leading-none font-black select-none pointer-events-none whitespace-nowrap opacity-[0.03]" style={{ fontFamily: '"Noto Serif SC",serif', color: '#F3EEE6' }}>川</span>
+        <span className="absolute left-[-8%] top-[10%] text-[min(42vw,520px)] leading-none font-black select-none pointer-events-none whitespace-nowrap opacity-[0.03]" style={{ fontFamily: '"Noto Serif SC",serif', color: '#F7F8F8' }}>海</span>
+        <span className="absolute right-[-8%] bottom-[5%] text-[min(42vw,520px)] leading-none font-black select-none pointer-events-none whitespace-nowrap opacity-[0.03]" style={{ fontFamily: '"Noto Serif SC",serif', color: '#F7F8F8' }}>川</span>
         <div className="relative z-10 w-full max-w-[1280px] mx-auto px-[22px] md:px-[40px] lg:px-[72px]">
           <SectionLabel number="03" label="PHILOSOPHY" />
           <div className="grid grid-cols-12 gap-x-6">
             <div className="col-span-12 md:col-start-3 md:col-span-8">
-              <p className="text-[clamp(32px,4.4vw,64px)] leading-[1.18] tracking-[.02em] max-w-[720px]" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#F3EEE6' }}>一件珠宝，<br />不会在完成制作的那一刻结束。</p>
-              <p className="text-[clamp(32px,4.4vw,64px)] leading-[1.18] tracking-[.02em] max-w-[720px] mt-4" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#F3EEE6' }}>它会在佩戴、触碰与时间里，<br />继续形成自己的样子。</p>
+              <p className="text-[clamp(32px,4.4vw,64px)] leading-[1.18] tracking-[.02em] max-w-[720px]" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#F7F8F8' }}>一件珠宝，<br />不会在完成制作的那一刻结束。</p>
+              <p className="text-[clamp(32px,4.4vw,64px)] leading-[1.18] tracking-[.02em] max-w-[720px] mt-4" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#F7F8F8' }}>它会在佩戴、触碰与时间里，<br />继续形成自己的样子。</p>
             </div>
           </div>
           <div className="mt-20 md:mt-28 text-right">
-            <p className="text-[12px] tracking-[.12em]" style={{ color: '#F3EEE6', fontFamily: 'Inter, system-ui, sans-serif' }}>HAICHUAN JEWELRY</p>
-            <p className="text-[11px] tracking-[.1em] mt-1 opacity-60" style={{ color: '#F3EEE6' }}>A STUDY OF TIME AND MATERIAL</p>
+            <p className="text-[12px] tracking-[.12em]" style={{ color: '#F7F8F8', fontFamily: 'Inter, system-ui, sans-serif' }}>HAICHUAN JEWELRY</p>
+            <p className="text-[11px] tracking-[.1em] mt-1 opacity-60" style={{ color: '#F7F8F8' }}>A STUDY OF TIME AND MATERIAL</p>
           </div>
         </div>
       </section>
 
       {/* ═══ Scene 04 — 设计语言（Sticky） ═══ */}
-      <section style={{ background: '#F3F0EA', padding: '160px 0' }}>
+      <section style={{ background: '#F4F5F5', padding: '160px 0' }}>
         <div className="max-w-[1280px] mx-auto px-[22px] md:px-[40px] lg:px-[72px]">
           <div className="grid grid-cols-12 gap-x-6">
             <aside className="hidden md:block md:col-span-4">
@@ -156,7 +133,7 @@ export default function About() {
                 <SectionLabel number="04" label="DESIGN APPROACH" />
                 {['线', '材', '光'].map((char, i) => (
                   <span key={char} className="text-[clamp(48px,5vw,80px)] leading-none tracking-[.04em] transition-all duration-500"
-                    style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: activeDesign === i ? '#27231F' : 'rgba(39,35,31,0.16)' }}>{char}</span>
+                    style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: activeDesign === i ? '#181A1B' : 'rgba(24,26,27,0.16)' }}>{char}</span>
                 ))}
               </div>
             </aside>
@@ -164,13 +141,13 @@ export default function About() {
               <div className="md:hidden mb-12"><SectionLabel number="04" label="DESIGN APPROACH" /></div>
               {designChapters.map((ch, i) => (
                 <section key={ch.id} ref={(el) => { designRefs.current[i] = el; }} style={{ minHeight: 'clamp(520px, 78svh, 780px)', marginBottom: i < 2 ? '120px' : '0' }}>
-                  <p className="text-[11px] tracking-[.2em] mb-4 font-sans" style={{ color: '#9B8264' }}>{ch.id} / {ch.en}</p>
-                  <h2 className="text-[clamp(28px,3vw,44px)] leading-[1.22] tracking-[.03em] mb-6 max-w-[480px]" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#27231F' }}>{ch.zh}</h2>
-                  <p className="text-[15px] leading-[1.9] mb-10 max-w-[400px]" style={{ color: '#777067' }}>{ch.body}</p>
-                  <div className={`${ch.ratio} overflow-hidden`} style={{ background: '#E8E3D9' }}>
+                  <p className="text-[11px] tracking-[.2em] mb-4 font-sans" style={{ color: '#5F6568' }}>{ch.id} / {ch.en}</p>
+                  <h2 className="text-[clamp(28px,3vw,44px)] leading-[1.22] tracking-[.03em] mb-6 max-w-[480px]" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#181A1B' }}>{ch.zh}</h2>
+                  <p className="text-[15px] leading-[1.9] mb-10 max-w-[400px]" style={{ color: '#5F6568' }}>{ch.body}</p>
+                  <div className={`${ch.ratio} overflow-hidden`} style={{ background: '#DDE1E2' }}>
                     <img src={ch.img} alt={ch.en} className="w-full h-full object-cover" loading="lazy" />
                   </div>
-                  <p className="text-[10px] tracking-[.15em] uppercase mt-2" style={{ color: '#777067' }}>FIG. {String(i + 4).padStart(2, '0')} &nbsp; {ch.en} STUDY</p>
+                  <p className="text-[10px] tracking-[.15em] uppercase mt-2" style={{ color: '#5F6568' }}>FIG. {String(i + 4).padStart(2, '0')} &nbsp; {ch.en} STUDY</p>
                 </section>
               ))}
             </div>
@@ -179,19 +156,19 @@ export default function About() {
       </section>
 
       {/* ═══ Scene 05 — 作品入口 ═══ */}
-      <div className="w-full overflow-hidden" style={{ height: 'clamp(360px, 60vw, 640px)', background: '#E8E3D9' }}>
+      <div className="w-full overflow-hidden" style={{ height: 'clamp(360px, 60vw, 640px)', background: '#DDE1E2' }}>
         <img src="/images/设计.png" alt="海川珠宝作品陈列" className="w-full h-full object-cover" loading="lazy" style={{ objectPosition: '50% 35%' }} />
       </div>
-      <section style={{ background: '#FAF8F4', padding: '160px 0' }}>
+      <section style={{ background: '#F4F5F5', padding: '160px 0' }}>
         <div className="max-w-[1280px] mx-auto px-[22px] md:px-[40px] lg:px-[72px]">
           <SectionLabel number="05" label="COLLECTION" />
           <div className="grid grid-cols-12 gap-x-6 gap-y-10">
             <div className="col-span-12 md:col-span-6">
-              <h2 className="text-[clamp(36px,4vw,56px)] leading-[1.18] tracking-[.02em]" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#27231F' }}>故事最终，<br />回到作品本身。</h2>
+              <h2 className="text-[clamp(36px,4vw,56px)] leading-[1.18] tracking-[.02em]" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#181A1B' }}>故事最终，<br />回到作品本身。</h2>
             </div>
             <div className="col-span-12 md:col-span-5 md:col-start-8 md:pt-4">
-              <p className="text-[15px] leading-[1.9] mb-8 max-w-[380px]" style={{ color: '#777067' }}>从形态、材质与光开始，继续探索海川的珠宝作品。</p>
-              <Link to="/products" className="group inline-flex items-center gap-2 pb-1 text-sm tracking-[.08em]" style={{ color: '#27231F', borderBottom: '1px solid rgba(39,35,31,0.2)' }}>
+              <p className="text-[15px] leading-[1.9] mb-8 max-w-[380px]" style={{ color: '#5F6568' }}>从形态、材质与光开始，继续探索海川的珠宝作品。</p>
+              <Link to="/products" className="group inline-flex items-center gap-2 pb-1 text-sm tracking-[.08em]" style={{ color: '#181A1B', borderBottom: '1px solid rgba(24,26,27,0.2)' }}>
                 <span>查看珠宝作品</span>
                 <span className="inline-block transition-transform duration-300 group-hover:translate-x-[5px]">→</span>
               </Link>

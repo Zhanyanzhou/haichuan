@@ -1,6 +1,28 @@
 # 海川珠宝 — 当前状态
 
-> 最后更新：2026-08-17 | 基于当前代码、配置与静态契约测试核对；未核验生产环境
+> 最后更新：2026-08-20 | 基于当前代码、配置与静态契约核对；未核验生产环境。本文件记录易变化事实，不构成操作授权。
+
+## 开发与实现入口（2026-08-20 核对）
+
+- 当前工作区为 `G:\网站搭建2`，前端路径别名 `@/` 指向 `client/src/`。
+- 本地开发端口所有权：宿主机后端 `3000`，Vite 前端 `5173`；容器后端仅映射 `127.0.0.1:3002`，完整容器栈通过 `:80` 访问。运行说明见 `docs/DEVELOPMENT_WORKFLOW.md`，决策原因见 `docs/DECISIONS.md` A.12。
+- 前端共享 HTTP 客户端当前位于 `client/src/services/api.ts`；该文件同时聚合多个领域 API。长期硬约束是共享同一传输与拦截器，未来可在不建立第二客户端的前提下按领域拆分。
+- 响应解包入口为 `client/src/utils/unwrap.ts`；商品图选取入口为 `client/src/utils/productImage.ts`；材质标签入口为 `client/src/utils/material.ts`。
+- Mock 开关当前为 `VITE_USE_MOCK`，示例值见根 `.env.example`，消费入口为 `client/src/services/mockData.ts`；默认与生产要求为关闭。
+
+## 认证、状态与数据生命周期（2026-08-20 核对）
+
+- 后台员工使用 `User`，前台客户使用 `Customer`；当前后台角色为 `SUPER_ADMIN / ADMIN / EDITOR / CUSTOMER_SERVICE / WAREHOUSE / SALES_CONSULTANT / FINANCE`。
+- 两域当前共用 `JWT_SECRET` 并通过 payload `type` 区分；`JwtAuthGuard`、`RolesGuard`、`ThrottlerGuard` 当前注册为全局 Guard。是否拆分密钥仍是 `docs/DECISIONS.md` D.6 的待决事项。
+- 前端全局状态当前沿用 Zustand；具体 Store、权限键和 Feature Flag 导出必须从当前代码复核。
+- `Product` 当前使用 `deletedAt` 软删除；`Category` 当前以 `isActive` 停用，`deletedAt` 尚未形成有效语义。终局语义仍是 `docs/DECISIONS.md` D.5 的待决事项。
+- 项目当前没有统一 Prisma 软删除 middleware/extension；涉及删除过滤时必须沿当前查询链逐项核对，不得凭此现状推断未来实现。
+
+## 页面装修（2026-08-20 核对）
+
+- Puck `PageDocument` 是唯一活跃装修体系，贯穿页面模块后端、编辑器、预览、公开 Renderer、区块组件和适配器。
+- 活跃模板数量、角色、比例、控件和发布限制以 `contracts/page-builder/content-templates.contract.json` 及生成产物为准，不在本文件复制易漂移数字。
+- 历史 `ContentSlot` 与旧装修体系已清退；历史材料仅作证据，不具执行力。
 
 ## 页面清单
 
@@ -39,7 +61,7 @@ products, categories, auth, users, orders, inventory, inquiries, selection-inqui
 
 结论：交易域具备**受控开放路径**，但仓库证据不能证明生产环境已经开放或完成真实交易联调。
 
-- `docker-compose.yml` 将 `CUSTOMER_COMMERCE_ENABLED` 的 Compose 默认值设为 `true`；这只描述使用该编排且未覆盖变量时的容器配置，不等于生产状态或上线批准。
+- `docker-compose.yml` 将 `CUSTOMER_COMMERCE_ENABLED` 的 Compose 默认值设为 `false`；仅按 D.2 完成审批的环境才可显式设为 `true`，不等于生产状态或上线批准。
 - 后端 `CustomerCommerceGuard` 与公开 `GET /settings/flags` 只在环境变量精确为 `true` 时开放；变量缺失、拼写错误或其他值均按关闭处理。
 - 前端从 `/settings/flags` 加载同一开关；加载失败回退全关。开关关闭时 `/cart`、`/checkout` 跳转咨询页，开启时才渲染需登录的购物车与结算页面。
 - 线下转账、付款凭证私有存储、客户读取与后台审核链路已有代码和静态契约；2026-08-17 `npm run test:trade` 共 59 项通过，但尚未在本轮使用真实数据库、真实客户身份和实际转账完成端到端联调。

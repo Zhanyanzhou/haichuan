@@ -43,6 +43,7 @@ import { RolesGuard } from "./common/guards/roles.guard";
 import { AuditLogInterceptor } from "./common/interceptors/audit-log.interceptor";
 import { HealthController } from "./common/health/health.controller";
 import { LoggerModule } from "nestjs-pino";
+import { ShippingTemplatesModule } from "./modules/shipping-templates/shipping-templates.module";
 
 @Module({
   controllers: [HealthController],
@@ -126,6 +127,7 @@ import { LoggerModule } from "nestjs-pino";
     PartnerApplicationsModule,
     RecommendationsModule,
     ReviewsModule,
+    ShippingTemplatesModule,
   ],
   providers: [
     // 默认认证、默认角色判定：新增接口必须显式标注 @Public() 才允许匿名访问。

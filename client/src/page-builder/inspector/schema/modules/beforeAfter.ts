@@ -8,7 +8,7 @@ import {
 } from "../../../config/blockContracts";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { beforeAfterPuckConfig } from "../../../adapters/beforeAfter.puck";
-import { bgColorPresetField, linkTargetField, moduleNameField, ratioField } from "../shared";
+import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, linkTargetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 /** 槽位比例选项(契约派生):改款前后两图同步应用 */
@@ -128,7 +128,7 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
       id: "before-after-style",
       title: "样式",
       layer: "style",
-      fields: [bgColorPresetField()],
+      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
     },
   ],
 };

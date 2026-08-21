@@ -242,12 +242,12 @@ test("canPublish：价格、图片、有价启用 SKU 齐备时允许发布", as
   await assert.doesNotReject(() => service.canPublish(1));
 });
 
-test("更新接口直写 PUBLISHED 必须经过 canPublish 门禁", async () => {
+test("状态接口写入 PUBLISHED 必须经过 canPublish 门禁", async () => {
   const failing = createService([
     product({ id: 1, status: "DRAFT", price: 0, primaryImageId: 1 }),
   ]);
   await assert.rejects(
-    () => failing.service.update(1, { status: "PUBLISHED" } as never),
+    () => failing.service.updateStatus(1, "PUBLISHED"),
     BadRequestException,
   );
   assert.equal(failing.records[0].status, "DRAFT");
@@ -262,9 +262,73 @@ test("更新接口直写 PUBLISHED 必须经过 canPublish 门禁", async () => 
     }),
   ]);
   await assert.doesNotReject(() =>
-    passing.service.update(2, { status: "PUBLISHED" } as never),
+    passing.service.updateStatus(2, "PUBLISHED"),
   );
   assert.equal(passing.records[0].status, "PUBLISHED");
+});
+
+test("普通内容更新不会改变已发布商品状态", async () => {
+  const { service, records } = createService([
+    product({
+      id: 9,
+      status: "PUBLISHED",
+      visibility: "PUBLIC",
+      price: 100,
+      primaryImageId: 1,
+      skus: [{ id: 1, isActive: true, price: 100 }],
+    }),
+  ]);
+
+  await service.update(9, { price: 120 } as never);
+  assert.equal(records[0].price, 120);
+  assert.equal(records[0].status, "PUBLISHED");
+});
+
+test("重复校验已上架商品不会重写首次发布时间", async () => {
+  const firstPublishedAt = new Date("2026-01-01T00:00:00.000Z");
+  const { service, records } = createService([
+    product({
+      id: 10,
+      status: "PUBLISHED",
+      price: 100,
+      primaryImageId: 1,
+      publishedAt: firstPublishedAt,
+      skus: [{ id: 1, isActive: true, price: 100 }],
+    }),
+  ]);
+
+  await service.updateStatus(10, "PUBLISHED");
+  assert.equal(records[0].publishedAt, firstPublishedAt);
+});
+
+test("资料完整度按销售方式给出可解释的缺失项", () => {
+  const { service } = createService([]);
+  const common = {
+    name: "测试商品",
+    code: "TEST-001",
+    categoryId: 1,
+    images: [{ id: 1 }],
+    salesMode: "DISPLAY_ONLY",
+    materialType: "GOLD_999",
+    visibility: "MEMBER",
+    detailContent: [{ type: "TEXT", text: "详情" }],
+    price: 100,
+    skus: [],
+    deliveryMethods: [],
+  };
+  assert.deepEqual(service.calcCompleteness(common), {
+    isComplete: true,
+    missingFields: [],
+    score: 100,
+  });
+
+  const directPurchase = service.calcCompleteness({
+    ...common,
+    salesMode: "DIRECT_PURCHASE",
+  });
+  assert.equal(directPurchase.isComplete, false);
+  assert.deepEqual(directPurchase.missingFields, ["activeSku", "stock", "deliveryMethods"]);
+  assert.equal(directPurchase.score, 75);
 });
 
 test("游客公开列表仅返回 PUBLISHED + PUBLIC + 未删除商品", async () => {
@@ -302,11 +366,11 @@ test("已发布商品改为 OFFLINE 或 ARCHIVED 后公开查询不再返回", a
   ]);
   assert.equal((await service.findPublic({})).total, 1);
 
-  await service.update(1, { status: "OFFLINE" } as never);
+  await service.updateStatus(1, "OFFLINE");
   assert.equal(records[0].status, "OFFLINE");
   assert.equal((await service.findPublic({})).total, 0);
 
-  await service.update(1, { status: "PUBLISHED" } as never);
+  await service.updateStatus(1, "PUBLISHED");
   assert.equal((await service.findPublic({})).total, 1);
 
   await service.archive(1);
@@ -337,15 +401,15 @@ test("归档商品不可直接发布或改为其他状态", async () => {
     }),
   ]);
   await assert.rejects(
-    () => service.update(1, { status: "PUBLISHED" } as never),
+    () => service.updateStatus(1, "PUBLISHED"),
     ConflictException,
   );
   await assert.rejects(
-    () => service.update(1, { status: "OFFLINE" } as never),
+    () => service.updateStatus(1, "OFFLINE"),
     ConflictException,
   );
   await assert.rejects(
-    () => service.update(1, { status: "DRAFT" } as never),
+    () => service.updateStatus(1, "DRAFT"),
     ConflictException,
   );
 });
@@ -372,7 +436,7 @@ test("恢复为草稿后仍需通过正常发布门禁", async () => {
   await incomplete.service.restore(1);
   assert.equal(incomplete.records[0].status, "DRAFT");
   await assert.rejects(
-    () => incomplete.service.update(1, { status: "PUBLISHED" } as never),
+    () => incomplete.service.updateStatus(1, "PUBLISHED"),
     BadRequestException,
   );
 
@@ -387,7 +451,7 @@ test("恢复为草稿后仍需通过正常发布门禁", async () => {
     }),
   ]);
   await complete.service.restore(2);
-  await complete.service.update(2, { status: "PUBLISHED" } as never);
+  await complete.service.updateStatus(2, "PUBLISHED");
   assert.equal(complete.records[0].status, "PUBLISHED");
 });
 

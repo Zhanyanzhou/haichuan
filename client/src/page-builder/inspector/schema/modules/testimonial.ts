@@ -3,8 +3,9 @@
  * Editorial Story 母版(口碑变体):引语式排版,需顾客授权。
  */
 import { testimonialPuckConfig } from "../../../adapters/testimonial.puck";
-import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
-import { bgColorPresetField, moduleNameField, ratioField } from "../shared";
+import { getContractRoleQuantity } from "../../../config/blockContracts";
+import { IMAGE_SPECS } from "../../../config/imageSpecs";
+import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 /** 槽位比例选项(契约派生):授权实拍图统一比例 */
@@ -51,6 +52,8 @@ export const testimonialSchema: ModuleInspectorSchema = {
           label: "顾客引语",
           control: "array",
           itemLabel: "引语",
+          minItems: getContractRoleQuantity("testimonials", "authorizedPhoto").min,
+          maxItems: getContractRoleQuantity("testimonials", "authorizedPhoto").max,
           defaultItem: { name: "", meta: "", content: "", image: "" },
           itemSummary: (item) =>
             typeof item.name === "string" && item.name.trim()
@@ -92,7 +95,7 @@ export const testimonialSchema: ModuleInspectorSchema = {
       id: "testimonial-style",
       title: "样式",
       layer: "style",
-      fields: [bgColorPresetField()],
+      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
     },
   ],
 };

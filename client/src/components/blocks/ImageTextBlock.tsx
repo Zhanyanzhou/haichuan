@@ -12,7 +12,7 @@ interface ImageTextBlockProps {
 
 function ImageTextAction({ editMode, text, targetUrl }: { editMode?: boolean; text?: string; targetUrl: string }) {
   if (!text || !targetUrl) return null;
-  const style = { display: 'inline-block', marginTop: 24, paddingBottom: 6, borderBottom: '1px solid #1A1A1A', color: '#1A1A1A', fontSize: 12, textDecoration: 'none', letterSpacing: '0.12em' } as const;
+  const style = { display: 'inline-block', marginTop: 24, paddingBottom: 6, borderBottom: '1px solid #181A1B', color: '#181A1B', fontSize: 12, textDecoration: 'none', letterSpacing: '0.12em' } as const;
   return editMode
     ? <span data-editor-field="buttonText linkUrl productId" style={style}>{text}</span>
     : <Link data-editor-field="buttonText linkUrl productId" to={targetUrl} style={style}>{text}</Link>;
@@ -30,7 +30,7 @@ export default function ImageTextBlock({ module, editMode }: ImageTextBlockProps
   const spacing = styleConfig.spacing || 'normal';
   const focusX = Math.min(100, Math.max(0, Number(styleConfig.focusX ?? 50)));
   const focusY = Math.min(100, Math.max(0, Number(styleConfig.focusY ?? 50)));
-  const targetUrl = resolveLinkTargetUrl({ targetType: content.targetType, productId: content.productId, linkUrl });
+  const targetUrl = resolveLinkTargetUrl({ targetType: content.targetType, productCode: content.productCode, productId: content.productId, linkUrl });
 
   const paddingMap: Record<string, string> = { compact: '40px 0', normal: '72px 0', spacious: '100px 0' };
 
@@ -40,17 +40,17 @@ export default function ImageTextBlock({ module, editMode }: ImageTextBlockProps
       <section style={{ padding: paddingMap[spacing], background: '#FFFFFF' }}>
         <div style={{ maxWidth: 720, margin: '0 auto', padding: '0 24px', textAlign: 'center' }}>
           {label && (
-            <p data-editor-field="label" style={{ fontSize: 11, letterSpacing: '0.3em', textTransform: 'uppercase', color: '#8C8C8C', marginBottom: 16 }}>
+            <p data-editor-field="label" style={{ fontSize: 11, letterSpacing: '0.3em', textTransform: 'uppercase', color: '#6E7477', marginBottom: 16 }}>
               {label}
             </p>
           )}
           {title && (
-            <h2 data-editor-field="title" style={{ fontSize: 36, fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#1A1A1A', marginBottom: 24, lineHeight: 1.3 }}>
+            <h2 data-editor-field="title" style={{ fontSize: 36, fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#181A1B', marginBottom: 24, lineHeight: 1.3 }}>
               {title}
             </h2>
           )}
           {body && (
-            <p data-editor-field="body" style={{ fontSize: 15, color: '#8C8C8C', lineHeight: 1.8, maxWidth: 560, margin: '0 auto' }}>
+            <p data-editor-field="body" style={{ fontSize: 15, color: '#6E7477', lineHeight: 1.8, maxWidth: 560, margin: '0 auto' }}>
               {body}
             </p>
           )}
@@ -67,7 +67,7 @@ export default function ImageTextBlock({ module, editMode }: ImageTextBlockProps
     }
     if (!image) return null;
     return (
-      <section className="homepage-image-text-background" style={{ position: 'relative', minHeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#2C2C2C', maxWidth: IMAGE_TEXT_CONTRACT.canvas.maxWidth, margin: '0 auto' }}>
+      <section className="homepage-image-text-background" style={{ position: 'relative', minHeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#181A1B', maxWidth: IMAGE_TEXT_CONTRACT.canvas.maxWidth, margin: '0 auto' }}>
         <style>{`
           @media (max-width: ${IMAGE_TEXT_CONTRACT.canvas.mobileBreakpoint}px) {
             .homepage-image-text-background { min-height: 420px !important; }
@@ -75,7 +75,7 @@ export default function ImageTextBlock({ module, editMode }: ImageTextBlockProps
         `}</style>
         <SecureImage src={image} alt={imageAlt || title || "图文背景图"} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: `${focusX}% ${focusY}%`, opacity: 0.5 }} />
         <div style={{ position: 'relative', zIndex: 1, padding: 60, textAlign: 'center', maxWidth: 720 }}>
-          {label && <p data-editor-field="label" style={{ fontSize: 11, letterSpacing: '0.3em', color: '#8C8C8C', marginBottom: 12 }}>{label}</p>}
+          {label && <p data-editor-field="label" style={{ fontSize: 11, letterSpacing: '0.3em', color: '#6E7477', marginBottom: 12 }}>{label}</p>}
           {title && <h2 data-editor-field="title" style={{ fontSize: 40, fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#fff', marginBottom: 20 }}>{title}</h2>}
           {body && <p data-editor-field="body" style={{ fontSize: 15, color: 'rgba(255,255,255,0.8)', lineHeight: 1.7 }}>{body}</p>}
           <ImageTextAction editMode={editMode} text={buttonText} targetUrl={targetUrl} />
@@ -98,9 +98,9 @@ export default function ImageTextBlock({ module, editMode }: ImageTextBlockProps
   const textCol = (
     <div className="homepage-image-text__copy" style={{ minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: spacing === 'compact' ? '40px 36px' : spacing === 'spacious' ? '64px 52px' : '52px 44px' }}>
       <div style={{ maxWidth: 440 }}>
-        {label && <p data-editor-field="label" style={{ fontSize: 11, letterSpacing: '0.3em', textTransform: 'uppercase', color: '#8C8C8C', marginBottom: 16 }}>{label}</p>}
-        {title && <h2 data-editor-field="title" style={{ fontSize: 32, fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#1A1A1A', marginBottom: 18, lineHeight: 1.25 }}>{title}</h2>}
-        {body && <p data-editor-field="body" style={{ fontSize: 14, color: '#8C8C8C', lineHeight: 1.8 }}>{body}</p>}
+        {label && <p data-editor-field="label" style={{ fontSize: 11, letterSpacing: '0.3em', textTransform: 'uppercase', color: '#6E7477', marginBottom: 16 }}>{label}</p>}
+        {title && <h2 data-editor-field="title" style={{ fontSize: 32, fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#181A1B', marginBottom: 18, lineHeight: 1.25 }}>{title}</h2>}
+        {body && <p data-editor-field="body" style={{ fontSize: 14, color: '#6E7477', lineHeight: 1.8 }}>{body}</p>}
         <ImageTextAction editMode={editMode} text={buttonText} targetUrl={targetUrl} />
       </div>
     </div>
@@ -114,9 +114,9 @@ export default function ImageTextBlock({ module, editMode }: ImageTextBlockProps
           min-width: 0;
           overflow: hidden;
           aspect-ratio: ${IMAGE_TEXT_CONTRACT.canvas.desktopMediaAspectRatio};
-          background: #F7F8FB;
+          background: #F4F5F5;
         }
-        @media ${RESPONSIVE_CANVAS.tabletMediaQuery} {
+        @media ${RESPONSIVE_CANVAS.compactDesktopMediaQuery} {
           .homepage-image-text__copy { padding: 44px 32px !important; }
         }
         @media (max-width: ${IMAGE_TEXT_CONTRACT.canvas.mobileBreakpoint}px) {

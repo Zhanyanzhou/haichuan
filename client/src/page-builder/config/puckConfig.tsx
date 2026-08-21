@@ -86,7 +86,7 @@ type RenderableConfig<Props> = {
   render: (props: Props) => ReactNode;
 } & Record<string, unknown>;
 
-/** 保留 adapter 的真实 render 与 props，只在外层附加 schema v2 根合同。 */
+/** 保留 adapter 的真实 render 与 props，只在外层附加 schema v3 根合同。 */
 function withContractRenderer<Props>(
   moduleType: string,
   config: RenderableConfig<Props>,
@@ -95,7 +95,11 @@ function withContractRenderer<Props>(
   return {
     ...config,
     render: (props: Props) => (
-      <ContentTemplateContractFrame moduleType={moduleType} mode="editor">
+      <ContentTemplateContractFrame
+        moduleType={moduleType}
+        mode="editor"
+        props={props as Record<string, unknown>}
+      >
         {render(props)}
       </ContentTemplateContractFrame>
     ),

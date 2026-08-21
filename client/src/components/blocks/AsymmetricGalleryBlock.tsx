@@ -19,8 +19,8 @@ interface GalleryBlockProps {
   editMode?: boolean;
 }
 
-const INK = "#1A1A1A";
-const MUTED = "#8C8C8C";
+const INK = "#181A1B";
+const MUTED = "#6E7477";
 
 /**
  * 作品画廊 — Asymmetric Gallery 母版
@@ -112,7 +112,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
   return (
     <DecorSection master="asymmetric-gallery" background={bgColor}>
       {(title || subtitle || editMode) && (
-        <header style={{ maxWidth: 640, margin: "0 auto 48px", textAlign: "center" }}>
+        <header data-content-role="copy" style={{ maxWidth: 640, margin: "0 auto 48px", textAlign: "center" }}>
           {title ? (
             <h2
               data-editor-field="title"
@@ -135,7 +135,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
           ) : null}
         </header>
       )}
-      <div className="hc-gallery">
+      <div data-content-role="works" className="hc-gallery">
         <style>{`
           .hc-gallery {
             display: grid;
@@ -145,7 +145,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
             align-items: start;
           }
           .hc-gallery__item { display: block; min-width: 0; color: inherit; text-decoration: none; }
-          .hc-gallery__frame { background: #E4E3DF; overflow: hidden; }
+          .hc-gallery__frame { background: #DDE1E2; overflow: hidden; }
           .hc-gallery__img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .7s ease; }
           .hc-gallery__item:hover .hc-gallery__img { transform: scale(1.02); }
           /* 桌面非对称节奏 */

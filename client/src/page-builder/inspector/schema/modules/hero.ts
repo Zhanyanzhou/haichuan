@@ -31,18 +31,9 @@ export const heroSchema: ModuleInspectorSchema = {
       fields: [
         moduleNameField("首屏"),
         {
-          key: "eyebrow",
-          label: "眉题",
-          control: "text",
-          maxLength: HERO_CONTRACT.content.limits.eyebrow,
-          hint: "标题上方的小字引导，留空不显示",
-          placeholder: "如 THE HOUSE OF HAICHUAN",
-        },
-        {
           key: "title",
           label: "主标题",
           control: "text",
-          required: true,
           maxLength: HERO_CONTRACT.content.limits.title,
           placeholder: "如 东方之形，自有光华",
         },
@@ -54,6 +45,14 @@ export const heroSchema: ModuleInspectorSchema = {
           hint: "标题下方的一句话主张，留空不显示",
           placeholder: "如 以东方美学，铸当代珠宝",
         },
+        {
+          key: "eyebrow",
+          label: "眉题",
+          control: "text",
+          maxLength: HERO_CONTRACT.content.limits.eyebrow,
+          hint: "标题上方的小字引导，留空不显示",
+          placeholder: "如 THE HOUSE OF HAICHUAN",
+        },
       ],
     },
     {
@@ -63,13 +62,13 @@ export const heroSchema: ModuleInspectorSchema = {
       fields: [
         {
           key: "actionText",
-          label: "行动入口文字",
+          label: "按钮文字",
           control: "text",
           maxLength: HERO_CONTRACT.content.limits.actionText,
           hint: "留空不显示；品牌页建议不超过一个行动入口",
           placeholder: "如 探索系列",
         },
-        linkTargetField("行动入口点击后"),
+        linkTargetField("点击后前往"),
       ],
     },
     {

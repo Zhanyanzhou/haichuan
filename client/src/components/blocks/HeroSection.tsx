@@ -52,6 +52,7 @@ export default function HeroSection({ module, editMode }: Props) {
   const linkUrl = typeof c?.linkUrl === "string" ? c.linkUrl : "";
   const targetUrl = resolveLinkTargetUrl({
     targetType: c?.targetType,
+    productCode: c?.productCode,
     productId: c?.productId,
     linkUrl,
   });
@@ -61,15 +62,14 @@ export default function HeroSection({ module, editMode }: Props) {
   const desktopFocusY = s?.desktopFocusY ?? legacyFocusY;
   const mobileFocusX = s?.mobileFocusX ?? legacyFocusX;
   const mobileFocusY = s?.mobileFocusY ?? legacyFocusY;
-  // 白盒画册(2026-08-19):默认居中束,左下为受控备选
+  // 沉浸式画册：桌面支持左下叙事束，移动端由共享布局恢复为图下文案。
   // 链路修复:编辑器字段为 alignment(旧数据为 template),统一兼容读取
   const rawAlign = l?.alignment || l?.template || "center";
   const alignment = rawAlign === "left" ? "left" : "center";
-  // 白盒画册(2026-08-19):全站禁黑色背景,废除暗调图浅字档,统一亮图深字
-  const textTone = "dark";
+  const textTone = "light";
   const heroStyle = {
-    background: "#FFFFFF",
-    outline: editMode ? "2px solid rgba(184,148,78,0.6)" : undefined,
+    background: "#181A1B",
+    outline: editMode ? "2px solid rgba(24,26,27,0.48)" : undefined,
     outlineOffset: -2,
     position: "relative",
     "--hc-hero-focus-desktop": `${desktopFocusX}% ${desktopFocusY}%`,
@@ -86,9 +86,6 @@ export default function HeroSection({ module, editMode }: Props) {
       data-height-mode-desktop={
         CONTENT_TEMPLATE_LAYOUTS.hero.heightModeByViewport.desktop
       }
-      data-height-mode-tablet={
-        CONTENT_TEMPLATE_LAYOUTS.hero.heightModeByViewport.tablet
-      }
       data-height-mode-mobile={
         CONTENT_TEMPLATE_LAYOUTS.hero.heightModeByViewport.mobile
       }
@@ -96,6 +93,7 @@ export default function HeroSection({ module, editMode }: Props) {
       data-flow={CONTENT_TEMPLATE_LAYOUTS.hero.flow}
       data-density="brand"
       data-spacing="normal"
+      data-visual-direction="immersive-editorial"
       style={heroStyle}
     >
       <DesignSystemStyles />
@@ -107,7 +105,7 @@ export default function HeroSection({ module, editMode }: Props) {
             top: 8,
             right: 12,
             zIndex: 10,
-            background: "#B8944E",
+            background: "#181A1B",
             color: "#fff",
             fontSize: 10,
             padding: "2px 8px",
@@ -117,7 +115,11 @@ export default function HeroSection({ module, editMode }: Props) {
           可编辑 · 首屏
         </div>
       )}
-      <div className="hc-content-template__media hc-phase1-hero__media">
+      <div
+        className="hc-content-template__media hc-phase1-hero__media"
+        data-content-role-desktop="desktopImage"
+        data-content-role-mobile="mobileImage"
+      >
         {desktopImg ? (
           <picture data-editor-field="desktopImage mobileImage">
             <source
@@ -155,19 +157,10 @@ export default function HeroSection({ module, editMode }: Props) {
             className="absolute inset-0 grid place-items-center text-xs tracking-[.08em]"
             role="img"
             aria-label={c?.altText || "主视觉图片暂不可用"}
-            style={{ color: "#7E7468", background: "#F5F5F5" }}
+            style={{ color: "#5F6568", background: "#F4F5F5" }}
           >
             主视觉图片暂不可用
           </div>
-        ) : null}
-        {desktopImg ? (
-          <div
-            className="absolute inset-0 pointer-events-none"
-            style={
-              // 亮调图:中央极轻提白承深字
-              { background: "radial-gradient(ellipse 70% 60% at 50% 48%, rgba(255,255,255,0.40), rgba(255,255,255,0) 70%)" }
-            }
-          />
         ) : null}
       </div>
 
@@ -176,32 +169,35 @@ export default function HeroSection({ module, editMode }: Props) {
         <div className="hc-phase1-hero__copy-band">
           <div
             className="hc-content-template__copy hc-phase1-hero__copy"
+            data-content-role="copy"
             data-align={alignment}
             data-tone={textTone}
           >
-            {eyebrow ? (
+            {eyebrow || editMode ? (
               <p
                 data-editor-field="eyebrow"
-                className="hc-content-template__eyebrow hc-hero__reveal"
+                data-hc-editor-placeholder={!eyebrow && editMode ? "true" : undefined}
+                className={`hc-content-template__eyebrow hc-hero__reveal${!eyebrow && editMode ? " hc-visual-empty-role" : ""}`}
                 style={{
                   fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
                   opacity: 1,
                   transform: "none",
                   animation: rm
                     ? "none"
-                    : "hcHeroFadeUp 0.7s 0.18s cubic-bezier(0.22,1,0.36,1) both",
+                    : "hcHeroFadeUp 0.7s 0.3s cubic-bezier(0.22,1,0.36,1) both",
                 }}
               >
-                {eyebrow}
+                {eyebrow || "点击添加眉题"}
               </p>
             ) : null}
-            {title ? (
+            {title || editMode ? (
               <h1
                 data-editor-field="title"
-                className="hc-content-template__title hc-hero__reveal whitespace-pre-line"
+                data-hc-editor-placeholder={!title && editMode ? "true" : undefined}
+                className={`hc-content-template__title hc-hero__reveal whitespace-pre-line${!title && editMode ? " hc-visual-empty-role" : ""}`}
                 style={{
                   fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
-                  fontSize: "var(--hc-type-hero, clamp(40px,5vw,68px))",
+                  fontSize: "var(--hc-hero-title-size, clamp(42px, 4.4vw, 76px))",
                   opacity: 1,
                   transform: "none",
                   animation: rm
@@ -209,15 +205,17 @@ export default function HeroSection({ module, editMode }: Props) {
                     : "hcHeroFadeUp 0.7s 0.28s cubic-bezier(0.22,1,0.36,1) both",
                 }}
               >
-                {title}
+                {title || "点击添加主标题"}
               </h1>
             ) : null}
-            {subtitle ? (
+            {subtitle || editMode ? (
               <p
                 data-editor-field="subtitle"
-                className="hc-content-template__body hc-hero__reveal"
+                data-hc-editor-placeholder={!subtitle && editMode ? "true" : undefined}
+                className={`hc-content-template__body hc-hero__reveal${!subtitle && editMode ? " hc-visual-empty-role" : ""}`}
                 style={{
-                  fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
+                  fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
+                  fontStyle: "italic",
                   opacity: 1,
                   transform: "none",
                   animation: rm
@@ -225,45 +223,47 @@ export default function HeroSection({ module, editMode }: Props) {
                     : "hcHeroFadeUp 0.7s 0.34s cubic-bezier(0.22,1,0.36,1) both",
                 }}
               >
-                {subtitle}
+                {subtitle || "点击添加副标题"}
               </p>
             ) : null}
-            {actionText && targetUrl ? (
-              editMode ? (
-                <span
-                  data-editor-field="actionText linkUrl productId"
-                  className="hc-content-template__action"
-                  style={{
-                    fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
-                  }}
-                >
-                  {actionText} <span>→</span>
-                </span>
-              ) : (
-                <Link
-                  data-editor-field="actionText linkUrl productId"
-                  to={targetUrl}
-                  className="hc-content-template__action hc-hero__reveal transition-opacity duration-300 hover:opacity-60"
-                  style={{
-                    fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
-                    opacity: 1,
-                    transform: "none",
-                    animation: rm
-                      ? "none"
-                      : "hcHeroFadeUp 0.7s 0.38s cubic-bezier(0.22,1,0.36,1) both",
-                  }}
-                >
-                  {actionText} <span>→</span>
-                </Link>
-              )
+            {editMode ? (
+              <span
+                data-content-role="action"
+                data-editor-field="actionText"
+                data-hc-editor-placeholder={!actionText ? "true" : undefined}
+                className={`hc-content-template__action${!actionText ? " hc-visual-empty-role" : ""}`}
+                style={{
+                  fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
+                }}
+              >
+                {actionText || "点击添加行动文字"} <span>→</span>
+              </span>
+            ) : actionText && targetUrl ? (
+              <Link
+                data-content-role="action"
+                data-editor-field="actionText linkUrl productId"
+                to={targetUrl}
+                className="hc-content-template__action hc-hero__reveal transition-opacity duration-300 hover:opacity-60"
+                style={{
+                  fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
+                  opacity: 1,
+                  transform: "none",
+                  animation: rm
+                    ? "none"
+                    : "hcHeroFadeUp 0.7s 0.38s cubic-bezier(0.22,1,0.36,1) both",
+                }}
+              >
+                {actionText} <span>→</span>
+              </Link>
             ) : null}
           </div>
         </div>
       ) : null}
-      {/* 底部下滑线：编辑预览中静态化，避免持续 pulse 动画拖慢画布滚动 */}
+      {/* 静态下滑线：保留方向提示，不用持续动画干扰珠宝影像。 */}
       {desktopImg ? (
         <span
-          className={`absolute bottom-[22px] left-1/2 -translate-x-1/2 w-8 h-px ${editMode ? "" : "animate-pulse"} opacity-40`}
+          aria-hidden="true"
+          className="absolute bottom-[22px] left-1/2 -translate-x-1/2 w-8 h-px opacity-40"
           style={{ background: "rgba(255,255,255,0.5)" }}
         />
       ) : null}
@@ -273,6 +273,36 @@ export default function HeroSection({ module, editMode }: Props) {
           to { opacity: 1; transform: translateY(0); }
         }
         .hc-hero__image { object-position: var(--hc-hero-focus-desktop); }
+        .hc-phase1-hero__copy-band {
+          z-index: 3;
+        }
+        .hc-phase1-hero--edit .hc-phase1-hero__copy-band {
+          pointer-events: auto;
+        }
+        .hc-visual-empty-role {
+          display: block;
+          width: fit-content;
+          max-width: min(100%, 18rem);
+          min-width: 0;
+          min-height: 0;
+          margin-block: 0 8px;
+          border: 1px dashed currentColor;
+          padding: 6px 10px;
+          font-family: var(--hc-font-sans, ${FONT_SANS}) !important;
+          font-size: 14px !important;
+          font-style: normal !important;
+          font-weight: 500 !important;
+          line-height: 20px !important;
+          letter-spacing: 0 !important;
+          white-space: nowrap;
+          opacity: 0.9;
+          cursor: pointer;
+        }
+        .hc-content-template__action.hc-visual-empty-role {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+        }
         @media ${RESPONSIVE_CANVAS.mobileMediaQuery} {
           .hc-hero__image { object-position: var(--hc-hero-focus-mobile); }
         }

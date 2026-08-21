@@ -48,7 +48,7 @@ const ProgressBar: React.FC = () => {
         style={{
           width: `${width}%`,
           opacity: width === 100 ? 0 : 1,
-          boxShadow: '0 0 10px rgba(184,148,78,0.5)',
+          boxShadow: '0 0 10px rgba(24,26,27,0.22)',
         }}
       />
     </div>

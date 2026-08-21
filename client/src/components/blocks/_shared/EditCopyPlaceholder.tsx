@@ -47,7 +47,7 @@ const VARIANT_STYLE: Record<Variant, CSSProperties> = {
     fontFamily: "var(--hc-font-sans, Inter,system-ui,sans-serif)",
     fontSize: 13,
     letterSpacing: "0.08em",
-    borderBottom: "1px dashed #C9C6C0",
+    borderBottom: "1px dashed #DDE1E2",
     paddingBottom: 4,
   },
 } as const;
@@ -63,7 +63,7 @@ export default function EditCopyPlaceholder({
       style={{
         ...VARIANT_STYLE[variant],
         display: block ? "block" : "inline-block",
-        color: "#A8A59E",
+        color: "#B8BEC1",
         width: "fit-content",
         maxWidth: "100%",
         pointerEvents: "none",

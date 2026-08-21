@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { usePageMetaStore } from "@/store/pageMetaStore";
+import { usePageDecorationState } from "@/page-builder/runtime/PublishedPageDecoration";
 import { motion, useInView } from "framer-motion";
 import { Spin, Button, Select } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
@@ -19,12 +20,12 @@ import FilterPanel from "@/components/common/FilterPanel";
 
 /* ═══════ 视觉常量 ═══════ */
 const V = {
-  bg: "#F4F1EA",
-  surface: "#F8F6F1",
-  text: "#29241F",
-  sec: "rgba(41,36,31,0.56)",
-  line: "rgba(41,36,31,0.12)",
-  acc: "#A7895B",
+  bg: "#F4F5F5",
+  surface: "#FFFFFF",
+  text: "#181A1B",
+  sec: "rgba(24,26,27,0.62)",
+  line: "rgba(24,26,27,0.12)",
+  acc: "#6E7477",
 };
 const MX = "max-w-[1760px] mx-auto";
 const PX = "clamp(48px,5vw,88px)";
@@ -205,6 +206,7 @@ function ProductCardItem({
 
 /* ═══════ 主组件 ═══════ */
 export default function ProductList() {
+  const { active: hasPageDecoration } = usePageDecorationState();
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
   useEffect(() => {
@@ -393,7 +395,7 @@ export default function ProductList() {
 
   return (
     <div style={{ background: V.bg, overflowX: "hidden", minHeight: "100vh" }}>
-      <PageHeader />
+      {!hasPageDecoration && <PageHeader />}
 
       {/* ── 筛选与排序（服务端查询） ── */}
       {showDiscoveryTools ? (

@@ -260,7 +260,7 @@ export default function FulfillmentCenter() {
             <div className="flex justify-between"><span className="text-brand-muted">运单号</span><span>{detail.trackingNo || '—'}</span></div>
             <div className="flex justify-between"><span className="text-brand-muted">发货时间</span><span>{detail.shippedAt || '—'}</span></div>
             <div className="flex justify-between"><span className="text-brand-muted">送达时间</span><span>{detail.deliveredAt || '—'}</span></div>
-            {detail.abnormalReason && <div className="flex justify-between"><span className="text-brand-muted">异常原因</span><span className="text-red-500">{detail.abnormalReason}</span></div>}
+            {detail.abnormalReason && <div className="flex justify-between"><span className="text-brand-muted">异常原因</span><span style={{ color: "var(--adm-error)" }}>{detail.abnormalReason}</span></div>}
             <div><p className="text-brand-muted mb-1">内部备注</p><p className="bg-brand-bg p-3 rounded">{detail.internalNote || '无'}</p></div>
             {detail.creator && <div className="flex justify-between"><span className="text-brand-muted">创建人</span><span>{detail.creator.realName || detail.creator.username}</span></div>}
           </div>

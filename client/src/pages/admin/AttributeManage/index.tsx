@@ -190,7 +190,7 @@ export default function AttributeManage() {
         subtitle="统一管理商品筛选维度（材质、工艺、尺寸、场景等），前台筛选器按此字典动态生成"
       />
       <Card
-        style={{ borderRadius: 10, border: "1px solid #E7E6E2" }}
+        style={{ borderRadius: 10, border: "1px solid var(--adm-line)" }}
         title={
           <Space>
             <span>属性列表</span>

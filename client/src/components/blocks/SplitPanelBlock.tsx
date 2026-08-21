@@ -88,7 +88,7 @@ export default function SplitPanelBlock({
               fontSize: 10,
               letterSpacing: "0.25em",
               textTransform: "uppercase",
-              color: "#8C8C8C",
+              color: "#6E7477",
               marginBottom: 16,
               fontFamily: "Inter,system-ui,sans-serif",
             }}
@@ -101,7 +101,7 @@ export default function SplitPanelBlock({
             style={{
               fontSize: "clamp(24px,2.8vw,40px)",
               fontFamily: '"Cormorant Garamond","Noto Serif SC",serif',
-              color: "#1A1A1A",
+              color: "#181A1B",
               lineHeight: 1.15,
               marginBottom: 20,
             }}
@@ -113,7 +113,7 @@ export default function SplitPanelBlock({
           <p data-editor-field="body"
             style={{
               fontSize: 14,
-              color: "#8C8C8C",
+              color: "#6E7477",
               lineHeight: 1.8,
               marginBottom: 28,
             }}
@@ -127,8 +127,8 @@ export default function SplitPanelBlock({
             style={{
               display: "inline-block",
               paddingBottom: 6,
-              borderBottom: "1px solid #1A1A1A",
-              color: "#1A1A1A",
+              borderBottom: "1px solid #181A1B",
+              color: "#181A1B",
               fontSize: 12,
               letterSpacing: "0.12em",
               textTransform: "uppercase",

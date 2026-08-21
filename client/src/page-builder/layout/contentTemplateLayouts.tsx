@@ -22,10 +22,10 @@ export interface PreviewZone {
 }
 
 interface ResponsiveSkeleton {
-  columns: 12 | 8 | 1;
+  columns: 12 | 1;
   mediaRatio?: string;
   detailRatio?: string;
-  /** schema v2 根角色 id 顺序；集合型模板不再展开重复 generic role。 */
+  /** schema v3 根角色 id 顺序；集合型模板不再展开重复 generic role。 */
   order: readonly string[];
 }
 
@@ -38,12 +38,10 @@ export interface ContentTemplateLayout {
     zones: readonly PreviewZone[];
   };
   desktop: ResponsiveSkeleton;
-  tablet: ResponsiveSkeleton;
   mobile: ResponsiveSkeleton;
   controls: readonly string[];
   heightModeByViewport: {
     desktop: "viewport" | "ratio" | "content";
-    tablet: "viewport" | "ratio" | "content";
     mobile: "viewport" | "ratio" | "content";
   };
   visualRole: "primary-stage" | "feature-stage" | "support-stage";
@@ -53,177 +51,26 @@ export interface ContentTemplateLayout {
   flow: "bleed" | "flow";
 }
 
-/**
- * 第一批五模板的最小语义布局源。
- *
- * 这里只保存模板专属的比例、主次、三端顺序和受控选项；颜色、字体、
- * 容器与全局间距继续由 designSystem tokens / UI_GUIDE 提供。缩略图与
- * Renderer 均消费本对象，避免两处各自维护坐标和内容顺序。
- */
-const ACTIVE_TEMPLATE_LAYOUTS = {
-  hero: {
-    ...CONTENT_TEMPLATE_CONTRACTS.hero,
-    preview: {
-      tone: "light",
-      zones: [
-        { role: "media", column: 1, span: 12, row: 2, rowSpan: 4 },
-        { role: "copy", column: 2, span: 5, row: 3, rowSpan: 1, overlay: true },
-        {
-          role: "action",
-          column: 2,
-          span: 3,
-          row: 4,
-          rowSpan: 1,
-          overlay: true,
-        },
-      ],
-    },
-    desktop: {
-      columns: 12,
-      mediaRatio: CONTENT_TEMPLATE_CONTRACTS.hero.media[0].desktopRatio,
-      order: ["media", "copy", "action"],
-    },
-    tablet: {
-      columns: 8,
-      mediaRatio: CONTENT_TEMPLATE_CONTRACTS.hero.media[0].tabletRatio,
-      order: ["media", "copy", "action"],
-    },
-    mobile: {
-      columns: 1,
-      mediaRatio: CONTENT_TEMPLATE_CONTRACTS.hero.media[1].mobileRatio,
-      order: ["media", "copy", "action"],
-    },
-    controls: CONTENT_TEMPLATE_CONTRACTS.hero.allowedControls,
-  },
-  fullBleed: {
-    ...CONTENT_TEMPLATE_CONTRACTS.fullBleed,
-    preview: {
-      tone: "light",
-      zones: [
-        { role: "media", column: 1, span: 12, row: 1, rowSpan: 3 },
-        { role: "copy", column: 1, span: 8, row: 4, rowSpan: 2 },
-        { role: "action", column: 10, span: 3, row: 5, rowSpan: 1 },
-      ],
-    },
-    desktop: {
-      columns: 12,
-      mediaRatio: CONTENT_TEMPLATE_CONTRACTS.fullBleed.media[0].desktopRatio,
-      order: ["media", "copy", "action"],
-    },
-    tablet: {
-      columns: 8,
-      mediaRatio: CONTENT_TEMPLATE_CONTRACTS.fullBleed.media[0].tabletRatio,
-      order: ["media", "copy", "action"],
-    },
-    mobile: {
-      columns: 1,
-      mediaRatio: CONTENT_TEMPLATE_CONTRACTS.fullBleed.media[1].mobileRatio,
-      order: ["media", "copy", "action"],
-    },
-    controls: CONTENT_TEMPLATE_CONTRACTS.fullBleed.allowedControls,
-  },
-  singlePoster: {
-    ...CONTENT_TEMPLATE_CONTRACTS.singlePoster,
-    preview: {
-      tone: "light",
-      zones: [
-        { role: "copy", column: 1, span: 4.56, row: 3, rowSpan: 3 },
-        { role: "action", column: 1, span: 3, row: 7, rowSpan: 1 },
-        { role: "media", column: 5.56, span: 7.44, row: 1, rowSpan: 8 },
-      ],
-    },
-    desktop: {
-      columns: 12,
-      mediaRatio: CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[0].desktopRatio,
-      order: ["copy", "action", "media"],
-    },
-    tablet: {
-      columns: 8,
-      mediaRatio: CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[0].tabletRatio,
-      order: ["media", "copy", "action"],
-    },
-    mobile: {
-      columns: 1,
-      mediaRatio: CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[1].mobileRatio,
-      order: ["media", "copy", "action"],
-    },
-    controls: CONTENT_TEMPLATE_CONTRACTS.singlePoster.allowedControls,
-  },
-  doublePoster: {
-    ...CONTENT_TEMPLATE_CONTRACTS.doublePoster,
-    preview: {
-      tone: "light",
-      zones: [
-        { role: "mainMedia", column: 1, span: 8, row: 1, rowSpan: 6 },
-        { role: "detailMedia", column: 9, span: 4, row: 2, rowSpan: 4 },
-        { role: "copy", column: 9, span: 4, row: 6, rowSpan: 2 },
-        { role: "action", column: 9, span: 2, row: 8, rowSpan: 1 },
-      ],
-    },
-    desktop: {
-      columns: 12,
-      mediaRatio: CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[0].desktopRatio,
-      detailRatio:
-        CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[1].desktopRatio,
-      order: ["mainMedia", "detailMedia", "copy", "action"],
-    },
-    tablet: {
-      columns: 8,
-      mediaRatio: CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[0].tabletRatio,
-      detailRatio: CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[1].tabletRatio,
-      order: ["mainMedia", "copy", "detailMedia", "action"],
-    },
-    mobile: {
-      columns: 1,
-      mediaRatio: CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[0].mobileRatio,
-      detailRatio: CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[1].mobileRatio,
-      order: ["mainMedia", "copy", "detailMedia", "action"],
-    },
-    controls: CONTENT_TEMPLATE_CONTRACTS.doublePoster.allowedControls,
-  },
-  textBanner: {
-    ...CONTENT_TEMPLATE_CONTRACTS.textBanner,
-    preview: {
-      tone: "light",
-      zones: [
-        { role: "copy", column: 3, span: 8, row: 3, rowSpan: 3 },
-        { role: "action", column: 5, span: 4, row: 7, rowSpan: 1 },
-      ],
-    },
-    desktop: {
-      columns: 12,
-      order: ["copy", "action"],
-    },
-    tablet: {
-      columns: 8,
-      order: ["copy", "action"],
-    },
-    mobile: {
-      columns: 1,
-      order: ["copy", "action"],
-    },
-    controls: CONTENT_TEMPLATE_CONTRACTS.textBanner.allowedControls,
-  },
-} as const satisfies Record<"hero" | "fullBleed" | "singlePoster" | "doublePoster" | "textBanner", ContentTemplateLayout>;
-
 const getSlotRatio = (
   skeleton: ContentTemplateSkeleton,
-  device: "desktop" | "tablet" | "mobile",
+  device: "desktop" | "mobile",
   role: "media" | "mainMedia" | "detailMedia",
-) => skeleton.slots.find((slot) => slot.role === role)?.[`${device}Ratio`];
+) => skeleton.slots.find(
+  (slot) => slot.role === role && Boolean(slot[`${device}Ratio`]),
+)?.[`${device}Ratio`];
 
 const getPrimaryRatio = (
   skeleton: ContentTemplateSkeleton,
-  device: "desktop" | "tablet" | "mobile",
+  device: "desktop" | "mobile",
 ) => getSlotRatio(skeleton, device, "media")
   ?? getSlotRatio(skeleton, device, "mainMedia")
-  ?? skeleton.slots.find((slot) => slot.desktopRatio || slot.tabletRatio || slot.mobileRatio)?.[`${device}Ratio`];
+  ?? skeleton.slots.find((slot) => Boolean(slot[`${device}Ratio`]))?.[`${device}Ratio`];
 
 /**
- * 其余 18 个模板同样拥有真实 adapter / Renderer。这里仅把 schema v2
- * 生成产物转换为渲染布局元数据，不能据 implementationStatus 再降级为骨架。
+ * 全部 23 个模板均拥有真实 adapter / Renderer。这里仅把 schema v3
+ * 生成产物转换为渲染布局元数据，不能据 implementationStatus 降级为骨架。
  */
-const PLANNED_TEMPLATE_LAYOUTS = Object.fromEntries(
+const DERIVED_TEMPLATE_LAYOUTS = Object.fromEntries(
   Object.values(CONTENT_TEMPLATE_SKELETONS).map((skeleton) => {
     const contract = CONTENT_TEMPLATE_CONTRACTS[skeleton.key];
     return [skeleton.key, {
@@ -238,12 +85,6 @@ const PLANNED_TEMPLATE_LAYOUTS = Object.fromEntries(
         detailRatio: getSlotRatio(skeleton, "desktop", "detailMedia"),
         order: contract.order.desktop,
       },
-      tablet: {
-        columns: 8,
-        mediaRatio: getPrimaryRatio(skeleton, "tablet"),
-        detailRatio: getSlotRatio(skeleton, "tablet", "detailMedia"),
-        order: contract.order.tablet,
-      },
       mobile: {
         columns: 1,
         mediaRatio: getPrimaryRatio(skeleton, "mobile"),
@@ -252,16 +93,15 @@ const PLANNED_TEMPLATE_LAYOUTS = Object.fromEntries(
       },
       controls: contract.allowedControls,
       isSkeleton: false,
-      // planned 历史消费面只需要一个已注册母版类型；真实区块仍由各 adapter 决定表现层。
-      master: "editorial-text",
+      master: contract.master,
     }];
   }),
 ) as unknown as Record<string, ContentTemplateLayout>;
 
-export const CONTENT_TEMPLATE_LAYOUTS = {
-  ...ACTIVE_TEMPLATE_LAYOUTS,
-  ...PLANNED_TEMPLATE_LAYOUTS,
-} as unknown as Record<ContentTemplateLayoutKey, ContentTemplateLayout>;
+export const CONTENT_TEMPLATE_LAYOUTS = DERIVED_TEMPLATE_LAYOUTS as Record<
+  ContentTemplateLayoutKey,
+  ContentTemplateLayout
+>;
 
 export const CONTENT_TEMPLATE_LAYOUT_BY_TYPE = Object.fromEntries(
   Object.values(CONTENT_TEMPLATE_LAYOUTS).map((layout) => [
@@ -283,16 +123,14 @@ export function templateLayoutVars(
    * resolveContractAspectRatio 白名单解析后传入,逐端覆盖布局默认值。
    */
   overrides?: {
-    mediaRatio?: Partial<Record<"desktop" | "tablet" | "mobile", string>>;
-    detailRatio?: Partial<Record<"desktop" | "tablet" | "mobile", string>>;
+    mediaRatio?: Partial<Record<"desktop" | "mobile", string>>;
+    detailRatio?: Partial<Record<"desktop" | "mobile", string>>;
   },
 ): TemplateStyle {
   return {
     "--hc-template-media-desktop": overrides?.mediaRatio?.desktop ?? layout.desktop.mediaRatio ?? "auto",
-    "--hc-template-media-tablet": overrides?.mediaRatio?.tablet ?? layout.tablet.mediaRatio ?? "auto",
     "--hc-template-media-mobile": overrides?.mediaRatio?.mobile ?? layout.mobile.mediaRatio ?? "auto",
     "--hc-template-detail-desktop": overrides?.detailRatio?.desktop ?? layout.desktop.detailRatio ?? "auto",
-    "--hc-template-detail-tablet": overrides?.detailRatio?.tablet ?? layout.tablet.detailRatio ?? "auto",
     "--hc-template-detail-mobile": overrides?.detailRatio?.mobile ?? layout.mobile.detailRatio ?? "auto",
   };
 }
@@ -301,7 +139,7 @@ const LAYOUT_CSS = `
 .hc-content-template {
   --hc-template-container: 1280px;
   --hc-template-gutter: var(--hc-px, clamp(20px, 5vw, 80px));
-  color: var(--hc-ink, #222222);
+  color: var(--hc-ink, #181A1B);
   background: var(--hc-bg, #FFFFFF);
 }
 .hc-content-template__container {
@@ -311,7 +149,7 @@ const LAYOUT_CSS = `
 .hc-content-template__media {
   position: relative;
   overflow: hidden;
-  background: #F5F5F5;
+  background: #F4F5F5;
 }
 .hc-content-template__media img {
   display: block;
@@ -325,14 +163,14 @@ const LAYOUT_CSS = `
 }
 .hc-content-template__eyebrow {
   margin: 0 0 12px;
-  color: var(--hc-muted, #5C5C5C);
+  color: var(--hc-muted, #5F6568);
   font: 500 var(--hc-type-caption, 12px)/1.4 var(--hc-font-sans, sans-serif);
   letter-spacing: .12em;
   text-transform: uppercase;
 }
 .hc-content-template__title {
   margin: 0;
-  color: var(--hc-ink, #222222);
+  color: var(--hc-ink, #181A1B);
   font-family: var(--hc-font-display, serif);
   font-weight: 400;
   line-height: 1.2;
@@ -340,7 +178,7 @@ const LAYOUT_CSS = `
 .hc-content-template__body {
   max-width: 45em;
   margin: 16px 0 0;
-  color: var(--hc-muted, #5C5C5C);
+  color: var(--hc-muted, #5F6568);
   font: 400 var(--hc-type-body, 15px)/1.8 var(--hc-font-sans, sans-serif);
 }
 .hc-content-template__action {
@@ -348,21 +186,21 @@ const LAYOUT_CSS = `
   min-height: 44px;
   align-items: center;
   gap: 8px;
-  color: var(--hc-ink, #222222);
+  color: var(--hc-ink, #181A1B);
   font: 500 var(--hc-type-caption, 12px)/1.4 var(--hc-font-sans, sans-serif);
   letter-spacing: .08em;
   text-decoration: none;
   /* 十家实证(03 第八节):CTA 黑色细底线,金色废除 */
-  border-bottom: 1px solid var(--hc-ink, #222222);
+  border-bottom: 1px solid var(--hc-ink, #181A1B);
 }
 .hc-content-template__action:focus-visible {
-  outline: 2px solid #1A1A1A;
+  outline: 2px solid #181A1B;
   outline-offset: 4px;
 }
 
-/* 首屏：桌面是导航后的可见舞台，16:9 仅是图片交付与裁切建议，不决定根区块高度。 */
+/* 首屏：桌面与视口等高，导航悬浮在影像上，不在首屏底部留下工具栏高度的空带。 */
 .hc-phase1-hero {
-  min-height: max(620px, calc(100svh - var(--hc-hero-nav-offset, 80px)));
+  min-height: max(620px, 100svh);
 }
 /* 编辑画布内 iframe 会被整页内容撑高，svh 随之失真；编辑态改用编辑器预设的视口高度，保证比例准确。 */
 .hc-phase1-hero--edit {
@@ -380,23 +218,44 @@ const LAYOUT_CSS = `
   position: absolute;
   z-index: 2;
   inset-inline: 0;
-  bottom: clamp(40px, 7vh, 76px);
+  bottom: clamp(64px, 8vh, 96px);
   pointer-events: none;
 }
 .hc-phase1-hero__copy {
-  width: min(calc(100% - (var(--hc-template-gutter) * 2)), 1280px);
-  max-width: 720px;
+  width: min(calc(100% - (var(--hc-template-gutter) * 2)), 1760px);
   margin-inline: auto;
-  /* 白盒画册:亮图深字(2026-08-19 裁定,黑色背景废除) */
-  color: var(--hc-ink, #1A1A1A);
+  color: #F7F8F8;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, .18);
 }
 .hc-phase1-hero__copy[data-align="center"] { text-align: center; }
 .hc-phase1-hero__copy[data-align="center"] > * { margin-inline: auto; }
+.hc-phase1-hero__copy > * { max-width: min(620px, 48vw); }
 .hc-phase1-hero__copy .hc-content-template__title,
-.hc-phase1-hero__copy .hc-content-template__action { color: var(--hc-ink, #1A1A1A); }
+.hc-phase1-hero__copy .hc-content-template__action { color: #F7F8F8; }
+.hc-phase1-hero__copy .hc-content-template__title {
+  line-height: 1.04;
+  letter-spacing: .16em;
+}
 .hc-phase1-hero__copy .hc-content-template__body,
-.hc-phase1-hero__copy .hc-content-template__eyebrow { color: #5A5A5A; }
-.hc-phase1-hero__copy .hc-content-template__action { pointer-events: auto; border-color: var(--hc-ink, #1A1A1A); }
+.hc-phase1-hero__copy .hc-content-template__eyebrow { color: rgba(247, 248, 248, .84); }
+.hc-phase1-hero__copy .hc-content-template__title + .hc-content-template__eyebrow {
+  margin: 22px 0 0;
+  letter-spacing: .2em;
+}
+.hc-phase1-hero__copy .hc-content-template__body {
+  margin-top: 26px;
+  font-size: clamp(16px, 1.2vw, 20px);
+  line-height: 1.5;
+  letter-spacing: .025em;
+}
+.hc-phase1-hero__copy .hc-content-template__action {
+  pointer-events: auto;
+  margin-top: 28px;
+  border-color: rgba(247, 248, 248, .72);
+}
+.hc-phase1-hero__copy .hc-content-template__action:focus-visible {
+  outline-color: #F7F8F8;
+}
 
 /* 通栏图：任何断点都不压字，说明带跟在图片之后。 */
 .hc-phase1-full-bleed__media { aspect-ratio: var(--hc-template-media-desktop); }
@@ -448,31 +307,35 @@ const LAYOUT_CSS = `
 .hc-phase1-text[data-spacing="spacious"] { padding-block: 144px; }
 .hc-phase1-text[data-spacing="grand"] { padding-block: clamp(170px, 18vh, 280px); }
 
+/* 中间宽度只改变几何布局；素材、比例和阅读顺序沿用 desktop 合同。 */
 @media (min-width: 768px) and (max-width: 1023px) {
   .hc-content-template { --hc-template-gutter: 28px; }
   .hc-phase1-hero { min-height: 0; }
-  .hc-phase1-hero__media { position: relative; inset: auto; height: auto; min-height: 0; aspect-ratio: var(--hc-template-media-tablet); }
+  .hc-phase1-hero__media { position: relative; inset: auto; height: auto; min-height: 0; aspect-ratio: var(--hc-template-media-desktop); }
   .hc-phase1-hero__copy-band { position: relative; bottom: auto; padding-block: 40px 56px; background: var(--hc-bg, #FFFFFF); }
-  .hc-phase1-hero__copy { width: min(calc(100% - 56px), 704px); color: var(--hc-ink, #222222); }
+  .hc-phase1-hero__copy { width: min(calc(100% - 56px), 704px); color: var(--hc-ink, #181A1B); }
+  .hc-phase1-hero__copy > * { max-width: 45em; }
+  .hc-phase1-hero__copy .hc-content-template__title { letter-spacing: .1em; }
   .hc-phase1-hero__copy .hc-content-template__title,
-  .hc-phase1-hero__copy .hc-content-template__action { color: var(--hc-ink, #222222); }
+  .hc-phase1-hero__copy .hc-content-template__action { color: var(--hc-ink, #181A1B); }
   .hc-phase1-hero__copy .hc-content-template__body,
-  .hc-phase1-hero__copy .hc-content-template__eyebrow { color: var(--hc-muted, #5C5C5C); }
-  .hc-phase1-hero__copy .hc-content-template__action { border-color: var(--hc-ink, #1A1A1A); }
-  .hc-phase1-full-bleed__media { aspect-ratio: var(--hc-template-media-tablet); }
+  .hc-phase1-hero__copy .hc-content-template__eyebrow { color: var(--hc-muted, #5F6568); }
+  .hc-phase1-hero__copy .hc-content-template__action { border-color: var(--hc-ink, #181A1B); }
+  .hc-phase1-hero__copy .hc-content-template__action:focus-visible { outline-color: #181A1B; }
+  .hc-phase1-full-bleed__media { aspect-ratio: var(--hc-template-media-desktop); }
   .hc-phase1-full-bleed__caption { grid-template-columns: repeat(8, minmax(0, 1fr)); }
   .hc-phase1-full-bleed__copy { grid-column: 1 / span 6; }
   .hc-phase1-full-bleed__action { grid-column: 7 / span 2; }
   .hc-phase1-single { padding-left: clamp(0px, 6vw, 120px); }
-  .hc-phase1-single__media { width: min(80%, 100%); margin-left: auto; aspect-ratio: var(--hc-template-media-tablet); }
+  .hc-phase1-single__media { width: min(80%, 100%); margin-left: auto; aspect-ratio: var(--hc-template-media-desktop); }
   .hc-phase1-single__copy { position: absolute; left: 0; bottom: clamp(16px, 2vw, 48px); max-width: 220px; }
   .hc-phase1-single[data-mirror="true"] { padding-left: 0; padding-right: clamp(0px, 6vw, 120px); }
   .hc-phase1-single[data-mirror="true"] .hc-phase1-single__media { margin-left: 0; margin-right: auto; }
   .hc-phase1-single[data-mirror="true"] .hc-phase1-single__copy { left: auto; right: 0; }
   .hc-phase1-double { grid-template-columns: repeat(8, minmax(0, 1fr)); }
-  .hc-phase1-double__main { grid-column: 1 / span 8; grid-row: 1; aspect-ratio: var(--hc-template-media-tablet); }
+  .hc-phase1-double__main { grid-column: 1 / span 8; grid-row: 1; aspect-ratio: var(--hc-template-media-desktop); }
   .hc-phase1-double__copy { grid-column: 1 / span 5; grid-row: 2; padding-top: 32px; }
-  .hc-phase1-double__detail { grid-column: 6 / span 3; grid-row: 2; aspect-ratio: var(--hc-template-detail-tablet); margin-top: 32px; }
+  .hc-phase1-double__detail { grid-column: 6 / span 3; grid-row: 2; aspect-ratio: var(--hc-template-detail-desktop); margin-top: 32px; }
   .hc-phase1-double__action { grid-column: 1 / span 5; grid-row: 3; }
   .hc-phase1-text { width: calc((100% - 56px) * .75); max-width: 720px; }
   .hc-phase1-text[data-spacing="normal"] { padding-block: 80px; }
@@ -485,24 +348,26 @@ const LAYOUT_CSS = `
   .hc-phase1-hero { min-height: 0; }
   .hc-phase1-hero__media { position: relative; inset: auto; height: auto; min-height: 0; aspect-ratio: var(--hc-template-media-mobile); }
   .hc-phase1-hero__copy-band { position: relative; bottom: auto; padding-block: 32px 48px; background: var(--hc-bg, #FFFFFF); }
-  .hc-phase1-hero__copy { width: calc(100% - 40px); color: var(--hc-ink, #222222); text-align: left !important; }
+  .hc-phase1-hero__copy { width: calc(100% - 40px); color: var(--hc-ink, #181A1B); text-align: left !important; }
   .hc-phase1-hero__copy > * { margin-inline: 0 !important; }
+  .hc-phase1-hero__copy > * { max-width: 45em; }
+  .hc-phase1-hero__copy .hc-content-template__title { letter-spacing: .08em; }
   .hc-phase1-hero__copy .hc-content-template__title,
-  .hc-phase1-hero__copy .hc-content-template__action { color: var(--hc-ink, #222222); }
+  .hc-phase1-hero__copy .hc-content-template__action { color: var(--hc-ink, #181A1B); }
   .hc-phase1-hero__copy .hc-content-template__body,
-  .hc-phase1-hero__copy .hc-content-template__eyebrow { color: var(--hc-muted, #5C5C5C); }
-  .hc-phase1-hero__copy .hc-content-template__action { border-color: var(--hc-ink, #1A1A1A); }
+  .hc-phase1-hero__copy .hc-content-template__eyebrow { color: var(--hc-muted, #5F6568); }
+  .hc-phase1-hero__copy .hc-content-template__action { border-color: var(--hc-ink, #181A1B); }
+  .hc-phase1-hero__copy .hc-content-template__action:focus-visible { outline-color: #181A1B; }
   .hc-phase1-full-bleed__media { aspect-ratio: var(--hc-template-media-mobile); }
   .hc-phase1-full-bleed__caption { display: block; padding-block: 28px 44px; }
   .hc-phase1-full-bleed__action { margin-top: 22px; }
-  /* 移动：4:5 全屏叠字同构（亮图深字居中束），不做图上文下分离 */
-  .hc-phase1-single { position: relative; padding-left: 0; }
+  /* 移动：合同规定图片→文字→行动的堆叠阅读顺序；文字使用独立实色区，不依赖图片对比度。 */
+  .hc-phase1-single { position: relative; padding-left: 0; display: flex; flex-direction: column; }
   .hc-phase1-single__media { width: 100%; aspect-ratio: var(--hc-template-media-mobile); }
-  .hc-phase1-single__media::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse 70% 60% at 50% 45%, rgba(255,255,255,0.42), rgba(255,255,255,0) 68%); pointer-events: none; }
-  .hc-phase1-single__copy { position: absolute; inset: 0; max-width: none; margin-top: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 24px; }
+  .hc-phase1-single__copy { position: relative; inset: auto; max-width: none; margin-top: 0; display: flex; flex-direction: column; align-items: flex-start; text-align: left; padding: 32px 20px 8px; background: var(--hc-bg, #FFFFFF); }
   .hc-phase1-single[data-mirror="true"] { padding-right: 0; }
   .hc-phase1-single[data-mirror="true"] .hc-phase1-single__media { margin: 0; }
-  .hc-phase1-single[data-mirror="true"] .hc-phase1-single__copy { position: absolute; inset: 0; left: auto; right: auto; align-items: center; text-align: center; }
+  .hc-phase1-single[data-mirror="true"] .hc-phase1-single__copy { position: relative; inset: auto; align-items: flex-start; text-align: left; }
   .hc-phase1-double { display: grid; grid-template-columns: 1fr; gap: 0; }
   .hc-phase1-double__main { grid-column: 1; grid-row: 1; aspect-ratio: var(--hc-template-media-mobile); }
   .hc-phase1-double__copy { grid-column: 1; grid-row: 2; margin-top: 28px; }

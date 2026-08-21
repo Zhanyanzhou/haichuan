@@ -15,15 +15,15 @@ function BusinessRegionSummary({ props }: { props: Record<string, any> }) {
     <div
       style={{
         padding: "12px 14px",
-        border: "1px solid #D7D5D0",
+        border: "1px solid #DDE1E2",
         borderRadius: 6,
-        background: "#FCFCFB",
-        color: "#66645F",
+        background: "#FFFFFF",
+        color: "#5F6568",
         fontSize: 13,
         lineHeight: 1.7,
       }}
     >
-      <p style={{ margin: "0 0 6px", color: "#222", fontWeight: 500 }}>
+      <p style={{ margin: "0 0 6px", color: "#181A1B", fontWeight: 500 }}>
         {String(props.title ?? "固定业务区")}
       </p>
       <p style={{ margin: "0 0 10px" }}>{String(props.description ?? "")}</p>
@@ -33,7 +33,7 @@ function BusinessRegionSummary({ props }: { props: Record<string, any> }) {
             key={item}
             style={{
               padding: "4px 10px",
-              border: "1px solid #D7D5D0",
+              border: "1px solid #DDE1E2",
               borderRadius: 3,
               fontSize: 12,
             }}
@@ -42,7 +42,7 @@ function BusinessRegionSummary({ props }: { props: Record<string, any> }) {
           </span>
         ))}
       </div>
-      <p style={{ margin: "10px 0 0", fontSize: 12, color: "#98948D" }}>
+      <p style={{ margin: "10px 0 0", fontSize: 12, color: "#6E7477" }}>
         此区域在前台真实渲染,不能删除、隐藏或调整顺序;请通过对应业务管理维护其数据。
       </p>
     </div>

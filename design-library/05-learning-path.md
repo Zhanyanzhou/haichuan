@@ -15,7 +15,7 @@
 7. **响应式设计（Responsive Design）**：桌面/平板/手机的焦点重排、裁切与阅读顺序。
 8. **无障碍与性能（Accessibility & Performance）**：对比度、键盘焦点、减少动态效果、替代文本、加载稳定性。
 
-> 以上八项能力在模板中的落地（角色 / 槽位 / 权限三档 / 构图顺序）见 `06-jewelry-template-system.md`。
+> 在海川项目中应用这些能力时，模板稳定边界见 `docs/page-builder/template-design-framework.md`，具体模板事实只认机器合同。
 
 ---
 

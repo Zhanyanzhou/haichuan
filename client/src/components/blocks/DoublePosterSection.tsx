@@ -3,7 +3,10 @@ import { Link } from 'react-router-dom';
 import { useReducedMotion } from 'framer-motion';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
-import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
+import {
+  RESPONSIVE_CANVAS,
+  resolveContractAspectRatio,
+} from "@/page-builder/config/blockContracts";
 import type { PageModule } from '@/types/pageModule';
 import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
 import { DesignSystemStyles } from '@/page-builder/designSystem/sectionShell';
@@ -15,8 +18,8 @@ import {
 } from '@/page-builder/layout/contentTemplateLayouts';
 
 const SF = '#FFFFFF';
-const TX = '#1A1A1A';
-const MU = '#8C8C8C';
+const TX = '#181A1B';
+const MU = '#6E7477';
 
 interface Props { module?: PageModule; editMode?: boolean; }
 
@@ -57,7 +60,7 @@ function EditorialImage({
 
   if (failed) {
     return (
-      <div className="grid h-full w-full place-items-center text-xs tracking-[.08em]" role="img" aria-label={alt || "图片暂不可用"} style={{ color: '#7E7468', background: 'linear-gradient(135deg,#EDE6DC,#D9CDBD)' }}>
+      <div className="grid h-full w-full place-items-center text-xs tracking-[.08em]" role="img" aria-label={alt || "图片暂不可用"} style={{ color: '#5F6568', background: 'linear-gradient(135deg,#F4F5F5,#DDE1E2)' }}>
         图片暂不可用
       </div>
     );
@@ -81,6 +84,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
   const rm = useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+  const [isMobileContractViewport, setIsMobileContractViewport] = useState(false);
 
   useEffect(() => {
     const el = ref.current;
@@ -90,18 +94,30 @@ export default function DoublePosterSection({ module, editMode }: Props) {
     return () => o.disconnect();
   }, []);
 
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const syncViewport = () => {
+      setIsMobileContractViewport(
+        element.getBoundingClientRect().width <= RESPONSIVE_CANVAS.mobileMaxWidth,
+      );
+    };
+    syncViewport();
+    const observer = new ResizeObserver(syncViewport);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   const defaults = { number: "", label: "", title: "", description: "", href: "" };
   const c = module?.content as (PageModule['content'] & Record<string, any>) | undefined;
   const s = module?.styleConfig as (PageModule['styleConfig'] & Record<string, any>) | undefined;
   // 槽位比例选项(契约派生):主图/细节图各自独立选择,保持"主横副竖"对话结构
   const mainRatio = {
     desktop: resolveContractAspectRatio("doublePoster", "mainImage", c?.mainImageRatio, "desktop"),
-    tablet: resolveContractAspectRatio("doublePoster", "mainImage", c?.mainImageRatio, "tablet"),
     mobile: resolveContractAspectRatio("doublePoster", "mainImage", c?.mainImageRatio, "mobile"),
   };
   const detailRatio = {
     desktop: resolveContractAspectRatio("doublePoster", "detailImage", c?.detailImageRatio, "desktop"),
-    tablet: resolveContractAspectRatio("doublePoster", "detailImage", c?.detailImageRatio, "tablet"),
     mobile: resolveContractAspectRatio("doublePoster", "detailImage", c?.detailImageRatio, "mobile"),
   };
 
@@ -118,7 +134,37 @@ export default function DoublePosterSection({ module, editMode }: Props) {
   const description = c?.description ?? defaults.description;
   const actionText = typeof c?.actionText === "string" ? c.actionText : "";
   const linkUrl = c?.linkUrl ?? defaults.href;
-  const targetUrl = resolveLinkTargetUrl({ targetType: c?.targetType, productId: c?.productId, linkUrl });
+  const targetUrl = resolveLinkTargetUrl({ targetType: c?.targetType, productCode: c?.productCode, productId: c?.productId, linkUrl });
+  const detailSlot = detailImg || editMode ? (
+    <div
+      data-content-role="detailImage"
+      data-editor-field="detailImage"
+      className="hc-content-template__media hc-phase1-double__detail"
+      style={{ background: '#F4F5F5' }}
+    >
+      {detailImg ? (
+        <EditorialImage src={detailImg} alt={c?.detailAltText || ""} focusX={s?.detailFocusX ?? 50} focusY={s?.detailFocusY ?? 50} />
+      ) : (
+        <MissingImageSlot field="detailImage" label="细节海报" spec={IMAGE_SPECS.doublePoster.detail.label} height="100%" />
+      )}
+    </div>
+  ) : null;
+  const copySlot = (
+    <div className="hc-content-template__copy hc-phase1-double__copy" data-content-role="copy">
+      {(number || label) ? (
+        <p data-editor-field="number label" className="hc-content-template__eyebrow" style={{ color: MU, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+          {[number, label].filter(Boolean).join(" / ")}
+        </p>
+      ) : null}
+      {title ? (
+        <h2 data-editor-field="title" className="hc-content-template__title"
+          style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: 'var(--hc-type-h3, clamp(22px,2.2vw,32px))', color: TX }}>{title}</h2>
+      ) : null}
+      {description ? (
+        <p data-editor-field="description" className="hc-content-template__body" style={{ color: MU }}>{description}</p>
+      ) : null}
+    </div>
+  );
 
   return (
     <section
@@ -127,7 +173,6 @@ export default function DoublePosterSection({ module, editMode }: Props) {
       data-content-template={CONTENT_TEMPLATE_LAYOUTS.doublePoster.key}
       data-visual-role={CONTENT_TEMPLATE_LAYOUTS.doublePoster.visualRole}
       data-height-mode-desktop={CONTENT_TEMPLATE_LAYOUTS.doublePoster.heightModeByViewport.desktop}
-      data-height-mode-tablet={CONTENT_TEMPLATE_LAYOUTS.doublePoster.heightModeByViewport.tablet}
       data-height-mode-mobile={CONTENT_TEMPLATE_LAYOUTS.doublePoster.heightModeByViewport.mobile}
       data-mobile-order={CONTENT_TEMPLATE_LAYOUTS.doublePoster.mobile.order.join(",")}
       data-density="brand"
@@ -135,7 +180,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
       data-flow={CONTENT_TEMPLATE_LAYOUTS.doublePoster.flow}
       style={{
         background: s?.bgColor || SF,
-        outline: editMode ? '2px solid rgba(184,148,78,0.6)' : undefined,
+        outline: editMode ? '2px solid rgba(24,26,27,0.48)' : undefined,
         outlineOffset: -2,
         position: 'relative' as const,
         ...templateLayoutVars(CONTENT_TEMPLATE_LAYOUTS.doublePoster, { mediaRatio: mainRatio, detailRatio }),
@@ -144,13 +189,13 @@ export default function DoublePosterSection({ module, editMode }: Props) {
       <DesignSystemStyles />
       <ContentTemplateLayoutStyles />
       {editMode && (
-        <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 10, background: '#B8944E', color: '#fff', fontSize: 10, padding: '2px 8px', letterSpacing: '0.04em' }}>
+        <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 10, background: '#181A1B', color: '#fff', fontSize: 10, padding: '2px 8px', letterSpacing: '0.04em' }}>
           可编辑 · 双图文
         </div>
       )}
       <div className="hc-content-template__container hc-phase1-double">
-        <div data-editor-field="mainImage" className="hc-content-template__media hc-phase1-double__main" style={{
-            background: '#F3F1EE',
+        <div data-content-role="mainImage" data-editor-field="mainImage" className="hc-content-template__media hc-phase1-double__main" style={{
+            background: '#F4F5F5',
             opacity: rm || visible ? 1 : 0,
             transform: rm || visible ? 'translateY(0)' : 'translateY(18px)',
             transition: 'opacity 0.9s 0.05s ease, transform 0.9s 0.05s ease',
@@ -161,40 +206,14 @@ export default function DoublePosterSection({ module, editMode }: Props) {
               <MissingImageSlot field="mainImage" label="主海报" spec={IMAGE_SPECS.doublePoster.main.label} height="100%" />
             )}
         </div>
-        {detailImg || editMode ? (
-          <div
-            data-editor-field="detailImage"
-            className="hc-content-template__media hc-phase1-double__detail"
-            style={{ background: '#F3F1EE' }}
-          >
-            {detailImg ? (
-              <EditorialImage src={detailImg} alt={c?.detailAltText || ""} focusX={s?.detailFocusX ?? 50} focusY={s?.detailFocusY ?? 50} />
-            ) : (
-              <MissingImageSlot field="detailImage" label="细节海报" spec={IMAGE_SPECS.doublePoster.detail.label} height="100%" />
-            )}
-          </div>
-        ) : null}
-        <div className="hc-content-template__copy hc-phase1-double__copy">
-          {(number || label) ? (
-            <p data-editor-field="number label" className="hc-content-template__eyebrow" style={{ color: MU, fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
-              {[number, label].filter(Boolean).join(" / ")}
-            </p>
-          ) : null}
-          {title ? (
-            <h2 data-editor-field="title" className="hc-content-template__title"
-              style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: 'var(--hc-type-h3, clamp(22px,2.2vw,32px))', color: TX }}>{title}</h2>
-          ) : null}
-          {description ? (
-            <p data-editor-field="description" className="hc-content-template__body" style={{ color: MU }}>{description}</p>
-          ) : null}
-        </div>
+        {isMobileContractViewport ? <>{copySlot}{detailSlot}</> : <>{detailSlot}{copySlot}</>}
         {actionText && targetUrl ? (
           editMode ? (
-            <span data-editor-field="actionText linkUrl productId" className="hc-content-template__action hc-phase1-double__action" style={{ color: TX }}>
+            <span data-content-role="action" data-editor-field="actionText linkUrl productId" className="hc-content-template__action hc-phase1-double__action" style={{ color: TX }}>
               {actionText} <span>→</span>
             </span>
           ) : (
-            <Link data-editor-field="actionText linkUrl productId" to={targetUrl} className="hc-content-template__action hc-phase1-double__action transition-opacity hover:opacity-55" style={{ color: TX }}>
+            <Link data-content-role="action" data-editor-field="actionText linkUrl productId" to={targetUrl} className="hc-content-template__action hc-phase1-double__action transition-opacity hover:opacity-55" style={{ color: TX }}>
               {actionText} <span>→</span>
             </Link>
           )

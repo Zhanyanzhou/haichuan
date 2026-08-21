@@ -6,5 +6,5 @@ import { CreateProductDto } from './create-product.dto';
  * 所有字段可选，不允许修改系统字段（code 不可改；publishedAt 由 /status 端点发布时内部注入，不对前端开放，P1-24）
  */
 export class UpdateProductDto extends PartialType(
-  OmitType(CreateProductDto, ['code'] as const),
+  OmitType(CreateProductDto, ['code', 'status'] as const),
 ) {}

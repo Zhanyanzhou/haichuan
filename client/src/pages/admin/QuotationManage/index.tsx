@@ -639,7 +639,7 @@ export default function QuotationManage() {
               报价单 <code className="text-brand-gold">{convertTarget.quoteNo}</code> · 客户 {convertTarget.customerName} · 报价合计 <span className="text-brand-gold">¥{Number(convertTarget.finalAmount).toLocaleString()}</span>
             </div>
             {convertTarget.items?.some((it) => !it.skuId) && (
-              <div className="text-xs text-red-500 border border-red-200 bg-red-50 p-2 rounded">
+              <div className="text-xs border p-2 rounded" style={{ color: "var(--adm-error)", borderColor: "var(--adm-error-border)", background: "var(--adm-error-bg)" }}>
                 警告：该报价单存在未关联 SKU 的商品行，转订单将失败。请先在报价单补全商品 SKU。
               </div>
             )}

@@ -39,10 +39,13 @@ import {
   CreateSkuDto,
   UpdateSkuDto,
   PublicProductQueryDto,
+  AdminProductQueryDto,
+  ResolveProductReferencesDto,
 } from "./dto";
 import { join } from "path";
 import { stat } from "node:fs/promises";
 import { Observable } from "rxjs";
+import { ProductStatus } from "@prisma/client";
 const sharp = require("sharp");
 
 @ApiTags("产品管理")
@@ -66,8 +69,15 @@ export class ProductsController {
   @ApiQuery({ name: "pageSize", required: false, description: "每页数量" })
   @ApiQuery({ name: "categoryId", required: false, description: "分类ID" })
   @ApiQuery({ name: "keyword", required: false, description: "搜索关键词" })
-  findAll(@Query() query: Record<string, unknown>) {
+  findAll(@Query() query: AdminProductQueryDto) {
     return this.productsService.findAll(query);
+  }
+
+  @Post("admin/resolve-references")
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "按稳定 code 或旧 id 解析店铺装修商品引用" })
+  resolveReferences(@Body() body: ResolveProductReferencesDto) {
+    return this.productsService.resolveReferences(body);
   }
 
   @Public()
@@ -88,7 +98,7 @@ export class ProductsController {
   @Get("public/:id")
   @ApiOperation({ summary: "公开商品详情（仅 PUBLIC + PUBLISHED 安全字段）" })
   async findPublicById(@Param("id") id: string) {
-    const product = await this.productsService.findPublicById(+id);
+    const product = await this.productsService.findPublicById(id);
     if (!product) throw new NotFoundException("商品当前不可浏览");
     return product;
   }
@@ -149,7 +159,7 @@ export class ProductsController {
   @ApiOperation({ summary: "受控商品详情（登录后访问，按可见范围过滤）" })
   async findCatalogById(@Req() request: any, @Param("id") id: string) {
     const product = await this.productsService.findCatalogById(
-      +id,
+      id,
       request.customer,
     );
     if (!product) throw new NotFoundException("商品当前不可浏览");
@@ -239,9 +249,7 @@ export class ProductsController {
     if (status === "ARCHIVED") {
       return this.productsService.archive(+id);
     }
-    // 发布校验由 service.update 的统一上架门禁 (canPublish) 兜底,
-    // 避免与 PUT /:id 直写 status 两条路径产生不一致。
-    return this.productsService.update(+id, { status } as any);
+    return this.productsService.updateStatus(+id, status as ProductStatus);
   }
 
   @UseGuards(JwtAuthGuard)
