@@ -8,7 +8,7 @@
  */
 import { DesktopOutlined, MobileOutlined } from "@ant-design/icons";
 import { message, Modal } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RESPONSIVE_CANVAS } from "../config/blockContracts";
 import { useHomepagePuck } from "../../pages/admin/HomepageConfig/editor-store";
 import {
@@ -65,6 +65,7 @@ const VISUAL_NODE_LABELS: Record<string, string> = {
   image: "主图",
   mainImage: "主海报",
   detailImage: "细节海报",
+  copy: "文案",
   bgImage: "背景图",
   productCards: "商品区域",
   title: "标题",
@@ -175,6 +176,11 @@ export default function SchemaInspectorPanel({
   const editor = useInspectorModuleEditor();
   const [activePanelMode, setActivePanelMode] =
     useState<InspectorPanelMode>("content");
+  const inspectorScrollRef = useRef<HTMLDivElement>(null);
+  const panelScrollPositionsRef = useRef<Record<InspectorPanelMode, number>>({
+    content: 0,
+    design: 0,
+  });
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const appData = useHomepagePuck((state) => state.appState.data);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
@@ -186,9 +192,13 @@ export default function SchemaInspectorPanel({
   const editorBlockId = editor?.props.id;
 
   useEffect(() => {
+    panelScrollPositionsRef.current = { content: 0, design: 0 };
     setActivePanelMode("content");
     setVisualPanelMode("content");
-  }, [editor?.moduleType, setVisualPanelMode]);
+    window.requestAnimationFrame(() => {
+      inspectorScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
+    });
+  }, [editor?.moduleType, editorBlockId, setVisualPanelMode]);
 
   useEffect(() => {
     if (!editorBlockId || !visualSelection || visualSelection.blockId !== editorBlockId) return;
@@ -411,10 +421,23 @@ export default function SchemaInspectorPanel({
     panelMode: InspectorPanelMode,
     requestedMode?: "adjust-layout" | "adjust-media",
   ) => {
+    const targetScrollTop = panelScrollPositionsRef.current[panelMode];
+    if (panelMode !== activePanelMode && inspectorScrollRef.current) {
+      panelScrollPositionsRef.current[activePanelMode] =
+        inspectorScrollRef.current.scrollTop;
+    }
     setActivePanelMode(panelMode);
     setVisualPanelMode(panelMode);
     if (panelMode === "design" && requestedMode) {
       setVisualEditorMode(requestedMode);
+    }
+    if (panelMode !== activePanelMode) {
+      window.requestAnimationFrame(() => {
+        inspectorScrollRef.current?.scrollTo({
+          top: targetScrollTop,
+          behavior: "auto",
+        });
+      });
     }
   };
 
@@ -482,7 +505,7 @@ export default function SchemaInspectorPanel({
                 onClick={() => setInspectorDevice("desktop")}
               >
                 <DesktopOutlined />
-                <span>桌面端</span>
+                <span>桌面素材</span>
               </button>
               <button
                 type="button"
@@ -492,7 +515,7 @@ export default function SchemaInspectorPanel({
                 onClick={() => setInspectorDevice("mobile")}
               >
                 <MobileOutlined />
-                <span>移动端</span>
+                <span>移动素材</span>
               </button>
             </div>
           ) : null}
@@ -599,10 +622,10 @@ export default function SchemaInspectorPanel({
               (field) => !field.device || field.device === "shared",
             ),
           )
-            ? "全设备"
+            ? "双端通用"
             : editor.device === "mobile"
-              ? "移动端"
-              : "桌面端"
+              ? "移动素材"
+              : "桌面素材"
         }
         dirty={hasUnsavedChanges}
         onClose={editor.close}
@@ -638,7 +661,56 @@ export default function SchemaInspectorPanel({
         ]}
       />
 
-      <div className="homepage-editor__inspector-scroll">
+      <nav className="homepage-editor__panel-mode-tabs" aria-label="编辑类型">
+        <div role="tablist" aria-label="编辑类型">
+          <button
+            id="inspector-panel-tab-content"
+            type="button"
+            role="tab"
+            aria-selected={activePanelMode === "content"}
+            aria-controls="inspector-panel-content"
+            className={activePanelMode === "content" ? "is-active" : ""}
+            onClick={() => activatePanelMode("content")}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowRight" && event.key !== "End") return;
+              if (designTaskGroups.length === 0) return;
+              event.preventDefault();
+              activatePanelMode("design");
+              window.requestAnimationFrame(() =>
+                document.getElementById("inspector-panel-tab-design")?.focus(),
+              );
+            }}
+          >
+            内容
+          </button>
+          <button
+            id="inspector-panel-tab-design"
+            type="button"
+            role="tab"
+            aria-selected={activePanelMode === "design"}
+            aria-controls="inspector-panel-design"
+            aria-disabled={designTaskGroups.length === 0}
+            disabled={designTaskGroups.length === 0}
+            className={activePanelMode === "design" ? "is-active" : ""}
+            onClick={() => activatePanelMode("design")}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "Home") return;
+              event.preventDefault();
+              activatePanelMode("content");
+              window.requestAnimationFrame(() =>
+                document.getElementById("inspector-panel-tab-content")?.focus(),
+              );
+            }}
+          >
+            设计
+          </button>
+        </div>
+      </nav>
+
+      <div
+        ref={inspectorScrollRef}
+        className="homepage-editor__inspector-scroll"
+      >
         {validationState !== "current" ? (
           <p className="homepage-editor__validation-state" role="status" aria-live="polite">
             {validationState === "checking"
@@ -664,51 +736,6 @@ export default function SchemaInspectorPanel({
             </div>
           </section>
         ) : null}
-        <nav className="homepage-editor__panel-mode-tabs" aria-label="编辑类型">
-          <div role="tablist" aria-label="编辑类型">
-            <button
-              id="inspector-panel-tab-content"
-              type="button"
-              role="tab"
-              aria-selected={activePanelMode === "content"}
-              aria-controls="inspector-panel-content"
-              className={activePanelMode === "content" ? "is-active" : ""}
-              onClick={() => activatePanelMode("content")}
-              onKeyDown={(event) => {
-                if (event.key !== "ArrowRight" && event.key !== "End") return;
-                if (designTaskGroups.length === 0) return;
-                event.preventDefault();
-                activatePanelMode("design");
-                window.requestAnimationFrame(() =>
-                  document.getElementById("inspector-panel-tab-design")?.focus(),
-                );
-              }}
-            >
-              内容
-            </button>
-            <button
-              id="inspector-panel-tab-design"
-              type="button"
-              role="tab"
-              aria-selected={activePanelMode === "design"}
-              aria-controls="inspector-panel-design"
-              aria-disabled={designTaskGroups.length === 0}
-              disabled={designTaskGroups.length === 0}
-              className={activePanelMode === "design" ? "is-active" : ""}
-              onClick={() => activatePanelMode("design")}
-              onKeyDown={(event) => {
-                if (event.key !== "ArrowLeft" && event.key !== "Home") return;
-                event.preventDefault();
-                activatePanelMode("content");
-                window.requestAnimationFrame(() =>
-                  document.getElementById("inspector-panel-tab-content")?.focus(),
-                );
-              }}
-            >
-              设计
-            </button>
-          </div>
-        </nav>
         <VisualEditorToolbar
           blockId={String(editor.props.id ?? "")}
           moduleType={editor.moduleType}

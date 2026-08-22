@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  Alert,
   Button,
   Card,
   DatePicker,
@@ -15,7 +16,7 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { PlusOutlined, ReloadOutlined, EyeOutlined, ExportOutlined } from "@ant-design/icons";
+import { PlusOutlined, ReloadOutlined, EyeOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { productApi, quotationApi } from "@/services/api";
@@ -43,6 +44,9 @@ const STATUS_TABS: Array<{ k: string; l: string }> = [
   { k: "CONVERTED", l: "已转单" },
   { k: "CANCELLED", l: "已取消" },
 ];
+
+const STAFF_ACTION_NOTICE =
+  "客户本人确认能力与安全转单流程尚未完成；当前后台员工不能代客户确认报价或将报价转为订单。";
 
 type QuotationDetailItem = {
   id: number;
@@ -190,11 +194,8 @@ export default function QuotationManage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [convertTarget, setConvertTarget] = useState<QuotationDetail | null>(null);
-  const [convertLoading, setConvertLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
-  const [convertForm] = Form.useForm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -238,8 +239,8 @@ export default function QuotationManage() {
     } catch { /* 保留现有详情 */ }
   };
 
-  // 状态变更（提交/确认/取消），统一带二次确认
-  const changeStatus = (record: Quotation, action: "submit" | "confirm" | "cancel", label: string, danger = false) => {
+  // 后台员工仅可提交客户确认或取消报价，不能代客户确认。
+  const changeStatus = (record: Quotation, action: "submit" | "cancel", label: string, danger = false) => {
     Modal.confirm({
       title: `确认${label}该报价单？`,
       content: record.convertedOrderId ? "该报价单已转订单，操作需谨慎。" : undefined,
@@ -247,7 +248,7 @@ export default function QuotationManage() {
       okButtonProps: { danger },
       onOk: async () => {
         try {
-          await quotationApi[action === "submit" ? "submit" : action === "confirm" ? "confirm" : "cancel"](record.id);
+          await quotationApi[action](record.id);
           message.success(`已${label}`);
           void load();
           if (detail?.id === record.id) void reloadDetail(record.id);
@@ -352,39 +353,12 @@ export default function QuotationManage() {
     }
   };
 
-  const handleConvert = async () => {
-    if (!convertTarget) return;
-    let values: any;
-    try {
-      values = await convertForm.validateFields();
-    } catch {
-      return;
-    }
-    setConvertLoading(true);
-    try {
-      const res = await quotationApi.convertToOrder(convertTarget.id, {
-        address: values.address,
-        orderType: values.orderType || undefined,
-      });
-      const result = unwrapResponse<{ order: { id: number; orderNo: string } }>(res);
-      message.success(`已转订单 ${result?.order?.orderNo || ""}`);
-      setConvertTarget(null);
-      convertForm.resetFields();
-      void load();
-      if (detail?.id === convertTarget.id) void reloadDetail(convertTarget.id);
-    } catch (e: any) {
-      message.error(getSafeAdminErrorMessage(e, "报价单转订单失败，请核对商品和客户信息后重试。"));
-    } finally {
-      setConvertLoading(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-semibold text-brand-text">报价管理</h1>
-          <p className="text-sm text-brand-muted mt-1">管理报价、客户确认与转订单流程，并保留报价单和订单关联</p>
+          <p className="text-sm text-brand-muted mt-1">管理报价草稿、提交客户确认、取消和历史报价/订单关联</p>
         </div>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>刷新</Button>
@@ -434,7 +408,7 @@ export default function QuotationManage() {
               showTotal: (t) => `共 ${t} 条`,
               onChange: (p, ps) => { setPage(p); setPageSize(ps); },
             }}
-            locale={{ emptyText: "暂无报价单；新建报价后可继续完成客户确认和转订单" }}
+            locale={{ emptyText: "暂无报价单；可新建报价草稿并提交客户确认" }}
             columns={[
               { title: "报价单号", dataIndex: "quoteNo", render: (v: string) => <code className="text-xs text-brand-gold">{v}</code> },
               { title: "客户", dataIndex: "customerName", render: (v: string, r: Quotation) => <div><p>{v}</p><p className="text-xs text-brand-muted">{r.customerPhone}</p></div> },
@@ -451,8 +425,10 @@ export default function QuotationManage() {
                     {r.status === "DRAFT" && (
                       <Button size="small" onClick={() => void openEdit(r)}>编辑</Button>
                     )}
-                    {r.status === "CONFIRMED" && !r.convertedOrderId && (
-                      <Button size="small" type="primary" onClick={() => { setConvertTarget(detail && detail.id === r.id ? detail : r as QuotationDetail); convertForm.resetFields(); }}>转订单</Button>
+                    {(r.status === "PENDING_CONFIRM" || r.status === "CONFIRMED") && (
+                      <Text type="secondary" className="!text-xs">
+                        员工不能代确认或转单；相关流程待完成
+                      </Text>
                     )}
                   </Space>
                 ),
@@ -522,21 +498,23 @@ export default function QuotationManage() {
             </div>
 
             {/* 操作区 */}
+            {(detail.status === "PENDING_CONFIRM" || detail.status === "CONFIRMED") && (
+              <Alert
+                type="info"
+                showIcon
+                message="客户确认与转单暂不可由员工操作"
+                description={STAFF_ACTION_NOTICE}
+              />
+            )}
             <div className="flex gap-2 flex-wrap border-t border-brand-line pt-4">
               {detail.status === "DRAFT" && (
                 <Button onClick={() => changeStatus(detail, "submit", "提交")}>提交客户确认</Button>
               )}
               {detail.status === "PENDING_CONFIRM" && (
-                <>
-                  <Button type="primary" onClick={() => changeStatus(detail, "confirm", "确认")}>客户已确认</Button>
-                  <Button onClick={() => changeStatus(detail, "cancel", "取消")}>取消报价</Button>
-                </>
+                <Button onClick={() => changeStatus(detail, "cancel", "取消")}>取消报价</Button>
               )}
               {detail.status === "CONFIRMED" && !detail.convertedOrderId && (
-                <>
-                  <Button type="primary" onClick={() => { setConvertTarget(detail); convertForm.resetFields(); }}>转为订单</Button>
-                  <Button danger onClick={() => changeStatus(detail, "cancel", "取消")}>取消报价</Button>
-                </>
+                <Button danger onClick={() => changeStatus(detail, "cancel", "取消")}>取消报价</Button>
               )}
               {(detail.status === "DRAFT" || detail.status === "CANCELLED") && (
                 <Button danger onClick={() => handleRemove(detail)}>删除报价单</Button>
@@ -555,7 +533,7 @@ export default function QuotationManage() {
         confirmLoading={submitting}
         okText={editingId ? "保存修改" : "创建草稿"}
         width={720}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" initialValues={{ items: [{ quantity: 1 }] }}>
           <div className="grid grid-cols-2 gap-3">
@@ -619,46 +597,8 @@ export default function QuotationManage() {
               </div>
             )}
           </Form.List>
-          <p className="text-xs text-brand-muted mt-2">提示：搜索并关联商品 SKU 后会自动填充名称/规格/价格；转订单前请确保每行都已关联 SKU。</p>
+          <p className="text-xs text-brand-muted mt-2">提示：搜索并关联商品 SKU 后会自动填充名称、规格和价格。</p>
         </Form>
-      </Modal>
-
-      {/* 转订单 Modal */}
-      <Modal
-        title="报价单转订单"
-        open={!!convertTarget}
-        onCancel={() => { setConvertTarget(null); convertForm.resetFields(); }}
-        onOk={handleConvert}
-        confirmLoading={convertLoading}
-        okText="转为订单"
-        destroyOnClose
-      >
-        {convertTarget && (
-          <div className="space-y-3">
-            <div className="text-sm text-brand-muted">
-              报价单 <code className="text-brand-gold">{convertTarget.quoteNo}</code> · 客户 {convertTarget.customerName} · 报价合计 <span className="text-brand-gold">¥{Number(convertTarget.finalAmount).toLocaleString()}</span>
-            </div>
-            {convertTarget.items?.some((it) => !it.skuId) && (
-              <div className="text-xs border p-2 rounded" style={{ color: "var(--adm-error)", borderColor: "var(--adm-error-border)", background: "var(--adm-error-bg)" }}>
-                警告：该报价单存在未关联 SKU 的商品行，转订单将失败。请先在报价单补全商品 SKU。
-              </div>
-            )}
-            <Form form={convertForm} layout="vertical" initialValues={{ orderType: "SPOT" }}>
-              <Form.Item name="address" label="收货地址" rules={[{ required: true, message: "请输入收货地址" }]}>
-                <Input.TextArea rows={2} maxLength={500} />
-              </Form.Item>
-              <Form.Item name="orderType" label="订单类型">
-                <Select options={[
-                  { value: "SPOT", label: "现货订单" },
-                  { value: "CUSTOM", label: "定制订单" },
-                  { value: "RESERVATION", label: "预订订单" },
-                  { value: "OFFLINE", label: "线下订单" },
-                ]} />
-              </Form.Item>
-              <p className="text-xs text-brand-muted">转单后将生成订单号、预占库存、记录交易事件，并保留报价单和订单关联。</p>
-            </Form>
-          </div>
-        )}
       </Modal>
     </div>
   );

@@ -1,8 +1,8 @@
 // 作品详情：公开安全字段/灯箱/SKU/收藏/评价 Tab(晒单)/相似推荐/SEO meta
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Tabs, Spin, message, Rate } from "antd";
+import { App as AntdApp, Tabs, Spin, Rate } from "antd";
 import {
   ShoppingCartOutlined,
   SafetyCertificateOutlined,
@@ -35,7 +35,7 @@ import {
   isCommerceAllowed,
   salesModeRoute,
   salesModeCta,
-  useCommerceEnabled,
+  useCommerceCapabilities,
 } from "@/store/featureFlags";
 import { useReconnectingEventSource } from "@/hooks/useReconnectingEventSource";
 import { usePageMetaStore } from "@/store/pageMetaStore";
@@ -57,7 +57,7 @@ function SimilarProducts({ productId }: { productId: number }) {
   return (
     <div className="mt-12 pt-8 border-t border-brand-line">
       <p className="text-xs tracking-[.15em] uppercase text-brand-gold mb-5 font-sans">
-        相似作品 · 为您甄选
+        相关作品
       </p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
         {list.map((item) => (
@@ -173,6 +173,7 @@ function ProductReviewsTab({ productId }: { productId: number }) {
 }
 
 export default function ProductDetail() {
+  const { message } = AntdApp.useApp();
   const { id } = useParams();
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
@@ -184,10 +185,15 @@ export default function ProductDetail() {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [revision, setRevision] = useState(0);
   const [addingToCart, setAddingToCart] = useState(false);
+  const [purchaseError, setPurchaseError] = useState("");
+  const addPendingRef = useRef(false);
   const [goldPrice, setGoldPrice] = useState<{
     price?: number | string;
   } | null>(null);
-  const commerceEnabled = useCommerceEnabled();
+  const { flags: commerceFlags, loading: commerceFlagsLoading } =
+    useCommerceCapabilities();
+  const commerceEnabled = commerceFlags?.commerceEnabled ?? false;
+  const cartEnabled = commerceFlags?.cartEnabled ?? false;
   const isSignedIn = Boolean(
     typeof window !== "undefined" && localStorage.getItem("customerToken"),
   );
@@ -235,8 +241,9 @@ export default function ProductDetail() {
         const res = await productApi.getPublicById(id || "");
         const data = unwrapResponse<Product>(res);
         setProduct(data);
-        if (data?.skus?.length)
-          setSelectedSku(data.skus.find((s) => s.isActive) ?? null);
+        setSelectedSku(data?.skus?.find((s) => s.isActive) ?? null);
+        setQty(1);
+        setPurchaseError("");
       } catch {
         setProduct(null);
       } finally {
@@ -285,24 +292,26 @@ export default function ProductDetail() {
 
   if (loading)
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 bg-white" aria-live="polite" aria-busy="true">
         <Spin size="large" />
+        <p className="text-xs tracking-[.12em] text-brand-muted">正在加载作品</p>
       </div>
     );
   if (!product)
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4">
-        <p className="text-brand-muted text-lg">该珠宝作品当前暂不可浏览</p>
+      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 bg-white px-6 text-center">
+        <h1 className="font-display text-3xl font-normal tracking-[.04em]">作品暂不可浏览</h1>
+        <p className="text-brand-muted text-sm">该珠宝作品可能已下架，或公开信息暂时无法取得。</p>
         <Link
-          to="/products"
+          to="/catalog"
           className="text-brand-gold hover:underline text-sm"
         >
-          返回珠宝作品列表
+          进入选款中心
         </Link>
       </div>
     );
 
-  // 起价 = 活跃 SKU 最低价(与后端 Product.price 语义一致);选中 SKU 后切到该 SKU 价
+  // Product.price 是服务端派生展示价；选中 SKU 后只展示该 SKU 的成交价。
   const activeSkus = (product.skus ?? []).filter((s) => s.isActive);
   // P1-33：缩略图与主图共享同一数据源，mainImage 驱动主图切换
   // （原主图恒渲染 getPrimaryImage，点击缩略图只改高亮、主图不变）
@@ -311,45 +320,67 @@ export default function ProductDetail() {
     (thumbnails[mainImage] as any)?.mediaUrl ||
     thumbnails[mainImage]?.url ||
     getPrimaryImage(product as any);
-  const activePrices = activeSkus
-    .map((s) => Number(s.price) || 0)
-    .filter((p) => p > 0);
-  const startingPrice =
-    activePrices.length > 0
-      ? Math.min(...activePrices)
-      : Number(product.price) || 0;
+  const startingPrice = Number(product.price) || 0;
   const displayPrice = selectedSku ? Number(selectedSku.price) : startingPrice;
+  const isDirectPurchase = product.salesMode === "DIRECT_PURCHASE";
+  const isSingleUnit = product.inventoryPolicy === "SINGLE_UNIT";
+  const availabilityKnown = typeof product.isAvailableForPurchase === "boolean";
+  const isSoldOut = isDirectPurchase && product.isAvailableForPurchase === false;
   const commerceOk = isCommerceAllowed(product.salesMode, commerceEnabled);
+  const canUseCart = commerceOk && cartEnabled;
+  const canAddToCart =
+    canUseCart &&
+    product.isAvailableForPurchase === true &&
+    Boolean(selectedSku) &&
+    displayPrice > 0;
   const displayGoldWeight = selectedSku?.goldWeight ?? product.goldWeight;
   const detailBlocks = product.detailContent ?? [];
 
   const handleAddToCart = async () => {
+    if (addPendingRef.current || addingToCart) return;
+    setPurchaseError("");
+    if (!canUseCart) {
+      setPurchaseError("购买服务当前未开放，请通过珠宝顾问咨询。");
+      return;
+    }
+    if (!availabilityKnown) {
+      setPurchaseError("库存状态暂时无法确认，请刷新后重试。");
+      return;
+    }
+    if (isSoldOut) {
+      setPurchaseError("该作品已售罄，仍可浏览作品信息。");
+      return;
+    }
     if (!selectedSku) {
-      message.warning("请先选择商品规格");
+      setPurchaseError("请先选择可购买的商品规格。");
       return;
     }
 
+    addPendingRef.current = true;
     setAddingToCart(true);
     try {
       await cartApi.add({
         productId: product.id,
         skuId: selectedSku.id,
-        quantity: qty,
+        quantity: isSingleUnit ? 1 : qty,
       });
-      trackAddToCart(product.id, qty);
+      trackAddToCart(product.id, isSingleUnit ? 1 : qty);
       message.success("已加入购物车");
     } catch (error: any) {
-      message.error(error?.message || "加入购物车失败");
+      const reason = error?.message || "加入购物车失败，请稍后重试";
+      setPurchaseError(reason);
+      message.error(reason);
     } finally {
+      addPendingRef.current = false;
       setAddingToCart(false);
     }
   };
 
   return (
-    <div>
-      <div className="max-w-7xl mx-auto px-6 md:px-20 py-10 md:py-16">
+    <div className="product-detail-page bg-white text-[#181A1B]">
+      <div className="max-w-[1440px] mx-auto px-5 sm:px-8 lg:px-16 py-10 md:py-16 lg:py-20">
         {/* Breadcrumb */}
-        <div className="text-xs tracking-[.2em] text-brand-gold mb-8 font-sans">
+        <nav aria-label="面包屑" className="text-[11px] tracking-[.16em] text-brand-muted mb-8 md:mb-12 font-sans">
           <Link to="/" className="hover:text-brand-goldD transition-colors">
             首页
           </Link>
@@ -358,13 +389,13 @@ export default function ProductDetail() {
             to="/products"
             className="hover:text-brand-goldD transition-colors"
           >
-            臻品
+            珠宝作品
           </Link>
           <span className="mx-2 text-brand-muted">/</span>
           <span className="text-brand-muted">{product.name}</span>
-        </div>
+        </nav>
 
-        <div className="grid md:grid-cols-2 gap-10 md:gap-20">
+        <div className="grid lg:grid-cols-[minmax(0,1.12fr)_minmax(360px,.88fr)] gap-12 lg:gap-20 xl:gap-28 items-start">
           {/* Left: Images */}
           <motion.div
             initial={{ opacity: 0 }}
@@ -382,7 +413,7 @@ export default function ProductDetail() {
                   setLightboxOpen(true);
                 }
               }}
-              className={`aspect-[4/5] bg-brand-bg flex items-center justify-center sticky top-24 border border-brand-line ${mainImageUrl ? "cursor-zoom-in" : ""}`}
+              className={`aspect-[4/5] bg-[#F4F5F5] flex items-center justify-center lg:sticky lg:top-28 border border-[#DDE1E2] ${mainImageUrl ? "cursor-zoom-in" : ""}`}
             >
               {mainImageUrl ? (
                 <SecureImage
@@ -430,14 +461,15 @@ export default function ProductDetail() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.3 }}
           >
-            <h1 className="text-3xl md:text-4xl font-display font-semibold mb-2">
+            <p className="text-[10px] tracking-[.2em] text-brand-muted mb-5 font-sans">JEWELRY WORK</p>
+            <h1 className="text-[clamp(32px,4vw,52px)] leading-[1.15] tracking-[.02em] font-display font-normal mb-3">
               {product.name}
             </h1>
             <p className="text-xs text-brand-muted mb-6 font-sans">
               {product.code}
             </p>
 
-            <p className="body text-brand-muted mb-8 leading-relaxed">
+            <p className="body text-brand-muted mb-10 leading-[1.9] max-w-[42rem]">
               {product.description}
             </p>
 
@@ -458,7 +490,7 @@ export default function ProductDetail() {
                 <span className="text-brand-muted">金重</span>
                 <span>{displayGoldWeight ? `${displayGoldWeight}g` : "—"}</span>
               </div>
-              {commerceOk && displayPrice > 0 ? (
+              {isDirectPurchase && displayPrice > 0 ? (
                 <div className="flex items-center justify-between text-sm mt-2 pt-2 border-t border-brand-line font-medium">
                   <span>售价</span>
                   <span className="price text-2xl">
@@ -491,7 +523,7 @@ export default function ProductDetail() {
                     >
                       {getMaterialLabel(sku.material)} ·{" "}
                       {sku.goldWeight ? `${sku.goldWeight}g` : "—"}
-                      {commerceOk && Number(sku.price) > 0
+                      {isDirectPurchase && Number(sku.price) > 0
                         ? ` · ¥${Number(sku.price).toLocaleString()}`
                         : ""}
                     </button>
@@ -502,12 +534,13 @@ export default function ProductDetail() {
 
             {/* Quantity + Actions */}
             <div className="flex items-center gap-4 mb-8">
-              {commerceOk && (
-                <div className="flex items-center border border-brand-line">
+              {isDirectPurchase && canUseCart && product.isAvailableForPurchase === true && (
+                <div className="flex items-center border border-brand-line" aria-label={isSingleUnit ? "一物一件，数量固定为 1" : "购买数量"}>
                   <button
                     type="button"
                     aria-label="减少数量"
-                    className="px-4 py-2.5 text-brand-muted hover:text-brand-text transition-colors font-sans"
+                    disabled={qty <= 1 || isSingleUnit}
+                    className="min-w-11 min-h-11 px-4 py-2.5 text-brand-muted hover:text-brand-text transition-colors font-sans disabled:cursor-not-allowed disabled:opacity-40"
                     onClick={() => setQty(Math.max(1, qty - 1))}
                   >
                     −
@@ -521,19 +554,36 @@ export default function ProductDetail() {
                   <button
                     type="button"
                     aria-label="增加数量"
-                    className="px-4 py-2.5 text-brand-muted hover:text-brand-text transition-colors font-sans"
-                    onClick={() => setQty(qty + 1)}
+                    disabled={isSingleUnit || qty >= 99}
+                    className="min-w-11 min-h-11 px-4 py-2.5 text-brand-muted hover:text-brand-text transition-colors font-sans disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => setQty(Math.min(99, qty + 1))}
                   >
                     +
                   </button>
                 </div>
               )}
-              {commerceOk ? (
-                isSignedIn ? (
+              {isDirectPurchase ? (
+                commerceFlagsLoading || !commerceFlags ? (
+                  <button type="button" className="btn btn-primary flex-1" disabled>
+                    正在确认购买状态
+                  </button>
+                ) : isSoldOut ? (
+                  <button type="button" className="btn btn-primary flex-1" disabled>
+                    已售罄
+                  </button>
+                ) : !availabilityKnown ? (
+                  <button type="button" className="btn btn-primary flex-1" disabled>
+                    库存状态暂不可用
+                  </button>
+                ) : !canUseCart ? (
+                  <Link to="/contact" className="btn btn-secondary flex-1 text-center">
+                    购买暂未开放，联系顾问
+                  </Link>
+                ) : isSignedIn ? (
                   <button
-                    className="btn btn-primary flex-1"
+                    className="btn btn-primary flex-1 whitespace-nowrap px-4 sm:px-10"
                     onClick={handleAddToCart}
-                    disabled={addingToCart || !selectedSku}
+                    disabled={addingToCart || !canAddToCart}
                   >
                     <ShoppingCartOutlined />{" "}
                     {addingToCart ? "加入中..." : "加入购物车"}
@@ -542,7 +592,7 @@ export default function ProductDetail() {
                   <Link
                     to="/customer"
                     state={{ returnTo: `/products/${product.id}` }}
-                    className="btn btn-primary flex-1 text-center"
+                    className="btn btn-primary flex-1 whitespace-nowrap px-4 text-center sm:px-10"
                   >
                     登录后购买
                   </Link>
@@ -583,6 +633,21 @@ export default function ProductDetail() {
                 </Link>
               )}
             </div>
+            {isSingleUnit && isDirectPurchase ? (
+              <p className="-mt-5 mb-6 text-xs leading-6 text-brand-muted">
+                一物一件，每位顾客的购物车最多保留 1 件。
+              </p>
+            ) : null}
+            {isSoldOut ? (
+              <p className="-mt-5 mb-6 text-sm leading-6 text-brand-muted" role="status">
+                该作品已售罄，仍可继续浏览作品信息或联系珠宝顾问。
+              </p>
+            ) : null}
+            {purchaseError ? (
+              <p className="-mt-5 mb-6 text-sm leading-6 text-[#8C3F3B]" role="alert">
+                {purchaseError}
+              </p>
+            ) : null}
 
             {/* Tabs */}
             <Tabs
@@ -591,7 +656,7 @@ export default function ProductDetail() {
                   key: "params",
                   label: (
                     <span className="font-sans text-xs tracking-[.1em]">
-                      产品参数
+                      作品信息
                     </span>
                   ),
                   children: (
@@ -662,8 +727,8 @@ export default function ProductDetail() {
                 },
               ]}
             />
-            {/* 相似作品推荐（recommendations 模块首次接线） */}
-            <SimilarProducts productId={product.id} />
+            {/* 推荐接口要求客户登录；游客不发必然 401 的请求。 */}
+            {isSignedIn ? <SimilarProducts productId={product.id} /> : null}
           </motion.div>
         </div>
         {detailBlocks.length > 0 && (

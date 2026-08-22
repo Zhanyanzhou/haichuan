@@ -30,7 +30,12 @@ export default function TestimonialBlock({ module, editMode }: TestimonialBlockP
   if (!list.length && editMode) {
     return (
       <DecorSection master="editorial-story" background={bgColor}>
-        <BlockEmptyPlaceholder hint="顾客之声" spec="请添加顾客引语（建议 2–3 条，需取得顾客授权）" ratio={TESTIMONIAL_RATIO} />
+        <BlockEmptyPlaceholder
+          assetSlot={{ templateKey: "testimonials", roleId: "authorizedPhoto" }}
+          hint="顾客之声"
+          spec="请添加顾客引语（建议 2–3 条，需取得顾客授权）"
+          ratio={TESTIMONIAL_RATIO}
+        />
       </DecorSection>
     );
   }
@@ -69,7 +74,12 @@ export default function TestimonialBlock({ module, editMode }: TestimonialBlockP
                 {item.image ? (
                   <img src={item.image} alt={item.name || "顾客授权实拍"} loading="lazy" decoding="async" />
                 ) : (
-                  <BlockEmptyPlaceholder hint="授权实拍" spec="请上传已取得公开授权的顾客实拍" height="100%" />
+                  <BlockEmptyPlaceholder
+                    assetSlot={{ templateKey: "testimonials", roleId: "authorizedPhoto" }}
+                    hint="授权实拍"
+                    spec="请上传已取得公开授权的顾客实拍"
+                    height="100%"
+                  />
                 )}
               </div>
             </figure>

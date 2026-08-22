@@ -93,10 +93,27 @@ test.describe("游客公开浏览", () => {
   for (const path of publicRoutes) {
     test(`${path} 不再跳转到客户登录`, async ({ page }) => {
       await page.goto(path);
-      await expect.poll(() => new URL(page.url()).pathname).toBe(path);
+      await expect
+        .poll(() => new URL(page.url()).pathname)
+        .toBe(path === "/search" ? "/catalog" : path);
       await expect(page.getByRole("banner")).toBeVisible();
     });
   }
+
+  test("旧合作入口要求登录并回到我的账户内唯一申请入口", async ({ page }) => {
+    await page.goto("/partner");
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/customer");
+
+    await page.addInitScript(() => localStorage.setItem("customerToken", "partner-route-test"));
+    await page.route("**/api/**", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ code: 200, data: null, message: "success" }),
+    }));
+    await page.goto("/partner");
+    await expect(page).toHaveURL(/\/customer\?section=partner$/);
+    await expect(page.getByRole("heading", { name: "申请成为合作商家" })).toBeVisible();
+  });
 
   for (const path of ["/cart", "/checkout"]) {
     test(`${path} 在交易关闭时降级至咨询页`, async ({ page }) => {
@@ -127,15 +144,15 @@ test.describe("游客公开浏览", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("未登录商品列表请求公开接口", async ({ page }) => {
+  test("未登录选款中心请求公开接口", async ({ page }) => {
     test.skip(useMock, "模拟数据模式不发送商品网络请求");
     const requestPromise = page.waitForRequest((request) =>
       request.url().includes("/api/products/public"),
     );
-    await page.goto("/products");
+    await page.goto("/catalog");
     const request = await requestPromise;
     expect(request.url()).toContain("/api/products/public");
-    await expect(page).toHaveURL(/\/products(?:[?#]|$)/);
+    await expect(page).toHaveURL(/\/catalog(?:[?#]|$)/);
   });
 
   test("存在客户令牌时优先请求会员目录", async ({ page }) => {
@@ -149,7 +166,7 @@ test.describe("游客公开浏览", () => {
     const requestPromise = page.waitForRequest((request) =>
       request.url().includes("/api/products/catalog"),
     );
-    await page.goto("/products");
+    await page.goto("/catalog");
     const request = await requestPromise;
     expect(request.headers().authorization).toBe(
       "Bearer public-access-contract-test-token",

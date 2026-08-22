@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Alert, Button, Spin, message } from "antd";
 import { customerApi, partnerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import AccountExperience from "./AccountExperience";
 import MyAccountDashboard from "./MyAccountDashboard";
+import PartnerApplication from "@/pages/public/PartnerApplication";
 
 type CustomerOrder = {
   id: number;
@@ -54,7 +55,7 @@ export default function CustomerCenter() {
     return null;
   };
 
-  const clearSession = () => {
+  const clearSession = useCallback(() => {
     localStorage.removeItem("customerToken");
     localStorage.removeItem("customer");
     setOrders([]);
@@ -63,9 +64,9 @@ export default function CustomerCenter() {
     setAddresses([]);
     setProfile(null);
     setPartner(null);
-  };
+  }, []);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!localStorage.getItem("customerToken")) {
       setLoadError(null);
       setLoading(false);
@@ -102,11 +103,11 @@ export default function CustomerCenter() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [clearSession]);
 
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+  }, [load]);
 
   const signOut = () => {
     clearSession();
@@ -159,8 +160,12 @@ export default function CustomerCenter() {
     );
 
   const isSignedIn = Boolean(localStorage.getItem("customerToken"));
+  const accountSection = new URLSearchParams(location.search).get("section");
 
   if (isSignedIn) {
+    if (accountSection === "partner") {
+      return <PartnerApplication />;
+    }
     return (
       <>
         {loadError && (

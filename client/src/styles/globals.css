@@ -755,6 +755,12 @@ html.home-route::-webkit-scrollbar {
     color: #fff;
   }
 
+  .product-detail-page :is(a, button, [role="button"]):focus-visible,
+  .cart-page :is(a, button, [role="button"]):focus-visible {
+    outline: 2px solid #181a1b;
+    outline-offset: 3px;
+  }
+
   .h1 {
     @apply text-6xl md:text-7xl font-display font-semibold leading-[1.05];
   }
@@ -3372,5 +3378,39 @@ body.nav-locked {
     display: flex;
     align-items: center;
     min-height: 44px;
+  }
+}
+
+/* 390px 页头只保留三个必要锚点：菜单、品牌、账户；搜索与选款仍可从菜单进入。 */
+@media (max-width: 420px) {
+  .site-header__inner {
+    width: calc(100% - 32px);
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+  }
+
+  .site-header__left-group {
+    top: 10px;
+    left: 16px;
+    width: 44px;
+    gap: 0;
+  }
+
+  .site-header__left-group > .site-header__nav-item,
+  .site-header__right > .site-header__nav-item:not(:last-child) {
+    display: none;
+  }
+
+  .site-header__right {
+    width: 44px;
+    gap: 0;
+  }
+
+  .site-header__brand {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .site-header__brand-text {
+    font-size: 20px;
   }
 }

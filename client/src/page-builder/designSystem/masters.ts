@@ -272,7 +272,3 @@ export const MASTERS: Record<MasterId, MasterDefinition> = {
     ],
   },
 };
-
-export function getMaster(id: MasterId): MasterDefinition {
-  return MASTERS[id];
-}

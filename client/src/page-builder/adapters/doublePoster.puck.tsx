@@ -27,6 +27,8 @@ export interface DoublePosterPuckProps {
   mainFocusY: number;
   detailFocusX: number;
   detailFocusY: number;
+  /** 区块背景色（对齐其余 16 个内容模板的 bgColor 约定） */
+  bgColor: string;
   /** 系统保留：区块级内容模板合同印记，不在 Inspector 中展示。 */
   __contentTemplate?: ContentTemplateMarker;
   locked?: boolean;
@@ -53,6 +55,7 @@ export const doublePosterPuckConfig = {
     mainFocusY: 50,
     detailFocusX: 50,
     detailFocusY: 50,
+    bgColor: "#FFFFFF",
     __contentTemplate: createContentTemplateMarker("双图海报"),
     locked: false,
   } satisfies DoublePosterPuckProps,

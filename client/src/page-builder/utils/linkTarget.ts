@@ -22,6 +22,23 @@ export function isSafeInternalPath(value: unknown): value is string {
   return typeof value === "string" && value.startsWith("/") && !value.startsWith("//");
 }
 
+/** 选款中心当前稳定支持的分类筛选入口。 */
+export function createCatalogCategoryUrl(categoryId: unknown): string {
+  const normalizedId = Number(categoryId);
+  return Number.isInteger(normalizedId) && normalizedId > 0
+    ? `/catalog?category=${encodeURIComponent(String(normalizedId))}`
+    : "/catalog";
+}
+
+/** 公开运行时兼容旧分类 CTA，不改写保存中的 Puck 文档。 */
+export function normalizeCatalogIntentUrl(value: string): string {
+  if (!isSafeInternalPath(value)) return value;
+  const url = new URL(value, "https://haichuan.invalid");
+  if (url.pathname !== "/products") return value;
+  const categoryId = url.searchParams.get("categoryId") || url.searchParams.get("category");
+  return categoryId ? createCatalogCategoryUrl(categoryId) : "/catalog";
+}
+
 /** 统一解析装修模板的点击目标；旧草稿未保存 targetType 时仍兼容 productId/linkUrl。 */
 export function resolveLinkTargetUrl(value: LinkTargetValue): string {
   const targetType = normalizeLinkTargetType(value);

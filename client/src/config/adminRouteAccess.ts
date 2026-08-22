@@ -20,6 +20,12 @@ const CUSTOMER_SERVICE: readonly AdminRole[] = [
   "ADMIN",
   "CUSTOMER_SERVICE",
 ];
+// 付款审核查看：与 payments.controller 类级 @Roles 一致；仓库角色无权进入。
+const PAYMENT_REVIEW: readonly AdminRole[] = [
+  "SUPER_ADMIN",
+  "ADMIN",
+  "CUSTOMER_SERVICE",
+];
 const WAREHOUSE: readonly AdminRole[] = ["SUPER_ADMIN", "ADMIN", "WAREHOUSE"];
 // 交易域订单查看：客服跟进订单、仓储发货都需要看订单；EDITOR 不含交易权限。
 const TRADE_VIEW: readonly AdminRole[] = [
@@ -65,7 +71,7 @@ const ROUTE_RULES: RouteRule[] = [
   // 交易域：订单中心对所有交易角色可见（查看）；EDITOR 无权限
   { prefix: "/admin/orders", roles: TRADE_VIEW },
   // 交易域子页面（放于 orders 之后，避免前缀误匹配——它们以 /admin/trade/ 开头，互不冲突）
-  { prefix: "/admin/trade/payments", roles: TRADE_VIEW },
+  { prefix: "/admin/trade/payments", roles: PAYMENT_REVIEW },
   { prefix: "/admin/trade/fulfillment", roles: WAREHOUSE },
   { prefix: "/admin/trade/refunds", roles: CUSTOMER_SERVICE },
   { prefix: "/admin/trade/after-sales", roles: CUSTOMER_SERVICE },
@@ -80,7 +86,8 @@ const ROUTE_RULES: RouteRule[] = [
   // 评价管理：客服可看列表跟进，审核写操作由后端 @Roles 限定 ADMIN（与服务端 reviews.controller 同口径）
   { prefix: "/admin/reviews", roles: CUSTOMER_SERVICE },
   { prefix: "/admin/editor", roles: CONTENT_EDITORS },
-  { prefix: "/admin/site-content", roles: CONTENT_EDITORS },
+  // 店铺资料读写与 settings.controller 类级 @Roles 保持一致。
+  { prefix: "/admin/site-content", roles: ADMIN_ONLY },
   { prefix: "/admin/media", roles: CONTENT_EDITORS },
   // 客服域
   { prefix: "/admin/leads", roles: CUSTOMER_SERVICE },

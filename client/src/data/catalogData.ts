@@ -19,6 +19,9 @@ export interface CatalogProduct {
   images: string[];
   categoryName?: string;
   price?: number;
+  salesMode?: import("@/types").SalesMode;
+  inventoryPolicy?: import("@/types").InventoryPolicy;
+  isAvailableForPurchase?: boolean;
 }
 
 /* ═══════ 筛选选项（后端属性字典为空时的兜底） ═══════ */

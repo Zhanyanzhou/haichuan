@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Alert,
@@ -74,7 +74,7 @@ export default function PartnerApplication() {
   const latestReviewNote = state?.latest?.reviewNote as
     string | null | undefined;
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await partnerApi.getMine();
@@ -99,11 +99,11 @@ export default function PartnerApplication() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [form]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const onSubmit = async (values: any) => {
     setSubmitting(true);

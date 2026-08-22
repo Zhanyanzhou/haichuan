@@ -48,7 +48,7 @@ export class QuotationsController {
   }
 
   @Put(':id/confirm')
-  @ApiOperation({ summary: '确认报价（待客户确认→已确认）' })
+  @ApiOperation({ summary: '员工确认报价（安全暂停：员工不得代客户确认）' })
   confirm(@Param('id') id: string) {
     return this.quotationsService.changeStatus(+id, 'CONFIRMED');
   }
@@ -60,7 +60,7 @@ export class QuotationsController {
   }
 
   @Post(':id/convert')
-  @ApiOperation({ summary: '一键转订单（已确认→生成订单，保留关联）' })
+  @ApiOperation({ summary: '报价转订单（安全暂停：等待客户确认状态机）' })
   convertToOrder(@Param('id') id: string, @Body() dto: ConvertQuotationDto) {
     return this.quotationsService.convertToOrder(+id, dto);
   }

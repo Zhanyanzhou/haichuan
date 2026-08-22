@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Card,
   Table,
   Button,
@@ -14,6 +15,11 @@ import { ExportOutlined } from "@ant-design/icons";
 import { inventoryApi, warehouseApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
+import {
+  AdminEmptyState,
+  AdminErrorState,
+  AdminLoadingState,
+} from "@/components/common/AdminDataStates";
 
 const sm: Record<string, { c: string; t: string }> = {
   normal: { c: "green", t: "正常" },
@@ -21,12 +27,38 @@ const sm: Record<string, { c: string; t: string }> = {
   out: { c: "red", t: "缺货" },
 };
 
+type InventoryApiItem = {
+  id: number;
+  skuCode?: string;
+  productName?: string;
+  warehouse?: string | { name?: string };
+  quantity?: number;
+  safetyStock?: number;
+  sku?: {
+    skuCode?: string;
+    product?: { name?: string };
+  };
+};
+
+type InventoryRow = {
+  id: number;
+  skuCode?: string;
+  productName?: string;
+  warehouse?: string;
+  quantity: number;
+  safetyStock: number;
+  status: "normal" | "low" | "out";
+};
+
 export default function Inventory() {
-  const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState<InventoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("all");
   const [warehouseId, setWarehouseId] = useState<number | undefined>(undefined);
   const [warehouses, setWarehouses] = useState<{ id: number; name: string }[]>([]);
+  const [warehouseLoading, setWarehouseLoading] = useState(true);
+  const [warehouseError, setWarehouseError] = useState(false);
   const [adjustModal, setAdjustModal] = useState<{
     open: boolean;
     record: any;
@@ -35,56 +67,79 @@ export default function Inventory() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
+  const requestIdRef = useRef(0);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
+    setError(null);
     try {
       const res = await inventoryApi.getList({ page, pageSize, warehouseId });
-      const data = unwrapResponse<{ list: any[]; total: number }>(res);
+      const data = unwrapResponse<{ list: InventoryApiItem[]; total: number }>(res);
+      if (!data || !Array.isArray(data.list) || !Number.isFinite(Number(data.total))) {
+        throw new Error("Invalid inventory response");
+      }
       // 服务端返回嵌套 sku/warehouse，mock 返回扁平字段——两侧兼容，并在前端统一计算库存状态
-      const rows = (data?.list || []).map((i: any) => {
+      const rows = data.list.map((i): InventoryRow => {
         const quantity = i.quantity ?? 0;
         const safety = i.safetyStock ?? 0;
         return {
           id: i.id,
           skuCode: i.sku?.skuCode ?? i.skuCode,
           productName: i.sku?.product?.name ?? i.productName,
-          warehouse: i.warehouse?.name ?? i.warehouse,
+          warehouse:
+            typeof i.warehouse === "string"
+              ? i.warehouse
+              : i.warehouse?.name,
           quantity,
           safetyStock: safety,
           status: quantity <= 0 ? "out" : quantity <= safety ? "low" : "normal",
         };
       });
+      if (requestId !== requestIdRef.current) return;
       setItems(rows);
-      setTotal(data?.total || 0);
-    } catch {
-      setItems([]);
-      setTotal(0);
+      setTotal(Number(data.total));
+    } catch (loadError) {
+      if (requestId !== requestIdRef.current) return;
+      setError(
+        getSafeAdminErrorMessage(
+          loadError,
+          "库存数据加载失败，请稍后重新加载。",
+        ),
+      );
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    load();
   }, [page, pageSize, warehouseId]);
 
   useEffect(() => {
-    warehouseApi
-      .list()
-      .then((res) => {
-        const data = unwrapResponse<any[]>(res);
-        setWarehouses(
-          (Array.isArray(data) ? data : []).map((w) => ({ id: w.id, name: w.name })),
-        );
-      })
-      .catch(() => {
-        /* 仓库列表加载失败不阻断库存展示 */
-      });
+    void load();
+  }, [load]);
+
+  const loadWarehouses = useCallback(async () => {
+    setWarehouseLoading(true);
+    setWarehouseError(false);
+    try {
+      const res = await warehouseApi.list();
+      const data = unwrapResponse<Array<{ id: number; name: string }>>(res);
+      if (!Array.isArray(data)) throw new Error("Invalid warehouse response");
+      setWarehouses(data.map((warehouse) => ({ id: warehouse.id, name: warehouse.name })));
+    } catch {
+      setWarehouses([]);
+      setWarehouseError(true);
+    } finally {
+      setWarehouseLoading(false);
+    }
   }, []);
 
-  const filtered =
-    filter === "all" ? items : items.filter((i) => i.status === filter);
+  useEffect(() => {
+    void loadWarehouses();
+  }, [loadWarehouses]);
+
+  const filtered = useMemo(
+    () => filter === "all" ? items : items.filter((item) => item.status === filter),
+    [filter, items],
+  );
 
   const handleAdjust = async () => {
     if (!adjustModal.record) return;
@@ -92,7 +147,7 @@ export default function Inventory() {
       await inventoryApi.update(adjustModal.record.id, { quantity: adjustQty });
       message.success("库存已调整");
       setAdjustModal({ open: false, record: null });
-      load();
+      void load();
     } catch (e: any) {
       message.error(getSafeAdminErrorMessage(e, "库存调整失败，请重新加载库存后核对数量。"));
     }
@@ -114,14 +169,14 @@ export default function Inventory() {
     a.download = `库存报表_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    message.success("导出成功");
+    message.success(`已导出当前页 ${filtered.length} 条库存记录`);
   };
 
   const stats = [
-    { t: "库存总数", v: total },
-    { t: "正常", v: items.filter((i) => i.status === "normal").length },
-    { t: "偏低", v: items.filter((i) => i.status === "low").length },
-    { t: "缺货", v: items.filter((i) => i.status === "out").length },
+    { t: "库存记录总数（全量）", v: total },
+    { t: "本页正常", v: items.filter((i) => i.status === "normal").length },
+    { t: "本页偏低", v: items.filter((i) => i.status === "low").length },
+    { t: "本页缺货", v: items.filter((i) => i.status === "out").length },
   ];
 
   return (
@@ -137,53 +192,84 @@ export default function Inventory() {
           <Select
             allowClear
             placeholder="全部仓库"
+            aria-label="仓库筛选"
             className="w-36"
             value={warehouseId}
+            loading={warehouseLoading}
+            disabled={warehouseLoading || warehouseError}
             onChange={(v) => {
               setWarehouseId(v);
               setPage(1);
             }}
             options={warehouses.map((w) => ({ value: w.id, label: w.name }))}
           />
-          <Select value={filter} onChange={setFilter} className="w-32">
+          <Select value={filter} onChange={setFilter} className="w-32" aria-label="本页库存状态筛选">
             <Select.Option value="all">全部</Select.Option>
             <Select.Option value="normal">正常</Select.Option>
             <Select.Option value="low">偏低</Select.Option>
             <Select.Option value="out">缺货</Select.Option>
           </Select>
-          <Button icon={<ExportOutlined />} onClick={handleExport}>
-            导出
+          <Button
+            icon={<ExportOutlined />}
+            onClick={handleExport}
+            disabled={loading || Boolean(error) || filtered.length === 0}
+          >
+            导出当前页
           </Button>
         </Space>
       </div>
-      <div className="grid grid-cols-4 gap-4">
-        {stats.map((s) => (
-          <div key={s.t} className="bg-white border border-brand-line p-4">
-            <p className="text-xs text-brand-muted">{s.t}</p>
-            <p className="text-xl font-sans font-bold text-brand-text mt-1">
-              {s.v}
-            </p>
+      {warehouseError && (
+        <Alert
+          showIcon
+          type="warning"
+          message="仓库筛选项加载失败"
+          description="库存数据仍可查看；重新加载仓库后可继续按仓库筛选。"
+          action={<Button onClick={() => void loadWarehouses()}>重新加载仓库</Button>}
+        />
+      )}
+      {loading ? (
+        <AdminLoadingState subject="库存数据" />
+      ) : error ? (
+        <AdminErrorState subject="库存数据" message={error} onRetry={() => void load()} />
+      ) : items.length === 0 ? (
+        <Card className="!bg-white !border-brand-line">
+          <AdminEmptyState subject="库存记录" />
+        </Card>
+      ) : (
+        <>
+          <p className="text-xs leading-[18px] text-brand-muted">
+            全量总数来自服务端；状态统计与状态筛选仅针对当前页已加载记录。
+          </p>
+          <div className="grid grid-cols-4 gap-4">
+            {stats.map((s) => (
+              <div key={s.t} className="bg-white border border-brand-line p-4">
+                <p className="text-xs text-brand-muted">{s.t}</p>
+                <p className="text-xl font-sans font-bold text-brand-text mt-1">
+                  {s.v}
+                </p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <Card className="!bg-white !border-brand-line">
-        <Table
-          dataSource={filtered}
-          rowKey="id"
-          loading={loading}
-          size="middle"
-          pagination={{
-            current: page,
-            pageSize,
-            total,
-            showSizeChanger: true,
-            showTotal: (t) => `共 ${t} 条`,
-            onChange: (p, ps) => {
-              setPage(p);
-              setPageSize(ps);
-            },
-          }}
-          columns={[
+          <Card className="!bg-white !border-brand-line">
+            {filtered.length === 0 ? (
+              <AdminEmptyState description="当前页没有符合状态筛选的库存记录" />
+            ) : (
+              <Table
+                dataSource={filtered}
+                rowKey="id"
+                size="middle"
+                pagination={{
+                  current: page,
+                  pageSize,
+                  total,
+                  showSizeChanger: true,
+                  showTotal: (t) => `全量共 ${t} 条`,
+                  onChange: (p, ps) => {
+                    setPage(p);
+                    setPageSize(ps);
+                  },
+                }}
+                columns={[
             {
               title: "SKU",
               dataIndex: "skuCode",
@@ -219,7 +305,7 @@ export default function Inventory() {
             },
             {
               title: "操作",
-              render: (_: any, r: any) => (
+              render: (_: unknown, r: InventoryRow) => (
                 <Button
                   size="small"
                   type="primary"
@@ -232,9 +318,12 @@ export default function Inventory() {
                 </Button>
               ),
             },
-          ]}
-        />
-      </Card>
+                ]}
+              />
+            )}
+          </Card>
+        </>
+      )}
 
       <Modal
         title="调整库存"

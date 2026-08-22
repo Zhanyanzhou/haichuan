@@ -22,7 +22,7 @@ test.describe("商品编辑器关键回归", () => {
     await expect(page.getByRole("heading", { name: "图文描述" })).toBeVisible();
   });
 
-  test("新建状态、必填过滤、预览和物流条件一致", async ({ page }) => {
+  test("新建状态、核心字段过滤、预览和物流条件一致", async ({ page }) => {
     await expect(page.getByText("尚未保存", { exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "品牌" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "批量导入" })).toHaveCount(0);
@@ -32,7 +32,7 @@ test.describe("商品编辑器关键回归", () => {
     const primaryTextColor = await page.locator(".pro-editor__footer .ant-btn-primary > span").evaluate((element) => getComputedStyle(element).color);
     expect(primaryTextColor).toBe("rgb(255, 255, 255)");
 
-    await page.getByRole("switch", { name: "只看必填" }).click();
+    await page.getByRole("switch", { name: "只看核心字段" }).click();
     await expect(page.getByRole("textbox", { name: "品牌" })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "证书编号" })).toBeVisible();
 
@@ -51,7 +51,7 @@ test.describe("商品编辑器关键回归", () => {
 
   test("校验提示准确，草稿允许标题未完成", async ({ page }) => {
     await page.getByRole("button", { name: "保存到仓库" }).click();
-    await expect(page.getByText("请先完善全部必填信息")).toBeVisible();
+    await expect(page.getByText("请检查并修正标红字段")).toBeVisible();
     await expect(page.getByText("保存失败，请检查后重试")).toHaveCount(0);
 
     await page.getByRole("button", { name: "基础信息" }).click();
@@ -73,8 +73,9 @@ test.describe("商品编辑器关键回归", () => {
   });
 
   test("桌面金额输入宽度和平板重排可用", async ({ page }) => {
+    await page.getByRole("switch", { name: "只看核心字段" }).click();
     await page.getByRole("button", { name: "销售信息" }).click();
-    const priceWidth = await page.getByRole("spinbutton", { name: "一口价" }).evaluate((element) => element.closest(".ant-input-number-affix-wrapper")?.getBoundingClientRect().width || 0);
+    const priceWidth = await page.getByRole("spinbutton", { name: "工费" }).evaluate((element) => element.closest(".ant-input-number-affix-wrapper")?.getBoundingClientRect().width || 0);
     expect(priceWidth).toBeGreaterThanOrEqual(300);
 
     await page.setViewportSize({ width: 720, height: 720 });

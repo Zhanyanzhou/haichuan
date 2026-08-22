@@ -2,22 +2,20 @@ import {
   createContext,
   lazy,
   Suspense,
-  useCallback,
   useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
   type ReactNode,
 } from "react";
 import { usePagePublishStream } from "@/hooks/usePagePublishStream";
-import { pageDocumentApi } from "@/services/api";
-import { unwrapResponse } from "@/utils/unwrap";
+import StaleDocumentNotice from "./StaleDocumentNotice";
 import {
   createEditorPageDefault,
   ensureEditorPageStructure,
   isEditorPageKey,
 } from "@/page-builder/config/editorPages";
+import {
+  usePublishedPageDocument,
+  type PublishedPageDocumentStatus,
+} from "./usePublishedPageDocument";
 
 // 页面装修器及其编辑器依赖仅在确有已发布内容时加载，避免进入纯展示页首屏。
 const PuckDocumentRenderer = lazy(() => import("./PuckDocumentRenderer"));
@@ -31,19 +29,15 @@ type PublishedPageDecorationProps = {
   replaceChildren?: boolean;
 };
 
-type PageResult = {
-  pageKey?: string;
-  pageDocument: any;
-  status: "idle" | "loading" | "ready";
-};
-
 type PageDecorationState = {
   active: boolean;
   pageKey?: string;
+  status: PublishedPageDocumentStatus;
 };
 
 const PageDecorationContext = createContext<PageDecorationState>({
   active: false,
+  status: "idle",
 });
 
 /** 动态业务页用它隐藏自身旧页头，只保留装修文档中的视觉页头。 */
@@ -53,7 +47,8 @@ export function usePageDecorationState() {
 
 /**
  * 业务页保留其商品、筛选、表单等真实功能；装修内容围绕固定业务区渲染。
- * 没有发布文档时使用与编辑器一致的 PageDocument 种子，不再回退到第二套静态页面。
+ * 只有取得有效发布快照时才渲染装修内容；从未发布、请求失败或文档无效时
+ * 保留代码兜底/固定业务区，绝不把编辑器 seed 伪装为正式公开内容。
  */
 export default function PublishedPageDecoration({
   pageKey,
@@ -61,70 +56,30 @@ export default function PublishedPageDecoration({
   children,
   replaceChildren = false,
 }: PublishedPageDecorationProps) {
-  const [result, setResult] = useState<PageResult>({
-    pageKey: undefined,
-    pageDocument: null,
-    status: "idle",
-  });
-  const mountedRef = useRef(true);
-  const requestIdRef = useRef(0);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const refresh = useCallback(async (showLoading = false) => {
-    if (!pageKey) {
-      setResult({ pageKey: undefined, pageDocument: null, status: "ready" });
-      return;
-    }
-
-    const requestId = ++requestIdRef.current;
-    if (showLoading) {
-      setResult({ pageKey, pageDocument: null, status: "loading" });
-    }
-    try {
-      const response = await pageDocumentApi.getPublished(pageKey);
-      if (mountedRef.current && requestIdRef.current === requestId) {
-        setResult({
-          pageKey,
-          pageDocument: unwrapResponse<any>(response),
-          status: "ready",
-        });
-      }
-    } catch {
-      if (mountedRef.current && requestIdRef.current === requestId) {
-        setResult({ pageKey, pageDocument: null, status: "ready" });
-      }
-    }
-  }, [pageKey]);
-
-  useEffect(() => {
-    void refresh(true);
-  }, [refresh]);
+  const { pageDocument, status, stale, refresh } = usePublishedPageDocument(pageKey);
 
   usePagePublishStream(pageKey, () => {
     void refresh();
   });
 
-  const defaultData = useMemo(
-    () => isEditorPageKey(pageKey) ? createEditorPageDefault(pageKey) : null,
-    [pageKey],
-  );
   const hasPublishedDocument = Boolean(
-    result.pageKey === pageKey && result.pageDocument?.puckData,
+    status === "published" && pageDocument?.puckData,
   );
   const sourceData = hasPublishedDocument
-    ? result.pageDocument.puckData
-    : defaultData;
+    ? pageDocument?.puckData
+    : null;
   const structuredData = sourceData && isEditorPageKey(pageKey)
     ? ensureEditorPageStructure(pageKey, sourceData)
     : sourceData;
-  const content = Array.isArray(structuredData?.content)
+  const publishedContent = Array.isArray(structuredData?.content)
     ? structuredData.content
+    : [];
+  const fallbackData = pageKey === "products" && !publishedContent.length
+    ? ensureEditorPageStructure("products", createEditorPageDefault("products"))
+    : null;
+  const effectiveData = fallbackData ?? structuredData;
+  const content = Array.isArray(effectiveData?.content)
+    ? effectiveData.content
     : [];
   const businessRegionIndex = content.findIndex(
     (block: { type?: string }) => block?.type === "业务功能区",
@@ -135,16 +90,17 @@ export default function PublishedPageDecoration({
   const afterContent = businessRegionIndex >= 0
     ? content.slice(businessRegionIndex + 1)
     : [];
+  const hasLeadingDecoration = hasPublishedDocument && beforeContent.length > 0;
 
   if (!pageKey) return <>{children}</>;
 
   const withDecorationState = (node: ReactNode) => (
-    <PageDecorationContext.Provider value={{ active: hasPublishedDocument, pageKey }}>
+    <PageDecorationContext.Provider value={{ active: hasLeadingDecoration, pageKey, status }}>
       {node}
     </PageDecorationContext.Provider>
   );
 
-  const loading = result.pageKey !== pageKey || result.status === "loading";
+  const loading = status === "idle" || status === "loading";
   if (loading) {
     if (!replaceChildren) return withDecorationState(children);
     return withDecorationState(
@@ -159,8 +115,8 @@ export default function PublishedPageDecoration({
   }
 
   const renderDecoration = (sectionContent: any[], position: "before" | "after") => {
-    if (!sectionContent.length || !structuredData) return null;
-    const data = { ...structuredData, content: sectionContent };
+    if (!sectionContent.length || !effectiveData) return null;
+    const data = { ...effectiveData, content: sectionContent };
     return (
       <section aria-label={`${pageLabel || "页面"}装修内容${position === "after" ? "补充" : ""}`}>
         <Suspense
@@ -185,16 +141,22 @@ export default function PublishedPageDecoration({
   if (!content.length) return withDecorationState(children);
 
   if (replaceChildren) {
-    return withDecorationState(
+    const replacement = (
       <>
-        {!hasPublishedDocument && pageLabel ? (
+        {pageLabel && (!hasPublishedDocument || fallbackData) ? (
           <h1 className="sr-only">{pageLabel}</h1>
         ) : null}
         {renderDecoration(
           content.filter((block: { type?: string }) => block?.type !== "业务功能区"),
           "before",
         )}
-      </>,
+        <StaleDocumentNotice visible={stale} onRefresh={() => void refresh()} />
+      </>
+    );
+    return withDecorationState(
+      pageKey === "products"
+        ? <div data-page-document-state={hasPublishedDocument ? "published" : status}>{replacement}</div>
+        : replacement,
     );
   }
 
@@ -203,6 +165,7 @@ export default function PublishedPageDecoration({
       {renderDecoration(beforeContent, "before")}
       {children}
       {renderDecoration(afterContent, "after")}
+      <StaleDocumentNotice visible={stale} onRefresh={() => void refresh()} />
     </>,
   );
 }

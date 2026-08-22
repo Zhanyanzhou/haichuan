@@ -32,6 +32,81 @@ function sortReplacer(_key, value) {
 const hash = createHash("sha256").update(JSON.stringify(source, sortReplacer)).digest("hex");
 
 const rootDevices = ["desktop", "mobile"];
+const assetClasses = new Set(["product", "editorial", "craft", "service"]);
+const templateWidths = ["full", "wide", "standard", "editorial"];
+
+const derivePreviewOrder = (template, device, viewport) => {
+  const previewRoleIds = new Set(viewport.zones.map((zone) => zone.roleId));
+  const rolesById = new Map(template.roles.map((role) => [role.id, role]));
+  return template.order[device].filter((id) =>
+    rolesById.get(id)?.positioning !== "background" && previewRoleIds.has(id),
+  );
+};
+
+function validateAssetPolicy(policy) {
+  invariant(policy && typeof policy === "object", "assetPolicy 缺失");
+  invariant(
+    Array.isArray(policy.classes)
+      && policy.classes.length === assetClasses.size
+      && policy.classes.every((value) => assetClasses.has(value)),
+    "assetPolicy.classes 必须完整声明素材分类",
+  );
+  invariant(
+    policy.placeholder?.status === "waiting-final-asset"
+      && policy.placeholder?.publishable === false,
+    "assetPolicy.placeholder 必须是不可发布的等待最终素材状态",
+  );
+  for (const viewport of rootDevices) {
+    const widths = policy.minimumWidthByViewport?.[viewport];
+    invariant(widths && typeof widths === "object", `assetPolicy.minimumWidthByViewport.${viewport} 缺失`);
+    for (const width of templateWidths) {
+      invariant(
+        Number.isInteger(widths[width]) && widths[width] >= 1000,
+        `assetPolicy.minimumWidthByViewport.${viewport}.${width} 必须是有效建议宽度`,
+      );
+    }
+  }
+}
+
+function validatePageRules(rules) {
+  invariant(Array.isArray(rules) && rules.length === 6, "pageRules 必须覆盖 6 个装修页面");
+  const pageKeys = rules.map((rule) => rule.pageKey);
+  invariant(new Set(pageKeys).size === pageKeys.length, "pageRules.pageKey 不得重复");
+  const templatesByKey = new Map(source.templates.map((template) => [template.key, template]));
+  for (const rule of rules) {
+    invariant(/^[a-z0-9-]+$/i.test(rule.pageKey), `pageRules.${rule.pageKey}.pageKey 无效`);
+    invariant(typeof rule.pageRole === "string" && rule.pageRole.length > 0, `pageRules.${rule.pageKey}.pageRole 缺失`);
+    invariant(
+      Array.isArray(rule.allowedTemplateKeys)
+        && rule.allowedTemplateKeys.length > 0
+        && new Set(rule.allowedTemplateKeys).size === rule.allowedTemplateKeys.length,
+      `pageRules.${rule.pageKey}.allowedTemplateKeys 缺失或重复`,
+    );
+    invariant(
+      rule.allowedTemplateKeys.every((key) => templatesByKey.get(key)?.implementationStatus === "active"),
+      `pageRules.${rule.pageKey} 只能引用 active 模板`,
+    );
+    invariant([0, 1].includes(rule.businessRegionCount), `pageRules.${rule.pageKey}.businessRegionCount 只能为 0 或 1`);
+    invariant(
+      rule.businessRegionCount === 1
+        ? rule.businessRegionPosition === "after-first-brand-block"
+        : rule.businessRegionPosition === undefined,
+      `pageRules.${rule.pageKey}.businessRegionPosition 与固定业务区数量不一致`,
+    );
+    invariant(
+      ["overlay-light", "solid"].includes(rule.headerMode?.configured)
+        && rule.headerMode?.fallback === "solid",
+      `pageRules.${rule.pageKey}.headerMode 无效`,
+    );
+    if (rule.headerMode.configured === "overlay-light") {
+      invariant(
+        rule.headerMode.overlayRequiresFirstTemplate === "hero"
+          && rule.allowedTemplateKeys.includes("hero"),
+        `pageRules.${rule.pageKey} 覆盖式导航必须要求首个 hero`,
+      );
+    }
+  }
+}
 
 function validateUnifiedRoot(template) {
   invariant(Array.isArray(template.roles) && template.roles.length > 0, `${template.key}.roles 缺失`);
@@ -75,6 +150,16 @@ function validateUnifiedRoot(template) {
   const actionCount = template.roles.filter((role) => role.kind === "action").length;
   invariant(actionCount <= template.contentBudget.maxCtas, `${template.key} 行动角色数超过 maxCtas`);
   for (const role of template.roles) {
+    if (role.kind === "media") {
+      invariant(assetClasses.has(role.assetClass), `${template.key}.${role.id}.assetClass 缺失或无效`);
+    }
+    if (role.assetClass !== undefined) {
+      invariant(assetClasses.has(role.assetClass), `${template.key}.${role.id}.assetClass 无效`);
+      invariant(
+        rootDevices.some((device) => Boolean(role.defaultRatioByViewport?.[device])),
+        `${template.key}.${role.id} 素材槽必须声明至少一个默认比例`,
+      );
+    }
     if (role.appliesTo !== undefined) {
       invariant(Array.isArray(role.appliesTo) && role.appliesTo.length > 0, `${template.key}.${role.id}.appliesTo 不能为空`);
       invariant(new Set(role.appliesTo).size === role.appliesTo.length, `${template.key}.${role.id}.appliesTo 不得重复`);
@@ -108,6 +193,12 @@ function validateUnifiedRoot(template) {
     }
     invariant(viewport.order.every((id) => rolesById.has(id) && zoneRoleIds.has(id)), `${template.key}.preview.${device}.order 包含无区域或未声明 role id`);
     invariant([...structuralRoleIds].every((id) => viewport.order.includes(id)), `${template.key}.preview.${device}.order 未覆盖全部非 overlay 区域`);
+    const derivedOrder = derivePreviewOrder(template, device, viewport);
+    invariant(
+      JSON.stringify(viewport.order) === JSON.stringify(derivedOrder),
+      `${template.key}.preview.${device}.order 必须由根 order 派生；背景角色需显式标记 positioning=background`,
+    );
+    viewport.order = derivedOrder;
   }
   if (template.key === "booking") {
     invariant(!template.roles.some((role) => role.kind === "form" || role.role === "form"), "booking 禁止 form 角色");
@@ -115,19 +206,21 @@ function validateUnifiedRoot(template) {
   }
 }
 
+validateAssetPolicy(source.assetPolicy);
 for (const template of source.templates) validateUnifiedRoot(template);
+validatePageRules(source.pageRules);
 
 // 权威 JSON 从 schema v3 起(桌面+移动双端),23 个模板均直接声明同一根构图。
 // 以下仅为既有 TypeScript 消费面的只读派生形状，不能反写或形成第二份合同。
-const toLegacyPreviewViewport = (template, viewport) => ({
+const toLegacyPreviewViewport = (template, device, viewport) => ({
   ...viewport,
-  order: viewport.order.map((id) => template.roles.find((role) => role.id === id)?.role ?? id),
+  order: derivePreviewOrder(template, device, viewport).map((id) => template.roles.find((role) => role.id === id)?.role ?? id),
   zones: viewport.zones.map(({ roleId: _roleId, ...zone }) => zone),
 });
 source.previewProfiles = Object.fromEntries(source.templates.map((template) => [template.key, {
   ...template.preview,
-  desktop: toLegacyPreviewViewport(template, template.preview.desktop),
-  mobile: toLegacyPreviewViewport(template, template.preview.mobile),
+  desktop: toLegacyPreviewViewport(template, "desktop", template.preview.desktop),
+  mobile: toLegacyPreviewViewport(template, "mobile", template.preview.mobile),
 }]));
 for (const template of source.templates) {
   template.media = template.roles
@@ -315,6 +408,7 @@ const registry = source.templates.map(({ key, moduleType, displayName, category,
   implementationStatus,
 }));
 const contractMap = Object.fromEntries(source.templates.map(({ category: _category, implementationStatus: _status, skeleton: _skeleton, ...contract }) => [contract.key, contract]));
+const pageRuleMap = Object.fromEntries(source.pageRules.map((rule) => [rule.pageKey, rule]));
 const templateSkeletonMap = Object.fromEntries(source.templates.map(({ key, moduleType, displayName, category, skeleton }) => [key, {
   key,
   moduleType,
@@ -343,6 +437,38 @@ export const CONTENT_TEMPLATE_CONTRACT_VERSION = ${contractVersion};
 export type RegisteredContentTemplateKey = ${registeredKeys};
 export type ContentTemplateKey = RegisteredContentTemplateKey;
 export type ContentTemplateMaster = ${masters};
+export type ContentTemplateAssetClass = "product" | "editorial" | "craft" | "service";
+
+export type ContentTemplateAssetPolicy = {
+  classes: readonly ContentTemplateAssetClass[];
+  placeholder: {
+    status: "waiting-final-asset";
+    label: string;
+    badge: string;
+    publishable: false;
+  };
+  minimumWidthByViewport: Record<
+    "desktop" | "mobile",
+    Record<"full" | "wide" | "standard" | "editorial", number>
+  >;
+};
+
+export const CONTENT_TEMPLATE_ASSET_POLICY = ${JSON.stringify(source.assetPolicy, sortReplacer, 2)} as const satisfies ContentTemplateAssetPolicy;
+
+export type ContentTemplatePageRule = {
+  pageKey: string;
+  pageRole: string;
+  allowedTemplateKeys: readonly ContentTemplateKey[];
+  businessRegionCount: 0 | 1;
+  businessRegionPosition?: "after-first-brand-block";
+  headerMode: {
+    configured: "overlay-light" | "solid";
+    overlayRequiresFirstTemplate?: "hero";
+    fallback: "solid";
+  };
+};
+
+export const CONTENT_TEMPLATE_PAGE_RULES = ${JSON.stringify(pageRuleMap, sortReplacer, 2)} as const satisfies Record<string, ContentTemplatePageRule>;
 
 export type MediaSlot = {
   key: string;
@@ -370,6 +496,7 @@ export type ContentTemplateContract = {
     role: ContentTemplateSkeletonRole;
     kind: string;
     required: boolean;
+    assetClass?: ContentTemplateAssetClass;
     semantic?: string;
     previewRoles?: readonly ContentTemplateSkeletonRole[];
     appliesTo?: readonly ("desktop" | "mobile")[];
@@ -629,6 +756,20 @@ export const CONTENT_TEMPLATE_BY_MODULE_TYPE = Object.fromEntries(
 
 export function getContentTemplateContract(moduleType: string) {
   return CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType];
+}
+
+export function getContentTemplatePageRule(pageKey: string) {
+  return (CONTENT_TEMPLATE_PAGE_RULES as Record<string, ContentTemplatePageRule | undefined>)[pageKey];
+}
+
+export function isContentTemplateAllowedForPage(pageKey: string, moduleType: string) {
+  const rule = getContentTemplatePageRule(pageKey);
+  const contract = getContentTemplateContract(moduleType);
+  return Boolean(
+    rule
+      && contract
+      && (rule.allowedTemplateKeys as readonly ContentTemplateKey[]).includes(contract.key),
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -9,20 +9,39 @@ function createScheduledService(publishable: boolean) {
     product: {
       findMany: async () => [{ id: 7 }],
       findFirst: async () => ({
+        id: 7,
+        code: "SCHEDULED-7",
+        name: "定时商品",
+        category: { isActive: true, deletedAt: null },
+        salesMode: "DIRECT_PURCHASE",
+        inventoryPolicy: "STANDARD",
         price: 1280,
-        primaryImageId: publishable ? 11 : null,
-        images: publishable ? [{ id: 11 }] : [],
-        skus: [{ id: 21 }],
+        deliveryMethods: ["EXPRESS"],
+        shippingTemplate: null,
+        images: publishable
+          ? [{ id: 11, url: "https://example.test/image.jpg", storageKey: null, isVideo: false, mimeType: "image/jpeg" }]
+          : [],
+        skus: [{ id: 21, price: 1280, inventories: [{ quantity: 0 }] }],
       }),
+      findUnique: async () => ({ status: "DRAFT", inventoryPolicy: "STANDARD" }),
       update: async ({ data }: any) => {
-        updates.push(data);
+        if (data.status || data.publishMode) updates.push(data);
         return { id: 7, ...data };
       },
     },
+    productSKU: {
+      findMany: async () => [{ price: 1280 }],
+      count: async () => 1,
+    },
+    inventory: {
+      aggregate: async () => ({ _sum: { quantity: 0 } }),
+    },
+    $queryRaw: async () => [{ id: 7 }],
+    $transaction: async (callback: (tx: any) => Promise<any>) => callback(prisma),
   };
   const service = new ProductsService(
     prisma as unknown as PrismaService,
-    { invalidate: () => undefined } as never,
+    { invalidate: () => undefined, readProductImage: () => ({ buffer: Buffer.from("x") }) } as never,
     {} as never,
   );
   return { service, updates };

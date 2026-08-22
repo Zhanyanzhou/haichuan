@@ -93,9 +93,6 @@ export class GoldPriceService {
       },
     });
 
-    // Trigger price adjustment for all products
-    await this.adjustProductPrices(data.price);
-
     this.logger.log(`Gold price manually updated to ¥${data.price}/g`);
 
     return {
@@ -120,10 +117,10 @@ export class GoldPriceService {
   }
 
   /**
-   * 自动金价采集：从 GOLD_PRICE_API_URL 拉取行情并写库、触发全店调价。
+   * 自动金价采集：从 GOLD_PRICE_API_URL 拉取行情并只记录金价事实。
    * - 未配置数据源时诚实跳过（不写模拟报价，避免污染商品售价）；
    * - 价格越界（<100 或 >2000 元/克）视为脏数据丢弃；
-   * - 失败仅记录日志，不影响商品价格与既有金价记录。
+   * - 失败仅记录日志，不影响商品固定售价与既有金价记录。
    */
   private async fetchAndUpdateGoldPrice(source: string) {
     const apiUrl = process.env.GOLD_PRICE_API_URL?.trim();
@@ -149,8 +146,6 @@ export class GoldPriceService {
         // GoldPriceSource 仅 AUTO / MANUAL：自动采集统一记 AUTO，remark 记录早盘/午盘时段
         data: { price, source: "AUTO", remark: source, recordDate: new Date() },
       });
-      await this.adjustProductPrices(price);
-
       this.logger.log(`金价自动更新成功：¥${price}/g（${source}）`);
     } catch (e: any) {
       this.logger.error(`金价自动更新失败（${source}）：${e?.message || e}`);
@@ -198,10 +193,10 @@ export class GoldPriceService {
   }
 
   /**
-   * 自动调价引擎（P1-2/P1-3）：
+   * 已停用的历史自动调价实现（无调用方）：
+   * 金价记录不得改写固定 SKU.price；Product.price 只由 ProductsService 从有效 SKU 派生。
    * - 仅作用于 PUBLISHED 商品（不再改动 DRAFT 草稿价）
-   * - 只更新 SKU.price；Product.price（起价）由 ProductsService.syncProductStartingPrice 统一维护为 min 活跃 SKU 价
-   *   （原来 gold-price 直接覆盖 Product.price 会破坏 syncProductStartingPrice 的单一真相源）
+   * - 只更新 SKU.price；Product.price（起价）由 ProductsService 的统一交易规则入口维护为有效 SKU 最低价
    * - 调价后通知前台 SSE 刷新（原来不触发 notifyPublicChange，前台价格不更新）
    * - 加价系数 1.05 暂硬编码（DECISIONS D.10 待决策：按 MaterialType 分级并参数化）
    * Formula: sku_price = sku_gold_weight × gold_price × coefficient + craft_fee（取整到 10 元）
@@ -223,6 +218,8 @@ export class GoldPriceService {
               10,
           ) * 10;
         if (Math.abs(refPrice - Number(product.price)) <= 1) continue;
+
+        await this.productsService.lockProductForTradeMutation(product.id, tx);
 
         // 同步该商品下有金重的 SKU 售价（下单读 sku.price，否则实付金额错误）
         const skus = await tx.productSKU.findMany({
@@ -246,6 +243,10 @@ export class GoldPriceService {
         }
         if (!skuChanged) continue;
 
+        await this.productsService.reconcileTradeRulesInTransaction(
+          product.id,
+          tx,
+        );
         affectedProductIds.push(product.id);
       }
       return {
@@ -254,9 +255,9 @@ export class GoldPriceService {
       };
     });
 
-    // 事务提交后：重算起价（Product.price = min 活跃 SKU 价）并通知前台 SSE 刷新（P1-2）
+    // 价格与发布门禁已在调价事务内完成；提交后仅广播刷新信号。
     for (const pid of affectedProductIds) {
-      await this.productsService.refreshStartingPriceAndNotify(pid);
+      this.productsService.notifyTradeProductChanged(pid);
     }
 
     this.logger.log(

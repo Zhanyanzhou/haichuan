@@ -15,7 +15,7 @@ function gallery(viewport: "desktop" | "mobile") {
           body { margin: 0; color: #292722; background: #ebe7e1; font: 12px/1.5 Arial, sans-serif; }
           main { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; padding: 24px; }
           .preview-card { min-width: 0; padding: 10px; border: 1px solid #d9d3c9; background: #fffefc; }
-          .preview-card svg { display: block; width: 100%; height: auto; }
+          .preview-card [data-content-template-preview] { display: block; width: 100%; }
           .preview-card strong { display: block; margin-top: 8px; font-size: 13px; }
           @media (max-width: 720px) { main { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; } }
         </style>
@@ -64,12 +64,11 @@ for (const viewport of ["desktop", "mobile"] as const) {
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     )).toBe(true);
 
-    const expectedViewBox = viewport === "desktop" ? "0 0 300 186" : "0 0 180 228";
     for (const preview of await previews.all()) {
-      await expect(preview).toHaveAttribute("viewBox", expectedViewBox);
       await expect(preview).toHaveAttribute("data-preview-viewport", viewport);
       await expect(preview).toHaveAttribute("data-desktop-order", /.+/);
       await expect(preview).toHaveAttribute("data-mobile-order", /.+/);
+      await expect(preview.locator('[data-content-template-renderer="real"]')).toHaveCount(1);
     }
 
     await mkdir(screenshotDir, { recursive: true });

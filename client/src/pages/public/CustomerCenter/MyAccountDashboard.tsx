@@ -93,10 +93,10 @@ const PARTNER_STATUS_LABEL: Record<string, string> = {
 
 // 合作商家区块入口动作：按状态给出可操作目标
 const PARTNER_ACTION: Record<string, { label: string; to: string }> = {
-  NONE: { label: "申请合作商家", to: "/partner" },
-  PENDING: { label: "查看进度", to: "/partner" },
-  NEEDS_SUPPLEMENT: { label: "补充资料", to: "/partner" },
-  REJECTED: { label: "重新申请", to: "/partner" },
+  NONE: { label: "申请合作商家", to: "/customer?section=partner" },
+  PENDING: { label: "查看进度", to: "/customer?section=partner" },
+  NEEDS_SUPPLEMENT: { label: "补充资料", to: "/customer?section=partner" },
+  REJECTED: { label: "重新申请", to: "/customer?section=partner" },
   SUSPENDED: { label: "联系顾问", to: "/contact" },
   APPROVED: { label: "查看合作作品", to: "/catalog" },
 };
@@ -930,7 +930,7 @@ export default function MyAccountDashboard({
                   ) : null}
                 </div>
                 <Link
-                  to={PARTNER_ACTION[partnerStatus]?.to || "/partner"}
+                  to={PARTNER_ACTION[partnerStatus]?.to || "/customer?section=partner"}
                   style={{ fontSize: 12, color: "#181a1b", flexShrink: 0 }}
                 >
                   {PARTNER_ACTION[partnerStatus]?.label || "了解详情"} →

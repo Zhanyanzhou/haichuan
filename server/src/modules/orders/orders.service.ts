@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  ConflictException,
   NotFoundException,
   Logger,
 } from "@nestjs/common";
@@ -183,6 +184,54 @@ export class OrdersService {
     return new Date(now.getTime() + OFFLINE_PAYMENT_RESERVATION_MS);
   }
 
+  /**
+   * 库存策略切换、预占与释放共用商品行锁，避免事务读取到切换前策略后再写库存。
+   * 这里只串行化交易事实，不修改商品本身。
+   */
+  private async lockTradeProduct(
+    tx: Prisma.TransactionClient,
+    productId: number,
+  ) {
+    const rows = await tx.$queryRaw<
+      Array<{ id: number; inventoryPolicy: "STANDARD" | "SINGLE_UNIT" }>
+    >(
+      Prisma.sql`SELECT id, inventory_policy AS inventoryPolicy FROM products WHERE id = ${productId} AND deleted_at IS NULL FOR UPDATE`,
+    );
+    if (rows.length === 0) throw new NotFoundException("商品不存在或已删除");
+    return rows[0].inventoryPolicy;
+  }
+
+  /** 由 SKU 直接锁定所属商品，避免锁前普通读取建立旧事务快照。 */
+  private async lockTradeProductBySku(
+    tx: Prisma.TransactionClient,
+    skuId: number,
+  ) {
+    const rows = await tx.$queryRaw<
+      Array<{
+        id: number;
+        inventoryPolicy: "STANDARD" | "SINGLE_UNIT";
+      }>
+    >(
+      Prisma.sql`SELECT p.id, p.inventory_policy AS inventoryPolicy FROM products p INNER JOIN product_skus sku ON sku.product_id = p.id WHERE sku.id = ${skuId} AND p.deleted_at IS NULL FOR UPDATE`,
+    );
+    if (rows.length === 0) throw new BadRequestException("商品规格不存在");
+    return {
+      productId: rows[0].id,
+      inventoryPolicy: rows[0].inventoryPolicy,
+    };
+  }
+
+  /** SINGLE_UNIT 校验使用当前读并锁定库存行，不受事务旧快照影响。 */
+  private async getLockedInventoryTotal(
+    tx: Prisma.TransactionClient,
+    productId: number,
+  ) {
+    const rows = await tx.$queryRaw<Array<{ quantity: number }>>(
+      Prisma.sql`SELECT inventory.quantity FROM inventories inventory INNER JOIN product_skus sku ON sku.id = inventory.sku_id WHERE sku.product_id = ${productId} FOR UPDATE`,
+    );
+    return rows.reduce((sum, row) => sum + Number(row.quantity), 0);
+  }
+
   private async reserveStock(
     tx: Prisma.TransactionClient,
     orderId: number,
@@ -190,6 +239,20 @@ export class OrdersService {
     quantity: number,
     expiresAt: Date,
   ) {
+    const { productId, inventoryPolicy } = await this.lockTradeProductBySku(
+      tx,
+      skuId,
+    );
+    if (inventoryPolicy === "SINGLE_UNIT") {
+      if (quantity !== 1) {
+        throw new ConflictException("一物一件商品每个订单最多购买 1 件");
+      }
+      const total = await this.getLockedInventoryTotal(tx, productId);
+      if (total < 0 || total > 1) {
+        throw new ConflictException("一物一件商品库存状态异常，请先核对库存");
+      }
+    }
+
     const inventories = await tx.inventory.findMany({
       where: { skuId },
       orderBy: { quantity: "desc" },
@@ -235,30 +298,79 @@ export class OrdersService {
   ) {
     const reservations = await tx.inventoryReservation.findMany({
       where: { orderId, releasedAt: null, consumedAt: null },
-      select: { id: true, inventoryId: true, skuId: true, quantity: true },
+      select: {
+        id: true,
+        inventoryId: true,
+        skuId: true,
+        quantity: true,
+        sku: { select: { productId: true } },
+      },
     });
 
+    const byProduct = new Map<number, typeof reservations>();
     for (const reservation of reservations) {
-      if (reservation.inventoryId) {
-        await tx.inventory.update({
-          where: { id: reservation.inventoryId },
-          data: { quantity: { increment: reservation.quantity } },
-        });
-      } else {
-        // 兼容历史数据：极早期预占可能落在已废弃的 ProductSKU.stock（inventoryId 为 null）。
-        // 新预占（reserveStock）始终带 inventoryId，此分支仅处理迁移前残留行，不构成双库存源。
-        await tx.productSKU.update({
-          where: { id: reservation.skuId },
-          data: { stock: { increment: reservation.quantity } },
-        });
-      }
-      await tx.inventoryReservation.update({
-        where: { id: reservation.id },
-        data: { releasedAt },
-      });
+      const group = byProduct.get(reservation.sku.productId) ?? [];
+      group.push(reservation);
+      byProduct.set(reservation.sku.productId, group);
     }
 
-    return reservations.length;
+    let releasedCount = 0;
+    for (const productId of [...byProduct.keys()].sort((a, b) => a - b)) {
+      const inventoryPolicy = await this.lockTradeProduct(tx, productId);
+      const claimed = [] as typeof reservations;
+      for (const reservation of byProduct.get(productId) ?? []) {
+        // 先用状态条件原子抢占释放权；库存写入失败会随整个事务回滚该标记。
+        const result = await tx.inventoryReservation.updateMany({
+          where: {
+            id: reservation.id,
+            releasedAt: null,
+            consumedAt: null,
+          },
+          data: { releasedAt },
+        });
+        if (result.count === 1) claimed.push(reservation);
+      }
+      if (claimed.length === 0) continue;
+      releasedCount += claimed.length;
+
+      if (inventoryPolicy === "SINGLE_UNIT") {
+        const total = await this.getLockedInventoryTotal(tx, productId);
+        if (total < 0 || total > 1) {
+          throw new ConflictException("一物一件商品库存状态异常，请先核对库存");
+        }
+        if (total === 0) {
+          const target = claimed.find(
+            (reservation) => reservation.inventoryId !== null,
+          );
+          if (target?.inventoryId) {
+            await tx.inventory.update({
+              where: { id: target.inventoryId },
+              data: { quantity: 1 },
+            });
+          }
+        }
+        // inventoryId 为空的是旧版预占；SINGLE_UNIT 不再回写废弃的 SKU.stock，
+        // 避免策略切换后把一物一件恢复为大于 1。
+        continue;
+      }
+
+      for (const reservation of claimed) {
+        if (reservation.inventoryId) {
+          await tx.inventory.update({
+            where: { id: reservation.inventoryId },
+            data: { quantity: { increment: reservation.quantity } },
+          });
+        } else {
+          // 仅兼容迁移前的 STANDARD 预占；当前预占始终写 Inventory。
+          await tx.productSKU.update({
+            where: { id: reservation.skuId },
+            data: { stock: { increment: reservation.quantity } },
+          });
+        }
+      }
+    }
+
+    return releasedCount;
   }
 
   private async consumeStockReservations(
@@ -583,6 +695,7 @@ export class OrdersService {
             id: true,
             name: true,
             code: true,
+            inventoryPolicy: true,
             primaryImage: { select: { url: true } },
             images: {
               select: { url: true },
@@ -610,8 +723,17 @@ export class OrdersService {
     // 用整数分累加，规避 JS Number 浮点误差（P1-18），最后转回 Decimal(10,2) 入库
     let totalCents = 0;
     const orderItems: Prisma.OrderItemUncheckedCreateWithoutOrderInput[] = [];
+    const singleUnitProductQuantities = new Map<number, number>();
     for (const sku of skus) {
       const quantity = quantities.get(sku.id)!;
+      if (sku.product.inventoryPolicy === "SINGLE_UNIT") {
+        const next =
+          (singleUnitProductQuantities.get(sku.product.id) ?? 0) + quantity;
+        if (quantity !== 1 || next > 1) {
+          throw new ConflictException("一物一件商品每个订单最多购买 1 件");
+        }
+        singleUnitProductQuantities.set(sku.product.id, next);
+      }
       const unitPrice = Number(sku.price);
       if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
         throw new BadRequestException(`商品 ${sku.skuCode} 尚未设置有效售价`);
@@ -708,7 +830,9 @@ export class OrdersService {
           include: { items: true },
         });
 
-        for (const item of order.items) {
+        for (const item of [...order.items].sort(
+          (a, b) => a.productId - b.productId || a.skuId - b.skuId,
+        )) {
           await this.reserveStock(
             tx,
             order.id,
@@ -878,6 +1002,39 @@ export class OrdersService {
     if (!data.items?.length)
       throw new BadRequestException("报价单无商品，不可转订单");
 
+    const quoteSkuIds = [...new Set(data.items.map((item) => item.skuId))];
+    const quoteSkus = await tx.productSKU.findMany({
+      where: { id: { in: quoteSkuIds } },
+      select: {
+        id: true,
+        productId: true,
+        product: { select: { inventoryPolicy: true } },
+      },
+    });
+    if (quoteSkus.length !== quoteSkuIds.length) {
+      throw new BadRequestException("报价单包含不存在的商品规格");
+    }
+    const quoteSkuFacts = new Map(
+      quoteSkus.map((sku) => [
+        sku.id,
+        { productId: sku.productId, inventoryPolicy: sku.product.inventoryPolicy },
+      ]),
+    );
+    const singleUnitQuoteQuantities = new Map<number, number>();
+    for (const item of data.items) {
+      const skuFacts = quoteSkuFacts.get(item.skuId)!;
+      if (skuFacts.productId !== item.productId) {
+        throw new BadRequestException("报价单商品与规格不匹配");
+      }
+      if (skuFacts.inventoryPolicy !== "SINGLE_UNIT") continue;
+      const next =
+        (singleUnitQuoteQuantities.get(skuFacts.productId) ?? 0) + item.quantity;
+      if (item.quantity !== 1 || next > 1) {
+        throw new ConflictException("一物一件商品每个订单最多购买 1 件");
+      }
+      singleUnitQuoteQuantities.set(skuFacts.productId, next);
+    }
+
     // 金额统一用整数分计算后转 Decimal，规避浮点误差
     const toDecimal = (v: number | string) =>
       new Prisma.Decimal(Math.round(Number(v) * 100)).div(100);
@@ -925,7 +1082,9 @@ export class OrdersService {
       include: { items: true },
     });
 
-    for (const item of order.items) {
+    for (const item of [...order.items].sort(
+      (a, b) => a.productId - b.productId || a.skuId - b.skuId,
+    )) {
       await this.reserveStock(
         tx,
         order.id,
@@ -1114,7 +1273,9 @@ export class OrdersService {
       );
       if (consumed.count === 0) {
         const expiresAt = this.getReservationExpiry(now);
-        for (const item of payment.order.items) {
+        for (const item of [...payment.order.items].sort(
+          (a, b) => a.productId - b.productId || a.skuId - b.skuId,
+        )) {
           await this.reserveStock(
             tx,
             payment.orderId,
@@ -1240,7 +1401,9 @@ export class OrdersService {
         if (result.count === 0) {
           // 预占已超时释放，重新预占后立即消费（与 approveOfflinePayment 一致）
           const expiresAt = this.getReservationExpiry(now);
-          for (const item of order.items) {
+          for (const item of [...order.items].sort(
+            (a, b) => a.productId - b.productId || a.skuId - b.skuId,
+          )) {
             await this.reserveStock(
               tx,
               data.orderId,

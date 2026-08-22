@@ -1,7 +1,7 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：b827a810412ee767fcb641fbeb938594e30918e0b522eca04157db92d0d6e573
+ * SHA-256：efd8f33629b9642314331ff023e556504190586264a7b3d852f5d95d292c5d62
  */
 
 export const CONTENT_TEMPLATE_REGISTRY_VERSION = 3;
@@ -10,6 +10,191 @@ export const CONTENT_TEMPLATE_CONTRACT_VERSION = 2;
 export type RegisteredContentTemplateKey = "hero" | "fullBleed" | "video" | "carousel" | "singlePoster" | "doublePoster" | "textBanner" | "journey" | "comparison" | "featuredProduct" | "productRow" | "gallery" | "wearingInspiration" | "categoryCards" | "sceneShopping" | "hotspot" | "brandPoints" | "servicePromises" | "certificates" | "storeInfo" | "testimonials" | "booking" | "limitedEvent";
 export type ContentTemplateKey = RegisteredContentTemplateKey;
 export type ContentTemplateMaster = "asymmetric-gallery" | "booking-epilogue" | "brand-points" | "category-navigation" | "cinematic-hero" | "cinematic-video" | "comparison-stage" | "editorial-journey" | "editorial-split" | "editorial-story" | "editorial-text" | "event-stage" | "hotspot-stage" | "immersive-image" | "product-focus" | "product-grid" | "scene-navigation" | "sequence-stage" | "service-policy" | "store-visit" | "testimonial-proof" | "trust-gallery" | "wearing-story";
+export type ContentTemplateAssetClass = "product" | "editorial" | "craft" | "service";
+
+export type ContentTemplateAssetPolicy = {
+  classes: readonly ContentTemplateAssetClass[];
+  placeholder: {
+    status: "waiting-final-asset";
+    label: string;
+    badge: string;
+    publishable: false;
+  };
+  minimumWidthByViewport: Record<
+    "desktop" | "mobile",
+    Record<"full" | "wide" | "standard" | "editorial", number>
+  >;
+};
+
+export const CONTENT_TEMPLATE_ASSET_POLICY = {
+  "classes": [
+    "product",
+    "editorial",
+    "craft",
+    "service"
+  ],
+  "minimumWidthByViewport": {
+    "desktop": {
+      "editorial": 1600,
+      "full": 3360,
+      "standard": 1600,
+      "wide": 2400
+    },
+    "mobile": {
+      "editorial": 1500,
+      "full": 1500,
+      "standard": 1500,
+      "wide": 1500
+    }
+  },
+  "placeholder": {
+    "badge": "内部占位",
+    "label": "等待最终素材",
+    "publishable": false,
+    "status": "waiting-final-asset"
+  }
+} as const satisfies ContentTemplateAssetPolicy;
+
+export type ContentTemplatePageRule = {
+  pageKey: string;
+  pageRole: string;
+  allowedTemplateKeys: readonly ContentTemplateKey[];
+  businessRegionCount: 0 | 1;
+  businessRegionPosition?: "after-first-brand-block";
+  headerMode: {
+    configured: "overlay-light" | "solid";
+    overlayRequiresFirstTemplate?: "hero";
+    fallback: "solid";
+  };
+};
+
+export const CONTENT_TEMPLATE_PAGE_RULES = {
+  "about": {
+    "allowedTemplateKeys": [
+      "hero",
+      "fullBleed",
+      "video",
+      "singlePoster",
+      "doublePoster",
+      "textBanner",
+      "journey",
+      "certificates",
+      "storeInfo",
+      "booking"
+    ],
+    "businessRegionCount": 0,
+    "headerMode": {
+      "configured": "overlay-light",
+      "fallback": "solid",
+      "overlayRequiresFirstTemplate": "hero"
+    },
+    "pageKey": "about",
+    "pageRole": "brand-story"
+  },
+  "catalog": {
+    "allowedTemplateKeys": [
+      "fullBleed",
+      "singlePoster",
+      "textBanner",
+      "booking"
+    ],
+    "businessRegionCount": 1,
+    "businessRegionPosition": "after-first-brand-block",
+    "headerMode": {
+      "configured": "solid",
+      "fallback": "solid"
+    },
+    "pageKey": "catalog",
+    "pageRole": "selection-tool"
+  },
+  "contact": {
+    "allowedTemplateKeys": [
+      "hero",
+      "fullBleed",
+      "singlePoster",
+      "textBanner",
+      "storeInfo"
+    ],
+    "businessRegionCount": 1,
+    "businessRegionPosition": "after-first-brand-block",
+    "headerMode": {
+      "configured": "solid",
+      "fallback": "solid",
+      "overlayRequiresFirstTemplate": "hero"
+    },
+    "pageKey": "contact",
+    "pageRole": "conversion-support"
+  },
+  "custom": {
+    "allowedTemplateKeys": [
+      "hero",
+      "fullBleed",
+      "video",
+      "singlePoster",
+      "doublePoster",
+      "textBanner",
+      "journey",
+      "comparison",
+      "gallery",
+      "testimonials",
+      "certificates",
+      "booking"
+    ],
+    "businessRegionCount": 0,
+    "headerMode": {
+      "configured": "overlay-light",
+      "fallback": "solid",
+      "overlayRequiresFirstTemplate": "hero"
+    },
+    "pageKey": "custom",
+    "pageRole": "brand-service"
+  },
+  "home": {
+    "allowedTemplateKeys": [
+      "hero",
+      "fullBleed",
+      "video",
+      "singlePoster",
+      "doublePoster",
+      "textBanner",
+      "journey",
+      "featuredProduct",
+      "gallery",
+      "wearingInspiration",
+      "booking"
+    ],
+    "businessRegionCount": 0,
+    "headerMode": {
+      "configured": "overlay-light",
+      "fallback": "solid",
+      "overlayRequiresFirstTemplate": "hero"
+    },
+    "pageKey": "home",
+    "pageRole": "brand-home"
+  },
+  "products": {
+    "allowedTemplateKeys": [
+      "hero",
+      "fullBleed",
+      "video",
+      "singlePoster",
+      "doublePoster",
+      "textBanner",
+      "featuredProduct",
+      "gallery",
+      "wearingInspiration",
+      "booking"
+    ],
+    "businessRegionCount": 0,
+    "headerMode": {
+      "configured": "solid",
+      "fallback": "solid",
+      "overlayRequiresFirstTemplate": "hero"
+    },
+    "pageKey": "products",
+    "pageRole": "brand-showcase"
+  }
+} as const satisfies Record<string, ContentTemplatePageRule>;
 
 export type MediaSlot = {
   key: string;
@@ -37,6 +222,7 @@ export type ContentTemplateContract = {
     role: ContentTemplateSkeletonRole;
     kind: string;
     required: boolean;
+    assetClass?: ContentTemplateAssetClass;
     semantic?: string;
     previewRoles?: readonly ContentTemplateSkeletonRole[];
     appliesTo?: readonly ("desktop" | "mobile")[];
@@ -690,12 +876,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "4 / 5"
           ]
         },
+        "assetClass": "service",
         "defaultRatioByViewport": {
           "desktop": "21 / 6",
           "mobile": "4 / 5"
         },
         "id": "bgImage",
         "kind": "media",
+        "positioning": "background",
         "required": false,
         "role": "media",
         "semantic": "atmosphere-background"
@@ -1042,6 +1230,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "4 / 5"
           ]
         },
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "desktop": "21 / 6",
           "mobile": "4 / 5"
@@ -1240,6 +1429,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "1 / 1"
           ]
         },
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "desktop": "1 / 1",
           "mobile": "4 / 5"
@@ -1422,6 +1612,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "16 / 9"
           ]
         },
+        "assetClass": "service",
         "defaultRatioByViewport": {
           "desktop": "3 / 2",
           "mobile": "3 / 2"
@@ -1644,6 +1835,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "3 / 2"
           ]
         },
+        "assetClass": "craft",
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
           "mobile": "4 / 5"
@@ -1664,6 +1856,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "3 / 2"
           ]
         },
+        "assetClass": "craft",
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
           "mobile": "4 / 5"
@@ -1775,6 +1968,26 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "min": 1,
               "step": 0.05
             }
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "roleId": "copy",
+            "sizePresets": [
+              "small",
+              "standard",
+              "large"
+            ]
           }
         ]
       },
@@ -1919,6 +2132,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "16 / 9"
           ]
         },
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "desktop": "3 / 2",
           "mobile": "3 / 2"
@@ -1939,6 +2153,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "1 / 1"
           ]
         },
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
           "mobile": "4 / 5"
@@ -2150,6 +2365,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "1 / 1"
           ]
         },
+        "assetClass": "product",
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
           "mobile": "4 / 5"
@@ -2393,6 +2609,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "appliesTo": [
           "desktop"
         ],
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "desktop": "21 / 6"
         },
@@ -2410,6 +2627,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "appliesTo": [
           "mobile"
         ],
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "mobile": "4 / 5"
         },
@@ -2618,6 +2836,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "3 / 2"
           ]
         },
+        "assetClass": "product",
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
           "mobile": "4 / 5"
@@ -2980,6 +3199,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "appliesTo": [
           "desktop"
         ],
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "desktop": "16 / 9"
         },
@@ -2997,6 +3217,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "appliesTo": [
           "mobile"
         ],
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "mobile": "4 / 5"
         },
@@ -3228,6 +3449,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "4 / 5"
           ]
         },
+        "assetClass": "product",
         "defaultRatioByViewport": {
           "desktop": "16 / 9",
           "mobile": "4 / 5"
@@ -3385,6 +3607,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "1 / 1"
           ]
         },
+        "assetClass": "craft",
         "defaultRatioByViewport": {
           "desktop": "1 / 1",
           "mobile": "1 / 1"
@@ -3619,6 +3842,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "4 / 5"
           ]
         },
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "desktop": "16 / 9",
           "mobile": "4 / 5"
@@ -3844,6 +4068,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "1 / 1"
           ]
         },
+        "assetClass": "product",
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
           "mobile": "4 / 5"
@@ -4042,6 +4267,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "1 / 1"
           ]
         },
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
           "mobile": "4 / 5"
@@ -4369,9 +4595,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "moduleType": "单图海报",
     "order": {
       "desktop": [
+        "desktopImage",
         "copy",
-        "action",
-        "desktopImage"
+        "action"
       ],
       "mobile": [
         "mobileImage",
@@ -4482,6 +4708,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "appliesTo": [
           "desktop"
         ],
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "desktop": "4 / 5"
         },
@@ -4501,6 +4728,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "appliesTo": [
           "mobile"
         ],
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "mobile": "4 / 5"
         },
@@ -4710,6 +4938,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "4 / 5"
           ]
         },
+        "assetClass": "service",
         "defaultRatioByViewport": {
           "desktop": "3 / 2",
           "mobile": "3 / 2"
@@ -4902,6 +5131,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "3 / 2"
           ]
         },
+        "assetClass": "service",
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
           "mobile": "4 / 5"
@@ -5108,11 +5338,13 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "21 / 6"
           ]
         },
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "desktop": "21 / 6"
         },
         "id": "bgImage",
         "kind": "media",
+        "positioning": "background",
         "required": false,
         "role": "media"
       },
@@ -5331,6 +5563,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "9 / 16"
           ]
         },
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "desktop": "16 / 9",
           "mobile": "4 / 5"
@@ -5449,25 +5682,44 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "desktop": {
         "order": [
           "wearingImage",
-          "copy"
+          "copy",
+          "relatedProducts",
+          "action"
         ],
+        "rows": 10,
         "tone": "light",
         "zones": [
           {
-            "column": 4,
+            "column": 1,
             "role": "mainMedia",
             "roleId": "wearingImage",
             "row": 1,
-            "rowSpan": 7,
+            "rowSpan": 8,
+            "span": 7
+          },
+          {
+            "column": 8,
+            "role": "copy",
+            "roleId": "copy",
+            "row": 1,
+            "rowSpan": 2,
             "span": 5
           },
           {
-            "column": 4,
-            "role": "copy",
-            "roleId": "copy",
-            "row": 8,
-            "rowSpan": 1,
+            "column": 8,
+            "role": "detailMedia",
+            "roleId": "relatedProducts",
+            "row": 3,
+            "rowSpan": 6,
             "span": 5
+          },
+          {
+            "column": 8,
+            "role": "action",
+            "roleId": "action",
+            "row": 10,
+            "rowSpan": 1,
+            "span": 3
           }
         ]
       },
@@ -5529,6 +5781,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "3 / 2"
           ]
         },
+        "assetClass": "editorial",
         "defaultRatioByViewport": {
           "desktop": "4 / 5",
           "mobile": "4 / 5"
@@ -6854,9 +7107,9 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "moduleType": "单图海报",
     "order": {
       "desktop": [
+        "media",
         "copy",
-        "action",
-        "media"
+        "action"
       ],
       "mobile": [
         "media",
@@ -7258,18 +7511,32 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 4,
+          "column": 1,
           "role": "mainMedia",
           "row": 1,
-          "rowSpan": 7,
+          "rowSpan": 8,
+          "span": 7
+        },
+        {
+          "column": 8,
+          "role": "copy",
+          "row": 1,
+          "rowSpan": 2,
           "span": 5
         },
         {
-          "column": 4,
-          "role": "copy",
+          "column": 8,
+          "role": "detailMedia",
+          "row": 3,
+          "rowSpan": 6,
+          "span": 5
+        },
+        {
+          "column": 8,
+          "role": "action",
           "row": 8,
           "rowSpan": 1,
-          "span": 5
+          "span": 3
         }
       ],
       "tone": "light"
@@ -9124,23 +9391,40 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "desktop": {
       "order": [
         "mainMedia",
-        "copy"
+        "copy",
+        "detailMedia",
+        "action"
       ],
+      "rows": 10,
       "tone": "light",
       "zones": [
         {
-          "column": 4,
+          "column": 1,
           "role": "mainMedia",
           "row": 1,
-          "rowSpan": 7,
+          "rowSpan": 8,
+          "span": 7
+        },
+        {
+          "column": 8,
+          "role": "copy",
+          "row": 1,
+          "rowSpan": 2,
           "span": 5
         },
         {
-          "column": 4,
-          "role": "copy",
-          "row": 8,
-          "rowSpan": 1,
+          "column": 8,
+          "role": "detailMedia",
+          "row": 3,
+          "rowSpan": 6,
           "span": 5
+        },
+        {
+          "column": 8,
+          "role": "action",
+          "row": 10,
+          "rowSpan": 1,
+          "span": 3
         }
       ]
     },
@@ -9213,6 +9497,20 @@ export const CONTENT_TEMPLATE_BY_MODULE_TYPE = Object.fromEntries(
 
 export function getContentTemplateContract(moduleType: string) {
   return CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType];
+}
+
+export function getContentTemplatePageRule(pageKey: string) {
+  return (CONTENT_TEMPLATE_PAGE_RULES as Record<string, ContentTemplatePageRule | undefined>)[pageKey];
+}
+
+export function isContentTemplateAllowedForPage(pageKey: string, moduleType: string) {
+  const rule = getContentTemplatePageRule(pageKey);
+  const contract = getContentTemplateContract(moduleType);
+  return Boolean(
+    rule
+      && contract
+      && (rule.allowedTemplateKeys as readonly ContentTemplateKey[]).includes(contract.key),
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

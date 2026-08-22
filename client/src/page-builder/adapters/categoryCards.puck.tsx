@@ -7,6 +7,7 @@ import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
 import { categoryApi, type CategoryReferenceResult } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { convertPuckProps } from "../utils/puckPropsToModule";
+import { createCatalogCategoryUrl } from "../utils/linkTarget";
 
 export interface CategoryCardItem {
   name: string;
@@ -54,7 +55,7 @@ function CategoryCardsPreview(props: CategoryCardsPuckProps) {
         if (!controller.signal.aborted) setResolved((Array.isArray(data) ? data : []).map((node) => ({
           name: node.name || node.slug,
           image: node.coverImage || "",
-          link: node.id ? `/products?categoryId=${node.id}` : "",
+          link: createCatalogCategoryUrl(node.id),
           altText: node.name || node.slug,
           description: node.eligible ? "" : "当前不可发布，请在属性面板处理",
         })));
@@ -81,9 +82,9 @@ export const categoryCardsPuckConfig = {
     title: "探索分类",
     subtitle: "按品类、系列或主题，找到适合你的珠宝作品。",
     categories: [
-      { name: "手镯", image: "", link: "/products", count: "" },
-      { name: "吊坠", image: "", link: "/products", count: "" },
-      { name: "戒指", image: "", link: "/products", count: "" },
+      { name: "手镯", image: "", link: "/catalog", count: "" },
+      { name: "吊坠", image: "", link: "/catalog", count: "" },
+      { name: "戒指", image: "", link: "/catalog", count: "" },
     ],
     categorySlugs: [],
     layout: "grid-3",

@@ -1,9 +1,9 @@
 /**
  * InspectorTopBar.tsx — Schema 面板顶部上下文栏。
  * 只保留必要上下文：模块类型徽标 / 模块名（重命名）/ 设备标识 /
- * 本模块保存状态 / 关闭 / 更多菜单。
+ * 本模块保存状态 / 退出模块编辑 / 更多菜单。
  */
-import { MoreOutlined, CloseOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, MoreOutlined } from "@ant-design/icons";
 import { Dropdown } from "antd";
 import type { EditorAction } from "./InspectorFooterBar";
 
@@ -62,11 +62,13 @@ export default function InspectorTopBar({
       </Dropdown>
       <button
         type="button"
-        className="homepage-editor__close-panel"
-        aria-label="收起模块设置"
+        className="homepage-editor__exit-module"
+        aria-label="退出当前模块编辑"
+        title="退出当前模块编辑"
         onClick={onClose}
       >
-        <CloseOutlined />
+        <ArrowLeftOutlined />
+        <span>退出</span>
       </button>
     </header>
   );

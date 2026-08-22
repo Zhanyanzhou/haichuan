@@ -1,0 +1,267 @@
+import { expect, test, type Page, type Route } from "@playwright/test";
+
+type TestedRole = "ADMIN" | "WAREHOUSE" | "CUSTOMER_SERVICE";
+
+const orders = [
+  {
+    id: 101,
+    orderNo: "HC-PENDING-SHIP",
+    customerName: "待发货客户",
+    customerPhone: "13800000001",
+    address: "测试地址一",
+    totalAmount: 12000,
+    discountAmount: 0,
+    finalAmount: 12000,
+    paidAmount: 12000,
+    status: "PENDING_SHIP",
+    orderType: "SPOT",
+    deliveryStatus: "PENDING_SHIP",
+    items: [],
+    createdAt: "2026-08-22T01:00:00.000Z",
+  },
+  {
+    id: 102,
+    orderNo: "HC-SHIPPED",
+    customerName: "已发货客户",
+    customerPhone: "13800000002",
+    address: "测试地址二",
+    totalAmount: 18000,
+    discountAmount: 1000,
+    finalAmount: 17000,
+    paidAmount: 17000,
+    status: "SHIPPED",
+    orderType: "SPOT",
+    deliveryStatus: "SHIPPED",
+    logisticsCompany: "顺丰速运",
+    logisticsNo: "SF-TEST-102",
+    items: [],
+    createdAt: "2026-08-22T02:00:00.000Z",
+  },
+  {
+    id: 103,
+    orderNo: "HC-CUSTOM",
+    customerName: "定制客户",
+    customerPhone: "13800000003",
+    address: "测试地址三",
+    totalAmount: 36000,
+    discountAmount: 0,
+    finalAmount: 36000,
+    paidAmount: 10000,
+    status: "PENDING_SHIP",
+    orderType: "CUSTOM",
+    customStage: "NEED_CONFIRM",
+    deliveryStatus: "PENDING_SHIP",
+    internalNote: "仅用于权限测试",
+    items: [],
+    createdAt: "2026-08-22T03:00:00.000Z",
+  },
+] as const;
+
+async function authenticate(page: Page, role: TestedRole) {
+  await page.addInitScript((currentRole) => {
+    const user = {
+      id: 1,
+      username: `capability-${currentRole.toLowerCase()}`,
+      realName: "权限矩阵测试用户",
+      role: currentRole,
+      status: "ACTIVE",
+      createdAt: "2026-08-22T00:00:00.000Z",
+    };
+    localStorage.setItem("token", "capability-ui-test-token");
+    localStorage.setItem(
+      "jewelry-auth",
+      JSON.stringify({
+        state: {
+          token: "capability-ui-test-token",
+          user,
+          isLoggedIn: true,
+        },
+        version: 0,
+      }),
+    );
+  }, role);
+}
+
+async function mockOrderApis(page: Page) {
+  const prohibitedRequests: string[] = [];
+
+  await page.route("**/api/**", async (route: Route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+    const isMutation = ["POST", "PUT", "PATCH", "DELETE"].includes(
+      request.method(),
+    );
+
+    if (isMutation || path.endsWith("/orders/export")) {
+      prohibitedRequests.push(`${request.method()} ${path}`);
+    }
+
+    if (request.method() === "GET" && path.endsWith("/orders")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: 200,
+          data: { list: orders, total: orders.length },
+          message: "ok",
+        }),
+      });
+      return;
+    }
+
+    const detailMatch = path.match(/\/orders\/(\d+)$/);
+    if (request.method() === "GET" && detailMatch) {
+      const order = orders.find(({ id }) => id === Number(detailMatch[1]));
+      await route.fulfill({
+        status: order ? 200 : 404,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: order ? 200 : 404,
+          data: order ?? null,
+          message: order ? "ok" : "not found",
+        }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ code: 200, data: {}, message: "ok" }),
+    });
+  });
+
+  return prohibitedRequests;
+}
+
+function rowFor(page: Page, orderNo: string) {
+  return page.getByRole("row").filter({ hasText: orderNo });
+}
+
+async function openDetail(page: Page, orderNo: string) {
+  await rowFor(page, orderNo).getByRole("button", { name: "详情" }).click();
+  const dialog = page.getByRole("dialog", { name: "订单详情" });
+  await expect(dialog).toContainText(orderNo);
+  return dialog;
+}
+
+async function closeDetail(page: Page) {
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("dialog", { name: "订单详情" })).toHaveCount(0);
+}
+
+test.describe("订单管理前端 capability 矩阵", () => {
+  test("ADMIN 可见全部既有管理员操作", async ({ page }) => {
+    const antdConsoleProblems: string[] = [];
+    page.on("console", (entry) => {
+      const text = entry.text();
+      if (/Static function can not consume context|destroyOnClose.*deprecated/i.test(text)) {
+        antdConsoleProblems.push(text);
+      }
+    });
+    await authenticate(page, "ADMIN");
+    const prohibitedRequests = await mockOrderApis(page);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/admin/orders");
+
+    await expect(page.getByRole("button", { name: "导出" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "人工建单" })).toBeVisible();
+    await expect(
+      rowFor(page, "HC-PENDING-SHIP").getByRole("button", { name: "发货" }),
+    ).toBeVisible();
+    await expect(
+      rowFor(page, "HC-PENDING-SHIP").getByRole("button", { name: /取\s*消/ }),
+    ).toBeVisible();
+    await expect(
+      rowFor(page, "HC-SHIPPED").getByRole("button", { name: /完\s*成/ }),
+    ).toBeVisible();
+    await rowFor(page, "HC-SHIPPED").getByRole("button", { name: /完\s*成/ }).click();
+    const completeConfirm = page.getByRole("dialog", { name: "确认完成该订单？" });
+    await expect(completeConfirm).toBeVisible();
+    await completeConfirm.getByRole("button", { name: /取\s*消/ }).click();
+
+    const customDialog = await openDetail(page, "HC-CUSTOM");
+    for (const action of [
+      "修改金额",
+      "修改地址",
+      "修改备注",
+      "修改顾问",
+      "推进定制阶段",
+    ]) {
+      await expect(customDialog.getByRole("button", { name: action })).toBeVisible();
+    }
+    await closeDetail(page);
+
+    const shippedDialog = await openDetail(page, "HC-SHIPPED");
+    await expect(
+      shippedDialog.getByRole("button", { name: "确认签收" }),
+    ).toBeVisible();
+    expect(prohibitedRequests).toEqual([]);
+    expect(antdConsoleProblems).toEqual([]);
+  });
+
+  test("WAREHOUSE 仅可见发货与确认签收", async ({ page }) => {
+    await authenticate(page, "WAREHOUSE");
+    const prohibitedRequests = await mockOrderApis(page);
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto("/admin/orders");
+
+    await expect(page.getByRole("button", { name: "导出" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "人工建单" })).toHaveCount(0);
+    await expect(
+      rowFor(page, "HC-PENDING-SHIP").getByRole("button", { name: "发货" }),
+    ).toBeVisible();
+    await expect(
+      rowFor(page, "HC-PENDING-SHIP").getByRole("button", { name: /取\s*消/ }),
+    ).toHaveCount(0);
+    await expect(
+      rowFor(page, "HC-SHIPPED").getByRole("button", { name: /完\s*成/ }),
+    ).toHaveCount(0);
+
+    const shippedDialog = await openDetail(page, "HC-SHIPPED");
+    await expect(
+      shippedDialog.getByRole("button", { name: "确认签收" }),
+    ).toBeVisible();
+    for (const action of ["修改金额", "修改地址", "修改备注", "修改顾问"]) {
+      await expect(shippedDialog.getByRole("button", { name: action })).toHaveCount(0);
+    }
+    await closeDetail(page);
+
+    const customDialog = await openDetail(page, "HC-CUSTOM");
+    await expect(customDialog.getByText("订单操作")).toHaveCount(0);
+    await expect(
+      customDialog.getByRole("button", { name: "推进定制阶段" }),
+    ).toHaveCount(0);
+    expect(prohibitedRequests).toEqual([]);
+  });
+
+  test("CUSTOMER_SERVICE 仅可见内部备注修改", async ({ page }) => {
+    await authenticate(page, "CUSTOMER_SERVICE");
+    const prohibitedRequests = await mockOrderApis(page);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/admin/orders");
+
+    await expect(page.getByRole("button", { name: "导出" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "人工建单" })).toHaveCount(0);
+    for (const orderNo of ["HC-PENDING-SHIP", "HC-SHIPPED", "HC-CUSTOM"]) {
+      const row = rowFor(page, orderNo);
+      await expect(row.getByRole("button", { name: "发货" })).toHaveCount(0);
+      await expect(row.getByRole("button", { name: /完\s*成/ })).toHaveCount(0);
+      await expect(row.getByRole("button", { name: /取\s*消/ })).toHaveCount(0);
+    }
+
+    const customDialog = await openDetail(page, "HC-CUSTOM");
+    await expect(
+      customDialog.getByRole("button", { name: "修改备注" }),
+    ).toBeVisible();
+    for (const action of [
+      "修改金额",
+      "修改地址",
+      "修改顾问",
+      "推进定制阶段",
+      "确认签收",
+    ]) {
+      await expect(customDialog.getByRole("button", { name: action })).toHaveCount(0);
+    }
+    expect(prohibitedRequests).toEqual([]);
+  });
+});

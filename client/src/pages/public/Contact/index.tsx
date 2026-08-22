@@ -465,7 +465,7 @@ export default function Contact() {
                 </p>
               )}
               {settingsStatus === "loaded" &&
-                CONTACT_INFO.map((c, i) => (
+                CONTACT_INFO.map((c) => (
                   <div key={c.label} style={{ marginBottom: 10, fontSize: 13 }}>
                     <span style={{ color: T.light, marginRight: 8 }}>
                       {c.label}

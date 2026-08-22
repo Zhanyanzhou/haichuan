@@ -15,7 +15,7 @@ interface AppointmentBlockProps {
  * 背景图仅是可选氛围层，不参与根角色顺序。
  */
 export default function AppointmentBlock({ module, editMode }: AppointmentBlockProps) {
-  const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
+  const { content = {}, styleConfig = {} } = module;
   const { backgroundImage, title, subtitle, buttonText, phone, altText } = content;
   const bgColor = '#FFFFFF';
   const textColor = '#181A1B';

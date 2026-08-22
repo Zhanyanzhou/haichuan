@@ -17,7 +17,31 @@ import { expect, test, type Page } from "@playwright/test";
  */
 const useMock = process.env.VITE_USE_MOCK === "true";
 
-const API_PREFIX = "**/api/page-modules/document";
+const API_PREFIX = "**/api/**";
+
+async function authenticateAdmin(page: Page) {
+  await page.goto("/admin/login");
+  await page.evaluate(() => {
+    const user = {
+      id: 1,
+      username: "publish-validation-test-admin",
+      realName: "发布校验管理员",
+      role: "SUPER_ADMIN",
+    };
+    localStorage.setItem("token", "publish-validation-test-token");
+    localStorage.setItem(
+      "jewelry-auth",
+      JSON.stringify({
+        state: {
+          token: "publish-validation-test-token",
+          user,
+          isLoggedIn: true,
+        },
+        version: 0,
+      }),
+    );
+  });
+}
 
 /** 一个结构合法的草稿（单个首屏主视觉），保证编辑器可正常加载 */
 function validDraft() {
@@ -72,6 +96,9 @@ async function mockEditorApis(page: Page, opts: { valid: boolean; errors?: strin
     if (url.includes("/revisions")) {
       return route.fulfill(json([]));
     }
+    if (url.includes("/published")) {
+      return route.fulfill(json(null));
+    }
     if (url.includes("/publish")) {
       // 发布接口（PUT）：返回已发布快照
       return route.fulfill(
@@ -85,7 +112,7 @@ async function mockEditorApis(page: Page, opts: { valid: boolean; errors?: strin
     if (url.includes("/admin")) {
       return route.fulfill(json(draft));
     }
-    return route.continue();
+    return route.fulfill(json({}));
   });
 }
 
@@ -99,6 +126,10 @@ function json(data: unknown) {
 
 test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () => {
   test.skip(useMock, "发布预检闭环依赖 HTTP 拦截夹具，mock 模式下由手动验收覆盖");
+
+  test.beforeEach(async ({ page }) => {
+    await authenticateAdmin(page);
+  });
 
   test("超长文本 / 过多组件 / SEO 超限时，最新服务端门禁直接禁用发布入口", async ({ page }) => {
     await mockEditorApis(page, {
@@ -118,7 +149,7 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
     await expect(publishButton).toBeDisabled();
     await expect(publishButton).toHaveAttribute(
       "aria-label",
-      /发布到前台网站（.+发布资格.+）/,
+      /发布到前台网站（(?:.+发布资格.+|还有 3 项发布问题需要处理)）/,
     );
     // 服务端返回三个阻断问题后，按钮继续禁用并说明真实原因。
     await expect(publishButton).toHaveAttribute(

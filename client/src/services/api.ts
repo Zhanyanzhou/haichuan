@@ -1302,23 +1302,27 @@ export const inventoryApi = {
     if (USE_MOCK) {
       await mockDelay();
       const items = mockProducts.flatMap((p) =>
-        (p.skus || []).map((sku) => ({
-          id: sku.id,
-          skuCode: sku.skuCode,
-          productName: p.name,
-          warehouse: ["深圳展厅", "广州工厂", "北京门店"][
-            Math.floor(Math.random() * 3)
-          ],
-          material: sku.material,
-          quantity: sku.stock,
-          safetyStock: sku.safetyStock,
-          status:
-            sku.stock <= 0
-              ? "out"
-              : sku.stock <= sku.safetyStock
-                ? "low"
-                : "normal",
-        })),
+        (p.skus || []).map((sku) => {
+          const quantity = sku.stock ?? 0;
+          const safetyStock = sku.safetyStock ?? 0;
+          return {
+            id: sku.id,
+            skuCode: sku.skuCode,
+            productName: p.name,
+            warehouse: ["深圳展厅", "广州工厂", "北京门店"][
+              Math.floor(Math.random() * 3)
+            ],
+            material: sku.material,
+            quantity,
+            safetyStock,
+            status:
+              quantity <= 0
+                ? "out"
+                : quantity <= safetyStock
+                  ? "low"
+                  : "normal",
+          };
+        }),
       );
       return mockRes(paginate(items, params.page || 1, params.pageSize || 20));
     }
@@ -1882,10 +1886,24 @@ export const pageDocumentApi = {
     }
     return api.get("/page-modules/document/revisions", { params: { pageKey } });
   },
-  restoreRevision: async (pageKey: string, version: number) => {
+  restoreRevision: async (
+    pageKey: string,
+    version: number,
+    expectedUpdatedAt: string,
+  ) => {
     if (USE_MOCK) {
       await mockDelay(160);
       const store = loadMockPageDocuments();
+      const current = store.drafts[pageKey] || store.published[pageKey];
+      if (!expectedUpdatedAt || Number.isNaN(Date.parse(expectedUpdatedAt))) {
+        throw mockRequestError("恢复版本时缺少页面版本标识", 400);
+      }
+      if (!current || current.updatedAt !== expectedUpdatedAt) {
+        throw mockRequestError(
+          "该页面已被其他编辑者更新，请重新加载版本记录后再恢复",
+          409,
+        );
+      }
       const revision = (store.revisions[pageKey] || []).find(
         (item) => item.version === version,
       );
@@ -1896,12 +1914,16 @@ export const pageDocumentApi = {
         metadata: revision.metadata,
         editorVersion: revision.editorVersion,
       });
+      restored.updatedAt = new Date(
+        Math.max(Date.now(), Date.parse(current.updatedAt) + 1),
+      ).toISOString();
       store.drafts[pageKey] = restored;
       persistMockPageDocuments();
       return mockRes(cloneMockDocument(restored));
     }
     return api.put(`/page-modules/document/revisions/${version}/restore`, {
       pageKey,
+      expectedUpdatedAt,
     });
   },
 };

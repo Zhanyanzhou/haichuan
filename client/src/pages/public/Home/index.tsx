@@ -9,15 +9,16 @@ import React, {
 import { Link, useParams } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import { usePagePublishStream } from "@/hooks/usePagePublishStream";
-import { pageDocumentApi, productApi } from "@/services/api";
+import { pageDocumentApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { trackPageView } from "@/hooks/useAnalytics";
-import { SecureImage } from "@/components/common/SecureImage";
 import {
   createEditorPageDefault,
   isEditorPageKey,
 } from "@/page-builder/config/editorPages";
+import { usePublishedPageDocument } from "@/page-builder/runtime/usePublishedPageDocument";
+import StaleDocumentNotice from "@/page-builder/runtime/StaleDocumentNotice";
 
 // 首页基础内容与装修渲染器分离，只有取得已发布的 Puck 数据时才加载编辑器运行时。
 const PuckDocumentRenderer = lazy(
@@ -59,46 +60,14 @@ const productFocus = [
   {
     image:
       "/images/products/ATP103_FRONT_ATP103平安扣涡旋鱼鳞纹卷云纹浮雕线刻弧面外凸立体中央圆孔内外圈组合吊坠正面.png",
-    title: "涡旋鱼鳞纹平安扣",
-    meta: "足金 / 浮雕线刻",
   },
   {
     image:
       "/images/products/ATP1048_FRONT_ATP1048元宝形长命锁牌吉祥文字如意云纹圆珠浮雕吊坠正面.png",
-    title: "如意云纹长命锁",
-    meta: "足金 / 圆珠浮雕",
   },
   {
     image:
       "/images/products/ATP1055_FRONT_ATP1055圆牌福字蝙蝠祥云珐琅卷草纹吊坠正面.png",
-    title: "福字祥云圆牌",
-    meta: "足金 / 珐琅卷草纹",
-  },
-];
-
-const productRail = [
-  {
-    image:
-      "/images/products/ATP1079_FRONT_ATP1079平安扣龙凤呈祥祥云纹浮雕立体弧面外凸中央圆孔对向环列内外圈组合吊坠正面.png",
-    title: "龙凤呈祥平安扣",
-    meta: "浮雕 / 祥云纹",
-  },
-  {
-    image:
-      "/images/products/ATP1270_FRONT_ATP1270圆牌六蝠莲花纹珐琅花丝镂空吊坠正面.png",
-    title: "六蝠莲花圆牌",
-    meta: "珐琅 / 花丝镂空",
-  },
-  {
-    image:
-      "/images/products/ATP1469_FRONT_ATP1469圆牌奔马祥云纹扬蹄飘动鬃尾转动内芯浮雕磨砂内圈环形圆石群镶同心环吊坠正面.png",
-    title: "奔马祥云转芯圆牌",
-    meta: "转动内芯 / 磨砂",
-  },
-  {
-    image: "/images/products/ATP1669_FRONT_ATP1669珐琅牡丹鼓面吊坠正面.png",
-    title: "珐琅牡丹鼓面吊坠",
-    meta: "珐琅 / 花卉纹",
   },
 ];
 
@@ -108,14 +77,14 @@ const occasionCards = [
     desc: "以长命锁与福袋寄寓平安喜乐。",
     image:
       "/images/products/ATP1049_FRONT_ATP1049元宝形长命锁牌招财猫莲花钱袋吉语纹浮雕吊坠正面.png",
-    href: "/products",
+    href: "/catalog",
   },
   {
     title: "日常佩戴",
     desc: "选择轮廓轻盈、纹样耐看的黄金作品。",
     image:
       "/images/products/ATP1780_FRONT_ATP1780转动葫芦镂空卷草花纹麻花边O型扣头吊坠正面.png",
-    href: "/products",
+    href: "/catalog",
   },
   {
     title: "纪念时刻",
@@ -151,7 +120,7 @@ const storyBands = [
     title: "标志性纹样",
     desc: "以龙纹、云纹与金工线条形成海川珠宝的东方秩序感。",
     action: "回溯灵感",
-    href: "/products?categoryId=6",
+    href: "/catalog?category=6",
     tone: "light",
     productScene: true,
   },
@@ -181,31 +150,31 @@ const categories = [
     name: "吊坠",
     image:
       "/images/products/ATP103_FRONT_ATP103平安扣涡旋鱼鳞纹卷云纹浮雕线刻弧面外凸立体中央圆孔内外圈组合吊坠正面.png",
-    href: "/products",
+    href: "/catalog",
   },
   {
     name: "长命锁",
     image:
       "/images/products/ATP1048_FRONT_ATP1048元宝形长命锁牌吉祥文字如意云纹圆珠浮雕吊坠正面.png",
-    href: "/products",
+    href: "/catalog",
   },
   {
     name: "圆牌",
     image:
       "/images/products/ATP1055_FRONT_ATP1055圆牌福字蝙蝠祥云珐琅卷草纹吊坠正面.png",
-    href: "/products",
+    href: "/catalog",
   },
   {
     name: "平安扣",
     image:
       "/images/products/ATP1068_FRONT_ATP1068平安扣六字真言莲瓣浮雕磨砂吊坠正面.png",
-    href: "/products",
+    href: "/catalog",
   },
   {
     name: "珐琅作品",
     image:
       "/images/products/ATP1104_FRONT_ATP1104海棠形牌双鹦鹉相依花枝花卉叶片纹珐琅镂空浮雕乳钉纹边内外框组合吊坠正面.png",
-    href: "/products",
+    href: "/catalog",
   },
   {
     name: "定制金饰",
@@ -346,7 +315,6 @@ const homeCss = `
   .vca-hero__copy h1,
   .vca-band__copy h2,
   .vca-section-title h2,
-  .vca-product__copy h2,
   .vca-service h2 {
     letter-spacing: 0;
     font-weight: 400;
@@ -365,157 +333,12 @@ const homeCss = `
     line-height: 2;
   }
 
-  .vca-product {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    min-height: 620px;
-    background: #fff;
-  }
-
-  .vca-product__copy {
-    display: flex;
-    min-height: 620px;
-    align-items: center;
-    justify-content: center;
-    padding: 76px ${PAD};
-    text-align: center;
-  }
-
-  .vca-product__inner {
-    width: min(420px, 100%);
-  }
-
-  .vca-product__visuals {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: clamp(20px, 4vw, 68px);
-    min-height: 250px;
-  }
-
-  .vca-product__visuals img {
-    width: min(35vw, 210px);
-    max-height: 240px;
-    object-fit: contain;
-    mix-blend-mode: multiply;
-  }
-
-  .vca-product__visuals img:nth-child(2) {
-    width: min(25vw, 150px);
-    opacity: 0.72;
-  }
-
-  .vca-product__copy h2 {
-    margin: 28px 0 10px;
-    font-size: clamp(22px, 2vw, 30px);
-    text-decoration: underline;
-    text-underline-offset: 5px;
-  }
-
-  .vca-product__copy p {
-    margin: 0 0 10px;
-    color: var(--home-muted);
-    font-size: 14px;
-  }
-
-  .vca-product__dots {
-    display: flex;
-    justify-content: center;
-    gap: 12px;
-    margin: 34px 0 52px;
-  }
-
-  .vca-product__dots span {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: rgba(24,26,27,0.24);
-  }
-
-  .vca-product__dots span:first-child {
-    background: rgba(24,26,27,0.78);
-  }
-
-  .vca-product__portrait {
-    min-height: 620px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #dde1e2;
-    padding: clamp(48px, 8vw, 96px);
-  }
-
-  .vca-product__portrait img {
-    width: min(72%, 420px);
-    height: min(72%, 420px);
-    object-fit: contain;
-    filter: drop-shadow(0 28px 28px rgba(0,0,0,0.24));
-    mix-blend-mode: screen;
-  }
-
-  .vca-rail {
-    padding: clamp(76px, 10vw, 128px) ${PAD};
-    background: #f4f5f5;
-  }
-
-  .vca-rail__head {
-    display: flex;
-    align-items: end;
-    justify-content: space-between;
-    gap: 28px;
-    max-width: 1220px;
-    margin: 0 auto 42px;
-  }
-
-  .vca-rail__head h2,
   .vca-occasion h2,
   .vca-craft h2 {
     margin: 0;
     font-size: clamp(34px, 4vw, 56px);
     font-weight: 400;
     letter-spacing: 0;
-  }
-
-  .vca-rail__head p {
-    max-width: 440px;
-    margin: 0;
-    color: var(--home-muted);
-    line-height: 1.9;
-  }
-
-  .vca-rail__grid {
-    display: grid;
-    max-width: 1220px;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1px;
-    margin: 0 auto;
-    background: rgba(24,26,27,0.08);
-  }
-
-  .vca-rail-card {
-    min-height: 390px;
-    padding: 36px 28px 32px;
-    background: #fff;
-    text-align: center;
-  }
-
-  .vca-rail-card img {
-    width: 100%;
-    height: 230px;
-    object-fit: contain;
-    mix-blend-mode: multiply;
-  }
-
-  .vca-rail-card h3 {
-    margin: 28px 0 8px;
-    font-size: 20px;
-    font-weight: 400;
-  }
-
-  .vca-rail-card p {
-    margin: 0;
-    color: var(--home-muted);
-    font-size: 14px;
   }
 
   .vca-band {
@@ -900,36 +723,11 @@ const homeCss = `
       max-width: none;
     }
 
-    .vca-product,
     .vca-news__grid,
     .vca-service,
-    .vca-rail__grid,
     .vca-occasion__grid,
     .vca-craft__grid {
       grid-template-columns: 1fr;
-    }
-
-    .vca-rail__head {
-      display: block;
-      text-align: center;
-    }
-
-    .vca-rail__head p {
-      margin: 18px auto 0;
-    }
-
-    .vca-product__copy,
-    .vca-product__portrait {
-      min-height: auto;
-    }
-
-    .vca-product__copy {
-      padding-top: 66px;
-      padding-bottom: 74px;
-    }
-
-    .vca-product__portrait {
-      aspect-ratio: 1 / 1;
     }
 
     .vca-hero__stage {
@@ -1033,106 +831,6 @@ export function HeroFilm() {
         </Link>
       </div>
     </section>
-  );
-}
-
-function ProductMoment() {
-  return (
-    <section className="vca-product">
-      <div className="vca-product__copy">
-        <div className="vca-product__inner">
-          <div className="vca-product__visuals" aria-hidden="true">
-            <img src={productFocus[0].image} alt="" loading="eager" />
-            <img src={productFocus[1].image} alt="" loading="eager" />
-          </div>
-          <h2>{productFocus[0].title}</h2>
-          <p>{productFocus[0].meta}</p>
-          <p>¥ 按克重与工艺核价</p>
-          <div className="vca-product__dots" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-            <span />
-            <span />
-          </div>
-          <Link className="vca-link" to="/products">
-            更多作品
-          </Link>
-        </div>
-      </div>
-      <div className="vca-product__portrait">
-        <img
-          src={productRail[0].image}
-          alt="龙凤呈祥平安扣正面图"
-          loading="lazy"
-        />
-      </div>
-    </section>
-  );
-}
-
-function ProductRail() {
-  const [products, setProducts] = useState<any[] | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    productApi
-      .getPublicList({ isRecommended: "true", page: 1, pageSize: 6 })
-      .then((res) => {
-        const data = unwrapResponse<any>(res);
-        if (!cancelled) setProducts(data?.list || []);
-      })
-      .catch(() => {
-        if (!cancelled) setProducts([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // 有真实推荐商品时展示真实商品（点击进详情）
-  if (products && products.length > 0) {
-    return (
-      <Reveal className="vca-rail">
-        <div className="vca-rail__head">
-          <h2>本季精选</h2>
-          <p>甄选当季推荐作品，点击查看详情。</p>
-        </div>
-        <div className="vca-rail__grid">
-          {products.map((p) => {
-            const img = p.primaryImage?.mediaUrl || p.images?.[0]?.mediaUrl;
-            return (
-              <Link key={p.id} className="vca-rail-card" to={`/products/${p.id}`}>
-                <SecureImage src={img} alt={p.name} />
-                <h3>{p.name}</h3>
-                <p>{p.shortDescription || p.materialType || "海川珠宝"}</p>
-              </Link>
-            );
-          })}
-        </div>
-      </Reveal>
-    );
-  }
-
-  // 静态兑底（商品数据尚未就绪时）
-  return (
-    <Reveal className="vca-rail">
-      <div className="vca-rail__head">
-        <h2>本季精选</h2>
-        <p>
-          用产品正面图建立首页视觉语言：轮廓清晰、纹样可读、适合转化为主视觉和系列入口。
-        </p>
-      </div>
-      <div className="vca-rail__grid">
-        {productRail.map((item) => (
-          <Link key={item.title} className="vca-rail-card" to="/products">
-            <img src={item.image} alt={item.title} loading="lazy" />
-            <h3>{item.title}</h3>
-            <p>{item.meta}</p>
-          </Link>
-        ))}
-      </div>
-    </Reveal>
   );
 }
 
@@ -1295,73 +993,42 @@ function FallbackHome() {
   return (
     <div className="vca-home">
       <style>{homeCss}</style>
-      <HeroFilm />
-      <ProductMoment />
-      <ProductRail />
-      {storyBands.map((item) => (
-        <StoryBand key={item.title} item={item} />
-      ))}
-      <GiftPromenade />
-      <OccasionPromenade />
-      <CraftProcess />
-      <CreationsUniverse />
-      <Newsroom />
-      <ServiceStrip />
+      <section
+        style={{
+          minHeight: "min(760px, calc(100svh - 64px))",
+          display: "grid",
+          placeItems: "center",
+          padding: "96px 20px",
+          background: "#FFFFFF",
+          textAlign: "center",
+        }}
+      >
+        <div style={{ maxWidth: 560 }}>
+          <p style={{ margin: "0 0 18px", color: "#6E7477", fontSize: 11, letterSpacing: ".18em" }}>
+            HAICHUAN JEWELRY
+          </p>
+          <h1 style={{ margin: 0, color: "#181A1B", fontSize: "clamp(40px,6vw,72px)", fontWeight: 400 }}>
+            海川珠宝
+          </h1>
+          <p style={{ margin: "24px auto 0", color: "#5F6568", fontSize: 14, lineHeight: 1.9 }}>
+            首页内容尚未发布。您仍可浏览当前公开作品，或联系顾问了解现有服务。
+          </p>
+          <div style={{ marginTop: 32, display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 20 }}>
+            <Link className="vca-link" to="/catalog">进入选款中心</Link>
+            <Link className="vca-link" to="/contact">联系顾问</Link>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
 
-function usePublishedPageDocument(pageKey = "home") {
-  const [pageDocument, setPageDocument] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const mountedRef = useRef(true);
-  const requestIdRef = useRef(0);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const refresh = useCallback(
-    async (showLoading = false) => {
-      const requestId = ++requestIdRef.current;
-      if (showLoading) setLoading(true);
-      try {
-        const response = await pageDocumentApi.getPublished(pageKey);
-        // 仅采纳最新一次请求的结果，避免并发刷新时旧响应覆盖新数据
-        if (mountedRef.current && requestIdRef.current === requestId) {
-          setPageDocument(unwrapResponse<any>(response));
-          setLoadFailed(false);
-        }
-      } catch {
-        if (mountedRef.current && requestIdRef.current === requestId) {
-          setPageDocument(null);
-          setLoadFailed(true);
-        }
-      } finally {
-        if (mountedRef.current && requestIdRef.current === requestId) {
-          setLoading(false);
-        }
-      }
-    },
-    [pageKey],
-  );
-
-  useEffect(() => {
-    void refresh(true);
-  }, [refresh]);
-
-  return { pageDocument, loading, loadFailed, refresh };
-}
-
 function HomeDocumentLoading() {
   return (
-    <main aria-busy="true" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center" }}>
+    <div aria-busy="true" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center" }}>
+      <h1 className="sr-only">海川珠宝</h1>
       <span style={{ color: "#5F6568", fontSize: 12, letterSpacing: ".16em" }}>正在载入首页</span>
-    </main>
+    </div>
   );
 }
 
@@ -1379,20 +1046,21 @@ function PuckDocumentLoading() {
 
 function HomeDocumentError({ onRetry }: { onRetry: () => void }) {
   return (
-    <main role="status" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center", textAlign: "center", padding: 24 }}>
+    <div role="status" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center", textAlign: "center", padding: 24 }}>
+      <h1 className="sr-only">海川珠宝</h1>
       <div>
         <p style={{ color: "#181A1B", margin: "0 0 10px" }}>首页内容暂时无法载入</p>
         <button type="button" onClick={onRetry} style={{ border: "1px solid #181A1B", background: "transparent", color: "#181A1B", padding: "8px 16px", cursor: "pointer" }}>重新载入</button>
       </div>
-    </main>
+    </div>
   );
 }
 
 export default function Home() {
   const {
     pageDocument,
-    loading: documentLoading,
-    loadFailed: documentLoadFailed,
+    status: documentStatus,
+    stale: documentStale,
     refresh: refreshDocument,
   } = usePublishedPageDocument("home");
 
@@ -1420,12 +1088,18 @@ export default function Home() {
   const clearPageMeta = usePageMetaStore((s) => s.clear);
 
   useEffect(() => {
-    const meta = pageDocument?.metadata;
-    if (meta && (meta.seoTitle || meta.seoDescription || meta.ogImage)) {
+    const rawMeta = pageDocument?.metadata;
+    const meta = rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
+      ? rawMeta as Record<string, unknown>
+      : null;
+    const seoTitle = typeof meta?.seoTitle === "string" ? meta.seoTitle : undefined;
+    const seoDescription = typeof meta?.seoDescription === "string" ? meta.seoDescription : undefined;
+    const ogImage = typeof meta?.ogImage === "string" ? meta.ogImage : undefined;
+    if (seoTitle || seoDescription || ogImage) {
       setPageMeta({
-        title: meta.seoTitle || undefined,
-        description: meta.seoDescription || undefined,
-        image: meta.ogImage || undefined,
+        title: seoTitle,
+        description: seoDescription,
+        image: ogImage,
       });
     } else {
       clearPageMeta();
@@ -1433,26 +1107,40 @@ export default function Home() {
     return () => clearPageMeta();
   }, [pageDocument, setPageMeta, clearPageMeta]);
 
-  if (documentLoading) {
+  if (documentStatus === "idle" || documentStatus === "loading") {
     return <HomeDocumentLoading />;
   }
 
-  if (documentLoadFailed) {
+  if (documentStatus === "error" || documentStatus === "invalid") {
+    return <HomeDocumentError onRetry={() => void refreshDocument(true)} />;
+  }
+
+  if (documentStatus === "unpublished") {
+    return (
+      <div data-page-document-state="unpublished" style={{ background: LG }}>
+        <FallbackHome />
+      </div>
+    );
+  }
+
+  if (!pageDocument) {
     return <HomeDocumentError onRetry={() => void refreshDocument(true)} />;
   }
 
   return (
-    <main style={{ background: LG }}>
-      {pageDocument?.puckData ? (
-        <Suspense fallback={<PuckDocumentLoading />}>
-          <PuckDocumentRenderer data={pageDocument.puckData} />
-        </Suspense>
-      ) : (
-        <Suspense fallback={<PuckDocumentLoading />}>
-          <PuckDocumentRenderer data={createEditorPageDefault("home")} />
-        </Suspense>
-      )}
-    </main>
+    <div data-page-document-state="published" style={{ background: LG }}>
+      <h1 className="sr-only">海川珠宝</h1>
+      <Suspense fallback={<PuckDocumentLoading />}>
+        <PuckDocumentRenderer
+          data={pageDocument.puckData}
+          heroHeadingLevel={2}
+        />
+      </Suspense>
+      <StaleDocumentNotice
+        visible={documentStale}
+        onRefresh={() => void refreshDocument(false)}
+      />
+    </div>
   );
 }
 
@@ -1507,11 +1195,11 @@ export function PagePreview({ pageKey: pageKeyProp }: { pageKey?: string }) {
     <main style={{ background: LG }}>
       {pageDocument?.puckData ? (
         <Suspense fallback={<PuckDocumentLoading />}>
-          <PuckDocumentRenderer data={pageDocument.puckData} />
+          <PuckDocumentRenderer data={pageDocument.puckData} mode="preview" />
         </Suspense>
       ) : (
         <Suspense fallback={<PuckDocumentLoading />}>
-          <PuckDocumentRenderer data={
+          <PuckDocumentRenderer mode="preview" data={
             isEditorPageKey(pageKey)
               ? createEditorPageDefault(pageKey)
               : createEditorPageDefault("home")

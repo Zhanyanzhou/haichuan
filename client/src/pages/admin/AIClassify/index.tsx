@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Card, Upload, Table, Tag, Button, Space, message, Row, Col, Input } from 'antd';
-import { InboxOutlined, RobotOutlined, CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, ThunderboltOutlined, SendOutlined } from '@ant-design/icons';
+import { InboxOutlined, RobotOutlined, CheckCircleOutlined, ThunderboltOutlined, SendOutlined } from '@ant-design/icons';
 import { aiClassifyApi, uploadApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
@@ -33,7 +33,7 @@ export default function AIClassify() {
   const [chatInput, setChatInput] = useState('');
   const [sending, setSending] = useState(false);
 
-  const loadRecords = async () => {
+  const loadRecords = useCallback(async () => {
     setLoading(true);
     try {
       const res = await aiClassifyApi.getRecords({ page, pageSize });
@@ -42,7 +42,7 @@ export default function AIClassify() {
       setTotal(data?.total || 0);
     } catch { setRecords([]); }
     finally { setLoading(false); }
-  };
+  }, [page, pageSize]);
 
   const loadReport = async () => {
     try {
@@ -51,7 +51,7 @@ export default function AIClassify() {
     } catch { /* 报告拉取失败不影响页面 */ }
   };
 
-  useEffect(() => { loadRecords(); void loadReport(); }, [page, pageSize]);
+  useEffect(() => { void loadRecords(); void loadReport(); }, [loadRecords]);
 
   const customUpload = async (options: any) => {
     setUploading(true);

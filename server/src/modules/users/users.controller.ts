@@ -49,6 +49,7 @@ export class UsersController {
 
   @Delete(':id')
   @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: '禁用员工账号（兼容原 DELETE 路由）' })
   delete(@Param('id') id: string, @Request() req: any) {
     return this.usersService.delete(+id, req.user);
   }

@@ -4,6 +4,7 @@ import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined } from '@ant-de
 import { afterSalesApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
+import { useAuthStore } from '@/store/authStore';
 import type { AfterSalesCase, AfterSalesStatus, AfterSalesType, PaginatedResult } from '@/types';
 
 const STATUS_META: Record<AfterSalesStatus, { color: string; label: string }> = {
@@ -35,19 +36,10 @@ type AfterSalesListItem = AfterSalesCase & {
   order: { orderNo: string; customerName: string; customerPhone: string; finalAmount: number | string; status: string };
 };
 
-function useIsAdmin(): boolean {
-  try {
-    const raw = localStorage.getItem('jewelry-auth');
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    const role = parsed?.state?.user?.role;
-    return role === 'SUPER_ADMIN' || role === 'ADMIN';
-  } catch {
-    return false;
-  }
-}
-
 export default function AfterSalesManage() {
+  const role = useAuthStore((state) => state.user?.role);
+  // 与 after-sales.controller 类级 @Roles 一致：客服可登记、审核并推进售后。
+  const canManageAfterSales = role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'CUSTOMER_SERVICE';
   const [list, setList] = useState<AfterSalesListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -62,8 +54,6 @@ export default function AfterSalesManage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createForm] = Form.useForm();
-  const isAdmin = useIsAdmin();
-
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
@@ -202,7 +192,7 @@ export default function AfterSalesManage() {
             className="w-64"
             allowClear
           />
-          {isAdmin && <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>登记售后</Button>}
+          {canManageAfterSales && <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>登记售后</Button>}
         </Space>
       </div>
 
@@ -269,13 +259,13 @@ export default function AfterSalesManage() {
               title: '操作', render: (_: unknown, r: AfterSalesListItem) => (
                 <Space>
                   <Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(r)}>详情</Button>
-                  {isAdmin && r.status === 'REQUESTED' && (
+                  {canManageAfterSales && r.status === 'REQUESTED' && (
                     <>
                       <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => handleReview(r, 'APPROVED')}>通过</Button>
                       <Button size="small" danger icon={<CloseOutlined />} onClick={() => handleReview(r, 'REJECTED')}>驳回</Button>
                     </>
                   )}
-                  {isAdmin && !['COMPLETED', 'REJECTED', 'CANCELLED', 'REQUESTED'].includes(r.status) && (
+                  {canManageAfterSales && !['COMPLETED', 'REJECTED', 'CANCELLED', 'REQUESTED'].includes(r.status) && (
                     <Button size="small" onClick={() => handleUpdateStatus(r)}>推进状态</Button>
                   )}
                 </Space>

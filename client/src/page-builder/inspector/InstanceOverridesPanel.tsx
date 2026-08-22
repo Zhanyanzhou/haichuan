@@ -96,7 +96,7 @@ const ROLE_LABELS: Record<string, string> = {
   authorizedPhoto: "授权实拍",
   bgImage: "背景图",
   event: "活动主图",
-  copy: "叠加文字",
+  copy: "文案",
   eyebrow: "眉题",
   title: "主标题",
   subtitle: "副标题",

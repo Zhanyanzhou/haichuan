@@ -15,7 +15,7 @@ const NODE_LABELS: Record<string, string> = {
   description: "说明",
   actionText: "行动文字",
   buttonText: "主按钮",
-  copy: "文字区域",
+  copy: "文案",
   action: "行动区域",
 };
 

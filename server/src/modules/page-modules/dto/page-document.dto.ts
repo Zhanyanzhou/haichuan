@@ -47,3 +47,13 @@ export class ValidatePageDocumentDto {
   @IsObject()
   metadata?: Record<string, unknown>;
 }
+
+export class RestorePageDocumentRevisionDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  pageKey?: string;
+
+  @IsISO8601()
+  expectedUpdatedAt!: string;
+}

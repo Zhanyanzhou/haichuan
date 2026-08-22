@@ -320,8 +320,8 @@ export class ProductsController {
   @ApiBearerAuth()
   @Delete(":id/images/:imageId")
   @ApiOperation({ summary: "删除产品图片" })
-  deleteImage(@Param("imageId") imageId: string) {
-    return this.productsService.deleteImage(+imageId);
+  deleteImage(@Param("id") id: string, @Param("imageId") imageId: string) {
+    return this.productsService.deleteImage(+id, +imageId);
   }
 
   /* ═══ 列表图裁切 ═══ */

@@ -1,91 +1,96 @@
 # HC-MASTER-ACCEPTANCE-10: 功能完成度矩阵
 
-> 最后核对：2026-08-13（基于当前代码事实）
-> ✅=代码已证实  ⚠️=部分可用/待运行验证  ❌=未实现  🧊=安全冻结（代码保留）
+> 最后核对：2026-08-23。本文区分当前证据层级，不把路由、页面、API、构建或 Mock/隔离测试存在写成真实数据闭环。
+> ✅ 已验证=当前范围有直接运行或目标测试证据；🧪 仅代码/隔离测试=已接线但未用真实开发库完成闭环；❌ 未验证/未完成；🧊 安全冻结。
+> 🎯 已确认目标、尚未实现=产品边界已经确认，但不得据此声称代码、Schema、迁移、后台页面或真实数据闭环完成。
 
 ## 商品中心
 
 | 功能 | 状态 | 证据 |
 |---|---|---|
-| Product 模型 + 公开/会员/合作可见性 | ✅ | PUBLIC/MEMBER/PARTNER/INTERNAL |
-| Category 模型 | ✅ | 4 级树形 |
-| 公开商品列表 API | ✅ | GET /products/public，字段白名单（PUBLIC_ACCESS_MATRIX §3） |
-| 公开商品详情 API | ✅ | GET /products/public/:id，不可见统一 404 |
-| 会员目录 API | ✅ | GET /products/catalog，CustomerAuthGuard |
-| 公开媒体端点 | ✅ | productId+imageId 联合校验，DB buffer 输出，nosniff |
-| 商品管理 CRUD | ✅ | 后台 ProductManage/ProductEditor |
-| 前台商品列表 | ✅ | ProductList → useProductData → 公开 API |
-| 前台商品详情 | ✅ | ProductDetail → productApi.getPublicById |
-| 前台选款中心 | ✅ | Catalog → useProductData → API |
-| 前台搜索 | ✅ | Search → useProductData → API |
-| 空状态/loading/error | ✅ | ProductList/Catalog/Search 三态完整（P0-E 核对） |
+| Product/Category 模型与公开范围代码 | 🧪 仅代码/目标测试 | 当前 Schema、Service、DTO 和目标测试存在；migration/真实库兼容未确认 |
+| 公开目录、详情与媒体 API | 🧪 仅代码/局部运行 | 当前运行目录仅 3 条 `DISPLAY_ONLY` 测试商品；无直购、售罄和单件库存验收样本 |
+| 后台商品管理、编辑、SKU 与发布 | 🧪 仅代码/隔离测试 | 页面与 API 已接线，目标 Playwright/单元测试不能代替真实开发库 CRUD 与发布回显 |
+| `/products` 品牌作品展陈 | ✅ 隔离浏览器行为 | PageDocument 品牌展陈替换旧 ProductList；无搜索、筛选、排序或交易工具 |
+| `/catalog` 唯一搜索筛选与快速选款中心 | 🧪 仅代码/隔离测试 | 搜索、筛选、排序和选款集中于 Catalog；它不是唯一购买入口，统一详情的五种公开主行动与三个独立报价通道仍未形成真实业务闭环 |
+| `/search` 兼容入口 | ✅ 代码核对 | 保留受支持查询参数并重定向 `/catalog`，不再是独立 Search 页面 |
+| 商品详情现状 | 🧪 仅代码/隔离测试 | 公开/会员读取与销售模式 UI 有目标测试；真实商品状态矩阵未完成 |
+| 所有作品详情的对应行动路径 | 🎯 已确认目标、尚未实现 | 五种 `SalesMode` 分别进入品牌顾问咨询（不直接下单）、选款、预约、直购或高级定制报价；详情不得复制 `/catalog` 的搜索筛选中心 |
 
 ## 页面构建器（Puck PageDocument）
 
 | 功能 | 状态 | 证据 |
 |---|---|---|
-| PageDocument 模型 + 版本历史 | ✅ | page_documents / page_document_revisions |
-| 已发布文档前台读取 | ✅ | pageDocumentApi.getPublished（@Public） |
-| Puck 渲染器 | ✅ | PuckDocumentRenderer（lazy） |
-| 编辑器工作台 | ⚠️ | EditorWorkbench 存在，模块编辑完整度需浏览器实测 |
-| 首页兜底 | ✅ | FallbackHome（无发布文档时不白屏） |
+| PageDocument、发布快照与版本代码 | 🧪 代码/隔离浏览器已验证 | 保存、发布与版本恢复均携带并校验 `expectedUpdatedAt`；恢复使用原子条件更新并在陈旧请求时返回 409，真实数据库多人并发尚未验收 |
+| 23 模板机器合同与双端生成物 | ✅ 目标检查 | `test:content-templates` 验证注册、根角色/顺序、比例派生和双端生成一致 |
+| 页面角色门禁 | ✅ 目标检查 | 只认机器合同 `pageRules`；模板不是全页面通用 |
+| 已发布首页公开读取 | ✅ 本地只读检查 | 当前 `id=3/version=38` 可读，但含 `AURÉLIA PARIS` 外部品牌素材，不能视为内容验收通过 |
+| CMS 编辑、保存、预览、预检、发布、公开回显 | ❌ 真实闭环未验证 | 本轮未登录后台或执行 CMS；已批准中性替换尚未实施 |
+| `FallbackHome` | 🧪 兼容兜底 | 只证明未发布时不白屏；不证明内容真实性、素材授权、CMS 发布或视觉验收 |
 
 ## 客户线索
 
 | 功能 | 状态 | 证据 |
 |---|---|---|
-| Inquiry 模型 | ✅ | 含 internalNote/nextFollowUpAt |
-| SelectionInquiry 模型 | ✅ | 含商品快照 |
-| LeadFollowUp 模型 | ✅ | 表已创建 |
-| 统一线索聚合 API | ✅ | GET /api/leads |
-| 后台线索/咨询/选款管理页 | ✅ | /admin/leads、/admin/inquiries、/admin/selection-inquiry |
-| 客户前台预约提交 | ✅ | inquiriesApi.submit（Contact 页，含隐私同意） |
-| 客户前台选款提交 | ✅ | selectionInquiryApi.submit（Catalog 选款托盘，2026-08-13 补隐私同意） |
-| 提交限流 | ✅ | inquiry + selection-inquiry 均 @Throttle 5/min |
-| 真实线索数据 | ❌ | 不向真实库写测试线索，部署前人工验收 |
+| Inquiry / SelectionInquiry / LeadFollowUp 模型与 API | 🧪 仅代码/静态测试 | 模型、DTO、限流和聚合代码存在 |
+| 后台线索/咨询/选款管理页 | 🧪 仅代码/隔离测试 | 页面存在，不代表真实线索的分配、跟进和回显已验收 |
+| 前台预约与选款提交 | 🧪 仅代码/隔离测试 | 隐私同意和提交路径有测试；本轮未向已确认开发库写入测试线索 |
+| 真实线索数据闭环 | ❌ 未验证 | 需经批准的开发数据完成提交、后台读取、流转与失败态验收 |
 
-## 客户前台数据源（全部真实 API）
+## 客户分层、合作申请与客户专属价格
+
+| 功能 | 状态 | 证据 |
+|---|---|---|
+| `RETAIL / 合作申请中 / APPROVED / SUSPENDED` 访问边界 | 🎯 已确认目标、尚未实现 | 现有 `MEMBER/PARTNER + PartnerStatus` 和局部鉴权不能证明目标客户分层已落地 |
+| 普通客户价格与高级定制路径 | 🎯 已确认目标、尚未实现 | 普通客户只看公开零售价或高级定制报价流程，不得看客户专属红蜡/紫蜡克价 |
+| “我的账户”内唯一合作申请入口 | 🧪 入口已实现、业务闭环未完成 | 实际表单位于登录后的 `/customer?section=partner`；旧 `/partner` 只做登录保护后的兼容跳转。目标申请字段、真实提交、审核与合作价格/订单闭环仍待实现和联调 |
+| 合作申请人工审核 | 🎯 已确认目标、尚未实现 | 客户不得自授 `APPROVED`；资质私有访问、审核记录和权限仍需完整实现与真实验收 |
+| `APPROVED` 客户合作克价 | 🎯 已确认目标、尚未实现 | 仅本人可见当前有效克价；专属双克价优先、否则回退系统默认双克价，客户隔离、生效区间与调价历史尚无完成证据 |
+| 合作订单与价格快照 | 🎯 已确认目标、尚未实现 | 只有 `APPROVED` 可创建；须固化成交克价和适用区间，后续调价不得改写历史 |
+| `SUSPENDED` 暂停边界 | 🎯 已确认目标、尚未实现 | 暂停后禁止新价格、新报价和新合作订单，保留本人暂停前价格快照、报价和订单历史 |
+| 后台客户经营视图 | 🎯 已确认目标、尚未实现 | 目标包含申请审核、客户专属双克价、生效区间、调价历史、普通/定制/合作订单及审计 |
+
+## 客户前台数据源与职责
 
 | 页面 | 数据源 | 状态 |
 |---|---|---|
-| 首页 | Puck PageDocument / FallbackHome | ✅ |
-| 商品列表 | useProductData → /products/public | ✅ |
-| 商品详情 | productApi.getPublicById | ✅ |
-| 搜索 | useProductData → API | ✅ |
-| 选款中心 | useProductData → API | ✅ |
-| 预约咨询 | inquiriesApi | ✅ |
-| 联系信息 | settingsApi.getPublicSettings | ✅ 真实来源（P0-C） |
-| SEO meta | PublicLayout syncMeta + pageMetaStore | ✅ 动态（P1-C） |
+| 首页 | 已发布 PageDocument；FallbackHome 仅兼容 | ✅ 运行可读，内容未通过 |
+| 珠宝作品 `/products` | PageDocument 品牌展陈 | ✅ 隔离行为；真实发布内容待运营完成 |
+| 商品详情 | productApi 公开/会员双通道 | 🧪 现有读取与隔离行为；对应五种销售模式的完整行动路径为已确认目标、尚未实现 |
+| 搜索、筛选、选款、销售 `/catalog` | useProductData → 真实 API 路径 | 🧪 当前仅 3 条 DISPLAY_ONLY 测试数据 |
+| `/search` | 兼容重定向 `/catalog` | ✅ 代码核对 |
+| 预约咨询 | inquiriesApi | 🧪 真实写入未验证 |
+| 联系信息 | settingsApi.getPublicSettings | 🧪 真实运营内容未确认 |
+| SEO meta | PublicLayout syncMeta + pageMetaStore | 🧪 代码接线，正式域名/公开内容未确认 |
 
 ## 公开信息真实性（P0-C，2026-08-13）
 
 | 功能 | 状态 | 证据 |
 |---|---|---|
-| 假电话/邮箱/地址清除 | ✅ | 全仓搜索仅测试文件保留断言 |
-| Contact 三态 | ✅ | loading/loaded/error + 空值过滤 |
-| /privacy 页面 | ✅ | 匿名可访问，7 章节 + SiteSettings 联系区块 |
-| 隐私链接（表单+页脚） | ✅ | Contact + Catalog + PublicLayout → /privacy |
-| 行为分析默认关闭 | ✅ | useAnalytics no-op，无 _asid、无 /analytics/track |
-| JSON-LD 仅可确认字段 | ✅ | 删除未确认域名 + 假电话 |
-| robots/sitemap 无未确认域名 | ✅ | sitemap 合法空结构 |
+| 联系信息安全空值与三态 | 🧪 代码/隔离测试 | 不编造电话、邮箱、地址；真实运营值待确认 |
+| 隐私页与表单链接 | 🧪 代码/隔离测试 | 匿名路由和链接存在；生产内容未核验 |
+| 行为分析默认关闭 | 🧊 安全冻结 | 当前 no-op；未来开启需单独隐私批准 |
+| 首页素材与品牌归属 | ❌ 未通过 | 当前发布图含 `AURÉLIA PARIS`；CMS 可逆替换已批准但尚未执行 |
+| SEO/robots/sitemap | ❌ 待运营/域名确认 | 不得以安全空值或相对路径宣称正式发布完成 |
 
 ## 交易冻结（P0-B/D）
 
 | 功能 | 状态 | 证据 |
 |---|---|---|
-| 前端交易 CTA 冻结 | 🧊 | CUSTOMER_COMMERCE_ENABLED=false → 加购/付款凭证不渲染 |
-| /cart /checkout 重定向 | 🧊 | → /contact?reason=commerce-unavailable |
-| 后端交易写接口 503 | 🧊 | CustomerCommerceGuard 拒绝 cart/checkout/payment-proof |
-| 后台交易域管理 | ✅ | /admin/trade/*（payments/fulfillment/refunds/after-sales/quotations/overview/anomalies） |
-| 支付网关 | ❌ | 未对接（当前阶段不开放） |
+| 当前运行交易能力 | 🧊 已验证关闭 | 本地 flags 返回 commerce/cart/payment 全 false |
+| 前端交易关闭降级 | ✅ 隔离测试 | `/cart`、`/checkout` 与 CTA 的关闭行为有目标测试 |
+| 后端交易规则与权限 | 🧪 单元/目标测试 | 不能替代真实身份、真实数据库和跨模块联调 |
+| 后台交易域管理 | 🧪 仅代码/隔离测试 | payments/fulfillment/refunds/after-sales/quotations/overview/anomalies 页面存在；真实数据闭环未完成 |
+| 支付网关与生产交易 | ❌ 未开放/未验证 | 当前阶段不得宣称可支付或可交易 |
 
 ## 测试
 
 | 类型 | 状态 | 证据 |
 |---|---|---|
-| Playwright 公开访问 | ✅ | public-access.spec.ts |
-| Playwright 隐私信任 | ✅ | privacy-trust.spec.ts（2026-08-13 新增） |
-| Playwright 响应式 | ✅ | responsive-public.spec.ts（4 视口，含 /privacy） |
-| 契约测试 | ✅ | page-builder / trade 状态机 / 并发 / 契约 |
-| CI（lint+build+typecheck+契约） | ✅ | ci.yml + quality.yml |
-| Playwright 纳入 CI | ❌ | 需浏览器安装，记录建议 |
+| 当前双端类型检查 | ✅ | Client、Server 与合同检查通过 |
+| 23 模板静态合同 | ✅ | 注册/根构图/比例派生通过；不等于真实浏览器视觉验收 |
+| 后台产品/权限 Playwright | ✅ 隔离测试 | 8/8；不等于真实 API/数据库联调 |
+| 前台销售模式隔离 Playwright | ✅ 隔离测试 | 14/14；当前公开数据不能覆盖直购/售罄/单件库存 |
+| 真实 PageDocument CMS 发布 | ❌ 未运行 | 未登录后台、未保存或发布草稿 |
+| 后台核心经营真实数据闭环 | ❌ 未完成 | migration、运行后端版本与验收数据仍未对齐 |
+| 生产、支付、备份与部署 | ❌ 未验证 | 不在当前完成范围 |

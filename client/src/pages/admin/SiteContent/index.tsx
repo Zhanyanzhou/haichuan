@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Alert,
   Card,
@@ -6,37 +6,92 @@ import {
   Input,
   Button,
   Upload,
-  message,
-  Spin,
-  Divider,
+  App as AntdApp,
 } from "antd";
 import { SaveOutlined, UploadOutlined } from "@ant-design/icons";
 import { settingsApi, uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import AdminPageHeader from "@/components/common/AdminPageHeader";
-import { AdminLoadingState } from "@/components/common/AdminDataStates";
+import {
+  AdminLoadingState,
+  AdminEmptyState,
+  AdminErrorState,
+} from "@/components/common/AdminDataStates";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
+type SiteContentLoadState = "loading" | "empty" | "ready" | "error";
+
+interface SiteContentValues {
+  siteName?: string;
+  siteDescription?: string;
+  logo?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  contactAddress?: string;
+  businessHours?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
+}
+
+const SITE_CONTENT_FIELDS: ReadonlyArray<keyof SiteContentValues> = [
+  "siteName",
+  "siteDescription",
+  "logo",
+  "contactPhone",
+  "contactEmail",
+  "contactAddress",
+  "businessHours",
+  "seoTitle",
+  "seoDescription",
+  "seoKeywords",
+];
+
+function hasSiteContent(values: SiteContentValues | null): values is SiteContentValues {
+  if (!values) return false;
+  return SITE_CONTENT_FIELDS.some((field) => {
+    const value = values[field];
+    return typeof value === "string" && value.trim().length > 0;
+  });
+}
+
 export default function SiteContent() {
+  const { message } = AntdApp.useApp();
   const [form] = Form.useForm();
-  const [loading, setLoading] = useState(true);
+  const [loadState, setLoadState] = useState<SiteContentLoadState>("loading");
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [loadedValues, setLoadedValues] = useState<SiteContentValues>({});
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await settingsApi.getSettings();
-        const data = unwrapResponse<any>(res);
-        form.setFieldsValue(data);
-      } catch {
-        // Keep the form empty when remote settings are unavailable.
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [form]);
+  const loadSettings = useCallback(async () => {
+    setLoadState("loading");
+    setLoadError(null);
+    try {
+      const res = await settingsApi.getSettings();
+      const data = unwrapResponse<SiteContentValues | null>(res);
+      setLoadedValues(data ?? {});
+      setLoadState(hasSiteContent(data) ? "ready" : "empty");
+    } catch (error) {
+      setLoadError(error);
+      setLoadState("error");
+    }
+  }, []);
 
-  const onFinish = async (values: any) => {
+  useEffect(() => {
+    void loadSettings();
+  }, [loadSettings]);
+
+  useEffect(() => {
+    if (loadState !== "empty" && loadState !== "ready") return;
+    form.resetFields();
+    form.setFieldsValue(loadedValues);
+  }, [form, loadedValues, loadState]);
+
+  const onFinish = async (values: SiteContentValues) => {
+    if (loadState !== "empty" && loadState !== "ready") {
+      message.error("店铺资料尚未成功加载，请重试后再保存。");
+      return;
+    }
     setSaving(true);
     try {
       // 保存站点内容字段（品牌/联系方式/营业时间/SEO，含 siteName）
@@ -63,7 +118,7 @@ export default function SiteContent() {
     return false; // 阻止默认上传行为
   };
 
-  if (loading) return <AdminLoadingState subject="店铺资料" />;
+  const canEdit = loadState === "empty" || loadState === "ready";
 
   return (
     <div>
@@ -71,18 +126,36 @@ export default function SiteContent() {
         title="店铺资料与品牌设置"
         subtitle="管理客户可见的店铺信息与全站默认 SEO"
       />
-      <Alert
-        type="info"
-        showIcon
-        message="这些资料会用于网站页眉、页脚、联系入口及浏览器默认搜索信息。"
-        style={{ maxWidth: 680, marginBottom: 20 }}
-      />
-      <Form
-        form={form}
-        onFinish={onFinish}
-        layout="vertical"
-        style={{ maxWidth: 680 }}
-      >
+      {loadState === "loading" ? (
+        <AdminLoadingState subject="店铺资料" />
+      ) : loadState === "error" ? (
+        <AdminErrorState
+          subject="店铺资料"
+          error={loadError}
+          context="load"
+          message="店铺资料读取失败。为避免覆盖未知的远端内容，当前已禁止编辑和保存。"
+          onRetry={() => void loadSettings()}
+        />
+      ) : (
+        <>
+          {loadState === "empty" ? (
+            <AdminEmptyState
+              subject="店铺资料"
+              message="当前尚未配置店铺资料。填写下方表单并保存后，将用于网站页眉、页脚和默认 SEO。"
+            />
+          ) : null}
+          <Alert
+            type="info"
+            showIcon
+            message="这些资料会用于网站页眉、页脚、联系入口及浏览器默认搜索信息。"
+            style={{ maxWidth: 680, marginBottom: 20 }}
+          />
+          <Form
+            form={form}
+            onFinish={onFinish}
+            layout="vertical"
+            style={{ maxWidth: 680 }}
+          >
         <Card
           title="品牌基础信息"
           style={{
@@ -101,7 +174,10 @@ export default function SiteContent() {
               placeholder="品牌简介，用于浏览器默认描述"
             />
           </Form.Item>
-          <Form.Item name="logo" label="网站 Logo">
+          <Form.Item label="网站 Logo">
+            <Form.Item name="logo" noStyle>
+              <Input type="hidden" />
+            </Form.Item>
             <Upload
               accept="image/*"
               showUploadList={false}
@@ -173,6 +249,7 @@ export default function SiteContent() {
           type="primary"
           htmlType="submit"
           loading={saving}
+          disabled={!canEdit}
           icon={<SaveOutlined />}
           style={{
             height: 44,
@@ -181,7 +258,9 @@ export default function SiteContent() {
         >
           保存设置
         </Button>
-      </Form>
+          </Form>
+        </>
+      )}
     </div>
   );
 }

@@ -3,7 +3,12 @@ import {
   jewelryHomeTemplate,
 } from "@/page-builder/templates/templates";
 import type { DesignMode } from "@/page-builder/designSystem/masters";
-import { createContentTemplateMarker } from "@/page-builder/generated/contentTemplates.generated";
+import {
+  createContentTemplateMarker,
+  getContentTemplateContract,
+  getContentTemplatePageRule,
+  isContentTemplateAllowedForPage,
+} from "@/page-builder/generated/contentTemplates.generated";
 
 export const EDITOR_PAGE_KEYS = [
   "home",
@@ -44,7 +49,7 @@ export const editorPages: EditorPageDefinition[] = [
   {
     key: "about",
     label: "关于海川",
-    description: "品牌故事、工艺与价值表达",
+    description: "品牌精神、审美、工艺与可核验背景",
     publicPath: "/about",
     mode: "brand",
     headerMode: "overlay-light",
@@ -52,16 +57,10 @@ export const editorPages: EditorPageDefinition[] = [
   {
     key: "products",
     label: "珠宝作品",
-    description: "视觉页头 + 固定商品列表；商品资料来自商品管理",
+    description: "编辑式作品展陈；具体找款工具集中在选款中心",
     publicPath: "/products",
     mode: "brand",
     headerMode: "solid",
-    dynamic: true,
-    businessRegion: {
-      title: "商品列表与筛选",
-      description: "商品卡片、分类、排序和分页由商品管理与前台筛选系统驱动。",
-      items: "商品卡片|分类筛选|排序|分页",
-    },
   },
   {
     key: "catalog",
@@ -73,14 +72,14 @@ export const editorPages: EditorPageDefinition[] = [
     dynamic: true,
     businessRegion: {
       title: "选款工具与商品结果",
-      description: "参数筛选、对比、排序和商品结果由选款中心的业务逻辑驱动。",
-      items: "条件筛选|商品结果|排序|快速查看",
+      description: "搜索、筛选、排序、快速查看、选款清单与询价由选款中心的真实业务逻辑驱动。",
+      items: "关键词/货号搜索|条件筛选|排序与结果|快速查看|选款清单|提交询价",
     },
   },
   {
     key: "custom",
     label: "珠宝定制",
-    description: "定制服务说明与案例内容",
+    description: "统一的高级定制叙事；需求类型在咨询流程中处理",
     publicPath: "/custom",
     mode: "brand",
     headerMode: "overlay-light",
@@ -131,6 +130,25 @@ export function getEditorPageByPath(path: string) {
   return editorPages.find((page) => page.publicPath === path);
 }
 
+/** 覆盖式白色导航只有在首个可见品牌模块满足机器合同要求时启用。 */
+export function resolvePageHeaderMode(
+  key: EditorPageKey,
+  data: { content?: Array<{ type?: string; props?: Record<string, unknown> }> } | null | undefined,
+): PageHeaderMode {
+  const page = getEditorPage(key);
+  const rule = getContentTemplatePageRule(key);
+  if (page.headerMode !== "overlay-light" || !rule?.headerMode.overlayRequiresFirstTemplate) {
+    return "solid";
+  }
+  const firstVisible = data?.content?.find(
+    (block) => block?.props?.isVisible !== false && block?.type !== "业务功能区",
+  );
+  const contract = getContentTemplateContract(firstVisible?.type || "");
+  return contract?.key === rule.headerMode.overlayRequiresFirstTemplate
+    ? "overlay-light"
+    : rule.headerMode.fallback;
+}
+
 /** 为尚未保存的页面提供可立即编辑、且彼此可区分的初始画布（即该页面的推荐结构）。 */
 export function createEditorPageDefault(key: EditorPageKey) {
   const data = createPageDocumentSeed(templateIdByPage[key]) ?? JSON.parse(
@@ -167,11 +185,9 @@ function placeBusinessRegion(
   const visualBlocks = content.filter(
     (block: any) => block?.type !== "业务功能区",
   );
-  const heroIndex = visualBlocks.findIndex(
-    (block: any) => block?.type === "首屏主视觉",
-  );
-  // 商品、选款和预约的核心任务必须在简短首屏后立即出现；没有首屏时直接置顶。
-  const insertionIndex = heroIndex >= 0 ? heroIndex + 1 : 0;
+  // 动态业务区始终紧随第一个受控品牌框架；这与机器合同的
+  // after-first-brand-block 位置语义一致，不把“必须是 Hero”写成第二套规则。
+  const insertionIndex = visualBlocks.length > 0 ? 1 : 0;
   const nextContent = [...visualBlocks];
   nextContent.splice(insertionIndex, 0, businessRegionBlock);
   return nextContent;
@@ -206,9 +222,42 @@ function migrateLegacyAboutVisuals(key: EditorPageKey, data: any) {
   return changed ? { ...data, content } : data;
 }
 
+/**
+ * 旧发布文档可能包含当前页面能力矩阵已禁止的模块。
+ * 读取时过滤副本，不回写或升级原始草稿/发布快照。
+ */
+function normalizePageCapabilities(key: EditorPageKey, data: any) {
+  if (!data || typeof data !== "object") return data;
+  const rule = getContentTemplatePageRule(key);
+  if (!rule) return data;
+
+  const isAllowed = (block: any) => block?.type === "业务功能区"
+    ? rule.businessRegionCount === 1
+    : isContentTemplateAllowedForPage(key, block?.type || "");
+  let changed = false;
+  const filterBlocks = (blocks: unknown) => {
+    if (!Array.isArray(blocks)) return blocks;
+    const filtered = blocks.filter(isAllowed);
+    if (filtered.length !== blocks.length) changed = true;
+    return filtered;
+  };
+
+  const content = filterBlocks(data.content);
+  const zones = data.zones && typeof data.zones === "object"
+    ? Object.fromEntries(
+        Object.entries(data.zones).map(([zone, blocks]) => [zone, filterBlocks(blocks)]),
+      )
+    : data.zones;
+  if (!changed) return data;
+  return { ...data, content, ...(data.zones ? { zones } : {}) };
+}
+
 /** 规范化已知旧视觉，并为既有草稿补齐固定业务区。 */
 export function ensureEditorPageStructure(key: EditorPageKey, data: any) {
-  const normalizedData = migrateLegacyAboutVisuals(key, data);
+  const normalizedData = normalizePageCapabilities(
+    key,
+    migrateLegacyAboutVisuals(key, data),
+  );
   const page = getEditorPage(key);
   if (!page.businessRegion) return normalizedData;
   const content = Array.isArray(normalizedData?.content)

@@ -7,7 +7,7 @@ import { Type } from 'class-transformer';
 import {
   MaterialType, ProductStatus, ProductVisibility, SalesMode,
   ProductPurchaseRegion, ProductPublishMode, ProductFulfillmentType,
-  ProductDispatchTime,
+  ProductDispatchTime, InventoryPolicy,
 } from '@prisma/client';
 import { CreateSkuDto } from './sku.dto';
 
@@ -56,6 +56,7 @@ export class CreateProductDto {
 
   @Type(() => Number)
   @IsInt({ message: '请选择商品分类' })
+  @Min(1, { message: '请选择有效的商品分类' })
   categoryId!: number;
 
   @IsOptional()
@@ -115,6 +116,10 @@ export class CreateProductDto {
   @IsOptional()
   @IsEnum(SalesMode, { message: '销售模式不正确，请重新选择' })
   salesMode?: SalesMode;
+
+  @IsOptional()
+  @IsEnum(InventoryPolicy, { message: '库存策略不正确，请重新选择' })
+  inventoryPolicy?: InventoryPolicy;
 
   @IsOptional()
   @IsEnum(ProductPurchaseRegion)
@@ -209,6 +214,7 @@ export class CreateProductDto {
 
   /** 多规格模式：传入 SKU 列表则不再自动创建默认 SKU，商品起价取 SKU 最低价 */
   @IsOptional()
+  @IsArray({ message: '商品规格必须是数组' })
   @ValidateNested({ each: true })
   @Type(() => CreateSkuDto)
   skus?: CreateSkuDto[];

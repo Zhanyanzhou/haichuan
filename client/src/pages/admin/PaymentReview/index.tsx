@@ -5,6 +5,7 @@ import { SecureImage } from '@/components/common/SecureImage';
 import { paymentApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
+import { useAuthStore } from '@/store/authStore';
 import type { PaginatedResult, Payment } from '@/types';
 
 const statusMap: Record<string, { color: string; label: string }> = {
@@ -20,19 +21,9 @@ type PaymentListItem = Payment & {
   reviewer?: { id: number; realName?: string; username: string } | null;
 };
 
-function useIsAdmin(): boolean {
-  try {
-    const raw = localStorage.getItem('jewelry-auth');
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    const role = parsed?.state?.user?.role;
-    return role === 'SUPER_ADMIN' || role === 'ADMIN';
-  } catch {
-    return false;
-  }
-}
-
 export default function PaymentReview() {
+  const role = useAuthStore((state) => state.user?.role);
+  const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
   const [list, setList] = useState<PaymentListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -49,8 +40,6 @@ export default function PaymentReview() {
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [receiptSubmitting, setReceiptSubmitting] = useState(false);
   const [receiptForm] = Form.useForm();
-  const isAdmin = useIsAdmin();
-
   const STATUS_TABS: Array<{ k: string; l: string }> = [
     { k: 'all', l: '全部' },
     { k: 'PENDING', l: '待审核' },

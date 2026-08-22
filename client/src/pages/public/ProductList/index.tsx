@@ -33,10 +33,6 @@ const SX = { paddingInline: PX } as const;
 
 /* ═══════ 工具 ═══════ */
 const U = { hidden: { opacity: 0, y: 14 }, visible: { opacity: 1, y: 0 } };
-const F = {
-  hidden: { opacity: 0, scale: 1.01 },
-  visible: { opacity: 1, scale: 1 },
-};
 const D = 0.9;
 const E: [number, number, number, number] = [0.22, 1, 0.36, 1];
 

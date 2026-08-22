@@ -1,6 +1,8 @@
 # 海川珠宝 — 当前系统地图 (Current System Map)
 
 > 生成日期：2026-08-06 | 阶段：HC-PROGRAM-00
+>
+> ⚠️ **历史快照，已停止作为当前系统事实（2026-08-23）**：本文包含已退役的 `ContentSlot` / `PageModule`、旧 ProductList、独立 Search、静态商品数据和旧角色数量。当前实现、路由与完成度只认代码、机器合同及 `docs/CURRENT_STATE.md`；不得据此恢复旧架构、执行 migration 或宣称功能闭环。保留本文仅用于追溯，不逐项维护。
 
 ---
 

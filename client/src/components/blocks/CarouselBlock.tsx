@@ -75,6 +75,7 @@ export default function CarouselBlock({
     if (!editMode) return null;
     return (
       <BlockEmptyPlaceholder
+        assetSlot={{ templateKey: "carousel", roleId: "frames" }}
         icon="🖼️"
         hint="轮播图"
         spec={`请添加轮播图片 · 电脑端 ${IMAGE_SPECS.carousel.image.label}`}

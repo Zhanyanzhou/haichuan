@@ -105,66 +105,6 @@ export const mockGoldPriceHistory = [
 // ===== Mock API Delay =====
 export const mockDelay = (ms = 300) => new Promise((r) => setTimeout(r, ms));
 
-// ===== Homepage Config (DIY) =====
-export const mockHomepageConfig = [
-  {
-    id: 1, type: 'hero', title: '', subtitle: '',
-    content: '', imageUrl: '/images/editorial/hero-gold-bangle-v1.png', videoUrl: '', linkUrl: '', linkText: '', isEnabled: true, sortOrder: 1,
-    settings: { focusX: 50, focusY: 50 },
-  },
-  {
-    id: 7, type: 'poster', title: '', subtitle: '', content: '', imageUrl: '', videoUrl: '', linkUrl: '', linkText: '', isEnabled: true, sortOrder: 2,
-    settings: { layout: 'full', items: [
-      { imageUrl: '/images/editorial/poster-dragon-bangle-v1.png', alt: '东方雕刻黄金手镯', title: '龙纹鎏光', subtitle: '东方金工 · 当代新境', linkUrl: '/products?categoryId=6', focusX: 50, focusY: 50 },
-    ] },
-  },
-  {
-    id: 8, type: 'poster', title: '', subtitle: '', content: '', imageUrl: '', videoUrl: '', linkUrl: '', linkText: '', isEnabled: true, sortOrder: 3,
-    settings: { layout: 'split', items: [
-      { imageUrl: '/images/editorial/poster-gold-ring-v1.png', alt: '黄金戒指作品', title: '金环有序', subtitle: '', linkUrl: '/products?categoryId=17', focusX: 50, focusY: 50 },
-      { imageUrl: '/images/editorial/poster-gold-pendant-v1.png', alt: '黄金吊坠作品', title: '云起东方', subtitle: '', linkUrl: '/products?categoryId=53', focusX: 50, focusY: 50 },
-    ] },
-  },
-  {
-    id: 9, type: 'poster', title: '', subtitle: '', content: '', imageUrl: '', videoUrl: '', linkUrl: '', linkText: '', isEnabled: true, sortOrder: 4,
-    settings: { layout: 'full', items: [
-      { imageUrl: '/images/editorial/poster-gold-earrings-v1.png', alt: '黄金耳饰作品', title: '双璧生辉', subtitle: '', linkUrl: '/products?categoryId=21', focusX: 50, focusY: 50 },
-    ] },
-  },
-  {
-    id: 2, type: 'categories', title: '探索系列', subtitle: '发现您心仪的风格',
-    content: '', imageUrl: '', videoUrl: '', linkUrl: '', linkText: '', isEnabled: true, sortOrder: 2,
-    settings: { cols: 4, categories: [
-      {id:1,name:'手镯',image:'/images/成型.png'},
-      {id:2,name:'吊坠',image:'/images/錾刻.png'},
-      {id:3,name:'戒指',image:'/images/镶嵌.png'},
-      {id:4,name:'耳饰',image:'/images/抛光.png'},
-    ] },
-  },
-  {
-    id: 3, type: 'story', title: '品牌故事', subtitle: '十五载匠心，只为您腕间一缕金光',
-    content: '海川珠宝成立于2008年，致力于将传统金工与现代设计相结合。我们拥有超过4000款产品，覆盖手镯、吊坠、戒指、耳饰等多个品类。每一件作品都经过严格的品质把控，从选料、设计到制作，凝聚了匠人的智慧与心血。',
-    imageUrl: '', videoUrl: 'https://images.unsplash.com/photo-1617038260897-41a1f14a8ca0?w=1200', linkUrl: '/about', linkText: '了解更多', isEnabled: true, sortOrder: 3,
-    settings: { stats: [{label:'年品牌历史',value:15},{label:'产品款式',value:4000},{label:'匠心工艺',value:'20+'}] },
-  },
-  {
-    id: 4, type: 'products', title: '精选推荐', subtitle: '匠心之作，为您甄选',
-    content: '', imageUrl: '', videoUrl: '', linkUrl: '/products', linkText: '查看全部', isEnabled: true, sortOrder: 4,
-    settings: { limit: 6, productIds: [1,2,3,4,5,6] },
-  },
-  {
-    id: 5, type: 'craft', title: '匠心工艺', subtitle: '六道工序，成就一件作品',
-    content: '熔金如霞，锤纹似水。錾刻花开，镶嵌星河。执一锤定音，是百年传承的温度。',
-    imageUrl: '', videoUrl: '', linkUrl: '/about', linkText: '了解工艺', isEnabled: true, sortOrder: 5,
-    settings: { steps: [{title:'设计'},{title:'成型'},{title:'錾刻'},{title:'镶嵌'},{title:'抛光'},{title:'质检'}] },
-  },
-  {
-    id: 6, type: 'contact', title: '联系我们', subtitle: '期待与您相遇',
-    content: '', imageUrl: 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?w=800', videoUrl: '', linkUrl: '/contact', linkText: '在线咨询', isEnabled: true, sortOrder: 6,
-    settings: { phone: '', email: '', address: '', hours: '' },
-  },
-];
-
 // ===== Helper: Paginate =====
 export function paginate<T>(list: T[], page: number, pageSize: number) {
   const start = (page - 1) * pageSize;

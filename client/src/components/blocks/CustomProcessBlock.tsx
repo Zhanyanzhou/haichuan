@@ -26,7 +26,11 @@ export default function CustomProcessBlock({ module, editMode }: CustomProcessBl
     if (!editMode) return null;
     return (
       <DecorSection master="journey" background={bgColor}>
-        <BlockEmptyPlaceholder hint="定制旅程" spec="请添加旅程节点（如 01 DISCOVERY · 理解您的故事）" />
+        <BlockEmptyPlaceholder
+          assetSlot={{ templateKey: "journey", roleId: "steps" }}
+          hint="定制旅程"
+          spec="请添加旅程节点（如 01 DISCOVERY · 理解您的故事）"
+        />
       </DecorSection>
     );
   }

@@ -1,13 +1,13 @@
 # 海川珠宝 — 开发工作流
 
-> 最后更新：2026-08-20
+> 最后更新：2026-08-23
 > 本文件只提供开发命令与运行拓扑，不授予 AI 安装依赖、迁移数据库、修改环境或操作生产的权限；授权统一以根目录 `AGENTS.md` 为准。
 
 ## 环境搭建
 
 ### 前置条件
 
-- Node.js 18+
+- Node.js `^20.19.0` 或 `>=22.12.0`（与当前锁定的 Vite 8.2.1 / `@vitejs/plugin-react` 6.0.5 engine 一致；Node 18 不受支持）
 - Docker Desktop
 - npm 9+
 
@@ -19,10 +19,10 @@ cd client && npm install
 cd ../server && npm install
 cd ..
 
-# 2. 仅启动本地开发所需的数据库与缓存
-docker-compose up -d mysql redis
+# 2. 仅启动当前容器拓扑中的本地开发数据库
+docker compose up -d mysql
 
-# 3. 数据库迁移（仅在已确认目标环境并获批准后）
+# 3. 本地开发数据库迁移（仅限已确认的本地目标，并获批准后）
 cd server && npx prisma migrate dev
 
 # 4. (可选) 填充种子数据
@@ -41,7 +41,6 @@ npm run dev
 | 3000 | 宿主机 NestJS 后端（开发唯一归属） |
 | 3002 | 容器后端映射（仅验收直连） |
 | 3306 | MySQL (Docker) |
-| 6379 | Redis (Docker) |
 
 ## 常用命令
 
@@ -51,7 +50,7 @@ npm run dev
 | `npm.cmd run dev:client` | 仅前端                 |
 | `npm run dev:server`     | 仅后端                 |
 | `npm run build`          | 生产构建               |
-| `npx prisma migrate dev` | 数据库迁移             |
+| `npx prisma migrate dev` | 本地开发数据库迁移（需批准） |
 | `npx prisma db seed`     | 种子数据               |
 | `npx prisma studio`      | 数据库管理界面         |
 | `npx prisma generate`    | 重新生成 Prisma Client |
@@ -73,7 +72,9 @@ npm run dev
 
 ## 数据库迁移
 
-只在明确指定的目标环境、已核对迁移记录并获得批准后执行 `npx prisma migrate deploy`；不要在不明环境下执行迁移。历史迁移是否已部署必须从目标数据库和部署记录核验，不能凭目录存在推断。
+`npx prisma migrate dev` 只用于已确认且获批准的本地开发数据库，不得用于生产。生产 migration 必须先建立数据库与媒体回滚点，再由获批的独立 migration runner 按 `server/package-lock.json` 锁定依赖，核验目标库 migration 状态和待应用清单，最后执行批准范围内的 migration。
+
+当前运行时镜像通过 `npm ci --omit=dev` 排除了位于 `devDependencies` 的 Prisma CLI。禁止使用 `docker compose exec server npx prisma migrate deploy`：该顺序会在新服务启动后才迁移，并可能由 `npx` 临时下载未锁定 CLI。独立 runner 尚未获批前，不得以旧命令执行生产 migration；完整生产顺序见 `docs/DEPLOYMENT.md`“第六步”。
 
 ## 健康检查
 
@@ -82,7 +83,7 @@ npm run dev
 
 ## 端口与启动说明
 
-- Docker 整站通过 `docker-compose up -d` 启动，前台入口为 `http://localhost/`，后台登录为 `http://localhost/admin/login`。
+- 本地 Docker 整站通过 `docker compose up -d` 启动，会自动合并仅供本地开发的 `docker-compose.override.yml`；前台入口为 `http://localhost/`，后台登录为 `http://localhost/admin/login`。生产必须按 `docs/DEPLOYMENT.md` 显式使用 `docker compose -f docker-compose.yml ...`，不得自动合并该 override。
 - 本地开发通过 `npm run dev` 启动，前台入口为 `http://localhost:5173/`，后台登录为 `http://localhost:5173/admin/login`。
 - 整套 Docker 与宿主机开发可以同时存在：宿主机后端固定占用 `3000`，容器后端通过 override 映射 `127.0.0.1:3002`，完整容器栈经 `:80` 自包含访问。不得改回容器抢占宿主机 `3000`。
 - PowerShell 若阻止 `npm.ps1`，请使用 `npm.cmd run dev` 或 `npm.cmd run dev:client`。

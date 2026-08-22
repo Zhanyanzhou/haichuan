@@ -72,7 +72,8 @@ export function canonicalizePageContent(
 
 export function getModuleDisplayName(
   type: string,
-  props?: Record<string, any>,
+  // 保留第二参以兼容历史调用签名；模块名固定取模板显示名，不再读取 props。
+  _props?: Record<string, any>,
 ) {
   // 2026-08-16 用户决策：模块名固定为模板显示名，忽略历史自定义 moduleName。
   return BLOCK_META[type]?.name ?? type;

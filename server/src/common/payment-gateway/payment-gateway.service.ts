@@ -56,6 +56,19 @@ export class PaymentGatewayService {
     this.initWechatPay();
   }
 
+  /**
+   * 真实资金交易总门禁：只有显式 true 才允许创建新的网关交易。
+   * 回调验签不读取该门禁，确保关闭期间仍能安全处理关闭前已创建的有效交易。
+   */
+  isTransactionCreationEnabled(): boolean {
+    return (
+      this.configService
+        .get<string>('PAYMENT_GATEWAY_TRANSACTIONS_ENABLED')
+        ?.trim()
+        .toLowerCase() === 'true'
+    );
+  }
+
   private initAlipay() {
     const appId = this.configService.get<string>('ALIPAY_APP_ID');
     const privateKey = this.configService.get<string>('ALIPAY_PRIVATE_KEY');
@@ -205,7 +218,10 @@ export class PaymentGatewayService {
   }
 
   isAvailable(provider: OnlinePayProvider): boolean {
-    return this.adapters.get(provider)?.isAvailable() ?? false;
+    return (
+      this.isTransactionCreationEnabled() &&
+      (this.adapters.get(provider)?.isAvailable() ?? false)
+    );
   }
 
   availableChannels(): Array<{ provider: OnlinePayProvider; available: boolean }> {
@@ -216,6 +232,11 @@ export class PaymentGatewayService {
   }
 
   async createPayment(provider: OnlinePayProvider, params: CreatePayParams): Promise<CreatePayResult> {
+    if (!this.isTransactionCreationEnabled()) {
+      throw new ServiceUnavailableException(
+        '在线资金交易当前已关闭，不能发起新的支付网关交易',
+      );
+    }
     const adapter = this.adapters.get(provider);
     if (!adapter) {
       throw new ServiceUnavailableException(

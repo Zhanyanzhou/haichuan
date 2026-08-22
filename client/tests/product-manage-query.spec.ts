@@ -78,4 +78,42 @@ test.describe("商品管理列表查询契约", () => {
       false,
     );
   });
+
+  test("商品列表失败时不展示服务端原始异常正文", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("token", "safe-error-test-token");
+      localStorage.setItem(
+        "jewelry-auth",
+        JSON.stringify({
+          state: {
+            token: "safe-error-test-token",
+            user: { id: 1, username: "safe-error-admin", role: "SUPER_ADMIN" },
+            isLoggedIn: true,
+          },
+          version: 0,
+        }),
+      );
+    });
+    const rawServerMessage = "SQLSTATE internal_product_table leaked detail";
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/api/products") {
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ code: 503, data: null, message: rawServerMessage }),
+        });
+      }
+      const data = path === "/api/categories/admin/tree" ? [] : {};
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data, message: "ok" }),
+      });
+    });
+
+    await page.goto("/admin/products");
+    await expect(page.getByText("商品数据加载失败，请检查网络后重新加载。")).toBeVisible();
+    await expect(page.getByText(rawServerMessage)).toHaveCount(0);
+  });
 });

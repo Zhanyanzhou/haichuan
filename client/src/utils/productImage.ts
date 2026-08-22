@@ -54,7 +54,7 @@ type ProductLike = {
 } | null | undefined;
 
 /**
- * 获取列表图 URL（Catalog / Search / 推荐）——自动请求 480px 缩放版，替代原图直出
+ * 获取列表图 URL（Catalog / 推荐）——自动请求 480px 缩放版，替代原图直出
  */
 export function getListingImage(product: ProductLike): string {
   if (!product) return '/images/products/placeholder.svg';

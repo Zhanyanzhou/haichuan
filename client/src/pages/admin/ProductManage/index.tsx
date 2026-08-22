@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Key } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
+  App as AntdApp,
   Button,
   Dropdown,
   Input,
@@ -13,8 +14,6 @@ import {
   Table,
   Tag,
   Tooltip,
-  message,
-  Modal,
 } from "antd";
 import {
   DownOutlined,
@@ -34,7 +33,11 @@ import { SecureImage } from "@/components/common/SecureImage";
 import { productPlaceholder } from "@/utils/placeholder";
 import type { Category, Product, ProductStatus } from "@/types";
 import { unwrapResponse } from "@/utils/unwrap";
-import { ADMIN_COPY, getAdminEmptyText } from "@/constants/adminCopy";
+import {
+  ADMIN_COPY,
+  getAdminEmptyText,
+  getSafeAdminErrorMessage,
+} from "@/constants/adminCopy";
 import "./ProductManage.css";
 
 type ProductListItem = Product & {
@@ -47,20 +50,33 @@ type ProductListItem = Product & {
   };
 };
 
-type ProductActionError = Error & { status?: number };
+type ProductActionError = { status?: number };
+
+function reportUnexpectedProductActionError(error: unknown, action: string) {
+  const status = (error as ProductActionError | undefined)?.status;
+  if (status && status >= 400 && status < 500) return;
+
+  console.error(`${action}发生未知异常`, {
+    status: status ?? null,
+    errorType: error instanceof Error ? error.name : typeof error,
+  });
+}
 
 function getProductActionErrorMessage(error: unknown, action: string): string {
   const requestError = error as ProductActionError | undefined;
   const status = requestError?.status;
-  const serverMessage = requestError?.message?.trim();
 
-  if (status === 401) return `${action}未完成：登录已失效，请重新登录后再试。`;
-  if (status === 403) return `${action}未完成：当前账号没有操作权限，请联系管理员处理。`;
+  if (status === 401 || status === 403 || status === 409) {
+    return `${action}未完成：${getSafeAdminErrorMessage(error, "商品状态已变化，请重新加载后再试。")}`;
+  }
   if (status === 404) {
     return `${action}未完成：商品不存在或已被其他人处理，请刷新列表确认最新状态。`;
   }
-  if (status === 400 || status === 409) {
-    return `${action}未完成：${serverMessage || "商品存在关联数据或状态冲突"}。请刷新列表确认后再试。`;
+  if (status === 422) {
+    return `${action}未完成：商品未达到发布条件，请打开商品编辑页按提示补全资料。`;
+  }
+  if (status === 400) {
+    return `${action}未完成：提交内容不符合要求，请重新加载并检查商品资料后再试。`;
   }
   if (status && status >= 500) {
     return `${action}未完成：服务端暂时无法处理，请稍后重试；若持续失败，请联系管理员。`;
@@ -92,10 +108,11 @@ const completenessFieldLabels: Record<string, string> = {
   materialType: "主要材质",
   visibility: "可见范围",
   detailContent: "商品详情",
-  price: "有效价格",
-  activeSku: "可售 SKU",
-  stock: "可售库存",
+  derivedPrice: "SKU 派生最低价",
+  activeSku: "有效且有价的 SKU",
+  inventoryRecord: "SKU 库存记录",
   deliveryMethods: "提取方式",
+  singleUnit: "一物一件 SKU 与库存约束",
 };
 
 function formatDate(value?: string) {
@@ -106,6 +123,7 @@ function formatDate(value?: string) {
 }
 
 export default function ProductManage() {
+  const { message, modal } = AntdApp.useApp();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [products, setProducts] = useState<ProductListItem[]>([]);
@@ -130,11 +148,11 @@ export default function ProductManage() {
   const [selectedIds, setSelectedIds] = useState<Key[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [debouncedKeyword, setDebouncedKeyword] = useState("");
-  const [creating, setCreating] = useState(false);
   const [pendingProductId, setPendingProductId] = useState<number | null>(null);
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  const productRequestIdRef = useRef(0);
   const [sortBy, setSortBy] = useState<
     NonNullable<ProductAdminQuery["sortBy"]>
   >("updated_desc");
@@ -181,13 +199,18 @@ export default function ProductManage() {
       walk(unwrapResponse<Category[]>(response) || []);
       setCategoryOptions(options);
     } catch (err: any) {
-      console.error("加载分类失败:", err);
-      message.error(err?.message || "分类数据加载失败，请刷新页面重试");
+      reportUnexpectedProductActionError(err, "加载分类");
+      message.error(
+        getSafeAdminErrorMessage(
+          err,
+          "分类数据加载失败，请刷新页面后重试。",
+        ),
+      );
       setCategoryOptions([]);
     } finally {
       setCategoriesLoaded(true);
     }
-  }, []);
+  }, [message]);
 
   const loadCounts = useCallback(async () => {
     try {
@@ -195,11 +218,16 @@ export default function ProductManage() {
       const data = unwrapResponse<Record<string, number>>(response);
       setCounts(data || {});
     } catch (err: any) {
-      console.error("加载统计数量失败:", err);
-      message.error(err?.message || "商品统计数量加载失败，请刷新页面重试");
+      reportUnexpectedProductActionError(err, "加载统计数量");
+      message.error(
+        getSafeAdminErrorMessage(
+          err,
+          "商品统计数量加载失败，请刷新页面后重试。",
+        ),
+      );
       setCounts({});
     }
-  }, []);
+  }, [message]);
 
   const loadProducts = useCallback(
     async (
@@ -210,6 +238,7 @@ export default function ProductManage() {
         keyword?: string;
       },
     ) => {
+      const requestId = ++productRequestIdRef.current;
       setLoading(true);
       setError(null);
       try {
@@ -229,16 +258,21 @@ export default function ProductManage() {
         const data = unwrapResponse<{ list: ProductListItem[]; total: number }>(
           response,
         );
+        if (requestId !== productRequestIdRef.current) return;
         setProducts(data?.list || []);
         setTotal(data?.total || 0);
       } catch (requestError: any) {
+        if (requestId !== productRequestIdRef.current) return;
         setError(
-          requestError?.message || "商品数据加载失败，请检查服务后重试。",
+          getSafeAdminErrorMessage(
+            requestError,
+            "商品数据加载失败，请检查网络后重新加载。",
+          ),
         );
         setProducts([]);
         setTotal(0);
       } finally {
-        setLoading(false);
+        if (requestId === productRequestIdRef.current) setLoading(false);
       }
     },
     [
@@ -324,11 +358,26 @@ export default function ProductManage() {
       );
       await Promise.all([loadProducts(), loadCounts()]);
     } catch (requestError: unknown) {
-      console.error("更新商品状态失败:", requestError);
+      reportUnexpectedProductActionError(requestError, "更新商品状态");
       message.error(getProductActionErrorMessage(requestError, "商品状态更新"));
     } finally {
       setPendingProductId(null);
     }
+  };
+
+  const requestStatusChange = (product: Product, status: ProductStatus) => {
+    if (status !== "OFFLINE") {
+      void changeStatus(product.id, status);
+      return;
+    }
+    modal.confirm({
+      title: "确认下架这个商品？",
+      content: `下架「${product.name}」后，商品将移入仓库并停止对客户展示；商品资料、SKU 和库存不会删除。`,
+      okText: "确认下架",
+      cancelText: "取消",
+      okButtonProps: { danger: true },
+      onOk: () => changeStatus(product.id, status),
+    });
   };
 
   const archiveProduct = async (product: Product) => {
@@ -339,7 +388,7 @@ export default function ProductManage() {
       await refreshAfterRowsLeave([product.id]);
       message.success(`已将「${product.name}」移入回收站，可在回收站中恢复。`);
     } catch (requestError: unknown) {
-      console.error("移入回收站失败:", requestError);
+      reportUnexpectedProductActionError(requestError, "移入回收站");
       message.error(getProductActionErrorMessage(requestError, "移入回收站"));
       throw requestError;
     } finally {
@@ -355,7 +404,7 @@ export default function ProductManage() {
       await refreshAfterRowsLeave([product.id]);
       message.success(`已恢复「${product.name}」为草稿，可重新编辑后发布。`);
     } catch (requestError: unknown) {
-      console.error("恢复商品失败:", requestError);
+      reportUnexpectedProductActionError(requestError, "恢复商品");
       message.error(getProductActionErrorMessage(requestError, "恢复商品"));
       throw requestError;
     } finally {
@@ -363,9 +412,9 @@ export default function ProductManage() {
     }
   };
 
-  // 危险/不可逆操作统一走 Modal.confirm（Dropdown 嵌套 Popconfirm 会因 menu 关闭而失效）
+  // 危险/不可逆操作统一走 App 上下文 modal（Dropdown 嵌套 Popconfirm 会因 menu 关闭而失效）
   const confirmArchive = (product: Product) =>
-    Modal.confirm({
+    modal.confirm({
       title: "移入回收站",
       content: `将「${product.name}」移入回收站？之后可从回收站恢复。`,
       okText: "移入",
@@ -374,7 +423,7 @@ export default function ProductManage() {
     });
 
   const confirmRestore = (product: Product) =>
-    Modal.confirm({
+    modal.confirm({
       title: "恢复草稿",
       content: `将「${product.name}」恢复为草稿？恢复后可重新编辑并发布。`,
       okText: "恢复草稿",
@@ -435,6 +484,25 @@ export default function ProductManage() {
     }
   };
 
+  const requestSelectedStatusChange = (status: ProductStatus) => {
+    if (status !== "OFFLINE") {
+      void changeSelectedStatus(status);
+      return;
+    }
+    if (!selectedIds.length) {
+      message.warning("请先选择商品，再进行批量操作");
+      return;
+    }
+    modal.confirm({
+      title: "确认批量下架？",
+      content: `将选中的 ${selectedIds.length} 件商品移入仓库并停止对客户展示；商品资料、SKU 和库存不会删除。`,
+      okText: "确认下架",
+      cancelText: "取消",
+      okButtonProps: { danger: true },
+      onOk: () => changeSelectedStatus("OFFLINE"),
+    });
+  };
+
   const batchArchive = async () => {
     if (!selectedIds.length) {
       message.warning("请先选择商品，再进行批量删除");
@@ -464,7 +532,7 @@ export default function ProductManage() {
       message.warning("请先选择商品，再进行批量删除");
       return;
     }
-    Modal.confirm({
+    modal.confirm({
       title: "批量移入回收站",
       content: `将选中的 ${selectedIds.length} 件商品移入回收站？之后可逐件恢复。`,
       okText: "确认移入",
@@ -483,7 +551,7 @@ export default function ProductManage() {
       return;
     }
     navigate("/admin/products/new");
-  }, [categoriesLoaded, navigate]);
+  }, [categoriesLoaded, message, navigate]);
 
   const openEdit = useCallback(
     (product: Product) => {
@@ -494,11 +562,14 @@ export default function ProductManage() {
 
   const cloneProduct = async (product: Product) => {
     try {
+      const source = unwrapResponse<Product>(await productApi.getById(product.id));
       const newCode = `HC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
-      const pick = <K extends keyof Product>(key: K) => product[key];
+      const suffix = Date.now().toString(36).toUpperCase().slice(-4);
+      const pick = <K extends keyof Product>(key: K) => source[key];
+      const activeSkus = (source.skus || []).filter((sku) => sku.isActive);
       const created = unwrapResponse<Product>(
         await productApi.create({
-          name: `${product.name}（副本）`,
+          name: `${source.name}（副本）`,
           code: newCode,
           categoryId: pick("categoryId"),
           materialType: pick("materialType"),
@@ -507,12 +578,33 @@ export default function ProductManage() {
           goldWeight: pick("goldWeight"),
           weight: pick("weight"),
           size: pick("size"),
-          price: pick("price"),
           craftFee: pick("craftFee"),
           gemInfo: pick("gemInfo"),
           craftTechnique: pick("craftTechnique"),
           sortOrder: pick("sortOrder"),
           salesMode: pick("salesMode"),
+          inventoryPolicy: pick("inventoryPolicy") || "STANDARD",
+          visibility: pick("visibility"),
+          purchaseRegion: pick("purchaseRegion"),
+          fulfillmentType: pick("fulfillmentType"),
+          dispatchTime: pick("dispatchTime"),
+          shippingTemplateId: pick("shippingTemplateId"),
+          deliveryMethods: pick("deliveryMethods"),
+          requiresInsuredShipping: pick("requiresInsuredShipping"),
+          requiresSignature: pick("requiresSignature"),
+          includesCertificate: pick("includesCertificate"),
+          packageType: pick("packageType"),
+          customLeadTime: pick("customLeadTime"),
+          ...(activeSkus.length > 0 ? {
+            skus: activeSkus.map((sku, index) => ({
+              skuCode: `${sku.skuCode}-${suffix}${index}`.slice(0, 100),
+              material: sku.material,
+              size: sku.size,
+              goldWeight: sku.goldWeight,
+              price: sku.price,
+              isActive: true,
+            })),
+          } : {}),
           status: "DRAFT" as const,
           isHot: pick("isHot"),
           isNew: pick("isNew"),
@@ -522,10 +614,9 @@ export default function ProductManage() {
         }),
       );
       if (created?.id) {
-        // 复制子资源：图片（共用文件源）、证书、标签、启用中的 SKU
-        const suffix = Date.now().toString(36).toUpperCase().slice(-4);
+        // SKU 已在创建事务中复制并建立零库存记录；其余子资源继续沿用现有接口。
         const subTasks: Promise<unknown>[] = [
-          ...(product.images || []).map((img) =>
+          ...(source.images || []).map((img) =>
             productApi.addImage(created.id, {
               url: img.url,
               type: img.type,
@@ -533,7 +624,7 @@ export default function ProductManage() {
               isVideo: img.isVideo,
             }),
           ),
-          ...(product.certificates || []).map((cert) =>
+          ...(source.certificates || []).map((cert) =>
             productApi.addCertificate(created.id, {
               certType: cert.certType,
               certNumber: cert.certNumber,
@@ -541,25 +632,9 @@ export default function ProductManage() {
               expireDate: cert.expireDate,
             }),
           ),
-          ...(product.skus || [])
-            .filter((s) => s.isActive)
-            .map((sku, i) =>
-              // 副本 SKU 库存归零：后端 createSku 不复制原 SKU 的 stock/safetyStock（契约约定，
-              // 复制库存需业务授权）。副本 stock=0，避免假数据；运营需在编辑页显式补库存。
-              productApi.createSku(created.id, {
-                skuCode: `${sku.skuCode}-${suffix}${i}`.slice(0, 100),
-                material: sku.material,
-                size: sku.size,
-                goldWeight: sku.goldWeight,
-                price: sku.price,
-                stock: 0,
-                safetyStock: 0,
-                isActive: true,
-              }),
-            ),
           productApi.updateTags(
             created.id,
-            (product.tags || []).map((t) => t.tagName),
+            (source.tags || []).map((t) => t.tagName),
           ),
         ];
         const results = await Promise.allSettled(subTasks);
@@ -578,8 +653,13 @@ export default function ProductManage() {
         message.error("复制失败：服务端未返回有效的商品数据，请重试");
       }
     } catch (requestError: any) {
-      console.error("复制商品失败:", requestError);
-      message.error(requestError?.message || "商品复制失败，请稍后重试。");
+      reportUnexpectedProductActionError(requestError, "复制商品");
+      message.error(
+        getSafeAdminErrorMessage(
+          requestError,
+          "商品复制失败，请稍后重试。",
+        ),
+      );
     }
   };
 
@@ -620,12 +700,12 @@ export default function ProductManage() {
         },
       },
       {
-        title: "价格",
+        title: "SKU 最低价",
         key: "price",
         width: 110,
         render: (_: unknown, product: ProductListItem) => (
           <span className="product-manage__price">
-            {formatPrice(product.price)}
+            {Number(product.price) > 0 ? formatPrice(product.price) : "—"}
           </span>
         ),
       },
@@ -653,8 +733,15 @@ export default function ProductManage() {
       {
         title: "库存",
         key: "stock",
-        width: 78,
-        render: (_: unknown, product: ProductListItem) => product.totalStock ?? "—",
+        width: 190,
+        render: (_: unknown, product: ProductListItem) => (
+          <Space size={4} wrap>
+            <span>{product.totalStock ?? "—"}</span>
+            {product.salesMode === "DIRECT_PURCHASE" && product.totalStock === 0 && (
+              <Tag color="default">售罄 / 不可加入购物车</Tag>
+            )}
+          </Space>
+        ),
       },
       {
         title: "累计销量",
@@ -665,8 +752,15 @@ export default function ProductManage() {
       {
         title: "销售方式",
         key: "salesMode",
-        width: 108,
-        render: (_: unknown, product: ProductListItem) => salesModeLabels[product.salesMode || ""] || "—",
+        width: 120,
+        render: (_: unknown, product: ProductListItem) => (
+          <div>
+            <div>{salesModeLabels[product.salesMode || ""] || "—"}</div>
+            <span className="product-manage__product-meta">
+              {product.inventoryPolicy === "SINGLE_UNIT" ? "一物一件" : "标准库存"}
+            </span>
+          </div>
+        ),
       },
       {
         title: "创建时间",
@@ -748,7 +842,7 @@ export default function ProductManage() {
                     type="link"
                     size="small"
                     className="product-manage__action-link"
-                    onClick={() => void changeStatus(product.id, "OFFLINE")}
+                    onClick={() => requestStatusChange(product, "OFFLINE")}
                     loading={rowPending}
                     disabled={pendingProductId !== null && !rowPending}
                   >
@@ -759,7 +853,7 @@ export default function ProductManage() {
                     type="link"
                     size="small"
                     className="product-manage__action-link"
-                    onClick={() => void changeStatus(product.id, "PUBLISHED")}
+                    onClick={() => requestStatusChange(product, "PUBLISHED")}
                     loading={rowPending}
                     disabled={pendingProductId !== null && !rowPending}
                   >
@@ -934,7 +1028,6 @@ export default function ProductManage() {
             className="product-manage__publish-button"
             icon={<PlusOutlined />}
             onClick={() => void openCreate()}
-            loading={creating}
             disabled={!categoriesLoaded}
           >
             新建商品
@@ -947,13 +1040,13 @@ export default function ProductManage() {
                   key: "published",
                   label: "批量上架",
                   disabled: batchProcessing || activeStatus === "ARCHIVED",
-                  onClick: () => void changeSelectedStatus("PUBLISHED"),
+                  onClick: () => requestSelectedStatusChange("PUBLISHED"),
                 },
                 {
                   key: "offline",
                   label: "批量下架",
                   disabled: batchProcessing || activeStatus === "ARCHIVED",
-                  onClick: () => void changeSelectedStatus("OFFLINE"),
+                  onClick: () => requestSelectedStatusChange("OFFLINE"),
                 },
                 {
                   key: "delete",

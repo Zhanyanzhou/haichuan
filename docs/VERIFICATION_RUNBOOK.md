@@ -1,11 +1,16 @@
 # 验证 Runbook — 2026-08-15 批次 A（验证还债批）
 
-> 适用范围：2026-08-14/15 全部静态完成批次的首次运行验证。
+> [!CAUTION]
+> **历史验证脚本，不是当前 Runbook。** 当前状态只查 `docs/CURRENT_STATE.md`，身份/行动/字段边界查 `docs/PUBLIC_ACCESS_MATRIX.md`，阶段验收查当前 `docs/acceptance/feature-completion-matrix.md` 并以本轮新鲜验证为准。下文命令、页面职责、migration 数量、预期结果与“必须”顺序只属于 2026-08-14/15 批次，严禁据此执行 migration、恢复旧 ProductList/Search、操作环境或宣称当前全部通过/就绪。
+>
+> 历史适用范围：2026-08-14/15 全部静态完成批次的首次运行验证。
 > 覆盖：OR-1/OR-2/支付框架/营销生效/收藏/评价/物流轨迹/SMS/合规/清扫 + 模板重构 R0-R5 + 本轮批次 B（ContentSlot 清退）/ C（客户管理+备份状态）/ D（ProductList 服务端搜索）。
 > 约束：服务端勿用 `nest dev`（本机 hang），一律 production 产物；admin 端点回归需 admin 密码。
 > 顺序即依赖顺序，请自上而下执行；任一步失败，将命令与完整报错回传给 AI 会话修复后重试。
 
 ---
+
+## 历史正文（保留取证，不具现行效力）
 
 ## 一、静态门禁（必须先过，否则后续验证无意义）
 
@@ -87,9 +92,9 @@ npx playwright test tests
 
 ## 七、收尾清单
 
-- [ ] `git rm` 六个墓碑文件（client useContentSlots.ts / contentSlot.ts；server content-slots/ 三文件）
 - [ ] uptime-kuma 初始化（127.0.0.1:3001 添加 server/client 两个监控项 + 通知渠道）
-- [ ] 外部凭据接入（批次 E，可并行）：SMTP → 快递100 → 阿里云短信 → 支付宝/微信商户号（签约周期长，尽早启动）
+- [ ] 非资金外部服务按需接入：SMTP → 快递100 → 阿里云短信；逐项验证失败降级与敏感信息边界
+- [ ] 支付宝/微信商户号只在支付专项获得批准、目标环境与资金验收方案明确后接入，不与普通外部服务并行解冻
 - [ ] 正式域名确认（解锁 robots/sitemap/og/支付回调）
 
 ## 常见预期行为（不是 bug）
@@ -97,4 +102,5 @@ npx playwright test tests
 - 本地裸跑 server（非容器）时设置页显示"备份目录未挂载"——诚实降级
 - 快递100/短信/SMTP 未配置时对应功能 503 + 明确提示——诚实降级
 - CUSTOMER_COMMERCE_ENABLED 默认 false：加购/结算/付款凭证入口按开关隐藏（安全兜底）；仅获 D.2 批准的环境显式设为 true 后才正常渲染
+- PAYMENT_GATEWAY_TRANSACTIONS_ENABLED 默认 false：客户和后台均不能创建新网关交易；暂停前已创建交易的有效回调仍须验签、校验金额并幂等处理
 - ProductList SSE 商品变更后回到第一页——服务端分页模式的既定行为

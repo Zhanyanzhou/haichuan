@@ -237,18 +237,3 @@ export async function resolveProductReferences(
     .filter((item): item is ProductReferenceResult => Boolean(item))
     .map(referenceToRow);
 }
-
-/** mapRow：搜索结果列显示 */
-export function mapProductRow(row: ProductRow) {
-  return {
-    商品: row.name,
-    货号: row.code || "-",
-    分类: row.category || "-",
-    价格: row.priceLabel,
-  };
-}
-
-/** 新编辑只保存稳定 Product.code；旧 numeric id 由兼容字段独立读取。 */
-export function mapProductProp(row: ProductRow): string {
-  return row.code;
-}

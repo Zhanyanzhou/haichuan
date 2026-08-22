@@ -47,8 +47,6 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
   INVALID: [],
 };
 
-const LEAD_TYPES = { inquiry: "预约咨询", selection: "选款咨询" } as const;
-
 export default function LeadManage() {
   const [searchParams] = useSearchParams();
   const [list, setList] = useState<any[]>([]);

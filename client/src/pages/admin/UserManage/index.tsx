@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Card,
   Table,
@@ -16,12 +16,18 @@ import {
   PlusOutlined,
   EditOutlined,
   LockOutlined,
-  DeleteOutlined,
+  StopOutlined,
 } from "@ant-design/icons";
 import { userApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
-import type { User, PaginatedResult } from "@/types";
+import {
+  AdminEmptyState,
+  AdminErrorState,
+  AdminLoadingState,
+} from "@/components/common/AdminDataStates";
+import type { User } from "@/types";
+import { useAuthStore } from "@/store/authStore";
 
 const rm: Record<string, { c: string; t: string }> = {
   SUPER_ADMIN: { c: "red", t: "超级管理员" },
@@ -34,8 +40,11 @@ const rm: Record<string, { c: string; t: string }> = {
 };
 
 export default function UserManage() {
+  const role = useAuthStore((state) => state.user?.role);
+  const isSuperAdmin = role === "SUPER_ADMIN";
   const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [form] = Form.useForm();
@@ -48,28 +57,45 @@ export default function UserManage() {
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [roleCounts, setRoleCounts] = useState<Record<string, number>>({});
+  const requestIdRef = useRef(0);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
+    setError(null);
     try {
       const res = await userApi.getList({ page, pageSize, keyword: keyword || undefined });
-      const data = unwrapResponse<any>(res);
-      setUsers(data?.list || []);
-      setTotal(data?.total || 0);
-      setRoleCounts(data?.roleCounts || {});
-    } catch {
-      setUsers([]);
-      setTotal(0);
+      const data = unwrapResponse<{
+        list: User[];
+        total: number;
+        roleCounts?: Record<string, number>;
+      }>(res);
+      if (!data || !Array.isArray(data.list) || !Number.isFinite(Number(data.total))) {
+        throw new Error("Invalid user response");
+      }
+      if (requestId !== requestIdRef.current) return;
+      setUsers(data.list);
+      setTotal(Number(data.total));
+      setRoleCounts(data.roleCounts || {});
+    } catch (loadError) {
+      if (requestId !== requestIdRef.current) return;
+      setError(
+        getSafeAdminErrorMessage(
+          loadError,
+          "后台员工数据加载失败，请稍后重新加载。",
+        ),
+      );
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
-  };
+  }, [keyword, page, pageSize]);
 
   useEffect(() => {
-    load();
-  }, [page, pageSize, keyword]);
+    void load();
+  }, [load]);
 
   const openCreate = () => {
+    if (!isSuperAdmin) return;
     setEditing(null);
     form.resetFields();
     form.setFieldsValue({ role: "ADMIN", status: "ACTIVE" });
@@ -86,25 +112,37 @@ export default function UserManage() {
     const values = await form.validateFields();
     try {
       if (editing) {
-        await userApi.update(editing.id, values);
+        const editableValues = { ...values };
+        delete editableValues.username;
+        delete editableValues.password;
+        const payload = isSuperAdmin
+          ? editableValues
+          : {
+              realName: values.realName,
+              phone: values.phone,
+              email: values.email,
+            };
+        await userApi.update(editing.id, payload);
       } else {
+        if (!isSuperAdmin) return;
         await userApi.create(values);
       }
       message.success(editing ? "后台员工信息已更新" : "后台员工已创建");
       setModalOpen(false);
-      load();
+      void load();
     } catch (e: any) {
       message.error(getSafeAdminErrorMessage(e, "后台员工信息保存失败，请检查填写内容后重试。"));
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDisable = async (id: number) => {
+    if (!isSuperAdmin) return;
     try {
       await userApi.delete(id);
-      message.success("后台员工已删除");
-      load();
+      message.success("后台员工已禁用");
+      void load();
     } catch (e: any) {
-      message.error(getSafeAdminErrorMessage(e, "后台员工删除失败，请重新加载后确认当前状态。"));
+      message.error(getSafeAdminErrorMessage(e, "后台员工禁用失败，请重新加载后确认当前状态。"));
     }
   };
 
@@ -131,24 +169,36 @@ export default function UserManage() {
           </h1>
           <p className="text-sm text-brand-muted mt-1">RBAC 七角色权限</p>
         </div>
-        <Button type="primary" onClick={openCreate}>
-          <PlusOutlined /> 新建员工
-        </Button>
+        {isSuperAdmin && (
+          <Button type="primary" onClick={openCreate}>
+            <PlusOutlined /> 新建员工
+          </Button>
+        )}
       </div>
-      <div className="grid grid-cols-7 gap-3">
-        {Object.entries(rm).map(([k, v]) => (
-          <div
-            key={k}
-            className="bg-white border border-brand-line p-3 text-center"
-          >
-            <p className="text-lg font-sans font-bold" style={{ color: "var(--adm-ink)" }}>
-              {roleCounts[k] ?? 0}
-            </p>
-            <p className="text-xs leading-[18px] text-brand-muted mt-1">{v.t}</p>
+      {loading ? (
+        <AdminLoadingState subject="后台员工数据" />
+      ) : error ? (
+        <AdminErrorState subject="后台员工数据" message={error} onRetry={() => void load()} />
+      ) : users.length === 0 ? (
+        <Card className="!bg-white !border-brand-line">
+          <AdminEmptyState subject="后台员工" kind={keyword ? "filtered" : "initial"} />
+        </Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-7 gap-3">
+            {Object.entries(rm).map(([k, v]) => (
+              <div
+                key={k}
+                className="bg-white border border-brand-line p-3 text-center"
+              >
+                <p className="text-lg font-sans font-bold" style={{ color: "var(--adm-ink)" }}>
+                  {roleCounts[k] ?? "—"}
+                </p>
+                <p className="text-xs leading-[18px] text-brand-muted mt-1">{v.t}</p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <Card className="!bg-white !border-brand-line">
+          <Card className="!bg-white !border-brand-line">
         <div style={{ marginBottom: 16 }}>
           <Input.Search
             allowClear
@@ -159,7 +209,7 @@ export default function UserManage() {
             style={{ width: 280 }}
           />
         </div>
-        <Table
+            <Table
           dataSource={users}
           rowKey="id"
           loading={loading}
@@ -210,40 +260,48 @@ export default function UserManage() {
                   >
                     编辑
                   </Button>
-                  <Button
-                    size="small"
-                    icon={<LockOutlined />}
-                    type="text"
-                    onClick={() => {
-                      setResetPwdUser(r);
-                      resetPwdForm.resetFields();
-                      setResetPwdOpen(true);
-                    }}
-                  >
-                    重置密码
-                  </Button>
-                  <Popconfirm
-                    title="删除该后台员工？"
-                    description="删除后该员工将无法继续登录后台。"
-                    okText="删除员工"
-                    cancelText="取消"
-                    onConfirm={() => handleDelete(r.id)}
-                  >
-                    <Button
-                      size="small"
-                      icon={<DeleteOutlined />}
-                      type="text"
-                      danger
-                    >
-                      删除
-                    </Button>
-                  </Popconfirm>
+                  {isSuperAdmin && (
+                    <>
+                      <Button
+                        size="small"
+                        icon={<LockOutlined />}
+                        type="text"
+                        onClick={() => {
+                          setResetPwdUser(r);
+                          resetPwdForm.resetFields();
+                          setResetPwdOpen(true);
+                        }}
+                      >
+                        重置密码
+                      </Button>
+                      {r.status !== "DISABLED" && (
+                        <Popconfirm
+                          title="禁用该后台员工？"
+                          description="禁用后该员工将无法继续登录后台，账号资料仍会保留。"
+                          okText="确认禁用"
+                          cancelText="取消"
+                          onConfirm={() => handleDisable(r.id)}
+                        >
+                          <Button
+                            size="small"
+                            icon={<StopOutlined />}
+                            type="text"
+                            danger
+                          >
+                            禁用
+                          </Button>
+                        </Popconfirm>
+                      )}
+                    </>
+                  )}
                 </Space>
               ),
             },
           ]}
-        />
-      </Card>
+            />
+          </Card>
+        </>
+      )}
 
       <Modal
         title={editing ? "编辑后台员工" : "新建后台员工"}
@@ -259,7 +317,11 @@ export default function UserManage() {
             label="用户名"
             rules={[{ required: true }]}
           >
-            <Input placeholder="用户名" />
+            <Input
+              placeholder="用户名"
+              readOnly={Boolean(editing)}
+              aria-readonly={Boolean(editing)}
+            />
           </Form.Item>
           <div className="grid grid-cols-2 gap-4">
             <Form.Item name="realName" label="姓名">
@@ -272,6 +334,7 @@ export default function UserManage() {
           <div className="grid grid-cols-2 gap-4">
             <Form.Item name="role" label="角色" rules={[{ required: true }]}>
               <Select
+                disabled={!isSuperAdmin}
                 options={Object.entries(rm).map(([k, v]) => ({
                   value: k,
                   label: v.t,
@@ -280,6 +343,7 @@ export default function UserManage() {
             </Form.Item>
             <Form.Item name="status" label="状态">
               <Select
+                disabled={!isSuperAdmin}
                 options={[
                   { value: "ACTIVE", label: "正常" },
                   { value: "DISABLED", label: "禁用" },
@@ -288,7 +352,14 @@ export default function UserManage() {
             </Form.Item>
           </div>
           {!editing && (
-            <Form.Item name="password" label="密码">
+            <Form.Item
+              name="password"
+              label="密码"
+              rules={[
+                { required: true, message: "请输入登录密码" },
+                { min: 8, message: "密码至少 8 位" },
+              ]}
+            >
               <Input.Password placeholder="登录密码" />
             </Form.Item>
           )}
@@ -310,7 +381,7 @@ export default function UserManage() {
             label="新密码"
             rules={[
               { required: true, message: "请输入新密码" },
-              { min: 6, message: "至少6位" },
+              { min: 8, message: "密码至少 8 位" },
             ]}
           >
             <Input.Password placeholder="输入新密码" />

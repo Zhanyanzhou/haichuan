@@ -168,6 +168,7 @@ export function convertPuckProps(
         },
         {},
         {
+          bgColor: props.bgColor || "#FFFFFF",
           mainFocusX: props.mainFocusX ?? 50,
           mainFocusY: props.mainFocusY ?? 50,
           detailFocusX: props.detailFocusX ?? 50,

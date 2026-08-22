@@ -5,7 +5,7 @@
 
 const neutralColors = ['#181A1B', '#5F6568', '#B8BEC1', '#DDE1E2'];
 
-export function placeholderImage(id: number, text: string = ''): string {
+export function placeholderImage(id: number, _text: string = ''): string {
   const accent = neutralColors[id % neutralColors.length];
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="480" viewBox="0 0 400 480">
     <defs>

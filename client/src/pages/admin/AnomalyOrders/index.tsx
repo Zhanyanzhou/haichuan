@@ -6,7 +6,7 @@ import dayjs from "dayjs";
 import { orderApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
-import type { Order, OrderStatus } from "@/types";
+import type { Order } from "@/types";
 
 const STATUS_LABEL: Record<string, { c: string; t: string }> = {
   PENDING_PAYMENT: { c: "gold", t: "待付款" },
@@ -152,7 +152,7 @@ export default function AnomalyOrders() {
               {
                 title: "操作",
                 width: 90,
-                render: (_: unknown, r: Order) => (
+                render: () => (
                   <Button
                     size="small"
                     onClick={() => navigate("/admin/orders")}

@@ -137,7 +137,7 @@ export default function Custom() {
   const toggleFaq = (i: number) => setOpenFaq(openFaq === i ? null : i);
 
   return (
-    <main style={{ background: BG, fontFamily: FONT_SANS }}>
+    <div style={{ background: BG, fontFamily: FONT_SANS }}>
 
       <section style={{
         position: 'relative',
@@ -617,6 +617,6 @@ export default function Custom() {
           }
         }
       `}</style>
-    </main>
+    </div>
   );
 }

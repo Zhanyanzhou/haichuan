@@ -205,6 +205,13 @@ export class UsersService {
       return tx.user.update({
         where: { id },
         data: { status: 'DISABLED' },
+        select: {
+          id: true,
+          username: true,
+          realName: true,
+          role: true,
+          status: true,
+        },
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }

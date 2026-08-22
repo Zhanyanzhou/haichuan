@@ -71,6 +71,8 @@
   margin: 0 auto;
 }
 .pro-editor__notice { margin: 16px 3px 10px; border: 0; border-radius: 11px; background: var(--pro-info-bg); }
+.pro-editor__submit-error { margin: 0 3px 10px; }
+.pro-editor__derived-price { min-height: 36px; display: flex; align-items: center; font-weight: 600; font-variant-numeric: tabular-nums; }
 .pro-editor__category { height: 54px; margin: 0 3px 10px; padding: 0 24px; display: flex; align-items: center; gap: 34px; background: #fff; border: 1px solid var(--pro-line); border-radius: 13px; font-size: 13px; }
 .pro-editor__category i { color: var(--pro-error); font-style: normal; }
 .pro-editor__category button { padding: 0; border: 0; background: transparent; color: var(--pro-action); cursor: pointer; }
@@ -95,6 +97,8 @@
 .pro-editor__upload-item { position: relative; overflow: hidden; border-style: solid; }
 .pro-editor__upload-item img, .pro-editor__upload-item > div:first-child { width: 100%; height: 66px; object-fit: cover; }
 .pro-editor__upload-item > span { width: 100%; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.pro-editor__upload-actions { width: 100%; display: flex; justify-content: center; border-top: 1px solid var(--pro-line); }
+.pro-editor__upload-actions .ant-btn { padding-inline: 5px; font-size: 12px; }
 .pro-editor__upload-remove {
   position: absolute;
   top: 4px;

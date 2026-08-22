@@ -1,14 +1,22 @@
 # 海川珠宝 — 4000+ 商品导入规范（PRODUCT_IMPORT_SPEC）
 
-> 本文件定义**导入输入数据契约**：商品主数据与图片清单的字段模板、取值规则、校验规则。
-> 基于 `docs/PRODUCT_IMPORT_DECISIONS.md` 已落定决策（2026-08-12，采纳 AI 推荐）生成。
-> 后续导入脚本重写、后台批量编辑、AI 数据生成**均以本文件为输入标准**。
+> **状态：旧输入方案已于 2026-08-23 被当前商品合同取代，暂停执行。**
+> 本文件仅保留 2026-08-12 的历史 CSV 草案，不再是导入输入标准；与 `docs/PRODUCT_DATA_CONTRACT.md` 冲突时以后者和当前 Schema/Service 为准。
+> 禁止按本文旧字段模板直接写 `Product.price`，禁止无有效 SKU、SKU 成交价和 Inventory 记录的 `DIRECT_PURCHASE` 导入，禁止写 `ProductSKU.stock` 建立库存双轨。
+> 新导入只能在确认**精确的本地开发数据库**并获得用户对目标库、数据范围和写入操作的明确批准后重新设计和执行；在此之前不得运行导入、migration、seed 或真实数据回填。
+>
+> 当前合同边界：`SalesMode` 是作品公开主行动模式，不是排他报价通道；现有零售购物车、零售结算和直接下单只允许 `DIRECT_PURCHASE`，但未来高级定制与合作蜡模可在客户本人确认有效报价后按独立状态机转单。同一设计可有独立零售、定制与合作报价。双客群和三报价业务决定只认 `docs/DECISIONS.md` D.19；商品字段与必要数值见 `docs/PRODUCT_DATA_CONTRACT.md`。
+>
+> 以下正文为历史草案。
+>
+> 本文件原定义导入输入数据契约：商品主数据与图片清单的字段模板、取值规则、校验规则。
+> 基于 `docs/PRODUCT_IMPORT_DECISIONS.md` 2026-08-12 的历史决策生成。
 > 商品字段的业务含义与冲突见 `docs/PRODUCT_DATA_CONTRACT.md`；本文件不重复，只规定"导入输入怎么填"。
 > 本文件是规范，不动业务代码；脚本实现属 B 类，另行确认。
 
 ---
 
-## 0. 前置状态
+## 0. 历史前置状态（已暂停）
 
 ### 已落定决策（影响字段模板）
 - D-1 商品类型 = **B 类 `SELECTION`**（展示+选款咨询，不建 SKU、不写库存）。
@@ -29,7 +37,7 @@
 
 ---
 
-## 1. 导入输入：两个 CSV（单一事实来源）
+## 1. 历史导入输入：两个 CSV（不得直接执行）
 
 取代现有"从图片文件名推断 + `upload-products.csv` 单文件"的做法，改为**两个分工明确的 CSV**：
 
@@ -136,7 +144,7 @@ ATP103,ATP103_BACK_ATP103平安扣背面.png,BACK,2
 
 ---
 
-## 5. 导入前校验规则（必过）
+## 5. 历史导入前校验规则（已被当前合同取代）
 
 校验失败的行**不得导入**，输出错误报告而非静默跳过：
 
@@ -182,4 +190,4 @@ ATP103,ATP103_BACK_ATP103平安扣背面.png,BACK,2
 5. **`gemInfo` / `craftTechnique` / `shortDescription` / `description`**（可选，可后补）。
 6. **OSS 决策与时间表**（D-13）。
 
-> 本文件是输入规范。决策依据见 `docs/PRODUCT_IMPORT_DECISIONS.md`；字段业务含义与冲突见 `docs/PRODUCT_DATA_CONTRACT.md`。脚本重写与 Schema 迁移属 B 类，须按 `WORKFLOW.md` 先出方案并获确认。
+> 本文件不是当前输入规范。新方案须从 `docs/PRODUCT_DATA_CONTRACT.md`、当前 Schema/Service 和已确认的本地开发数据库状态重新设计，并单独获得写入批准。

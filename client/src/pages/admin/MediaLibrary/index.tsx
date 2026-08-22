@@ -6,7 +6,6 @@ import { productApi, uploadApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
 import AdminPageHeader from '@/components/common/AdminPageHeader';
-import AdminStatusTag from '@/components/common/AdminStatusTag';
 import { AdminLoadingState, AdminEmptyState, AdminErrorState } from '@/components/common/AdminDataStates';
 import type { PaginatedResult } from '@/types';
 

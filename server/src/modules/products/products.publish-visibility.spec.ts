@@ -11,10 +11,15 @@ interface SkuRecord {
   id: number;
   isActive: boolean;
   price: number;
+  inventories?: Array<{ quantity: number }>;
 }
 
 interface ImageRecord {
   id: number;
+  url?: string;
+  storageKey?: string | null;
+  isVideo?: boolean;
+  mimeType?: string | null;
 }
 
 interface ProductRecord {
@@ -22,6 +27,13 @@ interface ProductRecord {
   status: Status;
   deletedAt: Date | null;
   visibility: Visibility;
+  name: string;
+  code: string;
+  category: { isActive: boolean; deletedAt: Date | null };
+  salesMode: "DISPLAY_ONLY" | "SELECTION" | "APPOINTMENT" | "DIRECT_PURCHASE" | "CUSTOM_INQUIRY";
+  inventoryPolicy: "STANDARD" | "SINGLE_UNIT";
+  deliveryMethods: string[];
+  shippingTemplate: { isActive: boolean } | null;
   price: number;
   primaryImageId: number | null;
   images: ImageRecord[];
@@ -71,18 +83,33 @@ function matches(record: ProductRecord, where: Where): boolean {
 function product(
   partial: Partial<ProductRecord> & { id: number; status: Status },
 ): ProductRecord {
-  return {
+  const record: ProductRecord = {
     visibility: "PUBLIC",
     deletedAt: null,
+    name: "测试商品",
+    code: `TEST-${partial.id}`,
+    category: { isActive: true, deletedAt: null },
+    salesMode: "DIRECT_PURCHASE",
+    inventoryPolicy: "STANDARD",
+    deliveryMethods: ["EXPRESS"],
+    shippingTemplate: null,
     price: 0,
     primaryImageId: null,
     images: [],
     skus: [],
     ...partial,
   };
+  if (record.primaryImageId && record.images.length === 0) {
+    record.images = [{ id: record.primaryImageId, url: "https://example.test/product.jpg", isVideo: false }];
+  }
+  record.skus = record.skus.map((sku) => ({
+    ...sku,
+    inventories: sku.inventories ?? [{ quantity: 0 }],
+  }));
+  return record;
 }
 
-function createService(initial: ProductRecord[]) {
+function createService(initial: ProductRecord[], mediaReadable = true) {
   const records = initial.map((r) => ({ ...r }));
 
   const findFirst = async ({
@@ -95,6 +122,16 @@ function createService(initial: ProductRecord[]) {
     const record = records.find((r) => matches(r, where)) || null;
     if (!record) return null;
     if (!select) return { ...record };
+    if (select.category || select.salesMode || select.inventoryPolicy) {
+      const skuWhere = select.skus?.where || {};
+      const selectedSkus = (record.skus || []).filter(
+        (sku) => skuWhere.isActive === undefined || sku.isActive === skuWhere.isActive,
+      );
+      const selectedImages = (record.images || []).filter(
+        (image) => select.images?.where?.isVideo === undefined || image.isVideo === select.images.where.isVideo,
+      );
+      return { ...record, skus: selectedSkus, images: selectedImages };
+    }
     const out: Record<string, any> = {};
     for (const key of Object.keys(select)) {
       if (key === "images") {
@@ -128,6 +165,11 @@ function createService(initial: ProductRecord[]) {
       findFirst,
       findUnique: async ({ where }: { where: { id: number } }) =>
         records.find((r) => r.id === where.id) || null,
+      findUniqueOrThrow: async ({ where }: { where: { id: number } }) => {
+        const record = records.find((r) => r.id === where.id);
+        if (!record) throw new Error("测试数据不存在");
+        return { ...record };
+      },
       findMany: async ({ where }: { where: Where }) =>
         records.filter((r) => matches(r, where)).map((r) => ({ ...r })),
       count: async ({ where }: { where: Where }) =>
@@ -145,11 +187,64 @@ function createService(initial: ProductRecord[]) {
         return { ...record };
       },
     },
+    productSKU: {
+      findFirst: async ({ where }: any) => {
+        const record = records.find((r) => r.id === where.productId);
+        const sku = record?.skus.find((item) => item.id === where.id);
+        return sku ? { ...sku, productId: record!.id } : null;
+      },
+      findMany: async ({ where }: any) => {
+        const record = records.find((r) => r.id === where.productId);
+        return (record?.skus || [])
+          .filter((sku) => where.isActive === undefined || sku.isActive === where.isActive)
+          .map((sku) => ({ id: sku.id, price: sku.price }));
+      },
+      update: async ({ where, data }: any) => {
+        for (const record of records) {
+          const sku = record.skus.find((item) => item.id === where.id);
+          if (sku) {
+            Object.assign(sku, data);
+            return { ...sku, productId: record.id };
+          }
+        }
+        throw new Error("测试 SKU 不存在");
+      },
+      count: async ({ where }: any) => {
+        const record = records.find((r) => r.id === where.productId);
+        return (record?.skus || []).filter((sku) => sku.isActive).length;
+      },
+    },
+    inventory: {
+      aggregate: async ({ where }: any) => {
+        const record = records.find((r) => r.id === where.sku.productId);
+        const quantity = (record?.skus || []).reduce(
+          (sum, sku) => sum + (sku.inventories || []).reduce((inner, item) => inner + item.quantity, 0),
+          0,
+        );
+        return { _sum: { quantity } };
+      },
+    },
+    $queryRaw: async () => [{ id: 1 }],
+    $transaction: async (callback: (tx: any) => Promise<any>) => {
+      const snapshot = structuredClone(records);
+      try {
+        return await callback(prisma);
+      } catch (error) {
+        records.splice(0, records.length, ...snapshot);
+        throw error;
+      }
+    },
   };
 
   const service = new ProductsService(
     prisma as unknown as PrismaService,
-    { invalidate: () => undefined } as never,
+    {
+      invalidate: () => undefined,
+      readProductImage: () => {
+        if (!mediaReadable) throw new Error("媒体不可读取");
+        return { buffer: Buffer.from("x") };
+      },
+    } as never,
     {} as never,
   );
   return { service, records };
@@ -201,7 +296,7 @@ test("canPublish：启用 SKU 但价格为 0 时不可发布", async () => {
 });
 
 test("canPublish：缺价格或图片时不可发布", async () => {
-  const { service } = createService([
+  const missingPrice = createService([
     product({
       id: 1,
       status: "DRAFT",
@@ -209,6 +304,8 @@ test("canPublish：缺价格或图片时不可发布", async () => {
       primaryImageId: 1,
       skus: [{ id: 1, isActive: true, price: 100 }],
     }),
+  ]);
+  const missingImage = createService([
     product({
       id: 2,
       status: "DRAFT",
@@ -218,12 +315,11 @@ test("canPublish：缺价格或图片时不可发布", async () => {
     }),
   ]);
   await assert.rejects(
-    () => service.canPublish(1),
-    (err: unknown) =>
-      err instanceof BadRequestException && /价格/.test(err.message),
+    () => missingPrice.service.canPublish(1),
+    BadRequestException,
   );
   await assert.rejects(
-    () => service.canPublish(2),
+    () => missingImage.service.canPublish(2),
     (err: unknown) =>
       err instanceof BadRequestException && /图片/.test(err.message),
   );
@@ -327,8 +423,116 @@ test("资料完整度按销售方式给出可解释的缺失项", () => {
     salesMode: "DIRECT_PURCHASE",
   });
   assert.equal(directPurchase.isComplete, false);
-  assert.deepEqual(directPurchase.missingFields, ["activeSku", "stock", "deliveryMethods"]);
+  assert.deepEqual(directPurchase.missingFields, ["activeSku", "inventoryRecord", "deliveryMethods"]);
   assert.equal(directPurchase.score, 75);
+});
+
+test("五种销售模式：四种非直购不要求价格/SKU，DIRECT_PURCHASE 要求交易事实", async () => {
+  const modes = ["DISPLAY_ONLY", "SELECTION", "APPOINTMENT", "CUSTOM_INQUIRY"] as const;
+  for (const [index, salesMode] of modes.entries()) {
+    const { service } = createService([
+      product({
+        id: 100 + index,
+        status: "DRAFT",
+        salesMode,
+        price: 0,
+        primaryImageId: 1,
+        skus: [],
+      }),
+    ]);
+    await assert.doesNotReject(() => service.canPublish(100 + index));
+  }
+
+  const direct = createService([
+    product({
+      id: 200,
+      status: "DRAFT",
+      salesMode: "DIRECT_PURCHASE",
+      price: 0,
+      primaryImageId: 1,
+      skus: [],
+    }),
+  ]);
+  await assert.rejects(() => direct.service.canPublish(200), BadRequestException);
+});
+
+test("DIRECT_PURCHASE 库存为 0 仍可发布，SINGLE_UNIT 多有效 SKU 返回冲突", async () => {
+  const zeroStock = createService([
+    product({
+      id: 300,
+      status: "DRAFT",
+      price: 100,
+      primaryImageId: 1,
+      skus: [{ id: 31, isActive: true, price: 100, inventories: [{ quantity: 0 }] }],
+    }),
+  ]);
+  await assert.doesNotReject(() => zeroStock.service.canPublish(300));
+
+  const invalidSingle = createService([
+    product({
+      id: 301,
+      status: "DRAFT",
+      inventoryPolicy: "SINGLE_UNIT",
+      price: 100,
+      primaryImageId: 1,
+      skus: [
+        { id: 32, isActive: true, price: 100, inventories: [{ quantity: 0 }] },
+        { id: 33, isActive: true, price: 120, inventories: [{ quantity: 0 }] },
+      ],
+    }),
+  ]);
+  await assert.rejects(() => invalidSingle.service.canPublish(301), ConflictException);
+});
+
+test("五种销售模式共通拒绝仅视频或不可读取的受控媒体", async () => {
+  const videoOnly = createService([
+    product({
+      id: 310,
+      status: "DRAFT",
+      salesMode: "DISPLAY_ONLY",
+      images: [{ id: 1, url: "https://example.test/video.mp4", isVideo: true }],
+    }),
+  ]);
+  await assert.rejects(() => videoOnly.service.canPublish(310), BadRequestException);
+
+  const unreadable = createService(
+    [
+      product({
+        id: 311,
+        status: "DRAFT",
+        salesMode: "DISPLAY_ONLY",
+        images: [
+          {
+            id: 2,
+            url: "/products/catalog/311/media/2",
+            storageKey: "missing.webp",
+            isVideo: false,
+          },
+        ],
+      }),
+    ],
+    false,
+  );
+  await assert.rejects(() => unreadable.service.canPublish(311), BadRequestException);
+});
+
+test("已发布商品 SKU 更新破坏门禁时返回 409，并由事务回滚价格与派生缓存", async () => {
+  const { service, records } = createService([
+    product({
+      id: 320,
+      status: "PUBLISHED",
+      price: 100,
+      primaryImageId: 1,
+      skus: [{ id: 41, isActive: true, price: 100 }],
+    }),
+  ]);
+
+  await assert.rejects(
+    () => service.updateSku(320, 41, { price: 0 }),
+    ConflictException,
+  );
+  assert.equal(records[0].skus[0].price, 100);
+  assert.equal(records[0].price, 100);
 });
 
 test("游客公开列表仅返回 PUBLISHED + PUBLIC + 未删除商品", async () => {

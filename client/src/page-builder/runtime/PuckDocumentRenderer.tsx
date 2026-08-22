@@ -29,117 +29,24 @@ import type { Product } from "@/types";
 import { getListingImage } from "@/utils/productImage";
 import { unwrapResponse } from "@/utils/unwrap";
 import { convertPuckProps } from "@/page-builder/utils/puckPropsToModule";
+import { createCatalogCategoryUrl } from "@/page-builder/utils/linkTarget";
 import { getContentTemplateIssues } from "@/page-builder/generated/contentTemplates.generated";
 import ContentTemplateContractFrame from "@/page-builder/runtime/ContentTemplateContractFrame";
+import {
+  MissingMediaState,
+  normalizeLegacyRenderColors,
+  useHasMissingAssets,
+} from "@/page-builder/runtime/renderParity";
 
-type PuckBlock = {
+export type PuckBlock = {
   type?: string;
   props?: Record<string, any>;
 };
 
-type PuckDocument = {
+export type PuckDocument = {
   content?: PuckBlock[];
   zones?: Record<string, PuckBlock[]>;
 };
-
-const LOCAL_UPLOAD_PREFIX = "/uploads/";
-const BLOCK_ASSET_FIELDS = [
-  "desktopImage",
-  "mobileImage",
-  "mainImage",
-  "detailImage",
-  "image",
-  "posterUrl",
-  "url",
-  "videoUrl",
-  "backgroundImage",
-  "beforeImage",
-  "afterImage",
-];
-
-const LEGACY_RENDER_COLOR_MAP: Record<string, string> = {
-  "#1A1A1A": "#181A1B",
-  "#222222": "#181A1B",
-  "#66645F": "#5F6568",
-  "#8C8C8C": "#6E7477",
-  "#E4E3DF": "#DDE1E2",
-  "#F5F5F5": "#F4F5F5",
-  "#F8F7F4": "#F7F8F8",
-  "#FCFCFB": "#FFFFFF",
-};
-
-function normalizeLegacyRenderColors(value: unknown): unknown {
-  if (typeof value === "string") {
-    return LEGACY_RENDER_COLOR_MAP[value.toUpperCase()] ?? value;
-  }
-  if (Array.isArray(value)) return value.map(normalizeLegacyRenderColors);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, normalizeLegacyRenderColors(item)]),
-    );
-  }
-  return value;
-}
-
-function getLocalUploadUrls(props: Record<string, any>): string[] {
-  const urls = new Set<string>();
-  const collect = (value: unknown) => {
-    if (typeof value === "string" && value.startsWith(LOCAL_UPLOAD_PREFIX)) {
-      urls.add(value);
-    }
-  };
-
-  BLOCK_ASSET_FIELDS.forEach((field) => collect(props[field]));
-  if (Array.isArray(props.images)) {
-    props.images.forEach((item: any) => {
-      collect(item?.url);
-      collect(item?.mobileUrl);
-    });
-  }
-  if (Array.isArray(props.categories)) {
-    props.categories.forEach((item: any) => collect(item?.image));
-  }
-  if (Array.isArray(props.items)) {
-    // 作品画廊条目图
-    props.items.forEach((item: any) => collect(item?.image));
-  }
-  if (Array.isArray(props.certificates)) {
-    props.certificates.forEach((item: any) => collect(item?.imageUrl));
-  }
-  if (Array.isArray(props.steps)) {
-    props.steps.forEach((item: any) => collect(item?.image));
-  }
-  if (Array.isArray(props.testimonials)) {
-    props.testimonials.forEach((item: any) => collect(item?.image));
-  }
-
-  return [...urls];
-}
-
-function MissingMediaState({ type }: { type?: string }) {
-  return (
-    <section
-      role="status"
-      style={{
-        minHeight: 260,
-        display: "grid",
-        placeItems: "center",
-        padding: "48px 24px",
-        background: "#F4F5F5",
-        border: "1px solid #DDE1E2",
-        color: "#181A1B",
-        textAlign: "center",
-      }}
-    >
-      <div>
-        <p style={{ margin: "0 0 8px", fontSize: 15 }}>该内容暂不可展示</p>
-        <p style={{ margin: 0, fontSize: 13, color: "#5F6568" }}>
-          {type ? `「${type}」相关素材` : "相关素材"}暂时不可用，请稍后再试。
-        </p>
-      </div>
-    </section>
-  );
-}
 
 function UnsupportedContentTemplateState({
   type,
@@ -408,7 +315,13 @@ function ResolvedProductRowBlock({
   return <ProductRowBlock module={module} />;
 }
 
-function ResolvedFeaturedProductBlock({ props }: { props: Record<string, any> }) {
+function ResolvedFeaturedProductBlock({
+  props,
+  editMode = false,
+}: {
+  props: Record<string, any>;
+  editMode?: boolean;
+}) {
   const productId = Number(props.productId);
   const productCode = String(props.productCode || "").trim();
   const hasValidProductId = Boolean(productCode) || (Number.isInteger(productId) && productId > 0);
@@ -444,14 +357,18 @@ function ResolvedFeaturedProductBlock({ props }: { props: Record<string, any> })
     return () => { cancelled = true; controller.abort(); };
   }, [productCode, productId]);
 
-  if (!hasValidProductId) return null;
+  if (!hasValidProductId) {
+    if (!editMode) return null;
+    const module = convertPuckProps("单品焦点推荐", props);
+    return module ? <FeaturedProductBlock module={module} editMode /> : null;
+  }
   if (loading) return <ProductRowState title={props.title} bgColor={props.bgColor} message="正在加载主推商品" />;
   if (error) return <ProductRowState title={props.title} bgColor={props.bgColor} message="主推商品加载失败，请稍后重试" />;
   if (!product) return <ProductRowState title={props.title} bgColor={props.bgColor} message="所选主推商品已下架或暂不可展示" />;
   const module = convertPuckProps("单品焦点推荐", props);
   if (!module) return null;
   (module as any).content.product = toProductRowItem(product);
-  return <FeaturedProductBlock module={module} />;
+  return <FeaturedProductBlock module={module} editMode={editMode} />;
 }
 
 function ResolvedLookbookBlock({ props }: { props: Record<string, any> }) {
@@ -540,7 +457,7 @@ function ResolvedCategoryCardsBlock({ props }: { props: Record<string, any> }) {
         const bySlug = new Map(flattenCategoryNodes(Array.isArray(data) ? data : []).map((node) => [node.slug, node]));
         if (!controller.signal.aborted) setCategories(slugs.flatMap((slug) => {
           const node = bySlug.get(slug);
-          return node?.coverImage ? [{ name: node.name, image: node.coverImage, link: `/products?categoryId=${node.id}`, altText: node.name }] : [];
+          return node?.coverImage ? [{ name: node.name, image: node.coverImage, link: createCatalogCategoryUrl(node.id), altText: node.name }] : [];
         }));
       })
       .catch(() => { if (!controller.signal.aborted) setError(true); })
@@ -555,9 +472,17 @@ function ResolvedCategoryCardsBlock({ props }: { props: Record<string, any> }) {
   return module ? <CategoryCardsBlock module={module} /> : null;
 }
 
-function renderBlock(block: PuckBlock, index: number) {
+export type PuckDocumentRenderMode = "public" | "preview";
+
+function renderBlock(
+  block: PuckBlock,
+  index: number,
+  mode: PuckDocumentRenderMode,
+  heroHeadingLevel: 1 | 2,
+) {
   const props = normalizeLegacyRenderColors(block.props || {}) as Record<string, any>;
   const key = props.id || `${block.type || "block"}-${index}`;
+  const preview = mode === "preview";
   const wrap = (node: ReactNode) => (
     <ContentTemplateContractFrame
       key={key}
@@ -591,7 +516,7 @@ function renderBlock(block: PuckBlock, index: number) {
     return wrap(<ResolvedProductRowBlock props={props} />);
   }
   if (block.type === "单品焦点推荐") {
-    return wrap(<ResolvedFeaturedProductBlock props={props} />);
+    return wrap(<ResolvedFeaturedProductBlock props={props} editMode={preview} />);
   }
   if (block.type === "佩戴灵感") {
     return wrap(<ResolvedLookbookBlock props={props} />);
@@ -602,25 +527,30 @@ function renderBlock(block: PuckBlock, index: number) {
 
   const module = convertPuckProps(block.type || "", props);
   if (!module) return null;
-
   switch (block.type) {
     case "首屏主视觉":
-      return wrap(<HeroSection module={module} />);
+      return wrap(
+        <HeroSection
+          module={module}
+          editMode={preview}
+          headingLevel={heroHeadingLevel}
+        />,
+      );
     case "单图海报":
-      return wrap(<SinglePosterSection module={module} />);
+      return wrap(<SinglePosterSection module={module} editMode={preview} />);
     case "双图海报":
-      return wrap(<DoublePosterSection module={module} />);
+      return wrap(<DoublePosterSection module={module} editMode={preview} />);
     // 旧类型(分割面板/图文混排/礼赠指南)分支保留:
     // 已发布历史版本(revision)仍含这些类型,公开渲染永久兼容;
     // 编辑器侧已由 migratePuckData 转为新类型,模板库不再提供添加。
     case "图文混排":
       return <ImageTextBlock key={key} module={module} />;
     case "全屏出血图":
-      return wrap(<FullBleedBlock module={module} />);
+      return wrap(<FullBleedBlock module={module} editMode={preview} />);
     case "文字横幅":
-      return wrap(<TextBannerBlock module={module} />);
+      return wrap(<TextBannerBlock module={module} editMode={preview} />);
     case "作品画廊":
-      return wrap(<AsymmetricGalleryBlock module={module} />);
+      return wrap(<AsymmetricGalleryBlock module={module} editMode={preview} />);
     case "改款对比":
       return wrap(<BeforeAfterBlock module={module} />);
     case "分类卡片":
@@ -640,7 +570,7 @@ function renderBlock(block: PuckBlock, index: number) {
     case "热区图":
       return wrap(<HotspotBlock module={module} />);
     case "预约入口":
-      return wrap(<AppointmentBlock module={module} />);
+      return wrap(<AppointmentBlock module={module} editMode={preview} />);
     case "资质证书":
       return wrap(<CertificateBlock module={module} />);
     case "定制流程":
@@ -658,38 +588,32 @@ function renderBlock(block: PuckBlock, index: number) {
   }
 }
 
-function GuardedBlock({ block, index }: { block: PuckBlock; index: number }) {
-  const urlsKey = useMemo(() => getLocalUploadUrls(block.props || {}).join("\n"), [block.props]);
-  const [hasMissingAsset, setHasMissingAsset] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const urls = urlsKey ? urlsKey.split("\n") : [];
-    if (!urls.length) {
-      setHasMissingAsset(false);
-      return;
-    }
-
-    void Promise.all(
-      urls.map((url) =>
-        fetch(url, { method: "HEAD" })
-          .then((response) => response.ok)
-          .catch(() => false),
-      ),
-    ).then((available) => {
-      if (!cancelled) setHasMissingAsset(available.some((value) => !value));
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [urlsKey]);
+function GuardedBlock({
+  block,
+  index,
+  mode,
+  heroHeadingLevel,
+}: {
+  block: PuckBlock;
+  index: number;
+  mode: PuckDocumentRenderMode;
+  heroHeadingLevel: 1 | 2;
+}) {
+  const hasMissingAsset = useHasMissingAssets(block.props || {});
 
   if (hasMissingAsset) return <MissingMediaState type={block.type} />;
-  return renderBlock(block, index);
+  return renderBlock(block, index, mode, heroHeadingLevel);
 }
 
-export default function PuckDocumentRenderer({ data }: { data: PuckDocument }) {
+export default function PuckDocumentRenderer({
+  data,
+  mode = "public",
+  heroHeadingLevel = 1,
+}: {
+  data: PuckDocument;
+  mode?: PuckDocumentRenderMode;
+  heroHeadingLevel?: 1 | 2;
+}) {
   if (!Array.isArray(data?.content)) return null;
   const zoneBlocks =
     data?.zones && typeof data.zones === "object"
@@ -708,7 +632,12 @@ export default function PuckDocumentRenderer({ data }: { data: PuckDocument }) {
           </section>
         }
       >
-        <GuardedBlock block={block} index={index} />
+        <GuardedBlock
+          block={block}
+          index={index}
+          mode={mode}
+          heroHeadingLevel={heroHeadingLevel}
+        />
       </ErrorBoundary>
     );
   };

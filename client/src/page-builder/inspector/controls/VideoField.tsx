@@ -52,10 +52,12 @@ export default function VideoField({
   required,
 }: VideoFieldProps) {
   const pageData = useHomepagePuck((state) => state.appState.data);
-  const [sessionRevision, setSessionRevision] = useState(0);
+  const [sessionVideos, setSessionVideos] = useState(() => [
+    ...sessionUploadedVideos,
+  ]);
   const currentPageVideos = useMemo(
-    () => [...new Set([...collectPageVideos(pageData), ...sessionUploadedVideos])],
-    [pageData, sessionRevision],
+    () => [...new Set([...collectPageVideos(pageData), ...sessionVideos])],
+    [pageData, sessionVideos],
   );
   const [replaceOpen, setReplaceOpen] = useState(false);
   const [urlMode, setUrlMode] = useState(false);
@@ -83,7 +85,7 @@ export default function VideoField({
       const data = unwrapResponse<{ url: string }>(response);
       if (data?.url) {
         sessionUploadedVideos.add(data.url);
-        setSessionRevision((revision) => revision + 1);
+        setSessionVideos([...sessionUploadedVideos]);
         onChange?.(data.url);
         message.success("视频上传成功");
         setReplaceOpen(false);

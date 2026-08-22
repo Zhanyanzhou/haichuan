@@ -110,7 +110,3 @@ export function trackSubmitSelection(count: number) {
 export function trackSubmitInquiry() {
   fire("submit_inquiry");
 }
-
-export function trackCtaClick(label: string) {
-  fire("cta_click", { metadata: { label } });
-}

@@ -1,17 +1,18 @@
-import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  ConflictException,
+  ForbiddenException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { Prisma, QuotationStatus } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { OrdersService } from '../orders/orders.service';
 
 /**
- * 报价管理服务：草稿 → 待客户确认 → 已确认 → 一键转订单。
- *
- * 设计要点：
- * - 报价单号 QT + 日期 + 4 位流水（事务内查 max +1，@unique 兜底）；
- * - 金额一律整数分计算后转 Decimal，规避浮点误差；
- * - 状态机用乐观锁（status 条件更新），防并发；
- * - 转订单复用 OrdersService.createFromQuotation（含订单号 + 库存预占 + 事件），
- *   转单后保留 convertedOrderId 双向关联。
+ * 报价管理服务：员工可维护草稿、提交待确认和取消。
+ * 客户本人确认与转单在完整身份状态机和不可变快照落地前安全暂停。
+ * 报价单号、金额计算及其余员工状态转换仍分别使用唯一约束、整数分和乐观锁。
  */
 @Injectable()
 export class QuotationsService {
@@ -25,10 +26,7 @@ export class QuotationsService {
     CONVERTED: [],
   };
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly ordersService: OrdersService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   /** 生成报价单号：QT + 日期 + 4 位日内流水 */
   private async generateQuoteNo(tx: Prisma.TransactionClient): Promise<string> {
@@ -213,6 +211,11 @@ export class QuotationsService {
 
   /** 推进报价单状态（乐观锁） */
   async changeStatus(id: number, newStatus: QuotationStatus) {
+    if (newStatus === 'CONFIRMED') {
+      throw new ForbiddenException(
+        '后台员工不能代替客户确认报价；客户本人确认能力尚未开放',
+      );
+    }
     const quotation = await this.prisma.quotation.findUnique({ where: { id } });
     if (!quotation) throw new NotFoundException('报价单不存在');
     const allowed = QuotationsService.VALID_TRANSITIONS[quotation.status];
@@ -228,54 +231,19 @@ export class QuotationsService {
   }
 
   /**
-   * 报价确认后一键转订单。
-   * 商品必须全部关联 SKU（库存预占需要）；转单后保留 convertedOrderId 双向关联。
+   * 当前 Schema 不能证明 CONFIRMED 由客户本人产生，也不能冻结完整确认快照。
+   * 在客户身份确认状态机落地前，服务层直接暂停转单，确保不会产生重复或孤立订单。
    */
-  async convertToOrder(id: number, data: { address: string; orderType?: 'SPOT' | 'CUSTOM' | 'RESERVATION' | 'OFFLINE' }) {
-    const quotation = await this.findById(id);
-    if (quotation.status !== 'CONFIRMED') throw new BadRequestException('只有已确认的报价单可以转订单');
-    if (quotation.convertedOrderId) throw new BadRequestException('该报价单已转订单');
-    if (!data.address?.trim()) throw new BadRequestException('请提供收货地址');
-
-    const missing = quotation.items.filter((it) => !it.skuId || !it.productId);
-    if (missing.length) throw new BadRequestException('报价商品缺少 SKU 关联，无法转订单，请先在报价单补全商品');
-
-    const order = await this.ordersService.createFromQuotation({
-      quotationId: id,
-      customerId: quotation.customerId ?? undefined,
-      customerName: quotation.customerName,
-      customerPhone: quotation.customerPhone,
-      customerEmail: quotation.customerEmail ?? undefined,
-      address: data.address,
-      salesConsultantId: quotation.salesConsultantId ?? undefined,
-      orderType: data.orderType,
-      totalAmount: quotation.totalAmount.toString(),
-      discountAmount: quotation.discountAmount.toString(),
-      finalAmount: quotation.finalAmount.toString(),
-      depositAmount: quotation.depositAmount.toString(),
-      items: quotation.items.map((it) => ({
-        skuId: it.skuId as number,
-        productId: it.productId as number,
-        productName: it.productName,
-        productImage: it.productImage,
-        productCode: it.product?.code ?? null,
-        skuSnapshot: it.spec,
-        quantity: it.quantity,
-        unitPrice: it.unitPrice.toString(),
-        subtotal: it.subtotal.toString(),
-      })),
-    });
-
-    // 关联报价单 + 状态 CONVERTED（乐观锁：仅 CONFIRMED 且未转过可转）
-    const linked = await this.prisma.quotation.updateMany({
-      where: { id, status: 'CONFIRMED', convertedOrderId: null },
-      data: { convertedOrderId: order.id, convertedAt: new Date(), status: 'CONVERTED' },
-    });
-    if (linked.count === 0) {
-      // 并发：报价状态已变或已转单。订单已创建——这是罕见竞态，抛错让操作员核对。
-      throw new ConflictException('报价单状态已变化，转订单关联失败，请核对已生成订单后重试');
-    }
-    return { order, quotation: await this.findById(id) };
+  async convertToOrder(
+    _id: number,
+    _data: {
+      address: string;
+      orderType?: 'SPOT' | 'CUSTOM' | 'RESERVATION' | 'OFFLINE';
+    },
+  ): Promise<never> {
+    throw new ServiceUnavailableException(
+      '报价转订单暂未开放：需先完成客户本人确认与不可变报价快照',
+    );
   }
 
   async remove(id: number) {

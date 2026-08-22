@@ -116,6 +116,11 @@ export class PaymentsService {
     method: OnlinePayProvider,
     operator: OperatorContext,
   ) {
+    if (!this.paymentGateway.isTransactionCreationEnabled()) {
+      throw new ServiceUnavailableException(
+        '在线资金交易当前已关闭，不能发起新的支付网关交易',
+      );
+    }
     if (!this.paymentGateway.isAvailable(method)) {
       throw new ServiceUnavailableException(
         method === 'alipay'

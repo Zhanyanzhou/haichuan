@@ -6,7 +6,6 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CustomerAuthGuard } from '../customers/customer-auth.guard';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ReviewsService } from './reviews.service';
 import { CreateReviewDto, ModerateReviewDto } from './dto/review.dto';
 
@@ -70,7 +69,6 @@ export class ReviewsController {
   moderate(
     @Param('id') id: string,
     @Body() dto: ModerateReviewDto,
-    @CurrentUser() user: any,
   ) {
     return this.reviewsService.moderate(+id, dto);
   }

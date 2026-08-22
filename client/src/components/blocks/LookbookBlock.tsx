@@ -91,7 +91,12 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
               style={{ objectPosition: `${focusX}% ${focusY}%` }}
             />
           ) : (
-            <BlockEmptyPlaceholder hint="佩戴大片" spec={`请上传佩戴大片 · ${IMAGE_SPECS.lookbook.image.label}`} height="100%" />
+            <BlockEmptyPlaceholder
+              assetSlot={{ templateKey: "wearingInspiration", roleId: "wearingImage" }}
+              hint="佩戴大片"
+              spec={`请上传佩戴大片 · ${IMAGE_SPECS.lookbook.image.label}`}
+              height="100%"
+            />
           )}
         </div>
         {!pureAtmosphere && (title || subtitle || editMode) && (

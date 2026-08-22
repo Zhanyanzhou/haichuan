@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Header,
   Post,
   Put,
   Delete,
@@ -21,6 +22,7 @@ import { Public } from "../../common/decorators/public.decorator";
 import { Observable } from "rxjs";
 import {
   PublishPageDocumentDto,
+  RestorePageDocumentRevisionDto,
   SavePageDocumentDto,
   ValidatePageDocumentDto,
 } from "./dto";
@@ -35,6 +37,8 @@ export class PageModulesController {
 
   @Public()
   @Get("document/published")
+  // 发布后立即回读必须拿到新版本，禁止浏览器/中间代理启发式缓存该 JSON。
+  @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "获取已发布页面文档（前台）" })
   getPublishedDocument(@Query("pageKey") pageKey: string) {
     return this.service.getPublishedPageDocument(pageKey || "home");
@@ -49,6 +53,8 @@ export class PageModulesController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Get("document/admin")
+  // 草稿回读同样禁止缓存，编辑器重开必须看到最新草稿。
+  @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "获取页面文档（后台，含草稿）" })
   getAdminDocument(@Query("pageKey") pageKey: string) {
     return this.service.getPageDocument(pageKey || "home");
@@ -124,9 +130,13 @@ export class PageModulesController {
   @Put("document/revisions/:version/restore")
   @ApiOperation({ summary: "恢复页面文档版本为草稿" })
   restoreDocumentRevision(
-    @Body("pageKey") pageKey: string,
+    @Body() body: RestorePageDocumentRevisionDto,
     @Param("version") version: string,
   ) {
-    return this.service.restorePageDocumentRevision(pageKey || "home", +version);
+    return this.service.restorePageDocumentRevision(
+      body.pageKey || "home",
+      +version,
+      body.expectedUpdatedAt,
+    );
   }
 }

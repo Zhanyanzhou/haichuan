@@ -5,10 +5,8 @@ const root = resolve(import.meta.dirname, "..");
 const monitored = [
   "client/src/constants/adminCopy.ts",
   "client/src/components/common/AdminDataStates.tsx",
-  "client/src/components/common/AdminConfirm.tsx",
   "client/src/components/common/AdminPageHeader.tsx",
   "client/src/components/common/AdminStatusTag.tsx",
-  "client/src/components/admin/ImageCropper.tsx",
   "client/src/components/layout/AdminLayout.tsx",
   "client/src/styles/antdTheme.ts",
   "client/src/styles/adminLuxury.css",
@@ -111,11 +109,6 @@ check(
   "client/src/constants/adminCopy.ts",
   /\bconfirm\s*:\s*["']确认["']|actions\.confirm/,
   "共享词源不得提供泛化“确认”动作",
-);
-check(
-  "client/src/components/common/AdminConfirm.tsx",
-  /(?:okText|title)\s*=\s*["'][^"']*(?:确认|确定)[^"']*["']|actions\.confirm/,
-  "确认组件不得为危险操作提供泛化确认默认值",
 );
 check(
   "client/src/styles/adminLuxury.css",

@@ -15,7 +15,27 @@ import { expect, test, type Page } from "@playwright/test";
  */
 
 const useMock = process.env.VITE_USE_MOCK === "true";
-const API_PREFIX = "**/api/page-modules/document";
+const API_PREFIX = "**/api/**";
+
+async function authenticateAdmin(page: Page) {
+  await page.goto("/admin/login");
+  await page.evaluate(() => {
+    const user = {
+      id: 1,
+      username: "editor-draft-test-admin",
+      realName: "草稿回归管理员",
+      role: "SUPER_ADMIN",
+    };
+    localStorage.setItem("token", "editor-draft-test-token");
+    localStorage.setItem(
+      "jewelry-auth",
+      JSON.stringify({
+        state: { token: "editor-draft-test-token", user, isLoggedIn: true },
+        version: 0,
+      }),
+    );
+  });
+}
 
 const heroBlock = {
   type: "首屏主视觉",
@@ -61,8 +81,16 @@ function json(data: unknown) {
   };
 }
 
-async function mockEditorApis(page: Page) {
-  let saved = { ...draftDoc };
+async function mockEditorApis(
+  page: Page,
+  options: {
+    published?: Record<string, any>;
+    draft?: Record<string, any>;
+    saveDelayMs?: number;
+  } = {},
+) {
+  let published: Record<string, any> = options.published ?? publishedDoc;
+  let saved: Record<string, any> = { ...(options.draft ?? draftDoc) };
   await page.route(`${API_PREFIX}*`, async (route) => {
     const url = route.request().url();
     const method = route.request().method();
@@ -73,21 +101,25 @@ async function mockEditorApis(page: Page) {
     if (url.includes("/revisions")) {
       return route.fulfill(json([]));
     }
+    if (url.includes("/published")) {
+      return route.fulfill(json(published));
+    }
     if (url.includes("/publish")) {
       saved = {
         ...saved,
         status: "PUBLISHED",
         publishedAt: "2026-08-14T02:00:00.000Z",
       };
+      published = { ...published, ...saved };
       return route.fulfill(json(saved));
-    }
-    if (url.includes("/published")) {
-      return route.fulfill(json(publishedDoc));
     }
     if (url.includes("/admin")) {
       return route.fulfill(json(saved));
     }
     if (method === "PUT") {
+      if (options.saveDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.saveDelayMs));
+      }
       const body = route.request().postDataJSON() as {
         puckData?: unknown;
         metadata?: unknown;
@@ -100,7 +132,7 @@ async function mockEditorApis(page: Page) {
       };
       return route.fulfill(json(saved));
     }
-    return route.continue();
+    return route.fulfill(json({}));
   });
 }
 
@@ -108,6 +140,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
   test.skip(useMock, "依赖 HTTP 拦截夹具，mock 模式由手动验收覆盖");
 
   test.beforeEach(async ({ page }) => {
+    await authenticateAdmin(page);
     await mockEditorApis(page);
   });
 
@@ -115,38 +148,94 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
 
-    const status = page.locator(".homepage-editor__pending-draft");
-    await expect(status).toContainText("正在编辑草稿", { timeout: 10000 });
+    const status = page.locator(".homepage-editor__draft-status");
+    await expect(status).toContainText("草稿有未发布修改", { timeout: 10000 });
     await expect(status).toContainText("最后保存");
+    await expect(status).toHaveAttribute(
+      "aria-label",
+      /草稿状态：草稿有未发布修改，最后保存/,
+    );
   });
 
   test("查看线上版本后，可无损回到草稿", async ({ page }) => {
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
-    const status = page.locator(".homepage-editor__pending-draft");
-    await expect(status).toContainText("正在编辑草稿", { timeout: 10000 });
+    const status = page.locator(".homepage-editor__draft-status");
+    await expect(status).toContainText("草稿有未发布修改", { timeout: 10000 });
 
-    await page.getByRole("button", { name: "查看线上版本" }).click();
-    await expect(status).toContainText("正在查看线上版本");
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: "查看线上版本" }).click();
+    await expect(status).toHaveCount(0);
 
-    await page.getByRole("button", { name: "继续编辑草稿" }).first().click();
-    await expect(status).toContainText("正在编辑草稿");
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: "继续编辑草稿" }).click();
+    await expect(status).toContainText("草稿有未发布修改");
   });
 
   test("放弃草稿需二次确认，取消后草稿不变", async ({ page }) => {
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
-    const status = page.locator(".homepage-editor__pending-draft");
-    await expect(status).toContainText("正在编辑草稿", { timeout: 10000 });
+    const status = page.locator(".homepage-editor__draft-status");
+    await expect(status).toContainText("草稿有未发布修改", { timeout: 10000 });
 
-    await page.getByRole("button", { name: "放弃草稿" }).click();
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: "放弃草稿" }).click();
     const dialog = page.getByRole("dialog", {
       name: "放弃当前草稿并恢复线上版本？",
     });
     await expect(dialog).toBeVisible();
 
-    await dialog.getByRole("button", { name: "取消" }).click();
+    await dialog.getByRole("button", { name: /取\s*消/ }).click();
     await expect(dialog).toBeHidden();
-    await expect(status).toContainText("正在编辑草稿");
+    await expect(status).toContainText("草稿有未发布修改");
+  });
+
+  test("仅 metadata 不同时仍识别为未发布草稿", async ({ page }) => {
+    const sharedPuck = { content: [heroBlock], root: { props: {} } };
+    await page.unroute(`${API_PREFIX}*`);
+    await mockEditorApis(page, {
+      published: {
+        ...publishedDoc,
+        puckData: sharedPuck,
+        metadata: { seoTitle: "线上 SEO" },
+      },
+      draft: {
+        ...draftDoc,
+        puckData: sharedPuck,
+        metadata: { seoTitle: "草稿 SEO" },
+      },
+    });
+
+    await page.goto("/admin/editor/home");
+    const status = page.locator(".homepage-editor__draft-status");
+    await expect(status).toContainText("草稿有未发布修改", { timeout: 10000 });
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await expect(page.getByRole("menuitem", { name: "查看线上版本" })).toBeVisible();
+  });
+
+  test("发布后再次保存不会把相同 content 和 metadata 误报为草稿", async ({
+    page,
+  }) => {
+    await page.unroute(`${API_PREFIX}*`);
+    await mockEditorApis(page, { saveDelayMs: 250 });
+
+    await page.goto("/admin/editor/home");
+    const publishButton = page.locator(".homepage-editor__toolbar-publish");
+    await expect(publishButton).toBeEnabled({ timeout: 10000 });
+    await publishButton.click();
+    const publishDialog = page.getByRole("dialog", { name: "确认发布首页？" });
+    await publishDialog.getByRole("button", { name: "确认发布" }).click();
+    await expect(page.getByText("店铺首页已发布")).toBeVisible();
+
+    const status = page.locator(".homepage-editor__draft-status");
+    await expect(status).toContainText("与线上版本一致");
+    const saveButton = page.getByRole("button", { name: "保存当前装修草稿" });
+    await saveButton.click();
+    await expect(status).toContainText("正在保存草稿");
+    await expect(status).toHaveAttribute("title", "草稿状态：正在保存草稿");
+    await expect(page.getByText("页面草稿已保存")).toBeVisible();
+    await expect(status).toContainText("与线上版本一致");
+    await expect(status).toContainText("最后保存");
+    await expect(status).not.toContainText("草稿有未发布修改");
   });
 });

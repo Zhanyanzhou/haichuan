@@ -146,7 +146,7 @@ export default function Checkout() {
         <div className="text-center">
           <CheckCircleOutlined className="text-5xl text-brand-gold mb-4" />
           <p className="text-xl font-display text-brand-text mb-4">购物车为空</p>
-          <Link to="/products" className="btn btn-primary">继续选购</Link>
+          <Link to="/catalog" className="btn btn-primary">继续选购</Link>
         </div>
       </div>
     );

@@ -99,7 +99,7 @@ model Product {
   materialType            MaterialType           @default(GOLD_999) @map("material_type")
   goldWeight              Decimal?               @default(0) @map("gold_weight") @db.Decimal(8, 2) // 金重(g)
   craftFee                Decimal?               @default(0) @map("craft_fee") @db.Decimal(10, 2) // 工费
-  price                   Decimal?               @default(0) @db.Decimal(10, 2) // 当前售价
+  price                   Decimal?               @default(0) @db.Decimal(10, 2) // 有效且有价 SKU 的派生最低价缓存，禁止作为成交价事实源
   priceMin                Decimal?               @default(0) @map("price_min") @db.Decimal(10, 2)
   priceMax                Decimal?               @default(0) @map("price_max") @db.Decimal(10, 2)
   weight                  Decimal?               @default(0) @db.Decimal(8, 2) // 总重量(g)
@@ -113,6 +113,7 @@ model Product {
   // PARTNER=仅审核通过的合作商家可见；INTERNAL=仅后台员工可见，前台永不展示。
   visibility              ProductVisibility      @default(MEMBER)
   salesMode               SalesMode              @default(DISPLAY_ONLY) @map("sales_mode")
+  inventoryPolicy         InventoryPolicy        @default(STANDARD) @map("inventory_policy")
   purchaseRegion          ProductPurchaseRegion  @default(MAINLAND) @map("purchase_region")
   publishMode             ProductPublishMode     @default(WAREHOUSE) @map("publish_mode")
   scheduledPublishAt      DateTime?              @map("scheduled_publish_at")
@@ -208,6 +209,11 @@ enum SalesMode {
   APPOINTMENT // 预约模式
   DIRECT_PURCHASE // 直接购买(暂未开放)
   CUSTOM_INQUIRY // 定制咨询
+}
+
+enum InventoryPolicy {
+  STANDARD // 普通商品，库存和购买数量按现有规则管理
+  SINGLE_UNIT // 一物一件：一个有效 SKU，库存总量与购买数量均不超过 1
 }
 
 enum ProductPurchaseRegion {
@@ -309,7 +315,7 @@ model ProductSKU {
   material    MaterialType @default(GOLD_999)
   size        String?      @db.VarChar(50)
   goldWeight  Decimal?     @map("gold_weight") @db.Decimal(8, 2)
-  price       Decimal      @default(0) @db.Decimal(10, 2)
+  price       Decimal      @default(0) @db.Decimal(10, 2) // DIRECT_PURCHASE 唯一成交价事实源
   stock       Int          @default(0) // @deprecated 库存请通过 InventoryService 统一管理
   safetyStock Int          @default(5) @map("safety_stock")
   isActive    Boolean      @default(true) @map("is_active")

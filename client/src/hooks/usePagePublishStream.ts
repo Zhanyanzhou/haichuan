@@ -19,6 +19,9 @@ export type PagePublishEvent = {
 const MAX_RETRIES = 10;
 const BASE_RETRY_DELAY_MS = 1000;
 const MAX_RETRY_DELAY_MS = 30000;
+// SSE 重连耗尽后的兜底轮询间隔：直接回源拉取已发布文档（接口已 no-store），
+// 保证长连接长期不可用时前台内容至多滞后约一分钟，而不是永远停在旧快照。
+const POLLING_FALLBACK_MS = 60000;
 
 export function usePagePublishStream(
   pageKey: string | undefined,
@@ -37,8 +40,28 @@ export function usePagePublishStream(
 
     let stream: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
     let retry = 0;
     let closed = false;
+
+    const stopPolling = () => {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+
+    // 兜底轮询：消费方只把回调当"刷新信号"使用，合成事件与真实发布事件等效。
+    // 轮询期间每个周期也顺带重试一次 SSE；一旦 SSE 恢复（收到消息）即停止轮询。
+    const startPolling = () => {
+      if (pollTimer || closed) return;
+      pollTimer = setInterval(() => {
+        if (closed) return;
+        retry = 0;
+        open();
+        callbackRef.current({ type: "unknown", pageKey });
+      }, POLLING_FALLBACK_MS);
+    };
 
     const handleMessage = (event: MessageEvent) => {
       let payload: PagePublishEvent;
@@ -71,13 +94,18 @@ export function usePagePublishStream(
       stream = new EventSource(publicPageDocumentStreamUrl);
       stream.onmessage = (event) => {
         retry = 0; // 成功收到消息即视为连接健康，重置退避计数
+        stopPolling(); // SSE 已恢复，退出兜底轮询
         handleMessage(event);
       };
       stream.onerror = () => {
         stream?.close();
         stream = null;
         if (closed) return;
-        if (retry >= MAX_RETRIES) return; // 达上限停止，避免无限重试
+        if (retry >= MAX_RETRIES) {
+          // 不再永久放弃：降级为 60 秒轮询兜底，避免前台停在旧快照。
+          startPolling();
+          return;
+        }
         const delay = Math.min(
           BASE_RETRY_DELAY_MS * 2 ** retry,
           MAX_RETRY_DELAY_MS,
@@ -91,6 +119,7 @@ export function usePagePublishStream(
     return () => {
       closed = true;
       stream?.close();
+      stopPolling();
       if (retryTimer) clearTimeout(retryTimer);
     };
   }, [pageKey]);

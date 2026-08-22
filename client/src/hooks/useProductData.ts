@@ -55,6 +55,12 @@ function mapApiProduct(
     images: (p.images || []).map((img: any) => img.mediaUrl || img.url || ""),
     categoryName: categoryById.get(p.categoryId)?.name || p.category?.name || "",
     price: Number(p.price) || 0,
+    salesMode: p.salesMode,
+    inventoryPolicy: p.inventoryPolicy,
+    isAvailableForPurchase:
+      typeof p.isAvailableForPurchase === "boolean"
+        ? p.isAvailableForPurchase
+        : undefined,
   };
 }
 

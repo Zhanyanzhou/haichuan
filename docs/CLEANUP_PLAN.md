@@ -1,5 +1,8 @@
 # 海川珠宝 — 清理计划
 
+> [!CAUTION]
+> **历史清理快照，现已失效，禁止按正文清单执行。** 文件名、引用关系、死代码判断和建议动作均可能已变化；本文仅保留审计证据，不是删除、移动、重命名、批量修改或 Git 操作授权。当前权限只认 `AGENTS.md` / `WORKFLOW.md`，当前事实先查 `docs/CURRENT_STATE.md` 并重新核验工作树；任何清理都须重新列出精确目标、风险与所需审批。
+
 > 最后更新：2026-08-07 | 需逐项确认后执行
 
 ## 待删除
@@ -35,15 +38,11 @@
 
 ### common/ 未引用
 
-AdminConfirm, EmptyState, FilterPanel, ImageUpload, PageHeader, ProductCard
+FilterPanel, ProductCard
 
 ### ui/ 未引用
 
 GlowCard, ParticleBg
-
-### admin/ 未引用
-
-ImageCropper
 
 ### blocks/ 旧版（仅通过注册表可达）
 

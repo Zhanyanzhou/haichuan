@@ -36,7 +36,12 @@ function MissingImageSlot({
 }) {
   return (
     <div data-editor-field={field} style={{ height }}>
-      <BlockEmptyPlaceholder hint={`${label}待上传`} spec={spec} height="100%" />
+      <BlockEmptyPlaceholder
+        assetSlot={{ templateKey: "doublePoster", roleId: field }}
+        hint={`${label}待上传`}
+        spec={spec}
+        height="100%"
+      />
     </div>
   );
 }
@@ -60,7 +65,7 @@ function EditorialImage({
 
   if (failed) {
     return (
-      <div className="grid h-full w-full place-items-center text-xs tracking-[.08em]" role="img" aria-label={alt || "图片暂不可用"} style={{ color: '#5F6568', background: 'linear-gradient(135deg,#F4F5F5,#DDE1E2)' }}>
+      <div className="grid h-full w-full place-items-center text-xs tracking-[.08em]" role="img" aria-label={alt || "图片暂不可用"} style={{ color: '#5F6568', background: '#F4F5F5' }}>
         图片暂不可用
       </div>
     );

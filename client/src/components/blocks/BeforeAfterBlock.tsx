@@ -72,6 +72,10 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
     return (
       <DecorSection master="editorial-story" background={bgColor}>
         <BlockEmptyPlaceholder
+          assetSlots={[
+            { templateKey: "comparison", roleId: "before" },
+            { templateKey: "comparison", roleId: "after" },
+          ]}
           hint="改款前后对比"
           spec={`请上传改款前/后两张同比例图 · ${IMAGE_SPECS.beforeAfter.image.label}`}
           ratio={trackRatioDesktop}

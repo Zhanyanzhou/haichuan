@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
 import {
+  App as AntdApp,
   Button,
   Card,
   DatePicker,
@@ -9,7 +10,6 @@ import {
   Form,
   Input,
   InputNumber,
-  message,
   Modal,
   Select,
   Space,
@@ -30,6 +30,7 @@ import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import { orderApi, userApi, productApi, marketingApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { ADMIN_COPY, getAdminEmptyText } from "@/constants/adminCopy";
+import { useAuthStore } from "@/store/authStore";
 import type {
   Order,
   OrderItem,
@@ -186,19 +187,45 @@ type OrderDetail = Order & {
   } | null;
 };
 
-function useIsAdmin(): boolean {
-  try {
-    const raw = localStorage.getItem("jewelry-auth");
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    const role = parsed?.state?.user?.role;
-    return role === "SUPER_ADMIN" || role === "ADMIN" || role === "WAREHOUSE";
-  } catch {
-    return false;
-  }
+type OrderCapabilities = Readonly<{
+  canExport: boolean;
+  canCreate: boolean;
+  canShip: boolean;
+  canComplete: boolean;
+  canCancel: boolean;
+  canEditAmount: boolean;
+  canEditAddress: boolean;
+  canEditNote: boolean;
+  canEditConsultant: boolean;
+  canAdvanceCustomStage: boolean;
+  canReceive: boolean;
+}>;
+
+/** 与 orders.controller.ts 当前 @Roles 严格对齐；服务端仍是最终权限边界。 */
+function getOrderCapabilities(role: User["role"] | undefined): OrderCapabilities {
+  const isAdmin = role === "SUPER_ADMIN" || role === "ADMIN";
+  const isWarehouse = role === "WAREHOUSE";
+  const isCustomerService = role === "CUSTOMER_SERVICE";
+
+  return {
+    canExport: isAdmin,
+    canCreate: isAdmin,
+    canShip: isAdmin || isWarehouse,
+    canComplete: isAdmin,
+    canCancel: isAdmin,
+    canEditAmount: isAdmin,
+    canEditAddress: isAdmin,
+    canEditNote: isAdmin || isCustomerService,
+    canEditConsultant: isAdmin,
+    canAdvanceCustomStage: isAdmin,
+    canReceive: isAdmin || isWarehouse,
+  };
 }
 
 export default function OrderManage() {
+  const { message, modal } = AntdApp.useApp();
+  const role = useAuthStore((state) => state.user?.role);
+  const capabilities = getOrderCapabilities(role);
   const [searchParams, setSearchParams] = useSearchParams();
   const [list, setList] = useState<Order[]>([]);
   const [total, setTotal] = useState(0);
@@ -259,8 +286,6 @@ export default function OrderManage() {
       discount: number;
     }>
   >([]);
-  const canShip = useIsAdmin();
-
   const handleStatusFilter = (status: string) => {
     setSearchParams(status === "all" ? {} : { status });
     setPage(1);
@@ -335,6 +360,7 @@ export default function OrderManage() {
       internalNote?: string;
     },
   ) => {
+    if (!capabilities.canShip) return;
     setShipping(true);
     try {
       await orderApi.ship(id, values);
@@ -350,7 +376,8 @@ export default function OrderManage() {
   };
 
   const handleComplete = (record: Order) => {
-    Modal.confirm({
+    if (!capabilities.canComplete) return;
+    modal.confirm({
       title: "确认完成该订单？",
       content: "订单完成后进入终态，不可再变更。",
       okText: "确认完成",
@@ -368,8 +395,9 @@ export default function OrderManage() {
   };
 
   const handleCancel = (record: Order) => {
+    if (!capabilities.canCancel) return;
     let internalNote = "";
-    Modal.confirm({
+    modal.confirm({
       title: "确认取消该订单？",
       content: (
         <Input.TextArea
@@ -399,6 +427,7 @@ export default function OrderManage() {
   };
 
   const handleExport = async () => {
+    if (!capabilities.canExport) return;
     setExporting(true);
     try {
       const res = await orderApi.exportList({
@@ -468,6 +497,13 @@ export default function OrderManage() {
   };
 
   const openOp = (type: string) => {
+    const allowed =
+      (type === "amount" && capabilities.canEditAmount) ||
+      (type === "address" && capabilities.canEditAddress) ||
+      (type === "note" && capabilities.canEditNote) ||
+      (type === "consultant" && capabilities.canEditConsultant) ||
+      (type === "custom-stage" && capabilities.canAdvanceCustomStage);
+    if (!allowed) return;
     if (type === "consultant" && consultants.length === 0)
       void loadConsultants();
     setOpModal({ type, open: true });
@@ -475,6 +511,13 @@ export default function OrderManage() {
 
   const submitOp = async (values: any) => {
     if (!detail) return;
+    const allowed =
+      (opModal.type === "amount" && capabilities.canEditAmount) ||
+      (opModal.type === "address" && capabilities.canEditAddress) ||
+      (opModal.type === "note" && capabilities.canEditNote) ||
+      (opModal.type === "consultant" && capabilities.canEditConsultant) ||
+      (opModal.type === "custom-stage" && capabilities.canAdvanceCustomStage);
+    if (!allowed) return;
     try {
       if (opModal.type === "amount")
         await orderApi.updateAmount(detail.id, values);
@@ -499,8 +542,8 @@ export default function OrderManage() {
   };
 
   const handleReceive = () => {
-    if (!detail) return;
-    Modal.confirm({
+    if (!detail || !capabilities.canReceive) return;
+    modal.confirm({
       title: "确认签收？",
       content: "确认后，订单的发货状态将更新为“已签收”。",
       okText: "确认签收",
@@ -599,6 +642,7 @@ export default function OrderManage() {
   }, [createOpen, createTotalCents]);
 
   const submitCreate = async (values: any) => {
+    if (!capabilities.canCreate) return;
     const items = itemRows
       .filter((r) => r.skuId)
       .map((r) => ({ skuId: r.skuId, quantity: r.quantity }));
@@ -650,14 +694,16 @@ export default function OrderManage() {
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>
             刷新
           </Button>
-          <Button
-            icon={<ExportOutlined />}
-            loading={exporting}
-            onClick={handleExport}
-          >
-            导出
-          </Button>
-          {canShip && (
+          {capabilities.canExport && (
+            <Button
+              icon={<ExportOutlined />}
+              loading={exporting}
+              onClick={handleExport}
+            >
+              导出
+            </Button>
+          )}
+          {capabilities.canCreate && (
             <Button
               type="primary"
               onClick={() => {
@@ -904,7 +950,7 @@ export default function OrderManage() {
                     >
                       详情
                     </Button>
-                    {canShip && r.status === "PENDING_SHIP" && (
+                    {capabilities.canShip && r.status === "PENDING_SHIP" && (
                       <Button
                         size="small"
                         type="primary"
@@ -914,7 +960,7 @@ export default function OrderManage() {
                         发货
                       </Button>
                     )}
-                    {canShip && r.status === "SHIPPED" && (
+                    {capabilities.canComplete && r.status === "SHIPPED" && (
                       <Button
                         size="small"
                         type="primary"
@@ -923,7 +969,7 @@ export default function OrderManage() {
                         完成
                       </Button>
                     )}
-                    {canShip &&
+                    {capabilities.canCancel &&
                       (r.status === "PENDING_PAYMENT" ||
                         r.status === "PENDING_SHIP") && (
                         <Button
@@ -1306,29 +1352,42 @@ export default function OrderManage() {
               )}
             </div>
 
-            {/* 订单管理操作（仅管理员） */}
-            {canShip && (
+            {/* 操作权限与订单状态分别判断；服务端 @Roles 仍是最终边界。 */}
+            {(capabilities.canEditAmount ||
+              capabilities.canEditAddress ||
+              capabilities.canEditNote ||
+              capabilities.canEditConsultant ||
+              (capabilities.canAdvanceCustomStage && detail.orderType === "CUSTOM") ||
+              (capabilities.canReceive && detail.status === "SHIPPED")) && (
               <div>
                 <h3 className="font-semibold mb-2">订单操作</h3>
                 <Space wrap>
-                  <Button size="small" onClick={() => openOp("amount")}>
-                    修改金额
-                  </Button>
-                  <Button size="small" onClick={() => openOp("address")}>
-                    修改地址
-                  </Button>
-                  <Button size="small" onClick={() => openOp("note")}>
-                    修改备注
-                  </Button>
-                  <Button size="small" onClick={() => openOp("consultant")}>
-                    修改顾问
-                  </Button>
-                  {detail.orderType === "CUSTOM" && (
+                  {capabilities.canEditAmount && (
+                    <Button size="small" onClick={() => openOp("amount")}>
+                      修改金额
+                    </Button>
+                  )}
+                  {capabilities.canEditAddress && (
+                    <Button size="small" onClick={() => openOp("address")}>
+                      修改地址
+                    </Button>
+                  )}
+                  {capabilities.canEditNote && (
+                    <Button size="small" onClick={() => openOp("note")}>
+                      修改备注
+                    </Button>
+                  )}
+                  {capabilities.canEditConsultant && (
+                    <Button size="small" onClick={() => openOp("consultant")}>
+                      修改顾问
+                    </Button>
+                  )}
+                  {capabilities.canAdvanceCustomStage && detail.orderType === "CUSTOM" && (
                     <Button size="small" onClick={() => openOp("custom-stage")}>
                       推进定制阶段
                     </Button>
                   )}
-                  {detail.status === "SHIPPED" && (
+                  {capabilities.canReceive && detail.status === "SHIPPED" && (
                     <Button size="small" type="primary" onClick={handleReceive}>
                       确认签收
                     </Button>
@@ -1394,7 +1453,7 @@ export default function OrderManage() {
         open={!!shippingOrder}
         onCancel={() => setShippingOrder(null)}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         {shippingOrder && (
           <Form
@@ -1458,7 +1517,7 @@ export default function OrderManage() {
         open={opModal.open}
         onCancel={() => setOpModal({ type: "", open: false })}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form layout="vertical" onFinish={submitOp}>
           {opModal.type === "amount" && (
@@ -1534,7 +1593,7 @@ export default function OrderManage() {
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         width={680}
       >
         <Form layout="vertical" form={createForm} onFinish={submitCreate}>

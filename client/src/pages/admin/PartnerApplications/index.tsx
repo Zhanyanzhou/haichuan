@@ -12,7 +12,6 @@ import {
   Modal,
   message,
   Space,
-  Tooltip,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { partnerApi } from "@/services/api";

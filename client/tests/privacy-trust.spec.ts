@@ -140,7 +140,7 @@ test.describe("隐私页面", () => {
   });
 
   test("页脚隐私链接跳转到 /privacy", async ({ page }) => {
-    await page.goto("/products");
+    await page.goto("/catalog");
     await expect(page.getByRole("contentinfo")).toBeVisible();
     await page.getByRole("link", { name: "隐私说明" }).last().click();
     await expect.poll(() => new URL(page.url()).pathname).toBe("/privacy");
@@ -165,7 +165,7 @@ test.describe("匿名行为分析", () => {
     await page.addInitScript(() => {
       localStorage.removeItem("_asid");
     });
-    await page.goto("/products");
+    await page.goto("/catalog");
     await expect.poll(() => page.evaluate(() => localStorage.getItem("_asid"))).toMatch(/^s_[a-z0-9]+$/);
   });
 
@@ -177,7 +177,7 @@ test.describe("匿名行为分析", () => {
         analyticsRequests.push(req.url());
       }
     });
-    await page.goto("/products");
+    await page.goto("/catalog");
     await expect.poll(() => analyticsRequests.length).toBeGreaterThan(0);
   });
 });
@@ -223,9 +223,11 @@ test.describe("SEO 与索引", () => {
     expect(html).not.toContain("haichuanjewelry.com");
   });
 
-  test("搜索页使用中性标题不拼搜索词", async ({ page }) => {
+  test("旧搜索深链进入选款中心并使用不拼搜索词的中性标题", async ({ page }) => {
     await page.goto("/search?query=平安扣");
-    await expect(page).toHaveTitle(/搜索珠宝作品/);
+    await expect(page).toHaveURL(/\/catalog\?query=%E5%B9%B3%E5%AE%89%E6%89%A3/);
+    await expect(page).toHaveTitle(/选款中心 \| 海川珠宝/);
+    await expect(page).not.toHaveTitle(/平安扣/);
   });
 
   test("联系页有独立标题", async ({ page }) => {

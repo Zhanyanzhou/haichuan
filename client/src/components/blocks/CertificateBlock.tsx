@@ -31,7 +31,12 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
     if (!editMode) return null;
     return (
       <DecorSection master="asymmetric-gallery" background={bgColor}>
-        <BlockEmptyPlaceholder hint="权威认证" spec={`请添加证书条目 · ${IMAGE_SPECS.certificate.image.label}`} ratio={CERTIFICATE_RATIO_DESKTOP} />
+        <BlockEmptyPlaceholder
+          assetSlot={{ templateKey: "certificates", roleId: "certificates" }}
+          hint="权威认证"
+          spec={`请添加证书条目 · ${IMAGE_SPECS.certificate.image.label}`}
+          ratio={CERTIFICATE_RATIO_DESKTOP}
+        />
       </DecorSection>
     );
   }

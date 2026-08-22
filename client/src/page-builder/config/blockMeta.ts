@@ -423,17 +423,3 @@ export function getCategoryComponents(): Record<string, { defaultExpanded: boole
   }
   return map;
 }
-
-/** 模板库只按唯一的一级经营目标归类，避免同一模板在多个标签中重复出现。 */
-export function blockMatchesPrimary(meta: BlockMeta, primary: BlockCategory | "全部"): boolean {
-  if (primary === "全部") return true;
-  return meta.category === primary;
-}
-
-/** 取某个一级分类下的二级类型列表（去重）；"全部"时返回所有 type 去重 */
-export function getSubTypes(primary: BlockCategory | "全部"): string[] {
-  const types = Object.values(BLOCK_META)
-    .filter((meta) => blockMatchesPrimary(meta, primary))
-    .map((meta) => meta.type);
-  return [...new Set(types)];
-}

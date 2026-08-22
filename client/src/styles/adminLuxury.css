@@ -51,7 +51,7 @@
   --adm-active-border: #181a1b;
 
   /* 布局 */
-  --adm-header-h: 48px;
+  --adm-header-h: 60px;
   --adm-sidebar-w: 160px;
   --adm-nav-top: clamp(58px, 3.75vw, 72px);
   --adm-nav-x: 16px;
@@ -269,10 +269,13 @@
 .admin-header__right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 8px;
 }
 
 .admin-header__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   cursor: pointer;
@@ -292,23 +295,70 @@
   background: var(--adm-gold-soft);
 }
 
-.admin-header__link {
+.admin-header__site-link {
   display: inline-flex;
-  min-height: var(--adm-control-compact);
   align-items: center;
-  color: var(--adm-muted);
+  justify-content: center;
+  gap: 6px;
+  height: var(--adm-control-default);
+  padding: 0 12px;
+  border: 1px solid var(--adm-line-strong);
+  border-radius: 4px;
+  color: var(--adm-text);
   font-size: 13px;
   text-decoration: none;
-  transition: color 0.15s;
-}
-.admin-header__link:hover {
-  color: var(--adm-action);
+  white-space: nowrap;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
 }
 
-.admin-header__avatar {
-  cursor: pointer;
+.admin-header__site-link:hover {
+  border-color: var(--adm-action);
+  color: var(--adm-action);
+  background: var(--adm-neutral-bg);
+}
+
+.admin-header__account-group {
   display: flex;
   align-items: center;
+  margin-left: 8px;
+  padding-left: 16px;
+  border-left: 1px solid var(--adm-line);
+}
+
+.admin-header__account {
+  display: inline-flex;
+  height: var(--adm-control-default);
+  padding: 0 8px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--adm-text);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.admin-header__account:hover,
+.admin-header__account[aria-expanded="true"] {
+  background: var(--adm-neutral-bg);
+}
+
+.admin-header__account-name {
+  max-width: 128px;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-header__account-chevron {
+  color: var(--adm-muted);
+  font-size: 12px;
 }
 
 /* 紧凑工作区：浏览器放大或分屏时保留主操作区，次级文字入口让位给抽屉菜单。 */
@@ -318,11 +368,27 @@
   }
 
   .admin-header__right {
-    gap: 12px;
+    gap: 8px;
   }
 
-  .admin-header__link {
+  .admin-header__site-link {
+    width: var(--adm-control-default);
+    padding: 0;
+  }
+
+  .admin-header__site-label,
+  .admin-header__account-name,
+  .admin-header__account-chevron {
     display: none;
+  }
+
+  .admin-header__account-group {
+    margin-left: 4px;
+    padding-left: 12px;
+  }
+
+  .admin-header__account {
+    padding: 0 4px;
   }
 
   .admin-sidebar__collapse-handle {
@@ -364,25 +430,33 @@
   border-right-width: 0;
 }
 
-/* 参考装修工作台的边缘把手：不占主内容宽度，收起后仍可随时恢复。 */
-.admin-sidebar__collapse-handle {
-  position: absolute;
-  z-index: 12;
-  top: 50%;
-  left: calc(var(--adm-sidebar-w) - 1px);
+/* 收起后不保留空白侧轨，普通后台与店铺装修使用同一种零宽收纳结果。 */
+.admin-shell-v7.is-sidebar-collapsed {
+  --adm-sidebar-w: 0px;
+}
+
+/* 全后台与装修工作台共用同一种面板收纳按钮。 */
+.admin-panel-collapse-toggle {
   display: grid;
-  width: 24px;
-  height: 78px;
+  width: 28px;
+  height: 32px;
+  flex: 0 0 28px;
   padding: 0;
   place-items: center;
   border: 1px solid var(--adm-line);
-  border-left: 0;
-  border-radius: 0 8px 8px 0;
+  border-radius: 4px;
   color: var(--adm-muted);
   background: rgb(255 255 255 / 96%);
-  box-shadow: 3px 0 10px rgb(24 26 27 / 6%);
+  box-shadow: 0 2px 8px rgb(24 26 27 / 8%);
   cursor: pointer;
-  transform: translateY(-50%);
+}
+
+.admin-sidebar__collapse-handle {
+  position: absolute;
+  z-index: 12;
+  top: 6px;
+  left: calc(var(--adm-sidebar-w) - 32px);
+  transform: none;
   transition:
     left 0.22s ease,
     color 0.15s ease,
@@ -390,19 +464,21 @@
     box-shadow 0.15s ease;
 }
 
-.admin-sidebar__collapse-handle:hover {
+.admin-panel-collapse-toggle:hover {
   color: var(--adm-ink);
   background: #fff;
   box-shadow: 4px 0 14px rgb(24 26 27 / 10%);
 }
 
-.admin-sidebar__collapse-handle:focus-visible {
+.admin-panel-collapse-toggle:focus-visible {
   outline: 2px solid var(--adm-focus);
   outline-offset: 2px;
 }
 
 .admin-shell-v7.is-sidebar-collapsed .admin-sidebar__collapse-handle {
-  left: 0;
+  position: absolute;
+  top: 6px;
+  left: 8px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1328,6 +1404,14 @@
 @media (max-width: 767px) {
   .admin-header {
     padding: 0 12px;
+  }
+  .admin-header__site-link,
+  .admin-header__account {
+    min-width: 40px;
+    height: 40px;
+  }
+  .admin-header__account-group {
+    padding-left: 8px;
   }
   .admin-sidebar {
     flex-basis: 100%;

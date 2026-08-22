@@ -17,6 +17,15 @@ interface Props {
   tone?: "neutral" | "dark";
   height?: string | number;
   bg?: string;
+  /** 权威内容模板合同中的素材槽；用于派生尺寸、裁切、焦点和发布状态。 */
+  assetSlot?: {
+    templateKey: ContentTemplateKey;
+    roleId: string;
+  };
+  assetSlots?: Array<{
+    templateKey: ContentTemplateKey;
+    roleId: string;
+  }>;
 }
 
 const SURFACE = {
@@ -45,10 +54,43 @@ export default function BlockEmptyPlaceholder({
   tone = "neutral",
   height,
   bg,
+  assetSlot,
+  assetSlots,
 }: Props) {
   const color = SURFACE[tone];
+  const contracts = (assetSlots ?? (assetSlot ? [assetSlot] : []))
+    .map((slot) => getAssetSlotContract(slot.templateKey, slot.roleId))
+    .filter((value): value is NonNullable<typeof value> => Boolean(value));
+  const contract = contracts[0] ?? null;
+  const contractRatio = contract?.ratioByViewport.desktop
+    ?? contract?.ratioByViewport.mobile;
+  const contractField = <T,>(read: (item: NonNullable<typeof contract>) => T | undefined) =>
+    contracts.map((item) => `${item.slotId}:${read(item) ?? "none"}`).join("|") || undefined;
+  const sizeSummary = (viewport: "desktop" | "mobile") =>
+    contracts
+      .filter((item) => item.minimumSizeByViewport[viewport])
+      .map((item) => `${item.slotId} ${formatAssetSlotMinimumSize(item, viewport)}`)
+      .join("；") || "不适用";
+  const desktopSize = contract ? sizeSummary("desktop") : undefined;
+  const mobileSize = contract ? sizeSummary("mobile") : undefined;
   return (
     <section
+      role="status"
+      aria-label={contract
+        ? `${contract.placeholder.label}，${contract.placeholder.badge}，槽位 ${contracts.map((item) => item.slotId).join("、")}`
+        : hint}
+      data-asset-slot-id={contracts.map((item) => item.slotId).join("|") || undefined}
+      data-asset-visual-role={contractField((item) => item.visualRole)}
+      data-asset-class={contractField((item) => item.assetClass)}
+      data-asset-placeholder-status={contract?.placeholder.status}
+      data-asset-publishable={contract ? String(contract.placeholder.publishable) : undefined}
+      data-asset-focus-mode={contractField((item) => item.focusMode)}
+      data-asset-safe-zone-desktop={contractField((item) => item.textSafeZoneByViewport.desktop)}
+      data-asset-safe-zone-mobile={contractField((item) => item.textSafeZoneByViewport.mobile)}
+      data-asset-crop-desktop={contractField((item) => item.cropDirectionByViewport.desktop)}
+      data-asset-crop-mobile={contractField((item) => item.cropDirectionByViewport.mobile)}
+      data-asset-minimum-desktop={desktopSize}
+      data-asset-minimum-mobile={mobileSize}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -57,7 +99,7 @@ export default function BlockEmptyPlaceholder({
         gap: 14,
         height: height ?? undefined,
         minHeight: height ?? (ratio ? undefined : 320),
-        aspectRatio: !height && ratio ? ratio : undefined,
+        aspectRatio: !height && (ratio || contractRatio) ? (ratio || contractRatio) : undefined,
         padding: "clamp(30px, 6vw, 48px) 24px",
         background: bg ?? color.canvas,
         border: `1px solid ${color.line}`,
@@ -67,6 +109,19 @@ export default function BlockEmptyPlaceholder({
         width: "100%",
       }}
     >
+      {contract ? (
+        <span
+          style={{
+            border: `1px solid ${color.line}`,
+            padding: "4px 8px",
+            color: color.muted,
+            fontSize: 10,
+            letterSpacing: "0.12em",
+          }}
+        >
+          {contract.placeholder.label} · {contract.placeholder.badge}
+        </span>
+      ) : null}
       <svg
         viewBox="0 0 118 84"
         fill="none"
@@ -96,6 +151,16 @@ export default function BlockEmptyPlaceholder({
           {spec}
         </p>
       )}
+      {contract ? (
+        <p style={{ margin: 0, color: color.muted, fontSize: 11, lineHeight: 1.6 }}>
+          {contracts.map((item) => `${item.slotId}/${item.assetClass}`).join(" · ")} · 桌面 {desktopSize} · 手机 {mobileSize}
+        </p>
+      ) : null}
     </section>
   );
 }
+import {
+  formatAssetSlotMinimumSize,
+  getAssetSlotContract,
+} from "@/page-builder/config/assetSlots";
+import type { ContentTemplateKey } from "@/page-builder/generated/contentTemplates.generated";

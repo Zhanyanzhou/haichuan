@@ -596,6 +596,7 @@
   overflow: hidden;
 }
 .homepage-editor__toolbar {
+  position: relative;
   height: 64px;
   min-height: 64px;
   box-sizing: border-box;
@@ -610,8 +611,8 @@
 
 /* 店铺装修专注模式：将装修工具栏挂入后台顶栏。 */
 .admin-header--editor {
-  height: 60px;
-  min-height: 60px;
+  height: var(--adm-header-h);
+  min-height: var(--adm-header-h);
   gap: 8px;
   padding: 0 12px 0 0;
 }
@@ -625,8 +626,8 @@
 }
 .admin-header__editor-slot .homepage-editor__toolbar {
   width: 100%;
-  height: 59px;
-  min-height: 59px;
+  height: calc(var(--adm-header-h) - 1px);
+  min-height: calc(var(--adm-header-h) - 1px);
   padding: 0 12px 0 20px;
   border-bottom: 0;
 }
@@ -648,6 +649,17 @@
   border: 1px solid var(--adm-line);
   border-radius: 6px;
   background: var(--adm-neutral-bg);
+}
+/* 中等及以上工作区让设备切换器使用页面中心轴，不受右侧全局操作区挤压。
+ * 更窄视口保留紧凑网格位置，避免与发布操作重叠。 */
+@media (min-width: 768px) {
+  .admin-header__editor-slot .homepage-editor__viewport-switcher {
+    position: fixed;
+    top: calc(var(--adm-header-h) / 2);
+    left: 50%;
+    z-index: 2;
+    transform: translate(-50%, -50%);
+  }
 }
 .homepage-editor__viewport-switcher button {
   display: inline-flex;
@@ -683,14 +695,55 @@
   box-shadow: 0 1px 3px rgba(24, 26, 27, 0.1);
 }
 .homepage-editor__toolbar-actions {
-  grid-column: 3;
-  justify-self: end;
+  position: absolute;
+  top: 50%;
+  right: 24px;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
   flex-shrink: 0;
   min-width: max-content;
+}
+.homepage-editor__draft-status {
+  grid-column: 1;
+  justify-self: start;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--adm-neutral-border);
+  border-radius: 999px;
+  color: var(--adm-text);
+  background: var(--adm-neutral-bg);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.homepage-editor__draft-status small {
+  overflow: hidden;
+  color: var(--adm-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+.homepage-editor__draft-status-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--adm-warning);
+}
+.homepage-editor__draft-status[data-mode="dirty"],
+.homepage-editor__draft-status[data-mode="saving"] {
+  border-color: var(--adm-warning-border);
+  color: var(--adm-warning);
+  background: var(--adm-warning-bg);
+}
+.homepage-editor__draft-status[data-mode="clean"] {
+  color: var(--adm-muted);
 }
 .homepage-editor__toolbar-secondary-actions {
   display: flex;
@@ -1061,15 +1114,29 @@
 .homepage-editor__template-card-main {
   touch-action: pan-y;
 }
+.homepage-editor__template-card[role="button"] {
+  touch-action: pan-y;
+  cursor: pointer;
+}
+.homepage-editor__template-card[role="button"]:focus-visible,
+.homepage-editor__template-card-main[role="button"]:focus-visible {
+  outline: 2px solid var(--adm-focus);
+  outline-offset: 2px;
+}
 @media (pointer: fine) {
+  .homepage-editor__template-card[role="button"],
   .homepage-editor__template-card-main {
     cursor: grab;
   }
+  .homepage-editor__template-card[role="button"]:active,
   .homepage-editor__template-card-main:active {
     cursor: grabbing;
   }
 }
 .homepage-editor__template-card-main:disabled {
+  cursor: not-allowed;
+}
+.homepage-editor__template-card.is-disabled[role="button"] {
   cursor: not-allowed;
 }
 .homepage-editor__template-preview-wrap {
@@ -1240,7 +1307,13 @@ body:has(.homepage-editor__storefront-frame) {
   background: var(--adm-content-bg);
 }
 .homepage-editor__storefront-frame {
-  background: var(--adm-content-bg);
+  display: flex;
+  flex-direction: column;
+  min-height: var(--homepage-editor-preview-height, 900px);
+  background: var(--hc-canvas, #FFFFFF);
+}
+.homepage-editor__storefront-frame > .site-footer {
+  margin-top: auto;
 }
 /* Puck 预览根节点自带 min-height:100vh，会把画布文档撑到 iframe 视口高度。   导致“内容高度 < 文档高度”，页脚下方出现大段空白（2026-08-16）。   这里恢复为内容自适应，让画布文档高度与真实内容高度一致。 */
 #frame-root {
@@ -1412,7 +1485,7 @@ body:has(.homepage-editor__storefront-frame) {
   outline-offset: -2px;
   box-shadow: 0 0 0 3px rgba(24, 26, 27, 0.12);
 }
-/* 模块顺序与删除已经集中到图层面板，预览 iframe 不再叠加 Puck 黑色操作浮条。 */
+/* 隐藏 Puck 原生黑色操作条，画布只使用项目自己的右下角操作组。 */
 body:has(#frame-root) [class*="DraggableComponent-actionsOverlay"],
 body:has(#frame-root) [class*="ActionBar_"] {
   display: none !important;
@@ -1427,6 +1500,59 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
   outline: 1px solid #181A1B !important;
   outline-offset: -1px !important;
   box-shadow: none !important;
+}
+body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.homepage-editor__canvas-selection-dock {
+  position: absolute;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--adm-line);
+  border-radius: 4px;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 3px 12px rgb(24 26 27 / 14%);
+  transform: translateY(-100%);
+  pointer-events: auto;
+}
+.homepage-editor__canvas-selection-dock:hover,
+.homepage-editor__canvas-selection-dock:focus-within {
+  outline: none !important;
+}
+.homepage-editor__canvas-selection-dock button {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--adm-text-strong);
+  background: transparent;
+  cursor: pointer;
+}
+.homepage-editor__canvas-selection-dock button:hover:not(:disabled) {
+  border-color: var(--adm-line);
+  color: var(--adm-action);
+  background: var(--adm-neutral-bg);
+}
+.homepage-editor__canvas-selection-dock button.is-danger:hover:not(:disabled) {
+  color: var(--adm-error);
+  background: var(--adm-error-bg);
+}
+.homepage-editor__canvas-selection-dock button:focus-visible {
+  outline: 2px solid var(--adm-focus);
+  outline-offset: 1px;
+}
+.homepage-editor__canvas-selection-dock button:disabled {
+  color: var(--adm-subtle);
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 .homepage-editor__preview-frame :is(img, video, embed, object) {
   position: relative !important;
@@ -2222,7 +2348,7 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
 }
 @media (max-width: 980px) {
   .homepage-editor__toolbar {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     gap: 8px;
     padding-inline: 12px;
   }
@@ -2237,10 +2363,6 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
     padding-inline: 7px;
   }
   .homepage-editor__toolbar-secondary-actions {
-    display: none;
-  }
-  /* 窄屏收紧草稿徽标:隐藏“已保存时间”冗余信息,避免徽标过宽挤压主操作 */
-  .homepage-editor__draft-status small {
     display: none;
   }
   .homepage-editor__toolbar-more {
@@ -2275,10 +2397,6 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
   }
   .homepage-editor__toolbar-actions {
     grid-column: 2;
-  }
-  /* 窄屏(两列布局)隐藏草稿徽标,把空间让给设备切换与发布主操作 */
-  .homepage-editor__draft-status {
-    display: none;
   }
   .homepage-editor__viewport-switcher button {
     width: 34px;
@@ -2717,6 +2835,9 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
   font-size: 12px;
   line-height: 18px;
 }
+.homepage-editor__properties-empty-state .ant-btn {
+  margin-top: 8px;
+}
 
 /* 页面图层改为独立模块卡片：与画布内容一一对应，拖拽排序更直观。 */
 .homepage-editor__layer-rail {
@@ -3107,38 +3228,6 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 徽章警示色被第三层 `> span`（0-2-1）特异性压成 text-strong，此处 0-3-0 找回；
-   同时补边框，避免 hover 条目同为 gold-soft 底时徽章融入背景。 */
-.homepage-editor__layer-select > .homepage-editor__layer-mobile-hint {
-  color: var(--adm-warning);
-  border: 1px solid var(--adm-warning-border);
-}
-/* 发布质量标记：编辑时在图层栏标出 error 级待完善模块，替代发布时弹错误框。 */
-.homepage-editor__layer-select > .homepage-editor__layer-issue-hint {
-  flex: none;
-  padding: 1px 5px;
-  border-radius: 3px;
-  border: 1px solid var(--adm-error-border);
-  background: var(--adm-error-bg);
-  color: var(--adm-error);
-  font-size: 12px;
-  line-height: 18px;
-  white-space: nowrap;
-}
-.homepage-editor__layer-select > .homepage-editor__layer-validation {
-  flex: none;
-  min-width: 20px;
-  color: var(--adm-text-muted);
-  font-size: 12px;
-  line-height: 20px;
-  text-align: center;
-}
-.homepage-editor__layer-select > .homepage-editor__layer-validation.is-current {
-  border: 1px solid var(--adm-success-border);
-  border-radius: 3px;
-  color: var(--adm-success);
-  background: var(--adm-success-bg);
-}
 .homepage-editor__validation-state {
   margin: 14px 14px 0;
   padding: 8px 10px;
@@ -3269,6 +3358,26 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
   color: var(--adm-text-strong);
   outline: none;
 }
+.homepage-editor__publish-issues-hint {
+  margin: 0 0 8px;
+  opacity: 0.85;
+}
+.homepage-editor__publish-issue-item {
+  display: flex !important;
+  align-items: baseline;
+  gap: 8px;
+}
+.homepage-editor__publish-issue-item > button:first-child,
+.homepage-editor__publish-issue-item > p {
+  flex: 1;
+  min-width: 0;
+}
+.homepage-editor__publish-issue-hide {
+  flex-shrink: 0;
+  text-decoration: none !important;
+  white-space: nowrap;
+  opacity: 0.85;
+}
 .homepage-editor__inspector-publish-issues {
   margin: 14px 0 0;
 }
@@ -3376,25 +3485,6 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
   flex: 1;
   min-height: 0;
   border: 0;
-}
-.homepage-editor__structure-collapse-btn {
-  flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--adm-line);
-  border-radius: 4px;
-  color: var(--adm-text);
-  background: rgba(255, 255, 255, 0.94);
-  cursor: pointer;
-}
-.homepage-editor__structure-collapse-btn:hover,
-.homepage-editor__structure-collapse-btn:focus-visible {
-  border-color: var(--adm-neutral-border);
-  color: var(--adm-action);
-  box-shadow: 0 0 0 2px rgba(24, 26, 27, 0.12);
 }
 .homepage-editor__structure-workspace.is-collapsed {
   overflow: hidden;
@@ -4005,6 +4095,9 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
 .admin-header__editor-slot .homepage-editor__toolbar {
   padding-inline: 16px 10px;
 }
+.admin-header__editor-slot .homepage-editor__toolbar-actions {
+  right: 10px;
+}
 .homepage-editor__viewport-switcher {
   min-height: 38px;
   padding: 2px;
@@ -4057,24 +4150,6 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
 .homepage-editor__library-drag-tip {
   display: none;
 }
-.homepage-editor__library-overview-btn {
-  width: 28px;
-  height: 28px;
-  display: inline-grid;
-  padding: 0;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--adm-muted);
-  background: transparent;
-  cursor: pointer;
-}
-.homepage-editor__library-overview-btn:hover,
-.homepage-editor__library-overview-btn:focus-visible {
-  border-color: var(--adm-neutral-border);
-  color: var(--adm-action);
-  background: var(--ed-paper);
-}
 .homepage-editor__library-search-row {
   gap: 8px;
 }
@@ -4104,60 +4179,6 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
 .homepage-editor__layer-scroll {
   padding: 14px 10px 24px;
 }
-.homepage-editor__layer-selection-actions {
-  display: grid;
-  gap: 8px;
-  margin: 0 0 10px;
-  padding: 9px 10px;
-  border: 1px solid var(--adm-line);
-  border-left: 3px solid var(--adm-gold);
-  border-radius: 4px;
-  background: var(--ed-paper);
-}
-.homepage-editor__layer-selection-actions > span {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--adm-text-strong);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.homepage-editor__layer-selection-actions > div {
-  display: grid;
-  grid-template-columns: repeat(3, 32px);
-  gap: 6px;
-}
-.homepage-editor__layer-selection-actions button {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--adm-line);
-  border-radius: 4px;
-  color: var(--adm-text-strong);
-  background: var(--adm-content-bg);
-  cursor: pointer;
-}
-.homepage-editor__layer-selection-actions button:hover:not(:disabled),
-.homepage-editor__layer-selection-actions button:focus-visible {
-  border-color: var(--adm-action);
-  color: var(--adm-action);
-  outline: none;
-}
-.homepage-editor__layer-selection-actions button.is-danger:hover:not(:disabled),
-.homepage-editor__layer-selection-actions button.is-danger:focus-visible {
-  border-color: var(--adm-error);
-  color: var(--adm-error);
-}
-.homepage-editor__layer-selection-actions button:disabled {
-  color: var(--adm-subtle);
-  background: var(--adm-neutral-bg);
-  cursor: not-allowed;
-}
-.homepage-editor__structure-collapse-btn,
 .homepage-editor__library-collapse-btn,
 .homepage-editor__inspector-collapse-btn {
   width: 28px;
@@ -4183,10 +4204,13 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
   overflow: hidden;
 }
 .homepage-editor__canvas-scroll {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  /* 垂直滚动条只出现在右侧会让 auto margin 的画布偏左半个滚动条宽度。 */
+  scrollbar-gutter: stable both-edges;
   /* Puck 更新属性时会替换选中区块的 iframe 子树；禁止浏览器把该重排
      误判为滚动锚点变化，否则点字段会把画布跳到后续模块。 */
   overflow-anchor: none;
@@ -4224,22 +4248,6 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
 }
 .homepage-editor__canvas-readout span {
   color: var(--adm-text);
-}
-
-/* 全局导航继续保留，但其收缩把手不再跨栏遮挡模块库。 */
-.admin-body:has(.homepage-editor) .admin-sidebar__collapse-handle {
-  left: calc(var(--adm-sidebar-w) - 24px);
-  z-index: 5;
-  width: 24px;
-  height: 56px;
-  border-left: 1px solid var(--adm-line);
-  border-radius: 6px;
-  box-shadow: 0 2px 8px rgb(24 26 27 / 8%);
-}
-.admin-shell-v7.is-sidebar-collapsed
-  .admin-body:has(.homepage-editor)
-  .admin-sidebar__collapse-handle {
-  left: 0;
 }
 
 @media (min-width: 1600px) {
@@ -4625,7 +4633,7 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
 .homepage-editor__inspector .homepage-editor__inspector-header {
   min-height: 64px;
   padding: 8px 14px 8px 18px;
-  border-bottom: 1px solid var(--inspector-line);
+  border-bottom: 1px solid var(--inspector-line, #dde1e2);
   background: var(--inspector-card);
 }
 
@@ -4659,6 +4667,30 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
 .homepage-editor__inspector .homepage-editor__close-panel:focus-visible {
   color: var(--inspector-ink);
   background: var(--adm-surface-muted);
+}
+
+.homepage-editor__inspector .homepage-editor__exit-module {
+  min-width: 58px;
+  height: 32px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--inspector-text);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
+.homepage-editor__inspector .homepage-editor__exit-module:hover,
+.homepage-editor__inspector .homepage-editor__exit-module:focus-visible {
+  border-color: var(--inspector-line);
+  color: var(--inspector-ink);
+  background: var(--adm-surface-muted);
+  outline: none;
 }
 
 .homepage-editor__inspector .homepage-editor__inspector-scroll {
@@ -4706,8 +4738,13 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
 }
 
 .homepage-editor__panel-mode-tabs button[role="tab"]:focus-visible {
-  outline: 2px solid var(--inspector-action);
+  outline: 1px solid var(--inspector-line-strong);
   outline-offset: -3px;
+}
+
+.homepage-editor__panel-mode-tabs
+  button[role="tab"]:focus:not(:focus-visible) {
+  outline: none;
 }
 
 .homepage-editor__panel-mode-tabs button[role="tab"].is-active {
@@ -5162,43 +5199,6 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
   }
 }
 
-/* ═══ 草稿状态徽标（2026-08-18 P1-5:六态常显） ═══ */
-.homepage-editor__draft-status {
-  grid-column: 1;
-  justify-self: start;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border: 1px solid var(--adm-neutral-border);
-  border-radius: 999px;
-  background: var(--adm-neutral-bg);
-  font-size: 12px;
-  color: var(--adm-text);
-  white-space: nowrap;
-}
-.homepage-editor__draft-status small {
-  color: var(--adm-muted);
-  font-size: 12px;
-}
-.homepage-editor__draft-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--adm-gold);
-}
-.homepage-editor__draft-status[data-mode="dirty"] {
-  border-color: var(--adm-gold);
-  color: var(--adm-action);
-  background: var(--ed-paper);
-}
-.homepage-editor__draft-status[data-mode="clean"] {
-  color: var(--adm-muted);
-}
-
 /* ═══ A.5 键盘焦点环(2026-08-19):2px 实色 --adm-focus(对比度 6.8:1)+2px 偏移;
  * 键盘导航与画布选中焦点态清晰可辨,纯功能不花哨,优先无障碍。 ═══ */
 .homepage-editor button:focus-visible,
@@ -5342,27 +5342,10 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
 .homepage-editor__layer-frame button:hover,
 .homepage-editor__layer-frame button:focus-visible,
 .homepage-editor__layer-frame button[aria-pressed="true"] {
-  border-color: #181A1B;
-  color: #181A1B;
+  border-color: var(--adm-action);
+  color: var(--adm-action);
   background: #ECEEEF;
   box-shadow: none;
-}
-.homepage-editor__layer-selection-actions {
-  margin-bottom: 12px;
-  padding: 9px;
-  border-left: 2px solid #181A1B;
-  background: #F4F5F5;
-}
-.homepage-editor__layer-selection-actions > div {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
-}
-.homepage-editor__layer-selection-actions button {
-  width: auto;
-  min-width: 0;
-  height: 36px;
-  padding: 0 2px;
-  font-size: 14px;
 }
 .homepage-editor__link-target-detail {
   scroll-margin-block: 12px 88px;
@@ -5422,15 +5405,6 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.homepage-editor__layer-select > .homepage-editor__layer-mobile-hint,
-.homepage-editor__layer-select > .homepage-editor__layer-issue-hint {
-  display: inline-flex;
-  min-width: 18px;
-  align-items: center;
-  justify-content: center;
-  padding: 0 3px;
-  font-size: 11px;
-}
 .homepage-editor__layer-select > .homepage-editor__layer-grip {
   position: absolute !important;
   top: 50% !important;
@@ -5471,28 +5445,11 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
   background: #fff;
 }
 
-/* 装修器也必须保留一级导航的收起入口。将把手收进导航右上角，
- * 避免原先的中部大把手压住组件库，又不会让入口在编辑器中消失。 */
-.admin-body:has(.homepage-editor) .admin-sidebar__collapse-handle {
-  z-index: 20;
-  top: 12px;
-  left: calc(var(--adm-sidebar-w) - 32px);
-  width: 28px;
-  height: 32px;
-  border: 1px solid var(--adm-line);
-  border-radius: 4px;
-  transform: none;
-}
-.admin-shell-v7.is-sidebar-collapsed
-  .admin-body:has(.homepage-editor)
-  .admin-sidebar__collapse-handle {
-  position: fixed;
-  top: 14px;
-  left: 8px;
-}
-
 /* 最终响应式收敛层：后续桌面密度规则不得让手机端设备文字重新出现。 */
 @media (max-width: 520px) {
+  .admin-header__editor-slot .homepage-editor__toolbar-actions {
+    right: 6px;
+  }
   .homepage-editor__viewport-switcher button > span:not(.anticon),
   .homepage-editor__toolbar-more > span:not(.ant-btn-icon),
   .homepage-editor__toolbar-publish > span:not(.ant-btn-icon) {
@@ -5533,4 +5490,367 @@ body:has(#frame-root) [class*="DraggableComponent-overlay_"] {
     .homepage-editor__structure-workspace.is-collapsed {
     width: 40px;
   }
+}
+
+/* ═══ 编辑器停靠面板：一级导航、模板库、图层、画布、属性按顺序停靠 ═══ */
+.admin-body:has(.homepage-editor) > .admin-sidebar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 50;
+  width: var(--adm-sidebar-w);
+  flex-basis: var(--adm-sidebar-w);
+  border-right: 1px solid var(--adm-line);
+  box-shadow: none;
+}
+.admin-body:has(.homepage-editor) > .admin-sidebar.is-collapsed {
+  width: 0;
+  flex-basis: 0;
+  border-right: 0;
+}
+.admin-body:has(.homepage-editor) > .admin-content {
+  width: 100%;
+  flex: 1 1 100%;
+}
+.admin-body:has(.homepage-editor) > .admin-sidebar__collapse-handle {
+  z-index: 51;
+}
+.admin-header--editor .admin-header__editor-preview {
+  width: auto;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  color: var(--adm-text);
+  font-size: 12px;
+  text-decoration: none;
+}
+.admin-header--editor .admin-header__editor-preview:hover,
+.admin-header--editor .admin-header__editor-preview:focus-visible {
+  border-color: var(--adm-line);
+  color: var(--adm-action);
+  background: var(--adm-neutral-bg);
+}
+
+.homepage-editor__panel-header {
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 10px;
+}
+.homepage-editor__panel-header .homepage-editor__region-title {
+  position: absolute;
+  left: 50%;
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+.homepage-editor__library-collapse-btn.admin-panel-collapse-toggle,
+.homepage-editor__inspector-collapse-btn.admin-panel-collapse-toggle,
+.homepage-editor__library-expand-btn.admin-panel-collapse-toggle,
+.homepage-editor__structure-expand-btn.admin-panel-collapse-toggle,
+.homepage-editor__inspector-expand-btn.admin-panel-collapse-toggle {
+  display: inline-grid !important;
+  width: 28px !important;
+  height: 32px !important;
+  min-height: 32px;
+  flex: 0 0 28px;
+  margin: 0;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--adm-line) !important;
+  border-radius: 4px;
+  color: var(--adm-muted) !important;
+  background: rgb(255 255 255 / 96%) !important;
+  box-shadow: 0 2px 8px rgb(24 26 27 / 8%);
+  cursor: pointer;
+  writing-mode: horizontal-tb;
+  letter-spacing: 0;
+}
+.homepage-editor__library-collapse-btn.admin-panel-collapse-toggle:hover,
+.homepage-editor__library-collapse-btn.admin-panel-collapse-toggle:focus-visible,
+.homepage-editor__inspector-collapse-btn.admin-panel-collapse-toggle:hover,
+.homepage-editor__inspector-collapse-btn.admin-panel-collapse-toggle:focus-visible,
+.homepage-editor__library-expand-btn.admin-panel-collapse-toggle:hover,
+.homepage-editor__library-expand-btn.admin-panel-collapse-toggle:focus-visible,
+.homepage-editor__structure-expand-btn.admin-panel-collapse-toggle:hover,
+.homepage-editor__structure-expand-btn.admin-panel-collapse-toggle:focus-visible,
+.homepage-editor__inspector-expand-btn.admin-panel-collapse-toggle:hover,
+.homepage-editor__inspector-expand-btn.admin-panel-collapse-toggle:focus-visible {
+  border-color: var(--adm-line) !important;
+  color: var(--adm-ink) !important;
+  background: #fff !important;
+  box-shadow: 4px 0 14px rgb(24 26 27 / 10%);
+}
+.homepage-editor__library-expand-btn.admin-panel-collapse-toggle,
+.homepage-editor__structure-expand-btn.admin-panel-collapse-toggle,
+.homepage-editor__inspector-expand-btn.admin-panel-collapse-toggle {
+  margin: 6px;
+}
+.homepage-editor__library-expand-btn.admin-panel-collapse-toggle span,
+.homepage-editor__structure-expand-btn.admin-panel-collapse-toggle span,
+.homepage-editor__inspector-expand-btn.admin-panel-collapse-toggle span {
+  writing-mode: horizontal-tb;
+}
+
+@media (min-width: 1200px) {
+  .homepage-editor__body,
+  .homepage-editor__body.is-inspecting {
+    --editor-library-dock-width: 256px;
+    --editor-structure-dock-width: 224px;
+    --editor-inspector-dock-width: 480px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .homepage-editor__body .homepage-editor__library {
+    position: absolute;
+    inset: 0 auto 0 0;
+    grid-column: auto;
+    z-index: 30;
+    width: var(--editor-library-dock-width);
+    transition: left 160ms ease;
+  }
+  .homepage-editor__body .homepage-editor__library--collapsed {
+    width: 40px;
+  }
+  .homepage-editor__body .homepage-editor__structure-workspace {
+    position: absolute;
+    inset: 0 auto 0 var(--editor-library-dock-width);
+    grid-column: auto;
+    z-index: 29;
+    width: var(--editor-structure-dock-width);
+    transition:
+      left 160ms ease,
+      width 160ms ease;
+  }
+  .homepage-editor__body .homepage-editor__structure-workspace.is-collapsed {
+    width: 40px;
+  }
+  .homepage-editor__body .homepage-editor__stage {
+    grid-column: 1;
+    width: 100%;
+    box-sizing: border-box;
+    padding-left: calc(
+      var(--editor-library-dock-width) + var(--editor-structure-dock-width)
+    );
+    padding-right: var(--editor-inspector-dock-width);
+    transition: padding-left 160ms ease;
+  }
+  .homepage-editor__body .homepage-editor__right-workspace,
+  .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
+    position: absolute;
+    inset: 0 0 0 auto;
+    grid-column: auto;
+    z-index: 28;
+    width: var(--editor-inspector-dock-width);
+  }
+  .homepage-editor__body .homepage-editor__right-workspace.is-inspector-collapsed,
+  .homepage-editor__body.is-inspecting
+    .homepage-editor__right-workspace.is-inspector-collapsed {
+    width: 40px;
+  }
+  .admin-shell-v7.is-editor-navigation-open .homepage-editor__library {
+    left: var(--adm-sidebar-w);
+  }
+  .admin-shell-v7.is-editor-navigation-open
+    .homepage-editor__structure-workspace {
+    left: calc(var(--adm-sidebar-w) + var(--editor-library-dock-width));
+    width: 0;
+    border-right: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+@media (min-width: 1200px) and (max-width: 1439px) {
+  .homepage-editor__body,
+  .homepage-editor__body.is-inspecting {
+    --editor-library-dock-width: 220px;
+    --editor-structure-dock-width: 140px;
+    --editor-inspector-dock-width: 360px;
+  }
+}
+
+@media (min-width: 1440px) and (max-width: 1599px) {
+  .homepage-editor__body,
+  .homepage-editor__body.is-inspecting {
+    --editor-library-dock-width: 236px;
+    --editor-structure-dock-width: 144px;
+    --editor-inspector-dock-width: 380px;
+  }
+}
+
+@media (min-width: 1600px) {
+  .homepage-editor__body,
+  .homepage-editor__body.is-inspecting {
+    --editor-library-dock-width: 272px;
+    --editor-structure-dock-width: 168px;
+    --editor-inspector-dock-width: 440px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .homepage-editor__body .homepage-editor__library,
+  .homepage-editor__body .homepage-editor__structure-workspace,
+  .homepage-editor__body .homepage-editor__stage {
+    transition: none;
+  }
+}
+
+/* 窄屏本来就是覆盖式面板；固定画布矩形，避免任何抽屉状态触发布局重排。 */
+@media (max-width: 1199px) {
+  .homepage-editor__body,
+  .homepage-editor__body.is-inspecting {
+    display: block;
+  }
+  .homepage-editor__body .homepage-editor__stage {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+  }
+}
+
+@media (min-width: 1025px) {
+  .admin-shell-v7.is-sidebar-collapsed
+    .homepage-editor__body
+    .homepage-editor__library--collapsed {
+    width: 80px;
+  }
+  .admin-shell-v7.is-sidebar-collapsed
+    .homepage-editor__library-expand-btn.admin-panel-collapse-toggle {
+    margin-left: 46px;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1199px) {
+  .homepage-editor__body.is-inspecting
+    .homepage-editor__structure-workspace {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 31;
+    width: 208px;
+  }
+  .homepage-editor__body.is-inspecting
+    .homepage-editor__structure-workspace.is-collapsed {
+    width: 40px;
+  }
+}
+
+@media (max-width: 520px) {
+  .admin-header--editor .admin-header__editor-preview {
+    width: 34px;
+    justify-content: center;
+    padding: 0;
+  }
+  .admin-header--editor .admin-header__editor-preview span {
+    display: none;
+  }
+}
+
+/* ═══ 双图文对象化面板（实验，仅 .homepage-editor__dp-panel 作用域） ═══ */
+/* 面包屑：双图文 › 当前对象 */
+.homepage-editor__dp-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--adm-muted);
+}
+.homepage-editor__dp-breadcrumb > button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--inspector-action, #181a1b);
+  font-size: 12px;
+  cursor: pointer;
+}
+.homepage-editor__dp-breadcrumb > button:hover,
+.homepage-editor__dp-breadcrumb > button:focus-visible {
+  text-decoration: underline;
+}
+.homepage-editor__dp-breadcrumb > strong {
+  color: var(--inspector-ink, #181a1b);
+  font-weight: 600;
+}
+
+/* 对象切换 chips：整个模块 / 主图 / 细节图 / 文案（高频直出） */
+.homepage-editor__dp-object-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 16px 10px;
+  border-bottom: 1px solid var(--inspector-line, #DDE1E2);
+}
+.homepage-editor__dp-object-chips > button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid #dde1e2;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--adm-text-strong);
+  font-size: 12px;
+  cursor: pointer;
+}
+.homepage-editor__dp-object-chips > button:is(:hover, :focus-visible) {
+  border-color: #181a1b;
+}
+.homepage-editor__dp-object-chips > button.is-active {
+  border-color: #181a1b;
+  color: var(--inspector-action, #181a1b);
+  background: var(--inspector-action-soft, #eceeef);
+}
+
+/* 本面板内放开图形示意（全局 L302/L347 隐藏规则不动，其他模块不受影响） */
+.homepage-editor__dp-panel .homepage-editor__ratio-cards i {
+  display: block;
+  width: 100%;
+  max-width: 64px;
+  margin: 0 auto 4px;
+  border: 1px solid #6e7477;
+  border-radius: 2px;
+  background: #dde1e2;
+}
+.homepage-editor__dp-panel .homepage-editor__ratio-cards > button {
+  flex-direction: column;
+  padding-top: 8px;
+}
+.homepage-editor__dp-panel .homepage-editor__choice-cards i {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 36px;
+  margin-bottom: 4px;
+}
+.homepage-editor__dp-panel .homepage-editor__choice-cards > button {
+  flex-direction: column;
+  padding: 6px 8px;
+}
+
+/* 构图卡片补齐：main-led 主图占大（左宽右窄）、detail-led 细节图占大（左窄右宽） */
+.homepage-editor__dp-panel
+  .homepage-editor__choice-cards.is-composition
+  i[data-choice="main-led"]
+  b {
+  right: 34%;
+}
+.homepage-editor__dp-panel
+  .homepage-editor__choice-cards.is-composition
+  i[data-choice="main-led"]::after {
+  left: 70%;
+}
+.homepage-editor__dp-panel
+  .homepage-editor__choice-cards.is-composition
+  i[data-choice="detail-led"]
+  b {
+  right: 62%;
+}
+.homepage-editor__dp-panel
+  .homepage-editor__choice-cards.is-composition
+  i[data-choice="detail-led"]::after {
+  left: 42%;
 }

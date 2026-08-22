@@ -3,7 +3,6 @@
  * Phase 5: 模板系统
  */
 
-import type { Config } from "@puckeditor/core";
 
 /** 模板定义 */
 export interface TemplateDefinition {
@@ -22,26 +21,31 @@ export interface TemplateDefinition {
   version: number;
 }
 
-/** 珠宝首页模板 v2 — 品牌节奏:电影首屏 → 编辑分栏故事 → 留白宣言 → 商品精选 → 转化尾章 */
+/**
+ * 珠宝首页推荐结构 — 只提供品牌叙事与受控素材槽。
+ *
+ * 这里是新建草稿/安全 fixture，不是公开内容兜底。所有媒体保持为空，
+ * 由合同占位呈现构图，并由发布校验阻止在最终素材确认前上线。
+ */
 export const jewelryHomeTemplate: TemplateDefinition = {
   id: "jewelry-home-v2",
   name: "品牌形象首页",
   pageType: "home",
-  description: "七页画册式品牌首页：全屏封面 → 品牌宣言 → 当季专题 → 代表作品 → 匠心工艺 → 佩戴大片 → 预约尾章。",
+  description: "六段画册式品牌首页：品牌首屏 → 作品开场 → 代表作品 → 设计与工艺 → 珠宝定制 → 品牌收束。",
   puckData: {
     content: [
       {
         type: "首屏主视觉",
         props: {
           id: "hero-cover",
-          eyebrow: "THE HOUSE OF HAICHUAN",
+          eyebrow: "HAICHUAN JEWELRY",
           title: "海川珠宝",
-          subtitle: "以东方美学，铸当代珠宝",
+          subtitle: "让作品、材质与细节成为叙事本身",
           desktopImage: "",
           mobileImage: "",
-          actionText: "",
-          linkUrl: "",
-          targetType: "none",
+          actionText: "探索珠宝作品",
+          linkUrl: "/products",
+          targetType: "page",
           productId: 0,
           altText: "",
           alignment: "left",
@@ -55,10 +59,10 @@ export const jewelryHomeTemplate: TemplateDefinition = {
       {
         type: "文字横幅",
         props: {
-          id: "cover-letter",
-          eyebrow: "THE HOUSE OF HAICHUAN",
-          title: "珠宝，沿着时间生长",
-          body: "我们从材质的纹理、光的变化与佩戴的关系出发，让每一件作品在日常之中，慢慢形成属于佩戴者自己的意义。",
+          id: "works-overture",
+          eyebrow: "JEWELRY WORKS",
+          title: "珠宝作品",
+          body: "从整体轮廓到局部细节，以克制的视觉层次呈现作品。",
           buttonText: "",
           linkUrl: "",
           targetType: "none",
@@ -73,15 +77,15 @@ export const jewelryHomeTemplate: TemplateDefinition = {
       {
         type: "全屏出血图",
         props: {
-          id: "feature-collection",
+          id: "representative-works",
           image: "",
           mobileImage: "",
-          eyebrow: "COLLECTION",
-          title: "当季主题",
-          subtitle: "一段关于系列的诗意描述，留给作品自己说话。",
-          buttonText: "",
-          linkUrl: "",
-          targetType: "none",
+          eyebrow: "SELECTED WORKS",
+          title: "代表作品",
+          subtitle: "最终作品影像与作品事实将在素材确认后补充。",
+          buttonText: "进入珠宝作品",
+          linkUrl: "/products",
+          targetType: "page",
           productId: 0,
           template: "captionBelow",
           overlayPreset: "none",
@@ -94,34 +98,43 @@ export const jewelryHomeTemplate: TemplateDefinition = {
         },
       },
       {
-        type: "单品焦点推荐",
+        type: "双图海报",
         props: {
-          id: "hero-piece",
-          eyebrow: "SIGNATURE PIECE",
-          title: "代表作品",
-          summary: "为重要时刻挑选一件值得珍藏的珠宝，细节与光泽都经得起近距离凝视。",
+          id: "design-and-craft",
+          number: "01",
+          label: "DESIGN & CRAFT",
+          title: "设计与工艺",
+          description: "通过线条、比例与细节建立清晰的作品观看关系。",
+          mainImage: "",
+          detailImage: "",
+          actionText: "了解海川",
+          targetType: "page",
           productId: 0,
-          primaryText: "查看作品",
-          secondaryText: "预约鉴赏",
-          secondaryLink: "/contact",
-          layout: "imageLeft",
-          showPrice: false,
-          bgColor: "#FFFFFF",
+          linkUrl: "/about",
+          mainAltText: "",
+          detailAltText: "",
+          mainFocusX: 50,
+          mainFocusY: 50,
+          detailFocusX: 50,
+          detailFocusY: 50,
           locked: false,
         },
       },
       {
         type: "单图海报",
         props: {
-          id: "craft-section",
+          id: "custom-world",
           number: "02",
-          label: "CRAFTMANSHIP",
-          title: "匠心",
-          subtitle: "一凿一刻，皆是时光的痕迹。",
+          label: "BESPOKE JEWELRY",
+          title: "珠宝定制",
+          subtitle: "从灵感与需求出发，了解珠宝定制的咨询路径。",
           desktopImage: "",
           mobileImage: "",
-          linkUrl: "/about",
-          actionText: "了解海川",
+          linkUrl: "/custom",
+          actionText: "探索珠宝定制",
+          targetType: "page",
+          productId: 0,
+          altText: "",
           template: "leftImageRightText",
           desktopFocusX: 50,
           desktopFocusY: 50,
@@ -131,37 +144,19 @@ export const jewelryHomeTemplate: TemplateDefinition = {
         },
       },
       {
-        type: "佩戴灵感",
+        type: "文字横幅",
         props: {
-          id: "editorial-spread",
-          title: "",
-          subtitle: "",
-          image: "",
-          imageAlt: "珠宝佩戴大片",
-          productIds: [],
-          actionText: "",
+          id: "brand-colophon",
+          eyebrow: "HAICHUAN JEWELRY",
+          title: "以作品为先",
+          body: "让真实作品、材质信息与服务事实构成海川的品牌表达。",
+          buttonText: "",
           linkUrl: "",
           targetType: "none",
           productId: 0,
-          bgColor: "#FFFFFF",
-          locked: false,
-        },
-      },
-      {
-        type: "预约入口",
-        props: {
-          id: "colophon",
-          title: "预约鉴赏",
-          subtitle: "一对一珠宝顾问，为您安排专属服务",
-          buttonText: "预约鉴赏",
-          linkUrl: "/contact",
-          phone: "",
-          altText: "",
-          desktopFocusX: 50,
-          desktopFocusY: 50,
-          mobileFocusX: 50,
-          mobileFocusY: 50,
-          tone: "ivory",
+          template: "center",
+          bgImage: "",
+          spacing: "grand",
           bgColor: "#FFFFFF",
           locked: false,
         },
@@ -184,115 +179,28 @@ export const jewelryHomeTemplate: TemplateDefinition = {
     "视频区块",
     "预约入口",
   ],
-  version: 2,
+  version: 3,
 };
-
-/** 深拷贝并替换区块属性，保证不同页面模板可独立维护。 */
-function createHomeVariant(
-  id: string,
-  name: string,
-  description: string,
-  coverImage: string,
-  scenario: string,
-  tags: string[],
-  overrides: Record<string, Record<string, unknown>>,
-): TemplateDefinition {
-  const puckData = JSON.parse(JSON.stringify(jewelryHomeTemplate.puckData));
-  puckData.content = puckData.content.map((block: any) => ({
-    ...block,
-    props: {
-      ...block.props,
-      ...(overrides[block.type] ?? {}),
-    },
-  }));
-
-  return {
-    ...jewelryHomeTemplate,
-    id,
-    name,
-    description,
-    coverImage,
-    scenario,
-    tags,
-    puckData,
-  };
-}
 
 /** 首页整页方案：用于新建或替换首页，不与单个区块混在模板库里。 */
 const rawPageTemplates: TemplateDefinition[] = [
   {
     ...jewelryHomeTemplate,
-    coverImage: "/images/editorial/hero-gold-bangle-v1.webp",
-    scenario: "日常品牌官网",
+    coverImage: "/images/admin/templates/jewelry-home-wireframe.png",
+    scenario: "奢侈品品牌官网",
     tags: ["品牌形象", "推荐"],
   },
-  createHomeVariant(
-    "jewelry-product-guide-v1",
-    "商品导购首页",
-    "以品类入口与精选商品为主，帮助访客快速找到心仪款式。",
-    "/images/products/ATP1020素金正面.png",
-    "商品发现与选购",
-    ["商品导购", "高转化"],
-    {
-      "首屏主视觉": {
-        title: "探索心仪臻品",
-        subtitle: "从经典系列到当季新作，找到属于你的光芒",
-        actionText: "浏览全系商品",
-        linkUrl: "/products",
-      },
-      "单图海报": { label: "CURATED COLLECTION", title: "按系列探索" },
-      "产品展示行": { title: "本季推荐" },
-      "文字横幅": { title: "预约专属选购服务", buttonText: "联系顾问" },
-    },
-  ),
-  createHomeVariant(
-    "jewelry-new-launch-v1",
-    "新品发布首页",
-    "围绕一个新品系列展开，从首屏、故事到主推商品逐步建立期待。",
-    "/images/editorial/poster-gold-pendant-v1.webp",
-    "系列新品发布",
-    ["新品", "系列故事"],
-    {
-      "首屏主视觉": {
-        title: "2026 新作发布",
-        subtitle: "以东方意蕴，重释当代珠宝之美",
-        actionText: "探索新系列",
-      },
-      "单图海报": { label: "NEW COLLECTION", title: "新作灵感" },
-      "产品展示行": { title: "新作精选" },
-      "文字横幅": { eyebrow: "PRIVATE VIEWING", title: "预约新品鉴赏" },
-    },
-  ),
-  createHomeVariant(
-    "jewelry-campaign-v1",
-    "活动营销首页",
-    "突出活动利益点与行动入口，适合节日、限时礼遇和专题推广。",
-    "/images/editorial/poster-dragon-bangle-v1.webp",
-    "节日与限时活动",
-    ["活动", "节日", "高转化"],
-    {
-      "首屏主视觉": {
-        title: "主题活动信息待确认",
-        subtitle: "请在发布前填写已确认的活动内容与适用规则。",
-        actionText: "查看详情",
-      },
-      "单图海报": { label: "CAMPAIGN", title: "主题内容待确认" },
-      "产品展示行": { title: "主题推荐" },
-      "文字横幅": { eyebrow: "CAMPAIGN", title: "活动信息待确认", buttonText: "查看详情" },
-    },
-  ),
-
   /* ═══════ 六个品牌页面的推荐起点 ════════
    * 模块全部 locked:false；动态业务页的固定功能区由 editorPages 放在简短首屏之后，
    * 避免作品、筛选和预约任务被连续装饰模块推到页面末尾。 */
 
-  /** 关于海川：影像开场 → 品牌视角 → 可核验实践 → 作品 → 服务入口。 */
+  /** 关于海川：品牌宣言 → 审美与价值 → 工作方式 → 真实背景 → 联系入口。 */
   {
     id: "jewelry-about-v1",
-    name: "关于海川·信任叙事",
+    name: "关于海川·品牌叙事",
     pageType: "about",
     description:
-      "以品牌视角、设计实践和作品建立信任；资质与历史只在运营提供真实证据后添加。",
+      "以作品、审美与可核验背景建立品牌认知；不使用企业宣传栏、荣誉墙或未经确认的事实。",
     scenario: "品牌信任页",
     tags: ["品牌", "信任", "推荐"],
     puckData: {
@@ -302,7 +210,7 @@ const rawPageTemplates: TemplateDefinition[] = [
           props: {
             id: "about-hero",
             title: "关于海川",
-            subtitle: "在东方审美与当代工艺之间，守护每一份珍贵",
+            subtitle: "从作品、材质与工作方式出发，认识海川",
             desktopImage: "",
             mobileImage: "",
             actionText: "",
@@ -321,11 +229,11 @@ const rawPageTemplates: TemplateDefinition[] = [
         {
           type: "单图海报",
           props: {
-            id: "about-story",
+            id: "about-aesthetic",
             number: "01",
-            label: "OUR STORY",
-            title: "品牌故事",
-            subtitle: "从材质、比例与佩戴关系理解作品",
+            label: "AESTHETIC & VALUES",
+            title: "审美与价值",
+            subtitle: "以线条、比例、材质与佩戴关系组织作品表达",
             desktopImage: "",
             mobileImage: "",
             linkUrl: "",
@@ -341,11 +249,11 @@ const rawPageTemplates: TemplateDefinition[] = [
         {
           type: "双图海报",
           props: {
-            id: "about-craft",
+            id: "about-studio-craft",
             number: "02",
-            label: "CRAFTSMANSHIP",
-            title: "工艺与匠心",
-            description: "展示已经确认的设计、制作或质量信息，并为图片补充真实说明。",
+            label: "STUDIO & CRAFT",
+            title: "工作室与工艺",
+            description: "仅呈现已经确认的工作环境、制作过程与工艺事实，并为素材补充真实说明。",
             mainImage: "",
             detailImage: "",
             actionText: "",
@@ -382,18 +290,24 @@ const rawPageTemplates: TemplateDefinition[] = [
           },
         },
         {
-          type: "作品画廊",
+          type: "全屏出血图",
           props: {
-            id: "about-gallery",
-            title: "作品画廊",
-            subtitle: "以线条、比例与光，呈现海川的作品语言。",
-            items: [
-              { image: "", altText: "", caption: "FIG. 01 · 主视觉", link: "" },
-              { image: "", altText: "", caption: "", link: "" },
-              { image: "", altText: "", caption: "", link: "" },
-              { image: "", altText: "", caption: "FIG. 02 · 细节", link: "" },
-            ],
+            id: "about-verifiable-background",
+            image: "",
+            mobileImage: "",
+            eyebrow: "VERIFIABLE BACKGROUND",
+            title: "真实背景",
+            subtitle: "品牌背景、工作室影像与相关说明等待真实资料确认。",
+            buttonText: "",
+            linkUrl: "",
+            targetType: "none",
+            productId: 0,
+            template: "captionBelow",
+            overlayPreset: "none",
             bgColor: "#FFFFFF",
+            altText: "",
+            imageFocusX: 50,
+            imageFocusY: 50,
             locked: false,
           },
         },
@@ -401,8 +315,8 @@ const rawPageTemplates: TemplateDefinition[] = [
           type: "预约入口",
           props: {
             id: "about-appointment",
-            title: "走进海川",
-            subtitle: "一对一珠宝顾问，为您安排专属服务",
+            title: "联系海川",
+            subtitle: "如需了解作品或定制，可提交具体需求进入咨询流程。",
             buttonText: "预约咨询",
             linkUrl: "/contact",
             phone: "",
@@ -424,34 +338,36 @@ const rawPageTemplates: TemplateDefinition[] = [
       "单图海报",
       "双图海报",
       "全屏出血图",
-      "作品画廊",
       "文字横幅",
       "视频区块",
       "资质证书",
       "门店信息",
-      "单品焦点推荐",
       "预约入口",
     ],
-    version: 2,
+    version: 3,
   },
 
-  /** 珠宝作品：精简页头 → 商品作品 → 顾问服务入口。 */
+  /**
+   * 珠宝作品推荐结构 — 编辑式展陈，不承担搜索、筛选、排序或结果工具。
+   * 所有媒体与产品引用保持为空，由素材合同和发布校验阻止未确认内容上线。
+   */
   {
     id: "jewelry-products-v1",
-    name: "珠宝作品·视觉框架",
+    name: "珠宝作品·编辑展陈",
     pageType: "products",
     description:
-      "作品列表在简短页头后立即出现，避免编辑内容阻断浏览；尾部承接预约鉴赏。",
-    scenario: "作品浏览页",
-    tags: ["作品", "框架", "推荐"],
+      "六段画册式作品页：系列开场 → 重点作品 → 代表作品引用 → 细节关系 → 作品章节 → 选款中心收束。",
+    scenario: "作品展陈页",
+    tags: ["作品", "展陈", "编辑式"],
     puckData: {
       content: [
         {
           type: "首屏主视觉",
           props: {
             id: "products-hero",
+            eyebrow: "JEWELRY WORKS",
             title: "珠宝作品",
-            subtitle: "从经典系列到当季新作，发现心仪臻品",
+            subtitle: "以整体轮廓、佩戴关系与工艺细节展开作品叙事",
             desktopImage: "",
             mobileImage: "",
             actionText: "",
@@ -468,21 +384,94 @@ const rawPageTemplates: TemplateDefinition[] = [
           },
         },
         {
-          type: "预约入口",
+          type: "全屏出血图",
           props: {
-            id: "products-appointment",
-            title: "需要进一步了解作品？",
-            subtitle: "说明感兴趣的作品与佩戴需求，由顾问协助确认后续安排。",
-            buttonText: "预约咨询",
-            linkUrl: "/contact",
-            phone: "",
-            altText: "",
-            desktopFocusX: 50,
-            desktopFocusY: 50,
-            mobileFocusX: 50,
-            mobileFocusY: 50,
-            tone: "ivory",
+            id: "products-feature-spread",
+            image: "",
+            mobileImage: "",
+            eyebrow: "SELECTED WORK",
+            title: "重点作品",
+            subtitle: "最终作品影像与公开事实将在素材确认后补充。",
+            buttonText: "",
+            linkUrl: "",
+            targetType: "none",
+            productId: 0,
+            template: "captionBelow",
+            overlayPreset: "none",
             bgColor: "#FFFFFF",
+            altText: "",
+            imageFocusX: 50,
+            imageFocusY: 50,
+            locked: false,
+          },
+        },
+        {
+          type: "单品焦点推荐",
+          props: {
+            id: "products-signature-reference",
+            eyebrow: "SIGNATURE PIECE",
+            title: "代表作品",
+            summary: "选择真实公开作品后，此处仅保存稳定引用，名称、图片与经营事实由商品来源解析。",
+            productId: 0,
+            productCode: "",
+            primaryText: "查看作品",
+            secondaryText: "",
+            secondaryLink: "",
+            layout: "imageLeft",
+            showPrice: false,
+            bgColor: "#FFFFFF",
+            locked: false,
+          },
+        },
+        {
+          type: "双图海报",
+          props: {
+            id: "products-detail-relationship",
+            number: "01",
+            label: "FORM & DETAIL",
+            title: "轮廓与细节",
+            description: "用整体与局部的观看关系呈现作品，不以参数墙代替视觉叙事。",
+            mainImage: "",
+            detailImage: "",
+            actionText: "",
+            targetType: "none",
+            productId: 0,
+            linkUrl: "",
+            mainAltText: "",
+            detailAltText: "",
+            mainFocusX: 50,
+            mainFocusY: 50,
+            detailFocusX: 50,
+            detailFocusY: 50,
+            locked: false,
+          },
+        },
+        {
+          type: "作品画廊",
+          props: {
+            id: "products-editorial-gallery",
+            title: "作品章节",
+            subtitle: "在最终素材确认后，以一大一小与平衡不对称的节奏组织作品。",
+            items: [],
+            bgColor: "#FFFFFF",
+            locked: false,
+          },
+        },
+        {
+          type: "文字横幅",
+          props: {
+            id: "products-catalog-colophon",
+            eyebrow: "SELECTION CENTER",
+            title: "寻找具体款式",
+            body: "需要按关键词、货号或属性查找时，请进入选款中心。",
+            buttonText: "进入选款中心",
+            linkUrl: "/catalog",
+            targetType: "page",
+            productId: 0,
+            template: "center",
+            bgColor: "#FFFFFF",
+            textColor: "#181A1B",
+            spacing: "grand",
             locked: false,
           },
         },
@@ -499,10 +488,10 @@ const rawPageTemplates: TemplateDefinition[] = [
       "文字横幅",
       "预约入口",
     ],
-    version: 2,
+    version: 3,
   },
 
-  /** 选款中心：精简页头 → 筛选与结果 → 顾问协助。 */
+  /** 选款中心：精简品牌框架 → 唯一固定选款区 → 顾问协助。 */
   {
     id: "jewelry-catalog-v1",
     name: "选款中心·视觉框架",
@@ -514,24 +503,32 @@ const rawPageTemplates: TemplateDefinition[] = [
     puckData: {
       content: [
         {
-          type: "首屏主视觉",
+          type: "文字横幅",
           props: {
-            id: "catalog-hero",
+            id: "catalog-intro",
+            eyebrow: "SELECTION CENTER",
             title: "选款中心",
-            subtitle: "按风格、材质与场景，快速找到合适作品",
-            desktopImage: "",
-            mobileImage: "",
-            actionText: "",
+            body: "按关键词、货号与当前真实数据支持的属性查找作品。",
+            buttonText: "",
             linkUrl: "",
             targetType: "none",
             productId: 0,
-            altText: "",
-            alignment: "center",
-            desktopFocusX: 50,
-            desktopFocusY: 50,
-            mobileFocusX: 50,
-            mobileFocusY: 50,
+            template: "left",
+            bgColor: "#FFFFFF",
+            textColor: "#181A1B",
+            spacing: "compact",
             locked: false,
+          },
+        },
+        {
+          type: "业务功能区",
+          props: {
+            id: "catalog-business-region",
+            pageKey: "catalog",
+            title: "选款工具与商品结果",
+            description: "搜索、筛选、排序、快速查看、选款清单与询价由选款中心的真实业务逻辑驱动。",
+            items: "关键词/货号搜索|条件筛选|排序与结果|快速查看|选款清单|提交询价",
+            locked: true,
           },
         },
         {
@@ -557,25 +554,21 @@ const rawPageTemplates: TemplateDefinition[] = [
       root: { props: {} },
     },
     allowedBlockTypes: [
-      "首屏主视觉",
-      "轮播图",
-      "分类卡片",
       "全屏出血图",
-      "产品展示行",
-      "按场景选购",
+      "单图海报",
       "文字横幅",
       "预约入口",
     ],
-    version: 2,
+    version: 4,
   },
 
-  /** 珠宝定制：服务开场 → 服务范围 → 定制过程 → 经授权案例 → 咨询入口。 */
+  /** 珠宝定制：主视觉 → 理念 → 灵感与设计 → 材质与工艺 → 过程 → 案例槽 → 咨询。 */
   {
     id: "jewelry-custom-v1",
     name: "珠宝定制·服务叙事",
     pageType: "custom",
     description:
-      "用实际服务范围、确认过程与经授权案例建立信任，收束到定制咨询。",
+      "建立统一的高级定制世界；客户需求类型只在最终咨询流程中处理。",
     scenario: "定制服务页",
     tags: ["定制", "服务", "推荐"],
     puckData: {
@@ -585,7 +578,7 @@ const rawPageTemplates: TemplateDefinition[] = [
           props: {
             id: "custom-hero",
             title: "珠宝定制",
-            subtitle: "以专属设计，记录独一无二的重要时刻",
+            subtitle: "从灵感与需求出发，进入清晰而克制的定制沟通",
             desktopImage: "",
             mobileImage: "",
             actionText: "",
@@ -602,18 +595,62 @@ const rawPageTemplates: TemplateDefinition[] = [
           },
         },
         {
+          type: "文字横幅",
+          props: {
+            id: "custom-philosophy",
+            eyebrow: "BESPOKE PHILOSOPHY",
+            title: "定制理念",
+            body: "围绕已经确认的需求、材质与设计方向展开，不预设未经核实的服务承诺。",
+            buttonText: "",
+            linkUrl: "",
+            targetType: "none",
+            productId: 0,
+            template: "center",
+            bgColor: "#FFFFFF",
+            textColor: "#181A1B",
+            spacing: "spacious",
+            locked: false,
+          },
+        },
+        {
+          type: "双图海报",
+          props: {
+            id: "custom-inspiration-design",
+            number: "01",
+            label: "INSPIRATION & DESIGN",
+            title: "灵感与设计",
+            description: "通过整体构图与局部细节承接灵感、轮廓和佩戴关系。",
+            mainImage: "",
+            detailImage: "",
+            actionText: "",
+            targetType: "none",
+            productId: 0,
+            linkUrl: "",
+            mainAltText: "",
+            detailAltText: "",
+            mainFocusX: 50,
+            mainFocusY: 50,
+            detailFocusX: 50,
+            detailFocusY: 50,
+            locked: false,
+          },
+        },
+        {
           type: "单图海报",
           props: {
-            id: "custom-services",
-            number: "01",
-            label: "BESPOKE SERVICES",
-            title: "三种定制方式",
-            subtitle: "专属设计 · 珠宝改款 · 尺寸定制",
+            id: "custom-material-craft",
+            number: "02",
+            label: "MATERIAL & CRAFT",
+            title: "材质与工艺",
+            subtitle: "最终材质、工艺与服务范围以真实资料和咨询确认结果为准。",
             desktopImage: "",
             mobileImage: "",
             linkUrl: "",
             actionText: "",
-            template: "leftTextRightImage",
+            targetType: "none",
+            productId: 0,
+            altText: "",
+            template: "leftImageRightText",
             desktopFocusX: 50,
             desktopFocusY: 50,
             mobileFocusX: 50,
@@ -625,34 +662,14 @@ const rawPageTemplates: TemplateDefinition[] = [
           type: "定制流程",
           props: {
             id: "custom-journey",
-            title: "定制旅程",
-            subtitle: "一件珠宝如何为一个人诞生。",
+            title: "定制过程",
+            subtitle: "以下步骤为内容结构草稿，发布前需按真实业务流程确认。",
             steps: [
-              { number: "01", en: "DISCOVERY", name: "需求沟通", desc: "说明佩戴场景、审美偏好与已有材料,共同梳理需求。", image: "" },
-              { number: "02", en: "DESIGN", name: "方案确认", desc: "确认设计范围、材质建议、调整方式与相关安排。", image: "" },
-              { number: "03", en: "MAKING", name: "制作沟通", desc: "按已确认方案推进制作与质量检查,同步必要进度。", image: "" },
-              { number: "04", en: "DELIVERY", name: "交付说明", desc: "确认作品、相关资料、交付方式与后续服务说明。", image: "" },
+              { number: "01", en: "DISCOVERY", name: "需求沟通", desc: "沟通目标与已知条件，具体内容等待业务确认。", image: "" },
+              { number: "02", en: "DESIGN", name: "方案确认", desc: "确认设计与材质方向，具体内容等待业务确认。", image: "" },
+              { number: "03", en: "MAKING", name: "制作安排", desc: "按确认结果安排后续，具体内容等待业务确认。", image: "" },
+              { number: "04", en: "COMPLETION", name: "完成确认", desc: "核对作品与相关说明，具体内容等待业务确认。", image: "" },
             ],
-            bgColor: "#FFFFFF",
-            locked: false,
-          },
-        },
-        {
-          type: "改款对比",
-          props: {
-            id: "custom-before-after",
-            title: "旧物新生",
-            subtitle: "旧物的情感,以新的形态延续。",
-            beforeImage: "",
-            afterImage: "",
-            beforeLabel: "改款前",
-            afterLabel: "改款后",
-            beforeAltText: "",
-            afterAltText: "",
-            beforeFocusX: 50,
-            beforeFocusY: 50,
-            afterFocusX: 50,
-            afterFocusY: 50,
             bgColor: "#FFFFFF",
             locked: false,
           },
@@ -661,14 +678,9 @@ const rawPageTemplates: TemplateDefinition[] = [
           type: "作品画廊",
           props: {
             id: "custom-cases-gallery",
-            title: "定制案例画廊",
-            subtitle: "真实案例需取得客户授权后展示，请在发布前确认素材授权。",
-            items: [
-              { image: "", altText: "", caption: "FIG. 01 · 定制案例", link: "" },
-              { image: "", altText: "", caption: "", link: "" },
-              { image: "", altText: "", caption: "", link: "" },
-              { image: "", altText: "", caption: "FIG. 02 · 细节", link: "" },
-            ],
+            title: "完成作品",
+            subtitle: "仅展示已确认且具备使用授权的真实案例。",
+            items: [],
             bgColor: "#FFFFFF",
             locked: false,
           },
@@ -678,7 +690,7 @@ const rawPageTemplates: TemplateDefinition[] = [
           props: {
             id: "custom-appointment",
             title: "预约定制咨询",
-            subtitle: "与专属顾问沟通您的想法",
+            subtitle: "提交已知需求，具体服务范围与安排以实际沟通为准。",
             buttonText: "开始咨询",
             linkUrl: "/contact",
             phone: "",
@@ -708,7 +720,7 @@ const rawPageTemplates: TemplateDefinition[] = [
       "视频区块",
       "预约入口",
     ],
-    version: 2,
+    version: 3,
   },
 
   /** 预约咨询：简洁页头 → 预约表单与联系信息。 */
@@ -727,7 +739,7 @@ const rawPageTemplates: TemplateDefinition[] = [
           props: {
             id: "contact-hero",
             title: "预约咨询",
-            subtitle: "一对一珠宝顾问，为您安排专属服务",
+            subtitle: "提交作品、选款或定制相关需求，具体安排以实际沟通为准。",
             desktopImage: "",
             mobileImage: "",
             actionText: "",
@@ -754,7 +766,7 @@ const rawPageTemplates: TemplateDefinition[] = [
       "真实评价与实拍",
       "全屏出血图",
     ],
-    version: 2,
+    version: 3,
   },
 ];
 
@@ -811,8 +823,3 @@ function asBlankStructuralTemplate(template: TemplateDefinition): TemplateDefini
 /** 全部可用模板 */
 export const pageTemplates: TemplateDefinition[] = rawPageTemplates.map(asBlankStructuralTemplate);
 export const templates: TemplateDefinition[] = pageTemplates;
-
-/** 根据 id 获取模板 */
-export function getTemplate(id: string): TemplateDefinition | undefined {
-  return templates.find((t) => t.id === id);
-}

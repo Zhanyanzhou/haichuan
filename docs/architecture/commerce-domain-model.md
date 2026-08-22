@@ -1,6 +1,8 @@
 # 海川珠宝 — 电商扩展领域模型设计
 
 > HC-COMMERCE-07 | 2026-08-06
+>
+> ⚠️ **历史规划，已被当前业务契约取代（2026-08-23）**：本页的阶段模型、`Product.price`“售价”和“不接真实网关”等描述不再是现行规则。当前只认 `docs/PRODUCT_DATA_CONTRACT.md`、`docs/DECISIONS.md` D.2 / D.18、Prisma Schema 与服务端实现；本文不得用于新增字段、迁移、导入或交易解冻。
 
 ---
 
@@ -9,7 +11,7 @@
 | 能力 | 状态 |
 |---|---|
 | Product.salesMode | ✅ SalesMode 枚举 (5 值) |
-| Product.price | ✅ Decimal 售价 |
+| Product.price | ⚠️ 历史描述；当前为有效 SKU 最低价派生缓存 |
 | Product.goldWeight | ✅ 金重 |
 | ProductSKU | ✅ 多规格 |
 | ProductImage | ✅ 三视图 |

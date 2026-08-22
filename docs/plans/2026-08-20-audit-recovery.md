@@ -1,5 +1,8 @@
 # Audit Recovery Implementation Plan
 
+> [!CAUTION]
+> **2026-08-20 历史实施计划，现已失效，禁止按正文执行。** 下文任务、文件、顺序、断言和命令只保留为当时证据；不得覆盖当前 `AGENTS.md`、`WORKFLOW.md`、机器合同、已批准决策或当前工作树。任何恢复工作必须重新取证并由新的明确任务授权。
+>
 > **For agentic workers:** Execute this plan inline in small, independently verified tasks. Git write operations are forbidden for this recovery batch.
 
 **Goal:** Resolve the audit's in-flight direction conflicts and make page-builder publishing safe, intelligible and brand-consistent.

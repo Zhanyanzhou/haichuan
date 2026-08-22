@@ -3,15 +3,16 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { usePageMetaStore } from "@/store/pageMetaStore";
-import { getEditorPageByPath } from "@/page-builder/config/editorPages";
+import {
+  getEditorPage,
+  getEditorPageByPath,
+  isEditorPageKey,
+  resolvePageHeaderMode,
+} from "@/page-builder/config/editorPages";
 import PublishedPageDecoration from "@/page-builder/runtime/PublishedPageDecoration";
+import { usePublishedPageDocument } from "@/page-builder/runtime/usePublishedPageDocument";
 import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
-
-/**
- * 页脚 ICP 备案号：国内公网上线前完成备案后填入（格式如"京ICP备2026XXXXXX号-1"），
- * 未填写时不渲染该行——不展示占位假号。公安备案（公安网备）如需同展示，在此扩展。
- */
-const FOOTER_ICP_NUMBER = "";
+import StorefrontFooter from "./StorefrontFooter";
 
 /** 幂等写入/更新 <meta> 标签（按 name 或 property 选择）。 */
 function upsertMeta(attr: "name" | "property", key: string, content: string) {
@@ -127,9 +128,17 @@ const AccountIcon = () => (
 
 export default function PublicLayout() {
   const location = useLocation();
-  const isHome = location.pathname === "/";
-  const pageDefinition = getEditorPageByPath(location.pathname);
-  const decorationPage = isHome ? undefined : pageDefinition;
+  const previewPageKey = location.pathname.match(/^\/preview\/([^/]+)$/)?.[1];
+  const previewPage = isEditorPageKey(previewPageKey)
+    ? getEditorPage(previewPageKey)
+    : undefined;
+  const isHome = location.pathname === "/" || previewPage?.key === "home";
+  const pageDefinition = getEditorPageByPath(location.pathname) ?? previewPage;
+  const publishedHeaderDocument = usePublishedPageDocument(
+    previewPage ? undefined : pageDefinition?.key,
+  );
+  // 预览页由 PagePreview 读取草稿；不能再套一层公开发布文档装饰器。
+  const decorationPage = previewPage ? undefined : isHome ? undefined : pageDefinition;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const [scrolled, setScrolled] = useState(false);
@@ -220,31 +229,48 @@ export default function PublicLayout() {
     };
   }, [isHome]);
 
-  // SEO：前台公开页确保可索引（与 AdminLayout 的 noindex 互补，防御性）
+  // SEO：公开页可索引；受保护的草稿预览必须保持 noindex。
   useEffect(() => {
+    const content = previewPage ? "noindex, nofollow" : "index, follow";
     const tag = document.head.querySelector<HTMLMetaElement>(
       'meta[name="robots"]',
     );
     if (tag) {
-      tag.setAttribute("content", "index, follow");
+      tag.setAttribute("content", content);
       return;
     }
 
     const robots = document.createElement("meta");
     robots.setAttribute("name", "robots");
-    robots.setAttribute("content", "index, follow");
+    robots.setAttribute("content", content);
     document.head.appendChild(robots);
-  }, [location.pathname]);
+  }, [location.pathname, previewPage]);
 
-  const isOverlayHeader = pageDefinition?.headerMode === "overlay-light";
+  const resolvedHeaderMode = previewPage
+    ? previewPage.headerMode
+    : pageDefinition && publishedHeaderDocument.status === "published"
+      ? resolvePageHeaderMode(
+          pageDefinition.key,
+          publishedHeaderDocument.pageDocument?.puckData,
+        )
+      : "solid";
+  const isOverlayHeader = resolvedHeaderMode === "overlay-light";
   const isTransparent = isOverlayHeader && !scrolled && !menuOpen;
   const headerBg = isTransparent ? "transparent" : "rgba(255,255,255,0.92)";
   const headerBorder = isTransparent ? "transparent" : "rgba(24,26,27,0.06)";
 
+  const handleBrandHomeClick = () => {
+    // Link 在首页内重复导航时 pathname 不变，不会再次触发路由回顶副作用。
+    // 品牌字标始终承担“返回首页起点”的语义，因此同页点击也要明确回到顶部。
+    if (isHome) {
+      window.scrollTo({ top: 0, behavior: "auto" });
+    }
+  };
+
   return (
     <div
       className={isHome ? "editorial-shell" : `site-shell${isOverlayHeader ? " site-shell--overlay" : ""}`}
-      data-page-header-mode={pageDefinition?.headerMode || "solid"}
+      data-page-header-mode={resolvedHeaderMode}
     >
       <a
         href="#main-content"
@@ -269,6 +295,7 @@ export default function PublicLayout() {
             to="/"
             className="site-header__brand"
             aria-label={`${siteName}首页`}
+            onClick={handleBrandHomeClick}
           >
             {logoUrl && (
               <img
@@ -308,12 +335,12 @@ export default function PublicLayout() {
             </Link>
             <Link
               to="/customer"
-              aria-label="我的账号"
+              aria-label="我的账户"
               className="site-header__nav-item"
             >
               <AccountIcon />
               <span className="site-header__nav-label hidden sm:inline">
-                我的账号
+                我的账户
               </span>
             </Link>
           </div>
@@ -346,7 +373,7 @@ export default function PublicLayout() {
           )}
         </button>
         <Link
-          to="/search"
+          to="/catalog"
           aria-label="搜索"
           className="site-header__nav-item"
         >
@@ -368,6 +395,7 @@ export default function PublicLayout() {
       {/* ═══════ Main ═══════ */}
       <main
         id="main-content"
+        tabIndex={-1}
         className={isHome ? "editorial-main" : `site-main${isOverlayHeader ? " site-main--overlay" : ""}`}
       >
         <PublishedPageDecoration
@@ -379,44 +407,7 @@ export default function PublicLayout() {
         </PublishedPageDecoration>
       </main>
 
-      {/* ═══════ Footer ═══════ */}
-      <footer className="site-footer">
-        <div className="site-footer__inner">
-          <div className="site-footer__service">
-            <p className="site-footer__service-label">PRIVATE APPOINTMENT</p>
-            <Link to="/contact" className="site-footer__service-link">
-              <span>预约私人珠宝顾问</span>
-              <span aria-hidden="true">→</span>
-            </Link>
-          </div>
-
-          <nav className="site-footer__links" aria-label="页脚导航">
-            <Link to="/products">珠宝作品</Link>
-            <Link to="/custom">定制服务</Link>
-            <Link to="/about">品牌故事</Link>
-            <Link to="/privacy">隐私说明</Link>
-            <Link to="/business-info">经营主体信息</Link>
-          </nav>
-
-          <div className="site-footer__signature">
-            <span className="site-footer__brandmark">HAICHUAN JEWELRY</span>
-            <span aria-hidden="true" className="site-footer__signature-divider" />
-            <span>© {new Date().getFullYear()} {siteName}</span>
-          </div>
-
-          {/* 国内公网上线前完成 ICP 备案后填入真实号码；空值时不渲染。 */}
-          {FOOTER_ICP_NUMBER && (
-            <a
-              href="https://beian.miit.gov.cn/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="site-footer__filing"
-            >
-              {FOOTER_ICP_NUMBER}
-            </a>
-          )}
-        </div>
-      </footer>
+      <StorefrontFooter siteName={siteName} />
     </div>
   );
 }

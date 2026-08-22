@@ -1,5 +1,8 @@
 # 给 Codex 的修复执行指令（基于 2026-08-20 全产品深度审计）
 
+> [!CAUTION]
+> **历史旧审计会话指令，现已失效，严禁执行。** 下文批次、文件范围、命令、分支、运行状态和“必须”措辞只保留为当时证据，不得覆盖当前 `AGENTS.md` / `WORKFLOW.md`，不得据此修改代码、执行 Git、迁移、数据或环境操作，也不得据此宣称当前验收通过。当前事实以 `docs/CURRENT_STATE.md`、现行 acceptance 矩阵和本轮新鲜验证为准。
+
 > 本指令配套 `AUDIT.md`（同目录，含完整证据、截图索引与行号）。先读 `AUDIT.md` §0/§3/§5 再动手。
 > 项目规则以 `AGENTS.md`、`PROJECT_RULES.md`、`WORKFLOW.md`、`docs/PROJECT_GUARDRAILS.md` 为准，本指令不重复、不覆盖。
 

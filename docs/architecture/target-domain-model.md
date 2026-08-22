@@ -1,5 +1,8 @@
 # 海川珠宝 — 目标领域模型规划 (Target Domain Model)
 
+> [!CAUTION]
+> **2026-08-06 历史架构提案，现已失效，禁止据此实施。** 下文模型、字段、关系与迁移顺序不构成当前产品决定、Schema 修改或 migration 授权。当前权限只认 `AGENTS.md` / `WORKFLOW.md`；当前实现与批准目标查 `docs/CURRENT_STATE.md` 及现行决策文档，数据库与权限变更必须重新审校并单独获批。
+
 > 生成日期：2026-08-06 | 阶段：HC-PROGRAM-00
 
 ---

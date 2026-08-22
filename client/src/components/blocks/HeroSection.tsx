@@ -13,16 +13,22 @@ import {
   ContentTemplateLayoutStyles,
   templateLayoutVars,
 } from "@/page-builder/layout/contentTemplateLayouts";
+import { hasRenderableImageDimensions } from "@/utils/imageLoad";
 
 interface Props {
   module?: PageModule;
   editMode?: boolean;
+  headingLevel?: 1 | 2;
 }
 
 /**
  * Hero 模块 — 全屏首屏主视觉
  */
-export default function HeroSection({ module, editMode }: Props) {
+export default function HeroSection({
+  module,
+  editMode,
+  headingLevel = 1,
+}: Props) {
   const rm = useReducedMotion();
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
@@ -49,6 +55,7 @@ export default function HeroSection({ module, editMode }: Props) {
   const title = typeof c?.title === "string" ? c.title : "";
   const subtitle = typeof c?.subtitle === "string" ? c.subtitle : "";
   const actionText = typeof c?.actionText === "string" ? c.actionText : "";
+  const Heading = headingLevel === 2 ? "h2" : "h1";
   const linkUrl = typeof c?.linkUrl === "string" ? c.linkUrl : "";
   const targetUrl = resolveLinkTargetUrl({
     targetType: c?.targetType,
@@ -120,7 +127,7 @@ export default function HeroSection({ module, editMode }: Props) {
         data-content-role-desktop="desktopImage"
         data-content-role-mobile="mobileImage"
       >
-        {desktopImg ? (
+        {desktopImg && !imageFailed ? (
           <picture data-editor-field="desktopImage mobileImage">
             <source
               media={RESPONSIVE_CANVAS.mobileMediaQuery}
@@ -131,7 +138,11 @@ export default function HeroSection({ module, editMode }: Props) {
               alt={c?.altText || title}
               loading="eager"
               decoding="async"
-              onLoad={() => setImageLoaded(true)}
+              onLoad={(event) => {
+                const renderable = hasRenderableImageDimensions(event.currentTarget);
+                setImageFailed(!renderable);
+                setImageLoaded(true);
+              }}
               onError={() => {
                 setImageFailed(true);
                 setImageLoaded(true);
@@ -145,19 +156,24 @@ export default function HeroSection({ module, editMode }: Props) {
               }}
             />
           </picture>
-        ) : (
+        ) : !desktopImg ? (
           <BlockEmptyPlaceholder
+            assetSlots={[
+              { templateKey: "hero", roleId: "desktopImage" },
+              { templateKey: "hero", roleId: "mobileImage" },
+            ]}
             hint={CONTENT_TEMPLATE_LAYOUTS.hero.displayName}
             spec={IMAGE_SPECS.hero.desktop.label}
+            tone="dark"
             height="100%"
           />
-        )}
+        ) : null}
         {imageFailed ? (
           <div
             className="absolute inset-0 grid place-items-center text-xs tracking-[.08em]"
             role="img"
             aria-label={c?.altText || "主视觉图片暂不可用"}
-            style={{ color: "#5F6568", background: "#F4F5F5" }}
+            style={{ color: "#DDE1E2", background: "#181A1B" }}
           >
             主视觉图片暂不可用
           </div>
@@ -191,7 +207,7 @@ export default function HeroSection({ module, editMode }: Props) {
               </p>
             ) : null}
             {title || editMode ? (
-              <h1
+              <Heading
                 data-editor-field="title"
                 data-hc-editor-placeholder={!title && editMode ? "true" : undefined}
                 className={`hc-content-template__title hc-hero__reveal whitespace-pre-line${!title && editMode ? " hc-visual-empty-role" : ""}`}
@@ -206,7 +222,7 @@ export default function HeroSection({ module, editMode }: Props) {
                 }}
               >
                 {title || "点击添加主标题"}
-              </h1>
+              </Heading>
             ) : null}
             {subtitle || editMode ? (
               <p

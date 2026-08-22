@@ -4,8 +4,8 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
  * 手动录入金价 DTO
- *金价会触发全店金价类商品的自动调价（goldWeight × price × 系数 + 工费），
- * 因此必须在入口处校验范围，防止 0 / 负数 / 非数字把整店价格改乱。
+ * 仅记录金价事实，不会改写已发布商品的固定 SKU 售价。
+ * 入口仍校验合理范围，避免无效行情污染金价记录。
  */
 export class ManualGoldPriceDto {
   @ApiProperty({ description: '金价（元/克）', example: 485.6 })

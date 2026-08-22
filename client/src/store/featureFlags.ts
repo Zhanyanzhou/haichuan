@@ -67,6 +67,20 @@ export function useCommerceEnabled(): boolean {
   return flags?.commerceEnabled ?? false;
 }
 
+/** 交易页面读取完整能力集合；加载失败仍返回安全关闭值。 */
+export function useCommerceCapabilities(): {
+  flags: CommerceFlags | null;
+  loading: boolean;
+} {
+  const flags = useCommerceFlags((s) => s.flags);
+  const loading = useCommerceFlags((s) => s.loading);
+  const load = useCommerceFlags((s) => s.load);
+  useEffect(() => {
+    if (!flags && !loading) void load();
+  }, [flags, loading, load]);
+  return { flags, loading };
+}
+
 /** 统一规则：全站交易开关开启且商品为“直接购买”时，才允许加购/下单。 */
 export function isCommerceAllowed(
   salesMode: string | undefined,

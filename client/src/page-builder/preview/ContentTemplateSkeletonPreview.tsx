@@ -108,7 +108,7 @@ function Quote({ zone, frame, inverse }: { zone: ContentTemplatePreviewZone; fra
   return <g data-preview-role="quote"><text x={box.x} y={box.y + 20} fill={PREVIEW_TOKENS.accent} fontSize="24" fontFamily="serif">“</text><rect x={box.x + 17} y={box.y + 14} width={Math.max(20, box.width - 22)} height="4" rx="2" fill={ink} /><rect x={box.x + 4} y={box.y + 29} width={Math.max(18, box.width - 30)} height="4" rx="2" fill={inverse ? "rgba(247,248,248,.42)" : PREVIEW_TOKENS.line} /></g>;
 }
 
-function Eyebrow({ zone, frame, inverse }: { zone: ContentTemplatePreviewZone; frame: Metrics; inverse: boolean }) {
+function Eyebrow({ zone, frame }: { zone: ContentTemplatePreviewZone; frame: Metrics; inverse: boolean }) {
   const box = rect(zone, frame);
   return <g data-preview-role="eyebrow"><rect x={box.x} y={box.y + 2} width={Math.max(16, box.width * .55)} height="3" rx="1.5" fill={PREVIEW_TOKENS.accent} /></g>;
 }

@@ -130,7 +130,8 @@ test("Catalog 使用服务端分页并保持 URL、快速预览与跨页选款�
   await expect(page.getByRole("heading", { name: "作品 01" })).toBeVisible();
   await expect(page.getByRole("button", { name: "2", exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "快速预览 作品 01" }).press("Enter");
+  const quickViewTrigger = page.getByRole("button", { name: "快速预览 作品 01" });
+  await quickViewTrigger.press("Enter");
   const quickView = page.getByRole("dialog");
   await expect(quickView).toBeVisible();
   await expect(quickView).toHaveAccessibleName("HC-TEST-001");
@@ -139,6 +140,7 @@ test("Catalog 使用服务端分页并保持 URL、快速预览与跨页选款�
   await expect(quickView.getByText("作品 01", { exact: true })).toBeVisible();
   await quickView.getByRole("button", { name: "+ 加入选款" }).click();
   await page.keyboard.press("Escape");
+  await expect(quickViewTrigger).toBeFocused();
   await expect(page.getByText("已选 1 款")).toBeVisible();
 
   const secondRequest = page.waitForRequest((request) => {
@@ -186,38 +188,17 @@ test("Catalog 将现有 URL 筛选翻译为服务端参数而不复用商品 ids
   await expect(page).not.toHaveURL(/material=/);
 });
 
-test("Search 使用 24 条服务端分页并可加载更多", async ({ page }) => {
-  await page.goto("/search");
-  const input = page.getByPlaceholder("搜索作品名称、货号、品类或系列");
-  const firstSearch = page.waitForRequest((request) => {
-    const url = new URL(request.url());
-    return url.searchParams.get("keyword") === "作品" && url.searchParams.get("page") === "1";
-  });
-  await input.fill("作品");
-  const firstUrl = new URL((await firstSearch).url());
-  expect(firstUrl.searchParams.get("pageSize")).toBe("24");
-  await expect(page.getByText("共找到 40 件作品")).toBeVisible();
-  await expect(page.getByRole("button", { name: "加载更多" })).toBeVisible();
-
-  const secondSearch = page.waitForRequest((request) => {
-    const url = new URL(request.url());
-    return url.searchParams.get("keyword") === "作品" && url.searchParams.get("page") === "2";
-  });
-  await page.getByRole("button", { name: "加载更多" }).click();
-  await secondSearch;
-  await expect(page.getByRole("link", { name: /作品 40/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "加载更多" })).toHaveCount(0);
-});
-
-test("Search 的空态、错误态与 390px 溢出状态完整", async ({ page }) => {
+test("Catalog 搜索的空态、错误态与 390px 溢出状态完整", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/search");
-  const input = page.getByPlaceholder("搜索作品名称、货号、品类或系列");
+  await page.goto("/catalog");
+  const input = page.getByRole("search").getByRole("combobox", { name: "关键词或货号" });
   await input.fill("无结果");
-  await expect(page.getByText("暂未找到符合条件的珠宝作品")).toBeVisible();
+  await input.press("Enter");
+  await expect(page.getByText("没有符合当前筛选的作品")).toBeVisible();
 
   await input.fill("触发错误");
-  await expect(page.getByText("搜索结果暂时无法加载")).toBeVisible();
+  await input.press("Enter");
+  await expect(page.getByText("作品目录暂时无法加载")).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(
@@ -225,4 +206,56 @@ test("Search 的空态、错误态与 390px 溢出状态完整", async ({ page }
       ),
     )
     .toBe(true);
+});
+
+test("Catalog 在 390px 保持 4:5 媒体、可用对话框宽度并恢复触发焦点", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/catalog");
+
+  const search = page.getByRole("combobox", { name: "关键词或货号" });
+  await search.fill("作品");
+  await expect(search).toHaveAttribute("aria-expanded", "true");
+  await expect(search).toHaveAttribute("aria-controls");
+  const listboxId = await search.getAttribute("aria-controls");
+  expect(listboxId).toBeTruthy();
+  await expect(page.getByRole("listbox")).toHaveAttribute("id", listboxId!);
+  await search.fill("");
+  await search.blur();
+
+  const productMedia = page.locator("[data-catalog-product-media]").first();
+  const productMediaBox = await productMedia.boundingBox();
+  expect(productMediaBox).not.toBeNull();
+  expect(productMediaBox!.width / productMediaBox!.height).toBeCloseTo(0.8, 1);
+
+  const quickTrigger = page.getByRole("button", { name: "快速预览 作品 01" });
+  await quickTrigger.click();
+  const quickDialog = page.getByRole("dialog", { name: "HC-TEST-001" });
+  await expect(quickDialog).toBeVisible();
+  const quickDialogBox = await quickDialog.boundingBox();
+  const quickMediaBox = await quickDialog.locator("[data-catalog-quick-media]").boundingBox();
+  expect(quickDialogBox).not.toBeNull();
+  expect(quickDialogBox!.width).toBeGreaterThanOrEqual(350);
+  expect(quickDialogBox!.x + quickDialogBox!.width).toBeLessThanOrEqual(390);
+  expect(quickMediaBox).not.toBeNull();
+  expect(quickMediaBox!.width / quickMediaBox!.height).toBeCloseTo(0.8, 1);
+  await page.keyboard.press("Escape");
+  await expect(quickTrigger).toBeFocused();
+
+  const filterTrigger = page.getByRole("button", { name: "更多筛选" });
+  await filterTrigger.click();
+  const filterDialog = page.getByRole("dialog", { name: "更多筛选" });
+  await expect(filterDialog).toBeVisible();
+  await expect(filterDialog.getByRole("button", { name: "关闭筛选" })).toBeFocused();
+  const filterDialogBox = await filterDialog.boundingBox();
+  expect(filterDialogBox).not.toBeNull();
+  expect(filterDialogBox!.width).toBeGreaterThanOrEqual(350);
+  expect(filterDialogBox!.x + filterDialogBox!.width).toBeLessThanOrEqual(390);
+  await page.keyboard.press("Escape");
+  await expect(filterTrigger).toBeFocused();
+
+  for (const control of [quickTrigger, filterTrigger]) {
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
 });

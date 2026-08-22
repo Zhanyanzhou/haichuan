@@ -52,4 +52,4 @@ docs/     项目文档
 
 ## Feature Flags
 
-服务端 `CUSTOMER_COMMERCE_ENABLED` 是交易开关的运行时单一来源；Docker Compose 当前默认传入 `true`，后端变量缺失或无效时关闭，前端读取失败时也回退全关。该机制证明交易能力可受控启停，不证明生产环境、商户凭据或真实支付已经验证。详见 `docs/CURRENT_STATE.md`。
+服务端 `CUSTOMER_COMMERCE_ENABLED` 是客户交易开关的运行时单一来源；Docker Compose 与 `.env.example` 当前均以 `false` 为安全默认，变量缺失或无效时关闭，前端读取失败时也回退全关。后台与其他新网关交易入口另受 `PAYMENT_GATEWAY_TRANSACTIONS_ENABLED` 服务端总门禁约束，该变量同样只有精确 `true` 才放行；当前只完成代码级安全接线，尚未获批真实资金验收。代码存在或页面可访问不代表交易、支付或生产上线已经获批；详见 `docs/CURRENT_STATE.md` 与 `docs/DECISIONS.md` D.2。

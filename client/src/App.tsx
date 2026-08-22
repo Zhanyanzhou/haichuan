@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Suspense, lazy, useEffect } from "react";
 import PublicLayout from "@/components/layout/PublicLayout";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
@@ -24,7 +24,6 @@ const HomePreview = lazy(() =>
 const PagePreview = lazy(() =>
   import("@/pages/public/Home").then((m) => ({ default: m.PagePreview })),
 );
-const ProductList = lazy(() => import("@/pages/public/ProductList"));
 const ProductDetail = lazy(() => import("@/pages/public/ProductDetail"));
 const CustomerCenter = lazy(() => import("@/pages/public/CustomerCenter"));
 const ForgotPassword = lazy(
@@ -42,10 +41,6 @@ const Cart = lazy(() => import("@/pages/public/Cart"));
 const Checkout = lazy(() => import("@/pages/public/Checkout"));
 const Catalog = lazy(() => import("@/pages/public/Catalog"));
 const Custom = lazy(() => import("@/pages/public/Custom"));
-const Search = lazy(() => import("@/pages/public/Search"));
-const PartnerApplication = lazy(
-  () => import("@/pages/public/PartnerApplication"),
-);
 // dev-only 模板台架:真实组件的占位状态设计视图(非公开页面)
 const TemplateGallery = lazy(() => import("@/pages/dev/TemplateGallery"));
 
@@ -90,7 +85,7 @@ const Loading = () => (
     aria-live="polite"
   >
     <span
-      className="h-10 w-10 animate-spin rounded-full border-4 border-brand-line border-t-brand-gold"
+      className="h-10 w-10 animate-spin rounded-full border-4 border-brand-line border-t-brand-text"
       aria-hidden="true"
     />
     <span className="sr-only">页面加载中</span>
@@ -101,7 +96,13 @@ const Loading = () => (
  * 交易开关关闭或读取失败时，直接访问旧链接也不能进入购物车/结算页面。
  * 服务端 CustomerCommerceGuard 仍是写操作的最终保护；本组件只负责访客路径降级。
  */
-const CommerceRoute = ({ children }: { children: React.ReactNode }) => {
+const CommerceRoute = ({
+  children,
+  capability,
+}: {
+  children: React.ReactNode;
+  capability: "cart" | "checkout";
+}) => {
   const flags = useCommerceFlags((state) => state.flags);
   const loading = useCommerceFlags((state) => state.loading);
   const load = useCommerceFlags((state) => state.load);
@@ -111,7 +112,10 @@ const CommerceRoute = ({ children }: { children: React.ReactNode }) => {
   }, [flags, loading, load]);
 
   if (!flags) return <Loading />;
-  if (!flags.commerceEnabled) return <Navigate to="/contact" replace />;
+  const allowed = capability === "cart"
+    ? flags.commerceEnabled && flags.cartEnabled
+    : flags.commerceEnabled && flags.cartEnabled && flags.paymentEnabled;
+  if (!allowed) return <Navigate to="/contact" replace />;
   return <>{children}</>;
 };
 
@@ -142,6 +146,25 @@ const ADMIN_LANDING: Readonly<Record<string, string>> = {
   FINANCE: "/admin/trade/overview",
 };
 
+/** 旧搜索链接只做参数兼容；真实查询、建议、历史与埋点统一由选款中心执行。 */
+function LegacySearchRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const query = params.get("query") || params.get("q") || params.get("keyword") || "";
+  const category = params.get("category") || params.get("categoryId") || "";
+  const material = params.get("material") || params.get("materialType") || "";
+  const canonical = new URLSearchParams();
+  if (query) canonical.set("query", query);
+  if (category) canonical.set("category", category);
+  if (material) canonical.set("material", material);
+  for (const key of ["subcategory", "craft", "weight", "size", "sort", "page"]) {
+    const value = params.get(key);
+    if (value) canonical.set(key, value);
+  }
+  const suffix = canonical.toString();
+  return <Navigate replace to={`/catalog${suffix ? `?${suffix}` : ""}`} />;
+}
+
 function AdminIndexRedirect() {
   const role = useAuthStore((s) => s.user?.role);
   const preferred = role ? ADMIN_LANDING[role] : undefined;
@@ -162,14 +185,8 @@ function App() {
           {/* Public Routes — 首页和其他页面统一使用 PublicLayout */}
           <Route element={<PublicLayout />}>
             <Route index element={<Home />} />
-            <Route
-              path="products"
-              element={
-                <AntdRoute>
-                  <ProductList />
-                </AntdRoute>
-              }
-            />
+            {/* /products 是品牌 PageDocument 容器；不再加载休眠商品列表。 */}
+            <Route path="products" element={null} />
             <Route
               path="products/:id"
               element={
@@ -181,7 +198,7 @@ function App() {
             <Route
               path="cart"
               element={
-                <CommerceRoute>
+                <CommerceRoute capability="cart">
                   <CustomerProtectedRoute>
                     <AntdRoute>
                       <Cart />
@@ -193,7 +210,7 @@ function App() {
             <Route
               path="checkout"
               element={
-                <CommerceRoute>
+                <CommerceRoute capability="checkout">
                   <CustomerProtectedRoute>
                     <AntdRoute>
                       <Checkout />
@@ -211,14 +228,12 @@ function App() {
               }
             />
             <Route path="custom" element={<Custom />} />
-            <Route path="search" element={<Search />} />
+            <Route path="search" element={<LegacySearchRedirect />} />
             <Route
               path="partner"
               element={
                 <CustomerProtectedRoute>
-                  <AntdRoute>
-                    <PartnerApplication />
-                  </AntdRoute>
+                  <Navigate to="/customer?section=partner" replace />
                 </CustomerProtectedRoute>
               }
             />

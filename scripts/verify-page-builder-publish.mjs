@@ -194,7 +194,210 @@ const editorOnlyResult = await service.validatePageDocument("home", {
 assert.equal(editorOnlyResult.valid, false);
 assert.deepEqual(editorOnlyResult.errors, [
   "页面至少需要 1 个可见的前台内容模块",
+  "覆盖式浅色导航要求首个可见品牌模块为首屏主视觉",
 ]);
+
+const unfinishedBrandHomeResult = await service.validatePageDocument("home", {
+  content: [
+    {
+      type: "首屏主视觉",
+      props: {
+        id: "brand-home-hero",
+        title: "海川珠宝",
+        desktopImage: "",
+        mobileImage: "",
+      },
+    },
+    {
+      type: "全屏出血图",
+      props: {
+        id: "brand-home-works",
+        title: "代表作品",
+        image: "",
+        mobileImage: "",
+      },
+    },
+    {
+      type: "双图海报",
+      props: {
+        id: "brand-home-craft",
+        title: "设计与工艺",
+        mainImage: "",
+        detailImage: "",
+      },
+    },
+    {
+      type: "单图海报",
+      props: {
+        id: "brand-home-custom",
+        title: "珠宝定制",
+        desktopImage: "",
+        mobileImage: "",
+      },
+    },
+  ],
+  root: { props: {} },
+});
+assert.equal(unfinishedBrandHomeResult.valid, false);
+assert.ok(
+  unfinishedBrandHomeResult.errors.some((error) =>
+    error.includes("brand-home-hero") || error.includes("海川珠宝"),
+  ),
+  "首页首屏缺少最终素材时必须阻断发布",
+);
+assert.ok(
+  unfinishedBrandHomeResult.errors.some((error) =>
+    error.includes("代表作品") && error.includes("图片不能为空"),
+  ),
+  "首页作品区缺少最终素材时必须阻断发布",
+);
+
+const validProductsResult = await service.validatePageDocument(
+  "products",
+  validData("珠宝作品"),
+  {},
+);
+assert.equal(
+  validProductsResult.valid,
+  true,
+  `作品页允许纯品牌展陈且不要求业务功能区：${JSON.stringify(validProductsResult.errors)}`,
+);
+
+const productsWithBusinessRegion = validData("珠宝作品");
+productsWithBusinessRegion.content.push({
+  type: "业务功能区",
+  props: {
+    id: "products-business-region",
+    pageKey: "products",
+    title: "商品列表与筛选",
+  },
+});
+const productsWithBusinessRegionResult = await service.validatePageDocument(
+  "products",
+  productsWithBusinessRegion,
+  {},
+);
+assert.equal(productsWithBusinessRegionResult.valid, false);
+assert.ok(
+  productsWithBusinessRegionResult.errors.some((error) =>
+    error.includes("固定业务区数量为 0"),
+  ),
+  `珠宝作品页必须拒绝筛选/结果业务区：${JSON.stringify(productsWithBusinessRegionResult.errors)}`,
+);
+
+const unfinishedProductsResult = await service.validatePageDocument(
+  "products",
+  {
+    content: [
+      {
+        type: "首屏主视觉",
+        props: {
+          id: "products-hero",
+          title: "珠宝作品",
+          desktopImage: "",
+          mobileImage: "",
+        },
+      },
+      {
+        type: "单品焦点推荐",
+        props: {
+          id: "products-signature-reference",
+          title: "代表作品",
+          productCode: "",
+          productId: 0,
+        },
+      },
+    ],
+    root: { props: {} },
+  },
+  {},
+);
+assert.equal(unfinishedProductsResult.valid, false);
+assert.ok(
+  unfinishedProductsResult.errors.some((error) =>
+    error.includes("代表作品") && error.includes("商品"),
+  ),
+  "作品页未选择真实公开商品引用时必须阻断发布",
+);
+
+const validCatalogFrame = {
+  content: [
+    {
+      type: "文字横幅",
+      props: {
+        id: "catalog-intro",
+        title: "选款中心",
+        body: "按关键词、货号与真实属性查找作品。",
+        targetType: "none",
+        linkUrl: "",
+      },
+    },
+    {
+      type: "业务功能区",
+      props: {
+        id: "catalog-business-region",
+        pageKey: "catalog",
+        title: "选款工具与商品结果",
+        locked: true,
+      },
+    },
+  ],
+  root: { props: {} },
+};
+const validCatalogFrameResult = await service.validatePageDocument("catalog", validCatalogFrame, {});
+assert.equal(
+  validCatalogFrameResult.valid,
+  true,
+  `选款中心必须允许一个紧随品牌框架的固定业务区：${JSON.stringify(validCatalogFrameResult.errors)}`,
+);
+
+const catalogWithoutBusinessRegion = clone(validCatalogFrame);
+catalogWithoutBusinessRegion.content.splice(1, 1);
+const catalogWithoutBusinessRegionResult = await service.validatePageDocument(
+  "catalog",
+  catalogWithoutBusinessRegion,
+  {},
+);
+assert.equal(catalogWithoutBusinessRegionResult.valid, false);
+assert.ok(
+  catalogWithoutBusinessRegionResult.errors.some((error) => error.includes("固定业务区数量为 1")),
+  "选款中心缺少唯一固定业务区时必须阻断发布",
+);
+
+for (const pageKey of ["custom", "about"]) {
+  const unfinishedBrandPage = {
+    content: [
+      {
+        type: "首屏主视觉",
+        props: {
+          id: `${pageKey}-hero`,
+          title: pageKey === "custom" ? "珠宝定制" : "关于海川",
+          desktopImage: "",
+          mobileImage: "",
+        },
+      },
+      {
+        type: "文字横幅",
+        props: {
+          id: `${pageKey}-draft-copy`,
+          title: "待确认内容",
+          body: "等待真实资料",
+        },
+      },
+    ],
+    root: { props: {} },
+  };
+  const unfinishedBrandPageResult = await service.validatePageDocument(pageKey, unfinishedBrandPage, {});
+  assert.equal(unfinishedBrandPageResult.valid, false);
+  assert.ok(
+    unfinishedBrandPageResult.errors.some((error) => error.includes("图片不能为空")),
+    `${pageKey} 缺少最终主视觉素材时必须阻断发布`,
+  );
+  assert.ok(
+    unfinishedBrandPageResult.errors.some((error) => error.includes("占位内容")),
+    `${pageKey} 未确认文案必须阻断发布`,
+  );
+}
 
 const invalidResult = await service.validatePageDocument("home", {
   content: [
@@ -359,30 +562,33 @@ assert.ok(
 );
 
 const bookingFrameData = {
-  content: [{
-    type: "预约入口",
-    props: {
-      id: "booking",
-      title: "预约鉴赏",
-      buttonText: "立即预约",
-      linkUrl: "/contact",
-      backgroundImage: image,
-      __contentTemplate: { key: "booking", version: 2 },
-      __instanceOverrides: {
-        version: 2,
-        frame: { aspectRatioByViewport: { desktop: 16 / 9, mobile: 4 / 5 } },
-        nodes: {
-          bgImage: {
-            mediaView: {
-              fit: "contain",
-              zoom: 1.05,
-              focusByViewport: { desktop: { x: 36, y: 64 } },
+  content: [
+    validData("首页首屏").content[0],
+    {
+      type: "预约入口",
+      props: {
+        id: "booking",
+        title: "预约鉴赏",
+        buttonText: "立即预约",
+        linkUrl: "/contact",
+        backgroundImage: image,
+        __contentTemplate: { key: "booking", version: 2 },
+        __instanceOverrides: {
+          version: 2,
+          frame: { aspectRatioByViewport: { desktop: 16 / 9, mobile: 4 / 5 } },
+          nodes: {
+            bgImage: {
+              mediaView: {
+                fit: "contain",
+                zoom: 1.05,
+                focusByViewport: { desktop: { x: 36, y: 64 } },
+              },
             },
           },
         },
       },
     },
-  }],
+  ],
   root: { props: {} },
   zones: {},
 };
@@ -390,8 +596,8 @@ const bookingFrameResult = await service.validatePageDocument("home", bookingFra
 assert.equal(bookingFrameResult.valid, true, "Booking 应以整体框架比例和背景观看参数通过发布合同");
 
 const invalidBookingData = clone(bookingFrameData);
-invalidBookingData.content[0].props.linkUrl = "javascript:alert(1)";
-invalidBookingData.content[0].props.phone = "abc";
+invalidBookingData.content[1].props.linkUrl = "javascript:alert(1)";
+invalidBookingData.content[1].props.phone = "abc";
 const invalidBookingResult = await service.validatePageDocument("home", invalidBookingData);
 assert.equal(invalidBookingResult.valid, false, "Booking 非法主行动与电话必须被服务端发布门禁阻止");
 assert.deepEqual(

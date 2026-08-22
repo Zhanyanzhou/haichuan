@@ -11,6 +11,7 @@ import {
   ContentTemplateLayoutStyles,
   templateLayoutVars,
 } from "@/page-builder/layout/contentTemplateLayouts";
+import { hasRenderableImageDimensions } from "@/utils/imageLoad";
 
 interface FullBleedBlockProps {
   module: {
@@ -89,6 +90,10 @@ export default function FullBleedBlock({
       >
       {!desktopImg ? (
         <BlockEmptyPlaceholder
+          assetSlots={[
+            { templateKey: "fullBleed", roleId: "image" },
+            { templateKey: "fullBleed", roleId: "mobileImage" },
+          ]}
           hint={CONTENT_TEMPLATE_LAYOUTS.fullBleed.displayName}
           spec={`桌面 ${IMAGE_SPECS.fullBleed.desktop.label} · 移动 ${IMAGE_SPECS.fullBleed.mobile.label}`}
           height="100%"
@@ -104,6 +109,9 @@ export default function FullBleedBlock({
             decoding="async"
             width={3360}
             height={960}
+            onLoad={(event) =>
+              setImageFailed(!hasRenderableImageDimensions(event.currentTarget))
+            }
             onError={() => setImageFailed(true)}
           />
         </picture>

@@ -44,10 +44,12 @@ export function SecureImage({
   const [status, setStatus] = useState<"loading" | "error" | "ready">(
     "loading",
   );
+  const [fallbackFailed, setFallbackFailed] = useState(false);
   const revokeRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setFallbackFailed(false);
 
     // 非受控媒体端点（http/data/相对静态资源）：直接用 src
     const isPublicProductMedia =
@@ -93,7 +95,7 @@ export function SecureImage({
         revokeRef.current = null;
       }
     };
-  }, [src, tokenKind]);
+  }, [fallback, src, tokenKind]);
 
   const placeholderStyle: CSSProperties = {
     background: "#F4F5F5",
@@ -116,9 +118,18 @@ export function SecureImage({
   }
 
   if (status === "error" || !blobUrl) {
-    if (fallback) {
+    if (fallback && !fallbackFailed && fallback !== blobUrl) {
       return (
-        <img src={fallback} alt={alt} className={className} style={style} />
+        <img
+          src={fallback}
+          alt={alt}
+          className={className}
+          style={style}
+          onLoad={(event) => {
+            if (event.currentTarget.naturalWidth === 0) setFallbackFailed(true);
+          }}
+          onError={() => setFallbackFailed(true)}
+        />
       );
     }
     return (
@@ -143,6 +154,10 @@ export function SecureImage({
       }
       loading="lazy"
       draggable={false}
+      onLoad={(event) => {
+        if (event.currentTarget.naturalWidth === 0) setStatus("error");
+      }}
+      onError={() => setStatus("error")}
       onContextMenu={(event) => event.preventDefault()}
     />
   );

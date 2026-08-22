@@ -1,4 +1,7 @@
-import { CONTENT_TEMPLATE_CONTRACTS } from "../generated/contentTemplates.generated";
+import {
+  CONTENT_TEMPLATE_ASSET_POLICY,
+  CONTENT_TEMPLATE_CONTRACTS,
+} from "../generated/contentTemplates.generated";
 import { getContractRoleRatio } from "./blockContracts";
 
 type ContractKey = keyof typeof CONTENT_TEMPLATE_CONTRACTS;
@@ -9,7 +12,7 @@ type SpecViewport = "desktop" | "mobile";
  *
  * 定位(2026-08-18 比例派生管道):
  * - 比例唯一来源是内容模板契约(roles[].defaultRatioByViewport),本表不再手写比例字面值;
- * - 每条目只声明「用途文案 + 建议像素宽度」,宽高与比例名由契约现算,评审改契约后全链路自动跟随;
+ * - 每条目只声明「模板 + 槽位 + 用途文案」,宽高与比例均由契约现算;
  * - imageText / splitPanel 条目为已退役模板的遗留规格,仅供旧数据编辑兜底,不再新增使用。
  *
  * 桌面端按 2K+ 出图,移动端按 3x 出图,商品图可放大看细节。
@@ -23,10 +26,6 @@ interface ContractSpecInput {
   viewport: SpecViewport;
   /** 用途短语,label 前缀(如 "证书图") */
   note: string;
-  /** 建议像素宽度(桌面 2K+,移动 3x) */
-  baseWidth: number;
-  /** label 尾注,保留 "2K+ / 4K / 超宽" 等运营提示 */
-  suffix?: string;
 }
 
 function contractSpec({
@@ -34,9 +33,9 @@ function contractSpec({
   role,
   viewport,
   note,
-  baseWidth,
-  suffix,
 }: ContractSpecInput) {
+  const contract = CONTENT_TEMPLATE_CONTRACTS[template];
+  const baseWidth = CONTENT_TEMPLATE_ASSET_POLICY.minimumWidthByViewport[viewport][contract.width];
   const ratio = getContractRoleRatio(template, role, viewport); // "3 / 2"
   const [num, den] = ratio.split("/").map((part) => Number(part.trim()));
   const height = Math.round((baseWidth * den) / num);
@@ -44,7 +43,7 @@ function contractSpec({
     width: baseWidth,
     height,
     ratio,
-    label: `${note}（建议 ${baseWidth}×${height}，${num}:${den}${suffix ? "，" + suffix : ""}）`,
+    label: `${note}（建议至少 ${baseWidth}×${height}，${num}:${den}）`,
   };
 }
 
@@ -71,15 +70,12 @@ export const IMAGE_SPECS = {
       role: "desktopImage",
       viewport: "desktop",
       note: "桌面端主视觉",
-      baseWidth: 3360,
-      suffix: "2K+",
     }),
     mobile: contractSpec({
       template: "hero",
       role: "mobileImage",
       viewport: "mobile",
       note: "移动端主视觉",
-      baseWidth: 1500,
     }),
   },
   singlePoster: {
@@ -88,14 +84,12 @@ export const IMAGE_SPECS = {
       role: "desktopImage",
       viewport: "desktop",
       note: "海报主图",
-      baseWidth: 1600,
     }),
     mobile: contractSpec({
       template: "singlePoster",
       role: "mobileImage",
       viewport: "mobile",
       note: "移动端单海报",
-      baseWidth: 1500,
     }),
   },
   doublePoster: {
@@ -104,14 +98,12 @@ export const IMAGE_SPECS = {
       role: "mainImage",
       viewport: "desktop",
       note: "主海报",
-      baseWidth: 2400,
     }),
     detail: contractSpec({
       template: "doublePoster",
       role: "detailImage",
       viewport: "desktop",
       note: "细节海报",
-      baseWidth: 1280,
     }),
   },
   imageText: {
@@ -128,15 +120,12 @@ export const IMAGE_SPECS = {
       role: "image",
       viewport: "desktop",
       note: "通栏桌面图",
-      baseWidth: 3360,
-      suffix: "超宽",
     }),
     mobile: contractSpec({
       template: "fullBleed",
       role: "mobileImage",
       viewport: "mobile",
       note: "通栏移动图",
-      baseWidth: 1500,
     }),
   },
   splitPanel: {
@@ -154,7 +143,6 @@ export const IMAGE_SPECS = {
       role: "certificates",
       viewport: "desktop",
       note: "证书图",
-      baseWidth: 3000,
     }),
   },
   customProcess: {
@@ -163,7 +151,6 @@ export const IMAGE_SPECS = {
       role: "steps",
       viewport: "desktop",
       note: "节点图",
-      baseWidth: 2000,
     }),
   },
   testimonial: {
@@ -172,7 +159,6 @@ export const IMAGE_SPECS = {
       role: "authorizedPhoto",
       viewport: "desktop",
       note: "实拍图",
-      baseWidth: 1600,
     }),
   },
   // 2026-08-18 构图评审 #5/#6 决议:品牌要点与服务承诺定位纯文字卡,原卡片图规格删除
@@ -182,15 +168,12 @@ export const IMAGE_SPECS = {
       role: "sceneImage",
       viewport: "desktop",
       note: "热区桌面图",
-      baseWidth: 3840,
-      suffix: "4K",
     }),
     mobile: contractSpec({
       template: "hotspot",
       role: "sceneImage",
       viewport: "mobile",
       note: "热区移动图",
-      baseWidth: 1170,
     }),
   },
   textBanner: {
@@ -199,7 +182,6 @@ export const IMAGE_SPECS = {
       role: "bgImage",
       viewport: "desktop",
       note: "横幅背景图",
-      baseWidth: 3360,
     }),
   },
   productRow: {
@@ -208,7 +190,6 @@ export const IMAGE_SPECS = {
       role: "productCards",
       viewport: "desktop",
       note: "商品图",
-      baseWidth: 2000,
     }),
   },
   featuredProduct: {
@@ -217,7 +198,6 @@ export const IMAGE_SPECS = {
       role: "product",
       viewport: "desktop",
       note: "主推作品图",
-      baseWidth: 1600,
     }),
   },
   lookbook: {
@@ -226,14 +206,12 @@ export const IMAGE_SPECS = {
       role: "wearingImage",
       viewport: "desktop",
       note: "佩戴大片",
-      baseWidth: 1600,
     }),
     mobile: contractSpec({
       template: "wearingInspiration",
       role: "wearingImage",
       viewport: "mobile",
       note: "佩戴大片（手机端）",
-      baseWidth: 1500,
     }),
   },
   categoryCards: {
@@ -242,7 +220,6 @@ export const IMAGE_SPECS = {
       role: "categories",
       viewport: "desktop",
       note: "入口卡图",
-      baseWidth: 1600,
     }),
   },
   // 分类卡片(1:1)与场景选购(4:5)同用 CategoryCardsBlock,模板类型二选一,规格分列
@@ -252,7 +229,6 @@ export const IMAGE_SPECS = {
       role: "scenes",
       viewport: "desktop",
       note: "场景入口图",
-      baseWidth: 1600,
     }),
   },
   carousel: {
@@ -261,14 +237,12 @@ export const IMAGE_SPECS = {
       role: "frames",
       viewport: "desktop",
       note: "电脑端宽幕轮播图",
-      baseWidth: 3360,
     }),
     mobile: contractSpec({
       template: "carousel",
       role: "frames",
       viewport: "mobile",
       note: "手机端轮播图",
-      baseWidth: 1500,
     }),
   },
   gallery: {
@@ -277,7 +251,6 @@ export const IMAGE_SPECS = {
       role: "works",
       viewport: "desktop",
       note: "画廊主图",
-      baseWidth: 1600,
     }),
   },
   storeInfo: {
@@ -286,14 +259,12 @@ export const IMAGE_SPECS = {
       role: "store",
       viewport: "desktop",
       note: "门店空间图",
-      baseWidth: 2400,
     }),
     mobile: contractSpec({
       template: "storeInfo",
       role: "store",
       viewport: "mobile",
       note: "门店空间图（手机端）",
-      baseWidth: 1500,
     }),
   },
   beforeAfter: {
@@ -302,8 +273,6 @@ export const IMAGE_SPECS = {
       role: "before",
       viewport: "desktop",
       note: "改款对比图",
-      baseWidth: 1600,
-      suffix: "前后同比例",
     }),
   },
   video: {
@@ -312,15 +281,12 @@ export const IMAGE_SPECS = {
       role: "coverImage",
       viewport: "desktop",
       note: "视频封面",
-      baseWidth: 3840,
-      suffix: "4K",
     }),
     posterMobile: contractSpec({
       template: "video",
       role: "coverImage",
       viewport: "mobile",
       note: "视频封面（手机端）",
-      baseWidth: 1500,
     }),
   },
   limitedOffer: {
@@ -329,8 +295,6 @@ export const IMAGE_SPECS = {
       role: "event",
       viewport: "desktop",
       note: "活动视觉",
-      baseWidth: 3360,
-      suffix: "超宽",
     }),
   },
   // 2026-08-18 构图评审 #3:预约入口补可选氛围背景(裁切驱动,比例为宽度保障建议)
@@ -340,14 +304,12 @@ export const IMAGE_SPECS = {
       role: "bgImage",
       viewport: "desktop",
       note: "预约背景图",
-      baseWidth: 3360,
     }),
     bgImageMobile: contractSpec({
       template: "booking",
       role: "bgImage",
       viewport: "mobile",
       note: "预约背景图（手机端）",
-      baseWidth: 1500,
     }),
   },
 };

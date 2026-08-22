@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag } from 'antd';
+import { Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Space, Table, Tag } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import { refundApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
+import { useAuthStore } from '@/store/authStore';
 import type { PaginatedResult, Refund, RefundStatus } from '@/types';
 
 const STATUS_META: Record<RefundStatus, { color: string; label: string }> = {
@@ -27,20 +28,10 @@ type RefundListItem = Refund & {
   order: { orderNo: string; customerName: string; customerPhone: string; finalAmount: number | string; status: string };
 };
 
-// 仅 ADMIN 可执行写操作；前端按角色隐藏按钮（后端 @Roles 是最终边界）
-function useIsAdmin(): boolean {
-  try {
-    const raw = localStorage.getItem('jewelry-auth');
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    const role = parsed?.state?.user?.role;
-    return role === 'SUPER_ADMIN' || role === 'ADMIN';
-  } catch {
-    return false;
-  }
-}
-
 export default function RefundManage() {
+  // 仅 ADMIN 可执行写操作；前端按角色隐藏按钮（后端 @Roles 是最终边界）
+  const role = useAuthStore((state) => state.user?.role);
+  const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
   const [list, setList] = useState<RefundListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -54,8 +45,6 @@ export default function RefundManage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createForm] = Form.useForm();
-  const isAdmin = useIsAdmin();
-
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(false);

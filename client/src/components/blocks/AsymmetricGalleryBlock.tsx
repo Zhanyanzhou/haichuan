@@ -46,6 +46,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
     return (
       <DecorSection master="asymmetric-gallery" background={bgColor}>
         <BlockEmptyPlaceholder
+          assetSlot={{ templateKey: "gallery", roleId: "works" }}
           hint="作品画廊"
           spec="请添加 3–5 张图片,形成「大图 + 双图 + 大图」的画廊节奏"
           ratio={galleryRatio}

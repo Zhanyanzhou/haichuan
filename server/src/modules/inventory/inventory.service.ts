@@ -4,10 +4,14 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { ProductsService } from "../products/products.service";
 
 @Injectable()
 export class InventoryService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly productsService: ProductsService,
+  ) {}
 
   async findAll(params: {
     page?: number;
@@ -59,31 +63,43 @@ export class InventoryService {
       throw new BadRequestException("数量必须为非负整数");
     }
 
-    const inv = await this.prisma.inventory.findUnique({ where: { id } });
-    if (!inv) throw new NotFoundException("库存记录不存在");
-
-    if (data.type === "in") {
-      return this.prisma.inventory.update({
+    let changedProductId: number | null = null;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const inv = await tx.inventory.findUnique({
         where: { id },
-        data: { quantity: { increment: data.quantity } },
+        select: { id: true, sku: { select: { productId: true } } },
       });
-    }
+      if (!inv) throw new NotFoundException("库存记录不存在");
+      const productId = inv.sku.productId;
+      changedProductId = productId;
+      await this.productsService.lockProductForTradeMutation(productId, tx);
 
-    if (data.type === "out") {
-      // 原子条件更新：where quantity >= 出库量，防止并发超卖
-      const result = await this.prisma.inventory.updateMany({
-        where: { id, quantity: { gte: data.quantity } },
-        data: { quantity: { decrement: data.quantity } },
-      });
-      if (result.count === 0) throw new BadRequestException("库存不足");
-      return this.prisma.inventory.findUniqueOrThrow({ where: { id } });
-    }
+      if (data.type === "in") {
+        await tx.inventory.update({
+          where: { id },
+          data: { quantity: { increment: data.quantity } },
+        });
+      } else if (data.type === "out") {
+        // 原子条件更新：where quantity >= 出库量，防止并发超卖
+        const result = await tx.inventory.updateMany({
+          where: { id, quantity: { gte: data.quantity } },
+          data: { quantity: { decrement: data.quantity } },
+        });
+        if (result.count === 0) throw new BadRequestException("库存不足");
+      } else {
+        await tx.inventory.update({
+          where: { id },
+          data: { quantity: data.quantity },
+        });
+      }
 
-    // adjust：直接设置为指定值（入口已校验非负）
-    return this.prisma.inventory.update({
-      where: { id },
-      data: { quantity: data.quantity },
+      await this.productsService.reconcileTradeRulesInTransaction(productId, tx);
+      return tx.inventory.findUniqueOrThrow({ where: { id } });
     });
+    if (changedProductId !== null) {
+      this.productsService.notifyTradeProductChanged(changedProductId);
+    }
+    return updated;
   }
 
   /** 聚合某商品全部 SKU 的可用库存总量(经 Inventory，统一库存真相源) */

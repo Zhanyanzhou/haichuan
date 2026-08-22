@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ConfigProvider } from 'antd';
+import { App, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import antdTheme from '@/styles/antdTheme';
 
@@ -11,7 +11,7 @@ import antdTheme from '@/styles/antdTheme';
 export default function AntdProvider({ children }: { children: ReactNode }) {
   return (
     <ConfigProvider locale={zhCN} theme={antdTheme}>
-      {children}
+      <App component={false}>{children}</App>
     </ConfigProvider>
   );
 }

@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { SecureImage } from "@/components/common/SecureImage";
 import { CATEGORY_CARDS_CONTRACT, RESPONSIVE_CANVAS, resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
-import { isSafeInternalPath, resolveItemLinkUrl } from "@/page-builder/utils/linkTarget";
+import { normalizeCatalogIntentUrl, resolveItemLinkUrl } from "@/page-builder/utils/linkTarget";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 
@@ -38,14 +38,19 @@ export default function CategoryCardsBlock({
     ? resolveContractAspectRatio("sceneShopping", "scenes", content.imageRatio, "mobile")
     : resolveContractAspectRatio("categoryCards", "categories", content.imageRatio, "mobile");
   const normalizedCategories = Array.isArray(categories) ? categories.slice(0, CATEGORY_CARDS_CONTRACT.content.maxItems) : [];
+  const getCardLinkUrl = (item: any) => normalizeCatalogIntentUrl(resolveItemLinkUrl(item));
   const visibleCategories = editMode
     ? normalizedCategories
-    : normalizedCategories.filter((item: any) => item?.name && item?.image && resolveItemLinkUrl(item));
+    : normalizedCategories.filter((item: any) => item?.name && item?.image && getCardLinkUrl(item));
 
   if (!visibleCategories.length) {
     if (!editMode) return null;
     return (
       <BlockEmptyPlaceholder
+        assetSlot={{
+          templateKey: isSceneShopping ? "sceneShopping" : "categoryCards",
+          roleId: isSceneShopping ? "scenes" : "categories",
+        }}
         icon="📂"
         hint="分类导航卡片"
         spec="请在右侧配置分类数据"
@@ -173,7 +178,7 @@ export default function CategoryCardsBlock({
               </div>
               </div>
             );
-            const cardLinkUrl = resolveItemLinkUrl(c);
+            const cardLinkUrl = getCardLinkUrl(c);
             return editMode || !cardLinkUrl ? (
               <div key={c.id || `${c.name}-${i}`}>{card}</div>
             ) : (

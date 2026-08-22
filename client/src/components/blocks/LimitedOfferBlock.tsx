@@ -124,7 +124,12 @@ export default function LimitedOfferBlock({
           {eventImage ? (
             <SecureImage src={eventImage} alt={title || "活动视觉"} />
           ) : editMode ? (
-            <BlockEmptyPlaceholder hint="活动视觉" spec={`桌面 ${desktopEventRatio} · 手机 ${mobileEventRatio}`} height="100%" />
+            <BlockEmptyPlaceholder
+              assetSlot={{ templateKey: "limitedEvent", roleId: "event" }}
+              hint="活动视觉"
+              spec={`桌面 ${desktopEventRatio} · 手机 ${mobileEventRatio}`}
+              height="100%"
+            />
           ) : null}
         </div>
         <div className="hc-limited-event__time" data-content-role="time" data-editor-field="targetDate">

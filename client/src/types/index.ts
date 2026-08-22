@@ -81,12 +81,10 @@ export interface Product {
   priceMax?: number;
   weight?: number;
   size?: string;
-  salesMode?:
-    | "DISPLAY_ONLY"
-    | "SELECTION"
-    | "APPOINTMENT"
-    | "DIRECT_PURCHASE"
-    | "CUSTOM_INQUIRY";
+  salesMode?: SalesMode;
+  inventoryPolicy?: InventoryPolicy;
+  /** 服务端按实时库存聚合得出的购买可用性，不暴露具体库存数量。 */
+  isAvailableForPurchase?: boolean;
   sortOrder?: number;
   gemInfo?: GemInfo;
   craftTechnique?: string[];
@@ -137,6 +135,13 @@ export type MaterialType =
   | "COLOR_GEM"
   | "OTHER";
 export type ProductStatus = "DRAFT" | "PUBLISHED" | "OFFLINE" | "ARCHIVED";
+export type SalesMode =
+  | "DISPLAY_ONLY"
+  | "SELECTION"
+  | "APPOINTMENT"
+  | "DIRECT_PURCHASE"
+  | "CUSTOM_INQUIRY";
+export type InventoryPolicy = "STANDARD" | "SINGLE_UNIT";
 
 export interface GemInfo {
   type?: string;
@@ -192,8 +197,9 @@ export interface ProductSKU {
   size?: string;
   goldWeight?: number;
   price: number;
-  stock: number;
-  safetyStock: number;
+  /** 仅旧 Mock 商品数据可能携带；真实库存以 Inventory 接口为准。 */
+  stock?: number;
+  safetyStock?: number;
   isActive: boolean;
 }
 

@@ -36,23 +36,21 @@ export const VIEWPORT_PRESETS: ViewportPreset[] = [
   { label: "移动端", icon: <MobileOutlined />, ...RESPONSIVE_CANVAS.mobile },
 ];
 
-/** 草稿状态机的展示态:查看线上(不渲染) > 未保存 > 未发布差异 > 与线上一致 */
-type DraftStatusMode = "published" | "dirty" | "pending" | "clean";
+type DraftStatusMode = "saving" | "dirty" | "pending" | "clean" | "published";
 
 function getDraftStatusMode(options: {
+  saving: boolean;
   viewingPublished: boolean;
   hasUnsavedChanges: boolean;
   hasPendingDraft: boolean;
 }): DraftStatusMode {
-  // 未保存修改优先于“查看线上版本”，避免线上查看态下改动画布却看不到脏提示。
+  if (options.saving) return "saving";
   if (options.hasUnsavedChanges) return "dirty";
   if (options.viewingPublished) return "published";
   if (options.hasPendingDraft) return "pending";
   return "clean";
 }
 
-/** 草稿状态徽标(常显部分;查看线上态不渲染——2026-08-19 用户决策删
- * "正在查看线上版本"字样,此时工具栏已有「返回编辑」按钮与禁用的发布钮,状态不迷失) */
 function DraftStatusBadge({
   mode,
   draftSavedAtLabel,
@@ -61,8 +59,11 @@ function DraftStatusBadge({
   draftSavedAtLabel: string | null;
 }) {
   if (mode === "published") return null;
+
   let content: ReactNode;
-  if (mode === "dirty") {
+  if (mode === "saving") {
+    content = <>正在保存草稿</>;
+  } else if (mode === "dirty") {
     content = (
       <>
         <i className="homepage-editor__draft-status-dot" aria-hidden="true" />
@@ -73,18 +74,34 @@ function DraftStatusBadge({
     content = (
       <>
         草稿有未发布修改
-        {draftSavedAtLabel ? <small>已保存 {draftSavedAtLabel}</small> : null}
+        {draftSavedAtLabel ? <small>最后保存 {draftSavedAtLabel}</small> : null}
       </>
     );
   } else {
-    content = <>与线上版本一致</>;
+    content = (
+      <>
+        与线上版本一致
+        {draftSavedAtLabel ? <small>最后保存 {draftSavedAtLabel}</small> : null}
+      </>
+    );
   }
+
+  const accessibleLabel =
+    mode === "saving"
+      ? "草稿状态：正在保存草稿"
+      : mode === "dirty"
+        ? "草稿状态：有未保存修改"
+        : mode === "pending"
+          ? `草稿状态：草稿有未发布修改${draftSavedAtLabel ? `，最后保存 ${draftSavedAtLabel}` : ""}`
+          : `草稿状态：与线上版本一致${draftSavedAtLabel ? `，最后保存 ${draftSavedAtLabel}` : ""}`;
+
   return (
     <div
       className="homepage-editor__draft-status"
       data-mode={mode}
       role="status"
-      aria-label="草稿状态"
+      aria-label={accessibleLabel}
+      title={accessibleLabel}
     >
       {content}
     </div>
@@ -116,13 +133,9 @@ export default function EditorToolbar({
   saving: boolean;
   hasPendingDraft: boolean;
   viewingPublished: boolean;
-  /** 画布存在未保存修改 */
   hasUnsavedChanges: boolean;
-  /** 最新服务端发布门禁状态；非 current 时不得把页面表现为可发布。 */
   publishValidationState: "checking" | "current" | "stale" | "error";
-  /** 最新服务端门禁中的阻断级问题数量。 */
   publishErrorCount: number;
-  /** 草稿最后保存时间标签(如 "14:32") */
   draftSavedAtLabel: string | null;
   onPublish: (data: unknown, locateBlock: (blockIndex: number) => void) => void;
   onSaveDraft: (data: unknown) => void;
@@ -415,9 +428,9 @@ export default function EditorToolbar({
         ))}
       </div>
 
-      {/* 草稿状态徽标:未保存/未发布差异/与线上一致 常显;查看线上态不渲染(2026-08-19 用户决策) */}
       <DraftStatusBadge
         mode={getDraftStatusMode({
+          saving,
           viewingPublished,
           hasUnsavedChanges,
           hasPendingDraft,
@@ -442,7 +455,8 @@ export default function EditorToolbar({
               icon={<SaveOutlined />}
               loading={saving}
               onClick={() => onSaveDraft(appData)}
-              title="立即保存当前装修草稿"
+              aria-label={saving ? "正在保存当前装修草稿" : "保存当前装修草稿"}
+              title={saving ? "正在保存当前装修草稿" : "保存当前装修草稿"}
             >
               保存草稿
             </Button>
@@ -467,9 +481,11 @@ export default function EditorToolbar({
           size="small"
           type="primary"
           icon={<SendOutlined />}
-          aria-label={publishUnavailableReason
-            ? `发布到前台网站（${publishUnavailableReason}）`
-            : "发布到前台网站"}
+          aria-label={
+            publishUnavailableReason
+              ? `发布到前台网站（${publishUnavailableReason}）`
+              : "发布到前台网站"
+          }
           loading={publishing}
           disabled={Boolean(publishUnavailableReason)}
           onClick={publishCurrentPage}

@@ -20,7 +20,6 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
-  GiftOutlined,
 } from "@ant-design/icons";
 import { marketingApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";

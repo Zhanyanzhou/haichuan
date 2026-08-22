@@ -31,7 +31,6 @@ import {
   BarChartOutlined,
   SettingOutlined,
   HomeOutlined,
-  ReloadOutlined,
   UserOutlined,
   LogoutOutlined,
   MenuOutlined,
@@ -40,8 +39,8 @@ import {
   PushpinOutlined,
   PushpinFilled,
   GlobalOutlined,
-  SearchOutlined,
-  AppstoreOutlined,
+  ExportOutlined,
+  DownOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "@/store/authStore";
 import {
@@ -248,7 +247,10 @@ export default function AdminLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     getInitialSidebarCollapsed,
   );
+  const [editorSidebarCollapsed, setEditorSidebarCollapsed] = useState(true);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(
     new Set(),
   );
@@ -261,6 +263,9 @@ export default function AdminLayout() {
   );
   const sections = useNavSections(user?.role);
   const isEditorWorkspace = location.pathname.startsWith("/admin/editor/");
+  const desktopSidebarCollapsed = isEditorWorkspace
+    ? editorSidebarCollapsed
+    : sidebarCollapsed;
 
   // 从路由反向推导当前导航上下文
   const navCtx = useMemo(
@@ -304,6 +309,30 @@ export default function AdminLayout() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isCompact, mobileOpen]);
+
+  useEffect(() => {
+    if (!isEditorWorkspace || isCompact || desktopSidebarCollapsed) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setEditorSidebarCollapsed(true);
+      requestAnimationFrame(() => sidebarToggleRef.current?.focus());
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [desktopSidebarCollapsed, isCompact, isEditorWorkspace]);
+
+  useEffect(() => {
+    if (!isEditorWorkspace || isCompact) return;
+
+    window.dispatchEvent(
+      new CustomEvent("homepage-editor-primary-navigation-change", {
+        detail: { open: !editorSidebarCollapsed },
+      }),
+    );
+  }, [editorSidebarCollapsed, isCompact, isEditorWorkspace]);
 
   // 未登录跳转
   useEffect(() => {
@@ -505,7 +534,7 @@ export default function AdminLayout() {
 
   return (
     <div
-      className={`admin-shell-v7${!isCompact && sidebarCollapsed ? " is-sidebar-collapsed" : ""}`}
+      className={`admin-shell-v7${!isCompact && desktopSidebarCollapsed ? " is-sidebar-collapsed" : ""}${isEditorWorkspace && !isCompact && !desktopSidebarCollapsed ? " is-editor-navigation-open" : ""}`}
     >
       {/* ═══ Header ═══ */}
       <header
@@ -536,82 +565,71 @@ export default function AdminLayout() {
 
         <div className="admin-header__right">
           {!isEditorWorkspace ? (
-            <>
-              <Link
-                to="/"
-                target="_blank"
-                className="admin-header__icon-btn"
-                title="访问前台首页"
-                aria-label="访问前台首页"
-              >
-                <GlobalOutlined />
-              </Link>
-              <Link
-                to="/search"
-                target="_blank"
-                className="admin-header__icon-btn"
-                title="搜索商品"
-                aria-label="搜索商品"
-              >
-                <SearchOutlined />
-              </Link>
-              <Link
-                to="/catalog"
-                target="_blank"
-                className="admin-header__icon-btn"
-                title="选款中心"
-                aria-label="选款中心"
-              >
-                <AppstoreOutlined />
-              </Link>
-              <button
-                type="button"
-                onClick={() => window.location.reload()}
-                className="admin-header__icon-btn"
-                aria-label="刷新"
-                title="刷新"
-              >
-                <ReloadOutlined />
-              </button>
-            </>
+            <Link
+              to="/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="admin-header__site-link"
+              aria-label="查看网站，在新标签页打开"
+            >
+              <ExportOutlined aria-hidden="true" />
+              <span className="admin-header__site-label">查看网站</span>
+            </Link>
           ) : null}
           {isEditorWorkspace ? (
             <Link
               to="/"
               target="_blank"
-              className="admin-header__icon-btn"
+              rel="noopener noreferrer"
+              className="admin-header__icon-btn admin-header__editor-preview"
               title="预览网站"
-              aria-label="预览网站"
+              aria-label="预览网站，在新标签页打开"
             >
               <GlobalOutlined />
+              <span>预览网站</span>
             </Link>
-          ) : (
-            <Link to="/" target="_blank" className="admin-header__link">
-              预览网站
-            </Link>
-          )}
-          <Dropdown
-            menu={{
-              items: userMenuItems,
-              onClick: ({ key }) => {
-                if (key === "logout") {
-                  logout();
-                  navigate("/admin/login");
-                }
-              },
-            }}
-          >
-            <div className="admin-header__avatar">
-              <Avatar
-                size={28}
-                icon={<UserOutlined />}
-                style={{
-                  backgroundColor: "var(--adm-gold-soft)",
-                  color: "var(--adm-action)",
-                }}
-              />
-            </div>
-          </Dropdown>
+          ) : null}
+          <div className="admin-header__account-group">
+            <Dropdown
+              open={accountMenuOpen}
+              onOpenChange={setAccountMenuOpen}
+              trigger={["click"]}
+              menu={{
+                items: userMenuItems,
+                onClick: ({ key }) => {
+                  setAccountMenuOpen(false);
+                  if (key === "logout") {
+                    logout();
+                    navigate("/admin/login");
+                  }
+                },
+              }}
+            >
+              <button
+                type="button"
+                className="admin-header__account"
+                aria-label={`账户菜单，当前用户${user?.realName || user?.username || "管理员"}`}
+                aria-haspopup="menu"
+                aria-expanded={accountMenuOpen}
+              >
+                <Avatar
+                  size={28}
+                  icon={<UserOutlined />}
+                  style={{
+                    backgroundColor: "var(--adm-gold-soft)",
+                    color: "var(--adm-action)",
+                  }}
+                />
+                <span className="admin-header__account-name">
+                  {user?.realName || user?.username || "管理员"}
+                </span>
+                <DownOutlined
+                  className="admin-header__account-chevron"
+                  aria-hidden="true"
+                />
+              </button>
+            </Dropdown>
+          </div>
         </div>
       </header>
 
@@ -620,21 +638,28 @@ export default function AdminLayout() {
         {/* 桌面端侧边栏 */}
         {!isCompact &&
           renderSidebar({
-            collapsed: sidebarCollapsed,
+            collapsed: desktopSidebarCollapsed,
             id: "admin-navigation-sidebar",
           })}
 
         {!isCompact && (
           <button
+            ref={sidebarToggleRef}
             type="button"
-            className="admin-sidebar__collapse-handle"
-            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
-            aria-label={sidebarCollapsed ? "展开一级导航" : "收起一级导航"}
+            className="admin-sidebar__collapse-handle admin-panel-collapse-toggle"
+            onClick={() => {
+              if (isEditorWorkspace) {
+                setEditorSidebarCollapsed((collapsed) => !collapsed);
+                return;
+              }
+              setSidebarCollapsed((collapsed) => !collapsed);
+            }}
+            aria-label={desktopSidebarCollapsed ? "展开一级导航" : "收起一级导航"}
             aria-controls="admin-navigation-sidebar"
-            aria-expanded={!sidebarCollapsed}
-            title={sidebarCollapsed ? "展开一级导航" : "收起一级导航"}
+            aria-expanded={!desktopSidebarCollapsed}
+            title={desktopSidebarCollapsed ? "展开一级导航" : "收起一级导航"}
           >
-            {sidebarCollapsed ? <RightOutlined /> : <LeftOutlined />}
+            {desktopSidebarCollapsed ? <RightOutlined /> : <LeftOutlined />}
           </button>
         )}
 

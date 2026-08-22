@@ -294,17 +294,31 @@ function createInstanceCss(
       if (mobileFocus) rules.push(`@media (max-width:767px){${selector} :where(img,video){${mobileFocus}}}`);
       const typography = isRecord(rawNode.typography) ? rawNode.typography : {};
       const typeDeclarations: string[] = [];
+      // 后代规则：子元素常带内联 color/font-size 或模板自有 line-height，
+      // 容器声明到不了它们；必须以后代选择器 + !important 直写到文本元素。
+      const descendantDeclarations: string[] = [];
       const sizeMap: Record<string, string> = { xs: ".78em", sm: ".9em", md: "1em", lg: "1.18em", xl: "1.38em" };
-      if (typeof typography.sizeLevel === "string" && sizeMap[typography.sizeLevel]) typeDeclarations.push(`font-size:${sizeMap[typography.sizeLevel]}`);
+      // 字号只落到块级文本元素（em 相对容器），不含 span，避免嵌套 span 复合缩小
+      if (typeof typography.sizeLevel === "string" && sizeMap[typography.sizeLevel]) {
+        rules.push(`${selector} :where(h1,h2,h3,h4,p){font-size:${sizeMap[typography.sizeLevel]}!important}`);
+      }
       if (["left", "center", "right"].includes(String(typography.align))) typeDeclarations.push(`text-align:${typography.align}`);
       const typeColor = color(typography.color);
-      if (typeColor) typeDeclarations.push(`color:${typeColor}!important`);
+      if (typeColor) {
+        typeDeclarations.push(`color:${typeColor}!important`);
+        descendantDeclarations.push(`color:${typeColor}!important`);
+      }
+      const lineHeight = Number(typography.lineHeight);
+      if (Number.isFinite(lineHeight) && lineHeight >= 1 && lineHeight <= 2.5) descendantDeclarations.push(`line-height:${lineHeight}!important`);
+      const letterSpacing = Number(typography.letterSpacing);
+      if (Number.isFinite(letterSpacing) && letterSpacing >= -0.05 && letterSpacing <= 0.5) descendantDeclarations.push(`letter-spacing:${letterSpacing}em!important`);
       if (typography.safeBand === "light" || typography.safeBand === "dark") {
         typeDeclarations.push(`background:${typography.safeBand === "light" ? "#ffffff" : "#181A1B"}!important`);
         typeDeclarations.push(`color:${typography.safeBand === "light" ? "#181A1B" : "#ffffff"}!important`);
         typeDeclarations.push("padding:clamp(12px,2vw,28px)");
       }
       if (typeDeclarations.length) rules.push(`${selector}{${typeDeclarations.join(";")}}`);
+      if (descendantDeclarations.length) rules.push(`${selector} :where(h1,h2,h3,h4,p,span){${descendantDeclarations.join(";")}}`);
       const maxLines = Number(typography.maxLines);
       if (Number.isInteger(maxLines) && maxLines >= 1 && maxLines <= 12) {
         rules.push(`${selector}{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${maxLines};overflow:hidden;overflow-wrap:anywhere}`);

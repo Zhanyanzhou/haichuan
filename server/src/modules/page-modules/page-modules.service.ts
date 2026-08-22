@@ -10,9 +10,12 @@ import { existsSync } from "fs";
 import { relative, resolve, sep } from "path";
 import { fromEvent, interval, map, merge, Observable, startWith } from "rxjs";
 import {
+  CONTENT_TEMPLATE_ASSET_POLICY,
   CONTENT_TEMPLATE_BY_MODULE_TYPE,
+  getContentTemplatePageRule,
   getContentTemplateIssues,
   getContentTemplateCompletion,
+  isContentTemplateAllowedForPage,
   type ContentTemplateIssue,
 } from "./content-template-contract";
 
@@ -123,9 +126,16 @@ const PUCK_SEO_LIMITS: Record<string, number> = {
 
 /**
  * 发布校验：占位文案关键词。
- * 默认模板与新增模块内置了“待确认 / 待配置”等占位文案，运营未替换时不得发布到前台。
+ * 默认模板与新增模块内置的文案及素材占位状态，运营未替换时不得发布到前台。
  */
-const PLACEHOLDER_MARKERS = ["待确认", "待配置", "请填写"];
+const PLACEHOLDER_MARKERS = [
+  "待确认",
+  "待配置",
+  "请填写",
+  CONTENT_TEMPLATE_ASSET_POLICY.placeholder.label,
+  CONTENT_TEMPLATE_ASSET_POLICY.placeholder.badge,
+  CONTENT_TEMPLATE_ASSET_POLICY.placeholder.status,
+];
 
 @Injectable()
 export class PageModulesService {
@@ -461,6 +471,7 @@ export class PageModulesService {
       Array<{ blockId?: string; path: string; label: string; field: string; index: number }>
     >();
     const missingUploadUrls = new Set<string>();
+    const pageRule = getContentTemplatePageRule(pageKey);
     if (!/^[a-z0-9-]{1,50}$/i.test(pageKey)) {
       errors.push("页面标识不合法");
     }
@@ -494,6 +505,16 @@ export class PageModulesService {
         errors.push(`${displayPath}：未知区块类型「${type || "空"}」`);
         attachBlockContext();
         return;
+      }
+
+      if (
+        pageRule
+        && CONTENT_TEMPLATE_BY_MODULE_TYPE[type]
+        && !isContentTemplateAllowedForPage(pageKey, type)
+      ) {
+        errors.push(
+          `${displayPath}「${type}」不适用于当前页面角色 ${pageRule.pageRole}`,
+        );
       }
 
       if (!props || typeof props !== "object") {
@@ -713,22 +734,26 @@ export class PageModulesService {
         }
       };
 
-      // 卡片类模块（品牌亮点/服务保障）与限时活动内置“待确认”占位文案，拦截未替换的占位发布到前台。
-      if (type === "卡片网格" || type === "服务承诺") {
-        const cards = Array.isArray(props.cards) ? props.cards : [];
-        cards.forEach((card: any, index: number) => {
-          rejectPlaceholderText(card?.title, `第 ${index + 1} 张卡片标题`);
-          rejectPlaceholderText(card?.body, `第 ${index + 1} 张卡片说明`);
-        });
-      }
-      if (type === "限时活动") {
-        rejectPlaceholderText(props.title, "活动标题");
-        rejectPlaceholderText(props.body, "活动说明");
-        const benefits = Array.isArray(props.benefits) ? props.benefits : [];
-        benefits.forEach((benefit: any, index: number) => {
-          rejectPlaceholderText(benefit?.value, `第 ${index + 1} 项权益`);
-        });
-      }
+      // 占位可能出现在普通文案、列表条目、alt、素材状态或后续新增结构中；
+      // 递归检查当前区块的可序列化 props，避免只拦截少数已知模板而漏过新页面。
+      const scanPlaceholderValues = (value: unknown, valuePath: string) => {
+        if (typeof value === "string") {
+          rejectPlaceholderText(value, valuePath);
+          return;
+        }
+        if (Array.isArray(value)) {
+          value.forEach((item, index) =>
+            scanPlaceholderValues(item, `${valuePath}[${index}]`),
+          );
+          return;
+        }
+        if (value && typeof value === "object") {
+          Object.entries(value).forEach(([key, item]) =>
+            scanPlaceholderValues(item, `${valuePath}.${key}`),
+          );
+        }
+      };
+      scanPlaceholderValues(props, "配置");
 
       if (type === "产品展示行") {
         const codes = Array.isArray(props.productCodes)
@@ -1012,6 +1037,36 @@ export class PageModulesService {
         block.props?.isVisible !== false &&
         !EDITOR_ONLY_COMPONENTS.has(block.type),
     );
+    if (pageRule) {
+      const rootContent = Array.isArray(puckData.content) ? puckData.content : [];
+      const businessRegions = rootContent.filter(
+        (block: any) => block?.type === "业务功能区",
+      );
+      if (businessRegions.length !== pageRule.businessRegionCount) {
+        errors.push(
+          `页面角色 ${pageRule.pageRole} 要求固定业务区数量为 ${pageRule.businessRegionCount}，当前为 ${businessRegions.length}`,
+        );
+      }
+      businessRegions.forEach((block: any) => {
+        if (block?.props?.pageKey !== pageKey || block?.props?.locked !== true) {
+          errors.push("固定业务区必须属于当前页面且保持锁定");
+        }
+      });
+      if (
+        pageRule.businessRegionPosition === "after-first-brand-block"
+        && rootContent.findIndex((block: any) => block?.type === "业务功能区") !== 1
+      ) {
+        errors.push("固定业务区必须紧随首个品牌框架模块之后");
+      }
+      if (pageRule.headerMode.configured === "overlay-light") {
+        const firstTemplate = CONTENT_TEMPLATE_BY_MODULE_TYPE[
+          orderedVisibleBlocks[0]?.type
+        ];
+        if (firstTemplate?.key !== pageRule.headerMode.overlayRequiresFirstTemplate) {
+          errors.push("覆盖式浅色导航要求首个可见品牌模块为首屏主视觉");
+        }
+      }
+    }
     const primaryStageIndexes = orderedVisibleBlocks
       .map((block: any, index: number) =>
         CONTENT_TEMPLATE_BY_MODULE_TYPE[block.type]?.visualRole === "primary-stage"
@@ -1274,23 +1329,38 @@ export class PageModulesService {
     });
   }
 
-  async restorePageDocumentRevision(pageKey: string, version: number) {
+  async restorePageDocumentRevision(
+    pageKey: string,
+    version: number,
+    expectedUpdatedAt: string,
+  ) {
     if (!Number.isInteger(version) || version <= 0) {
       throw new BadRequestException("版本号不正确");
+    }
+
+    const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
+    if (!expected) {
+      throw new BadRequestException("恢复版本时缺少页面版本标识");
     }
 
     const doc = await this.prisma.pageDocument.findUnique({
       where: { pageKey },
     });
     if (!doc) throw new BadRequestException("页面草稿不存在");
+    if (doc.updatedAt.getTime() !== expected.getTime()) {
+      throw new ConflictException(
+        "该页面已被其他编辑者更新，请重新加载版本记录后再恢复",
+      );
+    }
 
     const revision = await this.prisma.pageDocumentRevision.findFirst({
       where: { documentId: doc.id, version },
     });
     if (!revision) throw new BadRequestException("指定版本不存在");
 
-    return this.prisma.pageDocument.update({
-      where: { pageKey },
+    // 查版本后仍可能发生并发保存；最终更新必须继续带上读取时的 updatedAt。
+    const updated = await this.prisma.pageDocument.updateMany({
+      where: { pageKey, updatedAt: doc.updatedAt },
       data: {
         puckData: revision.puckData as any,
         metadata: revision.metadata as any,
@@ -1298,6 +1368,12 @@ export class PageModulesService {
         editorVersion: doc.editorVersion,
       },
     });
+    if (updated.count !== 1) {
+      throw new ConflictException(
+        "该页面刚刚被其他编辑者更新，请重新加载版本记录后再恢复",
+      );
+    }
+    return this.prisma.pageDocument.findUnique({ where: { pageKey } });
   }
 
   private notifyPublicChange(

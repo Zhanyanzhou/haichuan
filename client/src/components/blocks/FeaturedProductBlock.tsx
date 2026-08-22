@@ -34,6 +34,7 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
       <DecorSection master="hero-piece" background={bgColor}>
         <div style={{ maxWidth: 640, margin: "0 auto", width: "100%" }}>
           <BlockEmptyPlaceholder
+            assetSlot={{ templateKey: "featuredProduct", roleId: "product" }}
             hint="代表作品"
             spec={`请选择 1 件作品 · 作品图默认 ${productRatio.replace(" / ", ":")}`}
             ratio={productRatio}

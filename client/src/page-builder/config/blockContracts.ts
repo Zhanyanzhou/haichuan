@@ -108,17 +108,6 @@ export function isMobileCanvasWidth(width: number | "100%"): boolean {
   return typeof width === "number" && width <= RESPONSIVE_CANVAS.mobileMaxWidth;
 }
 
-export interface ImageTextContractProps extends LinkTargetValue {
-  label?: string;
-  title?: string;
-  body?: string;
-  image?: string;
-  imageAlt?: string;
-  buttonText?: string;
-  template?: ImageTextTemplate | string;
-  spacing?: ModuleDensity | string;
-}
-
 export interface SinglePosterContractProps {
   title?: string;
   desktopImage?: string;
@@ -713,41 +702,6 @@ export function evaluateAppointmentContract(
   };
 }
 
-/**
- * 草稿允许不完整；这里返回的是发布质量状态，供编辑器即时提示。
- */
-export function evaluateImageTextContract(
-  props: ImageTextContractProps,
-): ModuleContractStatus {
-  const template = props.template || IMAGE_TEXT_CONTRACT.defaults.template;
-  const needsImage = template !== "textOnly";
-  const completionChecks = [hasText(props.title), hasText(props.body)];
-  if (needsImage) completionChecks.push(hasText(props.image));
-
-  const errors: string[] = [];
-  const warnings: string[] = [];
-
-  if (!hasText(props.title)) errors.push("请填写标题");
-  if (needsImage && !hasText(props.image)) errors.push("请上传图文配图");
-  const target = evaluateLinkTarget(props);
-  if (hasText(props.buttonText) && normalizeLinkTargetType(props) === "none") {
-    errors.push("按钮已显示，请设置跳转目标");
-  } else if (hasText(props.buttonText) && !target.ready) {
-    errors.push(target.error || "按钮已显示，请设置跳转目标");
-  }
-  if (!hasText(props.body)) warnings.push("建议补充正文，让品牌故事更完整");
-  if (needsImage && !hasText(props.imageAlt)) {
-    warnings.push("建议填写图片替代文字，提升无障碍与搜索表现");
-  }
-
-  return {
-    completed: completionChecks.filter(Boolean).length,
-    total: completionChecks.length,
-    errors,
-    warnings,
-  };
-}
-
 export function evaluateSinglePosterContract(
   props: SinglePosterContractProps,
 ): ModuleContractStatus {
@@ -935,49 +889,6 @@ export function evaluateTextBannerContract(
   const errors: string[] = [];
   const warnings: string[] = [];
   if (!hasText(props.title)) errors.push("请填写横幅标题");
-  if (hasText(props.buttonText) && !hasText(resolvedLink))
-    warnings.push("按钮文字已填写但未设置跳转，前台不会显示按钮");
-  return {
-    completed: checks.filter(Boolean).length,
-    total: checks.length,
-    errors,
-    warnings,
-  };
-}
-
-/* ═══════ 分割面板契约 ═══════ */
-
-export const SPLIT_PANEL_CONTRACT = {
-  type: "分割面板",
-  purpose: "左图右文的对称叙事区块，适合品牌故事与工艺说明",
-  content: {
-    limits: {
-      title: 100,
-      subtitle: 200,
-      body: 2000,
-      buttonText: 30,
-    },
-  },
-} as const;
-
-export interface SplitPanelContractProps extends LinkTargetValue {
-  image?: string;
-  title?: string;
-  subtitle?: string;
-  body?: string;
-  buttonText?: string;
-}
-
-export function evaluateSplitPanelContract(
-  props: SplitPanelContractProps,
-): ModuleContractStatus {
-  const resolvedLink = resolveLinkTargetUrl(props);
-  const buttonReady = !hasText(props.buttonText) || hasText(resolvedLink);
-  const checks = [hasText(props.image), hasText(props.title), buttonReady];
-  const errors: string[] = [];
-  const warnings: string[] = [];
-  if (!hasText(props.image)) errors.push("请上传分栏配图");
-  if (!hasText(props.title)) errors.push("请填写标题");
   if (hasText(props.buttonText) && !hasText(resolvedLink))
     warnings.push("按钮文字已填写但未设置跳转，前台不会显示按钮");
   return {

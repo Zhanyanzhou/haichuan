@@ -82,7 +82,12 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
         .hc-video-frame { aspect-ratio: ${desktopRatio}; }
         @media (max-width: 767px) { .hc-video-frame { aspect-ratio: ${mobileRatio}; } }
       `}</style>
-      <BlockEmptyPlaceholder hint="品牌影片" spec={`请设置视频地址 · ${IMAGE_SPECS.video.poster.label}`} height="100%" />
+      <BlockEmptyPlaceholder
+        assetSlot={{ templateKey: "video", roleId: "coverImage" }}
+        hint="品牌影片"
+        spec={`请设置视频地址 · ${IMAGE_SPECS.video.poster.label}`}
+        height="100%"
+      />
     </div>;
   }
 

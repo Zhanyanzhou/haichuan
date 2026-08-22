@@ -59,6 +59,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
             <img src={image} alt={storeName || "门店空间"} loading="lazy" decoding="async" />
           ) : (
             <BlockEmptyPlaceholder
+              assetSlot={{ templateKey: "storeInfo", roleId: "store" }}
               hint="门店空间"
               spec={`请上传门店空间图 · ${IMAGE_SPECS.storeInfo.image.label}`}
               height="100%"

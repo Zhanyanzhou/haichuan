@@ -1,5 +1,6 @@
 ﻿import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
+import { useId, type RefObject } from "react";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { motion, AnimatePresence } from "framer-motion";
 import { message } from "antd";
@@ -13,6 +14,7 @@ import {
   type RealCategory,
 } from "@/hooks/useProductData";
 import { useAttributeDictionary } from "@/hooks/useAttributeDictionary";
+import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { getListingImage } from "@/utils/productImage";
 import { SecureImage } from "@/components/common/SecureImage";
 import { getMaterialCode } from "@/utils/material";
@@ -23,7 +25,10 @@ import {
   trackRemoveFromSelection,
   trackSubmitSelection,
   trackFilter,
+  trackSearch,
 } from "@/hooks/useAnalytics";
+import { usePageDecorationState } from "@/page-builder/runtime/PublishedPageDecoration";
+import { salesModeCta, salesModeRoute } from "@/store/featureFlags";
 
 /* ══════════════════════════════════════
    设计令牌
@@ -82,25 +87,30 @@ interface URLParams {
   page: number;
 }
 
-function useURLParams() {
+function createURLParams(readLocation: boolean): URLParams {
+  const u = readLocation ? new URL(window.location.href) : null;
+  const rawPage = Number.parseInt(u?.searchParams.get("page") || "1", 10);
+  return {
+    category: u?.searchParams.get("category") || "",
+    subcategory: u?.searchParams.get("subcategory") || "",
+    query: u?.searchParams.get("query") || "",
+    materials:
+      u?.searchParams.get("material")?.split(",").filter(Boolean) || [],
+    crafts: u?.searchParams.get("craft")?.split(",").filter(Boolean) || [],
+    weights: u?.searchParams.get("weight")?.split(",").filter(Boolean) || [],
+    sizes: u?.searchParams.get("size")?.split(",").filter(Boolean) || [],
+    sort: u?.searchParams.get("sort") || "recommended",
+    page: Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1,
+  };
+}
+
+function useURLParams(syncHistory = true) {
   const [p, setP] = useState<URLParams>(() => {
-    const u = new URL(window.location.href);
-    const rawPage = Number.parseInt(u.searchParams.get("page") || "1", 10);
-    return {
-      category: u.searchParams.get("category") || "",
-      subcategory: u.searchParams.get("subcategory") || "",
-      query: u.searchParams.get("query") || "",
-      materials:
-        u.searchParams.get("material")?.split(",").filter(Boolean) || [],
-      crafts: u.searchParams.get("craft")?.split(",").filter(Boolean) || [],
-      weights: u.searchParams.get("weight")?.split(",").filter(Boolean) || [],
-      sizes: u.searchParams.get("size")?.split(",").filter(Boolean) || [],
-      sort: u.searchParams.get("sort") || "recommended",
-      page: Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1,
-    };
+    return createURLParams(syncHistory);
   });
 
   const syncURL = useCallback((next: URLParams) => {
+    if (!syncHistory) return;
     const u = new URL(window.location.href);
     const s = (k: string, v: string) =>
       v ? u.searchParams.set(k, v) : u.searchParams.delete(k);
@@ -114,7 +124,7 @@ function useURLParams() {
     s("sort", next.sort !== "recommended" ? next.sort : "");
     s("page", next.page > 1 ? String(next.page) : "");
     window.history.replaceState(null, "", u.toString());
-  }, []);
+  }, [syncHistory]);
 
   const update = useCallback(
     (key: string, val: string | string[]) => {
@@ -179,62 +189,26 @@ function PrimaryNav({
   const primaryCats = getPrimaryCats(categories);
   if (!primaryCats.length) return null;
   return (
-    <nav style={{ borderBottom: `1px solid ${T.line}` }}>
-      <div
-        style={{
-          maxWidth: 1560,
-          marginInline: "auto",
-          paddingInline: "clamp(48px,5vw,80px)",
-          display: "flex",
-          justifyContent: "center",
-          height: 66,
-          alignItems: "center",
-          gap: "clamp(48px,6vw,104px)",
-          overflowX: "auto",
-          scrollbarWidth: "none",
-        }}
-      >
-        {primaryCats.map((c) => {
-          const cid = String(c.id);
-          const isA = active === cid;
-          return (
-            <button
-              key={c.id}
-              onClick={() => onChange(isA ? "" : cid)}
-              style={{
-                position: "relative",
-                background: "none",
-                border: 0,
-                cursor: "pointer",
-                fontSize: "clamp(16px,1.8vw,19px)",
-                fontWeight: 400,
-                letterSpacing: "0.06em",
-                whiteSpace: "nowrap",
-                color: isA ? T.txt : T.sec,
-                padding: "0 0 8px 0",
-                minHeight: 44,
-                display: "inline-flex",
-                alignItems: "center",
-                transition: "color 280ms",
-              }}
-            >
-              {c.name}
-              {isA && (
-                <span
-                  style={{
-                    position: "absolute",
-                    bottom: -1,
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    width: "clamp(28px,3vw,36px)",
-                    height: 1.5,
-                    background: T.txt,
-                  }}
-                />
-              )}
-            </button>
-          );
-        })}
+    <nav className="catalog-category-nav" aria-label="作品品类">
+      <div className="catalog-category-nav__inner">
+        <span className="catalog-category-nav__label">按品类浏览</span>
+        <div className="catalog-category-nav__items">
+          {primaryCats.map((c) => {
+            const cid = String(c.id);
+            const isA = active === cid;
+            return (
+              <button
+                key={c.id}
+                className="catalog-category-nav__item"
+                aria-pressed={isA}
+                onClick={() => onChange(isA ? "" : cid)}
+              >
+                {c.name}
+                {isA ? <span aria-hidden="true" /> : null}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </nav>
   );
@@ -356,7 +330,7 @@ function Toolbar({
   selCount: number;
   onToggleMaterial: (m: string) => void;
   onSort: (s: string) => void;
-  onOpenFilter: () => void;
+  onOpenFilter: (trigger: HTMLButtonElement) => void;
   categories: RealCategory[];
 }) {
   const parentName = catNameById(categories, Number(category));
@@ -367,6 +341,7 @@ function Toolbar({
     <>
       <div style={{ borderBottom: `1px solid ${T.line}` }}>
         <div
+          className="catalog-toolbar__inner"
           style={{
             maxWidth: 1560,
             marginInline: "auto",
@@ -374,14 +349,13 @@ function Toolbar({
             height: 52,
             display: "flex",
             alignItems: "center",
-            gap: 20,
             fontSize: 12,
             color: T.sec,
           }}
         >
-          <span style={{ color: T.txt, fontSize: 13 }}>{path}</span>
-          <span style={{ color: T.light }}>{total} 件作品</span>
-          <div style={{ flex: 1 }} />
+          <span style={{ color: T.txt, fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>{path}</span>
+          <span style={{ color: T.light, whiteSpace: "nowrap", flexShrink: 0 }}>{total} 件作品</span>
+          <div className="catalog-toolbar__spacer" style={{ flex: 1 }} />
           <div style={{ position: "relative" }}>
             <button
               onClick={() =>
@@ -397,6 +371,8 @@ function Toolbar({
                 minHeight: 44,
                 display: "inline-flex",
                 alignItems: "center",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
               }}
             >
               材质{materials.length > 0 ? ` ${materials.length}` : ""}
@@ -456,6 +432,8 @@ function Toolbar({
               cursor: "pointer",
               outline: "none",
               minHeight: 44,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
             <option value="recommended">推荐</option>
@@ -463,7 +441,7 @@ function Toolbar({
             <option value="sku">货号</option>
           </select>
           <button
-            onClick={onOpenFilter}
+            onClick={(event) => onOpenFilter(event.currentTarget)}
             style={{
               background: "none",
               border: 0,
@@ -474,12 +452,14 @@ function Toolbar({
               minHeight: 44,
               display: "inline-flex",
               alignItems: "center",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
             更多筛选
           </button>
           {selCount > 0 && (
-            <span style={{ color: T.txt }}>已选 {selCount}</span>
+            <span style={{ color: T.txt, whiteSpace: "nowrap", flexShrink: 0 }}>已选 {selCount}</span>
           )}
         </div>
       </div>
@@ -666,7 +646,7 @@ function Tag({ label, onRemove }: { label: string; onRemove: () => void }) {
         alignItems: "center",
         gap: 5,
         paddingInline: 9,
-        height: 28,
+        minHeight: 44,
         border: `1px solid ${T.line}`,
         fontSize: 11,
         color: T.txt,
@@ -674,6 +654,8 @@ function Tag({ label, onRemove }: { label: string; onRemove: () => void }) {
     >
       {label}
       <button
+        type="button"
+        aria-label={`移除筛选 ${label}`}
         onClick={onRemove}
         style={{
           background: "none",
@@ -682,6 +664,8 @@ function Tag({ label, onRemove }: { label: string; onRemove: () => void }) {
           color: T.sec,
           fontSize: 14,
           lineHeight: 1,
+          minWidth: 44,
+          minHeight: 44,
           padding: 0,
         }}
       >
@@ -694,6 +678,62 @@ function Tag({ label, onRemove }: { label: string; onRemove: () => void }) {
 /* ══════════════════════════════════════
    组件：更多筛选抽屉
    ══════════════════════════════════════ */
+function useCatalogDialog(
+  onClose: () => void,
+  returnFocusRef: RefObject<HTMLElement | null>,
+) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const initialFocusRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const ownerDocument = dialog?.ownerDocument;
+    const ownerWindow = ownerDocument?.defaultView;
+    if (!dialog || !ownerDocument || !ownerWindow) return;
+    const returnFocusTarget = returnFocusRef.current;
+
+    const previousOverflow = ownerDocument.body.style.overflow;
+    ownerDocument.body.style.overflow = "hidden";
+    const focusTimer = ownerWindow.setTimeout(
+      () => initialFocusRef.current?.focus({ preventScroll: true }),
+      0,
+    );
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => element.getClientRects().length > 0);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && ownerDocument.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && ownerDocument.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    ownerWindow.addEventListener("keydown", onKeyDown);
+    return () => {
+      ownerWindow.clearTimeout(focusTimer);
+      ownerWindow.removeEventListener("keydown", onKeyDown);
+      ownerDocument.body.style.overflow = previousOverflow;
+      ownerWindow.setTimeout(
+        () => returnFocusTarget?.focus({ preventScroll: true }),
+        0,
+      );
+    };
+  }, [onClose, returnFocusRef]);
+
+  return { dialogRef, initialFocusRef };
+}
+
 function FilterDrawer({
   materials,
   crafts,
@@ -709,6 +749,7 @@ function FilterDrawer({
   onClear,
   onClose,
   total,
+  returnFocusRef,
 }: {
   materials: string[];
   crafts: string[];
@@ -724,13 +765,17 @@ function FilterDrawer({
   onClear: () => void;
   onClose: () => void;
   total: number;
+  returnFocusRef: RefObject<HTMLElement | null>;
 }) {
+  const titleId = useId();
+  const { dialogRef, initialFocusRef } = useCatalogDialog(onClose, returnFocusRef);
   const toggle = (arr: string[], v: string, setter: (a: string[]) => void) => {
     setter(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   };
   return (
     <>
       <div
+        aria-hidden="true"
         style={{
           position: "fixed",
           inset: 0,
@@ -740,12 +785,16 @@ function FilterDrawer({
         onClick={onClose}
       />
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         style={{
           position: "fixed",
           top: 0,
           right: 0,
           bottom: 0,
-          width: "clamp(380px,28vw,440px)",
+          width: "min(440px, 100%)",
           zIndex: 91,
           background: T.bg,
           overflowY: "auto",
@@ -764,11 +813,15 @@ function FilterDrawer({
           }}
         >
           <h3
+            id={titleId}
             style={{ fontSize: 16, fontWeight: 400, color: T.txt, margin: 0 }}
           >
             更多筛选
           </h3>
           <button
+            ref={initialFocusRef}
+            type="button"
+            aria-label="关闭筛选"
             onClick={onClose}
             style={{
               background: "none",
@@ -824,7 +877,7 @@ function FilterDrawer({
             onClick={onClear}
             style={{
               flex: 1,
-              height: 40,
+              minHeight: 44,
               border: `1px solid ${T.line}`,
               background: "transparent",
               cursor: "pointer",
@@ -838,7 +891,7 @@ function FilterDrawer({
             onClick={onClose}
             style={{
               flex: 1,
-              height: 40,
+              minHeight: 44,
               border: 0,
               background: T.txt,
               cursor: "pointer",
@@ -885,6 +938,8 @@ function FG({
             style={{
               display: "inline-flex",
               alignItems: "center",
+              minHeight: 44,
+              paddingInline: 4,
               gap: 6,
               cursor: "pointer",
               fontSize: 12,
@@ -914,18 +969,76 @@ function FG({
 /* ══════════════════════════════════════
    组件：产品卡片（梵克雅宝矩阵风格）
    ══════════════════════════════════════ */
+function CatalogProductAction({
+  product,
+  selected,
+  onToggle,
+}: {
+  product: CatalogProduct;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  const commonStyle: React.CSSProperties = {
+    display: "inline-flex",
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0 16px",
+    border: `1px solid ${T.line}`,
+    background: "transparent",
+    color: T.txt,
+    cursor: "pointer",
+    fontSize: 11,
+    letterSpacing: "0.03em",
+    textDecoration: "none",
+  };
+
+  if (product.salesMode === "SELECTION") {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-pressed={selected}
+        style={{
+          ...commonStyle,
+          borderColor: selected ? T.txt : T.line,
+          background: selected ? T.txt : "transparent",
+          color: selected ? "#FFFFFF" : T.sec,
+        }}
+      >
+        {selected ? "✓ 已选" : "+ 加入选款"}
+      </button>
+    );
+  }
+
+  if (product.salesMode === "APPOINTMENT" || product.salesMode === "CUSTOM_INQUIRY") {
+    return (
+      <Link to={salesModeRoute(product.salesMode)} style={commonStyle}>
+        {salesModeCta(product.salesMode)}
+      </Link>
+    );
+  }
+
+  return (
+    <Link to={`/products/${product.id}`} style={commonStyle}>
+      {product.salesMode === "DIRECT_PURCHASE" && product.isAvailableForPurchase === true
+        ? "查看并购买"
+        : "查看作品"}
+    </Link>
+  );
+}
+
 function ProductCard({
   product,
   onQuickView,
 }: {
   product: CatalogProduct;
-  onQuickView: (p: CatalogProduct) => void;
+  onQuickView: (p: CatalogProduct, trigger: HTMLButtonElement) => void;
 }) {
   const toggle = useSelectionStore((s) => s.toggle);
   const sel = useSelectionStore((s) => s.isSelected)(product.id);
 
-  const handleToggle = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleToggle = () => {
     toggle(product.id);
     if (sel) trackRemoveFromSelection(product.id);
     else trackAddToSelection(product.id);
@@ -955,10 +1068,11 @@ function ProductCard({
     setImgIdx(0);
   };
 
-  const priceText =
-    product.price && product.price > 0
+  const priceText = product.salesMode === "DIRECT_PURCHASE"
+    ? product.price && product.price > 0
       ? `¥${product.price.toLocaleString()} 起`
-      : "咨询价格";
+      : "价格暂不可用"
+    : salesModeCta(product.salesMode);
 
   const subInfo = [product.categoryName, product.material]
     .filter(Boolean)
@@ -966,10 +1080,11 @@ function ProductCard({
 
   return (
     <div style={{ background: T.bg }}>
-      {/* 图片区：1:1 */}
+      {/* 商品目录统一使用 4:5 产品图比例。 */}
       <div
+        data-catalog-product-media
         style={{
-          aspectRatio: "1/1",
+          aspectRatio: "4/5",
           background: T.imgBg,
           overflow: "hidden",
           position: "relative",
@@ -979,7 +1094,7 @@ function ProductCard({
           type="button"
           className="catalog-image-trigger"
           aria-label={`快速预览 ${product.name || product.sku}`}
-          onClick={() => onQuickView(product)}
+          onClick={(event) => onQuickView(product, event.currentTarget)}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
           style={{
@@ -1025,16 +1140,26 @@ function ProductCard({
                 setImgIdx(i);
               }}
               style={{
-                width: i === imgIdx ? 20 : 8,
-                height: 2,
+                width: 44,
+                height: 44,
                 border: "none",
                 padding: 0,
                 cursor: "pointer",
-                background:
-                  i === imgIdx ? "rgba(24,26,27,0.55)" : "rgba(24,26,27,0.18)",
-                transition: "all 0.25s",
+                display: "grid",
+                placeItems: "center",
+                background: "transparent",
               }}
-            />
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: i === imgIdx ? 20 : 8,
+                  height: 2,
+                  background: i === imgIdx ? "rgba(24,26,27,0.55)" : "rgba(24,26,27,0.18)",
+                  transition: "all 0.25s",
+                }}
+              />
+            </button>
           ))}
         </div>
       </div>
@@ -1079,26 +1204,16 @@ function ProductCard({
         >
           {priceText}
         </p>
-        <button
-          onClick={handleToggle}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 4,
-            height: 28,
-            padding: "0 12px",
-            background: "none",
-            border: `1px solid ${T.line}`,
-            cursor: "pointer",
-            fontSize: 11,
-            letterSpacing: "0.03em",
-            color: sel ? "#fff" : T.sec,
-            backgroundColor: sel ? T.txt : "transparent",
-            transition: "all 0.2s",
-          }}
-        >
-          {sel ? "✓ 已选" : "+ 选款"}
-        </button>
+        {product.salesMode === "DIRECT_PURCHASE" && product.isAvailableForPurchase === false ? (
+          <p role="status" style={{ margin: "-4px 0 10px", color: T.sec, fontSize: 11 }}>
+            已售罄
+          </p>
+        ) : null}
+        <CatalogProductAction
+          product={product}
+          selected={sel}
+          onToggle={handleToggle}
+        />
       </div>
     </div>
   );
@@ -1115,7 +1230,7 @@ function ProductGrid({
   onQuickView,
 }: {
   products: CatalogProduct[];
-  onQuickView: (p: CatalogProduct) => void;
+  onQuickView: (p: CatalogProduct, trigger: HTMLButtonElement) => void;
 }) {
   return (
     <>
@@ -1180,20 +1295,25 @@ function ProductGrid({
 function QuickView({
   product,
   onClose,
+  returnFocusRef,
 }: {
   product: CatalogProduct | null;
   onClose: () => void;
+  returnFocusRef: RefObject<HTMLElement | null>;
 }) {
   const toggle = useSelectionStore((s) => s.toggle);
   const isSelected = useSelectionStore((s) => s.isSelected);
+  const { dialogRef, initialFocusRef } = useCatalogDialog(onClose, returnFocusRef);
   if (!product) return null;
   const sel = isSelected(product.id);
+  const handleToggle = () => {
+    toggle(product.id);
+    if (sel) trackRemoveFromSelection(product.id);
+    else trackAddToSelection(product.id);
+  };
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="catalog-quick-view-title"
       style={{
         position: "fixed",
         inset: 0,
@@ -1203,13 +1323,17 @@ function QuickView({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="catalog-quick-view-title"
         onClick={(event) => event.stopPropagation()}
         style={{
           position: "absolute",
           top: 0,
           right: 0,
           bottom: 0,
-          width: "min(720px,44vw)",
+          width: "min(720px, 100%)",
           zIndex: 96,
           background: T.bg,
           overflowY: "auto",
@@ -1218,8 +1342,8 @@ function QuickView({
         }}
       >
         <button
+          ref={initialFocusRef}
           type="button"
-          autoFocus
           aria-label="关闭快速预览"
           onClick={onClose}
           style={{
@@ -1239,8 +1363,9 @@ function QuickView({
           ✕
         </button>
         <div
+          data-catalog-quick-media
           style={{
-            aspectRatio: "1/1",
+            aspectRatio: "4/5",
             background: T.imgBg,
             overflow: "hidden",
             marginBottom: 28,
@@ -1291,24 +1416,21 @@ function QuickView({
           {product.size && <Info label="规格" value={product.size} />}
           {product.series && <Info label="系列" value={product.series} />}
         </div>
-        <button
-          onClick={() => toggle(product.id)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            height: 44,
-            paddingInline: 24,
-            border: `1px solid ${sel ? T.txt : T.line}`,
-            background: sel ? T.txt : "transparent",
-            cursor: "pointer",
-            fontSize: 13,
-            letterSpacing: "0.04em",
-            color: sel ? "#FFFFFF" : T.txt,
-          }}
-        >
-          {sel ? "✓ 已选" : "+ 加入选款"}
-        </button>
+        {product.salesMode === "DIRECT_PURCHASE" && product.price && product.price > 0 ? (
+          <p style={{ margin: "0 0 12px", color: T.txt, fontSize: 15 }}>
+            ¥{product.price.toLocaleString()} 起
+          </p>
+        ) : null}
+        {product.salesMode === "DIRECT_PURCHASE" && product.isAvailableForPurchase === false ? (
+          <p role="status" style={{ margin: "0 0 12px", color: T.sec, fontSize: 13 }}>
+            已售罄，作品仍可浏览
+          </p>
+        ) : null}
+        <CatalogProductAction
+          product={product}
+          selected={sel}
+          onToggle={handleToggle}
+        />
       </div>
     </div>
   );
@@ -1396,8 +1518,8 @@ function PBtn({
       disabled={disabled}
       onClick={onClick}
       style={{
-        minWidth: 36,
-        height: 36,
+        minWidth: 44,
+        minHeight: 44,
         border: "none",
         background: active ? T.txt : "transparent",
         cursor: disabled ? "default" : "pointer",
@@ -1963,23 +2085,212 @@ function StickyBar({
   );
 }
 
+type CatalogSuggestion = { type: "品类" | "材质" | "作品" | "货号"; value: string };
+
+function getCatalogSuggestions(
+  query: string,
+  products: CatalogProduct[],
+  categories: RealCategory[],
+  materials: string[],
+): CatalogSuggestion[] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return [];
+  const suggestions: CatalogSuggestion[] = [];
+  const seen = new Set<string>();
+  const add = (type: CatalogSuggestion["type"], value: string | undefined) => {
+    const clean = value?.trim();
+    if (!clean || seen.has(clean.toLocaleLowerCase())) return;
+    seen.add(clean.toLocaleLowerCase());
+    suggestions.push({ type, value: clean });
+  };
+  const visitCategories = (nodes: RealCategory[]) => {
+    for (const category of nodes) {
+      if (category.name.toLocaleLowerCase().includes(needle)) add("品类", category.name);
+      if (category.children?.length) visitCategories(category.children);
+    }
+  };
+  visitCategories(categories);
+  for (const material of materials) {
+    if (material.toLocaleLowerCase().includes(needle)) add("材质", material);
+  }
+  for (const product of products) {
+    if (product.sku.toLocaleLowerCase().includes(needle)) add("货号", product.sku);
+    if (product.name?.toLocaleLowerCase().includes(needle)) add("作品", product.name);
+  }
+  return suggestions.slice(0, 8);
+}
+
+function CatalogSearch({
+  query,
+  products,
+  categories,
+  materials,
+  onSearch,
+}: {
+  query: string;
+  products: CatalogProduct[];
+  categories: RealCategory[];
+  materials: string[];
+  onSearch: (value: string) => void;
+}) {
+  const listboxId = useId();
+  const [draft, setDraft] = useState(query);
+  const [focused, setFocused] = useState(false);
+  const { history, addToHistory, removeOne, clearAll } = useSearchHistory();
+  const suggestions = useMemo(
+    () => getCatalogSuggestions(draft, products, categories, materials),
+    [categories, draft, materials, products],
+  );
+
+  useEffect(() => setDraft(query), [query]);
+
+  const submit = (value: string) => {
+    const clean = value.trim();
+    setDraft(clean);
+    onSearch(clean);
+    if (clean) {
+      addToHistory(clean);
+      trackSearch(clean);
+    }
+    setFocused(false);
+  };
+  const showSuggestions = focused && draft.trim() && suggestions.length > 0;
+  const showHistory = focused && !draft.trim() && history.length > 0;
+
+  return (
+    <div className="catalog-search" aria-label="选款搜索">
+      <p className="catalog-search__eyebrow">SEARCH THE COLLECTION</p>
+      <h2 className="catalog-search__title">查找作品</h2>
+      <div className="catalog-search__field">
+        <form
+            className="catalog-search__form"
+            role="search"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submit(draft);
+            }}
+          >
+            <label className="sr-only" htmlFor="catalog-search-input">
+              关键词或货号
+            </label>
+            <input
+              id="catalog-search-input"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+              placeholder="输入关键词或货号"
+              autoComplete="off"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={Boolean(showSuggestions || showHistory)}
+              aria-controls={showSuggestions || showHistory ? listboxId : undefined}
+              className="catalog-search__input"
+            />
+            <div className="catalog-search__actions">
+              {draft ? (
+                <button
+                  type="button"
+                  className="catalog-search__clear"
+                  aria-label="清除关键词"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setDraft("");
+                    onSearch("");
+                  }}
+                >
+                  ×
+                </button>
+              ) : null}
+              <button type="submit" className="catalog-search__submit">
+                <span>搜索</span>
+                <span aria-hidden="true">→</span>
+              </button>
+            </div>
+        </form>
+        <AnimatePresence>
+            {showSuggestions || showHistory ? (
+              <motion.div
+                id={listboxId}
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.15 }}
+                role="listbox"
+                className="catalog-search__suggestions"
+              >
+                {showSuggestions
+                  ? suggestions.map((suggestion) => (
+                      <button
+                        key={`${suggestion.type}-${suggestion.value}`}
+                        type="button"
+                        role="option"
+                        aria-selected="false"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => submit(suggestion.value)}
+                        style={{ display: "flex", width: "100%", gap: 14, padding: "12px 16px", border: 0, borderBottom: `1px solid ${T.line}`, background: "none", color: T.txt, cursor: "pointer", textAlign: "left" }}
+                      >
+                        <span style={{ minWidth: 32, color: T.light, fontSize: 10 }}>{suggestion.type}</span>
+                        <span style={{ fontSize: 13 }}>{suggestion.value}</span>
+                      </button>
+                    ))
+                  : (
+                      <>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", color: T.light, fontSize: 10 }}>
+                          <span>最近搜索</span>
+                          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={clearAll} style={{ border: 0, background: "none", color: T.sec, cursor: "pointer", fontSize: 11 }}>清除记录</button>
+                        </div>
+                        {history.slice(0, 5).map((item) => (
+                          <div key={item} style={{ display: "grid", gridTemplateColumns: "1fr 44px", borderTop: `1px solid ${T.line}` }}>
+                            <button type="button" role="option" aria-selected="false" onMouseDown={(event) => event.preventDefault()} onClick={() => submit(item)} style={{ minHeight: 44, border: 0, background: "none", padding: "12px 16px", color: T.txt, cursor: "pointer", textAlign: "left", fontSize: 13 }}>{item}</button>
+                            <button type="button" aria-label={`删除搜索记录 ${item}`} onMouseDown={(event) => event.preventDefault()} onClick={() => removeOne(item)} style={{ border: 0, background: "none", color: T.light, cursor: "pointer" }}>×</button>
+                          </div>
+                        ))}
+                      </>
+                    )}
+              </motion.div>
+            ) : null}
+        </AnimatePresence>
+      </div>
+      <p className="catalog-search__hint">支持作品名称、品类、材质或货号</p>
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════
    主页面
    ══════════════════════════════════════ */
-export default function Catalog() {
+export type CatalogProps = {
+  mode?: "public" | "editor-preview";
+  hasLeadingDecoration?: boolean;
+};
+
+export default function Catalog({
+  mode = "public",
+  hasLeadingDecoration: leadingDecorationOverride,
+}: CatalogProps = {}) {
+  const decorationState = usePageDecorationState();
+  const editorPreview = mode === "editor-preview";
+  const hasLeadingDecoration =
+    leadingDecorationOverride ?? decorationState.active;
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
   useEffect(() => {
+    if (editorPreview) return;
     setPageMeta({
       title: "选款中心 | 海川珠宝",
       description: "按品类、材质与货号选款，加入心仪作品并提交选款咨询。",
     });
     return () => clearPageMeta();
-  }, [setPageMeta, clearPageMeta]);
+  }, [clearPageMeta, editorPreview, setPageMeta]);
 
-  const { params, update } = useURLParams();
+  const { params, update } = useURLParams(!editorPreview);
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickView, setQuickView] = useState<CatalogProduct | null>(null);
+  const filterTriggerRef = useRef<HTMLElement | null>(null);
+  const quickViewTriggerRef = useRef<HTMLElement | null>(null);
+  const closeFilter = useCallback(() => setFilterOpen(false), []);
+  const closeQuickView = useCallback(() => setQuickView(null), []);
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const selCount = selectedIds.size;
   const { materialOptions, craftOptions } = useAttributeDictionary();
@@ -2084,20 +2395,10 @@ export default function Catalog() {
   useEffect(() => {
     if (!apiLoading && params.page > tp && tp > 0) update("page", String(tp));
   }, [apiLoading, tp, params.page, update]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setQuickView(null);
-        setFilterOpen(false);
-      }
-    };
-    if (quickView || filterOpen) window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [quickView, filterOpen]);
-
   const [stickyVisible, setStickyVisible] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    if (editorPreview) return;
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
     const observer = new IntersectionObserver(
@@ -2106,9 +2407,11 @@ export default function Catalog() {
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, []);
+  }, [editorPreview]);
 
   const clearAll = () => {
+    update("category", "");
+    update("query", "");
     update("material", []);
     update("craft", []);
     update("weight", []);
@@ -2134,33 +2437,321 @@ export default function Catalog() {
   };
 
   useEffect(() => {
+    if (editorPreview) return;
     trackPageView();
-  }, []);
+  }, [editorPreview]);
 
   return (
     <div
-      className="catalog-page"
+      className={`catalog-page${editorPreview ? " is-editor-preview" : ""}`}
       style={{
         background: T.bg,
-        minHeight: "100vh",
+        minHeight: editorPreview ? "auto" : "100vh",
         paddingBottom: 160,
         overflowX: "hidden",
       }}
     >
       <style>{`
+        .catalog-page.is-editor-preview {
+          pointer-events: none;
+        }
         .catalog-page :is(button, a, input, select):focus-visible {
           outline: 2px solid #5F6568 !important;
           outline-offset: 3px;
         }
+        .catalog-page__discovery {
+          background: #FFFFFF;
+          border-bottom: 1px solid #DDE1E2;
+        }
+        .catalog-page__discovery-main {
+          max-width: 1440px;
+          margin-inline: auto;
+          padding: clamp(64px, 6vw, 88px) clamp(32px, 5.55vw, 80px) clamp(56px, 5vw, 72px);
+          display: grid;
+          grid-template-columns: minmax(300px, .8fr) minmax(440px, 1fr);
+          align-items: end;
+          gap: clamp(56px, 9vw, 136px);
+        }
+        .catalog-page__discovery.is-compact .catalog-page__discovery-main {
+          grid-template-columns: minmax(0, 720px);
+          justify-content: center;
+          padding-block: 48px;
+        }
+        .catalog-page__intro-eyebrow {
+          margin: 0 0 20px;
+          color: #5F6568;
+          font-size: 11px;
+          line-height: 1;
+          letter-spacing: .2em;
+        }
+        .catalog-page__intro h1 {
+          margin: 0;
+          color: #181A1B;
+          font-family: "Cormorant Garamond", "Noto Serif SC", serif;
+          font-size: clamp(48px, 4.7vw, 68px);
+          font-weight: 400;
+          line-height: 1.04;
+          letter-spacing: -.02em;
+        }
+        .catalog-page__intro-copy {
+          max-width: 430px;
+          margin: 24px 0 0;
+          color: #5F6568;
+          font-size: 14px;
+          line-height: 1.9;
+        }
+        .catalog-search {
+          min-width: 0;
+          padding: 32px 36px 28px;
+          background: #F4F5F5;
+        }
+        .catalog-search__eyebrow {
+          margin: 0 0 10px;
+          color: #6E7477;
+          font-size: 10px;
+          line-height: 1;
+          letter-spacing: .18em;
+        }
+        .catalog-search__title {
+          margin: 0 0 24px;
+          color: #181A1B;
+          font-family: "Cormorant Garamond", "Noto Serif SC", serif;
+          font-size: 24px;
+          font-weight: 400;
+          line-height: 1.3;
+        }
+        .catalog-search__field {
+          position: relative;
+        }
+        .catalog-search__form {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          border-bottom: 1px solid #B8BEC1;
+          transition: border-color 180ms ease;
+        }
+        .catalog-search__form:focus-within {
+          border-color: #181A1B;
+          outline: 2px solid #5F6568;
+          outline-offset: 3px;
+        }
+        .catalog-search__input {
+          min-width: 0;
+          height: 56px;
+          padding: 0 16px 0 0;
+          border: 0;
+          outline: 0;
+          background: transparent;
+          color: #181A1B;
+          font: inherit;
+          font-size: 16px;
+        }
+        .catalog-search__input::placeholder {
+          color: #6E7477;
+          opacity: 1;
+        }
+        .catalog-page .catalog-search__input:focus-visible {
+          outline: none !important;
+        }
+        .catalog-search__actions {
+          display: flex;
+          align-items: center;
+        }
+        .catalog-search__clear {
+          min-width: 44px;
+          min-height: 44px;
+          border: 0;
+          background: none;
+          color: #5F6568;
+          cursor: pointer;
+          font-size: 18px;
+        }
+        .catalog-search__submit {
+          min-width: 112px;
+          min-height: 56px;
+          padding-inline: 20px;
+          border: 0;
+          background: #181A1B;
+          color: #F7F8F8;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 20px;
+          font-size: 12px;
+          letter-spacing: .08em;
+          transition: background-color 180ms ease;
+        }
+        .catalog-search__submit:hover {
+          background: #101213;
+        }
+        .catalog-search__hint {
+          margin: 12px 0 0;
+          color: #6E7477;
+          font-size: 11px;
+          line-height: 1.6;
+        }
+        .catalog-search__suggestions {
+          position: absolute;
+          inset-inline: 0;
+          top: calc(100% + 1px);
+          z-index: 60;
+          background: #FFFFFF;
+          border: 1px solid #DDE1E2;
+          box-shadow: 0 18px 42px rgba(24, 26, 27, .09);
+        }
+        .catalog-category-nav {
+          border-top: 1px solid #DDE1E2;
+        }
+        .catalog-category-nav__inner {
+          max-width: 1440px;
+          min-height: 84px;
+          margin-inline: auto;
+          padding-inline: clamp(32px, 5.55vw, 80px);
+          display: grid;
+          grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
+          align-items: center;
+          gap: 32px;
+        }
+        .catalog-category-nav__label {
+          color: #6E7477;
+          font-size: 11px;
+          letter-spacing: .08em;
+        }
+        .catalog-category-nav__items {
+          min-width: 0;
+          display: flex;
+          align-items: center;
+          gap: clamp(32px, 4vw, 64px);
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+        .catalog-category-nav__items::-webkit-scrollbar {
+          display: none;
+        }
+        .catalog-category-nav__item {
+          position: relative;
+          min-height: 44px;
+          padding: 0;
+          border: 0;
+          background: none;
+          color: #5F6568;
+          cursor: pointer;
+          white-space: nowrap;
+          font-family: "Cormorant Garamond", "Noto Serif SC", serif;
+          font-size: 18px;
+          font-weight: 400;
+          transition: color 180ms ease;
+        }
+        .catalog-category-nav__item:hover,
+        .catalog-category-nav__item[aria-pressed="true"] {
+          color: #181A1B;
+        }
+        .catalog-category-nav__item > span {
+          position: absolute;
+          right: 0;
+          bottom: 4px;
+          left: 0;
+          height: 1px;
+          background: #181A1B;
+        }
+        .catalog-toolbar__inner {
+          gap: 20px;
+        }
+        @media (max-width: 900px) {
+          .catalog-page__discovery-main {
+            grid-template-columns: minmax(240px, .72fr) minmax(360px, 1fr);
+            gap: 40px;
+            padding-inline: 32px;
+          }
+          .catalog-category-nav__inner {
+            padding-inline: 32px;
+          }
+        }
+        @media (max-width: 720px) {
+          .catalog-page__discovery-main,
+          .catalog-page__discovery.is-compact .catalog-page__discovery-main {
+            grid-template-columns: minmax(0, 1fr);
+            padding: 44px 20px 40px;
+            gap: 40px;
+          }
+          .catalog-page__intro h1 {
+            font-size: 40px;
+            line-height: 1.1;
+          }
+          .catalog-page__intro-copy {
+            margin-top: 18px;
+            font-size: 13px;
+          }
+          .catalog-search {
+            padding: 24px 20px 20px;
+          }
+          .catalog-search__title {
+            margin-bottom: 18px;
+            font-size: 20px;
+          }
+          .catalog-search__input {
+            font-size: 14px;
+          }
+          .catalog-search__submit {
+            min-width: 92px;
+            padding-inline: 16px;
+            gap: 14px;
+          }
+          .catalog-category-nav__inner {
+            min-height: auto;
+            padding: 22px 20px 16px;
+            display: block;
+          }
+          .catalog-category-nav__label {
+            display: block;
+            margin-bottom: 8px;
+          }
+          .catalog-category-nav__items {
+            gap: 36px;
+          }
+          .catalog-category-nav__item {
+            font-size: 16px;
+          }
+          .catalog-toolbar__inner {
+            gap: 8px;
+          }
+        }
       `}</style>
-      <h1 className="sr-only">选款中心</h1>
-      {showCatalogTools ? (
-        <>
+      <section
+        className={`catalog-page__discovery${hasLeadingDecoration ? " is-compact" : ""}`}
+        aria-label={hasLeadingDecoration ? "选款中心检索" : undefined}
+        aria-labelledby={hasLeadingDecoration ? undefined : "catalog-page-title"}
+      >
+        <div className="catalog-page__discovery-main">
+          {hasLeadingDecoration ? (
+            <h1 className="sr-only">选款中心</h1>
+          ) : (
+            <header className="catalog-page__intro">
+            <p className="catalog-page__intro-eyebrow">SELECTION CENTER</p>
+            <h1 id="catalog-page-title">选款中心</h1>
+            <p className="catalog-page__intro-copy">
+              按关键词、货号与当前公开属性查找作品，并将意向款式加入选款清单。
+            </p>
+            </header>
+          )}
+          <CatalogSearch
+            query={params.query}
+            products={mergedProducts}
+            categories={categories}
+            materials={materialOptions}
+            onSearch={(value) => update("query", value)}
+          />
+        </div>
+        {showCatalogTools ? (
           <PrimaryNav
             active={params.category}
             onChange={(c) => update("category", c)}
             categories={categories}
           />
+        ) : null}
+      </section>
+      {showCatalogTools ? (
+        <>
           {params.category ? (
             <SecondaryNav
               parentId={params.category}
@@ -2181,7 +2772,10 @@ export default function Catalog() {
                 toggleArray("material", params.materials, m)
               }
               onSort={(s) => update("sort", s)}
-              onOpenFilter={() => setFilterOpen(true)}
+              onOpenFilter={(trigger) => {
+                filterTriggerRef.current = trigger;
+                setFilterOpen(true);
+              }}
               categories={categories}
             />
           </div>
@@ -2351,7 +2945,10 @@ export default function Catalog() {
       ) : (
         <ProductGrid
           products={mergedProducts}
-          onQuickView={setQuickView}
+          onQuickView={(product, trigger) => {
+            quickViewTriggerRef.current = trigger;
+            setQuickView(product);
+          }}
         />
       )}
       <Pagination
@@ -2360,7 +2957,11 @@ export default function Catalog() {
         onPage={(p) => update("page", String(p))}
       />
       {quickView && (
-        <QuickView product={quickView} onClose={() => setQuickView(null)} />
+        <QuickView
+          product={quickView}
+          onClose={closeQuickView}
+          returnFocusRef={quickViewTriggerRef}
+        />
       )}
       {filterOpen && (
         <FilterDrawer
@@ -2381,11 +2982,12 @@ export default function Catalog() {
             update("weight", []);
             update("size", []);
           }}
-          onClose={() => setFilterOpen(false)}
+          onClose={closeFilter}
           total={total}
+          returnFocusRef={filterTriggerRef}
         />
       )}
-      <SelectionTray products={selectionProducts} />
+      {!editorPreview ? <SelectionTray products={selectionProducts} /> : null}
     </div>
   );
 }

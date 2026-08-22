@@ -105,15 +105,6 @@ function expectedObservedOrder(
   return contract.order[viewport].filter((role) => observedSet.has(role));
 }
 
-function expectedPreviewOrder(
-  contract: ContentTemplateContract,
-  viewport: ContractViewport,
-  observed: readonly string[],
-) {
-  const observedSet = new Set(observed);
-  return contract.preview[viewport].order.filter((role) => observedSet.has(role));
-}
-
 async function seed(page: Page) {
   await page.route("**/svg/template-*.svg", (route) => route.fulfill({
     status: 200,
@@ -196,10 +187,8 @@ test.describe("23 个内容模板真实 Renderer（确定性 UI）", () => {
         ).toEqual([]);
 
         const contractOrder = expectedObservedOrder(contract, viewportName, observedRoles);
-        const previewOrder = expectedPreviewOrder(contract, viewportName, observedRoles);
         expect(
-          observedRoles.join(",") === contractOrder.join(",")
-            || observedRoles.join(",") === previewOrder.join(","),
+          observedRoles.join(",") === contractOrder.join(","),
           `${entry.moduleType} 真实 DOM 角色顺序 ${observedRoles.join(" > ")} 未匹配合同顺序`,
         ).toBe(true);
 
@@ -258,6 +247,17 @@ test.describe("23 个内容模板真实 Renderer（确定性 UI）", () => {
     const booking = page.locator('[data-content-template-contract="booking"]');
     await expect(booking.locator("form")).toHaveCount(0);
     await expect(booking.locator('[data-content-role="primaryAction"]')).toHaveCount(1);
+
+    await expect
+      .poll(() => page.locator('[data-content-template-contract="categoryCards"] a').evaluateAll(
+        (links) => links.map((link) => link.getAttribute("href")),
+      ))
+      .toEqual(["/catalog?category=1", "/catalog?category=2", "/catalog?category=3"]);
+    await expect
+      .poll(() => page.locator('[data-content-template-contract="sceneShopping"] a').evaluateAll(
+        (links) => links.map((link) => link.getAttribute("href")),
+      ))
+      .toEqual(["/catalog", "/catalog", "/catalog"]);
   });
 
   test("23 模板声明的可视编辑槽位具有真实 DOM 落点", async ({ page }) => {
@@ -333,6 +333,8 @@ test.describe("23 个内容模板真实 Renderer（确定性 UI）", () => {
     await expect(doubleRenderer.locator('[data-content-role="mainImage"]')).toHaveCSS("grid-column-start", "1");
     await expect(doubleRenderer.locator('[data-content-role="detailImage"]')).toHaveCSS("grid-column-start", "6");
     await expect(doubleRenderer.locator('[data-content-role="copy"]')).toHaveCSS("grid-column-start", "6");
+    await expect(doubleRenderer.locator("a")).toHaveCount(1);
+    await expect(doubleRenderer.locator('[data-content-role="action"]')).toHaveCount(1);
     const bookingRenderer = page.locator('[data-content-template-contract="booking"]');
     await expect(bookingRenderer).toHaveAttribute("data-instance-frame", "compact");
     await expect(bookingRenderer.locator(".hc-appointment")).toHaveCSS("aspect-ratio", "1.77778 / 1");

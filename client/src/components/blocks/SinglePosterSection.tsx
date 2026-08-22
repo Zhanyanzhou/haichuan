@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from 'react-router-dom';
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { SINGLE_POSTER_CONTRACT, resolveContractAspectRatio } from '@/page-builder/config/blockContracts';
@@ -11,6 +12,7 @@ import {
   templateLayoutVars,
 } from '@/page-builder/layout/contentTemplateLayouts';
 import type { PageModule } from '@/types/pageModule';
+import { hasRenderableImageDimensions } from "@/utils/imageLoad";
 
 /** 白盒画册冷调(2026-08-19):纯白底、近黑字、冷灰;金色废除。 */
 const BG = '#FFFFFF';
@@ -27,6 +29,13 @@ export default function SinglePosterSection({ module, editMode }: Props) {
 
   const desktopImg = c?.desktopImage || c?.mobileImage;
   const mobileImg = c?.mobileImage || c?.desktopImage;
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageLoaded(false);
+    setImageFailed(false);
+  }, [desktopImg, mobileImg]);
   // 公开态无图不兜底陌生营销图,静默隐藏;编辑态显示占位
   if (!editMode && !desktopImg) return null;
   // 文案不再回退营销默认值:未填写即不渲染对应节点
@@ -63,7 +72,7 @@ export default function SinglePosterSection({ module, editMode }: Props) {
       data-content-role-mobile="mobileImage"
       className="hc-content-template__media hc-phase1-single__media"
     >
-      {desktopImg ? (
+      {desktopImg && !imageFailed ? (
         <picture className="block w-full h-full">
           <source media={`(max-width:${SINGLE_POSTER_CONTRACT.canvas.mobileBreakpoint}px)`} srcSet={mobileImg} />
           <img
@@ -74,10 +83,36 @@ export default function SinglePosterSection({ module, editMode }: Props) {
             decoding="async"
             width={1600}
             height={Math.round((1600 * posterRatioH) / posterRatioW)}
+            onLoad={(event) => {
+              const renderable = hasRenderableImageDimensions(event.currentTarget);
+              setImageFailed(!renderable);
+              setImageLoaded(true);
+            }}
+            onError={() => {
+              setImageFailed(true);
+              setImageLoaded(true);
+            }}
+            style={{ opacity: imageLoaded ? 1 : 0 }}
           />
         </picture>
+      ) : imageFailed ? (
+        <div
+          className="homepage-single-poster__image-error"
+          role="img"
+          aria-label={c?.altText || "海报图片暂不可用"}
+        >
+          海报图片暂不可用
+        </div>
       ) : (
-        <BlockEmptyPlaceholder hint={CONTENT_TEMPLATE_LAYOUTS.singlePoster.displayName} spec={`请上传海报主图 · ${IMAGE_SPECS.singlePoster.image.label}`} height="100%" />
+        <BlockEmptyPlaceholder
+          assetSlots={[
+            { templateKey: "singlePoster", roleId: "desktopImage" },
+            { templateKey: "singlePoster", roleId: "mobileImage" },
+          ]}
+          hint={CONTENT_TEMPLATE_LAYOUTS.singlePoster.displayName}
+          spec={`请上传海报主图 · ${IMAGE_SPECS.singlePoster.image.label}`}
+          height="100%"
+        />
       )}
     </div>
   );
@@ -135,6 +170,17 @@ export default function SinglePosterSection({ module, editMode }: Props) {
       <ContentTemplateLayoutStyles />
       <style>{`
         .homepage-single-poster__image { object-position: var(--sp-focus-d); }
+        .homepage-single-poster__image-error {
+          width: 100%;
+          height: 100%;
+          min-height: 240px;
+          display: grid;
+          place-items: center;
+          color: #5F6568;
+          background: #F4F5F5;
+          font-size: 13px;
+          letter-spacing: .08em;
+        }
         @media (max-width: ${SINGLE_POSTER_CONTRACT.canvas.mobileBreakpoint}px) {
           .homepage-single-poster__image { object-position: var(--sp-focus-m); }
         }

@@ -20,6 +20,10 @@ export interface EffectiveVisualNode {
     color?: string;
     maxLines?: number;
     safeBand?: "none" | "light" | "dark";
+    /** 行距倍数（1–2.5），数值型，由面板滑杆写入 */
+    lineHeight?: number;
+    /** 字间距 em（-0.05–0.5），数值型，由面板滑杆写入 */
+    letterSpacing?: number;
   };
 }
 
@@ -102,6 +106,12 @@ export function resolveVisualNode(
               : undefined,
             safeBand: ["none", "light", "dark"].includes(typography.safeBand)
               ? typography.safeBand
+              : undefined,
+            lineHeight: Number.isFinite(Number(typography.lineHeight))
+              ? clamp(typography.lineHeight, 1, 2.5, 1.5)
+              : undefined,
+            letterSpacing: Number.isFinite(Number(typography.letterSpacing))
+              ? clamp(typography.letterSpacing, -0.05, 0.5, 0)
               : undefined,
           }
         : undefined,

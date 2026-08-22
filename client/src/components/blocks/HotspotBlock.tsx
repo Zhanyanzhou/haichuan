@@ -172,6 +172,7 @@ export default function HotspotBlock({
           }
         `}</style>
         <BlockEmptyPlaceholder
+          assetSlot={{ templateKey: "hotspot", roleId: "sceneImage" }}
           hint="热区图"
           spec={`先上传底图，再添加点击热区 · 桌面 ${IMAGE_SPECS.hotspot.desktop.label}`}
           height="100%"

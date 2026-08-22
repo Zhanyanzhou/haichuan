@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { DeleteOutlined, ShoppingOutlined, RightOutlined } from "@ant-design/icons";
-import { message } from "antd";
-import { cartApi } from "@/services/api";
+import { App as AntdApp } from "antd";
+import { cartApi, productApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getMaterialLabel } from "@/utils/material";
+import type { InventoryPolicy, Product } from "@/types";
 
 type CartItem = {
   id: number;
@@ -15,6 +16,7 @@ type CartItem = {
   product: {
     name: string;
     goldWeight?: number | string | null;
+    inventoryPolicy?: InventoryPolicy;
   };
   sku: {
     material: string;
@@ -28,17 +30,56 @@ const getItemGoldWeight = (item: CartItem) =>
   Number(item.sku.goldWeight ?? item.product.goldWeight ?? 0);
 
 export default function Cart() {
+  const { message } = AntdApp.useApp();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [policyLoadError, setPolicyLoadError] = useState(false);
+  const [cartError, setCartError] = useState("");
   const [mutatingId, setMutatingId] = useState<number | null>(null);
+  const mutatingIdRef = useRef<number | null>(null);
 
   const loadCart = async () => {
     setLoading(true);
     setLoadError(false);
+    setPolicyLoadError(false);
+    setCartError("");
     try {
       const response = await cartApi.get();
-      setCartItems(unwrapResponse<CartItem[]>(response) || []);
+      const items = unwrapResponse<CartItem[]>(response) || [];
+      const missingProductIds = Array.from(new Set(
+        items
+          .filter((item) => !item.product.inventoryPolicy)
+          .map((item) => item.productId),
+      ));
+      const policies = new Map<number, InventoryPolicy>();
+      let failedToLoadPolicies = false;
+      if (missingProductIds.length > 0) {
+        try {
+          const productResponse = await productApi.getPublicList({
+            ids: missingProductIds.join(","),
+            page: 1,
+            pageSize: missingProductIds.length,
+          });
+          const productPayload = unwrapResponse<{ list?: Product[] } | Product[]>(productResponse);
+          const products = Array.isArray(productPayload)
+            ? productPayload
+            : productPayload?.list ?? [];
+          for (const product of products) {
+            if (product.inventoryPolicy) policies.set(product.id, product.inventoryPolicy);
+          }
+        } catch {
+          failedToLoadPolicies = true;
+        }
+      }
+      setPolicyLoadError(failedToLoadPolicies);
+      setCartItems(items.map((item) => ({
+        ...item,
+        product: {
+          ...item.product,
+          inventoryPolicy: item.product.inventoryPolicy || policies.get(item.productId),
+        },
+      })));
     } catch {
       setLoadError(true);
       setCartItems([]);
@@ -52,7 +93,15 @@ export default function Cart() {
   }, []);
 
   const updateQuantity = async (item: CartItem, quantity: number) => {
-    if (quantity < 1 || quantity > 99 || mutatingId === item.id) return;
+    const maxQuantity = item.product.inventoryPolicy === "SINGLE_UNIT" ? 1 : 99;
+    if (
+      (!item.product.inventoryPolicy && quantity >= item.quantity) ||
+      quantity < 1 ||
+      quantity > maxQuantity ||
+      mutatingIdRef.current === item.id
+    ) return;
+    setCartError("");
+    mutatingIdRef.current = item.id;
     setMutatingId(item.id);
     try {
       await cartApi.updateQuantity(item.id, quantity);
@@ -62,21 +111,29 @@ export default function Cart() {
         ),
       );
     } catch (error: any) {
-      message.error(error?.message || "更新商品数量失败");
+      const reason = error?.message || "更新商品数量失败";
+      setCartError(reason);
+      message.error(reason);
     } finally {
+      mutatingIdRef.current = null;
       setMutatingId(null);
     }
   };
 
   const removeItem = async (item: CartItem) => {
-    if (mutatingId === item.id) return;
+    if (mutatingIdRef.current === item.id) return;
+    setCartError("");
+    mutatingIdRef.current = item.id;
     setMutatingId(item.id);
     try {
       await cartApi.remove(item.id);
       setCartItems((items) => items.filter((current) => current.id !== item.id));
     } catch (error: any) {
-      message.error(error?.message || "移除商品失败");
+      const reason = error?.message || "移除商品失败";
+      setCartError(reason);
+      message.error(reason);
     } finally {
+      mutatingIdRef.current = null;
       setMutatingId(null);
     }
   };
@@ -90,14 +147,19 @@ export default function Cart() {
     0,
   );
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const hasUnknownPolicy = cartItems.some((item) => !item.product.inventoryPolicy);
+  const hasInvalidSingleUnitQuantity = cartItems.some(
+    (item) => item.product.inventoryPolicy === "SINGLE_UNIT" && item.quantity > 1,
+  );
+  const canCheckout = !hasUnknownPolicy && !hasInvalidSingleUnitQuantity;
 
   if (loading) {
-    return <div className="min-h-screen bg-brand-bg flex items-center justify-center"><div className="text-brand-muted">加载中...</div></div>;
+    return <div className="cart-page min-h-screen bg-brand-bg flex items-center justify-center"><div className="text-brand-muted">加载中...</div></div>;
   }
 
   if (loadError) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-brand-bg px-6">
+      <div className="cart-page min-h-screen flex items-center justify-center bg-brand-bg px-6">
         <div className="text-center">
           <p className="text-xl font-display text-brand-text mb-4">购物车暂时无法加载</p>
           <button type="button" onClick={() => void loadCart()} className="btn btn-primary">重新加载</button>
@@ -108,38 +170,57 @@ export default function Cart() {
 
   if (cartItems.length === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-brand-bg">
-        <div className="text-center"><p className="text-2xl font-display text-brand-muted mb-4">购物车为空</p><Link to="/products" className="btn btn-primary">去选购</Link></div>
+      <div className="cart-page min-h-screen flex items-center justify-center bg-brand-bg">
+        <div className="text-center"><p className="text-2xl font-display text-brand-muted mb-4">购物车为空</p><Link to="/catalog" className="btn btn-primary">去选购</Link></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-brand-bg">
+    <div className="cart-page min-h-screen bg-brand-bg">
       <div className="page-header"><h1 className="h1">购物车</h1><p className="text-brand-muted mt-2">{itemCount} 件臻品</p></div>
       <div className="max-w-5xl mx-auto px-6 md:px-20 py-10">
+        {policyLoadError || hasUnknownPolicy ? (
+          <div className="mb-6 border border-brand-line bg-brand-surface p-4 text-sm leading-6 text-brand-muted" role="alert">
+            部分商品的数量规则暂时无法确认。为避免误购，已暂停增加数量和结算；您可以重新加载或移除该商品。
+            <button type="button" onClick={() => void loadCart()} className="ml-3 min-h-11 underline underline-offset-4">
+              重新加载
+            </button>
+          </div>
+        ) : null}
+        {cartError ? (
+          <p className="mb-6 text-sm leading-6 text-[#8C3F3B]" role="alert">{cartError}</p>
+        ) : null}
         <div className="grid md:grid-cols-3 gap-10">
           <div className="md:col-span-2 space-y-6">
             {cartItems.map((item) => (
               <motion.div key={item.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                className="flex gap-6 p-6 bg-brand-surface border border-brand-line">
-                <div className="w-24 h-24 bg-brand-bg flex-shrink-0 flex items-center justify-center"><ShoppingOutlined className="text-brand-muted text-2xl" /></div>
+                className="flex flex-col gap-4 p-5 bg-brand-surface border border-brand-line sm:flex-row sm:gap-6 sm:p-6">
+                <div className="w-full aspect-[4/3] bg-brand-bg flex-shrink-0 flex items-center justify-center sm:w-24 sm:h-24 sm:aspect-auto"><ShoppingOutlined className="text-brand-muted text-2xl" /></div>
                 <div className="flex-1 min-w-0">
                   <Link to={`/products/${item.productId}`} className="font-display text-lg hover:text-brand-gold transition-colors">{item.product.name}</Link>
                   <p className="text-sm text-brand-muted mt-1">{getMaterialLabel(item.sku.material as any)} · {getItemGoldWeight(item)}g</p>
-                  <div className="flex items-center justify-between mt-4">
+                  <div className="flex flex-col gap-4 mt-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-3">
                       <button type="button" onClick={() => void updateQuantity(item, item.quantity - 1)} disabled={item.quantity <= 1 || mutatingId === item.id}
-                        className="w-8 h-8 border border-brand-line flex items-center justify-center text-brand-muted hover:text-brand-text hover:border-brand-gold transition-colors disabled:opacity-40">−</button>
+                        aria-label={`减少${item.product.name}数量`}
+                        className="w-11 h-11 border border-brand-line flex items-center justify-center text-brand-muted hover:text-brand-text hover:border-brand-gold transition-colors disabled:opacity-40">−</button>
                       <span className="text-sm w-6 text-center">{item.quantity}</span>
-                      <button type="button" onClick={() => void updateQuantity(item, item.quantity + 1)} disabled={item.quantity >= 99 || mutatingId === item.id}
-                        className="w-8 h-8 border border-brand-line flex items-center justify-center text-brand-muted hover:text-brand-text hover:border-brand-gold transition-colors disabled:opacity-40">+</button>
+                      <button type="button" onClick={() => void updateQuantity(item, item.quantity + 1)} disabled={!item.product.inventoryPolicy || item.product.inventoryPolicy === "SINGLE_UNIT" || item.quantity >= 99 || mutatingId === item.id}
+                        aria-label={`增加${item.product.name}数量`}
+                        className="w-11 h-11 border border-brand-line flex items-center justify-center text-brand-muted hover:text-brand-text hover:border-brand-gold transition-colors disabled:opacity-40">+</button>
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="price">¥{(getItemPrice(item) * item.quantity).toLocaleString()}</span>
-                      <button type="button" onClick={() => void removeItem(item)} disabled={mutatingId === item.id} aria-label={`移除${item.product.name}`} className="text-brand-muted hover:text-[#8C3F3B] transition-colors disabled:opacity-40"><DeleteOutlined /></button>
+                      <button type="button" onClick={() => void removeItem(item)} disabled={mutatingId === item.id} aria-label={`移除${item.product.name}`} className="w-11 h-11 flex items-center justify-center text-brand-muted hover:text-[#8C3F3B] transition-colors disabled:opacity-40"><DeleteOutlined /></button>
                     </div>
                   </div>
+                  {item.product.inventoryPolicy === "SINGLE_UNIT" ? (
+                    <p className="mt-3 text-xs leading-5 text-brand-muted">一物一件，购物车数量上限为 1。</p>
+                  ) : null}
+                  {item.product.inventoryPolicy === "SINGLE_UNIT" && item.quantity > 1 ? (
+                    <p className="mt-2 text-xs leading-5 text-[#8C3F3B]" role="alert">数量不符合一物一件规则，请减少至 1 后结算。</p>
+                  ) : null}
                 </div>
               </motion.div>
             ))}
@@ -152,7 +233,11 @@ export default function Cart() {
                 <span>合计</span><span className="price text-2xl">¥{total.toLocaleString()}</span>
               </div>
             </div>
-            <Link to="/checkout" className="btn btn-primary w-full mt-8">去结算 <RightOutlined /></Link>
+            {canCheckout ? (
+              <Link to="/checkout" className="btn btn-primary w-full mt-8">去结算 <RightOutlined /></Link>
+            ) : (
+              <button type="button" className="btn btn-primary w-full mt-8" disabled>暂不可结算</button>
+            )}
           </div>
         </div>
       </div>
