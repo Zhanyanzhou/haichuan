@@ -129,6 +129,81 @@ test.describe("后台经营底座第一批状态", () => {
     await expect(page.getByText("库存记录总数（全量）")).toHaveCount(0);
   });
 
+  test("Inventory 设为目标库存发送 adjust 契约，并反馈非法输入与接口失败", async ({
+    page,
+  }) => {
+    await authenticateAdmin(page);
+    let quantity = 8;
+    let updateMode: "success" | "fail" = "success";
+    let updateCalls = 0;
+    let lastUpdateBody: unknown;
+
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path.endsWith("/api/warehouses")) {
+        await fulfillJson(route, [{ id: 1, name: "深圳展厅" }]);
+        return;
+      }
+      if (path.endsWith("/api/inventory/11") && request.method() === "PUT") {
+        updateCalls += 1;
+        lastUpdateBody = request.postDataJSON();
+        if (updateMode === "fail") {
+          await fulfillJson(route, null, 400);
+          return;
+        }
+        quantity = Number((lastUpdateBody as { quantity?: number }).quantity);
+        await fulfillJson(route, { id: 11, quantity });
+        return;
+      }
+      if (path.endsWith("/api/inventory")) {
+        await fulfillJson(route, {
+          list: [
+            {
+              id: 11,
+              quantity,
+              safetyStock: 2,
+              sku: { skuCode: "HC-SKU-11", product: { name: "测试戒指" } },
+              warehouse: { name: "深圳展厅" },
+            },
+          ],
+          total: 1,
+        });
+        return;
+      }
+      await fulfillJson(route, {});
+    });
+
+    await page.goto("/admin/inventory");
+    await expect(page.getByText("测试戒指")).toBeVisible();
+
+    const inventoryRow = page.getByRole("row").filter({ hasText: "测试戒指" });
+    await inventoryRow.getByRole("button").click();
+    const targetQuantity = page.getByRole("spinbutton", { name: "目标库存" });
+    await targetQuantity.fill("5");
+    await page.getByRole("button", { name: "保存库存调整" }).click();
+
+    await expect(page.getByText("库存已调整")).toBeVisible();
+    expect(lastUpdateBody).toEqual({ type: "adjust", quantity: 5 });
+    expect(updateCalls).toBe(1);
+
+    await inventoryRow.getByRole("button").click();
+    await targetQuantity.clear();
+    await page.getByRole("button", { name: "保存库存调整" }).click();
+    await expect(page.getByText("目标库存必须是非负整数")).toBeVisible();
+    expect(updateCalls).toBe(1);
+
+    updateMode = "fail";
+    await targetQuantity.fill("7");
+    await page.getByRole("button", { name: "保存库存调整" }).click();
+    await expect(
+      page.getByText("库存调整失败，请重新加载库存后核对数量。"),
+    ).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "调整库存" })).toBeVisible();
+    expect(lastUpdateBody).toEqual({ type: "adjust", quantity: 7 });
+    expect(updateCalls).toBe(2);
+  });
+
   test("UserManage 隐藏失败前的旧结果，重试与筛选空态可恢复", async ({ page }) => {
     await authenticateAdmin(page);
     let mode: "old" | "fail" | "fresh" | "empty" = "old";

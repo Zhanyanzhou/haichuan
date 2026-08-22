@@ -1297,6 +1297,12 @@ export const goldPriceApi = {
 };
 
 // ===== Inventory API =====
+type InventoryStockUpdateInput = {
+  type: "in" | "out" | "adjust";
+  quantity: number;
+  remark?: string;
+};
+
 export const inventoryApi = {
   getList: async (params: any) => {
     if (USE_MOCK) {
@@ -1328,7 +1334,8 @@ export const inventoryApi = {
     }
     return api.get("/inventory", { params });
   },
-  update: (id: number, data: any) => api.put(`/inventory/${id}`, data),
+  update: (id: number, data: InventoryStockUpdateInput) =>
+    api.put(`/inventory/${id}`, data),
 };
 
 // ===== Warehouse API（仓库管理）=====

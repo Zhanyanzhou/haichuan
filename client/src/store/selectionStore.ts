@@ -4,6 +4,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 interface SelectionState {
   selectedIds: Set<number>;
   toggle: (id: number) => void;
+  removeMany: (ids: number[]) => void;
   isSelected: (id: number) => boolean;
   count: () => number;
   clear: () => void;
@@ -18,6 +19,14 @@ export const useSelectionStore = create<SelectionState>()(
           const next = new Set(state.selectedIds);
           if (next.has(id)) next.delete(id);
           else next.add(id);
+          return { selectedIds: next };
+        });
+      },
+      removeMany: (ids: number[]) => {
+        if (!ids.length) return;
+        set((state) => {
+          const next = new Set(state.selectedIds);
+          ids.forEach((id) => next.delete(id));
           return { selectedIds: next };
         });
       },

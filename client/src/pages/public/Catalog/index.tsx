@@ -1535,7 +1535,17 @@ function PBtn({
 /* ══════════════════════════════════════
    组件：选款托盘 + 提交弹窗
    ══════════════════════════════════════ */
-function SelectionTray({ products }: { products: CatalogProduct[] }) {
+type SelectionLookupState = "loading" | "error" | "ready";
+
+function SelectionTray({
+  products,
+  lookupState,
+  onRetry,
+}: {
+  products: CatalogProduct[];
+  lookupState: SelectionLookupState;
+  onRetry: () => void;
+}) {
   const ids = useSelectionStore((s) => s.selectedIds);
   const clear = useSelectionStore((s) => s.clear);
   const [open, setOpen] = useState(false);
@@ -1574,6 +1584,59 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
   if (!ids.size) return null;
 
   const selected = products.filter((p) => ids.has(p.id));
+  if (lookupState !== "ready") {
+    const failed = lookupState === "error";
+    return (
+      <div
+        role={failed ? "alert" : "status"}
+        aria-live="polite"
+        style={{
+          position: "fixed",
+          bottom: 24,
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 80,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12,
+          minHeight: 48,
+          maxWidth: "calc(100vw - 32px)",
+          padding: failed ? "2px 4px 2px 18px" : "0 20px",
+          background: T.txt,
+          color: "#FFFFFF",
+          borderRadius: 4,
+          boxSizing: "border-box",
+        }}
+      >
+        <span style={{ minWidth: 0, fontSize: 12, lineHeight: 1.5 }}>
+          {failed ? "选款状态暂时无法确认" : "正在确认已选作品"}
+        </span>
+        {failed ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            style={{
+              minHeight: 44,
+              flexShrink: 0,
+              border: 0,
+              paddingInline: 14,
+              background: "rgba(255,255,255,0.12)",
+              color: "#FFFFFF",
+              cursor: "pointer",
+              font: "inherit",
+              fontSize: 12,
+            }}
+          >
+            重新确认选款
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+  if (!selected.length) return null;
+
+  const selectedCount = selected.length;
   const thumbs = selected.slice(0, 4);
 
   const handleSubmit = async () => {
@@ -1647,7 +1710,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
       {/* 底部托盘 */}
       <button
         type="button"
-        aria-label={`查看已选 ${ids.size} 款并提交选款咨询`}
+        aria-label={`查看已选 ${selectedCount} 款并提交选款咨询`}
         onClick={() => setOpen(true)}
         style={{
           position: "fixed",
@@ -1694,7 +1757,7 @@ function SelectionTray({ products }: { products: CatalogProduct[] }) {
           ))}
         </div>
         <span style={{ fontSize: 12, color: "#FFFFFF" }}>
-          已选 {ids.size} 款
+          已选 {selectedCount} 款
         </span>
         <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
           提交选款咨询 →
@@ -2292,7 +2355,7 @@ export default function Catalog({
   const closeFilter = useCallback(() => setFilterOpen(false), []);
   const closeQuickView = useCallback(() => setQuickView(null), []);
   const selectedIds = useSelectionStore((s) => s.selectedIds);
-  const selCount = selectedIds.size;
+  const removeInvalidSelections = useSelectionStore((s) => s.removeMany);
   const { materialOptions, craftOptions } = useAttributeDictionary();
 
   const {
@@ -2356,6 +2419,7 @@ export default function Catalog({
     facets,
     loading: productsLoading,
     error: productsError,
+    revision: catalogRevision,
   } = useProductData(catalogQuery, {
     loadCategories: false,
   });
@@ -2380,10 +2444,50 @@ export default function Catalog({
         : null,
     [selectedIds.size, selectedIdsKey],
   );
-  const { products: selectedProducts } = useProductData(selectedQuery, {
+  const {
+    products: selectedProducts,
+    total: selectedTotal,
+    loading: selectedLoading,
+    error: selectedError,
+    reload: reloadSelected,
+    queryKey: selectedQueryKey,
+    dataQueryKey: selectedDataQueryKey,
+  } = useProductData(selectedQuery, {
     subscribe: false,
     loadCategories: false,
+    refreshKey: catalogRevision,
   });
+  const selectedResponseCurrent = selectedDataQueryKey === selectedQueryKey;
+  const selectedResponseComplete = selectedProducts.length >= selectedTotal;
+  const selectionLookupState: SelectionLookupState = selectedIds.size === 0
+    ? "ready"
+    : selectedError || (!selectedLoading && selectedResponseCurrent && !selectedResponseComplete)
+      ? "error"
+      : selectedLoading || !selectedResponseCurrent
+        ? "loading"
+        : "ready";
+  const reconciliationRef = useRef("");
+  useEffect(() => {
+    if (!selectedQuery || selectionLookupState !== "ready") return;
+    const validIds = new Set(selectedProducts.map((product) => product.id));
+    const signature = `${selectedDataQueryKey}|${Array.from(validIds).sort((a, b) => a - b).join(",")}`;
+    if (reconciliationRef.current === signature) return;
+    reconciliationRef.current = signature;
+    const invalidIds = Array.from(selectedIds).filter((id) => !validIds.has(id));
+    if (!invalidIds.length) return;
+    removeInvalidSelections(invalidIds);
+    message.warning({
+      key: "catalog-invalid-selections",
+      content: `已移除 ${invalidIds.length} 款当前不可用的作品`,
+    });
+  }, [
+    removeInvalidSelections,
+    selectedDataQueryKey,
+    selectedIds,
+    selectedProducts,
+    selectedQuery,
+    selectionLookupState,
+  ]);
   const selectionProducts = useMemo(() => {
     const byId = new Map<number, CatalogProduct>();
     for (const product of [...selectedProducts, ...mergedProducts]) {
@@ -2391,6 +2495,9 @@ export default function Catalog({
     }
     return Array.from(byId.values());
   }, [mergedProducts, selectedProducts]);
+  const selCount = selectionLookupState === "ready"
+    ? selectionProducts.filter((product) => selectedIds.has(product.id)).length
+    : 0;
 
   useEffect(() => {
     if (!apiLoading && params.page > tp && tp > 0) update("page", String(tp));
@@ -2987,7 +3094,13 @@ export default function Catalog({
           returnFocusRef={filterTriggerRef}
         />
       )}
-      {!editorPreview ? <SelectionTray products={selectionProducts} /> : null}
+      {!editorPreview ? (
+        <SelectionTray
+          products={selectionProducts}
+          lookupState={selectionLookupState}
+          onRetry={reloadSelected}
+        />
+      ) : null}
     </div>
   );
 }

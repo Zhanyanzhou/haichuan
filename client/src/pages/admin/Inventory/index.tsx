@@ -63,7 +63,7 @@ export default function Inventory() {
     open: boolean;
     record: any;
   }>({ open: false, record: null });
-  const [adjustQty, setAdjustQty] = useState(0);
+  const [adjustQty, setAdjustQty] = useState<number | null>(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
@@ -143,8 +143,15 @@ export default function Inventory() {
 
   const handleAdjust = async () => {
     if (!adjustModal.record) return;
+    if (adjustQty === null || !Number.isInteger(adjustQty) || adjustQty < 0) {
+      message.error("目标库存必须是非负整数");
+      return;
+    }
     try {
-      await inventoryApi.update(adjustModal.record.id, { quantity: adjustQty });
+      await inventoryApi.update(adjustModal.record.id, {
+        type: "adjust",
+        quantity: adjustQty,
+      });
       message.success("库存已调整");
       setAdjustModal({ open: false, record: null });
       void load();
@@ -341,9 +348,11 @@ export default function Inventory() {
             SKU：{adjustModal.record?.skuCode}
           </p>
           <InputNumber
+            aria-label="目标库存"
             min={0}
+            precision={0}
             value={adjustQty}
-            onChange={(v) => setAdjustQty(v || 0)}
+            onChange={setAdjustQty}
             className="w-full"
             size="large"
           />

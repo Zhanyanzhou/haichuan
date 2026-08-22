@@ -83,6 +83,9 @@ async function mockCatalogApi(page: Page) {
     }
     let filtered = [...products];
     const ids = url.searchParams.get("ids")?.split(",").map(Number).filter(Boolean);
+    if (ids?.includes(9_998)) {
+      return route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+    }
     if (ids?.length) filtered = filtered.filter((product) => ids.includes(product.id));
     if (keyword === "无结果") filtered = [];
     else if (keyword) {
@@ -114,6 +117,15 @@ async function mockCatalogApi(page: Page) {
       ),
     });
   });
+}
+
+async function seedSelection(page: Page, ids: number[]) {
+  await page.addInitScript((selectedIds) => {
+    localStorage.setItem(
+      "hc_selection_tray",
+      JSON.stringify({ state: { selectedIds }, version: 0 }),
+    );
+  }, ids);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -199,6 +211,114 @@ test("Catalog 搜索的空态、错误态与 390px 溢出状态完整", async ({
   await input.fill("触发错误");
   await input.press("Enter");
   await expect(page.getByText("作品目录暂时无法加载")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    )
+    .toBe(true);
+});
+
+test("Catalog 筛选无结果时保留仍有效的持久化选款", async ({ page }) => {
+  await seedSelection(page, [1]);
+  await page.goto("/catalog?query=%E6%97%A0%E7%BB%93%E6%9E%9C");
+
+  await expect(page.getByText("没有符合当前筛选的作品")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "查看已选 1 款并提交选款咨询" }),
+  ).toBeVisible();
+
+  const persistedIds = await page.evaluate(() => {
+    const raw = localStorage.getItem("hc_selection_tray");
+    return raw ? JSON.parse(raw).state.selectedIds : [];
+  });
+  expect(persistedIds).toEqual([1]);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    )
+    .toBe(true);
+});
+
+test("Catalog 权威查询确认作品失效后清理旧选款且空目录不显示虚假数量", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seedSelection(page, [9_999]);
+  await page.route("**/api/products/public**", (route) => {
+    const url = new URL(route.request().url());
+    const pageNumber = Number(url.searchParams.get("page") || 1);
+    const pageSize = Number(url.searchParams.get("pageSize") || 20);
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        wrapped({
+          list: [],
+          total: 0,
+          page: pageNumber,
+          pageSize,
+          facets: { sizes: [] },
+        }),
+      ),
+    });
+  });
+  await page.goto("/catalog");
+
+  await expect(page.getByText("珠宝作品正在筹备中")).toBeVisible();
+  await expect(page.getByText("已移除 1 款当前不可用的作品")).toBeVisible();
+  await expect(page.getByText("已选 1 款")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const raw = localStorage.getItem("hc_selection_tray");
+        return raw ? JSON.parse(raw).state.selectedIds : [];
+      }),
+    )
+    .toEqual([]);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    )
+    .toBe(true);
+});
+
+test("Catalog 校验持久化选款时区分 loading 与 error 且不误删", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let releaseSelectionLookup: (() => void) | undefined;
+  const selectionLookupBlocked = new Promise<void>((resolve) => {
+    releaseSelectionLookup = resolve;
+  });
+  await page.route("**/api/products/public**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("ids") === "1") {
+      await selectionLookupBlocked;
+    }
+    await route.fallback();
+  });
+  await seedSelection(page, [1]);
+  await page.goto("/catalog?query=%E6%97%A0%E7%BB%93%E6%9E%9C");
+
+  await expect(page.getByText("正在确认已选作品")).toBeVisible();
+  await expect(page.getByText("已选 1 款")).toHaveCount(0);
+  releaseSelectionLookup?.();
+  await expect(
+    page.getByRole("button", { name: "查看已选 1 款并提交选款咨询" }),
+  ).toBeVisible();
+
+  await seedSelection(page, [9_998]);
+  await page.reload();
+  await expect(page.getByText("选款状态暂时无法确认")).toBeVisible();
+  await expect(page.getByRole("button", { name: "重新确认选款" })).toBeVisible();
+  await expect(page.getByText("已选 1 款")).toHaveCount(0);
+  const persistedIds = await page.evaluate(() => {
+    const raw = localStorage.getItem("hc_selection_tray");
+    return raw ? JSON.parse(raw).state.selectedIds : [];
+  });
+  expect(persistedIds).toEqual([9_998]);
   await expect
     .poll(() =>
       page.evaluate(

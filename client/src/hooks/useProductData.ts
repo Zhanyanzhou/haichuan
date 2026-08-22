@@ -115,6 +115,8 @@ interface ProductDataOptions {
   subscribe?: boolean;
   /** 定向按商品 ID 补取无需再次请求分类树。 */
   loadCategories?: boolean;
+  /** 复用外层目录的更新信号刷新定向选款，不再建立第二条 SSE。 */
+  refreshKey?: string | number;
 }
 
 export function useProductCategories() {
@@ -169,6 +171,7 @@ export function useProductData(
   const [dataQueryKey, setDataQueryKey] = useState("");
   const subscribe = options.subscribe !== false;
   const loadCategories = options.loadCategories !== false;
+  const refreshKey = options.refreshKey;
   // query 引用不稳定会导致无限重拉，按值序列化作为 effect 依赖
   const queryKey = query === null ? "__paused__" : JSON.stringify(query);
 
@@ -269,7 +272,7 @@ export function useProductData(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revision, queryKey, loadCategories]);
+  }, [revision, queryKey, loadCategories, refreshKey]);
 
   // P1-35：带自动重连 + debounce 的 SSE（断线重连；消息风暴合并为一次重拉）
   useReconnectingEventSource(
