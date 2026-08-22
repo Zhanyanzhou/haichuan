@@ -349,8 +349,9 @@ export default function Inventory() {
           </p>
           <InputNumber
             aria-label="目标库存"
-            min={0}
-            precision={0}
+            changeOnBlur={false}
+            inputMode="decimal"
+            step={1}
             value={adjustQty}
             onChange={setAdjustQty}
             className="w-full"

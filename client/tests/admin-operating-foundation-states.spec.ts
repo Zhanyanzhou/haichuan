@@ -190,7 +190,17 @@ test.describe("后台经营底座第一批状态", () => {
     await inventoryRow.getByRole("button").click();
     await targetQuantity.clear();
     await page.getByRole("button", { name: "保存库存调整" }).click();
-    await expect(page.getByText("目标库存必须是非负整数")).toBeVisible();
+    await expect(page.getByText("目标库存必须是非负整数").last()).toBeVisible();
+    expect(updateCalls).toBe(1);
+
+    await targetQuantity.fill("-1");
+    await page.getByRole("button", { name: "保存库存调整" }).click();
+    await expect(page.getByText("目标库存必须是非负整数").last()).toBeVisible();
+    expect(updateCalls).toBe(1);
+
+    await targetQuantity.fill("1.5");
+    await page.getByRole("button", { name: "保存库存调整" }).click();
+    await expect(page.getByText("目标库存必须是非负整数").last()).toBeVisible();
     expect(updateCalls).toBe(1);
 
     updateMode = "fail";
