@@ -5,12 +5,13 @@ const FOOTER_ICP_NUMBER = "";
 
 type StorefrontFooterProps = {
   siteName: string;
+  showService?: boolean;
   preview?: boolean;
   onPreviewNavigate?: (path: string) => void;
 };
 
 const footerLinks = [
-  { label: "珠宝作品", path: "/products" },
+  { label: "选款中心", path: "/catalog" },
   { label: "定制服务", path: "/custom" },
   { label: "品牌故事", path: "/about" },
   { label: "隐私说明", path: "/privacy" },
@@ -20,6 +21,7 @@ const footerLinks = [
 /** 公开网站与装修画布共用的唯一页脚。 */
 export default function StorefrontFooter({
   siteName,
+  showService = true,
   preview = false,
   onPreviewNavigate,
 }: StorefrontFooterProps) {
@@ -37,17 +39,19 @@ export default function StorefrontFooter({
   return (
     <footer className="site-footer" aria-label={preview ? "页脚预览" : undefined}>
       <div className="site-footer__inner">
-        <div className="site-footer__service">
-          <p className="site-footer__service-label">PRIVATE APPOINTMENT</p>
-          <Link
-            to="/contact"
-            className="site-footer__service-link"
-            {...previewLinkProps("/contact")}
-          >
-            <span>预约私人珠宝顾问</span>
-            <span aria-hidden="true">→</span>
-          </Link>
-        </div>
+        {showService ? (
+          <div className="site-footer__service">
+            <p className="site-footer__service-label">PRIVATE APPOINTMENT</p>
+            <Link
+              to="/contact"
+              className="site-footer__service-link"
+              {...previewLinkProps("/contact")}
+            >
+              <span>预约私人珠宝顾问</span>
+              <span aria-hidden="true">→</span>
+            </Link>
+          </div>
+        ) : null}
 
         <nav className="site-footer__links" aria-label="页脚导航">
           {footerLinks.map((item) => (

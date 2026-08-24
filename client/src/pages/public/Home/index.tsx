@@ -1127,13 +1127,21 @@ export default function Home() {
     return <HomeDocumentError onRetry={() => void refreshDocument(true)} />;
   }
 
+  const hasVisibleHeroTitle = pageDocument.puckData.content.some((block) =>
+    block.type === "首屏主视觉"
+    && block.props?.isVisible !== false
+    && typeof block.props?.title === "string"
+    && block.props.title.trim().length > 0,
+  );
+
   return (
     <div data-page-document-state="published" style={{ background: LG }}>
-      <h1 className="sr-only">海川珠宝</h1>
+      {!hasVisibleHeroTitle ? <h1 className="sr-only">海川珠宝</h1> : null}
       <Suspense fallback={<PuckDocumentLoading />}>
         <PuckDocumentRenderer
           data={pageDocument.puckData}
-          heroHeadingLevel={2}
+          surface="home"
+          heroHeadingLevel={hasVisibleHeroTitle ? 1 : 2}
         />
       </Suspense>
       <StaleDocumentNotice

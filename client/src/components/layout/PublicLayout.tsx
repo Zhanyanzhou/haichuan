@@ -128,11 +128,15 @@ const AccountIcon = () => (
 
 export default function PublicLayout() {
   const location = useLocation();
+  const mainRef = useRef<HTMLElement>(null);
+  const previousPathRef = useRef(location.pathname);
   const previewPageKey = location.pathname.match(/^\/preview\/([^/]+)$/)?.[1];
   const previewPage = isEditorPageKey(previewPageKey)
     ? getEditorPage(previewPageKey)
     : undefined;
   const isHome = location.pathname === "/" || previewPage?.key === "home";
+  const hideFooterService =
+    location.pathname === "/custom" || location.pathname === "/contact";
   const pageDefinition = getEditorPageByPath(location.pathname) ?? previewPage;
   const publishedHeaderDocument = usePublishedPageDocument(
     previewPage ? undefined : pageDefinition?.key,
@@ -218,8 +222,16 @@ export default function PublicLayout() {
   }, []);
 
   useEffect(() => {
+    const pathChanged = previousPathRef.current !== location.pathname;
+    previousPathRef.current = location.pathname;
     setMenuOpen(false);
     window.scrollTo({ top: 0, behavior: "auto" });
+
+    if (!pathChanged) return;
+    const focusFrame = window.requestAnimationFrame(() => {
+      mainRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(focusFrame);
   }, [location.pathname]);
 
   useEffect(() => {
@@ -394,8 +406,10 @@ export default function PublicLayout() {
 
       {/* ═══════ Main ═══════ */}
       <main
+        ref={mainRef}
         id="main-content"
         tabIndex={-1}
+        style={{ outline: "none" }}
         className={isHome ? "editorial-main" : `site-main${isOverlayHeader ? " site-main--overlay" : ""}`}
       >
         <PublishedPageDecoration
@@ -407,7 +421,7 @@ export default function PublicLayout() {
         </PublishedPageDecoration>
       </main>
 
-      <StorefrontFooter siteName={siteName} />
+      <StorefrontFooter siteName={siteName} showService={!hideFooterService} />
     </div>
   );
 }

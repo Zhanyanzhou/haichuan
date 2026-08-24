@@ -55,7 +55,7 @@ export function resolveSiteLogo(logo?: string | null) {
 }
 
 export const storefrontMenuLinks = [
-  { label: "珠宝作品", description: "浏览黄金珠宝作品", href: "/products" },
+  { label: "首页", description: "返回品牌首页", href: "/" },
   { label: "选款中心", description: "按品类与货号快速选款", href: "/catalog" },
   { label: "珠宝定制", description: "了解专属定制流程", href: "/custom" },
   { label: "关于海川", description: "认识海川珠宝与东方工艺", href: "/about" },

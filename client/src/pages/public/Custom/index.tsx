@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { productPlaceholder } from '@/utils/placeholder';
 import { usePageMetaStore } from '@/store/pageMetaStore';
 
 /* ═══════ 设计常量 ═══════ */
@@ -60,62 +59,62 @@ function IconSizing() {
 
 /* ═══════ FAQ 数据（中性说明，不含未经确认的价格、工期、物流、地域与售后承诺） ═══════ */
 const faqItems = [
-  { q: '可以自带黄金或宝石进行定制吗？', a: '欢迎就自有材料定制与我们沟通。顾问会结合您的材料情况与定制需求给出建议，具体可行性与流程在咨询阶段确认。' },
-  { q: '旧款珠宝可以翻新改造吗？', a: '我们提供旧款改造类咨询。是否适合改造、可采用的方案，需在了解旧件实际状况后由顾问与您共同确认。' },
-  { q: '定制周期一般需要多长时间？', a: '定制周期视设计复杂度、材料与工艺而定。具体时间安排会在方案沟通阶段明确告知。' },
-  { q: '定制费用如何计算？', a: '费用与设计、材料、工艺相关。我们会在充分了解需求后提供清晰的方案说明，由您确认后再推进。' },
-  { q: '设计方案可以调整吗？', a: '在设计沟通阶段，我们与您反复对齐方向。具体调整安排以沟通确认的方案为准。' },
-  { q: '交付后尺寸不合适怎么办？', a: '交付相关事宜会在方案阶段与您明确约定。如有调整需求，可通过咨询联系顾问协助处理。' },
-  { q: '异地客户如何沟通定制？', a: '我们支持线上沟通，也可到店进一步交流；具体方式可在咨询阶段选择最适合您的安排。' },
-  { q: '定制作品的保养与售后如何安排？', a: '售后与保养安排会在交付时与您说明。如需了解详情，欢迎通过咨询与顾问沟通。' },
+  {
+    q: '可以自带材料进行定制吗？',
+    a: '请在咨询中说明材料类型与现状，是否适合使用需在评估后确认。',
+  },
+  {
+    q: '旧款珠宝可以改造吗？',
+    a: '请提供作品现状与改造方向，是否适合翻新、调整或重新设计需在评估后确认。',
+  },
+  {
+    q: '周期与费用如何确认？',
+    a: '周期与费用受设计、材料与制作范围影响，均以沟通确认的方案为准。',
+  },
+  {
+    q: '设计与交付后的调整如何确认？',
+    a: '可在方案确认前提出调整需求；交付后的尺寸、保养或其他需求，以作品结构与实际评估为准。',
+  },
 ];
 
 /* ═══════ 工艺数据 ═══════ */
 const craftItems = [
-  { id: 9909, title: '贵金属' },
-  { id: 9910, title: '天然宝石' },
-  { id: 9911, title: '手工雕刻' },
-  { id: 9912, title: '精密镶嵌' },
-  { id: 9913, title: '表面处理' },
-  { id: 9914, title: '质检品控' },
+  '材质需求',
+  '宝石需求',
+  '雕刻需求',
+  '镶嵌需求',
+  '表面效果',
+  '交付确认',
 ];
 
 /* ═══════ 定制案例 ═══════ */
 /*
  * 真实客户案例与图片需取得书面授权后方可展示。
  * 在运营提供获授权的真实案例前，本页不展示任何案例与客户故事，
- * 也不以虚构内容占位；访客可经底部"预约私人顾问"入口发起咨询。
+ * 也不以虚构内容占位；访客可经底部咨询入口提交需求。
  */
 
 /* ═══════ 流程步骤数据 ═══════ */
-  const processSteps = [
+const processSteps = [
   {
     num: '01',
     title: '灵感沟通',
     desc: '说明佩戴场景、偏好与已有材料，顾问将与您共同梳理需求和可继续确认的方向。',
-    imgId: 9905,
-    imgAlt: '灵感沟通 — 一对一顾问咨询场景',
   },
   {
     num: '02',
     title: '设计提案',
     desc: '根据沟通结果形成方案与材质建议；具体设计范围、调整方式和费用在推进前确认。',
-    imgId: 9906,
-    imgAlt: '设计提案 — 设计方向与材质建议',
   },
   {
     num: '03',
     title: '工艺制作',
     desc: '方案确认后进入制作与质量检查；实际采用的工艺、进度和变更方式以确认内容为准。',
-    imgId: 9907,
-    imgAlt: '工艺制作 — 工坊制作过程',
   },
   {
     num: '04',
     title: '作品交付',
     desc: '完成后确认作品、相关资料、交付方式与后续可提供的服务说明。',
-    imgId: 9908,
-    imgAlt: '作品交付 — 作品资料与交付确认',
   },
 ];
 
@@ -127,7 +126,7 @@ export default function Custom() {
   useEffect(() => {
     setPageMeta({
       title: '珠宝定制 | 海川珠宝',
-      description: '海川珠宝高级定制服务：设计灵感、材质、宝石与工艺的一对一沟通。',
+      description: '珠宝定制需求说明与咨询入口，具体可提供内容与安排以实际沟通为准。',
     });
     return () => clearPageMeta();
   }, [setPageMeta, clearPageMeta]);
@@ -249,7 +248,7 @@ export default function Custom() {
 
 
       {/* ═══════════════════════════════════════════
-          3. 四步定制流程（交错图文）
+          3. 四步定制流程
           ═══════════════════════════════════════════ */}
       <section id="process" style={{
         background: '#DDE1E2',
@@ -277,55 +276,38 @@ export default function Custom() {
             </h2>
           </motion.div>
 
-          {processSteps.map((step, i) => {
-            const isEven = i % 2 === 0;
-            return (
-              <motion.div
+          <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+            {processSteps.map((step, i) => (
+              <motion.li
                 key={step.num}
                 initial="hidden"
                 whileInView="visible"
                 viewport={{ once: true, margin: '-80px' }}
                 variants={fadeIn}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'clamp(32px, 6vw, 80px)',
-                  marginBottom: i < processSteps.length - 1 ? 'clamp(48px, 6vw, 80px)' : 0,
-                  /* 桌面端文字在左、图片在右；偶数步图片在左、文字在右 */
-                  flexDirection: 'row',
+                  display: 'grid',
+                  gridTemplateColumns: 'clamp(80px, 8vw, 96px) minmax(0, 1fr)',
+                  gap: 'clamp(24px, 4vw, 48px)',
+                  padding: 'clamp(28px, 4vw, 44px) 0',
+                  borderTop: '1px solid rgba(24,26,27,0.18)',
                 }}
                 className="custom-process-row"
               >
-                {/* 图片区 */}
-                <div style={{
-                  flex: '0 0 clamp(280px, 42%, 440px)',
-                  order: isEven ? 1 : 0,
-                }}>
-                  {/* TODO: 替换为真实流程摄影作品，建议 4:3 比例 */}
-                  <img
-                    src={productPlaceholder(step.imgId, '流程')}
-                    alt={step.imgAlt}
-                    style={{ width: '100%', height: 'auto', display: 'block' }}
-                  />
-                </div>
-
-                {/* 文字区 */}
-                <div style={{
-                  flex: 1,
-                  order: isEven ? 0 : 1,
-                }}>
-                  <span style={{
+                <span
+                  aria-hidden="true"
+                  style={{
                     fontFamily: FONT_SANS,
-                    fontSize: 'clamp(48px, 6vw, 72px)',
+                    fontSize: 'clamp(36px, 5vw, 56px)',
                     fontWeight: 300,
                     color: ACCENT,
                     lineHeight: 1,
-                    opacity: 0.3,
+                    opacity: 0.45,
                     display: 'block',
-                    marginBottom: 8,
-                  }}>
-                    {step.num}
-                  </span>
+                  }}
+                >
+                  {step.num}
+                </span>
+                <div>
                   <h3 style={{
                     fontFamily: FONT_SERIF,
                     fontSize: 'clamp(22px, 2.4vw, 30px)',
@@ -345,15 +327,15 @@ export default function Custom() {
                     {step.desc}
                   </p>
                 </div>
-              </motion.div>
-            );
-          })}
+              </motion.li>
+            ))}
+          </ol>
         </div>
       </section>
 
 
       {/* ═══════════════════════════════════════════
-          4. 材质与工艺
+          4. 材质与制作细节
           ═══════════════════════════════════════════ */}
       <section style={{
         maxWidth: 1100,
@@ -377,57 +359,45 @@ export default function Custom() {
             color: BODY,
             margin: 0,
           }}>
-            材质甄选，工艺传承
+            材质与制作细节
           </h2>
         </motion.div>
 
-        <div style={{
+        <ul
+          className="custom-craft-grid"
+          style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 'clamp(12px, 2vw, 24px)',
+          columnGap: 'clamp(24px, 4vw, 48px)',
+          rowGap: 'clamp(24px, 4vw, 40px)',
+          listStyle: 'none',
+          margin: 0,
+          padding: 0,
         }}>
-          {craftItems.map((item, i) => (
-            <motion.div
-              key={item.id}
+          {craftItems.map((title, i) => (
+            <motion.li
+              key={title}
               initial="hidden"
               whileInView="visible"
               viewport={{ once: true, margin: '-40px' }}
               variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5, delay: i * 0.08 } } }}
               style={{
-                position: 'relative',
-                aspectRatio: '4 / 5',
-                overflow: 'hidden',
-                background: '#DDE1E2',
+                borderTop: '1px solid rgba(24,26,27,0.18)',
+                paddingTop: 20,
               }}
             >
-              {/* TODO: 替换为真实材质与工艺摄影，建议 4:5 竖版 */}
-              <img
-                src={productPlaceholder(item.id, '工艺')}
-                alt={`海川珠宝工艺 — ${item.title}`}
-                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-              />
-              {/* 实色标题带，避免图片亮部影响可读性。 */}
-              <div style={{
-                position: 'absolute',
-                bottom: 0,
-                left: 0,
-                right: 0,
-                padding: '14px 20px',
-                background: 'rgba(24,26,27,0.78)',
-              }}>
-                <h4 style={{
+                <h3 style={{
                   fontFamily: FONT_SERIF,
-                  fontSize: 18,
+                  fontSize: 20,
                   fontWeight: 400,
-                  color: '#F4F5F5',
+                  color: BODY,
                   margin: 0,
                 }}>
-                  {item.title}
-                </h4>
-              </div>
-            </motion.div>
+                  {title}
+                </h3>
+            </motion.li>
           ))}
-        </div>
+        </ul>
       </section>
 
 
@@ -526,7 +496,7 @@ export default function Custom() {
 
 
       {/* ═══════════════════════════════════════════
-          7. 预约区域（底部CTA）
+          7. 咨询区域（底部CTA）
           ═══════════════════════════════════════════ */}
       <section style={{
         background: DARK,
@@ -548,7 +518,7 @@ export default function Custom() {
             lineHeight: 1.3,
             margin: '0 0 16px',
           }}>
-            开始您的专属珠宝创作
+            提交定制需求
           </h2>
           <p style={{
             fontSize: 'clamp(13px, 1vw, 15px)',
@@ -556,18 +526,18 @@ export default function Custom() {
             lineHeight: 1.8,
             margin: '0 0 40px',
           }}>
-            预约私人顾问，开启一对一定制之旅。<br />提交后由顾问与您联系，具体响应方式在沟通中确认。
+            说明您的设计、改款或尺寸需求；具体可提供内容与安排以实际沟通为准。
           </p>
 
-          <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 16,
-            justifyContent: 'center',
-          }}>
-            <Link to="/contact" style={{
-              display: 'inline-block',
-              padding: '14px 40px',
+          <Link
+            to="/contact?type=custom"
+            className="custom-final-cta"
+            style={{
+              display: 'inline-flex',
+              minHeight: 48,
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 40px',
               background: '#F4F5F5',
               color: DARK,
               fontSize: 13,
@@ -577,43 +547,30 @@ export default function Custom() {
               fontFamily: FONT_SANS,
               fontWeight: 500,
               transition: 'background 0.4s',
+              boxSizing: 'border-box',
             }}
               onMouseEnter={e => (e.currentTarget.style.background = '#FFFFFF')}
               onMouseLeave={e => (e.currentTarget.style.background = '#F4F5F5')}
-            >
-              预约私人顾问
-            </Link>
-            <Link to="/contact" style={{
-              display: 'inline-block',
-              padding: '14px 40px',
-              background: 'transparent',
-              color: 'rgba(247,248,248,0.78)',
-              fontSize: 13,
-              letterSpacing: '0.18em',
-              textTransform: 'uppercase',
-              textDecoration: 'none',
-              fontFamily: FONT_SANS,
-              fontWeight: 400,
-              border: '1px solid rgba(247,248,248,0.32)',
-              transition: 'border-color 0.4s, color 0.4s',
-            }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = ACCENT; e.currentTarget.style.color = ACCENT; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(247,248,248,0.32)'; e.currentTarget.style.color = 'rgba(247,248,248,0.78)'; }}
-            >
-              联系客服
-            </Link>
-          </div>
+          >
+            前往咨询
+          </Link>
         </motion.div>
       </section>
 
-      {/* ═══════ 响应式：流程模块手机端单列 ═══════ */}
+      {/* ═══════ 响应式：流程与工艺手机端单列 ═══════ */}
       <style>{`
         @media (max-width: 767px) {
           .custom-process-row {
-            flex-direction: column !important;
+            grid-template-columns: 1fr !important;
+            gap: 16px !important;
           }
-          .custom-process-row > div:first-child {
-            order: -1 !important;
+          .custom-craft-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+        @media (max-width: 390px) {
+          .custom-final-cta {
+            width: 100%;
           }
         }
       `}</style>

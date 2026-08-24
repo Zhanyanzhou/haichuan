@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect, useRef, type FormEvent } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { inquiriesApi, settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackPageView, trackSubmitInquiry } from "@/hooks/useAnalytics";
@@ -43,6 +43,32 @@ const BUDGET_OPTIONS = [
   "暂不透露",
 ];
 
+const REQUIRED_FIELDS = [
+  "name",
+  "phone",
+  "consultationType",
+  "preferredTime",
+  "message",
+  "privacyConsent",
+] as const;
+type RequiredField = (typeof REQUIRED_FIELDS)[number];
+const FIELD_IDS: Record<RequiredField, string> = {
+  name: "cf-name",
+  phone: "cf-phone",
+  consultationType: "cf-type",
+  preferredTime: "cf-time",
+  message: "cf-message",
+  privacyConsent: "cf-privacy-consent",
+};
+const ERROR_IDS: Record<RequiredField, string> = {
+  name: "cf-name-error",
+  phone: "cf-phone-error",
+  consultationType: "cf-type-error",
+  preferredTime: "cf-time-error",
+  message: "cf-message-error",
+  privacyConsent: "cf-privacy-consent-error",
+};
+
 const SERVICES = [
   {
     title: "选款需求咨询",
@@ -61,7 +87,7 @@ const SERVICES = [
 const FAQS = [
   {
     q: "提交咨询需求后多久会与我联系？",
-    a: "我们会尽快与您联系，具体联系时间与安排以实际沟通为准。",
+    a: "我们会根据您提供的联系方式与您联系，具体时间与安排以实际沟通为准。",
   },
   {
     q: "是否支持到店咨询？",
@@ -85,7 +111,6 @@ const inputS: React.CSSProperties = {
   fontSize: 14,
   color: T.txt,
   background: T.bg,
-  outline: "none",
   boxSizing: "border-box",
 };
 const selS: React.CSSProperties = {
@@ -127,6 +152,9 @@ function useSiteSettings() {
 }
 
 export default function Contact() {
+  const [searchParams] = useSearchParams();
+  const preselectedConsultationType =
+    searchParams.get("type") === "custom" ? "高级定制" : "";
   const { active: hasPageDecoration } = usePageDecorationState();
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
@@ -175,7 +203,7 @@ export default function Contact() {
   const [form, setForm] = useState({
     name: savedCustomer?.name || "",
     phone: savedCustomer?.phone || "",
-    consultationType: "",
+    consultationType: preselectedConsultationType,
     preferredContact: "电话",
     preferredTime: "",
     budgetRange: "",
@@ -186,10 +214,17 @@ export default function Contact() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const formRef = useRef<HTMLFormElement>(null);
+  const successHeadingRef = useRef<HTMLHeadingElement>(null);
+  const submitPendingRef = useRef(false);
 
   useEffect(() => {
     trackPageView();
   }, []);
+
+  useEffect(() => {
+    if (submitted) successHeadingRef.current?.focus();
+  }, [submitted]);
 
   const set = (key: string, value: any) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -199,6 +234,20 @@ export default function Contact() {
         delete n[key];
         return n;
       });
+  };
+
+  const focusInvalidField = (field: RequiredField) => {
+    requestAnimationFrame(() => {
+      // 等错误文案完成布局后再聚焦和滚动，避免移动端表单增高时把首错推到固定页头下方。
+      requestAnimationFrame(() => {
+        const target = formRef.current?.querySelector<HTMLElement>(
+          `#${FIELD_IDS[field]}`,
+        );
+        if (!target) return;
+        target.focus({ preventScroll: true });
+        target.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
+      });
+    });
   };
 
   const validate = () => {
@@ -212,11 +261,16 @@ export default function Contact() {
       e.message = "请至少输入10个字描述您的需求";
     if (!form.privacyConsent) e.privacyConsent = "请阅读并同意隐私说明";
     setErrors(e);
-    return Object.keys(e).length === 0;
+    const firstInvalidField = REQUIRED_FIELDS.find((field) => e[field]);
+    if (firstInvalidField) focusInvalidField(firstInvalidField);
+    return !firstInvalidField;
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submitPendingRef.current || submitting) return;
     if (!validate()) return;
+    submitPendingRef.current = true;
     setSubmitting(true);
     setSubmitError("");
     try {
@@ -235,6 +289,7 @@ export default function Contact() {
     } catch (err: any) {
       setSubmitError(err?.message || "提交失败，请稍后再试");
     } finally {
+      submitPendingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -270,11 +325,18 @@ export default function Contact() {
             ✓
           </div>
           <h2
+            ref={successHeadingRef}
+            tabIndex={-1}
             style={{
               fontSize: 24,
               fontWeight: 400,
               color: T.txt,
               marginBottom: 12,
+              outline: "none",
+              textDecorationLine: "underline",
+              textDecorationColor: T.txt,
+              textDecorationThickness: 2,
+              textUnderlineOffset: 6,
             }}
           >
             需求已提交
@@ -287,32 +349,40 @@ export default function Contact() {
               lineHeight: 1.6,
             }}
           >
-            我们会尽快根据您提供的联系方式与您联系，具体安排以实际沟通为准。
+            我们会根据您提供的联系方式与您联系，具体时间与安排以实际沟通为准。
           </p>
-          <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 16,
+            }}
+          >
             <Link
-              to="/"
+              to="/catalog"
+              className="contact-success__primary"
               style={{
                 padding: "10px 28px",
-                border: `1px solid ${T.line}`,
+                border: `1px solid ${T.txt}`,
                 fontSize: 13,
                 color: T.txt,
                 textDecoration: "none",
+              }}
+            >
+              浏览作品
+            </Link>
+            <Link
+              to="/"
+              className="contact-success__secondary"
+              style={{
+                fontSize: 13,
+                color: T.sec,
+                textDecoration: "underline",
+                textUnderlineOffset: 4,
               }}
             >
               返回首页
-            </Link>
-            <Link
-              to="/catalog"
-              style={{
-                padding: "10px 28px",
-                border: `1px solid ${T.line}`,
-                fontSize: 13,
-                color: T.txt,
-                textDecoration: "none",
-              }}
-            >
-              浏览珠宝作品
             </Link>
           </div>
         </div>
@@ -449,7 +519,7 @@ export default function Contact() {
                     lineHeight: 1.6,
                   }}
                 >
-                  联系信息暂时无法加载，您仍可通过右侧表单提交需求。
+                  联系信息暂时无法加载，您仍可通过本页表单提交需求。
                 </p>
               )}
               {settingsStatus === "loaded" && CONTACT_INFO.length === 0 && (
@@ -461,7 +531,7 @@ export default function Contact() {
                     lineHeight: 1.6,
                   }}
                 >
-                  公开联系方式正在完善，您仍可通过右侧表单提交需求。
+                  公开联系方式正在完善，您仍可通过本页表单提交需求。
                 </p>
               )}
               {settingsStatus === "loaded" &&
@@ -511,14 +581,18 @@ export default function Contact() {
                 <span>具体安排</span>
               </div>
               <p style={{ fontSize: 11, color: T.light, marginTop: 8 }}>
-                我们会尽快与您联系，具体时间与安排以实际沟通为准。
+                我们会根据您提供的联系方式与您联系，具体时间与安排以实际沟通为准。
               </p>
             </div>
           </div>
 
           {/* 右侧：表单 */}
           <div>
-            <div
+            <form
+              ref={formRef}
+              className="contact-form"
+              onSubmit={handleSubmit}
+              noValidate
               style={{
                 background: T.warmBg,
                 padding: "clamp(24px,4vw,40px)",
@@ -540,6 +614,8 @@ export default function Contact() {
                   </label>
                   <input
                     id="cf-name"
+                    aria-invalid={errors.name ? true : undefined}
+                    aria-describedby={errors.name ? ERROR_IDS.name : undefined}
                     style={{
                       ...inputS,
                       borderColor: errors.name ? "#8C3F3B" : T.line,
@@ -550,6 +626,7 @@ export default function Contact() {
                   />
                   {errors.name && (
                     <p
+                      id={ERROR_IDS.name}
                       style={{
                         fontSize: 11,
                         color: "#8C3F3B",
@@ -566,6 +643,8 @@ export default function Contact() {
                   </label>
                   <input
                     id="cf-phone"
+                    aria-invalid={errors.phone ? true : undefined}
+                    aria-describedby={errors.phone ? ERROR_IDS.phone : undefined}
                     style={{
                       ...inputS,
                       borderColor: errors.phone ? "#8C3F3B" : T.line,
@@ -578,6 +657,7 @@ export default function Contact() {
                   />
                   {errors.phone && (
                     <p
+                      id={ERROR_IDS.phone}
                       style={{
                         fontSize: 11,
                         color: "#8C3F3B",
@@ -604,6 +684,12 @@ export default function Contact() {
                   </label>
                   <select
                     id="cf-type"
+                    aria-invalid={errors.consultationType ? true : undefined}
+                    aria-describedby={
+                      errors.consultationType
+                        ? ERROR_IDS.consultationType
+                        : undefined
+                    }
                     style={{
                       ...selS,
                       borderColor: errors.consultationType ? "#8C3F3B" : T.line,
@@ -622,6 +708,7 @@ export default function Contact() {
                   </select>
                   {errors.consultationType && (
                     <p
+                      id={ERROR_IDS.consultationType}
                       style={{
                         fontSize: 11,
                         color: "#8C3F3B",
@@ -665,6 +752,10 @@ export default function Contact() {
                   </label>
                   <select
                     id="cf-time"
+                    aria-invalid={errors.preferredTime ? true : undefined}
+                    aria-describedby={
+                      errors.preferredTime ? ERROR_IDS.preferredTime : undefined
+                    }
                     style={{
                       ...selS,
                       borderColor: errors.preferredTime ? "#8C3F3B" : T.line,
@@ -683,6 +774,7 @@ export default function Contact() {
                   </select>
                   {errors.preferredTime && (
                     <p
+                      id={ERROR_IDS.preferredTime}
                       style={{
                         fontSize: 11,
                         color: "#8C3F3B",
@@ -717,6 +809,8 @@ export default function Contact() {
                 </label>
                 <textarea
                   id="cf-message"
+                  aria-invalid={errors.message ? true : undefined}
+                  aria-describedby={errors.message ? ERROR_IDS.message : undefined}
                   style={{
                     ...inputS,
                     height: 100,
@@ -730,6 +824,7 @@ export default function Contact() {
                 />
                 {errors.message && (
                   <p
+                    id={ERROR_IDS.message}
                     style={{
                       fontSize: 11,
                       color: "#8C3F3B",
@@ -752,13 +847,14 @@ export default function Contact() {
                   }}
                 >
                   <input
+                    id="cf-privacy-consent"
                     type="checkbox"
                     checked={form.privacyConsent}
                     onChange={(e) => set("privacyConsent", e.target.checked)}
                     aria-invalid={errors.privacyConsent ? true : undefined}
                     aria-describedby={
                       errors.privacyConsent
-                        ? "cf-privacy-consent-error"
+                        ? ERROR_IDS.privacyConsent
                         : undefined
                     }
                     style={{ marginTop: 2, accentColor: T.gold }}
@@ -777,8 +873,7 @@ export default function Contact() {
                 </label>
                 {errors.privacyConsent && (
                   <p
-                    id="cf-privacy-consent-error"
-                    role="alert"
+                    id={ERROR_IDS.privacyConsent}
                     style={{
                       fontSize: 11,
                       color: "#8C3F3B",
@@ -790,13 +885,15 @@ export default function Contact() {
                 )}
               </div>
               {submitError && (
-                <p style={{ fontSize: 12, color: "#8C3F3B", marginBottom: 12 }}>
+                <p
+                  role="alert"
+                  style={{ fontSize: 12, color: "#8C3F3B", marginBottom: 12 }}
+                >
                   {submitError}
                 </p>
               )}
               <button
-                type="button"
-                onClick={handleSubmit}
+                type="submit"
                 disabled={submitting}
                 style={{
                   width: "100%",
@@ -812,7 +909,7 @@ export default function Contact() {
               >
                 {submitting ? "正在提交…" : "提交需求"}
               </button>
-            </div>
+            </form>
           </div>
         </div>
       </section>
@@ -872,6 +969,13 @@ export default function Contact() {
       </section>
 
       <style>{`
+        .contact-form input:focus-visible,
+        .contact-form select:focus-visible,
+        .contact-form textarea:focus-visible {
+          outline: 2px solid #181A1B;
+          outline-offset: 2px;
+        }
+
         @media (max-width: 767px) {
           .contact-grid { grid-template-columns: 1fr !important; }
           .contact-grid > div:first-child { order: 2; }
