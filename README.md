@@ -22,10 +22,14 @@ npm run
 
 开发、测试、端口与数据状态请分别查阅：
 
-- `docs/CURRENT_STATE.md`：当前可验证实现、已批准目标与待真实验证项；
+- `docs/PROJECT_GUARDRAILS.md`：唯一项目与品牌方向基线，定义产品、品牌与公开网站方向；
+- `docs/UI_GUIDE.md`：承接项目与品牌基线的视觉与体验执行标准；
+- `docs/CURRENT_STATE.md`：当前可验证实现、与现行方向或专项决定的实现差距及待真实验证项；
 - `docs/DEVELOPMENT_WORKFLOW.md`：当前开发运行方式；
-- `docs/VERIFICATION_RUNBOOK.md`：历史验证证据边界；实际检查须从当前脚本重新选择；
+- `WORKFLOW.md` 第 5 节与当前 `package.json` 脚本：当前验证范围与命令选择；
 - `docs/PUBLIC_ACCESS_MATRIX.md`：身份、行动与字段访问边界。
+
+`docs/VERIFICATION_RUNBOOK.md` 只保留历史验证证据边界，不是当前 Runbook，也不作为默认执行入口。
 
 ## 项目结构
 

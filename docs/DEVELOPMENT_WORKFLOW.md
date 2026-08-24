@@ -28,7 +28,7 @@ cd server && npx prisma migrate dev
 # 4. (可选) 填充种子数据
 npx prisma db seed
 
-# 5. 启动开发服务器
+# 5. 启动真实联调环境（先构建服务端，再启动单一前端与后端）
 npm run dev
 ```
 
@@ -38,6 +38,7 @@ npm run dev
 | ---- | -------------- |
 | 80   | 完整 Docker 栈入口（Nginx） |
 | 5173 | Vite 开发前端（`strictPort`） |
+| 5174 | 显式 Mock 前端（仅 `npm run dev:mock`） |
 | 3000 | 宿主机 NestJS 后端（开发唯一归属） |
 | 3002 | 容器后端映射（仅验收直连） |
 | 3306 | MySQL (Docker) |
@@ -46,9 +47,10 @@ npm run dev
 
 | 命令                     | 说明                   |
 | ------------------------ | ---------------------- |
-| `npm run dev`            | 同时启动前后端         |
-| `npm.cmd run dev:client` | 仅前端                 |
-| `npm run dev:server`     | 仅后端                 |
+| `npm run dev`            | 构建服务端、预加载 `server/.env` 后启动 Real 前端与回环后端 |
+| `npm.cmd run dev:client` | 仅启动 Real 前端（需要 3000 后端） |
+| `npm run dev:server`     | 构建、预加载 `server/.env` 并启动编译后的后端 |
+| `npm run dev:mock`       | 仅启动 5174 Mock 前端  |
 | `npm run build`          | 生产构建               |
 | `npx prisma migrate dev` | 本地开发数据库迁移（需批准） |
 | `npx prisma db seed`     | 种子数据               |
@@ -68,7 +70,7 @@ npm run dev
 
 ## Mock 模式
 
-通过 `VITE_USE_MOCK=true` 可绕过真实 API，适用于后端未启动时的前端开发；未设置时默认调用真实 API，生产环境不得开启。
+Mock 只能通过 `npm run dev:mock` 显式启动，固定使用 `http://127.0.0.1:5174`，适用于后端未启动时的纯界面开发。页面会显示 Mock 标识；其结果只能证明 UI 冒烟，不能证明鉴权、草稿、发布或真实接口联调。默认 `npm run dev` 与 `npm run dev:client` 均为 Real 模式，生产构建不会启用 Mock。
 
 ## 数据库迁移
 
@@ -80,11 +82,15 @@ npm run dev
 
 - `GET /api/health`：进程存活探针，不访问外部依赖。
 - `GET /api/ready`：数据库就绪探针；数据库不可用时返回 503。
+- Real 本地启动后同时核验 `http://127.0.0.1:3000/api/ready` 与经前端代理的 `http://127.0.0.1:5173/api/ready`；两者都成功才说明接线就绪。
 
 ## 端口与启动说明
 
 - 本地 Docker 整站通过 `docker compose up -d` 启动，会自动合并仅供本地开发的 `docker-compose.override.yml`；前台入口为 `http://localhost/`，后台登录为 `http://localhost/admin/login`。生产必须按 `docs/DEPLOYMENT.md` 显式使用 `docker compose -f docker-compose.yml ...`，不得自动合并该 override。
-- 本地开发通过 `npm run dev` 启动，前台入口为 `http://localhost:5173/`，后台登录为 `http://localhost:5173/admin/login`。
+- 本地 Real 开发通过 `npm run dev` 启动，前台入口为 `http://127.0.0.1:5173/`，后台登录为 `http://127.0.0.1:5173/admin/login`。不要使用 `localhost` 或 IPv6 地址切换运行模式。
+- 宿主机后端运行当前编译产物，不提供后端热更新；修改服务端代码后需停止当前进程并重新执行 `npm run dev` 或 `npm run dev:server`。
+- 本地编译产物在模块导入阶段即校验 `JWT_SECRET`，因此开发命令使用 Node `--env-file=.env` 在导入前加载现有 `server/.env`；不得把真实值写入脚本、日志或仓库。
+- `server/scripts/start-local.cjs` 只为宿主机开发固定 `127.0.0.1:3000`；Docker/生产继续使用 `server/package.json` 的 `start:prod`，不复用本地绑定。
 - 整套 Docker 与宿主机开发可以同时存在：宿主机后端固定占用 `3000`，容器后端通过 override 映射 `127.0.0.1:3002`，完整容器栈经 `:80` 自包含访问。不得改回容器抢占宿主机 `3000`。
 - PowerShell 若阻止 `npm.ps1`，请使用 `npm.cmd run dev` 或 `npm.cmd run dev:client`。
 - 后端默认使用 `3000`。若该端口已被不明进程占用，先识别并停止错误实例；不要通过临时改端口掩盖 API 所有权冲突。需要改变端口拓扑时按基础设施决策处理。

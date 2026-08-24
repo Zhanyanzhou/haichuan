@@ -1,6 +1,6 @@
 # 海川珠宝 — 组件手册
 
-> 最后更新：2026-08-23。组件存在不代表公开路由仍消费它；公开页面职责以机器合同、`docs/CURRENT_STATE.md` 与 `docs/PROJECT_GUARDRAILS.md` 为准。
+> 最后更新：2026-08-23。组件存在不代表公开路由仍消费它；公开页面职责只认 `docs/PROJECT_GUARDRAILS.md`，当前路由与组件消费事实见 `docs/CURRENT_STATE.md` 和代码，模板页面角色门禁只认机器合同。
 
 ## 布局组件 (layout/)
 

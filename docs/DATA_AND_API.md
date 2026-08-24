@@ -88,7 +88,7 @@
 
 - 认证：`Authorization: Bearer <jwt_token>`
 - 分页：`?page=1&pageSize=20`
-- Mock 模式：仅在构建变量 `VITE_USE_MOCK=true` 时启用；生产环境必须保持未设置或 `false`
+- Mock 模式：仅由显式 Vite `mock` mode（`npm run dev:mock`）启用；默认开发与生产构建均走真实 API
 - 路由或 API 存在不代表交易开放；客户交易和真实资金门禁以 `docs/DECISIONS.md` D.2 / D.18 为准。
 
 ## 已批准报价目标（尚未形成当前 API 或数据表）

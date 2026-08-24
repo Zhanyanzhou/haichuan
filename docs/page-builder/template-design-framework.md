@@ -2,6 +2,7 @@
 
 > 当前入口：本文件只规定模板体系的稳定边界与变更流程。
 > 模板清单、状态、槽位、比例、顺序、预设、内容预算和预览结构只认 `contracts/page-builder/content-templates.contract.json`。
+> 产品定位、品牌原则与公开页面职责只认 `docs/PROJECT_GUARDRAILS.md`；本文件不得通过模板规则改变项目方向。
 > 品牌视觉、排印、颜色、响应式、无障碍与性能只认 `docs/UI_GUIDE.md`。
 > 最近核对：2026-08-20（模板规则单一来源收敛）。
 
@@ -16,6 +17,7 @@
 
 其他文件的职责：
 
+- `docs/PROJECT_GUARDRAILS.md` 是唯一项目与品牌方向基线，负责产品、品牌与公开网站方向，不保存模板字段。
 - `docs/UI_GUIDE.md` 负责品牌和体验标准，不保存模板字段。
 - `docs/DECISIONS.md` 只记录已批准的长期取舍及原因，不充当当前模板台账。
 - `PROJECT_RULES.md` 与 `WORKFLOW.md` 只声明项目硬边界和执行门禁，并引用本文件与机器合同。

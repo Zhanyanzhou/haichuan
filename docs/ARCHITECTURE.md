@@ -85,6 +85,6 @@ JwtAuthGuard / RolesGuard → @CurrentUser
 
 - **Zustand** 而非 Redux：轻量、无 Provider、selector 模式
 - **Feature Flags**：电商功能代码已完成，开关控制上线节奏
-- **Mock 模式**：由 `VITE_USE_MOCK=true` 显式开启，默认走真实 API
+- **Mock 模式**：仅由 Vite `mock` mode 显式开启（`npm run dev:mock`），默认走真实 API
 - **页面构建器**：iframe + postMessage 架构，编辑/预览完全隔离
 - **站点设置**：以 `site_settings` 数据表为唯一持久化来源；旧 `settings.json` 只在首次初始化时导入

@@ -143,4 +143,4 @@
 | `client/src/data/homeCampaign.ts` | 首页活动配置 | Home |
 | `client/src/data/collections.ts` | 系列/集合数据 | Home, Catalog |
 | `client/src/data/catalogData.ts` | 选款目录数据 | Catalog |
-| `client/src/services/mockData.ts` | 完整 Mock 数据集 | 当 VITE_USE_MOCK=true 时 |
+| `client/src/services/mockData.ts` | 完整 Mock 数据集 | 仅显式 Vite `mock` mode |

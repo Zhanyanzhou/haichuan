@@ -41,7 +41,7 @@
 **运行 Playwright 前注意**：
 
 - 需先 `cd client && npm install`（若未装 Playwright 浏览器则 `npx playwright install chromium`）
-- mock 模式：`$env:VITE_USE_MOCK="true"` 后运行（不依赖后端）
+- mock 模式：`$env:PLAYWRIGHT_APP_MODE="mock"` 后运行（启动显式 Vite `mock` mode，不依赖后端）
 - 真实接口模式：需 3000 端口后端运行 + `$env:PLAYWRIGHT_API_BASE_URL="http://127.0.0.1:3000/api"`
 
 ---
