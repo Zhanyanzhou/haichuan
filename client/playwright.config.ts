@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const port = Number(process.env.PLAYWRIGHT_PORT || 5174);
+const appMode = process.env.PLAYWRIGHT_APP_MODE === "mock" ? "mock" : "development";
+// 旧测试只在 Node 侧读取该变量决定网络夹具/skip；envPrefix 白名单确保它不进入浏览器。
+process.env.VITE_USE_MOCK = appMode === "mock" ? "true" : "false";
+const port = Number(process.env.PLAYWRIGHT_PORT || (appMode === "mock" ? 5174 : 5173));
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${port}`;
 const adminStorageState = process.env.PLAYWRIGHT_ADMIN_STORAGE_STATE;
 
@@ -39,7 +42,7 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_BASE_URL
     ? undefined
     : {
-        command: `npm run dev -- --host 127.0.0.1 --port ${port}`,
+        command: `npm run dev -- --mode ${appMode} --host 127.0.0.1 --port ${port}`,
         url: baseURL,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,

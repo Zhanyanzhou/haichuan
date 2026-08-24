@@ -2,23 +2,24 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
 
-const apiProxyTarget =
-  process.env.VITE_API_PROXY_TARGET || "http://localhost:3000";
+const apiProxyTarget = "http://127.0.0.1:3000";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
+  // 仅把确需由浏览器读取的公开配置暴露给 import.meta.env。
+  // Vite 的 envPrefix 是前缀匹配，因此使用完整键名作为最小白名单。
+  envPrefix: ["VITE_API_BASE_URL", "VITE_ANALYTICS_ENABLED"],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
   server: {
-    // 固定 5173（Vite 默认、后端 CORS_ORIGIN 已放行）：strictPort 被占时直接报错，
-    // 避免端口静默顺延导致旧地址全部"拒绝连接"；host: true 双栈绑定 127.0.0.1 与 ::1，
-    // 否则 Windows 下 Node 解析 localhost 只绑 IPv6，IPv4 访问打不开。
-    port: 5173,
+    // 协议族不承担运行模式切换：real 固定 5173，显式 mock 固定 5174。
+    // strictPort 被占时直接报错，避免遗留进程静默制造第二套服务。
+    port: mode === "mock" ? 5174 : 5173,
     strictPort: true,
-    host: true,
+    host: "127.0.0.1",
     watch: {
       // Windows 中文路径 + Node.js 文件监视器 = EBUSY，改用轮询
       usePolling: true,
@@ -66,4 +67,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

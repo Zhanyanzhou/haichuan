@@ -146,10 +146,8 @@ export const authApi = {
   login: async (data: { username: string; password: string }) => {
     if (USE_MOCK) {
       await mockDelay();
-      if (
-        data.username === (import.meta as any).env?.VITE_MOCK_ADMIN_USERNAME &&
-        data.password === (import.meta as any).env?.VITE_MOCK_ADMIN_PASSWORD
-      ) {
+      // Mock 是显式本机模式，不模拟真实凭据校验，也不把凭据写入浏览器环境变量。
+      if (data.username.trim() && data.password.trim()) {
         return mockRes({ accessToken: "mock-jwt-token", user: mockUsers[0] });
       }
       throw new Error("用户名或密码错误");
@@ -1845,7 +1843,7 @@ export const pageDocumentApi = {
       await mockDelay(180);
       const store = loadMockPageDocuments();
       const draft = store.drafts[pageKey];
-      if (!draft) throw new Error("请先保存首页草稿");
+      if (!draft) throw new Error("请先保存页面草稿");
       const now = new Date().toISOString();
       const published: MockPageDocument = {
         ...cloneMockDocument(draft),

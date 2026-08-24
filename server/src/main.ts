@@ -6,6 +6,7 @@ import { Logger as PinoLogger } from "nestjs-pino";
 import { AppModule } from "./app.module";
 import { TransformInterceptor } from "./common/interceptors/transform.interceptor";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
+import { resolveCorsOrigins } from "./common/config/cors-origins";
 
 async function bootstrap() {
   // rawBody：保留请求体原始字节串——微信支付 APIv3 回调验签必须对原始报文（重新序列化会改变字段序/空白导致验签必败）。
@@ -29,24 +30,12 @@ async function bootstrap() {
 
   // 访问日志已由 nestjs-pino（pino-http）统一记录，不再手写请求日志中间件。
 
-  // CORS：开发环境宽松，生产环境只接受显式配置的正式来源。
-  // 不使用代码内置域名作为回退值，避免在域名变更或未确认时静默开放错误站点。
-  const corsOrigin =
-    process.env.NODE_ENV === "production"
-      ? getProductionCorsOrigins()
-      : [
-          "http://localhost:5173",
-          "http://localhost:5174",
-          "http://localhost:5175",
-          "http://localhost:5176",
-          "http://localhost:5177",
-          "http://127.0.0.1:5173",
-          "http://127.0.0.1:5174",
-          "http://127.0.0.1:5175",
-          "http://127.0.0.1:5176",
-          "http://127.0.0.1:5177",
-          "http://localhost:3000",
-        ];
+  // 开发环境未配置时保留常用端口；显式配置时仅接受精确 loopback 来源。
+  // 生产环境继续要求明确的正式来源，不使用代码内置域名回退。
+  const corsOrigin = resolveCorsOrigins(
+    process.env.NODE_ENV,
+    process.env.CORS_ORIGIN,
+  );
 
   app.enableCors({
     origin: corsOrigin,
@@ -86,35 +75,3 @@ async function bootstrap() {
   logger.log(`🚀 Jewelry Server running on http://localhost:${port}`);
 }
 bootstrap();
-
-function getProductionCorsOrigins(): string[] {
-  const configuredOrigins = process.env.CORS_ORIGIN;
-  if (!configuredOrigins?.trim()) {
-    throw new Error(
-      "CORS_ORIGIN 在生产环境为必填项；请配置已确认的正式前端来源。",
-    );
-  }
-
-  const origins = configuredOrigins.split(",").map((origin) => origin.trim());
-  if (origins.some((origin) => !origin)) {
-    throw new Error("CORS_ORIGIN 不能包含空白来源。");
-  }
-
-  for (const origin of origins) {
-    try {
-      const url = new URL(origin);
-      if (
-        !["http:", "https:"].includes(url.protocol) ||
-        url.origin !== origin
-      ) {
-        throw new Error();
-      }
-    } catch {
-      throw new Error(
-        "CORS_ORIGIN 必须为一个或多个以逗号分隔的 HTTP(S) 来源（不含路径、查询参数或尾随斜杠）。",
-      );
-    }
-  }
-
-  return origins;
-}

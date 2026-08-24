@@ -1,8 +1,8 @@
 import { productPlaceholder } from '@/utils/placeholder';
 
 // ===== Mock Data for Demo Mode (no backend required) =====
-// 由环境变量 VITE_USE_MOCK 控制；默认关闭（仅 VITE_USE_MOCK=true 时启用），生产环境不得开启。
-export const USE_MOCK = (import.meta as any).env?.VITE_USE_MOCK === 'true';
+// 只由显式 Vite mode 控制：development/production 均为真实接口，`--mode mock` 才启用。
+export const USE_MOCK = import.meta.env.MODE === 'mock';
 
 // ===== Categories (4-level tree) =====
 export const mockCategories = [

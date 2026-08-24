@@ -35,6 +35,10 @@ screenshot-*.png
 /home-5174.png
 /home-5174.jpeg
 /test-results/
+# Playwright 并行验收按角色生成的本地结果目录（例如 test-results-role03-*）。
+/client/test-results-*/
+# 本地后端启动与媒体诊断证据（截图、PID、进程元数据），不属于交付源码。
+/server/.diagnostics/
 /*.sql
 
 # Claude Code：skills 为指向 .agents/skills 的符号链接（不入库）；仅子代理入库共享

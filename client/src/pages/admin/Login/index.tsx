@@ -5,6 +5,7 @@ import type { InputRef } from 'antd';
 import { UserOutlined, LockOutlined, EyeInvisibleOutlined, EyeOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
 import { authApi } from '@/services/api';
+import { USE_MOCK } from '@/services/mockData';
 import { unwrapResponse } from '@/utils/unwrap';
 import { ADMIN_COLORS } from '@/styles/antdTheme';
 
@@ -107,6 +108,26 @@ export default function Login() {
             style={{ width: 30, height: 2, background: TOKENS.accent }}
           />
         </div>
+
+        {USE_MOCK ? (
+          <div
+            role="status"
+            aria-label="当前为 Mock 模式，输入任意非空用户名和密码即可进入，数据仅保存在本机"
+            className="mb-5"
+            style={{
+              padding: '10px 12px',
+              border: `1px solid ${ADMIN_COLORS.infoBorder}`,
+              borderRadius: 6,
+              color: ADMIN_COLORS.info,
+              background: ADMIN_COLORS.infoBg,
+              fontSize: 13,
+              lineHeight: '20px',
+              textAlign: 'left',
+            }}
+          >
+            Mock 模式：输入任意非空用户名和密码即可进入；数据仅保存在本机。
+          </div>
+        ) : null}
 
         {/* ═══ 表单 ═══ */}
         <Form form={form} onFinish={onFinish} autoComplete="off" layout="vertical" size="large">
