@@ -14,6 +14,7 @@ interface HotspotItem {
 export interface HotspotPuckProps {
   image: string;
   mobileImage: string;
+  altText: string;
   hotspots: HotspotItem[];
   mobileHotspots: HotspotItem[];
   locked?: boolean;
@@ -27,6 +28,7 @@ export const hotspotPuckConfig = {
   defaultProps: {
     image: "",
     mobileImage: "",
+    altText: "",
     hotspots: [],
     mobileHotspots: [],
     locked: false,

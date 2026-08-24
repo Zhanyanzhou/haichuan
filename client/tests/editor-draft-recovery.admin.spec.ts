@@ -87,6 +87,7 @@ async function mockEditorApis(
     published?: Record<string, any>;
     draft?: Record<string, any>;
     saveDelayMs?: number;
+    saveConflict?: boolean;
   } = {},
 ) {
   let published: Record<string, any> = options.published ?? publishedDoc;
@@ -117,6 +118,16 @@ async function mockEditorApis(
       return route.fulfill(json(saved));
     }
     if (method === "PUT") {
+      if (options.saveConflict) {
+        return route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: 409,
+            message: "该页面已被其他编辑者更新，请重新加载后再保存",
+          }),
+        });
+      }
       if (options.saveDelayMs) {
         await new Promise((resolve) => setTimeout(resolve, options.saveDelayMs));
       }
@@ -237,5 +248,100 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await expect(status).toContainText("与线上版本一致");
     await expect(status).toContainText("最后保存");
     await expect(status).not.toContainText("草稿有未发布修改");
+  });
+
+  test("归一化后的 409 仍触发并发保护并保留本地画布", async ({ page }) => {
+    await page.unroute(`${API_PREFIX}*`);
+    await mockEditorApis(page, { saveConflict: true });
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+
+    const conflictDialog = page.getByRole("dialog", {
+      name: "检测到其他人更新了这份页面草稿",
+    });
+    await expect(conflictDialog).toBeVisible();
+    await expect(conflictDialog).toContainText("当前画布修改仍完整保留");
+    await conflictDialog.getByRole("button", { name: "保留本地修改" }).click();
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+  });
+
+  test("SPA 切换页面时隐藏旧画布且不会把旧内容写入新 pageKey", async ({
+    page,
+  }) => {
+    await page.unroute(`${API_PREFIX}*`);
+    let releaseCustom!: () => void;
+    const customGate = new Promise<void>((resolve) => {
+      releaseCustom = resolve;
+    });
+    const writes: Array<Record<string, unknown>> = [];
+    const validations: string[] = [];
+
+    await page.route(`${API_PREFIX}*`, async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const pageKey = url.searchParams.get("pageKey") || "home";
+      const method = request.method();
+      if (url.pathname.endsWith("/document/validate")) {
+        const body = request.postDataJSON() as { pageKey?: string };
+        validations.push(body.pageKey || "");
+        return route.fulfill(json({ valid: true, errors: [], issues: [] }));
+      }
+      if (method === "PUT") {
+        writes.push(request.postDataJSON());
+        return route.fulfill(json(draftDoc));
+      }
+      if (
+        pageKey === "custom" &&
+        (url.pathname.endsWith("/document/admin") ||
+          url.pathname.endsWith("/document/published"))
+      ) {
+        await customGate;
+      }
+      if (url.pathname.endsWith("/document/published")) {
+        return route.fulfill(json(pageKey === "home" ? publishedDoc : null));
+      }
+      if (url.pathname.endsWith("/document/admin")) {
+        return route.fulfill(
+          json(
+            pageKey === "home"
+              ? draftDoc
+              : {
+                  ...draftDoc,
+                  pageKey: "custom",
+                  puckData: {
+                    content: [
+                      {
+                        type: "文字横幅",
+                        props: { id: "custom-copy", title: "定制页草稿" },
+                      },
+                    ],
+                    root: { props: {} },
+                  },
+                },
+          ),
+        );
+      }
+      return route.fulfill(json([]));
+    });
+
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    validations.length = 0;
+
+    await page.evaluate(() => {
+      window.history.pushState({}, "", "/admin/editor/custom");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await expect(page).toHaveURL(/\/admin\/editor\/custom$/);
+    await expect(page.locator(".homepage-editor__toolbar")).toHaveCount(0);
+    await expect(page.locator(".ant-spin-spinning")).toBeVisible();
+    expect(writes).toEqual([]);
+    expect(validations).toEqual([]);
+
+    releaseCustom();
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    expect(writes).toEqual([]);
   });
 });

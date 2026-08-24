@@ -74,13 +74,16 @@ test.describe("Booking 黄金模板（独立属性面板与画布）", () => {
 
     const titleGroup = page.locator("fieldset").filter({ has: page.locator("legend", { hasText: "主标题" }) });
     await titleGroup.getByRole("checkbox").check();
-    await titleGroup.getByText("更多设置").click();
+    await titleGroup.getByRole("button", { name: "高级设置" }).click();
     await titleGroup.getByRole("group", { name: "安全文字带" }).getByRole("button", { name: "深色文字带" }).click();
     await expect(page.getByTestId("booking-state")).toContainText('"safeBand":"dark"');
 
     const media = canvas.locator('[data-hc-keyboard-node="bgImage"]');
     await media.click({ position: { x: 80, y: 80 } });
-    await page.getByRole("button", { name: "调整图片构图" }).click();
+    const mediaHud = canvas.getByRole("toolbar", {
+      name: "调整画布对象 bgImage",
+    });
+    await mediaHud.getByRole("button", { name: "调整图片构图" }).click();
     await expect(media).toBeFocused();
     await media.press("Shift+ArrowRight");
     await expect(page.getByTestId("booking-state")).toContainText('"focusByViewport":{"desktop":{"x":55,"y":50}}');

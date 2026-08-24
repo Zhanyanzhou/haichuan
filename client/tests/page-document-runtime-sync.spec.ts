@@ -520,7 +520,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
         "下移当前模块",
         "删除当前模块",
       ]) {
-        await expect(page.getByRole("button", { name: buttonName })).toBeInViewport({
+        await expect(dock.getByRole("button", { name: buttonName })).toBeInViewport({
           ratio: 0.98,
         });
       }
@@ -532,7 +532,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await expect(layerItems.nth(2)).toHaveClass(/is-active/);
     await assertDockAtBottomRight(2);
 
-    await page.getByRole("button", { name: "上移当前模块" }).click();
+    await dock.getByRole("button", { name: "上移当前模块" }).click();
     await expect.poll(() => layerNames.allTextContents()).toEqual([
       namesBeforeMove[0],
       namesBeforeMove[2],
@@ -541,7 +541,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     ]);
     await expect(layerItems.nth(1)).toHaveClass(/is-active/);
 
-    await page.getByRole("button", { name: "删除当前模块" }).click();
+    await dock.getByRole("button", { name: "删除当前模块" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "删除模块" }).click();
@@ -1004,14 +1004,21 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await page.goto("/admin/editor/custom");
     await expect(templateName("内容流程")).toBeVisible();
     await expect(templateName("前后对比")).toBeVisible();
+    await expect(templateName("品牌要点")).toBeVisible();
+    await expect(templateName("服务承诺")).toBeVisible();
+    await expect(templateName("图片热区")).toBeVisible();
     await expect(templateName("商品列表")).toHaveCount(0);
     await expect(templateName("限时活动")).toHaveCount(0);
 
     await page.goto("/admin/editor/products");
     await expect(templateName("单品展示")).toBeVisible();
     await expect(templateName("作品画廊")).toBeVisible();
-    await expect(templateName("商品列表")).toHaveCount(0);
-    await expect(templateName("品类入口")).toHaveCount(0);
+    await expect(templateName("轮播")).toBeVisible();
+    await expect(templateName("商品列表")).toBeVisible();
+    await expect(templateName("品类入口")).toBeVisible();
+    await expect(templateName("场景入口")).toBeVisible();
+    await expect(templateName("图片热区")).toBeVisible();
+    await expect(templateName("限时活动")).toBeVisible();
     await expect(page.getByText("商品列表与筛选", { exact: true })).toHaveCount(0);
 
     await page.goto("/admin/editor/catalog");
@@ -1096,9 +1103,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await expect(
       page.locator('.homepage-editor__draft-status[data-mode="dirty"]'),
     ).toContainText("有未保存修改");
-    await expect(
-      page.locator('.homepage-editor__properties-status[data-status="dirty"]'),
-    ).toContainText("有未保存修改");
+    await expect(page.locator(".homepage-editor__properties-actions")).toHaveCount(0);
     await expect.poll(readAnchor).toEqual(initialAnchor);
 
     for (const viewport of [
@@ -1530,6 +1535,98 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await expect(page.getByRole("button", { name: "退出当前模块编辑" })).toBeVisible();
     await page.getByRole("button", { name: "收起属性面板" }).click();
     await expect(page.getByRole("button", { name: "展开属性面板" })).toBeVisible();
+  });
+
+  test("对象属性面板在 1280 与 1600 桌面视口保持紧凑且不截断", async ({ page }) => {
+    await installAdminSession(page);
+    await mockEmptyEditorApis(page);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/admin/editor/home");
+
+    const objectSelect = page.getByRole("combobox", { name: "选择编辑对象" });
+    await expect(objectSelect).toBeVisible();
+    await objectSelect.selectOption("desktopImage");
+    const designQuickAction = page.getByRole("button", {
+      name: "调整图片构图与布局",
+    });
+    await expect(designQuickAction).toBeVisible();
+    await designQuickAction.click();
+    await expect(page.getByRole("tab", { name: "设计" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.getByRole("group", { name: "桌面主图比例" })).toBeVisible();
+    await expect(
+      page.getByRole("status", { name: "响应式状态：桌面端基准，移动端继承" }),
+    ).toBeVisible();
+
+    const readInspectorGeometry = () => page.evaluate(() => {
+      const inspector = document.querySelector<HTMLElement>(".homepage-editor__inspector");
+      if (!inspector) throw new Error("未找到属性面板");
+      const inspectorRect = inspector.getBoundingClientRect();
+      const withinInspector = (selector: string) =>
+        [...inspector.querySelectorAll<HTMLElement>(selector)].every((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.left >= inspectorRect.left - 0.5 && rect.right <= inspectorRect.right + 0.5;
+        });
+      const footer = inspector.querySelector<HTMLElement>(".homepage-editor__properties-actions");
+      const scroll = inspector.querySelector<HTMLElement>(".homepage-editor__inspector-scroll");
+      const select = inspector.querySelector<HTMLSelectElement>(".homepage-editor__object-context select");
+      return {
+        documentOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        inspectorOverflow: inspector.scrollWidth > inspector.clientWidth,
+        headerContained: withinInspector(".homepage-editor__inspector-header > *"),
+        contextContained: withinInspector(".homepage-editor__object-context > *"),
+        actionContained: withinInspector(".homepage-editor__visual-toolbar button"),
+        selectOverflow: Boolean(select && select.scrollWidth > select.clientWidth),
+        scrollHasRoom: Boolean(scroll && scroll.clientHeight > 200),
+        footerHeight: footer ? Math.round(footer.getBoundingClientRect().height) : 0,
+        footerVisible: Boolean(footer && footer.getBoundingClientRect().bottom <= window.innerHeight + 0.5),
+      };
+    });
+
+    for (const viewport of [
+      { width: 1280, height: 720 },
+      { width: 1600, height: 1000 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await expect.poll(readInspectorGeometry).toEqual({
+        documentOverflow: false,
+        inspectorOverflow: false,
+        headerContained: true,
+        contextContained: true,
+        actionContained: true,
+        selectOverflow: false,
+        scrollHasRoom: true,
+        footerHeight: 0,
+        footerVisible: false,
+      });
+      await page.screenshot({
+        path: `test-results/inspector-information-architecture-${viewport.width}x${viewport.height}.png`,
+        fullPage: false,
+      });
+    }
+
+    await objectSelect.focus();
+    await page.keyboard.press("Home");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(objectSelect).toHaveValue("desktopImage");
+    await page.getByRole("tab", { name: "内容" }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByRole("tab", { name: "设计" })).toBeFocused();
+
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect(objectSelect).toHaveValue("");
+    await objectSelect.selectOption("mobileImage");
+    await expect(
+      page.getByRole("status", { name: "响应式状态：桌面端基准，移动端继承" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "上移一层" }).click();
+    await expect(
+      page.getByRole("status", { name: "响应式状态：桌面端基准，移动端部分独立" }),
+    ).toBeVisible();
   });
 
   test("窄桌面保持左侧图层、中间画布和右侧属性面板的停靠方向", async ({ page }) => {

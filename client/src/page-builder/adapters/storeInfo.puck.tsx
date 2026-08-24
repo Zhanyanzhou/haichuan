@@ -6,6 +6,7 @@ import StoreInfoBlock from "@/components/blocks/StoreInfoBlock";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 
 export interface StoreInfoPuckProps {
+  useSiteSettings: boolean;
   storeName: string;
   address: string;
   hours: string;
@@ -21,6 +22,7 @@ export const storeInfoPuckConfig = {
     <StoreInfoBlock module={convertPuckProps("门店信息", props as any) as any} editMode />
   ),
   defaultProps: {
+    useSiteSettings: true,
     storeName: "海川珠宝",
     address: "",
     hours: "",

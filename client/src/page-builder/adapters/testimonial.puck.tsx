@@ -4,7 +4,7 @@ import { convertPuckProps } from "../utils/puckPropsToModule";
 export interface TestimonialPuckProps {
   title: string;
   subtitle: string;
-  testimonials: Array<{ name: string; meta: string; content: string; image: string }>;
+  testimonials: Array<{ name: string; meta: string; content: string; image: string; authorizationConfirmed: boolean }>;
   bgColor: string;
   locked?: boolean;
 }

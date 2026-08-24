@@ -77,7 +77,7 @@ const puckData = {
         id: "core-products",
         title: "当季作品",
         subtitle: "以统一比例、价格层级与购买路径呈现精选作品",
-        productIds: [1, 2, 3, 4],
+        productCodes: ["TEST-1", "TEST-2", "TEST-3", "TEST-4"],
         layout: "grid-4",
         mobileColumns: 2,
         displayMode: "standard",
@@ -121,7 +121,7 @@ const puckData = {
         title: "本季主推作品",
         summary:
           "把一件重点作品放大讲清，让品牌叙事自然进入商品详情与预约路径。",
-        productId: 1,
+        productCode: "TEST-1",
         primaryText: "查看作品",
         secondaryText: "预约鉴赏",
         secondaryLink: "/contact",
@@ -305,14 +305,8 @@ test.describe("八个核心装修模块首页闭环", () => {
     await expect(
       page.getByRole("link", { name: /探索本季作品/ }),
     ).toHaveAttribute("href", "/products");
-    await expect(page.getByRole("link", { name: /关于海川/ })).toHaveAttribute(
-      "href",
-      "/about",
-    );
-    await expect(page.getByRole("link", { name: /立即预约/ })).toHaveAttribute(
-      "href",
-      "/contact",
-    );
+    await expect(page.getByRole("link", { name: /关于海川/ })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /立即预约/ })).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
   });
 

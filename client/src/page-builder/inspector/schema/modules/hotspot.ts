@@ -9,7 +9,7 @@ import {
 } from "../../../config/blockContracts";
 import { IMAGE_SPECS } from "../../../config/imageSpecs";
 import { hotspotPuckConfig } from "../../../adapters/hotspot.puck";
-import { moduleNameField } from "../shared";
+import { altTextField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
 const hotspotArrayFields = [
@@ -60,6 +60,7 @@ export const hotspotSchema: ModuleInspectorSchema = {
           placeholder: "上传手机端底图",
           showSpecCheck: true,
         },
+        altTextField(80),
       ],
     },
     {

@@ -7,14 +7,14 @@
     {
       "pageKey": "home",
       "pageRole": "brand-home",
-      "allowedTemplateKeys": ["hero", "fullBleed", "video", "singlePoster", "doublePoster", "textBanner", "journey", "featuredProduct", "gallery", "wearingInspiration", "booking"],
+      "allowedTemplateKeys": ["hero", "fullBleed", "video", "carousel", "singlePoster", "doublePoster", "textBanner", "journey", "featuredProduct", "productRow", "gallery", "wearingInspiration", "categoryCards", "sceneShopping", "brandPoints", "booking", "limitedEvent"],
       "businessRegionCount": 0,
       "headerMode": { "configured": "overlay-light", "overlayRequiresFirstTemplate": "hero", "fallback": "solid" }
     },
     {
       "pageKey": "products",
       "pageRole": "brand-showcase",
-      "allowedTemplateKeys": ["hero", "fullBleed", "video", "singlePoster", "doublePoster", "textBanner", "featuredProduct", "gallery", "wearingInspiration", "booking"],
+      "allowedTemplateKeys": ["hero", "fullBleed", "video", "carousel", "singlePoster", "doublePoster", "textBanner", "featuredProduct", "productRow", "gallery", "wearingInspiration", "categoryCards", "sceneShopping", "hotspot", "booking", "limitedEvent"],
       "businessRegionCount": 0,
       "headerMode": { "configured": "solid", "overlayRequiresFirstTemplate": "hero", "fallback": "solid" }
     },
@@ -29,14 +29,14 @@
     {
       "pageKey": "custom",
       "pageRole": "brand-service",
-      "allowedTemplateKeys": ["hero", "fullBleed", "video", "singlePoster", "doublePoster", "textBanner", "journey", "comparison", "gallery", "testimonials", "certificates", "booking"],
+      "allowedTemplateKeys": ["hero", "fullBleed", "video", "singlePoster", "doublePoster", "textBanner", "journey", "comparison", "gallery", "hotspot", "brandPoints", "servicePromises", "testimonials", "certificates", "booking"],
       "businessRegionCount": 0,
       "headerMode": { "configured": "overlay-light", "overlayRequiresFirstTemplate": "hero", "fallback": "solid" }
     },
     {
       "pageKey": "about",
       "pageRole": "brand-story",
-      "allowedTemplateKeys": ["hero", "fullBleed", "video", "singlePoster", "doublePoster", "textBanner", "journey", "certificates", "storeInfo", "booking"],
+      "allowedTemplateKeys": ["hero", "fullBleed", "video", "singlePoster", "doublePoster", "textBanner", "journey", "brandPoints", "servicePromises", "certificates", "storeInfo", "booking"],
       "businessRegionCount": 0,
       "headerMode": { "configured": "overlay-light", "overlayRequiresFirstTemplate": "hero", "fallback": "solid" }
     },
@@ -75,7 +75,16 @@
   "templates": [
     {
       "key": "hero",
-      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "framePresets": ["compact", "standard", "immersive"], "frameRatioPresets": ["21 / 9", "16 / 9", "3 / 2", "4 / 5"], "frameRatioRange": { "min": 0.8, "max": 2.4, "step": 0.05 }, "slots": [{ "roleId": "desktopImage", "ratioPresets": ["16 / 9", "3 / 2"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 2.5, "step": 0.05 }, "focusByViewport": true }, { "roleId": "mobileImage", "ratioPresets": ["4 / 5", "3 / 4"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 2.5, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "eyebrow", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 2 }, { "roleId": "title", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard", "wide"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 3 }, { "roleId": "subtitle", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard", "wide"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 4 }, { "roleId": "actionText", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 1 }] } },
+      "editorCapabilities": {
+        "primaryTask": "media",
+        "editableObjects": [
+          { "roleId": "desktopImage", "kind": "media", "contentFieldKeys": ["desktopImage", "altText"], "altFieldKey": "altText", "fieldScopes": { "desktopImage": "viewport-specific", "altText": "shared" }, "capabilities": ["content", "layout", "layer", "ratio", "fit", "zoom", "focus"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } },
+          { "roleId": "mobileImage", "kind": "media", "contentFieldKeys": ["mobileImage", "altText"], "altFieldKey": "altText", "fieldScopes": { "mobileImage": "viewport-specific", "altText": "shared" }, "capabilities": ["content", "layout", "layer", "ratio", "fit", "zoom", "focus"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } },
+          { "roleId": "copy", "nodeIds": ["copy", "eyebrow", "title", "subtitle"], "kind": "text", "contentFieldKeys": ["eyebrow", "title", "subtitle"], "capabilities": ["content", "layout", "layer", "visibility", "typography"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "visibility": "shared", "typography": "shared" } },
+          { "roleId": "action", "nodeIds": ["action", "actionText"], "kind": "action", "contentFieldKeys": ["actionText", "targetType", "productId", "linkUrl"], "capabilities": ["content", "link", "layout", "layer", "visibility", "typography"], "responsive": { "content": "shared", "link": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "visibility": "shared", "typography": "shared" } }
+        ],
+        "layoutOverrides": { "framePresets": ["compact", "standard", "immersive"], "frameRatioPresets": ["21 / 9", "16 / 9", "3 / 2", "4 / 5"], "frameRatioRange": { "min": 0.8, "max": 2.4, "step": 0.05 }, "slots": [{ "roleId": "desktopImage", "ratioPresets": ["16 / 9", "3 / 2"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 2.5, "step": 0.05 }, "focusByViewport": true }, { "roleId": "mobileImage", "ratioPresets": ["4 / 5", "3 / 4"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 2.5, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "eyebrow", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 2 }, { "roleId": "title", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard", "wide"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 3 }, { "roleId": "subtitle", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard", "wide"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 4 }, { "roleId": "actionText", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 1 }] }
+      },
       "moduleType": "首屏主视觉",
       "displayName": "首屏",
       "category": "视觉展示",
@@ -244,7 +253,16 @@
     },
     {
       "key": "fullBleed",
-      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "framePresets": ["standard", "immersive"], "slots": [{ "roleId": "image", "ratioPresets": ["16 / 9", "3 / 2"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }, { "roleId": "mobileImage", "ratioPresets": ["4 / 5", "3 / 4"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "copy", "placementPresets": ["overlay", "below"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 4 }] } },
+      "editorCapabilities": {
+        "primaryTask": "media",
+        "editableObjects": [
+          { "roleId": "image", "kind": "media", "contentFieldKeys": ["image", "altText"], "altFieldKey": "altText", "fieldScopes": { "image": "viewport-specific", "altText": "shared" }, "capabilities": ["content", "layout", "layer", "ratio", "fit", "zoom", "focus"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } },
+          { "roleId": "mobileImage", "kind": "media", "contentFieldKeys": ["mobileImage", "altText"], "altFieldKey": "altText", "fieldScopes": { "mobileImage": "viewport-specific", "altText": "shared" }, "capabilities": ["content", "layout", "layer", "ratio", "fit", "zoom", "focus"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["eyebrow", "title", "subtitle"], "capabilities": ["content", "layout", "layer", "visibility", "typography"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "visibility": "shared", "typography": "shared" } },
+          { "roleId": "action", "nodeIds": ["action", "buttonText"], "kind": "action", "contentFieldKeys": ["buttonText", "targetType", "productId", "linkUrl"], "capabilities": ["content", "link"], "responsive": { "content": "shared", "link": "shared" } }
+        ],
+        "layoutOverrides": { "framePresets": ["standard", "immersive"], "slots": [{ "roleId": "image", "ratioPresets": ["16 / 9", "3 / 2"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }, { "roleId": "mobileImage", "ratioPresets": ["4 / 5", "3 / 4"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "copy", "placementPresets": ["overlay", "below"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 4 }] }
+      },
       "moduleType": "全屏出血图",
       "displayName": "通栏图",
       "category": "视觉展示",
@@ -392,7 +410,15 @@
     },
     {
       "key": "video",
-      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "framePresets": ["standard", "wide"], "slots": [{ "roleId": "coverImage", "ratioPresets": ["16 / 9", "3 / 2"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 }, "focusByViewport": true }] } },
+      "editorCapabilities": {
+        "primaryTask": "media",
+        "editableObjects": [
+          { "roleId": "coverImage", "kind": "video", "contentFieldKeys": ["videoUrl", "posterUrl", "videoWidth", "autoPlay", "loop", "muted", "showControls"], "altPolicy": "not-applicable", "capabilities": ["content", "playback", "layout", "layer", "ratio", "fit", "zoom", "focus"], "responsive": { "content": "shared", "playback": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "subtitle"], "capabilities": ["content"], "responsive": { "content": "shared" } },
+          { "roleId": "action", "nodeIds": ["action", "actionText"], "kind": "action", "contentFieldKeys": ["actionText", "targetType", "productId", "linkUrl"], "capabilities": ["content", "link"], "responsive": { "content": "shared", "link": "shared" } }
+        ],
+        "layoutOverrides": { "framePresets": ["standard", "wide"], "slots": [{ "roleId": "coverImage", "fieldKey": "posterUrl", "ratioPresets": ["16 / 9", "3 / 2"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 }, "focusByViewport": true }] }
+      },
       "moduleType": "视频区块",
       "displayName": "视频",
       "category": "视觉展示",
@@ -549,7 +575,13 @@
     },
     {
       "key": "carousel",
-      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "framePresets": ["standard", "wide"], "slots": [{ "roleId": "frames", "ratioPresets": ["16 / 9", "3 / 2", "4 / 5"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 }, "focusByViewport": true }] } },
+      "editorCapabilities": {
+        "primaryTask": "media",
+        "editableObjects": [
+          { "roleId": "frames", "kind": "collection", "contentFieldKeys": ["images", "autoPlay", "showDots", "showArrows", "interval"], "collectionFieldKeys": ["images"], "capabilities": ["content", "items", "playback", "layout", "layer", "ratio", "fit", "zoom", "focus"], "responsive": { "content": "shared", "items": "shared", "playback": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } }
+        ],
+        "layoutOverrides": { "framePresets": ["standard", "wide"], "slots": [{ "roleId": "frames", "fieldKey": "images", "ratioPresets": ["16 / 9", "3 / 2", "4 / 5"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 }, "focusByViewport": true }] }
+      },
       "moduleType": "轮播图",
       "displayName": "轮播",
       "category": "视觉展示",
@@ -687,7 +719,16 @@
     },
     {
       "key": "singlePoster",
-      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "framePresets": ["compact", "standard", "tall"], "slots": [{ "roleId": "desktopImage", "ratioPresets": ["4 / 5", "3 / 4", "1 / 1"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.6, "step": 0.05 }, "focusByViewport": true }, { "roleId": "mobileImage", "ratioPresets": ["4 / 5", "3 / 4"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.6, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "copy", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 4 }] } },
+      "editorCapabilities": {
+        "primaryTask": "media",
+        "editableObjects": [
+          { "roleId": "desktopImage", "kind": "media", "contentFieldKeys": ["desktopImage", "altText"], "altFieldKey": "altText", "fieldScopes": { "desktopImage": "viewport-specific", "altText": "shared" }, "capabilities": ["content", "layout", "layer", "ratio", "fit", "zoom", "focus"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } },
+          { "roleId": "mobileImage", "kind": "media", "contentFieldKeys": ["mobileImage", "altText"], "altFieldKey": "altText", "fieldScopes": { "mobileImage": "viewport-specific", "altText": "shared" }, "capabilities": ["content", "layout", "layer", "ratio", "fit", "zoom", "focus"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "subtitle", "number", "label"], "capabilities": ["content", "layout", "layer", "visibility", "typography"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "visibility": "shared", "typography": "shared" } },
+          { "roleId": "action", "nodeIds": ["action", "actionText"], "kind": "action", "contentFieldKeys": ["actionText", "targetType", "productId", "linkUrl"], "capabilities": ["content", "link"], "responsive": { "content": "shared", "link": "shared" } }
+        ],
+        "layoutOverrides": { "framePresets": ["compact", "standard", "tall"], "slots": [{ "roleId": "desktopImage", "ratioPresets": ["4 / 5", "3 / 4", "1 / 1"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.6, "step": 0.05 }, "focusByViewport": true }, { "roleId": "mobileImage", "ratioPresets": ["4 / 5", "3 / 4"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.6, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "copy", "placementPresets": ["left", "center", "right"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center", "right"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 4 }] }
+      },
       "moduleType": "单图海报",
       "displayName": "单图文",
       "category": "图文内容",
@@ -855,7 +896,16 @@
     },
     {
       "key": "doublePoster",
-      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "compositionPresets": ["balanced", "main-led", "detail-led"], "slots": [{ "roleId": "mainImage", "ratioPresets": ["3 / 2", "4 / 5", "1 / 1"], "sizePresets": ["standard", "large"], "positionPresets": ["start", "center"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }, { "roleId": "detailImage", "ratioPresets": ["4 / 5", "3 / 4", "1 / 1"], "sizePresets": ["small", "standard"], "positionPresets": ["center", "end"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "copy", "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "mineral", "ivory"], "maxLines": 6 }] } },
+      "editorCapabilities": {
+        "primaryTask": "media",
+        "editableObjects": [
+          { "roleId": "mainImage", "kind": "media", "contentFieldKeys": ["mainImage", "mainAltText"], "altFieldKey": "mainAltText", "capabilities": ["content", "layout", "layer", "ratio", "size", "position", "fit", "zoom", "focus"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "size": "shared", "position": "shared", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } },
+          { "roleId": "detailImage", "kind": "media", "contentFieldKeys": ["detailImage", "detailAltText"], "altFieldKey": "detailAltText", "capabilities": ["content", "layout", "layer", "ratio", "size", "position", "fit", "zoom", "focus"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "size": "shared", "position": "shared", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "description", "number", "label"], "capabilities": ["content", "layout", "layer", "visibility", "typography"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "visibility": "shared", "typography": "shared" } },
+          { "roleId": "action", "nodeIds": ["action", "actionText"], "kind": "action", "contentFieldKeys": ["actionText", "targetType", "productId", "linkUrl"], "capabilities": ["content", "link"], "responsive": { "content": "shared", "link": "shared" } }
+        ],
+        "layoutOverrides": { "compositionPresets": ["balanced", "main-led", "detail-led"], "slots": [{ "roleId": "mainImage", "ratioPresets": ["3 / 2", "4 / 5", "1 / 1"], "sizePresets": ["standard", "large"], "positionPresets": ["start", "center"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }, { "roleId": "detailImage", "ratioPresets": ["4 / 5", "3 / 4", "1 / 1"], "sizePresets": ["small", "standard"], "positionPresets": ["center", "end"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "copy", "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "mineral", "ivory"], "maxLines": 6 }] }
+      },
       "moduleType": "双图海报",
       "displayName": "双图文",
       "category": "图文内容",
@@ -1022,7 +1072,15 @@
     },
     {
       "key": "textBanner",
-      "editorCapabilities": { "primaryTask": "text", "layoutOverrides": { "framePresets": ["compact", "standard", "spacious"], "textRoles": [{ "roleId": "copy", "placementPresets": ["left", "center"], "widthPresets": ["narrow", "standard", "wide"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "mineral", "ivory"], "maxLines": 6 }] } },
+      "editorCapabilities": {
+        "primaryTask": "text",
+        "editableObjects": [
+          { "roleId": "bgImage", "kind": "media", "contentFieldKeys": ["bgImage"], "altPolicy": "decorative", "capabilities": ["content"], "responsive": { "content": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["eyebrow", "title", "body"], "capabilities": ["content", "layout", "layer", "visibility", "typography"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "visibility": "shared", "typography": "shared" } },
+          { "roleId": "action", "nodeIds": ["action", "buttonText"], "kind": "action", "contentFieldKeys": ["buttonText", "targetType", "productId", "linkUrl"], "capabilities": ["content", "link"], "responsive": { "content": "shared", "link": "shared" } }
+        ],
+        "layoutOverrides": { "framePresets": ["compact", "standard", "spacious"], "textRoles": [{ "roleId": "copy", "placementPresets": ["left", "center"], "widthPresets": ["narrow", "standard", "wide"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "mineral", "ivory"], "maxLines": 6 }] }
+      },
       "moduleType": "文字横幅",
       "displayName": "纯文字",
       "category": "图文内容",
@@ -1155,7 +1213,14 @@
     },
     {
       "key": "journey",
-      "editorCapabilities": { "primaryTask": "structured", "layoutOverrides": { "framePresets": ["standard", "spacious"] } },
+      "editorCapabilities": {
+        "primaryTask": "structured",
+        "editableObjects": [
+          { "roleId": "steps", "kind": "collection", "contentFieldKeys": ["steps"], "collectionFieldKeys": ["steps"], "capabilities": ["content", "items"], "responsive": { "content": "shared", "items": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "subtitle"], "capabilities": ["content"], "responsive": { "content": "shared" } }
+        ],
+        "layoutOverrides": { "framePresets": ["standard", "spacious"] }
+      },
       "moduleType": "定制流程",
       "displayName": "内容流程",
       "category": "图文内容",
@@ -1268,7 +1333,16 @@
     },
     {
       "key": "comparison",
-      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "slots": [{ "roleId": "before", "ratioPresets": ["4 / 5", "1 / 1"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }, { "roleId": "after", "ratioPresets": ["4 / 5", "1 / 1"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }] } },
+      "editorCapabilities": {
+        "primaryTask": "media",
+        "editableObjects": [
+          { "roleId": "before", "kind": "media", "contentFieldKeys": ["beforeImage", "beforeLabel", "beforeAltText"], "altFieldKey": "beforeAltText", "capabilities": ["content", "layout", "layer", "ratio", "fit", "zoom"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared" } },
+          { "roleId": "after", "kind": "media", "contentFieldKeys": ["afterImage", "afterLabel", "afterAltText"], "altFieldKey": "afterAltText", "capabilities": ["content", "layout", "layer", "ratio", "fit", "zoom"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "subtitle"], "capabilities": ["content"], "responsive": { "content": "shared" } },
+          { "roleId": "action", "nodeIds": ["action", "actionText"], "kind": "action", "contentFieldKeys": ["actionText", "targetType", "productId", "linkUrl"], "capabilities": ["content", "link"], "responsive": { "content": "shared", "link": "shared" } }
+        ],
+        "layoutOverrides": { "slots": [{ "roleId": "before", "fieldKey": "beforeImage", "ratioPresets": ["4 / 5", "1 / 1"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }, { "roleId": "after", "fieldKey": "afterImage", "ratioPresets": ["4 / 5", "1 / 1"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }] }
+      },
       "moduleType": "改款对比",
       "displayName": "前后对比",
       "category": "图文内容",
@@ -1432,7 +1506,17 @@
     },
     {
       "key": "featuredProduct",
-      "editorCapabilities": { "primaryTask": "product", "referenceFields": [{ "kind": "product", "key": "productCode", "legacyKey": "productId", "min": 1, "max": 1 }], "layoutOverrides": { "compositionPresets": ["image-left", "image-right"], "slots": [{ "roleId": "product", "ratioPresets": ["4 / 5", "1 / 1"], "sizePresets": ["standard", "large"], "fit": ["cover", "contain"] }] } },
+      "editorCapabilities": {
+        "primaryTask": "product",
+        "referenceFields": [{ "kind": "product", "key": "productCode", "legacyKey": "productId", "min": 1, "max": 1 }],
+        "editableObjects": [
+          { "roleId": "product", "kind": "product", "contentFieldKeys": ["productCode"], "referenceFieldKey": "productCode", "capabilities": ["content", "reference", "layout", "layer", "ratio", "size", "fit"], "responsive": { "content": "shared", "reference": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "size": "shared", "fit": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["eyebrow", "title", "summary"], "capabilities": ["content"], "responsive": { "content": "shared" } },
+          { "roleId": "action", "nodeIds": ["action", "primaryText", "secondaryText"], "kind": "action", "contentFieldKeys": ["primaryText", "secondaryText", "secondaryTargetType", "secondaryProductId", "secondaryLinkUrl"], "capabilities": ["content", "link"], "responsive": { "content": "shared", "link": "shared" } },
+          { "roleId": "list", "kind": "collection", "contentFieldKeys": ["showPrice"], "capabilities": ["content"], "responsive": { "content": "shared" } }
+        ],
+        "layoutOverrides": { "compositionPresets": ["image-left", "image-right"], "slots": [{ "roleId": "product", "fieldKey": "productCode", "ratioPresets": ["4 / 5", "1 / 1"], "sizePresets": ["standard", "large"], "fit": ["cover", "contain"] }] }
+      },
       "moduleType": "单品焦点推荐",
       "displayName": "单品展示",
       "category": "商品展示",
@@ -1582,7 +1666,15 @@
     },
     {
       "key": "productRow",
-      "editorCapabilities": { "primaryTask": "product", "referenceFields": [{ "kind": "product", "key": "productCodes", "legacyKey": "productIds", "min": 2, "max": 8 }], "layoutOverrides": { "compositionPresets": ["grid-2", "grid-3", "grid-4"], "slots": [{ "roleId": "productCards", "ratioPresets": ["4 / 5", "1 / 1", "3 / 4"], "fit": ["cover", "contain"] }] } },
+      "editorCapabilities": {
+        "primaryTask": "product",
+        "referenceFields": [{ "kind": "product", "key": "productCodes", "legacyKey": "productIds", "min": 2, "max": 8 }],
+        "editableObjects": [
+          { "roleId": "productCards", "kind": "product", "contentFieldKeys": ["productCodes"], "referenceFieldKey": "productCodes", "capabilities": ["content", "reference", "layout", "layer", "ratio", "fit"], "responsive": { "content": "shared", "reference": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "subtitle"], "capabilities": ["content"], "responsive": { "content": "shared" } }
+        ],
+        "layoutOverrides": { "compositionPresets": ["grid-2", "grid-3", "grid-4"], "slots": [{ "roleId": "productCards", "fieldKey": "productCodes", "ratioPresets": ["4 / 5", "1 / 1", "3 / 4"], "fit": ["cover", "contain"] }] }
+      },
       "moduleType": "产品展示行",
       "displayName": "商品列表",
       "category": "商品展示",
@@ -1737,7 +1829,14 @@
     },
     {
       "key": "gallery",
-      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "compositionPresets": ["editorial", "balanced"], "slots": [{ "roleId": "works", "ratioPresets": ["4 / 5", "1 / 1", "3 / 2"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }] } },
+      "editorCapabilities": {
+        "primaryTask": "media",
+        "editableObjects": [
+          { "roleId": "works", "kind": "collection", "contentFieldKeys": ["items"], "collectionFieldKeys": ["items"], "capabilities": ["content", "items", "layout", "layer", "ratio", "fit", "zoom"], "responsive": { "content": "shared", "items": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "subtitle"], "capabilities": ["content"], "responsive": { "content": "shared" } }
+        ],
+        "layoutOverrides": { "compositionPresets": ["editorial", "balanced"], "slots": [{ "roleId": "works", "fieldKey": "items", "ratioPresets": ["4 / 5", "1 / 1", "3 / 2"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }] }
+      },
       "moduleType": "作品画廊",
       "displayName": "作品画廊",
       "category": "商品展示",
@@ -1900,7 +1999,17 @@
     },
     {
       "key": "wearingInspiration",
-      "editorCapabilities": { "primaryTask": "product", "referenceFields": [{ "kind": "product", "key": "productCodes", "legacyKey": "productIds", "min": 1, "max": 4 }], "layoutOverrides": { "slots": [{ "roleId": "wearingImage", "ratioPresets": ["4 / 5", "3 / 4"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }] } },
+      "editorCapabilities": {
+        "primaryTask": "product",
+        "referenceFields": [{ "kind": "product", "key": "productCodes", "legacyKey": "productIds", "min": 1, "max": 4 }],
+        "editableObjects": [
+          { "roleId": "wearingImage", "kind": "media", "contentFieldKeys": ["image", "altText"], "altFieldKey": "altText", "capabilities": ["content", "layout", "layer", "ratio", "fit", "zoom", "focus"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "subtitle"], "capabilities": ["content"], "responsive": { "content": "shared" } },
+          { "roleId": "relatedProducts", "kind": "product", "contentFieldKeys": ["productCodes"], "referenceFieldKey": "productCodes", "capabilities": ["content", "reference"], "responsive": { "content": "shared", "reference": "shared" } },
+          { "roleId": "action", "nodeIds": ["action", "actionText"], "kind": "action", "contentFieldKeys": ["actionText", "targetType", "productId", "linkUrl"], "capabilities": ["content", "link"], "responsive": { "content": "shared", "link": "shared" } }
+        ],
+        "layoutOverrides": { "slots": [{ "roleId": "wearingImage", "fieldKey": "image", "ratioPresets": ["4 / 5", "3 / 4"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.5, "step": 0.05 }, "focusByViewport": true }] }
+      },
       "moduleType": "佩戴灵感",
       "displayName": "佩戴展示",
       "category": "商品展示",
@@ -2053,7 +2162,15 @@
     },
     {
       "key": "categoryCards",
-      "editorCapabilities": { "primaryTask": "category", "referenceFields": [{ "kind": "category", "key": "categorySlugs", "legacyKey": "categories", "min": 2, "max": 4 }], "layoutOverrides": { "compositionPresets": ["grid-2", "grid-3", "grid-4"], "slots": [{ "roleId": "categories", "ratioPresets": ["1 / 1", "4 / 5"], "fit": ["cover"] }] } },
+      "editorCapabilities": {
+        "primaryTask": "category",
+        "referenceFields": [{ "kind": "category", "key": "categorySlugs", "legacyKey": "categories", "min": 2, "max": 4 }],
+        "editableObjects": [
+          { "roleId": "categories", "kind": "collection", "contentFieldKeys": ["categorySlugs", "categories"], "collectionFieldKeys": ["categories"], "referenceFieldKey": "categorySlugs", "capabilities": ["content", "items", "reference", "layout", "layer", "ratio", "fit"], "responsive": { "content": "shared", "items": "shared", "reference": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "subtitle"], "capabilities": ["content"], "responsive": { "content": "shared" } }
+        ],
+        "layoutOverrides": { "compositionPresets": ["grid-2", "grid-3", "grid-4"], "slots": [{ "roleId": "categories", "fieldKey": "categories", "ratioPresets": ["1 / 1", "4 / 5"], "fit": ["cover"] }] }
+      },
       "moduleType": "分类卡片",
       "displayName": "品类入口",
       "category": "导航入口",
@@ -2196,7 +2313,14 @@
     },
     {
       "key": "sceneShopping",
-      "editorCapabilities": { "primaryTask": "structured", "layoutOverrides": { "compositionPresets": ["grid-2", "grid-3", "grid-4"], "slots": [{ "roleId": "scenes", "ratioPresets": ["4 / 5", "1 / 1"], "fit": ["cover"] }] } },
+      "editorCapabilities": {
+        "primaryTask": "structured",
+        "editableObjects": [
+          { "roleId": "scenes", "kind": "collection", "contentFieldKeys": ["categories"], "collectionFieldKeys": ["categories"], "capabilities": ["content", "items", "layout", "layer", "ratio", "fit"], "responsive": { "content": "shared", "items": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "subtitle"], "capabilities": ["content"], "responsive": { "content": "shared" } }
+        ],
+        "layoutOverrides": { "compositionPresets": ["grid-2", "grid-3", "grid-4"], "slots": [{ "roleId": "scenes", "fieldKey": "categories", "ratioPresets": ["4 / 5", "1 / 1"], "fit": ["cover"] }] }
+      },
       "moduleType": "按场景选购",
       "displayName": "场景入口",
       "category": "导航入口",
@@ -2355,7 +2479,14 @@
     },
     {
       "key": "hotspot",
-      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "slots": [{ "roleId": "sceneImage", "ratioPresets": ["16 / 9", "3 / 2", "4 / 5"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 }, "focusByViewport": true }] } },
+      "editorCapabilities": {
+        "primaryTask": "media",
+        "editableObjects": [
+          { "roleId": "sceneImage", "kind": "media", "contentFieldKeys": ["image", "mobileImage", "altText"], "altFieldKey": "altText", "altPolicy": "required", "fieldScopes": { "image": "viewport-specific", "mobileImage": "viewport-specific", "altText": "shared" }, "capabilities": ["content", "layout", "layer", "ratio", "fit", "zoom", "focus"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } },
+          { "roleId": "hotspots", "kind": "collection", "contentFieldKeys": ["hotspots", "mobileHotspots"], "fieldScopes": { "hotspots": "viewport-specific", "mobileHotspots": "viewport-specific" }, "collectionFieldKeys": ["hotspots", "mobileHotspots"], "capabilities": ["content", "items", "link"], "responsive": { "content": "shared", "items": "viewport-specific", "link": "shared" } }
+        ],
+        "layoutOverrides": { "slots": [{ "roleId": "sceneImage", "fieldKey": "image", "ratioPresets": ["16 / 9", "3 / 2", "4 / 5"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 }, "focusByViewport": true }] }
+      },
       "moduleType": "热区图",
       "displayName": "图片热区",
       "category": "导航入口",
@@ -2425,8 +2556,8 @@
       },
       "presets": ["hotspotEditor"],
       "contentBudget": {
-        "limits": {},
-        "requiredText": [],
+        "limits": { "altText": 80 },
+        "requiredText": ["altText"],
         "maxCtas": 0
       },
       "allowedControls": [],
@@ -2542,7 +2673,14 @@
     },
     {
       "key": "brandPoints",
-      "editorCapabilities": { "primaryTask": "structured", "layoutOverrides": { "framePresets": ["compact", "standard", "spacious"], "compositionPresets": ["grid-2", "grid-3", "grid-4"] } },
+      "editorCapabilities": {
+        "primaryTask": "structured",
+        "editableObjects": [
+          { "roleId": "points", "kind": "collection", "contentFieldKeys": ["cards"], "collectionFieldKeys": ["cards"], "capabilities": ["content", "items"], "responsive": { "content": "shared", "items": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "subtitle"], "capabilities": ["content"], "responsive": { "content": "shared" } }
+        ],
+        "layoutOverrides": { "framePresets": ["compact", "standard", "spacious"], "compositionPresets": ["grid-2", "grid-3", "grid-4"] }
+      },
       "moduleType": "卡片网格",
       "displayName": "品牌要点",
       "category": "服务信息",
@@ -2678,7 +2816,14 @@
     },
     {
       "key": "servicePromises",
-      "editorCapabilities": { "primaryTask": "structured", "layoutOverrides": { "framePresets": ["compact", "standard"], "compositionPresets": ["grid-2", "grid-4"] } },
+      "editorCapabilities": {
+        "primaryTask": "structured",
+        "editableObjects": [
+          { "roleId": "promises", "kind": "collection", "contentFieldKeys": ["cards"], "collectionFieldKeys": ["cards"], "capabilities": ["content", "items"], "responsive": { "content": "shared", "items": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "subtitle"], "capabilities": ["content"], "responsive": { "content": "shared" } }
+        ],
+        "layoutOverrides": { "framePresets": ["compact", "standard"], "compositionPresets": ["grid-2", "grid-4"] }
+      },
       "moduleType": "服务承诺",
       "displayName": "服务承诺",
       "category": "服务信息",
@@ -2830,7 +2975,14 @@
     },
     {
       "key": "certificates",
-      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "compositionPresets": ["grid-2", "grid-3"], "slots": [{ "roleId": "certificates", "ratioPresets": ["3 / 2", "4 / 5"], "fit": ["contain", "cover"] }] } },
+      "editorCapabilities": {
+        "primaryTask": "media",
+        "editableObjects": [
+          { "roleId": "certificates", "kind": "collection", "contentFieldKeys": ["certificates"], "collectionFieldKeys": ["certificates"], "capabilities": ["content", "items", "layout", "layer", "ratio", "fit"], "responsive": { "content": "shared", "items": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["title", "subtitle"], "capabilities": ["content"], "responsive": { "content": "shared" } }
+        ],
+        "layoutOverrides": { "compositionPresets": ["grid-2", "grid-3"], "slots": [{ "roleId": "certificates", "fieldKey": "certificates", "ratioPresets": ["3 / 2", "4 / 5"], "fit": ["contain", "cover"] }] }
+      },
       "moduleType": "资质证书",
       "displayName": "证书展示",
       "category": "服务信息",
@@ -2869,6 +3021,10 @@
             "default": 3,
             "min": 2,
             "max": 6
+          },
+          "publicationAttestation": {
+            "fieldKey": "verificationConfirmed",
+            "label": "已核验证书原件与展示信息一致"
           }
         },
         {
@@ -2973,7 +3129,16 @@
     },
     {
       "key": "storeInfo",
-      "editorCapabilities": { "primaryTask": "structured", "layoutOverrides": { "compositionPresets": ["image-left", "image-right"], "slots": [{ "roleId": "store", "ratioPresets": ["3 / 2", "4 / 5"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }] } },
+      "editorCapabilities": {
+        "primaryTask": "structured",
+        "editableObjects": [
+          { "roleId": "store", "kind": "media", "contentFieldKeys": ["image"], "altPolicy": "derived", "capabilities": ["content", "layout", "layer", "ratio", "fit", "zoom"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared" } },
+          { "roleId": "details", "kind": "collection", "contentFieldKeys": ["useSiteSettings", "storeName", "address", "hours", "phone"], "fieldScopes": { "useSiteSettings": "shared", "storeName": "shared", "address": "shared", "hours": "shared", "phone": "shared" }, "capabilities": ["content"], "responsive": { "content": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["storeName"], "capabilities": ["content"], "responsive": { "content": "shared" } },
+          { "roleId": "action", "kind": "action", "contentFieldKeys": ["mapUrl", "phone"], "capabilities": ["content", "link"], "responsive": { "content": "shared", "link": "shared" } }
+        ],
+        "layoutOverrides": { "compositionPresets": ["image-left", "image-right"], "slots": [{ "roleId": "store", "fieldKey": "image", "ratioPresets": ["3 / 2", "4 / 5"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }] }
+      },
       "moduleType": "门店信息",
       "displayName": "门店信息",
       "category": "服务信息",
@@ -3125,7 +3290,13 @@
     },
     {
       "key": "testimonials",
-      "editorCapabilities": { "primaryTask": "structured", "layoutOverrides": { "compositionPresets": ["editorial", "balanced"], "slots": [{ "roleId": "authorizedPhoto", "ratioPresets": ["4 / 5", "1 / 1"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }] } },
+      "editorCapabilities": {
+        "primaryTask": "structured",
+        "editableObjects": [
+          { "roleId": "authorizedPhoto", "nodeIds": ["authorizedPhoto", "mainQuote", "attribution"], "kind": "collection", "contentFieldKeys": ["testimonials"], "collectionFieldKeys": ["testimonials"], "capabilities": ["content", "items", "layout", "layer", "ratio", "fit", "zoom"], "responsive": { "content": "shared", "items": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared" } }
+        ],
+        "layoutOverrides": { "compositionPresets": ["editorial", "balanced"], "slots": [{ "roleId": "authorizedPhoto", "fieldKey": "testimonials", "ratioPresets": ["4 / 5", "1 / 1"], "fit": ["cover"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }] }
+      },
       "moduleType": "真实评价与实拍",
       "displayName": "顾客分享",
       "category": "服务信息",
@@ -3166,6 +3337,10 @@
             "default": 1,
             "min": 1,
             "max": 3
+          },
+          "publicationAttestation": {
+            "fieldKey": "authorizationConfirmed",
+            "label": "已取得顾客公开展示的书面授权"
           }
         },
         {
@@ -3264,7 +3439,16 @@
     },
     {
       "key": "booking",
-      "editorCapabilities": { "primaryTask": "action", "layoutOverrides": { "framePresets": ["compact", "standard", "spacious"], "frameRatioPresets": ["21 / 6", "16 / 9", "3 / 2", "4 / 5"], "frameRatioRange": { "min": 0.8, "max": 3.5, "step": 0.05 }, "slots": [{ "roleId": "bgImage", "fieldKey": "backgroundImage", "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "title", "placementPresets": ["left", "center"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 2 }, { "roleId": "subtitle", "placementPresets": ["left", "center"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 3 }, { "roleId": "buttonText", "placementPresets": ["left", "center"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 1 }] } },
+      "editorCapabilities": {
+        "primaryTask": "action",
+        "editableObjects": [
+          { "roleId": "bgImage", "kind": "media", "contentFieldKeys": ["backgroundImage", "altText"], "altFieldKey": "altText", "capabilities": ["content", "layout", "layer", "fit", "zoom", "focus"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "fit": "shared", "zoom": "shared", "focus": "viewport-specific" } },
+          { "roleId": "copy", "nodeIds": ["copy", "title", "subtitle"], "kind": "text", "contentFieldKeys": ["title", "subtitle"], "capabilities": ["content", "layout", "layer", "visibility", "typography"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "visibility": "shared", "typography": "shared" } },
+          { "roleId": "primaryAction", "nodeIds": ["primaryAction", "buttonText"], "kind": "action", "contentFieldKeys": ["buttonText", "targetType", "productId", "linkUrl"], "capabilities": ["content", "link", "layout", "layer", "visibility", "typography"], "responsive": { "content": "shared", "link": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "visibility": "shared", "typography": "shared" } },
+          { "roleId": "secondaryContact", "kind": "action", "contentFieldKeys": ["phone"], "capabilities": ["content"], "responsive": { "content": "shared" } }
+        ],
+        "layoutOverrides": { "framePresets": ["compact", "standard", "spacious"], "frameRatioPresets": ["21 / 6", "16 / 9", "3 / 2", "4 / 5"], "frameRatioRange": { "min": 0.8, "max": 3.5, "step": 0.05 }, "slots": [{ "roleId": "bgImage", "fieldKey": "backgroundImage", "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 }, "focusByViewport": true }], "textRoles": [{ "roleId": "title", "placementPresets": ["left", "center"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 2 }, { "roleId": "subtitle", "placementPresets": ["left", "center"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 3 }, { "roleId": "buttonText", "placementPresets": ["left", "center"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 1 }] }
+      },
       "moduleType": "预约入口",
       "displayName": "预约入口",
       "category": "服务信息",
@@ -3412,7 +3596,16 @@
     },
     {
       "key": "limitedEvent",
-      "editorCapabilities": { "primaryTask": "media", "layoutOverrides": { "framePresets": ["standard", "immersive"], "slots": [{ "roleId": "event", "ratioPresets": ["16 / 9", "3 / 2", "4 / 5"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }], "textRoles": [{ "roleId": "copy", "placementPresets": ["overlay", "below"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 5 }] } },
+      "editorCapabilities": {
+        "primaryTask": "media",
+        "editableObjects": [
+          { "roleId": "event", "kind": "media", "contentFieldKeys": ["eventImage"], "altPolicy": "derived", "capabilities": ["content", "layout", "layer", "ratio", "fit", "zoom"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "ratio": "shared", "fit": "shared", "zoom": "shared" } },
+          { "roleId": "time", "kind": "collection", "contentFieldKeys": ["targetDate", "benefits"], "collectionFieldKeys": ["benefits"], "capabilities": ["content", "items"], "responsive": { "content": "shared", "items": "shared" } },
+          { "roleId": "copy", "kind": "text", "contentFieldKeys": ["eyebrow", "title", "body"], "capabilities": ["content", "layout", "layer", "visibility", "typography"], "responsive": { "content": "shared", "layout": "viewport-specific", "layer": "viewport-specific", "visibility": "shared", "typography": "shared" } },
+          { "roleId": "action", "nodeIds": ["action", "buttonText"], "kind": "action", "contentFieldKeys": ["buttonText", "targetType", "productId", "linkUrl"], "capabilities": ["content", "link"], "responsive": { "content": "shared", "link": "shared" } }
+        ],
+        "layoutOverrides": { "framePresets": ["standard", "immersive"], "slots": [{ "roleId": "event", "fieldKey": "eventImage", "ratioPresets": ["16 / 9", "3 / 2", "4 / 5"], "fit": ["cover", "contain"], "zoom": { "min": 1, "max": 1.4, "step": 0.05 } }], "textRoles": [{ "roleId": "copy", "placementPresets": ["overlay", "below"], "widthPresets": ["narrow", "standard"], "sizePresets": ["small", "standard", "large"], "align": ["left", "center"], "colorTokens": ["ink", "ivory"], "requiresSafeBand": true, "maxLines": 5 }] }
+      },
       "moduleType": "限时活动",
       "displayName": "限时活动",
       "category": "活动内容",

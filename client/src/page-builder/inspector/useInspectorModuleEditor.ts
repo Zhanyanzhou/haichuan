@@ -7,8 +7,10 @@
  * 提供 props 读取、patch 写入、设备档、dirty 判断、撤销与整页草稿保存。
  */
 import { useEffect, useMemo, useRef } from "react";
+import { useGetPuck } from "@puckeditor/core";
 import {
   ROOT_ZONE,
+  useEditorHistoryTransaction,
   useHomepagePuck,
 } from "../../pages/admin/HomepageConfig/editor-store";
 import {
@@ -24,6 +26,12 @@ export interface InspectorModuleEditor {
   dirty: boolean;
   /** 写入 props 补丁（即时同步画布） */
   update: (patch: Record<string, any>) => void;
+  /** 将一次恢复操作写成明确的 before/after 历史事务。 */
+  updateHistoryTransaction: (
+    patch: Record<string, any> | ((props: Record<string, any>) => Record<string, any>),
+  ) => void;
+  /** 恢复事务闭合期间为 true，供恢复按钮阻止重复提交。 */
+  historyTransactionPending: boolean;
   /** 撤销本模块自面板打开/上次撤销以来的修改 */
   revert: () => void;
   /** 关闭面板 */
@@ -31,12 +39,20 @@ export interface InspectorModuleEditor {
 }
 
 export function useInspectorModuleEditor(): InspectorModuleEditor | null {
+  const getPuck = useGetPuck();
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const appData = useHomepagePuck((state) => state.appState.data);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const currentViewport = useHomepagePuck(
     (state) => state.appState.ui.viewports.current,
   );
+  const historyTransactionPending = useEditorHistoryTransaction(
+    (state) => state.pending,
+  );
+  const setHistoryTransactionPending = useEditorHistoryTransaction(
+    (state) => state.setPending,
+  );
+  const historyTransactionRef = useRef(0);
 
   const props = (selectedItem?.props || {}) as Record<string, any>;
   const moduleType = selectedItem?.type || "";
@@ -68,7 +84,7 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
   if (!selectedItem) return null;
 
   const update = (patch: Record<string, any>) => {
-    if (index < 0) return;
+    if (index < 0 || historyTransactionPending) return;
     const nextItem = {
       ...content[index],
       props: { ...content[index].props, ...patch },
@@ -79,6 +95,72 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
       destinationZone: ROOT_ZONE,
       data: nextItem,
     });
+  };
+
+  const updateHistoryTransaction: InspectorModuleEditor["updateHistoryTransaction"] = (
+    patchOrFactory,
+  ) => {
+    if (index < 0 || historyTransactionPending) return;
+    const before = getPuck();
+    const beforeData = before.appState.data;
+    const beforeIndex = beforeData.content.findIndex(
+      (item) => item.props?.id === props.id,
+    );
+    if (beforeIndex < 0) return;
+    const beforeItem = beforeData.content[beforeIndex];
+    const patch = typeof patchOrFactory === "function"
+      ? patchOrFactory(beforeItem.props)
+      : patchOrFactory;
+    const afterContent = [...beforeData.content];
+    afterContent[beforeIndex] = {
+      ...beforeItem,
+      props: { ...beforeItem.props, ...patch },
+    };
+    const afterState = {
+      ...before.appState,
+      data: { ...beforeData, content: afterContent },
+    };
+    const transactionId = historyTransactionRef.current + 1;
+    historyTransactionRef.current = transactionId;
+    setHistoryTransactionPending(true);
+
+    // 覆盖 Puck 尚未触发的 250ms 防抖记录：先让当前完整状态成为 before。
+    dispatch({
+      type: "replace",
+      destinationIndex: beforeIndex,
+      destinationZone: ROOT_ZONE,
+      data: beforeItem,
+      recordHistory: true,
+    });
+    // reset 立即反映到画布；after 由下方 setHistories 原子追加。
+    dispatch({
+      type: "replace",
+      destinationIndex: beforeIndex,
+      destinationZone: ROOT_ZONE,
+      data: afterContent[beforeIndex],
+      recordHistory: false,
+    });
+
+    const finishTransaction = (attempt = 0) => {
+      if (historyTransactionRef.current !== transactionId) return;
+      const latest = getPuck();
+      const currentHistory = latest.history.histories[latest.history.index];
+      const currentHistoryData = (currentHistory?.state as { data?: unknown } | undefined)?.data;
+      const beforeRecorded = JSON.stringify(currentHistoryData) === JSON.stringify(beforeData);
+      if (!beforeRecorded && attempt < 8) {
+        window.setTimeout(() => finishTransaction(attempt + 1), 25);
+        return;
+      }
+      const historyPrefix = latest.history.histories.slice(0, latest.history.index + 1);
+      const beforeEntry = beforeRecorded ? [] : [{ state: before.appState }];
+      latest.history.setHistories([
+        ...historyPrefix,
+        ...beforeEntry,
+        { state: afterState },
+      ]);
+      setHistoryTransactionPending(false);
+    };
+    window.setTimeout(() => finishTransaction(), 260);
   };
 
   const revert = () => {
@@ -112,6 +194,8 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
     device: getInspectorDevice(currentViewport),
     dirty,
     update,
+    updateHistoryTransaction,
+    historyTransactionPending,
     revert,
     close,
   };

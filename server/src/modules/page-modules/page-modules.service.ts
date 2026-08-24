@@ -563,6 +563,35 @@ export class PageModulesService {
       for (const field of requiredImageFields) {
         errors.push(`${label}：${field} 图片不能为空`);
       }
+      for (const field of completion?.content.missing ?? []) {
+        const errorIndex = errors.push(`${label}：${field} 内容不能为空`) - 1;
+        errorContexts[errorIndex] = {
+          blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+          path: `${path}.props.${field}`,
+          field,
+        };
+      }
+      for (const collection of completion?.collections.invalid ?? []) {
+        const errorIndex = errors.push(
+          `${label}：${collection.fieldKey} 数量应为 ${collection.min}–${collection.max} 项，当前为 ${collection.count} 项`,
+        ) - 1;
+        errorContexts[errorIndex] = {
+          blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+          path: `${path}.props.${collection.fieldKey}`,
+          field: collection.fieldKey,
+        };
+      }
+      for (const attestation of completion?.attestations.missing ?? []) {
+        const errorIndex = errors.push(
+          `${label}：第 ${attestation.index + 1} 项发布前必须确认“${attestation.label}”`,
+        ) - 1;
+        errorContexts[errorIndex] = {
+          blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+          path: `${path}.props.${attestation.collectionFieldKey}[${attestation.index}].${attestation.attestationFieldKey}`,
+          field: attestation.collectionFieldKey,
+          index: attestation.index,
+        };
+      }
 
       const validateAsset = (value: unknown, assetLabel: string) => {
         if (!this.isNonEmptyString(value)) return;
@@ -723,45 +752,75 @@ export class PageModulesService {
         errors.push(`${label}：image 图片不能为空`);
       }
 
-      const rejectPlaceholderText = (value: unknown, fieldLabel: string) => {
+      const rejectPlaceholderText = (
+        value: unknown,
+        fieldLabel: string,
+        valuePath: string,
+        field?: string,
+        index?: number,
+      ) => {
         if (typeof value !== "string") return;
         const trimmed = value.trim();
         if (!trimmed) return;
         if (PLACEHOLDER_MARKERS.some((marker) => trimmed.includes(marker))) {
-          errors.push(
+          const errorIndex = errors.push(
             `${label}：${fieldLabel}“${trimmed}”仍是占位内容，请填写正式文案`,
-          );
+          ) - 1;
+          errorContexts[errorIndex] = {
+            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+            path: valuePath,
+            field,
+            index,
+          };
         }
       };
 
       // 占位可能出现在普通文案、列表条目、alt、素材状态或后续新增结构中；
       // 递归检查当前区块的可序列化 props，避免只拦截少数已知模板而漏过新页面。
-      const scanPlaceholderValues = (value: unknown, valuePath: string) => {
+      const scanPlaceholderValues = (
+        value: unknown,
+        displayValuePath: string,
+        valuePath: string,
+        field?: string,
+        itemIndex?: number,
+      ) => {
         if (typeof value === "string") {
-          rejectPlaceholderText(value, valuePath);
+          rejectPlaceholderText(value, displayValuePath, valuePath, field, itemIndex);
           return;
         }
         if (Array.isArray(value)) {
           value.forEach((item, index) =>
-            scanPlaceholderValues(item, `${valuePath}[${index}]`),
+            scanPlaceholderValues(
+              item,
+              `${displayValuePath}[${index}]`,
+              `${valuePath}[${index}]`,
+              field,
+              index,
+            ),
           );
           return;
         }
         if (value && typeof value === "object") {
           Object.entries(value).forEach(([key, item]) =>
-            scanPlaceholderValues(item, `${valuePath}.${key}`),
+            scanPlaceholderValues(
+              item,
+              `${displayValuePath}.${key}`,
+              `${valuePath}.${key}`,
+              field ?? key,
+              itemIndex,
+            ),
           );
         }
       };
-      scanPlaceholderValues(props, "配置");
+      scanPlaceholderValues(props, "配置", `${path}.props`);
 
       if (type === "产品展示行") {
         const codes = Array.isArray(props.productCodes)
           ? props.productCodes.map((code: unknown) => String(code).trim()).filter(Boolean)
           : [];
         if (codes.length > 0) {
-          if (codes.length < 2 || codes.length > 8 || new Set(codes).size !== codes.length) {
-            const errorIndex = errors.push(`${label}：请选择 2–8 件不重复的商品`) - 1;
+          if (new Set(codes).size !== codes.length) {
+            const errorIndex = errors.push(`${label}：商品引用不能重复`) - 1;
             errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.productCodes`, field: "productCodes" };
           }
           codes.forEach((code: string, index: number) => {
@@ -773,8 +832,8 @@ export class PageModulesService {
         } else if (!Array.isArray(props.productIds)) {
           errors.push(`${label}：productCodes 或兼容 productIds 必须是商品引用数组`);
         } else {
-          if (props.productIds.length < 2 || props.productIds.length > 8 || new Set(props.productIds.map(Number)).size !== props.productIds.length) {
-            const errorIndex = errors.push(`${label}：请选择 2–8 件不重复的商品`) - 1;
+          if (new Set(props.productIds.map(Number)).size !== props.productIds.length) {
+            const errorIndex = errors.push(`${label}：商品引用不能重复`) - 1;
             errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.productIds`, field: "productIds" };
           }
           for (const [index, id] of props.productIds.entries()) {
@@ -870,9 +929,7 @@ export class PageModulesService {
       }
 
       if (type === "轮播图") {
-        if (!Array.isArray(props.images) || props.images.length === 0) {
-          errors.push(`${label}：轮播图至少需要 1 张图片`);
-        } else {
+        if (Array.isArray(props.images)) {
           props.images.forEach((item: any, index: number) => {
             if (!this.isNonEmptyString(item?.url)) {
               errors.push(`${label}：第 ${index + 1} 张轮播图片不能为空`);
@@ -974,8 +1031,8 @@ export class PageModulesService {
         const slugs = props.categorySlugs
           .map((slug: unknown) => String(slug).trim())
           .filter(Boolean);
-        if (slugs.length < 2 || slugs.length > 4 || new Set(slugs).size !== slugs.length) {
-          const errorIndex = errors.push(`${label}：请选择 2–4 个不重复的真实分类`) - 1;
+        if (new Set(slugs).size !== slugs.length) {
+          const errorIndex = errors.push(`${label}：分类引用不能重复`) - 1;
           errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.categorySlugs`, field: "categorySlugs" };
         }
         slugs.forEach((slug: string, index: number) => {
@@ -1501,10 +1558,8 @@ export class PageModulesService {
   ) {
     const doc = await this.prisma.pageDocument.findUnique({ where: { pageKey } });
     if (!doc) throw new BadRequestException("该页面没有草稿");
-    if (
-      expectedUpdatedAt &&
-      doc.updatedAt.toISOString() !== expectedUpdatedAt
-    ) {
+    const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
+    if (expected && doc.updatedAt.getTime() !== expected.getTime()) {
       throw new ConflictException(
         "草稿已被其他编辑保存，请刷新页面后重试",
       );
@@ -1514,16 +1569,29 @@ export class PageModulesService {
       orderBy: { version: "desc" },
     });
     if (latestRevision) {
-      return this.prisma.pageDocument.update({
-        where: { pageKey },
+      const restored = await this.prisma.pageDocument.updateMany({
+        where: { pageKey, updatedAt: doc.updatedAt },
         data: {
           puckData: latestRevision.puckData as any,
           metadata: latestRevision.metadata as any,
           status: "PUBLISHED",
         },
       });
+      if (restored.count !== 1) {
+        throw new ConflictException(
+          "草稿刚刚被其他编辑保存，请刷新页面后重试",
+        );
+      }
+      return this.prisma.pageDocument.findUnique({ where: { pageKey } });
     }
-    await this.prisma.pageDocument.delete({ where: { pageKey } });
+    const deleted = await this.prisma.pageDocument.deleteMany({
+      where: { pageKey, updatedAt: doc.updatedAt },
+    });
+    if (deleted.count !== 1) {
+      throw new ConflictException(
+        "草稿刚刚被其他编辑保存，请刷新页面后重试",
+      );
+    }
     return { deleted: true };
   }
 }

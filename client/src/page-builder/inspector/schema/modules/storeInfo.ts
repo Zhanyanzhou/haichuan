@@ -23,15 +23,22 @@ export const storeInfoSchema: ModuleInspectorSchema = {
       fields: [
         moduleNameField("门店信息"),
         {
+          key: "useSiteSettings",
+          label: "使用站点统一门店信息",
+          control: "switch",
+          hint: "开启后读取「站点内容」中的名称、地址、营业时间和电话，避免多页重复维护。",
+        },
+        {
           key: "storeName",
           label: "门店名称",
           control: "text",
           required: true,
           maxLength: 24,
           placeholder: "如 海川珠宝",
+          visibleWhen: (ctx) => ctx.props.useSiteSettings === false,
         },
-        { key: "address", label: "地址", control: "text" },
-        { key: "hours", label: "营业时间", control: "text" },
+        { key: "address", label: "地址", control: "text", visibleWhen: (ctx) => ctx.props.useSiteSettings === false },
+        { key: "hours", label: "营业时间", control: "text", visibleWhen: (ctx) => ctx.props.useSiteSettings === false },
       ],
     },
     {
@@ -39,7 +46,7 @@ export const storeInfoSchema: ModuleInspectorSchema = {
       title: "行动与关联",
       layer: "interaction",
       fields: [
-        { key: "phone", label: "联系电话", control: "text" },
+        { key: "phone", label: "联系电话", control: "text", visibleWhen: (ctx) => ctx.props.useSiteSettings === false },
         {
           key: "mapUrl",
           label: "地图链接（可选）",

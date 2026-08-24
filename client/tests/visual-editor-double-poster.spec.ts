@@ -53,7 +53,7 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
     }));
   });
 
-  test("两个槽位可直接选择，比例、大小、位置和构图卡片实时写回当前实例", async ({ page }) => {
+  test("两个槽位可直接选择，比例、精确尺寸、位置和构图实时写回当前实例", async ({ page }) => {
     await page.setViewportSize({ width: 1520, height: 1100 });
     await page.goto("/__visual-editor-double-poster");
 
@@ -66,43 +66,70 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
 
     await main.locator("img").click();
     await expect(page.getByText("已选择：主海报")).toBeVisible();
+    const state = page.getByTestId("visual-state");
+    const layerGroup = page.getByRole("group", { name: "图层顺序（桌面端）" });
+    await layerGroup.getByRole("button", { name: "上移一层" }).click();
+    await expect(state).toContainText('"zIndexByViewport":{"desktop":3}');
+    await layerGroup.getByRole("button", { name: "下移一层" }).click();
+    await expect(state).toContainText('"zIndexByViewport":{"desktop":2}');
     const mainGroup = page.locator("fieldset").filter({ has: page.locator("legend", { hasText: "主海报" }) });
     await mainGroup.getByRole("group", { name: "主海报比例" }).getByRole("button", { name: "4 / 5" }).click();
-    const mainBaseWidth = await main.evaluate((node) => node.getBoundingClientRect().width);
-    await mainGroup.getByText("更多设置").click();
-    await mainGroup.getByRole("group", { name: "区域大小" }).getByRole("button", { name: "标准" }).click();
-    await mainGroup.getByRole("group", { name: "区域位置" }).getByRole("button", { name: "居中" }).click();
+    const mainHud = canvas.getByRole("toolbar", { name: "调整画布对象 mainImage" });
+    const mainLayoutButton = mainHud.getByRole("button", { name: "调整对象区域" });
+    await mainLayoutButton.focus();
+    await mainLayoutButton.press("Enter");
+    await expect(main).toBeFocused();
+    await main.press("ArrowRight");
+    await mainGroup.getByRole("button", { name: "精确位置与尺寸" }).click();
+    await mainGroup.getByLabel("区域宽度（桌面端）").fill("44");
+    await mainGroup.getByLabel("横向位置（桌面端）").fill("20");
 
-    await detail.locator("img").click();
-    await expect(page.getByText("已选择：细节海报")).toBeVisible();
+    await detail.focus();
+    await detail.press("Enter");
+    await expect(page.getByText("正在调整：细节海报")).toBeVisible();
     await expect(page.locator("fieldset").filter({ has: page.locator("legend", { hasText: "主海报" }) })).toHaveCount(0);
     const detailGroup = page.locator("fieldset").filter({ has: page.locator("legend", { hasText: "细节海报" }) });
     await detailGroup.getByRole("group", { name: "细节海报比例" }).getByRole("button", { name: "1 / 1" }).click();
-    const detailBaseWidth = await detail.evaluate((node) => node.getBoundingClientRect().width);
-    await detailGroup.getByText("更多设置").click();
-    await detailGroup.getByRole("group", { name: "区域大小" }).getByRole("button", { name: "小" }).click();
-    await detailGroup.getByRole("group", { name: "区域位置" }).getByRole("button", { name: "末端侧" }).click();
+    const detailHud = canvas.getByRole("toolbar", { name: "调整画布对象 detailImage" });
+    const detailLayoutButton = detailHud.getByRole("button", { name: "调整对象区域" });
+    await detailLayoutButton.focus();
+    await detailLayoutButton.press("Enter");
+    await expect(detail).toBeFocused();
+    await detail.press("ArrowLeft");
+    await detailGroup.getByRole("button", { name: "精确位置与尺寸" }).click();
+    await detailGroup.getByLabel("区域宽度（桌面端）").fill("28");
+    await detailGroup.getByLabel("横向位置（桌面端）").fill("68");
 
-    const state = page.getByTestId("visual-state");
     await expect(state).toContainText('"compositionPreset":"detail-led"');
-    await expect(state).toContainText('"sizePreset":"standard"');
-    await expect(state).toContainText('"positionPreset":"center"');
-    await expect(state).toContainText('"sizePreset":"small"');
-    await expect(state).toContainText('"positionPreset":"end"');
+    await expect(state).toContainText('"x":0.2');
+    await expect(state).toContainText('"width":0.44');
+    await expect(state).toContainText('"x":0.68');
+    await expect(state).toContainText('"width":0.28');
 
     await expect(main).toHaveCSS("aspect-ratio", "0.8 / 1");
     await expect(detail).toHaveCSS("aspect-ratio", "1 / 1");
-    const mainWidth = await main.evaluate((node) => node.getBoundingClientRect().width);
-    const detailWidth = await detail.evaluate((node) => node.getBoundingClientRect().width);
-    expect(mainWidth / mainBaseWidth).toBeCloseTo(0.88, 2);
-    expect(detailWidth / detailBaseWidth).toBeCloseTo(0.72, 2);
-    await expect(main).toHaveCSS("justify-self", "center");
-    await expect(detail).toHaveCSS("justify-self", "end");
-    await expect(main).toHaveCSS("grid-column-start", "1");
-    await expect(detail).toHaveCSS("grid-column-start", "6");
+    const readNormalizedRect = (locator: typeof main) => locator.evaluate((node) => {
+      let containingBlock = node.parentElement;
+      while (containingBlock && getComputedStyle(containingBlock).position === "static") {
+        containingBlock = containingBlock.parentElement;
+      }
+      if (!containingBlock) throw new Error("未找到视觉对象定位容器");
+      const nodeRect = node.getBoundingClientRect();
+      const containerRect = containingBlock.getBoundingClientRect();
+      return {
+        x: (nodeRect.x - containerRect.x) / containerRect.width,
+        width: nodeRect.width / containerRect.width,
+      };
+    });
+    const mainRect = await readNormalizedRect(main);
+    const detailRect = await readNormalizedRect(detail);
+    expect(mainRect.x).toBeCloseTo(0.2, 1);
+    expect(mainRect.width).toBeCloseTo(0.44, 1);
+    expect(detailRect.x).toBeCloseTo(0.68, 1);
+    expect(detailRect.width).toBeCloseTo(0.28, 1);
     await expect(copy).toHaveCSS("grid-column-start", "6");
 
-    await page.getByRole("button", { name: "恢复默认" }).click();
+    await page.getByRole("button", { name: "恢复细节海报设计默认" }).click();
     await expect(state).toContainText('"mainImage"');
     await page.getByRole("button", { name: "返回模块级" }).click();
     await page.getByRole("button", { name: "恢复整个模块" }).click();

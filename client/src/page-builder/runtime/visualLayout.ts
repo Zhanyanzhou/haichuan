@@ -10,7 +10,10 @@ export interface VisualRect {
 export interface EffectiveVisualNode {
   enabled?: boolean;
   rect?: VisualRect;
+  zIndex?: number;
   ratio?: number;
+  sizePreset?: string;
+  positionPreset?: string;
   fit?: "cover" | "contain";
   zoom?: number;
   focus?: { x: number; y: number };
@@ -79,9 +82,22 @@ export function resolveVisualNode(
             height: clamp(rawRect.height, 0.01, 1, 1),
           }
         : undefined,
+      zIndex: (() => {
+        const zIndexes = isVisualRecord(node.zIndexByViewport)
+          ? node.zIndexByViewport
+          : {};
+        const direct = zIndexes[viewport];
+        const inherited = viewport === "mobile" ? zIndexes.desktop : undefined;
+        const rawZIndex = direct ?? inherited;
+        return Number.isInteger(Number(rawZIndex))
+          ? clamp(rawZIndex, 0, 20, 2)
+          : undefined;
+      })(),
       ratio: Number.isFinite(Number(node.ratio))
         ? clamp(node.ratio, 0.25, 4, 1)
         : undefined,
+      sizePreset: typeof node.sizePreset === "string" ? node.sizePreset : undefined,
+      positionPreset: typeof node.positionPreset === "string" ? node.positionPreset : undefined,
       fit: mediaView.fit === "contain" ? "contain" : mediaView.fit === "cover" ? "cover" : undefined,
       zoom: Number.isFinite(Number(mediaView.zoom))
         ? clamp(mediaView.zoom, 1, 3, 1)
@@ -130,6 +146,8 @@ export function resolveVisualNode(
         ? focusByViewport.desktop
         : undefined;
     return {
+      sizePreset: typeof slot.sizePreset === "string" ? slot.sizePreset : undefined,
+      positionPreset: typeof slot.positionPreset === "string" ? slot.positionPreset : undefined,
       fit: slot.fit === "contain" ? "contain" : slot.fit === "cover" ? "cover" : undefined,
       zoom: Number.isFinite(Number(slot.zoom)) ? clamp(slot.zoom, 1, 3, 1) : undefined,
       focus: rawFocus
@@ -175,6 +193,8 @@ export function toVisualOverridesV2(source: unknown): UnknownRecord {
         ratio: typeof rawSlot.ratioPreset === "string"
           ? Number(rawSlot.ratioPreset.split("/")[0]) / Number(rawSlot.ratioPreset.split("/")[1])
           : undefined,
+        sizePreset: rawSlot.sizePreset,
+        positionPreset: rawSlot.positionPreset,
         mediaView: {
           fit: rawSlot.fit,
           zoom: rawSlot.zoom,

@@ -196,7 +196,11 @@ export default function CanvasSelectionDock({
       nextContent[targetIndex],
       nextContent[selectedIndex],
     ];
-    dispatch({ type: "setData", data: { ...appData, content: nextContent } });
+    dispatch({
+      type: "setData",
+      data: { ...appData, content: nextContent },
+      recordHistory: true,
+    });
     dispatch({
       type: "setUi",
       ui: { itemSelector: { index: targetIndex, zone: ROOT_ZONE } },
@@ -222,6 +226,7 @@ export default function CanvasSelectionDock({
             ...appData,
             content: content.filter((_, index) => index !== selectedIndex),
           },
+          recordHistory: true,
         });
         dispatch({ type: "setUi", ui: { itemSelector: null } });
       },

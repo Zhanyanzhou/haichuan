@@ -20,17 +20,30 @@ export interface CardGridPuckProps {
   locked?: boolean;
 }
 
+export function renderCardGridPuck(
+  props: CardGridPuckProps,
+  contentTemplateKey: "brandPoints" | "servicePromises" = "brandPoints",
+) {
+  return (
+    <CardGridBlock
+      module={convertPuckProps(
+        contentTemplateKey === "servicePromises" ? "服务承诺" : "卡片网格",
+        props as any,
+      ) as any}
+      contentTemplateKey={contentTemplateKey}
+    />
+  );
+}
+
 export const cardGridPuckConfig = {
-  render: (props: CardGridPuckProps) => (
-    <CardGridBlock module={convertPuckProps("卡片网格", props as any) as any} />
-  ),
+  render: (props: CardGridPuckProps) => renderCardGridPuck(props),
   defaultProps: {
-    title: "品牌价值",
-    subtitle: "",
+    title: "品牌要点待确认",
+    subtitle: "请填写经品牌确认的真实信息。",
     cards: [
-      { icon: "", title: "匠心工艺", body: "每件作品均由资深工匠手工打造" },
-      { icon: "", title: "真材实料", body: "所有材质均附国家权威检测证书" },
-      { icon: "", title: "终身保养", body: "购买即享终身免费清洗保养服务" },
+      { icon: "", title: "要点一待确认", body: "请填写经品牌确认的要点说明。" },
+      { icon: "", title: "要点二待确认", body: "请填写经品牌确认的要点说明。" },
+      { icon: "", title: "要点三待确认", body: "请填写经品牌确认的要点说明。" },
     ],
     layout: "grid-3",
     bgColor: "#FFFFFF",

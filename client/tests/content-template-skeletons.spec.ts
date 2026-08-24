@@ -250,10 +250,9 @@ test.describe("第一批内容模板公共 Renderer 三端骨架", () => {
     const main = await box(page.locator(".hc-phase1-double__main"));
     const copy = await box(page.locator(".hc-phase1-double__copy"));
     const detail = await box(page.locator(".hc-phase1-double__detail"));
-    const action = await box(page.locator(".hc-phase1-double__action"));
     expect(main.y + main.height).toBeLessThanOrEqual(copy.y + 1);
     expect(copy.y + copy.height).toBeLessThanOrEqual(detail.y + 1);
-    expect(detail.y + detail.height).toBeLessThanOrEqual(action.y + 1);
+    await expect(page.locator(".hc-phase1-double__action")).toHaveCount(0);
     expect(detail.width / main.width).toBeGreaterThan(0.56);
     expect(detail.width / main.width).toBeLessThan(0.60);
     expect(detail.x).toBeGreaterThan(main.x);

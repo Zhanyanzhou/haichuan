@@ -38,7 +38,7 @@ export default function HotspotBlock({
   onHotspotsChange,
 }: HotspotBlockProps) {
   const { content = {} } = module;
-  const { image, mobileImage, hotspots = [], mobileHotspots = [] } = content;
+  const { image, mobileImage, altText, hotspots = [], mobileHotspots = [] } = content;
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia(`(max-width:${HOTSPOT_CONTRACT.canvas.mobileBreakpoint}px)`).matches);
   useEffect(() => {
     const media = window.matchMedia(`(max-width:${HOTSPOT_CONTRACT.canvas.mobileBreakpoint}px)`);
@@ -207,7 +207,7 @@ export default function HotspotBlock({
         <img
           ref={imgRef}
           src={desktopImg}
-          alt="热区导购场景"
+          alt={altText || ""}
           style={{ width: "100%", height: "100%", display: "block", objectFit: "cover", userSelect: "none" }}
           draggable={false}
         />

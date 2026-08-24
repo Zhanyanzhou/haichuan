@@ -20,7 +20,10 @@ import { productRowPuckConfig } from "../adapters/productRow.puck";
 import type { ProductRowPuckProps } from "../adapters/productRow.puck";
 import { categoryCardsPuckConfig } from "../adapters/categoryCards.puck";
 import type { CategoryCardsPuckProps } from "../adapters/categoryCards.puck";
-import { cardGridPuckConfig } from "../adapters/cardGrid.puck";
+import {
+  cardGridPuckConfig,
+  renderCardGridPuck,
+} from "../adapters/cardGrid.puck";
 import type { CardGridPuckProps } from "../adapters/cardGrid.puck";
 import { galleryPuckConfig } from "../adapters/gallery.puck";
 import type { GalleryPuckProps } from "../adapters/gallery.puck";
@@ -134,6 +137,8 @@ export const puckConfig: Config<MyComponents> = {
     定制流程: withContractRenderer("定制流程", customProcessPuckConfig),
     服务承诺: withContractRenderer("服务承诺", {
       ...cardGridPuckConfig,
+      render: (props: CardGridPuckProps) =>
+        renderCardGridPuck(props, "servicePromises"),
       defaultProps: {
         title: "服务信息",
         subtitle: "请在发布前填写已确认的服务信息。",

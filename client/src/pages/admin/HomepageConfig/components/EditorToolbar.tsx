@@ -5,8 +5,10 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useGetPuck } from "@puckeditor/core";
 import { Button, Dropdown, Modal, message } from "antd";
 import {
+  CopyOutlined,
   DeleteOutlined,
   DesktopOutlined,
   DownloadOutlined,
@@ -16,9 +18,11 @@ import {
   LayoutOutlined,
   MobileOutlined,
   MoreOutlined,
+  RedoOutlined,
   SaveOutlined,
   SendOutlined,
   SettingOutlined,
+  UndoOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import type { EditorPageKey } from "@/page-builder/config/editorPages";
@@ -26,8 +30,17 @@ import { createEditorPageDefault } from "@/page-builder/config/editorPages";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { BLOCK_META } from "@/page-builder/config/blockMeta";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
-import { ROOT_ZONE, useHomepagePuck } from "../editor-store";
-import { formatViewportSize, type ViewportPreset } from "../editor-utils";
+import { USE_MOCK } from "@/services/mockData";
+import {
+  ROOT_ZONE,
+  useEditorHistoryTransaction,
+  useHomepagePuck,
+} from "../editor-store";
+import {
+  formatViewportSize,
+  getModuleDisplayName,
+  type ViewportPreset,
+} from "../editor-utils";
 
 export const VIEWPORT_PRESETS: ViewportPreset[] = [
   // 平板档已移除（2026-08-16 用户决策）：平板继承桌面布局无独立编辑价值，
@@ -114,6 +127,7 @@ export default function EditorToolbar({
   saving,
   hasPendingDraft,
   viewingPublished,
+  previewMode,
   hasUnsavedChanges,
   publishValidationState,
   publishErrorCount,
@@ -126,6 +140,7 @@ export default function EditorToolbar({
   onDiscardDraft,
   onOpenRevisions,
   onOpenPageSettings,
+  onPreviewModeChange,
   onDataChange,
 }: {
   pageKey: EditorPageKey;
@@ -133,6 +148,7 @@ export default function EditorToolbar({
   saving: boolean;
   hasPendingDraft: boolean;
   viewingPublished: boolean;
+  previewMode: boolean;
   hasUnsavedChanges: boolean;
   publishValidationState: "checking" | "current" | "stale" | "error";
   publishErrorCount: number;
@@ -145,13 +161,32 @@ export default function EditorToolbar({
   onDiscardDraft: () => void;
   onOpenRevisions: () => void;
   onOpenPageSettings: () => void;
+  onPreviewModeChange: (previewing: boolean) => void;
   onDataChange: (data: unknown) => void;
 }) {
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
+  const getPuck = useGetPuck();
   const appData = useHomepagePuck((state) => state.appState.data);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
   const dispatch = useHomepagePuck((state) => state.dispatch);
+  const selectedItem = useHomepagePuck((state) => state.selectedItem);
+  const history = useHomepagePuck((state) => state.history);
+  const historyTransactionPending = useEditorHistoryTransaction(
+    (state) => state.pending,
+  );
   const currentViewport = viewports.current;
+  const content = appData.content as Array<{
+    type: string;
+    props: Record<string, any>;
+  }>;
+  const selectedIndex = content.findIndex(
+    (item) => item.props?.id === selectedItem?.props?.id,
+  );
+  const selectedModule = selectedIndex >= 0 ? content[selectedIndex] : null;
+  const selectedLocked = Boolean(selectedModule?.props?.locked);
+  const selectedLabel = selectedModule
+    ? getModuleDisplayName(selectedModule.type, selectedModule.props)
+    : null;
   const publishUnavailableReason = viewingPublished
     ? "正在查看线上版本，无需重复发布"
     : publishValidationState === "checking"
@@ -187,6 +222,38 @@ export default function EditorToolbar({
     [dispatch, viewports],
   );
 
+  const navigateHistory = useCallback(
+    (direction: "back" | "forward") => {
+      if (previewMode || useEditorHistoryTransaction.getState().pending) {
+        return;
+      }
+
+      const before = getPuck();
+      const canNavigate =
+        direction === "back"
+          ? before.history.hasPast
+          : before.history.hasFuture;
+      if (!canNavigate) return;
+
+      // Puck 历史快照包含 ui.viewports.current；内容撤销不应切换用户
+      // 正在编辑的设备。历史导航后只恢复 current，且不再写入历史。
+      const activeViewport = { ...before.appState.ui.viewports.current };
+      before.history[direction]();
+      const after = getPuck();
+      after.dispatch({
+        type: "setUi",
+        ui: {
+          viewports: {
+            ...after.appState.ui.viewports,
+            current: activeViewport,
+          },
+        },
+        recordHistory: false,
+      });
+    },
+    [getPuck, previewMode],
+  );
+
   const publishCurrentPage = useCallback(() => {
     onPublish(appData, (blockIndex) => {
       dispatch({
@@ -195,6 +262,72 @@ export default function EditorToolbar({
       });
     });
   }, [appData, dispatch, onPublish]);
+
+  const duplicateSelected = useCallback(() => {
+    if (!selectedModule || selectedLocked || previewMode) return;
+    dispatch({
+      type: "duplicate",
+      sourceIndex: selectedIndex,
+      sourceZone: ROOT_ZONE,
+    });
+    message.success(`已复制“${selectedLabel}”模块`);
+  }, [
+    dispatch,
+    previewMode,
+    selectedIndex,
+    selectedLabel,
+    selectedLocked,
+    selectedModule,
+  ]);
+
+  const deleteSelected = useCallback(() => {
+    if (!selectedModule || selectedLocked || previewMode) return;
+    Modal.confirm({
+      title: `删除“${selectedLabel}”？`,
+      content: "删除后可使用“撤销”恢复；发布前不会影响线上页面。",
+      okText: "删除模块",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: () => {
+        dispatch({
+          type: "remove",
+          index: selectedIndex,
+          zone: ROOT_ZONE,
+        });
+        message.success(`已删除“${selectedLabel}”模块`);
+      },
+    });
+  }, [
+    dispatch,
+    previewMode,
+    selectedIndex,
+    selectedLabel,
+    selectedLocked,
+    selectedModule,
+  ]);
+
+  const togglePreviewMode = useCallback(() => {
+    const nextPreviewMode = !previewMode;
+    if (nextPreviewMode) {
+      dispatch({
+        type: "setUi",
+        ui: { itemSelector: null },
+        recordHistory: false,
+      });
+    }
+    onPreviewModeChange(nextPreviewMode);
+  }, [dispatch, onPreviewModeChange, previewMode]);
+
+  useEffect(() => {
+    if (!previewMode) return undefined;
+    const exitPreviewOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onPreviewModeChange(false);
+    };
+    window.addEventListener("keydown", exitPreviewOnEscape);
+    return () => window.removeEventListener("keydown", exitPreviewOnEscape);
+  }, [onPreviewModeChange, previewMode]);
 
   /* ── 装修方案导入/导出(纯编辑器侧,便于跨环境迁移与备份) ── */
 
@@ -266,7 +399,7 @@ export default function EditorToolbar({
           okText: "导入并替换画布",
           cancelText: "取消",
           onOk: () => {
-            dispatch({ type: "setData", data: migrated });
+            dispatch({ type: "setData", data: migrated, recordHistory: true });
             message.success("方案已导入画布，请检查后保存草稿");
           },
         });
@@ -288,7 +421,11 @@ export default function EditorToolbar({
       okText: "套用并替换画布",
       cancelText: "取消",
       onOk: () => {
-        dispatch({ type: "setData", data: recommended });
+        dispatch({
+          type: "setData",
+          data: recommended,
+          recordHistory: true,
+        });
         dispatch({ type: "setUi", ui: { itemSelector: null } });
         message.success("推荐结构已套用，模块可自由调整，请检查后保存草稿");
       },
@@ -397,8 +534,8 @@ export default function EditorToolbar({
       />
       <div
         className="homepage-editor__viewport-switcher"
-        aria-label="预览设备：仅手机端可覆写素材与焦点"
-        title="仅手机端（≤767px）可覆写素材与焦点"
+        aria-label="编辑设备：桌面端与移动端布局可分别调整"
+        title="切换桌面端或移动端布局；移动端调整不会覆盖桌面端"
       >
         {VIEWPORT_PRESETS.map((preset) => (
           <button
@@ -418,6 +555,7 @@ export default function EditorToolbar({
                 currentViewport.width === "100%")
             }
             title={`${preset.label}预览（${formatViewportSize(preset)}）`}
+            aria-label={`${preset.label}布局（${formatViewportSize(preset)}）`}
           >
             {preset.icon}
             <span>
@@ -428,17 +566,109 @@ export default function EditorToolbar({
         ))}
       </div>
 
-      <DraftStatusBadge
-        mode={getDraftStatusMode({
-          saving,
-          viewingPublished,
-          hasUnsavedChanges,
-          hasPendingDraft,
-        })}
-        draftSavedAtLabel={draftSavedAtLabel}
-      />
+      <div className="homepage-editor__toolbar-left-context">
+        <DraftStatusBadge
+          mode={getDraftStatusMode({
+            saving,
+            viewingPublished,
+            hasUnsavedChanges,
+            hasPendingDraft,
+          })}
+          draftSavedAtLabel={draftSavedAtLabel}
+        />
+
+        <div className="homepage-editor__edit-context">
+          <span
+            className="homepage-editor__selected-module"
+            data-selected={selectedModule ? "true" : "false"}
+            role="status"
+            aria-label={
+              selectedLabel
+                ? `当前选中模块：${selectedLabel}`
+                : "当前未选中模块"
+            }
+            title={
+              selectedLabel
+                ? `当前选中：${selectedLabel}`
+                : "请在画布或图层面板选择模块"
+            }
+          >
+            {selectedLabel ? `已选：${selectedLabel}` : "未选模块"}
+          </span>
+          <div
+            className="homepage-editor__history-actions"
+            role="toolbar"
+            aria-label="画布编辑操作"
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<UndoOutlined />}
+              disabled={!history.hasPast || previewMode || historyTransactionPending}
+              onClick={() => navigateHistory("back")}
+              aria-label="撤销"
+              title="撤销"
+            />
+            <Button
+              type="text"
+              size="small"
+              icon={<RedoOutlined />}
+              disabled={!history.hasFuture || previewMode || historyTransactionPending}
+              onClick={() => navigateHistory("forward")}
+              aria-label="重做"
+              title="重做"
+            />
+            <Button
+              type="text"
+              size="small"
+              icon={<CopyOutlined />}
+              disabled={!selectedModule || selectedLocked || previewMode}
+              onClick={duplicateSelected}
+              aria-label="复制当前模块"
+              title={selectedLocked ? "固定模块不能复制" : "复制当前模块"}
+            />
+            <Button
+              type="text"
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              disabled={!selectedModule || selectedLocked || previewMode}
+              onClick={deleteSelected}
+              aria-label="删除当前模块"
+              title={selectedLocked ? "固定模块不能删除" : "删除当前模块"}
+            />
+          </div>
+        </div>
+      </div>
 
       <div className="homepage-editor__toolbar-actions">
+        {USE_MOCK ? (
+          <span
+            className="homepage-editor__mock-mode-badge"
+            data-testid="homepage-editor-mock-mode"
+            role="status"
+            aria-label="当前为 Mock 模式，数据仅保存在本机，不连接真实接口"
+            title="当前为 Mock 模式，数据仅保存在本机，不连接真实接口"
+          >
+            Mock <span>模式</span>
+          </span>
+        ) : null}
+        <Button
+          className="homepage-editor__toolbar-preview"
+          size="small"
+          type={previewMode ? "primary" : "default"}
+          icon={<EyeOutlined />}
+          onClick={togglePreviewMode}
+          aria-pressed={previewMode}
+          aria-label={previewMode ? "退出当前画布预览" : "预览当前画布"}
+          title={
+            previewMode
+              ? "退出当前画布预览（Esc）"
+              : "预览当前内存中的画布，不会保存或发布"
+          }
+        >
+          {previewMode ? "退出预览" : "预览"}
+        </Button>
         <div className="homepage-editor__toolbar-secondary-actions">
           {viewingPublished ? (
             <Button

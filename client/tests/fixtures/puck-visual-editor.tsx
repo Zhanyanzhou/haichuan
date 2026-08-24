@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Puck } from "@puckeditor/core";
 import "@puckeditor/core/puck.css";
@@ -63,6 +63,8 @@ const data = {
 function PuckVisualEditorFixture() {
   const [overrides, setOverrides] = useState<Record<string, unknown> | undefined>();
   const [selectedBlock, setSelectedBlock] = useState<string | null>(null);
+  const selectedBlockRef = useRef<string | null>(null);
+  const [blockSelectionCount, setBlockSelectionCount] = useState(0);
   const [contentOrder, setContentOrder] = useState(
     data.content.map((block) => block.props.id),
   );
@@ -85,7 +87,13 @@ function PuckVisualEditorFixture() {
                 blockId={String(props.id ?? "")}
                 blockType={componentType}
                 blockLabel={componentType}
-                onSelect={() => setSelectedBlock(String(props.id ?? ""))}
+                selected={selectedBlockRef.current === String(props.id ?? "")}
+                onSelect={() => {
+                  const nextBlockId = String(props.id ?? "");
+                  selectedBlockRef.current = nextBlockId;
+                  setSelectedBlock(nextBlockId);
+                  setBlockSelectionCount((count) => count + 1);
+                }}
               >
                 {render(props)}
               </CanvasBlockInteractionBoundary>
@@ -118,6 +126,7 @@ function PuckVisualEditorFixture() {
         <output data-testid="selected-block-state">
           {selectedBlock ? `已选择模块：${selectedBlock}` : "未选择模块"}
         </output>
+        <output data-testid="block-selection-count">{blockSelectionCount}</output>
         <output data-testid="selected-visual-state">
           {visualSelection ? `${visualSelection.blockId}:${visualSelection.nodeId}:${visualMode}` : "未选择对象"}
         </output>

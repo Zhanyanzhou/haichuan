@@ -29,13 +29,18 @@ export default function InspectorTopBar({
 
   return (
     <header className="homepage-editor__inspector-header">
-      {/* 眉标=模块类型名;仅当运营改过名(与类型名不同)时显示,避免默认态上下两行重复同一文本 */}
-      {moduleName && moduleName !== displayName ? (
-        <span className="homepage-editor__inspector-eyebrow">{displayName}</span>
-      ) : null}
-      <strong className="homepage-editor__inspector-title">
-        {moduleName || displayName}
-      </strong>
+      <div className="homepage-editor__inspector-heading">
+        {/* 眉标=模块类型名;仅当运营改过名(与类型名不同)时显示,避免默认态上下两行重复同一文本 */}
+        {moduleName && moduleName !== displayName ? (
+          <span className="homepage-editor__inspector-eyebrow">{displayName}</span>
+        ) : null}
+        <strong
+          className="homepage-editor__inspector-title"
+          title={moduleName || displayName}
+        >
+          {moduleName || displayName}
+        </strong>
+      </div>
       <span
         className="homepage-editor__inspector-device"
         title={dirty ? "本模块有未保存修改" : undefined}

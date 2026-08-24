@@ -7,8 +7,18 @@
  */
 import { createUsePuck } from "@puckeditor/core";
 import { puckConfig } from "@/page-builder/config/puckConfig";
+import { create } from "zustand";
 
 export const useHomepagePuck = createUsePuck<typeof puckConfig>();
+
+/** Inspector reset 写入 Puck 历史期间，阻止顶栏读取到尚未闭合的事务。 */
+export const useEditorHistoryTransaction = create<{
+  pending: boolean;
+  setPending: (pending: boolean) => void;
+}>((set) => ({
+  pending: false,
+  setPending: (pending) => set({ pending }),
+}));
 
 /** 内容区根插槽标识（与 Puck itemSelector.zone 对应） */
 export const ROOT_ZONE = "root:default-zone";

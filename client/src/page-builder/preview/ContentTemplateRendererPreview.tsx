@@ -7,6 +7,13 @@ import { puckConfig } from "../config/puckConfig";
 
 type PreviewViewport = "desktop" | "mobile";
 
+const NEUTRAL_PREVIEW_COPY: Partial<Record<string, Record<string, string>>> = {
+  textBanner: {
+    title: "章节标题",
+    body: "内容说明",
+  },
+};
+
 function sanitizePreviewDefaults(value: unknown): unknown {
   if (typeof value === "string") {
     return /^https?:\/\//i.test(value) ? "" : value;
@@ -38,6 +45,7 @@ export default function ContentTemplateRendererPreview({
 
   const props = {
     ...(sanitizePreviewDefaults(component.defaultProps ?? {}) as Record<string, unknown>),
+    ...(NEUTRAL_PREVIEW_COPY[contract.key] ?? {}),
     id: `template-library-preview-${contract.key}`,
     __contentTemplate: createContentTemplateMarker(moduleType),
   };

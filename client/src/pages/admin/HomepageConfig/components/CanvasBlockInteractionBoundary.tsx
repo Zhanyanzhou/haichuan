@@ -5,6 +5,7 @@ import {
   useRef,
   type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 
@@ -14,6 +15,7 @@ type CanvasBlockInteractionBoundaryProps = {
   blockLabel: string;
   children: ReactNode;
   focused?: boolean;
+  selected?: boolean;
   scrollMarginTop?: number;
   onSelect: () => void;
 };
@@ -32,6 +34,7 @@ const CanvasBlockInteractionBoundary = forwardRef<
     blockLabel,
     children,
     focused = false,
+    selected = false,
     scrollMarginTop = 80,
     onSelect,
   },
@@ -93,6 +96,15 @@ const CanvasBlockInteractionBoundary = forwardRef<
     }
   };
 
+  const handleCanvasPointerDown = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    // 模块与视觉节点均由项目自己的选择链处理。若继续冒泡到 Puck 的
+    // 区块处理器，同一次点击会再次选中并按未缩放坐标滚动 iframe。
+    event.stopPropagation();
+    if (!selected) onSelect();
+  };
+
   return (
     <div
       ref={assignBoundaryRef}
@@ -100,8 +112,9 @@ const CanvasBlockInteractionBoundary = forwardRef<
       data-editor-block-type={blockType}
       // 视觉节点在子树 capture 阶段先取得事件并写入节点选择；模块选中放到
       // 冒泡阶段，避免 Puck 的同步选中更新抢先重渲染、吞掉图片/文字选择。
-      onPointerDown={onSelect}
+      onPointerDown={handleCanvasPointerDown}
       onClickCapture={handleCanvasClickCapture}
+      onClick={(event) => event.stopPropagation()}
       style={{
         position: "relative",
         scrollMarginTop: `${scrollMarginTop}px`,
@@ -121,13 +134,13 @@ const CanvasBlockInteractionBoundary = forwardRef<
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          onSelect();
+          if (!selected) onSelect();
         }}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
           event.stopPropagation();
-          onSelect();
+          if (!selected) onSelect();
         }}
       >
         <span aria-hidden="true">⋮⋮</span>

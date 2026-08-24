@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import AppointmentBlock from "@/components/blocks/AppointmentBlock";
 import StoreInfoBlock from "@/components/blocks/StoreInfoBlock";
@@ -29,11 +30,12 @@ import type { Product } from "@/types";
 import { getListingImage } from "@/utils/productImage";
 import { unwrapResponse } from "@/utils/unwrap";
 import { convertPuckProps } from "@/page-builder/utils/puckPropsToModule";
-import { createCatalogCategoryUrl } from "@/page-builder/utils/linkTarget";
+import { createCatalogCategoryUrl, resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import { getContentTemplateIssues } from "@/page-builder/generated/contentTemplates.generated";
 import ContentTemplateContractFrame from "@/page-builder/runtime/ContentTemplateContractFrame";
+import { DecorSection } from "@/page-builder/designSystem/sectionShell";
+import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import {
-  MissingMediaState,
   normalizeLegacyRenderColors,
   useHasMissingAssets,
 } from "@/page-builder/runtime/renderParity";
@@ -157,6 +159,111 @@ function ProductRowState({
   );
 }
 
+function textValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function PublicMediaFallback({
+  type,
+  props,
+  headingLevel,
+}: {
+  type?: string;
+  props: Record<string, any>;
+  headingLevel: 1 | 2;
+}) {
+  const eyebrow = [props.number, props.label, props.eyebrow]
+    .map(textValue)
+    .filter(Boolean)
+    .join(" / ");
+  const title = textValue(props.title);
+  const body = textValue(
+    props.body || props.subtitle || props.description || props.summary,
+  );
+  const actionText = textValue(
+    props.actionText || props.buttonText || props.primaryText,
+  );
+  const targetUrl = resolveLinkTargetUrl({
+    targetType: props.targetType,
+    productCode: props.productCode,
+    productId: props.productId,
+    linkUrl: props.linkUrl,
+  });
+  const Heading = headingLevel === 1 ? "h1" : "h2";
+  const isHero = type === "首屏主视觉";
+  const background = isHero ? "#111315" : textValue(props.bgColor) || "#FFFFFF";
+  const ink = isHero ? "#F7F8F8" : "#181A1B";
+  const muted = isHero ? "rgba(247,248,248,.76)" : "#5F6568";
+
+  if (!eyebrow && !title && !body && !(actionText && targetUrl)) return null;
+
+  return (
+    <DecorSection
+      master="editorial-text"
+      width="narrow"
+      background={background}
+      className="hc-public-media-fallback"
+      data-media-fallback-for={type || "unknown"}
+      style={isHero ? { minHeight: "max(520px, 100svh)", display: "grid", alignItems: "center" } : undefined}
+    >
+      <div style={{ maxWidth: 720, marginInline: "auto", textAlign: "center" }}>
+        {eyebrow ? (
+          <p style={{ margin: "0 0 18px", color: muted, fontFamily: FONT_SANS, fontSize: 11, letterSpacing: ".18em" }}>
+            {eyebrow}
+          </p>
+        ) : null}
+        {title ? (
+          <Heading style={{ margin: 0, color: ink, fontFamily: FONT_DISPLAY, fontSize: "clamp(28px,3.2vw,48px)", fontWeight: 500, lineHeight: 1.25 }}>
+            {title}
+          </Heading>
+        ) : null}
+        {body ? (
+          <p style={{ maxWidth: 720, margin: title ? "22px auto 0" : 0, color: muted, fontSize: 15, lineHeight: 1.9 }}>
+            {body}
+          </p>
+        ) : null}
+        {actionText && targetUrl ? (
+          <Link
+            to={targetUrl}
+            style={{ display: "inline-flex", minHeight: 44, alignItems: "center", marginTop: 28, color: ink, fontFamily: FONT_SANS, fontSize: 13, letterSpacing: ".08em", textDecoration: "none", borderBottom: "1px solid currentColor" }}
+          >
+            {actionText}
+          </Link>
+        ) : null}
+      </div>
+    </DecorSection>
+  );
+}
+
+function hasRequiredPublicMedia(block: PuckBlock) {
+  const props = block.props || {};
+  switch (block.type) {
+    case "首屏主视觉":
+      return Boolean(textValue(props.desktopImage) || textValue(props.mobileImage));
+    case "全屏出血图":
+      return Boolean(textValue(props.image) || textValue(props.mobileImage));
+    case "单图海报":
+      return Boolean(textValue(props.desktopImage) || textValue(props.mobileImage));
+    case "双图海报":
+      return Boolean(textValue(props.mainImage));
+    case "作品画廊":
+      return Array.isArray(props.items)
+        && props.items.some((item: unknown) => Boolean(textValue((item as Record<string, unknown>)?.image)));
+    default:
+      return true;
+  }
+}
+
+function suppressHomeSecondaryActions(props: Record<string, any>): Record<string, any> {
+  return {
+    ...props,
+    actionText: "",
+    buttonText: "",
+    primaryText: "",
+    secondaryText: "",
+  };
+}
+
 // 模块级单例：多个产品行共享同一条商品变更 SSE，引用计数管理生命周期
 // P1-35：onerror 时指数退避重连（与 useReconnectingEventSource 同策略），避免单例流断线后所有产品行静默不刷新
 type ProductStreamHandle = {
@@ -206,17 +313,19 @@ function subscribeProductStream(onTick: () => void): () => void {
 
 function ResolvedProductRowBlock({
   props,
+  codeOnly = false,
 }: {
   props: Record<string, any>;
+  codeOnly?: boolean;
 }) {
   const productIds = useMemo(
     () =>
-      Array.isArray(props.productIds)
+      !codeOnly && Array.isArray(props.productIds)
         ? props.productIds
           .map((id: unknown) => Number(id))
           .filter((id: number) => Number.isInteger(id) && id > 0)
         : [],
-    [props.productIds],
+    [codeOnly, props.productIds],
   );
   const productCodes = useMemo(
     () => Array.isArray(props.productCodes)
@@ -311,26 +420,44 @@ function ResolvedProductRowBlock({
   const module = convertPuckProps("产品展示行", props);
   if (!module) return null;
   (module as any).content.products = products.map(toProductRowItem);
+  if (codeOnly) {
+    (module as any).content.displayMode = "album";
+    (module as any).content.showPrice = false;
+    (module as any).content.showButton = false;
+    (module as any).content.actionStyle = "none";
+    (module as any).content.mobileColumns = 1;
+    (module as any).content.layout = products.length === 2 ? "grid-2" : "grid-3";
+  }
 
-  return <ProductRowBlock module={module} />;
+  const productRow = <ProductRowBlock module={module} />;
+  return codeOnly ? (
+    <div
+      className="hc-home-product-row"
+      data-home-product-count={Math.min(products.length, 3)}
+    >
+      {productRow}
+    </div>
+  ) : productRow;
 }
 
 function ResolvedFeaturedProductBlock({
   props,
   editMode = false,
+  codeOnly = false,
 }: {
   props: Record<string, any>;
   editMode?: boolean;
+  codeOnly?: boolean;
 }) {
   const productId = Number(props.productId);
   const productCode = String(props.productCode || "").trim();
-  const hasValidProductId = Boolean(productCode) || (Number.isInteger(productId) && productId > 0);
+  const hasValidProductId = Boolean(productCode) || (!codeOnly && Number.isInteger(productId) && productId > 0);
   const [product, setProduct] = useState<Product | null>(null);
-  const [loading, setLoading] = useState(Boolean(productCode) || productId > 0);
+  const [loading, setLoading] = useState(Boolean(productCode) || (!codeOnly && productId > 0));
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    if (!productCode && (!Number.isInteger(productId) || productId <= 0)) {
+    if (!productCode && (codeOnly || !Number.isInteger(productId) || productId <= 0)) {
       setProduct(null);
       setLoading(false);
       return;
@@ -355,7 +482,7 @@ function ResolvedFeaturedProductBlock({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; controller.abort(); };
-  }, [productCode, productId]);
+  }, [codeOnly, productCode, productId]);
 
   if (!hasValidProductId) {
     if (!editMode) return null;
@@ -368,6 +495,7 @@ function ResolvedFeaturedProductBlock({
   const module = convertPuckProps("单品焦点推荐", props);
   if (!module) return null;
   (module as any).content.product = toProductRowItem(product);
+  if (codeOnly) (module as any).content.showPrice = false;
   return <FeaturedProductBlock module={module} editMode={editMode} />;
 }
 
@@ -479,8 +607,13 @@ function renderBlock(
   index: number,
   mode: PuckDocumentRenderMode,
   heroHeadingLevel: 1 | 2,
+  homeSurface: boolean,
+  allowHomePrimaryAction: boolean,
 ) {
-  const props = normalizeLegacyRenderColors(block.props || {}) as Record<string, any>;
+  const contractProps = normalizeLegacyRenderColors(block.props || {}) as Record<string, any>;
+  const props = homeSurface && !allowHomePrimaryAction
+    ? suppressHomeSecondaryActions(contractProps)
+    : contractProps;
   const key = props.id || `${block.type || "block"}-${index}`;
   const preview = mode === "preview";
   const wrap = (node: ReactNode) => (
@@ -488,7 +621,7 @@ function renderBlock(
       key={key}
       moduleType={block.type || ""}
       mode="public"
-      props={props}
+      props={contractProps}
     >
       {node}
     </ContentTemplateContractFrame>
@@ -513,16 +646,26 @@ function renderBlock(
   }
 
   if (block.type === "产品展示行") {
-    return wrap(<ResolvedProductRowBlock props={props} />);
+    return wrap(<ResolvedProductRowBlock props={props} codeOnly={homeSurface} />);
   }
   if (block.type === "单品焦点推荐") {
-    return wrap(<ResolvedFeaturedProductBlock props={props} editMode={preview} />);
+    return wrap(<ResolvedFeaturedProductBlock props={props} editMode={preview} codeOnly={homeSurface} />);
   }
   if (block.type === "佩戴灵感") {
     return wrap(<ResolvedLookbookBlock props={props} />);
   }
   if (block.type === "分类卡片" && Array.isArray(props.categorySlugs) && props.categorySlugs.length > 0) {
     return wrap(<ResolvedCategoryCardsBlock props={props} />);
+  }
+
+  if (!preview && !hasRequiredPublicMedia({ ...block, props })) {
+    return wrap(
+      <PublicMediaFallback
+        type={block.type}
+        props={props}
+        headingLevel={block.type === "首屏主视觉" ? heroHeadingLevel : 2}
+      />,
+    );
   }
 
   const module = convertPuckProps(block.type || "", props);
@@ -548,7 +691,11 @@ function renderBlock(
     case "全屏出血图":
       return wrap(<FullBleedBlock module={module} editMode={preview} />);
     case "文字横幅":
-      return wrap(<TextBannerBlock module={module} editMode={preview} />);
+      return wrap(homeSurface ? (
+        <div className="hc-home-text-banner">
+          <TextBannerBlock module={module} editMode={preview} />
+        </div>
+      ) : <TextBannerBlock module={module} editMode={preview} />);
     case "作品画廊":
       return wrap(<AsymmetricGalleryBlock module={module} editMode={preview} />);
     case "改款对比":
@@ -560,7 +707,11 @@ function renderBlock(
         ? <CategoryCardsBlock key={key} module={module} />
         : wrap(<CategoryCardsBlock module={module} />);
     case "卡片网格":
-      return wrap(<CardGridBlock module={module} />);
+      return wrap(homeSurface ? (
+        <div className="hc-home-brand-points">
+          <CardGridBlock module={module} contentTemplateKey="brandPoints" />
+        </div>
+      ) : <CardGridBlock module={module} contentTemplateKey="brandPoints" />);
     case "分割面板":
       return <SplitPanelBlock key={key} module={module} />;
     case "轮播图":
@@ -570,13 +721,19 @@ function renderBlock(
     case "热区图":
       return wrap(<HotspotBlock module={module} />);
     case "预约入口":
-      return wrap(<AppointmentBlock module={module} editMode={preview} />);
+      return wrap(homeSurface ? (
+        <div className="hc-home-booking">
+          <AppointmentBlock module={module} editMode={preview} />
+        </div>
+      ) : <AppointmentBlock module={module} editMode={preview} />);
     case "资质证书":
       return wrap(<CertificateBlock module={module} />);
     case "定制流程":
       return wrap(<CustomProcessBlock module={module} />);
     case "服务承诺":
-      return wrap(<CardGridBlock module={module} />);
+      return wrap(
+        <CardGridBlock module={module} contentTemplateKey="servicePromises" />,
+      );
     case "门店信息":
       return wrap(<StoreInfoBlock module={module} />);
     case "限时活动":
@@ -593,26 +750,51 @@ function GuardedBlock({
   index,
   mode,
   heroHeadingLevel,
+  homeSurface,
+  allowHomePrimaryAction,
 }: {
   block: PuckBlock;
   index: number;
   mode: PuckDocumentRenderMode;
   heroHeadingLevel: 1 | 2;
+  homeSurface: boolean;
+  allowHomePrimaryAction: boolean;
 }) {
   const hasMissingAsset = useHasMissingAssets(block.props || {});
 
-  if (hasMissingAsset) return <MissingMediaState type={block.type} />;
-  return renderBlock(block, index, mode, heroHeadingLevel);
+  if (hasMissingAsset && mode === "public") {
+    const normalizedProps = normalizeLegacyRenderColors(block.props || {}) as Record<string, any>;
+    const fallbackProps = homeSurface && !allowHomePrimaryAction
+      ? suppressHomeSecondaryActions(normalizedProps)
+      : normalizedProps;
+    return (
+      <PublicMediaFallback
+        type={block.type}
+        props={fallbackProps}
+        headingLevel={block.type === "首屏主视觉" ? heroHeadingLevel : 2}
+      />
+    );
+  }
+  return renderBlock(
+    block,
+    index,
+    mode,
+    heroHeadingLevel,
+    homeSurface,
+    allowHomePrimaryAction,
+  );
 }
 
 export default function PuckDocumentRenderer({
   data,
   mode = "public",
   heroHeadingLevel = 1,
+  surface,
 }: {
   data: PuckDocument;
   mode?: PuckDocumentRenderMode;
   heroHeadingLevel?: 1 | 2;
+  surface?: "home";
 }) {
   if (!Array.isArray(data?.content)) return null;
   const zoneBlocks =
@@ -621,6 +803,13 @@ export default function PuckDocumentRenderer({
           Array.isArray(blocks) ? blocks : [],
         )
       : [];
+  const homeSurface = surface === "home";
+  const allBlocks = [...data.content, ...zoneBlocks];
+  const homePrimaryHeroIndex = homeSurface
+    ? allBlocks.findIndex((block) =>
+        block.type === "首屏主视觉" && block.props?.isVisible !== false,
+      )
+    : -1;
   // 区块级兜底：单个 block 运行时抛错只跳过该区块，避免整页白屏
   const render = (block: PuckBlock, index: number) => {
     return (
@@ -637,16 +826,46 @@ export default function PuckDocumentRenderer({
           index={index}
           mode={mode}
           heroHeadingLevel={heroHeadingLevel}
+          homeSurface={homeSurface}
+          allowHomePrimaryAction={homeSurface && index === homePrimaryHeroIndex}
         />
       </ErrorBoundary>
     );
   };
   return (
-    <>
+    <div className="hc-public-document" data-home-surface={homeSurface ? "true" : undefined}>
+      <style>{`
+        .hc-public-document { min-width: 0; background: #FFFFFF; }
+        .hc-public-document[data-home-surface="true"] .hc-section {
+          --hc-px: 20px;
+          --hc-py-brand: 64px;
+        }
+        .hc-public-document[data-home-surface="true"] .hc-content-template__body { max-width: 720px; }
+        .hc-public-document[data-home-surface="true"] .hc-phase1-hero__copy { max-width: 520px; }
+        .hc-public-document a:focus-visible {
+          outline: 2px solid currentColor;
+          outline-offset: 4px;
+        }
+        @media (min-width: 768px) {
+          .hc-public-document[data-home-surface="true"] .hc-section {
+            --hc-px: clamp(48px, 5.55vw, 80px);
+            --hc-py-brand: 96px;
+          }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .hc-public-document *,
+          .hc-public-document *::before,
+          .hc-public-document *::after {
+            scroll-behavior: auto !important;
+            animation: none !important;
+            transition: none !important;
+          }
+        }
+      `}</style>
       {data.content.map(render)}
       {zoneBlocks.map((block, index) =>
         render(block, data.content!.length + index),
       )}
-    </>
+    </div>
   );
 }

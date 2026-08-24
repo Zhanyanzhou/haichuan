@@ -8,7 +8,9 @@ export interface LookbookPuckProps {
   title: string;
   subtitle: string;
   image: string;
-  imageAlt: string;
+  altText: string;
+  /** 历史草稿兼容；新保存统一使用 altText。 */
+  imageAlt?: string;
   productIds: number[];
   productCodes: string[];
   actionText: string;
@@ -52,7 +54,7 @@ export const lookbookPuckConfig = {
     title: "佩戴灵感",
     subtitle: "在每一个日常与重要时刻，让珠宝成为你的光。",
     image: "",
-    imageAlt: "珠宝佩戴灵感",
+    altText: "珠宝佩戴灵感",
     productIds: [],
     productCodes: [],
     actionText: "",

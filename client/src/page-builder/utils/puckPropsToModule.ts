@@ -315,7 +315,7 @@ export function convertPuckProps(
           title: props.title,
           subtitle: props.subtitle,
           image: props.image,
-          imageAlt: props.imageAlt,
+          imageAlt: props.altText || props.imageAlt,
           productIds: props.productIds || [],
           productCodes: props.productCodes || [],
           products: [],
@@ -492,6 +492,7 @@ export function convertPuckProps(
       return baseModule("hotspot", {
         image: props.image,
         mobileImage: props.mobileImage,
+        altText: props.altText,
         hotspots: props.hotspots || [],
         mobileHotspots: props.mobileHotspots || [],
       });
@@ -562,6 +563,7 @@ export function convertPuckProps(
       return baseModule(
         "storeInfo",
         {
+          useSiteSettings: props.useSiteSettings !== false,
           storeName: props.storeName,
           address: props.address,
           hours: props.hours,

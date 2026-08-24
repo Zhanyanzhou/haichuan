@@ -22,19 +22,19 @@ export const carouselPuckConfig = {
   defaultProps: {
     images: [
       {
-        url: "https://placehold.co/1200x500/B8944E/fff?text=珠宝轮播一",
+        url: "",
         link: "",
-        alt: "珠宝轮播图一",
+        alt: "",
       },
       {
-        url: "https://placehold.co/1200x500/2C2C2C/B8944E?text=珠宝轮播二",
+        url: "",
         link: "",
-        alt: "珠宝轮播图二",
+        alt: "",
       },
       {
-        url: "https://placehold.co/1200x500/1C1A18/fff?text=珠宝轮播三",
+        url: "",
         link: "",
-        alt: "珠宝轮播图三",
+        alt: "",
       },
     ],
     autoPlay: true,

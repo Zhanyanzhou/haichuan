@@ -106,6 +106,13 @@ function validatePageRules(rules) {
       );
     }
   }
+  const reachableTemplateKeys = new Set(rules.flatMap((rule) => rule.allowedTemplateKeys));
+  invariant(
+    source.templates
+      .filter((template) => template.implementationStatus === "active")
+      .every((template) => reachableTemplateKeys.has(template.key)),
+    "每个 active 模板必须至少适用于一个真实页面角色",
+  );
 }
 
 function validateUnifiedRoot(template) {
@@ -170,6 +177,19 @@ function validateUnifiedRoot(template) {
       invariant(fallbackRole, `${template.key}.${role.id}.fallbackRoleId 必须引用已声明角色`);
       invariant(role.fallbackRoleId !== role.id, `${template.key}.${role.id}.fallbackRoleId 不得引用自身`);
       invariant(fallbackRole.kind === role.kind && fallbackRole.role === role.role, `${template.key}.${role.id}.fallbackRoleId 必须保持角色种类一致`);
+    }
+    if (role.publicationAttestation !== undefined) {
+      const editableObject = template.editorCapabilities?.editableObjects?.find((object) => object.roleId === role.id);
+      invariant(
+        editableObject?.kind === "collection" && editableObject.collectionFieldKeys?.length > 0,
+        `${template.key}.${role.id}.publicationAttestation 必须绑定集合编辑对象`,
+      );
+      invariant(
+        /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(role.publicationAttestation.fieldKey)
+          && typeof role.publicationAttestation.label === "string"
+          && role.publicationAttestation.label.trim().length > 0,
+        `${template.key}.${role.id}.publicationAttestation 必须声明有效字段与标签`,
+      );
     }
     for (const device of rootDevices) {
       const defaultRatio = role.defaultRatioByViewport?.[device];
@@ -264,6 +284,13 @@ const widths = new Set(["full", "standard", "wide", "editorial"]);
 const flows = new Set(["bleed", "flow"]);
 const copyPlacements = new Set(["overlay", "stacked", "split"]);
 const primaryTasks = new Set(["media", "product", "category", "structured", "text", "action"]);
+const editableObjectKinds = new Set(["media", "video", "text", "action", "product", "collection"]);
+const altPolicies = new Set(["required", "derived", "decorative", "not-applicable"]);
+const editableObjectCapabilities = new Set([
+  "content", "layout", "layer", "visibility", "ratio", "size", "position",
+  "fit", "zoom", "focus", "typography", "link", "items", "reference", "playback",
+]);
+const responsiveScopes = new Set(["shared", "viewport-specific"]);
 const skeletonRoles = new Set([
   "media", "mainMedia", "detailMedia", "copy", "action", "marker",
   "timeline", "list", "card", "quote", "form",
@@ -355,6 +382,75 @@ for (const template of source.templates) {
   invariant(typeof template.supportsLinkTarget === "boolean", `${template.key}.supportsLinkTarget 必须是布尔值`);
   invariant(template.editorCapabilities && typeof template.editorCapabilities === "object", `${template.key}.editorCapabilities 缺失`);
   invariant(primaryTasks.has(template.editorCapabilities.primaryTask), `${template.key}.editorCapabilities.primaryTask 不合法`);
+  const editableObjects = template.editorCapabilities.editableObjects ?? [];
+  invariant(Array.isArray(editableObjects) && editableObjects.length > 0, `${template.key}.editorCapabilities.editableObjects 缺失`);
+  const editableRoleIds = editableObjects.map((object) => object.roleId);
+  invariant(new Set(editableRoleIds).size === editableRoleIds.length, `${template.key}.editableObjects.roleId 不得重复`);
+  const editableNodeIds = new Set();
+  for (const object of editableObjects) {
+    const role = template.roles.find((candidate) => candidate.id === object.roleId);
+    invariant(editableObjectKinds.has(object.kind), `${template.key}.editableObjects.${object.roleId}.kind 不合法`);
+    const nodeIds = object.nodeIds ?? [object.roleId];
+    invariant(Array.isArray(nodeIds) && nodeIds.length > 0, `${template.key}.editableObjects.${object.roleId}.nodeIds 不能为空`);
+    invariant(nodeIds.includes(object.roleId), `${template.key}.editableObjects.${object.roleId}.nodeIds 必须包含 roleId`);
+    invariant(new Set(nodeIds).size === nodeIds.length, `${template.key}.editableObjects.${object.roleId}.nodeIds 不得重复`);
+    for (const nodeId of nodeIds) {
+      invariant(/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(nodeId), `${template.key}.editableObjects.${object.roleId}.nodeIds 含非法节点 ${nodeId}`);
+      invariant(!editableNodeIds.has(nodeId), `${template.key}.editableObjects 节点 ${nodeId} 被多个对象声明`);
+      editableNodeIds.add(nodeId);
+    }
+    invariant(Array.isArray(object.contentFieldKeys), `${template.key}.editableObjects.${object.roleId}.contentFieldKeys 必须是数组`);
+    invariant(new Set(object.contentFieldKeys).size === object.contentFieldKeys.length, `${template.key}.editableObjects.${object.roleId}.contentFieldKeys 不得重复`);
+    invariant(object.contentFieldKeys.every((field) => /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(field)), `${template.key}.editableObjects.${object.roleId}.contentFieldKeys 含非法字段`);
+    const specialFieldKeys = [
+      object.altFieldKey,
+      object.referenceFieldKey,
+      ...(object.collectionFieldKeys ?? []),
+    ].filter(Boolean);
+    invariant(specialFieldKeys.every((field) => object.contentFieldKeys.includes(field)), `${template.key}.editableObjects.${object.roleId} 的特殊字段必须包含在 contentFieldKeys`);
+    if (object.altPolicy !== undefined) {
+      invariant(altPolicies.has(object.altPolicy), `${template.key}.editableObjects.${object.roleId}.altPolicy 不合法`);
+    }
+    if (object.kind === "media" || object.kind === "video") {
+      invariant(Boolean(object.altFieldKey || object.altPolicy), `${template.key}.editableObjects.${object.roleId} 必须声明 altFieldKey 或 altPolicy`);
+      if (object.altPolicy === "required") {
+        invariant(Boolean(object.altFieldKey), `${template.key}.editableObjects.${object.roleId} 的 required altPolicy 必须绑定 altFieldKey`);
+      }
+    }
+    if (object.referenceFieldKey) {
+      invariant(
+        (template.editorCapabilities.referenceFields ?? []).some((reference) => reference.key === object.referenceFieldKey),
+        `${template.key}.editableObjects.${object.roleId}.referenceFieldKey 未映射 referenceFields`,
+      );
+    }
+    if (object.collectionFieldKeys !== undefined) {
+      invariant(Array.isArray(object.collectionFieldKeys) && object.collectionFieldKeys.length > 0, `${template.key}.editableObjects.${object.roleId}.collectionFieldKeys 必须是非空数组`);
+    }
+    invariant(Array.isArray(object.capabilities), `${template.key}.editableObjects.${object.roleId}.capabilities 必须是数组`);
+    invariant(new Set(object.capabilities).size === object.capabilities.length, `${template.key}.editableObjects.${object.roleId}.capabilities 不得重复`);
+    invariant(object.capabilities.every((capability) => editableObjectCapabilities.has(capability)), `${template.key}.editableObjects.${object.roleId}.capabilities 含未知能力`);
+    if (!role) {
+      invariant(
+        object.kind === "action" &&
+          object.contentFieldKeys.length > 0 &&
+          object.capabilities.every((capability) => ["content", "link"].includes(capability)),
+        `${template.key}.editableObjects.${object.roleId} 未声明为角色时只能作为 content/link 行动字段组`,
+      );
+    }
+    invariant(object.responsive && typeof object.responsive === "object" && !Array.isArray(object.responsive), `${template.key}.editableObjects.${object.roleId}.responsive 缺失`);
+    invariant(
+      Object.keys(object.responsive).length === object.capabilities.length &&
+        object.capabilities.every((capability) => responsiveScopes.has(object.responsive[capability])),
+      `${template.key}.editableObjects.${object.roleId}.responsive 必须逐项声明 shared 或 viewport-specific`,
+    );
+    if (object.fieldScopes !== undefined) {
+      invariant(object.fieldScopes && typeof object.fieldScopes === "object" && !Array.isArray(object.fieldScopes), `${template.key}.editableObjects.${object.roleId}.fieldScopes 必须是对象`);
+      invariant(
+        Object.entries(object.fieldScopes).every(([field, scope]) => object.contentFieldKeys.includes(field) && responsiveScopes.has(scope)),
+        `${template.key}.editableObjects.${object.roleId}.fieldScopes 只能覆盖已绑定字段`,
+      );
+    }
+  }
   const referenceFields = template.editorCapabilities.referenceFields ?? [];
   invariant(Array.isArray(referenceFields), `${template.key}.editorCapabilities.referenceFields 必须是数组`);
   for (const reference of referenceFields) {
@@ -381,6 +477,19 @@ for (const template of source.templates) {
     invariant(template.roles.some((role) => role.id === slot.roleId), `${template.key}.layoutOverrides.slots 引用了未知角色 ${slot.roleId}`);
     invariant(!slot.fieldKey || /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(slot.fieldKey), `${template.key}.${slot.roleId}.fieldKey 不合法`);
     invariant(!slot.zoom || (Number.isFinite(slot.zoom.min) && Number.isFinite(slot.zoom.max) && slot.zoom.min >= 1 && slot.zoom.max >= slot.zoom.min), `${template.key}.${slot.roleId}.zoom 范围不合法`);
+    const editableObject = editableObjects.find((object) => (object.nodeIds ?? [object.roleId]).includes(slot.roleId));
+    invariant(editableObject, `${template.key}.${slot.roleId} 布局槽位缺少 editableObjects 映射`);
+    if (slot.fieldKey) invariant(editableObject.contentFieldKeys.includes(slot.fieldKey), `${template.key}.${slot.roleId}.fieldKey 未进入 editableObjects.contentFieldKeys`);
+    const requiredCapabilities = [
+      "layout", "layer",
+      slot.ratioPresets?.length ? "ratio" : undefined,
+      slot.sizePresets?.length ? "size" : undefined,
+      slot.positionPresets?.length ? "position" : undefined,
+      slot.fit?.length ? "fit" : undefined,
+      slot.zoom ? "zoom" : undefined,
+      slot.focusByViewport ? "focus" : undefined,
+    ].filter(Boolean);
+    invariant(requiredCapabilities.every((capability) => editableObject.capabilities.includes(capability)), `${template.key}.${slot.roleId} editableObjects 能力未覆盖布局槽位`);
   }
   for (const textRole of layoutOverrides.textRoles ?? []) {
     const knownTextRole =
@@ -389,6 +498,12 @@ for (const template of source.templates) {
       ) ||
       Object.prototype.hasOwnProperty.call(template.contentBudget?.limits ?? {}, textRole.roleId);
     invariant(knownTextRole, `${template.key}.layoutOverrides.textRoles 引用了未知角色 ${textRole.roleId}`);
+    const editableObject = editableObjects.find((object) => (object.nodeIds ?? [object.roleId]).includes(textRole.roleId));
+    invariant(editableObject, `${template.key}.${textRole.roleId} 文字角色缺少 editableObjects 映射`);
+    invariant(
+      ["layout", "layer", "visibility", "typography"].every((capability) => editableObject.capabilities.includes(capability)),
+      `${template.key}.${textRole.roleId} editableObjects 能力未覆盖文字布局`,
+    );
   }
 }
 
@@ -477,6 +592,30 @@ export type MediaSlot = {
   mobileRatio?: string;
 };
 
+export type ContentTemplateEditableObjectKind =
+  | "media" | "video" | "text" | "action" | "product" | "collection";
+
+export type ContentTemplateEditableCapability =
+  | "content" | "layout" | "layer" | "visibility" | "ratio"
+  | "size" | "position" | "fit" | "zoom" | "focus"
+  | "typography" | "link" | "items" | "reference" | "playback";
+
+export type ContentTemplateResponsiveScope = "shared" | "viewport-specific";
+
+export type ContentTemplateEditableObject = {
+  roleId: string;
+  nodeIds?: readonly string[];
+  kind: ContentTemplateEditableObjectKind;
+  contentFieldKeys: readonly string[];
+  altFieldKey?: string;
+  altPolicy?: "required" | "derived" | "decorative" | "not-applicable";
+  collectionFieldKeys?: readonly string[];
+  referenceFieldKey?: string;
+  fieldScopes?: Readonly<Record<string, ContentTemplateResponsiveScope>>;
+  capabilities: readonly ContentTemplateEditableCapability[];
+  responsive: Partial<Record<ContentTemplateEditableCapability, ContentTemplateResponsiveScope>>;
+};
+
 export type ContentTemplateContract = {
   key: ContentTemplateKey;
   moduleType: string;
@@ -507,6 +646,7 @@ export type ContentTemplateContract = {
     relation?: string;
     emphasis?: string;
     quantity?: { default: number; min: number; max: number };
+    publicationAttestation?: { fieldKey: string; label: string };
     defaultRatioByViewport?: Partial<Record<"desktop" | "mobile", string>>;
     allowedRatioPresetsByViewport?: Partial<Record<"desktop" | "mobile", readonly string[]>>;
   }[];
@@ -528,6 +668,7 @@ export type ContentTemplateContract = {
   supportsLinkTarget: boolean;
   editorCapabilities: {
     primaryTask: "media" | "product" | "category" | "structured" | "text" | "action";
+    editableObjects: readonly ContentTemplateEditableObject[];
     referenceFields?: readonly {
       kind: "product" | "category";
       key: string;
@@ -620,7 +761,10 @@ export type ContentTemplateInstanceOverridesV2 = {
   nodes?: Record<string, {
     enabled?: boolean;
     rectByViewport?: Partial<Record<"desktop" | "mobile", ContentTemplateVisualRect>>;
+    zIndexByViewport?: Partial<Record<"desktop" | "mobile", number>>;
     ratio?: number;
+    sizePreset?: string;
+    positionPreset?: string;
     mediaView?: {
       fit?: "cover" | "contain";
       zoom?: number;
@@ -632,6 +776,8 @@ export type ContentTemplateInstanceOverridesV2 = {
       color?: string;
       maxLines?: number;
       safeBand?: "none" | "light" | "dark";
+      lineHeight?: number;
+      letterSpacing?: number;
     };
   }>;
 };
@@ -720,6 +866,26 @@ export type ContentTemplateIssue = {
 export type ContentTemplateCompletion = {
   material: { complete: boolean; missing: string[] };
   content: { complete: boolean; missing: string[] };
+  collections: {
+    complete: boolean;
+    invalid: Array<{
+      roleId: string;
+      fieldKey: string;
+      count: number;
+      min: number;
+      max: number;
+    }>;
+  };
+  attestations: {
+    complete: boolean;
+    missing: Array<{
+      roleId: string;
+      collectionFieldKey: string;
+      attestationFieldKey: string;
+      label: string;
+      index: number;
+    }>;
+  };
   publish: { complete: boolean; issues: ContentTemplateIssue[] };
 };
 
@@ -756,6 +922,37 @@ export const CONTENT_TEMPLATE_BY_MODULE_TYPE = Object.fromEntries(
 
 export function getContentTemplateContract(moduleType: string) {
   return CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType];
+}
+
+export function findContentTemplateEditableObject(
+  contract: ContentTemplateContract | undefined,
+  nodeId: string,
+): ContentTemplateEditableObject | undefined {
+  if (!contract || !nodeId) return undefined;
+  return contract.editorCapabilities.editableObjects.find((object) =>
+    (object.nodeIds ?? [object.roleId]).includes(nodeId),
+  );
+}
+
+export function getContentTemplateEditableObject(
+  moduleType: string,
+  nodeId: string,
+): ContentTemplateEditableObject | undefined {
+  return findContentTemplateEditableObject(getContentTemplateContract(moduleType), nodeId);
+}
+
+export function getContentTemplateEditableFieldKeys(
+  moduleType: string,
+  nodeId: string,
+): readonly string[] {
+  return getContentTemplateEditableObject(moduleType, nodeId)?.contentFieldKeys ?? [];
+}
+
+export function contentTemplateObjectHasCapability(
+  object: ContentTemplateEditableObject | undefined,
+  capability: ContentTemplateEditableCapability,
+) {
+  return Boolean(object?.capabilities.includes(capability));
 }
 
 export function getContentTemplatePageRule(pageKey: string) {
@@ -809,6 +1006,30 @@ function getCompatibilityRoleValue(
     default:
       return directValue;
   }
+}
+
+function getQuantifiedCollectionValue(
+  contract: ContentTemplateContract,
+  roleId: string,
+  values: Record<string, unknown>,
+): { fieldKey: string; value: unknown[] } | undefined {
+  const editableObject = contract.editorCapabilities.editableObjects.find(
+    (object) => object.roleId === roleId,
+  );
+  if (!editableObject) return undefined;
+  const reference = contract.editorCapabilities.referenceFields?.find(
+    (item) => item.key === editableObject.referenceFieldKey,
+  );
+  const candidateKeys = [
+    editableObject.referenceFieldKey,
+    reference?.legacyKey,
+    ...(editableObject.collectionFieldKeys ?? []),
+  ].filter((key, index, keys): key is string => Boolean(key) && keys.indexOf(key) === index);
+  const populatedKey = candidateKeys.find(
+    (key) => Array.isArray(values[key]) && (values[key] as unknown[]).length > 0,
+  );
+  const arrayKey = populatedKey ?? candidateKeys.find((key) => Array.isArray(values[key]));
+  return arrayKey ? { fieldKey: arrayKey, value: values[arrayKey] as unknown[] } : undefined;
 }
 
 export function createContentTemplateMarker(
@@ -900,17 +1121,20 @@ function getInstanceOverrideIssues(input: {
       }
       const slotCapability = frameCapabilities.slots?.find((slot) => slot.roleId === nodeId);
       const textCapability = frameCapabilities.textRoles?.find((role) => role.roleId === nodeId);
-      if (!slotCapability && !textCapability) {
+      const editableObject = findContentTemplateEditableObject(input.contract, nodeId);
+      if (!editableObject || (!slotCapability && !textCapability)) {
         issues.push(issue("当前模板未声明该可视化节点的实例编辑能力。", path, nodeId));
         continue;
       }
-      if (rawNode.enabled !== undefined && !textCapability) {
-        issues.push(issue("当前节点不允许启用或隐藏文字角色。", path + ".enabled", nodeId));
+      const hasCapability = (capability: ContentTemplateEditableCapability) =>
+        editableObject.capabilities.includes(capability);
+      if (rawNode.enabled !== undefined && !hasCapability("visibility")) {
+        issues.push(issue("当前节点不允许启用或隐藏。", path + ".enabled", nodeId));
       }
       if (rawNode.ratio !== undefined && !finiteInRange(rawNode.ratio, 0.25, 4)) {
         issues.push(issue("节点比例必须位于 0.25–4 的安全范围。", path + ".ratio", nodeId));
       }
-      if (rawNode.ratio !== undefined && !slotCapability) {
+      if (rawNode.ratio !== undefined && (!slotCapability || !hasCapability("ratio"))) {
         issues.push(issue("当前节点不允许图片槽位比例覆盖。", path + ".ratio", nodeId));
       }
       if (rawNode.ratio !== undefined && slotCapability?.ratioPresets?.length) {
@@ -923,7 +1147,16 @@ function getInstanceOverrideIssues(input: {
           issues.push(issue("当前模板不允许该图片槽位比例。", path + ".ratio", nodeId));
         }
       }
+      if (rawNode.sizePreset !== undefined && (!slotCapability?.sizePresets?.includes(String(rawNode.sizePreset)) || !hasCapability("size"))) {
+        issues.push(issue("当前节点不允许该尺寸预设。", path + ".sizePreset", nodeId));
+      }
+      if (rawNode.positionPreset !== undefined && (!slotCapability?.positionPresets?.includes(String(rawNode.positionPreset)) || !hasCapability("position"))) {
+        issues.push(issue("当前节点不允许该位置预设。", path + ".positionPreset", nodeId));
+      }
       if (rawNode.rectByViewport !== undefined) {
+        if (!hasCapability("layout")) {
+          issues.push(issue("当前节点不允许响应式位置覆盖。", path + ".rectByViewport", nodeId));
+        }
         if (!isRecord(rawNode.rectByViewport)) {
           issues.push(issue("节点响应式位置格式无效。", path + ".rectByViewport", nodeId));
         } else {
@@ -943,19 +1176,40 @@ function getInstanceOverrideIssues(input: {
           }
         }
       }
+      if (rawNode.zIndexByViewport !== undefined) {
+        if (!hasCapability("layer")) {
+          issues.push(issue("当前节点不允许响应式层级覆盖。", path + ".zIndexByViewport", nodeId));
+        }
+        if (!isRecord(rawNode.zIndexByViewport)) {
+          issues.push(issue("节点响应式层级格式无效。", path + ".zIndexByViewport", nodeId));
+        } else {
+          for (const [viewport, rawZIndex] of Object.entries(rawNode.zIndexByViewport)) {
+            const zIndexPath = path + ".zIndexByViewport." + viewport;
+            const zIndex = Number(rawZIndex);
+            if (
+              !["desktop", "mobile"].includes(viewport) ||
+              !Number.isInteger(zIndex) ||
+              zIndex < 0 ||
+              zIndex > 20
+            ) {
+              issues.push(issue("节点层级必须是 0–20 的整数。", zIndexPath, nodeId));
+            }
+          }
+        }
+      }
       if (rawNode.mediaView !== undefined) {
-        if (!slotCapability) {
+        if (!slotCapability || !["fit", "zoom", "focus"].some((capability) => hasCapability(capability as ContentTemplateEditableCapability))) {
           issues.push(issue("当前节点不允许图片观看窗覆盖。", path + ".mediaView", nodeId));
         } else if (!isRecord(rawNode.mediaView)) {
           issues.push(issue("图片观看窗格式无效。", path + ".mediaView", nodeId));
         } else {
           const mediaView = rawNode.mediaView;
-          if (mediaView.fit !== undefined && !slotCapability.fit?.some((fit) => fit === String(mediaView.fit))) {
+          if (mediaView.fit !== undefined && (!hasCapability("fit") || !slotCapability.fit?.some((fit) => fit === String(mediaView.fit)))) {
             issues.push(issue("图片适配方式无效。", path + ".mediaView.fit", nodeId));
           }
           if (
             mediaView.zoom !== undefined &&
-            (!slotCapability.zoom || !finiteInRange(mediaView.zoom, slotCapability.zoom.min, slotCapability.zoom.max))
+            (!hasCapability("zoom") || !slotCapability.zoom || !finiteInRange(mediaView.zoom, slotCapability.zoom.min, slotCapability.zoom.max))
           ) {
             issues.push(issue("图片缩放超出当前模板槽位允许范围。", path + ".mediaView.zoom", nodeId));
           }
@@ -966,7 +1220,7 @@ function getInstanceOverrideIssues(input: {
             } else {
               for (const [viewport, rawFocus] of Object.entries(focusByViewport)) {
                 const focusPath = path + ".mediaView.focusByViewport." + viewport;
-                if (!slotCapability.focusByViewport || !["desktop", "mobile"].includes(viewport) || !isRecord(rawFocus) || !finiteInRange(rawFocus.x, 0, 100) || !finiteInRange(rawFocus.y, 0, 100)) {
+                if (!hasCapability("focus") || !slotCapability.focusByViewport || !["desktop", "mobile"].includes(viewport) || !isRecord(rawFocus) || !finiteInRange(rawFocus.x, 0, 100) || !finiteInRange(rawFocus.y, 0, 100)) {
                   issues.push(issue("图片焦点必须位于 0–100 的归一化范围。", focusPath, nodeId));
                 }
               }
@@ -975,7 +1229,7 @@ function getInstanceOverrideIssues(input: {
         }
       }
       if (rawNode.typography !== undefined) {
-        if (!textCapability) {
+        if (!textCapability || !hasCapability("typography")) {
           issues.push(issue("当前节点不允许文字排版覆盖。", path + ".typography", nodeId));
         } else if (!isRecord(rawNode.typography)) {
           issues.push(issue("文字布局格式无效。", path + ".typography", nodeId));
@@ -1012,16 +1266,34 @@ function getInstanceOverrideIssues(input: {
           if (typography.safeBand !== undefined && !["none", "light", "dark"].includes(String(typography.safeBand))) {
             issues.push(issue("安全文字带值无效。", path + ".typography.safeBand", nodeId));
           }
+          if (
+            typography.lineHeight !== undefined &&
+            !finiteInRange(typography.lineHeight, 1, 2.5)
+          ) {
+            issues.push(issue("文字行距必须位于 1–2.5 的安全范围。", path + ".typography.lineHeight", nodeId));
+          }
+          if (
+            typography.letterSpacing !== undefined &&
+            !finiteInRange(typography.letterSpacing, -0.05, 0.5)
+          ) {
+            issues.push(issue("文字字间距必须位于 -0.05–0.5em 的安全范围。", path + ".typography.letterSpacing", nodeId));
+          }
         }
       }
-      const textValue = input.props[nodeId];
-      const roleHasContent = typeof textValue === "string" && textValue.trim().length > 0;
+      const nodeContentFieldKeys = editableObject.contentFieldKeys.includes(nodeId)
+        ? [nodeId]
+        : editableObject.contentFieldKeys;
+      const roleHasContent = nodeContentFieldKeys.some((fieldKey) => {
+        const textValue = input.props[fieldKey];
+        return typeof textValue === "string" && textValue.trim().length > 0;
+      });
       const roleVisible = rawNode.enabled === true || (rawNode.enabled !== false && roleHasContent);
       const roleHasVisualOverride = rawNode.enabled !== undefined || rawNode.rectByViewport !== undefined || rawNode.typography !== undefined;
       if (rawNode.enabled === true && textCapability && !roleHasContent) {
+        const contentFieldKey = nodeContentFieldKeys[0] ?? nodeId;
         const contentPath = basePath.endsWith(".__instanceOverrides")
-          ? basePath.slice(0, -".__instanceOverrides".length) + "." + nodeId
-          : "props." + nodeId;
+          ? basePath.slice(0, -".__instanceOverrides".length) + "." + contentFieldKey
+          : "props." + contentFieldKey;
         issues.push(issue("已启用的文字角色必须填写内容。", contentPath, nodeId));
       }
       if (roleVisible && roleHasVisualOverride && textCapability?.requiresSafeBand) {
@@ -1239,10 +1511,43 @@ export function getContentTemplateCompletion(
     .map((slot) => slot.key);
   const missingText = contract.contentBudget.requiredText
     .filter((key) => !hasNonEmptyText(values[key]));
+  const invalidCollections = contract.roles.flatMap((role) => {
+    if (!role.quantity) return [];
+    const collection = getQuantifiedCollectionValue(contract, role.id, values);
+    const count = collection?.value.length ?? 0;
+    return count < role.quantity.min || count > role.quantity.max
+      ? [{
+          roleId: role.id,
+          fieldKey: collection?.fieldKey ?? role.id,
+          count,
+          min: role.quantity.min,
+          max: role.quantity.max,
+        }]
+      : [];
+  });
+  const missingAttestations = contract.roles.flatMap((role) => {
+    const attestation = role.publicationAttestation;
+    if (!attestation) return [];
+    const collection = getQuantifiedCollectionValue(contract, role.id, values);
+    if (!collection) return [];
+    return collection.value.flatMap((item, index) =>
+      !isRecord(item) || item[attestation.fieldKey] !== true
+        ? [{
+            roleId: role.id,
+            collectionFieldKey: collection.fieldKey,
+            attestationFieldKey: attestation.fieldKey,
+            label: attestation.label,
+            index,
+          }]
+        : [],
+    );
+  });
   const issues = getContentTemplateIssues({ moduleType, props: values });
   return {
     material: { complete: missingMedia.length === 0, missing: missingMedia },
     content: { complete: missingText.length === 0, missing: missingText },
+    collections: { complete: invalidCollections.length === 0, invalid: invalidCollections },
+    attestations: { complete: missingAttestations.length === 0, missing: missingAttestations },
     publish: {
       complete: !issues.some((issue) => issue.severity === "error"),
       issues,

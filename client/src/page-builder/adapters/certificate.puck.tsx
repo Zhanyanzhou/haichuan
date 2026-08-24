@@ -9,6 +9,7 @@ export interface CertificateItem {
   name: string;
   desc: string;
   imageUrl: string;
+  verificationConfirmed: boolean;
   focusX?: number;
   focusY?: number;
 }
@@ -26,12 +27,12 @@ export const certificatePuckConfig = {
     <CertificateBlock module={convertPuckProps("资质证书", props as any) as any} />
   ),
   defaultProps: {
-    title: "权威认证",
-    subtitle: "每件作品均附权威检测证书",
+    title: "证书信息待确认",
+    subtitle: "请填写并上传已经核验的真实证书信息。",
     certificates: [
-      { name: "国检证书", desc: "NGTC 国家珠宝玉石质量监督检验中心", imageUrl: "" },
-      { name: "IGI 国际证书", desc: "国际宝石学院认证", imageUrl: "" },
-      { name: "足金 999", desc: "材质成色权威检测", imageUrl: "" },
+      { name: "证书一待确认", desc: "请填写经核验的证书名称与说明。", imageUrl: "", verificationConfirmed: false },
+      { name: "证书二待确认", desc: "请填写经核验的证书名称与说明。", imageUrl: "", verificationConfirmed: false },
+      { name: "证书三待确认", desc: "请填写经核验的证书名称与说明。", imageUrl: "", verificationConfirmed: false },
     ],
     bgColor: "#FFFFFF",
     locked: false,

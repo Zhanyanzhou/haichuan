@@ -39,17 +39,42 @@ function sortObjectKeys(value: any): any {
 }
 
 /**
- * 页面内容语义指纹：只比较 content 数组的 type 与 props，
- * 忽略会话生成的 block id、对象键序与 Puck 归一化带来的结构差异。
+ * 页面内容语义指纹：比较根 content、zones 与 root，
+ * 忽略区块会话 id、对象键序与 Puck 归一化带来的结构差异。
  * 用于判断“草稿是否与线上已发布内容存在实质差异”。
  */
 export function canonicalizePuckContent(puck: unknown): string {
-  if (!puck || !Array.isArray((puck as any).content)) return "";
+  if (!puck || typeof puck !== "object" || Array.isArray(puck)) return "";
+  const document = puck as Record<string, any>;
+  const normalizeBlocks = (blocks: unknown) =>
+    Array.isArray(blocks)
+      ? blocks.map((block: any) => {
+          const props = { ...(block?.props || {}) };
+          delete props.id;
+          return { type: block?.type, props: sortObjectKeys(props) };
+        })
+      : [];
+  const zones =
+    document.zones &&
+    typeof document.zones === "object" &&
+    !Array.isArray(document.zones)
+      ? Object.fromEntries(
+          Object.keys(document.zones)
+            .sort()
+            .map((zoneKey) => [
+              zoneKey,
+              normalizeBlocks(document.zones[zoneKey]),
+            ]),
+        )
+      : {};
   return JSON.stringify(
-    (puck as any).content.map((block: any) => {
-      const props = { ...(block.props || {}) };
-      delete props.id;
-      return { type: block.type, props: sortObjectKeys(props) };
+    sortObjectKeys({
+      content: normalizeBlocks(document.content),
+      zones,
+      root:
+        document.root && typeof document.root === "object"
+          ? document.root
+          : {},
     }),
   );
 }
@@ -57,7 +82,7 @@ export function canonicalizePuckContent(puck: unknown): string {
 /**
  * 页面完整语义签名：content 指纹 + metadata 规范化签名。
  * 用于判定“草稿是否与线上已发布内容存在实质差异”（含 SEO 等 metadata 差异）。
- * canonicalizePuckContent 仅比较 content，无法识别仅 metadata 不同的未发布草稿。
+ * metadata 与 Puck 文档分别规范化，避免键序差异造成误判。
  */
 export function canonicalizePageContent(
   puck: unknown,
@@ -118,8 +143,9 @@ export function getEditorErrorMessage(error: unknown, fallback: string) {
 }
 
 export function getEditorHttpStatus(error: unknown) {
-  const status = (error as { response?: { status?: unknown } })?.response
-    ?.status;
+  const normalizedStatus = (error as { status?: unknown })?.status;
+  if (typeof normalizedStatus === "number") return normalizedStatus;
+  const status = (error as { response?: { status?: unknown } })?.response?.status;
   return typeof status === "number" ? status : undefined;
 }
 

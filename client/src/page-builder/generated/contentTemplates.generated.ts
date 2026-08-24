@@ -1,7 +1,7 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：efd8f33629b9642314331ff023e556504190586264a7b3d852f5d95d292c5d62
+ * SHA-256：96eb3520457242c6edf5552cc74f1a55079cdd974e913cbf8acb8638cd42362c
  */
 
 export const CONTENT_TEMPLATE_REGISTRY_VERSION = 3;
@@ -78,6 +78,8 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "doublePoster",
       "textBanner",
       "journey",
+      "brandPoints",
+      "servicePromises",
       "certificates",
       "storeInfo",
       "booking"
@@ -136,6 +138,9 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "journey",
       "comparison",
       "gallery",
+      "hotspot",
+      "brandPoints",
+      "servicePromises",
       "testimonials",
       "certificates",
       "booking"
@@ -154,14 +159,20 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "hero",
       "fullBleed",
       "video",
+      "carousel",
       "singlePoster",
       "doublePoster",
       "textBanner",
       "journey",
       "featuredProduct",
+      "productRow",
       "gallery",
       "wearingInspiration",
-      "booking"
+      "categoryCards",
+      "sceneShopping",
+      "brandPoints",
+      "booking",
+      "limitedEvent"
     ],
     "businessRegionCount": 0,
     "headerMode": {
@@ -177,13 +188,19 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "hero",
       "fullBleed",
       "video",
+      "carousel",
       "singlePoster",
       "doublePoster",
       "textBanner",
       "featuredProduct",
+      "productRow",
       "gallery",
       "wearingInspiration",
-      "booking"
+      "categoryCards",
+      "sceneShopping",
+      "hotspot",
+      "booking",
+      "limitedEvent"
     ],
     "businessRegionCount": 0,
     "headerMode": {
@@ -201,6 +218,30 @@ export type MediaSlot = {
   required: boolean;
   desktopRatio?: string;
   mobileRatio?: string;
+};
+
+export type ContentTemplateEditableObjectKind =
+  | "media" | "video" | "text" | "action" | "product" | "collection";
+
+export type ContentTemplateEditableCapability =
+  | "content" | "layout" | "layer" | "visibility" | "ratio"
+  | "size" | "position" | "fit" | "zoom" | "focus"
+  | "typography" | "link" | "items" | "reference" | "playback";
+
+export type ContentTemplateResponsiveScope = "shared" | "viewport-specific";
+
+export type ContentTemplateEditableObject = {
+  roleId: string;
+  nodeIds?: readonly string[];
+  kind: ContentTemplateEditableObjectKind;
+  contentFieldKeys: readonly string[];
+  altFieldKey?: string;
+  altPolicy?: "required" | "derived" | "decorative" | "not-applicable";
+  collectionFieldKeys?: readonly string[];
+  referenceFieldKey?: string;
+  fieldScopes?: Readonly<Record<string, ContentTemplateResponsiveScope>>;
+  capabilities: readonly ContentTemplateEditableCapability[];
+  responsive: Partial<Record<ContentTemplateEditableCapability, ContentTemplateResponsiveScope>>;
 };
 
 export type ContentTemplateContract = {
@@ -233,6 +274,7 @@ export type ContentTemplateContract = {
     relation?: string;
     emphasis?: string;
     quantity?: { default: number; min: number; max: number };
+    publicationAttestation?: { fieldKey: string; label: string };
     defaultRatioByViewport?: Partial<Record<"desktop" | "mobile", string>>;
     allowedRatioPresetsByViewport?: Partial<Record<"desktop" | "mobile", readonly string[]>>;
   }[];
@@ -254,6 +296,7 @@ export type ContentTemplateContract = {
   supportsLinkTarget: boolean;
   editorCapabilities: {
     primaryTask: "media" | "product" | "category" | "structured" | "text" | "action";
+    editableObjects: readonly ContentTemplateEditableObject[];
     referenceFields?: readonly {
       kind: "product" | "category";
       key: string;
@@ -346,7 +389,10 @@ export type ContentTemplateInstanceOverridesV2 = {
   nodes?: Record<string, {
     enabled?: boolean;
     rectByViewport?: Partial<Record<"desktop" | "mobile", ContentTemplateVisualRect>>;
+    zIndexByViewport?: Partial<Record<"desktop" | "mobile", number>>;
     ratio?: number;
+    sizePreset?: string;
+    positionPreset?: string;
     mediaView?: {
       fit?: "cover" | "contain";
       zoom?: number;
@@ -358,6 +404,8 @@ export type ContentTemplateInstanceOverridesV2 = {
       color?: string;
       maxLines?: number;
       safeBand?: "none" | "light" | "dark";
+      lineHeight?: number;
+      letterSpacing?: number;
     };
   }>;
 };
@@ -446,6 +494,26 @@ export type ContentTemplateIssue = {
 export type ContentTemplateCompletion = {
   material: { complete: boolean; missing: string[] };
   content: { complete: boolean; missing: string[] };
+  collections: {
+    complete: boolean;
+    invalid: Array<{
+      roleId: string;
+      fieldKey: string;
+      count: number;
+      min: number;
+      max: number;
+    }>;
+  };
+  attestations: {
+    complete: boolean;
+    missing: Array<{
+      roleId: string;
+      collectionFieldKey: string;
+      attestationFieldKey: string;
+      label: string;
+      index: number;
+    }>;
+  };
   publish: { complete: boolean; issues: ContentTemplateIssue[] };
 };
 
@@ -637,6 +705,103 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "预约入口",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altFieldKey": "altText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "contentFieldKeys": [
+            "backgroundImage",
+            "altText"
+          ],
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "zoom": "shared"
+          },
+          "roleId": "bgImage"
+        },
+        {
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "nodeIds": [
+            "copy",
+            "title",
+            "subtitle"
+          ],
+          "responsive": {
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "capabilities": [
+            "content",
+            "link",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
+          ],
+          "contentFieldKeys": [
+            "buttonText",
+            "targetType",
+            "productId",
+            "linkUrl"
+          ],
+          "kind": "action",
+          "nodeIds": [
+            "primaryAction",
+            "buttonText"
+          ],
+          "responsive": {
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "link": "shared",
+            "typography": "shared",
+            "visibility": "shared"
+          },
+          "roleId": "primaryAction"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "phone"
+          ],
+          "kind": "action",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "secondaryContact"
+        }
+      ],
       "layoutOverrides": {
         "framePresets": [
           "compact",
@@ -925,6 +1090,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "品牌要点",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "capabilities": [
+            "content",
+            "items"
+          ],
+          "collectionFieldKeys": [
+            "cards"
+          ],
+          "contentFieldKeys": [
+            "cards"
+          ],
+          "kind": "collection",
+          "responsive": {
+            "content": "shared",
+            "items": "shared"
+          },
+          "roleId": "points"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        }
+      ],
       "layoutOverrides": {
         "compositionPresets": [
           "grid-2",
@@ -1088,6 +1287,44 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "轮播",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "capabilities": [
+            "content",
+            "items",
+            "playback",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "collectionFieldKeys": [
+            "images"
+          ],
+          "contentFieldKeys": [
+            "images",
+            "autoPlay",
+            "showDots",
+            "showArrows",
+            "interval"
+          ],
+          "kind": "collection",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "items": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "playback": "shared",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "frames"
+        }
+      ],
       "layoutOverrides": {
         "framePresets": [
           "standard",
@@ -1095,6 +1332,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "slots": [
           {
+            "fieldKey": "images",
             "fit": [
               "cover"
             ],
@@ -1281,6 +1519,52 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "品类入口",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "capabilities": [
+            "content",
+            "items",
+            "reference",
+            "layout",
+            "layer",
+            "ratio",
+            "fit"
+          ],
+          "collectionFieldKeys": [
+            "categories"
+          ],
+          "contentFieldKeys": [
+            "categorySlugs",
+            "categories"
+          ],
+          "kind": "collection",
+          "referenceFieldKey": "categorySlugs",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "items": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "reference": "shared"
+          },
+          "roleId": "categories"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        }
+      ],
       "layoutOverrides": {
         "compositionPresets": [
           "grid-2",
@@ -1289,6 +1573,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "slots": [
           {
+            "fieldKey": "categories",
             "fit": [
               "cover"
             ],
@@ -1473,6 +1758,48 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "证书展示",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "capabilities": [
+            "content",
+            "items",
+            "layout",
+            "layer",
+            "ratio",
+            "fit"
+          ],
+          "collectionFieldKeys": [
+            "certificates"
+          ],
+          "contentFieldKeys": [
+            "certificates"
+          ],
+          "kind": "collection",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "items": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared"
+          },
+          "roleId": "certificates"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        }
+      ],
       "layoutOverrides": {
         "compositionPresets": [
           "grid-2",
@@ -1480,6 +1807,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "slots": [
           {
+            "fieldKey": "certificates",
             "fit": [
               "contain",
               "cover"
@@ -1619,6 +1947,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         "id": "certificates",
         "kind": "collection",
+        "publicationAttestation": {
+          "fieldKey": "verificationConfirmed",
+          "label": "已核验证书原件与展示信息一致"
+        },
         "quantity": {
           "default": 3,
           "max": 6,
@@ -1656,9 +1988,100 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "前后对比",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altFieldKey": "beforeAltText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom"
+          ],
+          "contentFieldKeys": [
+            "beforeImage",
+            "beforeLabel",
+            "beforeAltText"
+          ],
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "before"
+        },
+        {
+          "altFieldKey": "afterAltText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom"
+          ],
+          "contentFieldKeys": [
+            "afterImage",
+            "afterLabel",
+            "afterAltText"
+          ],
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "after"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "capabilities": [
+            "content",
+            "link"
+          ],
+          "contentFieldKeys": [
+            "actionText",
+            "targetType",
+            "productId",
+            "linkUrl"
+          ],
+          "kind": "action",
+          "nodeIds": [
+            "action",
+            "actionText"
+          ],
+          "responsive": {
+            "content": "shared",
+            "link": "shared"
+          },
+          "roleId": "action"
+        }
+      ],
       "layoutOverrides": {
         "slots": [
           {
+            "fieldKey": "beforeImage",
             "fit": [
               "cover"
             ],
@@ -1674,6 +2097,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             }
           },
           {
+            "fieldKey": "afterImage",
             "fit": [
               "cover"
             ],
@@ -1910,6 +2334,116 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "双图文",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altFieldKey": "mainAltText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "size",
+            "position",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "contentFieldKeys": [
+            "mainImage",
+            "mainAltText"
+          ],
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "position": "shared",
+            "ratio": "shared",
+            "size": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "mainImage"
+        },
+        {
+          "altFieldKey": "detailAltText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "size",
+            "position",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "contentFieldKeys": [
+            "detailImage",
+            "detailAltText"
+          ],
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "position": "shared",
+            "ratio": "shared",
+            "size": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "detailImage"
+        },
+        {
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "description",
+            "number",
+            "label"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "capabilities": [
+            "content",
+            "link"
+          ],
+          "contentFieldKeys": [
+            "actionText",
+            "targetType",
+            "productId",
+            "linkUrl"
+          ],
+          "kind": "action",
+          "nodeIds": [
+            "action",
+            "actionText"
+          ],
+          "responsive": {
+            "content": "shared",
+            "link": "shared"
+          },
+          "roleId": "action"
+        }
+      ],
       "layoutOverrides": {
         "compositionPresets": [
           "balanced",
@@ -2198,6 +2732,86 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "单品展示",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "capabilities": [
+            "content",
+            "reference",
+            "layout",
+            "layer",
+            "ratio",
+            "size",
+            "fit"
+          ],
+          "contentFieldKeys": [
+            "productCode"
+          ],
+          "kind": "product",
+          "referenceFieldKey": "productCode",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "reference": "shared",
+            "size": "shared"
+          },
+          "roleId": "product"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "eyebrow",
+            "title",
+            "summary"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "capabilities": [
+            "content",
+            "link"
+          ],
+          "contentFieldKeys": [
+            "primaryText",
+            "secondaryText",
+            "secondaryTargetType",
+            "secondaryProductId",
+            "secondaryLinkUrl"
+          ],
+          "kind": "action",
+          "nodeIds": [
+            "action",
+            "primaryText",
+            "secondaryText"
+          ],
+          "responsive": {
+            "content": "shared",
+            "link": "shared"
+          },
+          "roleId": "action"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "showPrice"
+          ],
+          "kind": "collection",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "list"
+        }
+      ],
       "layoutOverrides": {
         "compositionPresets": [
           "image-left",
@@ -2205,6 +2819,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "slots": [
           {
+            "fieldKey": "productCode",
             "fit": [
               "cover",
               "contain"
@@ -2422,6 +3037,115 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "通栏图",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altFieldKey": "altText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "contentFieldKeys": [
+            "image",
+            "altText"
+          ],
+          "fieldScopes": {
+            "altText": "shared",
+            "image": "viewport-specific"
+          },
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "image"
+        },
+        {
+          "altFieldKey": "altText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "contentFieldKeys": [
+            "mobileImage",
+            "altText"
+          ],
+          "fieldScopes": {
+            "altText": "shared",
+            "mobileImage": "viewport-specific"
+          },
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "mobileImage"
+        },
+        {
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
+          ],
+          "contentFieldKeys": [
+            "eyebrow",
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "capabilities": [
+            "content",
+            "link"
+          ],
+          "contentFieldKeys": [
+            "buttonText",
+            "targetType",
+            "productId",
+            "linkUrl"
+          ],
+          "kind": "action",
+          "nodeIds": [
+            "action",
+            "buttonText"
+          ],
+          "responsive": {
+            "content": "shared",
+            "link": "shared"
+          },
+          "roleId": "action"
+        }
+      ],
       "layoutOverrides": {
         "framePresets": [
           "standard",
@@ -2672,6 +3396,50 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "作品画廊",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "capabilities": [
+            "content",
+            "items",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom"
+          ],
+          "collectionFieldKeys": [
+            "items"
+          ],
+          "contentFieldKeys": [
+            "items"
+          ],
+          "kind": "collection",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "items": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "works"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        }
+      ],
       "layoutOverrides": {
         "compositionPresets": [
           "editorial",
@@ -2679,6 +3447,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "slots": [
           {
+            "fieldKey": "items",
             "fit": [
               "cover"
             ],
@@ -2894,6 +3663,129 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "首屏",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altFieldKey": "altText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "contentFieldKeys": [
+            "desktopImage",
+            "altText"
+          ],
+          "fieldScopes": {
+            "altText": "shared",
+            "desktopImage": "viewport-specific"
+          },
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "desktopImage"
+        },
+        {
+          "altFieldKey": "altText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "contentFieldKeys": [
+            "mobileImage",
+            "altText"
+          ],
+          "fieldScopes": {
+            "altText": "shared",
+            "mobileImage": "viewport-specific"
+          },
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "mobileImage"
+        },
+        {
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
+          ],
+          "contentFieldKeys": [
+            "eyebrow",
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "nodeIds": [
+            "copy",
+            "eyebrow",
+            "title",
+            "subtitle"
+          ],
+          "responsive": {
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "capabilities": [
+            "content",
+            "link",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
+          ],
+          "contentFieldKeys": [
+            "actionText",
+            "targetType",
+            "productId",
+            "linkUrl"
+          ],
+          "kind": "action",
+          "nodeIds": [
+            "action",
+            "actionText"
+          ],
+          "responsive": {
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "link": "shared",
+            "typography": "shared",
+            "visibility": "shared"
+          },
+          "roleId": "action"
+        }
+      ],
       "layoutOverrides": {
         "framePresets": [
           "compact",
@@ -3258,9 +4150,13 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
   "hotspot": {
     "allowedControls": [],
     "contentBudget": {
-      "limits": {},
+      "limits": {
+        "altText": 80
+      },
       "maxCtas": 0,
-      "requiredText": []
+      "requiredText": [
+        "altText"
+      ]
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
@@ -3268,9 +4164,72 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "图片热区",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altFieldKey": "altText",
+          "altPolicy": "required",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "contentFieldKeys": [
+            "image",
+            "mobileImage",
+            "altText"
+          ],
+          "fieldScopes": {
+            "altText": "shared",
+            "image": "viewport-specific",
+            "mobileImage": "viewport-specific"
+          },
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "sceneImage"
+        },
+        {
+          "capabilities": [
+            "content",
+            "items",
+            "link"
+          ],
+          "collectionFieldKeys": [
+            "hotspots",
+            "mobileHotspots"
+          ],
+          "contentFieldKeys": [
+            "hotspots",
+            "mobileHotspots"
+          ],
+          "fieldScopes": {
+            "hotspots": "viewport-specific",
+            "mobileHotspots": "viewport-specific"
+          },
+          "kind": "collection",
+          "responsive": {
+            "content": "shared",
+            "items": "viewport-specific",
+            "link": "shared"
+          },
+          "roleId": "hotspots"
+        }
+      ],
       "layoutOverrides": {
         "slots": [
           {
+            "fieldKey": "image",
             "fit": [
               "cover",
               "contain"
@@ -3513,6 +4472,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "内容流程",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "capabilities": [
+            "content",
+            "items"
+          ],
+          "collectionFieldKeys": [
+            "steps"
+          ],
+          "contentFieldKeys": [
+            "steps"
+          ],
+          "kind": "collection",
+          "responsive": {
+            "content": "shared",
+            "items": "shared"
+          },
+          "roleId": "steps"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        }
+      ],
       "layoutOverrides": {
         "framePresets": [
           "standard",
@@ -3651,6 +4644,96 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "限时活动",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altPolicy": "derived",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom"
+          ],
+          "contentFieldKeys": [
+            "eventImage"
+          ],
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "event"
+        },
+        {
+          "capabilities": [
+            "content",
+            "items"
+          ],
+          "collectionFieldKeys": [
+            "benefits"
+          ],
+          "contentFieldKeys": [
+            "targetDate",
+            "benefits"
+          ],
+          "kind": "collection",
+          "responsive": {
+            "content": "shared",
+            "items": "shared"
+          },
+          "roleId": "time"
+        },
+        {
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
+          ],
+          "contentFieldKeys": [
+            "eyebrow",
+            "title",
+            "body"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "capabilities": [
+            "content",
+            "link"
+          ],
+          "contentFieldKeys": [
+            "buttonText",
+            "targetType",
+            "productId",
+            "linkUrl"
+          ],
+          "kind": "action",
+          "nodeIds": [
+            "action",
+            "buttonText"
+          ],
+          "responsive": {
+            "content": "shared",
+            "link": "shared"
+          },
+          "roleId": "action"
+        }
+      ],
       "layoutOverrides": {
         "framePresets": [
           "standard",
@@ -3658,6 +4741,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "slots": [
           {
+            "fieldKey": "eventImage",
             "fit": [
               "cover",
               "contain"
@@ -3895,6 +4979,46 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "商品列表",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "capabilities": [
+            "content",
+            "reference",
+            "layout",
+            "layer",
+            "ratio",
+            "fit"
+          ],
+          "contentFieldKeys": [
+            "productCodes"
+          ],
+          "kind": "product",
+          "referenceFieldKey": "productCodes",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "reference": "shared"
+          },
+          "roleId": "productCards"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        }
+      ],
       "layoutOverrides": {
         "compositionPresets": [
           "grid-2",
@@ -3903,6 +5027,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "slots": [
           {
+            "fieldKey": "productCodes",
             "fit": [
               "cover",
               "contain"
@@ -4112,6 +5237,48 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "场景入口",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "capabilities": [
+            "content",
+            "items",
+            "layout",
+            "layer",
+            "ratio",
+            "fit"
+          ],
+          "collectionFieldKeys": [
+            "categories"
+          ],
+          "contentFieldKeys": [
+            "categories"
+          ],
+          "kind": "collection",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "items": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared"
+          },
+          "roleId": "scenes"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        }
+      ],
       "layoutOverrides": {
         "compositionPresets": [
           "grid-2",
@@ -4120,6 +5287,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "slots": [
           {
+            "fieldKey": "categories",
             "fit": [
               "cover"
             ],
@@ -4311,6 +5479,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "服务承诺",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "capabilities": [
+            "content",
+            "items"
+          ],
+          "collectionFieldKeys": [
+            "cards"
+          ],
+          "contentFieldKeys": [
+            "cards"
+          ],
+          "kind": "collection",
+          "responsive": {
+            "content": "shared",
+            "items": "shared"
+          },
+          "roleId": "promises"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        }
+      ],
       "layoutOverrides": {
         "compositionPresets": [
           "grid-2",
@@ -4497,6 +5699,116 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "单图文",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altFieldKey": "altText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "contentFieldKeys": [
+            "desktopImage",
+            "altText"
+          ],
+          "fieldScopes": {
+            "altText": "shared",
+            "desktopImage": "viewport-specific"
+          },
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "desktopImage"
+        },
+        {
+          "altFieldKey": "altText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "contentFieldKeys": [
+            "mobileImage",
+            "altText"
+          ],
+          "fieldScopes": {
+            "altText": "shared",
+            "mobileImage": "viewport-specific"
+          },
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "mobileImage"
+        },
+        {
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle",
+            "number",
+            "label"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "capabilities": [
+            "content",
+            "link"
+          ],
+          "contentFieldKeys": [
+            "actionText",
+            "targetType",
+            "productId",
+            "linkUrl"
+          ],
+          "kind": "action",
+          "nodeIds": [
+            "action",
+            "actionText"
+          ],
+          "responsive": {
+            "content": "shared",
+            "link": "shared"
+          },
+          "roleId": "action"
+        }
+      ],
       "layoutOverrides": {
         "framePresets": [
           "compact",
@@ -4779,6 +6091,85 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "门店信息",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altPolicy": "derived",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom"
+          ],
+          "contentFieldKeys": [
+            "image"
+          ],
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "store"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "useSiteSettings",
+            "storeName",
+            "address",
+            "hours",
+            "phone"
+          ],
+          "fieldScopes": {
+            "address": "shared",
+            "hours": "shared",
+            "phone": "shared",
+            "storeName": "shared",
+            "useSiteSettings": "shared"
+          },
+          "kind": "collection",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "details"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "storeName"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "capabilities": [
+            "content",
+            "link"
+          ],
+          "contentFieldKeys": [
+            "mapUrl",
+            "phone"
+          ],
+          "kind": "action",
+          "responsive": {
+            "content": "shared",
+            "link": "shared"
+          },
+          "roleId": "action"
+        }
+      ],
       "layoutOverrides": {
         "compositionPresets": [
           "image-left",
@@ -4786,6 +6177,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "slots": [
           {
+            "fieldKey": "image",
             "fit": [
               "cover",
               "contain"
@@ -4991,6 +6383,41 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "顾客分享",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "capabilities": [
+            "content",
+            "items",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom"
+          ],
+          "collectionFieldKeys": [
+            "testimonials"
+          ],
+          "contentFieldKeys": [
+            "testimonials"
+          ],
+          "kind": "collection",
+          "nodeIds": [
+            "authorizedPhoto",
+            "mainQuote",
+            "attribution"
+          ],
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "items": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "authorizedPhoto"
+        }
+      ],
       "layoutOverrides": {
         "compositionPresets": [
           "editorial",
@@ -4998,6 +6425,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "slots": [
           {
+            "fieldKey": "testimonials",
             "fit": [
               "cover"
             ],
@@ -5139,6 +6567,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "id": "authorizedPhoto",
         "kind": "media",
         "proof": "authorized-customer-photo",
+        "publicationAttestation": {
+          "fieldKey": "authorizationConfirmed",
+          "label": "已取得顾客公开展示的书面授权"
+        },
         "quantity": {
           "default": 1,
           "max": 3,
@@ -5195,6 +6627,67 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "纯文字",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altPolicy": "decorative",
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "bgImage"
+          ],
+          "kind": "media",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "bgImage"
+        },
+        {
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
+          ],
+          "contentFieldKeys": [
+            "eyebrow",
+            "title",
+            "body"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "capabilities": [
+            "content",
+            "link"
+          ],
+          "contentFieldKeys": [
+            "buttonText",
+            "targetType",
+            "productId",
+            "linkUrl"
+          ],
+          "kind": "action",
+          "nodeIds": [
+            "action",
+            "buttonText"
+          ],
+          "responsive": {
+            "content": "shared",
+            "link": "shared"
+          },
+          "roleId": "action"
+        }
+      ],
       "layoutOverrides": {
         "framePresets": [
           "compact",
@@ -5393,6 +6886,78 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "视频",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altPolicy": "not-applicable",
+          "capabilities": [
+            "content",
+            "playback",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "contentFieldKeys": [
+            "videoUrl",
+            "posterUrl",
+            "videoWidth",
+            "autoPlay",
+            "loop",
+            "muted",
+            "showControls"
+          ],
+          "kind": "video",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "playback": "shared",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "coverImage"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "capabilities": [
+            "content",
+            "link"
+          ],
+          "contentFieldKeys": [
+            "actionText",
+            "targetType",
+            "productId",
+            "linkUrl"
+          ],
+          "kind": "action",
+          "nodeIds": [
+            "action",
+            "actionText"
+          ],
+          "responsive": {
+            "content": "shared",
+            "link": "shared"
+          },
+          "roleId": "action"
+        }
+      ],
       "layoutOverrides": {
         "framePresets": [
           "standard",
@@ -5400,6 +6965,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "slots": [
           {
+            "fieldKey": "posterUrl",
             "fit": [
               "cover",
               "contain"
@@ -5615,9 +7181,91 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     },
     "displayName": "佩戴展示",
     "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altFieldKey": "altText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "contentFieldKeys": [
+            "image",
+            "altText"
+          ],
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "ratio": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "wearingImage"
+        },
+        {
+          "capabilities": [
+            "content"
+          ],
+          "contentFieldKeys": [
+            "title",
+            "subtitle"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "capabilities": [
+            "content",
+            "reference"
+          ],
+          "contentFieldKeys": [
+            "productCodes"
+          ],
+          "kind": "product",
+          "referenceFieldKey": "productCodes",
+          "responsive": {
+            "content": "shared",
+            "reference": "shared"
+          },
+          "roleId": "relatedProducts"
+        },
+        {
+          "capabilities": [
+            "content",
+            "link"
+          ],
+          "contentFieldKeys": [
+            "actionText",
+            "targetType",
+            "productId",
+            "linkUrl"
+          ],
+          "kind": "action",
+          "nodeIds": [
+            "action",
+            "actionText"
+          ],
+          "responsive": {
+            "content": "shared",
+            "link": "shared"
+          },
+          "roleId": "action"
+        }
+      ],
       "layoutOverrides": {
         "slots": [
           {
+            "fieldKey": "image",
             "fit": [
               "cover",
               "contain"
@@ -9499,6 +11147,37 @@ export function getContentTemplateContract(moduleType: string) {
   return CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType];
 }
 
+export function findContentTemplateEditableObject(
+  contract: ContentTemplateContract | undefined,
+  nodeId: string,
+): ContentTemplateEditableObject | undefined {
+  if (!contract || !nodeId) return undefined;
+  return contract.editorCapabilities.editableObjects.find((object) =>
+    (object.nodeIds ?? [object.roleId]).includes(nodeId),
+  );
+}
+
+export function getContentTemplateEditableObject(
+  moduleType: string,
+  nodeId: string,
+): ContentTemplateEditableObject | undefined {
+  return findContentTemplateEditableObject(getContentTemplateContract(moduleType), nodeId);
+}
+
+export function getContentTemplateEditableFieldKeys(
+  moduleType: string,
+  nodeId: string,
+): readonly string[] {
+  return getContentTemplateEditableObject(moduleType, nodeId)?.contentFieldKeys ?? [];
+}
+
+export function contentTemplateObjectHasCapability(
+  object: ContentTemplateEditableObject | undefined,
+  capability: ContentTemplateEditableCapability,
+) {
+  return Boolean(object?.capabilities.includes(capability));
+}
+
 export function getContentTemplatePageRule(pageKey: string) {
   return (CONTENT_TEMPLATE_PAGE_RULES as Record<string, ContentTemplatePageRule | undefined>)[pageKey];
 }
@@ -9550,6 +11229,30 @@ function getCompatibilityRoleValue(
     default:
       return directValue;
   }
+}
+
+function getQuantifiedCollectionValue(
+  contract: ContentTemplateContract,
+  roleId: string,
+  values: Record<string, unknown>,
+): { fieldKey: string; value: unknown[] } | undefined {
+  const editableObject = contract.editorCapabilities.editableObjects.find(
+    (object) => object.roleId === roleId,
+  );
+  if (!editableObject) return undefined;
+  const reference = contract.editorCapabilities.referenceFields?.find(
+    (item) => item.key === editableObject.referenceFieldKey,
+  );
+  const candidateKeys = [
+    editableObject.referenceFieldKey,
+    reference?.legacyKey,
+    ...(editableObject.collectionFieldKeys ?? []),
+  ].filter((key, index, keys): key is string => Boolean(key) && keys.indexOf(key) === index);
+  const populatedKey = candidateKeys.find(
+    (key) => Array.isArray(values[key]) && (values[key] as unknown[]).length > 0,
+  );
+  const arrayKey = populatedKey ?? candidateKeys.find((key) => Array.isArray(values[key]));
+  return arrayKey ? { fieldKey: arrayKey, value: values[arrayKey] as unknown[] } : undefined;
 }
 
 export function createContentTemplateMarker(
@@ -9641,17 +11344,20 @@ function getInstanceOverrideIssues(input: {
       }
       const slotCapability = frameCapabilities.slots?.find((slot) => slot.roleId === nodeId);
       const textCapability = frameCapabilities.textRoles?.find((role) => role.roleId === nodeId);
-      if (!slotCapability && !textCapability) {
+      const editableObject = findContentTemplateEditableObject(input.contract, nodeId);
+      if (!editableObject || (!slotCapability && !textCapability)) {
         issues.push(issue("当前模板未声明该可视化节点的实例编辑能力。", path, nodeId));
         continue;
       }
-      if (rawNode.enabled !== undefined && !textCapability) {
-        issues.push(issue("当前节点不允许启用或隐藏文字角色。", path + ".enabled", nodeId));
+      const hasCapability = (capability: ContentTemplateEditableCapability) =>
+        editableObject.capabilities.includes(capability);
+      if (rawNode.enabled !== undefined && !hasCapability("visibility")) {
+        issues.push(issue("当前节点不允许启用或隐藏。", path + ".enabled", nodeId));
       }
       if (rawNode.ratio !== undefined && !finiteInRange(rawNode.ratio, 0.25, 4)) {
         issues.push(issue("节点比例必须位于 0.25–4 的安全范围。", path + ".ratio", nodeId));
       }
-      if (rawNode.ratio !== undefined && !slotCapability) {
+      if (rawNode.ratio !== undefined && (!slotCapability || !hasCapability("ratio"))) {
         issues.push(issue("当前节点不允许图片槽位比例覆盖。", path + ".ratio", nodeId));
       }
       if (rawNode.ratio !== undefined && slotCapability?.ratioPresets?.length) {
@@ -9664,7 +11370,16 @@ function getInstanceOverrideIssues(input: {
           issues.push(issue("当前模板不允许该图片槽位比例。", path + ".ratio", nodeId));
         }
       }
+      if (rawNode.sizePreset !== undefined && (!slotCapability?.sizePresets?.includes(String(rawNode.sizePreset)) || !hasCapability("size"))) {
+        issues.push(issue("当前节点不允许该尺寸预设。", path + ".sizePreset", nodeId));
+      }
+      if (rawNode.positionPreset !== undefined && (!slotCapability?.positionPresets?.includes(String(rawNode.positionPreset)) || !hasCapability("position"))) {
+        issues.push(issue("当前节点不允许该位置预设。", path + ".positionPreset", nodeId));
+      }
       if (rawNode.rectByViewport !== undefined) {
+        if (!hasCapability("layout")) {
+          issues.push(issue("当前节点不允许响应式位置覆盖。", path + ".rectByViewport", nodeId));
+        }
         if (!isRecord(rawNode.rectByViewport)) {
           issues.push(issue("节点响应式位置格式无效。", path + ".rectByViewport", nodeId));
         } else {
@@ -9684,19 +11399,40 @@ function getInstanceOverrideIssues(input: {
           }
         }
       }
+      if (rawNode.zIndexByViewport !== undefined) {
+        if (!hasCapability("layer")) {
+          issues.push(issue("当前节点不允许响应式层级覆盖。", path + ".zIndexByViewport", nodeId));
+        }
+        if (!isRecord(rawNode.zIndexByViewport)) {
+          issues.push(issue("节点响应式层级格式无效。", path + ".zIndexByViewport", nodeId));
+        } else {
+          for (const [viewport, rawZIndex] of Object.entries(rawNode.zIndexByViewport)) {
+            const zIndexPath = path + ".zIndexByViewport." + viewport;
+            const zIndex = Number(rawZIndex);
+            if (
+              !["desktop", "mobile"].includes(viewport) ||
+              !Number.isInteger(zIndex) ||
+              zIndex < 0 ||
+              zIndex > 20
+            ) {
+              issues.push(issue("节点层级必须是 0–20 的整数。", zIndexPath, nodeId));
+            }
+          }
+        }
+      }
       if (rawNode.mediaView !== undefined) {
-        if (!slotCapability) {
+        if (!slotCapability || !["fit", "zoom", "focus"].some((capability) => hasCapability(capability as ContentTemplateEditableCapability))) {
           issues.push(issue("当前节点不允许图片观看窗覆盖。", path + ".mediaView", nodeId));
         } else if (!isRecord(rawNode.mediaView)) {
           issues.push(issue("图片观看窗格式无效。", path + ".mediaView", nodeId));
         } else {
           const mediaView = rawNode.mediaView;
-          if (mediaView.fit !== undefined && !slotCapability.fit?.some((fit) => fit === String(mediaView.fit))) {
+          if (mediaView.fit !== undefined && (!hasCapability("fit") || !slotCapability.fit?.some((fit) => fit === String(mediaView.fit)))) {
             issues.push(issue("图片适配方式无效。", path + ".mediaView.fit", nodeId));
           }
           if (
             mediaView.zoom !== undefined &&
-            (!slotCapability.zoom || !finiteInRange(mediaView.zoom, slotCapability.zoom.min, slotCapability.zoom.max))
+            (!hasCapability("zoom") || !slotCapability.zoom || !finiteInRange(mediaView.zoom, slotCapability.zoom.min, slotCapability.zoom.max))
           ) {
             issues.push(issue("图片缩放超出当前模板槽位允许范围。", path + ".mediaView.zoom", nodeId));
           }
@@ -9707,7 +11443,7 @@ function getInstanceOverrideIssues(input: {
             } else {
               for (const [viewport, rawFocus] of Object.entries(focusByViewport)) {
                 const focusPath = path + ".mediaView.focusByViewport." + viewport;
-                if (!slotCapability.focusByViewport || !["desktop", "mobile"].includes(viewport) || !isRecord(rawFocus) || !finiteInRange(rawFocus.x, 0, 100) || !finiteInRange(rawFocus.y, 0, 100)) {
+                if (!hasCapability("focus") || !slotCapability.focusByViewport || !["desktop", "mobile"].includes(viewport) || !isRecord(rawFocus) || !finiteInRange(rawFocus.x, 0, 100) || !finiteInRange(rawFocus.y, 0, 100)) {
                   issues.push(issue("图片焦点必须位于 0–100 的归一化范围。", focusPath, nodeId));
                 }
               }
@@ -9716,7 +11452,7 @@ function getInstanceOverrideIssues(input: {
         }
       }
       if (rawNode.typography !== undefined) {
-        if (!textCapability) {
+        if (!textCapability || !hasCapability("typography")) {
           issues.push(issue("当前节点不允许文字排版覆盖。", path + ".typography", nodeId));
         } else if (!isRecord(rawNode.typography)) {
           issues.push(issue("文字布局格式无效。", path + ".typography", nodeId));
@@ -9753,16 +11489,34 @@ function getInstanceOverrideIssues(input: {
           if (typography.safeBand !== undefined && !["none", "light", "dark"].includes(String(typography.safeBand))) {
             issues.push(issue("安全文字带值无效。", path + ".typography.safeBand", nodeId));
           }
+          if (
+            typography.lineHeight !== undefined &&
+            !finiteInRange(typography.lineHeight, 1, 2.5)
+          ) {
+            issues.push(issue("文字行距必须位于 1–2.5 的安全范围。", path + ".typography.lineHeight", nodeId));
+          }
+          if (
+            typography.letterSpacing !== undefined &&
+            !finiteInRange(typography.letterSpacing, -0.05, 0.5)
+          ) {
+            issues.push(issue("文字字间距必须位于 -0.05–0.5em 的安全范围。", path + ".typography.letterSpacing", nodeId));
+          }
         }
       }
-      const textValue = input.props[nodeId];
-      const roleHasContent = typeof textValue === "string" && textValue.trim().length > 0;
+      const nodeContentFieldKeys = editableObject.contentFieldKeys.includes(nodeId)
+        ? [nodeId]
+        : editableObject.contentFieldKeys;
+      const roleHasContent = nodeContentFieldKeys.some((fieldKey) => {
+        const textValue = input.props[fieldKey];
+        return typeof textValue === "string" && textValue.trim().length > 0;
+      });
       const roleVisible = rawNode.enabled === true || (rawNode.enabled !== false && roleHasContent);
       const roleHasVisualOverride = rawNode.enabled !== undefined || rawNode.rectByViewport !== undefined || rawNode.typography !== undefined;
       if (rawNode.enabled === true && textCapability && !roleHasContent) {
+        const contentFieldKey = nodeContentFieldKeys[0] ?? nodeId;
         const contentPath = basePath.endsWith(".__instanceOverrides")
-          ? basePath.slice(0, -".__instanceOverrides".length) + "." + nodeId
-          : "props." + nodeId;
+          ? basePath.slice(0, -".__instanceOverrides".length) + "." + contentFieldKey
+          : "props." + contentFieldKey;
         issues.push(issue("已启用的文字角色必须填写内容。", contentPath, nodeId));
       }
       if (roleVisible && roleHasVisualOverride && textCapability?.requiresSafeBand) {
@@ -9980,10 +11734,43 @@ export function getContentTemplateCompletion(
     .map((slot) => slot.key);
   const missingText = contract.contentBudget.requiredText
     .filter((key) => !hasNonEmptyText(values[key]));
+  const invalidCollections = contract.roles.flatMap((role) => {
+    if (!role.quantity) return [];
+    const collection = getQuantifiedCollectionValue(contract, role.id, values);
+    const count = collection?.value.length ?? 0;
+    return count < role.quantity.min || count > role.quantity.max
+      ? [{
+          roleId: role.id,
+          fieldKey: collection?.fieldKey ?? role.id,
+          count,
+          min: role.quantity.min,
+          max: role.quantity.max,
+        }]
+      : [];
+  });
+  const missingAttestations = contract.roles.flatMap((role) => {
+    const attestation = role.publicationAttestation;
+    if (!attestation) return [];
+    const collection = getQuantifiedCollectionValue(contract, role.id, values);
+    if (!collection) return [];
+    return collection.value.flatMap((item, index) =>
+      !isRecord(item) || item[attestation.fieldKey] !== true
+        ? [{
+            roleId: role.id,
+            collectionFieldKey: collection.fieldKey,
+            attestationFieldKey: attestation.fieldKey,
+            label: attestation.label,
+            index,
+          }]
+        : [],
+    );
+  });
   const issues = getContentTemplateIssues({ moduleType, props: values });
   return {
     material: { complete: missingMedia.length === 0, missing: missingMedia },
     content: { complete: missingText.length === 0, missing: missingText },
+    collections: { complete: invalidCollections.length === 0, invalid: invalidCollections },
+    attestations: { complete: missingAttestations.length === 0, missing: missingAttestations },
     publish: {
       complete: !issues.some((issue) => issue.severity === "error"),
       issues,

@@ -30,7 +30,7 @@ export default function InspectorFooterBar({
       ? "有未保存修改"
       : "草稿已保存";
   const statusDescription = hasUnsavedChanges
-    ? "修改已同步到画布"
+    ? "修改已同步到画布，尚未保存"
     : "当前页面无待保存修改";
 
   return (
@@ -40,20 +40,20 @@ export default function InspectorFooterBar({
         data-status={status}
         role="status"
         aria-live="polite"
+        aria-label={`${statusTitle}。${statusDescription}`}
+        title={statusDescription}
       >
         <span aria-hidden="true" />
-        <div>
-          <strong>{statusTitle}</strong>
-          <small>{statusDescription}</small>
-        </div>
+        <strong>{statusTitle}</strong>
       </div>
       <Button
         type="primary"
         loading={saving}
         disabled={!hasUnsavedChanges}
         onClick={onSaveDraft}
+        aria-label="保存整页草稿"
       >
-        保存整页草稿
+        保存草稿
       </Button>
     </footer>
   );

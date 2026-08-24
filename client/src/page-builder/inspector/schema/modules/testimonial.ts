@@ -54,7 +54,7 @@ export const testimonialSchema: ModuleInspectorSchema = {
           itemLabel: "引语",
           minItems: getContractRoleQuantity("testimonials", "authorizedPhoto").min,
           maxItems: getContractRoleQuantity("testimonials", "authorizedPhoto").max,
-          defaultItem: { name: "", meta: "", content: "", image: "" },
+          defaultItem: { name: "", meta: "", content: "", image: "", authorizationConfirmed: false },
           itemSummary: (item) =>
             typeof item.name === "string" && item.name.trim()
               ? item.name
@@ -80,6 +80,13 @@ export const testimonialSchema: ModuleInspectorSchema = {
               control: "textarea",
               rows: 2,
               required: true,
+            },
+            {
+              key: "authorizationConfirmed",
+              label: "已取得书面授权",
+              control: "switch",
+              required: true,
+              hint: "仅在已留存顾客同意公开展示的书面记录后开启；未确认无法发布。",
             },
           ],
         },

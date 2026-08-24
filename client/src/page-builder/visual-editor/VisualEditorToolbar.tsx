@@ -1,4 +1,3 @@
-import { InfoCircleOutlined } from "@ant-design/icons";
 import { getContentTemplateContract } from "../generated/contentTemplates.generated";
 import { useVisualEditorSession } from "./visualEditorSession";
 
@@ -24,11 +23,13 @@ export default function VisualEditorToolbar({
   moduleType,
   panelMode = "content",
   onRequestDesign,
+  showSelectionLabel = true,
 }: {
   blockId: string;
   moduleType: string;
   panelMode?: "content" | "design";
   onRequestDesign?: (mode: "adjust-layout" | "adjust-media") => void;
+  showSelectionLabel?: boolean;
 }) {
   const selection = useVisualEditorSession((state) => state.selection);
   const mode = useVisualEditorSession((state) => state.mode);
@@ -36,7 +37,8 @@ export default function VisualEditorToolbar({
   const current = selection?.blockId === blockId ? selection : null;
   const capabilities = getContentTemplateContract(moduleType)?.editorCapabilities.layoutOverrides;
   const canAdjustMedia = Boolean(
-    current?.kind === "media" && capabilities?.slots?.some((slot) => slot.roleId === current.nodeId),
+    (current?.kind === "media" || current?.kind === "product") &&
+      capabilities?.slots?.some((slot) => slot.roleId === current.nodeId),
   );
   const canAdjustLayout = Boolean(
     current && (
@@ -45,22 +47,33 @@ export default function VisualEditorToolbar({
     ),
   );
 
+  const hasModeAction = Boolean(
+    current && (
+      (panelMode === "content" && canAdjustMedia && onRequestDesign) ||
+      (panelMode === "design" && (canAdjustLayout || canAdjustMedia))
+    ),
+  );
+  if (!showSelectionLabel && !hasModeAction) return null;
+
   return (
     <div
       className="homepage-editor__visual-toolbar"
       data-has-selection={current ? "true" : "false"}
-      aria-label="画布直接编辑"
+      aria-label="画布调整模式"
     >
-      <div>
-        <InfoCircleOutlined aria-hidden="true" />
-        <strong>
-          {current
-            ? `${mode === "select" ? "已选择" : "正在调整"}：${NODE_LABELS[current.nodeId] ?? current.nodeId}`
-            : panelMode === "design"
-              ? "在画布中点选对象，再明确选择调整方式"
-              : "在画布点选对象，面板只显示它的内容"}
-        </strong>
-      </div>
+      {showSelectionLabel ? (
+        <div>
+          <strong>
+            {current
+              ? `${mode === "select" ? "已选择" : "正在调整"}：${NODE_LABELS[current.nodeId] ?? current.nodeId}`
+              : panelMode === "design"
+                ? "在画布中点选对象，再明确选择调整方式"
+                : "在画布点选对象，面板只显示它的内容"}
+          </strong>
+        </div>
+      ) : (
+        <span className="homepage-editor__visual-toolbar-label">画布操作</span>
+      )}
       {current && panelMode === "content" && canAdjustMedia && onRequestDesign ? (
         <div role="group" aria-label="图片设计入口">
           <button
@@ -99,7 +112,7 @@ export default function VisualEditorToolbar({
         <p role="status">在画布中拖动图片调整焦点；按 Esc 退出调整。</p>
       ) : null}
       {mode === "adjust-layout" && canAdjustLayout ? (
-        <p role="status">拖动对象改变位置，拖动右下角调整大小；方向键移动，Alt + 方向键调整大小，Esc 退出。</p>
+        <p role="status">拖动对象改变位置，拖动右下角调整大小；对象会吸附到边缘、中心与相邻对象，按住 Alt 可临时关闭吸附。方向键移动，Alt + 方向键调整大小，Esc 退出。</p>
       ) : null}
     </div>
   );

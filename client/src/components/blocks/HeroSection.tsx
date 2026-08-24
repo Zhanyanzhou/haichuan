@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
@@ -30,8 +30,6 @@ export default function HeroSection({
   headingLevel = 1,
 }: Props) {
   const rm = useReducedMotion();
-  const [imageLoaded, setImageLoaded] = useState(false);
-  const [imageFailed, setImageFailed] = useState(false);
 
   const c = module?.content as
     (PageModule["content"] & Record<string, any>) | undefined;
@@ -39,17 +37,15 @@ export default function HeroSection({
     (PageModule["styleConfig"] & Record<string, any>) | undefined;
   const l = module?.layoutConfig;
 
-  useEffect(() => {
-    setImageLoaded(false);
-    setImageFailed(false);
-  }, [c?.desktopImage, c?.mobileImage]);
-
-  // 已配置的装修区块没有素材时，不能回退到活动默认图，避免前台或画布闪出陌生图片。
-  if (!c?.desktopImage && !c?.mobileImage && !editMode) return null;
-
   // 未上传某一端时复用另一端已配置图片，不再引入活动素材兜底。
   const desktopImg = c?.desktopImage || c?.mobileImage || "";
   const mobileImg = c?.mobileImage || c?.desktopImage || "";
+  const imageSourceKey = `${desktopImg}\u0000${mobileImg}`;
+  const [failedImageSourceKey, setFailedImageSourceKey] = useState<string | null>(null);
+  const imageFailed = failedImageSourceKey === imageSourceKey;
+
+  // 已配置的装修区块没有素材时，不能回退到活动默认图，避免前台或画布闪出陌生图片。
+  if (!desktopImg && !mobileImg && !editMode) return null;
   // 文案不再回退营销默认值:未填写即为空,公开态对应节点不渲染(编辑态有占位引导)
   const eyebrow = typeof c?.eyebrow === "string" ? c.eyebrow : "";
   const title = typeof c?.title === "string" ? c.title : "";
@@ -140,19 +136,16 @@ export default function HeroSection({
               decoding="async"
               onLoad={(event) => {
                 const renderable = hasRenderableImageDimensions(event.currentTarget);
-                setImageFailed(!renderable);
-                setImageLoaded(true);
+                setFailedImageSourceKey(renderable ? null : imageSourceKey);
               }}
               onError={() => {
-                setImageFailed(true);
-                setImageLoaded(true);
+                setFailedImageSourceKey(imageSourceKey);
               }}
               width={3360}
               height={1470}
               className="hc-hero__image absolute inset-0 h-full w-full object-cover"
               style={{
-                opacity: imageLoaded && !imageFailed ? 1 : 0,
-                transition: rm ? "none" : "opacity 240ms ease-out",
+                opacity: imageFailed ? 0 : 1,
               }}
             />
           </picture>

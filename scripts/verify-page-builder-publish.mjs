@@ -578,6 +578,7 @@ const bookingFrameData = {
           frame: { aspectRatioByViewport: { desktop: 16 / 9, mobile: 4 / 5 } },
           nodes: {
             bgImage: {
+              zIndexByViewport: { desktop: 1, mobile: 3 },
               mediaView: {
                 fit: "contain",
                 zoom: 1.05,
@@ -595,6 +596,17 @@ const bookingFrameData = {
 const bookingFrameResult = await service.validatePageDocument("home", bookingFrameData);
 assert.equal(bookingFrameResult.valid, true, "Booking 应以整体框架比例和背景观看参数通过发布合同");
 
+const invalidLayerOrderData = clone(bookingFrameData);
+invalidLayerOrderData.content[1].props.__instanceOverrides.nodes.bgImage.zIndexByViewport.mobile = 21;
+const invalidLayerOrderResult = await service.validatePageDocument("home", invalidLayerOrderData);
+assert.equal(invalidLayerOrderResult.valid, false, "节点层级超出 0–20 时必须阻止发布");
+assert.ok(
+  invalidLayerOrderResult.issues.some((issue) =>
+    issue.path.endsWith("__instanceOverrides.nodes.bgImage.zIndexByViewport.mobile"),
+  ),
+  "非法节点层级必须定位到具体设备覆盖路径",
+);
+
 const invalidBookingData = clone(bookingFrameData);
 invalidBookingData.content[1].props.linkUrl = "javascript:alert(1)";
 invalidBookingData.content[1].props.phone = "abc";
@@ -607,6 +619,118 @@ assert.deepEqual(
     .sort(),
   ["linkUrl", "phone"],
   "Booking 发布问题必须精确定位到链接和电话字段",
+);
+
+const incompleteCollectionData = {
+  content: [
+    {
+      type: "首屏主视觉",
+      props: {
+        id: "custom-hero",
+        title: "定制服务",
+        desktopImage: image,
+        __contentTemplate: { key: "hero", version: 2 },
+      },
+    },
+    {
+      type: "定制流程",
+      props: {
+        id: "custom-journey",
+        title: "定制流程",
+        steps: [{ number: "01", name: "需求沟通", desc: "确认设计方向", image }],
+        __contentTemplate: { key: "journey", version: 2 },
+      },
+    },
+    {
+      type: "资质证书",
+      props: {
+        id: "custom-certificates",
+        title: "资质说明",
+        certificates: [{ imageUrl: image, name: "测试证书", desc: "仅用于发布门禁测试", verificationConfirmed: true }],
+        __contentTemplate: { key: "certificates", version: 2 },
+      },
+    },
+    {
+      type: "真实评价与实拍",
+      props: {
+        id: "custom-testimonials",
+        title: "顾客分享",
+        testimonials: [{
+          name: "测试顾客",
+          meta: "授权门禁测试",
+          content: "这是一条不涉及真实顾客的测试引语。",
+          image,
+          authorizationConfirmed: true,
+        }],
+        __contentTemplate: { key: "testimonials", version: 2 },
+      },
+    },
+  ],
+  root: { props: {} },
+  zones: {},
+};
+const incompleteCollectionResult = await service.validatePageDocument("custom", incompleteCollectionData, {});
+assert.equal(incompleteCollectionResult.valid, false, "集合数量不足时必须由服务端发布门禁阻止");
+assert.deepEqual(
+  incompleteCollectionResult.issues
+    .filter((issue) => ["steps", "certificates"].includes(issue.field))
+    .map((issue) => issue.field)
+    .sort(),
+  ["certificates", "steps"],
+  "集合数量错误必须精确定位到对应集合字段",
+);
+
+const completeCollectionData = clone(incompleteCollectionData);
+completeCollectionData.content[1].props.steps = [1, 2, 3].map((number) => ({
+  number: `0${number}`,
+  name: `流程步骤 ${number}`,
+  desc: "已核对的测试流程说明",
+  image,
+}));
+completeCollectionData.content[2].props.certificates = [1, 2].map((number) => ({
+  imageUrl: image,
+  name: `测试证书 ${number}`,
+  desc: "仅用于发布门禁测试",
+  verificationConfirmed: true,
+}));
+const completeCollectionResult = await service.validatePageDocument("custom", completeCollectionData, {});
+assert.equal(completeCollectionResult.valid, true, "满足合同数量范围的集合应通过发布门禁");
+
+const unverifiedCertificateData = clone(completeCollectionData);
+unverifiedCertificateData.content[2].props.certificates[1].verificationConfirmed = false;
+const unverifiedCertificateResult = await service.validatePageDocument("custom", unverifiedCertificateData, {});
+assert.equal(unverifiedCertificateResult.valid, false, "未确认核验的证书条目不得发布");
+assert.ok(
+  unverifiedCertificateResult.issues.some((issue) =>
+    issue.blockId === "custom-certificates"
+      && issue.field === "certificates"
+      && issue.index === 1
+      && issue.path.endsWith("certificates[1].verificationConfirmed"),
+  ),
+  "证书核验错误必须定位到具体条目与确认字段",
+);
+
+const unauthorizedTestimonialData = clone(completeCollectionData);
+unauthorizedTestimonialData.content[3].props.testimonials[0].authorizationConfirmed = false;
+const unauthorizedTestimonialResult = await service.validatePageDocument("custom", unauthorizedTestimonialData, {});
+assert.equal(unauthorizedTestimonialResult.valid, false, "未确认书面授权的顾客评价不得发布");
+assert.ok(
+  unauthorizedTestimonialResult.issues.some((issue) =>
+    issue.blockId === "custom-testimonials"
+      && issue.field === "testimonials"
+      && issue.index === 0
+      && issue.path.endsWith("testimonials[0].authorizationConfirmed"),
+  ),
+  "顾客授权错误必须定位到具体条目与确认字段",
+);
+
+const placeholderClaimData = clone(completeCollectionData);
+placeholderClaimData.content[2].props.title = "证书信息待确认";
+const placeholderClaimResult = await service.validatePageDocument("custom", placeholderClaimData, {});
+assert.equal(placeholderClaimResult.valid, false, "带待确认标记的高风险默认文案不得发布");
+assert.ok(
+  placeholderClaimResult.issues.some((issue) => issue.blockId === "custom-certificates" && issue.field === "title"),
+  "高风险占位文案必须定位到具体区块和字段",
 );
 
 const invalidCategoryData = {

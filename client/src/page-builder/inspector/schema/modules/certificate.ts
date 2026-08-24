@@ -55,7 +55,7 @@ export const certificateSchema: ModuleInspectorSchema = {
           itemLabel: "证书",
           minItems: getContractRoleQuantity("certificates", "certificates").min,
           maxItems: getContractRoleQuantity("certificates", "certificates").max,
-          defaultItem: { name: "", desc: "", imageUrl: "", focusX: 50, focusY: 50 },
+          defaultItem: { name: "", desc: "", imageUrl: "", focusX: 50, focusY: 50, verificationConfirmed: false },
           itemSummary: (item) =>
             typeof item.name === "string" && item.name.trim()
               ? item.name
@@ -72,6 +72,13 @@ export const certificateSchema: ModuleInspectorSchema = {
             },
             { key: "name", label: "证书名称", control: "text", required: true },
             { key: "desc", label: "一句话说明", control: "text" },
+            {
+              key: "verificationConfirmed",
+              label: "已核验原件与展示信息",
+              control: "switch",
+              required: true,
+              hint: "仅在证书原件、名称和说明一致后开启；未确认无法发布。",
+            },
           ],
         },
       ],

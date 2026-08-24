@@ -73,7 +73,7 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
 
     await contentPanel.getByRole("button", { name: "在画布中调整构图" }).click();
     await expect(page.getByRole("tab", { name: "设计" })).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("button", { name: "调整图片构图" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("[data-hc-node-hud]").getByRole("button", { name: "调整图片构图" })).toHaveAttribute("aria-pressed", "true");
   });
 
   test("图片异常时只出现一条可操作警告，技术信息按需展开", async ({ page }) => {
@@ -116,7 +116,7 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     await titleGroup.getByRole("checkbox").check();
     await titleGroup.getByRole("button", { name: "居中对齐", exact: true }).click();
     await titleGroup.getByRole("button", { name: "象牙白" }).click();
-    await titleGroup.getByText("更多设置").click();
+    await titleGroup.getByRole("button", { name: "高级设置" }).click();
     await titleGroup.getByRole("group", { name: "安全文字带" }).getByRole("button", { name: "深色文字带" }).click();
 
     await expect(page.getByTestId("visual-state")).toContainText('"version":2');
@@ -151,8 +151,12 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     const media = canvas.locator('[data-content-role-desktop="desktopImage"]');
     await media.click({ position: { x: 100, y: 100 } });
     await expect(page.getByText("已选择：桌面主图")).toBeVisible();
-    await page.getByRole("button", { name: "调整图片构图" }).click();
-    await expect(page.getByRole("button", { name: "调整图片构图" })).toHaveAttribute("aria-pressed", "true");
+    await expect(media.locator("img")).toHaveCSS("opacity", "1");
+    const mediaHud = canvas.getByRole("toolbar", {
+      name: "调整画布对象 desktopImage",
+    });
+    await mediaHud.getByRole("button", { name: "调整图片构图" }).click();
+    await expect(mediaHud.getByRole("button", { name: "调整图片构图" })).toHaveAttribute("aria-pressed", "true");
     const mediaBox = await media.boundingBox();
     if (!mediaBox) throw new Error("图片槽位没有布局尺寸");
     await page.mouse.move(mediaBox.x + mediaBox.width / 2, mediaBox.y + mediaBox.height / 2);

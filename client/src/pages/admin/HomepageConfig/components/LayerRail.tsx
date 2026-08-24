@@ -73,11 +73,14 @@ export default function LayerRail({
   );
 
   const selectLayer = (index: number) => {
-    dispatch({
-      type: "setUi",
-      ui: { itemSelector: { index, zone: ROOT_ZONE } },
-    });
-    focusCanvasBlock(content[index]?.props?.id);
+    const targetId = content[index]?.props?.id;
+    if (targetId !== selectedId) {
+      dispatch({
+        type: "setUi",
+        ui: { itemSelector: { index, zone: ROOT_ZONE } },
+      });
+    }
+    focusCanvasBlock(targetId);
   };
 
   // 发布检查清单的逃生门：素材未到位时隐藏模块而非删除。
@@ -89,7 +92,11 @@ export default function LayerRail({
     const nextContent = content.map((item, i) =>
       i === index ? { ...item, props: { ...item.props, isVisible: false } } : item,
     );
-    dispatch({ type: "setData", data: { ...appData, content: nextContent } });
+    dispatch({
+      type: "setData",
+      data: { ...appData, content: nextContent },
+      recordHistory: true,
+    });
     message.success(
       `已暂时隐藏「${numberedNames[index]}」，排序保留；素材补齐后在属性面板恢复显示`,
     );
@@ -139,7 +146,11 @@ export default function LayerRail({
       moved = true;
     }
     if (moved) {
-      dispatch({ type: "setData", data: { ...appData, content: next } });
+      dispatch({
+        type: "setData",
+        data: { ...appData, content: next },
+        recordHistory: true,
+      });
       setMultiIndices((prev) => prev.map((i) => i + direction));
     }
   };
@@ -159,7 +170,11 @@ export default function LayerRail({
       onOk: () => {
         const removeSet = new Set(deletable);
         const nextContent = content.filter((_, index) => !removeSet.has(index));
-        dispatch({ type: "setData", data: { ...appData, content: nextContent } });
+        dispatch({
+          type: "setData",
+          data: { ...appData, content: nextContent },
+          recordHistory: true,
+        });
         dispatch({ type: "setUi", ui: { itemSelector: null } });
         setMultiIndices([]);
         anchorRef.current = null;
@@ -183,7 +198,11 @@ export default function LayerRail({
     const nextContent = [...content];
     const [moved] = nextContent.splice(from, 1);
     nextContent.splice(to, 0, moved);
-    dispatch({ type: "setData", data: { ...appData, content: nextContent } });
+    dispatch({
+      type: "setData",
+      data: { ...appData, content: nextContent },
+      recordHistory: true,
+    });
     selectLayer(to);
   };
 

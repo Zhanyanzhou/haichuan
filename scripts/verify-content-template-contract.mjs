@@ -22,6 +22,14 @@ assert.equal(contract.templates.length, 23, "必须保留 23 个运营模板");
 assert.equal(contract.activeTemplateCount, 23, "23 个运营模板必须全部处于 active 状态");
 assert.equal(contract.templates.filter((template) => template.implementationStatus === "active").length, 23, "不得错误隐藏可运营模板");
 assert.deepEqual(categories.map((category) => contract.templates.filter((template) => template.category === category).length), [4, 5, 4, 3, 6, 1], "六类数量必须保持 4/5/4/3/6/1");
+const reachableTemplateKeys = new Set(contract.pageRules.flatMap((rule) => rule.allowedTemplateKeys));
+assert.deepEqual(
+  contract.templates
+    .filter((template) => template.implementationStatus === "active" && !reachableTemplateKeys.has(template.key))
+    .map((template) => template.key),
+  [],
+  "每个 active 模板必须至少适用于一个真实页面角色",
+);
 
 for (const template of contract.templates) {
   const roleIds = template.roles.map((role) => role.id);
@@ -44,6 +52,13 @@ for (const template of contract.templates) {
   }
   for (const role of template.roles) {
     assert.ok(devices.some((device) => template.order[device].includes(role.id)), `${template.key}.${role.id}: 角色未进入任何根顺序`);
+    if (role.publicationAttestation) {
+      const editableObject = template.editorCapabilities.editableObjects.find((object) => object.roleId === role.id);
+      assert.equal(editableObject?.kind, "collection", `${template.key}.${role.id}: 发布确认必须绑定集合编辑对象`);
+      assert.ok(editableObject?.collectionFieldKeys?.length, `${template.key}.${role.id}: 发布确认缺少集合字段`);
+      assert.match(role.publicationAttestation.fieldKey, /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/, `${template.key}.${role.id}: 发布确认字段无效`);
+      assert.ok(role.publicationAttestation.label?.trim(), `${template.key}.${role.id}: 发布确认标签缺失`);
+    }
     for (const device of devices) {
       const defaultRatio = role.defaultRatioByViewport?.[device];
       const allowed = role.allowedRatioPresetsByViewport?.[device];
@@ -53,6 +68,33 @@ for (const template of contract.templates) {
   const actionCount = template.roles.filter((role) => role.kind === "action").length;
   assert.ok(actionCount <= template.contentBudget.maxCtas, `${template.key}: 行动角色数超过 maxCtas`);
   assert.ok(template.editorCapabilities?.primaryTask, `${template.key}: 属性面板主要运营任务缺失`);
+  const editableObjects = template.editorCapabilities.editableObjects ?? [];
+  assert.ok(editableObjects.length > 0, `${template.key}: 必须显式声明可编辑对象`);
+  const editableByNodeId = new Map();
+  for (const object of editableObjects) {
+    const nodeIds = object.nodeIds ?? [object.roleId];
+    assert.ok(nodeIds.includes(object.roleId), `${template.key}.${object.roleId}: nodeIds 必须包含语义对象 id`);
+    for (const nodeId of nodeIds) {
+      assert.equal(editableByNodeId.has(nodeId), false, `${template.key}.${nodeId}: 节点只能绑定一个可编辑对象`);
+      editableByNodeId.set(nodeId, object);
+    }
+    assert.deepEqual(
+      Object.keys(object.responsive).sort(),
+      [...object.capabilities].sort(),
+      `${template.key}.${object.roleId}: 每项能力必须声明 shared 或 viewport-specific`,
+    );
+    for (const [fieldKey, scope] of Object.entries(object.fieldScopes ?? {})) {
+      assert.ok(object.contentFieldKeys.includes(fieldKey), `${template.key}.${object.roleId}.${fieldKey}: 字段响应策略必须绑定内容字段`);
+      assert.ok(["shared", "viewport-specific"].includes(scope), `${template.key}.${object.roleId}.${fieldKey}: 字段响应策略不合法`);
+    }
+    if (["media", "video"].includes(object.kind)) {
+      assert.ok(object.altFieldKey || object.altPolicy, `${template.key}.${object.roleId}: 媒体对象必须声明替代文字字段或策略`);
+      if (object.altPolicy === "required") {
+        assert.ok(object.altFieldKey, `${template.key}.${object.roleId}: required 替代文字策略必须绑定字段`);
+        assert.ok(template.contentBudget.requiredText.includes(object.altFieldKey), `${template.key}.${object.roleId}: required 替代文字必须进入发布必填文本`);
+      }
+    }
+  }
   for (const reference of template.editorCapabilities.referenceFields ?? []) {
     assert.ok(["product", "category"].includes(reference.kind), `${template.key}.${reference.key}: 引用类型不合法`);
     assert.ok(reference.min >= 0 && reference.max >= reference.min, `${template.key}.${reference.key}: 引用数量边界不合法`);
@@ -61,6 +103,10 @@ for (const template of contract.templates) {
     assert.ok(roleIds.includes(slot.roleId), `${template.key}.${slot.roleId}: 实例图片槽位必须引用模板既有角色`);
     assert.ok((slot.ratioPresets ?? []).length <= 6, `${template.key}.${slot.roleId}: 比例预设必须保持受控`);
     assert.ok(!slot.zoom || (slot.zoom.min >= 1 && slot.zoom.max <= 3), `${template.key}.${slot.roleId}: zoom 必须处于受控非破坏范围`);
+    assert.ok(editableByNodeId.has(slot.roleId), `${template.key}.${slot.roleId}: 图片槽位必须绑定可编辑对象`);
+  }
+  for (const textRole of template.editorCapabilities.layoutOverrides?.textRoles ?? []) {
+    assert.ok(editableByNodeId.has(textRole.roleId), `${template.key}.${textRole.roleId}: 文字槽位必须绑定聚合或独立可编辑对象`);
   }
   for (const device of ["desktop", "mobile"]) {
     const viewport = template.preview[device];
@@ -106,12 +152,28 @@ assert.deepEqual(
   "Hero 必须以语义文字角色开放实例编辑，不能退回笼统 copy 开关",
 );
 assert.ok(byKey.hero.editorCapabilities.layoutOverrides.textRoles.every((role) => role.requiresSafeBand), "Hero 图片叠字必须为每个语义角色声明实色安全文字带门禁");
+const heroCopy = byKey.hero.editorCapabilities.editableObjects.find((object) => object.roleId === "copy");
+assert.deepEqual(heroCopy.nodeIds, ["copy", "eyebrow", "title", "subtitle"], "Hero 聚合 copy 必须显式绑定全部文字子节点");
+assert.deepEqual(heroCopy.contentFieldKeys, ["eyebrow", "title", "subtitle"], "Hero copy 内容字段必须来自同一对象合同");
+const heroMedia = byKey.hero.editorCapabilities.editableObjects.find((object) => object.roleId === "desktopImage");
+assert.equal(heroMedia.fieldScopes.altText, "shared", "图片 Alt 必须保持跨设备共享");
+assert.equal(heroMedia.fieldScopes.desktopImage, "viewport-specific", "桌面图片素材必须显式声明设备策略");
+assert.equal(byKey.video.editorCapabilities.editableObjects.find((object) => object.roleId === "coverImage")?.kind, "video", "视频对象类型不得退化为普通 media 推断");
+assert.ok(byKey.video.editorCapabilities.editableObjects.find((object) => object.roleId === "coverImage")?.capabilities.includes("playback"), "视频必须显式声明 playback 能力");
+assert.equal(byKey.featuredProduct.editorCapabilities.editableObjects.find((object) => object.roleId === "product")?.referenceFieldKey, "productCode", "单品对象必须绑定稳定商品引用字段");
+assert.deepEqual(byKey.carousel.editorCapabilities.editableObjects.find((object) => object.roleId === "frames")?.collectionFieldKeys, ["images"], "集合字段 API 必须统一使用 collectionFieldKeys 复数");
+assert.deepEqual(byKey.comparison.editorCapabilities.editableObjects.find((object) => object.roleId === "action")?.nodeIds, ["action", "actionText"], "无独立画布角色的行动字段必须作为 content-only 虚拟对象显式绑定");
 
 const sortReplacer = (_key, value) =>
   value && typeof value === "object" && !Array.isArray(value)
     ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, value[k]]))
     : value;
 const hash = createHash("sha256").update(JSON.stringify(contract, sortReplacer)).digest("hex");
-for (const generated of [client, server]) assert.ok(generated.includes(`SHA-256：${hash}`) && generated.includes("CONTENT_TEMPLATE_CONTRACTS"), "生成产物必须与权威合同摘要一致");
+for (const generated of [client, server]) {
+  assert.ok(generated.includes(`SHA-256：${hash}`) && generated.includes("CONTENT_TEMPLATE_CONTRACTS"), "生成产物必须与权威合同摘要一致");
+  assert.ok(generated.includes("export type ContentTemplateEditableObject ="), "客户端与服务端必须共享可编辑对象类型");
+  assert.ok(generated.includes("export function findContentTemplateEditableObject("), "客户端与服务端必须共享安全对象查询 helper");
+  assert.ok(generated.includes("sizePreset?: string;") && generated.includes("positionPreset?: string;"), "V2 必须声明并校验尺寸/位置预设");
+}
 assert.doesNotMatch(previewSource, /<img\b|https?:\/\//, "中性预览不得引入外部图片");
 console.log("内容模板统一合同验证通过：23 个根顺序、语义角色、预览映射和 CTA 门禁一致。");

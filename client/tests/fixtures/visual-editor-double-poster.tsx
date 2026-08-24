@@ -46,6 +46,12 @@ function VisualEditorDoublePosterFixture() {
   }, []);
 
   const update = (patch: Record<string, any>) => setProps((current) => ({ ...current, ...patch }));
+  const updateHistoryTransaction = (
+    patchOrFactory: Record<string, any> | ((current: Record<string, any>) => Record<string, any>),
+  ) => setProps((current) => ({
+    ...current,
+    ...(typeof patchOrFactory === "function" ? patchOrFactory(current) : patchOrFactory),
+  }));
   const panelMode = useVisualEditorSession((state) => state.panelMode);
   const selection = useVisualEditorSession((state) => state.selection);
   const setPanelMode = useVisualEditorSession((state) => state.setPanelMode);
@@ -73,6 +79,8 @@ function VisualEditorDoublePosterFixture() {
             moduleType={moduleType}
             props={props}
             update={update}
+            updateHistoryTransaction={updateHistoryTransaction}
+            historyTransactionPending={false}
             scopes={currentSelection ? ["slots"] : ["layout"]}
             selectedNodeId={currentSelection?.nodeId}
             resetAllDesign={!currentSelection}

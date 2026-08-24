@@ -1,8 +1,11 @@
+import { useEffect, useState } from "react";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
+import { settingsApi } from "@/services/api";
+import { unwrapResponse } from "@/utils/unwrap";
 
 interface StoreInfoBlockProps {
   module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
@@ -20,16 +23,46 @@ const MUTED = "#6E7477";
  */
 export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps) {
   const { content = {}, styleConfig = {} } = module;
-  const { storeName, address, hours, phone, mapUrl, image } = content;
+  const { useSiteSettings = true, storeName, address, hours, phone, mapUrl, image } = content;
+  const [siteSettingsState, setSiteSettingsState] = useState<{
+    status: "loading" | "loaded" | "error";
+    value?: Record<string, unknown>;
+  }>({ status: "loading" });
+
+  useEffect(() => {
+    if (!useSiteSettings) return;
+    let cancelled = false;
+    setSiteSettingsState({ status: "loading" });
+    settingsApi.getPublicSettings()
+      .then((response) => {
+        if (!cancelled) {
+          setSiteSettingsState({ status: "loaded", value: unwrapResponse<Record<string, unknown>>(response) });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSiteSettingsState({ status: "error" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [useSiteSettings]);
+
+  const unifiedSettings = useSiteSettings && siteSettingsState.status === "loaded"
+    ? siteSettingsState.value
+    : undefined;
+  const resolvedStoreName = unifiedSettings ? String(unifiedSettings.siteName || "") : storeName;
+  const resolvedAddress = unifiedSettings ? String(unifiedSettings.contactAddress || "") : address;
+  const resolvedHours = unifiedSettings ? String(unifiedSettings.businessHours || "") : hours;
+  const resolvedPhone = unifiedSettings ? String(unifiedSettings.contactPhone || "") : phone;
   const bgColor = styleConfig.bgColor || '#FFFFFF';
   // 槽位比例选项(契约派生):门店空间图属横构图物性,预设不含纯竖版
   const STORE_RATIO_DESKTOP = resolveContractAspectRatio("storeInfo", "store", content.imageRatio, "desktop");
   const STORE_RATIO_MOBILE = resolveContractAspectRatio("storeInfo", "store", content.imageRatio, "mobile");
 
   const infoRows: Array<{ label: string; value?: string }> = [
-    { label: "ADDRESS", value: address },
-    { label: "HOURS", value: hours },
-    { label: "CONTACT", value: phone },
+    { label: "ADDRESS", value: resolvedAddress },
+    { label: "HOURS", value: resolvedHours },
+    { label: "CONTACT", value: resolvedPhone },
   ];
 
   return (
@@ -56,7 +89,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
         `}</style>
         <div data-content-role="store" data-editor-field="image" className="hc-store-info__media">
           {image ? (
-            <img src={image} alt={storeName || "门店空间"} loading="lazy" decoding="async" />
+            <img src={image} alt={resolvedStoreName || "门店空间"} loading="lazy" decoding="async" />
           ) : (
             <BlockEmptyPlaceholder
               assetSlot={{ templateKey: "storeInfo", roleId: "store" }}
@@ -67,7 +100,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
           )}
         </div>
         <div className="hc-store-info__copy" data-content-role="copy">
-          {storeName ? (
+          {resolvedStoreName ? (
             <h2 data-editor-field="storeName"
               style={{
                 margin: 0,
@@ -78,7 +111,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
                 lineHeight: 1.2,
               }}
             >
-              {storeName}
+              {resolvedStoreName}
             </h2>
           ) : null}
           <div data-content-role="details" style={{ display: "grid", gap: 14 }}>

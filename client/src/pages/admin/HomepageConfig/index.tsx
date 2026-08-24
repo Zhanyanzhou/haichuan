@@ -325,6 +325,9 @@ function CanvasBlockAnchor({
     (state) => state.appState.ui.viewports.current,
   );
   const dispatch = useHomepagePuck((state) => state.dispatch);
+  const selectedBlockId = useHomepagePuck(
+    (state) => state.selectedItem?.props?.id,
+  );
   const editorViewportHeight =
     currentViewport.height === "auto"
       ? RESPONSIVE_CANVAS.desktop.height
@@ -490,6 +493,7 @@ function CanvasBlockAnchor({
       blockType={blockType}
       blockLabel={BLOCK_META[blockType]?.name ?? blockType}
       focused={isFocused}
+      selected={selectedBlockId === blockId}
       scrollMarginTop={CANVAS_SCROLL_SPY_TOP_OFFSET * 2 + 32}
       onSelect={requestCanvasSelection}
     >
@@ -1969,7 +1973,11 @@ function TemplateLibrary({
                               migratedBlock,
                             ],
                           };
-                          dispatch({ type: "setData", data: updated });
+                          dispatch({
+                            type: "setData",
+                            data: updated,
+                            recordHistory: true,
+                          });
                           message.success(
                             migratedBlock.type !== tpl.type
                               ? `已添加“${tpl.name}”(已升级为「${getModuleDisplayName(migratedBlock.type)}」)`
@@ -2243,6 +2251,7 @@ function EditorBody({
   pageMode,
   hasUnsavedChanges,
   saving,
+  previewMode,
   onSaveDraft,
   publishIssues,
   validationState,
@@ -2254,12 +2263,14 @@ function EditorBody({
   pageMode: "brand" | "commerce";
   hasUnsavedChanges: boolean;
   saving: boolean;
+  previewMode: boolean;
   onSaveDraft: (data: unknown) => void;
   publishIssues: PublishValidationIssue[];
   validationState: PublishValidationState;
 }) {
   const { message } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
+  const appDataRef = useRef(appData);
   const currentViewport = useHomepagePuck(
     (state) => state.appState.ui.viewports.current,
   );
@@ -2357,13 +2368,20 @@ function EditorBody({
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const previewFrameRef = useRef<HTMLDivElement>(null);
+  const visualEditStartRef = useRef(
+    new Map<string, { index: number; item: any }>(),
+  );
+  useEffect(() => {
+    appDataRef.current = appData;
+  }, [appData]);
+  useEffect(() => {
+    visualEditStartRef.current.clear();
+  }, [pageKey]);
   useEffect(() => {
     const handleVisualEdit = (event: MessageEvent<CanvasVisualEditMessage>) => {
       const detail = event.data;
-      const iframe = previewFrameRef.current?.querySelector<HTMLIFrameElement>("iframe");
       if (
         event.origin !== window.location.origin ||
-        event.source !== iframe?.contentWindow ||
         detail?.type !== CANVAS_VISUAL_EDIT_MESSAGE ||
         typeof detail.blockId !== "string" ||
         typeof detail.moduleType !== "string" ||
@@ -2372,12 +2390,15 @@ function EditorBody({
       ) {
         return;
       }
-      const contentIndex = appData.content.findIndex(
+      // Puck 在编辑过程中可能重建预览 iframe，WindowProxy 会变化；不能用
+      // event.source 对象全等判断。消息仍受同源、协议、模块 id/type 与 v2 合同校验。
+      const currentAppData = appDataRef.current;
+      const contentIndex = currentAppData.content.findIndex(
         (item: { type?: string; props?: Record<string, unknown> }) =>
           item.type === detail.moduleType && item.props?.id === detail.blockId,
       );
       if (contentIndex < 0) return;
-      const current = appData.content[contentIndex] as {
+      const current = currentAppData.content[contentIndex] as {
         type: string;
         props: { id: string; [key: string]: any };
       };
@@ -2391,16 +2412,37 @@ function EditorBody({
             : { __contentTemplate: createContentTemplateMarker(detail.moduleType) }),
         },
       };
+      const transient = detail.transient === true;
+      if (transient && !visualEditStartRef.current.has(detail.blockId)) {
+        visualEditStartRef.current.set(detail.blockId, {
+          index: contentIndex,
+          item: current,
+        });
+      }
+      const editStart = visualEditStartRef.current.get(detail.blockId);
+      if (!transient && editStart) {
+        // transient 已把 store 更新到最终值；先无历史恢复拖前快照，再记录
+        // pointerup 的最终值，让整次手势只产生一个且可用的撤销步骤。
+        dispatch({
+          type: "replace",
+          destinationIndex: editStart.index,
+          destinationZone: ROOT_ZONE,
+          data: editStart.item,
+          recordHistory: false,
+        });
+        visualEditStartRef.current.delete(detail.blockId);
+      }
       dispatch({
         type: "replace",
         destinationIndex: contentIndex,
         destinationZone: ROOT_ZONE,
         data: nextItem,
+        recordHistory: !transient,
       });
     };
     window.addEventListener("message", handleVisualEdit);
     return () => window.removeEventListener("message", handleVisualEdit);
-  }, [appData, dispatch]);
+  }, [dispatch]);
   const viewportWidth =
     currentViewport.width === "100%"
       ? RESPONSIVE_CANVAS.desktop.width
@@ -2611,6 +2653,7 @@ function EditorBody({
       dispatch({
         type: "setData",
         data: { ...appData, content: nextContent },
+        recordHistory: true,
       });
       dispatch({
         type: "setUi",
@@ -2672,7 +2715,7 @@ function EditorBody({
 
   return (
     <main
-      className={`homepage-editor__body${isInspecting ? " is-inspecting" : ""}`}
+      className={`homepage-editor__body${isInspecting ? " is-inspecting" : ""}${previewMode ? " is-previewing" : ""}`}
     >
       <TemplateLibrary
         pageKey={pageKey}
@@ -2718,6 +2761,12 @@ function EditorBody({
         className="homepage-editor__stage"
         aria-label={`${pageLabel}画布`}
       >
+        {previewMode ? (
+          <div className="homepage-editor__preview-mode-bar" role="status">
+            <strong>当前画布预览 · {canvasViewportLabel}</strong>
+            <span>包含尚未保存的修改；预览本身不会保存或发布。</span>
+          </div>
+        ) : null}
         <div className="homepage-editor__canvas-controls" aria-label="画布缩放">
           <button
             type="button"
@@ -2858,6 +2907,7 @@ export default function HomepageConfig({
   const [validationRevision, setValidationRevision] = useState(0);
   const validationRequestRef = useRef(0);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [revisionsLoading, setRevisionsLoading] = useState(false);
   const [revisions, setRevisions] = useState<PageDocumentRevision[]>([]);
@@ -2891,6 +2941,7 @@ export default function HomepageConfig({
 
   useEffect(() => {
     activePageKeyRef.current = pageKey;
+    setPreviewMode(false);
   }, [pageKey]);
 
   useEffect(() => {
@@ -3019,6 +3070,19 @@ export default function HomepageConfig({
     let cancelled = false;
     (async () => {
       setLoadedPageKey(null);
+      setHasUnsavedChanges(false);
+      setHasPendingDraft(false);
+      setViewingPublished(false);
+      setPublishIssues([]);
+      setPublishValidationState("stale");
+      setRevisions([]);
+      setDraftSnapshot(null);
+      setRevisionsOpen(false);
+      setPageSettingsOpen(false);
+      pendingDraftRef.current = null;
+      publishedBaselineRef.current = null;
+      publishedDataRef.current = null;
+      publishedMetadataRef.current = {};
       let serverData = createEditorPageDefault(pageKey);
       const cachedPage = pageSessionCacheRef.current[pageKey];
       if (!cancelled) {
@@ -3169,7 +3233,7 @@ export default function HomepageConfig({
   }, [message]);
 
   useEffect(() => {
-    if (initialLoading || loadError) return;
+    if (initialLoading || loadError || loadedPageKey !== pageKey) return;
     const controller = new AbortController();
     const requestId = ++validationRequestRef.current;
     const expectedSignature = canonicalizePageContent(
@@ -3215,7 +3279,7 @@ export default function HomepageConfig({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [initialLoading, loadError, metadata, pageKey, validationRevision]);
+  }, [initialLoading, loadError, loadedPageKey, metadata, pageKey, validationRevision]);
 
   const saveDraft = useCallback(
     async (
@@ -3223,6 +3287,14 @@ export default function HomepageConfig({
       options: { silent?: boolean } = {},
     ): Promise<boolean> => {
       const targetPageKey = pageKey;
+      if (
+        initialLoading ||
+        Boolean(loadError) ||
+        loadedPageKey !== targetPageKey
+      ) {
+        if (!options.silent) message.warning("页面内容仍在加载，请稍后再保存");
+        return false;
+      }
       const requestedData = nextData ?? latestData.current;
       const requestedMetadata = latestMetadata.current;
       const save = async (): Promise<boolean> => {
@@ -3287,7 +3359,7 @@ export default function HomepageConfig({
               okButtonProps: { danger: true },
               onOk: () => setLoadAttempt((attempt) => attempt + 1),
             });
-          } else if (!options.silent) {
+          } else {
             message.error(getEditorErrorMessage(error, "保存失败，请重试"));
           }
           return false;
@@ -3303,7 +3375,7 @@ export default function HomepageConfig({
       );
       return queuedSave;
     },
-    [message, modal, pageKey],
+    [initialLoading, loadError, loadedPageKey, message, modal, pageKey],
   );
 
   // 2026-08-16 批次 D（用户决策）：2 秒自动保存已移除，改为显式保存模型——
@@ -3614,8 +3686,17 @@ export default function HomepageConfig({
     nextData: unknown,
     locateBlock?: (blockIndex: number) => void,
   ) => {
-    if (publishing) return;
+    if (
+      publishing ||
+      initialLoading ||
+      Boolean(loadError) ||
+      loadedPageKey !== pageKey
+    ) {
+      if (!publishing) message.warning("页面内容仍在加载，请稍后再发布");
+      return;
+    }
     const editableData = nextData ?? latestData.current;
+    const pageLabel = getEditorPage(pageKey).label;
 
     // 发布前预检：单一数据源 = 后端校验器，前端只负责展示问题列表
     setPublishing(true);
@@ -3687,10 +3768,12 @@ export default function HomepageConfig({
         !block.props?.mobileImage,
     );
     modal.confirm({
-      title: "确认发布首页？",
+      title: pageKey === "home" ? "确认发布首页？" : `确认发布${pageLabel}？`,
       content: usesMobileFallback
         ? "部分模块未上传移动端图片，移动端会复用对应桌面图，可能产生裁切。你仍可发布。"
-        : "发布后，当前店铺首页将立即更新为本次编辑内容。",
+        : pageKey === "home"
+          ? "发布后，当前店铺首页将立即更新为本次编辑内容。"
+          : `发布后，${pageLabel}将立即更新为本次编辑内容。`,
       okText: "确认发布",
       cancelText: "继续检查",
       onOk: async () => {
@@ -3730,11 +3813,13 @@ export default function HomepageConfig({
           publishedDataRef.current = editableData;
           publishedMetadataRef.current = { ...latestMetadata.current };
           void loadRevisions();
-          message.success("店铺首页已发布，前台页面将立即读取最新版本");
-        } catch (error) {
-          message.error(
-            error instanceof Error ? error.message : "发布失败，请稍后重试",
+          message.success(
+            pageKey === "home"
+              ? "店铺首页已发布，前台页面将立即读取最新版本"
+              : `${pageLabel}已发布，前台页面将立即读取最新版本`,
           );
+        } catch (error) {
+          message.error(getEditorErrorMessage(error, "发布失败，请稍后重试"));
         } finally {
           setPublishing(false);
         }
@@ -3778,7 +3863,7 @@ export default function HomepageConfig({
             重新加载
           </Button>
         </div>
-      ) : initialLoading ? (
+      ) : initialLoading || loadedPageKey !== pageKey ? (
         <div
           style={{
             width: "100%",
@@ -3816,6 +3901,7 @@ export default function HomepageConfig({
             saving={saving}
             hasPendingDraft={hasPendingDraft}
             viewingPublished={viewingPublished}
+            previewMode={previewMode}
             hasUnsavedChanges={hasUnsavedChanges}
             publishValidationState={publishValidationState}
             publishErrorCount={
@@ -3833,6 +3919,7 @@ export default function HomepageConfig({
             onDiscardDraft={discardDraftToPublished}
             onOpenRevisions={openRevisions}
             onOpenPageSettings={() => setPageSettingsOpen(true)}
+            onPreviewModeChange={setPreviewMode}
             onDataChange={trackEditorData}
             onExitViewing={() => {
               viewingPublishedRef.current = false;
@@ -3847,6 +3934,7 @@ export default function HomepageConfig({
             pageMode={getEditorPage(pageKey).mode}
             hasUnsavedChanges={hasUnsavedChanges}
             saving={saving}
+            previewMode={previewMode}
             onSaveDraft={(nextData) => {
               void saveDraft(nextData);
             }}
@@ -3857,7 +3945,9 @@ export default function HomepageConfig({
       )}
       <UnsavedChangesGuard
         hasUnsavedChanges={hasUnsavedChanges}
-        disabled={initialLoading || Boolean(loadError)}
+        disabled={
+          initialLoading || Boolean(loadError) || loadedPageKey !== pageKey
+        }
         onSaveAndLeave={async () =>
           Boolean(await saveDraft(latestData.current))
         }

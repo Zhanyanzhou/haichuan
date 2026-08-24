@@ -74,13 +74,35 @@ export default function PublishedPageDecoration({
   const publishedContent = Array.isArray(structuredData?.content)
     ? structuredData.content
     : [];
-  const fallbackData = pageKey === "products" && !publishedContent.length
+  const hasRenderablePublishedContent = publishedContent.some(
+    (block: { type?: string; props?: Record<string, unknown> }) => {
+      if (!block?.type || block.props?.isVisible === false || block.type === "业务功能区") {
+        return false;
+      }
+      if (block.type !== "产品展示行") return true;
+      const productIds = Array.isArray(block.props?.productIds)
+        ? block.props.productIds
+        : [];
+      const productCodes = Array.isArray(block.props?.productCodes)
+        ? block.props.productCodes
+        : [];
+      return productIds.length > 0 || productCodes.length > 0;
+    },
+  );
+  const fallbackData = pageKey === "products" && !hasRenderablePublishedContent
     ? ensureEditorPageStructure("products", createEditorPageDefault("products"))
     : null;
   const effectiveData = fallbackData ?? structuredData;
   const content = Array.isArray(effectiveData?.content)
     ? effectiveData.content
     : [];
+  const hasVisibleHeroTitle = content.some(
+    (block: { type?: string; props?: Record<string, unknown> }) =>
+      block.type === "首屏主视觉" &&
+      block.props?.isVisible !== false &&
+      typeof block.props?.title === "string" &&
+      block.props.title.trim().length > 0,
+  );
   const businessRegionIndex = content.findIndex(
     (block: { type?: string }) => block?.type === "业务功能区",
   );
@@ -143,7 +165,7 @@ export default function PublishedPageDecoration({
   if (replaceChildren) {
     const replacement = (
       <>
-        {pageLabel && (!hasPublishedDocument || fallbackData) ? (
+        {pageLabel && fallbackData && !hasVisibleHeroTitle ? (
           <h1 className="sr-only">{pageLabel}</h1>
         ) : null}
         {renderDecoration(

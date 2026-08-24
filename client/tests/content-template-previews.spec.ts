@@ -53,6 +53,11 @@ for (const viewport of ["desktop", "mobile"] as const) {
       contentType: "text/html; charset=utf-8",
       body: gallery(viewport),
     }));
+    await page.route("**/api/settings/public", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ code: 200, data: {} }),
+    }));
     await page.goto(`/__content-template-preview-gallery?viewport=${viewport}`);
 
     const previews = page.locator("[data-content-template-preview]");
@@ -70,6 +75,10 @@ for (const viewport of ["desktop", "mobile"] as const) {
       await expect(preview).toHaveAttribute("data-mobile-order", /.+/);
       await expect(preview.locator('[data-content-template-renderer="real"]')).toHaveCount(1);
     }
+
+    const textBanner = page.locator('[data-content-template-preview="textBanner"]');
+    await expect(textBanner.locator('[data-content-role="copy"]')).toHaveCount(1);
+    await expect(textBanner.locator("[data-content-role]")).toHaveCount(1);
 
     await mkdir(screenshotDir, { recursive: true });
     await page.screenshot({
