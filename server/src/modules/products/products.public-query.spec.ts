@@ -32,7 +32,7 @@ function createService() {
   };
   const service = new ProductsService(
     prisma as unknown as PrismaService,
-    {} as never,
+    { isProductMediaReadable: (image: any) => Boolean(image?.id) } as never,
     {} as never,
   );
   return { service, findManyCalls, getCountWhere: () => countWhere };
@@ -176,7 +176,7 @@ test("装修商品引用解析：保持输入顺序并区分删除、下架、�
   };
   const service = new ProductsService(
     prisma as unknown as PrismaService,
-    {} as never,
+    { isProductMediaReadable: (image: any) => Boolean(image?.id) } as never,
     {} as never,
   );
 

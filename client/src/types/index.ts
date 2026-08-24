@@ -178,6 +178,7 @@ export interface ProductImage {
   id: number;
   productId: number;
   url: string;
+  storageKey?: string | null;
   type: "FRONT" | "SIDE" | "TOP" | "DETAIL" | "WEARING";
   sortOrder: number;
   isVideo: boolean;

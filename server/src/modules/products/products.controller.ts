@@ -41,6 +41,7 @@ import {
   PublicProductQueryDto,
   AdminProductQueryDto,
   ResolveProductReferencesDto,
+  AddProductImageDto,
 } from "./dto";
 import { join } from "path";
 import { stat } from "node:fs/promises";
@@ -275,7 +276,7 @@ export class ProductsController {
   @ApiBearerAuth()
   @Post(":id/images")
   @ApiOperation({ summary: "添加产品图片" })
-  addImage(@Param("id") id: string, @Body() body: any) {
+  addImage(@Param("id") id: string, @Body() body: AddProductImageDto) {
     return this.productsService.addImage(+id, body);
   }
 

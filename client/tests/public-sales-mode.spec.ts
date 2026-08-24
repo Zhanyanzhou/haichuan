@@ -99,6 +99,8 @@ async function mockPublicSales(
   options: {
     products: ReturnType<typeof product>[];
     flags?: { commerceEnabled: boolean; cartEnabled: boolean; paymentEnabled: boolean };
+    flagsStatus?: number;
+    flagsBarrier?: RouteBarrier;
     cartItems?: unknown[];
     cartStatus?: number;
     cartStatuses?: number[];
@@ -127,7 +129,16 @@ async function mockPublicSales(
     const method = request.method();
 
     if (path.endsWith("/stream")) return route.abort();
-    if (path.endsWith("/settings/flags")) return fulfill(route, flags);
+    if (path.endsWith("/settings/flags")) {
+      if (options.flagsBarrier) await options.flagsBarrier.waitUntilReleased();
+      return fulfill(
+        route,
+        options.flagsStatus === 500
+          ? { statusCode: 500, message: "交易能力暂时无法读取" }
+          : flags,
+        options.flagsStatus,
+      );
+    }
     if (path.endsWith("/settings/public")) return fulfill(route, { siteName: "海川珠宝" });
     if (path.endsWith("/page-modules/document/published")) return fulfill(route, null);
     if (path.endsWith("/categories/tree")) {
@@ -204,13 +215,48 @@ test("Catalog 消费服务端销售模式、派生价格和售罄状态", async 
   await expect(page.getByText("已售罄", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "查看作品" }).first()).toHaveAttribute("href", "/products/1");
   await expect(page.getByRole("button", { name: "+ 加入选款" })).toBeVisible();
-  await expect(page.getByText("仅展示", { exact: true })).toBeVisible();
+  const displayOnlyCard = page.locator(".catalog-cell").filter({
+    has: page.getByRole("heading", { name: "销售模式作品 3" }),
+  });
+  await expect(displayOnlyCard.getByText("仅展示", { exact: true })).toHaveCount(0);
+  await expect(displayOnlyCard.getByRole("link", { name: "查看作品" }))
+    .toHaveAttribute("href", "/products/3");
   await expect(page.getByText("图片暂不可用").first()).toBeVisible();
   await expect.poll(() => page.evaluate(() => Array.from(document.images)
     .filter((image) => {
       const rect = image.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && image.naturalWidth === 0;
     }).length)).toBe(0);
+});
+
+test("Catalog 在交易能力加载中先降级为查看作品，明确开放后再显示购买", async ({ page }) => {
+  const flagsBarrier = createRouteBarrier();
+  await mockPublicSales(page, {
+    products: [product(4, "DIRECT_PURCHASE", { available: true })],
+    flagsBarrier,
+  });
+  await page.goto("/catalog");
+  await flagsBarrier.reached;
+
+  await expect(page.getByRole("link", { name: "查看作品" }).first())
+    .toHaveAttribute("href", "/products/4");
+  await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
+
+  flagsBarrier.release();
+  await expect(page.getByRole("link", { name: "查看并购买" }).first())
+    .toHaveAttribute("href", "/products/4");
+});
+
+test("Catalog 在交易能力读取失败时不承诺购买", async ({ page }) => {
+  await mockPublicSales(page, {
+    products: [product(5, "DIRECT_PURCHASE", { available: true })],
+    flagsStatus: 500,
+  });
+  await page.goto("/catalog");
+
+  await expect(page.getByRole("link", { name: "查看作品" }).first())
+    .toHaveAttribute("href", "/products/5");
+  await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
 });
 
 test("DIRECT_PURCHASE 有货时使用 SKU 价格且重复点击只提交一次", async ({ page }) => {
@@ -276,10 +322,10 @@ test("SINGLE_UNIT 在详情和购物车都固定数量上限 1", async ({ page }
 
 test("四种非直购模式只提供真实可达的浏览、选款、预约或定制入口", async ({ page }) => {
   const cases = [
-    { id: 20, mode: "DISPLAY_ONLY" as const, text: "仅展示，暂不售卖", href: null },
-    { id: 21, mode: "SELECTION" as const, text: "去选款咨询", href: "/catalog" },
-    { id: 22, mode: "APPOINTMENT" as const, text: "预约到店", href: "/contact" },
-    { id: 23, mode: "CUSTOM_INQUIRY" as const, text: "定制咨询", href: "/custom" },
+    { id: 20, mode: "DISPLAY_ONLY" as const, text: "咨询此款作品", href: "/contact" },
+    { id: 21, mode: "SELECTION" as const, text: "加入选款", href: null },
+    { id: 22, mode: "APPOINTMENT" as const, text: "预约鉴赏此款", href: "/contact" },
+    { id: 23, mode: "CUSTOM_INQUIRY" as const, text: "咨询此款定制", href: "/custom" },
   ];
   await mockPublicSales(page, { products: cases.map((item) => product(item.id, item.mode)) });
 
@@ -288,7 +334,10 @@ test("四种非直购模式只提供真实可达的浏览、选款、预约或�
     if (item.href) {
       await expect(page.getByRole("link", { name: item.text })).toHaveAttribute("href", item.href);
     } else {
-      await expect(page.getByText(item.text, { exact: true })).toBeVisible();
+      const selectionAction = page.getByRole("button", { name: item.text });
+      await expect(selectionAction).toBeVisible();
+      await selectionAction.click();
+      await expect(page.getByRole("button", { name: "已加入" })).toBeVisible();
     }
     await expect(page.getByRole("button", { name: /加入购物车/ })).toHaveCount(0);
     await expect(page.getByText(/¥12,800/)).toHaveCount(0);
@@ -384,6 +433,11 @@ test("购物车与支付开关关闭时不能进入交易或创建订单", async
     flags: { commerceEnabled: true, cartEnabled: false, paymentEnabled: false },
     requestCounts,
   });
+  await page.goto("/catalog");
+  await expect(page.getByRole("link", { name: "查看作品" }).first())
+    .toHaveAttribute("href", "/products/40");
+  await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
+
   await page.goto("/products/40");
   await expect(page.getByRole("link", { name: "购买暂未开放，联系顾问" })).toHaveAttribute("href", "/contact");
   await expect(page.getByRole("button", { name: /加入购物车/ })).toHaveCount(0);

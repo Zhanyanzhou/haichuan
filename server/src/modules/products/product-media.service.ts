@@ -68,29 +68,32 @@ export class ProductMediaService {
     isVideo?: boolean;
     mimeType?: string | null;
   }): ReadResult {
-    // 1. 优先私有存储
-    if (image.storageKey) {
-      const privatePath = this.resolveWithin(this.privateRoot, image.storageKey);
-      if (privatePath && existsSync(privatePath)) {
-        return {
-          buffer: readFileSync(privatePath),
-          mimeType: image.mimeType || this.guessMime(privatePath),
-          isVideo: !!image.isVideo,
-        };
-      }
-    }
-    // 2. 回退旧公开路径（迁移兼容，迁移完成后旧文件删除，此处自然 404）
-    if (image.url) {
-      const legacyPath = this.resolveLocalPath(image.url);
-      if (legacyPath && existsSync(legacyPath)) {
-        return {
-          buffer: readFileSync(legacyPath),
-          mimeType: image.mimeType || this.guessMime(legacyPath),
-          isVideo: !!image.isVideo,
-        };
-      }
+    const mediaPath = this.resolveProductMediaPath(image);
+    if (mediaPath) {
+      return {
+        buffer: readFileSync(mediaPath),
+        mimeType: image.mimeType || this.guessMime(mediaPath),
+        isVideo: !!image.isVideo,
+      };
     }
     throw new NotFoundException('媒体文件暂不可用');
+  }
+
+  /** 写入和公开序列化共用同一可读性事实，避免生成必然 404 的受控媒体地址。 */
+  isProductMediaReadable(image: {
+    storageKey?: string | null;
+    url?: string | null;
+  }): boolean {
+    const cacheKey = `product-media:${image.storageKey || ""}|${image.url || ""}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.available;
+
+    const available = this.resolveProductMediaPath(image) !== null;
+    this.cache.set(cacheKey, {
+      available,
+      expiresAt: Date.now() + this.cacheTtlMs,
+    });
+    return available;
   }
 
   /** 返回私有根目录（上传/裁切/迁移脚本复用） */
@@ -180,6 +183,21 @@ export class ProductMediaService {
     }
     if (url.startsWith('/uploads/')) {
       return this.resolveWithin(this.uploadsRoot, url.slice('/uploads/'.length));
+    }
+    return null;
+  }
+
+  private resolveProductMediaPath(image: {
+    storageKey?: string | null;
+    url?: string | null;
+  }): string | null {
+    if (image.storageKey) {
+      const privatePath = this.resolveWithin(this.privateRoot, image.storageKey);
+      if (privatePath && existsSync(privatePath)) return privatePath;
+    }
+    if (image.url) {
+      const legacyPath = this.resolveLocalPath(image.url);
+      if (legacyPath && existsSync(legacyPath)) return legacyPath;
     }
     return null;
   }

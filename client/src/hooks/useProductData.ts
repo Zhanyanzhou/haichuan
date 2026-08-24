@@ -34,6 +34,15 @@ function mapApiProduct(
 
   const primaryCategory = lineage[0];
   const secondaryCategory = lineage[1];
+  const listingUrl =
+    p.listingImage?.mediaUrl || p.listingImage?.url || "";
+  const primaryUrl =
+    p.primaryImage?.mediaUrl || p.primaryImage?.url || "";
+  const orderedImages = [
+    listingUrl,
+    primaryUrl,
+    ...(p.images || []).map((img: any) => img.mediaUrl || img.url || ""),
+  ].filter(Boolean);
 
   return {
     id: p.id,
@@ -52,7 +61,8 @@ function mapApiProduct(
     size: p.size || "",
     series: "",
     scene: p.salesMode || "",
-    images: (p.images || []).map((img: any) => img.mediaUrl || img.url || ""),
+    // 目录卡片和快速预览都以运营指定的列表图为首图；其后保留主图与排序图片并去重。
+    images: [...new Set<string>(orderedImages)],
     categoryName: categoryById.get(p.categoryId)?.name || p.category?.name || "",
     price: Number(p.price) || 0,
     salesMode: p.salesMode,

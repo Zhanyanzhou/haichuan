@@ -28,7 +28,11 @@ import {
   trackSearch,
 } from "@/hooks/useAnalytics";
 import { usePageDecorationState } from "@/page-builder/runtime/PublishedPageDecoration";
-import { salesModeCta, salesModeRoute } from "@/store/featureFlags";
+import {
+  salesModeCta,
+  salesModeRoute,
+  useCommerceCapabilities,
+} from "@/store/featureFlags";
 
 /* ══════════════════════════════════════
    设计令牌
@@ -43,7 +47,7 @@ const T = {
   imgBg: "#F4F5F5",
 };
 
-const HEADER_H = 84;
+const DESKTOP_HEADER_H = 108;
 const PAGE_SIZE = 32;
 const SKU_RE = /^[A-Z]{2,3}-[A-Z]{2,3}-\d{3,4}$/i;
 
@@ -234,8 +238,9 @@ function SecondaryNav({
   return (
     <div style={{ borderBottom: `1px solid ${T.line}` }}>
       <div
+        className="catalog-secondary-nav__inner"
         style={{
-          maxWidth: 1560,
+          maxWidth: 1280,
           marginInline: "auto",
           paddingInline: "clamp(48px,5vw,80px)",
           display: "flex",
@@ -356,7 +361,7 @@ function Toolbar({
           <span style={{ color: T.txt, fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>{path}</span>
           <span style={{ color: T.light, whiteSpace: "nowrap", flexShrink: 0 }}>{total} 件作品</span>
           <div className="catalog-toolbar__spacer" style={{ flex: 1 }} />
-          <div style={{ position: "relative" }}>
+          <div className="catalog-toolbar__material" style={{ position: "relative" }}>
             <button
               onClick={() =>
                 setOpenDD(openDD === "material" ? null : "material")
@@ -593,6 +598,7 @@ function ActiveFilters({
   return (
     <div style={{ borderBottom: `1px solid ${T.line}` }}>
       <div
+        className="catalog-active-filters__inner"
         style={{
           maxWidth: 1560,
           marginInline: "auto",
@@ -681,11 +687,14 @@ function Tag({ label, onRemove }: { label: string; onRemove: () => void }) {
 function useCatalogDialog(
   onClose: () => void,
   returnFocusRef: RefObject<HTMLElement | null>,
+  active = true,
+  resolveReturnFocus?: () => HTMLElement | null,
 ) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const initialFocusRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
+    if (!active) return;
     const dialog = dialogRef.current;
     const ownerDocument = dialog?.ownerDocument;
     const ownerWindow = ownerDocument?.defaultView;
@@ -724,12 +733,20 @@ function useCatalogDialog(
       ownerWindow.clearTimeout(focusTimer);
       ownerWindow.removeEventListener("keydown", onKeyDown);
       ownerDocument.body.style.overflow = previousOverflow;
-      ownerWindow.setTimeout(
-        () => returnFocusTarget?.focus({ preventScroll: true }),
-        0,
-      );
+      if (resolveReturnFocus) {
+        ownerWindow.setTimeout(() => {
+          ownerWindow.requestAnimationFrame(() =>
+            resolveReturnFocus()?.focus({ preventScroll: true }),
+          );
+        }, 0);
+      } else {
+        ownerWindow.setTimeout(
+          () => returnFocusTarget?.focus({ preventScroll: true }),
+          0,
+        );
+      }
     };
-  }, [onClose, returnFocusRef]);
+  }, [active, onClose, resolveReturnFocus, returnFocusRef]);
 
   return { dialogRef, initialFocusRef };
 }
@@ -973,10 +990,12 @@ function CatalogProductAction({
   product,
   selected,
   onToggle,
+  commerceAllowed,
 }: {
   product: CatalogProduct;
   selected: boolean;
   onToggle: () => void;
+  commerceAllowed: boolean;
 }) {
   const commonStyle: React.CSSProperties = {
     display: "inline-flex",
@@ -1021,7 +1040,9 @@ function CatalogProductAction({
 
   return (
     <Link to={`/products/${product.id}`} style={commonStyle}>
-      {product.salesMode === "DIRECT_PURCHASE" && product.isAvailableForPurchase === true
+      {commerceAllowed &&
+      product.salesMode === "DIRECT_PURCHASE" &&
+      product.isAvailableForPurchase === true
         ? "查看并购买"
         : "查看作品"}
     </Link>
@@ -1031,9 +1052,11 @@ function CatalogProductAction({
 function ProductCard({
   product,
   onQuickView,
+  commerceAllowed,
 }: {
   product: CatalogProduct;
   onQuickView: (p: CatalogProduct, trigger: HTMLButtonElement) => void;
+  commerceAllowed: boolean;
 }) {
   const toggle = useSelectionStore((s) => s.toggle);
   const sel = useSelectionStore((s) => s.isSelected)(product.id);
@@ -1072,7 +1095,7 @@ function ProductCard({
     ? product.price && product.price > 0
       ? `¥${product.price.toLocaleString()} 起`
       : "价格暂不可用"
-    : salesModeCta(product.salesMode);
+    : "";
 
   const subInfo = [product.categoryName, product.material]
     .filter(Boolean)
@@ -1083,6 +1106,7 @@ function ProductCard({
       {/* 商品目录统一使用 4:5 产品图比例。 */}
       <div
         data-catalog-product-media
+        data-catalog-product-media-src={currentImg}
         style={{
           aspectRatio: "4/5",
           background: T.imgBg,
@@ -1167,6 +1191,7 @@ function ProductCard({
       {/* 信息区：名称 → 材质 → 价格 → 选款 */}
       <div style={{ padding: "14px 0 20px", textAlign: "center" }}>
         <h3
+          className="catalog-product-card__title"
           style={{
             fontSize: 13,
             fontWeight: 400,
@@ -1175,12 +1200,12 @@ function ProductCard({
             lineHeight: 1.4,
             overflow: "hidden",
             textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
           }}
         >
           {product.name || product.sku}
         </h3>
         <p
+          className="catalog-product-card__facts"
           style={{
             fontSize: 11,
             color: T.light,
@@ -1193,17 +1218,19 @@ function ProductCard({
         >
           {subInfo}
         </p>
-        <p
-          style={{
-            fontSize: 12,
-            fontWeight: 400,
-            color: T.txt,
-            margin: "0 0 10px",
-            lineHeight: 1.4,
-          }}
-        >
-          {priceText}
-        </p>
+        {priceText ? (
+          <p
+            style={{
+              fontSize: 12,
+              fontWeight: 400,
+              color: T.txt,
+              margin: "0 0 10px",
+              lineHeight: 1.4,
+            }}
+          >
+            {priceText}
+          </p>
+        ) : null}
         {product.salesMode === "DIRECT_PURCHASE" && product.isAvailableForPurchase === false ? (
           <p role="status" style={{ margin: "-4px 0 10px", color: T.sec, fontSize: 11 }}>
             已售罄
@@ -1213,6 +1240,7 @@ function ProductCard({
           product={product}
           selected={sel}
           onToggle={handleToggle}
+          commerceAllowed={commerceAllowed}
         />
       </div>
     </div>
@@ -1228,9 +1256,11 @@ function ProductCard({
 function ProductGrid({
   products,
   onQuickView,
+  commerceAllowed,
 }: {
   products: CatalogProduct[];
   onQuickView: (p: CatalogProduct, trigger: HTMLButtonElement) => void;
+  commerceAllowed: boolean;
 }) {
   return (
     <>
@@ -1245,7 +1275,7 @@ function ProductGrid({
           border-left: 1px solid ${T.line};
           border-right: 1px solid ${T.line};
         }
-        @media (min-width: 1280px) {
+        @media (min-width: 1024px) {
           .catalog-matrix { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         }
         .catalog-cell {
@@ -1258,7 +1288,7 @@ function ProductGrid({
         }
         /* 2列：第2列无右边线 */
         .catalog-cell:nth-child(2n) { border-right: none; }
-        @media (min-width: 1280px) {
+        @media (min-width: 1024px) {
           /* 3列：覆盖2列规则，改为第3列无右边线 */
           .catalog-cell:nth-child(2n) { border-right: 1px solid ${T.line}; }
           .catalog-cell:nth-child(3n) { border-right: none; }
@@ -1266,11 +1296,15 @@ function ProductGrid({
       `}</style>
       <div
         className="catalog-matrix"
-        style={{ maxWidth: "1560px", margin: "0 auto" }}
+        style={{ maxWidth: "1280px", margin: "0 auto" }}
       >
         {products.map((p) => (
           <div key={p.id} className="catalog-cell">
-            <ProductCard product={p} onQuickView={onQuickView} />
+            <ProductCard
+              product={p}
+              onQuickView={onQuickView}
+              commerceAllowed={commerceAllowed}
+            />
           </div>
         ))}
       </div>
@@ -1279,7 +1313,7 @@ function ProductGrid({
         aria-hidden="true"
         style={{
           width: "100%",
-          maxWidth: "1560px",
+          maxWidth: "1280px",
           margin: "0 auto",
           height: "1px",
           background: T.line,
@@ -1296,10 +1330,12 @@ function QuickView({
   product,
   onClose,
   returnFocusRef,
+  commerceAllowed,
 }: {
   product: CatalogProduct | null;
   onClose: () => void;
   returnFocusRef: RefObject<HTMLElement | null>;
+  commerceAllowed: boolean;
 }) {
   const toggle = useSelectionStore((s) => s.toggle);
   const isSelected = useSelectionStore((s) => s.isSelected);
@@ -1314,6 +1350,7 @@ function QuickView({
 
   return (
     <div
+      className="catalog-pagination"
       style={{
         position: "fixed",
         inset: 0,
@@ -1324,6 +1361,7 @@ function QuickView({
     >
       <div
         ref={dialogRef}
+        className="catalog-quick-view"
         role="dialog"
         aria-modal="true"
         aria-labelledby="catalog-quick-view-title"
@@ -1333,7 +1371,7 @@ function QuickView({
           top: 0,
           right: 0,
           bottom: 0,
-          width: "min(720px, 100%)",
+          width: "min(560px, 100%)",
           zIndex: 96,
           background: T.bg,
           overflowY: "auto",
@@ -1374,8 +1412,7 @@ function QuickView({
           <SecureImage
             src={getListingImage(product as any)}
             alt={product.sku}
-            fallback="/images/products/placeholder.svg"
-            style={{ width: "100%", height: "100%", objectFit: "contain" }}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
         </div>
         <h2
@@ -1387,9 +1424,9 @@ function QuickView({
             margin: "0 0 4px",
           }}
         >
-          {product.sku}
+          {product.name || product.sku}
         </h2>
-        {product.name && (
+        {product.name && product.sku ? (
           <p
             style={{
               fontSize: 16,
@@ -1398,9 +1435,9 @@ function QuickView({
               lineHeight: 1.5,
             }}
           >
-            {product.name}
+            {product.sku}
           </p>
-        )}
+        ) : null}
         <div
           style={{
             display: "flex",
@@ -1409,12 +1446,8 @@ function QuickView({
             marginBottom: 24,
           }}
         >
-          <Info label="品类" value={product.categoryName || ""} />
+          {product.categoryName ? <Info label="品类" value={product.categoryName} /> : null}
           {product.material && <Info label="材质" value={product.material} />}
-          {product.craft && <Info label="工艺" value={product.craft} />}
-          {product.weight && <Info label="重量" value={product.weight} />}
-          {product.size && <Info label="规格" value={product.size} />}
-          {product.series && <Info label="系列" value={product.series} />}
         </div>
         {product.salesMode === "DIRECT_PURCHASE" && product.price && product.price > 0 ? (
           <p style={{ margin: "0 0 12px", color: T.txt, fontSize: 15 }}>
@@ -1426,11 +1459,17 @@ function QuickView({
             已售罄，作品仍可浏览
           </p>
         ) : null}
-        <CatalogProductAction
-          product={product}
-          selected={sel}
-          onToggle={handleToggle}
-        />
+        <div className="catalog-quick-view__actions">
+          <CatalogProductAction
+            product={product}
+            selected={sel}
+            onToggle={handleToggle}
+            commerceAllowed={commerceAllowed}
+          />
+          <Link className="catalog-quick-view__detail-link" to={`/products/${product.id}`}>
+            查看完整信息
+          </Link>
+        </div>
       </div>
     </div>
   );
@@ -1549,6 +1588,15 @@ function SelectionTray({
   const ids = useSelectionStore((s) => s.selectedIds);
   const clear = useSelectionStore((s) => s.clear);
   const [open, setOpen] = useState(false);
+  const trayButtonRef = useRef<HTMLButtonElement>(null);
+  const closeDialog = useCallback(() => setOpen(false), []);
+  const resolveTrayButton = useCallback(() => trayButtonRef.current, []);
+  const { dialogRef, initialFocusRef } = useCatalogDialog(
+    closeDialog,
+    trayButtonRef,
+    open,
+    resolveTrayButton,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     customerName: "",
@@ -1571,15 +1619,6 @@ function SelectionTray({
   const isSignedIn = Boolean(
     localStorage.getItem("customerToken") && account?.phone,
   );
-
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open]);
 
   if (!ids.size) return null;
 
@@ -1677,7 +1716,7 @@ function SelectionTray({
         `已提交 ${selected.length} 款作品的选款咨询，我们的珠宝顾问将尽快与您联系`,
       );
       clear();
-      setOpen(false);
+      closeDialog();
       setForm({
         customerName: "",
         phone: "",
@@ -1707,69 +1746,74 @@ function SelectionTray({
 
   return (
     <>
-      {/* 底部托盘 */}
-      <button
-        type="button"
-        aria-label={`查看已选 ${selectedCount} 款并提交选款咨询`}
-        onClick={() => setOpen(true)}
-        style={{
-          position: "fixed",
-          bottom: 24,
-          left: "50%",
-          transform: "translateX(-50%)",
-          zIndex: 80,
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          paddingInline: 20,
-          height: 48,
-          background: T.txt,
-          maxWidth: "calc(100vw - 32px)",
-          cursor: "pointer",
-          borderRadius: 4,
-          border: 0,
-          textAlign: "left",
-          fontFamily: "inherit",
-        }}
-      >
-        <div
-          className="tray-thumbs"
-          style={{ display: "flex", gap: 6, alignItems: "center" }}
+      {/* 底部托盘：咨询弹窗打开时卸载，避免重复行动。 */}
+      {!open ? (
+        <button
+          ref={trayButtonRef}
+          className="catalog-selection-tray"
+          type="button"
+          aria-label={`查看已选 ${selectedCount} 款并提交选款咨询`}
+          onClick={() => setOpen(true)}
+          style={{
+            position: "fixed",
+            bottom: 24,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 80,
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            paddingInline: 20,
+            height: 48,
+            background: T.txt,
+            maxWidth: "calc(100vw - 32px)",
+            cursor: "pointer",
+            borderRadius: 4,
+            border: 0,
+            textAlign: "left",
+            fontFamily: "inherit",
+          }}
         >
-          {thumbs.map((p) => (
-            <div
-              key={p.id}
-              style={{
-                width: 32,
-                height: 32,
-                background: T.imgBg,
-                overflow: "hidden",
-                flexShrink: 0,
-                borderRadius: 2,
-              }}
-            >
-              <SecureImage
-                src={p.images?.[0] || getListingImage(p as any)}
-                alt={p.sku}
-                style={{ width: "100%", height: "100%", objectFit: "contain" }}
-              />
-            </div>
-          ))}
-        </div>
-        <span style={{ fontSize: 12, color: "#FFFFFF" }}>
-          已选 {selectedCount} 款
-        </span>
-        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
-          提交选款咨询 →
-        </span>
-      </button>
+          <div
+            className="tray-thumbs"
+            style={{ display: "flex", gap: 6, alignItems: "center" }}
+          >
+            {thumbs.map((p) => (
+              <div
+                key={p.id}
+                style={{
+                  width: 32,
+                  height: 32,
+                  background: T.imgBg,
+                  overflow: "hidden",
+                  flexShrink: 0,
+                  borderRadius: 2,
+                }}
+              >
+                <SecureImage
+                  src={p.images?.[0] || getListingImage(p as any)}
+                  alt={p.sku}
+                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                />
+              </div>
+            ))}
+          </div>
+          <span style={{ fontSize: 12, color: "#FFFFFF" }}>
+            已选 {selectedCount} 款
+          </span>
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
+            提交选款咨询 →
+          </span>
+        </button>
+      ) : null}
 
       {/* 提交弹窗 */}
       {open && (
         <>
           <div
+            className="catalog-selection-inquiry__backdrop"
             aria-hidden="true"
-            onClick={() => setOpen(false)}
+            onClick={closeDialog}
             style={{
               position: "fixed",
               inset: 0,
@@ -1778,6 +1822,7 @@ function SelectionTray({
             }}
           />
           <div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="selection-inquiry-title"
@@ -1794,10 +1839,10 @@ function SelectionTray({
             }}
           >
             <button
+              ref={initialFocusRef}
               type="button"
-              autoFocus
               aria-label="关闭选款咨询"
-              onClick={() => setOpen(false)}
+              onClick={closeDialog}
               style={{
                 position: "absolute",
                 top: 16,
@@ -2098,9 +2143,9 @@ function StickyBar({
   const path = category ? parentName : "全部款式";
   return (
     <div
+      className="catalog-sticky-bar"
       style={{
         position: "fixed",
-        top: HEADER_H,
         left: 0,
         right: 0,
         zIndex: 40,
@@ -2109,8 +2154,9 @@ function StickyBar({
       }}
     >
       <div
+        className="catalog-sticky-bar__inner"
         style={{
-          maxWidth: 1560,
+          maxWidth: 1280,
           marginInline: "auto",
           paddingInline: "clamp(48px,5vw,80px)",
           height: 52,
@@ -2242,7 +2288,7 @@ function CatalogSearch({
               onChange={(event) => setDraft(event.target.value)}
               onFocus={() => setFocused(true)}
               onBlur={() => window.setTimeout(() => setFocused(false), 120)}
-              placeholder="输入关键词或货号"
+              placeholder="搜索作品名称或编号"
               autoComplete="off"
               role="combobox"
               aria-autocomplete="list"
@@ -2332,6 +2378,12 @@ export default function Catalog({
   mode = "public",
   hasLeadingDecoration: leadingDecorationOverride,
 }: CatalogProps = {}) {
+  const { flags: commerceFlags, loading: commerceFlagsLoading } =
+    useCommerceCapabilities();
+  const commerceAllowed =
+    !commerceFlagsLoading &&
+    commerceFlags?.commerceEnabled === true &&
+    commerceFlags.cartEnabled === true;
   const decorationState = usePageDecorationState();
   const editorPreview = mode === "editor-preview";
   const hasLeadingDecoration =
@@ -2510,7 +2562,7 @@ export default function Catalog({
     if (!sentinel) return;
     const observer = new IntersectionObserver(
       ([entry]) => setStickyVisible(!entry.isIntersecting),
-      { rootMargin: `-${HEADER_H}px 0px 0px 0px`, threshold: 0 },
+      { rootMargin: `-${DESKTOP_HEADER_H}px 0px 0px 0px`, threshold: 0 },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
@@ -2931,6 +2983,7 @@ export default function Catalog({
       ) : null}
       {apiLoading ? (
         <div
+          className="catalog-state"
           style={{
             textAlign: "center",
             paddingBlock: 80,
@@ -2943,6 +2996,7 @@ export default function Catalog({
         </div>
       ) : apiError ? (
         <div
+          className="catalog-state"
           style={{
             textAlign: "center",
             paddingBlock: 80,
@@ -2987,6 +3041,7 @@ export default function Catalog({
         </div>
       ) : mergedProducts.length === 0 ? (
         <div
+          className="catalog-state"
           style={{
             textAlign: "center",
             paddingBlock: 80,
@@ -3052,6 +3107,7 @@ export default function Catalog({
       ) : (
         <ProductGrid
           products={mergedProducts}
+          commerceAllowed={commerceAllowed}
           onQuickView={(product, trigger) => {
             quickViewTriggerRef.current = trigger;
             setQuickView(product);
@@ -3068,6 +3124,7 @@ export default function Catalog({
           product={quickView}
           onClose={closeQuickView}
           returnFocusRef={quickViewTriggerRef}
+          commerceAllowed={commerceAllowed}
         />
       )}
       {filterOpen && (

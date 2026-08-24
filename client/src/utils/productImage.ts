@@ -89,7 +89,11 @@ export function getThumbnailImage(product: ProductLike): string {
 /**
  * 获取详情缩略图列表（ProductDetail 缩略图切换条）
  */
-export function getThumbnailList(images?: ProductImage[]): ProductImage[] {
-  if (!images) return [];
-  return [...images].sort((a, b) => a.sortOrder - b.sortOrder);
+export function getThumbnailList(
+  images?: ProductImage[],
+  primaryImage?: ProductImage | null,
+): ProductImage[] {
+  const sorted = [...(images || [])].sort((a, b) => a.sortOrder - b.sortOrder);
+  if (!primaryImage) return sorted;
+  return [primaryImage, ...sorted.filter((image) => image.id !== primaryImage.id)];
 }

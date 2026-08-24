@@ -41,7 +41,10 @@ function createScheduledService(publishable: boolean) {
   };
   const service = new ProductsService(
     prisma as unknown as PrismaService,
-    { invalidate: () => undefined, readProductImage: () => ({ buffer: Buffer.from("x") }) } as never,
+    {
+      invalidate: () => undefined,
+      isProductMediaReadable: () => publishable,
+    } as never,
     {} as never,
   );
   return { service, updates };

@@ -619,9 +619,14 @@ export default function ProductManage() {
           ...(source.images || []).map((img) =>
             productApi.addImage(created.id, {
               url: img.url,
+              storageKey: img.storageKey ?? undefined,
               type: img.type,
               sortOrder: img.sortOrder,
               isVideo: img.isVideo,
+              width: img.width ?? undefined,
+              height: img.height ?? undefined,
+              mimeType: img.mimeType ?? undefined,
+              fileSize: img.fileSize ?? undefined,
             }),
           ),
           ...(source.certificates || []).map((cert) =>

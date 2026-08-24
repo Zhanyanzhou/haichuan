@@ -12,6 +12,7 @@ import {
   PublicProductQueryDto,
   ResolveProductReferencesDto,
   UpdateProductDto,
+  AddProductImageDto,
 } from "./dto";
 import {
   InventoryPolicy,
@@ -30,6 +31,8 @@ import { Cron, CronExpression } from "@nestjs/schedule";
 
 const CUSTOMER_FACING_IMAGE_SELECT = {
   id: true,
+  url: true,
+  storageKey: true,
   type: true,
   sortOrder: true,
   isVideo: true,
@@ -545,12 +548,12 @@ export class ProductsService {
         visibility: true,
         deletedAt: true,
         category: { select: { id: true, name: true } },
-        listingImage: { select: { id: true } },
-        primaryImage: { select: { id: true } },
+        listingImage: { select: CUSTOMER_FACING_IMAGE_SELECT },
+        primaryImage: { select: CUSTOMER_FACING_IMAGE_SELECT },
         images: {
           orderBy: { sortOrder: "asc" },
-          take: 1,
-          select: { id: true },
+          take: 5,
+          select: CUSTOMER_FACING_IMAGE_SELECT,
         },
       },
     });
@@ -568,10 +571,13 @@ export class ProductsService {
           reason: "NOT_FOUND" as const,
         };
       }
-      const imageId =
-        product.listingImage?.id ??
-        product.primaryImage?.id ??
-        product.images[0]?.id;
+      const imageId = [
+        product.listingImage,
+        product.primaryImage,
+        ...product.images,
+      ].find((image) =>
+        image ? this.productMedia.isProductMediaReadable(image) : false,
+      )?.id;
       const reason = product.deletedAt
         ? "DELETED"
         : product.status === "OFFLINE"
@@ -849,7 +855,7 @@ export class ProductsService {
   ): Record<string, unknown> {
     const productId = product.id;
     const mapImage = (img: any) => {
-      if (!img) return null;
+      if (!img || !this.productMedia.isProductMediaReadable(img)) return null;
       return {
         id: img.id,
         type: img.type,
@@ -1235,11 +1241,20 @@ export class ProductsService {
       select: {
         id: true,
         name: true,
-        primaryImage: { select: { id: true } },
+        listingImage: { select: CUSTOMER_FACING_IMAGE_SELECT },
+        primaryImage: { select: CUSTOMER_FACING_IMAGE_SELECT },
+        images: {
+          orderBy: { sortOrder: "asc" },
+          take: 5,
+          select: CUSTOMER_FACING_IMAGE_SELECT,
+        },
       },
     });
     for (const row of rows) {
-      const imageId = row.primaryImage?.id ?? null;
+      const imageId = [row.listingImage, row.primaryImage, ...row.images].find(
+        (image) =>
+          image ? this.productMedia.isProductMediaReadable(image) : false,
+      )?.id ?? null;
       result.set(row.id, {
         name: row.name,
         // 媒体地址指向自有受控端点（catalog 媒体同时接受客户与员工令牌）；
@@ -1506,15 +1521,9 @@ export class ProductsService {
     if (!product.category.isActive || product.category.deletedAt)
       errors.push("有效且启用的商品分类");
 
-    const hasReadableImage = product.images.some((image) => {
-      try {
-        this.productMedia.readProductImage(image);
-        return true;
-      } catch {
-        // 兼容仍在使用的受信外部/内嵌图片；受控媒体端点必须由实际存储读取成功。
-        return /^(https?:|data:image\/)/i.test(image.url);
-      }
-    });
+    const hasReadableImage = product.images.some((image) =>
+      this.productMedia.isProductMediaReadable(image),
+    );
     if (!hasReadableImage) errors.push("至少一张可读取的非视频商品图片");
 
     switch (product.salesMode) {
@@ -1836,50 +1845,53 @@ export class ProductsService {
 
   async addImage(
     productId: number,
-    data: {
-      url?: string;
-      storageKey?: string;
-      type?: string;
-      sortOrder?: number;
-      sourceImageId?: number;
-      cropData?: any;
-      width?: number;
-      height?: number;
-      mimeType?: string;
-      fileSize?: number;
-      isVideo?: boolean;
-    },
+    data: AddProductImageDto,
   ) {
-    // 受控存储：优先 storageKey（私有目录）。url 创建后回填为受控媒体端点
-    // /products/catalog/:id/media/:imageId —— 统一作为订单/选款等历史快照的来源值，
-    // 避免用 catalog:// 等占位符污染快照导致后台缩略图失效。
+    // 受控存储优先 storageKey（私有目录）；legacy 本机 URL 必须保留为底层读取事实。
+    // 对调用方始终返回 /products/catalog/:id/media/:imageId 受控端点。
     const storageKey = data.storageKey?.trim() || undefined;
     const initialUrl =
       data.url || (storageKey ? `pending://${storageKey}` : "");
     if (!initialUrl) throw new BadRequestException("图片地址或存储键不能为空");
-    const image = await this.prisma.productImage.create({
-      data: {
-        productId,
-        url: initialUrl,
-        storageKey: storageKey ?? null,
-        type: this.normalizeImageType(data.type) as any,
-        sortOrder: data.sortOrder ?? 0,
-        isVideo: data.isVideo ?? false,
-        sourceImageId: data.sourceImageId ?? null,
-        cropData: data.cropData ?? undefined,
-        width: data.width ?? null,
-        height: data.height ?? null,
-        mimeType: data.mimeType ?? null,
-        fileSize: data.fileSize ?? null,
-      },
+    if (
+      !this.productMedia.isProductMediaReadable({
+        storageKey,
+        url: data.url,
+      })
+    ) {
+      throw new BadRequestException("媒体文件不可读取，请重新上传");
+    }
+    const image = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.productImage.create({
+        data: {
+          productId,
+          url: initialUrl,
+          storageKey: storageKey ?? null,
+          type: this.normalizeImageType(data.type) as any,
+          sortOrder: data.sortOrder ?? 0,
+          isVideo: data.isVideo ?? false,
+          sourceImageId: data.sourceImageId ?? null,
+          cropData:
+            data.cropData === undefined
+              ? undefined
+              : (data.cropData as Prisma.InputJsonValue),
+          width: data.width ?? null,
+          height: data.height ?? null,
+          mimeType: data.mimeType ?? null,
+          fileSize: data.fileSize ?? null,
+        },
+      });
+      const mediaUrl = `/products/catalog/${productId}/media/${created.id}`;
+      if (storageKey) {
+        return tx.productImage.update({
+          where: { id: created.id },
+          data: { url: mediaUrl },
+        });
+      }
+      // legacy /uploads 与 /images/products 路径是这类记录唯一的底层读取事实，
+      // 数据库必须保留；仅返回值改写为受控端点，公开序列化也不会泄漏底层路径。
+      return { ...created, url: mediaUrl };
     });
-    // 回填 url 为受控媒体端点（imageId 创建后才已知），快照字段取此值可在 SecureImage 中渲染
-    const mediaUrl = `/products/catalog/${productId}/media/${image.id}`;
-    await this.prisma.productImage.update({
-      where: { id: image.id },
-      data: { url: mediaUrl },
-    });
-    image.url = mediaUrl;
     this.notifyPublicChange(productId);
     return image;
   }
@@ -1943,6 +1955,9 @@ export class ProductsService {
       where: { id: imageId, productId },
     });
     if (!img) throw new BadRequestException("图片不属于该商品");
+    if (img.isVideo || !this.productMedia.isProductMediaReadable(img)) {
+      throw new BadRequestException("主图必须是可读取的非视频图片");
+    }
 
     // 主图通过 primaryImageId 指针 + sortOrder 表达，不改写图片 type（保留原始视角语义 FRONT/SIDE/...）。
     // 旧实现把所有 FRONT 改 SIDE、目标改 FRONT，会破坏原始拍摄视角。
@@ -1992,6 +2007,9 @@ export class ProductsService {
       where: { id: imageId, productId },
     });
     if (!img) throw new BadRequestException("图片不属于该商品");
+    if (img.isVideo || !this.productMedia.isProductMediaReadable(img)) {
+      throw new BadRequestException("列表图必须是可读取的非视频图片");
+    }
 
     await this.prisma.product.update({
       where: { id: productId },
@@ -2006,8 +2024,16 @@ export class ProductsService {
   async resetListingToPrimary(productId: number) {
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
+      select: { primaryImageId: true, primaryImage: true },
     });
     if (!product) throw new NotFoundException("商品不存在");
+    if (
+      !product.primaryImage ||
+      product.primaryImage.isVideo ||
+      !this.productMedia.isProductMediaReadable(product.primaryImage)
+    ) {
+      throw new BadRequestException("当前主图不可读取，无法恢复为列表图");
+    }
 
     await this.prisma.product.update({
       where: { id: productId },

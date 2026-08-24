@@ -146,10 +146,10 @@ test("Catalog 使用服务端分页并保持 URL、快速预览与跨页选款�
   await quickViewTrigger.press("Enter");
   const quickView = page.getByRole("dialog");
   await expect(quickView).toBeVisible();
-  await expect(quickView).toHaveAccessibleName("HC-TEST-001");
+  await expect(quickView).toHaveAccessibleName("作品 01");
   await expect(quickView.getByRole("button", { name: "关闭快速预览" })).toBeFocused();
-  await expect(quickView.getByRole("heading", { name: "HC-TEST-001" })).toBeVisible();
-  await expect(quickView.getByText("作品 01", { exact: true })).toBeVisible();
+  await expect(quickView.getByRole("heading", { name: "作品 01" })).toBeVisible();
+  await expect(quickView.getByText("HC-TEST-001", { exact: true })).toBeVisible();
   await quickView.getByRole("button", { name: "+ 加入选款" }).click();
   await page.keyboard.press("Escape");
   await expect(quickViewTrigger).toBeFocused();
@@ -349,7 +349,7 @@ test("Catalog 在 390px 保持 4:5 媒体、可用对话框宽度并恢复触发
 
   const quickTrigger = page.getByRole("button", { name: "快速预览 作品 01" });
   await quickTrigger.click();
-  const quickDialog = page.getByRole("dialog", { name: "HC-TEST-001" });
+  const quickDialog = page.getByRole("dialog", { name: "作品 01" });
   await expect(quickDialog).toBeVisible();
   const quickDialogBox = await quickDialog.boundingBox();
   const quickMediaBox = await quickDialog.locator("[data-catalog-quick-media]").boundingBox();

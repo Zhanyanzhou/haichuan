@@ -1,7 +1,7 @@
 // 作品详情：公开安全字段/灯箱/SKU/收藏/评价 Tab(晒单)/相似推荐/SEO meta
 import { useState, useEffect, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { App as AntdApp, Tabs, Spin, Rate } from "antd";
 import {
   ShoppingCartOutlined,
@@ -28,17 +28,18 @@ import { unwrapResponse } from "@/utils/unwrap";
 import type { Product, ProductSKU } from "@/types";
 import {
   trackAddToCart,
+  trackAddToSelection,
   trackPageView,
   trackProductView,
+  trackRemoveFromSelection,
 } from "@/hooks/useAnalytics";
 import {
   isCommerceAllowed,
-  salesModeRoute,
-  salesModeCta,
   useCommerceCapabilities,
 } from "@/store/featureFlags";
 import { useReconnectingEventSource } from "@/hooks/useReconnectingEventSource";
 import { usePageMetaStore } from "@/store/pageMetaStore";
+import { useSelectionStore } from "@/store/selectionStore";
 
 /** 相似作品推荐（同分类/材质+热度加权；recommendations 模块首次接线启用） */
 function SimilarProducts({ productId }: { productId: number }) {
@@ -84,41 +85,22 @@ function SimilarProducts({ productId }: { productId: number }) {
   );
 }
 
-/** 作品评价 Tab（先审后展）：平均分 + 审核通过的评价 + 商家回复 */
-function ProductReviewsTab({ productId }: { productId: number }) {
-  const [data, setData] = useState<{
-    list: Array<{
-      id: number;
-      rating: number;
-      content: string;
-      images?: string[];
-      reply: string | null;
-      createdAt: string;
-      reviewer: string;
-    }>;
-    total: number;
-    averageRating: number | null;
-  } | null>(null);
+type PublicReviewsData = {
+  list: Array<{
+    id: number;
+    rating: number;
+    content: string;
+    images?: string[];
+    reply: string | null;
+    createdAt: string;
+    reviewer: string;
+  }>;
+  total: number;
+  averageRating: number | null;
+};
 
-  useEffect(() => {
-    reviewApi
-      .listForProduct(productId, { pageSize: 20 })
-      .then((res) => setData(unwrapResponse<any>(res) || null))
-      .catch(() => setData({ list: [], total: 0, averageRating: null }));
-  }, [productId]);
-
-  if (!data) {
-    return (
-      <p className="text-brand-muted text-sm py-4">评价加载中…</p>
-    );
-  }
-  if (data.total === 0) {
-    return (
-      <p className="text-brand-muted text-sm py-4">
-        这件作品还没有评价。完成购买后，欢迎分享您的佩戴体验。
-      </p>
-    );
-  }
+/** 作品评价 Tab（先审后展）：只在存在已审核评价时渲染。 */
+function ProductReviewsTab({ data }: { data: PublicReviewsData }) {
   return (
     <div>
       <div className="flex items-center gap-3 mb-6 pb-4 border-b border-brand-line">
@@ -172,9 +154,104 @@ function ProductReviewsTab({ productId }: { productId: number }) {
   );
 }
 
+function hasPublicFact(value: unknown): boolean {
+  if (typeof value === "number") return Number.isFinite(value) && value > 0;
+  if (typeof value !== "string") return false;
+  const clean = value.trim();
+  return clean !== "" && clean !== "-" && clean !== "—";
+}
+
+function ProductPrimaryAction({
+  product,
+  selectedSku,
+  commerceFlags,
+  commerceFlagsLoading,
+  canUseCart,
+  canAddToCart,
+  addingToCart,
+  isSignedIn,
+  isSelected,
+  onToggleSelection,
+  onAddToCart,
+}: {
+  product: Product;
+  selectedSku: ProductSKU | null;
+  commerceFlags: { commerceEnabled: boolean; cartEnabled: boolean } | null;
+  commerceFlagsLoading: boolean;
+  canUseCart: boolean;
+  canAddToCart: boolean;
+  addingToCart: boolean;
+  isSignedIn: boolean;
+  isSelected: boolean;
+  onToggleSelection: () => void;
+  onAddToCart: () => void;
+}) {
+  const primaryClass = "btn btn-primary product-detail-page__primary-action";
+
+  if (product.salesMode === "SELECTION") {
+    return (
+      <button
+        type="button"
+        className={primaryClass}
+        aria-pressed={isSelected}
+        onClick={onToggleSelection}
+      >
+        {isSelected ? "已加入" : "加入选款"}
+      </button>
+    );
+  }
+
+  if (product.salesMode === "APPOINTMENT") {
+    return <Link to="/contact" className={`${primaryClass} text-center`}>预约鉴赏此款</Link>;
+  }
+
+  if (product.salesMode === "CUSTOM_INQUIRY") {
+    return <Link to="/custom" className={`${primaryClass} text-center`}>咨询此款定制</Link>;
+  }
+
+  if (product.salesMode !== "DIRECT_PURCHASE") {
+    return <Link to="/contact" className={`${primaryClass} text-center`}>咨询此款作品</Link>;
+  }
+
+  if (commerceFlagsLoading || !commerceFlags) {
+    return <button type="button" className={primaryClass} disabled>正在确认购买状态</button>;
+  }
+  if (product.isAvailableForPurchase === false) {
+    return <button type="button" className={primaryClass} disabled>已售罄</button>;
+  }
+  if (typeof product.isAvailableForPurchase !== "boolean") {
+    return <button type="button" className={primaryClass} disabled>库存状态暂不可用</button>;
+  }
+  if (!canUseCart) {
+    return <Link to="/contact" className={`${primaryClass} text-center`}>购买暂未开放，联系顾问</Link>;
+  }
+  if (!isSignedIn) {
+    return (
+      <Link
+        to="/customer"
+        state={{ returnTo: `/products/${product.id}` }}
+        className={`${primaryClass} text-center`}
+      >
+        登录后购买
+      </Link>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={primaryClass}
+      onClick={onAddToCart}
+      disabled={addingToCart || !canAddToCart || !selectedSku}
+    >
+      <ShoppingCartOutlined /> {addingToCart ? "加入中..." : "加入购物车"}
+    </button>
+  );
+}
+
 export default function ProductDetail() {
   const { message } = AntdApp.useApp();
   const { id } = useParams();
+  const reduceMotion = useReducedMotion();
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
   const [loading, setLoading] = useState(true);
@@ -186,6 +263,7 @@ export default function ProductDetail() {
   const [revision, setRevision] = useState(0);
   const [addingToCart, setAddingToCart] = useState(false);
   const [purchaseError, setPurchaseError] = useState("");
+  const [reviewsData, setReviewsData] = useState<PublicReviewsData | null>(null);
   const addPendingRef = useRef(false);
   const [goldPrice, setGoldPrice] = useState<{
     price?: number | string;
@@ -200,6 +278,10 @@ export default function ProductDetail() {
   // 心愿单仅对登录客户启用；游客仍可浏览公开安全字段。
   const [favorited, setFavorited] = useState(false);
   const [favBusy, setFavBusy] = useState(false);
+  const toggleSelection = useSelectionStore((state) => state.toggle);
+  const isSelected = useSelectionStore((state) =>
+    product ? state.selectedIds.has(product.id) : false,
+  );
 
   // 初始收藏态：拉一次心愿单判断当前作品是否在列（心愿单量级小，整表判断成本可忽略）。
   // 登录墙 return 之前 hooks 已执行，必须显式判断登录态，避免游客每次必发一个注定 401 的请求。
@@ -241,6 +323,7 @@ export default function ProductDetail() {
         const res = await productApi.getPublicById(id || "");
         const data = unwrapResponse<Product>(res);
         setProduct(data);
+        setMainImage(0);
         setSelectedSku(data?.skus?.find((s) => s.isActive) ?? null);
         setQty(1);
         setPurchaseError("");
@@ -252,6 +335,30 @@ export default function ProductDetail() {
     };
     load();
   }, [id, revision]);
+
+  useEffect(() => {
+    if (!product?.id) {
+      setReviewsData(null);
+      return;
+    }
+    let cancelled = false;
+    setReviewsData(null);
+    reviewApi
+      .listForProduct(product.id, { pageSize: 20 })
+      .then((res) => {
+        if (!cancelled) {
+          setReviewsData(unwrapResponse<PublicReviewsData>(res) || null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setReviewsData({ list: [], total: 0, averageRating: null });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [product?.id]);
 
   // SEO：商品详情独立标题（不泄露内部编号；未加载时不设误导标题）
   useEffect(() => {
@@ -315,11 +422,11 @@ export default function ProductDetail() {
   const activeSkus = (product.skus ?? []).filter((s) => s.isActive);
   // P1-33：缩略图与主图共享同一数据源，mainImage 驱动主图切换
   // （原主图恒渲染 getPrimaryImage，点击缩略图只改高亮、主图不变）
-  const thumbnails = getThumbnailList(product.images);
+  const thumbnails = getThumbnailList(product.images, product.primaryImage);
   const mainImageUrl =
     (thumbnails[mainImage] as any)?.mediaUrl ||
     thumbnails[mainImage]?.url ||
-    getPrimaryImage(product as any);
+    (thumbnails.length > 0 ? getPrimaryImage(product as any) : "");
   const startingPrice = Number(product.price) || 0;
   const displayPrice = selectedSku ? Number(selectedSku.price) : startingPrice;
   const isDirectPurchase = product.salesMode === "DIRECT_PURCHASE";
@@ -335,6 +442,25 @@ export default function ProductDetail() {
     displayPrice > 0;
   const displayGoldWeight = selectedSku?.goldWeight ?? product.goldWeight;
   const detailBlocks = product.detailContent ?? [];
+  const materialLabel = getMaterialLabel(product.materialType);
+  const publicFacts = [
+    { label: "材质", value: hasPublicFact(materialLabel) ? materialLabel : "" },
+    {
+      label: "金重",
+      value: hasPublicFact(displayGoldWeight) ? `${displayGoldWeight}g` : "",
+    },
+    {
+      label: "总重",
+      value: hasPublicFact(product.weight) ? `${product.weight}g` : "",
+    },
+    { label: "尺寸", value: hasPublicFact(product.size) ? product.size!.trim() : "" },
+    ...(product.craftTechnique ?? [])
+      .filter(hasPublicFact)
+      .map((craft) => ({ label: "工艺", value: craft.trim() })),
+  ].filter((fact) => fact.value);
+  const validCertificates = (product.certificates ?? []).filter((certificate) =>
+    hasPublicFact(certificate.certNumber),
+  );
 
   const handleAddToCart = async () => {
     if (addPendingRef.current || addingToCart) return;
@@ -378,31 +504,35 @@ export default function ProductDetail() {
 
   return (
     <div className="product-detail-page bg-white text-[#181A1B]">
-      <div className="max-w-[1440px] mx-auto px-5 sm:px-8 lg:px-16 py-10 md:py-16 lg:py-20">
+      <div className="product-detail-page__inner">
         {/* Breadcrumb */}
-        <nav aria-label="面包屑" className="text-[11px] tracking-[.16em] text-brand-muted mb-8 md:mb-12 font-sans">
+        <nav aria-label="面包屑" className="product-detail-page__breadcrumb text-[11px] tracking-[.16em] text-brand-muted font-sans">
           <Link to="/" className="hover:text-brand-goldD transition-colors">
             首页
           </Link>
           <span className="mx-2 text-brand-muted">/</span>
           <Link
-            to="/products"
+            to="/catalog"
             className="hover:text-brand-goldD transition-colors"
           >
-            珠宝作品
+            选款中心
           </Link>
           <span className="mx-2 text-brand-muted">/</span>
           <span className="text-brand-muted">{product.name}</span>
         </nav>
 
-        <div className="grid lg:grid-cols-[minmax(0,1.12fr)_minmax(360px,.88fr)] gap-12 lg:gap-20 xl:gap-28 items-start">
+        <div className="product-detail-page__layout">
           {/* Left: Images */}
           <motion.div
+            className="product-detail-page__gallery"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ duration: 1 }}
+            transition={{ duration: reduceMotion ? 0 : 0.6 }}
           >
             <div
+              data-product-main-media-id={
+                (thumbnails[mainImage] as any)?.id ?? ""
+              }
               onClick={() => mainImageUrl && setLightboxOpen(true)}
               role={mainImageUrl ? "button" : undefined}
               aria-label={mainImageUrl ? "放大查看作品图" : undefined}
@@ -413,7 +543,7 @@ export default function ProductDetail() {
                   setLightboxOpen(true);
                 }
               }}
-              className={`aspect-[4/5] bg-[#F4F5F5] flex items-center justify-center lg:sticky lg:top-28 border border-[#DDE1E2] ${mainImageUrl ? "cursor-zoom-in" : ""}`}
+              className={`product-detail-page__main-media ${mainImageUrl ? "cursor-zoom-in" : ""}`}
             >
               {mainImageUrl ? (
                 <SecureImage
@@ -422,15 +552,18 @@ export default function ProductDetail() {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <span className="text-7xl text-brand-gold/20">◆</span>
+                <span className="text-sm text-brand-muted">图片暂不可用</span>
               )}
             </div>
-            <div className="flex gap-3 mt-4">
+            {thumbnails.length > 0 ? <div className="product-detail-page__thumbnails">
               {thumbnails.map((img, i) => (
-                <div
+                <button
+                  type="button"
                   key={img.id}
                   onClick={() => setMainImage(i)}
-                  className={`w-16 h-16 bg-brand-bg flex items-center justify-center cursor-pointer border transition-colors overflow-hidden ${i === mainImage ? "border-brand-gold" : "border-transparent hover:border-brand-gold"}`}
+                  aria-label={`查看第 ${i + 1} 张作品图`}
+                  aria-pressed={i === mainImage}
+                  className={`product-detail-page__thumbnail ${i === mainImage ? "is-active" : ""}`}
                 >
                   {(img as any).mediaUrl || img.url ? (
                     <SecureImage
@@ -441,10 +574,10 @@ export default function ProductDetail() {
                   ) : (
                     <span className="text-xs text-brand-muted">图{i + 1}</span>
                   )}
-                </div>
+                </button>
               ))}
-            </div>
-            <Lightbox
+            </div> : null}
+            {thumbnails.length > 0 ? <Lightbox
               open={lightboxOpen}
               close={() => setLightboxOpen(false)}
               index={mainImage}
@@ -452,14 +585,15 @@ export default function ProductDetail() {
                 src: (img as any).mediaUrl || img.url,
                 alt: product.name,
               }))}
-            />
+            /> : null}
           </motion.div>
 
           {/* Right: Info */}
           <motion.div
+            className="product-detail-page__summary"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.3 }}
+            transition={{ duration: reduceMotion ? 0 : 0.5, delay: reduceMotion ? 0 : 0.12 }}
           >
             <p className="text-[10px] tracking-[.2em] text-brand-muted mb-5 font-sans">JEWELRY WORK</p>
             <h1 className="text-[clamp(32px,4vw,52px)] leading-[1.15] tracking-[.02em] font-display font-normal mb-3">
@@ -473,40 +607,33 @@ export default function ProductDetail() {
               {product.description}
             </p>
 
-            {/* 公开参数与价格：非直接购买模式不暴露价格组成，统一引导顾问服务。 */}
-            <div className="border-y border-brand-line py-4 mb-8">
-              {commerceOk && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-brand-muted">金价参考</span>
-                  <span className="font-sans font-medium">
-                    {goldPrice?.price
-                      ? `¥${Number(goldPrice.price).toFixed(2)}`
-                      : "—"}{" "}
-                    <span className="text-xs text-brand-gold">/克</span>
-                  </span>
-                </div>
-              )}
-              <div className="flex items-center justify-between text-sm mt-2">
-                <span className="text-brand-muted">金重</span>
-                <span>{displayGoldWeight ? `${displayGoldWeight}g` : "—"}</span>
-              </div>
-              {isDirectPurchase && displayPrice > 0 ? (
-                <div className="flex items-center justify-between text-sm mt-2 pt-2 border-t border-brand-line font-medium">
-                  <span>售价</span>
-                  <span className="price text-2xl">
-                    ¥{displayPrice.toLocaleString()}
-                    {!selectedSku && activeSkus.length > 1 && (
-                      <span className="text-xs text-brand-muted ml-1">起</span>
-                    )}
-                  </span>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between text-sm mt-2 pt-2 border-t border-brand-line">
-                  <span className="text-brand-muted">作品服务</span>
-                  <span className="font-medium">请咨询珠宝顾问</span>
-                </div>
-              )}
-            </div>
+            {/* 只显示来自公开事实源的非空事实，不以 0 或破折号填充。 */}
+            {hasPublicFact(goldPrice?.price) || hasPublicFact(displayGoldWeight) ||
+            (isDirectPurchase && displayPrice > 0) ? (
+              <dl className="product-detail-page__commerce-facts">
+                {commerceOk && hasPublicFact(goldPrice?.price) ? (
+                  <div>
+                    <dt>金价参考</dt>
+                    <dd>¥{Number(goldPrice!.price).toFixed(2)} <span>/克</span></dd>
+                  </div>
+                ) : null}
+                {hasPublicFact(displayGoldWeight) ? (
+                  <div>
+                    <dt>金重</dt>
+                    <dd>{displayGoldWeight}g</dd>
+                  </div>
+                ) : null}
+                {isDirectPurchase && displayPrice > 0 ? (
+                  <div className="is-price">
+                    <dt>售价</dt>
+                    <dd>
+                      ¥{displayPrice.toLocaleString()}
+                      {!selectedSku && activeSkus.length > 1 ? <span>起</span> : null}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+            ) : null}
 
             {/* SKU selection */}
             {activeSkus.length > 0 && (
@@ -521,138 +648,82 @@ export default function ProductDetail() {
                       onClick={() => setSelectedSku(sku)}
                       className={`px-5 py-2.5 text-sm border transition-colors font-sans ${selectedSku?.id === sku.id ? "border-brand-gold text-brand-gold" : "border-brand-line hover:border-brand-gold"}`}
                     >
-                      {getMaterialLabel(sku.material)} ·{" "}
-                      {sku.goldWeight ? `${sku.goldWeight}g` : "—"}
-                      {isDirectPurchase && Number(sku.price) > 0
-                        ? ` · ¥${Number(sku.price).toLocaleString()}`
-                        : ""}
+                      {[
+                        getMaterialLabel(sku.material),
+                        hasPublicFact(sku.goldWeight) ? `${sku.goldWeight}g` : "",
+                        isDirectPurchase && Number(sku.price) > 0
+                          ? `¥${Number(sku.price).toLocaleString()}`
+                          : "",
+                      ].filter(Boolean).join(" · ")}
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Quantity + Actions */}
-            <div className="flex items-center gap-4 mb-8">
-              {isDirectPurchase && canUseCart && product.isAvailableForPurchase === true && (
-                <div className="flex items-center border border-brand-line" aria-label={isSingleUnit ? "一物一件，数量固定为 1" : "购买数量"}>
-                  <button
-                    type="button"
-                    aria-label="减少数量"
-                    disabled={qty <= 1 || isSingleUnit}
-                    className="min-w-11 min-h-11 px-4 py-2.5 text-brand-muted hover:text-brand-text transition-colors font-sans disabled:cursor-not-allowed disabled:opacity-40"
-                    onClick={() => setQty(Math.max(1, qty - 1))}
-                  >
-                    −
-                  </button>
-                  <span
-                    className="px-4 py-2.5 text-sm font-sans"
-                    aria-live="polite"
-                  >
-                    {qty}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="增加数量"
-                    disabled={isSingleUnit || qty >= 99}
-                    className="min-w-11 min-h-11 px-4 py-2.5 text-brand-muted hover:text-brand-text transition-colors font-sans disabled:cursor-not-allowed disabled:opacity-40"
-                    onClick={() => setQty(Math.min(99, qty + 1))}
-                  >
-                    +
-                  </button>
-                </div>
-              )}
-              {isDirectPurchase ? (
-                commerceFlagsLoading || !commerceFlags ? (
-                  <button type="button" className="btn btn-primary flex-1" disabled>
-                    正在确认购买状态
-                  </button>
-                ) : isSoldOut ? (
-                  <button type="button" className="btn btn-primary flex-1" disabled>
-                    已售罄
-                  </button>
-                ) : !availabilityKnown ? (
-                  <button type="button" className="btn btn-primary flex-1" disabled>
-                    库存状态暂不可用
-                  </button>
-                ) : !canUseCart ? (
-                  <Link to="/contact" className="btn btn-secondary flex-1 text-center">
-                    购买暂未开放，联系顾问
-                  </Link>
-                ) : isSignedIn ? (
-                  <button
-                    className="btn btn-primary flex-1 whitespace-nowrap px-4 sm:px-10"
-                    onClick={handleAddToCart}
-                    disabled={addingToCart || !canAddToCart}
-                  >
-                    <ShoppingCartOutlined />{" "}
-                    {addingToCart ? "加入中..." : "加入购物车"}
-                  </button>
-                ) : (
-                  <Link
-                    to="/customer"
-                    state={{ returnTo: `/products/${product.id}` }}
-                    className="btn btn-primary flex-1 whitespace-nowrap px-4 text-center sm:px-10"
-                  >
-                    登录后购买
-                  </Link>
-                )
-              ) : product.salesMode === "DISPLAY_ONLY" ? (
-                <div className="flex-1 text-center text-brand-muted text-sm py-3 border border-brand-line">
-                  仅展示，暂不售卖
-                </div>
-              ) : (
-                <Link
-                  to={salesModeRoute(product.salesMode)}
-                  className="btn btn-primary flex-1 text-center"
-                >
-                  {salesModeCta(product.salesMode)}
-                </Link>
-              )}
-              {isSignedIn ? (
+            {/* 数量控制与 SalesMode 唯一主行动分层呈现。 */}
+            {isDirectPurchase && canUseCart && product.isAvailableForPurchase === true ? (
+              <div className="product-detail-page__quantity" aria-label={isSingleUnit ? "一物一件，数量固定为 1" : "购买数量"}>
                 <button
                   type="button"
-                  aria-label={favorited ? "移出心愿单" : "加入心愿单"}
-                  title={favorited ? "移出心愿单" : "加入心愿单"}
-                  onClick={handleToggleFavorite}
-                  disabled={favBusy}
-                  className={`w-12 h-12 shrink-0 flex items-center justify-center border transition-colors font-sans ${
-                    favorited
-                      ? "border-brand-gold text-brand-gold"
-                      : "border-brand-line text-brand-muted hover:border-brand-gold hover:text-brand-gold"
-                  }`}
+                  aria-label="减少数量"
+                  disabled={qty <= 1 || isSingleUnit}
+                  onClick={() => setQty(Math.max(1, qty - 1))}
                 >
-                  {favorited ? <HeartFilled /> : <HeartOutlined />}
+                  −
                 </button>
-              ) : (
-                <Link
-                  to="/contact"
-                  className="text-sm text-brand-gold hover:underline shrink-0"
+                <span aria-live="polite">{qty}</span>
+                <button
+                  type="button"
+                  aria-label="增加数量"
+                  disabled={isSingleUnit || qty >= 99}
+                  onClick={() => setQty(Math.min(99, qty + 1))}
                 >
-                  咨询此款
-                </Link>
-              )}
+                  +
+                </button>
+              </div>
+            ) : null}
+            <div className="product-detail-page__action-zone">
+              <ProductPrimaryAction
+                product={product}
+                selectedSku={selectedSku}
+                commerceFlags={commerceFlags}
+                commerceFlagsLoading={commerceFlagsLoading}
+                canUseCart={canUseCart}
+                canAddToCart={canAddToCart}
+                addingToCart={addingToCart}
+                isSignedIn={isSignedIn}
+                isSelected={isSelected}
+                onToggleSelection={() => {
+                  toggleSelection(product.id);
+                  if (isSelected) trackRemoveFromSelection(product.id);
+                  else trackAddToSelection(product.id);
+                }}
+                onAddToCart={handleAddToCart}
+              />
             </div>
             {isSingleUnit && isDirectPurchase ? (
-              <p className="-mt-5 mb-6 text-xs leading-6 text-brand-muted">
+              <p className="product-detail-page__status-copy text-xs leading-6 text-brand-muted">
                 一物一件，每位顾客的购物车最多保留 1 件。
               </p>
             ) : null}
             {isSoldOut ? (
-              <p className="-mt-5 mb-6 text-sm leading-6 text-brand-muted" role="status">
+              <p className="product-detail-page__status-copy text-sm leading-6 text-brand-muted" role="status">
                 该作品已售罄，仍可继续浏览作品信息或联系珠宝顾问。
               </p>
             ) : null}
             {purchaseError ? (
-              <p className="-mt-5 mb-6 text-sm leading-6 text-[#8C3F3B]" role="alert">
+              <p className="product-detail-page__status-copy text-sm leading-6 text-[#8C3F3B]" role="alert">
                 {purchaseError}
               </p>
             ) : null}
 
-            {/* Tabs */}
-            <Tabs
-              items={[
-                {
+            {/* 只有存在真实内容的标签才进入公开 DOM。 */}
+            {publicFacts.length > 0 || validCertificates.length > 0 ||
+            Boolean(reviewsData?.total) ? (
+              <Tabs
+                items={[
+                  ...(publicFacts.length > 0 ? [{
                   key: "params",
                   label: (
                     <span className="font-sans text-xs tracking-[.1em]">
@@ -660,43 +731,26 @@ export default function ProductDetail() {
                     </span>
                   ),
                   children: (
-                    <div className="grid grid-cols-2 gap-4">
-                      {[
-                        {
-                          l: "材质",
-                          v: getMaterialLabel(product.materialType),
-                        },
-                        { l: "金重", v: `${product.goldWeight || "-"}g` },
-                        { l: "总重", v: `${product.weight || "-"}g` },
-                        { l: "尺寸", v: product.size || "-" },
-                      ].map((i) => (
-                        <div key={i.l}>
+                    <dl className="product-detail-page__facts-grid">
+                      {publicFacts.map((fact, index) => (
+                        <div key={`${fact.label}-${fact.value}-${index}`}>
                           <p className="text-[10px] text-brand-muted uppercase">
-                            {i.l}
+                            {fact.label}
                           </p>
-                          <p className="text-sm mt-1">{i.v}</p>
+                          <p className="text-sm mt-1">{fact.value}</p>
                         </div>
                       ))}
-                      {product.craftTechnique?.map((c) => (
-                        <div key={c}>
-                          <p className="text-[10px] text-brand-muted uppercase">
-                            工艺
-                          </p>
-                          <p className="text-sm mt-1">{c}</p>
-                        </div>
-                      ))}
-                    </div>
+                    </dl>
                   ),
-                },
-                {
+                }] : []),
+                ...(validCertificates.length > 0 ? [{
                   key: "cert",
                   label: (
                     <span className="font-sans text-xs tracking-[.1em]">
                       证书
                     </span>
                   ),
-                  children: product.certificates?.length ? (
-                    product.certificates.map((c) => (
+                  children: validCertificates.map((c) => (
                       <div
                         key={c.id}
                         className="flex items-center gap-3 p-4 bg-brand-bg"
@@ -711,28 +765,37 @@ export default function ProductDetail() {
                           — {c.certNumber}
                         </span>
                       </div>
-                    ))
-                  ) : (
-                    <p className="text-brand-muted text-sm">暂无证书信息</p>
-                  ),
-                },
-                {
+                    )),
+                }] : []),
+                ...(reviewsData && reviewsData.total > 0 ? [{
                   key: "reviews",
                   label: (
                     <span className="font-sans text-xs tracking-[.1em]">
                       评价
                     </span>
                   ),
-                  children: <ProductReviewsTab productId={product.id} />,
-                },
+                  children: <ProductReviewsTab data={reviewsData} />,
+                }] : []),
               ]}
-            />
+              />
+            ) : null}
+            {isSignedIn ? (
+              <button
+                type="button"
+                onClick={handleToggleFavorite}
+                disabled={favBusy}
+                className="product-detail-page__favorite"
+              >
+                {favorited ? <HeartFilled /> : <HeartOutlined />}
+                <span>{favorited ? "已加入心愿单" : "加入心愿单"}</span>
+              </button>
+            ) : null}
             {/* 推荐接口要求客户登录；游客不发必然 401 的请求。 */}
             {isSignedIn ? <SimilarProducts productId={product.id} /> : null}
           </motion.div>
         </div>
         {detailBlocks.length > 0 && (
-          <section className="mx-auto mt-20 max-w-5xl border-t border-brand-line pt-14" aria-label="商品详情">
+          <section className="product-detail-page__content" aria-label="商品详情">
             {detailBlocks.map((block, index) => {
               if (block.type === "TEXT") {
                 return block.text ? (

@@ -240,10 +240,7 @@ function createService(initial: ProductRecord[], mediaReadable = true) {
     prisma as unknown as PrismaService,
     {
       invalidate: () => undefined,
-      readProductImage: () => {
-        if (!mediaReadable) throw new Error("媒体不可读取");
-        return { buffer: Buffer.from("x") };
-      },
+      isProductMediaReadable: () => mediaReadable,
     } as never,
     {} as never,
   );
