@@ -87,12 +87,14 @@ function ContentTemplateRealRendererPreview({
     if (!frame || !renderer || !ownerWindow) return;
     let measureTimer = 0;
     let lastObservedWidth = -1;
+    let lastObservedRendererHeight = -1;
     let disposed = false;
 
     const measure = () => {
       const width = frame.clientWidth;
       const naturalHeight = renderer.scrollHeight;
       if (width <= 0 || naturalHeight <= 0) return;
+      lastObservedRendererHeight = naturalHeight;
       const scale = width / sourceWidth;
       const height = naturalHeight * scale;
       setMeasurement((current) =>
@@ -126,6 +128,15 @@ function ContentTemplateRealRendererPreview({
       scheduleMeasure();
     });
     resizeObserver.observe(frame);
+    const rendererResizeObserver = new ownerWindow.ResizeObserver(() => {
+      const naturalHeight = renderer.scrollHeight;
+      if (Math.abs(naturalHeight - lastObservedRendererHeight) < 0.5) return;
+      lastObservedRendererHeight = naturalHeight;
+      scheduleMeasure();
+    });
+    // 字体替换、图片解码和响应式重排不一定产生 DOM mutation；直接观察真实
+    // Renderer 的尺寸，才能在内容收缩时同步去掉缩略图底部多余空间。
+    rendererResizeObserver.observe(renderer);
 
     // 异步商品、图片和字体仍可能改变真实 Renderer 高度；它们通过内容/加载事件补测。
     const mutationObserver = new ownerWindow.MutationObserver(scheduleMeasure);
@@ -141,6 +152,7 @@ function ContentTemplateRealRendererPreview({
       disposed = true;
       ownerWindow.clearTimeout(measureTimer);
       resizeObserver.disconnect();
+      rendererResizeObserver.disconnect();
       mutationObserver.disconnect();
       renderer.removeEventListener("load", scheduleMeasure, true);
     };

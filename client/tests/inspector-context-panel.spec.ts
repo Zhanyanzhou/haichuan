@@ -206,6 +206,43 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     "该层在 development 模式拦截自有 API；不用于证明真实保存或发布",
   );
 
+  test("属性面板删除确认使用当前 AntD context，不产生静态 API 警告", async ({
+    page,
+  }) => {
+    const antdContextWarnings: string[] = [];
+    page.on("console", (message) => {
+      if (message.text().includes("Static function can not consume context")) {
+        antdContextWarnings.push(message.text());
+      }
+    });
+    const inspector = await openHeroInspector(page);
+
+    await inspector.getByRole("button", { name: "更多模块操作" }).click();
+    await page.getByRole("menuitem", { name: "删除模块" }).click();
+    const dialog = page.getByRole("dialog").filter({ hasText: "删除“" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "删除模块" }).click();
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(0);
+    expect(antdContextWarnings).toEqual([]);
+  });
+
+  test("图层栏直接显示隐藏并删除模块，仍保持轻量页面导航", async ({ page }) => {
+    await openHeroInspector(page);
+    const layer = page.locator(".homepage-editor__layer-item").first();
+    await expect(layer).toHaveAttribute("data-layer-visible", "true");
+
+    await layer.getByRole("button", { name: "隐藏首屏" }).click();
+    await expect(layer).toHaveAttribute("data-layer-visible", "false");
+    await layer.getByRole("button", { name: "显示首屏" }).click();
+    await expect(layer).toHaveAttribute("data-layer-visible", "true");
+
+    await layer.getByRole("button", { name: "删除首屏" }).click();
+    const dialog = page.getByRole("dialog").filter({ hasText: "删除“首屏”" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "删除模块" }).click();
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(0);
+  });
+
   test("media / text / action 内容字段严格过滤，返回模块级恢复完整内容", async ({
     page,
   }) => {
@@ -217,6 +254,7 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await expect(field(inspector, "title")).toHaveCount(0);
     await expect(field(inspector, "actionText")).toHaveCount(0);
     await expect(field(inspector, "targetType")).toHaveCount(0);
+    await expect(inspector.locator('[data-property-level="content"]')).toHaveCount(1);
 
     await selectObject(inspector, "title", "标题");
     await expect(field(inspector, "title")).toHaveCount(1);
@@ -224,6 +262,7 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await expect(field(inspector, "altText")).toHaveCount(0);
     await expect(field(inspector, "actionText")).toHaveCount(0);
     await expect(field(inspector, "targetType")).toHaveCount(0);
+    await expect(inspector.locator('[data-property-level="content"]')).toHaveCount(1);
 
     await selectObject(inspector, "actionText", "行动文字");
     await expect(field(inspector, "actionText")).toHaveCount(1);
@@ -231,6 +270,7 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await expect(field(inspector, "title")).toHaveCount(0);
     await expect(field(inspector, "desktopImage")).toHaveCount(0);
     await expect(field(inspector, "altText")).toHaveCount(0);
+    await expect(inspector.locator('[data-property-level="interaction"]')).toHaveCount(1);
 
     await inspector
       .getByRole("combobox", { name: "选择编辑对象" })
@@ -274,29 +314,84 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
 
   test("media / text / action 设计区只显示当前对象的真实控制", async ({ page }) => {
     const inspector = await openHeroInspector(page);
-    const designTab = inspector.getByRole("tab", { name: "设计" });
+    const designTab = inspector.getByRole("tab", { name: "模板编辑" });
 
     for (const object of [
       { value: "desktopImage", label: "桌面主图" },
       { value: "title", label: "标题" },
       { value: "actionText", label: "行动文字" },
     ]) {
-      await inspector.getByRole("tab", { name: "内容" }).click();
+      await inspector.getByRole("tab", { name: "内容编辑" }).click();
       await selectObject(inspector, object.value, object.label);
       await designTab.click();
       const groups = inspector.locator("fieldset.homepage-editor__instance-group");
-      await expect(groups).toHaveCount(1);
+      await expect(groups).toHaveCount(object.value === "desktopImage" ? 2 : 1);
       await expect(groups.locator("[data-visual-geometry-node]")).toHaveAttribute(
         "data-visual-geometry-node",
         object.value,
       );
+      await expect(inspector.locator(`[data-property-level="${object.value === "desktopImage" ? "layout" : "style"}"]`)).toHaveCount(1);
+      if (object.value === "desktopImage") {
+        await expect(inspector.locator('[data-object-appearance="desktopImage"]')).toBeVisible();
+        await expect(inspector.getByRole("group", { name: "对象圆角" })).toBeVisible();
+        await expect(inspector.getByRole("group", { name: "对象阴影" })).toBeVisible();
+        await expect(inspector.locator('[data-property-level="style"]')).toHaveCount(1);
+      }
     }
   });
 
-  test("Desktop 值由 Mobile 继承，Mobile 可独立写入并按设备重置", async ({ page }) => {
+  test("图层面板保持模块级，模板内部对象在属性面板可视切换", async ({ page }) => {
+    const maximumDepthErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error" && message.text().includes("Maximum update depth exceeded")) {
+        maximumDepthErrors.push(message.text());
+      }
+    });
+    const inspector = await openHeroInspector(page, { width: 1440, height: 900 });
+
+    await expect(page.locator(".homepage-editor__layer-children")).toHaveCount(0);
+    const objectPicker = inspector.getByRole("listbox", {
+      name: "属性面板对象列表",
+    });
+    await expect(objectPicker).toBeVisible();
+
+    const desktopImage = objectPicker.getByRole("option", {
+      name: "选择桌面主图",
+    });
+    await desktopImage.click();
+    await expect(desktopImage).toHaveAttribute("aria-selected", "true");
+    await expect(
+      inspector.getByRole("region", { name: "当前编辑对象" }),
+    ).toHaveAttribute("data-selected-node-id", "desktopImage");
+    await page.waitForTimeout(250);
+    expect(
+      maximumDepthErrors,
+      "选择图片对象不得触发 React 更新循环",
+    ).toEqual([]);
+    maximumDepthErrors.length = 0;
+    await inspector.screenshot({
+      path: "test-results/inspector-object-picker.png",
+    });
+
+    const wholeTemplate = objectPicker.getByRole("option", {
+      name: /选择.*整个模板/,
+    });
+    await wholeTemplate.click();
+    await expect(wholeTemplate).toHaveAttribute("aria-selected", "true");
+    await expect(
+      inspector.getByRole("region", { name: "当前编辑对象" }),
+    ).toHaveAttribute("data-selected-node-id", "module");
+    await page.waitForTimeout(250);
+    expect(
+      maximumDepthErrors,
+      "对象选择不得触发 React 更新循环",
+    ).toEqual([]);
+  });
+
+  test("Desktop / Mobile 使用独立默认与覆盖，并可按设备重置", async ({ page }) => {
     const inspector = await openHeroInspector(page);
     await selectObject(inspector, "title", "标题");
-    await inspector.getByRole("tab", { name: "设计" }).click();
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
     await inspector.getByRole("button", { name: "精确位置与尺寸" }).click();
 
     const desktopX = inspector.getByRole("slider", {
@@ -319,36 +414,36 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     const mobileX = inspector.getByRole("slider", {
       name: "横向位置（移动端）",
     });
-    await expect(mobileX).toHaveValue("22");
-    await expect(inspector.locator('[data-device-state="mobile-inherited"]')).toBeVisible();
+    await expect(mobileX).toHaveValue("16");
+    await expect(inspector.locator('[data-device-state="mobile-default"]')).toBeVisible();
     const mobileLayer = inspector.getByRole("group", {
       name: "图层顺序（移动端）",
     });
-    await expect(mobileLayer).toContainText("当前层级 5");
+    await expect(mobileLayer).toContainText("当前层级 2");
 
     await setRangeValue(mobileX, 27);
     await mobileLayer.getByRole("button", { name: "上移一层" }).click();
-    await expect(mobileLayer).toContainText("当前层级 6");
+    await expect(mobileLayer).toContainText("当前层级 3");
     await expect(inspector.locator('[data-device-state="mobile-independent"]')).toBeVisible();
     await page.getByRole("button", { name: /桌面端布局/ }).click();
     await expect(desktopX).toHaveValue("22");
     await expect(desktopLayer).toContainText("当前层级 5");
     await page.getByRole("button", { name: /移动端布局/ }).click();
     await expect(mobileX).toHaveValue("27");
-    await expect(mobileLayer).toContainText("当前层级 6");
+    await expect(mobileLayer).toContainText("当前层级 3");
 
     await inspector.getByRole("button", { name: "恢复移动端默认位置" }).click();
-    await expect(mobileX).toHaveValue("22");
+    await expect(mobileX).toHaveValue("16");
     await inspector.getByRole("button", { name: "恢复主标题设计默认" }).click();
     await expect(
       inspector.getByRole("slider", { name: "横向位置（移动端）" }),
-    ).toHaveCount(0);
+    ).toHaveValue("16");
   });
 
   test("键盘可切换内容/设计并进入对象选择，焦点可见", async ({ page }) => {
     const inspector = await openHeroInspector(page);
-    const contentTab = inspector.getByRole("tab", { name: "内容" });
-    const designTab = inspector.getByRole("tab", { name: "设计" });
+    const contentTab = inspector.getByRole("tab", { name: "内容编辑" });
+    const designTab = inspector.getByRole("tab", { name: "模板编辑" });
 
     await contentTab.focus();
     await expect(contentTab).toBeFocused();
@@ -356,12 +451,11 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await expect(designTab).toBeFocused();
     await expect(designTab).toHaveAttribute("aria-selected", "true");
     await page.keyboard.press("Home");
-    const quickTab = inspector.getByRole("tab", { name: "快捷操作" });
-    await expect(quickTab).toBeFocused();
-    await expect(quickTab).toHaveAttribute("aria-selected", "true");
-    await page.keyboard.press("ArrowRight");
     await expect(contentTab).toBeFocused();
     await expect(contentTab).toHaveAttribute("aria-selected", "true");
+    await page.keyboard.press("ArrowRight");
+    await expect(designTab).toBeFocused();
+    await expect(designTab).toHaveAttribute("aria-selected", "true");
 
     const objectSelect = inspector.getByRole("combobox", { name: "选择编辑对象" });
     await objectSelect.focus();

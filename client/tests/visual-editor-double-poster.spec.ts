@@ -61,10 +61,12 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
     const main = canvas.locator('[data-content-role="mainImage"]');
     const detail = canvas.locator('[data-content-role="detailImage"]');
     const copy = canvas.locator('[data-content-role="copy"]');
-    await page.getByRole("tab", { name: "设计" }).click();
+    await page.getByRole("tab", { name: "模板编辑" }).click();
     await page.getByRole("group", { name: "版式" }).getByRole("button", { name: "细节图优先" }).click();
 
-    await main.locator("img").click();
+    const mainBox = await main.boundingBox();
+    if (!mainBox) throw new Error("主海报槽位没有布局尺寸");
+    await page.mouse.click(mainBox.x + 20, mainBox.y + 20);
     await expect(page.getByText("已选择：主海报")).toBeVisible();
     const state = page.getByTestId("visual-state");
     const layerGroup = page.getByRole("group", { name: "图层顺序（桌面端）" });

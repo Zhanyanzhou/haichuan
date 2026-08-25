@@ -79,7 +79,14 @@ async function mockPublishedHeaderDocuments(
     () => [
       {
         type: "首屏主视觉",
-        props: { id: "published-header-hero", isVisible: true, title: "已发布品牌页" },
+        props: {
+          id: "published-header-hero",
+          isVisible: true,
+          title: "已发布品牌页",
+          desktopImage: "/images/镶嵌.png",
+          mobileImage: "/images/镶嵌.png",
+          altText: "珠宝工艺影像",
+        },
       },
       ...Array.from({ length: 3 }, (_, index) => ({
         type: "文字横幅",
@@ -124,6 +131,7 @@ test.describe("公开页面导航一致性", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
   test("品牌字标从其他页面返回首页，并在首页重复点击时回到顶部", async ({ page }) => {
+    await mockPublishedHeaderDocuments(page);
     const brandHomeLink = () => page.getByRole("link", { name: "海川珠宝首页" });
 
     await page.goto("/catalog");
@@ -141,13 +149,37 @@ test.describe("公开页面导航一致性", () => {
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   });
 
-  test("旧搜索链接映射到选款中心并保留查询状态，顶部搜索不再进入第二套页面", async ({ page }) => {
+  test("旧搜索链接保留查询状态，顶部搜索进入同一选款中心并直接聚焦", async ({ page }) => {
     await page.goto("/search?q=戒指&categoryId=17&material=足金");
     await expect(page).toHaveURL(/\/catalog\?query=%E6%88%92%E6%8C%87&category=17&material=%E8%B6%B3%E9%87%91/);
     await expect(page.getByRole("search").getByRole("combobox", { name: "关键词或货号" })).toHaveValue("戒指");
 
     const headerSearch = page.getByRole("link", { name: "搜索" }).first();
-    await expect(headerSearch).toHaveAttribute("href", "/catalog");
+    await expect(headerSearch).toHaveAttribute("href", "/catalog#catalog-search-input");
+    await headerSearch.click();
+    await expect(page).toHaveURL(/\/catalog#catalog-search-input$/);
+    const searchInput = page.getByRole("search").getByRole("combobox", { name: "关键词或货号" });
+    await expect(searchInput).toBeFocused();
+
+    await page.getByRole("heading", { name: "查找作品" }).click();
+    await expect(searchInput).not.toBeFocused();
+    await headerSearch.click();
+    await expect(searchInput).toBeFocused();
+  });
+
+  test("390px 菜单搜索关闭菜单后进入同一搜索框并聚焦", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/contact");
+    await page.getByRole("button", { name: "打开菜单" }).click();
+    const drawer = page.getByRole("dialog", { name: "品牌菜单" });
+    const searchLink = drawer.getByRole("link", { name: "搜索" });
+    await expect(searchLink).toHaveAttribute("href", "/catalog#catalog-search-input");
+    await searchLink.click();
+    await expect(drawer).toHaveCount(0);
+    await expect(page).toHaveURL(/\/catalog#catalog-search-input$/);
+    await expect(page.getByRole("search").getByRole("combobox", { name: "关键词或货号" }))
+      .toBeFocused();
+    await expectNoHorizontalOverflow(page);
   });
 
   test("商品详情不可用时返回选款中心", async ({ page }) => {
@@ -301,6 +333,7 @@ test.describe("公开页面业务区顺序", () => {
                   subtitle: "",
                   desktopImage: "/uploads/2026/08/12/021a4e7e-5533-4f69-b232-bda3827c55fc.png",
                   mobileImage: "/uploads/2026/08/12/021a4e7e-5533-4f69-b232-bda3827c55fc.png",
+                  altText: "海川珠宝工艺影像",
                   actionText: "",
                   targetType: "none",
                   linkUrl: "",
@@ -434,6 +467,7 @@ test.describe("公开菜单键盘交互", () => {
                   title: "首页主视觉标题",
                   desktopImage: "/images/镶嵌.png",
                   mobileImage: "/images/镶嵌.png",
+                  altText: "海川珠宝主视觉",
                   actionText: "",
                   targetType: "none",
                   linkUrl: "",

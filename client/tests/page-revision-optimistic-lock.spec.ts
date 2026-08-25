@@ -123,7 +123,7 @@ test.describe("页面历史版本恢复乐观锁", () => {
       "ARTICLE",
     );
     await expect(
-      appointmentCard.locator("[data-content-template-preview] > [inert]"),
+      appointmentCard.locator('[data-content-template-preview="booking"]'),
     ).toHaveCount(1);
     await expect(appointmentCard.getByRole("button")).toHaveCount(0);
 
@@ -133,11 +133,13 @@ test.describe("页面历史版本恢复乐观锁", () => {
       .poll(() => appointmentCard.evaluate((element) => getComputedStyle(element).outlineStyle))
       .not.toBe("none");
     await appointmentCard.press("Enter");
-    await expect(page.getByText("按住模块并拖到画布中的目标位置").last()).toBeVisible();
-    await appointmentCard.press("Space");
-    await expect(page.getByText("按住模块并拖到画布中的目标位置").last()).toBeVisible();
-    await appointmentCard.locator(".homepage-editor__template-footer").click();
-    await expect(page.getByText("按住模块并拖到画布中的目标位置").last()).toBeVisible();
+    await expect(page.getByText("已插入“预约入口”，可在右侧继续编辑")).toBeVisible();
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(1);
+    await expect(appointmentCard.locator(".homepage-editor__template-usage")).toHaveText(
+      "已添加 1 / 3",
+    );
+    await expect(appointmentCard).not.toHaveAttribute("aria-disabled", "true");
+    await expect(appointmentCard).toHaveAttribute("tabindex", "0");
 
     await page.getByRole("button", { name: "更多编辑操作" }).click();
     await page.getByRole("menuitem", { name: "发布历史" }).click();

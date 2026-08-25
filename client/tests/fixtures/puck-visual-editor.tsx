@@ -119,8 +119,8 @@ function PuckVisualEditorFixture() {
     <main className="puck-visual-fixture">
       <aside>
         <div role="tablist" aria-label="编辑类型">
-          <button type="button" role="tab" aria-selected={panelMode === "content"} onClick={() => setPanelMode("content")}>内容</button>
-          <button type="button" role="tab" aria-selected={panelMode === "design"} onClick={() => setPanelMode("design")}>设计</button>
+          <button type="button" role="tab" aria-selected={panelMode === "content"} onClick={() => setPanelMode("content")}>内容编辑</button>
+          <button type="button" role="tab" aria-selected={panelMode === "design"} onClick={() => setPanelMode("design")}>模板编辑</button>
         </div>
         <VisualEditorToolbar blockId={blockId} moduleType={moduleType} panelMode={panelMode} />
         <output data-testid="selected-block-state">

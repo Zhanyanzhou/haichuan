@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 
 const appMode = process.env.PLAYWRIGHT_APP_MODE === "mock" ? "mock" : "development";
 
@@ -119,6 +119,74 @@ function makeHeroDraft() {
   };
 }
 
+function makeSinglePosterDraft({ emptyCopy = false }: { emptyCopy?: boolean } = {}) {
+  const draft = makeEmptyDraft();
+  return {
+    ...draft,
+    id: 9604,
+    pageKey: "products",
+    puckData: {
+      ...draft.puckData,
+      content: [
+        {
+          type: "单图海报",
+          props: {
+            id: emptyCopy
+              ? "template-editor-single-poster-empty-copy"
+              : "template-editor-single-poster-copy",
+            desktopImage: "/svg/template-hero.svg",
+            mobileImage: "/svg/template-hero.svg",
+            number: emptyCopy ? "" : "01",
+            label: emptyCopy ? "" : "EDITORIAL",
+            title: emptyCopy ? "" : "单图文布局标题",
+            subtitle: emptyCopy ? "" : "验证完整编辑器中的文案区域拖动。",
+            actionText: "",
+            targetType: "none",
+          },
+        },
+      ],
+    },
+  };
+}
+
+function makeCraftDetailsDraft() {
+  const draft = makeEmptyDraft();
+  return {
+    ...draft,
+    id: 9603,
+    puckData: {
+      ...draft.puckData,
+      content: [
+        {
+          type: "工艺细节",
+          props: {
+            id: "template-editor-craft-details",
+            eyebrow: "CRAFT STUDY",
+            title: "工艺细节闭环标题",
+            body: "仅使用已核验的材质与制作说明。",
+            leadImage: "/svg/template-hero.svg",
+            leadAltText: "珠宝工艺主图",
+            detailImageOne: "/svg/template-hero.svg",
+            detailOneAltText: "珠宝材质细节一",
+            detailImageTwo: "/svg/template-hero.svg",
+            detailTwoAltText: "珠宝材质细节二",
+            leadImageRatio: "3:2",
+            detailOneRatio: "1:1",
+            detailTwoRatio: "1:1",
+            leadFocusX: 50,
+            leadFocusY: 50,
+            detailOneFocusX: 50,
+            detailOneFocusY: 50,
+            detailTwoFocusX: 50,
+            detailTwoFocusY: 50,
+            bgColor: "#FFFFFF",
+          },
+        },
+      ],
+    },
+  };
+}
+
 async function authenticateAdmin(page: Page) {
   await page.goto("/admin/login");
   await page.evaluate(() => {
@@ -204,10 +272,81 @@ async function readFixtureData(page: Page) {
   };
 }
 
+async function setRangeValue(range: Locator, value: number) {
+  const current = Number(await range.inputValue());
+  const key = value >= current ? "ArrowRight" : "ArrowLeft";
+  await range.focus();
+  for (let step = 0; step < Math.abs(value - current); step += 1) {
+    await range.press(key);
+  }
+  await expect(range).toHaveValue(String(value));
+}
+
 async function attachScreenshot(page: Page, testInfo: TestInfo, name: string) {
   const screenshotPath = testInfo.outputPath(`${name}.png`);
   await page.screenshot({ path: screenshotPath, animations: "disabled" });
   await testInfo.attach(name, { path: screenshotPath, contentType: "image/png" });
+}
+
+type PuckPerformanceWarning = {
+  kind: "setData" | "set";
+  text: string;
+  location: { url: string; lineNumber: number; columnNumber: number };
+};
+
+function observePuckPerformanceWarnings(page: Page) {
+  const warnings: PuckPerformanceWarning[] = [];
+  page.on("console", (message) => {
+    if (message.type() !== "warning") return;
+    const text = message.text();
+    if (!text.includes("expensive") || (!text.includes("`setData`") && !text.includes("`set`"))) {
+      return;
+    }
+    warnings.push({
+      kind: text.includes("`setData`") ? "setData" : "set",
+      text,
+      location: message.location(),
+    });
+  });
+
+  return {
+    drain() {
+      const snapshot = warnings.splice(0, warnings.length);
+      return snapshot;
+    },
+  };
+}
+
+function observeAntdStaticContextWarnings(page: Page) {
+  const warnings: string[] = [];
+  page.on("console", (message) => {
+    const text = message.text();
+    if (text.includes("Static function can not consume context")) warnings.push(text);
+  });
+  return warnings;
+}
+
+async function attachPuckWarningEvidence(
+  testInfo: TestInfo,
+  name: string,
+  phases: Record<string, PuckPerformanceWarning[]>,
+) {
+  const summary = Object.fromEntries(
+    Object.entries(phases).map(([phase, warnings]) => [
+      phase,
+      {
+        setData: warnings.filter((warning) => warning.kind === "setData").length,
+        set: warnings.filter((warning) => warning.kind === "set").length,
+        warnings,
+      },
+    ]),
+  );
+  console.info(`[puck-performance] ${name} ${JSON.stringify(summary)}`);
+  await testInfo.attach(`${name}.json`, {
+    body: JSON.stringify(summary, null, 2),
+    contentType: "application/json",
+  });
+  return summary;
 }
 
 function heroOverrides(data: Awaited<ReturnType<typeof readFixtureData>>) {
@@ -268,12 +407,18 @@ test.describe("模板内部编辑器（真实产品组件集成；不含后端�
     await expect(hud).toHaveAttribute("data-can-adjust-zoom", "true");
     await expect(hud.getByRole("button", { name: "调整对象区域" })).toBeVisible();
     await expect(hud.getByRole("button", { name: "调整图片构图" })).toBeVisible();
-    await page.getByRole("tab", { name: "设计" }).click();
+    await page.getByRole("tab", { name: "模板编辑" }).click();
     await hud.getByRole("button", { name: "调整图片构图" }).click();
     await expect(root).toHaveAttribute("data-hc-media-focus-enabled", "true");
-
-    const dragBox = await image.boundingBox();
-    if (!dragBox) throw new Error("主图在构图模式下没有尺寸");
+    // 模板设计模式会隐藏真实图片并展示可操作槽位；拖动目标应绑定槽位，
+    // 同时等待 Puck 重挂后的合同布局变量恢复非零尺寸。
+    const mediaSlot = canvas
+      .locator('[data-content-role-desktop="desktopImage"]')
+      .first();
+    await expect.poll(async () => (await mediaSlot.boundingBox())?.height ?? 0)
+      .toBeGreaterThan(0);
+    const dragBox = await mediaSlot.boundingBox();
+    if (!dragBox) throw new Error("主图槽位在构图模式下没有尺寸");
     await page.mouse.move(dragBox.x + dragBox.width * 0.75, dragBox.y + dragBox.height * 0.25);
     await page.mouse.down();
     await page.mouse.move(
@@ -288,6 +433,7 @@ test.describe("模板内部编辑器（真实产品组件集成；不含后端�
         ?.focusByViewport?.desktop,
     ).not.toEqual(undefined);
 
+    await page.getByRole("tab", { name: "内容编辑" }).click();
     const title = canvas.locator('[data-hc-keyboard-node="title"]:visible').first();
     await title.click();
     await expect(page.getByTestId("selected-visual-state")).toHaveText(
@@ -347,12 +493,17 @@ test.describe("模板内部编辑器（真实产品组件集成；不含后端�
   });
 
   test("8 个方向把手分别改变对应边、写入 store 且不越出模块", async ({ page }, testInfo) => {
+    const warningProbe = observePuckPerformanceWarnings(page);
     const canvas = page.frameLocator("iframe");
     const root = canvas.locator('[data-content-template-module="首屏主视觉"]').first();
     const title = canvas.locator('[data-hc-keyboard-node="title"]:visible').first();
+    await expect.poll(async () => root.evaluate((element) =>
+      element.style.getPropertyValue("--hc-node-title-desktop-width"),
+    )).not.toBe("");
     const rootBox = await root.boundingBox();
     if (!rootBox) throw new Error("模块没有布局尺寸");
     const undo = page.getByRole("button", { name: "撤销" });
+    const edgeTolerancePx = 4;
     const directions = {
       n: { dx: 0, dy: -24, name: "调整对象大小：上边" },
       ne: { dx: 24, dy: -24, name: "调整对象大小：右上角" },
@@ -375,13 +526,24 @@ test.describe("模板内部编辑器（真实产品组件集成；不含后端�
       );
       await expect(handle).toHaveCount(1);
       await expect(handle).toHaveAccessibleName(movement.name);
-      expect(await handle.evaluate((element) => {
+      const hitTarget = await handle.evaluate((element) => {
         const box = element.getBoundingClientRect();
-        return document.elementFromPoint(
+        const topElement = document.elementFromPoint(
           box.x + box.width / 2,
           box.y + box.height / 2,
-        ) === element;
-      })).toBe(true);
+        );
+        return {
+          matches: topElement === element,
+          tagName: topElement?.tagName,
+          nodeId: topElement?.getAttribute("data-node-id"),
+          resizeDirection: topElement?.getAttribute("data-resize-direction"),
+          hudMode: topElement?.getAttribute("data-hc-hud-mode"),
+        };
+      });
+      expect(
+        hitTarget.matches,
+        `${direction} 把手被其他元素遮挡：${JSON.stringify(hitTarget)}`,
+      ).toBe(true);
 
       const before = await title.boundingBox();
       const handleBox = await handle.boundingBox();
@@ -396,7 +558,11 @@ test.describe("模板内部编辑器（真实产品组件集成；不含后端�
         { steps: 8 },
       );
       await page.mouse.up();
-      await expect(root).toHaveAttribute("data-hc-gesture-phase", "commit");
+      await expect.poll(async () => JSON.stringify(
+        heroOverrides(await readFixtureData(page))?.nodes?.title?.rectByViewport
+          ?.desktop,
+      )).not.toBe(JSON.stringify(storeBefore));
+      await expect(root).not.toHaveAttribute("data-hc-gesture-phase");
 
       const after = await title.boundingBox();
       if (!after) throw new Error(`${direction} 缺少缩放后尺寸`);
@@ -407,29 +573,27 @@ test.describe("模板内部编辑器（真实产品组件集成；不含后端�
       const afterBottom = after.y + after.height;
       if (direction.includes("e")) {
         expect(afterRight).toBeGreaterThan(beforeRight + 1);
-        expect(Math.abs(after.x - before.x)).toBeLessThan(3);
+        expect(Math.abs(after.x - before.x)).toBeLessThan(edgeTolerancePx);
       } else if (direction.includes("w")) {
         expect(after.x).toBeLessThan(before.x - 1);
-        expect(Math.abs(afterRight - beforeRight)).toBeLessThan(3);
+        expect(Math.abs(afterRight - beforeRight)).toBeLessThan(edgeTolerancePx);
       } else {
-        expect(Math.abs(after.x - before.x)).toBeLessThan(3);
-        expect(Math.abs(after.width - before.width)).toBeLessThan(3);
+        expect(Math.abs(after.x - before.x), `${direction} 不应改变横向位置`).toBeLessThan(edgeTolerancePx);
+        expect(
+          Math.abs(after.width - before.width),
+          `${direction} 不应改变宽度（before=${JSON.stringify(before)} after=${JSON.stringify(after)}）`,
+        ).toBeLessThan(edgeTolerancePx);
       }
       if (direction.includes("s")) {
         expect(afterBottom).toBeGreaterThan(beforeBottom + 1);
-        expect(Math.abs(after.y - before.y)).toBeLessThan(3);
+        expect(Math.abs(after.y - before.y)).toBeLessThan(edgeTolerancePx);
       } else if (direction.includes("n")) {
         expect(after.y).toBeLessThan(before.y - 1);
-        expect(Math.abs(afterBottom - beforeBottom)).toBeLessThan(3);
+        expect(Math.abs(afterBottom - beforeBottom)).toBeLessThan(edgeTolerancePx);
       } else {
-        expect(Math.abs(after.y - before.y)).toBeLessThan(3);
-        expect(Math.abs(after.height - before.height)).toBeLessThan(3);
+        expect(Math.abs(after.y - before.y), `${direction} 不应改变纵向位置`).toBeLessThan(edgeTolerancePx);
+        expect(Math.abs(after.height - before.height), `${direction} 不应改变高度`).toBeLessThan(edgeTolerancePx);
       }
-      await expect.poll(async () => JSON.stringify(
-        heroOverrides(await readFixtureData(page))?.nodes?.title?.rectByViewport
-          ?.desktop,
-      )).not.toBe(JSON.stringify(storeBefore));
-
       if (direction === "nw") {
         await attachScreenshot(page, testInfo, "template-eight-direction-resize");
       }
@@ -440,7 +604,20 @@ test.describe("模板内部编辑器（真实产品组件集成；不含后端�
         heroOverrides(await readFixtureData(page))?.nodes?.title?.rectByViewport
           ?.desktop,
       )).toBe(JSON.stringify(storeBefore));
+      if (direction !== "nw") {
+        await page.reload();
+        await expect(page.getByRole("note")).toContainText("不调用保存、发布或后端接口");
+        await expect(page.locator("iframe")).toHaveCount(1);
+        await page.getByRole("button", { name: /桌面端布局/ }).click();
+        await expect(page.getByTestId("viewport-state")).toHaveText("desktop");
+        await expect.poll(async () => root.evaluate((element) =>
+          element.style.getPropertyValue("--hc-node-title-desktop-width"),
+        )).not.toBe("");
+      }
     }
+    await attachPuckWarningEvidence(testInfo, "eight-resize-handles", {
+      resizeAndUndo: warningProbe.drain(),
+    });
   });
 
   test("文字框可从左右边调宽，8 个把手保持在模块边界内", async ({ page }) => {
@@ -559,6 +736,7 @@ test.describe("模板内部编辑器（真实产品组件集成；不含后端�
   });
 
   test("顶部撤销、重做、复制、删除与预览均操作当前 Puck 画布", async ({ page }) => {
+    const antdContextWarnings = observeAntdStaticContextWarnings(page);
     const canvas = page.frameLocator("iframe");
     await canvas.getByRole("button", { name: "选择“首屏主视觉”模块" }).click();
     await expect(page.getByTestId("selected-module-state")).toHaveText(
@@ -589,6 +767,7 @@ test.describe("模板内部编辑器（真实产品组件集成；不含后端�
     await expect.poll(async () => (await readFixtureData(page)).content.length).toBe(2);
 
     await page.getByRole("button", { name: "预览当前画布" }).click();
+    expect(antdContextWarnings).toEqual([]);
     await expect(page.getByTestId("preview-state")).toHaveText("preview");
     await expect(page.getByRole("button", { name: "退出当前画布预览" })).toBeVisible();
     await page.keyboard.press("Escape");
@@ -602,17 +781,24 @@ test.describe("完整后台壳（确定性 UI / 自有 API 网络夹具）", () 
     "该层在 development 模式用 page.route 替换自有 API；Mock 启动模式另有显式标识测试",
   );
 
-  test("模板库真实拖入画布；本用例不证明保存或发布持久化", async ({ page }) => {
+  test("工艺细节从模板库真实拖入画布并暴露四个可编辑槽位；本用例不证明保存或发布持久化", async ({ page }, testInfo) => {
+    const warningProbe = observePuckPerformanceWarnings(page);
     const forbiddenWrites: string[] = [];
     await page.setViewportSize({ width: 1600, height: 1000 });
     await authenticateAdmin(page);
     await mockEditorApis(page, makeEmptyDraft(), forbiddenWrites);
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const loadWarnings = warningProbe.drain();
+    expect(loadWarnings, "初始载入不得重复执行 Puck 全树更新").toEqual([]);
 
-    const card = page.getByRole("button", { name: "首屏：拖到画布" });
+    const card = page.getByRole("button", {
+      name: "工艺细节：点击添加到页面末尾，也可拖到画布指定位置",
+    });
     const canvasDocument = page.locator(".homepage-editor__canvas-document");
     await expect(card).toBeVisible();
+    await card.scrollIntoViewIfNeeded();
+    await expect(card).toBeInViewport();
     await expect(canvasDocument).toBeVisible();
     const cardBox = await card.boundingBox();
     const canvasBox = await canvasDocument.boundingBox();
@@ -626,8 +812,15 @@ test.describe("完整后台壳（确定性 UI / 自有 API 网络夹具）", () 
     await expect(page.getByText("在此插入")).toBeVisible();
     await page.mouse.up();
 
-    await expect(page.getByText("已插入“首屏”，可在右侧继续编辑")).toBeVisible();
+    await expect(page.getByText("已插入“工艺细节”，可在右侧继续编辑")).toBeVisible();
     await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(1);
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const craftRoot = canvas.locator('[data-content-template-contract="craftDetails"]');
+    await expect(craftRoot).toBeVisible();
+    for (const role of ["leadImage", "copy", "detailImageOne", "detailImageTwo"]) {
+      await expect(craftRoot.locator(`[data-content-role="${role}"]`)).toBeVisible();
+    }
+    await attachScreenshot(page, testInfo, "craft-details-library-insert-desktop");
     const topOperations = page.getByRole("toolbar", { name: "画布编辑操作" });
     await expect(topOperations.getByRole("button", { name: "撤销" })).toBeEnabled();
     await expect(
@@ -636,18 +829,83 @@ test.describe("完整后台壳（确定性 UI / 自有 API 网络夹具）", () 
     await expect(
       topOperations.getByRole("button", { name: "删除当前模块" }),
     ).toBeEnabled();
+    const insertWarnings = warningProbe.drain();
+    expect(insertWarnings).toEqual([]);
+
+    const undo = topOperations.getByRole("button", { name: "撤销" });
+    await expect(undo).toBeEnabled();
+    // Puck 0.22.4 在 250ms 内合并历史记录；等待其落盘后再测试往返，
+    // 避免测试自身在 debounce 完成前触发 Undo 并截断刚生成的 Redo。
+    await page.waitForTimeout(300);
+    await undo.click();
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(0);
+    const undoWarnings = warningProbe.drain();
+    const redo = topOperations.getByRole("button", { name: "重做" });
+    await expect(redo).toBeEnabled();
+    await redo.click();
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(1);
+    const redoWarnings = warningProbe.drain();
+    await attachPuckWarningEvidence(testInfo, "template-insert", {
+      load: loadWarnings,
+      insert: insertWarnings,
+      undo: undoWarnings,
+      redo: redoWarnings,
+    });
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("模板库支持拖拽定位、点击与键盘追加，且一次拖拽不会重复插入", async ({
+    page,
+  }) => {
+    const forbiddenWrites: string[] = [];
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, makeEmptyDraft(), forbiddenWrites);
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const card = page.getByRole("button", {
+      name: "单图文：点击添加到页面末尾，也可拖到画布指定位置",
+    });
+    const canvasDocument = page.locator(".homepage-editor__canvas-document");
+    const layers = page.locator(".homepage-editor__layer-item");
+    await card.scrollIntoViewIfNeeded();
+    const cardBox = await card.boundingBox();
+    const canvasBox = await canvasDocument.boundingBox();
+    if (!cardBox || !canvasBox) throw new Error("模块卡或画布没有布局尺寸");
+
+    await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + 120, {
+      steps: 14,
+    });
+    await page.mouse.up();
+    await expect(layers, "拖拽释放只能插入一个模块").toHaveCount(1);
+
+    await card.click();
+    await expect(layers, "点击应追加一个模块").toHaveCount(2);
+
+    await card.focus();
+    await card.press("Enter");
+    await expect(layers, "键盘 Enter 应追加一个模块").toHaveCount(3);
+    await expect(card.locator(".homepage-editor__template-usage")).toHaveText(
+      "已添加 3 / 5",
+    );
     expect(forbiddenWrites).toEqual([]);
   });
 
   test("一次连续内部拖动只产生一条可撤销历史；本用例不证明服务端持久化", async ({
     page,
   }, testInfo) => {
+    const warningProbe = observePuckPerformanceWarnings(page);
     const forbiddenWrites: string[] = [];
     await page.setViewportSize({ width: 1600, height: 1000 });
     await authenticateAdmin(page);
     await mockEditorApis(page, makeHeroDraft(), forbiddenWrites);
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const loadWarnings = warningProbe.drain();
+    expect(loadWarnings, "初始载入不得重复执行 Puck 全树更新").toEqual([]);
 
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     const title = canvas.locator('[data-hc-keyboard-node="title"]:visible').first();
@@ -656,6 +914,7 @@ test.describe("完整后台壳（确定性 UI / 自有 API 网络夹具）", () 
     const root = canvas.locator('[data-content-template-module="首屏主视觉"]').first();
     await root.locator('[data-hc-node-hud][data-node-id="title"]')
       .getByRole("button", { name: "调整对象区域" }).click();
+    const selectWarnings = warningProbe.drain();
     const instanceStyle = canvas
       .locator('[data-content-template-module="首屏主视觉"]')
       .locator("style[data-hc-instance-overrides]");
@@ -685,17 +944,716 @@ test.describe("完整后台壳（确定性 UI / 自有 API 网络夹具）", () 
     expect(Math.abs(movedBox.x - initialBox.x) + Math.abs(movedBox.y - initialBox.y)).toBeGreaterThan(2);
     const movedInstanceStyle = await readInstanceStyle();
     expect(movedInstanceStyle).not.toBe(initialInstanceStyle);
+    const dragWarnings = warningProbe.drain();
 
     const undo = page.getByRole("button", { name: "撤销" });
     const redo = page.getByRole("button", { name: "重做" });
     await expect(undo).toBeEnabled();
     await undo.click();
     await expect.poll(readInstanceStyle).toBe(initialInstanceStyle);
+    const undoWarnings = warningProbe.drain();
 
     await expect(redo).toBeEnabled();
     await redo.click();
     await expect.poll(readInstanceStyle).toBe(movedInstanceStyle);
+    const redoWarnings = warningProbe.drain();
+    await attachPuckWarningEvidence(testInfo, "continuous-object-drag", {
+      load: loadWarnings,
+      select: selectWarnings,
+      drag: dragWarnings,
+      undo: undoWarnings,
+      redo: redoWarnings,
+    });
     await attachScreenshot(page, testInfo, "template-shell-single-history-step");
     expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("singlePoster.copy 桌面端指针拖动提交一条可撤销历史", async ({
+    page,
+  }) => {
+    const forbiddenWrites: string[] = [];
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, makeSinglePosterDraft(), forbiddenWrites);
+    await page.goto("/admin/editor/products");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const root = canvas.locator('[data-content-template-contract="singlePoster"]').first();
+    const copy = root.locator('[data-hc-keyboard-node="copy"]:visible').first();
+    await expect(copy).toBeVisible();
+    await copy.click();
+    await root.locator('[data-hc-node-hud][data-node-id="copy"]')
+      .getByRole("button", { name: "调整对象区域" }).click();
+    await expect(root).toHaveAttribute("data-visual-editor-mode", "adjust-layout");
+
+    const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+    const readInstanceStyle = async () =>
+      (await instanceStyle.count()) > 0
+        ? (await instanceStyle.textContent()) ?? ""
+        : "";
+    const initialStyle = await readInstanceStyle();
+    const initialBox = await copy.boundingBox();
+    if (!initialBox) throw new Error("singlePoster.copy 没有可拖动尺寸");
+
+    const undo = page.getByRole("button", { name: "撤销" });
+    const redo = page.getByRole("button", { name: "重做" });
+    await expect(undo).toBeDisabled();
+    await page.keyboard.down("Alt");
+    await page.mouse.move(
+      initialBox.x + initialBox.width / 2,
+      initialBox.y + initialBox.height / 2,
+    );
+    await page.mouse.down();
+    await expect(root).toHaveAttribute("data-hc-gesture-phase", "begin");
+    await page.mouse.move(
+      initialBox.x + initialBox.width / 2 + 60,
+      initialBox.y + initialBox.height / 2 + 30,
+      { steps: 12 },
+    );
+    await page.mouse.up();
+    await page.keyboard.up("Alt");
+
+    await expect.poll(readInstanceStyle).not.toBe(initialStyle);
+    const movedStyle = await readInstanceStyle();
+    expect(movedStyle).toContain("copy");
+    await expect(undo).toBeEnabled();
+    await undo.click();
+    await expect.poll(readInstanceStyle).toBe(initialStyle);
+    await expect(undo).toBeDisabled();
+    await expect(redo).toBeEnabled();
+    await redo.click();
+    await expect.poll(readInstanceStyle).toBe(movedStyle);
+    await expect(root).not.toHaveAttribute("data-hc-gesture-phase");
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("singlePoster.copy 移动端拖动保留桌面覆盖并独立撤销", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    const draft = makeSinglePosterDraft();
+    draft.puckData.content[0].props.__instanceOverrides = {
+      version: 2,
+      nodes: {
+        copy: {
+          rectByViewport: {
+            desktop: { x: 0.12, y: 0.58, width: 0.28, height: 0.2 },
+          },
+        },
+      },
+    };
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, draft, forbiddenWrites);
+    await page.goto("/admin/editor/products");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const root = canvas.locator('[data-content-template-contract="singlePoster"]').first();
+    const copy = root.locator('[data-hc-keyboard-node="copy"]:visible').first();
+    const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+    const readInstanceStyle = async () => (await instanceStyle.textContent()) ?? "";
+    const desktopOnlyStyle = await readInstanceStyle();
+    expect(desktopOnlyStyle).toContain("min-width:768px");
+    expect(desktopOnlyStyle).not.toContain("max-width:767px");
+
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect.poll(() => canvas.locator("html").evaluate(() => window.innerWidth))
+      .toBeLessThanOrEqual(480);
+    await expect.poll(readInstanceStyle).toBe(desktopOnlyStyle);
+    await copy.click();
+    await root.locator('[data-hc-node-hud][data-node-id="copy"]')
+      .getByRole("button", { name: "调整对象区域" }).click();
+    const initialMobileBox = await copy.boundingBox();
+    if (!initialMobileBox) throw new Error("移动端 singlePoster.copy 没有可拖动尺寸");
+
+    const undo = page.getByRole("button", { name: "撤销" });
+    const redo = page.getByRole("button", { name: "重做" });
+    await expect(undo).toBeDisabled();
+    await page.keyboard.down("Alt");
+    await page.mouse.move(
+      initialMobileBox.x + initialMobileBox.width / 2,
+      initialMobileBox.y + initialMobileBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      initialMobileBox.x + initialMobileBox.width / 2 - 24,
+      initialMobileBox.y + initialMobileBox.height / 2 + 18,
+      { steps: 10 },
+    );
+    await page.mouse.up();
+    await page.keyboard.up("Alt");
+
+    await expect.poll(readInstanceStyle).not.toBe(desktopOnlyStyle);
+    const mobileMovedStyle = await readInstanceStyle();
+    expect(mobileMovedStyle).toContain("min-width:768px");
+    expect(mobileMovedStyle).toContain("max-width:767px");
+    await undo.click();
+    await expect.poll(readInstanceStyle).toBe(desktopOnlyStyle);
+    await expect(undo).toBeDisabled();
+    await redo.click();
+    await expect.poll(readInstanceStyle).toBe(mobileMovedStyle);
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("singlePoster.copy 空文案仍可用真实指针拖动和撤销", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, makeSinglePosterDraft({ emptyCopy: true }), forbiddenWrites);
+    await page.goto("/admin/editor/products");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const root = canvas.locator('[data-content-template-contract="singlePoster"]').first();
+    const inspector = page.getByRole("region", { name: "属性面板" });
+    await inspector.getByRole("combobox", { name: "选择编辑对象" }).selectOption("copy");
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    const copy = root.locator('[data-hc-keyboard-node="copy"]:visible').first();
+    await expect(copy).toBeVisible();
+    await root.locator('[data-hc-node-hud][data-node-id="copy"]')
+      .getByRole("button", { name: "调整对象区域" }).click();
+
+    const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+    const readInstanceStyle = async () =>
+      (await instanceStyle.count()) > 0
+        ? (await instanceStyle.textContent()) ?? ""
+        : "";
+    const initialStyle = await readInstanceStyle();
+    const initialBox = await copy.boundingBox();
+    if (!initialBox || initialBox.height <= 0) {
+      throw new Error("空文案 copy 没有稳定的可拖动占位尺寸");
+    }
+    const undo = page.getByRole("button", { name: "撤销" });
+    const redo = page.getByRole("button", { name: "重做" });
+    await expect(undo).toBeDisabled();
+    await page.keyboard.down("Alt");
+    await page.mouse.move(
+      initialBox.x + initialBox.width / 2,
+      initialBox.y + initialBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      initialBox.x + initialBox.width / 2 + 36,
+      initialBox.y + initialBox.height / 2 - 18,
+      { steps: 10 },
+    );
+    await page.mouse.up();
+    await page.keyboard.up("Alt");
+
+    await expect.poll(readInstanceStyle).not.toBe(initialStyle);
+    const movedStyle = await readInstanceStyle();
+    expect(movedStyle).toContain("copy");
+    await undo.click();
+    await expect.poll(readInstanceStyle).toBe(initialStyle);
+    await expect(undo).toBeDisabled();
+    await redo.click();
+    await expect.poll(readInstanceStyle).toBe(movedStyle);
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("另存到我的模板只提交双端布局，不提交图片、文字或业务内容", async ({ page }, testInfo) => {
+    const warningProbe = observePuckPerformanceWarnings(page);
+    const antdContextWarnings = observeAntdStaticContextWarnings(page);
+    const maximumDepthErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error" && message.text().includes("Maximum update depth exceeded")) {
+        maximumDepthErrors.push(message.text());
+      }
+    });
+    const forbiddenWrites: string[] = [];
+    let createdBody: Record<string, any> | undefined;
+    let createdTemplate: Record<string, any> | undefined;
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, makeHeroDraft(), forbiddenWrites);
+    await page.route("**/api/page-modules/personal-content-templates", async (route) => {
+      const request = route.request();
+      if (request.method() === "GET") return route.fulfill(json(createdTemplate ? [createdTemplate] : []));
+      if (request.method() !== "POST") return route.fallback();
+      createdBody = request.postDataJSON();
+      createdTemplate = {
+        id: 701,
+        ownerId: 1,
+        name: createdBody?.name,
+        moduleType: createdBody?.moduleType,
+        contractKey: "hero",
+        contractVersion: 3,
+        layoutData: createdBody?.layoutData,
+        contentDefaults: null,
+        createdAt: "2026-08-24T00:00:00.000Z",
+        updatedAt: "2026-08-24T00:00:00.000Z",
+      };
+      return route.fulfill(json(createdTemplate));
+    });
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const loadWarnings = warningProbe.drain();
+    expect(loadWarnings, "初始载入不得重复执行 Puck 全树更新").toEqual([]);
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const heroRoot = canvas.locator('[data-content-template-contract="hero"]');
+    const heroInstanceStyle = heroRoot.locator("style[data-hc-instance-overrides]");
+    await canvas.locator('[data-hc-keyboard-node="desktopImage"]:visible').first().click();
+    const inspector = page.getByRole("region", { name: "属性面板" });
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    await inspector.getByRole("group", { name: "对象圆角" })
+      .getByRole("button", { name: "柔和" }).click();
+    await expect.poll(() => heroInstanceStyle.textContent()).toContain("border-radius:8px!important");
+    await inspector.getByRole("group", { name: "对象阴影" })
+      .getByRole("button", { name: "悬浮" }).click();
+    await expect.poll(() => heroInstanceStyle.textContent()).toContain("box-shadow:0 16px 36px rgba(24,26,27,.16)!important");
+    await inspector.getByRole("combobox", { name: "选择编辑对象" }).selectOption("");
+    await inspector.getByRole("group", { name: "模板配色" })
+      .getByRole("button", { name: "柔灰" }).click();
+    await expect.poll(() => heroInstanceStyle.textContent()).toContain("--hc-instance-background:#F7F8F8");
+    await inspector.getByRole("button", { name: "另存到模板库" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "另存到模板库" });
+    await expect(dialog).toContainText("默认仅保存桌面端与移动端布局");
+    await expect(dialog.getByRole("checkbox", { name: /同时保存当前默认内容/ })).not.toBeChecked();
+    await expect(dialog.locator('[data-content-template-preview="hero"]')).toHaveCount(2);
+    await dialog.getByLabel("模板名称").fill("首屏构图 A");
+    await dialog.getByRole("button", { name: "保存模板" }).click();
+    await expect(page.getByText("「首屏构图 A」已保存到我的模板")).toBeVisible();
+    const savedTemplate = page.getByRole("button", { name: "首屏构图 A：点击添加" });
+    await expect(savedTemplate).toBeVisible();
+    await expect(savedTemplate.locator('[data-content-template-preview="hero"]')).toHaveCount(1);
+    await page.getByRole("toolbar", { name: "画布编辑操作" })
+      .getByRole("button", { name: "删除当前模块" })
+      .click();
+    await page.getByRole("dialog").filter({ hasText: "删除“" }).getByRole("button", { name: "删除模块" }).click();
+    await expect(canvas.locator('[data-content-template-contract="hero"]')).toHaveCount(0);
+    const deleteWarnings = warningProbe.drain();
+    await savedTemplate.click();
+    const reappliedHero = canvas.locator('[data-content-template-contract="hero"]');
+    await expect(reappliedHero).toHaveCount(1);
+    const reappliedStyle = reappliedHero.locator("style[data-hc-instance-overrides]");
+    await expect.poll(() => reappliedStyle.textContent()).toContain("--hc-instance-background:#F7F8F8");
+    await expect.poll(() => reappliedStyle.textContent()).toContain("border-radius:8px!important");
+    await expect.poll(() => reappliedStyle.textContent()).toContain("box-shadow:0 16px 36px rgba(24,26,27,.16)!important");
+    const applyWarnings = warningProbe.drain();
+    expect(applyWarnings).toEqual([]);
+    await attachPuckWarningEvidence(testInfo, "personal-template-apply", {
+      load: loadWarnings,
+      delete: deleteWarnings,
+      apply: applyWarnings,
+    });
+
+    expect(createdBody).toMatchObject({
+      name: "首屏构图 A",
+      moduleType: "首屏主视觉",
+      layoutData: {
+        version: 2,
+        frame: { colorPreset: "mist" },
+        nodes: {
+          desktopImage: {
+            appearance: { radiusPreset: "soft", shadowPreset: "lifted" },
+          },
+        },
+      },
+    });
+    expect(Object.keys(createdBody ?? {}).sort()).toEqual(["layoutData", "moduleType", "name"]);
+    const serializedLayout = JSON.stringify(createdBody?.layoutData ?? {});
+    for (const forbidden of ["/svg/", "targetType", "linkUrl", "productId"]) {
+      expect(serializedLayout).not.toContain(forbidden);
+    }
+    expect(antdContextWarnings).toEqual([]);
+    expect(maximumDepthErrors, "个人模板保存与应用不得触发 React 更新循环").toEqual([]);
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("显式勾选后保存并恢复合同白名单默认内容", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    const draft = makeHeroDraft();
+    draft.puckData.content[0].props.eyebrow = "COLLECTION";
+    draft.puckData.content[0].props.title = "可复用默认标题";
+    draft.puckData.content[0].props.subtitle = "只保存展示内容，不复制业务事实";
+    draft.puckData.content[0].props.actionText = "查看系列";
+    draft.puckData.content[0].props.linkUrl = "/catalog";
+
+    let createdBody: Record<string, any> | undefined;
+    let createdTemplate: Record<string, any> | undefined;
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, draft, forbiddenWrites);
+    await page.route("**/api/page-modules/personal-content-templates", async (route) => {
+      const request = route.request();
+      if (request.method() === "GET") return route.fulfill(json(createdTemplate ? [createdTemplate] : []));
+      if (request.method() !== "POST") return route.fallback();
+      createdBody = request.postDataJSON();
+      createdTemplate = {
+        id: 702,
+        ownerId: 1,
+        name: createdBody?.name,
+        moduleType: createdBody?.moduleType,
+        contractKey: "hero",
+        contractVersion: 3,
+        layoutData: createdBody?.layoutData,
+        contentDefaults: createdBody?.contentDefaults ?? null,
+        createdAt: "2026-08-25T00:00:00.000Z",
+        updatedAt: "2026-08-25T00:00:00.000Z",
+      };
+      return route.fulfill(json(createdTemplate));
+    });
+
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    await canvas.locator('[data-hc-keyboard-node="desktopImage"]:visible').first().click();
+    const inspector = page.getByRole("region", { name: "属性面板" });
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    await inspector.getByRole("button", { name: "另存到模板库" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "另存到模板库" });
+    await dialog.getByLabel("模板名称").fill("含默认内容的首屏");
+    await dialog.getByRole("checkbox", { name: /同时保存当前默认内容/ }).check();
+    await dialog.getByRole("button", { name: "保存模板" }).click();
+    await expect(page.getByText("「含默认内容的首屏」已保存布局和默认内容")).toBeVisible();
+    expect(createdBody?.contentDefaults).toMatchObject({
+      desktopImage: "/svg/template-hero.svg",
+      eyebrow: "COLLECTION",
+      title: "可复用默认标题",
+      subtitle: "只保存展示内容，不复制业务事实",
+      actionText: "查看系列",
+      linkUrl: "/catalog",
+    });
+    expect(createdBody?.contentDefaults).not.toHaveProperty("id");
+    expect(createdBody?.contentDefaults).not.toHaveProperty("__instanceOverrides");
+
+    const savedTemplate = page.getByRole("button", { name: "含默认内容的首屏：点击添加" });
+    await expect(savedTemplate).toContainText("含默认内容");
+    await page.getByRole("toolbar", { name: "画布编辑操作" })
+      .getByRole("button", { name: "删除当前模块" })
+      .click();
+    await page.getByRole("dialog").filter({ hasText: "删除“" })
+      .getByRole("button", { name: "删除模块" }).click();
+    await expect(canvas.locator('[data-content-template-contract="hero"]')).toHaveCount(0);
+    await savedTemplate.click();
+    await expect(canvas.getByText("可复用默认标题")).toBeVisible();
+    await expect(canvas.getByText("只保存展示内容，不复制业务事实")).toBeVisible();
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("首帧不重复整树更新，线上版与草稿的后续切换各只同步一次", async ({ page }, testInfo) => {
+    const warningProbe = observePuckPerformanceWarnings(page);
+    const published = makeHeroDraft();
+    published.puckData.content[0].props.title = "线上版本标题";
+    published.status = "PUBLISHED";
+    published.version = 3;
+    published.publishedAt = "2026-08-25T00:00:00.000Z";
+    const draft = structuredClone(published);
+    draft.puckData.content[0].props.title = "未发布草稿标题";
+    draft.status = "DRAFT";
+    draft.updatedAt = "2026-08-25T00:00:01.000Z";
+
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await page.route("**/api/**", async (route) => {
+      const url = route.request().url();
+      if (url.includes("/page-modules/document/validate")) {
+        return route.fulfill(json({ valid: true, errors: [] }));
+      }
+      if (url.includes("/page-modules/document/revisions")) {
+        return route.fulfill(json([]));
+      }
+      if (url.includes("/page-modules/document/published")) {
+        return route.fulfill(json(published));
+      }
+      if (url.includes("/page-modules/document/admin")) {
+        return route.fulfill(json(draft));
+      }
+      if (url.includes("/page-modules/personal-content-templates")) {
+        return route.fulfill(json([]));
+      }
+      return route.fulfill(json({}));
+    });
+
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    await expect(canvas.getByText("未发布草稿标题")).toBeVisible();
+    const loadWarnings = warningProbe.drain();
+    expect(loadWarnings, "首帧不得因 Puck 归一化差异重复整树更新").toEqual([]);
+
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: "查看线上版本" }).click();
+    await expect(canvas.getByText("线上版本标题")).toBeVisible();
+    const publishedWarnings = warningProbe.drain();
+    expect(publishedWarnings.map((warning) => warning.kind)).toEqual(["setData"]);
+
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: "继续编辑草稿" }).click();
+    await expect(canvas.getByText("未发布草稿标题")).toBeVisible();
+    const draftWarnings = warningProbe.drain();
+    expect(draftWarnings.map((warning) => warning.kind)).toEqual(["setData"]);
+    await attachPuckWarningEvidence(testInfo, "external-document-switch", {
+      load: loadWarnings,
+      published: publishedWarnings,
+      draft: draftWarnings,
+    });
+  });
+
+  test("账号模板读取失败时保留明确状态并可重试恢复", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    const maximumDepthErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error" && message.text().includes("Maximum update depth exceeded")) {
+        maximumDepthErrors.push(message.text());
+      }
+    });
+    let shouldFail = true;
+    let requestCount = 0;
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, makeHeroDraft(), forbiddenWrites);
+    await page.route("**/api/page-modules/personal-content-templates", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      requestCount += 1;
+      return shouldFail
+        ? route.fulfill({
+            status: 503,
+            contentType: "application/json",
+            body: JSON.stringify({ message: "数据库错误: P2022" }),
+          })
+        : route.fulfill(json([]));
+    });
+
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const personalGroup = page.getByRole("heading", { name: "我的模板" }).locator("..");
+    const error = personalGroup.getByRole("alert");
+    await expect(error).toContainText("账号模板暂时不可用");
+    await expect(page.getByText("数据库错误: P2022", { exact: true })).toHaveCount(0);
+    await expect(
+      page.getByText("服务器繁忙，请稍后再试", { exact: true }),
+    ).toHaveCount(0);
+    await expect(page.locator(".homepage-editor__template-card-main").first()).toBeVisible();
+
+    shouldFail = false;
+    await error.getByRole("button", { name: "重新加载账号模板" }).click();
+    await expect(error).toHaveCount(0);
+    expect(requestCount).toBeGreaterThanOrEqual(2);
+    expect(maximumDepthErrors, "账号模板失败恢复不得触发 React 更新循环").toEqual([]);
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("工艺细节模板编辑双端布局、保存草稿、刷新、发布并由公开 Renderer 回显", async ({ page }, testInfo) => {
+    test.slow();
+    const warningProbe = observePuckPerformanceWarnings(page);
+    const initial = makeCraftDetailsDraft();
+    let saved: Record<string, any> = structuredClone(initial);
+    let published: Record<string, any> | null = null;
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await page.route("**/svg/template-hero.svg", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "image/svg+xml",
+        body: fixtureSvg,
+      }),
+    );
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const url = request.url();
+      if (url.includes("/page-modules/document/validate")) {
+        return route.fulfill(json({ valid: true, errors: [] }));
+      }
+      if (url.includes("/page-modules/document/revisions")) {
+        return route.fulfill(json([]));
+      }
+      if (url.includes("/page-modules/document/published")) {
+        return route.fulfill(json(published));
+      }
+      if (url.includes("/page-modules/document/publish")) {
+        saved = {
+          ...saved,
+          status: "PUBLISHED",
+          publishedAt: "2026-08-25T00:00:00.000Z",
+          version: Number(saved.version ?? 0) + 1,
+        };
+        published = structuredClone(saved);
+        return route.fulfill(json(saved));
+      }
+      if (url.includes("/page-modules/document/admin")) {
+        return route.fulfill(json(saved));
+      }
+      if (url.includes("/page-modules/document") && request.method() === "PUT") {
+        const body = request.postDataJSON() as Record<string, any>;
+        saved = {
+          ...saved,
+          puckData: body.puckData ?? saved.puckData,
+          metadata: body.metadata ?? saved.metadata,
+          updatedAt: "2026-08-25T00:00:01.000Z",
+        };
+        return route.fulfill(json(saved));
+      }
+      if (url.includes("/page-modules/personal-content-templates")) {
+        return route.fulfill(json([]));
+      }
+      return route.fulfill(json({}));
+    });
+
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const loadWarnings = warningProbe.drain();
+    expect(loadWarnings, "初始载入不得重复执行 Puck 全树更新").toEqual([]);
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const craftRoot = canvas.locator('[data-content-template-contract="craftDetails"]');
+    const leadImage = canvas.locator('[data-hc-keyboard-node="leadImage"]:visible').first();
+    const loadedLeadImage = leadImage.locator("img");
+    await expect(loadedLeadImage).toBeVisible();
+    await expect.poll(() => loadedLeadImage.evaluate((image: HTMLImageElement) =>
+      image.complete && image.naturalWidth > 0,
+    )).toBe(true);
+    await expect(loadedLeadImage).toHaveCSS("opacity", "1");
+    await leadImage.click({ force: true });
+    const inspector = page.getByRole("region", { name: "属性面板" });
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+
+    const leadHud = craftRoot.locator(
+      '[data-hc-node-hud][data-node-id="leadImage"][data-node-kind="media"]',
+    );
+    await leadHud.getByRole("button", { name: "调整图片构图" }).click();
+    await expect(craftRoot).toHaveAttribute("data-hc-media-focus-enabled", "true");
+    const leadImageSlot = craftRoot.locator('[data-content-role="leadImage"]');
+    await expect.poll(async () => (await leadImageSlot.boundingBox())?.height ?? 0)
+      .toBeGreaterThan(0);
+    const leadImageBox = await leadImageSlot.boundingBox();
+    if (!leadImageBox) throw new Error("工艺主图槽位在构图模式下没有尺寸");
+    const instanceStyle = craftRoot.locator("style[data-hc-instance-overrides]");
+    const readInstanceStyle = async () =>
+      (await instanceStyle.count()) > 0
+        ? (await instanceStyle.textContent()) ?? ""
+        : "";
+    const initialInstanceStyle = await readInstanceStyle();
+    await page.mouse.move(
+      leadImageBox.x + leadImageBox.width * 0.7,
+      leadImageBox.y + leadImageBox.height * 0.35,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      leadImageBox.x + leadImageBox.width * 0.7 + 64,
+      leadImageBox.y + leadImageBox.height * 0.35 + 24,
+      { steps: 12 },
+    );
+    await page.mouse.up();
+    await expect.poll(readInstanceStyle).not.toBe(initialInstanceStyle);
+    const focusedInstanceStyle = await readInstanceStyle();
+    await expect(craftRoot).not.toHaveAttribute("data-hc-gesture-phase");
+
+    // 一次连续构图拖动只提交一条历史；撤销/重做必须精确往返。
+    const undo = page.getByRole("button", { name: "撤销" });
+    const redo = page.getByRole("button", { name: "重做" });
+    await expect(undo).toBeEnabled();
+    await undo.evaluate((button: HTMLButtonElement) => button.click());
+    await expect.poll(readInstanceStyle).toBe(initialInstanceStyle);
+    await expect(redo).toBeEnabled();
+    await redo.evaluate((button: HTMLButtonElement) => button.click());
+    await expect.poll(readInstanceStyle).toBe(focusedInstanceStyle);
+
+    await expect(craftRoot).toHaveAttribute("data-visual-selected-node", "leadImage");
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    await inspector.getByRole("button", { name: "精确位置与尺寸" }).click();
+    const desktopX = inspector.getByRole("slider", { name: "横向位置（桌面端）" });
+    await setRangeValue(desktopX, 31);
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect(craftRoot).toHaveAttribute("data-visual-selected-node", "leadImage");
+    const mobileY = inspector.getByRole("slider", { name: "纵向位置（移动端）" });
+    await setRangeValue(mobileY, 7);
+
+    const objectRadius = inspector.getByRole("group", { name: "对象圆角" });
+    const objectShadow = inspector.getByRole("group", { name: "对象阴影" });
+    await objectRadius.getByRole("button", { name: "柔和" }).click();
+    await expect.poll(readInstanceStyle).toContain("border-radius:8px!important");
+    await objectShadow.getByRole("button", { name: "悬浮" }).click();
+    await expect.poll(readInstanceStyle).toContain("box-shadow:0 16px 36px rgba(24,26,27,.16)!important");
+
+    const objectSelector = inspector.getByRole("combobox", { name: "选择编辑对象" });
+    await objectSelector.selectOption("");
+    await expect(objectSelector).toHaveValue("");
+    const surfaceColor = inspector.getByRole("group", { name: "模板配色" });
+    const surfacePadding = inspector.getByRole("group", { name: "模块留白" });
+    const surfaceRadius = inspector.getByRole("group", { name: "模块圆角" });
+    const surfaceShadow = inspector.getByRole("group", { name: "模块阴影" });
+    await surfaceColor.getByRole("button", { name: "柔灰" }).click();
+    await expect.poll(readInstanceStyle).toContain("--hc-instance-background:#F7F8F8");
+    await surfacePadding.getByRole("button", { name: "舒展" }).click();
+    await expect.poll(readInstanceStyle).toContain("padding-block:clamp(88px,10vw,144px)!important");
+    await surfaceRadius.getByRole("button", { name: "圆润" }).click();
+    await expect.poll(readInstanceStyle).toContain("border-radius:16px!important");
+    await surfaceShadow.getByRole("button", { name: "悬浮" }).click();
+    await expect.poll(readInstanceStyle).toContain("box-shadow:0 20px 48px rgba(24,26,27,.14)!important");
+    await attachScreenshot(page, testInfo, "craft-details-editor-mobile-layout");
+    const propertyWarnings = warningProbe.drain();
+
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect(page.getByText("页面草稿已保存")).toBeVisible();
+    const saveWarnings = warningProbe.drain();
+    expect(saved.puckData.content[0].props.__instanceOverrides.nodes.leadImage.rectByViewport.desktop.x)
+      .toBeCloseTo(0.31, 2);
+    expect(saved.puckData.content[0].props.__instanceOverrides.nodes.leadImage.rectByViewport.mobile.y)
+      .toBeCloseTo(0.07, 2);
+    expect(saved.puckData.content[0].props.__instanceOverrides.nodes.leadImage.mediaView.focusByViewport.desktop)
+      .toBeTruthy();
+    expect(saved.puckData.content[0].props.__instanceOverrides.nodes.leadImage.appearance)
+      .toEqual({ radiusPreset: "soft", shadowPreset: "lifted" });
+    expect(saved.puckData.content[0].props.__instanceOverrides.frame).toMatchObject({
+      colorPreset: "mist",
+      paddingPreset: "spacious",
+      radiusPreset: "rounded",
+      shadowPreset: "lifted",
+    });
+
+    await page.reload();
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const reloadWarnings = warningProbe.drain();
+    const reloadedCanvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    await reloadedCanvas.locator('[data-hc-keyboard-node="leadImage"]:visible').first().click();
+    const reloadedInspector = page.getByRole("region", { name: "属性面板" });
+    await reloadedInspector.getByRole("tab", { name: "模板编辑" }).click();
+    await reloadedInspector.getByRole("button", { name: "精确位置与尺寸" }).click();
+    await expect(
+      reloadedInspector.getByRole("slider", { name: "横向位置（桌面端）" }),
+    ).toHaveValue("31");
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await reloadedCanvas.locator('[data-hc-keyboard-node="leadImage"]:visible').first().click();
+    await expect(
+      reloadedInspector.getByRole("slider", { name: "纵向位置（移动端）" }),
+    ).toHaveValue("7");
+
+    const publish = page.getByRole("button", { name: "发布到前台网站" });
+    await expect(publish).toBeEnabled();
+    await publish.click();
+    const publishDialog = page.getByRole("dialog", { name: "确认发布首页？" });
+    await publishDialog.getByRole("button", { name: "确认发布" }).click();
+    await expect(page.getByText("店铺首页已发布")).toBeVisible();
+    const publishWarnings = warningProbe.drain();
+    expect(published?.puckData.content[0].props.__instanceOverrides.nodes.leadImage.rectByViewport.desktop.x)
+      .toBeCloseTo(0.31, 2);
+    expect(published?.puckData.content[0].props.__instanceOverrides.nodes.leadImage.rectByViewport.mobile.y)
+      .toBeCloseTo(0.07, 2);
+
+    await page.goto("/");
+    const publicCraftDetails = page.locator('[data-content-template-contract="craftDetails"]');
+    await expect(publicCraftDetails).toBeVisible();
+    await expect(page.getByText("工艺细节闭环标题")).toBeVisible();
+    await expect.poll(async () =>
+      publicCraftDetails.locator("style[data-hc-instance-overrides]").textContent()
+    ).toContain("--hc-node-leadImage-desktop-left");
+    await expect.poll(async () =>
+      publicCraftDetails.locator("style[data-hc-instance-overrides]").textContent()
+    ).toContain("--hc-node-leadImage-mobile-top");
+    const publicInstanceStyle = publicCraftDetails.locator("style[data-hc-instance-overrides]");
+    await expect.poll(() => publicInstanceStyle.textContent()).toContain("--hc-instance-background:#F7F8F8");
+    await expect.poll(() => publicInstanceStyle.textContent()).toContain("padding-block:clamp(88px,10vw,144px)!important");
+    await expect.poll(() => publicInstanceStyle.textContent()).toContain("border-radius:8px!important");
+    await expect.poll(() => publicInstanceStyle.textContent()).toContain("box-shadow:0 16px 36px rgba(24,26,27,.16)!important");
+    await attachPuckWarningEvidence(testInfo, "property-save-publish", {
+      load: loadWarnings,
+      property: propertyWarnings,
+      save: saveWarnings,
+      reload: reloadWarnings,
+      publish: publishWarnings,
+    });
   });
 });

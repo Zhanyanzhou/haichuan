@@ -130,22 +130,24 @@ const puckData = {
       },
     },
     {
-      type: "图文混排",
+      type: "单图海报",
       props: {
         id: "core-image-text",
         label: "ABOUT HAICHUAN",
         title: "东方金工，当代表达",
-        body: "图文模块承担品牌、工艺与服务说明。图片建立氛围，文字只保留一条清晰叙事。",
-        image: image("image-text"),
-        imageAlt: "海川珠宝东方金工作品",
-        buttonText: "关于海川",
+        subtitle: "图文模块承担品牌、工艺与服务说明。图片建立氛围，文字只保留一条清晰叙事。",
+        desktopImage: image("image-text"),
+        mobileImage: "",
+        altText: "海川珠宝东方金工作品",
+        actionText: "关于海川",
         targetType: "page",
         productId: 0,
         linkUrl: "/about",
-        template: "imageLeft",
-        spacing: "comfortable",
-        focusX: 50,
-        focusY: 50,
+        template: "leftTextRightImage",
+        desktopFocusX: 50,
+        desktopFocusY: 50,
+        mobileFocusX: 50,
+        mobileFocusY: 50,
       },
     },
     {
@@ -294,7 +296,7 @@ test.describe("八个核心装修模块首页闭环", () => {
       "order",
       "2",
     );
-    await expect(page.locator(".homepage-image-text")).toBeVisible();
+    await expect(page.locator(".homepage-single-poster")).toBeVisible();
     await expect(
       page.locator(".homepage-category-cards__grid > a"),
     ).toHaveCount(3);

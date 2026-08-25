@@ -13,6 +13,7 @@ import CanvasBlockInteractionBoundary from "../../src/pages/admin/HomepageConfig
 import EditorToolbar, {
   VIEWPORT_PRESETS,
 } from "../../src/pages/admin/HomepageConfig/components/EditorToolbar";
+import AntdProvider from "../../src/components/common/AntdProvider";
 import {
   ROOT_ZONE,
   useHomepagePuck,
@@ -32,7 +33,7 @@ const initialData = {
         desktopImage: "/svg/template-hero.svg",
         mobileImage: "/svg/template-hero.svg",
         eyebrow: "",
-        title: "",
+        title: "测试标题",
         subtitle: "",
         actionText: "",
         targetType: "none",
@@ -165,7 +166,7 @@ function FixtureControls() {
             aria-selected={panelMode === "content"}
             onClick={() => setPanelMode("content")}
           >
-            内容
+            内容编辑
           </button>
           <button
             type="button"
@@ -173,7 +174,7 @@ function FixtureControls() {
             aria-selected={panelMode === "design"}
             onClick={() => setPanelMode("design")}
           >
-            设计
+            模板编辑
           </button>
         </div>
         <VisualEditorToolbar
@@ -258,5 +259,7 @@ function TemplateInternalEditorFixture() {
 }
 
 createRoot(document.getElementById("root")!).render(
-  <TemplateInternalEditorFixture />,
+  <AntdProvider>
+    <TemplateInternalEditorFixture />
+  </AntdProvider>,
 );

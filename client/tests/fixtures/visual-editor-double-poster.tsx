@@ -69,8 +69,8 @@ function VisualEditorDoublePosterFixture() {
     <main className="visual-editor-double-fixture">
       <aside aria-label="属性面板测试区">
         <div role="tablist" aria-label="编辑类型">
-          <button type="button" role="tab" aria-selected={panelMode === "content"} onClick={() => setPanelMode("content")}>内容</button>
-          <button type="button" role="tab" aria-selected={panelMode === "design"} onClick={() => setPanelMode("design")}>设计</button>
+          <button type="button" role="tab" aria-selected={panelMode === "content"} onClick={() => setPanelMode("content")}>内容编辑</button>
+          <button type="button" role="tab" aria-selected={panelMode === "design"} onClick={() => setPanelMode("design")}>模板编辑</button>
         </div>
         <VisualEditorToolbar blockId={blockId} moduleType={moduleType} panelMode={panelMode} />
         {currentSelection ? <button type="button" onClick={() => clearNode(blockId)}>返回模块级</button> : null}

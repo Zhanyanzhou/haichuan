@@ -230,20 +230,29 @@ for (const count of [1, 2, 3] as const) {
   });
 }
 
-for (const fixture of [
-  { name: "无 Hero", create: createNoHeroHomeFixture },
-  { name: "Hero 无 title", create: createUntitledHeroHomeFixture },
-] as const) {
-  test(`${fixture.name} 时保留且仅保留一个 sr-only H1`, async ({ page }) => {
-    await installPublicApiFixture(page, fixture.create());
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/");
+test("无 Hero 时保留且仅保留一个 sr-only H1", async ({ page }) => {
+  await installPublicApiFixture(page, createNoHeroHomeFixture());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
 
-    await expect(page.locator("main h1")).toHaveCount(1);
-    await expect(page.locator("main h1")).toHaveClass(/sr-only/);
-    await expect(page.locator("main h1")).toHaveText("海川珠宝");
-  });
-}
+  await expect(page.locator("main h1")).toHaveCount(1);
+  await expect(page.locator("main h1")).toHaveClass(/sr-only/);
+  await expect(page.locator("main h1")).toHaveText("海川珠宝");
+});
+
+test("Hero 缺少必填标题时不公开渲染旧快照", async ({ page }) => {
+  await installPublicApiFixture(page, createUntitledHeroHomeFixture());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  await expect(page.locator('[data-page-document-state="invalid"]')).toBeVisible();
+  await expect(page.getByRole("heading", { name: "首页正在完善", level: 1 })).toBeVisible();
+  await expect(page.locator("[data-content-template-module]")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "重新载入内容" })).toHaveCount(0);
+  await expect(page.locator('[data-page-header-mode="solid"]')).toBeVisible();
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex, nofollow");
+  await expectNoHorizontalOverflow(page);
+});
 
 test("PageDocument 首块合同决定 overlay 与白底页头边界", async ({ page }) => {
   await installPublicApiFixture(page, createPublishedHomeFixture());
@@ -284,7 +293,8 @@ test("移动菜单支持键盘关闭、焦点恢复与路由后主内容焦点",
   expect(drawerMetrics.height).toBe(844);
   expect(drawerMetrics.overflowY).toBe("auto");
   expect(drawerMetrics.smallestTarget).toBeGreaterThanOrEqual(44);
-  await expect(page.locator('.brand-menu a[href="/products"]')).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "品牌菜单" })
+    .getByRole("link", { name: /珠宝作品/ })).toHaveAttribute("href", "/products");
 
   await page.keyboard.press("Escape");
   await expect(menuButton).toBeFocused();

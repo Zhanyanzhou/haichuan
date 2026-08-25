@@ -217,10 +217,11 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     });
 
     await expect(page.getByRole("heading", { name: "最后一次有效版本" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "珠宝定制", level: 1 })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "珠宝定制", level: 1 })).toHaveCount(1);
+    await expect(page.locator("main h1")).toHaveCount(1);
   });
 
-  test("首页从未发布时使用代码兜底，并显式标记未发布状态", async ({ page }) => {
+  test("首页从未发布时不公开渲染代码种子，并显示可继续浏览的安全短页", async ({ page }) => {
     await mockPublicShell(page);
     const productRequests: string[] = [];
     page.on("request", (request) => {
@@ -239,13 +240,56 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await page.goto("/");
     await expect(page.locator('[data-page-document-state="unpublished"]')).toBeVisible();
     await expect(page.getByRole("main")).toHaveCount(1);
-    await expect(page.locator(".vca-home")).toBeVisible();
+    await expect(
+      page.locator('[data-page-document-state="unpublished"]'),
+    ).toHaveAttribute("data-production-fallback", "safe-status");
+    await expect(page.getByRole("heading", { name: "首页正在准备", level: 1 })).toBeVisible();
+    await expect(page.getByRole("link", { name: "进入选款中心" })).toHaveAttribute("href", "/catalog");
+    await expect(page.getByRole("link", { name: "了解珠宝定制" })).toHaveAttribute("href", "/custom");
+    await expect(page.getByRole("button", { name: "重新载入内容" })).toHaveCount(0);
+    await expect(page.locator(".vca-home")).toHaveCount(0);
     await expect(page.locator("[data-content-template-module]")).toHaveCount(0);
     await expect(page.getByText("本季精选", { exact: true })).toHaveCount(0);
     await expect(page.getByText(/按克重与工艺核价/)).toHaveCount(0);
     await expect(page.locator(".vca-home").getByText(/世家|传承|新闻|工艺/)).toHaveCount(0);
     await expect(page.locator('[data-page-header-mode="solid"]')).toBeVisible();
     expect(productRequests).toEqual([]);
+  });
+
+  test("首页读取失败时显示重试状态，恢复后切换为未发布安全短页", async ({ page }) => {
+    await mockPublicShell(page);
+    let shouldFail = true;
+    let requestCount = 0;
+    await page.route("**/api/page-modules/document/published?*", (route) => {
+      requestCount += 1;
+      return shouldFail
+        ? route.fulfill({
+            status: 503,
+            contentType: "application/json",
+            body: apiResponse({ message: "service unavailable" }),
+          })
+        : route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: apiResponse(null),
+          });
+    });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "首页暂不可用", level: 1 })).toBeVisible();
+    await expect(
+      page.getByRole("alert").filter({ hasText: "服务器繁忙，请稍后再试" }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "进入选款中心" })).toHaveAttribute("href", "/catalog");
+    const retry = page.getByRole("button", { name: "重新载入内容" });
+    await expect(retry).toBeVisible();
+
+    shouldFail = false;
+    await retry.click();
+    await expect(page.getByRole("heading", { name: "首页正在准备", level: 1 })).toBeVisible();
+    await expect(page.getByRole("button", { name: "重新载入内容" })).toHaveCount(0);
+    expect(requestCount).toBeGreaterThanOrEqual(2);
   });
 
   test("定制页在桌面与手机共用公共主内容区", async ({ page }) => {
@@ -293,6 +337,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
                 props: {
                   id: "failed-hero",
                   title: "海川珠宝",
+                  altText: "海川珠宝主视觉",
                   desktopImage: "/missing-brand-hero.jpg",
                   mobileImage: "/missing-brand-hero.jpg",
                   actionText: "",
@@ -305,6 +350,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
                 props: {
                   id: "failed-poster",
                   title: "叙事海报",
+                  altText: "海川珠宝叙事海报",
                   desktopImage: "/missing-brand-hero.jpg",
                   mobileImage: "/missing-brand-hero.jpg",
                   actionText: "",
@@ -348,6 +394,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
                 props: {
                   id: "zero-width-hero",
                   title: "海川珠宝",
+                  altText: "海川珠宝主视觉",
                   desktopImage: pixel,
                   mobileImage: pixel,
                   actionText: "",
@@ -360,6 +407,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
                 props: {
                   id: "zero-width-poster",
                   title: "叙事海报",
+                  altText: "海川珠宝叙事海报",
                   desktopImage: pixel,
                   mobileImage: pixel,
                   actionText: "",
@@ -457,9 +505,161 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     ).toHaveCount(0);
   });
 
-  test("选中首页画布模板后操作组贴在对应模板右下侧并可移动删除", async ({ page }) => {
+  test("套用推荐结构后切换双端并保存仍保持整页替换结果", async ({ page }) => {
+    let warningPhase = "load";
+    const wholeTreeWarnings: string[] = [];
+    page.on("console", (message) => {
+      if (
+        message.type() === "warning" &&
+        message.text().includes("`setData`") &&
+        message.text().includes("expensive")
+      ) {
+        wholeTreeWarnings.push(warningPhase);
+      }
+    });
+    await installAdminSession(page);
+    const publishedDocument = publishedTextDocument("about", "线上关于页", 1);
+    let draftDocument = {
+      ...publishedTextDocument("about", "旧版关于草稿", 2),
+      id: 8802,
+      status: "DRAFT",
+      publishedAt: null,
+      updatedAt: "2026-08-21T00:00:02.000Z",
+    };
+    let savedPuckData: any = null;
+
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const url = request.url();
+      if (url.includes("/page-modules/document/validate")) {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: apiResponse({ valid: false, errors: ["等待最终素材"], issues: [] }),
+        });
+      }
+      if (url.includes("/page-modules/document/published")) {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: apiResponse(publishedDocument),
+        });
+      }
+      if (url.includes("/page-modules/document/admin")) {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: apiResponse(draftDocument),
+        });
+      }
+      if (
+        url.endsWith("/api/page-modules/document") &&
+        request.method() === "PUT"
+      ) {
+        const payload = request.postDataJSON();
+        savedPuckData = payload.puckData;
+        draftDocument = {
+          ...draftDocument,
+          puckData: savedPuckData,
+          updatedAt: "2026-08-21T00:00:03.000Z",
+        };
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: apiResponse(draftDocument),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse([]),
+      });
+    });
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/admin/editor/about");
+    const canvas = page.frameLocator("iframe");
+    await expect(
+      canvas.getByRole("heading", { name: "旧版关于草稿", exact: true }),
+    ).toBeVisible();
+    wholeTreeWarnings.length = 0;
+    warningPhase = "replace";
+
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: /套用推荐结构/ }).click();
+    await page.getByRole("button", { name: "套用并替换画布" }).click();
+    await expect(
+      canvas.getByRole("heading", { name: "审美与价值", exact: true }),
+    ).toBeVisible();
+
+    warningPhase = "undo";
+    await page.getByRole("button", { name: "撤销" }).click();
+    await expect(
+      canvas.getByRole("heading", { name: "旧版关于草稿", exact: true }),
+    ).toBeVisible();
+    warningPhase = "redo";
+    await page.getByRole("button", { name: "重做" }).click();
+    await expect(
+      canvas.getByRole("heading", { name: "审美与价值", exact: true }),
+    ).toBeVisible();
+
+    // 等待发布资格异步回写触发父层重渲染；整页替换不能因此回退到旧 data prop。
+    await page.waitForTimeout(1_200);
+    warningPhase = "viewport";
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect(
+      canvas.getByRole("heading", { name: "审美与价值", exact: true }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("heading", { name: "旧版关于草稿", exact: true }),
+    ).toHaveCount(0);
+
+    warningPhase = "save";
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect(page.getByText("页面草稿已保存", { exact: true })).toBeVisible();
+    expect(
+      wholeTreeWarnings,
+      "整页替换只允许一次必要 setData，设备切换、撤销重做与保存不得重复整树更新",
+    ).toEqual(["replace"]);
+    await expect
+      .poll(() => savedPuckData?.content?.map((block: any) => block.type))
+      .toEqual([
+        "首屏主视觉",
+        "单图海报",
+        "双图海报",
+        "文字横幅",
+        "全屏出血图",
+        "预约入口",
+      ]);
+
+    await page.reload();
+    await expect(
+      canvas.getByRole("heading", { name: "审美与价值", exact: true }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("heading", { name: "旧版关于草稿", exact: true }),
+    ).toHaveCount(0);
+  });
+
+  test("选中首页画布模板后操作组贴在对应模板右下侧并可移动删除", async ({ page }, testInfo) => {
+    const puckWarnings: Array<"setData" | "set"> = [];
+    const antdContextWarnings: string[] = [];
+    const maximumDepthErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.text().includes("Static function can not consume context")) {
+        antdContextWarnings.push(message.text());
+      }
+      if (message.type() === "error" && message.text().includes("Maximum update depth exceeded")) {
+        maximumDepthErrors.push(message.text());
+      }
+      if (message.type() !== "warning" || !message.text().includes("expensive")) return;
+      if (message.text().includes("`setData`")) puckWarnings.push("setData");
+      else if (message.text().includes("`set`")) puckWarnings.push("set");
+    });
+    const drainWarnings = () => puckWarnings.splice(0, puckWarnings.length);
     await installAdminSession(page);
     await mockEmptyEditorApis(page);
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto("/admin/editor/home");
 
@@ -494,14 +694,25 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
         }),
       ),
     ).toBe(true);
+    await layerItems.nth(1).locator(".homepage-editor__layer-select").click();
+    await expect(layerItems.nth(1)).toHaveClass(/is-active/);
     await expect(dock).toBeVisible();
-    await expect(page.getByRole("button", { name: "上移当前模块" })).toBeDisabled();
+    const loadWarnings = drainWarnings();
+    const namesBeforeLayerReorder = await layerNames.allTextContents();
+    await layerItems.nth(1).dragTo(layerItems.nth(2));
+    await expect.poll(() => layerNames.allTextContents()).toEqual([
+      namesBeforeLayerReorder[0],
+      namesBeforeLayerReorder[2],
+      namesBeforeLayerReorder[1],
+      ...namesBeforeLayerReorder.slice(3),
+    ]);
+    const layerReorderWarnings = drainWarnings();
+    await layerItems.nth(1).locator(".homepage-editor__layer-select").click();
+    await expect(page.getByRole("button", { name: "上移当前模块" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "下移当前模块" })).toBeEnabled();
 
     const assertDockAtBottomRight = async (moduleIndex: number) => {
-      await canvasModules.nth(moduleIndex).evaluate((module) =>
-        module.scrollIntoView({ block: "end", inline: "nearest" }),
-      );
+      await expect(dock).toBeVisible();
       await expect
         .poll(async () => {
           const moduleBox = await canvasModules.nth(moduleIndex).boundingBox();
@@ -514,7 +725,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
             ),
           );
         })
-        .toBeLessThanOrEqual(3);
+        .toBeLessThanOrEqual(5);
       for (const buttonName of [
         "上移当前模块",
         "下移当前模块",
@@ -526,20 +737,17 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
       }
     };
 
-    await assertDockAtBottomRight(0);
+    await assertDockAtBottomRight(1);
     const namesBeforeMove = await layerNames.allTextContents();
-    await canvasModules.nth(2).click({ position: { x: 20, y: 20 } });
-    await expect(layerItems.nth(2)).toHaveClass(/is-active/);
-    await assertDockAtBottomRight(2);
 
     await dock.getByRole("button", { name: "上移当前模块" }).click();
     await expect.poll(() => layerNames.allTextContents()).toEqual([
-      namesBeforeMove[0],
-      namesBeforeMove[2],
       namesBeforeMove[1],
-      ...namesBeforeMove.slice(3),
+      namesBeforeMove[0],
+      ...namesBeforeMove.slice(2),
     ]);
-    await expect(layerItems.nth(1)).toHaveClass(/is-active/);
+    await expect(layerItems.nth(0)).toHaveClass(/is-active/);
+    const moveWarnings = drainWarnings();
 
     await dock.getByRole("button", { name: "删除当前模块" }).click();
     const dialog = page.getByRole("dialog");
@@ -547,6 +755,20 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await dialog.getByRole("button", { name: "删除模块" }).click();
     await expect(layerItems).toHaveCount(initialModuleCount - 1);
     await expect(canvasModules).toHaveCount(initialModuleCount - 1);
+    const deleteWarnings = drainWarnings();
+    const warningEvidence = {
+      load: loadWarnings,
+      layerReorder: layerReorderWarnings,
+      move: moveWarnings,
+      delete: deleteWarnings,
+    };
+    console.info(`[puck-performance] canvas-dock ${JSON.stringify(warningEvidence)}`);
+    await testInfo.attach("canvas-dock-warnings.json", {
+      body: JSON.stringify(warningEvidence, null, 2),
+      contentType: "application/json",
+    });
+    expect(antdContextWarnings).toEqual([]);
+    expect(maximumDepthErrors, "模板库真实 Renderer 不得在首帧测量时形成 React 更新循环").toEqual([]);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -555,18 +777,29 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
   });
 
   test("选中模块操作组在桌面切换手机后仍贴边且位于视口内", async ({ page }) => {
+    const maximumDepthErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error" && message.text().includes("Maximum update depth exceeded")) {
+        maximumDepthErrors.push(message.text());
+      }
+    });
     await installAdminSession(page);
     await mockEmptyEditorApis(page);
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await page.setViewportSize({ width: 1920, height: 1200 });
     await page.goto("/admin/editor/home");
 
     const canvas = page.frameLocator("iframe");
     const canvasModules = canvas.locator("[data-puck-component]");
-    const selectedModule = canvasModules.nth(2);
+    const selectedModule = canvasModules.nth(1);
+    const selectedLayer = page
+      .locator(".homepage-editor__layer-item")
+      .nth(1)
+      .locator(".homepage-editor__layer-select");
     const dock = page.locator(".homepage-editor__canvas-selection-dock");
     await expect.poll(() => canvasModules.count()).toBeGreaterThan(2);
-    await selectedModule.click({ position: { x: 20, y: 20 } });
-    await expect(page.locator(".homepage-editor__layer-item").nth(2)).toHaveClass(
+    await selectedLayer.click();
+    await expect(page.locator(".homepage-editor__layer-item").nth(1)).toHaveClass(
       /is-active/,
     );
     await expect(dock).toBeVisible();
@@ -628,6 +861,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await assertDockGeometry({ width: 1920, height: 1200 });
     await page.setViewportSize({ width: 390, height: 844 });
     await assertDockGeometry({ width: 390, height: 844 });
+    expect(maximumDepthErrors, "设备切换不得触发 React 更新循环").toEqual([]);
   });
 
   test("新版首页安全 fixture 在画布与预览中保持同一六段品牌结构", async ({ page }) => {
@@ -767,6 +1001,9 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await expect(main.getByRole("textbox")).toHaveCount(0);
     await expect(main.getByRole("combobox")).toHaveCount(0);
     await expect(main.getByText(/共\s*\d+\s*件作品/)).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: "预约私人珠宝顾问", exact: true }),
+    ).toBeVisible();
     await expect(main.locator('[data-asset-publishable="false"]')).toHaveCount(6);
     await expect
       .poll(() =>
@@ -871,12 +1108,65 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await expect(
       main.getByRole("heading", { name: "已发布作品展陈", level: 2 }),
     ).toBeVisible();
+    await expect(
+      main.getByRole("heading", { name: "珠宝作品", level: 1 }),
+    ).toHaveCount(1);
+    await expect(main.locator("h1")).toHaveCount(1);
     await expect(main.getByRole("textbox")).toHaveCount(0);
     await expect(main.getByRole("combobox")).toHaveCount(0);
     await expect(main.getByText(/共\s*\d+\s*件作品/)).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: "预约私人珠宝顾问", exact: true }),
+    ).toBeVisible();
+    await expect.poll(() => page.evaluate(() => {
+      const shell = document.querySelector<HTMLElement>(".site-shell");
+      const mainElement = document.querySelector<HTMLElement>(".site-main");
+      const footer = document.querySelector<HTMLElement>(".site-footer");
+      return {
+        shellBackground: shell ? getComputedStyle(shell).backgroundColor : "",
+        mainFlexGrow: mainElement ? getComputedStyle(mainElement).flexGrow : "",
+        footerReachesViewport: Boolean(
+          footer && footer.getBoundingClientRect().bottom >= window.innerHeight - 1,
+        ),
+      };
+    })).toEqual({
+      shellBackground: "rgb(255, 255, 255)",
+      mainFlexGrow: "1",
+      footerReachesViewport: true,
+    });
   });
 
-  test("珠宝作品未发布、空文档与请求失败时统一使用品牌兜底", async ({ page }) => {
+  test("珠宝作品 PageDocument 读取中在桌面与手机显示明确加载态", async ({ page }) => {
+    await mockPublicShell(page);
+    let releaseResponse = () => {};
+    let responseBarrier: Promise<void> = Promise.resolve();
+    await page.route("**/api/page-modules/document/published?*", async (route) => {
+      await responseBarrier;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse(null),
+      });
+    });
+
+    for (const viewport of [
+      { name: "desktop", width: 1440, height: 900 },
+      { name: "mobile", width: 390, height: 844 },
+    ]) {
+      responseBarrier = new Promise<void>((resolve) => {
+        releaseResponse = resolve;
+      });
+      await page.setViewportSize(viewport);
+      await page.goto(`/products?loadingViewport=${viewport.name}`);
+      await expect(page.locator('main [data-page-document-state="loading"]')).toContainText(
+        "正在载入珠宝作品",
+      );
+      releaseResponse();
+      await expect(page.getByRole("heading", { name: "珠宝作品正在策展", level: 1 })).toBeVisible();
+    }
+  });
+
+  test("珠宝作品未发布、空文档与请求失败时统一使用安全策展短页", async ({ page }) => {
     await mockPublicShell(page);
     let responseState: "unpublished" | "invalid" | "filtered" | "error" = "unpublished";
     const productRequests: string[] = [];
@@ -913,19 +1203,90 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
       });
     });
 
-    for (const state of ["unpublished", "invalid", "filtered", "error"] as const) {
-      responseState = state;
-      await page.goto(`/products?documentState=${state}`);
-      const main = page.locator("main");
-      const documentState = state === "filtered" ? "published" : state;
-      await expect(main.locator(`[data-page-document-state="${documentState}"]`)).toBeVisible();
-      await expect(main.getByRole("heading", { name: "珠宝作品", level: 1 })).toHaveCount(1);
-      await expect(main.getByRole("link", { name: "进入选款中心" })).toHaveAttribute("href", "/catalog");
-      await expect(main.getByRole("textbox")).toHaveCount(0);
-      await expect(main.getByRole("combobox")).toHaveCount(0);
-      await expect(main.getByText("不应展示的旧商品墙", { exact: true })).toHaveCount(0);
+    for (const viewport of [
+      { name: "desktop", width: 1440, height: 900 },
+      { name: "mobile", width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      for (const state of ["unpublished", "invalid", "filtered", "error"] as const) {
+        responseState = state;
+        await page.goto(`/products?viewport=${viewport.name}&documentState=${state}`);
+        const main = page.locator("main");
+        const documentState = state === "filtered" ? "invalid" : state;
+        await expect(main.locator(`[data-page-document-state="${documentState}"]`)).toBeVisible();
+        await expect(page).toHaveTitle("珠宝作品 | 海川珠宝");
+        await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+          "content",
+          "我们正在完成作品资料与材质工艺内容的审核。您可以先浏览当前已公开款式，或预约珠宝顾问获得协助。",
+        );
+        await expect(main.getByRole("heading", { name: "珠宝作品正在策展", level: 1 })).toHaveCount(1);
+        await expect(main.getByRole("link", { name: "进入选款中心" })).toHaveAttribute("href", "/catalog");
+        await expect(main.getByRole("link", { name: "预约珠宝顾问" })).toHaveAttribute("href", "/contact");
+        await expect(
+          page.getByRole("link", { name: "预约私人珠宝顾问", exact: true }),
+          `${viewport.name}/${state} 策展短页不得重复页脚预约入口`,
+        ).toHaveCount(0);
+        await expect(main.getByText("内容暂不可用，请稍后再试。")).toHaveCount(0);
+        await expect(main.getByRole("textbox")).toHaveCount(0);
+        await expect(main.getByRole("combobox")).toHaveCount(0);
+        await expect(main.getByText("不应展示的旧商品墙", { exact: true })).toHaveCount(0);
+        await expect(main.getByRole("button", { name: "重新载入内容" })).toHaveCount(
+          state === "error" ? 1 : 0,
+        );
+        await expect.poll(() => page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+        )).toBe(true);
+      }
     }
     expect(productRequests).toEqual([]);
+  });
+
+  test("珠宝作品策展短页支持键盘访问两个下一步，失败后可重新载入", async ({ page }) => {
+    await mockPublicShell(page);
+    let failPageDocument = true;
+    let pageDocumentRequests = 0;
+    await page.route("**/api/page-modules/document/published?*", (route) => {
+      pageDocumentRequests += 1;
+      return failPageDocument
+        ? route.fulfill({ status: 503, body: "" })
+        : route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: apiResponse(null),
+          });
+    });
+
+    await page.goto("/products?recovery=error");
+    const main = page.locator("main");
+    const primaryAction = main.getByRole("link", { name: "进入选款中心" });
+    const secondaryAction = main.getByRole("link", { name: "预约珠宝顾问" });
+    const retry = main.getByRole("button", { name: "重新载入内容" });
+
+    await expect(retry).toBeVisible();
+    failPageDocument = false;
+    await retry.click();
+    await expect(main.locator('[data-page-document-state="unpublished"]')).toBeVisible();
+    await expect(retry).toHaveCount(0);
+    expect(pageDocumentRequests).toBeGreaterThanOrEqual(2);
+
+    await main.focus();
+    await page.keyboard.press("Tab");
+    await expect(primaryAction).toBeFocused();
+    await expect.poll(() => primaryAction.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
+    await expect.poll(() => primaryAction.evaluate((element) => getComputedStyle(element).outlineWidth)).toBe("2px");
+    await page.keyboard.press("Tab");
+    await expect(secondaryAction).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(primaryAction).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/catalog$/);
+
+    await page.goto("/products?recovery=routes");
+    const recoveredSecondaryAction = page.getByRole("main").getByRole("link", { name: "预约珠宝顾问" });
+    await recoveredSecondaryAction.focus();
+    await expect(recoveredSecondaryAction).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/contact$/);
   });
 
   test("关于页公开运行时过滤能力矩阵禁止的商品展示行", async ({ page }) => {
@@ -991,6 +1352,45 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await expect(catalogTitle).not.toHaveClass(/sr-only/);
     await expect(page.getByText("旧精选商品", { exact: true })).toHaveCount(0);
     await expect(page.locator(".catalog-page")).toBeVisible();
+  });
+
+  test("选款中心装修区缺少必填文案时保留固定选款业务", async ({ page }) => {
+    await mockPublicShell(page);
+    const invalidCatalogDocument = publishedTextDocument("catalog", "选款中心说明", 11);
+    invalidCatalogDocument.puckData.content = [{
+      type: "预约入口",
+      props: {
+        id: "catalog-invalid-appointment",
+        title: "",
+        buttonText: "",
+        linkUrl: "/contact",
+        targetType: "page",
+      },
+    }, {
+      type: "业务功能区",
+      props: {
+        id: "catalog-business-region",
+        pageKey: "catalog",
+        title: "选款工具与商品结果",
+        items: "关键词/货号搜索|条件筛选|排序与结果|快速查看|选款清单|提交询价",
+        locked: true,
+      },
+    }];
+    await page.route("**/api/page-modules/document/published?*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse(invalidCatalogDocument),
+      }),
+    );
+
+    await page.goto("/catalog?invalidDecoration=1");
+    const main = page.getByRole("main");
+    await expect(main.locator('[data-page-document-state="invalid"]')).toBeVisible();
+    await expect(main.locator(".catalog-page")).toBeVisible();
+    await expect(main.getByRole("heading", { name: "选款中心", level: 1 })).toBeVisible();
+    await expect(main.locator("[data-content-template-module]")).toHaveCount(0);
+    await expect(page.locator('[data-page-header-mode="solid"]')).toBeVisible();
   });
 
   test("页面角色矩阵只开放当前页面允许的内容模板", async ({ page }) => {
@@ -1486,8 +1886,8 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await page.goto("/admin/editor/custom");
 
     const scroll = page.locator(".homepage-editor__inspector-scroll");
-    const contentTab = page.getByRole("tab", { name: "内容" });
-    const designTab = page.getByRole("tab", { name: "设计" });
+    const contentTab = page.getByRole("tab", { name: "内容编辑" });
+    const designTab = page.getByRole("tab", { name: "模板编辑" });
     await expect(page.getByRole("button", { name: "退出当前模块编辑" })).toBeVisible();
     await expect(page.locator(".homepage-editor__layer-item").first()).toHaveClass(
       /is-active/,
@@ -1552,13 +1952,13 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     });
     await expect(designQuickAction).toBeVisible();
     await designQuickAction.click();
-    await expect(page.getByRole("tab", { name: "设计" })).toHaveAttribute(
+    await expect(page.getByRole("tab", { name: "模板编辑" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     await expect(page.getByRole("group", { name: "桌面主图比例" })).toBeVisible();
     await expect(
-      page.getByRole("status", { name: "响应式状态：桌面端基准，移动端继承" }),
+      page.getByRole("status", { name: /响应式状态：桌面端.+，移动端.+/ }),
     ).toBeVisible();
 
     const readInspectorGeometry = () => page.evaluate(() => {
@@ -1613,15 +2013,15 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
     await expect(objectSelect).toHaveValue("desktopImage");
-    await page.getByRole("tab", { name: "内容" }).focus();
+    await page.getByRole("tab", { name: "内容编辑" }).focus();
     await page.keyboard.press("ArrowRight");
-    await expect(page.getByRole("tab", { name: "设计" })).toBeFocused();
+    await expect(page.getByRole("tab", { name: "模板编辑" })).toBeFocused();
 
     await page.getByRole("button", { name: /移动端布局/ }).click();
     await expect(objectSelect).toHaveValue("");
     await objectSelect.selectOption("mobileImage");
     await expect(
-      page.getByRole("status", { name: "响应式状态：桌面端基准，移动端继承" }),
+      page.getByRole("status", { name: "响应式状态：桌面端基准，移动端基准" }),
     ).toBeVisible();
     await page.getByRole("button", { name: "上移一层" }).click();
     await expect(

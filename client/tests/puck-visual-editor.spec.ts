@@ -107,7 +107,7 @@ test("缩放后的真实 Puck iframe 可同时选中模块和视觉槽位并写�
   await expect(page.getByText("已选择：标题")).toBeVisible();
   await expect(page.getByTestId("block-selection-count")).toHaveText("1");
   await expect(initialMedia.locator("img")).toHaveCSS("opacity", "1");
-  await page.getByRole("tab", { name: "设计" }).click();
+  await page.getByRole("tab", { name: "模板编辑" }).click();
   await expect(page.getByRole("button", { name: "调整布局" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "选择对象" })).toHaveCount(0);
   await expect(page.getByText("已选择：标题")).toBeVisible();
