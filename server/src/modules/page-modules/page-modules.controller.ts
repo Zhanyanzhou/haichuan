@@ -3,6 +3,7 @@ import {
   Get,
   Header,
   Post,
+  Patch,
   Put,
   Delete,
   Param,
@@ -21,9 +22,11 @@ import { Roles } from "../../common/decorators/roles.decorator";
 import { Public } from "../../common/decorators/public.decorator";
 import { Observable } from "rxjs";
 import {
+  CreatePersonalContentTemplateDto,
   PublishPageDocumentDto,
   RestorePageDocumentRevisionDto,
   SavePageDocumentDto,
+  UpdatePersonalContentTemplateDto,
   ValidatePageDocumentDto,
 } from "./dto";
 
@@ -32,6 +35,47 @@ import {
 @Controller("page-modules")
 export class PageModulesController {
   constructor(private service: PageModulesService) {}
+
+  // ========== 账号私有内容模板（仅布局） ==========
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Get("personal-content-templates")
+  @ApiOperation({ summary: "获取当前账号的布局模板" })
+  getPersonalContentTemplates(@Req() req: any) {
+    return this.service.getPersonalContentTemplates(req.user?.id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Post("personal-content-templates")
+  @ApiOperation({ summary: "保存当前账号的布局模板" })
+  createPersonalContentTemplate(
+    @Body() body: CreatePersonalContentTemplateDto,
+    @Req() req: any,
+  ) {
+    return this.service.createPersonalContentTemplate(req.user?.id, body);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Patch("personal-content-templates/:id")
+  @ApiOperation({ summary: "更新当前账号的布局模板" })
+  updatePersonalContentTemplate(
+    @Param("id") id: string,
+    @Body() body: UpdatePersonalContentTemplateDto,
+    @Req() req: any,
+  ) {
+    return this.service.updatePersonalContentTemplate(req.user?.id, +id, body);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Delete("personal-content-templates/:id")
+  @ApiOperation({ summary: "删除当前账号的布局模板" })
+  deletePersonalContentTemplate(@Param("id") id: string, @Req() req: any) {
+    return this.service.deletePersonalContentTemplate(req.user?.id, +id);
+  }
 
   // ========== Puck 页面文档（PageDocument）API ==========
 
@@ -78,6 +122,7 @@ export class PageModulesController {
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
+  @Roles("SUPER_ADMIN", "ADMIN")
   @Put("document/publish")
   @ApiOperation({ summary: "发布页面文档" })
   publishDocument(

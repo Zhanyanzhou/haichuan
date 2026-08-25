@@ -42,6 +42,7 @@ model User {
   // 交易中心：销售顾问关联的订单与报价单
   salesConsultantOrders     Order[]              @relation("OrderSalesConsultant")
   quotationsAsConsultant    Quotation[]          @relation("QuotationSalesConsultant")
+  personalContentTemplates PersonalContentTemplate[]
 
   @@map("users")
 }
@@ -1416,4 +1417,25 @@ model QuotationItem {
 
   @@index([quotationId])
   @@map("quotation_items")
+}
+
+// ========== 账号私有内容模板 ==========
+model PersonalContentTemplate {
+  id              Int      @id @default(autoincrement())
+  ownerId         Int      @map("owner_id")
+  name            String   @db.VarChar(100)
+  moduleType      String   @map("module_type") @db.VarChar(100)
+  contractKey     String   @map("contract_key") @db.VarChar(50)
+  contractVersion Int      @map("contract_version")
+  layoutData      Json     @map("layout_data")
+  // 运营明确选择后保存的合同白名单默认内容；禁止复制价格、库存、客户及其他业务事实。
+  contentDefaults Json?    @map("content_defaults")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, name])
+  @@index([ownerId, updatedAt])
+  @@map("personal_content_templates")
 }

@@ -3,7 +3,9 @@ import {
   ConflictException,
   Injectable,
   MessageEvent,
+  NotFoundException,
 } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { EventEmitter } from "events";
 import { existsSync } from "fs";
@@ -16,6 +18,9 @@ import {
   getContentTemplateIssues,
   getContentTemplateCompletion,
   isContentTemplateAllowedForPage,
+  sanitizeContentTemplateDefaultContent,
+  sanitizeContentTemplateLayoutData,
+  type ContentTemplateDefaultContentValue,
   type ContentTemplateIssue,
 } from "./content-template-contract";
 
@@ -51,6 +56,7 @@ const PUCK_COMPONENT_LABELS = [
   "限时活动",
   "真实评价与实拍",
   "按场景选购",
+  "工艺细节",
 ] as const;
 
 const PUCK_COMPONENT_SET = new Set<string>(PUCK_COMPONENT_LABELS);
@@ -137,6 +143,26 @@ const PLACEHOLDER_MARKERS = [
   CONTENT_TEMPLATE_ASSET_POLICY.placeholder.status,
 ];
 
+/**
+ * 这些字段表达会随经营系统变化、需要权限裁决或可能包含个人信息的事实，
+ * 不能被复制进账号私有模板。模块级清单用于保留普通营销文案与展示配置，
+ * 同时阻断门店、评价、资质、活动权益等结构化事实快照。
+ */
+const PERSONAL_TEMPLATE_FACT_FIELDS_BY_MODULE: Readonly<Record<string, ReadonlySet<string>>> = {
+  定制流程: new Set(["steps"]),
+  分类卡片: new Set(["categories"]),
+  按场景选购: new Set(["categories"]),
+  服务承诺: new Set(["cards"]),
+  资质证书: new Set(["certificates"]),
+  门店信息: new Set(["useSiteSettings", "storeName", "address", "hours", "phone", "mapUrl"]),
+  真实评价与实拍: new Set(["testimonials"]),
+  预约入口: new Set(["phone"]),
+  限时活动: new Set(["targetDate", "benefits"]),
+};
+
+const PERSONAL_TEMPLATE_MEDIA_KEY = /(?:image|poster|videoUrl)$/i;
+const PERSONAL_TEMPLATE_PRODUCT_ID_KEY = /productId$/i;
+
 @Injectable()
 export class PageModulesService {
   private readonly publicEvents = new EventEmitter();
@@ -146,6 +172,302 @@ export class PageModulesService {
     // 每条 SSE 连接都会订阅发布事件，连接数随并发前台用户增长；
     // 关闭默认上限避免误报 EventEmitter 内存泄漏告警
     this.publicEvents.setMaxListeners(0);
+  }
+
+  private requirePersonalTemplateOwner(ownerId?: number) {
+    if (!Number.isInteger(ownerId) || Number(ownerId) <= 0) {
+      throw new BadRequestException("当前登录身份无效");
+    }
+    return Number(ownerId);
+  }
+
+  private normalizePersonalTemplateName(name: string) {
+    const normalized = String(name ?? "").trim();
+    if (!normalized) throw new BadRequestException("模板名称不能为空");
+    if (normalized.length > 100) throw new BadRequestException("模板名称不能超过 100 个字符");
+    return normalized;
+  }
+
+  private sanitizePersonalTemplateLayout(moduleType: string, layoutData: unknown) {
+    const contract = CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType];
+    if (!contract) throw new BadRequestException("该模块不是可保存的内容模板");
+    const sanitized = sanitizeContentTemplateLayoutData(moduleType, layoutData);
+    if (!sanitized) throw new BadRequestException("布局数据版本无效或不符合当前模板合同");
+    return { contract, sanitized };
+  }
+
+  private isForbiddenPersonalTemplateFactKey(key: string) {
+    const normalized = key.replace(/[-_]/g, "");
+    if (normalized.toLowerCase() === "showprice") return false;
+    return /^(?:price|inventory|stock|customer|client|buyer|order|payment|refund|cost|amount)(?:[A-Z0-9]|$)/i.test(
+      normalized,
+    );
+  }
+
+  private containsForbiddenPersonalTemplateFact(value: unknown): boolean {
+    if (Array.isArray(value)) {
+      return value.some((item) => this.containsForbiddenPersonalTemplateFact(item));
+    }
+    if (!value || typeof value !== "object") return false;
+    return Object.entries(value).some(
+      ([key, child]) =>
+        this.isForbiddenPersonalTemplateFactKey(key) ||
+        this.containsForbiddenPersonalTemplateFact(child),
+    );
+  }
+
+  private collectPersonalTemplateUploadUrls(
+    value: unknown,
+    fieldKey: string,
+    urls: Set<string>,
+  ): void {
+    if (typeof value === "string") {
+      if (PERSONAL_TEMPLATE_MEDIA_KEY.test(fieldKey) && value.startsWith("/uploads/")) {
+        urls.add(value);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) this.collectPersonalTemplateUploadUrls(item, fieldKey, urls);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      this.collectPersonalTemplateUploadUrls(child, key, urls);
+    }
+  }
+
+  private assertPersonalTemplateUploadsExist(content: Record<string, unknown>) {
+    const urls = new Set<string>();
+    for (const [key, value] of Object.entries(content)) {
+      this.collectPersonalTemplateUploadUrls(value, key, urls);
+    }
+    for (const url of urls) {
+      const requestedPath = url.slice("/uploads/".length);
+      const targetPath = resolve(this.uploadsRoot, requestedPath);
+      const relativePath = relative(this.uploadsRoot, targetPath);
+      const isWithinUploads =
+        relativePath !== ".." &&
+        !relativePath.startsWith(`..${sep}`) &&
+        !relativePath.startsWith("../") &&
+        !relativePath.startsWith("..\\");
+      if (!isWithinUploads || !existsSync(targetPath)) {
+        throw new BadRequestException("默认内容包含不存在或越界的本地上传素材");
+      }
+    }
+  }
+
+  private async validatePersonalTemplateReferences(
+    moduleType: string,
+    content: Record<string, ContentTemplateDefaultContentValue>,
+  ) {
+    const contract = CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType];
+    const productCodes = new Set<string>();
+    const productIds = new Set<number>();
+    const categorySlugs = new Set<string>();
+
+    for (const reference of contract?.editorCapabilities.referenceFields ?? []) {
+      const rawValue = content[reference.key];
+      if (rawValue === undefined || rawValue === null || rawValue === "") continue;
+      const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+      if (!values.length) {
+        delete content[reference.key];
+        continue;
+      }
+      if (!values.every((value) => typeof value === "string" && value.trim().length > 0)) {
+        throw new BadRequestException("默认内容的业务引用格式不正确");
+      }
+      const normalized = values.map((value) => String(value).trim());
+      content[reference.key] = Array.isArray(rawValue) ? normalized : normalized[0];
+      for (const value of normalized) {
+        if (reference.kind === "product") productCodes.add(value);
+        else categorySlugs.add(value);
+      }
+    }
+
+    for (const [fieldKey, rawValue] of Object.entries(content)) {
+      if (!PERSONAL_TEMPLATE_PRODUCT_ID_KEY.test(fieldKey)) continue;
+      if (rawValue === 0 || rawValue === null || rawValue === "") {
+        delete content[fieldKey];
+        continue;
+      }
+      const numericId = Number(rawValue);
+      if (!Number.isInteger(numericId) || numericId <= 0) {
+        throw new BadRequestException("默认内容的商品引用格式不正确");
+      }
+      content[fieldKey] = numericId;
+      productIds.add(numericId);
+    }
+
+    if (productCodes.size || productIds.size) {
+      const products = await this.prisma.product.findMany({
+        where: {
+          deletedAt: null,
+          OR: [
+            ...(productCodes.size ? [{ code: { in: [...productCodes] } }] : []),
+            ...(productIds.size ? [{ id: { in: [...productIds] } }] : []),
+          ],
+        },
+        select: { id: true, code: true },
+      });
+      const availableCodes = new Set(products.map((product) => product.code));
+      const availableIds = new Set(products.map((product) => product.id));
+      if (
+        [...productCodes].some((code) => !availableCodes.has(code)) ||
+        [...productIds].some((id) => !availableIds.has(id))
+      ) {
+        throw new BadRequestException("默认内容包含不存在或已删除的商品引用");
+      }
+    }
+
+    if (categorySlugs.size) {
+      const categories = await this.prisma.category.findMany({
+        where: {
+          slug: { in: [...categorySlugs] },
+          deletedAt: null,
+          isActive: true,
+        },
+        select: { slug: true },
+      });
+      const availableSlugs = new Set(categories.map((category) => category.slug));
+      if ([...categorySlugs].some((slug) => !availableSlugs.has(slug))) {
+        throw new BadRequestException("默认内容包含不存在或已停用的分类引用");
+      }
+    }
+  }
+
+  private async sanitizePersonalTemplateContentDefaults(
+    moduleType: string,
+    rawContent: unknown,
+  ): Promise<Record<string, ContentTemplateDefaultContentValue> | null | undefined> {
+    if (rawContent === undefined) return undefined;
+    if (rawContent === null) return null;
+    const sanitized = sanitizeContentTemplateDefaultContent(moduleType, rawContent);
+    if (!sanitized) throw new BadRequestException("默认内容无效或不符合当前模板合同");
+
+    const blockedFields = PERSONAL_TEMPLATE_FACT_FIELDS_BY_MODULE[moduleType] ?? new Set<string>();
+    const filtered: Record<string, ContentTemplateDefaultContentValue> = {};
+    for (const [fieldKey, value] of Object.entries(sanitized)) {
+      if (
+        blockedFields.has(fieldKey) ||
+        this.isForbiddenPersonalTemplateFactKey(fieldKey) ||
+        this.containsForbiddenPersonalTemplateFact(value)
+      ) {
+        continue;
+      }
+      filtered[fieldKey] = value;
+    }
+    await this.validatePersonalTemplateReferences(moduleType, filtered);
+    this.assertPersonalTemplateUploadsExist(filtered);
+    return Object.keys(filtered).length ? filtered : null;
+  }
+
+  async getPersonalContentTemplates(ownerId?: number) {
+    const resolvedOwnerId = this.requirePersonalTemplateOwner(ownerId);
+    return this.prisma.personalContentTemplate.findMany({
+      where: { ownerId: resolvedOwnerId },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    });
+  }
+
+  async createPersonalContentTemplate(
+    ownerId: number | undefined,
+    input: {
+      name: string;
+      moduleType: string;
+      layoutData: unknown;
+      contentDefaults?: Record<string, unknown> | null;
+    },
+  ) {
+    const resolvedOwnerId = this.requirePersonalTemplateOwner(ownerId);
+    const name = this.normalizePersonalTemplateName(input.name);
+    const { contract, sanitized } = this.sanitizePersonalTemplateLayout(input.moduleType, input.layoutData);
+    const contentDefaults = await this.sanitizePersonalTemplateContentDefaults(
+      contract.moduleType,
+      input.contentDefaults,
+    );
+    try {
+      return await this.prisma.personalContentTemplate.create({
+        data: {
+          ownerId: resolvedOwnerId,
+          name,
+          moduleType: contract.moduleType,
+          contractKey: contract.key,
+          contractVersion: contract.version,
+          layoutData: sanitized as Prisma.InputJsonValue,
+          ...(contentDefaults
+            ? { contentDefaults: contentDefaults as Prisma.InputJsonValue }
+            : {}),
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("当前账号已存在同名模板");
+      }
+      throw error;
+    }
+  }
+
+  async updatePersonalContentTemplate(
+    ownerId: number | undefined,
+    id: number,
+    input: {
+      name?: string;
+      layoutData?: unknown;
+      contentDefaults?: Record<string, unknown> | null;
+    },
+  ) {
+    const resolvedOwnerId = this.requirePersonalTemplateOwner(ownerId);
+    if (!Number.isInteger(id) || id <= 0) throw new BadRequestException("模板 ID 无效");
+    const existing = await this.prisma.personalContentTemplate.findFirst({
+      where: { id, ownerId: resolvedOwnerId },
+    });
+    if (!existing) throw new NotFoundException("模板不存在或无权访问");
+    if (
+      input.name === undefined &&
+      input.layoutData === undefined &&
+      input.contentDefaults === undefined
+    ) {
+      throw new BadRequestException("没有可更新的模板字段");
+    }
+    const data: Prisma.PersonalContentTemplateUpdateInput = {};
+    if (input.name !== undefined) data.name = this.normalizePersonalTemplateName(input.name);
+    if (input.layoutData !== undefined) {
+      const { contract, sanitized } = this.sanitizePersonalTemplateLayout(existing.moduleType, input.layoutData);
+      data.contractKey = contract.key;
+      data.contractVersion = contract.version;
+      data.layoutData = sanitized as Prisma.InputJsonValue;
+    }
+    if (input.contentDefaults !== undefined) {
+      const contentDefaults = await this.sanitizePersonalTemplateContentDefaults(
+        existing.moduleType,
+        input.contentDefaults,
+      );
+      data.contentDefaults = contentDefaults
+        ? (contentDefaults as Prisma.InputJsonValue)
+        : Prisma.DbNull;
+    }
+    try {
+      return await this.prisma.personalContentTemplate.update({
+        where: { id },
+        data,
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("当前账号已存在同名模板");
+      }
+      throw error;
+    }
+  }
+
+  async deletePersonalContentTemplate(ownerId: number | undefined, id: number) {
+    const resolvedOwnerId = this.requirePersonalTemplateOwner(ownerId);
+    if (!Number.isInteger(id) || id <= 0) throw new BadRequestException("模板 ID 无效");
+    const deleted = await this.prisma.personalContentTemplate.deleteMany({
+      where: { id, ownerId: resolvedOwnerId },
+    });
+    if (deleted.count !== 1) throw new NotFoundException("模板不存在或无权访问");
+    return { id, deleted: true };
   }
 
   publicChangeStream(): Observable<MessageEvent> {
@@ -561,7 +883,12 @@ export class PageModulesService {
         ? completion.material.missing
         : (PUCK_REQUIRED_IMAGE_FIELDS[type] || []).filter((field) => !this.isNonEmptyString(props[field]));
       for (const field of requiredImageFields) {
-        errors.push(`${label}：${field} 图片不能为空`);
+        const errorIndex = errors.push(`${label}：${field} 图片不能为空`) - 1;
+        errorContexts[errorIndex] = {
+          blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+          path: `${path}.props.${field}`,
+          field,
+        };
       }
       for (const field of completion?.content.missing ?? []) {
         const errorIndex = errors.push(`${label}：${field} 内容不能为空`) - 1;
