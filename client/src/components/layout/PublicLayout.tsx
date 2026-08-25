@@ -3,6 +3,11 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { usePageMetaStore } from "@/store/pageMetaStore";
+import AnalyticsConsentBanner from "@/components/privacy/AnalyticsConsentBanner";
+import {
+  buildPublicUrl,
+  normalizePublicSiteOrigin,
+} from "@/utils/publicSiteUrl";
 import {
   getEditorPage,
   getEditorPageByPath,
@@ -11,6 +16,7 @@ import {
 } from "@/page-builder/config/editorPages";
 import PublishedPageDecoration from "@/page-builder/runtime/PublishedPageDecoration";
 import { usePublishedPageDocument } from "@/page-builder/runtime/usePublishedPageDocument";
+import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
 import StorefrontFooter from "./StorefrontFooter";
 
@@ -36,6 +42,24 @@ function syncMeta(attr: "name" | "property", key: string, content?: string) {
     .querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`)
     ?.remove();
 }
+
+function syncLink(rel: string, href?: string | null) {
+  const selector = `link[rel="${rel}"]`;
+  const existing = document.head.querySelector<HTMLLinkElement>(selector);
+  if (!href) {
+    existing?.remove();
+    return;
+  }
+  const link = existing ?? document.createElement("link");
+  link.rel = rel;
+  link.href = href;
+  if (!existing) document.head.appendChild(link);
+}
+
+const publicSiteOrigin = normalizePublicSiteOrigin(
+  import.meta.env.VITE_PUBLIC_SITE_ORIGIN,
+  { allowHttp: import.meta.env.DEV },
+);
 
 /* ═══════ 内联图标 ═══════ */
 const MenuIcon = () => (
@@ -135,12 +159,30 @@ export default function PublicLayout() {
     ? getEditorPage(previewPageKey)
     : undefined;
   const isHome = location.pathname === "/" || previewPage?.key === "home";
-  const hideFooterService =
-    location.pathname === "/custom" || location.pathname === "/contact";
   const pageDefinition = getEditorPageByPath(location.pathname) ?? previewPage;
   const publishedHeaderDocument = usePublishedPageDocument(
     previewPage ? undefined : pageDefinition?.key,
   );
+  const publishedHeaderReadiness = getPublishedPageReadiness(
+    pageDefinition?.key,
+    publishedHeaderDocument.pageDocument?.puckData,
+  );
+  const pageDocumentUnavailable = Boolean(
+    !previewPage
+    && pageDefinition
+    && (publishedHeaderDocument.status !== "published" || !publishedHeaderReadiness?.ready),
+  );
+  const fallbackHasContactAction = Boolean(
+    pageDocumentUnavailable
+    && [
+      pageDefinition?.publicFallback?.primaryAction,
+      pageDefinition?.publicFallback?.secondaryAction,
+    ].some((action) => action?.href.startsWith("/contact")),
+  );
+  const hideFooterService =
+    location.pathname === "/custom"
+    || location.pathname === "/contact"
+    || fallbackHasContactAction;
   // 预览页由 PagePreview 读取草稿；不能再套一层公开发布文档装饰器。
   const decorationPage = previewPage ? undefined : isHome ? undefined : pageDefinition;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -167,14 +209,28 @@ export default function PublicLayout() {
 
   useEffect(() => {
     const siteName = siteSettings?.siteName || "海川珠宝";
+    const routeTitle = pageDefinition && !isHome
+      ? `${pageDefinition.label} | ${siteName}`
+      : undefined;
+    const routeDescription = pageDefinition?.publicFallback?.description
+      || pageDefinition?.description;
     // 页面级 SEO 优先于站点级（装修页面可覆盖默认标题/描述）
     const title =
-      pageMeta.title || siteSettings?.seoTitle || siteSettings?.siteName;
+      pageMeta.title || routeTitle || siteSettings?.seoTitle || siteSettings?.siteName;
     const description =
       pageMeta.description ||
+      routeDescription ||
       siteSettings?.seoDescription ||
       siteSettings?.siteDescription;
     const keywords = siteSettings?.seoKeywords;
+    const noIndex = Boolean(previewPage || pageMeta.noIndex || pageDocumentUnavailable);
+    const canonicalPath =
+      previewPage || pageMeta.canonicalPath === null
+        ? null
+        : pageMeta.canonicalPath || location.pathname;
+    const canonicalUrl = canonicalPath
+      ? buildPublicUrl(publicSiteOrigin, canonicalPath)
+      : null;
     // og:image/twitter:image 相对路径绝对化，避免社交爬虫解析失败
     let image: string | undefined;
     if (pageMeta.image) {
@@ -182,7 +238,10 @@ export default function PublicLayout() {
         image = pageMeta.image;
       } else {
         try {
-          image = new URL(pageMeta.image, window.location.origin).href;
+          image = new URL(
+            pageMeta.image,
+            publicSiteOrigin || window.location.origin,
+          ).href;
         } catch {
           image = pageMeta.image;
         }
@@ -192,6 +251,12 @@ export default function PublicLayout() {
     document.title = title || siteName;
     syncMeta("name", "description", description);
     syncMeta("name", "keywords", keywords);
+    upsertMeta(
+      "name",
+      "robots",
+      noIndex ? "noindex, nofollow" : "index, follow",
+    );
+    syncLink("canonical", canonicalUrl);
 
     // 社交分享卡片（微信 / 微博 / Twitter / Facebook）—— 珠宝营销分享命脉
     upsertMeta("property", "og:type", "website");
@@ -199,6 +264,7 @@ export default function PublicLayout() {
     upsertMeta("property", "og:title", title || siteName);
     syncMeta("property", "og:description", description);
     syncMeta("property", "og:image", image);
+    syncMeta("property", "og:url", canonicalUrl || undefined);
     upsertMeta(
       "name",
       "twitter:card",
@@ -207,7 +273,7 @@ export default function PublicLayout() {
     syncMeta("name", "twitter:title", title || siteName);
     syncMeta("name", "twitter:description", description);
     syncMeta("name", "twitter:image", image);
-  }, [siteSettings, pageMeta]);
+  }, [siteSettings, pageMeta, location.pathname, previewPage, pageDocumentUnavailable, pageDefinition, isHome]);
 
   const siteName = siteSettings?.siteName || "海川珠宝";
   const contactPhone = siteSettings?.contactPhone?.trim() || "";
@@ -241,29 +307,12 @@ export default function PublicLayout() {
     };
   }, [isHome]);
 
-  // SEO：公开页可索引；受保护的草稿预览必须保持 noindex。
-  useEffect(() => {
-    const content = previewPage ? "noindex, nofollow" : "index, follow";
-    const tag = document.head.querySelector<HTMLMetaElement>(
-      'meta[name="robots"]',
-    );
-    if (tag) {
-      tag.setAttribute("content", content);
-      return;
-    }
-
-    const robots = document.createElement("meta");
-    robots.setAttribute("name", "robots");
-    robots.setAttribute("content", content);
-    document.head.appendChild(robots);
-  }, [location.pathname, previewPage]);
-
   const resolvedHeaderMode = previewPage
     ? previewPage.headerMode
-    : pageDefinition && publishedHeaderDocument.status === "published"
+    : pageDefinition && publishedHeaderDocument.status === "published" && publishedHeaderReadiness?.ready
       ? resolvePageHeaderMode(
           pageDefinition.key,
-          publishedHeaderDocument.pageDocument?.puckData,
+          publishedHeaderReadiness.data,
         )
       : "solid";
   const isOverlayHeader = resolvedHeaderMode === "overlay-light";
@@ -385,7 +434,7 @@ export default function PublicLayout() {
           )}
         </button>
         <Link
-          to="/catalog"
+          to="/catalog#catalog-search-input"
           aria-label="搜索"
           className="site-header__nav-item"
         >
@@ -416,12 +465,14 @@ export default function PublicLayout() {
           pageKey={decorationPage?.key}
           pageLabel={decorationPage?.label}
           replaceChildren={Boolean(decorationPage && !decorationPage.dynamic)}
+          publicFallback={decorationPage?.publicFallback}
         >
           <Outlet />
         </PublishedPageDecoration>
       </main>
 
       <StorefrontFooter siteName={siteName} showService={!hideFooterService} />
+      <AnalyticsConsentBanner />
     </div>
   );
 }

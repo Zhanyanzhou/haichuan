@@ -1,12 +1,64 @@
 /**
  * 前端行为事件采集 Hook
  *
- * 行为分析已开启（2026-08-16，项目负责人决定取消关闭限制）。
- * 可通过 `VITE_ANALYTICS_ENABLED=false` 显式关闭（默认开启）。
+ * 行为分析采用双门禁：构建配置显式开启 + 访客明确同意。
+ * 任一条件不满足都不会创建持久会话标识或发送事件。
  * 采集静默失败：不阻塞页面、不向用户报错、失败不重试。
  */
 
-const ANALYTICS_ENABLED = (import.meta as any).env?.VITE_ANALYTICS_ENABLED !== "false";
+const ANALYTICS_CONFIGURED =
+  (import.meta as any).env?.VITE_ANALYTICS_ENABLED === "true";
+const ANALYTICS_CONSENT_COOKIE = "hc_analytics_consent";
+const ANALYTICS_SESSION_KEY = "hc.analytics-session";
+const ANALYTICS_CONSENT_VERSION = "analytics-v1";
+const ANALYTICS_CONSENT_MAX_AGE_SECONDS = 60 * 60 * 24 * 180;
+
+export type AnalyticsConsentDecision = "granted" | "denied" | "withdrawn";
+
+export function isAnalyticsConfigured(): boolean {
+  return ANALYTICS_CONFIGURED;
+}
+
+export function getAnalyticsConsentDecision(): AnalyticsConsentDecision | null {
+  if (typeof document === "undefined") return null;
+  const prefix = `${ANALYTICS_CONSENT_COOKIE}=`;
+  const cookie = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix));
+  if (!cookie) return null;
+  const value = decodeURIComponent(cookie.slice(prefix.length));
+  const [version, decision] = value.split(":");
+  if (version !== ANALYTICS_CONSENT_VERSION) return null;
+  return decision === "granted" || decision === "denied" || decision === "withdrawn"
+    ? decision
+    : null;
+}
+
+export function hasAnalyticsConsent(): boolean {
+  return getAnalyticsConsentDecision() === "granted";
+}
+
+export function setAnalyticsConsent(decision: AnalyticsConsentDecision) {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${ANALYTICS_CONSENT_COOKIE}=${encodeURIComponent(
+    `${ANALYTICS_CONSENT_VERSION}:${decision}`,
+  )}; Path=/; Max-Age=${ANALYTICS_CONSENT_MAX_AGE_SECONDS}; SameSite=Lax${secure}`;
+  if (decision !== "granted") {
+    try {
+      sessionStorage.removeItem(ANALYTICS_SESSION_KEY);
+    } catch {
+      // 存储不可用时仍以内存清空保证当前页面停止复用标识。
+    }
+    sessionId = "";
+  }
+  window.dispatchEvent(
+    new CustomEvent("haichuan:analytics-consent-changed", {
+      detail: { decision },
+    }),
+  );
+}
 
 // 匿名会话标识：仅用于区分会话，不关联任何个人信息
 let sessionId = "";
@@ -14,14 +66,14 @@ function ensureSessionId(): string {
   if (sessionId) return sessionId;
   if (typeof window === "undefined") return "";
   try {
-    sessionId = localStorage.getItem("_asid") || "";
+    sessionId = sessionStorage.getItem(ANALYTICS_SESSION_KEY) || "";
     if (!sessionId) {
       sessionId =
         "s_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      localStorage.setItem("_asid", sessionId);
+      sessionStorage.setItem(ANALYTICS_SESSION_KEY, sessionId);
     }
   } catch {
-    // localStorage 不可用（隐私模式等）时退化为内存会话 ID
+    // sessionStorage 不可用（隐私模式等）时退化为内存会话 ID
     sessionId = "s_" + Date.now().toString(36);
   }
   return sessionId;
@@ -46,6 +98,8 @@ async function send(event: Record<string, unknown>) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...event,
+        consentGranted: true,
+        consentVersion: ANALYTICS_CONSENT_VERSION,
         sessionId: ensureSessionId(),
         deviceType:
           window.innerWidth < 768
@@ -62,7 +116,7 @@ async function send(event: Record<string, unknown>) {
 }
 
 function fire(eventName: string, payload?: Record<string, unknown>) {
-  if (!ANALYTICS_ENABLED) return;
+  if (!ANALYTICS_CONFIGURED || !hasAnalyticsConsent()) return;
   if (!shouldSend(eventName)) return;
   void send({ eventName, ...(payload || {}) });
 }

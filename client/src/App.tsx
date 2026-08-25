@@ -41,8 +41,11 @@ const Cart = lazy(() => import("@/pages/public/Cart"));
 const Checkout = lazy(() => import("@/pages/public/Checkout"));
 const Catalog = lazy(() => import("@/pages/public/Catalog"));
 const Custom = lazy(() => import("@/pages/public/Custom"));
+const NotFound = lazy(() => import("@/pages/public/NotFound"));
 // dev-only 模板台架:真实组件的占位状态设计视图(非公开页面)
-const TemplateGallery = lazy(() => import("@/pages/dev/TemplateGallery"));
+const TemplateGallery = import.meta.env.DEV
+  ? lazy(() => import("@/pages/dev/TemplateGallery"))
+  : null;
 
 const Login = lazy(() => import("@/pages/admin/Login"));
 const Dashboard = lazy(() => import("@/pages/admin/Dashboard"));
@@ -266,7 +269,9 @@ function App() {
             <Route path="contact" element={<Contact />} />
             <Route path="privacy" element={<Privacy />} />
             <Route path="business-info" element={<BusinessInfo />} />
-            <Route path="__templates" element={<TemplateGallery />} />
+            {TemplateGallery ? (
+              <Route path="__templates" element={<TemplateGallery />} />
+            ) : null}
             <Route
               path="preview/home"
               element={
@@ -287,6 +292,7 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            <Route path="*" element={<NotFound />} />
           </Route>
 
           <Route
@@ -570,8 +576,6 @@ function App() {
             }
           />
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
     </ErrorBoundary>

@@ -14,6 +14,10 @@ export interface PageMeta {
   description?: string;
   /** 社交分享卡片图（og:image / twitter:image） */
   image?: string;
+  /** true 时输出 noindex,nofollow；错误页和受控预览使用。 */
+  noIndex?: boolean;
+  /** 未设置时使用当前路径；null 表示本页不得输出 canonical。 */
+  canonicalPath?: string | null;
 }
 
 interface PageMetaState {

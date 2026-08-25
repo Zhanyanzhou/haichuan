@@ -80,6 +80,10 @@ services:
     build:
       context: ./client
       dockerfile: Dockerfile
+      args:
+        # Vite 公开配置在构建时固化；不得把服务端密钥作为 build arg 传入。
+        VITE_PUBLIC_SITE_ORIGIN: ${VITE_PUBLIC_SITE_ORIGIN:-""}
+        VITE_ANALYTICS_ENABLED: ${VITE_ANALYTICS_ENABLED:-"false"}
     container_name: jewelry-client
     restart: unless-stopped
     logging: *default-logging
