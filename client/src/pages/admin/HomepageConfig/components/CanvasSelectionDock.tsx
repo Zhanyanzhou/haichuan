@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Modal } from "antd";
+import { App as AntdApp } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -16,19 +16,10 @@ import { registerOverlayPortal } from "@puckeditor/core";
 import { ROOT_ZONE, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
 
-export default function CanvasSelectionDock({
-  children,
-  componentId,
-  componentType,
-  isSelected,
-}: {
-  children: ReactNode;
-  componentId: string;
-  componentType: string;
-  isSelected: boolean;
-}) {
-  const overlayRef = useRef<HTMLDivElement>(null);
+export default function CanvasSelectionDock() {
+  const { modal } = AntdApp.useApp();
   const portalRef = useRef<HTMLDivElement>(null);
+  const lastDockPositionRef = useRef<{ left: number; top: number } | null>(null);
   const [dockPosition, setDockPosition] = useState<{
     left: number;
     top: number;
@@ -36,6 +27,8 @@ export default function CanvasSelectionDock({
   const [dockHost, setDockHost] = useState<HTMLElement | null>(null);
   const appData = useHomepagePuck((state) => state.appState.data);
   const dispatch = useHomepagePuck((state) => state.dispatch);
+  const selectedItem = useHomepagePuck((state) => state.selectedItem);
+  const componentId = String(selectedItem?.props?.id ?? "");
   const content = appData.content as Array<{
     type: string;
     props: Record<string, any>;
@@ -44,6 +37,7 @@ export default function CanvasSelectionDock({
     (item) => item.props?.id === componentId,
   );
   const selectedModule = selectedIndex >= 0 ? content[selectedIndex] : null;
+  const componentType = selectedModule?.type ?? "";
   const selectedLocked = Boolean(selectedModule?.props?.locked);
   const canMoveUp =
     Boolean(selectedModule) &&
@@ -57,20 +51,20 @@ export default function CanvasSelectionDock({
     !content[selectedIndex + 1]?.props?.locked;
 
   useEffect(() => {
-    if (!isSelected || !portalRef.current) return undefined;
+    if (!componentId || !portalRef.current) return undefined;
     return registerOverlayPortal(portalRef.current, { disableDrag: true });
-  }, [dockHost, isSelected]);
+  }, [componentId, dockHost]);
 
   useLayoutEffect(() => {
-    const overlay = overlayRef.current;
-    const frameDocument = overlay?.ownerDocument;
-    const frameWindow = frameDocument?.defaultView;
-    const hostWindow = window.parent !== window ? window.parent : window;
-    const frame = frameDocument
-      ? Array.from(hostWindow.document.querySelectorAll("iframe")).find(
-          (candidate) => candidate.contentDocument === frameDocument,
-        )
-      : null;
+    const hostWindow = window;
+    const frame = document.querySelector<HTMLIFrameElement>(
+      ".homepage-editor__canvas-scroll iframe",
+    );
+    const frameDocument = frame?.contentDocument;
+    const frameWindow = frame?.contentWindow;
+    const selectedBlock = Array.from(
+      frameDocument?.querySelectorAll<HTMLElement>("[data-puck-component]") ?? [],
+    ).find((candidate) => candidate.dataset.puckComponent === componentId);
     const nextDockHost = frame?.closest<HTMLElement>(
       ".homepage-editor__canvas-scroll",
     );
@@ -78,7 +72,14 @@ export default function CanvasSelectionDock({
       ".homepage-editor__canvas-document",
     );
 
-    if (!isSelected || !overlay || !frameWindow || !frame || !nextDockHost) {
+    if (
+      !componentId ||
+      !selectedBlock ||
+      !frameWindow ||
+      !frame ||
+      !nextDockHost
+    ) {
+      lastDockPositionRef.current = null;
       setDockPosition(null);
       setDockHost(null);
       return undefined;
@@ -86,9 +87,7 @@ export default function CanvasSelectionDock({
     if (dockHost !== nextDockHost) setDockHost(nextDockHost);
 
     const updatePosition = () => {
-      const selectionBox = (
-        overlay.closest<HTMLElement>("[data-puck-component]") ?? overlay
-      ).getBoundingClientRect();
+      const selectionBox = selectedBlock.getBoundingClientRect();
       const frameBox = frame.getBoundingClientRect();
       const hostBox = nextDockHost.getBoundingClientRect();
       // iframe 的 DOMRect/offsetWidth 同属边框盒；contentDocument.clientWidth 会扣除
@@ -109,6 +108,15 @@ export default function CanvasSelectionDock({
           nextDockHost.clientTop +
           selectionBox.bottom * scale,
       };
+      const previousPosition = lastDockPositionRef.current;
+      if (
+        previousPosition &&
+        Math.abs(previousPosition.left - nextPosition.left) < 4 &&
+        Math.abs(previousPosition.top - nextPosition.top) < 4
+      ) {
+        return;
+      }
+      lastDockPositionRef.current = nextPosition;
 
       // dock 与 iframe 共处画布滚动容器，使用内容坐标后会随滚动同步移动，
       // 不再依赖父页面 scroll 事件追赶 iframe 的屏幕坐标。
@@ -117,13 +125,7 @@ export default function CanvasSelectionDock({
         portalRef.current.style.top = `${nextPosition.top}px`;
         portalRef.current.style.visibility = "visible";
       }
-      setDockPosition((current) =>
-        current &&
-        Math.abs(current.left - nextPosition.left) < 0.5 &&
-        Math.abs(current.top - nextPosition.top) < 0.5
-          ? current
-          : nextPosition,
-      );
+      setDockPosition(nextPosition);
     };
 
     let revealFrame = 0;
@@ -164,7 +166,7 @@ export default function CanvasSelectionDock({
     frameWindow.addEventListener("scroll", updatePosition, true);
     const overlayObserver = new ResizeObserver(updatePosition);
     const frameObserver = new ResizeObserver(revealDock);
-    overlayObserver.observe(overlay);
+    overlayObserver.observe(selectedBlock);
     frameObserver.observe(frame);
     if (canvasDocument) frameObserver.observe(canvasDocument);
 
@@ -177,7 +179,7 @@ export default function CanvasSelectionDock({
       overlayObserver.disconnect();
       frameObserver.disconnect();
     };
-  }, [componentId, dockHost, isSelected]);
+  }, [componentId, dockHost, selectedIndex]);
 
   const moveSelected = (direction: -1 | 1) => {
     const targetIndex = selectedIndex + direction;
@@ -191,14 +193,11 @@ export default function CanvasSelectionDock({
       return;
     }
 
-    const nextContent = [...content];
-    [nextContent[selectedIndex], nextContent[targetIndex]] = [
-      nextContent[targetIndex],
-      nextContent[selectedIndex],
-    ];
     dispatch({
-      type: "setData",
-      data: { ...appData, content: nextContent },
+      type: "reorder",
+      sourceIndex: selectedIndex,
+      destinationIndex: targetIndex,
+      destinationZone: ROOT_ZONE,
       recordHistory: true,
     });
     dispatch({
@@ -213,7 +212,7 @@ export default function CanvasSelectionDock({
       selectedModule.type || componentType,
       selectedModule.props,
     );
-    Modal.confirm({
+    modal.confirm({
       title: `删除“${displayName}”？`,
       content: "删除后可从模板组件库重新添加；尚未发布的修改可通过版本记录恢复。",
       okText: "删除模块",
@@ -221,11 +220,9 @@ export default function CanvasSelectionDock({
       cancelText: "取消",
       onOk: () => {
         dispatch({
-          type: "setData",
-          data: {
-            ...appData,
-            content: content.filter((_, index) => index !== selectedIndex),
-          },
+          type: "remove",
+          index: selectedIndex,
+          zone: ROOT_ZONE,
           recordHistory: true,
         });
         dispatch({ type: "setUi", ui: { itemSelector: null } });
@@ -233,56 +230,58 @@ export default function CanvasSelectionDock({
     });
   };
 
+  return selectedModule && dockHost
+    ? createPortal(
+        <div
+          ref={portalRef}
+          className="homepage-editor__canvas-selection-dock"
+          role="toolbar"
+          aria-label={`调整“${getModuleDisplayName(selectedModule.type, selectedModule.props)}”模块`}
+          style={
+            dockPosition
+              ? { left: dockPosition.left, top: dockPosition.top }
+              : { visibility: "hidden" }
+          }
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            disabled={!canMoveUp}
+            onClick={() => moveSelected(-1)}
+            aria-label="上移当前模块"
+            title="上移"
+          >
+            <ArrowUpOutlined aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            disabled={!canMoveDown}
+            onClick={() => moveSelected(1)}
+            aria-label="下移当前模块"
+            title="下移"
+          >
+            <ArrowDownOutlined aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="is-danger"
+            disabled={selectedLocked}
+            onClick={deleteSelected}
+            aria-label={selectedLocked ? "固定模块不能删除" : "删除当前模块"}
+            title={selectedLocked ? "固定模块不能删除" : "删除"}
+          >
+            <DeleteOutlined aria-hidden="true" />
+          </button>
+        </div>,
+        dockHost,
+      )
+    : null;
+}
+
+/** Puck 的临时 hover/selected portal 只负责绘制视觉覆盖层。 */
+export function CanvasSelectionOverlay({ children }: { children: ReactNode }) {
   return (
-    <div ref={overlayRef} className="homepage-editor__canvas-selection-overlay">
-      {children}
-      {isSelected && selectedModule && dockHost
-        ? createPortal(
-            <div
-              ref={portalRef}
-              className="homepage-editor__canvas-selection-dock"
-              role="toolbar"
-              aria-label={`调整“${getModuleDisplayName(selectedModule.type, selectedModule.props)}”模块`}
-              style={
-                dockPosition
-                  ? { left: dockPosition.left, top: dockPosition.top }
-                  : { visibility: "hidden" }
-              }
-              onClick={(event) => event.stopPropagation()}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              <button
-                type="button"
-                disabled={!canMoveUp}
-                onClick={() => moveSelected(-1)}
-                aria-label="上移当前模块"
-                title="上移"
-              >
-                <ArrowUpOutlined aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                disabled={!canMoveDown}
-                onClick={() => moveSelected(1)}
-                aria-label="下移当前模块"
-                title="下移"
-              >
-                <ArrowDownOutlined aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="is-danger"
-                disabled={selectedLocked}
-                onClick={deleteSelected}
-                aria-label={selectedLocked ? "固定模块不能删除" : "删除当前模块"}
-                title={selectedLocked ? "固定模块不能删除" : "删除"}
-              >
-                <DeleteOutlined aria-hidden="true" />
-              </button>
-            </div>,
-            dockHost,
-          )
-        : null}
-    </div>
+    <div className="homepage-editor__canvas-selection-overlay">{children}</div>
   );
 }

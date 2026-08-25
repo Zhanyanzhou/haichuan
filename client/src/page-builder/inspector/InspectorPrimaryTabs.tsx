@@ -1,6 +1,6 @@
 import { useRef } from "react";
 
-export type InspectorPrimaryMode = "quick" | "content" | "design";
+export type InspectorPrimaryMode = "content" | "design";
 
 interface InspectorPrimaryTabsProps {
   activeMode: InspectorPrimaryMode;
@@ -9,9 +9,8 @@ interface InspectorPrimaryTabsProps {
 }
 
 const TABS: ReadonlyArray<{ mode: InspectorPrimaryMode; label: string }> = [
-  { mode: "quick", label: "快捷操作" },
-  { mode: "content", label: "内容" },
-  { mode: "design", label: "设计" },
+  { mode: "content", label: "内容编辑" },
+  { mode: "design", label: "模板编辑" },
 ];
 
 /** 固定的 Inspector 一级导航；对象切换时只变化内容，不增删页签。 */

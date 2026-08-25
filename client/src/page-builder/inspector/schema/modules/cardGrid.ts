@@ -42,29 +42,6 @@ export function makeCardGridSchema(
     groupTitles: { media: "卡片列表" },
     sections: [
       {
-        id: `${variant.moduleType}-content`,
-        title: "内容",
-        layer: "content",
-        fields: [
-          moduleNameField(variant.displayName),
-          {
-            key: "title",
-            label: "标题",
-            control: "text",
-            required: true,
-            maxLength: CARD_GRID_CONTRACT.content.limits.title,
-            placeholder: "区块主标题",
-          },
-          {
-            key: "subtitle",
-            label: "副标题",
-            control: "text",
-            maxLength: CARD_GRID_CONTRACT.content.limits.subtitle,
-            hint: "留空不显示",
-          },
-        ],
-      },
-      {
         id: `${variant.moduleType}-media`,
         title: "素材",
         layer: "media",
@@ -104,6 +81,29 @@ export function makeCardGridSchema(
                 maxLength: CARD_GRID_CONTRACT.content.limits.cardBody,
               },
             ],
+          },
+        ],
+      },
+      {
+        id: `${variant.moduleType}-content`,
+        title: "内容",
+        layer: "content",
+        fields: [
+          moduleNameField(variant.displayName),
+          {
+            key: "title",
+            label: "标题",
+            control: "text",
+            required: true,
+            maxLength: CARD_GRID_CONTRACT.content.limits.title,
+            placeholder: "区块主标题",
+          },
+          {
+            key: "subtitle",
+            label: "副标题",
+            control: "text",
+            maxLength: CARD_GRID_CONTRACT.content.limits.subtitle,
+            hint: "留空不显示",
           },
         ],
       },

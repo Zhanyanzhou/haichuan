@@ -8,7 +8,7 @@
  * 上传走 uploadApi.uploadVideo(/upload/video,服务端 ≤100MB,120s 超时)。
  */
 import { useEffect, useMemo, useState } from "react";
-import { Upload, Button, Input, message } from "antd";
+import { App as AntdApp, Upload, Button, Input } from "antd";
 import {
   VideoCameraOutlined,
   LinkOutlined,
@@ -51,6 +51,7 @@ export default function VideoField({
   readOnly,
   required,
 }: VideoFieldProps) {
+  const { message } = AntdApp.useApp();
   const pageData = useHomepagePuck((state) => state.appState.data);
   const [sessionVideos, setSessionVideos] = useState(() => [
     ...sessionUploadedVideos,

@@ -25,6 +25,40 @@ export const heroSchema: ModuleInspectorSchema = {
   defaults: { ...heroPuckConfig.defaultProps },
   sections: [
     {
+      id: "hero-media",
+      title: "媒体",
+      layer: "media",
+      description: `首屏按视口裁切；素材建议 桌面 ${ratioLabelOf(IMAGE_SPECS.hero.desktop)} / 手机 ${ratioLabelOf(IMAGE_SPECS.hero.mobile)}`,
+      fields: [
+        desktopMediaField(
+          "desktopImage",
+          "桌面端主视觉",
+          IMAGE_SPECS.hero.desktop,
+          {
+            required: true,
+            focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
+            placeholder: "上传桌面端主视觉",
+          },
+        ),
+        mobileMediaField(
+          "mobileImage",
+          "手机端主视觉",
+          IMAGE_SPECS.hero.mobile,
+          "desktopImage",
+          {
+            required: true,
+            focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
+            placeholder: "上传手机端主视觉",
+          },
+        ),
+        {
+          ...altTextField(HERO_CONTRACT.content.limits.altText),
+          required: true,
+          hint: "描述画面中的真实作品或佩戴关系；不要填写营销关键词",
+        },
+      ],
+    },
+    {
       id: "hero-content",
       title: "内容",
       layer: "content",
@@ -34,8 +68,10 @@ export const heroSchema: ModuleInspectorSchema = {
           key: "title",
           label: "主标题",
           control: "text",
+          required: true,
           maxLength: HERO_CONTRACT.content.limits.title,
-          placeholder: "如 东方之形，自有光华",
+          hint: "公开页面的真实标题，不要把关键文字只做在图片里",
+          placeholder: "如 珠宝作品",
         },
         {
           key: "subtitle",
@@ -69,35 +105,6 @@ export const heroSchema: ModuleInspectorSchema = {
           placeholder: "如 探索系列",
         },
         linkTargetField("点击后前往"),
-      ],
-    },
-    {
-      id: "hero-media",
-      title: "媒体",
-      layer: "media",
-      description: `首屏按视口裁切；素材建议 桌面 ${ratioLabelOf(IMAGE_SPECS.hero.desktop)} / 手机 ${ratioLabelOf(IMAGE_SPECS.hero.mobile)}`,
-      fields: [
-        desktopMediaField(
-          "desktopImage",
-          "桌面端主视觉",
-          IMAGE_SPECS.hero.desktop,
-          {
-            required: true,
-            focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
-            placeholder: "上传桌面端主视觉",
-          },
-        ),
-        mobileMediaField(
-          "mobileImage",
-          "手机端主视觉",
-          IMAGE_SPECS.hero.mobile,
-          "desktopImage",
-          {
-            focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
-            placeholder: "上传手机端主视觉",
-          },
-        ),
-        altTextField(HERO_CONTRACT.content.limits.altText),
       ],
     },
     {

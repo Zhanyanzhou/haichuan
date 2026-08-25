@@ -34,6 +34,59 @@ const hash = createHash("sha256").update(JSON.stringify(source, sortReplacer)).d
 const rootDevices = ["desktop", "mobile"];
 const assetClasses = new Set(["product", "editorial", "craft", "service"]);
 const templateWidths = ["full", "wide", "standard", "editorial"];
+const resizeDirections = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
+
+const roundGeometry = (value) => Number(value.toFixed(6));
+
+/**
+ * schema v4 以归一化 defaultGeometryByViewport 为唯一默认构图来源。
+ * 旧的 12 列预览网格只是渲染适配层，必须由真实几何投影生成。
+ */
+const projectGeometryToPreview = (template, device, geometry) => {
+  const rows = geometry.rows ?? 8;
+  const zones = geometry.zones.map((zone) => ({
+    role: zone.role,
+    column: roundGeometry(zone.rect.x * 12 + 1),
+    span: roundGeometry(zone.rect.width * 12),
+    row: roundGeometry(zone.rect.y * rows + 1),
+    rowSpan: roundGeometry(zone.rect.height * rows),
+    ...(zone.overlay ? { overlay: true } : {}),
+    ...(zone.kind ? { kind: zone.kind } : {}),
+    roleId: zone.roleId,
+  }));
+  return {
+    tone: geometry.tone,
+    ...(rows === 8 ? {} : { rows }),
+    order: derivePreviewOrder(template, device, { zones }),
+    zones,
+  };
+};
+
+function validateDefaultGeometry(template) {
+  invariant(
+    template.defaultGeometryByViewport && typeof template.defaultGeometryByViewport === "object",
+    `${template.key}.defaultGeometryByViewport 缺失`,
+  );
+  const rolesById = new Map(template.roles.map((role) => [role.id, role]));
+  for (const device of rootDevices) {
+    const geometry = template.defaultGeometryByViewport[device];
+    invariant(geometry && typeof geometry === "object", `${template.key}.defaultGeometryByViewport.${device} 缺失`);
+    invariant(["light", "dark"].includes(geometry.tone), `${template.key}.defaultGeometryByViewport.${device}.tone 无效`);
+    invariant(Number.isFinite(geometry.frameAspectRatio) && geometry.frameAspectRatio >= 0.25 && geometry.frameAspectRatio <= 4, `${template.key}.defaultGeometryByViewport.${device}.frameAspectRatio 无效`);
+    invariant(Number.isInteger(geometry.rows) && geometry.rows >= 6 && geometry.rows <= 12, `${template.key}.defaultGeometryByViewport.${device}.rows 无效`);
+    const safeArea = geometry.safeArea;
+    invariant(safeArea && [safeArea.x, safeArea.y, safeArea.width, safeArea.height].every(Number.isFinite), `${template.key}.defaultGeometryByViewport.${device}.safeArea 缺失`);
+    invariant(safeArea.x >= 0 && safeArea.y >= 0 && safeArea.width > 0 && safeArea.height > 0 && safeArea.x + safeArea.width <= 1 && safeArea.y + safeArea.height <= 1, `${template.key}.defaultGeometryByViewport.${device}.safeArea 越界`);
+    invariant(Array.isArray(geometry.zones) && geometry.zones.length > 0, `${template.key}.defaultGeometryByViewport.${device}.zones 缺失`);
+    for (const zone of geometry.zones) {
+      invariant(rolesById.has(zone.roleId), `${template.key}.defaultGeometryByViewport.${device}.${zone.roleId} 未声明角色`);
+      invariant(typeof zone.nodeId === "string" && /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(zone.nodeId), `${template.key}.defaultGeometryByViewport.${device}.${zone.roleId}.nodeId 无效`);
+      const rect = zone.rect;
+      invariant(rect && [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite), `${template.key}.defaultGeometryByViewport.${device}.${zone.nodeId}.rect 缺失`);
+      invariant(rect.x >= 0 && rect.y >= 0 && rect.width > 0 && rect.height > 0 && rect.x + rect.width <= 1.000001 && rect.y + rect.height <= 1.000001, `${template.key}.defaultGeometryByViewport.${device}.${zone.nodeId}.rect 越界`);
+    }
+  }
+}
 
 const derivePreviewOrder = (template, device, viewport) => {
   const previewRoleIds = new Set(viewport.zones.map((zone) => zone.roleId));
@@ -227,10 +280,19 @@ function validateUnifiedRoot(template) {
 }
 
 validateAssetPolicy(source.assetPolicy);
-for (const template of source.templates) validateUnifiedRoot(template);
+for (const template of source.templates) {
+  validateDefaultGeometry(template);
+  template.preview = {
+    purpose: template.preview.purpose,
+    visualRole: template.preview.visualRole,
+    desktop: projectGeometryToPreview(template, "desktop", template.defaultGeometryByViewport.desktop),
+    mobile: projectGeometryToPreview(template, "mobile", template.defaultGeometryByViewport.mobile),
+  };
+  validateUnifiedRoot(template);
+}
 validatePageRules(source.pageRules);
 
-// 权威 JSON 从 schema v3 起(桌面+移动双端),23 个模板均直接声明同一根构图。
+// 权威 JSON 从 schema v4 起以归一化 defaultGeometryByViewport 声明双端根构图。
 // 以下仅为既有 TypeScript 消费面的只读派生形状，不能反写或形成第二份合同。
 const toLegacyPreviewViewport = (template, device, viewport) => ({
   ...viewport,
@@ -277,6 +339,7 @@ for (const template of source.templates) {
 }
 
 const categories = new Set(["视觉展示", "图文内容", "商品展示", "导航入口", "服务信息", "活动内容"]);
+const commercialPurposes = new Set(["品牌展示", "商品销售", "活动转化", "内容传播", "信任建立"]);
 const statuses = new Set(["active", "planned"]);
 const viewportModes = new Set(["viewport", "ratio", "content"]);
 const visualRoles = new Set(["primary-stage", "feature-stage", "support-stage"]);
@@ -319,6 +382,7 @@ for (const template of source.templates) {
   invariant(typeof template.moduleType === "string" && template.moduleType.length > 0, `${template.key}.moduleType 不能为空`);
   invariant(typeof template.displayName === "string" && template.displayName.length > 0, `${template.key}.displayName 不能为空`);
   invariant(categories.has(template.category), `${template.key}.category 不合法`);
+  invariant(commercialPurposes.has(template.commercialPurpose), `${template.key}.commercialPurpose 不合法`);
   invariant(statuses.has(template.implementationStatus), `${template.key}.implementationStatus 不合法`);
   const preview = source.previewProfiles[template.key];
   invariant(preview && typeof preview === "object", `${template.key}.previewProfiles 缺失`);
@@ -429,6 +493,43 @@ for (const template of source.templates) {
     invariant(Array.isArray(object.capabilities), `${template.key}.editableObjects.${object.roleId}.capabilities 必须是数组`);
     invariant(new Set(object.capabilities).size === object.capabilities.length, `${template.key}.editableObjects.${object.roleId}.capabilities 不得重复`);
     invariant(object.capabilities.every((capability) => editableObjectCapabilities.has(capability)), `${template.key}.editableObjects.${object.roleId}.capabilities 含未知能力`);
+    const constraints = object.constraints;
+    invariant(constraints && typeof constraints === "object" && !Array.isArray(constraints), `${template.key}.editableObjects.${object.roleId}.constraints 缺失`);
+    invariant(
+      [constraints.minSize?.width, constraints.minSize?.height, constraints.maxSize?.width, constraints.maxSize?.height].every(Number.isFinite)
+        && constraints.minSize.width > 0
+        && constraints.minSize.height > 0
+        && constraints.maxSize.width >= constraints.minSize.width
+        && constraints.maxSize.height >= constraints.minSize.height
+        && constraints.maxSize.width <= 1
+        && constraints.maxSize.height <= 1,
+      `${template.key}.editableObjects.${object.roleId}.constraints 尺寸范围无效`,
+    );
+    invariant(
+      Array.isArray(constraints.movementAxes)
+        && constraints.movementAxes.every((axis) => ["x", "y"].includes(axis)),
+      `${template.key}.editableObjects.${object.roleId}.constraints.movementAxes 无效`,
+    );
+    invariant(
+      Array.isArray(constraints.allowedResize)
+        && constraints.allowedResize.every((direction) => resizeDirections.includes(direction)),
+      `${template.key}.editableObjects.${object.roleId}.constraints.allowedResize 无效`,
+    );
+    invariant(
+      Number.isInteger(constraints.layerRange?.min)
+        && Number.isInteger(constraints.layerRange?.max)
+        && constraints.layerRange.min >= 0
+        && constraints.layerRange.max <= 20
+        && constraints.layerRange.max >= constraints.layerRange.min,
+      `${template.key}.editableObjects.${object.roleId}.constraints.layerRange 无效`,
+    );
+    for (const flag of ["allowHide", "allowAspectRatio", "allowFocus", "allowZoom", "allowTypography", "safeAreaRequired"]) {
+      invariant(typeof constraints[flag] === "boolean", `${template.key}.editableObjects.${object.roleId}.constraints.${flag} 必须是布尔值`);
+    }
+    invariant(!constraints.allowHide || object.capabilities.includes("visibility"), `${template.key}.editableObjects.${object.roleId}.allowHide 缺少 visibility 能力`);
+    invariant(!constraints.allowFocus || object.capabilities.includes("focus"), `${template.key}.editableObjects.${object.roleId}.allowFocus 缺少 focus 能力`);
+    invariant(!constraints.allowZoom || object.capabilities.includes("zoom"), `${template.key}.editableObjects.${object.roleId}.allowZoom 缺少 zoom 能力`);
+    invariant(!constraints.allowTypography || object.capabilities.includes("typography"), `${template.key}.editableObjects.${object.roleId}.allowTypography 缺少 typography 能力`);
     if (!role) {
       invariant(
         object.kind === "action" &&
@@ -515,11 +616,12 @@ invariant(plannedTemplates.length === source.expectedTemplateCount - source.acti
 const union = (values) => [...new Set(values)].sort().map((value) => JSON.stringify(value)).join(" | ");
 const masters = union(source.templates.map((item) => item.master));
 
-const registry = source.templates.map(({ key, moduleType, displayName, category, implementationStatus }) => ({
+const registry = source.templates.map(({ key, moduleType, displayName, category, commercialPurpose, implementationStatus }) => ({
   key,
   moduleType,
   displayName,
   category,
+  commercialPurpose,
   implementationStatus,
 }));
 const contractMap = Object.fromEntries(source.templates.map(({ category: _category, implementationStatus: _status, skeleton: _skeleton, ...contract }) => [contract.key, contract]));
@@ -531,10 +633,11 @@ const templateSkeletonMap = Object.fromEntries(source.templates.map(({ key, modu
   category,
   ...skeleton,
 }]));
-const templatePreviewMap = Object.fromEntries(source.templates.map(({ key, moduleType, displayName }) => [key, {
+const templatePreviewMap = Object.fromEntries(source.templates.map(({ key, moduleType, displayName, commercialPurpose }) => [key, {
   key,
   moduleType,
   displayName,
+  commercialPurpose,
   ...source.previewProfiles[key],
 }]));
 const registeredKeys = source.templates.map((item) => JSON.stringify(item.key)).join(" | ");
@@ -553,6 +656,8 @@ export type RegisteredContentTemplateKey = ${registeredKeys};
 export type ContentTemplateKey = RegisteredContentTemplateKey;
 export type ContentTemplateMaster = ${masters};
 export type ContentTemplateAssetClass = "product" | "editorial" | "craft" | "service";
+export type ContentTemplateCommercialPurpose =
+  | "品牌展示" | "商品销售" | "活动转化" | "内容传播" | "信任建立";
 
 export type ContentTemplateAssetPolicy = {
   classes: readonly ContentTemplateAssetClass[];
@@ -602,6 +707,22 @@ export type ContentTemplateEditableCapability =
 
 export type ContentTemplateResponsiveScope = "shared" | "viewport-specific";
 
+export type ContentTemplateResizeDirection = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+
+export type ContentTemplateEditableConstraints = {
+  minSize: { width: number; height: number };
+  maxSize: { width: number; height: number };
+  movementAxes: readonly ("x" | "y")[];
+  allowedResize: readonly ContentTemplateResizeDirection[];
+  layerRange: { min: number; max: number };
+  allowHide: boolean;
+  allowAspectRatio: boolean;
+  allowFocus: boolean;
+  allowZoom: boolean;
+  allowTypography: boolean;
+  safeAreaRequired: boolean;
+};
+
 export type ContentTemplateEditableObject = {
   roleId: string;
   nodeIds?: readonly string[];
@@ -614,12 +735,31 @@ export type ContentTemplateEditableObject = {
   fieldScopes?: Readonly<Record<string, ContentTemplateResponsiveScope>>;
   capabilities: readonly ContentTemplateEditableCapability[];
   responsive: Partial<Record<ContentTemplateEditableCapability, ContentTemplateResponsiveScope>>;
+  constraints: ContentTemplateEditableConstraints;
+};
+
+export type ContentTemplateDefaultGeometryZone = {
+  nodeId: string;
+  roleId: string;
+  role: ContentTemplateSkeletonRole;
+  rect: ContentTemplateVisualRect;
+  overlay?: boolean;
+  kind?: "play" | "pagination" | "steps-5" | "handle" | "hotspot" | "countdown";
+};
+
+export type ContentTemplateDefaultGeometryViewport = {
+  tone: "light" | "dark";
+  rows: number;
+  frameAspectRatio: number;
+  safeArea: ContentTemplateVisualRect;
+  zones: readonly ContentTemplateDefaultGeometryZone[];
 };
 
 export type ContentTemplateContract = {
   key: ContentTemplateKey;
   moduleType: string;
   displayName: string;
+  commercialPurpose: ContentTemplateCommercialPurpose;
   version: number;
   master: ContentTemplateMaster;
   visualRole: "primary-stage" | "feature-stage" | "support-stage";
@@ -651,6 +791,7 @@ export type ContentTemplateContract = {
     allowedRatioPresetsByViewport?: Partial<Record<"desktop" | "mobile", readonly string[]>>;
   }[];
   order: Record<"desktop" | "mobile", readonly string[]>;
+  defaultGeometryByViewport: Record<"desktop" | "mobile", ContentTemplateDefaultGeometryViewport>;
   preview: {
     purpose: string;
     visualRole: "primary-stage" | "feature-stage" | "support-stage";
@@ -752,6 +893,9 @@ export type ContentTemplateInstanceOverridesV2 = {
     heightPreset?: string;
     compositionPreset?: string;
     colorPreset?: string;
+    paddingPreset?: "compact" | "standard" | "spacious";
+    radiusPreset?: "square" | "soft" | "rounded";
+    shadowPreset?: "none" | "soft" | "lifted";
     customColors?: {
       background?: string;
       text?: string;
@@ -779,12 +923,28 @@ export type ContentTemplateInstanceOverridesV2 = {
       lineHeight?: number;
       letterSpacing?: number;
     };
+    appearance?: {
+      radiusPreset?: "square" | "soft" | "rounded";
+      shadowPreset?: "none" | "soft" | "lifted";
+    };
   }>;
 };
 
 export type ContentTemplateInstanceOverrides =
   | ContentTemplateInstanceOverridesV1
   | ContentTemplateInstanceOverridesV2;
+
+export type ContentTemplateDefaultContentValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly ContentTemplateDefaultContentValue[]
+  | { readonly [key: string]: ContentTemplateDefaultContentValue };
+
+export type ContentTemplateDefaultContent = Readonly<
+  Record<string, ContentTemplateDefaultContentValue>
+>;
 
 export type ContentTemplateSkeletonRole =
   | "media" | "mainMedia" | "detailMedia" | "copy" | "action" | "marker"
@@ -837,6 +997,7 @@ export type ContentTemplatePreview = {
   key: RegisteredContentTemplateKey;
   moduleType: string;
   displayName: string;
+  commercialPurpose: ContentTemplateCommercialPurpose;
   purpose: string;
   visualRole: "primary-stage" | "feature-stage" | "support-stage";
   desktop: ContentTemplatePreviewViewport;
@@ -891,13 +1052,13 @@ export type ContentTemplateCompletion = {
 
 export const CONTENT_TEMPLATE_REGISTRY = ${JSON.stringify(registry, sortReplacer, 2)} as const;
 
-/** 23 个真实 Renderer 的完整 schema v3 合同；implementationStatus 不再决定可否渲染。 */
+/** 所有真实 Renderer 的完整 schema v5 合同；implementationStatus 不再决定可否渲染。 */
 export const CONTENT_TEMPLATE_CONTRACTS = ${JSON.stringify(contractMap, sortReplacer, 2)} as const satisfies Record<ContentTemplateKey, ContentTemplateContract>;
 
-/** 全部 23 个模板的中性结构预览；不承担业务、发布或 Inspector 完整合同。 */
+/** 全部活跃模板的中性结构预览；不承担业务、发布或 Inspector 完整合同。 */
 export const CONTENT_TEMPLATE_SKELETONS = ${JSON.stringify(templateSkeletonMap, sortReplacer, 2)} as const satisfies Record<string, ContentTemplateSkeleton>;
 
-/** 所有 23 个模板的中性结构预览源；缩略图与总览不得另建坐标台账。 */
+/** 所有活跃模板的中性结构预览源；缩略图与总览不得另建坐标台账。 */
 export const CONTENT_TEMPLATE_PREVIEWS = ${JSON.stringify(templatePreviewMap, sortReplacer, 2)} as const satisfies Record<RegisteredContentTemplateKey, ContentTemplatePreview>;
 
 export const CONTENT_TEMPLATE_PREVIEW_BY_MODULE_TYPE = Object.fromEntries(
@@ -922,6 +1083,302 @@ export const CONTENT_TEMPLATE_BY_MODULE_TYPE = Object.fromEntries(
 
 export function getContentTemplateContract(moduleType: string) {
   return CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType];
+}
+
+export function getContentTemplateDefaultGeometry(
+  moduleType: string,
+  viewport: "desktop" | "mobile",
+) {
+  return getContentTemplateContract(moduleType)?.defaultGeometryByViewport[viewport];
+}
+
+export function getContentTemplateDefaultRect(
+  moduleType: string,
+  nodeId: string,
+  viewport: "desktop" | "mobile",
+): ContentTemplateVisualRect | undefined {
+  const geometry = getContentTemplateDefaultGeometry(moduleType, viewport);
+  const contract = getContentTemplateContract(moduleType);
+  const editableObject = findContentTemplateEditableObject(contract, nodeId);
+  const directMatches = geometry?.zones.filter((zone) => zone.nodeId === nodeId) ?? [];
+  if (directMatches.length === 1) return directMatches[0].rect;
+  const roleMatches = geometry?.zones.filter(
+    (zone) => zone.roleId === editableObject?.roleId,
+  ) ?? [];
+  return roleMatches.length === 1 ? roleMatches[0].rect : undefined;
+}
+
+const PERSONAL_TEMPLATE_COLOR_TOKENS = new Set([
+  "#181A1B", "#5F6568", "#DDE1E2", "#F7F8F8", "#FFFFFF",
+]);
+const SURFACE_COLOR_PRESETS = new Set(["canvas", "mist", "inkSurface"]);
+const SURFACE_PADDING_PRESETS = new Set(["compact", "standard", "spacious"]);
+const SURFACE_RADIUS_PRESETS = new Set(["square", "soft", "rounded"]);
+const SURFACE_SHADOW_PRESETS = new Set(["none", "soft", "lifted"]);
+const INVALID_DEFAULT_CONTENT = Symbol("invalid-default-content");
+const DEFAULT_CONTENT_MAX_DEPTH = 6;
+const DEFAULT_CONTENT_MAX_OBJECT_KEYS = 32;
+const DEFAULT_CONTENT_MAX_STRING_LENGTH = 4096;
+const DEFAULT_CONTENT_MAX_SERIALIZED_LENGTH = 128 * 1024;
+
+function isSafeDefaultContentUrl(fieldKey: string, value: string) {
+  const normalized = value.trim();
+  if (!normalized) return true;
+  const assetField = /(?:image|poster|videoUrl)$/i.test(fieldKey);
+  const linkField = /(?:linkUrl|mapUrl|link|url)$/i.test(fieldKey);
+  if (!assetField && !linkField) return true;
+  if (normalized.startsWith("/") && !normalized.startsWith("//")) return true;
+  const lower = normalized.toLowerCase();
+  return lower.startsWith("https://") || lower.startsWith("http://");
+}
+
+function sanitizeDefaultContentValue(
+  value: unknown,
+  fieldKey: string,
+  options: { depth: number; maxStringLength: number; maxItems: number },
+): ContentTemplateDefaultContentValue | typeof INVALID_DEFAULT_CONTENT {
+  if (value === null) return null;
+  if (typeof value === "string") {
+    if (value.length > options.maxStringLength || !isSafeDefaultContentUrl(fieldKey, value)) {
+      return INVALID_DEFAULT_CONTENT;
+    }
+    return value;
+  }
+  if (typeof value === "number") return Number.isFinite(value) ? value : INVALID_DEFAULT_CONTENT;
+  if (typeof value === "boolean") return value;
+  if (options.depth >= DEFAULT_CONTENT_MAX_DEPTH) return INVALID_DEFAULT_CONTENT;
+  if (Array.isArray(value)) {
+    if (value.length > options.maxItems) return INVALID_DEFAULT_CONTENT;
+    const result: ContentTemplateDefaultContentValue[] = [];
+    for (const item of value) {
+      const sanitized = sanitizeDefaultContentValue(item, fieldKey, {
+        ...options,
+        depth: options.depth + 1,
+        maxStringLength: DEFAULT_CONTENT_MAX_STRING_LENGTH,
+      });
+      if (sanitized === INVALID_DEFAULT_CONTENT) return INVALID_DEFAULT_CONTENT;
+      result.push(sanitized);
+    }
+    return result;
+  }
+  if (!isRecord(value)) return INVALID_DEFAULT_CONTENT;
+  const entries = Object.entries(value);
+  if (entries.length > DEFAULT_CONTENT_MAX_OBJECT_KEYS) return INVALID_DEFAULT_CONTENT;
+  const result: Record<string, ContentTemplateDefaultContentValue> = {};
+  for (const [key, child] of entries) {
+    if (
+      !/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key) ||
+      key === "constructor" || key === "prototype" || key === "__proto__"
+    ) {
+      return INVALID_DEFAULT_CONTENT;
+    }
+    const sanitized = sanitizeDefaultContentValue(child, key, {
+      ...options,
+      depth: options.depth + 1,
+      maxStringLength: DEFAULT_CONTENT_MAX_STRING_LENGTH,
+    });
+    if (sanitized === INVALID_DEFAULT_CONTENT) return INVALID_DEFAULT_CONTENT;
+    result[key] = sanitized;
+  }
+  return result;
+}
+
+/**
+ * 账号私有模板默认内容的合同白名单入口。
+ * 这里只处理 JSON 形状、数量、长度与 URL 协议；资源和商品是否属于当前账号，
+ * 必须由写入服务结合 ownerId 与数据库再次校验。
+ */
+export function sanitizeContentTemplateDefaultContent(
+  moduleType: string,
+  rawContent: unknown,
+): ContentTemplateDefaultContent | undefined {
+  const contract = getContentTemplateContract(moduleType);
+  if (!contract || !isRecord(rawContent)) return undefined;
+  const editableObjects = contract.editorCapabilities.editableObjects;
+  const allowedFields = new Set(editableObjects.flatMap((object) => object.contentFieldKeys));
+  const result: Record<string, ContentTemplateDefaultContentValue> = {};
+  for (const fieldKey of allowedFields) {
+    if (!Object.prototype.hasOwnProperty.call(rawContent, fieldKey)) continue;
+    const editableObject = editableObjects.find((object) => object.contentFieldKeys.includes(fieldKey));
+    const reference = contract.editorCapabilities.referenceFields?.find(
+      (candidate) => candidate.key === fieldKey || candidate.legacyKey === fieldKey,
+    );
+    const quantity = editableObject
+      ? contract.roles.find((role) => role.id === editableObject.roleId)?.quantity
+      : undefined;
+    const sanitized = sanitizeDefaultContentValue(rawContent[fieldKey], fieldKey, {
+      depth: 0,
+      maxStringLength: contract.contentBudget.limits[fieldKey] ?? DEFAULT_CONTENT_MAX_STRING_LENGTH,
+      maxItems: reference?.max ?? quantity?.max ?? 24,
+    });
+    if (sanitized !== INVALID_DEFAULT_CONTENT) result[fieldKey] = sanitized;
+  }
+  if (JSON.stringify(result).length > DEFAULT_CONTENT_MAX_SERIALIZED_LENGTH) return undefined;
+  return result;
+}
+
+export function extractContentTemplateDefaultContent(
+  moduleType: string,
+  props: unknown,
+) {
+  return sanitizeContentTemplateDefaultContent(moduleType, props);
+}
+
+function sanitizePersonalTemplateRect(
+  raw: unknown,
+  constraints: ContentTemplateEditableConstraints,
+  safeArea: ContentTemplateVisualRect,
+) {
+  if (!isRecord(raw)) return undefined;
+  const values = [raw.x, raw.y, raw.width, raw.height].map(Number);
+  if (!values.every(Number.isFinite)) return undefined;
+  let [x, y, width, height] = values;
+  width = Math.min(constraints.maxSize.width, Math.max(constraints.minSize.width, width));
+  height = Math.min(constraints.maxSize.height, Math.max(constraints.minSize.height, height));
+  const bounds = constraints.safeAreaRequired
+    ? safeArea
+    : { x: 0, y: 0, width: 1, height: 1 };
+  width = Math.min(width, bounds.width);
+  height = Math.min(height, bounds.height);
+  x = Math.min(bounds.x + bounds.width - width, Math.max(bounds.x, x));
+  y = Math.min(bounds.y + bounds.height - height, Math.max(bounds.y, y));
+  return { x, y, width, height };
+}
+
+/**
+ * 账号私有模板的唯一白名单清洗入口。返回值只含布局与受控视觉属性，
+ * 不会复制图片、文案、链接、商品、门店或其他业务事实。
+ */
+export function sanitizeContentTemplateLayoutData(
+  moduleType: string,
+  rawLayoutData: unknown,
+): ContentTemplateInstanceOverridesV2 | undefined {
+  const contract = getContentTemplateContract(moduleType);
+  if (!contract || !isRecord(rawLayoutData) || rawLayoutData.version !== 2) return undefined;
+  const result: ContentTemplateInstanceOverridesV2 = { version: 2 };
+  const rawFrame = isRecord(rawLayoutData.frame) ? rawLayoutData.frame : {};
+  const frame: NonNullable<ContentTemplateInstanceOverridesV2["frame"]> = {};
+  const layoutCapabilities = contract.editorCapabilities.layoutOverrides ?? {};
+  if (typeof rawFrame.heightPreset === "string" && layoutCapabilities.framePresets?.includes(rawFrame.heightPreset)) {
+    frame.heightPreset = rawFrame.heightPreset;
+  }
+  if (typeof rawFrame.compositionPreset === "string" && layoutCapabilities.compositionPresets?.includes(rawFrame.compositionPreset)) {
+    frame.compositionPreset = rawFrame.compositionPreset;
+  }
+  if (typeof rawFrame.colorPreset === "string" && SURFACE_COLOR_PRESETS.has(rawFrame.colorPreset)) {
+    frame.colorPreset = rawFrame.colorPreset;
+  }
+  if (contract.flow === "flow") {
+    if (typeof rawFrame.paddingPreset === "string" && SURFACE_PADDING_PRESETS.has(rawFrame.paddingPreset)) {
+      frame.paddingPreset = rawFrame.paddingPreset as NonNullable<typeof frame.paddingPreset>;
+    }
+    if (typeof rawFrame.radiusPreset === "string" && SURFACE_RADIUS_PRESETS.has(rawFrame.radiusPreset)) {
+      frame.radiusPreset = rawFrame.radiusPreset as NonNullable<typeof frame.radiusPreset>;
+    }
+    if (typeof rawFrame.shadowPreset === "string" && SURFACE_SHADOW_PRESETS.has(rawFrame.shadowPreset)) {
+      frame.shadowPreset = rawFrame.shadowPreset as NonNullable<typeof frame.shadowPreset>;
+    }
+  }
+  const rawRatios = isRecord(rawFrame.aspectRatioByViewport) ? rawFrame.aspectRatioByViewport : {};
+  const ratioRange = layoutCapabilities.frameRatioRange ?? { min: 0.25, max: 4, step: 0.01 };
+  const aspectRatioByViewport: Partial<Record<"desktop" | "mobile", number>> = {};
+  for (const viewport of ["desktop", "mobile"] as const) {
+    const ratio = Number(rawRatios[viewport]);
+    if (Number.isFinite(ratio) && ratio >= ratioRange.min && ratio <= ratioRange.max) {
+      aspectRatioByViewport[viewport] = ratio;
+    }
+  }
+  if (Object.keys(aspectRatioByViewport).length) frame.aspectRatioByViewport = aspectRatioByViewport;
+  if (Object.keys(frame).length) result.frame = frame;
+
+  const rawNodes = isRecord(rawLayoutData.nodes) ? rawLayoutData.nodes : {};
+  const nodes: NonNullable<ContentTemplateInstanceOverridesV2["nodes"]> = {};
+  for (const editableObject of contract.editorCapabilities.editableObjects) {
+    for (const nodeId of editableObject.nodeIds ?? [editableObject.roleId]) {
+      const rawNode = rawNodes[nodeId];
+      if (!isRecord(rawNode)) continue;
+      const node: NonNullable<ContentTemplateInstanceOverridesV2["nodes"]>[string] = {};
+      const constraints = editableObject.constraints;
+      if (constraints.allowHide && typeof rawNode.enabled === "boolean") node.enabled = rawNode.enabled;
+      if (contentTemplateObjectHasCapability(editableObject, "layout") && isRecord(rawNode.rectByViewport)) {
+        const rectByViewport: Partial<Record<"desktop" | "mobile", ContentTemplateVisualRect>> = {};
+        for (const viewport of ["desktop", "mobile"] as const) {
+          const safeArea = contract.defaultGeometryByViewport[viewport].safeArea;
+          const rect = sanitizePersonalTemplateRect(rawNode.rectByViewport[viewport], constraints, safeArea);
+          if (rect) rectByViewport[viewport] = rect;
+        }
+        if (Object.keys(rectByViewport).length) node.rectByViewport = rectByViewport;
+      }
+      if (contentTemplateObjectHasCapability(editableObject, "layer") && isRecord(rawNode.zIndexByViewport)) {
+        const zIndexByViewport: Partial<Record<"desktop" | "mobile", number>> = {};
+        for (const viewport of ["desktop", "mobile"] as const) {
+          const zIndex = Number(rawNode.zIndexByViewport[viewport]);
+          if (Number.isInteger(zIndex) && zIndex >= constraints.layerRange.min && zIndex <= constraints.layerRange.max) {
+            zIndexByViewport[viewport] = zIndex;
+          }
+        }
+        if (Object.keys(zIndexByViewport).length) node.zIndexByViewport = zIndexByViewport;
+      }
+      const ratio = Number(rawNode.ratio);
+      if (constraints.allowAspectRatio && Number.isFinite(ratio) && ratio >= 0.25 && ratio <= 4) node.ratio = ratio;
+      const slot = layoutCapabilities.slots?.find((candidate) => candidate.roleId === nodeId);
+      if (slot?.sizePresets?.includes(String(rawNode.sizePreset))) node.sizePreset = String(rawNode.sizePreset);
+      if (slot?.positionPresets?.includes(String(rawNode.positionPreset))) node.positionPreset = String(rawNode.positionPreset);
+      if (isRecord(rawNode.mediaView) && slot) {
+        const mediaView: NonNullable<typeof node.mediaView> = {};
+        if (slot.fit?.includes(rawNode.mediaView.fit as "cover" | "contain")) mediaView.fit = rawNode.mediaView.fit as "cover" | "contain";
+        const zoom = Number(rawNode.mediaView.zoom);
+        if (constraints.allowZoom && slot.zoom && Number.isFinite(zoom) && zoom >= slot.zoom.min && zoom <= slot.zoom.max) mediaView.zoom = zoom;
+        if (constraints.allowFocus && slot.focusByViewport && isRecord(rawNode.mediaView.focusByViewport)) {
+          const focusByViewport: Partial<Record<"desktop" | "mobile", { x: number; y: number }>> = {};
+          for (const viewport of ["desktop", "mobile"] as const) {
+            const rawFocus = rawNode.mediaView.focusByViewport[viewport];
+            if (!isRecord(rawFocus)) continue;
+            const x = Number(rawFocus.x);
+            const y = Number(rawFocus.y);
+            if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && x <= 100 && y >= 0 && y <= 100) focusByViewport[viewport] = { x, y };
+          }
+          if (Object.keys(focusByViewport).length) mediaView.focusByViewport = focusByViewport;
+        }
+        if (Object.keys(mediaView).length) node.mediaView = mediaView;
+      }
+      if (constraints.allowTypography && isRecord(rawNode.typography)) {
+        const textRole = layoutCapabilities.textRoles?.find((candidate) => candidate.roleId === nodeId);
+        const typography: NonNullable<typeof node.typography> = {};
+        if (["xs", "sm", "md", "lg", "xl"].includes(String(rawNode.typography.sizeLevel))) typography.sizeLevel = rawNode.typography.sizeLevel as NonNullable<typeof typography.sizeLevel>;
+        if (textRole?.align?.includes(rawNode.typography.align as "left" | "center" | "right")) typography.align = rawNode.typography.align as "left" | "center" | "right";
+        if (typeof rawNode.typography.color === "string" && PERSONAL_TEMPLATE_COLOR_TOKENS.has(rawNode.typography.color.toUpperCase())) typography.color = rawNode.typography.color.toUpperCase();
+        const maxLines = Number(rawNode.typography.maxLines);
+        if (Number.isInteger(maxLines) && maxLines >= 1 && maxLines <= (textRole?.maxLines ?? 6)) typography.maxLines = maxLines;
+        if (["none", "light", "dark"].includes(String(rawNode.typography.safeBand))) typography.safeBand = rawNode.typography.safeBand as "none" | "light" | "dark";
+        if (Object.keys(typography).length) node.typography = typography;
+      }
+      if (["media", "video", "product", "collection"].includes(editableObject.kind) && isRecord(rawNode.appearance)) {
+        const appearance: NonNullable<typeof node.appearance> = {};
+        if (typeof rawNode.appearance.radiusPreset === "string" && SURFACE_RADIUS_PRESETS.has(rawNode.appearance.radiusPreset)) {
+          appearance.radiusPreset = rawNode.appearance.radiusPreset as NonNullable<typeof appearance.radiusPreset>;
+        }
+        if (typeof rawNode.appearance.shadowPreset === "string" && SURFACE_SHADOW_PRESETS.has(rawNode.appearance.shadowPreset)) {
+          appearance.shadowPreset = rawNode.appearance.shadowPreset as NonNullable<typeof appearance.shadowPreset>;
+        }
+        if (Object.keys(appearance).length) node.appearance = appearance;
+      }
+      if (Object.keys(node).length) nodes[nodeId] = node;
+    }
+  }
+  if (Object.keys(nodes).length) result.nodes = nodes;
+  return result;
+}
+
+export function extractContentTemplateLayoutData(
+  moduleType: string,
+  props: unknown,
+) {
+  if (!isRecord(props)) return undefined;
+  return sanitizeContentTemplateLayoutData(
+    moduleType,
+    props.__instanceOverrides ?? { version: 2 },
+  );
 }
 
 export function findContentTemplateEditableObject(
@@ -1049,9 +1506,17 @@ function getInstanceOverrideIssues(input: {
   const overrides = input.props.__instanceOverrides;
   if (overrides === undefined) return [];
   const basePath = input.basePath ?? "props.__instanceOverrides";
-  const issue = (message: string, path = basePath, field?: string): ContentTemplateIssue => ({
+  const issue = (
+    message: string,
+    path = basePath,
+    field?: string,
+    severity: ContentTemplateIssue["severity"] =
+      isRecord(overrides) && (overrides as Record<string, unknown>).version === 2
+        ? "error"
+        : "warning",
+  ): ContentTemplateIssue => ({
     code: "page-validation",
-    severity: "error",
+    severity,
     layer: "contract",
     blockId: input.blockId,
     moduleType: input.moduleType,
@@ -1172,6 +1637,17 @@ function getInstanceOverrideIssues(input: {
             const height = Number(rawRect.height);
             if (![x, y, width, height].every((value) => Number.isFinite(value)) || x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.0001 || y + height > 1.0001) {
               issues.push(issue("节点必须完整位于画面 0–1 的归一化范围内。", rectPath, nodeId));
+            } else {
+              const constraints = editableObject.constraints;
+              const safeArea = input.contract.defaultGeometryByViewport[viewport as "desktop" | "mobile"].safeArea;
+              const bounds = constraints.safeAreaRequired ? safeArea : { x: 0, y: 0, width: 1, height: 1 };
+              if (
+                width < constraints.minSize.width || height < constraints.minSize.height ||
+                width > constraints.maxSize.width || height > constraints.maxSize.height ||
+                x < bounds.x || y < bounds.y || x + width > bounds.x + bounds.width + 0.0001 || y + height > bounds.y + bounds.height + 0.0001
+              ) {
+                issues.push(issue("节点位置或尺寸超出新版安全区，渲染时将自动使用安全回退值。", rectPath, nodeId));
+              }
             }
           }
         }
@@ -1264,7 +1740,7 @@ function getInstanceOverrideIssues(input: {
             issues.push(issue("文字最大行数超出当前角色允许范围。", path + ".typography.maxLines", nodeId));
           }
           if (typography.safeBand !== undefined && !["none", "light", "dark"].includes(String(typography.safeBand))) {
-            issues.push(issue("安全文字带值无效。", path + ".typography.safeBand", nodeId));
+            issues.push(issue("安全文字带值无效。", path + ".typography.safeBand", nodeId, "error"));
           }
           if (
             typography.lineHeight !== undefined &&
@@ -1294,7 +1770,7 @@ function getInstanceOverrideIssues(input: {
         const contentPath = basePath.endsWith(".__instanceOverrides")
           ? basePath.slice(0, -".__instanceOverrides".length) + "." + contentFieldKey
           : "props." + contentFieldKey;
-        issues.push(issue("已启用的文字角色必须填写内容。", contentPath, nodeId));
+        issues.push(issue("已启用的文字角色必须填写内容。", contentPath, nodeId, "error"));
       }
       if (roleVisible && roleHasVisualOverride && textCapability?.requiresSafeBand) {
         const typography = isRecord(rawNode.typography) ? rawNode.typography : {};
@@ -1303,6 +1779,7 @@ function getInstanceOverrideIssues(input: {
             "图片叠字需选择浅色或深色安全文字带后才能发布。",
             path + ".typography.safeBand",
             nodeId,
+            "error",
           ));
         }
       }
@@ -1401,7 +1878,7 @@ function getInstanceOverrideIssues(input: {
       }
     }
     if (value.enabled === true && capability.requiresSafeBand && value.safeBand !== "light" && value.safeBand !== "dark") {
-      issues.push(issue("图片叠字需选择浅色或深色安全文字带后才能发布。", path + ".safeBand", roleId));
+      issues.push(issue("图片叠字需选择浅色或深色安全文字带后才能发布。", path + ".safeBand", roleId, "error"));
     }
   }
   return issues;
@@ -1440,9 +1917,9 @@ export function getContentTemplateIssues(input: {
     if (props.__instanceOverrides !== undefined) {
       return [{
         ...base,
-        code: "content-template-marker-invalid",
-        severity: "error",
-        message: "实例覆盖缺少当前内容模板版本印记，不能按旧合同猜测渲染。",
+        code: "content-template-legacy",
+        severity: "warning",
+        message: "历史实例未携带版本印记；已按当前合同保留合法覆盖并安全回退不合法部分。",
       }, ...overrideIssues];
     }
     return [{
@@ -1479,13 +1956,13 @@ export function getContentTemplateIssues(input: {
     }];
   }
   if (markerVersion !== contract.version) {
-    if (markerVersion === 1 && contract.version === 2 && props.__instanceOverrides === undefined) {
+    if (markerVersion < contract.version && markerVersion >= 1) {
       return [{
         ...base,
         code: "content-template-legacy",
         severity: "info",
-        message: "内容模板版本 1 按原构图兼容读取；普通保存不会自动升级到实例覆盖合同。",
-      }];
+        message: "历史模板已自动采用新版默认构图；合法实例覆盖继续保留，不合法部分使用安全回退。",
+      }, ...overrideIssues];
     }
     return [{
       ...base,

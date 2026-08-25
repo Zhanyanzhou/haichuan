@@ -19,6 +19,29 @@ export const appointmentSchema: ModuleInspectorSchema = {
   defaults: { ...appointmentPuckConfig.defaultProps },
   sections: [
     {
+      id: "appointment-media",
+      title: "媒体",
+      layer: "media",
+      description: "桌面超宽背景带（留空用纯色）；手机独立裁切",
+      fields: [
+        {
+          key: "backgroundImage",
+          label: "背景图（可选）",
+          control: "media",
+          spec: IMAGE_SPECS.booking.bgImage,
+          focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
+          placeholder: "上传背景图，留空用纯色",
+          showSpecCheck: true,
+        },
+        {
+          key: "altText",
+          label: "背景图替代文字",
+          control: "text",
+          maxLength: APPOINTMENT_CONTRACT.content.limits.altText,
+        },
+      ],
+    },
+    {
       id: "appointment-content",
       title: "内容",
       layer: "content",
@@ -66,29 +89,6 @@ export const appointmentSchema: ModuleInspectorSchema = {
           control: "text",
           maxLength: APPOINTMENT_CONTRACT.content.limits.phone,
           hint: "留空只显示主按钮",
-        },
-      ],
-    },
-    {
-      id: "appointment-media",
-      title: "媒体",
-      layer: "media",
-      description: "桌面超宽背景带（留空用纯色）；手机独立裁切",
-      fields: [
-        {
-          key: "backgroundImage",
-          label: "背景图（可选）",
-          control: "media",
-          spec: IMAGE_SPECS.booking.bgImage,
-          focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
-          placeholder: "上传背景图，留空用纯色",
-          showSpecCheck: true,
-        },
-        {
-          key: "altText",
-          label: "背景图替代文字",
-          control: "text",
-          maxLength: APPOINTMENT_CONTRACT.content.limits.altText,
         },
       ],
     },

@@ -16,15 +16,17 @@ import {
   BlockOutlined,
   CheckCircleOutlined,
   ControlOutlined,
+  CopyOutlined,
   DeleteOutlined,
   DragOutlined,
+  EditOutlined,
   ExclamationCircleOutlined,
   LeftOutlined,
   MenuOutlined,
   RightOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
-import { Puck, type UiState } from "@puckeditor/core";
+import { Puck, type PuckAction, type UiState } from "@puckeditor/core";
 import { useNavigate } from "react-router-dom";
 import "@puckeditor/core/puck.css";
 import { puckConfig } from "@/page-builder/config/puckConfig";
@@ -37,7 +39,12 @@ import {
   isContentTemplateInsertable,
   type BlockMeta,
 } from "@/page-builder/config/blockMeta";
-import { pageDocumentApi, settingsApi } from "@/services/api";
+import {
+  pageDocumentApi,
+  personalContentTemplateApi,
+  settingsApi,
+  type PersonalContentTemplate,
+} from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
@@ -62,8 +69,12 @@ import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import ContentTemplateRendererPreview from "@/page-builder/preview/ContentTemplateRendererPreview";
 import {
   createContentTemplateMarker,
+  extractContentTemplateDefaultContent,
+  extractContentTemplateLayoutData,
   getContentTemplatePreview,
   isContentTemplateAllowedForPage,
+  sanitizeContentTemplateDefaultContent,
+  sanitizeContentTemplateLayoutData,
 } from "@/page-builder/generated/contentTemplates.generated";
 import { isVisualRecord } from "@/page-builder/runtime/visualLayout";
 import {
@@ -79,7 +90,9 @@ import "./editor.css";
 import EditorToolbar, { VIEWPORT_PRESETS } from "./components/EditorToolbar";
 import UnsavedChangesGuard from "./components/UnsavedChangesGuard";
 import LayerRail from "./components/LayerRail";
-import CanvasSelectionDock from "./components/CanvasSelectionDock";
+import CanvasSelectionDock, {
+  CanvasSelectionOverlay,
+} from "./components/CanvasSelectionDock";
 import RevisionDrawer from "./components/RevisionDrawer";
 import PageSettingsDrawer from "./components/PageSettingsDrawer";
 import CanvasBlockInteractionBoundary from "./components/CanvasBlockInteractionBoundary";
@@ -111,6 +124,17 @@ import {
   canonicalizePageContent,
 } from "./editor-utils";
 
+const HiddenPuckHeader = () => <span style={{ display: "none" }} />;
+
+// Puck 把 override 函数视为组件类型。若在 JSX 内联创建，编辑器父层因
+// 图层排序、滚动定位等状态重渲染时会反复卸载选区操作组，导致按钮抖动
+// 或短暂消失。保持同一组件与对象引用，让原子 action 只更新必要节点。
+const HOMEPAGE_EDITOR_OVERRIDES = {
+  header: HiddenPuckHeader,
+  headerActions: HiddenPuckHeader,
+  componentOverlay: CanvasSelectionOverlay,
+};
+
 // 固定由顶部设备切换器控制预览尺寸，避免 Puck 根据浏览器窗口宽度回写为桌面端。
 const INITIAL_EDITOR_UI: Partial<UiState> = {
   viewports: {
@@ -130,6 +154,7 @@ const INITIAL_EDITOR_UI: Partial<UiState> = {
 const CANVAS_SCROLL_SPY_TOP_OFFSET = 24;
 
 let blockIdSequence = 0;
+const PERSONAL_TEMPLATE_CHANGED_EVENT = "haichuan:personal-template-changed";
 
 /**
  * 脏标记比较签名:只取 content 的规范化形态(忽略 block id 与键序、不含 zones/ui)。
@@ -140,7 +165,10 @@ function dataSignature(data: unknown): string {
   return canonicalizePuckContent(data);
 }
 
-function createBlockContent(type: string) {
+function createBlockContent(type: string): {
+  type: string;
+  props: Record<string, any>;
+} {
   const component = (
     puckConfig.components as Record<
       string,
@@ -159,6 +187,38 @@ function createBlockContent(type: string) {
       locked: false,
     },
   };
+}
+
+/**
+ * 使用 Puck 的局部 action 插入已经准备好的合同模块。
+ * insert 先建立节点和索引但不记历史，replace 再写入合同印记与实例布局并记录；
+ * 这样一次用户插入仍只有一条可撤销历史，也不再用 setData 重建整棵页面树。
+ */
+function insertPreparedBlock(
+  dispatch: (action: PuckAction) => void,
+  block: { type: string; props: Record<string, any> },
+  destinationIndex: number,
+) {
+  const id = String(block.props.id);
+  const preparedBlock = {
+    ...block,
+    props: { ...block.props, id },
+  };
+  dispatch({
+    type: "insert",
+    componentType: block.type,
+    destinationIndex,
+    destinationZone: ROOT_ZONE,
+    id,
+    recordHistory: false,
+  });
+  dispatch({
+    type: "replace",
+    destinationIndex,
+    destinationZone: ROOT_ZONE,
+    data: preparedBlock,
+    recordHistory: true,
+  });
 }
 
 function EditorCanvasFooter() {
@@ -431,7 +491,6 @@ function CanvasBlockAnchor({
         Math.max(
           contentShell?.scrollHeight || 0,
           contentShell?.offsetHeight || 0,
-          anchor.ownerDocument.body?.scrollHeight || 0,
         ),
       );
       if (documentHeight <= 0) return;
@@ -506,13 +565,17 @@ function CanvasBlockAnchor({
 function CanvasPageDataSynchronizer({
   data,
   pageKey,
+  canvasDataSyncVersion,
 }: {
   data: any;
   pageKey: EditorPageKey;
+  canvasDataSyncVersion: number;
 }) {
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const currentData = useHomepagePuck((state) => state.appState.data);
   const appliedSignatureRef = useRef<string | null>(null);
+  const mountedWithInitialDataRef = useRef(false);
+  const consumedCanvasDataSyncVersionRef = useRef(canvasDataSyncVersion);
   const dataSignature = useMemo(() => JSON.stringify(data), [data]);
   const currentDataSignature = useMemo(
     () => JSON.stringify(currentData),
@@ -521,6 +584,22 @@ function CanvasPageDataSynchronizer({
 
   useEffect(() => {
     const signature = `${pageKey}:${dataSignature}`;
+    // Puck 0.22.4 在 Provider 挂载时已经读取 data 并完成 walkAppState 归一化。
+    // 归一化后的 store 与原始 data JSON 不同并不代表页面发生了外部切换；
+    // 首帧再次 setData 只会重复整树遍历。后续切页、恢复版本等 data 变化
+    // 仍由下方同步逻辑完成必要的整页替换。
+    if (!mountedWithInitialDataRef.current) {
+      mountedWithInitialDataRef.current = true;
+      appliedSignatureRef.current = signature;
+      return;
+    }
+    // 工具栏已经先把同一整页数据写入 Puck store，再同步父层 data prop。
+    // 该版本只用于确认这次父层变化已由内部 action 消费，避免重复 setData。
+    if (consumedCanvasDataSyncVersionRef.current !== canvasDataSyncVersion) {
+      consumedCanvasDataSyncVersionRef.current = canvasDataSyncVersion;
+      appliedSignatureRef.current = signature;
+      return;
+    }
     if (appliedSignatureRef.current === signature) return;
     appliedSignatureRef.current = signature;
     // Puck 已以同一份数据挂载时不重复执行昂贵的整页替换；页面切换时
@@ -528,7 +607,7 @@ function CanvasPageDataSynchronizer({
     if (currentDataSignature === dataSignature) return;
     dispatch({ type: "setData", data });
     dispatch({ type: "setUi", ui: { itemSelector: null } });
-  }, [currentDataSignature, data, dataSignature, dispatch, pageKey]);
+  }, [canvasDataSyncVersion, currentDataSignature, data, dataSignature, dispatch, pageKey]);
 
   return null;
 }
@@ -1529,6 +1608,7 @@ function TemplateCard({
   meta,
   viewMode,
   previewViewport,
+  onActivate,
   onPointerDragMove,
   onPointerDragEnd,
 }: {
@@ -1536,6 +1616,7 @@ function TemplateCard({
   meta: BlockMeta;
   viewMode: "single" | "double";
   previewViewport: "desktop" | "mobile";
+  onActivate: (name: string) => void;
   onPointerDragMove: (name: string, clientX: number, clientY: number) => void;
   onPointerDragEnd: (name: string, clientX: number, clientY: number) => boolean;
 }) {
@@ -1568,6 +1649,9 @@ function TemplateCard({
       pointerStart.current = null;
       if (!didPointerDrag.current) return;
       onPointerDragEnd(name, clientX, clientY);
+      window.setTimeout(() => {
+        didPointerDrag.current = false;
+      }, 0);
     },
     [name, onPointerDragEnd],
   );
@@ -1591,12 +1675,12 @@ function TemplateCard({
     };
   }, [endTemplateDrag, moveTemplate]);
 
-  const explainDrag = () => {
+  const activateTemplate = () => {
     if (unavailable) {
       message.info(`“${meta.name}”最多可添加 ${limit} 个`);
       return;
     }
-    message.info("按住模块并拖到画布中的目标位置");
+    onActivate(name);
   };
 
   return (
@@ -1606,9 +1690,13 @@ function TemplateCard({
       role="button"
       tabIndex={unavailable ? -1 : 0}
       aria-disabled={unavailable || undefined}
-      aria-label={`${meta.name}：拖到画布`}
+      aria-label={`${meta.name}：点击添加到页面末尾，也可拖到画布指定位置`}
       onClick={() => {
-        if (!unavailable) explainDrag();
+        if (didPointerDrag.current) {
+          didPointerDrag.current = false;
+          return;
+        }
+        activateTemplate();
       }}
       onKeyDown={(event) => {
         if (
@@ -1654,7 +1742,9 @@ function TemplateCard({
           didPointerDrag.current = false;
       }}
       title={
-        unavailable ? `${meta.name}已达可添加上限` : `拖拽${meta.name}到画布`
+        unavailable
+          ? `${meta.name}已达可添加上限`
+          : `点击添加${meta.name}到页面末尾，也可拖到画布指定位置`
       }
     >
       <div className="homepage-editor__template-card-main">
@@ -1675,7 +1765,7 @@ function TemplateCard({
               {meta.badge}
             </span>
           )}
-          <span className="homepage-editor__template-add">拖到画布</span>
+          <span className="homepage-editor__template-add">点击添加 · 可拖拽</span>
         </span>
         <span className="homepage-editor__template-name">{meta.name}</span>
         <span className="homepage-editor__template-description">
@@ -1700,11 +1790,12 @@ function TemplateCard({
 
 function TemplateLibrary({
   pageKey,
+  onInsertTemplate,
   onTemplatePointerDragMove,
   onTemplatePointerDragEnd,
-  onSaveAsTemplate,
 }: {
   pageKey: EditorPageKey;
+  onInsertTemplate: (name: string) => void;
   onTemplatePointerDragMove: (
     name: string,
     clientX: number,
@@ -1715,9 +1806,8 @@ function TemplateLibrary({
     clientX: number,
     clientY: number,
   ) => boolean;
-  onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
 }) {
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const currentViewport = useHomepagePuck(
@@ -1738,19 +1828,41 @@ function TemplateLibrary({
       return "double";
     }
   });
-  const [myTemplates, setMyTemplates] = useState<BlockTemplate[]>(() =>
+  const [localTemplates, setLocalTemplates] = useState<BlockTemplate[]>(() =>
     blockTemplateStore.getAll(),
   );
+  const [personalTemplates, setPersonalTemplates] = useState<PersonalContentTemplate[]>([]);
+  const [personalTemplatesLoading, setPersonalTemplatesLoading] = useState(true);
+  const [personalTemplatesError, setPersonalTemplatesError] = useState<string | null>(null);
 
   useEffect(() => {
     window.localStorage.setItem("homepage-editor-template-view-mode", viewMode);
   }, [viewMode]);
 
-  const refreshMyTemplates = useCallback(() => {
-    setMyTemplates(blockTemplateStore.getAll());
+  const refreshLocalTemplates = useCallback(() => {
+    setLocalTemplates(blockTemplateStore.getAll());
   }, []);
 
-  // 「保存为个人常用方案」弹窗逻辑由主编辑器组件定义并经 props 传入,此处不重复实现。
+  const refreshPersonalTemplates = useCallback(async () => {
+    setPersonalTemplatesLoading(true);
+    setPersonalTemplatesError(null);
+    try {
+      const response = await personalContentTemplateApi.list();
+      setPersonalTemplates(unwrapResponse<PersonalContentTemplate[]>(response) ?? []);
+    } catch {
+      const fallbackMessage = "账号模板暂时不可用，内置模板和本机旧方案仍可使用";
+      setPersonalTemplatesError(fallbackMessage);
+    } finally {
+      setPersonalTemplatesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshPersonalTemplates();
+    const refresh = () => void refreshPersonalTemplates();
+    window.addEventListener(PERSONAL_TEMPLATE_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(PERSONAL_TEMPLATE_CHANGED_EVENT, refresh);
+  }, [refreshPersonalTemplates]);
 
   const entries = useMemo(
     () =>
@@ -1820,6 +1932,150 @@ function TemplateLibrary({
         /* 偏好记忆失败不阻断收放 */
       }
       return next;
+    });
+  };
+
+  const insertPersonalTemplate = (template: PersonalContentTemplate) => {
+    if (!isContentTemplateAllowedForPage(pageKey, template.moduleType)) {
+      message.warning("当前页面角色不允许添加此模板");
+      return;
+    }
+    const layoutData = sanitizeContentTemplateLayoutData(
+      template.moduleType,
+      template.layoutData,
+    );
+    if (!layoutData) {
+      message.warning("此模板布局已不符合当前合同，请重新保存");
+      return;
+    }
+    const meta = BLOCK_META[template.moduleType];
+    const limit = meta?.limit ?? 5;
+    const usedCount = (appData.content ?? []).filter(
+      (item: { type: string }) => item.type === template.moduleType,
+    ).length;
+    if (usedCount >= limit) {
+      message.info(`“${getModuleDisplayName(template.moduleType)}”最多可添加 ${limit} 个`);
+      return;
+    }
+    const block = createBlockContent(template.moduleType);
+    const contentDefaults = sanitizeContentTemplateDefaultContent(
+      template.moduleType,
+      template.contentDefaults,
+    );
+    block.props = {
+      ...block.props,
+      ...(contentDefaults ?? {}),
+      __instanceOverrides: layoutData,
+    };
+    insertPreparedBlock(dispatch, block, appData.content?.length ?? 0);
+    message.success(
+      contentDefaults && Object.keys(contentDefaults).length > 0
+        ? `已添加“${template.name}”并恢复已保存的默认内容`
+        : `已添加“${template.name}”，内容使用安全空模板`,
+    );
+  };
+
+  const confirmDeletePersonalTemplate = (template: PersonalContentTemplate) => {
+    modal.confirm({
+      title: `删除“${template.name}”？`,
+      content: "只会删除当前账号的模板及其可选默认内容，不影响已插入页面或历史内容。",
+      okText: "删除模板",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        try {
+          await personalContentTemplateApi.remove(template.id);
+          await refreshPersonalTemplates();
+          message.success("模板已删除");
+        } catch (error) {
+          message.error(getEditorErrorMessage(error, "模板删除失败，请稍后重试"));
+          throw error;
+        }
+      },
+    });
+  };
+
+  const duplicatePersonalTemplate = async (template: PersonalContentTemplate) => {
+    try {
+      await personalContentTemplateApi.create({
+        name: `${template.name} 副本 ${personalTemplates.length + 1}`,
+        moduleType: template.moduleType,
+        layoutData: template.layoutData,
+        contentDefaults: template.contentDefaults,
+      });
+      await refreshPersonalTemplates();
+      message.success("模板副本已创建");
+    } catch (error) {
+      message.error(getEditorErrorMessage(error, "模板复制失败，请稍后重试"));
+    }
+  };
+
+  const renamePersonalTemplate = (template: PersonalContentTemplate) => {
+    const inputId = `personal-template-name-${template.id}`;
+    modal.confirm({
+      title: "重命名模板",
+      content: (
+        <label htmlFor={inputId} style={{ display: "block", marginTop: 8, fontSize: 12 }}>
+          模板名称
+          <input
+            id={inputId}
+            type="text"
+            defaultValue={template.name}
+            style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 10px", border: "1px solid var(--adm-line)", borderRadius: 3 }}
+          />
+        </label>
+      ),
+      okText: "保存名称",
+      cancelText: "取消",
+      onOk: async () => {
+        const name = (document.getElementById(inputId) as HTMLInputElement | null)?.value.trim();
+        if (!name) throw new Error("请输入模板名称");
+        try {
+          await personalContentTemplateApi.update(template.id, { name });
+          await refreshPersonalTemplates();
+          message.success("模板名称已更新");
+        } catch (error) {
+          message.error(
+            getEditorErrorMessage(error, "模板名称更新失败，请稍后重试"),
+          );
+          throw error;
+        }
+      },
+    });
+  };
+
+  const importLocalTemplate = (template: BlockTemplate) => {
+    const migrated = migratePuckData({
+      content: [{ type: template.type, props: template.props }],
+    }).content[0];
+    const layoutData = migrated
+      ? extractContentTemplateLayoutData(migrated.type, migrated.props)
+      : undefined;
+    if (!migrated || !layoutData) {
+      message.warning("此旧方案无法映射到当前模板合同");
+      return;
+    }
+    modal.confirm({
+      title: `导入“${template.name}”？`,
+      content: "只抽取合法布局；旧图片、文案、链接和商品数据不会上传。",
+      okText: "导入到我的模板",
+      cancelText: "取消",
+      onOk: async () => {
+        try {
+          await personalContentTemplateApi.create({
+            name: template.name,
+            moduleType: migrated.type,
+            layoutData,
+          });
+          await refreshPersonalTemplates();
+          message.success("旧方案的合法布局已导入");
+        } catch (error) {
+          message.error(
+            getEditorErrorMessage(error, "旧方案导入失败，请稍后重试"),
+          );
+          throw error;
+        }
+      },
     });
   };
 
@@ -1907,16 +2163,92 @@ function TemplateLibrary({
       <div
         className={`homepage-editor__template-scroll${viewMode === "double" ? " is-double" : ""}`}
       >
-        {entries.length > 0 || myTemplates.length > 0 ? (
+        {entries.length > 0 || personalTemplates.length > 0 || localTemplates.length > 0 || personalTemplatesLoading || personalTemplatesError ? (
           <>
-            {myTemplates.length > 0 ? (
+            {personalTemplatesLoading || personalTemplates.length > 0 || personalTemplatesError ? (
               <section
                 className="homepage-editor__template-group"
-                aria-labelledby="template-group-saved"
+                aria-labelledby="template-group-personal"
               >
-                <h3 id="template-group-saved">个人常用方案</h3>
+                <h3 id="template-group-personal">我的模板</h3>
+                {personalTemplatesLoading ? (
+                  <div className="homepage-editor__library-empty" role="status">
+                    <Spin size="small" />
+                    <p>正在读取账号模板…</p>
+                  </div>
+                ) : (
+                  <>
+                    {personalTemplatesError ? (
+                      <div className="homepage-editor__library-empty is-error" role="alert">
+                        <p>{personalTemplatesError}</p>
+                        <button
+                          type="button"
+                          className="homepage-editor__library-empty-action"
+                          onClick={() => void refreshPersonalTemplates()}
+                        >
+                          重新加载账号模板
+                        </button>
+                      </div>
+                    ) : null}
+                    {personalTemplates.length > 0 ? (
+                      <div className="homepage-editor__template-group-grid">
+                        {personalTemplates.map((template) => (
+                          <article className="homepage-editor__template-card" key={`personal-${template.id}`}>
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              className="homepage-editor__template-card-main"
+                              aria-label={`${template.name}：点击添加`}
+                              onKeyDown={(event) => {
+                                if (!event.repeat && (event.key === "Enter" || event.key === " ")) {
+                                  event.preventDefault();
+                                  insertPersonalTemplate(template);
+                                }
+                              }}
+                              onClick={() => insertPersonalTemplate(template)}
+                            >
+                              <span className="homepage-editor__template-preview-wrap">
+                                <ContentTemplateRendererPreview
+                                  moduleType={template.moduleType}
+                                  viewport={previewViewport}
+                                  layoutData={template.layoutData}
+                                />
+                                <span className="homepage-editor__template-badge" style={{ background: "#181A1B" }}>我的</span>
+                                <span className="homepage-editor__template-add">点击添加</span>
+                              </span>
+                              <span className="homepage-editor__template-name">{template.name}</span>
+                              <span className="homepage-editor__template-description">
+                                {getModuleDisplayName(template.moduleType)} · 账号同步
+                                {template.contentDefaults ? " · 含默认内容" : ""}
+                              </span>
+                            </div>
+                            <div className="homepage-editor__template-card-actions" aria-label={`${template.name}模板操作`}>
+                              <button type="button" onClick={() => renamePersonalTemplate(template)} title="重命名此账号模板" aria-label="重命名模板">
+                                <EditOutlined />
+                              </button>
+                              <button type="button" onClick={() => void duplicatePersonalTemplate(template)} title="复制此账号模板" aria-label="复制模板">
+                                <CopyOutlined />
+                              </button>
+                              <button type="button" onClick={() => confirmDeletePersonalTemplate(template)} title="删除此账号模板" aria-label="删除模板">
+                                <DeleteOutlined />
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </section>
+            ) : null}
+            {localTemplates.length > 0 ? (
+              <section
+                className="homepage-editor__template-group"
+                aria-labelledby="template-group-local"
+              >
+                <h3 id="template-group-local">本机旧方案</h3>
                 <div className="homepage-editor__template-group-grid">
-                  {myTemplates.map((tpl) => (
+                  {localTemplates.map((tpl) => (
                     <article
                       className="homepage-editor__template-card"
                       key={tpl.id}
@@ -1966,18 +2298,11 @@ function TemplateLibrary({
                             );
                             return;
                           }
-                          const updated = {
-                            ...appData,
-                            content: [
-                              ...(appData.content ?? []),
-                              migratedBlock,
-                            ],
-                          };
-                          dispatch({
-                            type: "setData",
-                            data: updated,
-                            recordHistory: true,
-                          });
+                          insertPreparedBlock(
+                            dispatch,
+                            migratedBlock,
+                            appData.content?.length ?? 0,
+                          );
                           message.success(
                             migratedBlock.type !== tpl.type
                               ? `已添加“${tpl.name}”(已升级为「${getModuleDisplayName(migratedBlock.type)}」)`
@@ -2008,11 +2333,20 @@ function TemplateLibrary({
                       <button
                         type="button"
                         className="homepage-editor__template-favorite"
+                        style={{ right: 34 }}
+                        onClick={() => importLocalTemplate(tpl)}
+                        title="只导入合法布局到我的模板"
+                      >
+                        导入
+                      </button>
+                      <button
+                        type="button"
+                        className="homepage-editor__template-favorite"
                         onClick={() => {
                           blockTemplateStore.remove(tpl.id);
-                          refreshMyTemplates();
+                          refreshLocalTemplates();
                         }}
-                        title="删除此个人常用方案"
+                        title="删除此本机旧方案"
                       >
                         <DeleteOutlined />
                       </button>
@@ -2036,6 +2370,7 @@ function TemplateLibrary({
                       meta={meta}
                       viewMode={viewMode}
                       previewViewport={previewViewport}
+                      onActivate={onInsertTemplate}
                       onPointerDragMove={onTemplatePointerDragMove}
                       onPointerDragEnd={onTemplatePointerDragEnd}
                     />
@@ -2078,12 +2413,14 @@ function InspectorPanel({
   hasUnsavedChanges,
   saving,
   onSaveDraft,
+  onSaveAsTemplate,
   publishIssues,
   validationState,
 }: {
   hasUnsavedChanges: boolean;
   saving: boolean;
   onSaveDraft: () => void;
+  onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
   publishIssues: PublishValidationIssue[];
   validationState: PublishValidationState;
 }) {
@@ -2129,13 +2466,14 @@ function InspectorPanel({
   }
 
   // 分派：双图文走对象化专用面板(实验,验证交互后再考虑推广);
-  // 其余 24 个组件(23 内容模板 + 网站全局设置/业务功能区)走 Schema 注册表。
+  // 其余 25 个组件(24 内容模板 + 网站全局设置/业务功能区)走 Schema 注册表。
   if (selectedItem.type === "双图海报") {
     return (
       <DoublePosterInspector
         hasUnsavedChanges={hasUnsavedChanges}
         saving={saving}
         onSaveDraft={onSaveDraft}
+        onSaveAsTemplate={onSaveAsTemplate}
         publishIssues={publishIssues}
         validationState={validationState}
       />
@@ -2149,6 +2487,7 @@ function InspectorPanel({
         hasUnsavedChanges={hasUnsavedChanges}
         saving={saving}
         onSaveDraft={onSaveDraft}
+        onSaveAsTemplate={onSaveAsTemplate}
         publishIssues={publishIssues}
         validationState={validationState}
       />
@@ -2620,6 +2959,23 @@ function EditorBody({
     return () => observer.disconnect();
   }, [updateCanvasMetrics, appData.content.length, viewportWidth]);
 
+  // 页面内容可以随工作区缩放，编辑 HUD 则需要保持稳定的屏幕尺寸。
+  // 通过同源 iframe 的 CSS 变量传入逆缩放值，避免 38% 画布下工具不可读。
+  useLayoutEffect(() => {
+    const frameHost = previewFrameRef.current;
+    const iframe = frameHost?.querySelector<HTMLIFrameElement>("iframe");
+    if (!iframe) return undefined;
+    const syncEditorUiScale = () => {
+      const documentElement = iframe.contentDocument?.documentElement;
+      if (!documentElement) return;
+      const inverseScale = Math.min(3, Math.max(1, 1 / Math.max(0.16, canvasZoom)));
+      documentElement.style.setProperty("--hc-editor-ui-scale", inverseScale.toFixed(3));
+    };
+    syncEditorUiScale();
+    iframe.addEventListener("load", syncEditorUiScale);
+    return () => iframe.removeEventListener("load", syncEditorUiScale);
+  }, [canvasZoom, viewportWidth, appData.content.length]);
+
   const adjustCanvasZoom = (delta: number) => {
     setIsFitView(false);
     setCanvasZoom((current) => Math.min(1, Math.max(0.16, current + delta)));
@@ -2644,17 +3000,7 @@ function EditorBody({
         return;
       }
 
-      const nextContent = [...appData.content];
-      nextContent.splice(
-        insertionIndex,
-        0,
-        createBlockContent(templateName) as (typeof appData.content)[number],
-      );
-      dispatch({
-        type: "setData",
-        data: { ...appData, content: nextContent },
-        recordHistory: true,
-      });
+      insertPreparedBlock(dispatch, createBlockContent(templateName), insertionIndex);
       dispatch({
         type: "setUi",
         ui: { itemSelector: { index: insertionIndex, zone: ROOT_ZONE } },
@@ -2708,6 +3054,11 @@ function EditorBody({
     [clearDragState, getCanvasDropIndex, insertTemplate],
   );
 
+  const handleTemplateActivate = useCallback(
+    (name: string) => insertTemplate(name, appData.content.length),
+    [appData.content.length, insertTemplate],
+  );
+
   const dropPosition =
     appData.content.length === 0 || dropIndex === null
       ? 50
@@ -2719,9 +3070,9 @@ function EditorBody({
     >
       <TemplateLibrary
         pageKey={pageKey}
+        onInsertTemplate={handleTemplateActivate}
         onTemplatePointerDragMove={handleTemplatePointerDragMove}
         onTemplatePointerDragEnd={handleTemplatePointerDragEnd}
-        onSaveAsTemplate={onSaveAsTemplate}
       />
 
       <aside
@@ -2747,7 +3098,6 @@ function EditorBody({
               </span>
             </div>
             <LayerRail
-              onSaveAsTemplate={onSaveAsTemplate}
               navigationPreviewOpen={navigationPreviewOpen}
               onToggleNavigationPreview={toggleNavigationPreview}
               scrollSpyIndex={scrollSpyIndex}
@@ -2879,6 +3229,7 @@ function EditorBody({
               hasUnsavedChanges={hasUnsavedChanges}
               saving={saving}
               onSaveDraft={() => onSaveDraft(appData)}
+              onSaveAsTemplate={onSaveAsTemplate}
               publishIssues={publishIssues}
               validationState={validationState}
             />
@@ -2922,6 +3273,8 @@ export default function HomepageConfig({
   const hasInitializedEditorRef = useRef(false);
   const activePageKeyRef = useRef(pageKey);
   const latestData = useRef<any>(data);
+  const preserveSavedBaselineOnDataSyncRef = useRef(false);
+  const [canvasDataSyncVersion, setCanvasDataSyncVersion] = useState(0);
   const pageSessionCacheRef = useRef<Record<string, PageSessionCache>>({});
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const dataSignatureRef = useRef("");  const [metadata, setMetadata] = useState<Record<string, any>>({});
@@ -2948,26 +3301,35 @@ export default function HomepageConfig({
     viewingPublishedRef.current = viewingPublished;
   }, [viewingPublished]);
 
-  const [myTemplates, setMyTemplates] = useState<BlockTemplate[]>(() =>
-    blockTemplateStore.getAll(),
-  );
-
-  const refreshMyTemplates = useCallback(() => {
-    setMyTemplates(blockTemplateStore.getAll());
-  }, []);
-
   const saveBlockAsTemplate = useCallback(
     (blockType: string, blockProps: Record<string, any>) => {
       const moduleDisplayName = getModuleDisplayName(blockType);
+      const layoutData = extractContentTemplateLayoutData(blockType, blockProps);
+      if (!layoutData) {
+        message.warning("当前模块不是可另存的内容模板，或布局数据需要先升级");
+        return;
+      }
       modal.confirm({
-        title: "保存为个人常用方案",
+        title: "另存到模板库",
         content: (
           <div style={{ marginTop: 8 }}>
             <p style={{ margin: "0 0 8px", color: "var(--adm-text)", fontSize: 12 }}>
-              仅在当前浏览器中保存当前模块的内容与受控预设，不会同步给其他账号或成员。
+              默认仅保存桌面端与移动端布局、焦点和受控视觉属性。
             </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 92px", gap: 8, marginBottom: 12 }}>
+              <ContentTemplateRendererPreview
+                moduleType={blockType}
+                viewport="desktop"
+                layoutData={layoutData}
+              />
+              <ContentTemplateRendererPreview
+                moduleType={blockType}
+                viewport="mobile"
+                layoutData={layoutData}
+              />
+            </div>
             <label style={{ fontSize: 12, color: "var(--adm-text-strong)" }}>
-              方案名称
+              模板名称
               <input
                 id="block-template-name-input"
                 type="text"
@@ -2984,22 +3346,58 @@ export default function HomepageConfig({
                 }}
               />
             </label>
+            <label
+              htmlFor="block-template-include-content"
+              style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 12, fontSize: 12, color: "var(--adm-text-strong)" }}
+            >
+              <input id="block-template-include-content" type="checkbox" style={{ marginTop: 2 }} />
+              <span>
+                同时保存当前默认内容
+                <small style={{ display: "block", marginTop: 3, color: "var(--adm-text)" }}>
+                  仅保存合同允许的文案、媒体、行动和有效引用；价格、库存、客户、门店资料及其他业务事实不会保存。
+                </small>
+              </span>
+            </label>
           </div>
         ),
-        okText: "保存方案",
+        okText: "保存模板",
         cancelText: "取消",
-        onOk: () => {
+        onOk: async () => {
           const input = document.getElementById(
             "block-template-name-input",
           ) as HTMLInputElement | null;
           const name = input?.value?.trim() || `我的${moduleDisplayName}`;
-          blockTemplateStore.save(name, blockType, blockProps);
-          refreshMyTemplates();
-          message.success(`「${name}」已保存为个人常用方案`);
+          const includeDefaultContent = (
+            document.getElementById("block-template-include-content") as HTMLInputElement | null
+          )?.checked;
+          const extractedDefaults = includeDefaultContent
+            ? extractContentTemplateDefaultContent(blockType, blockProps)
+            : undefined;
+          try {
+            await personalContentTemplateApi.create({
+              name,
+              moduleType: blockType,
+              layoutData,
+              ...(includeDefaultContent
+                ? { contentDefaults: extractedDefaults ?? null }
+                : {}),
+            });
+            window.dispatchEvent(new Event(PERSONAL_TEMPLATE_CHANGED_EVENT));
+            message.success(
+              includeDefaultContent && extractedDefaults && Object.keys(extractedDefaults).length > 0
+                ? `「${name}」已保存布局和默认内容`
+                : `「${name}」已保存到我的模板`,
+            );
+          } catch (error) {
+            message.error(
+              getEditorErrorMessage(error, "模板保存失败，请稍后重试"),
+            );
+            throw error;
+          }
         },
       });
     },
-    [message, modal, refreshMyTemplates],
+    [message, modal],
   );
   const editorConfig = useMemo(
     () =>
@@ -3213,8 +3611,22 @@ export default function HomepageConfig({
   }, [loadAttempt, pageKey]);
 
   useEffect(() => {
+    if (preserveSavedBaselineOnDataSyncRef.current) {
+      preserveSavedBaselineOnDataSyncRef.current = false;
+      return;
+    }
     dataSignatureRef.current = dataSignature(data);
   }, [data]);
+
+  const syncCanvasDataWithoutAdvancingSavedBaseline = useCallback(
+    (nextData: unknown) => {
+      preserveSavedBaselineOnDataSyncRef.current = true;
+      setData(nextData);
+      latestData.current = nextData;
+      setCanvasDataSyncVersion((version) => version + 1);
+    },
+    [],
+  );
 
   const trackEditorData = useCallback((nextData: unknown) => {
     latestData.current = nextData;
@@ -3327,6 +3739,7 @@ export default function HomepageConfig({
             lastSaved: lastSavedAt,
             updatedAt,
           };
+          dataSignatureRef.current = dataSignature(editableData);
 
           if (!isActivePage()) return true;
           const hasNewerLocalChanges =
@@ -3888,13 +4301,14 @@ export default function HomepageConfig({
             setData(nextData);
             latestData.current = nextData;
           }}
-          overrides={{
-            header: () => <span style={{ display: "none" }} />,
-            headerActions: () => <span style={{ display: "none" }} />,
-            componentOverlay: (props) => <CanvasSelectionDock {...props} />,
-          }}
+          overrides={HOMEPAGE_EDITOR_OVERRIDES}
         >
-          <CanvasPageDataSynchronizer data={data} pageKey={pageKey} />
+          <CanvasPageDataSynchronizer
+            data={data}
+            pageKey={pageKey}
+            canvasDataSyncVersion={canvasDataSyncVersion}
+          />
+          <CanvasSelectionDock />
           <EditorToolbar
             pageKey={pageKey}
             publishing={publishing}
@@ -3921,6 +4335,7 @@ export default function HomepageConfig({
             onOpenPageSettings={() => setPageSettingsOpen(true)}
             onPreviewModeChange={setPreviewMode}
             onDataChange={trackEditorData}
+            onCanvasDataSync={syncCanvasDataWithoutAdvancingSavedBaseline}
             onExitViewing={() => {
               viewingPublishedRef.current = false;
               setViewingPublished(false);

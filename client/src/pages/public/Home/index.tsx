@@ -15,10 +15,13 @@ import { usePageMetaStore } from "@/store/pageMetaStore";
 import { trackPageView } from "@/hooks/useAnalytics";
 import {
   createEditorPageDefault,
+  getEditorPage,
   isEditorPageKey,
 } from "@/page-builder/config/editorPages";
 import { usePublishedPageDocument } from "@/page-builder/runtime/usePublishedPageDocument";
 import StaleDocumentNotice from "@/page-builder/runtime/StaleDocumentNotice";
+import { PublicPageFallback } from "@/page-builder/runtime/PublishedPageDecoration";
+import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 
 // 首页基础内容与装修渲染器分离，只有取得已发布的 Puck 数据时才加载编辑器运行时。
 const PuckDocumentRenderer = lazy(
@@ -1044,18 +1047,6 @@ function PuckDocumentLoading() {
   );
 }
 
-function HomeDocumentError({ onRetry }: { onRetry: () => void }) {
-  return (
-    <div role="status" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center", textAlign: "center", padding: 24 }}>
-      <h1 className="sr-only">海川珠宝</h1>
-      <div>
-        <p style={{ color: "#181A1B", margin: "0 0 10px" }}>首页内容暂时无法载入</p>
-        <button type="button" onClick={onRetry} style={{ border: "1px solid #181A1B", background: "transparent", color: "#181A1B", padding: "8px 16px", cursor: "pointer" }}>重新载入</button>
-      </div>
-    </div>
-  );
-}
-
 export default function Home() {
   const {
     pageDocument,
@@ -1112,22 +1103,64 @@ export default function Home() {
   }
 
   if (documentStatus === "error" || documentStatus === "invalid") {
-    return <HomeDocumentError onRetry={() => void refreshDocument(true)} />;
+    const fallback = getEditorPage("home").publicFallback;
+    return (
+      <PublicPageFallback
+        pageKey="home"
+        pageLabel="店铺首页"
+        status={documentStatus}
+        content={fallback ? {
+          ...fallback,
+          title: "首页暂不可用",
+          description: "首页内容暂时无法载入。您可以重新载入，或先进入选款中心浏览当前公开款式。",
+        } : undefined}
+        onRetry={() => void refreshDocument(true)}
+      />
+    );
   }
 
   if (documentStatus === "unpublished") {
     return (
-      <div data-page-document-state="unpublished" style={{ background: LG }}>
-        <FallbackHome />
-      </div>
+      <PublicPageFallback
+        pageKey="home"
+        pageLabel="店铺首页"
+        status="unpublished"
+        content={getEditorPage("home").publicFallback}
+      />
     );
   }
 
   if (!pageDocument) {
-    return <HomeDocumentError onRetry={() => void refreshDocument(true)} />;
+    return (
+      <PublicPageFallback
+        pageKey="home"
+        pageLabel="店铺首页"
+        status="invalid"
+        content={getEditorPage("home").publicFallback}
+        onRetry={() => void refreshDocument(true)}
+      />
+    );
   }
 
-  const hasVisibleHeroTitle = pageDocument.puckData.content.some((block) =>
+  const readiness = getPublishedPageReadiness("home", pageDocument.puckData);
+  if (!readiness?.ready) {
+    const fallback = getEditorPage("home").publicFallback;
+    return (
+      <PublicPageFallback
+        pageKey="home"
+        pageLabel="店铺首页"
+        status="invalid"
+        content={fallback ? {
+          ...fallback,
+          title: "首页正在完善",
+          description: "首页内容尚未满足公开展示要求。您可以先进入选款中心，或了解珠宝定制服务。",
+        } : undefined}
+        onRetry={() => void refreshDocument(true)}
+      />
+    );
+  }
+
+  const hasVisibleHeroTitle = readiness.data.content?.some((block) =>
     block.type === "首屏主视觉"
     && block.props?.isVisible !== false
     && typeof block.props?.title === "string"
@@ -1139,7 +1172,7 @@ export default function Home() {
       {!hasVisibleHeroTitle ? <h1 className="sr-only">海川珠宝</h1> : null}
       <Suspense fallback={<PuckDocumentLoading />}>
         <PuckDocumentRenderer
-          data={pageDocument.puckData}
+          data={readiness.data as any}
           surface="home"
           heroHeadingLevel={hasVisibleHeroTitle ? 1 : 2}
         />

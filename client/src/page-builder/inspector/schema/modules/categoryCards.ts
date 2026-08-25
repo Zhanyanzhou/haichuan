@@ -44,46 +44,6 @@ export function makeCategoryCardsSchema(
       ? { product: "选择分类" }
       : { media: "卡片素材" },
     sections: [
-      ...(variant.moduleType === "分类卡片" ? [{
-        id: "分类卡片-reference",
-        title: "分类关联",
-        layer: "product" as const,
-        description: "名称、封面和链接始终从真实分类系统读取",
-        fields: [{
-          key: "categorySlugs",
-          label: "选择分类",
-          control: "categoryReferences" as const,
-          legacyKey: "categories",
-          minItems: 2,
-          maxItems: 4,
-        }],
-      }] : []),
-      {
-        id: `${variant.moduleType}-content`,
-        title: "内容",
-        layer: "content",
-        fields: [
-          moduleNameField(variant.displayName),
-          {
-            key: "title",
-            label: "标题",
-            control: "text",
-            required: true,
-            maxLength: CATEGORY_CARDS_CONTRACT.content.limits.title,
-            placeholder:
-              variant.moduleType === "分类卡片"
-                ? "如 按品类探索"
-                : "如 按场景选购",
-          },
-          {
-            key: "subtitle",
-            label: "副标题",
-            control: "text",
-            maxLength: CATEGORY_CARDS_CONTRACT.content.limits.subtitle,
-            hint: "留空不显示",
-          },
-        ],
-      },
       {
         id: `${variant.moduleType}-media`,
         title: "素材",
@@ -149,6 +109,46 @@ export function makeCategoryCardsSchema(
                 compact: true,
               },
             ],
+          },
+        ],
+      },
+      ...(variant.moduleType === "分类卡片" ? [{
+        id: "分类卡片-reference",
+        title: "分类关联",
+        layer: "product" as const,
+        description: "名称、封面和链接始终从真实分类系统读取",
+        fields: [{
+          key: "categorySlugs",
+          label: "选择分类",
+          control: "categoryReferences" as const,
+          legacyKey: "categories",
+          minItems: 2,
+          maxItems: 4,
+        }],
+      }] : []),
+      {
+        id: `${variant.moduleType}-content`,
+        title: "内容",
+        layer: "content",
+        fields: [
+          moduleNameField(variant.displayName),
+          {
+            key: "title",
+            label: "标题",
+            control: "text",
+            required: true,
+            maxLength: CATEGORY_CARDS_CONTRACT.content.limits.title,
+            placeholder:
+              variant.moduleType === "分类卡片"
+                ? "如 按品类探索"
+                : "如 按场景选购",
+          },
+          {
+            key: "subtitle",
+            label: "副标题",
+            control: "text",
+            maxLength: CATEGORY_CARDS_CONTRACT.content.limits.subtitle,
+            hint: "留空不显示",
           },
         ],
       },

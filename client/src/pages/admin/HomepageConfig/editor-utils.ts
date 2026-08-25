@@ -6,6 +6,7 @@
 import type { ReactNode } from "react";
 import { BLOCK_META } from "@/page-builder/config/blockMeta";
 import { isMobileCanvasWidth } from "@/page-builder/config/blockContracts";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
 export type ViewportPreset = {
   label: string;
@@ -129,17 +130,7 @@ export function formatEditorTime(value?: string | Date | null) {
 }
 
 export function getEditorErrorMessage(error: unknown, fallback: string) {
-  const responseMessage = (
-    error as { response?: { data?: { message?: unknown } } }
-  )?.response?.data?.message;
-  if (typeof responseMessage === "string" && responseMessage.trim())
-    return responseMessage;
-  if (Array.isArray(responseMessage))
-    return (
-      responseMessage.filter((item) => typeof item === "string").join("；") ||
-      fallback
-    );
-  return error instanceof Error && error.message ? error.message : fallback;
+  return getSafeAdminErrorMessage(error, fallback);
 }
 
 export function getEditorHttpStatus(error: unknown) {

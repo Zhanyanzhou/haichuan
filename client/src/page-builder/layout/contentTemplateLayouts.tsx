@@ -67,7 +67,7 @@ const getPrimaryRatio = (
   ?? skeleton.slots.find((slot) => Boolean(slot[`${device}Ratio`]))?.[`${device}Ratio`];
 
 /**
- * 全部 23 个模板均拥有真实 adapter / Renderer。这里仅把 schema v3
+ * 全部活跃模板均拥有真实 adapter / Renderer。这里仅把 schema v5
  * 生成产物转换为渲染布局元数据，不能据 implementationStatus 降级为骨架。
  */
 const DERIVED_TEMPLATE_LAYOUTS = Object.fromEntries(
@@ -310,7 +310,7 @@ const LAYOUT_CSS = `
 /* 中间宽度只改变几何布局；素材、比例和阅读顺序沿用 desktop 合同。 */
 @media (min-width: 768px) and (max-width: 1023px) {
   .hc-content-template { --hc-template-gutter: 28px; }
-  .hc-phase1-hero { min-height: 0; }
+  .hc-phase1-hero { min-height: 75svh; }
   .hc-phase1-hero__media { position: relative; inset: auto; height: auto; min-height: 0; aspect-ratio: var(--hc-template-media-desktop); }
   .hc-phase1-hero__copy-band { position: relative; bottom: auto; padding-block: 40px 56px; background: var(--hc-bg, #FFFFFF); }
   .hc-phase1-hero__copy { width: min(calc(100% - 56px), 704px); color: var(--hc-ink, #181A1B); }

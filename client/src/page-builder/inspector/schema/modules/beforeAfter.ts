@@ -26,31 +26,6 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
   groupTitles: { media: "对比图片" },
   sections: [
     {
-      id: "before-after-content",
-      title: "内容",
-      layer: "content",
-      fields: [
-        moduleNameField("前后对比"),
-        {
-          key: "title",
-          label: "标题",
-          control: "text",
-          required: true,
-          maxLength: BEFORE_AFTER_CONTRACT.content.limits.title,
-          placeholder: "如 珠宝改款",
-        },
-        {
-          key: "subtitle",
-          label: "改款说明",
-          control: "textarea",
-          rows: 2,
-          maxLength: BEFORE_AFTER_CONTRACT.content.limits.subtitle,
-          hint: "一两句情感或工艺说明,留空不显示",
-          placeholder: "如 旧物的情感，以新的形态延续。",
-        },
-      ],
-    },
-    {
       id: "before-after-media",
       title: "媒体",
       layer: "media",
@@ -99,6 +74,31 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
           label: "改款后替代文字",
           control: "text",
           maxLength: BEFORE_AFTER_CONTRACT.content.limits.altText,
+        },
+      ],
+    },
+    {
+      id: "before-after-content",
+      title: "内容",
+      layer: "content",
+      fields: [
+        moduleNameField("前后对比"),
+        {
+          key: "title",
+          label: "标题",
+          control: "text",
+          required: true,
+          maxLength: BEFORE_AFTER_CONTRACT.content.limits.title,
+          placeholder: "如 珠宝改款",
+        },
+        {
+          key: "subtitle",
+          label: "改款说明",
+          control: "textarea",
+          rows: 2,
+          maxLength: BEFORE_AFTER_CONTRACT.content.limits.subtitle,
+          hint: "一两句情感或工艺说明,留空不显示",
+          placeholder: "如 旧物的情感，以新的形态延续。",
         },
       ],
     },

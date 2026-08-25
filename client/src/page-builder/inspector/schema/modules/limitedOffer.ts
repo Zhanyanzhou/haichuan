@@ -53,6 +53,25 @@ export const limitedOfferSchema: ModuleInspectorSchema = {
       ],
     },
     {
+      id: "limited-offer-action",
+      title: "行动与关联",
+      layer: "interaction",
+      fields: [
+        { key: "buttonText", label: "按钮文字", control: "text" },
+        {
+          key: "linkTarget",
+          label: "按钮点击后",
+          control: "linkTarget",
+        },
+      ],
+    },
+    {
+      id: "limited-offer-style",
+      title: "样式",
+      layer: "style",
+      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
+    },
+    {
       id: "limited-offer-feature",
       title: "模板专属功能",
       layer: "feature",
@@ -77,25 +96,6 @@ export const limitedOfferSchema: ModuleInspectorSchema = {
           itemFields: [{ key: "value", label: "权益文案", control: "text" }],
         },
       ],
-    },
-    {
-      id: "limited-offer-action",
-      title: "行动与关联",
-      layer: "interaction",
-      fields: [
-        { key: "buttonText", label: "按钮文字", control: "text" },
-        {
-          key: "linkTarget",
-          label: "按钮点击后",
-          control: "linkTarget",
-        },
-      ],
-    },
-    {
-      id: "limited-offer-style",
-      title: "样式",
-      layer: "style",
-      fields: [bgColorPresetField(), ADVANCED_BG_COLOR_FIELD],
     },
   ],
 };

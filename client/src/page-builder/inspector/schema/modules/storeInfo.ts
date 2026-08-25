@@ -17,6 +17,22 @@ export const storeInfoSchema: ModuleInspectorSchema = {
   defaults: { ...storeInfoPuckConfig.defaultProps },
   sections: [
     {
+      id: "store-info-media",
+      title: "媒体",
+      layer: "media",
+      description: `门店空间图 ${ratioLabelOf(IMAGE_SPECS.storeInfo.image)}；手机转为 ${ratioLabelOf(IMAGE_SPECS.storeInfo.mobile)}`,
+      fields: [
+        {
+          key: "image",
+          label: "门店空间图",
+          control: "media",
+          spec: IMAGE_SPECS.storeInfo.image,
+          placeholder: "上传门店空间图",
+          showSpecCheck: true,
+        },
+      ],
+    },
+    {
       id: "store-info-content",
       title: "内容",
       layer: "content",
@@ -52,22 +68,6 @@ export const storeInfoSchema: ModuleInspectorSchema = {
           label: "地图链接（可选）",
           control: "text",
           hint: "高德/百度地图分享链接",
-        },
-      ],
-    },
-    {
-      id: "store-info-media",
-      title: "媒体",
-      layer: "media",
-      description: `门店空间图 ${ratioLabelOf(IMAGE_SPECS.storeInfo.image)}；手机转为 ${ratioLabelOf(IMAGE_SPECS.storeInfo.mobile)}`,
-      fields: [
-        {
-          key: "image",
-          label: "门店空间图",
-          control: "media",
-          spec: IMAGE_SPECS.storeInfo.image,
-          placeholder: "上传门店空间图",
-          showSpecCheck: true,
         },
       ],
     },

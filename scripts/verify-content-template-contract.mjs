@@ -6,23 +6,30 @@ import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file) => readFile(path.join(root, file), "utf8");
-const [text, client, server, previewSource] = await Promise.all([
+const [text, client, server, previewSource, blockMetaSource] = await Promise.all([
   read("contracts/page-builder/content-templates.contract.json"),
   read("client/src/page-builder/generated/contentTemplates.generated.ts"),
   read("server/src/modules/page-modules/generated/contentTemplates.generated.ts"),
   read("client/src/page-builder/preview/ContentTemplateSkeletonPreview.tsx"),
+  read("client/src/page-builder/config/blockMeta.ts"),
 ]);
 const contract = JSON.parse(text);
 const byKey = Object.fromEntries(contract.templates.map((template) => [template.key, template]));
 const categories = ["视觉展示", "图文内容", "商品展示", "导航入口", "服务信息", "活动内容"];
+const commercialPurposes = ["品牌展示", "商品销售", "活动转化", "内容传播", "信任建立"];
 const devices = ["desktop", "mobile"];
 
-assert.equal(contract.contractSchemaVersion, 3, "必须使用统一根构图合同 schema v3(桌面+移动双端)");
-assert.equal(contract.templates.length, 23, "必须保留 23 个运营模板");
-assert.equal(contract.activeTemplateCount, 23, "23 个运营模板必须全部处于 active 状态");
-assert.equal(contract.templates.filter((template) => template.implementationStatus === "active").length, 23, "不得错误隐藏可运营模板");
-assert.deepEqual(categories.map((category) => contract.templates.filter((template) => template.category === category).length), [4, 5, 4, 3, 6, 1], "六类数量必须保持 4/5/4/3/6/1");
+assert.equal(contract.contractSchemaVersion, 5, "必须使用含商业目的的归一化双端几何合同 schema v5");
+assert.equal(contract.templates.length, 24, "必须注册 24 个运营模板");
+assert.equal(contract.activeTemplateCount, 24, "24 个运营模板必须全部处于 active 状态");
+assert.equal(contract.templates.filter((template) => template.implementationStatus === "active").length, 24, "不得错误隐藏可运营模板");
+assert.deepEqual(categories.map((category) => contract.templates.filter((template) => template.category === category).length), [4, 6, 4, 3, 6, 1], "六类数量必须保持 4/6/4/3/6/1");
 const reachableTemplateKeys = new Set(contract.pageRules.flatMap((rule) => rule.allowedTemplateKeys));
+const getGeometryOrder = (template, device) => {
+  const roleIds = new Set(template.defaultGeometryByViewport[device].zones.map((zone) => zone.roleId));
+  const rolesById = new Map(template.roles.map((role) => [role.id, role]));
+  return template.order[device].filter((id) => rolesById.get(id)?.positioning !== "background" && roleIds.has(id));
+};
 assert.deepEqual(
   contract.templates
     .filter((template) => template.implementationStatus === "active" && !reachableTemplateKeys.has(template.key))
@@ -32,6 +39,7 @@ assert.deepEqual(
 );
 
 for (const template of contract.templates) {
+  assert.ok(commercialPurposes.includes(template.commercialPurpose), `${template.key}: 必须声明合法商业目的`);
   const roleIds = template.roles.map((role) => role.id);
   const rolesById = new Map(template.roles.map((role) => [role.id, role]));
   const semantics = template.roles.map((role) => role.semantic).filter(Boolean);
@@ -87,6 +95,10 @@ for (const template of contract.templates) {
       assert.ok(object.contentFieldKeys.includes(fieldKey), `${template.key}.${object.roleId}.${fieldKey}: 字段响应策略必须绑定内容字段`);
       assert.ok(["shared", "viewport-specific"].includes(scope), `${template.key}.${object.roleId}.${fieldKey}: 字段响应策略不合法`);
     }
+    assert.ok(object.constraints, `${template.key}.${object.roleId}: 缺少直接操作约束`);
+    assert.ok(object.constraints.minSize.width > 0 && object.constraints.minSize.height > 0, `${template.key}.${object.roleId}: 最小尺寸无效`);
+    assert.ok(object.constraints.maxSize.width <= 1 && object.constraints.maxSize.height <= 1, `${template.key}.${object.roleId}: 最大尺寸越界`);
+    assert.ok(object.constraints.allowedResize.every((direction) => ["n", "ne", "e", "se", "s", "sw", "w", "nw"].includes(direction)), `${template.key}.${object.roleId}: 缩放方向无效`);
     if (["media", "video"].includes(object.kind)) {
       assert.ok(object.altFieldKey || object.altPolicy, `${template.key}.${object.roleId}: 媒体对象必须声明替代文字字段或策略`);
       if (object.altPolicy === "required") {
@@ -109,19 +121,43 @@ for (const template of contract.templates) {
     assert.ok(editableByNodeId.has(textRole.roleId), `${template.key}.${textRole.roleId}: 文字槽位必须绑定聚合或独立可编辑对象`);
   }
   for (const device of ["desktop", "mobile"]) {
-    const viewport = template.preview[device];
+    const viewport = template.defaultGeometryByViewport[device];
     const zoneRoleIds = new Set();
     const structuralRoleIds = new Set();
-    assert.equal(new Set(viewport.order).size, viewport.order.length, `${template.key}.preview.${device}: 预览顺序不得重复 role id`);
+    assert.ok(viewport.frameAspectRatio >= 0.25 && viewport.frameAspectRatio <= 4, `${template.key}.${device}: 画布比例无效`);
+    assert.ok(viewport.safeArea.x >= 0 && viewport.safeArea.y >= 0 && viewport.safeArea.x + viewport.safeArea.width <= 1 && viewport.safeArea.y + viewport.safeArea.height <= 1, `${template.key}.${device}: 安全区越界`);
     for (const zone of viewport.zones) {
       const role = rolesById.get(zone.roleId);
-      assert.ok(role, `${template.key}.preview.${device}: 区域 ${zone.roleId} 未映射到已声明角色`);
-      assert.ok((role.previewRoles ?? [role.role]).includes(zone.role), `${template.key}.preview.${device}.${zone.roleId}: 渲染角色与语义角色矛盾`);
+      assert.ok(role, `${template.key}.defaultGeometryByViewport.${device}: 区域 ${zone.roleId} 未映射到已声明角色`);
+      assert.ok((role.previewRoles ?? [role.role]).includes(zone.role), `${template.key}.defaultGeometryByViewport.${device}.${zone.roleId}: 渲染角色与语义角色矛盾`);
+      assert.ok(zone.rect.x >= 0 && zone.rect.y >= 0 && zone.rect.width > 0 && zone.rect.height > 0 && zone.rect.x + zone.rect.width <= 1.000001 && zone.rect.y + zone.rect.height <= 1.000001, `${template.key}.${device}.${zone.nodeId}: 归一化几何越界`);
+      const editableObject = editableByNodeId.get(zone.nodeId);
+      if (editableObject?.capabilities.includes("layout")) {
+        const { constraints } = editableObject;
+        assert.ok(zone.rect.width >= constraints.minSize.width && zone.rect.height >= constraints.minSize.height, `${template.key}.${device}.${zone.nodeId}: 默认槽位小于合同最小尺寸`);
+        assert.ok(zone.rect.width <= constraints.maxSize.width && zone.rect.height <= constraints.maxSize.height, `${template.key}.${device}.${zone.nodeId}: 默认槽位超过合同最大尺寸`);
+        if (constraints.safeAreaRequired) {
+          const safe = viewport.safeArea;
+          assert.ok(zone.rect.x >= safe.x - 0.000001 && zone.rect.y >= safe.y - 0.000001 && zone.rect.x + zone.rect.width <= safe.x + safe.width + 0.000001 && zone.rect.y + zone.rect.height <= safe.y + safe.height + 0.000001, `${template.key}.${device}.${zone.nodeId}: 默认槽位越出安全区`);
+        }
+      }
       zoneRoleIds.add(zone.roleId);
       if (!zone.overlay) structuralRoleIds.add(zone.roleId);
     }
-    assert.deepEqual(viewport.order.filter((id) => !rolesById.has(id) || !zoneRoleIds.has(id)), [], `${template.key}.preview.${device}: 预览顺序包含无区域或未声明 role id`);
-    assert.deepEqual([...structuralRoleIds].filter((id) => !viewport.order.includes(id)), [], `${template.key}.preview.${device}: 预览顺序未覆盖全部非 overlay 区域`);
+    if (template.heightModeByViewport[device] !== "viewport") {
+      for (const role of template.roles.filter((candidate) => candidate.kind === "media")) {
+        const ratioPreset = role.defaultRatioByViewport?.[device];
+        const zone = viewport.zones.find((candidate) => candidate.nodeId === role.id);
+        if (!ratioPreset || !zone) continue;
+        const [ratioWidth, ratioHeight] = ratioPreset.split("/").map(Number);
+        const expectedRatio = ratioWidth / ratioHeight;
+        const actualRatio = viewport.frameAspectRatio * zone.rect.width / zone.rect.height;
+        assert.ok(Math.abs(actualRatio - expectedRatio) <= 0.06, `${template.key}.${device}.${role.id}: 默认几何比例 ${actualRatio.toFixed(3)} 与媒体合同 ${ratioPreset} 不一致`);
+      }
+    }
+    const geometryOrder = getGeometryOrder(template, device);
+    assert.deepEqual(geometryOrder.filter((id) => !rolesById.has(id) || !zoneRoleIds.has(id)), [], `${template.key}.${device}: 几何顺序包含无区域或未声明 role id`);
+    assert.deepEqual([...structuralRoleIds].filter((id) => !geometryOrder.includes(id)), [], `${template.key}.${device}: 几何顺序未覆盖全部非 overlay 区域`);
   }
 }
 
@@ -135,17 +171,26 @@ assert.deepEqual(byKey.video.allowedControls, ["videoWidth"], "视频宽度必�
 assert.equal(byKey.productRow.presetValues.columns.defaultByViewport.desktop, 3, "商品列表桌面默认必须为三列");
 assert.ok(byKey.hotspot.roles.some((role) => role.id === "hotspots" && role.parentRole === "sceneImage" && role.positioning === "relative-to-media"), "热点必须从属于媒体槽");
 assert.deepEqual(byKey.testimonials.roles.map((role) => role.id).sort(), ["attribution", "authorizedPhoto", "mainQuote"].sort(), "顾客分享只能保留授权实拍、主引语和署名角色");
-assert.deepEqual(byKey.testimonials.preview.desktop.order, ["authorizedPhoto", "mainQuote", "attribution"], "顾客分享预览顺序必须与批准结构一致");
+assert.deepEqual(getGeometryOrder(byKey.testimonials, "desktop"), ["authorizedPhoto", "mainQuote", "attribution"], "顾客分享几何顺序必须与批准结构一致");
 // 2026-08-18 构图评审修订:预约入口补可选氛围背景(bgImage,不承载内容/行动,
 // 仍维持一个主行动与禁 form 的尾章语义)
 assert.deepEqual(byKey.booking.roles.map((role) => role.id).sort(), ["bgImage", "copy", "primaryAction", "secondaryContact"].sort(), "预约入口只能保留可选背景、文案、一个主行动和可选联系方式");
 assert.equal(byKey.booking.roles.filter((role) => role.kind === "action").length, 1, "预约入口必须且只能有一个行动角色");
 assert.equal(byKey.booking.roles.some((role) => role.kind === "form" || role.role === "form"), false, "预约入口禁止 form 角色");
 assert.equal(byKey.booking.roles.find((role) => role.id === "bgImage")?.required, false, "预约入口背景必须是可选角色");
-for (const device of ["desktop", "mobile"]) assert.deepEqual(byKey.booking.preview[device].order, ["copy", "primaryAction", "secondaryContact"], `预约入口 ${device} 预览顺序不一致(背景不进结构预览)`);
+for (const device of ["desktop", "mobile"]) assert.deepEqual(getGeometryOrder(byKey.booking, device), ["copy", "primaryAction", "secondaryContact"], `预约入口 ${device} 几何顺序不一致(背景不进结构预览)`);
 assert.deepEqual(byKey.productRow.editorCapabilities.referenceFields, [{ kind: "product", key: "productCodes", legacyKey: "productIds", min: 2, max: 8 }], "商品列表必须保存稳定 code 并双读旧 numeric id");
 assert.deepEqual(byKey.categoryCards.editorCapabilities.referenceFields, [{ kind: "category", key: "categorySlugs", legacyKey: "categories", min: 2, max: 4 }], "分类卡必须保存真实 Category.slug");
-assert.equal(byKey.hero.contentBudget.requiredText.length, 0, "无文字 Hero 必须是合同允许状态");
+assert.deepEqual(
+  byKey.hero.contentBudget.requiredText,
+  ["title", "altText"],
+  "公开 Hero 必须保留真实 DOM 标题与图片替代文字",
+);
+assert.equal(
+  byKey.hero.roles.find((role) => role.id === "mobileImage")?.required,
+  true,
+  "公开 Hero 必须提供独立移动端素材，不能只依赖桌面裁切",
+);
 assert.deepEqual(
   byKey.hero.editorCapabilities.layoutOverrides.textRoles.map((role) => role.roleId),
   ["eyebrow", "title", "subtitle", "actionText"],
@@ -174,6 +219,8 @@ for (const generated of [client, server]) {
   assert.ok(generated.includes("export type ContentTemplateEditableObject ="), "客户端与服务端必须共享可编辑对象类型");
   assert.ok(generated.includes("export function findContentTemplateEditableObject("), "客户端与服务端必须共享安全对象查询 helper");
   assert.ok(generated.includes("sizePreset?: string;") && generated.includes("positionPreset?: string;"), "V2 必须声明并校验尺寸/位置预设");
+  assert.ok(generated.includes("export type ContentTemplateCommercialPurpose =") && generated.includes('"commercialPurpose"'), "客户端与服务端必须共享商业目的合同");
 }
+assert.doesNotMatch(blockMetaSource, /category:\s*"(?:品牌展示|商品销售|活动转化|内容传播|信任建立)"/, "BLOCK_META 商业分类必须从机器合同派生，不得手写第二份事实");
 assert.doesNotMatch(previewSource, /<img\b|https?:\/\//, "中性预览不得引入外部图片");
-console.log("内容模板统一合同验证通过：23 个根顺序、语义角色、预览映射和 CTA 门禁一致。");
+console.log("内容模板统一合同验证通过：24 个模板的商业目的、双端归一化几何、直接操作约束、语义角色和 CTA 门禁一致。");

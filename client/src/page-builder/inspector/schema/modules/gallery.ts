@@ -24,29 +24,6 @@ export const gallerySchema: ModuleInspectorSchema = {
   groupTitles: { media: "画廊图片" },
   sections: [
     {
-      id: "gallery-content",
-      title: "内容",
-      layer: "content",
-      fields: [
-        moduleNameField("作品画廊"),
-        {
-          key: "title",
-          label: "标题",
-          control: "text",
-          required: true,
-          maxLength: GALLERY_CONTRACT.content.limits.title,
-          placeholder: "如 本季作品",
-        },
-        {
-          key: "subtitle",
-          label: "副标题",
-          control: "text",
-          maxLength: GALLERY_CONTRACT.content.limits.subtitle,
-          hint: "留空不显示",
-        },
-      ],
-    },
-    {
       id: "gallery-media",
       title: "素材",
       layer: "media",
@@ -94,6 +71,29 @@ export const gallerySchema: ModuleInspectorSchema = {
               compact: true,
             },
           ],
+        },
+      ],
+    },
+    {
+      id: "gallery-content",
+      title: "内容",
+      layer: "content",
+      fields: [
+        moduleNameField("作品画廊"),
+        {
+          key: "title",
+          label: "标题",
+          control: "text",
+          required: true,
+          maxLength: GALLERY_CONTRACT.content.limits.title,
+          placeholder: "如 本季作品",
+        },
+        {
+          key: "subtitle",
+          label: "副标题",
+          control: "text",
+          maxLength: GALLERY_CONTRACT.content.limits.subtitle,
+          hint: "留空不显示",
         },
       ],
     },

@@ -11,8 +11,8 @@
  * 契约红线：比例选项一律由轴① getContractRoleRatioPresets 白名单派生（D.13），
  * 写 props 冒号格式；视觉覆盖稀疏写入、恢复默认只清对应路径（D.17）。
  */
-import { useEffect, useRef, useState } from "react";
-import { message, Modal } from "antd";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { App as AntdApp } from "antd";
 import InspectorTopBar from "../InspectorTopBar";
 import InspectorObjectContext, {
   getInspectorResponsiveStates,
@@ -21,7 +21,6 @@ import InspectorDisclosure from "../InspectorDisclosure";
 import InspectorPrimaryTabs, {
   type InspectorPrimaryMode,
 } from "../InspectorPrimaryTabs";
-import InspectorQuickActions from "../InspectorQuickActions";
 import FieldRenderer from "../FieldRenderer";
 import { useInspectorModuleEditor } from "../useInspectorModuleEditor";
 import { doublePosterSchema } from "../schema/modules/doublePoster";
@@ -47,7 +46,10 @@ import {
   getContractRoleRatio,
   getContractRoleRatioPresets,
 } from "../../config/blockContracts";
-import { useHomepagePuck } from "../../../pages/admin/HomepageConfig/editor-store";
+import {
+  ROOT_ZONE,
+  useHomepagePuck,
+} from "../../../pages/admin/HomepageConfig/editor-store";
 import { getModuleDisplayName } from "../../../pages/admin/HomepageConfig/editor-utils";
 
 type PanelMode = InspectorPrimaryMode;
@@ -57,6 +59,7 @@ interface DoublePosterInspectorProps {
   hasUnsavedChanges: boolean;
   saving: boolean;
   onSaveDraft: () => void;
+  onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
   publishIssues: Array<{
     blockId?: string;
     message: string;
@@ -151,15 +154,17 @@ export default function DoublePosterInspector({
   hasUnsavedChanges,
   publishIssues,
   validationState,
+  onSaveAsTemplate,
 }: DoublePosterInspectorProps) {
+  const { message, modal } = AntdApp.useApp();
   const editor = useInspectorModuleEditor();
   const [activePanelMode, setActivePanelMode] = useState<PanelMode>("content");
   const inspectorScrollRef = useRef<HTMLDivElement>(null);
   const panelScrollPositionsRef = useRef<Record<PanelMode, number>>({
-    quick: 0,
     content: 0,
     design: 0,
   });
+  const pendingPanelScrollRef = useRef<{ mode: PanelMode; top: number } | null>(null);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const appData = useHomepagePuck((state) => state.appState.data);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
@@ -167,17 +172,29 @@ export default function DoublePosterInspector({
   const selectVisualNode = useVisualEditorSession((state) => state.selectNode);
   const clearVisualNode = useVisualEditorSession((state) => state.clearNode);
   const setVisualPanelMode = useVisualEditorSession((state) => state.setPanelMode);
+  const visualPanelMode = useVisualEditorSession((state) => state.panelMode);
   const editorBlockId = editor?.props.id;
 
   // 切换模块时重置 tab 与滚动位置（与 SchemaInspectorPanel 同模式）
   useEffect(() => {
-    panelScrollPositionsRef.current = { quick: 0, content: 0, design: 0 };
+    panelScrollPositionsRef.current = { content: 0, design: 0 };
     setActivePanelMode("content");
     setVisualPanelMode("content");
     window.requestAnimationFrame(() => {
       inspectorScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
     });
   }, [editor?.moduleType, editorBlockId, setVisualPanelMode]);
+
+  useEffect(() => {
+    if (visualPanelMode !== activePanelMode) setActivePanelMode(visualPanelMode);
+  }, [activePanelMode, visualPanelMode]);
+
+  useLayoutEffect(() => {
+    const pending = pendingPanelScrollRef.current;
+    if (!pending || pending.mode !== activePanelMode) return;
+    inspectorScrollRef.current?.scrollTo({ top: pending.top, behavior: "auto" });
+    pendingPanelScrollRef.current = null;
+  }, [activePanelMode]);
 
   useEffect(() => {
     if (activePanelMode !== "design" || !editorBlockId || !visualSelection ||
@@ -231,7 +248,7 @@ export default function DoublePosterInspector({
   });
 
   const currentPublishIssues = publishIssues.filter(
-    (issue) => issue.severity === "error" && issue.blockId === props.id,
+    (issue) => issue.severity !== "info" && issue.blockId === props.id,
   );
 
   const fieldByKey = (key: string): FieldDef | undefined =>
@@ -320,17 +337,10 @@ export default function DoublePosterInspector({
     if (panelMode !== activePanelMode && inspectorScrollRef.current) {
       panelScrollPositionsRef.current[activePanelMode] =
         inspectorScrollRef.current.scrollTop;
+      pendingPanelScrollRef.current = { mode: panelMode, top: targetScrollTop };
     }
     setActivePanelMode(panelMode);
-    if (panelMode !== "quick") setVisualPanelMode(panelMode);
-    if (panelMode !== activePanelMode) {
-      window.requestAnimationFrame(() => {
-        inspectorScrollRef.current?.scrollTo({
-          top: targetScrollTop,
-          behavior: "auto",
-        });
-      });
-    }
+    setVisualPanelMode(panelMode);
   };
 
   const selectObject = (objectId: ObjectId | null) => {
@@ -411,7 +421,7 @@ export default function DoublePosterInspector({
       message.info("此模块已锁定，不能删除");
       return;
     }
-    Modal.confirm({
+    modal.confirm({
       title: `删除“${getModuleDisplayName(editor.moduleType, props)}”？`,
       content: "删除后可通过顶部撤销恢复；保存草稿前不会影响前台页面。",
       okText: "删除模块",
@@ -419,11 +429,9 @@ export default function DoublePosterInspector({
       cancelText: "取消",
       onOk: () => {
         dispatch({
-          type: "setData",
-          data: {
-            ...appData,
-            content: content.filter((_, i) => i !== index),
-          },
+          type: "remove",
+          index,
+          zone: ROOT_ZONE,
         });
         dispatch({ type: "setUi", ui: { itemSelector: null } });
       },
@@ -927,7 +935,7 @@ export default function DoublePosterInspector({
             aria-label="当前模块发布检查问题"
             role="alert"
           >
-            <strong>发布前待完善 · {currentPublishIssues.length} 项</strong>
+            <strong>当前模板提示 · {currentPublishIssues.length} 项</strong>
             <div>
               {currentPublishIssues.map((issue, index) => (
                 <p key={`${issue.path ?? ""}-${issue.message}-${index}`}>
@@ -943,17 +951,7 @@ export default function DoublePosterInspector({
           role="tabpanel"
           aria-labelledby={`inspector-panel-tab-${activePanelMode}`}
         >
-          {activePanelMode === "quick" ? (
-            <InspectorQuickActions
-              objectKind={currentEditableObject?.kind ?? "module"}
-              selectedObjectLabel={currentSelection ? OBJECT_LABELS[currentSelection] : "双图文模块"}
-              canEditDesign={currentObjectCanEditDesign}
-              isObjectScope={Boolean(currentSelection)}
-              onEditContent={() => activatePanelMode("content")}
-              onEditDesign={() => activatePanelMode("design")}
-              onReturnToModule={() => selectObject(null)}
-            />
-          ) : <>
+          <>
             {activePanelMode === "content" && currentEditableObject ? (
               <div
                 className="homepage-editor__design-scope-note"
@@ -973,9 +971,18 @@ export default function DoublePosterInspector({
               {activePanelMode === "content"
                 ? renderContentFields()
                 : renderDesignFields()}
+              {activePanelMode === "design" ? (
+                <button
+                  type="button"
+                  className="homepage-editor__task-bridge"
+                  onClick={() => onSaveAsTemplate(editor.moduleType, editor.props)}
+                >
+                  另存到模板库
+                </button>
+              ) : null}
             </div>
             </section>
-          </>}
+          </>
         </div>
       </div>
     </section>

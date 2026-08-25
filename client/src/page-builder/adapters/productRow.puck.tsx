@@ -20,6 +20,8 @@ export interface ProductRowPuckProps {
   showPrice: boolean;
   showButton: boolean;
   buttonText: string;
+  /** 模板库专用，只参与缩略图渲染，不进入 defaultProps / PageDocument。 */
+  __previewProducts?: ProductRow[];
   locked?: boolean;
 }
 
@@ -49,6 +51,9 @@ function ProductRowPreview(props: ProductRowPuckProps) {
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const previewProducts = Array.isArray(props.__previewProducts)
+    ? props.__previewProducts
+    : undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -86,35 +91,20 @@ function ProductRowPreview(props: ProductRowPuckProps) {
     };
   }, [productCodes, productIds]);
 
-  if (loading && products.length === 0) {
-    return (
-      <section style={{ padding: "56px 0", background: props.bgColor || "#FFFFFF", textAlign: "center" }}>
-        <p style={{ margin: 0, color: "#6E7477", fontSize: 13 }}>正在加载商品预览</p>
-      </section>
-    );
-  }
-
-  if (error && products.length === 0) {
-    return (
-      <section style={{ padding: "56px 0", background: props.bgColor || "#FFFFFF", textAlign: "center" }}>
-        <p style={{ margin: 0, color: "#8C3F3B", fontSize: 13 }}>商品预览加载失败，请稍后重试</p>
-      </section>
-    );
-  }
-
   // P1-32：原 `convertPuckProps(...) as any || toModule(...) as any` 因 `as any` 优先级高于 `||`、
   // 且 convertPuckProps 恒返回 truthy 基础结构，导致右侧 toModule（含已拉取的 products）被短路，
   // 编辑预览恒显示空占位。改为显式合并：把预览商品注入 module.content.products。
   const merged = convertPuckProps("产品展示行", { ...props, productIds, productCodes });
-  if (merged && products.length > 0) {
+  const displayProducts = previewProducts ?? products;
+  if (merged && displayProducts.length > 0) {
     // PageModuleContent 类型未声明 products（产品展示行专用扩展字段），用 as any 赋值
-    merged.content = { ...merged.content, products: toCards(products) } as any;
+    merged.content = { ...merged.content, products: toCards(displayProducts) } as any;
   }
   return (
     <>
       {loading ? (
         <p role="status" style={{ margin: 0, padding: "10px 20px", color: "#5F6568", background: "#F4F5F5", fontSize: 12 }}>
-          正在刷新商品预览，当前画面暂时保留
+          正在刷新商品预览，当前构图保持可编辑
         </p>
       ) : null}
       {error ? (

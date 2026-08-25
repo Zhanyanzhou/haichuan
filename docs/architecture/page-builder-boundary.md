@@ -16,9 +16,9 @@
 |---|---|---|
 | 设计系统 | `client/src/page-builder/designSystem/` | 当前设计令牌与母版实现；历史 `rhythm` 页面节奏引擎已退役，不得按旧文档恢复 |
 | 编辑器 | `client/src/pages/admin/HomepageConfig/` | 编辑器主体(index.tsx)+ LayerRail/RevisionDrawer/PageSettingsDrawer/EditorToolbar |
-| 编辑区 Schema | `client/src/page-builder/inspector/schema/` | 23 模块全量声明式 Schema(五层信息架构:内容→媒体→布局→样式→高级折叠),registry 统一注册 |
+| 编辑区 Schema | `client/src/page-builder/inspector/schema/` | 26 个组件(24 内容模板 + 2 系统区块)全量声明式 Schema(五层信息架构:内容→媒体→布局→样式→高级折叠),registry 统一注册 |
 | Puck 适配器 | `client/src/page-builder/adapters/*.puck.tsx` | 区块注册/默认值;旧专属 Inspector 已于 2026-08 R4b 退役(git 历史可查) |
-| 前台渲染块 | `client/src/components/blocks/` | 23 个区块组件(含作品画廊),`editMode` 区分编辑/公开态 |
+| 前台渲染块 | `client/src/components/blocks/` | 24 个活跃内容模板复用同一批真实区块组件，`editMode` 区分编辑/公开态 |
 | 公开渲染器 | `client/src/page-builder/runtime/` | PuckDocumentRenderer(含旧类型兼容分支)+ PublishedPageDecoration(业务页前置视觉区) |
 | 机器合同 | `contracts/page-builder/content-templates.contract.json` + 生成产物 | 模板注册、根角色、双端顺序/比例、实例能力、页面角色和发布限制的唯一事实来源 |
 | 元数据 | `client/src/page-builder/config/` | 编辑页声明、兼容映射和从机器合同派生的运行配置；不得复制 `pageRules` 建第二套页面门禁 |

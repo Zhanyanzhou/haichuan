@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useGetPuck } from "@puckeditor/core";
-import { Button, Dropdown, Modal, message } from "antd";
+import { App as AntdApp, Button, Dropdown } from "antd";
 import {
   CopyOutlined,
   DeleteOutlined,
@@ -142,6 +142,7 @@ export default function EditorToolbar({
   onOpenPageSettings,
   onPreviewModeChange,
   onDataChange,
+  onCanvasDataSync,
 }: {
   pageKey: EditorPageKey;
   publishing: boolean;
@@ -163,7 +164,10 @@ export default function EditorToolbar({
   onOpenPageSettings: () => void;
   onPreviewModeChange: (previewing: boolean) => void;
   onDataChange: (data: unknown) => void;
+  /** 整页替换或历史导航后同步父层 data prop，不推进已保存草稿基线。 */
+  onCanvasDataSync: (data: unknown) => void;
 }) {
+  const { message, modal } = AntdApp.useApp();
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
   const getPuck = useGetPuck();
   const appData = useHomepagePuck((state) => state.appState.data);
@@ -240,6 +244,7 @@ export default function EditorToolbar({
       const activeViewport = { ...before.appState.ui.viewports.current };
       before.history[direction]();
       const after = getPuck();
+      onCanvasDataSync(after.appState.data);
       after.dispatch({
         type: "setUi",
         ui: {
@@ -251,7 +256,7 @@ export default function EditorToolbar({
         recordHistory: false,
       });
     },
-    [getPuck, previewMode],
+    [getPuck, onCanvasDataSync, previewMode],
   );
 
   const publishCurrentPage = useCallback(() => {
@@ -273,6 +278,7 @@ export default function EditorToolbar({
     message.success(`已复制“${selectedLabel}”模块`);
   }, [
     dispatch,
+    message,
     previewMode,
     selectedIndex,
     selectedLabel,
@@ -282,7 +288,7 @@ export default function EditorToolbar({
 
   const deleteSelected = useCallback(() => {
     if (!selectedModule || selectedLocked || previewMode) return;
-    Modal.confirm({
+    modal.confirm({
       title: `删除“${selectedLabel}”？`,
       content: "删除后可使用“撤销”恢复；发布前不会影响线上页面。",
       okText: "删除模块",
@@ -299,6 +305,8 @@ export default function EditorToolbar({
     });
   }, [
     dispatch,
+    message,
+    modal,
     previewMode,
     selectedIndex,
     selectedLabel,
@@ -350,7 +358,7 @@ export default function EditorToolbar({
     anchor.click();
     URL.revokeObjectURL(url);
     message.success("方案已导出为 JSON");
-  }, [appData, pageKey]);
+  }, [appData, message, pageKey]);
 
   const importPageDecoration = useCallback(
     async (file: File) => {
@@ -392,7 +400,7 @@ export default function EditorToolbar({
           return;
         }
         const migrated = migratePuckData(puck);
-        Modal.confirm({
+        modal.confirm({
           title: "导入装修方案？",
           content:
             "当前画布内容将被导入的方案整体替换；尚未保存的修改会丢失，发布前不影响线上页面。",
@@ -400,6 +408,7 @@ export default function EditorToolbar({
           cancelText: "取消",
           onOk: () => {
             dispatch({ type: "setData", data: migrated, recordHistory: true });
+            onCanvasDataSync(migrated);
             message.success("方案已导入画布，请检查后保存草稿");
           },
         });
@@ -407,14 +416,14 @@ export default function EditorToolbar({
         message.error("导入失败：文件不是合法的 JSON");
       }
     },
-    [dispatch],
+    [dispatch, message, modal, onCanvasDataSync],
   );
 
   /* ── 套用推荐结构:整页替换为该页面的预置结构(模块全部可编辑,不锁定) ── */
 
   const applyRecommendedStructure = useCallback(() => {
     const recommended = createEditorPageDefault(pageKey);
-    Modal.confirm({
+    modal.confirm({
       title: "套用推荐结构？",
       content:
         "当前画布将被该页面的推荐结构整体替换；尚未保存的修改会丢失，发布前不影响线上页面。",
@@ -426,11 +435,12 @@ export default function EditorToolbar({
           data: recommended,
           recordHistory: true,
         });
+        onCanvasDataSync(recommended);
         dispatch({ type: "setUi", ui: { itemSelector: null } });
         message.success("推荐结构已套用，模块可自由调整，请检查后保存草稿");
       },
     });
-  }, [dispatch, pageKey]);
+  }, [dispatch, message, modal, onCanvasDataSync, pageKey]);
 
   const draftMenuItems = viewingPublished
     ? hasPendingDraft

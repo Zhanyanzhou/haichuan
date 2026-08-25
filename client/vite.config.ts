@@ -44,18 +44,13 @@ export default defineConfig(({ mode }) => ({
     emptyOutDir: process.platform !== "win32",
     rolldownOptions: {
       output: {
-        // 使用 Rolldown 原生分包，避免旧 manualChunks 兼容层把 React 依赖并入 Ant Design 块。
+        // 只固定共享框架块；Ant Design 保持按懒加载路由拆分，避免公开页下载整个后台组件库。
         codeSplitting: {
           groups: [
             {
               name: "react-vendor",
               test: /[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/,
               priority: 30,
-            },
-            {
-              name: "antd",
-              test: /[\\/]node_modules[\\/](@ant-design[\\/]icons|antd)[\\/]/,
-              priority: 20,
             },
             {
               name: "motion",

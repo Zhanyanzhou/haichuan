@@ -106,6 +106,26 @@ export const IMAGE_SPECS = {
       note: "细节海报",
     }),
   },
+  craftDetails: {
+    lead: contractSpec({
+      template: "craftDetails",
+      role: "leadImage",
+      viewport: "desktop",
+      note: "工艺主图",
+    }),
+    detailOne: contractSpec({
+      template: "craftDetails",
+      role: "detailImageOne",
+      viewport: "desktop",
+      note: "工艺细节图一",
+    }),
+    detailTwo: contractSpec({
+      template: "craftDetails",
+      role: "detailImageTwo",
+      viewport: "desktop",
+      note: "工艺细节图二",
+    }),
+  },
   imageText: {
     image: {
       width: 1600,

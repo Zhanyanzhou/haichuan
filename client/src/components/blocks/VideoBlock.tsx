@@ -95,22 +95,24 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
     <DecorSection master="cinematic-hero" width={videoWidth} flow={videoWidth === "full" ? "bleed" : "flow"} background={bgColor}>
       <div
         className="hc-video-frame"
-        data-content-role="coverImage"
         style={{
           position: "relative",
-          // 铺满(full)时放开最大高度,让画面按比例通栏撑满;其余宽度档保留 maxHeight 防超宽屏撑高
-          maxHeight: videoWidth === "full" ? undefined : maxHeight,
           width: "100%",
-          overflow: "hidden",
           background: bgColor,
         }}
       >
         <style>{`
-          .hc-video-frame { aspect-ratio: ${desktopRatio}; }
+          .hc-video__media {
+            position: relative;
+            aspect-ratio: ${desktopRatio};
+            max-height: ${videoWidth === "full" ? "none" : `${maxHeight}px`};
+            overflow: hidden;
+            background: ${bgColor};
+          }
           /* maxHeight 只为防桌面超宽屏撑高;移动端放开(inline style 优先,须 !important),
              让 9:16 全屏竖版完整呈现 */
           @media (max-width: 767px) {
-            .hc-video-frame { aspect-ratio: ${mobileRatio}; max-height: none !important; }
+            .hc-video__media { aspect-ratio: ${mobileRatio}; max-height: none; }
           }
           .hc-video__copy {
             position: absolute;
@@ -148,7 +150,7 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
           }
           @media (max-width: 767px) {
             .hc-video__copy {
-              position: static;
+              position: relative;
               padding: 20px 0 0;
               gap: 10px;
               color: #181A1B;
@@ -158,40 +160,42 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
             .hc-video__copy .hc-video__action { color: #181A1B; }
           }
         `}</style>
-        <video
-          data-content-role="playControl"
-          src={videoUrl}
-          autoPlay={autoPlay}
-          loop={loop}
-          muted={muted || autoPlay}
-          controls={showControls}
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          onEnded={() => setPlaying(false)}
-          style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            zIndex: 0,
-          }}
-        />
-        {posterUrl && !playing ? (
-          <div
-            aria-hidden
-            data-editor-field="posterUrl"
+        <div className="hc-video__media" data-content-role="coverImage">
+          <video
+            data-content-role="playControl"
+            src={videoUrl}
+            autoPlay={autoPlay}
+            loop={loop}
+            muted={muted || autoPlay}
+            controls={showControls}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onEnded={() => setPlaying(false)}
             style={{
               position: "absolute",
               inset: 0,
-              zIndex: 1,
-              backgroundImage: `url(${posterUrl})`,
-              backgroundSize: "cover",
-              backgroundPosition: `${coverFocusX}% ${coverFocusY}%`,
-              pointerEvents: "none",
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              zIndex: 0,
             }}
           />
-        ) : null}
+          {posterUrl && !playing ? (
+            <div
+              aria-hidden
+              data-editor-field="posterUrl"
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 1,
+                backgroundImage: `url(${posterUrl})`,
+                backgroundSize: "cover",
+                backgroundPosition: `${coverFocusX}% ${coverFocusY}%`,
+                pointerEvents: "none",
+              }}
+            />
+          ) : null}
+        </div>
         {showCopy ? (
           <div className="hc-video__copy" data-content-role="copy">
             {title ? (

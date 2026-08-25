@@ -1,7 +1,7 @@
 /**
  * schema/registry.ts — 模块编辑区 Schema 注册表(全量)。
  *
- * 全部 25 个组件(23 内容模板 + 2 系统区块)Schema 化;InspectorPanel 命中本表
+ * 全部 26 个组件(24 内容模板 + 2 系统区块)Schema 化;InspectorPanel 命中本表
  * 即渲染 SchemaInspectorPanel。旧专属面板(R4b)与 Puck.Fields fallback(P1-2,
  * 2026-08-18)均已物理删除,git 历史可查。
  */
@@ -12,6 +12,7 @@ import { cardGridSchema, servicePromiseSchema } from "./modules/cardGrid";
 import { heroSchema } from "./modules/hero";
 import { singlePosterSchema } from "./modules/singlePoster";
 import { doublePosterSchema } from "./modules/doublePoster";
+import { craftDetailsSchema } from "./modules/craftDetails";
 import { fullBleedSchema } from "./modules/fullBleed";
 import { gallerySchema } from "./modules/gallery";
 import { beforeAfterSchema } from "./modules/beforeAfter";
@@ -38,6 +39,7 @@ const MODULE_INSPECTOR_SCHEMA_SOURCE: Record<string, ModuleInspectorSchema> = {
   首屏主视觉: heroSchema,
   单图海报: singlePosterSchema,
   双图海报: doublePosterSchema,
+  工艺细节: craftDetailsSchema,
   全屏出血图: fullBleedSchema,
   作品画廊: gallerySchema,
   改款对比: beforeAfterSchema,
@@ -58,7 +60,7 @@ const MODULE_INSPECTOR_SCHEMA_SOURCE: Record<string, ModuleInspectorSchema> = {
   限时活动: limitedOfferSchema,
   轮播图: carouselSchema,
   热区图: hotspotSchema,
-  // 系统区块:迁出 index.tsx fallback,全 25 组件统一走 Schema 面板
+  // 系统区块:迁出 index.tsx fallback,全 26 组件统一走 Schema 面板
   网站全局设置: siteConfigSchema,
   业务功能区: businessRegionSchema,
 };

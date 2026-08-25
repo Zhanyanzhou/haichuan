@@ -19,30 +19,6 @@ export const testimonialSchema: ModuleInspectorSchema = {
   groupTitles: { media: "顾客引语与实拍" },
   sections: [
     {
-      id: "testimonial-content",
-      title: "内容",
-      layer: "content",
-      description: "真实顾客评价与实拍需取得书面授权后方可展示",
-      fields: [
-        moduleNameField("顾客分享"),
-        {
-          key: "title",
-          label: "标题",
-          control: "text",
-          required: true,
-          maxLength: 24,
-          placeholder: "如 来自顾客的真实分享",
-        },
-        {
-          key: "subtitle",
-          label: "副标题",
-          control: "text",
-          maxLength: 60,
-          hint: "留空不显示",
-        },
-      ],
-    },
-    {
       id: "testimonial-media",
       title: "素材",
       layer: "media",
@@ -89,6 +65,30 @@ export const testimonialSchema: ModuleInspectorSchema = {
               hint: "仅在已留存顾客同意公开展示的书面记录后开启；未确认无法发布。",
             },
           ],
+        },
+      ],
+    },
+    {
+      id: "testimonial-content",
+      title: "内容",
+      layer: "content",
+      description: "真实顾客评价与实拍需取得书面授权后方可展示",
+      fields: [
+        moduleNameField("顾客分享"),
+        {
+          key: "title",
+          label: "标题",
+          control: "text",
+          required: true,
+          maxLength: 24,
+          placeholder: "如 来自顾客的真实分享",
+        },
+        {
+          key: "subtitle",
+          label: "副标题",
+          control: "text",
+          maxLength: 60,
+          hint: "留空不显示",
         },
       ],
     },

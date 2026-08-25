@@ -10,14 +10,17 @@ import {
   contentTemplateObjectHasCapability,
   findContentTemplateEditableObject,
   getContentTemplateContract,
+  sanitizeContentTemplateLayoutData,
   type ContentTemplateContract,
+  type ContentTemplateEditableConstraints,
+  type ContentTemplateVisualRect,
 } from "../generated/contentTemplates.generated";
 import {
   ContentTemplateLayoutStyles,
   getContentTemplateLayout,
   templateLayoutVars,
 } from "../layout/contentTemplateLayouts";
-import { resolveVisualNode, setVisualOverridePath } from "./visualLayout";
+import { resolveVisualNode, setVisualOverridePath, toVisualOverridesV2 } from "./visualLayout";
 import {
   sendCanvasVisualEdit,
   useVisualEditorSession,
@@ -43,36 +46,87 @@ const EDITOR_SURFACE_CSS = `
   --hc-contract-muted: #5F6568;
   --hc-contract-line: #DDE1E2;
   --hc-contract-accent: #181A1B;
-  color: var(--hc-contract-ink);
-  background: var(--hc-contract-canvas);
   isolation: isolate;
 }
-.hc-contract-frame--editor[data-contract-tone="dark"] {
+.hc-contract-frame--editor[data-visual-panel-mode="design"] {
+  color: var(--hc-contract-ink);
+  background: var(--hc-contract-canvas);
+}
+.hc-contract-frame--editor[data-visual-panel-mode="design"][data-contract-tone="dark"] {
   --hc-contract-canvas: #181A1B;
-  --hc-contract-surface: #181A1B;
-  --hc-contract-surface-strong: #181A1B;
+  --hc-contract-surface: #252829;
+  --hc-contract-surface-strong: #303436;
   --hc-contract-ink: #F7F8F8;
   --hc-contract-muted: #DDE1E2;
   --hc-contract-line: #5F6568;
 }
-.hc-contract-frame--editor:not([data-content-template-module="视频区块"]) > :where(section, div),
-.hc-contract-frame--editor:not([data-content-template-module="视频区块"]) :where(section.hc-section) {
+.hc-contract-frame--editor[data-visual-panel-mode="design"]:not([data-content-template-module="视频区块"]) > :where(section, div),
+.hc-contract-frame--editor[data-visual-panel-mode="design"]:not([data-content-template-module="视频区块"]) :where(section.hc-section) {
   background: var(--hc-contract-canvas) !important;
   color: var(--hc-contract-ink) !important;
 }
-.hc-contract-frame--editor:not([data-content-template-module="视频区块"]) :where(h1, h2, h3, h4, p, strong, small, figcaption) {
-  color: inherit !important;
-}
-.hc-contract-frame--editor :where([class*="empty"], [class*="placeholder"]) {
+.hc-contract-frame--editor[data-visual-panel-mode="design"] :where([class*="empty"], [class*="placeholder"]) {
   border-color: var(--hc-contract-line) !important;
   background: var(--hc-contract-surface) !important;
   box-shadow: none !important;
 }
-.hc-contract-frame--editor :where([aria-current="true"], [class*="pagination"], [class*="handle"], [class*="hotspot"], [class*="action"], [class*="countdown"]) {
+.hc-contract-frame--editor[data-visual-panel-mode="design"] :where([aria-current="true"], [class*="pagination"], [class*="handle"], [class*="hotspot"], [class*="action"], [class*="countdown"]) {
   --hc-gold: var(--hc-contract-accent);
 }
-.hc-contract-frame--editor :where(article, figure, [class*="card"]) {
+.hc-contract-frame--editor[data-visual-panel-mode="design"] :where(article, figure, [class*="card"]) {
   box-shadow: none !important;
+}
+.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind] {
+  outline: 2px dashed #5F6568 !important;
+  outline-offset: -2px;
+}
+.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="media"],
+.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="product"],
+.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="structured"] {
+  background: #DDE1E2 !important;
+}
+.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="product"],
+.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="structured"] {
+  position: relative;
+}
+.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="media"] :where(img, picture, video, canvas, iframe),
+.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="product"] > *,
+.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="structured"] > * {
+  opacity: 0 !important;
+}
+.hc-contract-frame--editor[data-visual-panel-mode="design"] :is(
+  [data-hc-template-slot-kind="text"],
+  [data-hc-template-slot-kind="action"]
+) {
+  position: relative;
+  border-color: transparent !important;
+  min-height: 32px;
+  background: #F4F5F5 !important;
+  color: transparent !important;
+  text-shadow: none !important;
+}
+.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind]::after {
+  content: attr(data-hc-template-slot-label);
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2147483646;
+  display: inline-flex;
+  min-width: 76px;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 12px;
+  transform: translate(-50%, -50%);
+  border: 1px solid #5F6568;
+  border-radius: 3px;
+  background: #FFFFFF;
+  color: #181A1B !important;
+  font: 600 16px/1.25 var(--hc-font-sans, Arial, sans-serif) !important;
+  letter-spacing: .08em !important;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
 }
 .hc-contract-frame--editor :is(
   [data-content-role],
@@ -96,12 +150,63 @@ const EDITOR_SURFACE_CSS = `
   pointer-events: none;
   isolation: isolate;
 }
+.hc-contract-frame--editor [data-hc-layout-grid] {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: calc(1px * var(--hc-editor-ui-scale, 1)) solid rgba(51,95,125,.2);
+  background-image:
+    linear-gradient(
+      to right,
+      rgba(51,95,125,.22) 0 calc(1px * var(--hc-editor-ui-scale, 1)),
+      transparent calc(1px * var(--hc-editor-ui-scale, 1))
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(51,95,125,.18) 0 calc(1px * var(--hc-editor-ui-scale, 1)),
+      transparent calc(1px * var(--hc-editor-ui-scale, 1))
+    );
+  background-size:
+    calc(100% / 12) 100%,
+    100% calc(100% / var(--hc-layout-grid-rows, 8));
+  pointer-events: none;
+}
 .hc-contract-frame--editor [data-hc-selection-box] {
   position: absolute;
   border: 1px solid #335F7D;
   box-shadow: 0 0 0 1px rgba(255,255,255,.82);
   pointer-events: none;
   z-index: 2;
+}
+.hc-contract-frame--editor [data-hc-template-slot-box] {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 2px dashed #5F6568;
+  background: #DDE1E2;
+  color: #181A1B;
+  pointer-events: none;
+  z-index: 0;
+}
+.hc-contract-frame--editor [data-hc-template-slot-box][data-slot-kind="text"],
+.hc-contract-frame--editor [data-hc-template-slot-box][data-slot-kind="action"] {
+  background: #F4F5F5;
+}
+.hc-contract-frame--editor [data-hc-template-slot-box] > span {
+  display: inline-flex;
+  min-width: 76px;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 12px;
+  border: 1px solid #5F6568;
+  border-radius: 3px;
+  background: #FFFFFF;
+  color: #181A1B;
+  font: 600 16px/1.25 var(--hc-font-sans, Arial, sans-serif);
+  letter-spacing: .08em;
+  white-space: nowrap;
 }
 .hc-contract-frame--editor [data-hc-node-hud] {
   position: absolute;
@@ -120,7 +225,12 @@ const EDITOR_SURFACE_CSS = `
   white-space: nowrap;
 }
 .hc-contract-frame--editor [data-hc-node-hud][data-placement="above"] {
-  transform: translateY(-100%);
+  transform: translateY(-100%) scale(var(--hc-editor-ui-scale, 1));
+  transform-origin: left bottom;
+}
+.hc-contract-frame--editor [data-hc-node-hud]:not([data-placement="above"]) {
+  transform: scale(var(--hc-editor-ui-scale, 1));
+  transform-origin: left top;
 }
 .hc-contract-frame--editor [data-hc-node-hud] button {
   display: inline-flex;
@@ -161,7 +271,7 @@ const EDITOR_SURFACE_CSS = `
   border-radius: 1px;
   background: #FFFFFF;
   box-shadow: 0 0 0 1px rgba(255,255,255,.78);
-  transform: translate(-50%,-50%);
+  transform: translate(-50%,-50%) scale(var(--hc-editor-ui-scale, 1));
   z-index: 3;
   pointer-events: auto;
 }
@@ -175,7 +285,7 @@ const EDITOR_SURFACE_CSS = `
 .hc-contract-frame--editor [data-hc-resize-handle][data-resize-direction="se"] { cursor: nwse-resize; }
 .hc-contract-frame--editor [data-hc-snap-guide] {
   position: absolute;
-  z-index: 1;
+  z-index: 4;
   pointer-events: none;
   background: #335F7D;
 }
@@ -188,6 +298,32 @@ const EDITOR_SURFACE_CSS = `
   left: 0;
   right: 0;
   height: 1px;
+}
+.hc-contract-frame--editor [data-hc-geometry-hint] {
+  position: absolute;
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 8px);
+  padding: 3px 7px;
+  border: 1px solid rgba(51,95,125,.28);
+  border-radius: 3px;
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 2px 8px rgba(24,26,27,.1);
+  color: #335F7D;
+  font: 600 11px/1.35 var(--hc-font-sans, Arial, sans-serif);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 3;
+  transform: scale(var(--hc-editor-ui-scale, 1));
+  transform-origin: left top;
+}
+.hc-contract-frame--editor [data-hc-geometry-hint] b {
+  color: #181A1B;
+  font-weight: 600;
 }
 `;
 
@@ -226,6 +362,8 @@ type LayoutDragState = {
   frameOffsetX: number;
   frameOffsetY: number;
   lockRatio: boolean;
+  constraints: ContentTemplateEditableConstraints;
+  bounds: ContentTemplateVisualRect;
   sourceWindow: Window;
   snapX: SnapCandidate[];
   snapY: SnapCandidate[];
@@ -250,9 +388,23 @@ type SelectionOverlayBox = {
   top: number;
   width: number;
   height: number;
+  frameLeft: number;
+  frameTop: number;
+  frameWidth: number;
+  frameHeight: number;
   hudLeft: number;
   hudTop: number;
   hudPlacement: "above" | "below" | "inside";
+};
+
+type TemplateSlotOverlayBox = {
+  nodeId: string;
+  kind: VisualNodeKind;
+  label: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 };
 
 function getVisualNodeKind(
@@ -264,6 +416,34 @@ function getVisualNodeKind(
   if (kind === "text" || kind === "action" || kind === "product") return kind;
   if (kind === "collection") return "structured";
   return undefined;
+}
+
+function getTemplateSlotLabel(kind: VisualNodeKind) {
+  if (kind === "media") return "图片槽位";
+  if (kind === "text") return "文字槽位";
+  if (kind === "action") return "行动槽位";
+  if (kind === "product") return "商品槽位";
+  return "内容槽位";
+}
+
+function templateSlotOverlaysEqual(
+  current: TemplateSlotOverlayBox[],
+  next: TemplateSlotOverlayBox[],
+) {
+  if (current.length !== next.length) return false;
+  return current.every((slot, index) => {
+    const candidate = next[index];
+    return Boolean(
+      candidate &&
+        slot.nodeId === candidate.nodeId &&
+        slot.kind === candidate.kind &&
+        slot.label === candidate.label &&
+        Math.abs(slot.left - candidate.left) < 0.25 &&
+        Math.abs(slot.top - candidate.top) < 0.25 &&
+        Math.abs(slot.width - candidate.width) < 0.25 &&
+        Math.abs(slot.height - candidate.height) < 0.25,
+    );
+  });
 }
 
 type GesturePreviewState = {
@@ -292,14 +472,47 @@ const RESIZE_HANDLES: ReadonlyArray<{
   { direction: "w", label: "左边", x: 0, y: 0.5 },
 ];
 
-function clampRect(rect: { x: number; y: number; width: number; height: number }) {
-  const width = Math.min(1, Math.max(MIN_VISUAL_NODE_SIZE, rect.width));
-  const height = Math.min(1, Math.max(MIN_VISUAL_NODE_SIZE, rect.height));
+function clampRect(
+  rect: { x: number; y: number; width: number; height: number },
+  constraints: ContentTemplateEditableConstraints,
+  bounds: ContentTemplateVisualRect,
+) {
+  const minWidth = Math.max(MIN_VISUAL_NODE_SIZE, constraints.minSize.width);
+  const minHeight = Math.max(MIN_VISUAL_NODE_SIZE, constraints.minSize.height);
+  const width = Math.min(bounds.width, constraints.maxSize.width, Math.max(minWidth, rect.width));
+  const height = Math.min(bounds.height, constraints.maxSize.height, Math.max(minHeight, rect.height));
   return {
-    x: Math.min(1 - width, Math.max(0, rect.x)),
-    y: Math.min(1 - height, Math.max(0, rect.y)),
+    x: Math.min(bounds.x + bounds.width - width, Math.max(bounds.x, rect.x)),
+    y: Math.min(bounds.y + bounds.height - height, Math.max(bounds.y, rect.y)),
     width,
     height,
+  };
+}
+
+function interactionConstraints(
+  constraints: ContentTemplateEditableConstraints,
+  start: { width: number; height: number },
+  touchesWidth: boolean,
+  touchesHeight: boolean,
+): ContentTemplateEditableConstraints {
+  return {
+    ...constraints,
+    minSize: {
+      width: touchesWidth
+        ? constraints.minSize.width
+        : Math.min(constraints.minSize.width, start.width),
+      height: touchesHeight
+        ? constraints.minSize.height
+        : Math.min(constraints.minSize.height, start.height),
+    },
+    maxSize: {
+      width: touchesWidth
+        ? constraints.maxSize.width
+        : Math.max(constraints.maxSize.width, start.width),
+      height: touchesHeight
+        ? constraints.maxSize.height
+        : Math.max(constraints.maxSize.height, start.height),
+    },
   };
 }
 
@@ -309,6 +522,8 @@ function resizeRectFromHandle(
   dx: number,
   dy: number,
   lockRatio: boolean,
+  constraints: ContentTemplateEditableConstraints,
+  bounds: ContentTemplateVisualRect,
 ) {
   let left = start.x;
   let right = start.x + start.width;
@@ -324,10 +539,14 @@ function resizeRectFromHandle(
   if (changesTop) top += dy;
   if (changesBottom) bottom += dy;
 
-  left = Math.min(right - MIN_VISUAL_NODE_SIZE, Math.max(0, left));
-  right = Math.max(left + MIN_VISUAL_NODE_SIZE, Math.min(1, right));
-  top = Math.min(bottom - MIN_VISUAL_NODE_SIZE, Math.max(0, top));
-  bottom = Math.max(top + MIN_VISUAL_NODE_SIZE, Math.min(1, bottom));
+  const minWidth = Math.max(MIN_VISUAL_NODE_SIZE, constraints.minSize.width);
+  const minHeight = Math.max(MIN_VISUAL_NODE_SIZE, constraints.minSize.height);
+  const boundRight = bounds.x + bounds.width;
+  const boundBottom = bounds.y + bounds.height;
+  left = Math.min(right - minWidth, Math.max(bounds.x, left));
+  right = Math.max(left + minWidth, Math.min(boundRight, right));
+  top = Math.min(bottom - minHeight, Math.max(bounds.y, top));
+  bottom = Math.max(top + minHeight, Math.min(boundBottom, bottom));
 
   if (lockRatio && (changesLeft || changesRight) && (changesTop || changesBottom)) {
     const ratio = start.width / Math.max(MIN_VISUAL_NODE_SIZE, start.height);
@@ -338,8 +557,8 @@ function resizeRectFromHandle(
     if (widthDelta >= heightDeltaAsWidth) height = width / ratio;
     else width = height * ratio;
 
-    const maxWidth = changesLeft ? right : 1 - left;
-    const maxHeight = changesTop ? bottom : 1 - top;
+    const maxWidth = changesLeft ? right - bounds.x : boundRight - left;
+    const maxHeight = changesTop ? bottom - bounds.y : boundBottom - top;
     const scale = Math.min(1, maxWidth / width, maxHeight / height);
     width *= scale;
     height *= scale;
@@ -354,7 +573,7 @@ function resizeRectFromHandle(
     y: top,
     width: right - left,
     height: bottom - top,
-  });
+  }, constraints, bounds);
 }
 
 function nearestSnap(
@@ -391,6 +610,10 @@ function isHtmlElement(value: unknown): value is HTMLElement {
 }
 
 function findModuleFrameElement(element: HTMLElement, root: HTMLElement) {
+  // 部分模板（轮播、热区）把可编辑媒体角色直接标在模块根 section 上。
+  // 此时几何坐标必须相对合同 wrapper，而不能拿节点自身作参考，否则
+  // `height = 自身高度 × 0.75` 会在 ResizeObserver 中反复收缩到零。
+  if (element.parentElement === root) return root;
   let frameElement = element;
   while (frameElement.parentElement && frameElement.parentElement !== root) {
     frameElement = frameElement.parentElement;
@@ -439,10 +662,20 @@ const FRAME_CSS: Record<string, string> = {
   wide: "clamp(420px, 58vh, 680px)",
 };
 
+const EDITOR_FRAME_CSS: Record<string, string> = {
+  compact: "clamp(320px, calc(var(--homepage-editor-viewport-height, 1200px) * .48), 560px)",
+  standard: "clamp(460px, calc(var(--homepage-editor-viewport-height, 1200px) * .66), 760px)",
+  spacious: "clamp(560px, calc(var(--homepage-editor-viewport-height, 1200px) * .76), 900px)",
+  immersive: "clamp(640px, calc(var(--homepage-editor-viewport-height, 1200px) * .9), 1080px)",
+  tall: "clamp(620px, calc(var(--homepage-editor-viewport-height, 1200px) * .82), 980px)",
+  wide: "clamp(420px, calc(var(--homepage-editor-viewport-height, 1200px) * .58), 680px)",
+};
+
 function createInstanceCss(
   contract: ContentTemplateContract,
   overrides: Record<string, unknown> | undefined,
   scopeId: string,
+  mode: "editor" | "preview" | "public",
 ) {
   if (!overrides) return "";
   const capabilities = contract.editorCapabilities.layoutOverrides ?? {};
@@ -450,26 +683,53 @@ function createInstanceCss(
   const rules: string[] = [];
   if (overrides.version === 2) {
     const frame = isRecord(overrides.frame) ? overrides.frame : {};
-    if (
-      allowed(frame.heightPreset, capabilities.framePresets) &&
-      FRAME_CSS[String(frame.heightPreset)]
-    ) {
-      rules.push(`${root}>:where(section,div){min-height:${FRAME_CSS[String(frame.heightPreset)]}!important}`);
-    }
     const aspectRatios = isRecord(frame.aspectRatioByViewport)
       ? frame.aspectRatioByViewport
       : {};
     const legacyAspectRatio = Number(frame.aspectRatio);
     const desktopAspectRatio = Number(aspectRatios.desktop ?? legacyAspectRatio);
-    const mobileAspectRatio = Number(aspectRatios.mobile ?? aspectRatios.desktop ?? legacyAspectRatio);
+    const mobileAspectRatio = Number(aspectRatios.mobile ?? legacyAspectRatio);
+    const hasDesktopAspectRatio = Number.isFinite(desktopAspectRatio)
+      && desktopAspectRatio >= 0.25
+      && desktopAspectRatio <= 4;
+    const hasMobileAspectRatio = Number.isFinite(mobileAspectRatio)
+      && mobileAspectRatio >= 0.25
+      && mobileAspectRatio <= 4;
+    const selectedHeight = allowed(frame.heightPreset, capabilities.framePresets)
+      ? (mode === "editor" ? EDITOR_FRAME_CSS : FRAME_CSS)[String(frame.heightPreset)]
+      : undefined;
+    if (selectedHeight) {
+      rules.push(`${root}{min-height:${selectedHeight}!important}`);
+    } else {
+      if (!hasDesktopAspectRatio && contract.heightModeByViewport.desktop === "viewport") {
+        rules.push(`@media (min-width:768px){${root}{min-height:${mode === "editor" ? "calc(var(--homepage-editor-viewport-height, 1200px) * .75)" : "75vh"}}}`);
+      }
+      if (!hasMobileAspectRatio && contract.heightModeByViewport.mobile === "viewport") {
+        rules.push(`@media (max-width:767px){${root}{min-height:${mode === "editor" ? "calc(var(--homepage-editor-viewport-height, 844px) * .75)" : "75vh"}}}`);
+      }
+    }
     const frameAspectRule = (ratio: number) => Number.isFinite(ratio) && ratio >= 0.25 && ratio <= 4
-      ? `aspect-ratio:${ratio};min-height:0!important;position:relative;overflow:hidden`
+      ? `aspect-ratio:${ratio};position:relative;overflow:hidden`
       : "";
     const desktopFrameAspect = frameAspectRule(desktopAspectRatio);
     const mobileFrameAspect = frameAspectRule(mobileAspectRatio);
-    if (desktopFrameAspect) rules.push(`@media (min-width:768px){${root}>:where(section,div){${desktopFrameAspect}}}`);
-    if (mobileFrameAspect) rules.push(`@media (max-width:767px){${root}>:where(section,div){${mobileFrameAspect}}}`);
+    // 画布比例属于合同根框架。若把比例写在恰好也是可编辑槽位的根
+    // section 上（轮播、热区），该槽位再按百分比绝对定位时会形成
+    // “父高度依赖自身高度”的循环并收缩为 0。
+    if (desktopFrameAspect) rules.push(`@media (min-width:768px){${root}{${desktopFrameAspect}}}`);
+    if (mobileFrameAspect) rules.push(`@media (max-width:767px){${root}{${mobileFrameAspect}}}`);
+    if (desktopFrameAspect || mobileFrameAspect) {
+      rules.push(`${root}>:where(section,div):not([data-content-role]):not([data-content-role-desktop]):not([data-content-role-mobile]){height:100%!important;min-height:0!important;max-height:100%!important;overflow:hidden!important}`);
+    }
     const customColors = isRecord(frame.customColors) ? frame.customColors : {};
+    const colorPresets: Record<string, { background: string; text: string; accent: string }> = {
+      canvas: { background: "#FFFFFF", text: "#181A1B", accent: "#5F6568" },
+      mist: { background: "#F7F8F8", text: "#181A1B", accent: "#5F6568" },
+      inkSurface: { background: "#181A1B", text: "#FFFFFF", accent: "#DDE1E2" },
+    };
+    const colorPreset = typeof frame.colorPreset === "string"
+      ? colorPresets[frame.colorPreset]
+      : undefined;
     const allowedInstanceColors = new Set([
       "#181A1B", "#5F6568", "#DDE1E2", "#F7F8F8", "#FFFFFF",
       "#222222", "#66645F", "#E4E3DF", "#F8F7F4", "#FCFCFB",
@@ -487,13 +747,32 @@ function createInstanceCss(
       if (!allowedInstanceColors.has(normalized)) return undefined;
       return legacyColorMap[normalized] ?? normalized;
     };
-    const background = color(customColors.background);
-    const text = color(customColors.text);
-    const accent = color(customColors.accent);
+    const background = color(customColors.background) ?? colorPreset?.background;
+    const text = color(customColors.text) ?? colorPreset?.text;
+    const accent = color(customColors.accent) ?? colorPreset?.accent;
     if (background || text || accent) {
       rules.push(`${root}{${background ? `--hc-instance-background:${background};` : ""}${text ? `--hc-instance-text:${text};` : ""}${accent ? `--hc-instance-accent:${accent};` : ""}}`);
       if (background) rules.push(`${root}>:where(section,div){background:var(--hc-instance-background)!important}`);
       if (text) rules.push(`${root} :where(h1,h2,h3,h4,p,span,a){color:var(--hc-instance-text)}`);
+    }
+    if (contract.flow === "flow") {
+      const paddingMap: Record<string, string> = {
+        compact: "clamp(32px,4vw,56px)",
+        standard: "clamp(56px,7vw,96px)",
+        spacious: "clamp(88px,10vw,144px)",
+      };
+      const radiusMap: Record<string, string> = { square: "0", soft: "8px", rounded: "16px" };
+      const shadowMap: Record<string, string> = {
+        none: "none",
+        soft: "0 10px 28px rgba(24,26,27,.08)",
+        lifted: "0 20px 48px rgba(24,26,27,.14)",
+      };
+      const padding = typeof frame.paddingPreset === "string" ? paddingMap[frame.paddingPreset] : undefined;
+      const radius = typeof frame.radiusPreset === "string" ? radiusMap[frame.radiusPreset] : undefined;
+      const shadow = typeof frame.shadowPreset === "string" ? shadowMap[frame.shadowPreset] : undefined;
+      if (padding || radius || shadow) {
+        rules.push(`${root}{box-sizing:border-box!important;${padding ? `padding-block:${padding}!important;` : ""}${radius ? `border-radius:${radius}!important;overflow:clip;` : ""}${shadow ? `box-shadow:${shadow}!important;` : ""}}`);
+      }
     }
     if (allowed(frame.compositionPreset, capabilities.compositionPresets)) {
       const composition = String(frame.compositionPreset);
@@ -539,7 +818,7 @@ function createInstanceCss(
       };
       const desktopZIndex = hasCapability("layer") ? safeZIndex(zIndexByViewport.desktop) : undefined;
       const mobileZIndex = hasCapability("layer")
-        ? safeZIndex(zIndexByViewport.mobile) ?? desktopZIndex
+        ? safeZIndex(zIndexByViewport.mobile)
         : undefined;
       const rectRule = (
         rawRect: unknown,
@@ -552,17 +831,13 @@ function createInstanceCss(
         const width = Number(rawRect.width);
         const height = Number(rawRect.height);
         if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.0001 || y + height > 1.0001) return "";
-        return `position:absolute!important;box-sizing:border-box!important;left:var(${visualNodeLayoutVar(nodeId, viewport, "left")},${x * 100}%)!important;top:var(${visualNodeLayoutVar(nodeId, viewport, "top")},${y * 100}%)!important;width:var(${visualNodeLayoutVar(nodeId, viewport, "width")},${width * 100}%)!important;height:var(${visualNodeLayoutVar(nodeId, viewport, "height")},${height * 100}%)!important;margin:0!important;max-width:none!important;z-index:${zIndex ?? 2}`;
+        return `position:absolute!important;box-sizing:border-box!important;left:var(${visualNodeLayoutVar(nodeId, viewport, "left")},${x * 100}%)!important;top:var(${visualNodeLayoutVar(nodeId, viewport, "top")},${y * 100}%)!important;width:var(${visualNodeLayoutVar(nodeId, viewport, "width")},${width * 100}%)!important;height:var(${visualNodeLayoutVar(nodeId, viewport, "height")},${height * 100}%)!important;margin:0!important;max-width:none!important;max-height:none!important;z-index:${zIndex ?? 2}`;
       };
       const desktopRect = hasCapability("layout")
         ? rectRule(rectByViewport.desktop, desktopZIndex, "desktop")
         : "";
       const mobileRect = hasCapability("layout")
-        ? rectRule(
-            isRecord(rectByViewport.mobile) ? rectByViewport.mobile : rectByViewport.desktop,
-            mobileZIndex,
-            "mobile",
-          )
+        ? rectRule(rectByViewport.mobile, mobileZIndex, "mobile")
         : "";
       if (desktopRect || mobileRect) rules.push(`${root}>:where(section,div){position:relative}`);
       if (desktopRect) rules.push(`@media (min-width:768px){${selector}{${desktopRect}}}`);
@@ -587,6 +862,27 @@ function createInstanceCss(
         slotDeclarations.push(`margin-inline:${position === "center" ? "auto" : position === "end" ? "auto 0" : "0 auto"}`);
       }
       if (slotDeclarations.length) rules.push(`${selector}{${slotDeclarations.join(";")}}`);
+      const appearance = isRecord(rawNode.appearance) ? rawNode.appearance : {};
+      if (["media", "video", "product", "collection"].includes(editableObject.kind)) {
+        const radiusMap: Record<string, string> = { square: "0", soft: "8px", rounded: "16px" };
+        const shadowMap: Record<string, string> = {
+          none: "none",
+          soft: "0 8px 22px rgba(24,26,27,.1)",
+          lifted: "0 16px 36px rgba(24,26,27,.16)",
+        };
+        const radius = typeof appearance.radiusPreset === "string"
+          ? radiusMap[appearance.radiusPreset]
+          : undefined;
+        const shadow = typeof appearance.shadowPreset === "string"
+          ? shadowMap[appearance.shadowPreset]
+          : undefined;
+        const appearanceSelector = editableObject.kind === "collection"
+          ? `${selector}>*`
+          : selector;
+        if (radius || shadow) {
+          rules.push(`${appearanceSelector}{${radius ? `border-radius:${radius}!important;overflow:hidden;` : ""}${shadow ? `box-shadow:${shadow}!important;` : ""}}`);
+        }
+      }
       const mediaView = isRecord(rawNode.mediaView) ? rawNode.mediaView : {};
       const mediaDeclarations: string[] = [];
       if (hasCapability("fit") && (mediaView.fit === "cover" || mediaView.fit === "contain")) mediaDeclarations.push(`object-fit:${mediaView.fit}!important`);
@@ -603,7 +899,7 @@ function createInstanceCss(
           : "";
       };
       const desktopFocus = hasCapability("focus") ? focusRule(focusByViewport.desktop) : "";
-      const mobileFocus = hasCapability("focus") ? focusRule(focusByViewport.mobile) || desktopFocus : "";
+      const mobileFocus = hasCapability("focus") ? focusRule(focusByViewport.mobile) : "";
       if (desktopFocus) rules.push(`@media (min-width:768px){${selector} :where(img,video){${desktopFocus}}}`);
       if (mobileFocus) rules.push(`@media (max-width:767px){${selector} :where(img,video){${mobileFocus}}}`);
       const typography = isRecord(rawNode.typography) ? rawNode.typography : {};
@@ -775,6 +1071,55 @@ function createInstanceCss(
   return rules.join("\n");
 }
 
+function mergeInstanceValue(
+  base: InstanceValue,
+  override: InstanceValue,
+): InstanceValue {
+  const result: InstanceValue = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    if (isRecord(value) && isRecord(base[key])) {
+      result[key] = mergeInstanceValue(base[key] as InstanceValue, value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function createDefaultGeometryOverrides(contract: ContentTemplateContract): InstanceValue {
+  const nodes: InstanceValue = {};
+  for (const editableObject of contract.editorCapabilities.editableObjects) {
+    for (const nodeId of editableObject.nodeIds ?? [editableObject.roleId]) {
+      const rectByViewport: InstanceValue = {};
+      const zIndexByViewport: InstanceValue = {};
+      for (const viewport of ["desktop", "mobile"] as const) {
+        const geometry = contract.defaultGeometryByViewport[viewport];
+        const matchingZones = geometry.zones.filter((candidate) => candidate.nodeId === nodeId);
+        // 同一 nodeId 的多个区域只用于缩略图表达重复卡片/列表项，不能
+        // 被误当成一个真实 DOM 容器的默认绝对定位，否则整个列表会收缩
+        // 到第一张卡片并与标题重叠。没有唯一映射时以真实 Renderer 布局为准。
+        const zone = matchingZones.length === 1 ? matchingZones[0] : undefined;
+        if (!zone) continue;
+        rectByViewport[viewport] = zone.rect;
+        zIndexByViewport[viewport] = zone.overlay ? 4 : 2;
+      }
+      if (Object.keys(rectByViewport).length > 0) {
+        nodes[nodeId] = { rectByViewport, zIndexByViewport };
+      }
+    }
+  }
+  return {
+    version: 2,
+    frame: {
+      aspectRatioByViewport: {
+        desktop: contract.defaultGeometryByViewport.desktop.frameAspectRatio,
+        mobile: contract.defaultGeometryByViewport.mobile.frameAspectRatio,
+      },
+    },
+    nodes,
+  };
+}
+
 function resolveInstanceOverrides(
   contract: ContentTemplateContract,
   props: Record<string, unknown> | undefined,
@@ -789,28 +1134,65 @@ function resolveInstanceOverrides(
         ? "image-left"
         : undefined
     : undefined;
-  if (!legacyComposition) return source;
+  const normalizedSource = source?.version === 1
+    ? toVisualOverridesV2(source)
+    : source;
+  const normalizedFrame = isRecord(normalizedSource?.frame)
+    ? normalizedSource.frame
+    : {};
+  const withLegacyComposition = legacyComposition && typeof normalizedFrame.compositionPreset !== "string"
+    ? {
+        ...(normalizedSource ?? { version: 2 }),
+        frame: { ...normalizedFrame, compositionPreset: legacyComposition },
+      }
+    : normalizedSource;
+  const sanitized = withLegacyComposition?.version === 2
+    ? sanitizeContentTemplateLayoutData(contract.moduleType, withLegacyComposition)
+    : undefined;
+  return isRecord(sanitized) ? sanitized : undefined;
+}
 
-  if (!source) {
-    return { version: 2, frame: { compositionPreset: legacyComposition } };
-  }
-  if (source.version === 2) {
-    const frame = isRecord(source.frame) ? source.frame : {};
-    if (typeof frame.compositionPreset === "string") return source;
-    return { ...source, frame: { ...frame, compositionPreset: legacyComposition } };
-  }
-  if (source.version === 1) {
-    const layout = isRecord(source.layout) ? source.layout : {};
-    if (typeof layout.compositionPreset === "string") return source;
-    return { ...source, layout: { ...layout, compositionPreset: legacyComposition } };
-  }
-  return source;
+function resolveContractVisualNode(
+  contract: ContentTemplateContract,
+  props: Record<string, unknown> | undefined,
+  nodeId: string,
+  viewport: "desktop" | "mobile",
+) {
+  const explicitOverrides = resolveInstanceOverrides(contract, props);
+  return resolveVisualNode(
+    {
+      ...(props ?? {}),
+      __instanceOverrides: mergeInstanceValue(
+        createDefaultGeometryOverrides(contract),
+        isRecord(explicitOverrides) ? explicitOverrides : {},
+      ),
+    },
+    nodeId,
+    viewport,
+  );
+}
+
+function resolveExplicitVisualNode(
+  contract: ContentTemplateContract,
+  props: Record<string, unknown> | undefined,
+  nodeId: string,
+  viewport: "desktop" | "mobile",
+) {
+  return resolveVisualNode(
+    {
+      ...(props ?? {}),
+      __instanceOverrides: resolveInstanceOverrides(contract, props),
+    },
+    nodeId,
+    viewport,
+  );
 }
 
 /**
- * 三条真实渲染链路共用的 schema v3 根框架。
- * 它只提供合同元数据、响应式比例变量与编辑画布中性表面；子节点始终是
- * adapter / 公开 Renderer 的真实输出，不在这里重新实现模板构图。
+ * 三条真实渲染链路共用的 schema v5 根框架。
+ * 默认状态保留语义 Renderer 的内容流；合同默认几何仅作为编辑器选区回退，
+ * 只有合法的实例覆盖才会改变公开布局，从而统一驱动编辑器、
+ * 缩略图与公开 Renderer。子节点仍由 adapter 输出语义 DOM，本层不复制内容结构。
  */
 export default function ContentTemplateContractFrame({
   moduleType,
@@ -823,9 +1205,11 @@ export default function ContentTemplateContractFrame({
   const reactId = useId();
   const selection = useVisualEditorSession((state) => state.selection);
   const editorMode = useVisualEditorSession((state) => state.mode);
+  const panelMode = useVisualEditorSession((state) => state.panelMode);
   const layerCommand = useVisualEditorSession((state) => state.layerCommand);
   const selectNode = useVisualEditorSession((state) => state.selectNode);
   const setEditorMode = useVisualEditorSession((state) => state.setMode);
+  const setVisualPanelMode = useVisualEditorSession((state) => state.setPanelMode);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const propsRef = useRef(props);
   const dragRef = useRef<MediaDragState | null>(null);
@@ -836,6 +1220,7 @@ export default function ContentTemplateContractFrame({
   const [liveMessage, setLiveMessage] = useState("");
   const [activeGuides, setActiveGuides] = useState<ActiveGuides>({});
   const [selectionOverlay, setSelectionOverlay] = useState<SelectionOverlayBox | null>(null);
+  const [templateSlotOverlays, setTemplateSlotOverlays] = useState<TemplateSlotOverlayBox[]>([]);
   const [gesturePreview, setGesturePreview] = useState<GesturePreviewState | null>(null);
   const [gesturePhase, setGesturePhase] = useState<GesturePhase>("idle");
   const blockId = typeof props?.id === "string" ? props.id : "";
@@ -912,6 +1297,7 @@ export default function ContentTemplateContractFrame({
     if (JSON.stringify(current) !== JSON.stringify(gesturePreview.overrides)) return;
     gesturePreviewRef.current = null;
     setGesturePreview(null);
+    setGesturePhase("idle");
   }, [gesturePreview, props?.__instanceOverrides]);
 
   useEffect(() => {
@@ -930,7 +1316,8 @@ export default function ContentTemplateContractFrame({
     if (!allowedNode) return;
     const sourceWindow = rootRef.current?.ownerDocument.defaultView ?? window;
     const viewport = sourceWindow.innerWidth <= 767 ? "mobile" : "desktop";
-    const currentZIndex = resolveVisualNode(
+    const currentZIndex = resolveContractVisualNode(
+      contract,
       propsRef.current,
       layerCommand.nodeId,
       viewport,
@@ -979,6 +1366,7 @@ export default function ContentTemplateContractFrame({
     const updateOverlay = () => {
       const rootBounds = root.getBoundingClientRect();
       const targetBounds = target.getBoundingClientRect();
+      const frameBounds = findFrameElement(target, root).getBoundingClientRect();
       const left = targetBounds.left - rootBounds.left;
       const top = targetBounds.top - rootBounds.top;
       const width = targetBounds.width;
@@ -999,6 +1387,10 @@ export default function ContentTemplateContractFrame({
         top,
         width,
         height,
+        frameLeft: frameBounds.left - rootBounds.left,
+        frameTop: frameBounds.top - rootBounds.top,
+        frameWidth: frameBounds.width,
+        frameHeight: frameBounds.height,
         hudLeft: Math.max(
           4,
           Math.min(left, Math.max(4, rootBounds.width - HUD_ESTIMATED_WIDTH - 4)),
@@ -1007,8 +1399,8 @@ export default function ContentTemplateContractFrame({
         hudPlacement,
       });
     };
-    updateOverlay();
     const ownerWindow = root.ownerDocument.defaultView;
+    updateOverlay();
     const ResizeObserverConstructor = ownerWindow?.ResizeObserver;
     const observer = ResizeObserverConstructor
       ? new ResizeObserverConstructor(updateOverlay)
@@ -1054,7 +1446,12 @@ export default function ContentTemplateContractFrame({
         ancestor?.dataset.contentRoleDesktop ||
         ancestor?.dataset.contentRoleMobile;
       if (ancestorNodeId === nodeId && allowedNodes.has(ancestorNodeId)) return;
-      const isAction = getVisualNodeKind(contract, nodeId) === "action";
+      const nodeKind = getVisualNodeKind(contract, nodeId);
+      if (!nodeKind) return;
+      element.dataset.hcTemplateSlotKind = nodeKind;
+      element.dataset.hcTemplateSlotLabel = getTemplateSlotLabel(nodeKind);
+      touched.push(element);
+      const isAction = nodeKind === "action";
       if (isAction) return;
       if (!element.hasAttribute("tabindex")) {
         element.tabIndex = 0;
@@ -1065,10 +1462,11 @@ export default function ContentTemplateContractFrame({
         element.setAttribute("aria-label", `编辑画布对象 ${nodeId}`);
         element.dataset.hcKeyboardAria = "true";
       }
-      touched.push(element);
     });
     return () => {
       touched.forEach((element) => {
+        element.removeAttribute("data-hc-template-slot-kind");
+        element.removeAttribute("data-hc-template-slot-label");
         if (element.dataset.hcKeyboardNode) {
           element.removeAttribute("data-hc-keyboard-node");
         }
@@ -1083,6 +1481,56 @@ export default function ContentTemplateContractFrame({
       });
     };
   }, [blockId, contract, mode]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (mode !== "editor" || panelMode !== "design" || !root) {
+      setTemplateSlotOverlays([]);
+      return;
+    }
+    const nodes = Array.from(root.querySelectorAll<HTMLElement>("[data-hc-template-slot-kind]"));
+    const updateOverlays = () => {
+      const rootBounds = root.getBoundingClientRect();
+      const next = nodes.flatMap((element): TemplateSlotOverlayBox[] => {
+        const nodeId = element.dataset.hcKeyboardNode ||
+          element.dataset.contentRole ||
+          element.dataset.contentRoleDesktop ||
+          element.dataset.contentRoleMobile ||
+          element.dataset.editorField?.split(/\s+/).find(Boolean);
+        const kind = element.dataset.hcTemplateSlotKind as VisualNodeKind | undefined;
+        if (!nodeId || !kind) return [];
+        const bounds = element.getBoundingClientRect();
+        if (bounds.width <= 0 || bounds.height <= 0) return [];
+        return [{
+          nodeId,
+          kind,
+          label: element.dataset.hcTemplateSlotLabel || getTemplateSlotLabel(kind),
+          left: bounds.left - rootBounds.left,
+          top: bounds.top - rootBounds.top,
+          width: bounds.width,
+          height: bounds.height,
+        }];
+      });
+      setTemplateSlotOverlays((current) =>
+        templateSlotOverlaysEqual(current, next) ? current : next,
+      );
+    };
+    updateOverlays();
+    const ownerWindow = root.ownerDocument.defaultView;
+    const ResizeObserverConstructor = ownerWindow?.ResizeObserver;
+    const observer = ResizeObserverConstructor
+      ? new ResizeObserverConstructor(updateOverlays)
+      : undefined;
+    observer?.observe(root);
+    nodes.forEach((node) => observer?.observe(node));
+    ownerWindow?.addEventListener("resize", updateOverlays);
+    ownerWindow?.addEventListener("scroll", updateOverlays, true);
+    return () => {
+      observer?.disconnect();
+      ownerWindow?.removeEventListener("resize", updateOverlays);
+      ownerWindow?.removeEventListener("scroll", updateOverlays, true);
+    };
+  }, [contract, mode, panelMode, props]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -1122,12 +1570,21 @@ export default function ContentTemplateContractFrame({
     const root = rootRef.current;
     const ownerDocument = root?.ownerDocument;
     const ownerWindow = root?.ownerDocument.defaultView;
-    const cancelInteraction = () => cancelActiveGesture(true);
-    ownerWindow?.addEventListener("resize", cancelInteraction);
-    ownerWindow?.addEventListener("blur", cancelInteraction);
+    let viewportWidth = ownerWindow?.innerWidth;
+    const cancelOnViewportWidthChange = () => {
+      const nextWidth = ownerWindow?.innerWidth;
+      if (nextWidth === viewportWidth) return;
+      viewportWidth = nextWidth;
+      cancelActiveGesture(true);
+    };
+    const cancelOnBlur = () => cancelActiveGesture(true);
+    // Puck 会按内容高度同步调整 iframe。对象实时预览可能因此触发仅高度变化的
+    // resize；这不是视口/断点变化，若在这里释放 pointer capture 会中断拖动。
+    ownerWindow?.addEventListener("resize", cancelOnViewportWidthChange);
+    ownerWindow?.addEventListener("blur", cancelOnBlur);
     return () => {
-      ownerWindow?.removeEventListener("resize", cancelInteraction);
-      ownerWindow?.removeEventListener("blur", cancelInteraction);
+      ownerWindow?.removeEventListener("resize", cancelOnViewportWidthChange);
+      ownerWindow?.removeEventListener("blur", cancelOnBlur);
       cancelActiveGesture(false, false);
       // Puck 仅更新 itemSelector 时也可能短暂重挂当前区块。同步 clear 会把
       // 刚由图片/文字 pointerdown 写入的视觉选择擦掉，表现为画布点不中。
@@ -1168,11 +1625,16 @@ export default function ContentTemplateContractFrame({
       const viewport = (ownerWindow?.innerWidth ?? 1024) <= 767
         ? "mobile" as const
         : "desktop" as const;
+      root.style.setProperty(
+        "--hc-layout-grid-rows",
+        String(contract.defaultGeometryByViewport[viewport].rows),
+      );
+      appliedVariables.add("--hc-layout-grid-rows");
       const candidates = Array.from(root.querySelectorAll<HTMLElement>(
         "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
       ));
       nodeIds.forEach((nodeId) => {
-        const rect = resolveVisualNode(visualProps, nodeId, viewport).rect;
+        const rect = resolveContractVisualNode(contract, visualProps, nodeId, viewport).rect;
         if (!rect) return;
         const target = candidates.find((element) => {
           if (element.getClientRects().length === 0) return false;
@@ -1193,13 +1655,32 @@ export default function ContentTemplateContractFrame({
         )
           ? rawContainingBlock
           : frameElement;
-        const frameBounds = frameElement.getBoundingClientRect();
+        const measuredFrameBounds = frameElement.getBoundingClientRect();
+        const rootBounds = root.getBoundingClientRect();
+        // Puck 切换内容/模板编辑时会短暂重挂当前区块。直接框架在这一帧
+        // 可能尚未恢复高度；若把 0 写进布局变量，媒体槽位会保持折叠。
+        // 合同根框架已经具有当前设备的确定尺寸，可安全承担这一帧兜底。
+        const frameBounds = measuredFrameBounds.width > 0 && measuredFrameBounds.height > 0
+          ? measuredFrameBounds
+          : rootBounds;
         const containingBounds = containingBlock.getBoundingClientRect();
+        // 模板库缩略图会缩放真实 Renderer。getBoundingClientRect 返回缩放后的
+        // 视觉像素，而 CSS 自定义属性写入的是缩放前布局像素；两者混用会让
+        // 1/4 缩略图里的槽位再次缩小到 1/16。按包含块实际缩放比还原即可
+        // 同时覆盖编辑画布、缩略图和公开页面（公开页面比例为 1）。
+        const containingScaleX = containingBlock.offsetWidth > 0
+          ? containingBounds.width / containingBlock.offsetWidth
+          : 1;
+        const containingScaleY = containingBlock.offsetHeight > 0
+          ? containingBounds.height / containingBlock.offsetHeight
+          : containingScaleX;
         const values = {
-          left: frameBounds.left - containingBounds.left + rect.x * frameBounds.width,
-          top: frameBounds.top - containingBounds.top + rect.y * frameBounds.height,
-          width: rect.width * frameBounds.width,
-          height: rect.height * frameBounds.height,
+          left: (frameBounds.left - containingBounds.left + rect.x * frameBounds.width) /
+            Math.max(0.0001, containingScaleX),
+          top: (frameBounds.top - containingBounds.top + rect.y * frameBounds.height) /
+            Math.max(0.0001, containingScaleY),
+          width: rect.width * frameBounds.width / Math.max(0.0001, containingScaleX),
+          height: rect.height * frameBounds.height / Math.max(0.0001, containingScaleY),
         };
         (Object.entries(values) as Array<[keyof typeof values, number]>).forEach(
           ([axis, value]) => {
@@ -1231,12 +1712,15 @@ export default function ContentTemplateContractFrame({
     ? { ...props, __instanceOverrides: gesturePreview.overrides }
     : props;
   const instanceOverrides = resolveInstanceOverrides(contract, previewProps);
-  const instanceCss = createInstanceCss(contract, instanceOverrides, scopeId);
-  const instanceLayout = isRecord(instanceOverrides?.layout)
-    ? instanceOverrides.layout
+  const instanceCss = createInstanceCss(contract, instanceOverrides, scopeId, mode);
+  const instanceOverrideRecord: InstanceValue = isRecord(instanceOverrides)
+    ? instanceOverrides as InstanceValue
     : {};
-  const instanceFrame = isRecord(instanceOverrides?.frame)
-    ? instanceOverrides.frame
+  const instanceLayout = isRecord(instanceOverrideRecord.layout)
+    ? instanceOverrideRecord.layout
+    : {};
+  const instanceFrame = isRecord(instanceOverrideRecord.frame)
+    ? instanceOverrideRecord.frame
     : {};
 
   const nodeSelector = (nodeId: string) =>
@@ -1424,6 +1908,9 @@ export default function ContentTemplateContractFrame({
 
   const handleHudMode = (nextMode: "adjust-layout" | "adjust-media") => {
     cancelActiveGesture(false);
+    if (nextMode === "adjust-layout" && panelMode !== "design") {
+      setVisualPanelMode("design");
+    }
     setEditorMode(nextMode);
     setLiveMessage(
       nextMode === "adjust-layout"
@@ -1514,24 +2001,49 @@ export default function ContentTemplateContractFrame({
         node.nodeId,
         activeViewport,
       );
-      const effective = resolveVisualNode(props, node.nodeId, activeViewport);
+      const effective = resolveExplicitVisualNode(contract, props, node.nodeId, activeViewport);
+      const baseConstraints = editableObject!.constraints;
+      const bounds = baseConstraints.safeAreaRequired
+        ? contract.defaultGeometryByViewport[activeViewport].safeArea
+        : { x: 0, y: 0, width: 1, height: 1 };
+      if (baseConstraints.safeAreaRequired) {
+        snapCandidates.x.push(
+          { value: bounds.x, kind: "frame-edge" },
+          { value: bounds.x + bounds.width / 2, kind: "frame-center" },
+          { value: bounds.x + bounds.width, kind: "frame-edge" },
+        );
+        snapCandidates.y.push(
+          { value: bounds.y, kind: "frame-edge" },
+          { value: bounds.y + bounds.height / 2, kind: "frame-center" },
+          { value: bounds.y + bounds.height, kind: "frame-edge" },
+        );
+      }
       const derivedRect = {
         x: Math.min(1, Math.max(0, (nodeBounds.left - frameBounds.left) / Math.max(1, frameBounds.width))),
         y: Math.min(1, Math.max(0, (nodeBounds.top - frameBounds.top) / Math.max(1, frameBounds.height))),
         width: Math.min(1, Math.max(MIN_VISUAL_NODE_SIZE, nodeBounds.width / Math.max(1, frameBounds.width))),
         height: Math.min(1, Math.max(MIN_VISUAL_NODE_SIZE, nodeBounds.height / Math.max(1, frameBounds.height))),
       };
-      const startRect = effective.rect ?? derivedRect;
-      const operation = resizeHandleElement ||
-        (event.clientX >= nodeBounds.right - 20 && event.clientY >= nodeBounds.bottom - 20)
+      const requestedResizeDirection = resizeDirection ?? "se";
+      const canResizeDirection = baseConstraints.allowedResize.includes(requestedResizeDirection);
+      const operation = (resizeHandleElement && canResizeDirection) ||
+        (!resizeHandleElement && baseConstraints.allowedResize.includes("se") && event.clientX >= nodeBounds.right - 20 && event.clientY >= nodeBounds.bottom - 20)
         ? "resize" as const
         : "move" as const;
+      const rawStartRect = effective.rect ?? derivedRect;
+      const constraints = interactionConstraints(
+        baseConstraints,
+        rawStartRect,
+        operation === "resize" && (requestedResizeDirection.includes("e") || requestedResizeDirection.includes("w")),
+        operation === "resize" && (requestedResizeDirection.includes("n") || requestedResizeDirection.includes("s")),
+      );
+      const startRect = clampRect(rawStartRect, constraints, bounds);
       layoutDragRef.current = {
         pointerId: event.pointerId,
         nodeId: node.nodeId,
         viewport: activeViewport,
         operation,
-        resizeDirection: operation === "resize" ? resizeDirection ?? "se" : undefined,
+        resizeDirection: operation === "resize" ? requestedResizeDirection : undefined,
         startClientX: event.clientX,
         startClientY: event.clientY,
         startRect,
@@ -1540,6 +2052,8 @@ export default function ContentTemplateContractFrame({
         frameOffsetX: frameBounds.left - rootBounds.left,
         frameOffsetY: frameBounds.top - rootBounds.top,
         lockRatio: event.shiftKey,
+        constraints,
+        bounds,
         sourceWindow,
         snapX: snapCandidates.x,
         snapY: snapCandidates.y,
@@ -1562,7 +2076,7 @@ export default function ContentTemplateContractFrame({
     }
     if (activeMode !== "adjust-media" || !mediaFocusAllowed) return;
     const bounds = node.element.getBoundingClientRect();
-    const effective = resolveVisualNode(props, node.nodeId, activeViewport);
+    const effective = resolveContractVisualNode(contract, props, node.nodeId, activeViewport);
     dragRef.current = {
       pointerId: event.pointerId,
       nodeId: node.nodeId,
@@ -1641,7 +2155,13 @@ export default function ContentTemplateContractFrame({
     if (event.key === "Enter") {
       if (useVisualEditorSession.getState().panelMode === "design") {
         useVisualEditorSession.getState().setMode(mediaViewAllowed ? "adjust-media" : layoutAllowed ? "adjust-layout" : "select");
-        setLiveMessage(mediaViewAllowed ? "已进入图片构图调整" : "已进入对象位置调整");
+        setLiveMessage(
+          mediaViewAllowed
+            ? mediaFocusAllowed
+              ? "已进入图片画面调整，使用方向键移动焦点，按 Shift 加方向键可大幅调整，按 Escape 退出"
+              : "已进入图片显示调整，可使用画布工具调整显示方式和缩放，按 Escape 退出"
+            : "已进入对象位置调整，使用方向键移动，按 Alt 加方向键调整大小，按 Escape 退出",
+        );
       }
       event.preventDefault();
       return;
@@ -1651,7 +2171,7 @@ export default function ContentTemplateContractFrame({
     const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
     const axis = event.key === "ArrowLeft" || event.key === "ArrowRight" ? "x" : "y";
     if (activeMode === "adjust-media" && mediaFocusAllowed) {
-      const effective = resolveVisualNode(propsRef.current, node.nodeId, activeViewport);
+      const effective = resolveContractVisualNode(contract, propsRef.current, node.nodeId, activeViewport);
       const focus = {
         x: effective.focus?.x ?? 50,
         y: effective.focus?.y ?? 50,
@@ -1677,19 +2197,41 @@ export default function ContentTemplateContractFrame({
     const frameElement = findFrameElement(node.element, event.currentTarget);
     const frameBounds = frameElement.getBoundingClientRect();
     const nodeBounds = node.element.getBoundingClientRect();
-    const effective = resolveVisualNode(propsRef.current, node.nodeId, activeViewport);
-    const rect = effective.rect ?? {
+    const effective = resolveExplicitVisualNode(contract, propsRef.current, node.nodeId, activeViewport);
+    const baseConstraints = editableObject!.constraints;
+    const bounds = baseConstraints.safeAreaRequired
+      ? contract.defaultGeometryByViewport[activeViewport].safeArea
+      : { x: 0, y: 0, width: 1, height: 1 };
+    const rawRect = effective.rect ?? {
       x: Math.min(1, Math.max(0, (nodeBounds.left - frameBounds.left) / Math.max(1, frameBounds.width))),
       y: Math.min(1, Math.max(0, (nodeBounds.top - frameBounds.top) / Math.max(1, frameBounds.height))),
       width: Math.min(1, Math.max(MIN_VISUAL_NODE_SIZE, nodeBounds.width / Math.max(1, frameBounds.width))),
       height: Math.min(1, Math.max(MIN_VISUAL_NODE_SIZE, nodeBounds.height / Math.max(1, frameBounds.height))),
     };
+    const resizingWidth = event.altKey && axis === "x";
+    const resizingHeight = event.altKey && axis === "y";
+    const constraints = interactionConstraints(
+      baseConstraints,
+      rawRect,
+      resizingWidth,
+      resizingHeight,
+    );
+    const rect = clampRect(rawRect, constraints, bounds);
     const step = event.shiftKey ? 0.05 : 0.01;
     if (event.altKey) {
+      const resizeDirection = axis === "x" ? "e" : "s";
+      if (!constraints.allowedResize.includes(resizeDirection)) return;
       const dimension = axis === "x" ? "width" : "height";
-      rect[dimension] = Math.min(1 - (axis === "x" ? rect.x : rect.y), Math.max(MIN_VISUAL_NODE_SIZE, rect[dimension] + direction * step));
+      const maximum = axis === "x"
+        ? Math.min(constraints.maxSize.width, bounds.x + bounds.width - rect.x)
+        : Math.min(constraints.maxSize.height, bounds.y + bounds.height - rect.y);
+      const minimum = axis === "x" ? constraints.minSize.width : constraints.minSize.height;
+      rect[dimension] = Math.min(maximum, Math.max(minimum, rect[dimension] + direction * step));
     } else {
-      rect[axis] = Math.min(1 - (axis === "x" ? rect.width : rect.height), Math.max(0, rect[axis] + direction * step));
+      if (!constraints.movementAxes.includes(axis)) return;
+      rect[axis] = axis === "x"
+        ? Math.min(bounds.x + bounds.width - rect.width, Math.max(bounds.x, rect.x + direction * step))
+        : Math.min(bounds.y + bounds.height - rect.height, Math.max(bounds.y, rect.y + direction * step));
     }
     applyRect({
       pointerId: -1,
@@ -1705,6 +2247,8 @@ export default function ContentTemplateContractFrame({
       frameOffsetX: 0,
       frameOffsetY: 0,
       lockRatio: false,
+      constraints,
+      bounds,
       sourceWindow: event.currentTarget.ownerDocument.defaultView ?? window,
       snapX: [],
       snapY: [],
@@ -1720,8 +2264,12 @@ export default function ContentTemplateContractFrame({
       const dy = (event.clientY - layoutDrag.startClientY) / layoutDrag.frameHeight;
       let rect = { ...layoutDrag.startRect };
       if (layoutDrag.operation === "move") {
-        rect.x = Math.min(1 - rect.width, Math.max(0, rect.x + dx));
-        rect.y = Math.min(1 - rect.height, Math.max(0, rect.y + dy));
+        if (layoutDrag.constraints.movementAxes.includes("x")) {
+          rect.x = Math.min(layoutDrag.bounds.x + layoutDrag.bounds.width - rect.width, Math.max(layoutDrag.bounds.x, rect.x + dx));
+        }
+        if (layoutDrag.constraints.movementAxes.includes("y")) {
+          rect.y = Math.min(layoutDrag.bounds.y + layoutDrag.bounds.height - rect.height, Math.max(layoutDrag.bounds.y, rect.y + dy));
+        }
       } else {
         rect = resizeRectFromHandle(
           layoutDrag.startRect,
@@ -1729,6 +2277,8 @@ export default function ContentTemplateContractFrame({
           dx,
           dy,
           layoutDrag.lockRatio,
+          layoutDrag.constraints,
+          layoutDrag.bounds,
         );
       }
       const guides: ActiveGuides = {};
@@ -1814,7 +2364,7 @@ export default function ContentTemplateContractFrame({
           }
         }
       }
-      const boundedRect = clampRect(rect);
+      const boundedRect = clampRect(rect, layoutDrag.constraints, layoutDrag.bounds);
       setActiveGuides(guides);
       layoutDrag.pendingRect = boundedRect;
       if (!layoutDrag.frameId) {
@@ -1833,13 +2383,9 @@ export default function ContentTemplateContractFrame({
       y: Math.min(100, Math.max(0, drag.startFocusY - ((event.clientY - drag.startClientY) / drag.height) * 100)),
     };
     drag.pendingFocus = focus;
-    if (!drag.frameId) {
-      drag.frameId = drag.sourceWindow.requestAnimationFrame(() => {
-        const current = dragRef.current;
-        if (current?.pendingFocus) applyFocus(current, current.pendingFocus, "update");
-        if (current) current.frameId = undefined;
-      });
-    }
+    // 设计模式中的真实媒体会被槽位占位层隐藏；这里仅缓存最后焦点，
+    // pointerup 时一次提交。若在 pointermove 中触发 React 预览重绘，Puck
+    // 会重建当前渲染子树并提前释放 pointer capture，导致完整编辑器丢手势。
   };
 
   const finishPointerDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1902,7 +2448,8 @@ export default function ContentTemplateContractFrame({
     ? "mobile" as const
     : "desktop" as const;
   const selectedVisualNode = selectedHere
-    ? resolveVisualNode(
+    ? resolveContractVisualNode(
+        contract,
         gesturePreviewRef.current
           ? { ...propsRef.current, __instanceOverrides: gesturePreviewRef.current.overrides }
           : propsRef.current,
@@ -1920,6 +2467,22 @@ export default function ContentTemplateContractFrame({
   );
   const activeFit = selectedVisualNode.fit ?? (canAdjustFit ? selectedSlot?.fit?.[0] : undefined);
   const activeZoom = selectedVisualNode.zoom ?? 1;
+  const geometryHint = selectionOverlay && editorMode === "adjust-layout"
+    ? {
+        left: Math.max(0, Math.round(selectionOverlay.left - selectionOverlay.frameLeft)),
+        top: Math.max(0, Math.round(selectionOverlay.top - selectionOverlay.frameTop)),
+        right: Math.max(0, Math.round(
+          selectionOverlay.frameLeft + selectionOverlay.frameWidth -
+            selectionOverlay.left - selectionOverlay.width,
+        )),
+        bottom: Math.max(0, Math.round(
+          selectionOverlay.frameTop + selectionOverlay.frameHeight -
+            selectionOverlay.top - selectionOverlay.height,
+        )),
+        width: Math.round(selectionOverlay.width),
+        height: Math.round(selectionOverlay.height),
+      }
+    : null;
 
   const toggleMediaFit = () => {
     if (!selectedHere || !canAdjustFit || !selectedSlot?.fit?.length) return;
@@ -1983,6 +2546,7 @@ export default function ContentTemplateContractFrame({
           ? instanceLayout.compositionPreset
           : undefined}
       data-visual-editor-mode={mode === "editor" ? editorMode : undefined}
+      data-visual-panel-mode={mode === "editor" ? panelMode : undefined}
       data-visual-selected-node={selectedHere?.nodeId}
       data-hc-snap-active={activeGuides.x || activeGuides.y ? "true" : undefined}
       data-hc-gesture-phase={mode === "editor" && gesturePhase !== "idle" ? gesturePhase : undefined}
@@ -2000,7 +2564,7 @@ export default function ContentTemplateContractFrame({
       onKeyDownCapture={handleKeyDown}
     >
       <ContentTemplateLayoutStyles />
-      {mode === "editor" ? <style data-hc-contract-editor-surface>{EDITOR_SURFACE_CSS}</style> : null}
+      <style data-hc-contract-editor-surface={mode === "editor" ? "true" : undefined}>{EDITOR_SURFACE_CSS}</style>
       {instanceCss ? <style data-hc-instance-overrides>{instanceCss}</style> : null}
       {selectedHere ? (
         <style data-hc-visual-selection>{`${nodeSelector(selectedHere.nodeId)}{outline:1px solid #335F7D!important;outline-offset:-1px;cursor:${editorMode === "adjust-layout" ? "move" : editorMode === "adjust-media" && (selectedHere.kind === "media" || selectedHere.kind === "product") && canDragMediaFocus ? "grab" : "pointer"}}`}</style>
@@ -2009,8 +2573,28 @@ export default function ContentTemplateContractFrame({
         <span role="status" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>{liveMessage}</span>
       ) : null}
       {renderedChild}
-      {(activeGuides.x || activeGuides.y || (selectedHere && selectionOverlay)) ? (
+      {(editorMode === "adjust-layout" || activeGuides.x || activeGuides.y || (selectedHere && selectionOverlay) || templateSlotOverlays.length > 0) ? (
         <div data-hc-editor-overlay>
+          {mode === "editor" && editorMode === "adjust-layout" ? (
+            <span aria-hidden="true" data-hc-layout-grid />
+          ) : null}
+          {templateSlotOverlays.map((slot, index) => (
+            <div
+              key={`${slot.nodeId}-${slot.kind}-${index}`}
+              aria-hidden="true"
+              data-hc-template-slot-box
+              data-node-id={slot.nodeId}
+              data-slot-kind={slot.kind}
+              style={{
+                left: slot.left,
+                top: slot.top,
+                width: slot.width,
+                height: slot.height,
+              }}
+            >
+              <span>{slot.label}</span>
+            </div>
+          ))}
           {activeGuides.x && layoutDragRef.current ? (
             <span
               aria-hidden="true"
@@ -2048,6 +2632,33 @@ export default function ContentTemplateContractFrame({
                   height: selectionOverlay.height,
                 }}
               />
+              {geometryHint ? (
+                <output
+                  aria-label={`对象边距：左 ${geometryHint.left} 像素，上 ${geometryHint.top} 像素，右 ${geometryHint.right} 像素，下 ${geometryHint.bottom} 像素；尺寸 ${geometryHint.width} 乘 ${geometryHint.height} 像素`}
+                  data-hc-geometry-hint
+                  data-hc-spacing-hint
+                  data-hc-gesture-state={gesturePhase}
+                  style={{
+                    left: Math.max(
+                      selectionOverlay.frameLeft + 4,
+                      Math.min(
+                        selectionOverlay.left,
+                        selectionOverlay.frameLeft + selectionOverlay.frameWidth - 300,
+                      ),
+                    ),
+                    top: Math.max(
+                      selectionOverlay.frameTop + 4,
+                      Math.min(
+                        selectionOverlay.top + selectionOverlay.height + 6,
+                        selectionOverlay.frameTop + selectionOverlay.frameHeight - 30,
+                      ),
+                    ),
+                  }}
+                >
+                  <span>间距 L {geometryHint.left} · T {geometryHint.top} · R {geometryHint.right} · B {geometryHint.bottom}</span>
+                  <b>{geometryHint.width} × {geometryHint.height}</b>
+                </output>
+              ) : null}
               <div
                 role="toolbar"
                 aria-label={`调整画布对象 ${selectedHere.nodeId}`}
@@ -2142,7 +2753,9 @@ export default function ContentTemplateContractFrame({
                 ) : null}
               </div>
               {editorMode === "adjust-layout" && canAdjustLayout
-                ? RESIZE_HANDLES.map((handle) => (
+                ? RESIZE_HANDLES
+                    .filter((handle) => selectedEditableObject?.constraints.allowedResize.includes(handle.direction))
+                    .map((handle) => (
                     <button
                       key={handle.direction}
                       type="button"
@@ -2155,7 +2768,7 @@ export default function ContentTemplateContractFrame({
                         top: selectionOverlay.top + selectionOverlay.height * handle.y,
                       }}
                     />
-                  ))
+                    ))
                 : null}
             </>
           ) : null}

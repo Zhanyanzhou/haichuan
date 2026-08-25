@@ -2666,8 +2666,17 @@ body.nav-locked {
 
 /* Inner-site navigation */
 .site-shell {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
-  background: #181A1B;
+  min-height: 100svh;
+  background: var(--hc-canvas);
+}
+
+.site-shell > .site-main {
+  flex: 1 0 auto;
+  min-width: 0;
+  background: var(--hc-canvas);
 }
 
 .site-shell,
@@ -3272,6 +3281,12 @@ body.nav-locked {
 
 .site-footer a:focus-visible {
   outline: 2px solid var(--hc-ink);
+  outline-offset: 4px;
+}
+
+.page-public-fallback__action:focus-visible,
+.page-public-fallback__retry:focus-visible {
+  outline: 2px solid currentColor;
   outline-offset: 4px;
 }
 

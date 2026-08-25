@@ -174,6 +174,16 @@ export interface DoublePosterContractProps extends LinkTargetValue {
   detailAltText?: string;
 }
 
+export interface CraftDetailsContractProps {
+  title?: string;
+  leadImage?: string;
+  leadAltText?: string;
+  detailImageOne?: string;
+  detailOneAltText?: string;
+  detailImageTwo?: string;
+  detailTwoAltText?: string;
+}
+
 export interface FeaturedProductContractProps {
   productId?: number | string;
   title?: string;
@@ -259,6 +269,20 @@ export const DOUBLE_POSTER_CONTRACT = {
     limits: {
       ...CONTENT_TEMPLATE_CONTRACTS.doublePoster.contentBudget.limits,
     },
+  },
+} as const;
+
+export const CRAFT_DETAILS_CONTRACT = {
+  type: "工艺细节",
+  purpose: "以一张工艺主图和两张局部细节图呈现经过核验的材质、结构与制作信息。",
+  canvas: {
+    heightMode: "content",
+    maxWidth: 1520,
+    leadAspectRatio: getContractRoleRatio("craftDetails", "leadImage", "desktop"),
+    detailAspectRatio: getContractRoleRatio("craftDetails", "detailImageOne", "desktop"),
+  },
+  content: {
+    limits: { ...CONTENT_TEMPLATE_CONTRACTS.craftDetails.contentBudget.limits },
   },
 } as const;
 
@@ -535,16 +559,19 @@ export function evaluateHeroContract(
 ): ModuleContractStatus {
   const target = evaluateLinkTarget(props);
   const checks = [
+    hasText(props.title),
     hasText(props.desktopImage),
+    hasText(props.mobileImage),
+    hasText(props.altText),
     target.ready,
   ];
   const errors: string[] = [];
   const warnings: string[] = [];
+  if (!hasText(props.title)) errors.push("请填写公开页面主标题");
   if (!hasText(props.desktopImage)) errors.push("请上传桌面端主视觉");
+  if (!hasText(props.mobileImage)) errors.push("请上传手机端主视觉并单独确认裁切");
+  if (!hasText(props.altText)) errors.push("请填写图片替代文字");
   if (target.error) errors.push(target.error);
-  if (!hasText(props.mobileImage))
-    warnings.push("建议上传移动端4:5竖图并单独调整焦点");
-  if (!hasText(props.altText)) warnings.push("建议填写图片替代文字");
   return {
     completed: checks.filter(Boolean).length,
     total: checks.length,
@@ -598,6 +625,29 @@ export function evaluateDoublePosterContract(
     errors,
     warnings,
   };
+}
+
+export function evaluateCraftDetailsContract(
+  props: CraftDetailsContractProps,
+): ModuleContractStatus {
+  const checks = [
+    hasText(props.title),
+    hasText(props.leadImage),
+    hasText(props.leadAltText),
+    hasText(props.detailImageOne),
+    hasText(props.detailOneAltText),
+    hasText(props.detailImageTwo),
+    hasText(props.detailTwoAltText),
+  ];
+  const errors: string[] = [];
+  if (!hasText(props.title)) errors.push("请填写工艺细节标题");
+  if (!hasText(props.leadImage)) errors.push("请上传工艺主图");
+  if (!hasText(props.leadAltText)) errors.push("请填写主图替代文字");
+  if (!hasText(props.detailImageOne)) errors.push("请上传第一张细节图");
+  if (!hasText(props.detailOneAltText)) errors.push("请填写第一张细节图替代文字");
+  if (!hasText(props.detailImageTwo)) errors.push("请上传第二张细节图");
+  if (!hasText(props.detailTwoAltText)) errors.push("请填写第二张细节图替代文字");
+  return { completed: checks.filter(Boolean).length, total: checks.length, errors, warnings: [] };
 }
 
 export function evaluateFeaturedProductContract(

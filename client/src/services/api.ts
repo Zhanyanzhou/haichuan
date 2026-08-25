@@ -16,6 +16,17 @@ import {
   paginate,
 } from "./mockData";
 
+declare module "axios" {
+  interface AxiosRequestConfig {
+    /** 调用方已经提供就地 loading/error/retry 状态时，不再叠加全局错误浮层。 */
+    suppressGlobalError?: boolean;
+  }
+
+  interface InternalAxiosRequestConfig {
+    suppressGlobalError?: boolean;
+  }
+}
+
 const api = axios.create({
   baseURL: (import.meta as any).env?.VITE_API_BASE_URL || "/api",
   timeout: 30000,
@@ -84,12 +95,15 @@ api.interceptors.response.use(
     const data = response.data as ApiResponse<unknown>;
     // 兼容后端 TransformInterceptor 格式
     if (data && typeof data.code === "number" && data.code !== 200) {
-      notifyRequestError(data.message || "请求失败");
+      if (!response.config.suppressGlobalError) {
+        notifyRequestError(data.message || "请求失败");
+      }
       return Promise.reject(new Error(data.message || "Request failed"));
     }
     return response;
   },
   (error) => {
+    const suppressGlobalError = Boolean(error.config?.suppressGlobalError);
     if (error.response?.status === 401) {
       const customerToken = localStorage.getItem("customerToken");
       const requestAuthorization = String(
@@ -115,11 +129,11 @@ api.interceptors.response.use(
         const returnTo = window.location.pathname + window.location.search;
         window.location.href = `/customer?returnTo=${encodeURIComponent(returnTo)}`;
       }
-    } else if (error.response?.status === 403) {
+    } else if (!suppressGlobalError && error.response?.status === 403) {
       notifyRequestError("没有权限执行此操作");
-    } else if (error.response?.status === 429) {
+    } else if (!suppressGlobalError && error.response?.status === 429) {
       notifyRequestError("操作过于频繁，请稍后再试");
-    } else if (error.response?.status && error.response.status >= 500) {
+    } else if (!suppressGlobalError && error.response?.status && error.response.status >= 500) {
       notifyRequestError("服务器繁忙，请稍后再试");
     }
     const msg = error.response?.data?.message || error.message || "网络错误";
@@ -1776,6 +1790,99 @@ function createMockPageDocument(data: {
   };
 }
 
+export type PersonalContentTemplate = {
+  id: number;
+  name: string;
+  moduleType: string;
+  contractKey: string;
+  contractVersion: number;
+  layoutData: Record<string, unknown>;
+  contentDefaults: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const _mockPersonalContentTemplates: PersonalContentTemplate[] = [];
+
+export const personalContentTemplateApi = {
+  list: async () => {
+    if (USE_MOCK) {
+      await mockDelay(80);
+      return mockRes(cloneMockDocument(_mockPersonalContentTemplates));
+    }
+    return api.get("/page-modules/personal-content-templates", {
+      suppressGlobalError: true,
+    });
+  },
+  create: async (data: {
+    name: string;
+    moduleType: string;
+    layoutData: Record<string, unknown>;
+    contentDefaults?: Record<string, unknown> | null;
+  }) => {
+    if (USE_MOCK) {
+      await mockDelay(100);
+      const now = new Date().toISOString();
+      const record: PersonalContentTemplate = {
+        id: Math.max(0, ..._mockPersonalContentTemplates.map((item) => item.id)) + 1,
+        name: data.name.trim(),
+        moduleType: data.moduleType,
+        contractKey: data.moduleType,
+        contractVersion: 3,
+        layoutData: cloneMockDocument(data.layoutData),
+        contentDefaults: data.contentDefaults
+          ? cloneMockDocument(data.contentDefaults)
+          : null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      _mockPersonalContentTemplates.unshift(record);
+      return mockRes(cloneMockDocument(record));
+    }
+    return api.post("/page-modules/personal-content-templates", data, {
+      suppressGlobalError: true,
+    });
+  },
+  update: async (
+    id: number,
+    data: {
+      name?: string;
+      layoutData?: Record<string, unknown>;
+      contentDefaults?: Record<string, unknown> | null;
+    },
+  ) => {
+    if (USE_MOCK) {
+      await mockDelay(100);
+      const record = _mockPersonalContentTemplates.find((item) => item.id === id);
+      if (!record) throw new Error("模板不存在");
+      if (data.name !== undefined) record.name = data.name.trim();
+      if (data.layoutData !== undefined) record.layoutData = cloneMockDocument(data.layoutData);
+      if (data.contentDefaults !== undefined) {
+        record.contentDefaults = data.contentDefaults
+          ? cloneMockDocument(data.contentDefaults)
+          : null;
+      }
+      record.updatedAt = new Date().toISOString();
+      return mockRes(cloneMockDocument(record));
+    }
+    return api.patch(`/page-modules/personal-content-templates/${id}`, data, {
+      suppressGlobalError: true,
+    });
+  },
+  remove: async (id: number) => {
+    if (USE_MOCK) {
+      await mockDelay(80);
+      const index = _mockPersonalContentTemplates.findIndex((item) => item.id === id);
+      if (index < 0) throw new Error("模板不存在");
+      _mockPersonalContentTemplates.splice(index, 1);
+      return mockRes({ id, deleted: true });
+    }
+    return api.delete(`/page-modules/personal-content-templates/${id}`, {
+      suppressGlobalError: true,
+    });
+  },
+};
+
 export const pageDocumentApi = {
   getPublished: async (pageKey = "home") => {
     if (USE_MOCK) {
@@ -1783,7 +1890,10 @@ export const pageDocumentApi = {
       const store = loadMockPageDocuments();
       return mockRes(store.published[pageKey] || null);
     }
-    return api.get("/page-modules/document/published", { params: { pageKey } });
+    return api.get("/page-modules/document/published", {
+      params: { pageKey },
+      suppressGlobalError: true,
+    });
   },
   getAdmin: async (pageKey = "home") => {
     if (USE_MOCK) {

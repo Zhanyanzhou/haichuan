@@ -1,16 +1,15 @@
 import {
+  getContentTemplateContract,
   getContentTemplatePreview,
+  type ContentTemplateDefaultGeometryZone,
   type ContentTemplatePreviewViewport,
   type ContentTemplatePreviewZone,
 } from "../generated/contentTemplates.generated";
-import {
-  frameHeightByMediaRatio,
-  layoutFor,
-  primaryMediaZone,
-} from "./previewGeometry";
+import { resolveVisualNode } from "../runtime/visualLayout";
 
 type Density = "thumbnail" | "overview";
 type Metrics = { width: number; height: number; x: number; y: number; frameWidth: number; frameHeight: number; rows: number };
+type StructurePreviewZone = ContentTemplatePreviewZone & { nodeId: string; roleId: string };
 
 /** 后台缩略图色彩：中性白、石墨文字、矿物灰与单一深色焦点。 */
 const PREVIEW_TOKENS = {
@@ -32,35 +31,28 @@ function metrics(
   viewport: "desktop" | "mobile",
   density: Density,
   rows: number,
-  ratioHeight?: number,
+  frameAspectRatio: number,
 ): Metrics {
-  if (density === "thumbnail") {
-    const width = viewport === "mobile" ? 180 : 300;
-    const height = viewport === "mobile" ? 228 : 186;
-    const inset = viewport === "mobile" ? 12 : 14;
-    return {
-      width,
-      height,
-      x: inset,
-      y: inset,
-      frameWidth: width - inset * 2,
-      frameHeight: height - inset * 2,
-      rows,
-    };
-  }
   const width = viewport === "mobile" ? 180 : density === "overview" ? 460 : 300;
-  const x = 14;
-  const y = 14;
-  const frameWidth = width - x * 2;
-  // 按契约媒体比例推导时,frame 高由比例决定(夹底防过扁);
-  // 无媒体比例的模板退回行数推导。
-  const rowHeight = density === "overview" ? 34 : 21;
-  const gap = 4;
-  const rowsHeight = rows * rowHeight + (rows - 1) * gap;
-  const frameHeight = ratioHeight
-    ? Math.max(density === "overview" ? 170 : 110, Math.round(ratioHeight))
-    : Math.max(density === "overview" ? 210 : 148, rowsHeight);
-  return { width, height: frameHeight + y * 2, x, y, frameWidth, frameHeight, rows };
+  const height = viewport === "mobile" ? 228 : density === "overview" ? 286 : 186;
+  const inset = viewport === "mobile" ? 12 : 14;
+  const availableWidth = width - inset * 2;
+  const availableHeight = height - inset * 2;
+  const ratio = Number.isFinite(frameAspectRatio) && frameAspectRatio > 0
+    ? frameAspectRatio
+    : viewport === "mobile" ? 0.8 : 1.6;
+  const availableRatio = availableWidth / availableHeight;
+  const frameWidth = availableRatio > ratio ? availableHeight * ratio : availableWidth;
+  const frameHeight = availableRatio > ratio ? availableHeight : availableWidth / ratio;
+  return {
+    width,
+    height,
+    x: (width - frameWidth) / 2,
+    y: (height - frameHeight) / 2,
+    frameWidth,
+    frameHeight,
+    rows,
+  };
 }
 
 function rect(zone: ContentTemplatePreviewZone, frame: Metrics) {
@@ -77,6 +69,30 @@ function rect(zone: ContentTemplatePreviewZone, frame: Metrics) {
 
 function keyOf(zone: ContentTemplatePreviewZone) {
   return `${zone.role}-${zone.kind ?? "plain"}-${zone.column}-${zone.row}`;
+}
+
+function structureZone(
+  zone: ContentTemplateDefaultGeometryZone,
+  rows: number,
+  viewport: "desktop" | "mobile",
+  layoutData?: Record<string, unknown>,
+): StructurePreviewZone | null {
+  const override = layoutData
+    ? resolveVisualNode({ __instanceOverrides: layoutData }, zone.nodeId, viewport)
+    : {};
+  if (override.enabled === false) return null;
+  const source = override.rect ?? zone.rect;
+  return {
+    nodeId: zone.nodeId,
+    roleId: zone.roleId,
+    role: zone.role,
+    kind: zone.kind,
+    overlay: zone.overlay,
+    column: source.x * 12 + 1,
+    span: source.width * 12,
+    row: source.y * rows + 1,
+    rowSpan: source.height * rows,
+  };
 }
 
 function Copy({ zone, frame, inverse }: { zone: ContentTemplatePreviewZone; frame: Metrics; inverse: boolean }) {
@@ -139,24 +155,18 @@ function Zone({ zone, frame, inverse }: { zone: ContentTemplatePreviewZone; fram
 
 /** 模板库与总览共用合同结构坐标，不加载摄影、商品或任何外部图片。
  * frame 高优先按主媒体区契约比例推导 —— 横版模板出横框、竖版出竖框。 */
-export default function ContentTemplateSkeletonPreview({ moduleType, viewport = "desktop", density = "thumbnail" }: { moduleType: string; viewport?: "desktop" | "mobile"; density?: Density }) {
+export default function ContentTemplateSkeletonPreview({ moduleType, viewport = "desktop", density = "thumbnail", layoutData }: { moduleType: string; viewport?: "desktop" | "mobile"; density?: Density; layoutData?: Record<string, unknown> }) {
   const profile = getContentTemplatePreview(moduleType);
-  if (!profile) return null;
+  const contract = getContentTemplateContract(moduleType);
+  if (!profile || !contract) return null;
   const current: ContentTemplatePreviewViewport = profile[viewport];
-  const rows = current.rows ?? 8;
-  const layout = layoutFor(moduleType);
-  const mediaZone = layout ? primaryMediaZone(current) : undefined;
-  const ratioHeight =
-    density === "overview" && layout && mediaZone
-      ? frameHeightByMediaRatio(
-          (viewport === "mobile" ? 180 : density === "overview" ? 460 : 300) - 24,
-          rows,
-          mediaZone,
-          viewport,
-          layout,
-        )
-      : undefined;
-  const frame = metrics(viewport, density, rows, ratioHeight);
-  const inverse = current.tone === "dark";
-  return <svg className={`homepage-editor__template-preview-img is-${density} is-${viewport}`} viewBox={`0 0 ${frame.width} ${frame.height}`} role="img" aria-label={`${profile.displayName}的${viewport === "desktop" ? "桌面" : "手机"}结构预览：${profile.purpose}`} preserveAspectRatio="xMidYMid meet" data-content-template-preview={profile.key} data-preview-viewport={viewport} data-desktop-order={profile.desktop.order.join(",")} data-mobile-order={profile.mobile.order.join(",")}><rect width={frame.width} height={frame.height} fill={PREVIEW_TOKENS.canvasSoft} /><rect x={frame.x - 5} y={frame.y - 5} width={frame.frameWidth + 10} height={frame.frameHeight + 10} rx="3" fill={inverse ? PREVIEW_TOKENS.stage : PREVIEW_TOKENS.canvas} stroke={inverse ? "rgba(247,248,248,.12)" : PREVIEW_TOKENS.line} /><rect x={frame.x - 1} y={frame.y - 1} width={frame.frameWidth + 2} height={frame.frameHeight + 2} rx="1.5" fill="none" stroke={inverse ? "rgba(247,248,248,.08)" : PREVIEW_TOKENS.lineSoft} />{current.zones.map((zone) => <Zone key={keyOf(zone)} zone={zone} frame={frame} inverse={inverse} />)}</svg>;
+  const geometry = contract.defaultGeometryByViewport[viewport];
+  const rows = geometry.rows ?? current.rows ?? 8;
+  const frame = metrics(viewport, density, rows, geometry.frameAspectRatio);
+  const inverse = geometry.tone === "dark";
+  const zones = geometry.zones.flatMap((zone) => {
+    const resolved = structureZone(zone, rows, viewport, layoutData);
+    return resolved ? [resolved] : [];
+  });
+  return <svg className={`homepage-editor__template-preview-img is-${density} is-${viewport}`} viewBox={`0 0 ${frame.width} ${frame.height}`} role="img" aria-label={`${profile.displayName}的${viewport === "desktop" ? "桌面" : "手机"}结构预览：${profile.purpose}`} preserveAspectRatio="xMidYMid meet" data-content-template-preview={profile.key} data-preview-mode="structure" data-preview-layout-source="contract-geometry" data-preview-frame-aspect-ratio={geometry.frameAspectRatio} data-preview-viewport={viewport} data-desktop-order={profile.desktop.order.join(",")} data-mobile-order={profile.mobile.order.join(",")}><rect width={frame.width} height={frame.height} fill={PREVIEW_TOKENS.canvasSoft} /><rect data-preview-artboard x={frame.x} y={frame.y} width={frame.frameWidth} height={frame.frameHeight} rx="3" fill={inverse ? PREVIEW_TOKENS.stage : PREVIEW_TOKENS.canvas} stroke={inverse ? "rgba(247,248,248,.12)" : PREVIEW_TOKENS.line} /><rect x={frame.x + 1} y={frame.y + 1} width={Math.max(0, frame.frameWidth - 2)} height={Math.max(0, frame.frameHeight - 2)} rx="1.5" fill="none" stroke={inverse ? "rgba(247,248,248,.08)" : PREVIEW_TOKENS.lineSoft} />{zones.map((zone, index) => <g key={`${keyOf(zone)}-${index}`} data-preview-zone data-preview-node-id={zone.nodeId} data-preview-role-id={zone.roleId}><Zone zone={zone} frame={frame} inverse={inverse} /></g>)}</svg>;
 }

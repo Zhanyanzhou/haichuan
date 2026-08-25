@@ -32,7 +32,12 @@ export default function FeaturedProductBlock({ module, editMode }: FeaturedProdu
     if (!editMode) return null;
     return (
       <DecorSection master="hero-piece" background={bgColor}>
-        <div style={{ maxWidth: 640, margin: "0 auto", width: "100%" }}>
+        <div
+          data-content-role="product"
+          data-editor-field="productId"
+          className="homepage-featured-product__media"
+          style={{ maxWidth: 640, margin: "0 auto", width: "100%" }}
+        >
           <BlockEmptyPlaceholder
             assetSlot={{ templateKey: "featuredProduct", roleId: "product" }}
             hint="代表作品"

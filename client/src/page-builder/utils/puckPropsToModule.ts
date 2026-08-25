@@ -14,6 +14,7 @@ import { resolveLinkTargetUrl } from "./linkTarget";
 import type { HeroPuckProps } from "../adapters/hero.puck";
 import type { SinglePosterPuckProps } from "../adapters/singlePoster.puck";
 import type { DoublePosterPuckProps } from "../adapters/doublePoster.puck";
+import type { CraftDetailsPuckProps } from "../adapters/craftDetails.puck";
 import type { ImageTextPuckProps } from "../adapters/imageText.puck";
 import type { FullBleedPuckProps } from "../adapters/fullBleed.puck";
 import type { TextBannerPuckProps } from "../adapters/textBanner.puck";
@@ -40,6 +41,7 @@ export type PuckProps =
   | { type: "首屏主视觉"; props: HeroPuckProps }
   | { type: "单图海报"; props: SinglePosterPuckProps }
   | { type: "双图海报"; props: DoublePosterPuckProps }
+  | { type: "工艺细节"; props: CraftDetailsPuckProps }
   | { type: "图文混排"; props: ImageTextPuckProps }
   | { type: "全屏出血图"; props: FullBleedPuckProps }
   | { type: "文字横幅"; props: TextBannerPuckProps }
@@ -173,6 +175,35 @@ export function convertPuckProps(
           mainFocusY: props.mainFocusY ?? 50,
           detailFocusX: props.detailFocusX ?? 50,
           detailFocusY: props.detailFocusY ?? 50,
+        },
+      );
+
+    case "工艺细节":
+      return baseModule(
+        "craftDetails",
+        {
+          eyebrow: props.eyebrow,
+          title: props.title,
+          body: props.body,
+          leadImage: props.leadImage,
+          leadAltText: props.leadAltText,
+          detailImageOne: props.detailImageOne,
+          detailOneAltText: props.detailOneAltText,
+          detailImageTwo: props.detailImageTwo,
+          detailTwoAltText: props.detailTwoAltText,
+          leadImageRatio: props.leadImageRatio || "3:2",
+          detailOneRatio: props.detailOneRatio || "1:1",
+          detailTwoRatio: props.detailTwoRatio || "1:1",
+        },
+        {},
+        {
+          bgColor: props.bgColor || "#FFFFFF",
+          leadFocusX: props.leadFocusX ?? 50,
+          leadFocusY: props.leadFocusY ?? 50,
+          detailOneFocusX: props.detailOneFocusX ?? 50,
+          detailOneFocusY: props.detailOneFocusY ?? 50,
+          detailTwoFocusX: props.detailTwoFocusX ?? 50,
+          detailTwoFocusY: props.detailTwoFocusY ?? 50,
         },
       );
 

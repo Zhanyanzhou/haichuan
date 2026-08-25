@@ -5,6 +5,7 @@ import {
 import type { DesignMode } from "@/page-builder/designSystem/masters";
 import {
   createContentTemplateMarker,
+  getContentTemplateCompletion,
   getContentTemplateContract,
   getContentTemplatePageRule,
   isContentTemplateAllowedForPage,
@@ -35,6 +36,14 @@ export type EditorPageDefinition = {
   /** 动态业务页仍由业务数据驱动，装修器只编辑其视觉框架。 */
   dynamic?: boolean;
   businessRegion?: { title: string; description: string; items: string };
+  /** 未取得可公开 PageDocument 时的真实安全短页；不得复用编辑器 seed。 */
+  publicFallback?: {
+    eyebrow: string;
+    title: string;
+    description: string;
+    primaryAction: { label: string; href: string };
+    secondaryAction?: { label: string; href: string };
+  };
 };
 
 export const editorPages: EditorPageDefinition[] = [
@@ -45,6 +54,13 @@ export const editorPages: EditorPageDefinition[] = [
     publicPath: "/",
     mode: "brand",
     headerMode: "overlay-light",
+    publicFallback: {
+      eyebrow: "HAICHUAN JEWELRY",
+      title: "首页正在准备",
+      description: "首页内容正在整理。您可以先进入选款中心浏览当前公开款式，或了解珠宝定制服务。",
+      primaryAction: { label: "进入选款中心", href: "/catalog" },
+      secondaryAction: { label: "了解珠宝定制", href: "/custom" },
+    },
   },
   {
     key: "about",
@@ -61,6 +77,14 @@ export const editorPages: EditorPageDefinition[] = [
     publicPath: "/products",
     mode: "brand",
     headerMode: "solid",
+    publicFallback: {
+      eyebrow: "CURATED EXHIBITION",
+      title: "珠宝作品正在策展",
+      description:
+        "我们正在完成作品资料与材质工艺内容的审核。您可以先浏览当前已公开款式，或预约珠宝顾问获得协助。",
+      primaryAction: { label: "进入选款中心", href: "/catalog" },
+      secondaryAction: { label: "预约珠宝顾问", href: "/contact" },
+    },
   },
   {
     key: "catalog",
@@ -130,6 +154,24 @@ export function getEditorPageByPath(path: string) {
   return editorPages.find((page) => page.publicPath === path);
 }
 
+/**
+ * 公开端只硬拦无法安全补写的必填语义与合同版本错误。
+ * 媒体、集合数量和历史授权字段继续由现有模板失败态/服务端新发布门禁承接，
+ * 避免读取时误伤已经存在且可安全降级的旧快照。
+ */
+export function isContentTemplateBlockPublicReady(block: {
+  type?: string;
+  props?: Record<string, unknown>;
+} | undefined) {
+  if (!block) return false;
+  const completion = getContentTemplateCompletion(block.type || "", block.props);
+  return Boolean(
+    completion
+    && completion.content.complete
+    && completion.publish.complete,
+  );
+}
+
 /** 覆盖式白色导航只有在首个可见品牌模块满足机器合同要求时启用。 */
 export function resolvePageHeaderMode(
   key: EditorPageKey,
@@ -145,6 +187,7 @@ export function resolvePageHeaderMode(
   );
   const contract = getContentTemplateContract(firstVisible?.type || "");
   return contract?.key === rule.headerMode.overlayRequiresFirstTemplate
+    && isContentTemplateBlockPublicReady(firstVisible)
     ? "overlay-light"
     : rule.headerMode.fallback;
 }

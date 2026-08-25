@@ -18,6 +18,8 @@ export interface LookbookPuckProps {
   targetType: LinkTargetType;
   productId: number;
   bgColor: string;
+  /** 模板库专用，只参与缩略图渲染，不进入 defaultProps / PageDocument。 */
+  __previewProducts?: ProductRow[];
   locked?: boolean;
 }
 
@@ -42,7 +44,7 @@ function LookbookPreview(props: LookbookPuckProps) {
 
   const module = useMemo(() => {
     const result = convertPuckProps("佩戴灵感", props as any);
-    if (result) (result as any).content.products = toProducts(products);
+    if (result) (result as any).content.products = toProducts(props.__previewProducts ?? products);
     return result;
   }, [products, props]);
   return module ? <LookbookBlock module={module} editMode /> : null;

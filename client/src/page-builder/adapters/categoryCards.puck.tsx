@@ -35,7 +35,12 @@ export interface CategoryCardsPuckProps {
   locked?: boolean;
 }
 
-function CategoryCardsPreview(props: CategoryCardsPuckProps) {
+type CategoryCardsTemplateKey = "categoryCards" | "sceneShopping";
+
+function CategoryCardsPreview({
+  templateKey,
+  ...props
+}: CategoryCardsPuckProps & { templateKey: CategoryCardsTemplateKey }) {
   const slugs = useMemo(
     () => Array.isArray(props.categorySlugs) ? props.categorySlugs.map(String).filter(Boolean) : [],
     [props.categorySlugs],
@@ -67,17 +72,22 @@ function CategoryCardsPreview(props: CategoryCardsPuckProps) {
 
   if (loading) return <section role="status" aria-live="polite" style={{ padding: 56, textAlign: "center", background: props.bgColor }}>正在加载分类预览</section>;
   if (error) return <section role="alert" style={{ padding: 56, textAlign: "center", background: props.bgColor }}>分类预览加载失败，已保留当前引用</section>;
-  const module = convertPuckProps("分类卡片", {
+  const module = convertPuckProps(templateKey === "sceneShopping" ? "按场景选购" : "分类卡片", {
     ...props,
     categories: slugs.length ? resolved : props.categories,
   });
   return module ? <CategoryCardsBlock module={module as any} editMode /> : null;
 }
 
+export function renderCategoryCardsPuck(
+  props: CategoryCardsPuckProps,
+  templateKey: CategoryCardsTemplateKey = "categoryCards",
+) {
+  return <CategoryCardsPreview {...props} templateKey={templateKey} />;
+}
+
 export const categoryCardsPuckConfig = {
-  render: (props: CategoryCardsPuckProps) => (
-    <CategoryCardsPreview {...props} />
-  ),
+  render: (props: CategoryCardsPuckProps) => renderCategoryCardsPuck(props),
   defaultProps: {
     title: "探索分类",
     subtitle: "按品类、系列或主题，找到适合你的珠宝作品。",

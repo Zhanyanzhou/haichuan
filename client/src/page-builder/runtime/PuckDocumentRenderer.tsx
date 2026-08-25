@@ -15,6 +15,7 @@ import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
 import AsymmetricGalleryBlock from "@/components/blocks/AsymmetricGalleryBlock";
 import BeforeAfterBlock from "@/components/blocks/BeforeAfterBlock";
 import DoublePosterSection from "@/components/blocks/DoublePosterSection";
+import CraftDetailsBlock from "@/components/blocks/CraftDetailsBlock";
 import FullBleedBlock from "@/components/blocks/FullBleedBlock";
 import HeroSection from "@/components/blocks/HeroSection";
 import HotspotBlock from "@/components/blocks/HotspotBlock";
@@ -683,6 +684,8 @@ function renderBlock(
       return wrap(<SinglePosterSection module={module} editMode={preview} />);
     case "双图海报":
       return wrap(<DoublePosterSection module={module} editMode={preview} />);
+    case "工艺细节":
+      return wrap(<CraftDetailsBlock module={module} editMode={preview} />);
     // 旧类型(分割面板/图文混排/礼赠指南)分支保留:
     // 已发布历史版本(revision)仍含这些类型,公开渲染永久兼容;
     // 编辑器侧已由 migratePuckData 转为新类型,模板库不再提供添加。
@@ -789,11 +792,14 @@ export default function PuckDocumentRenderer({
   data,
   mode = "public",
   heroHeadingLevel = 1,
+  primaryHeading,
   surface,
 }: {
   data: PuckDocument;
   mode?: PuckDocumentRenderMode;
   heroHeadingLevel?: 1 | 2;
+  /** 纯装修公开页的页面标题；无有效 Hero 标题时补为唯一的视觉隐藏 h1。 */
+  primaryHeading?: string;
   surface?: "home";
 }) {
   if (!Array.isArray(data?.content)) return null;
@@ -805,6 +811,12 @@ export default function PuckDocumentRenderer({
       : [];
   const homeSurface = surface === "home";
   const allBlocks = [...data.content, ...zoneBlocks];
+  const primaryHeroIndex = allBlocks.findIndex((block) =>
+    block.type === "首屏主视觉"
+    && block.props?.isVisible !== false
+    && typeof block.props?.title === "string"
+    && block.props.title.trim().length > 0,
+  );
   const homePrimaryHeroIndex = homeSurface
     ? allBlocks.findIndex((block) =>
         block.type === "首屏主视觉" && block.props?.isVisible !== false,
@@ -812,6 +824,9 @@ export default function PuckDocumentRenderer({
     : -1;
   // 区块级兜底：单个 block 运行时抛错只跳过该区块，避免整页白屏
   const render = (block: PuckBlock, index: number) => {
+    const blockHeroHeadingLevel = index === primaryHeroIndex
+      ? heroHeadingLevel
+      : 2;
     return (
       <ErrorBoundary
         key={`eb-${block.props?.id || index}`}
@@ -825,7 +840,7 @@ export default function PuckDocumentRenderer({
           block={block}
           index={index}
           mode={mode}
-          heroHeadingLevel={heroHeadingLevel}
+          heroHeadingLevel={blockHeroHeadingLevel}
           homeSurface={homeSurface}
           allowHomePrimaryAction={homeSurface && index === homePrimaryHeroIndex}
         />
@@ -862,6 +877,9 @@ export default function PuckDocumentRenderer({
           }
         }
       `}</style>
+      {primaryHeading && (primaryHeroIndex < 0 || heroHeadingLevel !== 1) ? (
+        <h1 className="sr-only">{primaryHeading}</h1>
+      ) : null}
       {data.content.map(render)}
       {zoneBlocks.map((block, index) =>
         render(block, data.content!.length + index),

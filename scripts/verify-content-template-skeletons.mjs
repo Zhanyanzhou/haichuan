@@ -7,8 +7,13 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const contract = JSON.parse(await readFile(path.join(root, "contracts/page-builder/content-templates.contract.json"), "utf8"));
 for (const template of contract.templates) {
   assert.ok(Array.isArray(template.roles) && template.roles.length > 0, `${template.key} 缺少根构图角色`);
-  assert.ok(template.preview.desktop.zones.length && template.preview.mobile.zones.length, `${template.key} 缺少同源中性预览`);
-  for (const device of ["desktop", "mobile"]) assert.ok(template.order[device].length, `${template.key} 缺少 ${device} 阅读顺序`);
+  for (const device of ["desktop", "mobile"]) {
+    assert.ok(
+      template.defaultGeometryByViewport?.[device]?.zones?.length,
+      `${template.key} 缺少 ${device} 同源中性预览几何`,
+    );
+    assert.ok(template.order[device].length, `${template.key} 缺少 ${device} 阅读顺序`);
+  }
 }
 const [preview, puckConfig, runtime, frame] = await Promise.all([
   readFile(path.join(root, "client/src/page-builder/preview/ContentTemplateSkeletonPreview.tsx"), "utf8"),
@@ -23,4 +28,4 @@ for (const template of contract.templates) {
 }
 assert.match(runtime, /ContentTemplateContractFrame[\s\S]*mode="public"/, "公开 Renderer 未接入统一合同根框架");
 assert.match(frame, /data-content-template-renderer="real"/, "统一合同根框架缺少真实 Renderer 标记");
-console.log("内容模板根构图、缩略图与 23 个真实 Renderer 注册一致。");
+console.log("内容模板根构图、缩略图与 24 个真实 Renderer 注册一致。");

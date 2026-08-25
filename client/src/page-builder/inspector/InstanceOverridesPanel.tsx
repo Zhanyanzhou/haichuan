@@ -1,6 +1,8 @@
 import {
   createContentTemplateMarker,
   getContentTemplateContract,
+  getContentTemplateDefaultRect,
+  getContentTemplateEditableObject,
 } from "../generated/contentTemplates.generated";
 import {
   resolveVisualNode,
@@ -20,7 +22,7 @@ interface InstanceOverridesPanelProps {
     patch: Record<string, any> | ((props: Record<string, any>) => Record<string, any>),
   ) => void;
   historyTransactionPending: boolean;
-  scopes?: ReadonlyArray<"layout" | "slots" | "text">;
+  scopes?: ReadonlyArray<"layout" | "slots" | "text" | "surface" | "appearance">;
   embedded?: boolean;
   viewport?: VisualViewport;
   selectedNodeId?: string;
@@ -65,6 +67,14 @@ const LABELS: Record<string, string> = {
   lg: "大",
   xs: "极小",
   xl: "特大",
+  none: "无",
+  soft: "柔和",
+  canvas: "明亮",
+  mist: "柔灰",
+  inkSurface: "深色",
+  square: "直角",
+  rounded: "圆润",
+  lifted: "悬浮",
 };
 
 const TEXT_COLORS: Record<string, string> = {
@@ -153,7 +163,17 @@ export default function InstanceOverridesPanel({
   );
   const showSlots = scopes.includes("slots") && visibleSlots.length > 0;
   const showText = scopes.includes("text") && visibleTextRoles.length > 0;
-  const hasControls = showLayout || showSlots || showText;
+  const selectedEditableObject = selectedNodeId
+    ? getContentTemplateEditableObject(moduleType, selectedNodeId)
+    : undefined;
+  const supportsObjectAppearance = Boolean(
+    selectedEditableObject && ["media", "video", "product", "collection"].includes(
+      selectedEditableObject.kind,
+    ),
+  );
+  const showSurface = scopes.includes("surface");
+  const showAppearance = scopes.includes("appearance") && supportsObjectAppearance;
+  const hasControls = showLayout || showSlots || showText || showSurface || showAppearance;
   if (!hasControls) return null;
 
   const sourceOverrides = isRecord(props.__instanceOverrides)
@@ -164,10 +184,13 @@ export default function InstanceOverridesPanel({
   const frameAspectRatios = isRecord(frame.aspectRatioByViewport)
     ? frame.aspectRatioByViewport
     : {};
+  const hasActiveFrameRatioOverride = Object.prototype.hasOwnProperty.call(
+    frameAspectRatios,
+    viewport,
+  );
   const activeFrameRatio = Number(
-    frameAspectRatios[viewport] ??
-      (viewport === "mobile" ? frameAspectRatios.desktop : undefined) ??
-      frame.aspectRatio,
+    frameAspectRatios[viewport] ?? frame.aspectRatio ??
+      contract.defaultGeometryByViewport[viewport].frameAspectRatio,
   );
   const nodes = isRecord(overrides.nodes) ? overrides.nodes : {};
   const selectedRawNode = selectedNodeId && isRecord(nodes[selectedNodeId])
@@ -194,14 +217,22 @@ export default function InstanceOverridesPanel({
     ? "desktop"
     : hasMobileSpecificDesign
       ? "mobile-independent"
-      : "mobile-inherited";
+      : "mobile-default";
   const deviceLabel = viewport === "mobile" ? "移动端" : "桌面端";
-  const sharedDesignLabel = showSlots && !showText
-    ? "比例、填充与缩放双端共用"
+  const sharedDesignLabel = showSurface
+    ? "模块外观双端共用；留白遵循模板流式结构"
+    : showAppearance
+      ? "对象圆角与阴影双端共用"
+    : showSlots && !showText
+    ? "位置与焦点按当前端独立保存"
     : showText && !showSlots
-      ? "字号、对齐与颜色双端共用"
-      : "整体高度与构图双端共用";
-  const viewportDesignLabel = selectedNodeId
+      ? "位置与尺寸按当前端独立保存"
+      : "桌面端与移动端构图互不覆盖";
+  const viewportDesignLabel = showSurface
+    ? "配色、圆角、阴影与留白作用于整个模板"
+    : showAppearance
+      ? "对象外观不会改变槽位位置和内容"
+    : selectedNodeId
     ? `位置与层级作用于当前${deviceLabel}${showSlots ? "；图片焦点也按设备保存" : ""}`
     : `整体比例作用于当前${deviceLabel}`;
 
@@ -239,29 +270,58 @@ export default function InstanceOverridesPanel({
         : { __contentTemplate: createContentTemplateMarker(moduleType) }),
     });
   };
+  const copyCurrentViewportToOther = () => {
+    const targetViewport: VisualViewport = viewport === "desktop" ? "mobile" : "desktop";
+    const entries: Array<{ path: string[]; value: unknown }> = [];
+    if (showLayout) {
+      entries.push({
+        path: ["frame", "aspectRatioByViewport", targetViewport],
+        value: activeFrameRatio,
+      });
+    }
+    if (selectedNodeId) {
+      const visualNode = resolveVisualNode(props, selectedNodeId, viewport);
+      if (visualNode.rect) {
+        entries.push({
+          path: ["nodes", selectedNodeId, "rectByViewport", targetViewport],
+          value: visualNode.rect,
+        });
+      }
+      if (visualNode.focus) {
+        entries.push({
+          path: ["nodes", selectedNodeId, "mediaView", "focusByViewport", targetViewport],
+          value: visualNode.focus,
+        });
+      }
+    }
+    if (entries.length) applyPaths(entries);
+  };
 
   const renderSelectedNodeGeometry = (nodeId: string) => {
     if (selectedNodeId !== nodeId) return null;
     const visualNode = resolveVisualNode(props, nodeId, viewport);
-    const rect = visualNode.rect;
+    const rect = visualNode.rect ?? getContentTemplateDefaultRect(moduleType, nodeId, viewport);
+    const editableObject = getContentTemplateEditableObject(moduleType, nodeId);
+    const constraints = editableObject?.constraints;
+    const bounds = constraints?.safeAreaRequired
+      ? contract.defaultGeometryByViewport[viewport].safeArea
+      : { x: 0, y: 0, width: 1, height: 1 };
     const rawNode = isRecord(nodes[nodeId]) ? nodes[nodeId] : {};
     const zIndexByViewport = isRecord(rawNode.zIndexByViewport)
       ? rawNode.zIndexByViewport
       : {};
-    const inheritedZIndex = viewport === "mobile"
-      ? zIndexByViewport.mobile ?? zIndexByViewport.desktop
-      : zIndexByViewport.desktop;
-    const activeZIndex = Number.isInteger(Number(inheritedZIndex))
-      ? Number(inheritedZIndex)
+    const viewportZIndex = zIndexByViewport[viewport];
+    const activeZIndex = Number.isInteger(Number(viewportZIndex))
+      ? Number(viewportZIndex)
       : 2;
     const deviceLabel = viewport === "mobile" ? "移动端" : "桌面端";
     const updateRect = (key: "x" | "y" | "width" | "height", value: number) => {
       if (!rect) return;
       const next = { ...rect, [key]: value };
-      if (key === "x") next.x = Math.min(1 - next.width, Math.max(0, next.x));
-      if (key === "y") next.y = Math.min(1 - next.height, Math.max(0, next.y));
-      if (key === "width") next.width = Math.min(1 - next.x, Math.max(0.05, next.width));
-      if (key === "height") next.height = Math.min(1 - next.y, Math.max(0.05, next.height));
+      if (key === "x") next.x = Math.min(bounds.x + bounds.width - next.width, Math.max(bounds.x, next.x));
+      if (key === "y") next.y = Math.min(bounds.y + bounds.height - next.height, Math.max(bounds.y, next.y));
+      if (key === "width") next.width = Math.min(bounds.x + bounds.width - next.x, constraints?.maxSize.width ?? 1, Math.max(constraints?.minSize.width ?? 0.05, next.width));
+      if (key === "height") next.height = Math.min(bounds.y + bounds.height - next.y, constraints?.maxSize.height ?? 1, Math.max(constraints?.minSize.height ?? 0.05, next.height));
       apply(["nodes", nodeId, "rectByViewport", viewport], next);
     };
     const applyZIndex = (value: number) => {
@@ -302,10 +362,10 @@ export default function InstanceOverridesPanel({
           {rect ? (
             <div className="homepage-editor__geometry-fields">
               {([
-                ["x", "横向位置", 0, 1 - rect.width],
-                ["y", "纵向位置", 0, 1 - rect.height],
-                ["width", "区域宽度", 0.05, 1 - rect.x],
-                ["height", "区域高度", 0.05, 1 - rect.y],
+                ["x", "横向位置", bounds.x, bounds.x + bounds.width - rect.width],
+                ["y", "纵向位置", bounds.y, bounds.y + bounds.height - rect.height],
+                ["width", "区域宽度", constraints?.minSize.width ?? 0.05, Math.min(constraints?.maxSize.width ?? 1, bounds.x + bounds.width - rect.x)],
+                ["height", "区域高度", constraints?.minSize.height ?? 0.05, Math.min(constraints?.maxSize.height ?? 1, bounds.y + bounds.height - rect.y)],
               ] as const).map(([key, label, min, max]) => (
                 <label key={key} className="homepage-editor__instance-field">
                   <span>{label} · {Math.round(rect[key] * 100)}%</span>
@@ -397,6 +457,11 @@ export default function InstanceOverridesPanel({
     (showLayout && overrides?.frame) ||
       (showSlots && visibleSlots.some((slot) => nodes[slot.roleId])) ||
       (showText && visibleTextRoles.some((role) => nodes[role.roleId])) ||
+      (showSurface && ["colorPreset", "paddingPreset", "radiusPreset", "shadowPreset"].some(
+        (key) => frame[key] !== undefined,
+      )) ||
+      (showAppearance && selectedNodeId && isRecord(nodes[selectedNodeId]) &&
+        isRecord((nodes[selectedNodeId] as OverrideRecord).appearance)) ||
       (resetAllDesign && (overrides?.frame || Object.keys(nodes).length > 0)),
   );
   const createResetPatch = (currentProps: Record<string, any>) => {
@@ -412,11 +477,26 @@ export default function InstanceOverridesPanel({
         next = setVisualOverridePath(next, ["nodes", role.roleId], undefined);
       }
     }
+    if (showSurface && !resetAllDesign) {
+      for (const key of ["colorPreset", "paddingPreset", "radiusPreset", "shadowPreset"]) {
+        next = setVisualOverridePath(next, ["frame", key], undefined);
+      }
+    }
+    if (showAppearance && selectedNodeId && !resetAllDesign) {
+      next = setVisualOverridePath(next, ["nodes", selectedNodeId, "appearance"], undefined);
+    }
     return { __instanceOverrides: next };
   };
   const resetScopedOverrides = () => {
     updateHistoryTransaction(createResetPatch);
   };
+  const resetLabel = showSurface
+    ? "恢复模块样式默认"
+    : showAppearance && selectedNodeId
+      ? `恢复${ROLE_LABELS[selectedNodeId] ?? selectedNodeId}外观默认`
+      : selectedNodeId
+        ? `恢复${ROLE_LABELS[selectedNodeId] ?? selectedNodeId}设计默认`
+        : "恢复整个模块设计默认";
 
   return (
     <section
@@ -430,7 +510,11 @@ export default function InstanceOverridesPanel({
         <div>
           {embedded ? null : (
             <strong id={`instance-overrides-${String(props.id ?? contract.key)}`}>
-              {showSlots && !showLayout && !showText
+              {showSurface
+                ? "模块样式"
+                : showAppearance
+                  ? "对象样式"
+              : showSlots && !showLayout && !showText
                 ? "调整画面"
                 : showText && !showLayout && !showSlots
                   ? "文字布局与保护"
@@ -442,10 +526,23 @@ export default function InstanceOverridesPanel({
           type="button"
           disabled={!scopedOverrideExists || historyTransactionPending}
           onClick={resetScopedOverrides}
-          aria-label={selectedNodeId ? `恢复${ROLE_LABELS[selectedNodeId] ?? selectedNodeId}设计默认` : "恢复整个模块设计默认"}
+          aria-label={resetLabel}
         >
-          {resetAllDesign ? "恢复模块设计" : "恢复当前对象设计"}
+          {showSurface
+            ? "恢复模块样式"
+            : showAppearance
+              ? "恢复当前对象外观"
+              : resetAllDesign
+                ? "恢复模块设计"
+                : "恢复当前对象设计"}
         </button>
+        {!showSurface && !showAppearance ? <button
+          type="button"
+          disabled={historyTransactionPending}
+          onClick={copyCurrentViewportToOther}
+        >
+          复制到{viewport === "desktop" ? "移动端" : "桌面端"}
+        </button> : null}
       </div>
       <div
         className="homepage-editor__design-scope-note"
@@ -458,7 +555,7 @@ export default function InstanceOverridesPanel({
           {viewport === "mobile"
             ? hasMobileSpecificDesign
               ? " · 已有移动端独立位置"
-              : " · 当前位置继承桌面端"
+              : " · 使用移动端默认构图"
             : ""}
         </span>
       </div>
@@ -474,18 +571,15 @@ export default function InstanceOverridesPanel({
         <div className="homepage-editor__visual-preset-group" role="group" aria-label="画面比例" data-inspector-control="ratio">
           <span>
             画面比例 · {viewport === "mobile" ? "移动端" : "桌面端"}
-            {viewport === "mobile" && frameAspectRatios.mobile === undefined && frameAspectRatios.desktop !== undefined
-              ? "（与桌面端一致）"
-              : ""}
           </span>
           <div className="homepage-editor__ratio-cards">
             <button
               type="button"
-              className={!Number.isFinite(activeFrameRatio) ? "is-active" : ""}
-              aria-pressed={!Number.isFinite(activeFrameRatio)}
+              className={!hasActiveFrameRatioOverride ? "is-active" : ""}
+              aria-pressed={!hasActiveFrameRatioOverride}
               onClick={() => apply(["frame", "aspectRatioByViewport", viewport], undefined)}
             >
-              <i style={{ aspectRatio: capabilities.frameRatioPresets[0] }} />
+              <i style={{ aspectRatio: activeFrameRatio }} />
               <em>默认</em>
             </button>
             {capabilities.frameRatioPresets.map((ratioPreset) => {
@@ -495,8 +589,8 @@ export default function InstanceOverridesPanel({
                 <button
                   key={ratioPreset}
                   type="button"
-                  className={Number.isFinite(activeFrameRatio) && Math.abs(activeFrameRatio - ratio) < 0.001 ? "is-active" : ""}
-                  aria-pressed={Number.isFinite(activeFrameRatio) && Math.abs(activeFrameRatio - ratio) < 0.001}
+                  className={hasActiveFrameRatioOverride && Math.abs(activeFrameRatio - ratio) < 0.001 ? "is-active" : ""}
+                  aria-pressed={hasActiveFrameRatioOverride && Math.abs(activeFrameRatio - ratio) < 0.001}
                   onClick={() => apply(["frame", "aspectRatioByViewport", viewport], ratio)}
                 >
                   <i style={{ aspectRatio: ratioPreset }} />
@@ -532,7 +626,7 @@ export default function InstanceOverridesPanel({
                       undefined,
                     )}
                   >
-                    与桌面端一致
+                    恢复移动端默认比例
                   </button>
                 ) : null}
               </div>
@@ -546,6 +640,45 @@ export default function InstanceOverridesPanel({
         frame.compositionPreset,
         capabilities.compositionPresets,
         "composition",
+      ) : null}
+
+      {showSurface ? (
+        <>
+          {renderVisualChoices("模板配色", ["frame", "colorPreset"], frame.colorPreset, ["canvas", "mist", "inkSurface"], "surface-color")}
+          {contract.flow === "flow"
+            ? renderVisualChoices("模块留白", ["frame", "paddingPreset"], frame.paddingPreset, ["compact", "standard", "spacious"], "surface-padding")
+            : null}
+          {contract.flow === "flow"
+            ? renderVisualChoices("模块圆角", ["frame", "radiusPreset"], frame.radiusPreset, ["square", "soft", "rounded"], "surface-radius")
+            : null}
+          {contract.flow === "flow"
+            ? renderVisualChoices("模块阴影", ["frame", "shadowPreset"], frame.shadowPreset, ["none", "soft", "lifted"], "surface-shadow")
+            : null}
+        </>
+      ) : null}
+
+      {showAppearance && selectedNodeId ? (
+        <fieldset
+          className="homepage-editor__instance-group"
+          data-selected-object="true"
+          data-object-appearance={selectedNodeId}
+        >
+          <legend>{ROLE_LABELS[selectedNodeId] ?? selectedNodeId}外观</legend>
+          {renderVisualChoices(
+            "对象圆角",
+            ["nodes", selectedNodeId, "appearance", "radiusPreset"],
+            isRecord(selectedRawNode.appearance) ? selectedRawNode.appearance.radiusPreset : undefined,
+            ["square", "soft", "rounded"],
+            "object-radius",
+          )}
+          {renderVisualChoices(
+            "对象阴影",
+            ["nodes", selectedNodeId, "appearance", "shadowPreset"],
+            isRecord(selectedRawNode.appearance) ? selectedRawNode.appearance.shadowPreset : undefined,
+            ["none", "soft", "lifted"],
+            "object-shadow",
+          )}
+        </fieldset>
       ) : null}
 
       {showSlots ? visibleSlots.map((slot) => {
@@ -626,7 +759,7 @@ export default function InstanceOverridesPanel({
                       undefined,
                     )}
                   >
-                    恢复移动端焦点继承
+                    恢复移动端默认焦点
                   </button>
                 ) : null}
               </div>

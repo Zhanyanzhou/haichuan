@@ -1,11 +1,14 @@
 /**
- * LayerRail.tsx — 编辑器右侧的页面图层栏。
+ * LayerRail.tsx — 编辑器第二栏的页面结构导航。
  * 2026-08-16 升级：同类型模块自动序号（品牌故事 1/2）；Shift/Ctrl 多选批量删除与移动。
  * 固定业务区不可删除/调整；点选定位、拖拽排序保持原有行为。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { message, Modal } from "antd";
+import { App as AntdApp } from "antd";
 import {
+  DeleteOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
   HolderOutlined,
   LockOutlined,
 } from "@ant-design/icons";
@@ -13,13 +16,11 @@ import { ROOT_ZONE, focusCanvasBlock, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
 
 export default function LayerRail({
-  onSaveAsTemplate,
   navigationPreviewOpen,
   onToggleNavigationPreview,
   scrollSpyIndex,
   publishIssues,
 }: {
-  onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
   navigationPreviewOpen: boolean;
   onToggleNavigationPreview: () => void;
   scrollSpyIndex: number | null;
@@ -29,6 +30,7 @@ export default function LayerRail({
     severity: "error" | "warning" | "info";
   }>;
 }) {
+  const { message, modal } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
@@ -62,9 +64,15 @@ export default function LayerRail({
   // 画布滚动时，让图层列表自动滚动到当前可见模块（仅滚动，不改选中态）。
   useEffect(() => {
     if (scrollSpyIndex === null) return;
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
     layerScrollRef.current
       ?.querySelector<HTMLElement>(`[data-layer-index="${scrollSpyIndex}"]`)
-      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      ?.scrollIntoView({
+        block: "nearest",
+        behavior: reduceMotion ? "auto" : "smooth",
+      });
   }, [scrollSpyIndex]);
 
   const multiActive = multiIndices.length >= 2;
@@ -89,12 +97,18 @@ export default function LayerRail({
   const hideBlockFromIssue = (index: number) => {
     const target = content[index];
     if (!target || target.props?.locked) return;
-    const nextContent = content.map((item, i) =>
-      i === index ? { ...item, props: { ...item.props, isVisible: false } } : item,
-    );
     dispatch({
-      type: "setData",
-      data: { ...appData, content: nextContent },
+      type: "replace",
+      destinationIndex: index,
+      destinationZone: ROOT_ZONE,
+      data: {
+        ...target,
+        props: {
+          ...target.props,
+          id: String(target.props.id),
+          isVisible: false,
+        },
+      },
       recordHistory: true,
     });
     message.success(
@@ -161,7 +175,7 @@ export default function LayerRail({
       message.info("所选模块均为固定业务区，不能删除");
       return;
     }
-    Modal.confirm({
+    modal.confirm({
       title: `删除 ${deletable.length} 个模块？`,
       content: "删除后可从模块库重新添加；尚未发布的修改可通过版本记录恢复。",
       okText: "删除模块",
@@ -195,15 +209,63 @@ export default function LayerRail({
       message.info("固定业务区不能调整顺序");
       return;
     }
-    const nextContent = [...content];
-    const [moved] = nextContent.splice(from, 1);
-    nextContent.splice(to, 0, moved);
+    const movedBlockId = content[from]?.props?.id;
     dispatch({
-      type: "setData",
-      data: { ...appData, content: nextContent },
+      type: "reorder",
+      sourceIndex: from,
+      destinationIndex: to,
+      destinationZone: ROOT_ZONE,
       recordHistory: true,
     });
-    selectLayer(to);
+    dispatch({
+      type: "setUi",
+      ui: { itemSelector: { index: to, zone: ROOT_ZONE } },
+    });
+    focusCanvasBlock(movedBlockId);
+  };
+
+  const toggleLayerVisibility = (index: number) => {
+    const target = content[index];
+    if (!target || target.props?.locked) return;
+    const nextVisible = target.props?.isVisible === false;
+    dispatch({
+      type: "replace",
+      destinationIndex: index,
+      destinationZone: ROOT_ZONE,
+      data: {
+        ...target,
+        props: {
+          ...target.props,
+          id: String(target.props.id),
+          isVisible: nextVisible,
+        },
+      },
+      recordHistory: true,
+    });
+    message.success(`${nextVisible ? "已显示" : "已隐藏"}「${numberedNames[index]}」`);
+  };
+
+  const deleteLayer = (index: number) => {
+    const target = content[index];
+    if (!target || target.props?.locked) return;
+    modal.confirm({
+      title: `删除“${numberedNames[index]}”？`,
+      content: "删除后可从模板组件库重新添加；保存草稿前也可通过顶部撤销恢复。",
+      okText: "删除模块",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: () => {
+        dispatch({
+          type: "remove",
+          index,
+          zone: ROOT_ZONE,
+          recordHistory: true,
+        });
+        if (target.props?.id === selectedId) {
+          dispatch({ type: "setUi", ui: { itemSelector: null } });
+        }
+      },
+    });
   };
 
   return (
@@ -297,11 +359,13 @@ export default function LayerRail({
           const active = item.props?.id === selectedId;
           const inView = scrollSpyIndex === index;
           const multiSelected = multiIndices.includes(index);
+          const visible = item.props?.isVisible !== false;
           return (
             <div
               key={item.props?.id ?? `${item.type}-${index}`}
               data-layer-index={index}
-              className={`homepage-editor__layer-item${active ? " is-active" : ""}${inView ? " is-in-view" : ""}${multiSelected ? " is-multi-selected" : ""}${draggingIndex === index ? " is-dragging" : ""}${dropIndex === index ? " is-drop-target" : ""}`}
+              className={`homepage-editor__layer-item${active ? " is-active" : ""}${inView ? " is-in-view" : ""}${multiSelected ? " is-multi-selected" : ""}${visible ? "" : " is-hidden"}${draggingIndex === index ? " is-dragging" : ""}${dropIndex === index ? " is-drop-target" : ""}`}
+              data-layer-visible={visible ? "true" : "false"}
               draggable={!item.props?.locked}
               onDragStart={(event) => {
                 if (item.props?.locked) return;
@@ -339,6 +403,33 @@ export default function LayerRail({
                   aria-label="拖动调整顺序"
                 />
               </button>
+              {!item.props?.locked ? (
+                <div
+                  className="homepage-editor__layer-actions"
+                  role="group"
+                  aria-label={`${numberedNames[index]}图层操作`}
+                >
+                  <button
+                    type="button"
+                    draggable={false}
+                    onClick={() => toggleLayerVisibility(index)}
+                    aria-label={`${visible ? "隐藏" : "显示"}${numberedNames[index]}`}
+                    title={visible ? "隐藏模块" : "显示模块"}
+                  >
+                    {visible ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+                  </button>
+                  <button
+                    type="button"
+                    draggable={false}
+                    className="is-danger"
+                    onClick={() => deleteLayer(index)}
+                    aria-label={`删除${numberedNames[index]}`}
+                    title="删除模块"
+                  >
+                    <DeleteOutlined />
+                  </button>
+                </div>
+              ) : null}
             </div>
           );
         })}

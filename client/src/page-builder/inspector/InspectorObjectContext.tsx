@@ -10,9 +10,21 @@ import {
   VideoCameraOutlined,
 } from "@ant-design/icons";
 
+export type InspectorObjectKind =
+  | "module"
+  | "media"
+  | "video"
+  | "text"
+  | "action"
+  | "product"
+  | "collection"
+  | "structured";
+
 export interface InspectorObjectOption {
   id: string;
   label: string;
+  kind?: InspectorObjectKind;
+  thumbnailUrl?: string;
 }
 
 export type InspectorResponsiveState =
@@ -47,7 +59,7 @@ export function getInspectorResponsiveStates({
     const ratios = frame.aspectRatioByViewport;
     return {
       desktop: hasViewportValue(ratios, "desktop") ? "custom" : "base",
-      mobile: hasViewportValue(ratios, "mobile") ? "independent" : "inherited",
+      mobile: hasViewportValue(ratios, "mobile") ? "independent" : "base",
     };
   }
 
@@ -66,7 +78,7 @@ export function getInspectorResponsiveStates({
   return {
     desktop: desktopCount > 0 ? "custom" : "base",
     mobile: mobileCount === 0
-      ? "inherited"
+      ? "base"
       : mobileCount === responsiveMaps.length
         ? "independent"
         : "partial",
@@ -78,7 +90,7 @@ interface InspectorObjectContextProps {
   selectedObjectId: string | null;
   objects: readonly InspectorObjectOption[];
   onSelect: (objectId: string | null) => void;
-  objectKind?: "module" | "media" | "video" | "text" | "action" | "product" | "collection" | "structured";
+  objectKind?: InspectorObjectKind;
   thumbnailUrl?: string;
   activeDevice?: "desktop" | "mobile";
   desktopState?: InspectorResponsiveState;
@@ -88,7 +100,7 @@ interface InspectorObjectContextProps {
 
 /**
  * 属性面板的单一编辑范围入口。
- * 原生 select 同时承担当前对象提示与键盘切换，避免面包屑、标题和 chips 重复表达同一层级。
+ * 原生 select 保留紧凑键盘切换；可视对象卡承担直接鼠标选择，模板内部对象不进入图层面板。
  */
 export default function InspectorObjectContext({
   moduleLabel,
@@ -99,7 +111,7 @@ export default function InspectorObjectContext({
   thumbnailUrl,
   activeDevice = "desktop",
   desktopState = "base",
-  mobileState = "inherited",
+  mobileState = "base",
   sharedDesignLabel = "共享样式会同步到双端",
 }: InspectorObjectContextProps) {
   const scope = selectedObjectId ? "object" : "module";
@@ -133,6 +145,19 @@ export default function InspectorObjectContext({
           : objectKind === "collection"
             ? UnorderedListOutlined
             : AppstoreOutlined;
+  const iconForKind = (kind: InspectorObjectKind = "structured") => kind === "media"
+    ? FileImageOutlined
+    : kind === "video"
+      ? VideoCameraOutlined
+      : kind === "text"
+        ? FontSizeOutlined
+        : kind === "action"
+          ? LinkOutlined
+          : kind === "product"
+            ? ShoppingOutlined
+            : kind === "collection"
+              ? UnorderedListOutlined
+              : AppstoreOutlined;
 
   return (
     <section
@@ -205,6 +230,70 @@ export default function InspectorObjectContext({
       <span className="homepage-editor__edit-scope-badge">
         {scope === "object" ? "对象级" : "模块级"}
       </span>
+      {objects.length > 0 ? (
+        <div
+          className="homepage-editor__object-picker"
+          data-inspector-object-picker="visual"
+        >
+          <div className="homepage-editor__object-picker-heading">
+            <strong>模板对象</strong>
+            <span>点击对象后，画布与属性同步定位</span>
+          </div>
+          <div
+            className="homepage-editor__object-picker-grid"
+            role="listbox"
+            aria-label="属性面板对象列表"
+          >
+            <button
+              type="button"
+              role="option"
+              aria-selected={selectedObjectId === null}
+              className={selectedObjectId === null ? "is-active" : ""}
+              onClick={() => onSelect(null)}
+              aria-label={`选择${moduleLabel}整个模板`}
+            >
+              <span className="homepage-editor__object-picker-thumb" aria-hidden="true">
+                <AppstoreOutlined />
+              </span>
+              <span>
+                <strong>整个模板</strong>
+                <small>画布比例与整体布局</small>
+              </span>
+            </button>
+            {objects.map((object) => {
+              const ObjectIcon = iconForKind(object.kind);
+              return (
+                <button
+                  key={object.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selectedObjectId === object.id}
+                  className={selectedObjectId === object.id ? "is-active" : ""}
+                  onClick={() => onSelect(object.id)}
+                  aria-label={`选择${object.label}`}
+                >
+                  <span className="homepage-editor__object-picker-thumb" aria-hidden="true">
+                    <ObjectIcon />
+                    {object.thumbnailUrl ? (
+                      <img
+                        src={object.thumbnailUrl}
+                        alt=""
+                        onError={(event) => {
+                          event.currentTarget.hidden = true;
+                        }}
+                      />
+                    ) : null}
+                  </span>
+                  <span>
+                    <strong>{object.label}</strong>
+                    <small>{object.kind === "media" || object.kind === "video" ? "画面与槽位" : "位置与样式"}</small>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

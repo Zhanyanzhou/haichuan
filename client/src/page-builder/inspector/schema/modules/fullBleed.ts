@@ -25,6 +25,35 @@ export const fullBleedSchema: ModuleInspectorSchema = {
   defaults: { ...fullBleedPuckConfig.defaultProps },
   sections: [
     {
+      id: "full-bleed-media",
+      title: "媒体",
+      layer: "media",
+      description: `桌面 ${ratioLabelOf(IMAGE_SPECS.fullBleed.desktop)} 超宽横幅；手机独立 ${ratioLabelOf(IMAGE_SPECS.fullBleed.mobile)} 竖图`,
+      fields: [
+        desktopMediaField(
+          "image",
+          "桌面端海报",
+          IMAGE_SPECS.fullBleed.desktop,
+          {
+            required: true,
+            focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
+            placeholder: "上传桌面端海报",
+          },
+        ),
+        mobileMediaField(
+          "mobileImage",
+          "手机端海报",
+          IMAGE_SPECS.fullBleed.mobile,
+          "image",
+          {
+            focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
+            placeholder: "上传手机端海报",
+          },
+        ),
+        altTextField(FULL_BLEED_CONTRACT.content.limits.altText),
+      ],
+    },
+    {
       id: "full-bleed-content",
       title: "内容",
       layer: "content",
@@ -69,35 +98,6 @@ export const fullBleedSchema: ModuleInspectorSchema = {
           placeholder: "如 进入系列",
         },
         linkTargetField("点击后"),
-      ],
-    },
-    {
-      id: "full-bleed-media",
-      title: "媒体",
-      layer: "media",
-      description: `桌面 ${ratioLabelOf(IMAGE_SPECS.fullBleed.desktop)} 超宽横幅；手机独立 ${ratioLabelOf(IMAGE_SPECS.fullBleed.mobile)} 竖图`,
-      fields: [
-        desktopMediaField(
-          "image",
-          "桌面端海报",
-          IMAGE_SPECS.fullBleed.desktop,
-          {
-            required: true,
-            focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
-            placeholder: "上传桌面端海报",
-          },
-        ),
-        mobileMediaField(
-          "mobileImage",
-          "手机端海报",
-          IMAGE_SPECS.fullBleed.mobile,
-          "image",
-          {
-            focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
-            placeholder: "上传手机端海报",
-          },
-        ),
-        altTextField(FULL_BLEED_CONTRACT.content.limits.altText),
       ],
     },
   ],

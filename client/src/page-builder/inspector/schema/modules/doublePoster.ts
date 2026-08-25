@@ -25,6 +25,47 @@ export const doublePosterSchema: ModuleInspectorSchema = {
   defaults: { ...doublePosterPuckConfig.defaultProps },
   sections: [
     {
+      id: "double-poster-media",
+      title: "媒体",
+      layer: "media",
+      description:
+        "主图默认 3:2（约 2/3 宽）+ 细节图默认 4:5（细节下移错位），比例可在「布局」区调整；手机上下排列",
+      fields: [
+        {
+          key: "mainImage",
+          label: "主海报",
+          control: "media",
+          spec: IMAGE_SPECS.doublePoster.main,
+          required: true,
+          focusKeys: { x: "mainFocusX", y: "mainFocusY" },
+          placeholder: "上传主海报",
+          showSpecCheck: true,
+        },
+        {
+          key: "detailImage",
+          label: "细节海报",
+          control: "media",
+          spec: IMAGE_SPECS.doublePoster.detail,
+          required: true,
+          focusKeys: { x: "detailFocusX", y: "detailFocusY" },
+          placeholder: "上传细节海报",
+          showSpecCheck: true,
+        },
+        {
+          key: "mainAltText",
+          label: "主图替代文字",
+          control: "text",
+          maxLength: DOUBLE_POSTER_CONTRACT.content.limits.mainAltText,
+        },
+        {
+          key: "detailAltText",
+          label: "细节图替代文字",
+          control: "text",
+          maxLength: DOUBLE_POSTER_CONTRACT.content.limits.detailAltText,
+        },
+      ],
+    },
+    {
       id: "double-poster-content",
       title: "内容",
       layer: "content",
@@ -79,47 +120,6 @@ export const doublePosterSchema: ModuleInspectorSchema = {
           placeholder: "如 查看系列",
         },
         linkTargetField("引导文字点击后"),
-      ],
-    },
-    {
-      id: "double-poster-media",
-      title: "媒体",
-      layer: "media",
-      description:
-        "主图默认 3:2（约 2/3 宽）+ 细节图默认 4:5（细节下移错位），比例可在「布局」区调整；手机上下排列",
-      fields: [
-        {
-          key: "mainImage",
-          label: "主海报",
-          control: "media",
-          spec: IMAGE_SPECS.doublePoster.main,
-          required: true,
-          focusKeys: { x: "mainFocusX", y: "mainFocusY" },
-          placeholder: "上传主海报",
-          showSpecCheck: true,
-        },
-        {
-          key: "detailImage",
-          label: "细节海报",
-          control: "media",
-          spec: IMAGE_SPECS.doublePoster.detail,
-          required: true,
-          focusKeys: { x: "detailFocusX", y: "detailFocusY" },
-          placeholder: "上传细节海报",
-          showSpecCheck: true,
-        },
-        {
-          key: "mainAltText",
-          label: "主图替代文字",
-          control: "text",
-          maxLength: DOUBLE_POSTER_CONTRACT.content.limits.mainAltText,
-        },
-        {
-          key: "detailAltText",
-          label: "细节图替代文字",
-          control: "text",
-          maxLength: DOUBLE_POSTER_CONTRACT.content.limits.detailAltText,
-        },
       ],
     },
     ...(doublePosterRatioControls.length > 0 ? [{

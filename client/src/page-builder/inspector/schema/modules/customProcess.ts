@@ -16,30 +16,6 @@ export const customProcessSchema: ModuleInspectorSchema = {
   groupTitles: { media: "旅程节点" },
   sections: [
     {
-      id: "custom-process-content",
-      title: "内容",
-      layer: "content",
-      fields: [
-        moduleNameField("内容流程"),
-        {
-          key: "title",
-          label: "标题",
-          control: "text",
-          required: true,
-          maxLength: 24,
-          placeholder: "如 内容流程",
-        },
-        {
-          key: "subtitle",
-          label: "副标题",
-          control: "text",
-          maxLength: 60,
-          hint: "留空不显示",
-          placeholder: "如 一件珠宝如何为一个人诞生",
-        },
-      ],
-    },
-    {
       id: "custom-process-media",
       title: "素材",
       layer: "media",
@@ -68,6 +44,30 @@ export const customProcessSchema: ModuleInspectorSchema = {
             { key: "name", label: "中文题", control: "text", required: true },
             { key: "desc", label: "一句话说明", control: "textarea", rows: 2 },
           ],
+        },
+      ],
+    },
+    {
+      id: "custom-process-content",
+      title: "内容",
+      layer: "content",
+      fields: [
+        moduleNameField("内容流程"),
+        {
+          key: "title",
+          label: "标题",
+          control: "text",
+          required: true,
+          maxLength: 24,
+          placeholder: "如 内容流程",
+        },
+        {
+          key: "subtitle",
+          label: "副标题",
+          control: "text",
+          maxLength: 60,
+          hint: "留空不显示",
+          placeholder: "如 一件珠宝如何为一个人诞生",
         },
       ],
     },

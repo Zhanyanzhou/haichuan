@@ -29,6 +29,35 @@ export const singlePosterSchema: ModuleInspectorSchema = {
   defaults: { ...singlePosterPuckConfig.defaultProps },
   sections: [
     {
+      id: "single-poster-media",
+      title: "媒体",
+      layer: "media",
+      description: "桌面 4:5 海报主图占约 78% 偏右；手机独立 4:5 竖图",
+      fields: [
+        desktopMediaField(
+          "desktopImage",
+          "海报主图",
+          IMAGE_SPECS.singlePoster.image,
+          {
+            required: true,
+            focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
+            placeholder: "上传海报主图",
+          },
+        ),
+        mobileMediaField(
+          "mobileImage",
+          "手机端海报",
+          IMAGE_SPECS.singlePoster.mobile,
+          "desktopImage",
+          {
+            focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
+            placeholder: "上传手机端海报",
+          },
+        ),
+        altTextField(),
+      ],
+    },
+    {
       id: "single-poster-content",
       title: "内容",
       layer: "content",
@@ -82,35 +111,6 @@ export const singlePosterSchema: ModuleInspectorSchema = {
           placeholder: "如 查看系列",
         },
         linkTargetField("引导文字点击后"),
-      ],
-    },
-    {
-      id: "single-poster-media",
-      title: "媒体",
-      layer: "media",
-      description: "桌面 4:5 海报主图占约 78% 偏右；手机独立 4:5 竖图",
-      fields: [
-        desktopMediaField(
-          "desktopImage",
-          "海报主图",
-          IMAGE_SPECS.singlePoster.image,
-          {
-            required: true,
-            focusKeys: { x: "desktopFocusX", y: "desktopFocusY" },
-            placeholder: "上传海报主图",
-          },
-        ),
-        mobileMediaField(
-          "mobileImage",
-          "手机端海报",
-          IMAGE_SPECS.singlePoster.mobile,
-          "desktopImage",
-          {
-            focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
-            placeholder: "上传手机端海报",
-          },
-        ),
-        altTextField(),
       ],
     },
     {

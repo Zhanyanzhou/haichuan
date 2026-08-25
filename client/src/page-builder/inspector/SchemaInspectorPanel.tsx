@@ -6,9 +6,12 @@
  *       FooterBar（手动保存整页草稿）。
  * 与 InspectorPanel 的三级分派配合：仅在 registry 命中时渲染。
  */
-import { message, Modal } from "antd";
-import { useEffect, useRef, useState } from "react";
-import { useHomepagePuck } from "../../pages/admin/HomepageConfig/editor-store";
+import { App as AntdApp } from "antd";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  ROOT_ZONE,
+  useHomepagePuck,
+} from "../../pages/admin/HomepageConfig/editor-store";
 import {
   getModuleDisplayName,
 } from "../../pages/admin/HomepageConfig/editor-utils";
@@ -22,7 +25,6 @@ import InstanceOverridesPanel from "./InstanceOverridesPanel";
 import InspectorPrimaryTabs, {
   type InspectorPrimaryMode,
 } from "./InspectorPrimaryTabs";
-import InspectorQuickActions from "./InspectorQuickActions";
 import { useVisualEditorSession } from "../visual-editor/visualEditorSession";
 import { useInspectorModuleEditor } from "./useInspectorModuleEditor";
 import {
@@ -42,6 +44,7 @@ interface SchemaInspectorPanelProps {
   hasUnsavedChanges: boolean;
   saving: boolean;
   onSaveDraft: () => void;
+  onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
   publishIssues: Array<{
     blockId?: string;
     message: string;
@@ -59,6 +62,13 @@ type InspectorTaskGroup =
   | "composition"
   | "style"
   | "feature";
+
+type InspectorPropertyLevel =
+  | "content"
+  | "layout"
+  | "style"
+  | "interaction"
+  | "advanced";
 
 interface VisibleFieldEntry {
   sectionId: string;
@@ -205,26 +215,36 @@ const TASK_GROUP_META: Record<
   { label: string }
 > = {
   media: {
-    label: "图片",
+    label: "内容 · 图片",
   },
   content: {
-    label: "文字",
+    label: "内容 · 文字",
   },
   product: {
-    label: "商品",
+    label: "内容 · 商品",
   },
   link: {
-    label: "行动",
+    label: "交互",
   },
   composition: {
-    label: "布局与画面",
+    label: "布局",
   },
   style: {
-    label: "颜色与文字",
+    label: "样式",
   },
   feature: {
-    label: "专属内容",
+    label: "高级设置",
   },
+};
+
+const PROPERTY_LEVEL_BY_TASK_GROUP: Record<InspectorTaskGroup, InspectorPropertyLevel> = {
+  media: "content",
+  content: "content",
+  product: "content",
+  link: "interaction",
+  composition: "layout",
+  style: "style",
+  feature: "advanced",
 };
 
 function getPanelMode(
@@ -267,16 +287,22 @@ export default function SchemaInspectorPanel({
   hasUnsavedChanges,
   publishIssues,
   validationState,
+  onSaveAsTemplate,
 }: SchemaInspectorPanelProps) {
+  const { message, modal } = AntdApp.useApp();
   const editor = useInspectorModuleEditor();
   const [activePanelMode, setActivePanelMode] =
     useState<InspectorPrimaryMode>("content");
   const inspectorScrollRef = useRef<HTMLDivElement>(null);
   const panelScrollPositionsRef = useRef<Record<InspectorPrimaryMode, number>>({
-    quick: 0,
     content: 0,
     design: 0,
   });
+  const pendingPanelScrollRef = useRef<{
+    mode: InspectorPrimaryMode;
+    top: number;
+  } | null>(null);
+  const suppressSelectionAutoScrollRef = useRef<InspectorPrimaryMode | null>(null);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const appData = useHomepagePuck((state) => state.appState.data);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
@@ -284,16 +310,29 @@ export default function SchemaInspectorPanel({
   const selectVisualNode = useVisualEditorSession((state) => state.selectNode);
   const clearVisualNode = useVisualEditorSession((state) => state.clearNode);
   const setVisualPanelMode = useVisualEditorSession((state) => state.setPanelMode);
+  const visualPanelMode = useVisualEditorSession((state) => state.panelMode);
   const editorBlockId = editor?.props.id;
 
   useEffect(() => {
-    panelScrollPositionsRef.current = { quick: 0, content: 0, design: 0 };
+    panelScrollPositionsRef.current = { content: 0, design: 0 };
+    suppressSelectionAutoScrollRef.current = null;
     setActivePanelMode("content");
     setVisualPanelMode("content");
     window.requestAnimationFrame(() => {
       inspectorScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
     });
   }, [editor?.moduleType, editorBlockId, setVisualPanelMode]);
+
+  useEffect(() => {
+    if (visualPanelMode !== activePanelMode) setActivePanelMode(visualPanelMode);
+  }, [activePanelMode, visualPanelMode]);
+
+  useLayoutEffect(() => {
+    const pending = pendingPanelScrollRef.current;
+    if (!pending || pending.mode !== activePanelMode) return;
+    inspectorScrollRef.current?.scrollTo({ top: pending.top, behavior: "auto" });
+    pendingPanelScrollRef.current = null;
+  }, [activePanelMode]);
 
   useEffect(() => {
     if (!editorBlockId || !visualSelection || visualSelection.blockId !== editorBlockId) return;
@@ -318,6 +357,10 @@ export default function SchemaInspectorPanel({
       visualSelection.nodeId,
     );
     if (fieldKeys.length === 0 || activePanelMode !== "content") return;
+    if (suppressSelectionAutoScrollRef.current === activePanelMode) {
+      suppressSelectionAutoScrollRef.current = null;
+      return;
+    }
     const renderFrame = window.requestAnimationFrame(() => {
       const target = fieldKeys
         .map((fieldKey) => document.querySelector<HTMLElement>(
@@ -439,6 +482,12 @@ export default function SchemaInspectorPanel({
   ) {
     taskGroups.push({ group: "composition", entries: [] });
   }
+  if (
+    contentTemplateContract &&
+    !taskGroups.some(({ group }) => group === "style")
+  ) {
+    taskGroups.push({ group: "style", entries: [] });
+  }
   const contentTaskGroups = taskGroups.filter(
     ({ group }) => getPanelMode(group) === "content",
   );
@@ -478,18 +527,21 @@ export default function SchemaInspectorPanel({
   const selectedDesignGroup = designTaskGroups.find(
     ({ group }) => group === "composition",
   );
-  const moduleStyleEntries = designTaskGroups.find(
-    ({ group }) => group === "style",
-  )?.entries ?? [];
+  const selectedSupportsAppearance = Boolean(
+    currentEditableObject &&
+      ["media", "video", "product", "collection"].includes(currentEditableObject.kind),
+  );
   const activeTaskGroups = activePanelMode === "design"
-    ? selectedDesignGroup
-      ? [{
-          ...selectedDesignGroup,
-          entries: currentVisualSelection
-            ? []
-            : [...selectedDesignGroup.entries, ...moduleStyleEntries],
-        }]
-      : []
+    ? currentVisualSelection
+      ? selectedTextRole
+        ? [{ group: "style" as const, entries: [] }]
+        : [
+            ...(selectedDesignGroup ? [{ ...selectedDesignGroup, entries: [] }] : []),
+            ...(selectedSupportsAppearance
+              ? [{ group: "style" as const, entries: [] }]
+              : []),
+          ]
+      : designTaskGroups
     : selectedContentTaskGroups;
   const layoutTextRoleIds = new Set(
     (contractLayoutOverrides?.textRoles ?? []).map((role) => role.roleId),
@@ -554,7 +606,7 @@ export default function SchemaInspectorPanel({
   const schemaDefaults = schema.defaults ?? {};
   const currentPublishIssues = publishIssues.filter(
     (issue) =>
-      issue.severity === "error" && issue.blockId === editor.props.id,
+      issue.severity !== "info" && issue.blockId === editor.props.id,
   );
 
   const activatePanelMode = (panelMode: InspectorPrimaryMode) => {
@@ -562,17 +614,12 @@ export default function SchemaInspectorPanel({
     if (panelMode !== activePanelMode && inspectorScrollRef.current) {
       panelScrollPositionsRef.current[activePanelMode] =
         inspectorScrollRef.current.scrollTop;
+      pendingPanelScrollRef.current = { mode: panelMode, top: targetScrollTop };
+      // 手动切换页签时以该页签自己的位置为准，不能再被选中字段的自动定位覆盖。
+      suppressSelectionAutoScrollRef.current = panelMode;
     }
     setActivePanelMode(panelMode);
-    if (panelMode !== "quick") setVisualPanelMode(panelMode);
-    if (panelMode !== activePanelMode) {
-      window.requestAnimationFrame(() => {
-        inspectorScrollRef.current?.scrollTo({
-          top: targetScrollTop,
-          behavior: "auto",
-        });
-      });
-    }
+    setVisualPanelMode(panelMode);
   };
 
   const removeModule = () => {
@@ -584,7 +631,7 @@ export default function SchemaInspectorPanel({
       message.info("此模块已锁定，不能删除");
       return;
     }
-    Modal.confirm({
+    modal.confirm({
       title: `删除“${getModuleDisplayName(editor.moduleType, editor.props)}”？`,
       content: "删除后可通过顶部撤销恢复；保存草稿前不会影响前台页面。",
       okText: "删除模块",
@@ -592,11 +639,9 @@ export default function SchemaInspectorPanel({
       cancelText: "取消",
       onOk: () => {
         dispatch({
-          type: "setData",
-          data: {
-            ...appData,
-            content: content.filter((_, i) => i !== index),
-          },
+          type: "remove",
+          index,
+          zone: ROOT_ZONE,
         });
         dispatch({ type: "setUi", ui: { itemSelector: null } });
       },
@@ -615,23 +660,31 @@ export default function SchemaInspectorPanel({
     const meta = TASK_GROUP_META[group];
     const groupTitle = group === "composition"
       ? currentVisualSelection
-        ? "对象设计"
-        : "模块布局"
+        ? "布局 · 对象"
+        : "布局 · 模块"
+      : group === "style" && currentVisualSelection
+        ? selectedTextRole ? "样式 · 文字" : "样式 · 对象"
       : schema.groupTitles?.[group] ?? meta.label;
+    const rendersInstanceOverrides = group === "composition" || (
+      group === "style" && Boolean(
+        !currentVisualSelection || selectedTextRole || selectedSupportsAppearance,
+      )
+    );
     return (
       <section
         key={group}
         id={`inspector-task-section-${group}`}
         className="homepage-editor__task-group"
         data-task-group={group}
+        data-property-level={PROPERTY_LEVEL_BY_TASK_GROUP[group]}
       >
-        {group === "composition" && currentVisualSelection ? null : (
+        {rendersInstanceOverrides && currentVisualSelection ? null : (
           <header className="homepage-editor__task-panel-header">
             <h3>{groupTitle}</h3>
           </header>
         )}
         <div className="homepage-editor__task-panel-body">
-          {group === "composition" ? (
+          {rendersInstanceOverrides ? (
             <>
               <InstanceOverridesPanel
                 moduleType={editor.moduleType}
@@ -640,14 +693,18 @@ export default function SchemaInspectorPanel({
                 updateHistoryTransaction={editor.updateHistoryTransaction}
                 historyTransactionPending={editor.historyTransactionPending}
                 scopes={
-                  selectedSlot
-                    ? ["slots"]
-                    : selectedTextRole
+                  group === "style"
+                    ? selectedTextRole
                       ? ["text"]
-                      : ["layout"]
+                      : currentVisualSelection
+                        ? ["appearance"]
+                        : ["surface"]
+                    : selectedSlot
+                    ? ["slots"]
+                    : ["layout"]
                 }
                 selectedNodeId={selectedOverrideNodeId}
-                resetAllDesign={!currentVisualSelection}
+                resetAllDesign={group === "composition" && !currentVisualSelection}
                 embedded
                 viewport={editor.device}
               />
@@ -785,6 +842,10 @@ export default function SchemaInspectorPanel({
           objects={visualObjects.map((item) => ({
             id: item.nodeId,
             label: VISUAL_NODE_LABELS[item.nodeId] ?? item.nodeId,
+            kind: item.kind,
+            thumbnailUrl: item.object.contentFieldKeys
+              .map((fieldKey) => editor.props[fieldKey])
+              .find((value): value is string => typeof value === "string" && value.length > 0),
           }))}
           objectKind={currentEditableObject?.kind ?? "module"}
           thumbnailUrl={selectedThumbnailUrl}
@@ -837,7 +898,7 @@ export default function SchemaInspectorPanel({
             aria-label="当前模块发布检查问题"
             role="alert"
           >
-            <strong>发布前待完善 · {currentPublishIssues.length} 项</strong>
+            <strong>当前模板提示 · {currentPublishIssues.length} 项</strong>
             <div>
               {currentPublishIssues.map((issue, index) => (
                 <p key={`${issue.path ?? ""}-${issue.message}-${index}`}>
@@ -853,19 +914,7 @@ export default function SchemaInspectorPanel({
           role="tabpanel"
           aria-labelledby={`inspector-panel-tab-${activePanelMode}`}
         >
-          {activePanelMode === "quick" ? (
-            <InspectorQuickActions
-              objectKind={currentEditableObject?.kind ?? "module"}
-              selectedObjectLabel={currentEditableObject
-                ? VISUAL_NODE_LABELS[currentEditableObject.roleId] ?? currentEditableObject.roleId
-                : schema.displayName}
-              canEditDesign={currentObjectCanEditDesign}
-              isObjectScope={Boolean(currentEditableObject)}
-              onEditContent={() => activatePanelMode("content")}
-              onEditDesign={() => activatePanelMode("design")}
-              onReturnToModule={() => clearVisualNode(String(editor.props.id ?? ""))}
-            />
-          ) : activeTaskGroups.length > 0 ? (
+          {activeTaskGroups.length > 0 ? (
             <>
               {activePanelMode === "content" && currentEditableObject ? (
                 <div
@@ -892,6 +941,15 @@ export default function SchemaInspectorPanel({
                   onClick={() => activatePanelMode("design")}
                 >
                   继续调整{currentEditableObject.kind === "video" ? "封面" : "图片"}构图与布局
+                </button>
+              ) : null}
+              {activePanelMode === "design" && contentTemplateContract ? (
+                <button
+                  type="button"
+                  className="homepage-editor__task-bridge"
+                  onClick={() => onSaveAsTemplate(editor.moduleType, editor.props)}
+                >
+                  另存到模板库
                 </button>
               ) : null}
             </>

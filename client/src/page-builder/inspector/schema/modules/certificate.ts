@@ -21,29 +21,6 @@ export const certificateSchema: ModuleInspectorSchema = {
   groupTitles: { media: "证书材料" },
   sections: [
     {
-      id: "certificate-content",
-      title: "内容",
-      layer: "content",
-      fields: [
-        moduleNameField("证书展示"),
-        {
-          key: "title",
-          label: "标题",
-          control: "text",
-          required: true,
-          maxLength: 24,
-          placeholder: "如 证书展示",
-        },
-        {
-          key: "subtitle",
-          label: "副标题",
-          control: "text",
-          maxLength: 60,
-          hint: "留空不显示",
-        },
-      ],
-    },
-    {
       id: "certificate-media",
       title: "素材",
       layer: "media",
@@ -80,6 +57,29 @@ export const certificateSchema: ModuleInspectorSchema = {
               hint: "仅在证书原件、名称和说明一致后开启；未确认无法发布。",
             },
           ],
+        },
+      ],
+    },
+    {
+      id: "certificate-content",
+      title: "内容",
+      layer: "content",
+      fields: [
+        moduleNameField("证书展示"),
+        {
+          key: "title",
+          label: "标题",
+          control: "text",
+          required: true,
+          maxLength: 24,
+          placeholder: "如 证书展示",
+        },
+        {
+          key: "subtitle",
+          label: "副标题",
+          control: "text",
+          maxLength: 60,
+          hint: "留空不显示",
         },
       ],
     },

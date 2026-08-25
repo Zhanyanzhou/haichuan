@@ -1,16 +1,18 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：96eb3520457242c6edf5552cc74f1a55079cdd974e913cbf8acb8638cd42362c
+ * SHA-256：b2408b0caf77d48a255c2ad2eb0a1091f32f3ba93ff009ffcd9ef5b18dfee3bc
  */
 
-export const CONTENT_TEMPLATE_REGISTRY_VERSION = 3;
-export const CONTENT_TEMPLATE_CONTRACT_VERSION = 2;
+export const CONTENT_TEMPLATE_REGISTRY_VERSION = 7;
+export const CONTENT_TEMPLATE_CONTRACT_VERSION = 4;
 
-export type RegisteredContentTemplateKey = "hero" | "fullBleed" | "video" | "carousel" | "singlePoster" | "doublePoster" | "textBanner" | "journey" | "comparison" | "featuredProduct" | "productRow" | "gallery" | "wearingInspiration" | "categoryCards" | "sceneShopping" | "hotspot" | "brandPoints" | "servicePromises" | "certificates" | "storeInfo" | "testimonials" | "booking" | "limitedEvent";
+export type RegisteredContentTemplateKey = "hero" | "fullBleed" | "video" | "carousel" | "singlePoster" | "doublePoster" | "textBanner" | "journey" | "comparison" | "featuredProduct" | "productRow" | "gallery" | "wearingInspiration" | "categoryCards" | "sceneShopping" | "hotspot" | "brandPoints" | "servicePromises" | "certificates" | "storeInfo" | "testimonials" | "booking" | "limitedEvent" | "craftDetails";
 export type ContentTemplateKey = RegisteredContentTemplateKey;
 export type ContentTemplateMaster = "asymmetric-gallery" | "booking-epilogue" | "brand-points" | "category-navigation" | "cinematic-hero" | "cinematic-video" | "comparison-stage" | "editorial-journey" | "editorial-split" | "editorial-story" | "editorial-text" | "event-stage" | "hotspot-stage" | "immersive-image" | "product-focus" | "product-grid" | "scene-navigation" | "sequence-stage" | "service-policy" | "store-visit" | "testimonial-proof" | "trust-gallery" | "wearing-story";
 export type ContentTemplateAssetClass = "product" | "editorial" | "craft" | "service";
+export type ContentTemplateCommercialPurpose =
+  | "品牌展示" | "商品销售" | "活动转化" | "内容传播" | "信任建立";
 
 export type ContentTemplateAssetPolicy = {
   classes: readonly ContentTemplateAssetClass[];
@@ -76,6 +78,7 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "video",
       "singlePoster",
       "doublePoster",
+      "craftDetails",
       "textBanner",
       "journey",
       "brandPoints",
@@ -134,6 +137,7 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "video",
       "singlePoster",
       "doublePoster",
+      "craftDetails",
       "textBanner",
       "journey",
       "comparison",
@@ -162,6 +166,7 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "carousel",
       "singlePoster",
       "doublePoster",
+      "craftDetails",
       "textBanner",
       "journey",
       "featuredProduct",
@@ -191,6 +196,7 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "carousel",
       "singlePoster",
       "doublePoster",
+      "craftDetails",
       "textBanner",
       "featuredProduct",
       "productRow",
@@ -230,6 +236,22 @@ export type ContentTemplateEditableCapability =
 
 export type ContentTemplateResponsiveScope = "shared" | "viewport-specific";
 
+export type ContentTemplateResizeDirection = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+
+export type ContentTemplateEditableConstraints = {
+  minSize: { width: number; height: number };
+  maxSize: { width: number; height: number };
+  movementAxes: readonly ("x" | "y")[];
+  allowedResize: readonly ContentTemplateResizeDirection[];
+  layerRange: { min: number; max: number };
+  allowHide: boolean;
+  allowAspectRatio: boolean;
+  allowFocus: boolean;
+  allowZoom: boolean;
+  allowTypography: boolean;
+  safeAreaRequired: boolean;
+};
+
 export type ContentTemplateEditableObject = {
   roleId: string;
   nodeIds?: readonly string[];
@@ -242,12 +264,31 @@ export type ContentTemplateEditableObject = {
   fieldScopes?: Readonly<Record<string, ContentTemplateResponsiveScope>>;
   capabilities: readonly ContentTemplateEditableCapability[];
   responsive: Partial<Record<ContentTemplateEditableCapability, ContentTemplateResponsiveScope>>;
+  constraints: ContentTemplateEditableConstraints;
+};
+
+export type ContentTemplateDefaultGeometryZone = {
+  nodeId: string;
+  roleId: string;
+  role: ContentTemplateSkeletonRole;
+  rect: ContentTemplateVisualRect;
+  overlay?: boolean;
+  kind?: "play" | "pagination" | "steps-5" | "handle" | "hotspot" | "countdown";
+};
+
+export type ContentTemplateDefaultGeometryViewport = {
+  tone: "light" | "dark";
+  rows: number;
+  frameAspectRatio: number;
+  safeArea: ContentTemplateVisualRect;
+  zones: readonly ContentTemplateDefaultGeometryZone[];
 };
 
 export type ContentTemplateContract = {
   key: ContentTemplateKey;
   moduleType: string;
   displayName: string;
+  commercialPurpose: ContentTemplateCommercialPurpose;
   version: number;
   master: ContentTemplateMaster;
   visualRole: "primary-stage" | "feature-stage" | "support-stage";
@@ -279,6 +320,7 @@ export type ContentTemplateContract = {
     allowedRatioPresetsByViewport?: Partial<Record<"desktop" | "mobile", readonly string[]>>;
   }[];
   order: Record<"desktop" | "mobile", readonly string[]>;
+  defaultGeometryByViewport: Record<"desktop" | "mobile", ContentTemplateDefaultGeometryViewport>;
   preview: {
     purpose: string;
     visualRole: "primary-stage" | "feature-stage" | "support-stage";
@@ -380,6 +422,9 @@ export type ContentTemplateInstanceOverridesV2 = {
     heightPreset?: string;
     compositionPreset?: string;
     colorPreset?: string;
+    paddingPreset?: "compact" | "standard" | "spacious";
+    radiusPreset?: "square" | "soft" | "rounded";
+    shadowPreset?: "none" | "soft" | "lifted";
     customColors?: {
       background?: string;
       text?: string;
@@ -407,12 +452,28 @@ export type ContentTemplateInstanceOverridesV2 = {
       lineHeight?: number;
       letterSpacing?: number;
     };
+    appearance?: {
+      radiusPreset?: "square" | "soft" | "rounded";
+      shadowPreset?: "none" | "soft" | "lifted";
+    };
   }>;
 };
 
 export type ContentTemplateInstanceOverrides =
   | ContentTemplateInstanceOverridesV1
   | ContentTemplateInstanceOverridesV2;
+
+export type ContentTemplateDefaultContentValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly ContentTemplateDefaultContentValue[]
+  | { readonly [key: string]: ContentTemplateDefaultContentValue };
+
+export type ContentTemplateDefaultContent = Readonly<
+  Record<string, ContentTemplateDefaultContentValue>
+>;
 
 export type ContentTemplateSkeletonRole =
   | "media" | "mainMedia" | "detailMedia" | "copy" | "action" | "marker"
@@ -465,6 +526,7 @@ export type ContentTemplatePreview = {
   key: RegisteredContentTemplateKey;
   moduleType: string;
   displayName: string;
+  commercialPurpose: ContentTemplateCommercialPurpose;
   purpose: string;
   visualRole: "primary-stage" | "feature-stage" | "support-stage";
   desktop: ContentTemplatePreviewViewport;
@@ -520,6 +582,7 @@ export type ContentTemplateCompletion = {
 export const CONTENT_TEMPLATE_REGISTRY = [
   {
     "category": "视觉展示",
+    "commercialPurpose": "品牌展示",
     "displayName": "首屏",
     "implementationStatus": "active",
     "key": "hero",
@@ -527,6 +590,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "视觉展示",
+    "commercialPurpose": "品牌展示",
     "displayName": "通栏图",
     "implementationStatus": "active",
     "key": "fullBleed",
@@ -534,6 +598,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "视觉展示",
+    "commercialPurpose": "品牌展示",
     "displayName": "视频",
     "implementationStatus": "active",
     "key": "video",
@@ -541,6 +606,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "视觉展示",
+    "commercialPurpose": "品牌展示",
     "displayName": "轮播",
     "implementationStatus": "active",
     "key": "carousel",
@@ -548,6 +614,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "图文内容",
+    "commercialPurpose": "内容传播",
     "displayName": "单图文",
     "implementationStatus": "active",
     "key": "singlePoster",
@@ -555,6 +622,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "图文内容",
+    "commercialPurpose": "内容传播",
     "displayName": "双图文",
     "implementationStatus": "active",
     "key": "doublePoster",
@@ -562,6 +630,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "图文内容",
+    "commercialPurpose": "内容传播",
     "displayName": "纯文字",
     "implementationStatus": "active",
     "key": "textBanner",
@@ -569,6 +638,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "图文内容",
+    "commercialPurpose": "内容传播",
     "displayName": "内容流程",
     "implementationStatus": "active",
     "key": "journey",
@@ -576,6 +646,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "图文内容",
+    "commercialPurpose": "信任建立",
     "displayName": "前后对比",
     "implementationStatus": "active",
     "key": "comparison",
@@ -583,6 +654,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "商品展示",
+    "commercialPurpose": "商品销售",
     "displayName": "单品展示",
     "implementationStatus": "active",
     "key": "featuredProduct",
@@ -590,6 +662,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "商品展示",
+    "commercialPurpose": "商品销售",
     "displayName": "商品列表",
     "implementationStatus": "active",
     "key": "productRow",
@@ -597,6 +670,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "商品展示",
+    "commercialPurpose": "商品销售",
     "displayName": "作品画廊",
     "implementationStatus": "active",
     "key": "gallery",
@@ -604,6 +678,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "商品展示",
+    "commercialPurpose": "商品销售",
     "displayName": "佩戴展示",
     "implementationStatus": "active",
     "key": "wearingInspiration",
@@ -611,6 +686,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "导航入口",
+    "commercialPurpose": "商品销售",
     "displayName": "品类入口",
     "implementationStatus": "active",
     "key": "categoryCards",
@@ -618,6 +694,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "导航入口",
+    "commercialPurpose": "商品销售",
     "displayName": "场景入口",
     "implementationStatus": "active",
     "key": "sceneShopping",
@@ -625,6 +702,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "导航入口",
+    "commercialPurpose": "商品销售",
     "displayName": "图片热区",
     "implementationStatus": "active",
     "key": "hotspot",
@@ -632,6 +710,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "服务信息",
+    "commercialPurpose": "信任建立",
     "displayName": "品牌要点",
     "implementationStatus": "active",
     "key": "brandPoints",
@@ -639,6 +718,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "服务信息",
+    "commercialPurpose": "信任建立",
     "displayName": "服务承诺",
     "implementationStatus": "active",
     "key": "servicePromises",
@@ -646,6 +726,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "服务信息",
+    "commercialPurpose": "信任建立",
     "displayName": "证书展示",
     "implementationStatus": "active",
     "key": "certificates",
@@ -653,6 +734,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "服务信息",
+    "commercialPurpose": "信任建立",
     "displayName": "门店信息",
     "implementationStatus": "active",
     "key": "storeInfo",
@@ -660,6 +742,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "服务信息",
+    "commercialPurpose": "信任建立",
     "displayName": "顾客分享",
     "implementationStatus": "active",
     "key": "testimonials",
@@ -667,6 +750,7 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "服务信息",
+    "commercialPurpose": "活动转化",
     "displayName": "预约入口",
     "implementationStatus": "active",
     "key": "booking",
@@ -674,17 +758,27 @@ export const CONTENT_TEMPLATE_REGISTRY = [
   },
   {
     "category": "活动内容",
+    "commercialPurpose": "活动转化",
     "displayName": "限时活动",
     "implementationStatus": "active",
     "key": "limitedEvent",
     "moduleType": "限时活动"
+  },
+  {
+    "category": "图文内容",
+    "commercialPurpose": "信任建立",
+    "displayName": "工艺细节",
+    "implementationStatus": "active",
+    "key": "craftDetails",
+    "moduleType": "工艺细节"
   }
 ] as const;
 
-/** 23 个真实 Renderer 的完整 schema v3 合同；implementationStatus 不再决定可否渲染。 */
+/** 所有真实 Renderer 的完整 schema v5 合同；implementationStatus 不再决定可否渲染。 */
 export const CONTENT_TEMPLATE_CONTRACTS = {
   "booking": {
     "allowedControls": [],
+    "commercialPurpose": "活动转化",
     "contentBudget": {
       "limits": {
         "altText": 80,
@@ -703,6 +797,100 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "desktop": "stacked",
       "mobile": "stacked"
     },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 2.285714,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.375,
+              "width": 0.5,
+              "x": 0.083333,
+              "y": 0.125
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "primaryAction",
+            "rect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.666667,
+              "y": 0.25
+            },
+            "role": "action",
+            "roleId": "primaryAction"
+          },
+          {
+            "nodeId": "secondaryContact",
+            "rect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.666667,
+              "y": 0.5
+            },
+            "role": "marker",
+            "roleId": "secondaryContact"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.8,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.375,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "primaryAction",
+            "rect": {
+              "height": 0.125,
+              "width": 0.666667,
+              "x": 0.05,
+              "y": 0.5
+            },
+            "role": "action",
+            "roleId": "primaryAction"
+          },
+          {
+            "nodeId": "secondaryContact",
+            "rect": {
+              "height": 0.125,
+              "width": 0.666667,
+              "x": 0.05,
+              "y": 0.75
+            },
+            "role": "marker",
+            "roleId": "secondaryContact"
+          }
+        ]
+      }
+    },
     "displayName": "预约入口",
     "editorCapabilities": {
       "editableObjects": [
@@ -716,6 +904,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom",
             "focus"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "backgroundImage",
             "altText"
@@ -739,6 +961,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": true,
+            "allowTypography": true,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle"
@@ -767,6 +1023,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": true,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "buttonText",
             "targetType",
@@ -792,6 +1082,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "phone"
           ],
@@ -959,7 +1271,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 2,
+            "column": 1.999996,
             "role": "copy",
             "roleId": "copy",
             "row": 2,
@@ -967,7 +1279,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 6
           },
           {
-            "column": 9,
+            "column": 9.000004,
             "role": "action",
             "roleId": "primaryAction",
             "row": 3,
@@ -975,7 +1287,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 3
           },
           {
-            "column": 9,
+            "column": 9.000004,
             "role": "marker",
             "roleId": "secondaryContact",
             "row": 5,
@@ -993,28 +1305,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.32,
             "rowSpan": 3,
-            "span": 12
+            "span": 10.8
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "action",
             "roleId": "primaryAction",
             "row": 5,
             "rowSpan": 1,
-            "span": 8
+            "span": 8.000004
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "marker",
             "roleId": "secondaryContact",
             "row": 7,
             "rowSpan": 1,
-            "span": 8
+            "span": 8.000004
           }
         ]
       },
@@ -1072,13 +1384,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "standard"
   },
   "brandPoints": {
     "allowedControls": [],
+    "commercialPurpose": "信任建立",
     "contentBudget": {
       "limits": {},
       "maxCtas": 0,
@@ -1087,6 +1400,122 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.6,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.666667,
+              "x": 0.166667,
+              "y": 0.05
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "points",
+            "rect": {
+              "height": 0.375,
+              "width": 0.333333,
+              "x": 0,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "points"
+          },
+          {
+            "nodeId": "points",
+            "rect": {
+              "height": 0.375,
+              "width": 0.333333,
+              "x": 0.333333,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "points"
+          },
+          {
+            "nodeId": "points",
+            "rect": {
+              "height": 0.375,
+              "width": 0.333333,
+              "x": 0.666667,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "points"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.8,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "points",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.125
+            },
+            "role": "card",
+            "roleId": "points"
+          },
+          {
+            "nodeId": "points",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.375
+            },
+            "role": "card",
+            "roleId": "points"
+          },
+          {
+            "nodeId": "points",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.625
+            },
+            "role": "card",
+            "roleId": "points"
+          }
+        ]
+      }
     },
     "displayName": "品牌要点",
     "editorCapabilities": {
@@ -1099,6 +1528,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "collectionFieldKeys": [
             "cards"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "cards"
           ],
@@ -1113,6 +1564,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle"
@@ -1167,12 +1640,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 3,
+            "column": 3.000004,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.4,
             "rowSpan": 1,
-            "span": 8
+            "span": 8.000004
           },
           {
             "column": 1,
@@ -1180,23 +1653,23 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "points",
             "row": 3,
             "rowSpan": 3,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 5,
+            "column": 4.999996,
             "role": "card",
             "roleId": "points",
             "row": 3,
             "rowSpan": 3,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 9,
+            "column": 9.000004,
             "role": "card",
             "roleId": "points",
             "row": 3,
             "rowSpan": 3,
-            "span": 4
+            "span": 3.999996
           }
         ]
       },
@@ -1208,12 +1681,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.32,
             "rowSpan": 1,
-            "span": 12
+            "span": 10.8
           },
           {
             "column": 1,
@@ -1269,13 +1742,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "standard"
   },
   "carousel": {
     "allowedControls": [],
+    "commercialPurpose": "品牌展示",
     "contentBudget": {
       "limits": {},
       "maxCtas": 0,
@@ -1284,6 +1758,104 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "overlay",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 2.625,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "frames",
+            "rect": {
+              "height": 0.75,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "frames"
+          },
+          {
+            "nodeId": "copy",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.083333,
+              "y": 0.375
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "kind": "pagination",
+            "nodeId": "pagination",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.666667,
+              "y": 0.625
+            },
+            "role": "marker",
+            "roleId": "pagination"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.4,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "frames",
+            "rect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "frames"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.5
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "kind": "pagination",
+            "nodeId": "pagination",
+            "rect": {
+              "height": 0.125,
+              "width": 0.333333,
+              "x": 0,
+              "y": 0.75
+            },
+            "role": "marker",
+            "roleId": "pagination"
+          }
+        ]
+      }
     },
     "displayName": "轮播",
     "editorCapabilities": {
@@ -1303,6 +1875,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "collectionFieldKeys": [
             "images"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "images",
             "autoPlay",
@@ -1400,16 +2006,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 2,
+            "column": 1.999996,
             "overlay": true,
             "role": "copy",
             "roleId": "copy",
             "row": 4,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           },
           {
-            "column": 9,
+            "column": 9.000004,
             "kind": "pagination",
             "overlay": true,
             "role": "marker",
@@ -1451,7 +2057,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "pagination",
             "row": 7,
             "rowSpan": 1,
-            "span": 4
+            "span": 3.999996
           }
         ]
       },
@@ -1501,13 +2107,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
   },
   "categoryCards": {
     "allowedControls": [],
+    "commercialPurpose": "商品销售",
     "contentBudget": {
       "limits": {},
       "maxCtas": 0,
@@ -1516,6 +2123,122 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.6,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.333333,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "categories",
+            "rect": {
+              "height": 0.5,
+              "width": 0.333333,
+              "x": 0,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "categories"
+          },
+          {
+            "nodeId": "categories",
+            "rect": {
+              "height": 0.5,
+              "width": 0.333333,
+              "x": 0.333333,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "categories"
+          },
+          {
+            "nodeId": "categories",
+            "rect": {
+              "height": 0.5,
+              "width": 0.333333,
+              "x": 0.666667,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "categories"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.8,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "categories",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.125
+            },
+            "role": "card",
+            "roleId": "categories"
+          },
+          {
+            "nodeId": "categories",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.375
+            },
+            "role": "card",
+            "roleId": "categories"
+          },
+          {
+            "nodeId": "categories",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.625
+            },
+            "role": "card",
+            "roleId": "categories"
+          }
+        ]
+      }
     },
     "displayName": "品类入口",
     "editorCapabilities": {
@@ -1533,6 +2256,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "collectionFieldKeys": [
             "categories"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "categorySlugs",
             "categories"
@@ -1554,6 +2311,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle"
@@ -1625,12 +2404,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.48,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.4,
             "rowSpan": 1,
-            "span": 4
+            "span": 3.999996
           },
           {
             "column": 1,
@@ -1638,23 +2417,23 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "categories",
             "row": 3,
             "rowSpan": 4,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 5,
+            "column": 4.999996,
             "role": "card",
             "roleId": "categories",
             "row": 3,
             "rowSpan": 4,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 9,
+            "column": 9.000004,
             "role": "card",
             "roleId": "categories",
             "row": 3,
             "rowSpan": 4,
-            "span": 4
+            "span": 3.999996
           }
         ]
       },
@@ -1666,12 +2445,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.32,
             "rowSpan": 1,
-            "span": 12
+            "span": 10.8
           },
           {
             "column": 1,
@@ -1740,13 +2519,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "full"
   },
   "certificates": {
     "allowedControls": [],
+    "commercialPurpose": "信任建立",
     "contentBudget": {
       "limits": {},
       "maxCtas": 0,
@@ -1755,6 +2535,122 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.6,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.333333,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "certificates",
+            "rect": {
+              "height": 0.375,
+              "width": 0.333333,
+              "x": 0,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "certificates"
+          },
+          {
+            "nodeId": "certificates",
+            "rect": {
+              "height": 0.375,
+              "width": 0.333333,
+              "x": 0.333333,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "certificates"
+          },
+          {
+            "nodeId": "certificates",
+            "rect": {
+              "height": 0.375,
+              "width": 0.333333,
+              "x": 0.666667,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "certificates"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.8,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "certificates",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.125
+            },
+            "role": "card",
+            "roleId": "certificates"
+          },
+          {
+            "nodeId": "certificates",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.375
+            },
+            "role": "card",
+            "roleId": "certificates"
+          },
+          {
+            "nodeId": "certificates",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.625
+            },
+            "role": "card",
+            "roleId": "certificates"
+          }
+        ]
+      }
     },
     "displayName": "证书展示",
     "editorCapabilities": {
@@ -1771,6 +2667,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "collectionFieldKeys": [
             "certificates"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "certificates"
           ],
@@ -1789,6 +2719,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle"
@@ -1851,12 +2803,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.48,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.4,
             "rowSpan": 1,
-            "span": 4
+            "span": 3.999996
           },
           {
             "column": 1,
@@ -1864,23 +2816,23 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "certificates",
             "row": 3,
             "rowSpan": 3,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 5,
+            "column": 4.999996,
             "role": "card",
             "roleId": "certificates",
             "row": 3,
             "rowSpan": 3,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 9,
+            "column": 9.000004,
             "role": "card",
             "roleId": "certificates",
             "row": 3,
             "rowSpan": 3,
-            "span": 4
+            "span": 3.999996
           }
         ]
       },
@@ -1892,12 +2844,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.32,
             "rowSpan": 1,
-            "span": 12
+            "span": 10.8
           },
           {
             "column": 1,
@@ -1970,13 +2922,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
   },
   "comparison": {
     "allowedControls": [],
+    "commercialPurpose": "信任建立",
     "contentBudget": {
       "limits": {},
       "maxCtas": 0,
@@ -1985,6 +2938,126 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.6,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.92,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "before",
+            "rect": {
+              "height": 1,
+              "width": 0.5,
+              "x": 0,
+              "y": 0
+            },
+            "role": "mainMedia",
+            "roleId": "before"
+          },
+          {
+            "nodeId": "after",
+            "rect": {
+              "height": 1,
+              "width": 0.5,
+              "x": 0.5,
+              "y": 0
+            },
+            "role": "detailMedia",
+            "roleId": "after"
+          },
+          {
+            "kind": "handle",
+            "nodeId": "comparisonHandle",
+            "overlay": true,
+            "rect": {
+              "height": 0.25,
+              "width": 0.166667,
+              "x": 0.416667,
+              "y": 0.375
+            },
+            "role": "marker",
+            "roleId": "comparisonHandle"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.8,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "before",
+            "rect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "mainMedia",
+            "roleId": "before"
+          },
+          {
+            "nodeId": "after",
+            "rect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "detailMedia",
+            "roleId": "after"
+          },
+          {
+            "kind": "handle",
+            "nodeId": "comparisonHandle",
+            "overlay": true,
+            "rect": {
+              "height": 0.25,
+              "width": 0.166667,
+              "x": 0.416667,
+              "y": 0.375
+            },
+            "role": "marker",
+            "roleId": "comparisonHandle"
+          }
+        ]
+      }
     },
     "displayName": "前后对比",
     "editorCapabilities": {
@@ -1999,6 +3072,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "fit",
             "zoom"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "beforeImage",
             "beforeLabel",
@@ -2025,6 +3132,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "fit",
             "zoom"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "afterImage",
             "afterLabel",
@@ -2045,6 +3186,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle"
@@ -2060,6 +3223,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "content",
             "link"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "actionText",
             "targetType",
@@ -2164,38 +3349,38 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.48,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.4,
             "rowSpan": 1,
-            "span": 12
+            "span": 11.04
           },
           {
             "column": 1,
             "role": "mainMedia",
             "roleId": "before",
-            "row": 3,
-            "rowSpan": 4,
+            "row": 1,
+            "rowSpan": 8,
             "span": 6
           },
           {
             "column": 7,
             "role": "detailMedia",
             "roleId": "after",
-            "row": 3,
-            "rowSpan": 4,
+            "row": 1,
+            "rowSpan": 8,
             "span": 6
           },
           {
-            "column": 6,
+            "column": 6.000004,
             "kind": "handle",
             "overlay": true,
             "role": "marker",
             "roleId": "comparisonHandle",
             "row": 4,
             "rowSpan": 2,
-            "span": 2
+            "span": 2.000004
           }
         ]
       },
@@ -2209,38 +3394,38 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.32,
             "rowSpan": 1,
-            "span": 12
+            "span": 10.8
           },
           {
             "column": 1,
             "role": "mainMedia",
             "roleId": "before",
-            "row": 2,
-            "rowSpan": 3,
+            "row": 1,
+            "rowSpan": 8,
             "span": 12
           },
           {
             "column": 1,
             "role": "detailMedia",
             "roleId": "after",
-            "row": 5,
-            "rowSpan": 3,
+            "row": 1,
+            "rowSpan": 8,
             "span": 12
           },
           {
-            "column": 6,
+            "column": 6.000004,
             "kind": "handle",
             "overlay": true,
             "role": "marker",
             "roleId": "comparisonHandle",
             "row": 4,
             "rowSpan": 2,
-            "span": 2
+            "span": 2.000004
           }
         ]
       },
@@ -2308,13 +3493,745 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
   },
+  "craftDetails": {
+    "allowedControls": [],
+    "commercialPurpose": "信任建立",
+    "contentBudget": {
+      "limits": {
+        "body": 90,
+        "detailOneAltText": 80,
+        "detailTwoAltText": 80,
+        "eyebrow": 18,
+        "leadAltText": 80,
+        "title": 24
+      },
+      "maxCtas": 0,
+      "requiredText": [
+        "title",
+        "leadAltText",
+        "detailOneAltText",
+        "detailTwoAltText"
+      ]
+    },
+    "copyPlacementByViewport": {
+      "desktop": "split",
+      "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.25,
+        "rows": 12,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "leadImage",
+            "rect": {
+              "height": 0.522222,
+              "width": 0.626667,
+              "x": 0.333333,
+              "y": 0.04
+            },
+            "role": "mainMedia",
+            "roleId": "leadImage"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.28,
+              "width": 0.25,
+              "x": 0.04,
+              "y": 0.12
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "detailImageOne",
+            "rect": {
+              "height": 0.366667,
+              "width": 0.293333,
+              "x": 0.333333,
+              "y": 0.61
+            },
+            "role": "detailMedia",
+            "roleId": "detailImageOne"
+          },
+          {
+            "nodeId": "detailImageTwo",
+            "rect": {
+              "height": 0.366667,
+              "width": 0.293333,
+              "x": 0.666667,
+              "y": 0.61
+            },
+            "role": "detailMedia",
+            "roleId": "detailImageTwo"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.44,
+        "rows": 12,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "leadImage",
+            "rect": {
+              "height": 0.55,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "mainMedia",
+            "roleId": "leadImage"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.18,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.58
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "detailImageOne",
+            "rect": {
+              "height": 0.187,
+              "width": 0.425,
+              "x": 0.05,
+              "y": 0.78
+            },
+            "role": "detailMedia",
+            "roleId": "detailImageOne"
+          },
+          {
+            "nodeId": "detailImageTwo",
+            "rect": {
+              "height": 0.187,
+              "width": 0.425,
+              "x": 0.525,
+              "y": 0.78
+            },
+            "role": "detailMedia",
+            "roleId": "detailImageTwo"
+          }
+        ]
+      }
+    },
+    "displayName": "工艺细节",
+    "editorCapabilities": {
+      "editableObjects": [
+        {
+          "altFieldKey": "leadAltText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "size",
+            "position",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
+          "contentFieldKeys": [
+            "leadImage",
+            "leadAltText"
+          ],
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "position": "shared",
+            "ratio": "shared",
+            "size": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "leadImage"
+        },
+        {
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
+          ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": true,
+            "allowTypography": true,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": true
+          },
+          "contentFieldKeys": [
+            "eyebrow",
+            "title",
+            "body"
+          ],
+          "kind": "text",
+          "responsive": {
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
+          },
+          "roleId": "copy"
+        },
+        {
+          "altFieldKey": "detailOneAltText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "size",
+            "position",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
+          "contentFieldKeys": [
+            "detailImageOne",
+            "detailOneAltText"
+          ],
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "position": "shared",
+            "ratio": "shared",
+            "size": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "detailImageOne"
+        },
+        {
+          "altFieldKey": "detailTwoAltText",
+          "capabilities": [
+            "content",
+            "layout",
+            "layer",
+            "ratio",
+            "size",
+            "position",
+            "fit",
+            "zoom",
+            "focus"
+          ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
+          "contentFieldKeys": [
+            "detailImageTwo",
+            "detailTwoAltText"
+          ],
+          "kind": "media",
+          "responsive": {
+            "content": "shared",
+            "fit": "shared",
+            "focus": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "position": "shared",
+            "ratio": "shared",
+            "size": "shared",
+            "zoom": "shared"
+          },
+          "roleId": "detailImageTwo"
+        }
+      ],
+      "layoutOverrides": {
+        "compositionPresets": [
+          "lead-detail"
+        ],
+        "slots": [
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "positionPresets": [
+              "center",
+              "end"
+            ],
+            "ratioPresets": [
+              "3 / 2",
+              "4 / 5",
+              "1 / 1"
+            ],
+            "roleId": "leadImage",
+            "sizePresets": [
+              "standard",
+              "large"
+            ],
+            "zoom": {
+              "max": 1.5,
+              "min": 1,
+              "step": 0.05
+            }
+          },
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "positionPresets": [
+              "start",
+              "center"
+            ],
+            "ratioPresets": [
+              "1 / 1",
+              "4 / 5"
+            ],
+            "roleId": "detailImageOne",
+            "sizePresets": [
+              "small",
+              "standard"
+            ],
+            "zoom": {
+              "max": 1.5,
+              "min": 1,
+              "step": 0.05
+            }
+          },
+          {
+            "fit": [
+              "cover",
+              "contain"
+            ],
+            "focusByViewport": true,
+            "positionPresets": [
+              "center",
+              "end"
+            ],
+            "ratioPresets": [
+              "1 / 1",
+              "4 / 5"
+            ],
+            "roleId": "detailImageTwo",
+            "sizePresets": [
+              "small",
+              "standard"
+            ],
+            "zoom": {
+              "max": 1.5,
+              "min": 1,
+              "step": 0.05
+            }
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral"
+            ],
+            "maxLines": 6,
+            "placementPresets": [
+              "left",
+              "center"
+            ],
+            "roleId": "copy",
+            "sizePresets": [
+              "small",
+              "standard",
+              "large"
+            ],
+            "widthPresets": [
+              "narrow",
+              "standard"
+            ]
+          }
+        ]
+      },
+      "primaryTask": "media"
+    },
+    "flow": "flow",
+    "heightModeByViewport": {
+      "desktop": "content",
+      "mobile": "content"
+    },
+    "key": "craftDetails",
+    "master": "editorial-story",
+    "media": [
+      {
+        "desktopRatio": "3 / 2",
+        "key": "leadImage",
+        "mobileRatio": "4 / 5",
+        "required": true
+      },
+      {
+        "desktopRatio": "1 / 1",
+        "key": "detailImageOne",
+        "mobileRatio": "1 / 1",
+        "required": true
+      },
+      {
+        "desktopRatio": "1 / 1",
+        "key": "detailImageTwo",
+        "mobileRatio": "1 / 1",
+        "required": true
+      }
+    ],
+    "moduleType": "工艺细节",
+    "order": {
+      "desktop": [
+        "leadImage",
+        "copy",
+        "detailImageOne",
+        "detailImageTwo"
+      ],
+      "mobile": [
+        "leadImage",
+        "copy",
+        "detailImageOne",
+        "detailImageTwo"
+      ]
+    },
+    "presets": [],
+    "preview": {
+      "desktop": {
+        "order": [
+          "leadImage",
+          "copy",
+          "detailImageOne",
+          "detailImageTwo"
+        ],
+        "rows": 12,
+        "tone": "light",
+        "zones": [
+          {
+            "column": 4.999996,
+            "role": "mainMedia",
+            "roleId": "leadImage",
+            "row": 1.48,
+            "rowSpan": 6.266664,
+            "span": 7.520004
+          },
+          {
+            "column": 1.48,
+            "role": "copy",
+            "roleId": "copy",
+            "row": 2.44,
+            "rowSpan": 3.36,
+            "span": 3
+          },
+          {
+            "column": 4.999996,
+            "role": "detailMedia",
+            "roleId": "detailImageOne",
+            "row": 8.32,
+            "rowSpan": 4.400004,
+            "span": 3.519996
+          },
+          {
+            "column": 9.000004,
+            "role": "detailMedia",
+            "roleId": "detailImageTwo",
+            "row": 8.32,
+            "rowSpan": 4.400004,
+            "span": 3.519996
+          }
+        ]
+      },
+      "mobile": {
+        "order": [
+          "leadImage",
+          "copy",
+          "detailImageOne",
+          "detailImageTwo"
+        ],
+        "rows": 12,
+        "tone": "light",
+        "zones": [
+          {
+            "column": 1,
+            "role": "mainMedia",
+            "roleId": "leadImage",
+            "row": 1,
+            "rowSpan": 6.6,
+            "span": 12
+          },
+          {
+            "column": 1.6,
+            "role": "copy",
+            "roleId": "copy",
+            "row": 7.96,
+            "rowSpan": 2.16,
+            "span": 10.8
+          },
+          {
+            "column": 1.6,
+            "role": "detailMedia",
+            "roleId": "detailImageOne",
+            "row": 10.36,
+            "rowSpan": 2.244,
+            "span": 5.1
+          },
+          {
+            "column": 7.3,
+            "role": "detailMedia",
+            "roleId": "detailImageTwo",
+            "row": 10.36,
+            "rowSpan": 2.244,
+            "span": 5.1
+          }
+        ]
+      },
+      "purpose": "一张主图建立工艺焦点，两张细节图补充材质观察",
+      "visualRole": "support-stage"
+    },
+    "roles": [
+      {
+        "allowedRatioPresetsByViewport": {
+          "desktop": [
+            "3 / 2",
+            "4 / 5",
+            "1 / 1"
+          ],
+          "mobile": [
+            "4 / 5",
+            "1 / 1"
+          ]
+        },
+        "assetClass": "editorial",
+        "defaultRatioByViewport": {
+          "desktop": "3 / 2",
+          "mobile": "4 / 5"
+        },
+        "id": "leadImage",
+        "kind": "media",
+        "required": true,
+        "role": "mainMedia"
+      },
+      {
+        "id": "copy",
+        "kind": "text",
+        "previewRoles": [
+          "copy",
+          "eyebrow",
+          "title"
+        ],
+        "required": false,
+        "role": "copy"
+      },
+      {
+        "allowedRatioPresetsByViewport": {
+          "desktop": [
+            "1 / 1",
+            "4 / 5"
+          ],
+          "mobile": [
+            "1 / 1",
+            "4 / 5"
+          ]
+        },
+        "assetClass": "editorial",
+        "defaultRatioByViewport": {
+          "desktop": "1 / 1",
+          "mobile": "1 / 1"
+        },
+        "id": "detailImageOne",
+        "kind": "media",
+        "required": true,
+        "role": "detailMedia",
+        "semantic": "craft-detail-one"
+      },
+      {
+        "allowedRatioPresetsByViewport": {
+          "desktop": [
+            "1 / 1",
+            "4 / 5"
+          ],
+          "mobile": [
+            "1 / 1",
+            "4 / 5"
+          ]
+        },
+        "assetClass": "editorial",
+        "defaultRatioByViewport": {
+          "desktop": "1 / 1",
+          "mobile": "1 / 1"
+        },
+        "id": "detailImageTwo",
+        "kind": "media",
+        "required": true,
+        "role": "detailMedia",
+        "semantic": "craft-detail-two"
+      }
+    ],
+    "spacingPolicy": [
+      "normal"
+    ],
+    "supportsLinkTarget": false,
+    "version": 1,
+    "visualRole": "support-stage",
+    "visualWeight": "support-stage",
+    "width": "wide"
+  },
   "doublePoster": {
     "allowedControls": [],
+    "commercialPurpose": "内容传播",
     "contentBudget": {
       "limits": {
         "actionText": 12,
@@ -2332,6 +4249,122 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "desktop": "split",
       "mobile": "stacked"
     },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.5,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "mainImage",
+            "rect": {
+              "height": 0.666667,
+              "width": 0.666667,
+              "x": 0,
+              "y": 0
+            },
+            "role": "mainMedia",
+            "roleId": "mainImage"
+          },
+          {
+            "nodeId": "detailImage",
+            "rect": {
+              "height": 0.625,
+              "width": 0.333333,
+              "x": 0.666667,
+              "y": 0.125
+            },
+            "role": "detailMedia",
+            "roleId": "detailImage"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.25,
+              "width": 0.333333,
+              "x": 0.626667,
+              "y": 0.5
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.666667,
+              "y": 0.825
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.6,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "mainImage",
+            "rect": {
+              "height": 0.4,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "mainMedia",
+            "roleId": "mainImage"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.25,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.375
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "detailImage",
+            "rect": {
+              "height": 0.5,
+              "width": 0.666667,
+              "x": 0.333333,
+              "y": 0.4
+            },
+            "role": "detailMedia",
+            "roleId": "detailImage"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.835
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      }
+    },
     "displayName": "双图文",
     "editorCapabilities": {
       "editableObjects": [
@@ -2348,6 +4381,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom",
             "focus"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "mainImage",
             "mainAltText"
@@ -2379,6 +4446,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom",
             "focus"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "detailImage",
             "detailAltText"
@@ -2405,6 +4506,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": true,
+            "allowTypography": true,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "description",
@@ -2426,6 +4561,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "content",
             "link"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "actionText",
             "targetType",
@@ -2579,30 +4736,30 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "role": "mainMedia",
             "roleId": "mainImage",
             "row": 1,
-            "rowSpan": 6,
-            "span": 8
+            "rowSpan": 5.333336,
+            "span": 8.000004
           },
           {
-            "column": 9,
+            "column": 9.000004,
             "role": "detailMedia",
             "roleId": "detailImage",
             "row": 2,
-            "rowSpan": 3,
-            "span": 4
+            "rowSpan": 5,
+            "span": 3.999996
           },
           {
-            "column": 9,
+            "column": 8.520004,
             "role": "copy",
             "roleId": "copy",
             "row": 5,
             "rowSpan": 2,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 9,
+            "column": 9.000004,
             "role": "action",
             "roleId": "action",
-            "row": 8,
+            "row": 7.6,
             "rowSpan": 1,
             "span": 3
           }
@@ -2622,32 +4779,32 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "role": "mainMedia",
             "roleId": "mainImage",
             "row": 1,
-            "rowSpan": 3,
+            "rowSpan": 3.2,
             "span": 12
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
             "row": 4,
             "rowSpan": 2,
-            "span": 12
+            "span": 10.8
           },
           {
-            "column": 5,
+            "column": 4.999996,
             "role": "detailMedia",
             "roleId": "detailImage",
-            "row": 6,
-            "rowSpan": 2,
-            "span": 8
+            "row": 4.2,
+            "rowSpan": 4,
+            "span": 8.000004
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "action",
             "roleId": "action",
-            "row": 8,
+            "row": 7.68,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           }
         ]
       },
@@ -2714,13 +4871,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
   },
   "featuredProduct": {
     "allowedControls": [],
+    "commercialPurpose": "商品销售",
     "contentBudget": {
       "limits": {},
       "maxCtas": 1,
@@ -2729,6 +4887,122 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 0.75,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "product",
+            "rect": {
+              "height": 0.625,
+              "width": 0.666667,
+              "x": 0.166667,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "product"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.666667,
+              "x": 0.166667,
+              "y": 0.625
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "list",
+            "rect": {
+              "height": 0.125,
+              "width": 0.5,
+              "x": 0.25,
+              "y": 0.75
+            },
+            "role": "list",
+            "roleId": "list"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.125,
+              "width": 0.5,
+              "x": 0.25,
+              "y": 0.825
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.4,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "product",
+            "rect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "product"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.5
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "list",
+            "rect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.625
+            },
+            "role": "list",
+            "roleId": "list"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.75
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      }
     },
     "displayName": "单品展示",
     "editorCapabilities": {
@@ -2743,6 +5017,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "size",
             "fit"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "productCode"
           ],
@@ -2763,6 +5071,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "eyebrow",
             "title",
@@ -2779,6 +5109,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "content",
             "link"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "primaryText",
             "secondaryText",
@@ -2802,6 +5154,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "showPrice"
           ],
@@ -2889,20 +5263,20 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 3,
+            "column": 3.000004,
             "role": "media",
             "roleId": "product",
             "row": 1,
             "rowSpan": 5,
-            "span": 8
+            "span": 8.000004
           },
           {
-            "column": 3,
+            "column": 3.000004,
             "role": "copy",
             "roleId": "copy",
             "row": 6,
             "rowSpan": 1,
-            "span": 8
+            "span": 8.000004
           },
           {
             "column": 4,
@@ -2916,7 +5290,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "column": 4,
             "role": "action",
             "roleId": "action",
-            "row": 8,
+            "row": 7.6,
             "rowSpan": 1,
             "span": 6
           }
@@ -2940,12 +5314,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
             "row": 5,
             "rowSpan": 1,
-            "span": 12
+            "span": 10.8
           },
           {
             "column": 1,
@@ -2956,12 +5330,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "action",
             "roleId": "action",
             "row": 7,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           }
         ]
       },
@@ -3013,13 +5387,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
   },
   "fullBleed": {
     "allowedControls": [],
+    "commercialPurpose": "品牌展示",
     "contentBudget": {
       "limits": {
         "altText": 80,
@@ -3035,6 +5410,100 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "desktop": "stacked",
       "mobile": "stacked"
     },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.75,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "image",
+            "rect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "image"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.25,
+              "width": 0.666667,
+              "x": 0.04,
+              "y": 0.5
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.71,
+              "y": 0.75
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.4,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "mobileImage",
+            "rect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "mobileImage"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.25,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.5
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.75
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      }
+    },
     "displayName": "通栏图",
     "editorCapabilities": {
       "editableObjects": [
@@ -3049,6 +5518,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom",
             "focus"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "image",
             "altText"
@@ -3080,6 +5583,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom",
             "focus"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "mobileImage",
             "altText"
@@ -3108,6 +5645,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": true,
+            "allowTypography": true,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "eyebrow",
             "title",
@@ -3128,6 +5699,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "content",
             "link"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "buttonText",
             "targetType",
@@ -3269,15 +5862,15 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 1,
+            "column": 1.48,
             "role": "copy",
             "roleId": "copy",
             "row": 5,
             "rowSpan": 2,
-            "span": 8
+            "span": 8.000004
           },
           {
-            "column": 10,
+            "column": 9.52,
             "role": "action",
             "roleId": "action",
             "row": 7,
@@ -3303,20 +5896,20 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
             "row": 5,
             "rowSpan": 2,
-            "span": 12
+            "span": 10.8
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "action",
             "roleId": "action",
             "row": 7,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           }
         ]
       },
@@ -3378,13 +5971,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "full"
   },
   "gallery": {
     "allowedControls": [],
+    "commercialPurpose": "商品销售",
     "contentBudget": {
       "limits": {},
       "maxCtas": 0,
@@ -3393,6 +5987,144 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.6,
+        "rows": 10,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.1,
+              "width": 0.416667,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "works",
+            "rect": {
+              "height": 0.4,
+              "width": 0.583333,
+              "x": 0,
+              "y": 0.2
+            },
+            "role": "mainMedia",
+            "roleId": "works"
+          },
+          {
+            "nodeId": "works",
+            "rect": {
+              "height": 0.2,
+              "width": 0.416667,
+              "x": 0.583333,
+              "y": 0.2
+            },
+            "role": "detailMedia",
+            "roleId": "works"
+          },
+          {
+            "nodeId": "works",
+            "rect": {
+              "height": 0.2,
+              "width": 0.416667,
+              "x": 0.583333,
+              "y": 0.4
+            },
+            "role": "media",
+            "roleId": "works"
+          },
+          {
+            "nodeId": "works",
+            "rect": {
+              "height": 0.2,
+              "width": 1,
+              "x": 0,
+              "y": 0.7
+            },
+            "role": "media",
+            "roleId": "works"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.8,
+        "rows": 10,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.1,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "works",
+            "rect": {
+              "height": 0.3,
+              "width": 1,
+              "x": 0,
+              "y": 0.1
+            },
+            "role": "mainMedia",
+            "roleId": "works"
+          },
+          {
+            "nodeId": "works",
+            "rect": {
+              "height": 0.2,
+              "width": 1,
+              "x": 0,
+              "y": 0.4
+            },
+            "role": "detailMedia",
+            "roleId": "works"
+          },
+          {
+            "nodeId": "works",
+            "rect": {
+              "height": 0.2,
+              "width": 1,
+              "x": 0,
+              "y": 0.6
+            },
+            "role": "media",
+            "roleId": "works"
+          },
+          {
+            "nodeId": "works",
+            "rect": {
+              "height": 0.2,
+              "width": 1,
+              "x": 0,
+              "y": 0.8
+            },
+            "role": "media",
+            "roleId": "works"
+          }
+        ]
+      }
     },
     "displayName": "作品画廊",
     "editorCapabilities": {
@@ -3410,6 +6142,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "collectionFieldKeys": [
             "items"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "items"
           ],
@@ -3429,6 +6195,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle"
@@ -3497,12 +6285,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.48,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.5,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           },
           {
             "column": 1,
@@ -3510,23 +6298,23 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "works",
             "row": 3,
             "rowSpan": 4,
-            "span": 7
+            "span": 6.999996
           },
           {
-            "column": 8,
+            "column": 7.999996,
             "role": "detailMedia",
             "roleId": "works",
             "row": 3,
             "rowSpan": 2,
-            "span": 5
+            "span": 5.000004
           },
           {
-            "column": 8,
+            "column": 7.999996,
             "role": "media",
             "roleId": "works",
             "row": 5,
             "rowSpan": 2,
-            "span": 5
+            "span": 5.000004
           },
           {
             "column": 1,
@@ -3547,12 +6335,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.4,
             "rowSpan": 1,
-            "span": 12
+            "span": 10.8
           },
           {
             "column": 1,
@@ -3637,7 +6425,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -3646,6 +6434,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "allowedControls": [
       "alignment"
     ],
+    "commercialPurpose": "品牌展示",
     "contentBudget": {
       "limits": {
         "actionText": 12,
@@ -3655,11 +6444,156 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "title": 24
       },
       "maxCtas": 1,
-      "requiredText": []
+      "requiredText": [
+        "title",
+        "altText"
+      ]
     },
     "copyPlacementByViewport": {
       "desktop": "overlay",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.777778,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.93,
+          "x": 0.035,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "desktopImage",
+            "rect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "desktopImage"
+          },
+          {
+            "nodeId": "eyebrow",
+            "overlay": true,
+            "rect": {
+              "height": 0.0875,
+              "width": 0.333333,
+              "x": 0.333333,
+              "y": 0.4
+            },
+            "role": "eyebrow",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "title",
+            "overlay": true,
+            "rect": {
+              "height": 0.1625,
+              "width": 0.5,
+              "x": 0.25,
+              "y": 0.5
+            },
+            "role": "title",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "subtitle",
+            "overlay": true,
+            "rect": {
+              "height": 0.0875,
+              "width": 0.416667,
+              "x": 0.291667,
+              "y": 0.675
+            },
+            "role": "subtitle",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "overlay": true,
+            "rect": {
+              "height": 0.0875,
+              "width": 0.25,
+              "x": 0.333333,
+              "y": 0.8
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.8,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "mobileImage",
+            "rect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "mobileImage"
+          },
+          {
+            "nodeId": "eyebrow",
+            "rect": {
+              "height": 0.055,
+              "width": 0.48,
+              "x": 0.12,
+              "y": 0.54
+            },
+            "role": "eyebrow",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "title",
+            "rect": {
+              "height": 0.13,
+              "width": 0.68,
+              "x": 0.16,
+              "y": 0.61
+            },
+            "role": "title",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "subtitle",
+            "rect": {
+              "height": 0.09,
+              "width": 0.7,
+              "x": 0.12,
+              "y": 0.755
+            },
+            "role": "subtitle",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.07,
+              "width": 0.36,
+              "x": 0.12,
+              "y": 0.865
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      }
     },
     "displayName": "首屏",
     "editorCapabilities": {
@@ -3675,6 +6609,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom",
             "focus"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "desktopImage",
             "altText"
@@ -3706,6 +6674,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom",
             "focus"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "mobileImage",
             "altText"
@@ -3734,6 +6736,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": true,
+            "allowTypography": true,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "eyebrow",
             "title",
@@ -3764,6 +6800,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": true,
+            "allowTypography": true,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "actionText",
             "targetType",
@@ -3972,7 +7042,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "key": "mobileImage",
         "mobileRatio": "4 / 5",
-        "required": false
+        "required": true
       }
     ],
     "moduleType": "首屏主视觉",
@@ -4007,13 +7077,13 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 5,
+            "column": 4.999996,
             "overlay": true,
             "role": "eyebrow",
             "roleId": "copy",
             "row": 4.2,
             "rowSpan": 0.7,
-            "span": 4
+            "span": 3.999996
           },
           {
             "column": 4,
@@ -4025,16 +7095,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 6
           },
           {
-            "column": 4.5,
+            "column": 4.500004,
             "overlay": true,
             "role": "subtitle",
             "roleId": "copy",
             "row": 6.4,
             "rowSpan": 0.7,
-            "span": 5
+            "span": 5.000004
           },
           {
-            "column": 5,
+            "column": 4.999996,
             "overlay": true,
             "role": "action",
             "roleId": "action",
@@ -4057,24 +7127,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "role": "media",
             "roleId": "mobileImage",
             "row": 1,
-            "rowSpan": 4,
+            "rowSpan": 8,
             "span": 12
           },
           {
-            "column": 1,
-            "role": "copy",
+            "column": 2.44,
+            "role": "eyebrow",
             "roleId": "copy",
-            "row": 5,
-            "rowSpan": 2,
-            "span": 12
+            "row": 5.32,
+            "rowSpan": 0.44,
+            "span": 5.76
           },
           {
-            "column": 1,
+            "column": 2.92,
+            "role": "title",
+            "roleId": "copy",
+            "row": 5.88,
+            "rowSpan": 1.04,
+            "span": 8.16
+          },
+          {
+            "column": 2.44,
+            "role": "subtitle",
+            "roleId": "copy",
+            "row": 7.04,
+            "rowSpan": 0.72,
+            "span": 8.4
+          },
+          {
+            "column": 2.44,
             "role": "action",
             "roleId": "action",
-            "row": 7,
-            "rowSpan": 1,
-            "span": 5
+            "row": 7.92,
+            "rowSpan": 0.56,
+            "span": 4.32
           }
         ]
       },
@@ -4116,7 +7202,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "fallbackRoleId": "desktopImage",
         "id": "mobileImage",
         "kind": "media",
-        "required": false,
+        "required": true,
         "role": "media"
       },
       {
@@ -4142,13 +7228,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 4,
     "visualRole": "primary-stage",
     "visualWeight": "primary-stage",
     "width": "full"
   },
   "hotspot": {
     "allowedControls": [],
+    "commercialPurpose": "商品销售",
     "contentBudget": {
       "limits": {
         "altText": 80
@@ -4161,6 +7248,156 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.333333,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "sceneImage",
+            "rect": {
+              "height": 0.75,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "sceneImage"
+          },
+          {
+            "kind": "hotspot",
+            "nodeId": "hotspots",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.083333,
+              "x": 0.166667,
+              "y": 0.25
+            },
+            "role": "marker",
+            "roleId": "hotspots"
+          },
+          {
+            "kind": "hotspot",
+            "nodeId": "hotspots",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.083333,
+              "x": 0.5,
+              "y": 0.375
+            },
+            "role": "marker",
+            "roleId": "hotspots"
+          },
+          {
+            "kind": "hotspot",
+            "nodeId": "hotspots",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.083333,
+              "x": 0.75,
+              "y": 0.125
+            },
+            "role": "marker",
+            "roleId": "hotspots"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.083333,
+              "y": 0.75
+            },
+            "role": "copy",
+            "roleId": "copy"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.6,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "sceneImage",
+            "rect": {
+              "height": 0.75,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "sceneImage"
+          },
+          {
+            "kind": "hotspot",
+            "nodeId": "hotspots",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.083333,
+              "x": 0.166667,
+              "y": 0.125
+            },
+            "role": "marker",
+            "roleId": "hotspots"
+          },
+          {
+            "kind": "hotspot",
+            "nodeId": "hotspots",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.083333,
+              "x": 0.583333,
+              "y": 0.375
+            },
+            "role": "marker",
+            "roleId": "hotspots"
+          },
+          {
+            "kind": "hotspot",
+            "nodeId": "hotspots",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.083333,
+              "x": 0.416667,
+              "y": 0.5
+            },
+            "role": "marker",
+            "roleId": "hotspots"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.75
+            },
+            "role": "copy",
+            "roleId": "copy"
+          }
+        ]
+      }
     },
     "displayName": "图片热区",
     "editorCapabilities": {
@@ -4177,6 +7414,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom",
             "focus"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "image",
             "mobileImage",
@@ -4209,6 +7480,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "hotspots",
             "mobileHotspots"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "hotspots",
             "mobileHotspots"
@@ -4300,14 +7593,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 3,
+            "column": 3.000004,
             "kind": "hotspot",
             "overlay": true,
             "role": "marker",
             "roleId": "hotspots",
             "row": 3,
             "rowSpan": 1,
-            "span": 1
+            "span": 0.999996
           },
           {
             "column": 7,
@@ -4317,7 +7610,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "hotspots",
             "row": 4,
             "rowSpan": 1,
-            "span": 1
+            "span": 0.999996
           },
           {
             "column": 10,
@@ -4327,15 +7620,15 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "hotspots",
             "row": 2,
             "rowSpan": 1,
-            "span": 1
+            "span": 0.999996
           },
           {
-            "column": 2,
+            "column": 1.999996,
             "role": "copy",
             "roleId": "copy",
             "row": 7,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           }
         ]
       },
@@ -4356,34 +7649,34 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 3,
+            "column": 3.000004,
             "kind": "hotspot",
             "overlay": true,
             "role": "marker",
             "roleId": "hotspots",
             "row": 2,
             "rowSpan": 1,
-            "span": 1
+            "span": 0.999996
           },
           {
-            "column": 8,
+            "column": 7.999996,
             "kind": "hotspot",
             "overlay": true,
             "role": "marker",
             "roleId": "hotspots",
             "row": 4,
             "rowSpan": 1,
-            "span": 1
+            "span": 0.999996
           },
           {
-            "column": 6,
+            "column": 6.000004,
             "kind": "hotspot",
             "overlay": true,
             "role": "marker",
             "roleId": "hotspots",
             "row": 5,
             "rowSpan": 1,
-            "span": 1
+            "span": 0.999996
           },
           {
             "column": 1,
@@ -4454,13 +7747,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
   },
   "journey": {
     "allowedControls": [],
+    "commercialPurpose": "内容传播",
     "contentBudget": {
       "limits": {},
       "maxCtas": 0,
@@ -4469,6 +7763,80 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.6,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.25,
+              "width": 0.416667,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "kind": "steps-5",
+            "nodeId": "steps",
+            "rect": {
+              "height": 0.375,
+              "width": 1,
+              "x": 0,
+              "y": 0.375
+            },
+            "role": "timeline",
+            "roleId": "steps"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.8,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.25,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "kind": "steps-5",
+            "nodeId": "steps",
+            "rect": {
+              "height": 0.625,
+              "width": 1,
+              "x": 0,
+              "y": 0.25
+            },
+            "role": "timeline",
+            "roleId": "steps"
+          }
+        ]
+      }
     },
     "displayName": "内容流程",
     "editorCapabilities": {
@@ -4481,6 +7849,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "collectionFieldKeys": [
             "steps"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "steps"
           ],
@@ -4495,6 +7885,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle"
@@ -4543,12 +7955,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.48,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.4,
             "rowSpan": 2,
-            "span": 5
+            "span": 5.000004
           },
           {
             "column": 1,
@@ -4569,12 +7981,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.32,
             "rowSpan": 2,
-            "span": 12
+            "span": 10.8
           },
           {
             "column": 1,
@@ -4626,13 +8038,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
   },
   "limitedEvent": {
     "allowedControls": [],
+    "commercialPurpose": "活动转化",
     "contentBudget": {
       "limits": {},
       "maxCtas": 1,
@@ -4641,6 +8054,127 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "overlay",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.555556,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "dark",
+        "zones": [
+          {
+            "nodeId": "event",
+            "rect": {
+              "height": 0.875,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "event"
+          },
+          {
+            "kind": "countdown",
+            "nodeId": "time",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.083333,
+              "y": 0.125
+            },
+            "role": "marker",
+            "roleId": "time"
+          },
+          {
+            "nodeId": "copy",
+            "overlay": true,
+            "rect": {
+              "height": 0.25,
+              "width": 0.5,
+              "x": 0.083333,
+              "y": 0.375
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.083333,
+              "y": 0.75
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.4,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "event",
+            "rect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "event"
+          },
+          {
+            "kind": "countdown",
+            "nodeId": "time",
+            "rect": {
+              "height": 0.125,
+              "width": 0.333333,
+              "x": 0,
+              "y": 0.5
+            },
+            "role": "marker",
+            "roleId": "time"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.625
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.835
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      }
     },
     "displayName": "限时活动",
     "editorCapabilities": {
@@ -4655,6 +8189,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "fit",
             "zoom"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "eventImage"
           ],
@@ -4677,6 +8245,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "collectionFieldKeys": [
             "benefits"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "targetDate",
             "benefits"
@@ -4696,6 +8286,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": true,
+            "allowTypography": true,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "eyebrow",
             "title",
@@ -4716,6 +8340,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "content",
             "link"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "buttonText",
             "targetType",
@@ -4840,7 +8486,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 2,
+            "column": 1.999996,
             "kind": "countdown",
             "overlay": true,
             "role": "marker",
@@ -4850,7 +8496,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 3
           },
           {
-            "column": 2,
+            "column": 1.999996,
             "overlay": true,
             "role": "copy",
             "roleId": "copy",
@@ -4859,7 +8505,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 6
           },
           {
-            "column": 2,
+            "column": 1.999996,
             "overlay": true,
             "role": "action",
             "roleId": "action",
@@ -4893,23 +8539,23 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "time",
             "row": 5,
             "rowSpan": 1,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
             "row": 6,
             "rowSpan": 1,
-            "span": 12
+            "span": 10.8
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "action",
             "roleId": "action",
-            "row": 8,
+            "row": 7.68,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           }
         ]
       },
@@ -4961,13 +8607,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
   },
   "productRow": {
     "allowedControls": [],
+    "commercialPurpose": "商品销售",
     "contentBudget": {
       "limits": {},
       "maxCtas": 0,
@@ -4976,6 +8623,122 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.6,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "productCards",
+            "rect": {
+              "height": 0.5,
+              "width": 0.333333,
+              "x": 0,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "productCards"
+          },
+          {
+            "nodeId": "productCards",
+            "rect": {
+              "height": 0.5,
+              "width": 0.333333,
+              "x": 0.333333,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "productCards"
+          },
+          {
+            "nodeId": "productCards",
+            "rect": {
+              "height": 0.5,
+              "width": 0.333333,
+              "x": 0.666667,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "productCards"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.8,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "productCards",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.125
+            },
+            "role": "card",
+            "roleId": "productCards"
+          },
+          {
+            "nodeId": "productCards",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.375
+            },
+            "role": "card",
+            "roleId": "productCards"
+          },
+          {
+            "nodeId": "productCards",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.625
+            },
+            "role": "card",
+            "roleId": "productCards"
+          }
+        ]
+      }
     },
     "displayName": "商品列表",
     "editorCapabilities": {
@@ -4989,6 +8752,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "ratio",
             "fit"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "productCodes"
           ],
@@ -5008,6 +8805,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle"
@@ -5104,12 +8923,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.48,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.4,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           },
           {
             "column": 1,
@@ -5117,23 +8936,23 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "productCards",
             "row": 3,
             "rowSpan": 4,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 5,
+            "column": 4.999996,
             "role": "card",
             "roleId": "productCards",
             "row": 3,
             "rowSpan": 4,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 9,
+            "column": 9.000004,
             "role": "card",
             "roleId": "productCards",
             "row": 3,
             "rowSpan": 4,
-            "span": 4
+            "span": 3.999996
           }
         ]
       },
@@ -5145,12 +8964,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.32,
             "rowSpan": 1,
-            "span": 12
+            "span": 10.8
           },
           {
             "column": 1,
@@ -5219,13 +9038,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
   },
   "sceneShopping": {
     "allowedControls": [],
+    "commercialPurpose": "商品销售",
     "contentBudget": {
       "limits": {},
       "maxCtas": 0,
@@ -5234,6 +9054,144 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.6,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.92,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "scenes",
+            "rect": {
+              "height": 0.375,
+              "width": 0.25,
+              "x": 0,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "scenes"
+          },
+          {
+            "nodeId": "scenes",
+            "rect": {
+              "height": 0.375,
+              "width": 0.25,
+              "x": 0.25,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "scenes"
+          },
+          {
+            "nodeId": "scenes",
+            "rect": {
+              "height": 0.375,
+              "width": 0.25,
+              "x": 0.5,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "scenes"
+          },
+          {
+            "nodeId": "scenes",
+            "rect": {
+              "height": 0.375,
+              "width": 0.25,
+              "x": 0.75,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "scenes"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.8,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "scenes",
+            "rect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.125
+            },
+            "role": "card",
+            "roleId": "scenes"
+          },
+          {
+            "nodeId": "scenes",
+            "rect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.25
+            },
+            "role": "card",
+            "roleId": "scenes"
+          },
+          {
+            "nodeId": "scenes",
+            "rect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.375
+            },
+            "role": "card",
+            "roleId": "scenes"
+          },
+          {
+            "nodeId": "scenes",
+            "rect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.5
+            },
+            "role": "card",
+            "roleId": "scenes"
+          }
+        ]
+      }
     },
     "displayName": "场景入口",
     "editorCapabilities": {
@@ -5250,6 +9208,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "collectionFieldKeys": [
             "categories"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "categories"
           ],
@@ -5268,6 +9260,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle"
@@ -5330,12 +9344,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.48,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.4,
             "rowSpan": 1,
-            "span": 12
+            "span": 11.04
           },
           {
             "column": 1,
@@ -5379,12 +9393,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.32,
             "rowSpan": 1,
-            "span": 12
+            "span": 10.8
           },
           {
             "column": 1,
@@ -5461,13 +9475,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
   },
   "servicePromises": {
     "allowedControls": [],
+    "commercialPurpose": "信任建立",
     "contentBudget": {
       "limits": {},
       "maxCtas": 0,
@@ -5476,6 +9491,144 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.6,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "promises",
+            "rect": {
+              "height": 0.375,
+              "width": 0.25,
+              "x": 0,
+              "y": 0.25
+            },
+            "role": "list",
+            "roleId": "promises"
+          },
+          {
+            "nodeId": "promises",
+            "rect": {
+              "height": 0.375,
+              "width": 0.25,
+              "x": 0.25,
+              "y": 0.25
+            },
+            "role": "list",
+            "roleId": "promises"
+          },
+          {
+            "nodeId": "promises",
+            "rect": {
+              "height": 0.375,
+              "width": 0.25,
+              "x": 0.5,
+              "y": 0.25
+            },
+            "role": "list",
+            "roleId": "promises"
+          },
+          {
+            "nodeId": "promises",
+            "rect": {
+              "height": 0.375,
+              "width": 0.25,
+              "x": 0.75,
+              "y": 0.25
+            },
+            "role": "list",
+            "roleId": "promises"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.8,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "promises",
+            "rect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.125
+            },
+            "role": "list",
+            "roleId": "promises"
+          },
+          {
+            "nodeId": "promises",
+            "rect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.25
+            },
+            "role": "list",
+            "roleId": "promises"
+          },
+          {
+            "nodeId": "promises",
+            "rect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.375
+            },
+            "role": "list",
+            "roleId": "promises"
+          },
+          {
+            "nodeId": "promises",
+            "rect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.5
+            },
+            "role": "list",
+            "roleId": "promises"
+          }
+        ]
+      }
     },
     "displayName": "服务承诺",
     "editorCapabilities": {
@@ -5488,6 +9641,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "collectionFieldKeys": [
             "cards"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "cards"
           ],
@@ -5502,6 +9677,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle"
@@ -5554,12 +9751,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.48,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.4,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           },
           {
             "column": 1,
@@ -5603,12 +9800,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.32,
             "rowSpan": 1,
-            "span": 12
+            "span": 10.8
           },
           {
             "column": 1,
@@ -5672,7 +9869,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "full"
@@ -5681,6 +9878,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "allowedControls": [
       "template"
     ],
+    "commercialPurpose": "内容传播",
     "contentBudget": {
       "limits": {
         "actionText": 12,
@@ -5697,6 +9895,124 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "desktop": "split",
       "mobile": "stacked"
     },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.066667,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "desktopImage",
+            "rect": {
+              "height": 1,
+              "width": 0.75,
+              "x": 0.25,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "desktopImage"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.0875,
+              "width": 0.208333,
+              "x": 0.04,
+              "y": 0.475
+            },
+            "role": "eyebrow",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.2,
+              "width": 0.208333,
+              "x": 0.04,
+              "y": 0.5625
+            },
+            "role": "title",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.0875,
+              "width": 0.208333,
+              "x": 0.04,
+              "y": 0.7625
+            },
+            "role": "subtitle",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.075,
+              "width": 0.166667,
+              "x": 0.04,
+              "y": 0.85
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.5,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "mobileImage",
+            "rect": {
+              "height": 0.625,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "mobileImage"
+          },
+          {
+            "nodeId": "copy",
+            "overlay": true,
+            "rect": {
+              "height": 0.25,
+              "width": 0.833333,
+              "x": 0.083333,
+              "y": 0.125
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.25,
+              "y": 0.375
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      }
+    },
     "displayName": "单图文",
     "editorCapabilities": {
       "editableObjects": [
@@ -5711,6 +10027,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom",
             "focus"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "desktopImage",
             "altText"
@@ -5742,6 +10092,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom",
             "focus"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "mobileImage",
             "altText"
@@ -5770,6 +10154,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": true,
+            "allowTypography": true,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle",
@@ -5791,6 +10209,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "content",
             "link"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "actionText",
             "targetType",
@@ -5936,36 +10376,36 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 9
           },
           {
-            "column": 1,
+            "column": 1.48,
             "role": "eyebrow",
             "roleId": "copy",
             "row": 4.8,
             "rowSpan": 0.7,
-            "span": 2.5
+            "span": 2.499996
           },
           {
-            "column": 1,
+            "column": 1.48,
             "role": "title",
             "roleId": "copy",
             "row": 5.5,
             "rowSpan": 1.6,
-            "span": 2.5
+            "span": 2.499996
           },
           {
-            "column": 1,
+            "column": 1.48,
             "role": "subtitle",
             "roleId": "copy",
             "row": 7.1,
             "rowSpan": 0.7,
-            "span": 2.5
+            "span": 2.499996
           },
           {
-            "column": 1,
+            "column": 1.48,
             "role": "action",
             "roleId": "action",
             "row": 7.8,
             "rowSpan": 0.6,
-            "span": 2
+            "span": 2.000004
           }
         ]
       },
@@ -5986,13 +10426,13 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 2,
+            "column": 1.999996,
             "overlay": true,
             "role": "copy",
             "roleId": "copy",
             "row": 2,
             "rowSpan": 2,
-            "span": 10
+            "span": 9.999996
           },
           {
             "column": 4,
@@ -6001,7 +10441,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "action",
             "row": 4,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           }
         ]
       },
@@ -6073,13 +10513,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "standard"
   },
   "storeInfo": {
     "allowedControls": [],
+    "commercialPurpose": "信任建立",
     "contentBudget": {
       "limits": {},
       "maxCtas": 1,
@@ -6088,6 +10529,122 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.928573,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "store",
+            "rect": {
+              "height": 0.75,
+              "width": 0.583333,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "store"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.333333,
+              "x": 0.626667,
+              "y": 0.05
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "details",
+            "rect": {
+              "height": 0.25,
+              "width": 0.333333,
+              "x": 0.666667,
+              "y": 0.25
+            },
+            "role": "list",
+            "roleId": "details"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.666667,
+              "y": 0.625
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.75,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "store",
+            "rect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "store"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.5
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "details",
+            "rect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.625
+            },
+            "role": "list",
+            "roleId": "details"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.75
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      }
     },
     "displayName": "门店信息",
     "editorCapabilities": {
@@ -6102,6 +10659,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "fit",
             "zoom"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "image"
           ],
@@ -6120,6 +10711,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "useSiteSettings",
             "storeName",
@@ -6144,6 +10757,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "storeName"
           ],
@@ -6158,6 +10793,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "content",
             "link"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "mapUrl",
             "phone"
@@ -6244,26 +10901,26 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "store",
             "row": 1,
             "rowSpan": 6,
-            "span": 7
+            "span": 6.999996
           },
           {
-            "column": 9,
+            "column": 8.520004,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.4,
             "rowSpan": 1,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 9,
+            "column": 9.000004,
             "role": "list",
             "roleId": "details",
             "row": 3,
             "rowSpan": 2,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 9,
+            "column": 9.000004,
             "role": "action",
             "roleId": "action",
             "row": 6,
@@ -6290,12 +10947,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
             "row": 5,
             "rowSpan": 1,
-            "span": 12
+            "span": 10.8
           },
           {
             "column": 1,
@@ -6306,12 +10963,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "action",
             "roleId": "action",
             "row": 7,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           }
         ]
       },
@@ -6365,13 +11022,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
   },
   "testimonials": {
     "allowedControls": [],
+    "commercialPurpose": "信任建立",
     "contentBudget": {
       "limits": {},
       "maxCtas": 0,
@@ -6380,6 +11038,100 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.44,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "authorizedPhoto",
+            "rect": {
+              "height": 0.75,
+              "width": 0.416667,
+              "x": 0,
+              "y": 0.125
+            },
+            "role": "media",
+            "roleId": "authorizedPhoto"
+          },
+          {
+            "nodeId": "mainQuote",
+            "rect": {
+              "height": 0.375,
+              "width": 0.5,
+              "x": 0.5,
+              "y": 0.25
+            },
+            "role": "quote",
+            "roleId": "mainQuote"
+          },
+          {
+            "nodeId": "attribution",
+            "rect": {
+              "height": 0.125,
+              "width": 0.333333,
+              "x": 0.5,
+              "y": 0.625
+            },
+            "role": "quote",
+            "roleId": "attribution"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.4,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "authorizedPhoto",
+            "rect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "authorizedPhoto"
+          },
+          {
+            "nodeId": "mainQuote",
+            "rect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.5
+            },
+            "role": "quote",
+            "roleId": "mainQuote"
+          },
+          {
+            "nodeId": "attribution",
+            "rect": {
+              "height": 0.125,
+              "width": 0.666667,
+              "x": 0,
+              "y": 0.75
+            },
+            "role": "quote",
+            "roleId": "attribution"
+          }
+        ]
+      }
     },
     "displayName": "顾客分享",
     "editorCapabilities": {
@@ -6397,6 +11149,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "collectionFieldKeys": [
             "testimonials"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "testimonials"
           ],
@@ -6488,7 +11274,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "authorizedPhoto",
             "row": 2,
             "rowSpan": 6,
-            "span": 5
+            "span": 5.000004
           },
           {
             "column": 7,
@@ -6504,7 +11290,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "attribution",
             "row": 6,
             "rowSpan": 1,
-            "span": 4
+            "span": 3.999996
           }
         ]
       },
@@ -6538,7 +11324,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "attribution",
             "row": 7,
             "rowSpan": 1,
-            "span": 8
+            "span": 8.000004
           }
         ]
       },
@@ -6601,7 +11387,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
@@ -6611,6 +11397,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "template",
       "spacing"
     ],
+    "commercialPurpose": "内容传播",
     "contentBudget": {
       "limits": {
         "body": 180,
@@ -6625,6 +11412,100 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "desktop": "stacked",
       "mobile": "stacked"
     },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 2.285714,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.0875,
+              "width": 0.333333,
+              "x": 0.333333,
+              "y": 0.325
+            },
+            "role": "eyebrow",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.25,
+              "width": 0.666667,
+              "x": 0.166667,
+              "y": 0.4125
+            },
+            "role": "title",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.0875,
+              "width": 0.5,
+              "x": 0.25,
+              "y": 0.6625
+            },
+            "role": "subtitle",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.0875,
+              "width": 0.333333,
+              "x": 0.333333,
+              "y": 0.8
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.8,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.375,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.125
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.625
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      }
+    },
     "displayName": "纯文字",
     "editorCapabilities": {
       "editableObjects": [
@@ -6633,6 +11514,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "bgImage"
           ],
@@ -6650,6 +11553,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": true,
+            "allowTypography": true,
+            "allowZoom": false,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "eyebrow",
             "title",
@@ -6670,6 +11607,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "content",
             "link"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "buttonText",
             "targetType",
@@ -6763,20 +11722,20 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 5,
+            "column": 4.999996,
             "role": "eyebrow",
             "roleId": "copy",
             "row": 3.6,
             "rowSpan": 0.7,
-            "span": 4
+            "span": 3.999996
           },
           {
-            "column": 3,
+            "column": 3.000004,
             "role": "title",
             "roleId": "copy",
             "row": 4.3,
             "rowSpan": 2,
-            "span": 8
+            "span": 8.000004
           },
           {
             "column": 4,
@@ -6787,12 +11746,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 6
           },
           {
-            "column": 5,
+            "column": 4.999996,
             "role": "action",
             "roleId": "action",
             "row": 7.4,
             "rowSpan": 0.7,
-            "span": 4
+            "span": 3.999996
           }
         ]
       },
@@ -6804,20 +11763,20 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
             "row": 2,
             "rowSpan": 3,
-            "span": 12
+            "span": 10.8
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "action",
             "roleId": "action",
             "row": 6,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           }
         ]
       },
@@ -6866,7 +11825,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "grand"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "editorial"
@@ -6875,6 +11834,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "allowedControls": [
       "videoWidth"
     ],
+    "commercialPurpose": "品牌展示",
     "contentBudget": {
       "limits": {},
       "maxCtas": 1,
@@ -6883,6 +11843,128 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "overlay",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.555556,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "dark",
+        "zones": [
+          {
+            "nodeId": "coverImage",
+            "rect": {
+              "height": 0.875,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "coverImage"
+          },
+          {
+            "kind": "play",
+            "nodeId": "playControl",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.166667,
+              "x": 0.416667,
+              "y": 0.25
+            },
+            "role": "marker",
+            "roleId": "playControl"
+          },
+          {
+            "nodeId": "copy",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.083333,
+              "y": 0.5
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.083333,
+              "y": 0.75
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.4,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "coverImage",
+            "rect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "coverImage"
+          },
+          {
+            "kind": "play",
+            "nodeId": "playControl",
+            "overlay": true,
+            "rect": {
+              "height": 0.125,
+              "width": 0.166667,
+              "x": 0.416667,
+              "y": 0.125
+            },
+            "role": "marker",
+            "roleId": "playControl"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.25,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.5
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.75
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      }
     },
     "displayName": "视频",
     "editorCapabilities": {
@@ -6899,6 +11981,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom",
             "focus"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "videoUrl",
             "posterUrl",
@@ -6925,6 +12041,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle"
@@ -6940,6 +12078,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "content",
             "link"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "actionText",
             "targetType",
@@ -7039,26 +12199,26 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 6,
+            "column": 6.000004,
             "kind": "play",
             "overlay": true,
             "role": "marker",
             "roleId": "playControl",
             "row": 3,
             "rowSpan": 1,
-            "span": 2
+            "span": 2.000004
           },
           {
-            "column": 2,
+            "column": 1.999996,
             "overlay": true,
             "role": "copy",
             "roleId": "copy",
             "row": 5,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           },
           {
-            "column": 2,
+            "column": 1.999996,
             "overlay": true,
             "role": "action",
             "roleId": "action",
@@ -7086,30 +12246,30 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 6,
+            "column": 6.000004,
             "kind": "play",
             "overlay": true,
             "role": "marker",
             "roleId": "playControl",
             "row": 2,
             "rowSpan": 1,
-            "span": 2
+            "span": 2.000004
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
             "row": 5,
             "rowSpan": 2,
-            "span": 12
+            "span": 10.8
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "action",
             "roleId": "action",
             "row": 7,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           }
         ]
       },
@@ -7163,13 +12323,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
   },
   "wearingInspiration": {
     "allowedControls": [],
+    "commercialPurpose": "商品销售",
     "contentBudget": {
       "limits": {},
       "maxCtas": 1,
@@ -7178,6 +12339,122 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "copyPlacementByViewport": {
       "desktop": "stacked",
       "mobile": "stacked"
+    },
+    "defaultGeometryByViewport": {
+      "desktop": {
+        "frameAspectRatio": 1.097143,
+        "rows": 10,
+        "safeArea": {
+          "height": 0.9,
+          "width": 0.92,
+          "x": 0.04,
+          "y": 0.05
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "wearingImage",
+            "rect": {
+              "height": 0.8,
+              "width": 0.583333,
+              "x": 0,
+              "y": 0
+            },
+            "role": "mainMedia",
+            "roleId": "wearingImage"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.2,
+              "width": 0.416667,
+              "x": 0.543333,
+              "y": 0.05
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "relatedProducts",
+            "rect": {
+              "height": 0.6,
+              "width": 0.416667,
+              "x": 0.583333,
+              "y": 0.2
+            },
+            "role": "detailMedia",
+            "roleId": "relatedProducts"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.1,
+              "width": 0.25,
+              "x": 0.583333,
+              "y": 0.85
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      },
+      "mobile": {
+        "frameAspectRatio": 0.4,
+        "rows": 8,
+        "safeArea": {
+          "height": 0.92,
+          "width": 0.9,
+          "x": 0.05,
+          "y": 0.04
+        },
+        "tone": "light",
+        "zones": [
+          {
+            "nodeId": "wearingImage",
+            "rect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "mainMedia",
+            "roleId": "wearingImage"
+          },
+          {
+            "nodeId": "copy",
+            "rect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.5
+            },
+            "role": "copy",
+            "roleId": "copy"
+          },
+          {
+            "nodeId": "relatedProducts",
+            "rect": {
+              "height": 0.25,
+              "width": 0.666667,
+              "x": 0.333333,
+              "y": 0.625
+            },
+            "role": "detailMedia",
+            "roleId": "relatedProducts"
+          },
+          {
+            "nodeId": "action",
+            "rect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.835
+            },
+            "role": "action",
+            "roleId": "action"
+          }
+        ]
+      }
     },
     "displayName": "佩戴展示",
     "editorCapabilities": {
@@ -7193,6 +12470,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom",
             "focus"
           ],
+          "constraints": {
+            "allowAspectRatio": true,
+            "allowFocus": true,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": true,
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
+            "layerRange": {
+              "max": 20,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "image",
             "altText"
@@ -7213,6 +12524,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.7,
+              "width": 0.92
+            },
+            "minSize": {
+              "height": 0.03,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "title",
             "subtitle"
@@ -7228,6 +12561,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "content",
             "reference"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 1,
+              "width": 1
+            },
+            "minSize": {
+              "height": 0.1,
+              "width": 0.12
+            },
+            "movementAxes": [],
+            "safeAreaRequired": false
+          },
           "contentFieldKeys": [
             "productCodes"
           ],
@@ -7244,6 +12599,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "content",
             "link"
           ],
+          "constraints": {
+            "allowAspectRatio": false,
+            "allowFocus": false,
+            "allowHide": false,
+            "allowTypography": false,
+            "allowZoom": false,
+            "allowedResize": [],
+            "layerRange": {
+              "max": 0,
+              "min": 0
+            },
+            "maxSize": {
+              "height": 0.28,
+              "width": 0.72
+            },
+            "minSize": {
+              "height": 0.04,
+              "width": 0.08
+            },
+            "movementAxes": [],
+            "safeAreaRequired": true
+          },
           "contentFieldKeys": [
             "actionText",
             "targetType",
@@ -7343,29 +12720,29 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "roleId": "wearingImage",
             "row": 1,
             "rowSpan": 8,
-            "span": 7
+            "span": 6.999996
           },
           {
-            "column": 8,
+            "column": 7.519996,
             "role": "copy",
             "roleId": "copy",
-            "row": 1,
+            "row": 1.5,
             "rowSpan": 2,
-            "span": 5
+            "span": 5.000004
           },
           {
-            "column": 8,
+            "column": 7.999996,
             "role": "detailMedia",
             "roleId": "relatedProducts",
             "row": 3,
             "rowSpan": 6,
-            "span": 5
+            "span": 5.000004
           },
           {
-            "column": 8,
+            "column": 7.999996,
             "role": "action",
             "roleId": "action",
-            "row": 10,
+            "row": 9.5,
             "rowSpan": 1,
             "span": 3
           }
@@ -7389,28 +12766,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "span": 12
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "copy",
             "roleId": "copy",
             "row": 5,
             "rowSpan": 1,
-            "span": 12
+            "span": 10.8
           },
           {
-            "column": 5,
+            "column": 4.999996,
             "role": "detailMedia",
             "roleId": "relatedProducts",
             "row": 6,
             "rowSpan": 2,
-            "span": 8
+            "span": 8.000004
           },
           {
-            "column": 1,
+            "column": 1.6,
             "role": "action",
             "roleId": "action",
-            "row": 8,
+            "row": 7.68,
             "rowSpan": 1,
-            "span": 5
+            "span": 5.000004
           }
         ]
       },
@@ -7464,14 +12841,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 2,
+    "version": 3,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
   }
 } as const satisfies Record<ContentTemplateKey, ContentTemplateContract>;
 
-/** 全部 23 个模板的中性结构预览；不承担业务、发布或 Inspector 完整合同。 */
+/** 全部活跃模板的中性结构预览；不承担业务、发布或 Inspector 完整合同。 */
 export const CONTENT_TEMPLATE_SKELETONS = {
   "booking": {
     "category": "服务信息",
@@ -7500,21 +12877,21 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 2,
+          "column": 1.999996,
           "role": "copy",
           "row": 2,
           "rowSpan": 3,
           "span": 6
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "action",
           "row": 3,
           "rowSpan": 1,
           "span": 3
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "marker",
           "row": 5,
           "rowSpan": 1,
@@ -7569,32 +12946,32 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 3,
+          "column": 3.000004,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 8
+          "span": 8.000004
         },
         {
           "column": 1,
           "role": "card",
           "row": 3,
           "rowSpan": 3,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "card",
           "row": 3,
           "rowSpan": 3,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "card",
           "row": 3,
           "rowSpan": 3,
-          "span": 4
+          "span": 3.999996
         }
       ],
       "tone": "light"
@@ -7644,15 +13021,15 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "span": 12
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "overlay": true,
           "role": "copy",
           "row": 4,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "kind": "pagination",
           "overlay": true,
           "role": "marker",
@@ -7705,32 +13082,32 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 4
+          "span": 3.999996
         },
         {
           "column": 1,
           "role": "card",
           "row": 3,
           "rowSpan": 4,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "card",
           "row": 3,
           "rowSpan": 4,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "card",
           "row": 3,
           "rowSpan": 4,
-          "span": 4
+          "span": 3.999996
         }
       ],
       "tone": "light"
@@ -7773,32 +13150,32 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 4
+          "span": 3.999996
         },
         {
           "column": 1,
           "role": "card",
           "row": 3,
           "rowSpan": 3,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "card",
           "row": 3,
           "rowSpan": 3,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "card",
           "row": 3,
           "rowSpan": 3,
-          "span": 4
+          "span": 3.999996
         }
       ],
       "tone": "light"
@@ -7845,34 +13222,34 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 12
+          "span": 11.04
         },
         {
           "column": 1,
           "role": "mainMedia",
-          "row": 3,
-          "rowSpan": 4,
+          "row": 1,
+          "rowSpan": 8,
           "span": 6
         },
         {
           "column": 7,
           "role": "detailMedia",
-          "row": 3,
-          "rowSpan": 4,
+          "row": 1,
+          "rowSpan": 8,
           "span": 6
         },
         {
-          "column": 6,
+          "column": 6.000004,
           "kind": "handle",
           "overlay": true,
           "role": "marker",
           "row": 4,
           "rowSpan": 2,
-          "span": 2
+          "span": 2.000004
         }
       ],
       "tone": "light"
@@ -7900,6 +13277,90 @@ export const CONTENT_TEMPLATE_SKELETONS = {
       }
     ],
     "visualRole": "feature-stage",
+    "width": "wide"
+  },
+  "craftDetails": {
+    "category": "图文内容",
+    "displayName": "工艺细节",
+    "flow": "flow",
+    "heightModeByViewport": {
+      "desktop": "content",
+      "mobile": "content"
+    },
+    "key": "craftDetails",
+    "moduleType": "工艺细节",
+    "order": {
+      "desktop": [
+        "mainMedia",
+        "copy",
+        "detailMedia",
+        "detailMedia"
+      ],
+      "mobile": [
+        "mainMedia",
+        "copy",
+        "detailMedia",
+        "detailMedia"
+      ]
+    },
+    "preview": {
+      "desktopZones": [
+        {
+          "column": 4.999996,
+          "role": "mainMedia",
+          "row": 1.48,
+          "rowSpan": 6.266664,
+          "span": 7.520004
+        },
+        {
+          "column": 1.48,
+          "role": "copy",
+          "row": 2.44,
+          "rowSpan": 3.36,
+          "span": 3
+        },
+        {
+          "column": 4.999996,
+          "role": "detailMedia",
+          "row": 8,
+          "rowSpan": 1,
+          "span": 3.519996
+        },
+        {
+          "column": 9.000004,
+          "role": "detailMedia",
+          "row": 8,
+          "rowSpan": 1,
+          "span": 3.519996
+        }
+      ],
+      "tone": "light"
+    },
+    "slots": [
+      {
+        "desktopRatio": "3 / 2",
+        "key": "leadImage",
+        "mobileRatio": "4 / 5",
+        "role": "mainMedia"
+      },
+      {
+        "key": "copy",
+        "role": "copy"
+      },
+      {
+        "desktopRatio": "1 / 1",
+        "key": "detailImageOne",
+        "mobileRatio": "1 / 1",
+        "role": "detailMedia"
+      },
+      {
+        "desktopRatio": "1 / 1",
+        "key": "detailImageTwo",
+        "mobileRatio": "1 / 1",
+        "role": "detailMedia"
+      }
+    ],
+    "visualRole": "support-stage",
     "width": "wide"
   },
   "doublePoster": {
@@ -7932,27 +13393,27 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "column": 1,
           "role": "mainMedia",
           "row": 1,
-          "rowSpan": 6,
-          "span": 8
+          "rowSpan": 5.333336,
+          "span": 8.000004
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "detailMedia",
           "row": 2,
-          "rowSpan": 3,
-          "span": 4
+          "rowSpan": 5,
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 8.520004,
           "role": "copy",
           "row": 5,
           "rowSpan": 2,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "action",
-          "row": 8,
+          "row": 7.6,
           "rowSpan": 1,
           "span": 3
         }
@@ -8011,18 +13472,18 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 3,
+          "column": 3.000004,
           "role": "media",
           "row": 1,
           "rowSpan": 5,
-          "span": 8
+          "span": 8.000004
         },
         {
-          "column": 3,
+          "column": 3.000004,
           "role": "copy",
           "row": 6,
           "rowSpan": 1,
-          "span": 8
+          "span": 8.000004
         },
         {
           "column": 4,
@@ -8034,7 +13495,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         {
           "column": 4,
           "role": "action",
-          "row": 8,
+          "row": 7.6,
           "rowSpan": 1,
           "span": 6
         }
@@ -8096,14 +13557,14 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "span": 12
         },
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
           "row": 5,
           "rowSpan": 2,
-          "span": 8
+          "span": 8.000004
         },
         {
-          "column": 10,
+          "column": 9.52,
           "role": "action",
           "row": 7,
           "rowSpan": 1,
@@ -8158,32 +13619,32 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.5,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         },
         {
           "column": 1,
           "role": "mainMedia",
           "row": 3,
           "rowSpan": 4,
-          "span": 7
+          "span": 6.999996
         },
         {
-          "column": 8,
+          "column": 7.999996,
           "role": "detailMedia",
           "row": 3,
           "rowSpan": 2,
-          "span": 5
+          "span": 5.000004
         },
         {
-          "column": 8,
+          "column": 7.999996,
           "role": "media",
           "row": 5,
           "rowSpan": 2,
-          "span": 5
+          "span": 5.000004
         },
         {
           "column": 1,
@@ -8242,12 +13703,12 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "span": 12
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "overlay": true,
           "role": "eyebrow",
           "row": 4.2,
           "rowSpan": 0.7,
-          "span": 4
+          "span": 3.999996
         },
         {
           "column": 4,
@@ -8258,15 +13719,15 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "span": 6
         },
         {
-          "column": 4.5,
+          "column": 4.500004,
           "overlay": true,
           "role": "subtitle",
           "row": 6.4,
           "rowSpan": 0.7,
-          "span": 5
+          "span": 5.000004
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "overlay": true,
           "role": "action",
           "row": 7.4,
@@ -8331,13 +13792,13 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "span": 12
         },
         {
-          "column": 3,
+          "column": 3.000004,
           "kind": "hotspot",
           "overlay": true,
           "role": "marker",
           "row": 3,
           "rowSpan": 1,
-          "span": 1
+          "span": 0.999996
         },
         {
           "column": 7,
@@ -8346,7 +13807,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "role": "marker",
           "row": 4,
           "rowSpan": 1,
-          "span": 1
+          "span": 0.999996
         },
         {
           "column": 10,
@@ -8355,14 +13816,14 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "role": "marker",
           "row": 2,
           "rowSpan": 1,
-          "span": 1
+          "span": 0.999996
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "role": "copy",
           "row": 7,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         }
       ],
       "tone": "light"
@@ -8411,11 +13872,11 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 2,
-          "span": 5
+          "span": 5.000004
         },
         {
           "column": 1,
@@ -8477,7 +13938,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "span": 12
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "kind": "countdown",
           "overlay": true,
           "role": "marker",
@@ -8486,7 +13947,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "span": 3
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "overlay": true,
           "role": "copy",
           "row": 4,
@@ -8494,7 +13955,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "span": 6
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "overlay": true,
           "role": "action",
           "row": 7,
@@ -8550,32 +14011,32 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         },
         {
           "column": 1,
           "role": "card",
           "row": 3,
           "rowSpan": 4,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "card",
           "row": 3,
           "rowSpan": 4,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "card",
           "row": 3,
           "rowSpan": 4,
-          "span": 4
+          "span": 3.999996
         }
       ],
       "tone": "light"
@@ -8618,11 +14079,11 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 12
+          "span": 11.04
         },
         {
           "column": 1,
@@ -8693,11 +14154,11 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         },
         {
           "column": 1,
@@ -8775,32 +14236,32 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "span": 9
         },
         {
-          "column": 1,
+          "column": 1.48,
           "role": "eyebrow",
           "row": 4.8,
           "rowSpan": 0.7,
-          "span": 2.5
+          "span": 2.499996
         },
         {
-          "column": 1,
+          "column": 1.48,
           "role": "title",
           "row": 5.5,
           "rowSpan": 1.6,
-          "span": 2.5
+          "span": 2.499996
         },
         {
-          "column": 1,
+          "column": 1.48,
           "role": "subtitle",
           "row": 7.1,
           "rowSpan": 0.7,
-          "span": 2.5
+          "span": 2.499996
         },
         {
-          "column": 1,
+          "column": 1.48,
           "role": "action",
           "row": 7.8,
           "rowSpan": 0.6,
-          "span": 2
+          "span": 2.000004
         }
       ],
       "tone": "light"
@@ -8859,24 +14320,24 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "role": "media",
           "row": 1,
           "rowSpan": 6,
-          "span": 7
+          "span": 6.999996
         },
         {
-          "column": 9,
+          "column": 8.520004,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "list",
           "row": 3,
           "rowSpan": 2,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "action",
           "row": 6,
           "rowSpan": 1,
@@ -8937,7 +14398,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "role": "media",
           "row": 2,
           "rowSpan": 6,
-          "span": 5
+          "span": 5.000004
         },
         {
           "column": 7,
@@ -8951,7 +14412,7 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "role": "quote",
           "row": 6,
           "rowSpan": 1,
-          "span": 4
+          "span": 3.999996
         }
       ],
       "tone": "light"
@@ -9000,18 +14461,18 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "eyebrow",
           "row": 3.6,
           "rowSpan": 0.7,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 3,
+          "column": 3.000004,
           "role": "title",
           "row": 4.3,
           "rowSpan": 2,
-          "span": 8
+          "span": 8.000004
         },
         {
           "column": 4,
@@ -9021,11 +14482,11 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "span": 6
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "action",
           "row": 7.4,
           "rowSpan": 0.7,
-          "span": 4
+          "span": 3.999996
         }
       ],
       "tone": "light"
@@ -9082,24 +14543,24 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "span": 12
         },
         {
-          "column": 6,
+          "column": 6.000004,
           "kind": "play",
           "overlay": true,
           "role": "marker",
           "row": 3,
           "rowSpan": 1,
-          "span": 2
+          "span": 2.000004
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "overlay": true,
           "role": "copy",
           "row": 5,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "overlay": true,
           "role": "action",
           "row": 7,
@@ -9163,24 +14624,24 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "role": "mainMedia",
           "row": 1,
           "rowSpan": 8,
-          "span": 7
+          "span": 6.999996
         },
         {
-          "column": 8,
+          "column": 7.519996,
           "role": "copy",
-          "row": 1,
+          "row": 1.5,
           "rowSpan": 2,
-          "span": 5
+          "span": 5.000004
         },
         {
-          "column": 8,
+          "column": 7.999996,
           "role": "detailMedia",
           "row": 3,
           "rowSpan": 6,
-          "span": 5
+          "span": 5.000004
         },
         {
-          "column": 8,
+          "column": 7.999996,
           "role": "action",
           "row": 8,
           "rowSpan": 1,
@@ -9214,9 +14675,10 @@ export const CONTENT_TEMPLATE_SKELETONS = {
   }
 } as const satisfies Record<string, ContentTemplateSkeleton>;
 
-/** 所有 23 个模板的中性结构预览源；缩略图与总览不得另建坐标台账。 */
+/** 所有活跃模板的中性结构预览源；缩略图与总览不得另建坐标台账。 */
 export const CONTENT_TEMPLATE_PREVIEWS = {
   "booking": {
+    "commercialPurpose": "活动转化",
     "desktop": {
       "order": [
         "copy",
@@ -9226,21 +14688,21 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 2,
+          "column": 1.999996,
           "role": "copy",
           "row": 2,
           "rowSpan": 3,
           "span": 6
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "action",
           "row": 3,
           "rowSpan": 1,
           "span": 3
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "marker",
           "row": 5,
           "rowSpan": 1,
@@ -9259,25 +14721,25 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
-          "row": 1,
+          "row": 1.32,
           "rowSpan": 3,
-          "span": 12
+          "span": 10.8
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "action",
           "row": 5,
           "rowSpan": 1,
-          "span": 8
+          "span": 8.000004
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "marker",
           "row": 7,
           "rowSpan": 1,
-          "span": 8
+          "span": 8.000004
         }
       ]
     },
@@ -9286,6 +14748,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "feature-stage"
   },
   "brandPoints": {
+    "commercialPurpose": "信任建立",
     "desktop": {
       "order": [
         "copy",
@@ -9294,32 +14757,32 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 3,
+          "column": 3.000004,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 8
+          "span": 8.000004
         },
         {
           "column": 1,
           "role": "card",
           "row": 3,
           "rowSpan": 3,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "card",
           "row": 3,
           "rowSpan": 3,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "card",
           "row": 3,
           "rowSpan": 3,
-          "span": 4
+          "span": 3.999996
         }
       ]
     },
@@ -9333,11 +14796,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
-          "row": 1,
+          "row": 1.32,
           "rowSpan": 1,
-          "span": 12
+          "span": 10.8
         },
         {
           "column": 1,
@@ -9367,6 +14830,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "support-stage"
   },
   "carousel": {
+    "commercialPurpose": "品牌展示",
     "desktop": {
       "order": [
         "media",
@@ -9383,15 +14847,15 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "overlay": true,
           "role": "copy",
           "row": 4,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "kind": "pagination",
           "overlay": true,
           "role": "marker",
@@ -9431,7 +14895,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "role": "marker",
           "row": 7,
           "rowSpan": 1,
-          "span": 4
+          "span": 3.999996
         }
       ]
     },
@@ -9440,6 +14904,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "feature-stage"
   },
   "categoryCards": {
+    "commercialPurpose": "商品销售",
     "desktop": {
       "order": [
         "copy",
@@ -9448,32 +14913,32 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 4
+          "span": 3.999996
         },
         {
           "column": 1,
           "role": "card",
           "row": 3,
           "rowSpan": 4,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "card",
           "row": 3,
           "rowSpan": 4,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "card",
           "row": 3,
           "rowSpan": 4,
-          "span": 4
+          "span": 3.999996
         }
       ]
     },
@@ -9487,11 +14952,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
-          "row": 1,
+          "row": 1.32,
           "rowSpan": 1,
-          "span": 12
+          "span": 10.8
         },
         {
           "column": 1,
@@ -9521,6 +14986,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "support-stage"
   },
   "certificates": {
+    "commercialPurpose": "信任建立",
     "desktop": {
       "order": [
         "copy",
@@ -9529,32 +14995,32 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 4
+          "span": 3.999996
         },
         {
           "column": 1,
           "role": "card",
           "row": 3,
           "rowSpan": 3,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "card",
           "row": 3,
           "rowSpan": 3,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "card",
           "row": 3,
           "rowSpan": 3,
-          "span": 4
+          "span": 3.999996
         }
       ]
     },
@@ -9568,11 +15034,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
-          "row": 1,
+          "row": 1.32,
           "rowSpan": 1,
-          "span": 12
+          "span": 10.8
         },
         {
           "column": 1,
@@ -9602,6 +15068,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "support-stage"
   },
   "comparison": {
+    "commercialPurpose": "信任建立",
     "desktop": {
       "order": [
         "copy",
@@ -9612,34 +15079,34 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 12
+          "span": 11.04
         },
         {
           "column": 1,
           "role": "mainMedia",
-          "row": 3,
-          "rowSpan": 4,
+          "row": 1,
+          "rowSpan": 8,
           "span": 6
         },
         {
           "column": 7,
           "role": "detailMedia",
-          "row": 3,
-          "rowSpan": 4,
+          "row": 1,
+          "rowSpan": 8,
           "span": 6
         },
         {
-          "column": 6,
+          "column": 6.000004,
           "kind": "handle",
           "overlay": true,
           "role": "marker",
           "row": 4,
           "rowSpan": 2,
-          "span": 2
+          "span": 2.000004
         }
       ]
     },
@@ -9655,34 +15122,34 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
-          "row": 1,
+          "row": 1.32,
           "rowSpan": 1,
-          "span": 12
+          "span": 10.8
         },
         {
           "column": 1,
           "role": "mainMedia",
-          "row": 2,
-          "rowSpan": 3,
+          "row": 1,
+          "rowSpan": 8,
           "span": 12
         },
         {
           "column": 1,
           "role": "detailMedia",
-          "row": 5,
-          "rowSpan": 3,
+          "row": 1,
+          "rowSpan": 8,
           "span": 12
         },
         {
-          "column": 6,
+          "column": 6.000004,
           "kind": "handle",
           "overlay": true,
           "role": "marker",
           "row": 4,
           "rowSpan": 2,
-          "span": 2
+          "span": 2.000004
         }
       ]
     },
@@ -9690,7 +15157,96 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "purpose": "同尺寸前后画面与分割手柄",
     "visualRole": "feature-stage"
   },
+  "craftDetails": {
+    "commercialPurpose": "信任建立",
+    "desktop": {
+      "order": [
+        "mainMedia",
+        "copy",
+        "detailMedia",
+        "detailMedia"
+      ],
+      "rows": 12,
+      "tone": "light",
+      "zones": [
+        {
+          "column": 4.999996,
+          "role": "mainMedia",
+          "row": 1.48,
+          "rowSpan": 6.266664,
+          "span": 7.520004
+        },
+        {
+          "column": 1.48,
+          "role": "copy",
+          "row": 2.44,
+          "rowSpan": 3.36,
+          "span": 3
+        },
+        {
+          "column": 4.999996,
+          "role": "detailMedia",
+          "row": 8.32,
+          "rowSpan": 4.400004,
+          "span": 3.519996
+        },
+        {
+          "column": 9.000004,
+          "role": "detailMedia",
+          "row": 8.32,
+          "rowSpan": 4.400004,
+          "span": 3.519996
+        }
+      ]
+    },
+    "displayName": "工艺细节",
+    "key": "craftDetails",
+    "mobile": {
+      "order": [
+        "mainMedia",
+        "copy",
+        "detailMedia",
+        "detailMedia"
+      ],
+      "rows": 12,
+      "tone": "light",
+      "zones": [
+        {
+          "column": 1,
+          "role": "mainMedia",
+          "row": 1,
+          "rowSpan": 6.6,
+          "span": 12
+        },
+        {
+          "column": 1.6,
+          "role": "copy",
+          "row": 7.96,
+          "rowSpan": 2.16,
+          "span": 10.8
+        },
+        {
+          "column": 1.6,
+          "role": "detailMedia",
+          "row": 10.36,
+          "rowSpan": 2.244,
+          "span": 5.1
+        },
+        {
+          "column": 7.3,
+          "role": "detailMedia",
+          "row": 10.36,
+          "rowSpan": 2.244,
+          "span": 5.1
+        }
+      ]
+    },
+    "moduleType": "工艺细节",
+    "purpose": "一张主图建立工艺焦点，两张细节图补充材质观察",
+    "visualRole": "support-stage"
+  },
   "doublePoster": {
+    "commercialPurpose": "内容传播",
     "desktop": {
       "order": [
         "mainMedia",
@@ -9704,27 +15260,27 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "column": 1,
           "role": "mainMedia",
           "row": 1,
-          "rowSpan": 6,
-          "span": 8
+          "rowSpan": 5.333336,
+          "span": 8.000004
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "detailMedia",
           "row": 2,
-          "rowSpan": 3,
-          "span": 4
+          "rowSpan": 5,
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 8.520004,
           "role": "copy",
           "row": 5,
           "rowSpan": 2,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "action",
-          "row": 8,
+          "row": 7.6,
           "rowSpan": 1,
           "span": 3
         }
@@ -9745,29 +15301,29 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "column": 1,
           "role": "mainMedia",
           "row": 1,
-          "rowSpan": 3,
+          "rowSpan": 3.2,
           "span": 12
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
           "row": 4,
           "rowSpan": 2,
-          "span": 12
+          "span": 10.8
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "detailMedia",
-          "row": 6,
-          "rowSpan": 2,
-          "span": 8
+          "row": 4.2,
+          "rowSpan": 4,
+          "span": 8.000004
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "action",
-          "row": 8,
+          "row": 7.68,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         }
       ]
     },
@@ -9776,6 +15332,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "feature-stage"
   },
   "featuredProduct": {
+    "commercialPurpose": "商品销售",
     "desktop": {
       "order": [
         "media",
@@ -9786,18 +15343,18 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 3,
+          "column": 3.000004,
           "role": "media",
           "row": 1,
           "rowSpan": 5,
-          "span": 8
+          "span": 8.000004
         },
         {
-          "column": 3,
+          "column": 3.000004,
           "role": "copy",
           "row": 6,
           "rowSpan": 1,
-          "span": 8
+          "span": 8.000004
         },
         {
           "column": 4,
@@ -9809,7 +15366,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
         {
           "column": 4,
           "role": "action",
-          "row": 8,
+          "row": 7.6,
           "rowSpan": 1,
           "span": 6
         }
@@ -9834,11 +15391,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
           "row": 5,
           "rowSpan": 1,
-          "span": 12
+          "span": 10.8
         },
         {
           "column": 1,
@@ -9848,11 +15405,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "action",
           "row": 7,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         }
       ]
     },
@@ -9861,6 +15418,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "feature-stage"
   },
   "fullBleed": {
+    "commercialPurpose": "品牌展示",
     "desktop": {
       "order": [
         "media",
@@ -9877,14 +15435,14 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
           "row": 5,
           "rowSpan": 2,
-          "span": 8
+          "span": 8.000004
         },
         {
-          "column": 10,
+          "column": 9.52,
           "role": "action",
           "row": 7,
           "rowSpan": 1,
@@ -9910,18 +15468,18 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
           "row": 5,
           "rowSpan": 2,
-          "span": 12
+          "span": 10.8
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "action",
           "row": 7,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         }
       ]
     },
@@ -9930,6 +15488,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "support-stage"
   },
   "gallery": {
+    "commercialPurpose": "商品销售",
     "desktop": {
       "order": [
         "copy",
@@ -9939,32 +15498,32 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.5,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         },
         {
           "column": 1,
           "role": "mainMedia",
           "row": 3,
           "rowSpan": 4,
-          "span": 7
+          "span": 6.999996
         },
         {
-          "column": 8,
+          "column": 7.999996,
           "role": "detailMedia",
           "row": 3,
           "rowSpan": 2,
-          "span": 5
+          "span": 5.000004
         },
         {
-          "column": 8,
+          "column": 7.999996,
           "role": "media",
           "row": 5,
           "rowSpan": 2,
-          "span": 5
+          "span": 5.000004
         },
         {
           "column": 1,
@@ -9986,11 +15545,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 12
+          "span": 10.8
         },
         {
           "column": 1,
@@ -10027,6 +15586,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "feature-stage"
   },
   "hero": {
+    "commercialPurpose": "品牌展示",
     "desktop": {
       "order": [
         "media",
@@ -10043,12 +15603,12 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "overlay": true,
           "role": "eyebrow",
           "row": 4.2,
           "rowSpan": 0.7,
-          "span": 4
+          "span": 3.999996
         },
         {
           "column": 4,
@@ -10059,15 +15619,15 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 6
         },
         {
-          "column": 4.5,
+          "column": 4.500004,
           "overlay": true,
           "role": "subtitle",
           "row": 6.4,
           "rowSpan": 0.7,
-          "span": 5
+          "span": 5.000004
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "overlay": true,
           "role": "action",
           "row": 7.4,
@@ -10090,22 +15650,36 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "column": 1,
           "role": "media",
           "row": 1,
-          "rowSpan": 4,
+          "rowSpan": 8,
           "span": 12
         },
         {
-          "column": 1,
-          "role": "copy",
-          "row": 5,
-          "rowSpan": 2,
-          "span": 12
+          "column": 2.44,
+          "role": "eyebrow",
+          "row": 5.32,
+          "rowSpan": 0.44,
+          "span": 5.76
         },
         {
-          "column": 1,
+          "column": 2.92,
+          "role": "title",
+          "row": 5.88,
+          "rowSpan": 1.04,
+          "span": 8.16
+        },
+        {
+          "column": 2.44,
+          "role": "subtitle",
+          "row": 7.04,
+          "rowSpan": 0.72,
+          "span": 8.4
+        },
+        {
+          "column": 2.44,
           "role": "action",
-          "row": 7,
-          "rowSpan": 1,
-          "span": 5
+          "row": 7.92,
+          "rowSpan": 0.56,
+          "span": 4.32
         }
       ]
     },
@@ -10114,6 +15688,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "primary-stage"
   },
   "hotspot": {
+    "commercialPurpose": "商品销售",
     "desktop": {
       "order": [
         "media",
@@ -10130,13 +15705,13 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 3,
+          "column": 3.000004,
           "kind": "hotspot",
           "overlay": true,
           "role": "marker",
           "row": 3,
           "rowSpan": 1,
-          "span": 1
+          "span": 0.999996
         },
         {
           "column": 7,
@@ -10145,7 +15720,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "role": "marker",
           "row": 4,
           "rowSpan": 1,
-          "span": 1
+          "span": 0.999996
         },
         {
           "column": 10,
@@ -10154,14 +15729,14 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "role": "marker",
           "row": 2,
           "rowSpan": 1,
-          "span": 1
+          "span": 0.999996
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "role": "copy",
           "row": 7,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         }
       ]
     },
@@ -10183,31 +15758,31 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 3,
+          "column": 3.000004,
           "kind": "hotspot",
           "overlay": true,
           "role": "marker",
           "row": 2,
           "rowSpan": 1,
-          "span": 1
+          "span": 0.999996
         },
         {
-          "column": 8,
+          "column": 7.999996,
           "kind": "hotspot",
           "overlay": true,
           "role": "marker",
           "row": 4,
           "rowSpan": 1,
-          "span": 1
+          "span": 0.999996
         },
         {
-          "column": 6,
+          "column": 6.000004,
           "kind": "hotspot",
           "overlay": true,
           "role": "marker",
           "row": 5,
           "rowSpan": 1,
-          "span": 1
+          "span": 0.999996
         },
         {
           "column": 1,
@@ -10223,6 +15798,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "feature-stage"
   },
   "journey": {
+    "commercialPurpose": "内容传播",
     "desktop": {
       "order": [
         "copy",
@@ -10231,11 +15807,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 2,
-          "span": 5
+          "span": 5.000004
         },
         {
           "column": 1,
@@ -10257,11 +15833,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
-          "row": 1,
+          "row": 1.32,
           "rowSpan": 2,
-          "span": 12
+          "span": 10.8
         },
         {
           "column": 1,
@@ -10278,6 +15854,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "support-stage"
   },
   "limitedEvent": {
+    "commercialPurpose": "活动转化",
     "desktop": {
       "order": [
         "media",
@@ -10295,7 +15872,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "kind": "countdown",
           "overlay": true,
           "role": "marker",
@@ -10304,7 +15881,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 3
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "overlay": true,
           "role": "copy",
           "row": 4,
@@ -10312,7 +15889,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 6
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "overlay": true,
           "role": "action",
           "row": 7,
@@ -10345,21 +15922,21 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "role": "marker",
           "row": 5,
           "rowSpan": 1,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
           "row": 6,
           "rowSpan": 1,
-          "span": 12
+          "span": 10.8
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "action",
-          "row": 8,
+          "row": 7.68,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         }
       ]
     },
@@ -10368,6 +15945,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "feature-stage"
   },
   "productRow": {
+    "commercialPurpose": "商品销售",
     "desktop": {
       "order": [
         "copy",
@@ -10376,32 +15954,32 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         },
         {
           "column": 1,
           "role": "card",
           "row": 3,
           "rowSpan": 4,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "card",
           "row": 3,
           "rowSpan": 4,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "card",
           "row": 3,
           "rowSpan": 4,
-          "span": 4
+          "span": 3.999996
         }
       ]
     },
@@ -10415,11 +15993,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
-          "row": 1,
+          "row": 1.32,
           "rowSpan": 1,
-          "span": 12
+          "span": 10.8
         },
         {
           "column": 1,
@@ -10449,6 +16027,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "support-stage"
   },
   "sceneShopping": {
+    "commercialPurpose": "商品销售",
     "desktop": {
       "order": [
         "copy",
@@ -10457,11 +16036,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 12
+          "span": 11.04
         },
         {
           "column": 1,
@@ -10503,11 +16082,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
-          "row": 1,
+          "row": 1.32,
           "rowSpan": 1,
-          "span": 12
+          "span": 10.8
         },
         {
           "column": 1,
@@ -10544,6 +16123,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "support-stage"
   },
   "servicePromises": {
+    "commercialPurpose": "信任建立",
     "desktop": {
       "order": [
         "copy",
@@ -10552,11 +16132,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.48,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         },
         {
           "column": 1,
@@ -10598,11 +16178,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
-          "row": 1,
+          "row": 1.32,
           "rowSpan": 1,
-          "span": 12
+          "span": 10.8
         },
         {
           "column": 1,
@@ -10639,6 +16219,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "support-stage"
   },
   "singlePoster": {
+    "commercialPurpose": "内容传播",
     "desktop": {
       "order": [
         "media",
@@ -10655,32 +16236,32 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 9
         },
         {
-          "column": 1,
+          "column": 1.48,
           "role": "eyebrow",
           "row": 4.8,
           "rowSpan": 0.7,
-          "span": 2.5
+          "span": 2.499996
         },
         {
-          "column": 1,
+          "column": 1.48,
           "role": "title",
           "row": 5.5,
           "rowSpan": 1.6,
-          "span": 2.5
+          "span": 2.499996
         },
         {
-          "column": 1,
+          "column": 1.48,
           "role": "subtitle",
           "row": 7.1,
           "rowSpan": 0.7,
-          "span": 2.5
+          "span": 2.499996
         },
         {
-          "column": 1,
+          "column": 1.48,
           "role": "action",
           "row": 7.8,
           "rowSpan": 0.6,
-          "span": 2
+          "span": 2.000004
         }
       ]
     },
@@ -10702,12 +16283,12 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "overlay": true,
           "role": "copy",
           "row": 2,
           "rowSpan": 2,
-          "span": 10
+          "span": 9.999996
         },
         {
           "column": 4,
@@ -10715,7 +16296,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "role": "action",
           "row": 4,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         }
       ]
     },
@@ -10724,6 +16305,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "feature-stage"
   },
   "storeInfo": {
+    "commercialPurpose": "信任建立",
     "desktop": {
       "order": [
         "media",
@@ -10738,24 +16320,24 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "role": "media",
           "row": 1,
           "rowSpan": 6,
-          "span": 7
+          "span": 6.999996
         },
         {
-          "column": 9,
+          "column": 8.520004,
           "role": "copy",
-          "row": 1,
+          "row": 1.4,
           "rowSpan": 1,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "list",
           "row": 3,
           "rowSpan": 2,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 9,
+          "column": 9.000004,
           "role": "action",
           "row": 6,
           "rowSpan": 1,
@@ -10782,11 +16364,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
           "row": 5,
           "rowSpan": 1,
-          "span": 12
+          "span": 10.8
         },
         {
           "column": 1,
@@ -10796,11 +16378,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "action",
           "row": 7,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         }
       ]
     },
@@ -10809,6 +16391,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "feature-stage"
   },
   "testimonials": {
+    "commercialPurpose": "信任建立",
     "desktop": {
       "order": [
         "media",
@@ -10822,7 +16405,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "role": "media",
           "row": 2,
           "rowSpan": 6,
-          "span": 5
+          "span": 5.000004
         },
         {
           "column": 7,
@@ -10836,7 +16419,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "role": "quote",
           "row": 6,
           "rowSpan": 1,
-          "span": 4
+          "span": 3.999996
         }
       ]
     },
@@ -10869,7 +16452,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "role": "quote",
           "row": 7,
           "rowSpan": 1,
-          "span": 8
+          "span": 8.000004
         }
       ]
     },
@@ -10878,6 +16461,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "support-stage"
   },
   "textBanner": {
+    "commercialPurpose": "内容传播",
     "desktop": {
       "order": [
         "copy",
@@ -10886,18 +16470,18 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "eyebrow",
           "row": 3.6,
           "rowSpan": 0.7,
-          "span": 4
+          "span": 3.999996
         },
         {
-          "column": 3,
+          "column": 3.000004,
           "role": "title",
           "row": 4.3,
           "rowSpan": 2,
-          "span": 8
+          "span": 8.000004
         },
         {
           "column": 4,
@@ -10907,11 +16491,11 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 6
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "action",
           "row": 7.4,
           "rowSpan": 0.7,
-          "span": 4
+          "span": 3.999996
         }
       ]
     },
@@ -10925,18 +16509,18 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
           "row": 2,
           "rowSpan": 3,
-          "span": 12
+          "span": 10.8
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "action",
           "row": 6,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         }
       ]
     },
@@ -10945,6 +16529,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "support-stage"
   },
   "video": {
+    "commercialPurpose": "品牌展示",
     "desktop": {
       "order": [
         "media",
@@ -10962,24 +16547,24 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 6,
+          "column": 6.000004,
           "kind": "play",
           "overlay": true,
           "role": "marker",
           "row": 3,
           "rowSpan": 1,
-          "span": 2
+          "span": 2.000004
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "overlay": true,
           "role": "copy",
           "row": 5,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         },
         {
-          "column": 2,
+          "column": 1.999996,
           "overlay": true,
           "role": "action",
           "row": 7,
@@ -11007,27 +16592,27 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 6,
+          "column": 6.000004,
           "kind": "play",
           "overlay": true,
           "role": "marker",
           "row": 2,
           "rowSpan": 1,
-          "span": 2
+          "span": 2.000004
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
           "row": 5,
           "rowSpan": 2,
-          "span": 12
+          "span": 10.8
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "action",
           "row": 7,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         }
       ]
     },
@@ -11036,6 +16621,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
     "visualRole": "feature-stage"
   },
   "wearingInspiration": {
+    "commercialPurpose": "商品销售",
     "desktop": {
       "order": [
         "mainMedia",
@@ -11051,26 +16637,26 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "role": "mainMedia",
           "row": 1,
           "rowSpan": 8,
-          "span": 7
+          "span": 6.999996
         },
         {
-          "column": 8,
+          "column": 7.519996,
           "role": "copy",
-          "row": 1,
+          "row": 1.5,
           "rowSpan": 2,
-          "span": 5
+          "span": 5.000004
         },
         {
-          "column": 8,
+          "column": 7.999996,
           "role": "detailMedia",
           "row": 3,
           "rowSpan": 6,
-          "span": 5
+          "span": 5.000004
         },
         {
-          "column": 8,
+          "column": 7.999996,
           "role": "action",
-          "row": 10,
+          "row": 9.5,
           "rowSpan": 1,
           "span": 3
         }
@@ -11095,25 +16681,25 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "span": 12
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "copy",
           "row": 5,
           "rowSpan": 1,
-          "span": 12
+          "span": 10.8
         },
         {
-          "column": 5,
+          "column": 4.999996,
           "role": "detailMedia",
           "row": 6,
           "rowSpan": 2,
-          "span": 8
+          "span": 8.000004
         },
         {
-          "column": 1,
+          "column": 1.6,
           "role": "action",
-          "row": 8,
+          "row": 7.68,
           "rowSpan": 1,
-          "span": 5
+          "span": 5.000004
         }
       ]
     },
@@ -11145,6 +16731,302 @@ export const CONTENT_TEMPLATE_BY_MODULE_TYPE = Object.fromEntries(
 
 export function getContentTemplateContract(moduleType: string) {
   return CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType];
+}
+
+export function getContentTemplateDefaultGeometry(
+  moduleType: string,
+  viewport: "desktop" | "mobile",
+) {
+  return getContentTemplateContract(moduleType)?.defaultGeometryByViewport[viewport];
+}
+
+export function getContentTemplateDefaultRect(
+  moduleType: string,
+  nodeId: string,
+  viewport: "desktop" | "mobile",
+): ContentTemplateVisualRect | undefined {
+  const geometry = getContentTemplateDefaultGeometry(moduleType, viewport);
+  const contract = getContentTemplateContract(moduleType);
+  const editableObject = findContentTemplateEditableObject(contract, nodeId);
+  const directMatches = geometry?.zones.filter((zone) => zone.nodeId === nodeId) ?? [];
+  if (directMatches.length === 1) return directMatches[0].rect;
+  const roleMatches = geometry?.zones.filter(
+    (zone) => zone.roleId === editableObject?.roleId,
+  ) ?? [];
+  return roleMatches.length === 1 ? roleMatches[0].rect : undefined;
+}
+
+const PERSONAL_TEMPLATE_COLOR_TOKENS = new Set([
+  "#181A1B", "#5F6568", "#DDE1E2", "#F7F8F8", "#FFFFFF",
+]);
+const SURFACE_COLOR_PRESETS = new Set(["canvas", "mist", "inkSurface"]);
+const SURFACE_PADDING_PRESETS = new Set(["compact", "standard", "spacious"]);
+const SURFACE_RADIUS_PRESETS = new Set(["square", "soft", "rounded"]);
+const SURFACE_SHADOW_PRESETS = new Set(["none", "soft", "lifted"]);
+const INVALID_DEFAULT_CONTENT = Symbol("invalid-default-content");
+const DEFAULT_CONTENT_MAX_DEPTH = 6;
+const DEFAULT_CONTENT_MAX_OBJECT_KEYS = 32;
+const DEFAULT_CONTENT_MAX_STRING_LENGTH = 4096;
+const DEFAULT_CONTENT_MAX_SERIALIZED_LENGTH = 128 * 1024;
+
+function isSafeDefaultContentUrl(fieldKey: string, value: string) {
+  const normalized = value.trim();
+  if (!normalized) return true;
+  const assetField = /(?:image|poster|videoUrl)$/i.test(fieldKey);
+  const linkField = /(?:linkUrl|mapUrl|link|url)$/i.test(fieldKey);
+  if (!assetField && !linkField) return true;
+  if (normalized.startsWith("/") && !normalized.startsWith("//")) return true;
+  const lower = normalized.toLowerCase();
+  return lower.startsWith("https://") || lower.startsWith("http://");
+}
+
+function sanitizeDefaultContentValue(
+  value: unknown,
+  fieldKey: string,
+  options: { depth: number; maxStringLength: number; maxItems: number },
+): ContentTemplateDefaultContentValue | typeof INVALID_DEFAULT_CONTENT {
+  if (value === null) return null;
+  if (typeof value === "string") {
+    if (value.length > options.maxStringLength || !isSafeDefaultContentUrl(fieldKey, value)) {
+      return INVALID_DEFAULT_CONTENT;
+    }
+    return value;
+  }
+  if (typeof value === "number") return Number.isFinite(value) ? value : INVALID_DEFAULT_CONTENT;
+  if (typeof value === "boolean") return value;
+  if (options.depth >= DEFAULT_CONTENT_MAX_DEPTH) return INVALID_DEFAULT_CONTENT;
+  if (Array.isArray(value)) {
+    if (value.length > options.maxItems) return INVALID_DEFAULT_CONTENT;
+    const result: ContentTemplateDefaultContentValue[] = [];
+    for (const item of value) {
+      const sanitized = sanitizeDefaultContentValue(item, fieldKey, {
+        ...options,
+        depth: options.depth + 1,
+        maxStringLength: DEFAULT_CONTENT_MAX_STRING_LENGTH,
+      });
+      if (sanitized === INVALID_DEFAULT_CONTENT) return INVALID_DEFAULT_CONTENT;
+      result.push(sanitized);
+    }
+    return result;
+  }
+  if (!isRecord(value)) return INVALID_DEFAULT_CONTENT;
+  const entries = Object.entries(value);
+  if (entries.length > DEFAULT_CONTENT_MAX_OBJECT_KEYS) return INVALID_DEFAULT_CONTENT;
+  const result: Record<string, ContentTemplateDefaultContentValue> = {};
+  for (const [key, child] of entries) {
+    if (
+      !/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key) ||
+      key === "constructor" || key === "prototype" || key === "__proto__"
+    ) {
+      return INVALID_DEFAULT_CONTENT;
+    }
+    const sanitized = sanitizeDefaultContentValue(child, key, {
+      ...options,
+      depth: options.depth + 1,
+      maxStringLength: DEFAULT_CONTENT_MAX_STRING_LENGTH,
+    });
+    if (sanitized === INVALID_DEFAULT_CONTENT) return INVALID_DEFAULT_CONTENT;
+    result[key] = sanitized;
+  }
+  return result;
+}
+
+/**
+ * 账号私有模板默认内容的合同白名单入口。
+ * 这里只处理 JSON 形状、数量、长度与 URL 协议；资源和商品是否属于当前账号，
+ * 必须由写入服务结合 ownerId 与数据库再次校验。
+ */
+export function sanitizeContentTemplateDefaultContent(
+  moduleType: string,
+  rawContent: unknown,
+): ContentTemplateDefaultContent | undefined {
+  const contract = getContentTemplateContract(moduleType);
+  if (!contract || !isRecord(rawContent)) return undefined;
+  const editableObjects = contract.editorCapabilities.editableObjects;
+  const allowedFields = new Set(editableObjects.flatMap((object) => object.contentFieldKeys));
+  const result: Record<string, ContentTemplateDefaultContentValue> = {};
+  for (const fieldKey of allowedFields) {
+    if (!Object.prototype.hasOwnProperty.call(rawContent, fieldKey)) continue;
+    const editableObject = editableObjects.find((object) => object.contentFieldKeys.includes(fieldKey));
+    const reference = contract.editorCapabilities.referenceFields?.find(
+      (candidate) => candidate.key === fieldKey || candidate.legacyKey === fieldKey,
+    );
+    const quantity = editableObject
+      ? contract.roles.find((role) => role.id === editableObject.roleId)?.quantity
+      : undefined;
+    const sanitized = sanitizeDefaultContentValue(rawContent[fieldKey], fieldKey, {
+      depth: 0,
+      maxStringLength: contract.contentBudget.limits[fieldKey] ?? DEFAULT_CONTENT_MAX_STRING_LENGTH,
+      maxItems: reference?.max ?? quantity?.max ?? 24,
+    });
+    if (sanitized !== INVALID_DEFAULT_CONTENT) result[fieldKey] = sanitized;
+  }
+  if (JSON.stringify(result).length > DEFAULT_CONTENT_MAX_SERIALIZED_LENGTH) return undefined;
+  return result;
+}
+
+export function extractContentTemplateDefaultContent(
+  moduleType: string,
+  props: unknown,
+) {
+  return sanitizeContentTemplateDefaultContent(moduleType, props);
+}
+
+function sanitizePersonalTemplateRect(
+  raw: unknown,
+  constraints: ContentTemplateEditableConstraints,
+  safeArea: ContentTemplateVisualRect,
+) {
+  if (!isRecord(raw)) return undefined;
+  const values = [raw.x, raw.y, raw.width, raw.height].map(Number);
+  if (!values.every(Number.isFinite)) return undefined;
+  let [x, y, width, height] = values;
+  width = Math.min(constraints.maxSize.width, Math.max(constraints.minSize.width, width));
+  height = Math.min(constraints.maxSize.height, Math.max(constraints.minSize.height, height));
+  const bounds = constraints.safeAreaRequired
+    ? safeArea
+    : { x: 0, y: 0, width: 1, height: 1 };
+  width = Math.min(width, bounds.width);
+  height = Math.min(height, bounds.height);
+  x = Math.min(bounds.x + bounds.width - width, Math.max(bounds.x, x));
+  y = Math.min(bounds.y + bounds.height - height, Math.max(bounds.y, y));
+  return { x, y, width, height };
+}
+
+/**
+ * 账号私有模板的唯一白名单清洗入口。返回值只含布局与受控视觉属性，
+ * 不会复制图片、文案、链接、商品、门店或其他业务事实。
+ */
+export function sanitizeContentTemplateLayoutData(
+  moduleType: string,
+  rawLayoutData: unknown,
+): ContentTemplateInstanceOverridesV2 | undefined {
+  const contract = getContentTemplateContract(moduleType);
+  if (!contract || !isRecord(rawLayoutData) || rawLayoutData.version !== 2) return undefined;
+  const result: ContentTemplateInstanceOverridesV2 = { version: 2 };
+  const rawFrame = isRecord(rawLayoutData.frame) ? rawLayoutData.frame : {};
+  const frame: NonNullable<ContentTemplateInstanceOverridesV2["frame"]> = {};
+  const layoutCapabilities = contract.editorCapabilities.layoutOverrides ?? {};
+  if (typeof rawFrame.heightPreset === "string" && layoutCapabilities.framePresets?.includes(rawFrame.heightPreset)) {
+    frame.heightPreset = rawFrame.heightPreset;
+  }
+  if (typeof rawFrame.compositionPreset === "string" && layoutCapabilities.compositionPresets?.includes(rawFrame.compositionPreset)) {
+    frame.compositionPreset = rawFrame.compositionPreset;
+  }
+  if (typeof rawFrame.colorPreset === "string" && SURFACE_COLOR_PRESETS.has(rawFrame.colorPreset)) {
+    frame.colorPreset = rawFrame.colorPreset;
+  }
+  if (contract.flow === "flow") {
+    if (typeof rawFrame.paddingPreset === "string" && SURFACE_PADDING_PRESETS.has(rawFrame.paddingPreset)) {
+      frame.paddingPreset = rawFrame.paddingPreset as NonNullable<typeof frame.paddingPreset>;
+    }
+    if (typeof rawFrame.radiusPreset === "string" && SURFACE_RADIUS_PRESETS.has(rawFrame.radiusPreset)) {
+      frame.radiusPreset = rawFrame.radiusPreset as NonNullable<typeof frame.radiusPreset>;
+    }
+    if (typeof rawFrame.shadowPreset === "string" && SURFACE_SHADOW_PRESETS.has(rawFrame.shadowPreset)) {
+      frame.shadowPreset = rawFrame.shadowPreset as NonNullable<typeof frame.shadowPreset>;
+    }
+  }
+  const rawRatios = isRecord(rawFrame.aspectRatioByViewport) ? rawFrame.aspectRatioByViewport : {};
+  const ratioRange = layoutCapabilities.frameRatioRange ?? { min: 0.25, max: 4, step: 0.01 };
+  const aspectRatioByViewport: Partial<Record<"desktop" | "mobile", number>> = {};
+  for (const viewport of ["desktop", "mobile"] as const) {
+    const ratio = Number(rawRatios[viewport]);
+    if (Number.isFinite(ratio) && ratio >= ratioRange.min && ratio <= ratioRange.max) {
+      aspectRatioByViewport[viewport] = ratio;
+    }
+  }
+  if (Object.keys(aspectRatioByViewport).length) frame.aspectRatioByViewport = aspectRatioByViewport;
+  if (Object.keys(frame).length) result.frame = frame;
+
+  const rawNodes = isRecord(rawLayoutData.nodes) ? rawLayoutData.nodes : {};
+  const nodes: NonNullable<ContentTemplateInstanceOverridesV2["nodes"]> = {};
+  for (const editableObject of contract.editorCapabilities.editableObjects) {
+    for (const nodeId of editableObject.nodeIds ?? [editableObject.roleId]) {
+      const rawNode = rawNodes[nodeId];
+      if (!isRecord(rawNode)) continue;
+      const node: NonNullable<ContentTemplateInstanceOverridesV2["nodes"]>[string] = {};
+      const constraints = editableObject.constraints;
+      if (constraints.allowHide && typeof rawNode.enabled === "boolean") node.enabled = rawNode.enabled;
+      if (contentTemplateObjectHasCapability(editableObject, "layout") && isRecord(rawNode.rectByViewport)) {
+        const rectByViewport: Partial<Record<"desktop" | "mobile", ContentTemplateVisualRect>> = {};
+        for (const viewport of ["desktop", "mobile"] as const) {
+          const safeArea = contract.defaultGeometryByViewport[viewport].safeArea;
+          const rect = sanitizePersonalTemplateRect(rawNode.rectByViewport[viewport], constraints, safeArea);
+          if (rect) rectByViewport[viewport] = rect;
+        }
+        if (Object.keys(rectByViewport).length) node.rectByViewport = rectByViewport;
+      }
+      if (contentTemplateObjectHasCapability(editableObject, "layer") && isRecord(rawNode.zIndexByViewport)) {
+        const zIndexByViewport: Partial<Record<"desktop" | "mobile", number>> = {};
+        for (const viewport of ["desktop", "mobile"] as const) {
+          const zIndex = Number(rawNode.zIndexByViewport[viewport]);
+          if (Number.isInteger(zIndex) && zIndex >= constraints.layerRange.min && zIndex <= constraints.layerRange.max) {
+            zIndexByViewport[viewport] = zIndex;
+          }
+        }
+        if (Object.keys(zIndexByViewport).length) node.zIndexByViewport = zIndexByViewport;
+      }
+      const ratio = Number(rawNode.ratio);
+      if (constraints.allowAspectRatio && Number.isFinite(ratio) && ratio >= 0.25 && ratio <= 4) node.ratio = ratio;
+      const slot = layoutCapabilities.slots?.find((candidate) => candidate.roleId === nodeId);
+      if (slot?.sizePresets?.includes(String(rawNode.sizePreset))) node.sizePreset = String(rawNode.sizePreset);
+      if (slot?.positionPresets?.includes(String(rawNode.positionPreset))) node.positionPreset = String(rawNode.positionPreset);
+      if (isRecord(rawNode.mediaView) && slot) {
+        const mediaView: NonNullable<typeof node.mediaView> = {};
+        if (slot.fit?.includes(rawNode.mediaView.fit as "cover" | "contain")) mediaView.fit = rawNode.mediaView.fit as "cover" | "contain";
+        const zoom = Number(rawNode.mediaView.zoom);
+        if (constraints.allowZoom && slot.zoom && Number.isFinite(zoom) && zoom >= slot.zoom.min && zoom <= slot.zoom.max) mediaView.zoom = zoom;
+        if (constraints.allowFocus && slot.focusByViewport && isRecord(rawNode.mediaView.focusByViewport)) {
+          const focusByViewport: Partial<Record<"desktop" | "mobile", { x: number; y: number }>> = {};
+          for (const viewport of ["desktop", "mobile"] as const) {
+            const rawFocus = rawNode.mediaView.focusByViewport[viewport];
+            if (!isRecord(rawFocus)) continue;
+            const x = Number(rawFocus.x);
+            const y = Number(rawFocus.y);
+            if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && x <= 100 && y >= 0 && y <= 100) focusByViewport[viewport] = { x, y };
+          }
+          if (Object.keys(focusByViewport).length) mediaView.focusByViewport = focusByViewport;
+        }
+        if (Object.keys(mediaView).length) node.mediaView = mediaView;
+      }
+      if (constraints.allowTypography && isRecord(rawNode.typography)) {
+        const textRole = layoutCapabilities.textRoles?.find((candidate) => candidate.roleId === nodeId);
+        const typography: NonNullable<typeof node.typography> = {};
+        if (["xs", "sm", "md", "lg", "xl"].includes(String(rawNode.typography.sizeLevel))) typography.sizeLevel = rawNode.typography.sizeLevel as NonNullable<typeof typography.sizeLevel>;
+        if (textRole?.align?.includes(rawNode.typography.align as "left" | "center" | "right")) typography.align = rawNode.typography.align as "left" | "center" | "right";
+        if (typeof rawNode.typography.color === "string" && PERSONAL_TEMPLATE_COLOR_TOKENS.has(rawNode.typography.color.toUpperCase())) typography.color = rawNode.typography.color.toUpperCase();
+        const maxLines = Number(rawNode.typography.maxLines);
+        if (Number.isInteger(maxLines) && maxLines >= 1 && maxLines <= (textRole?.maxLines ?? 6)) typography.maxLines = maxLines;
+        if (["none", "light", "dark"].includes(String(rawNode.typography.safeBand))) typography.safeBand = rawNode.typography.safeBand as "none" | "light" | "dark";
+        if (Object.keys(typography).length) node.typography = typography;
+      }
+      if (["media", "video", "product", "collection"].includes(editableObject.kind) && isRecord(rawNode.appearance)) {
+        const appearance: NonNullable<typeof node.appearance> = {};
+        if (typeof rawNode.appearance.radiusPreset === "string" && SURFACE_RADIUS_PRESETS.has(rawNode.appearance.radiusPreset)) {
+          appearance.radiusPreset = rawNode.appearance.radiusPreset as NonNullable<typeof appearance.radiusPreset>;
+        }
+        if (typeof rawNode.appearance.shadowPreset === "string" && SURFACE_SHADOW_PRESETS.has(rawNode.appearance.shadowPreset)) {
+          appearance.shadowPreset = rawNode.appearance.shadowPreset as NonNullable<typeof appearance.shadowPreset>;
+        }
+        if (Object.keys(appearance).length) node.appearance = appearance;
+      }
+      if (Object.keys(node).length) nodes[nodeId] = node;
+    }
+  }
+  if (Object.keys(nodes).length) result.nodes = nodes;
+  return result;
+}
+
+export function extractContentTemplateLayoutData(
+  moduleType: string,
+  props: unknown,
+) {
+  if (!isRecord(props)) return undefined;
+  return sanitizeContentTemplateLayoutData(
+    moduleType,
+    props.__instanceOverrides ?? { version: 2 },
+  );
 }
 
 export function findContentTemplateEditableObject(
@@ -11272,9 +17154,17 @@ function getInstanceOverrideIssues(input: {
   const overrides = input.props.__instanceOverrides;
   if (overrides === undefined) return [];
   const basePath = input.basePath ?? "props.__instanceOverrides";
-  const issue = (message: string, path = basePath, field?: string): ContentTemplateIssue => ({
+  const issue = (
+    message: string,
+    path = basePath,
+    field?: string,
+    severity: ContentTemplateIssue["severity"] =
+      isRecord(overrides) && (overrides as Record<string, unknown>).version === 2
+        ? "error"
+        : "warning",
+  ): ContentTemplateIssue => ({
     code: "page-validation",
-    severity: "error",
+    severity,
     layer: "contract",
     blockId: input.blockId,
     moduleType: input.moduleType,
@@ -11395,6 +17285,17 @@ function getInstanceOverrideIssues(input: {
             const height = Number(rawRect.height);
             if (![x, y, width, height].every((value) => Number.isFinite(value)) || x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.0001 || y + height > 1.0001) {
               issues.push(issue("节点必须完整位于画面 0–1 的归一化范围内。", rectPath, nodeId));
+            } else {
+              const constraints = editableObject.constraints;
+              const safeArea = input.contract.defaultGeometryByViewport[viewport as "desktop" | "mobile"].safeArea;
+              const bounds = constraints.safeAreaRequired ? safeArea : { x: 0, y: 0, width: 1, height: 1 };
+              if (
+                width < constraints.minSize.width || height < constraints.minSize.height ||
+                width > constraints.maxSize.width || height > constraints.maxSize.height ||
+                x < bounds.x || y < bounds.y || x + width > bounds.x + bounds.width + 0.0001 || y + height > bounds.y + bounds.height + 0.0001
+              ) {
+                issues.push(issue("节点位置或尺寸超出新版安全区，渲染时将自动使用安全回退值。", rectPath, nodeId));
+              }
             }
           }
         }
@@ -11487,7 +17388,7 @@ function getInstanceOverrideIssues(input: {
             issues.push(issue("文字最大行数超出当前角色允许范围。", path + ".typography.maxLines", nodeId));
           }
           if (typography.safeBand !== undefined && !["none", "light", "dark"].includes(String(typography.safeBand))) {
-            issues.push(issue("安全文字带值无效。", path + ".typography.safeBand", nodeId));
+            issues.push(issue("安全文字带值无效。", path + ".typography.safeBand", nodeId, "error"));
           }
           if (
             typography.lineHeight !== undefined &&
@@ -11517,7 +17418,7 @@ function getInstanceOverrideIssues(input: {
         const contentPath = basePath.endsWith(".__instanceOverrides")
           ? basePath.slice(0, -".__instanceOverrides".length) + "." + contentFieldKey
           : "props." + contentFieldKey;
-        issues.push(issue("已启用的文字角色必须填写内容。", contentPath, nodeId));
+        issues.push(issue("已启用的文字角色必须填写内容。", contentPath, nodeId, "error"));
       }
       if (roleVisible && roleHasVisualOverride && textCapability?.requiresSafeBand) {
         const typography = isRecord(rawNode.typography) ? rawNode.typography : {};
@@ -11526,6 +17427,7 @@ function getInstanceOverrideIssues(input: {
             "图片叠字需选择浅色或深色安全文字带后才能发布。",
             path + ".typography.safeBand",
             nodeId,
+            "error",
           ));
         }
       }
@@ -11624,7 +17526,7 @@ function getInstanceOverrideIssues(input: {
       }
     }
     if (value.enabled === true && capability.requiresSafeBand && value.safeBand !== "light" && value.safeBand !== "dark") {
-      issues.push(issue("图片叠字需选择浅色或深色安全文字带后才能发布。", path + ".safeBand", roleId));
+      issues.push(issue("图片叠字需选择浅色或深色安全文字带后才能发布。", path + ".safeBand", roleId, "error"));
     }
   }
   return issues;
@@ -11663,9 +17565,9 @@ export function getContentTemplateIssues(input: {
     if (props.__instanceOverrides !== undefined) {
       return [{
         ...base,
-        code: "content-template-marker-invalid",
-        severity: "error",
-        message: "实例覆盖缺少当前内容模板版本印记，不能按旧合同猜测渲染。",
+        code: "content-template-legacy",
+        severity: "warning",
+        message: "历史实例未携带版本印记；已按当前合同保留合法覆盖并安全回退不合法部分。",
       }, ...overrideIssues];
     }
     return [{
@@ -11702,13 +17604,13 @@ export function getContentTemplateIssues(input: {
     }];
   }
   if (markerVersion !== contract.version) {
-    if (markerVersion === 1 && contract.version === 2 && props.__instanceOverrides === undefined) {
+    if (markerVersion < contract.version && markerVersion >= 1) {
       return [{
         ...base,
         code: "content-template-legacy",
         severity: "info",
-        message: "内容模板版本 1 按原构图兼容读取；普通保存不会自动升级到实例覆盖合同。",
-      }];
+        message: "历史模板已自动采用新版默认构图；合法实例覆盖继续保留，不合法部分使用安全回退。",
+      }, ...overrideIssues];
     }
     return [{
       ...base,

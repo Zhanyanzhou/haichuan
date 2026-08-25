@@ -56,10 +56,7 @@ export function resolveVisualNode(
     const node = isVisualRecord(nodes[nodeId]) ? nodes[nodeId] : {};
     const rects = isVisualRecord(node.rectByViewport) ? node.rectByViewport : {};
     const directRect = isVisualRecord(rects[viewport]) ? rects[viewport] : undefined;
-    const inheritedRect = viewport === "mobile" && isVisualRecord(rects.desktop)
-      ? rects.desktop
-      : undefined;
-    const rawRect = directRect ?? inheritedRect;
+    const rawRect = directRect;
     const mediaView = isVisualRecord(node.mediaView) ? node.mediaView : {};
     const focusByViewport = isVisualRecord(mediaView.focusByViewport)
       ? mediaView.focusByViewport
@@ -67,10 +64,7 @@ export function resolveVisualNode(
     const directFocus = isVisualRecord(focusByViewport[viewport])
       ? focusByViewport[viewport]
       : undefined;
-    const inheritedFocus = viewport === "mobile" && isVisualRecord(focusByViewport.desktop)
-      ? focusByViewport.desktop
-      : undefined;
-    const rawFocus = directFocus ?? inheritedFocus;
+    const rawFocus = directFocus;
     const typography = isVisualRecord(node.typography) ? node.typography : undefined;
     return {
       enabled: typeof node.enabled === "boolean" ? node.enabled : undefined,
@@ -87,8 +81,7 @@ export function resolveVisualNode(
           ? node.zIndexByViewport
           : {};
         const direct = zIndexes[viewport];
-        const inherited = viewport === "mobile" ? zIndexes.desktop : undefined;
-        const rawZIndex = direct ?? inherited;
+        const rawZIndex = direct;
         return Number.isInteger(Number(rawZIndex))
           ? clamp(rawZIndex, 0, 20, 2)
           : undefined;

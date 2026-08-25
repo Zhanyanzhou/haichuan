@@ -15,6 +15,8 @@ export interface FeaturedProductPuckProps {
   layout: "imageLeft" | "imageRight";
   showPrice: boolean;
   bgColor: string;
+  /** 模板库专用，只参与缩略图渲染，不进入 defaultProps / PageDocument。 */
+  __previewProduct?: ProductRow;
   locked?: boolean;
 }
 
@@ -59,14 +61,26 @@ function FeaturedProductPreview(props: FeaturedProductPuckProps) {
 
   const module = useMemo(() => {
     const result = convertPuckProps("单品焦点推荐", props as any);
-    if (result) (result as any).content.product = toProduct(product);
+    if (result) (result as any).content.product = toProduct(props.__previewProduct ?? product);
     return result;
   }, [product, props]);
 
   if (!module) return null;
-  if (loading) return <section style={{ padding: 56, textAlign: "center", background: props.bgColor }}>正在加载主推商品</section>;
-  if (error) return <section role="alert" style={{ padding: 56, textAlign: "center", background: props.bgColor, color: "#8C3F3B" }}>主推商品加载失败，请稍后重试</section>;
-  return <FeaturedProductBlock module={module} editMode />;
+  return (
+    <>
+      {loading ? (
+        <p role="status" style={{ margin: 0, padding: "10px 20px", textAlign: "center", background: "#F4F5F5", color: "#5F6568", fontSize: 12 }}>
+          正在加载主推商品，当前构图保持可编辑
+        </p>
+      ) : null}
+      {error ? (
+        <p role="alert" style={{ margin: 0, padding: "10px 20px", textAlign: "center", background: "#FAF0EF", color: "#8C3F3B", fontSize: 12 }}>
+          主推商品加载失败，当前构图仍可调整
+        </p>
+      ) : null}
+      <FeaturedProductBlock module={module} editMode />
+    </>
+  );
 }
 
 export const featuredProductPuckConfig = {

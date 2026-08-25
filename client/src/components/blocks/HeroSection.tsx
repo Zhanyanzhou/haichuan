@@ -173,6 +173,14 @@ export default function HeroSection({
         ) : null}
       </div>
 
+      {title || subtitle || (actionText && targetUrl) || editMode ? (
+        <div
+          aria-hidden="true"
+          className="hc-phase1-hero__copy-shade"
+          data-align={alignment}
+        />
+      ) : null}
+
       {/* 桌面位于图片安全区；平板和手机由共享布局移到图片下方。 */}
       {title || subtitle || (actionText && targetUrl) || editMode ? (
         <div className="hc-phase1-hero__copy-band">
@@ -285,6 +293,16 @@ export default function HeroSection({
         .hc-phase1-hero__copy-band {
           z-index: 3;
         }
+        .hc-phase1-hero__copy-shade {
+          position: absolute;
+          inset: 0;
+          z-index: 2;
+          pointer-events: none;
+          background: linear-gradient(90deg, rgba(10, 12, 13, 0.58) 0%, rgba(10, 12, 13, 0.26) 38%, rgba(10, 12, 13, 0) 68%);
+        }
+        .hc-phase1-hero__copy-shade[data-align="center"] {
+          background: linear-gradient(0deg, rgba(10, 12, 13, 0.54) 0%, rgba(10, 12, 13, 0.12) 38%, rgba(10, 12, 13, 0) 68%);
+        }
         .hc-phase1-hero--edit .hc-phase1-hero__copy-band {
           pointer-events: auto;
         }
@@ -314,6 +332,9 @@ export default function HeroSection({
         }
         @media ${RESPONSIVE_CANVAS.mobileMediaQuery} {
           .hc-hero__image { object-position: var(--hc-hero-focus-mobile); }
+        }
+        @media (max-width: 1023px) {
+          .hc-phase1-hero__copy-shade { display: none; }
         }
         @media (prefers-reduced-motion: reduce) {
           .hc-hero__reveal {

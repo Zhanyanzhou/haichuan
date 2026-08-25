@@ -1,14 +1,15 @@
 /**
- * blockMeta.ts — 所有区块/模块的唯一元数据来源
+ * blockMeta.ts — 区块库展示元数据
  *
- * puckConfig、HomepageConfig、模板库、模块分类筛选均从该文件引用，
- * 新增区块只需在此文件中添加一条记录。
+ * puckConfig、HomepageConfig 与模板库从该文件读取运营展示信息；
+ * 模板商业目的、结构与能力仍以机器合同为唯一事实源。
  *
  * mode/master 字段是 Brand/Commerce 双模式与 12 母版体系的挂靠点
  * (单一来源:page-builder/designSystem/masters)。
  */
 
 import type { DesignMode, MasterId } from "../designSystem/masters";
+import type { ContentTemplateCommercialPurpose } from "../generated/contentTemplates.generated";
 import {
   CONTENT_TEMPLATE_CONTRACTS,
   CONTENT_TEMPLATE_REGISTRY,
@@ -16,7 +17,7 @@ import {
 
 /**
  * 模板是否可从模块库新建，只由机器合同的实施状态决定。
- * 当前 23 个运营模板均为 active；状态不会影响存量页面的公开渲染。
+ * 当前 24 个运营模板均为 active；状态不会影响存量页面的公开渲染。
  */
 export type ContentTemplateImplementationStatus =
   (typeof CONTENT_TEMPLATE_REGISTRY)[number]["implementationStatus"];
@@ -42,21 +43,14 @@ export function isContentTemplateInsertable(moduleType: string): boolean {
 }
 
 /* ═══════ 区块分类 ═══════ */
-export type BlockCategory =
-  | "视觉展示"
-  | "图文内容"
-  | "商品展示"
-  | "导航入口"
-  | "服务信息"
-  | "活动内容";
+export type BlockCategory = ContentTemplateCommercialPurpose;
 
 export const BLOCK_CATEGORIES: BlockCategory[] = [
-  "视觉展示",
-  "图文内容",
-  "商品展示",
-  "导航入口",
-  "服务信息",
-  "活动内容",
+  "品牌展示",
+  "商品销售",
+  "活动转化",
+  "内容传播",
+  "信任建立",
 ];
 
 /* ═══════ 预览图种类（用于微缩布局图） ═══════ */
@@ -64,6 +58,7 @@ export const BLOCK_PREVIEW_KIND: Record<string, string> = {
   首屏主视觉: "hero",
   单图海报: "single-poster",
   双图海报: "double-poster",
+  工艺细节: "craft-details",
   全屏出血图: "full-bleed",
   作品画廊: "asymmetric-gallery",
   改款对比: "before-after",
@@ -91,6 +86,7 @@ export const TEMPLATE_MEDIA_HINT: Record<string, string> = {
   首屏主视觉: `桌面横图(${CONTENT_TEMPLATE_CONTRACTS.hero.media[0].desktopRatio}) + 手机竖图(${CONTENT_TEMPLATE_CONTRACTS.hero.media[1].mobileRatio})`,
   单图海报: `桌面 ${CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[0].desktopRatio} + 手机 ${CONTENT_TEMPLATE_CONTRACTS.singlePoster.media[1].mobileRatio} 双端海报`,
   双图海报: `主图 ${CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[0].desktopRatio} 与细节图 ${CONTENT_TEMPLATE_CONTRACTS.doublePoster.media[1].desktopRatio}`,
+  工艺细节: `工艺主图 ${CONTENT_TEMPLATE_CONTRACTS.craftDetails.media[0].desktopRatio} + 两张细节图 ${CONTENT_TEMPLATE_CONTRACTS.craftDetails.media[1].desktopRatio}`,
   全屏出血图: `桌面 ${CONTENT_TEMPLATE_CONTRACTS.fullBleed.media[0].desktopRatio} + 手机 ${CONTENT_TEMPLATE_CONTRACTS.fullBleed.media[1].mobileRatio}`,
   作品画廊: "建议 3–5 张,主图 4:5",
   轮播图: `桌面 ${CONTENT_TEMPLATE_CONTRACTS.carousel.media[0].desktopRatio} + 手机 ${CONTENT_TEMPLATE_CONTRACTS.carousel.media[0].mobileRatio}`,
@@ -137,7 +133,7 @@ export interface BlockMeta {
   /**
    * 所属视觉母版 — 归档元数据(2026-08-18:rhythm.ts 退役后无运行时消费者)。
    * 运行时构图由各区块 DecorSection master 决定;合同侧母版词汇以契约
-   * master 字段(23 个模板专属 id)为准,两者不再强行映射。
+   * master 字段(当前模板合同 id)为准,两者不再强行映射。
    */
   master: MasterId;
   /** Brand=奢侈品牌视觉 / Commerce=高端电商视觉 */
@@ -147,7 +143,7 @@ export interface BlockMeta {
 export const BLOCK_META: Record<string, BlockMeta> = {
   首屏主视觉: {
     name: "首屏",
-    category: "视觉展示",
+    category: CONTENT_TEMPLATE_CONTRACTS.hero.commercialPurpose,
     order: 1,
     type: "主视觉",
     badge: "核心模板",
@@ -160,7 +156,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   单图海报: {
     name: "单图文",
-    category: "图文内容",
+    category: CONTENT_TEMPLATE_CONTRACTS.singlePoster.commercialPurpose,
     order: 1,
     type: "单图",
     description: "38/62 编辑式图文分栏，适合品牌故事、人物与服务叙事。",
@@ -171,7 +167,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   双图海报: {
     name: "双图文",
-    category: "图文内容",
+    category: CONTENT_TEMPLATE_CONTRACTS.doublePoster.commercialPurpose,
     order: 2,
     type: "双图",
     description: "主图+细节图的非对称双幅叙事，呈现系列、工艺或作品对照。",
@@ -179,9 +175,20 @@ export const BLOCK_META: Record<string, BlockMeta> = {
     master: CONTENT_TEMPLATE_CONTRACTS.doublePoster.master,
     mode: "brand",
   },
+  工艺细节: {
+    name: "工艺细节",
+    category: CONTENT_TEMPLATE_CONTRACTS.craftDetails.commercialPurpose,
+    order: 3,
+    type: "三图工艺",
+    description: "一张主图与两张局部细节形成由整体到材质的工艺叙事。",
+    tags: ["工艺", "材质", "编辑叙事"],
+    recommended: true,
+    master: CONTENT_TEMPLATE_CONTRACTS.craftDetails.master,
+    mode: "brand",
+  },
   作品画廊: {
     name: "作品画廊",
-    category: "商品展示",
+    category: CONTENT_TEMPLATE_CONTRACTS.gallery.commercialPurpose,
     order: 3,
     type: "画廊",
     badge: "作品页核心",
@@ -194,7 +201,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   改款对比: {
     name: "前后对比",
-    category: "图文内容",
+    category: CONTENT_TEMPLATE_CONTRACTS.comparison.commercialPurpose,
     order: 5,
     type: "改款对比",
     description: "滑动分割线对比改款前/后的同比例影像，承载旧物新生的情感叙事。",
@@ -205,7 +212,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   全屏出血图: {
     name: "通栏图",
-    category: "视觉展示",
+    category: CONTENT_TEMPLATE_CONTRACTS.fullBleed.commercialPurpose,
     order: 2,
     type: "单张海报",
     description: "全宽定比大图建立高级氛围，适合章节转场、工艺沉浸与尾章。",
@@ -215,7 +222,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   产品展示行: {
     name: "商品列表",
-    category: "商品展示",
+    category: CONTENT_TEMPLATE_CONTRACTS.productRow.commercialPurpose,
     order: 2,
     type: "单品",
     badge: "推荐",
@@ -227,7 +234,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   分类卡片: {
     name: "品类入口",
-    category: "导航入口",
+    category: CONTENT_TEMPLATE_CONTRACTS.categoryCards.commercialPurpose,
     order: 1,
     type: "分类入口",
     description: "让访客按系列或品类快速进入选购。",
@@ -237,7 +244,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   卡片网格: {
     name: "品牌要点",
-    category: "服务信息",
+    category: CONTENT_TEMPLATE_CONTRACTS.brandPoints.commercialPurpose,
     order: 1,
     type: "服务预设",
     description: "以简洁条目呈现工艺、材质与服务承诺（电商场景专用）。",
@@ -247,7 +254,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   文字横幅: {
     name: "纯文字",
-    category: "图文内容",
+    category: CONTENT_TEMPLATE_CONTRACTS.textBanner.commercialPurpose,
     order: 3,
     type: "横幅",
     description: "纯文字与大留白：品牌宣言、章节标题或极简行动引导。",
@@ -257,7 +264,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   轮播图: {
     name: "轮播",
-    category: "视觉展示",
+    category: CONTENT_TEMPLATE_CONTRACTS.carousel.commercialPurpose,
     order: 4,
     type: "轮播",
     description: "同时展示多个系列或活动主视觉（建议仅电商与活动页使用）。",
@@ -267,7 +274,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   视频区块: {
     name: "视频",
-    category: "视觉展示",
+    category: CONTENT_TEMPLATE_CONTRACTS.video.commercialPurpose,
     order: 3,
     type: "视频",
     description: "用动态影像呈现工艺细节和品牌质感。",
@@ -277,7 +284,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   热区图: {
     name: "图片热区",
-    category: "导航入口",
+    category: CONTENT_TEMPLATE_CONTRACTS.hotspot.commercialPurpose,
     order: 3,
     type: "热区",
     description: "在场景大图上建立可点击区域，把视觉内容转为导购入口。",
@@ -287,7 +294,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   预约入口: {
     name: "预约入口",
-    category: "服务信息",
+    category: CONTENT_TEMPLATE_CONTRACTS.booking.commercialPurpose,
     order: 6,
     type: "预约",
     badge: "转化",
@@ -299,7 +306,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   资质证书: {
     name: "证书展示",
-    category: "服务信息",
+    category: CONTENT_TEMPLATE_CONTRACTS.certificates.commercialPurpose,
     order: 3,
     type: "证书",
     description: "以画廊式图墙展示国检 / IGI / 材质等权威认证。",
@@ -310,7 +317,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   定制流程: {
     name: "内容流程",
-    category: "图文内容",
+    category: CONTENT_TEMPLATE_CONTRACTS.journey.commercialPurpose,
     order: 4,
     type: "旅程",
     description: "01–05 大字叙事呈现定制旅程，而非功能步骤条。",
@@ -321,7 +328,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   服务承诺: {
     name: "服务承诺",
-    category: "服务信息",
+    category: CONTENT_TEMPLATE_CONTRACTS.servicePromises.commercialPurpose,
     order: 2,
     type: "承诺",
     badge: "服务预设",
@@ -333,7 +340,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   门店信息: {
     name: "门店信息",
-    category: "服务信息",
+    category: CONTENT_TEMPLATE_CONTRACTS.storeInfo.commercialPurpose,
     order: 4,
     type: "门店",
     description: "门店空间、地址、营业时间与联系方式。",
@@ -344,7 +351,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   单品焦点推荐: {
     name: "单品展示",
-    category: "商品展示",
+    category: CONTENT_TEMPLATE_CONTRACTS.featuredProduct.commercialPurpose,
     order: 1,
     type: "主推单品",
     badge: "高转化",
@@ -357,7 +364,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   佩戴灵感: {
     name: "佩戴展示",
-    category: "商品展示",
+    category: CONTENT_TEMPLATE_CONTRACTS.wearingInspiration.commercialPurpose,
     order: 4,
     type: "场景种草",
     description: "以佩戴大片串联可直接查看的关联作品。",
@@ -369,7 +376,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   限时活动: {
     name: "限时活动",
-    category: "活动内容",
+    category: CONTENT_TEMPLATE_CONTRACTS.limitedEvent.commercialPurpose,
     order: 1,
     type: "活动倒计时",
     badge: "限时",
@@ -382,7 +389,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   真实评价与实拍: {
     name: "顾客分享",
-    category: "服务信息",
+    category: CONTENT_TEMPLATE_CONTRACTS.testimonials.commercialPurpose,
     order: 5,
     type: "顾客口碑",
     description: "以引语与实拍补充第三方信任证据。",
@@ -393,7 +400,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
   },
   按场景选购: {
     name: "场景入口",
-    category: "导航入口",
+    category: CONTENT_TEMPLATE_CONTRACTS.sceneShopping.commercialPurpose,
     order: 2,
     type: "场景入口",
     badge: "运营预设",
@@ -414,7 +421,7 @@ export function getCategoryComponents(): Record<string, { defaultExpanded: boole
   const map: Record<string, { defaultExpanded: boolean; components: string[] }> = {};
   for (const cat of BLOCK_CATEGORIES) {
     map[cat] = {
-      defaultExpanded: cat === "视觉展示",
+      defaultExpanded: cat === "品牌展示",
       components: Object.entries(BLOCK_META)
         .filter(([, meta]) => meta.category === cat)
         .sort(([, left], [, right]) => left.order - right.order)

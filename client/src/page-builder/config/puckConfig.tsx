@@ -12,13 +12,18 @@ import { singlePosterPuckConfig } from "../adapters/singlePoster.puck";
 import type { SinglePosterPuckProps } from "../adapters/singlePoster.puck";
 import { doublePosterPuckConfig } from "../adapters/doublePoster.puck";
 import type { DoublePosterPuckProps } from "../adapters/doublePoster.puck";
+import { craftDetailsPuckConfig } from "../adapters/craftDetails.puck";
+import type { CraftDetailsPuckProps } from "../adapters/craftDetails.puck";
 import { fullBleedPuckConfig } from "../adapters/fullBleed.puck";
 import type { FullBleedPuckProps } from "../adapters/fullBleed.puck";
 import { textBannerPuckConfig } from "../adapters/textBanner.puck";
 import type { TextBannerPuckProps } from "../adapters/textBanner.puck";
 import { productRowPuckConfig } from "../adapters/productRow.puck";
 import type { ProductRowPuckProps } from "../adapters/productRow.puck";
-import { categoryCardsPuckConfig } from "../adapters/categoryCards.puck";
+import {
+  categoryCardsPuckConfig,
+  renderCategoryCardsPuck,
+} from "../adapters/categoryCards.puck";
 import type { CategoryCardsPuckProps } from "../adapters/categoryCards.puck";
 import {
   cardGridPuckConfig,
@@ -61,6 +66,7 @@ type MyComponents = {
   首屏主视觉: HeroPuckProps;
   单图海报: SinglePosterPuckProps;
   双图海报: DoublePosterPuckProps;
+  工艺细节: CraftDetailsPuckProps;
   全屏出血图: FullBleedPuckProps;
   文字横幅: TextBannerPuckProps;
   作品画廊: GalleryPuckProps;
@@ -120,6 +126,7 @@ export const puckConfig: Config<MyComponents> = {
     首屏主视觉: withContractRenderer("首屏主视觉", heroPuckConfig),
     单图海报: withContractRenderer("单图海报", singlePosterPuckConfig),
     双图海报: withContractRenderer("双图海报", doublePosterPuckConfig),
+    工艺细节: withContractRenderer("工艺细节", craftDetailsPuckConfig),
     全屏出血图: withContractRenderer("全屏出血图", fullBleedPuckConfig),
     文字横幅: withContractRenderer("文字横幅", textBannerPuckConfig),
     作品画廊: withContractRenderer("作品画廊", galleryPuckConfig),
@@ -160,6 +167,8 @@ export const puckConfig: Config<MyComponents> = {
     真实评价与实拍: withContractRenderer("真实评价与实拍", testimonialPuckConfig),
     按场景选购: withContractRenderer("按场景选购", {
       ...categoryCardsPuckConfig,
+      render: (props: CategoryCardsPuckProps) =>
+        renderCategoryCardsPuck(props, "sceneShopping"),
       defaultProps: {
         title: "场景选款",
         subtitle: "从重要时刻出发，挑选一件恰到好处的珠宝。",
