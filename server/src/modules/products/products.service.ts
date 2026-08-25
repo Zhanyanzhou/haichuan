@@ -28,6 +28,59 @@ import { MessageEvent } from "@nestjs/common";
 import { ProductMediaService } from "./product-media.service";
 import { ProductAccessService } from "./product-access.service";
 import { Cron, CronExpression } from "@nestjs/schedule";
+import { createHash } from "node:crypto";
+
+const PRODUCT_QUALITY_GATE_VERSION = "p0-product-quality-v1";
+const FORBIDDEN_PUBLIC_CONTENT =
+  /(?:\be2e\b|\btest\b|\bmock\b|\bseed\b|\bdemo\b|测试|样例|示例|演示|占位|待替换)/i;
+const MOJIBAKE_OR_REPLACEMENT = /[\u00c0-\u00ff]|\uFFFD/;
+
+function hasRepeatedPlaceholderText(value: string): boolean {
+  const compact = value.replace(/\s+/g, "");
+  return /(.)\1{3,}/u.test(compact) || /(.{2,4})\1{2,}/u.test(compact);
+}
+
+function isMeaningfulPublicText(value: unknown, minimumLength: number): boolean {
+  if (typeof value !== "string") return false;
+  const text = value.trim();
+  if (text.length < minimumLength) return false;
+  if (FORBIDDEN_PUBLIC_CONTENT.test(text) || MOJIBAKE_OR_REPLACEMENT.test(text)) return false;
+  if (/^[\d\s\p{P}\p{S}]+$/u.test(text)) return false;
+  return !hasRepeatedPlaceholderText(text);
+}
+
+function hasMeaningfulDetailContent(value: unknown): boolean {
+  if (value == null) return false;
+  const serialized = JSON.stringify(value);
+  if (!serialized || serialized === "{}" || serialized === "[]") return false;
+  return !FORBIDDEN_PUBLIC_CONTENT.test(serialized) && !MOJIBAKE_OR_REPLACEMENT.test(serialized);
+}
+
+function publicationQualityHash(product: any): string {
+  const snapshot = {
+    version: PRODUCT_QUALITY_GATE_VERSION,
+    code: product.code,
+    name: product.name,
+    shortDescription: product.shortDescription,
+    description: product.description,
+    detailContent: product.detailContent,
+    materialType: product.materialType,
+    goldWeight: product.goldWeight == null ? null : String(product.goldWeight),
+    weight: product.weight == null ? null : String(product.weight),
+    salesMode: product.salesMode,
+    inventoryPolicy: product.inventoryPolicy,
+    primaryImageId: product.primaryImage?.id ?? null,
+    listingImageId: product.listingImage?.id ?? null,
+    imageIds: (product.images || []).map((image: any) => image.id).sort((a: number, b: number) => a - b),
+    skus: (product.skus || []).map((sku: any) => ({
+      id: sku.id,
+      price: String(sku.price),
+      goldWeight: sku.goldWeight == null ? null : String(sku.goldWeight),
+      inventoryRecords: sku.inventories?.length ?? 0,
+    })),
+  };
+  return createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+}
 
 const CUSTOMER_FACING_IMAGE_SELECT = {
   id: true,
@@ -268,7 +321,12 @@ function mapCreateDto(dto: CreateProductDto): Prisma.ProductCreateInput {
 
 /** 从 DTO 提取 Prisma update 数据，仅包含前端传入的字段 */
 function mapUpdateDto(dto: UpdateProductDto): Prisma.ProductUpdateInput {
-  const data: Prisma.ProductUpdateInput = {};
+  const data: Prisma.ProductUpdateInput = {
+    // 任意业务内容编辑先退出正式发布质量态；已发布商品会在同一事务末尾重新校验。
+    publicationQualityStatus: "QUARANTINED",
+    publicationQualityHash: null,
+    publicationQualityCheckedAt: null,
+  };
 
   if (dto.name !== undefined) data.name = dto.name;
   if (dto.categoryId !== undefined) {
@@ -545,6 +603,7 @@ export class ProductsService {
         name: true,
         price: true,
         status: true,
+        publicationQualityStatus: true,
         visibility: true,
         deletedAt: true,
         category: { select: { id: true, name: true } },
@@ -598,6 +657,7 @@ export class ProductsService {
         name: product.name,
         price: product.price,
         status: product.status,
+        publicationQualityStatus: product.publicationQualityStatus,
         visibility: product.visibility,
         category: product.category,
         thumbnail: imageId
@@ -1489,12 +1549,24 @@ export class ProductsService {
       select: {
         code: true,
         name: true,
+        shortDescription: true,
+        description: true,
+        detailContent: true,
+        materialType: true,
+        goldWeight: true,
+        weight: true,
         category: { select: { isActive: true, deletedAt: true } },
         salesMode: true,
         inventoryPolicy: true,
         price: true,
         deliveryMethods: true,
         shippingTemplate: { select: { isActive: true } },
+        primaryImage: {
+          select: { id: true, url: true, storageKey: true, isVideo: true, mimeType: true },
+        },
+        listingImage: {
+          select: { id: true, url: true, storageKey: true, isVideo: true, mimeType: true },
+        },
         images: {
           where: { isVideo: false },
           select: {
@@ -1510,6 +1582,7 @@ export class ProductsService {
           select: {
             id: true,
             price: true,
+            goldWeight: true,
             inventories: { select: { quantity: true } },
           },
         },
@@ -1517,14 +1590,34 @@ export class ProductsService {
     });
     if (!product) throw new NotFoundException("商品不存在或已删除");
     const errors: string[] = [];
-    if (!product.name.trim() || !product.code.trim()) errors.push("有效的商品名称与货号");
+    if (!isMeaningfulPublicText(product.name, 2) || !product.code.trim())
+      errors.push("有效且非测试/乱码的商品名称与货号");
+    if (FORBIDDEN_PUBLIC_CONTENT.test(product.code) || MOJIBAKE_OR_REPLACEMENT.test(product.code))
+      errors.push("正式商品货号（禁止 E2E、Mock、Seed 或乱码标记）");
+    if (!isMeaningfulPublicText(product.shortDescription, 8))
+      errors.push("至少 8 个有效字符的正式商品简介");
+    if (!isMeaningfulPublicText(product.description, 20))
+      errors.push("至少 20 个有效字符的正式商品说明");
+    if (!hasMeaningfulDetailContent(product.detailContent))
+      errors.push("非测试且非空的商品详情内容");
     if (!product.category.isActive || product.category.deletedAt)
       errors.push("有效且启用的商品分类");
+
+    const hasPositiveWeight = [
+      product.goldWeight,
+      product.weight,
+      ...product.skus.map((sku) => sku.goldWeight),
+    ].some((value) => Number(value) > 0);
+    if (!hasPositiveWeight) errors.push("与材质一致且大于 0g 的商品或 SKU 重量");
 
     const hasReadableImage = product.images.some((image) =>
       this.productMedia.isProductMediaReadable(image),
     );
     if (!hasReadableImage) errors.push("至少一张可读取的非视频商品图片");
+    if (!product.primaryImage || !this.productMedia.isProductMediaReadable(product.primaryImage))
+      errors.push("已指定且可读取的详情主图");
+    if (!product.listingImage || !this.productMedia.isProductMediaReadable(product.listingImage))
+      errors.push("已指定且可读取的列表图");
 
     switch (product.salesMode) {
       case "DIRECT_PURCHASE": {
@@ -1555,6 +1648,16 @@ export class ProductsService {
     if (errors.length > 0) {
       throw new BadRequestException(`发布前请补全: ${errors.join("、")}`);
     }
+    const qualityHash = publicationQualityHash(product);
+    await db.product.update({
+      where: { id: productId },
+      data: {
+        publicationQualityStatus: "READY",
+        publicationQualityHash: qualityHash,
+        publicationQualityCheckedAt: new Date(),
+      },
+    });
+    return { status: "READY" as const, qualityHash };
   }
 
   /** Product.price 只由此处写入，值为有效且有价 SKU 的最低价。 */

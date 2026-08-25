@@ -6,11 +6,13 @@ import { ProductsService } from "./products.service";
 
 type Status = "DRAFT" | "PUBLISHED" | "OFFLINE" | "ARCHIVED";
 type Visibility = "PUBLIC" | "MEMBER" | "PARTNER" | "INTERNAL";
+type PublicationQualityStatus = "QUARANTINED" | "READY";
 
 interface SkuRecord {
   id: number;
   isActive: boolean;
   price: number;
+  goldWeight?: number | null;
   inventories?: Array<{ quantity: number }>;
 }
 
@@ -27,8 +29,17 @@ interface ProductRecord {
   status: Status;
   deletedAt: Date | null;
   visibility: Visibility;
+  publicationQualityStatus: PublicationQualityStatus;
+  publicationQualityHash?: string | null;
+  publicationQualityCheckedAt?: Date | null;
   name: string;
   code: string;
+  shortDescription: string;
+  description: string;
+  detailContent: unknown;
+  materialType: string;
+  goldWeight: number | null;
+  weight: number | null;
   category: { isActive: boolean; deletedAt: Date | null };
   salesMode: "DISPLAY_ONLY" | "SELECTION" | "APPOINTMENT" | "DIRECT_PURCHASE" | "CUSTOM_INQUIRY";
   inventoryPolicy: "STANDARD" | "SINGLE_UNIT";
@@ -36,6 +47,9 @@ interface ProductRecord {
   shippingTemplate: { isActive: boolean } | null;
   price: number;
   primaryImageId: number | null;
+  listingImageId: number | null;
+  primaryImage?: ImageRecord | null;
+  listingImage?: ImageRecord | null;
   images: ImageRecord[];
   skus: SkuRecord[];
   publishedAt?: Date | null;
@@ -46,6 +60,7 @@ interface Where {
   deletedAt?: null;
   status?: Status | { not: Status };
   visibility?: Visibility | { in: Visibility[] };
+  publicationQualityStatus?: PublicationQualityStatus;
 }
 
 function matches(record: ProductRecord, where: Where): boolean {
@@ -77,6 +92,12 @@ function matches(record: ProductRecord, where: Where): boolean {
       return false;
     }
   }
+  if (
+    where.publicationQualityStatus !== undefined &&
+    record.publicationQualityStatus !== where.publicationQualityStatus
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -85,9 +106,18 @@ function product(
 ): ProductRecord {
   const record: ProductRecord = {
     visibility: "PUBLIC",
+    publicationQualityStatus: "READY",
+    publicationQualityHash: "a".repeat(64),
+    publicationQualityCheckedAt: new Date("2026-08-24T00:00:00.000Z"),
     deletedAt: null,
-    name: "测试商品",
-    code: `TEST-${partial.id}`,
+    name: "海川典藏手工作品",
+    code: `HC-${partial.id}`,
+    shortDescription: "以匠心工艺呈现经典东方珠宝美感",
+    description: "精选可追溯材质并由资深匠人完成制作，每件作品均经过独立质量检查后呈现。",
+    detailContent: [{ type: "TEXT", text: "正式商品材质、工艺与保养说明。" }],
+    materialType: "GOLD_999",
+    goldWeight: 10,
+    weight: 12,
     category: { isActive: true, deletedAt: null },
     salesMode: "DIRECT_PURCHASE",
     inventoryPolicy: "STANDARD",
@@ -95,6 +125,10 @@ function product(
     shippingTemplate: null,
     price: 0,
     primaryImageId: null,
+    listingImageId:
+      partial.listingImageId === undefined
+        ? (partial.primaryImageId ?? null)
+        : partial.listingImageId,
     images: [],
     skus: [],
     ...partial,
@@ -102,6 +136,20 @@ function product(
   if (record.primaryImageId && record.images.length === 0) {
     record.images = [{ id: record.primaryImageId, url: "https://example.test/product.jpg", isVideo: false }];
   }
+  if (
+    record.listingImageId &&
+    !record.images.some((image) => image.id === record.listingImageId)
+  ) {
+    record.images.push({
+      id: record.listingImageId,
+      url: "https://example.test/product-listing.jpg",
+      isVideo: false,
+    });
+  }
+  record.primaryImage =
+    record.images.find((image) => image.id === record.primaryImageId) || null;
+  record.listingImage =
+    record.images.find((image) => image.id === record.listingImageId) || null;
   record.skus = record.skus.map((sku) => ({
     ...sku,
     inventories: sku.inventories ?? [{ quantity: 0 }],
@@ -323,7 +371,7 @@ test("canPublish：缺价格或图片时不可发布", async () => {
 });
 
 test("canPublish：价格、图片、有价启用 SKU 齐备时允许发布", async () => {
-  const { service } = createService([
+  const { service, records } = createService([
     product({
       id: 1,
       status: "DRAFT",
@@ -333,6 +381,38 @@ test("canPublish：价格、图片、有价启用 SKU 齐备时允许发布", as
     }),
   ]);
   await assert.doesNotReject(() => service.canPublish(1));
+  assert.equal(records[0].publicationQualityStatus, "READY");
+  assert.match(records[0].publicationQualityHash || "", /^[a-f0-9]{64}$/);
+});
+
+test("canPublish：拒绝 E2E、乱码、重复占位文案与 0g 商品", async () => {
+  const invalidProducts = [
+    product({ id: 401, status: "DRAFT", name: "E2E 测试商品", primaryImageId: 1 }),
+    product({ id: 402, status: "DRAFT", name: "å®šåˆ¶é¦–é¥°", primaryImageId: 1 }),
+    product({ id: 403, status: "DRAFT", description: "发发发反反复复反反复复", primaryImageId: 1 }),
+    product({ id: 404, status: "DRAFT", goldWeight: 0, weight: 0, primaryImageId: 1 }),
+  ];
+  for (const invalid of invalidProducts) {
+    const { service } = createService([invalid]);
+    await assert.rejects(() => service.canPublish(invalid.id), BadRequestException);
+  }
+});
+
+test("canPublish：详情主图与列表图必须分别明确且可读取", async () => {
+  const missingListing = createService([
+    product({
+      id: 405,
+      status: "DRAFT",
+      salesMode: "DISPLAY_ONLY",
+      primaryImageId: 1,
+      listingImageId: null,
+    }),
+  ]);
+  await assert.rejects(
+    () => missingListing.service.canPublish(405),
+    (error: unknown) =>
+      error instanceof BadRequestException && /列表图/.test(error.message),
+  );
 });
 
 test("状态接口写入 PUBLISHED 必须经过 canPublish 门禁", async () => {
@@ -532,7 +612,7 @@ test("已发布商品 SKU 更新破坏门禁时返回 409，并由事务回滚�
   assert.equal(records[0].price, 100);
 });
 
-test("游客公开列表仅返回 PUBLISHED + PUBLIC + 未删除商品", async () => {
+test("第一阶段公开列表不因存量质量状态隐藏已发布商品", async () => {
   const { service } = createService([
     product({ id: 1, status: "PUBLISHED", visibility: "PUBLIC" }),
     product({ id: 2, status: "OFFLINE", visibility: "PUBLIC" }),
@@ -547,11 +627,17 @@ test("游客公开列表仅返回 PUBLISHED + PUBLIC + 未删除商品", async (
     product({ id: 6, status: "PUBLISHED", visibility: "MEMBER" }),
     product({ id: 7, status: "PUBLISHED", visibility: "PARTNER" }),
     product({ id: 8, status: "PUBLISHED", visibility: "INTERNAL" }),
+    product({
+      id: 9,
+      status: "PUBLISHED",
+      visibility: "PUBLIC",
+      publicationQualityStatus: "QUARANTINED",
+    }),
   ]);
   const result = await service.findPublic({});
   const ids = result.list.map((p) => Number(p.id)).sort((a, b) => a - b);
-  assert.deepEqual(ids, [1]);
-  assert.equal(result.total, 1);
+  assert.deepEqual(ids, [1, 9]);
+  assert.equal(result.total, 2);
 });
 
 test("已发布商品改为 OFFLINE 或 ARCHIVED 后公开查询不再返回", async () => {

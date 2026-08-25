@@ -109,6 +109,9 @@ model Product {
   craftTechnique          Json?                  @map("craft_technique") // 工艺技法JSON
   detailContent           Json?                  @map("detail_content") // 模块化详情：图片/文字块
   status                  ProductStatus          @default(DRAFT)
+  publicationQualityStatus ProductPublicationQualityStatus @default(QUARANTINED) @map("publication_quality_status")
+  publicationQualityHash   String?                @map("publication_quality_hash") @db.Char(64)
+  publicationQualityCheckedAt DateTime?           @map("publication_quality_checked_at")
   // 商品可见范围分级（受控产品库核心字段）
   // PUBLIC=公开宣传款（本期不迁移旧商品到此）；MEMBER=登录会员可见（默认）；
   // PARTNER=仅审核通过的合作商家可见；INTERNAL=仅后台员工可见，前台永不展示。
@@ -168,6 +171,7 @@ model Product {
   @@index([isHot])
   @@index([categoryId, status]) // 复合索引：按分类+状态查询
   @@index([status, visibility]) // 受控目录：按状态+可见范围过滤
+  @@index([status, visibility, publicationQualityStatus], map: "products_publication_quality_idx")
   @@index([categoryId, status, visibility]) // 分类目录组合查询
   @@index([visibility])
   @@index([deletedAt]) // 软删除过滤
@@ -194,6 +198,12 @@ enum ProductStatus {
   PUBLISHED // 已发布(上架)
   OFFLINE // 已下架
   ARCHIVED // 已归档
+}
+
+// 公开商品必须通过当前内容、材质、媒体与销售模式门禁；旧数据默认隔离。
+enum ProductPublicationQualityStatus {
+  QUARANTINED
+  READY
 }
 
 // 商品可见范围分级（受控产品库）
