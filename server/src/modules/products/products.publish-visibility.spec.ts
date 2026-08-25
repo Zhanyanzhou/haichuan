@@ -159,6 +159,7 @@ function product(
 
 function createService(initial: ProductRecord[], mediaReadable = true) {
   const records = initial.map((r) => ({ ...r }));
+  let productUpdateCount = 0;
 
   const findFirst = async ({
     where,
@@ -218,8 +219,18 @@ function createService(initial: ProductRecord[], mediaReadable = true) {
         if (!record) throw new Error("测试数据不存在");
         return { ...record };
       },
-      findMany: async ({ where }: { where: Where }) =>
-        records.filter((r) => matches(r, where)).map((r) => ({ ...r })),
+      findMany: async ({ where, cursor, skip = 0, take }: any) => {
+        const matching = records
+          .filter((r) => matches(r, where))
+          .sort((a, b) => a.id - b.id);
+        const cursorIndex = cursor
+          ? matching.findIndex((record) => record.id === cursor.id)
+          : -1;
+        const start = Math.max(0, cursorIndex + skip);
+        return matching
+          .slice(start, take === undefined ? undefined : start + take)
+          .map((r) => ({ ...r }));
+      },
       count: async ({ where }: { where: Where }) =>
         records.filter((r) => matches(r, where)).length,
       update: async ({
@@ -229,6 +240,7 @@ function createService(initial: ProductRecord[], mediaReadable = true) {
         where: { id: number };
         data: Record<string, any>;
       }) => {
+        productUpdateCount += 1;
         const record = records.find((r) => r.id === where.id);
         if (!record) throw new Error("测试数据不存在");
         Object.assign(record, data);
@@ -292,7 +304,7 @@ function createService(initial: ProductRecord[], mediaReadable = true) {
     } as never,
     {} as never,
   );
-  return { service, records };
+  return { service, records, getProductUpdateCount: () => productUpdateCount };
 }
 
 test("canPublish：没有 SKU 时不可发布", async () => {
@@ -383,6 +395,82 @@ test("canPublish：价格、图片、有价启用 SKU 齐备时允许发布", as
   await assert.doesNotReject(() => service.canPublish(1));
   assert.equal(records[0].publicationQualityStatus, "READY");
   assert.match(records[0].publicationQualityHash || "", /^[a-f0-9]{64}$/);
+});
+
+test("存量质量报告复用发布门禁并保持严格只读", async () => {
+  const { service, getProductUpdateCount } = createService([
+    product({
+      id: 21,
+      status: "PUBLISHED",
+      price: 100,
+      primaryImageId: 1,
+      skus: [{ id: 211, isActive: true, price: 100 }],
+    }),
+    product({
+      id: 22,
+      status: "PUBLISHED",
+      visibility: "MEMBER",
+      publicationQualityStatus: "QUARANTINED",
+      name: "E2E 占位商品",
+      salesMode: "DISPLAY_ONLY",
+      primaryImageId: null,
+      listingImageId: null,
+    }),
+    product({
+      id: 23,
+      status: "PUBLISHED",
+      visibility: "PARTNER",
+      publicationQualityStatus: "QUARANTINED",
+      inventoryPolicy: "SINGLE_UNIT",
+      price: 100,
+      primaryImageId: 3,
+      skus: [
+        { id: 231, isActive: true, price: 100, inventories: [{ quantity: 1 }] },
+        { id: 232, isActive: true, price: 120, inventories: [{ quantity: 1 }] },
+      ],
+    }),
+    product({ id: 24, status: "DRAFT", visibility: "INTERNAL" }),
+  ]);
+
+  // 先用正式发布入口生成一个可核对的新鲜 READY 快照。
+  await service.canPublish(21);
+  const writesBeforeReport = getProductUpdateCount();
+  const report = await service.getPublicationQualityReport();
+
+  assert.equal(getProductUpdateCount(), writesBeforeReport);
+  assert.deepEqual(report.scope, {
+    status: "PUBLISHED",
+    deletedAt: null,
+    writeMode: "READ_ONLY",
+  });
+  assert.deepEqual(
+    {
+      total: report.summary.total,
+      readyByCurrentFacts: report.summary.readyByCurrentFacts,
+      needsRemediation: report.summary.needsRemediation,
+      storedReady: report.summary.storedReady,
+      storedQuarantined: report.summary.storedQuarantined,
+      freshReady: report.summary.freshReady,
+    },
+    {
+      total: 3,
+      readyByCurrentFacts: 1,
+      needsRemediation: 2,
+      storedReady: 1,
+      storedQuarantined: 2,
+      freshReady: 1,
+    },
+  );
+  assert.deepEqual(report.summary.byVisibility, {
+    PUBLIC: 1,
+    MEMBER: 1,
+    PARTNER: 1,
+    INTERNAL: 0,
+  });
+  assert.equal(report.items[0].assessment, "READY");
+  assert.equal(report.items[0].storedStateFresh, true);
+  assert.match(report.items[1].issues.join("、"), /名称|货号|图片|主图|列表图/);
+  assert.match(report.items[2].issues.join("、"), /一物一件商品/);
 });
 
 test("canPublish：拒绝 E2E、乱码、重复占位文案与 0g 商品", async () => {

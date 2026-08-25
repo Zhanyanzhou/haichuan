@@ -5,23 +5,44 @@ import { ProductsService } from "./products.service";
 
 function createScheduledService(publishable: boolean) {
   const updates: any[] = [];
+  const image = {
+    id: 11,
+    url: "https://example.test/image.jpg",
+    storageKey: null,
+    isVideo: false,
+    mimeType: "image/jpeg",
+  };
   const prisma = {
     product: {
       findMany: async () => [{ id: 7 }],
       findFirst: async () => ({
         id: 7,
         code: "SCHEDULED-7",
-        name: "定时商品",
+        name: "海川典藏定时作品",
+        shortDescription: "以匠心工艺呈现经典东方珠宝美感",
+        description: "精选可追溯材质并由资深匠人完成制作，每件作品均经过独立质量检查后呈现。",
+        detailContent: [{ type: "TEXT", text: "正式商品材质、工艺与保养说明。" }],
+        materialType: "GOLD_999",
+        goldWeight: 10,
+        weight: 12,
         category: { isActive: true, deletedAt: null },
         salesMode: "DIRECT_PURCHASE",
         inventoryPolicy: "STANDARD",
         price: 1280,
         deliveryMethods: ["EXPRESS"],
         shippingTemplate: null,
-        images: publishable
-          ? [{ id: 11, url: "https://example.test/image.jpg", storageKey: null, isVideo: false, mimeType: "image/jpeg" }]
-          : [],
-        skus: [{ id: 21, price: 1280, inventories: [{ quantity: 0 }] }],
+        primaryImage: publishable ? image : null,
+        listingImage: publishable ? image : null,
+        images: publishable ? [image] : [],
+        skus: [
+          {
+            id: 21,
+            isActive: true,
+            price: 1280,
+            goldWeight: 10,
+            inventories: [{ quantity: 0 }],
+          },
+        ],
       }),
       findUnique: async () => ({ status: "DRAFT", inventoryPolicy: "STANDARD" }),
       update: async ({ data }: any) => {

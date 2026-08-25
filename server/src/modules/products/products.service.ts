@@ -172,6 +172,58 @@ const CUSTOMER_FACING_DETAIL_SELECT = {
   },
 } satisfies Prisma.ProductSelect;
 
+const PUBLICATION_QUALITY_SELECT = {
+  id: true,
+  code: true,
+  name: true,
+  shortDescription: true,
+  description: true,
+  detailContent: true,
+  materialType: true,
+  goldWeight: true,
+  weight: true,
+  status: true,
+  visibility: true,
+  publicationQualityStatus: true,
+  publicationQualityHash: true,
+  category: { select: { isActive: true, deletedAt: true } },
+  salesMode: true,
+  inventoryPolicy: true,
+  price: true,
+  deliveryMethods: true,
+  shippingTemplate: { select: { isActive: true } },
+  primaryImage: {
+    select: { id: true, url: true, storageKey: true, isVideo: true, mimeType: true },
+  },
+  listingImage: {
+    select: { id: true, url: true, storageKey: true, isVideo: true, mimeType: true },
+  },
+  images: {
+    where: { isVideo: false },
+    select: {
+      id: true,
+      url: true,
+      storageKey: true,
+      isVideo: true,
+      mimeType: true,
+    },
+  },
+  skus: {
+    orderBy: { id: "asc" },
+    select: {
+      id: true,
+      isActive: true,
+      price: true,
+      goldWeight: true,
+      inventories: { select: { quantity: true } },
+    },
+  },
+} satisfies Prisma.ProductSelect;
+
+type PublicationQualitySnapshot = Prisma.ProductGetPayload<{
+  select: typeof PUBLICATION_QUALITY_SELECT;
+}>;
+
 const CUSTOMER_MATERIAL_TYPES = new Set([
   "GOLD_999",
   "GOLD_9999",
@@ -1546,50 +1598,119 @@ export class ProductsService {
   ) {
     const product = await db.product.findFirst({
       where: { id: productId, deletedAt: null },
-      select: {
-        code: true,
-        name: true,
-        shortDescription: true,
-        description: true,
-        detailContent: true,
-        materialType: true,
-        goldWeight: true,
-        weight: true,
-        category: { select: { isActive: true, deletedAt: true } },
-        salesMode: true,
-        inventoryPolicy: true,
-        price: true,
-        deliveryMethods: true,
-        shippingTemplate: { select: { isActive: true } },
-        primaryImage: {
-          select: { id: true, url: true, storageKey: true, isVideo: true, mimeType: true },
-        },
-        listingImage: {
-          select: { id: true, url: true, storageKey: true, isVideo: true, mimeType: true },
-        },
-        images: {
-          where: { isVideo: false },
-          select: {
-            id: true,
-            url: true,
-            storageKey: true,
-            isVideo: true,
-            mimeType: true,
-          },
-        },
-        skus: {
-          where: { isActive: true },
-          select: {
-            id: true,
-            price: true,
-            goldWeight: true,
-            inventories: { select: { quantity: true } },
-          },
-        },
-      },
+      select: PUBLICATION_QUALITY_SELECT,
     });
     if (!product) throw new NotFoundException("商品不存在或已删除");
+    const assessment = this.assessPublicationQuality(product);
+    if (assessment.conflicts.length > 0) {
+      throw new ConflictException(assessment.conflicts.join("；"));
+    }
+    if (assessment.errors.length > 0) {
+      throw new BadRequestException(`发布前请补全: ${assessment.errors.join("、")}`);
+    }
+    await db.product.update({
+      where: { id: productId },
+      data: {
+        publicationQualityStatus: "READY",
+        publicationQualityHash: assessment.qualityHash,
+        publicationQualityCheckedAt: new Date(),
+      },
+    });
+    return { status: "READY" as const, qualityHash: assessment.qualityHash };
+  }
+
+  /**
+   * 只读扫描全部已发布商品，预测第二阶段启用质量隔离后的影响。
+   * 分批读取避免单次查询无限膨胀；此方法不写质量状态、不发通知。
+   */
+  async getPublicationQualityReport() {
+    const batchSize = 200;
+    let cursor: number | undefined;
+    const items: Array<{
+      id: number;
+      code: string;
+      name: string;
+      visibility: ProductVisibility;
+      storedStatus: "QUARANTINED" | "READY";
+      assessment: "READY" | "NEEDS_REMEDIATION";
+      storedStateFresh: boolean;
+      issues: string[];
+    }> = [];
+    const byVisibility: Record<ProductVisibility, number> = {
+      PUBLIC: 0,
+      MEMBER: 0,
+      PARTNER: 0,
+      INTERNAL: 0,
+    };
+    const byIssue: Record<string, number> = {};
+    let storedReady = 0;
+    let storedQuarantined = 0;
+    let freshReady = 0;
+
+    while (true) {
+      const batch = await this.prisma.product.findMany({
+        where: { deletedAt: null, status: "PUBLISHED" },
+        orderBy: { id: "asc" },
+        take: batchSize,
+        ...(cursor === undefined ? {} : { cursor: { id: cursor }, skip: 1 }),
+        select: PUBLICATION_QUALITY_SELECT,
+      });
+      for (const product of batch) {
+        const assessment = this.assessPublicationQuality(product);
+        const issues = [...assessment.errors, ...assessment.conflicts];
+        const storedStateFresh =
+          product.publicationQualityStatus === "READY" &&
+          product.publicationQualityHash === assessment.qualityHash &&
+          issues.length === 0;
+        byVisibility[product.visibility] += 1;
+        if (product.publicationQualityStatus === "READY") storedReady += 1;
+        else storedQuarantined += 1;
+        if (storedStateFresh) freshReady += 1;
+        for (const issue of issues) byIssue[issue] = (byIssue[issue] ?? 0) + 1;
+        items.push({
+          id: product.id,
+          code: product.code,
+          name: product.name,
+          visibility: product.visibility,
+          storedStatus: product.publicationQualityStatus,
+          assessment: issues.length === 0 ? "READY" : "NEEDS_REMEDIATION",
+          storedStateFresh,
+          issues,
+        });
+      }
+      if (batch.length < batchSize) break;
+      cursor = batch[batch.length - 1].id;
+    }
+
+    const needsRemediation = items.filter(
+      (item) => item.assessment === "NEEDS_REMEDIATION",
+    ).length;
+    return {
+      gateVersion: PRODUCT_QUALITY_GATE_VERSION,
+      generatedAt: new Date(),
+      scope: {
+        status: "PUBLISHED" as const,
+        deletedAt: null,
+        writeMode: "READ_ONLY" as const,
+      },
+      summary: {
+        total: items.length,
+        readyByCurrentFacts: items.length - needsRemediation,
+        needsRemediation,
+        storedReady,
+        storedQuarantined,
+        freshReady,
+        byVisibility,
+        byIssue,
+      },
+      items,
+    };
+  }
+
+  private assessPublicationQuality(product: PublicationQualitySnapshot) {
     const errors: string[] = [];
+    const conflicts: string[] = [];
+    const activeSkus = product.skus.filter((sku) => sku.isActive);
     if (!isMeaningfulPublicText(product.name, 2) || !product.code.trim())
       errors.push("有效且非测试/乱码的商品名称与货号");
     if (FORBIDDEN_PUBLIC_CONTENT.test(product.code) || MOJIBAKE_OR_REPLACEMENT.test(product.code))
@@ -1606,7 +1727,7 @@ export class ProductsService {
     const hasPositiveWeight = [
       product.goldWeight,
       product.weight,
-      ...product.skus.map((sku) => sku.goldWeight),
+      ...activeSkus.map((sku) => sku.goldWeight),
     ].some((value) => Number(value) > 0);
     if (!hasPositiveWeight) errors.push("与材质一致且大于 0g 的商品或 SKU 重量");
 
@@ -1621,10 +1742,10 @@ export class ProductsService {
 
     switch (product.salesMode) {
       case "DIRECT_PURCHASE": {
-        if (product.skus.length === 0) errors.push("至少一个有效规格 (SKU)");
-        if (product.skus.some((sku) => Number(sku.price) <= 0))
+        if (activeSkus.length === 0) errors.push("至少一个有效规格 (SKU)");
+        if (activeSkus.some((sku) => Number(sku.price) <= 0))
           errors.push("所有有效 SKU 均设置大于 0 的交易价格");
-        if (product.skus.some((sku) => sku.inventories.length === 0))
+        if (activeSkus.some((sku) => sku.inventories.length === 0))
           errors.push("所有有效 SKU 均建立库存记录");
         if (!product.price || Number(product.price) <= 0)
           errors.push("SKU 派生最低价大于 0");
@@ -1632,7 +1753,19 @@ export class ProductsService {
           errors.push("至少一种配送方式");
         if (product.shippingTemplate && !product.shippingTemplate.isActive)
           errors.push("启用中的运费模板");
-        await this.assertInventoryPolicy(productId, db, product.inventoryPolicy);
+        if (product.inventoryPolicy === "SINGLE_UNIT") {
+          if (activeSkus.length !== 1) {
+            conflicts.push("一物一件商品必须且只能有一个有效 SKU");
+          }
+          const totalInventory = product.skus.reduce(
+            (total, sku) =>
+              total + sku.inventories.reduce((sum, item) => sum + item.quantity, 0),
+            0,
+          );
+          if (totalInventory < 0 || totalInventory > 1) {
+            conflicts.push("一物一件商品库存总量只能为 0 或 1");
+          }
+        }
         break;
       }
       case "DISPLAY_ONLY":
@@ -1642,22 +1775,14 @@ export class ProductsService {
         break;
       default: {
         const exhaustive: never = product.salesMode;
-        throw new BadRequestException(`不支持的销售模式: ${exhaustive}`);
+        errors.push(`不支持的销售模式: ${exhaustive}`);
       }
     }
-    if (errors.length > 0) {
-      throw new BadRequestException(`发布前请补全: ${errors.join("、")}`);
-    }
-    const qualityHash = publicationQualityHash(product);
-    await db.product.update({
-      where: { id: productId },
-      data: {
-        publicationQualityStatus: "READY",
-        publicationQualityHash: qualityHash,
-        publicationQualityCheckedAt: new Date(),
-      },
-    });
-    return { status: "READY" as const, qualityHash };
+    return {
+      errors,
+      conflicts,
+      qualityHash: publicationQualityHash({ ...product, skus: activeSkus }),
+    };
   }
 
   /** Product.price 只由此处写入，值为有效且有价 SKU 的最低价。 */

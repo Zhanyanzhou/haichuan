@@ -81,6 +81,13 @@ export class ProductsController {
     return this.productsService.resolveReferences(body);
   }
 
+  @Get("admin/publication-quality-report")
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "只读评估存量已发布商品的发布质量" })
+  getPublicationQualityReport() {
+    return this.productsService.getPublicationQualityReport();
+  }
+
   @Public()
   @Get("public")
   @ApiOperation({ summary: "公开商品列表（仅 PUBLIC + PUBLISHED 安全字段）" })
