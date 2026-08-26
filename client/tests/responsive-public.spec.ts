@@ -51,7 +51,7 @@ async function mockEmptyCommerceState(page: import("@playwright/test").Page) {
     contentType: "application/json",
     body: apiResponse(null),
   }));
-  await page.route("**/api/settings/public", (route) => route.fulfill({
+  await page.route("**/api/settings/public**", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: apiResponse({ commerceEnabled: true, salesMode: "DIRECT_PURCHASE" }),
@@ -183,7 +183,7 @@ test.describe("公开页面导航一致性", () => {
   });
 
   test("商品详情不可用时返回选款中心", async ({ page }) => {
-    await page.route("**/api/settings/public", (route) => route.fulfill({
+    await page.route("**/api/settings/public**", (route) => route.fulfill({
       status: 200,
       contentType: "application/json",
       body: apiResponse({ commerceEnabled: false, salesMode: "INQUIRY_ONLY" }),

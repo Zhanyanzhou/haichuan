@@ -46,6 +46,7 @@ function mapApiProduct(
 
   return {
     id: p.id,
+    code: p.code || "",
     sku: p.code || "",
     name: p.name || "",
     shortDescription: p.shortDescription || "",
@@ -286,7 +287,7 @@ export function useProductData(
 
   // P1-35：带自动重连 + debounce 的 SSE（断线重连；消息风暴合并为一次重拉）
   useReconnectingEventSource(
-    USE_MOCK || !subscribe ? null : publicProductStreamUrl,
+    USE_MOCK || !subscribe ? null : publicProductStreamUrl(),
     () => setRevision((value) => value + 1),
     { debounceMs: 500 },
   );

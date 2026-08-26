@@ -6,10 +6,11 @@ const monitored = [
   "client/src/constants/adminCopy.ts",
   "client/src/components/common/AdminDataStates.tsx",
   "client/src/components/common/AdminPageHeader.tsx",
-  "client/src/components/common/AdminStatusTag.tsx",
   "client/src/components/layout/AdminLayout.tsx",
   "client/src/styles/antdTheme.ts",
   "client/src/styles/adminLuxury.css",
+  "client/src/styles/adminDashboard.css",
+  "client/src/styles/adminCompatibility.css",
 ];
 
 function collectAdminFiles(directory, prefix) {
@@ -22,9 +23,9 @@ function collectAdminFiles(directory, prefix) {
 }
 
 // 临时所有权排除：并发任务完成后应删除，不得扩大为永久豁免。
-// HomepageConfig 豁免已于 2026-08-19 回收：editor.css 完成 --adm-* 令牌迁移与字号下限整改。
+// 页面装修器样式含受保护草稿及历史基线，只排除该单文件；同模块 TSX 仍受检。
 const ownershipExclusions = [
-  /^client\/src\/pages\/admin\/ProductManage\//,
+  /^client\/src\/pages\/admin\/HomepageConfig\/editor\.css$/,
 ];
 const guardedAdminFiles = collectAdminFiles(
   resolve(root, "client/src/pages/admin"),
@@ -119,6 +120,11 @@ check(
   "client/src/styles/adminLuxury.css",
   /outline:\s*1px\b/,
   "共享后台样式存在 1px 焦点线",
+);
+check(
+  "client/src/pages/admin/ProductManage/ProductManage.css",
+  /#[0-9a-f]{3,8}\b/i,
+  "已迁移商品管理样式不得重新定义后台调色板",
 );
 
 if (

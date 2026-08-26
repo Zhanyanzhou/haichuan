@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { publishedCatalogDocument } from "./fixtures/public-catalog-detail";
 
 type SalesMode =
   | "DISPLAY_ONLY"
@@ -110,7 +111,9 @@ async function mockPublicSales(
     requestCounts?: { add: number; update: number; checkout: number };
   },
 ) {
-  const productsById = new Map(options.products.map((item) => [item.id, item]));
+  const findProduct = (reference: string) => options.products.find(
+    (item) => item.code === reference || String(item.id) === reference,
+  );
   let cartGetCount = 0;
   const flags = options.flags ?? {
     commerceEnabled: true,
@@ -140,7 +143,12 @@ async function mockPublicSales(
       );
     }
     if (path.endsWith("/settings/public")) return fulfill(route, { siteName: "海川珠宝" });
-    if (path.endsWith("/page-modules/document/published")) return fulfill(route, null);
+    if (path.endsWith("/page-modules/document/published")) {
+      return fulfill(
+        route,
+        url.searchParams.get("pageKey") === "catalog" ? publishedCatalogDocument() : null,
+      );
+    }
     if (path.endsWith("/categories/tree")) {
       return fulfill(route, [{ id: 1, name: "戒指", slug: "rings", level: 1, parentId: null, children: [] }]);
     }
@@ -163,8 +171,10 @@ async function mockPublicSales(
         facets: { sizes: [] },
       });
     }
-    const detailMatch = path.match(/\/products\/(?:catalog|public)\/(\d+)$/);
-    if (detailMatch) return fulfill(route, productsById.get(Number(detailMatch[1])) ?? null);
+    const detailMatch = path.match(/\/products\/(?:catalog|public)\/([^/]+)$/);
+    if (detailMatch) {
+      return fulfill(route, findProduct(decodeURIComponent(detailMatch[1])) ?? null);
+    }
 
     if (path.endsWith("/cart") && method === "GET") {
       const requestIndex = cartGetCount++;
@@ -213,14 +223,14 @@ test("Catalog 消费服务端销售模式、派生价格和售罄状态", async 
 
   await expect(page.getByText("¥12,800 起")).toBeVisible();
   await expect(page.getByText("已售罄", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "查看作品" }).first()).toHaveAttribute("href", "/products/1");
+  await expect(page.getByRole("link", { name: "查看作品" }).first()).toHaveAttribute("href", "/products/HC-1");
   await expect(page.getByRole("button", { name: "+ 加入选款" })).toBeVisible();
   const displayOnlyCard = page.locator(".catalog-cell").filter({
     has: page.getByRole("heading", { name: "销售模式作品 3" }),
   });
   await expect(displayOnlyCard.getByText("仅展示", { exact: true })).toHaveCount(0);
   await expect(displayOnlyCard.getByRole("link", { name: "查看作品" }))
-    .toHaveAttribute("href", "/products/3");
+    .toHaveAttribute("href", "/products/HC-3");
   await expect(page.getByText("图片暂不可用").first()).toBeVisible();
   await expect.poll(() => page.evaluate(() => Array.from(document.images)
     .filter((image) => {
@@ -239,12 +249,12 @@ test("Catalog 在交易能力加载中先降级为查看作品，明确开放后
   await flagsBarrier.reached;
 
   await expect(page.getByRole("link", { name: "查看作品" }).first())
-    .toHaveAttribute("href", "/products/4");
+    .toHaveAttribute("href", "/products/HC-4");
   await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
 
   flagsBarrier.release();
   await expect(page.getByRole("link", { name: "查看并购买" }).first())
-    .toHaveAttribute("href", "/products/4");
+    .toHaveAttribute("href", "/products/HC-4");
 });
 
 test("Catalog 在交易能力读取失败时不承诺购买", async ({ page }) => {
@@ -255,7 +265,7 @@ test("Catalog 在交易能力读取失败时不承诺购买", async ({ page }) =
   await page.goto("/catalog");
 
   await expect(page.getByRole("link", { name: "查看作品" }).first())
-    .toHaveAttribute("href", "/products/5");
+    .toHaveAttribute("href", "/products/HC-5");
   await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
 });
 
@@ -435,7 +445,7 @@ test("购物车与支付开关关闭时不能进入交易或创建订单", async
   });
   await page.goto("/catalog");
   await expect(page.getByRole("link", { name: "查看作品" }).first())
-    .toHaveAttribute("href", "/products/40");
+    .toHaveAttribute("href", "/products/HC-40");
   await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
 
   await page.goto("/products/40");

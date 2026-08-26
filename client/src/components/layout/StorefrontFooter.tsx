@@ -11,6 +11,7 @@ type StorefrontFooterProps = {
 };
 
 const footerLinks = [
+  { label: "珠宝作品", path: "/products" },
   { label: "选款中心", path: "/catalog" },
   { label: "定制服务", path: "/custom" },
   { label: "品牌故事", path: "/about" },

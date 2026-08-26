@@ -1,0 +1,560 @@
+.jewelry-hero {
+  position: relative;
+  min-height: 100svh;
+  width: 100%;
+  overflow: hidden;
+  background: #111315;
+  color: var(--hc-inverse-text);
+}
+.jewelry-hero__media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: translateY(-4.5%);
+}
+
+.jewelry-hero__video {
+  opacity: 0;
+  transition: opacity 900ms ease;
+}
+
+.jewelry-hero__video.is-ready {
+  opacity: 1;
+}
+
+.jewelry-hero__veil {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(17,19,21, 0.24) 0%,
+    rgba(17,19,21, 0.02) 38%,
+    rgba(17,19,21, 0.16) 61%,
+    rgba(17,19,21, 0.76) 100%
+  );
+}
+
+.jewelry-hero__content {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: clamp(112px, 13.5vh, 142px);
+  width: min(92vw, 720px);
+  transform: translateX(-50%);
+  text-align: center;
+  color: var(--hc-inverse-text);
+  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.5);
+}
+
+.jewelry-hero__content h1 {
+  font-family: "Noto Sans SC", "PingFang SC", "Times New Roman", serif;
+  font-size: clamp(2rem, 2.85vw, 2.75rem);
+  font-weight: 400;
+  line-height: 1.24;
+  letter-spacing: 0.16em;
+}
+
+.jewelry-hero__content p {
+  margin-top: 10px;
+  font-family: "Noto Sans SC", "PingFang SC", serif;
+  font-size: clamp(0.78rem, 1.08vw, 1rem);
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  color: rgba(247, 248, 248, 0.82);
+}
+
+.jewelry-hero__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 194px;
+  height: 52px;
+  margin-top: 28px;
+  border: 1px solid rgba(247, 248, 248, 0.72);
+  color: var(--hc-inverse-text);
+  font-size: 0.94rem;
+  letter-spacing: 0.18em;
+  background: rgba(17,19,21, 0.18);
+  backdrop-filter: blur(3px);
+  transition:
+    color 300ms ease,
+    background 300ms ease,
+    border-color 300ms ease;
+}
+
+.jewelry-hero__cta:hover,
+.jewelry-hero__cta:focus-visible {
+  color: var(--hc-ink);
+  background: var(--hc-inverse-text);
+  border-color: var(--hc-inverse-text);
+}
+
+.jewelry-hero__skip {
+  position: absolute;
+  z-index: 2;
+  left: 4.2vw;
+  bottom: 31px;
+}
+
+.jewelry-hero__skip button {
+  color: rgba(247, 248, 248, 0.78);
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  transition: color 250ms ease;
+}
+
+.jewelry-hero__skip button:hover {
+  color: #ffffff;
+}
+.jewelry-hero__skip span {
+  margin-left: 6px;
+  font-size: 1.05rem;
+}
+
+.jewelry-hero__timeline {
+  position: absolute;
+  z-index: 2;
+  left: 28.5%;
+  right: 28.5%;
+  bottom: 30px;
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  color: rgba(247, 248, 248, 0.78);
+}
+
+.jewelry-hero__sound {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(247, 248, 248, 0.72);
+  border-radius: 50%;
+  font-size: 0.75rem;
+  transition:
+    border-color 250ms ease,
+    color 250ms ease;
+}
+
+.jewelry-hero__sound:hover {
+  border-color: #ffffff;
+  color: #ffffff;
+}
+.jewelry-hero__sound[aria-disabled="true"] {
+  cursor: default;
+}
+
+.jewelry-hero__track {
+  position: relative;
+  height: 1px;
+  overflow: hidden;
+  background: rgba(247, 248, 248, 0.28);
+}
+
+.jewelry-hero__track > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(221, 225, 226, 0.92);
+  transition: width 180ms linear;
+}
+
+.jewelry-hero__count {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .jewelry-hero__media {
+    object-position: 52% center !important;
+    transform: none;
+  }
+  .jewelry-hero__veil {
+    background: linear-gradient(
+      180deg,
+      rgba(17,19,21, 0.25),
+      rgba(17,19,21, 0.02) 35%,
+      rgba(17,19,21, 0.82) 100%
+    );
+  }
+  .jewelry-hero__content {
+    bottom: 130px;
+  }
+  .jewelry-hero__content h1 {
+    font-size: clamp(1.75rem, 7vw, 2.25rem);
+    letter-spacing: 0.12em;
+  }
+  .jewelry-hero__content p {
+    letter-spacing: 0.14em;
+  }
+  .jewelry-hero__cta {
+    min-width: 170px;
+    height: 48px;
+    margin-top: 23px;
+  }
+  .jewelry-hero__skip {
+    left: 20px;
+    bottom: 24px;
+  }
+  .jewelry-hero__timeline {
+    left: auto;
+    right: 20px;
+    bottom: 23px;
+    width: 44%;
+    grid-template-columns: 28px 1fr;
+  }
+  .jewelry-hero__count {
+    display: none;
+  }
+}
+
+/* 选款中心：页面限定的 1280 内容轴、移动工具条与安全浮层。 */
+.catalog-page {
+  --catalog-max: 1280px;
+}
+
+.catalog-page__discovery-main,
+.catalog-category-nav__inner,
+.catalog-toolbar__inner,
+.catalog-secondary-nav__inner,
+.catalog-active-filters__inner,
+.catalog-pagination,
+.catalog-state {
+  max-width: var(--catalog-max) !important;
+}
+
+.catalog-product-card__title {
+  min-height: 2.8em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.catalog-product-card__facts {
+  min-height: 1.5em;
+}
+
+.catalog-sticky-bar {
+  top: 108px;
+}
+
+.catalog-quick-view__actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.catalog-quick-view__actions > :first-child {
+  flex: 1;
+}
+
+.catalog-quick-view__detail-link {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: #5f6568;
+  font-size: 12px;
+  text-underline-offset: 4px;
+}
+
+.catalog-selection-tray {
+  bottom: max(24px, calc(env(safe-area-inset-bottom) + 12px)) !important;
+}
+
+/* 统一作品详情：7/12 影像与 5/12 事实，业务状态仍由现有 API/flags 提供。 */
+.product-detail-page :is(button, a, [role="button"]):focus-visible {
+  outline: 2px solid #5f6568;
+  outline-offset: 3px;
+}
+
+.product-detail-page__inner {
+  width: min(1280px, calc(100% - 40px));
+  margin-inline: auto;
+  padding-block: 56px 96px;
+}
+
+.product-detail-page__breadcrumb {
+  margin-bottom: 48px;
+}
+
+.product-detail-page__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(340px, 5fr);
+  align-items: start;
+  gap: clamp(48px, 5.5vw, 80px);
+}
+
+.product-detail-page__main-media {
+  aspect-ratio: 4 / 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid #dde1e2;
+  background: #f4f5f5;
+}
+
+.product-detail-page__thumbnails {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.product-detail-page__thumbnail {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: #f4f5f5;
+}
+
+.product-detail-page__thumbnail:hover,
+.product-detail-page__thumbnail.is-active {
+  border-color: #181a1b;
+}
+
+.product-detail-page__summary {
+  min-width: 0;
+  padding-top: 8px;
+}
+
+.product-detail-page__commerce-facts {
+  margin: 0 0 32px;
+  padding-block: 14px;
+  border-block: 1px solid #dde1e2;
+}
+
+.product-detail-page__commerce-facts > div {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  font-size: 14px;
+}
+
+.product-detail-page__commerce-facts dt {
+  color: #5f6568;
+}
+
+.product-detail-page__commerce-facts dd {
+  margin: 0;
+  text-align: right;
+}
+
+.product-detail-page__commerce-facts dd span {
+  margin-left: 4px;
+  color: #6e7477;
+  font-size: 11px;
+}
+
+.product-detail-page__commerce-facts .is-price {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid #dde1e2;
+}
+
+.product-detail-page__commerce-facts .is-price dd {
+  font-size: 24px;
+}
+
+.product-detail-page__quantity {
+  width: max-content;
+  min-height: 44px;
+  margin-bottom: 16px;
+  display: grid;
+  grid-template-columns: 44px 44px 44px;
+  align-items: center;
+  border: 1px solid #dde1e2;
+}
+
+.product-detail-page__quantity button,
+.product-detail-page__quantity span {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.product-detail-page__quantity button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.product-detail-page__quantity button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.product-detail-page__action-zone {
+  margin-bottom: 16px;
+}
+
+.product-detail-page__primary-action {
+  width: 100%;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.product-detail-page__status-copy {
+  margin: 0 0 24px;
+}
+
+.product-detail-page__facts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 28px;
+}
+
+.product-detail-page__favorite {
+  min-height: 44px;
+  margin-top: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: #5f6568;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.product-detail-page__content {
+  max-width: 960px;
+  margin: 80px auto 0;
+  padding-top: 56px;
+  border-top: 1px solid #dde1e2;
+}
+
+@media (min-width: 1024px) {
+  .product-detail-page__main-media {
+    position: sticky;
+    top: 132px;
+  }
+}
+
+@media (max-width: 767px) {
+  .catalog-page__discovery-main,
+  .catalog-category-nav__inner,
+  .catalog-toolbar__inner,
+  .catalog-secondary-nav__inner,
+  .catalog-active-filters__inner,
+  .catalog-pagination,
+  .catalog-state,
+  .catalog-sticky-bar__inner {
+    padding-inline: 20px !important;
+  }
+
+  .catalog-toolbar__material,
+  .catalog-toolbar__spacer + .catalog-toolbar__material {
+    display: none;
+  }
+
+  .catalog-toolbar__inner {
+    gap: 8px !important;
+  }
+
+  .catalog-sticky-bar {
+    top: 64px;
+  }
+
+  .catalog-sticky-bar__inner {
+    gap: 8px !important;
+  }
+
+  .catalog-quick-view {
+    width: 100% !important;
+    padding: 72px 20px max(28px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .catalog-quick-view__actions {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .catalog-quick-view__detail-link {
+    justify-content: center;
+  }
+
+  .catalog-selection-tray {
+    width: calc(100vw - 40px);
+    max-width: none !important;
+    justify-content: center;
+  }
+
+  .catalog-selection-tray .tray-thumbs {
+    display: none !important;
+  }
+
+  .product-detail-page__inner {
+    width: calc(100% - 40px);
+    padding-block: 32px 64px;
+  }
+
+  .product-detail-page__breadcrumb {
+    margin-bottom: 32px;
+  }
+
+  .product-detail-page__layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 48px;
+  }
+
+  .product-detail-page__summary {
+    padding-top: 0;
+  }
+
+  .product-detail-page__commerce-facts {
+    margin-bottom: 28px;
+  }
+
+  .product-detail-page__facts-grid {
+    gap: 18px 20px;
+  }
+
+  .product-detail-page__content {
+    margin-top: 64px;
+    padding-top: 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jewelry-hero__video,
+  .jewelry-hero__cta,
+  .jewelry-hero__track > span {
+    transition: none;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--muted);
+  border-radius: 2px;
+}
+html.home-route::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}

@@ -397,6 +397,16 @@ export default function LeadManage() {
               <Descriptions.Item label="类型">
                 <Tag>{detail.leadTypeLabel}</Tag>
               </Descriptions.Item>
+              {detail.leadType === "inquiry" && detail.product && (
+                <Descriptions.Item label="来源作品">
+                  <Space direction="vertical" size={0}>
+                    <span>{detail.product.name}</span>
+                    <span style={{ color: "var(--adm-muted)", fontSize: 12 }}>
+                      货号：{detail.product.code || "历史记录未保留货号"}
+                    </span>
+                  </Space>
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label="状态">
                 <Tag color={STATUS_MAP[detail.status]?.color}>
                   {STATUS_MAP[detail.status]?.label || detail.status}

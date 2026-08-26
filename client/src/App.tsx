@@ -11,6 +11,12 @@ import {
 } from "@/config/adminRouteAccess";
 import { useAuthStore } from "@/store/authStore";
 import { useCommerceFlags } from "@/store/featureFlags";
+import { CONTENT_TEMPLATE_PAGE_PATHS } from "@/page-builder/generated/contentTemplates.generated";
+import EnglishPublicRouteGate from "@/components/common/EnglishPublicRouteGate";
+import {
+  type PublicContentLocale,
+  withPublicLocalePath,
+} from "@/i18n/publicLocale";
 
 // 后台布局与后台鉴权失败页依赖 Ant Design，不应进入前台首屏依赖图。
 const AdminLayout = lazy(() => import("@/components/layout/AdminLayout"));
@@ -33,14 +39,12 @@ const ResetPassword = lazy(
   () => import("@/pages/public/CustomerCenter/ResetPassword"),
 );
 const PaymentReview = lazy(() => import("@/pages/admin/PaymentReview"));
-const About = lazy(() => import("@/pages/public/About"));
 const Contact = lazy(() => import("@/pages/public/Contact"));
 const Privacy = lazy(() => import("@/pages/public/Privacy"));
 const BusinessInfo = lazy(() => import("@/pages/public/BusinessInfo"));
 const Cart = lazy(() => import("@/pages/public/Cart"));
 const Checkout = lazy(() => import("@/pages/public/Checkout"));
 const Catalog = lazy(() => import("@/pages/public/Catalog"));
-const Custom = lazy(() => import("@/pages/public/Custom"));
 const NotFound = lazy(() => import("@/pages/public/NotFound"));
 // dev-only 模板台架:真实组件的占位状态设计视图(非公开页面)
 const TemplateGallery = import.meta.env.DEV
@@ -102,9 +106,11 @@ const Loading = () => (
 const CommerceRoute = ({
   children,
   capability,
+  locale,
 }: {
   children: React.ReactNode;
   capability: "cart" | "checkout";
+  locale: PublicContentLocale;
 }) => {
   const flags = useCommerceFlags((state) => state.flags);
   const loading = useCommerceFlags((state) => state.loading);
@@ -118,7 +124,9 @@ const CommerceRoute = ({
   const allowed = capability === "cart"
     ? flags.commerceEnabled && flags.cartEnabled
     : flags.commerceEnabled && flags.cartEnabled && flags.paymentEnabled;
-  if (!allowed) return <Navigate to="/contact" replace />;
+  if (!allowed) {
+    return <Navigate to={withPublicLocalePath("/contact", locale)} replace />;
+  }
   return <>{children}</>;
 };
 
@@ -150,7 +158,7 @@ const ADMIN_LANDING: Readonly<Record<string, string>> = {
 };
 
 /** 旧搜索链接只做参数兼容；真实查询、建议、历史与埋点统一由选款中心执行。 */
-function LegacySearchRedirect() {
+function LegacySearchRedirect({ locale }: { locale: PublicContentLocale }) {
   const location = useLocation();
   const params = new URLSearchParams(location.search);
   const query = params.get("query") || params.get("q") || params.get("keyword") || "";
@@ -165,7 +173,8 @@ function LegacySearchRedirect() {
     if (value) canonical.set(key, value);
   }
   const suffix = canonical.toString();
-  return <Navigate replace to={`/catalog${suffix ? `?${suffix}` : ""}`} />;
+  const catalogPath = withPublicLocalePath("/catalog", locale);
+  return <Navigate replace to={`${catalogPath}${suffix ? `?${suffix}` : ""}`} />;
 }
 
 function AdminIndexRedirect() {
@@ -178,6 +187,105 @@ function AdminIndexRedirect() {
   return <Navigate to={target} replace />;
 }
 
+function contentPageRoute(pageKey: keyof typeof CONTENT_TEMPLATE_PAGE_PATHS) {
+  const publicPath = CONTENT_TEMPLATE_PAGE_PATHS[pageKey];
+  return publicPath === "/" ? "" : publicPath.slice(1);
+}
+
+/** 中文和英文共享同一组核心路由定义；英文入口由外层发布门禁统一控制。 */
+function publicRouteElements(locale: PublicContentLocale) {
+  return (
+    <>
+      <Route index element={<Home />} />
+      {/* /products 是品牌 PageDocument 容器；不再加载休眠商品列表。 */}
+      <Route path={contentPageRoute("products")} element={null} />
+      <Route
+        path="products/:id"
+        element={
+          <AntdRoute>
+            <ProductDetail />
+          </AntdRoute>
+        }
+      />
+      <Route
+        path="cart"
+        element={
+          <CommerceRoute capability="cart" locale={locale}>
+            <CustomerProtectedRoute>
+              <AntdRoute>
+                <Cart />
+              </AntdRoute>
+            </CustomerProtectedRoute>
+          </CommerceRoute>
+        }
+      />
+      <Route
+        path="checkout"
+        element={
+          <CommerceRoute capability="checkout" locale={locale}>
+            <CustomerProtectedRoute>
+              <AntdRoute>
+                <Checkout />
+              </AntdRoute>
+            </CustomerProtectedRoute>
+          </CommerceRoute>
+        }
+      />
+      <Route
+        path={contentPageRoute("catalog")}
+        element={
+          <AntdRoute>
+            <Catalog />
+          </AntdRoute>
+        }
+      />
+      {/* 纯品牌页只由 PublicLayout 中的 PageDocument Renderer 提供内容。 */}
+      <Route path={contentPageRoute("custom")} element={null} />
+      <Route path="search" element={<LegacySearchRedirect locale={locale} />} />
+      <Route
+        path="partner"
+        element={
+          <CustomerProtectedRoute>
+            <Navigate
+              to={`${withPublicLocalePath("/customer", locale)}?section=partner`}
+              replace
+            />
+          </CustomerProtectedRoute>
+        }
+      />
+      <Route
+        path="customer"
+        element={
+          <AntdRoute>
+            <CustomerCenter />
+          </AntdRoute>
+        }
+      />
+      <Route
+        path="customer/forgot"
+        element={
+          <AntdRoute>
+            <ForgotPassword />
+          </AntdRoute>
+        }
+      />
+      <Route
+        path="customer/reset"
+        element={
+          <AntdRoute>
+            <ResetPassword />
+          </AntdRoute>
+        }
+      />
+      <Route path={contentPageRoute("about")} element={null} />
+      <Route path={contentPageRoute("contact")} element={<Contact />} />
+      <Route path="privacy" element={<Privacy />} />
+      <Route path="business-info" element={<BusinessInfo />} />
+      <Route path="*" element={<NotFound />} />
+    </>
+  );
+}
+
 function App() {
   return (
     <ErrorBoundary>
@@ -187,88 +295,7 @@ function App() {
         <Routes>
           {/* Public Routes — 首页和其他页面统一使用 PublicLayout */}
           <Route element={<PublicLayout />}>
-            <Route index element={<Home />} />
-            {/* /products 是品牌 PageDocument 容器；不再加载休眠商品列表。 */}
-            <Route path="products" element={null} />
-            <Route
-              path="products/:id"
-              element={
-                <AntdRoute>
-                  <ProductDetail />
-                </AntdRoute>
-              }
-            />
-            <Route
-              path="cart"
-              element={
-                <CommerceRoute capability="cart">
-                  <CustomerProtectedRoute>
-                    <AntdRoute>
-                      <Cart />
-                    </AntdRoute>
-                  </CustomerProtectedRoute>
-                </CommerceRoute>
-              }
-            />
-            <Route
-              path="checkout"
-              element={
-                <CommerceRoute capability="checkout">
-                  <CustomerProtectedRoute>
-                    <AntdRoute>
-                      <Checkout />
-                    </AntdRoute>
-                  </CustomerProtectedRoute>
-                </CommerceRoute>
-              }
-            />
-            <Route
-              path="catalog"
-              element={
-                <AntdRoute>
-                  <Catalog />
-                </AntdRoute>
-              }
-            />
-            <Route path="custom" element={<Custom />} />
-            <Route path="search" element={<LegacySearchRedirect />} />
-            <Route
-              path="partner"
-              element={
-                <CustomerProtectedRoute>
-                  <Navigate to="/customer?section=partner" replace />
-                </CustomerProtectedRoute>
-              }
-            />
-            <Route
-              path="customer"
-              element={
-                <AntdRoute>
-                  <CustomerCenter />
-                </AntdRoute>
-              }
-            />
-            {/* 密码找回：邮件重置链接落地页（公开访问，令牌在链接内） */}
-            <Route
-              path="customer/forgot"
-              element={
-                <AntdRoute>
-                  <ForgotPassword />
-                </AntdRoute>
-              }
-            />
-            <Route
-              path="customer/reset"
-              element={
-                <AntdRoute>
-                  <ResetPassword />
-                </AntdRoute>
-              }
-            />
-            <Route path="about" element={<About />} />
-            <Route path="contact" element={<Contact />} />
-            <Route path="privacy" element={<Privacy />} />
-            <Route path="business-info" element={<BusinessInfo />} />
+            {publicRouteElements("zh-CN")}
             {TemplateGallery ? (
               <Route path="__templates" element={<TemplateGallery />} />
             ) : null}
@@ -292,7 +319,12 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="*" element={<NotFound />} />
+          </Route>
+
+          <Route path="/en" element={<EnglishPublicRouteGate />}>
+            <Route element={<PublicLayout />}>
+              {publicRouteElements("en")}
+            </Route>
           </Route>
 
           <Route

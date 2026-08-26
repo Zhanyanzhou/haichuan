@@ -1,6 +1,10 @@
 import { useEffect, useRef } from "react";
 import { publicPageDocumentStreamUrl } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
+import {
+  getBrowserPublicContentLocale,
+  type PublicContentLocale,
+} from "@/i18n/publicLocale";
 
 export type PagePublishEvent = {
   type:
@@ -26,6 +30,7 @@ const POLLING_FALLBACK_MS = 60000;
 export function usePagePublishStream(
   pageKey: string | undefined,
   onPublished: (event: PagePublishEvent) => void,
+  locale: PublicContentLocale = getBrowserPublicContentLocale(),
 ) {
   const callbackRef = useRef(onPublished);
 
@@ -91,7 +96,7 @@ export function usePagePublishStream(
 
     const open = () => {
       if (closed) return;
-      stream = new EventSource(publicPageDocumentStreamUrl);
+      stream = new EventSource(publicPageDocumentStreamUrl(locale));
       stream.onmessage = (event) => {
         retry = 0; // 成功收到消息即视为连接健康，重置退避计数
         stopPolling(); // SSE 已恢复，退出兜底轮询
@@ -122,5 +127,5 @@ export function usePagePublishStream(
       stopPolling();
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [pageKey]);
+  }, [locale, pageKey]);
 }

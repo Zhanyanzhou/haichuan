@@ -8,31 +8,33 @@ import {
   Form,
   Input,
   Button,
-  Rate,
-  Select,
 } from "antd";
-import { customerApi, reviewApi, uploadApi } from "@/services/api";
+import { customerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useCommerceEnabled } from "@/store/featureFlags";
 import { SecureImage } from "@/components/common/SecureImage";
+import CustomerPaymentDialog, {
+  type CustomerPaymentOrder,
+} from "@/components/commerce/CustomerPaymentDialog";
+import CustomerAfterSalesDialog, {
+  getCustomerAfterSalesError,
+  getRequestableAfterSalesItems,
+} from "./CustomerAfterSalesDialog";
+import CustomerOrdersPanel from "./CustomerOrdersPanel";
+import CustomerReviewDialog from "./CustomerReviewDialog";
 import ForYouRecommendations from "./ForYouRecommendations";
+import CustomerNotificationsPanel from "./CustomerNotificationsPanel";
+import type {
+  CustomerAfterSalesCase,
+  CustomerNotificationPage,
+  CustomerOrder,
+  CustomerReviewOrder,
+} from "./types";
+import "./MyAccountDashboard.css";
 
 type AccountDashboardProps = {
   profile: { name?: string; phone?: string; email?: string } | null;
-  orders: Array<{
-    id: number;
-    orderNo: string;
-    finalAmount: number | string;
-    status: string;
-    createdAt: string;
-    paymentConfirmedAt?: string | null;
-    shippedAt?: string | null;
-    completedAt?: string | null;
-    logisticsCompany?: string | null;
-    logisticsNo?: string | null;
-    items?: Array<{ productId: number; product?: { name: string } }>;
-    payments?: Array<{ id: number; status: string; hasProof?: boolean }>;
-  }>;
+  orders: CustomerOrder[];
   addresses: Array<{
     id: number;
     recipientName: string;
@@ -63,16 +65,12 @@ type AccountDashboardProps = {
     } | null;
     latest?: { reviewNote?: string | null } | null;
   } | null;
+  notifications: CustomerNotificationPage;
+  notificationError: string | null;
+  onReadNotification: (id: number) => Promise<void>;
+  onReadAllNotifications: () => Promise<void>;
   onSignOut: () => void;
   onRefresh?: () => void;
-};
-
-const orderStatus: Record<string, string> = {
-  PENDING_PAYMENT: "待付款",
-  PENDING_SHIP: "待发货",
-  SHIPPED: "已发货",
-  COMPLETED: "已完成",
-  CANCELLED: "已取消",
 };
 
 const inquiryStatus: Record<string, string> = {
@@ -112,6 +110,10 @@ export default function MyAccountDashboard({
   addresses,
   selectionInquiries,
   inquiries,
+  notifications,
+  notificationError,
+  onReadNotification,
+  onReadAllNotifications,
   onSignOut,
   onRefresh,
 }: AccountDashboardProps) {
@@ -150,9 +152,18 @@ export default function MyAccountDashboard({
       .catch(() => setFavorites([]));
   }, []);
 
-  // P1-29：付款凭证上传（电商闭环 —— 线下转账订单需顾客补凭证，否则卡死 PENDING_PAYMENT）
+  // 特殊线下订单凭证兜底；标准零售主链使用客户本人发起的微信支付。
   const [proofOrderId, setProofOrderId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [paymentOrder, setPaymentOrder] = useState<CustomerPaymentOrder | null>(null);
+
+  // 客户本人售后：只提交订单商品、类型和原因，不采集金额或后台字段。
+  const [afterSalesOrder, setAfterSalesOrder] = useState<
+    CustomerOrder | null
+  >(null);
+  const [cancellingAfterSalesId, setCancellingAfterSalesId] = useState<
+    number | null
+  >(null);
 
   // 个人资料编辑
   const [profileEditOpen, setProfileEditOpen] = useState(false);
@@ -165,15 +176,9 @@ export default function MyAccountDashboard({
   const [editingAddressId, setEditingAddressId] = useState<number | null>(null);
 
   // 评价（已完成订单 → 先审后展）
-  const [reviewOrder, setReviewOrder] = useState<{
-    id: number;
-    items: Array<{ productId: number; product?: { name: string } }>;
-  } | null>(null);
-  const [reviewRating, setReviewRating] = useState(5);
-  const [reviewProductId, setReviewProductId] = useState<number | null>(null);
-  const [reviewContent, setReviewContent] = useState("");
-  const [reviewImages, setReviewImages] = useState<string[]>([]);
-  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewOrder, setReviewOrder] = useState<CustomerReviewOrder | null>(
+    null,
+  );
 
   // 合规：数据导出 + 注销
   const [exportingData, setExportingData] = useState(false);
@@ -219,109 +224,45 @@ export default function MyAccountDashboard({
     }
   };
 
-  // 物流轨迹（快递100，按订单展开）
-  const [trackingOrderId, setTrackingOrderId] = useState<number | null>(null);
-  const [trackingData, setTrackingData] = useState<{
-    carrier: string;
-    trackingNo: string;
-    state: string;
-    events: Array<{ time: string; context: string }>;
-  } | null>(null);
-  const [trackingLoading, setTrackingLoading] = useState(false);
-
-  const TRACK_STATE: Record<string, string> = {
-    "0": "在途",
-    "1": "已揽收",
-    "2": "疑难",
-    "3": "已签收",
-    "4": "退签",
-    "5": "派件中",
-    "6": "退回",
-    "10": "待揽收",
-  };
-
-  const toggleTracking = async (orderId: number) => {
-    if (trackingOrderId === orderId) {
-      setTrackingOrderId(null);
-      setTrackingData(null);
-      return;
-    }
-    setTrackingOrderId(orderId);
-    setTrackingData(null);
-    setTrackingLoading(true);
-    try {
-      const res = await customerApi.getOrderTracking(orderId);
-      setTrackingData(unwrapResponse<any>(res) || null);
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || "轨迹查询失败";
-      setTrackingData({ carrier: "", trackingNo: "", state: "", events: [] });
-      message.error(msg);
-    } finally {
-      setTrackingLoading(false);
-    }
-  };
-
-  const openReview = (order: {
-    id: number;
-    items: Array<{ productId: number; product?: { name: string } }>;
-  }) => {
+  const openReview = (order: CustomerReviewOrder) => {
     setReviewOrder(order);
-    setReviewProductId(order.items[0]?.productId ?? null);
-    setReviewRating(5);
-    setReviewContent("");
-    setReviewImages([]);
   };
 
-  /** 晒单图上传：复用公开上传管线，成功后暂存 URL（提交时随评价一起落库） */
-  const uploadReviewImage = async (options: any) => {
-    const { onSuccess, onError, file } = options;
-    try {
-      const res = await uploadApi.uploadImage(file as File);
-      const url = unwrapResponse<{ url: string }>(res)?.url;
-      if (!url) throw new Error("上传失败");
-      setReviewImages((list) => (list.length >= 6 ? list : [...list, url]));
-      onSuccess?.(url);
-    } catch (e: any) {
-      message.error(e?.message || "晒单图上传失败");
-      onError?.(e);
+  const openAfterSales = (order: CustomerOrder) => {
+    const requestableItems = getRequestableAfterSalesItems(order);
+    if (!requestableItems.length) {
+      message.info("订单商品已有进行中的售后申请");
+      return;
     }
+    setAfterSalesOrder(order);
   };
 
-  const submitReview = async () => {
-    if (!reviewOrder || !reviewProductId) {
-      message.warning("请选择要评价的作品");
-      return;
-    }
-    if (reviewRating < 1) {
-      message.warning("请选择星级");
-      return;
-    }
-    if (reviewContent.trim().length < 5) {
-      message.warning("评价内容至少 5 个字");
-      return;
-    }
-    setSubmittingReview(true);
-    try {
-      await reviewApi.submit({
-        orderId: reviewOrder.id,
-        productId: reviewProductId,
-        rating: reviewRating,
-        content: reviewContent.trim(),
-        imageUrls: reviewImages.length ? reviewImages : undefined,
-      });
-      message.success("评价已提交，审核通过后将在作品页展示");
-      setReviewOrder(null);
-    } catch (e: any) {
-      message.error(e?.response?.data?.message || e?.message || "提交失败");
-    } finally {
-      setSubmittingReview(false);
-    }
+  const cancelAfterSales = (caseRecord: CustomerAfterSalesCase) => {
+    Modal.confirm({
+      title: "撤销售后申请？",
+      content: "撤销后本次申请将结束；如仍需服务，可以重新提交。",
+      okText: "确认撤销",
+      cancelText: "暂不撤销",
+      onOk: async () => {
+        setCancellingAfterSalesId(caseRecord.id);
+        try {
+          await customerApi.cancelAfterSales(caseRecord.id);
+          message.success("售后申请已撤销");
+          onRefresh?.();
+        } catch (error) {
+          message.error(
+            getCustomerAfterSalesError(
+              error,
+              "售后申请暂时无法撤销，请刷新后重试。",
+            ),
+          );
+          return Promise.reject();
+        } finally {
+          setCancellingAfterSalesId(null);
+        }
+      },
+    });
   };
-
-  const hasPendingProof = (orderId: number) =>
-    orders
-      .find((x) => x.id === orderId)
-      ?.payments?.some((p) => p.status === "PENDING" && p.hasProof);
 
   const handleUploadProof = async (file: File) => {
     if (proofOrderId == null) return;
@@ -410,7 +351,6 @@ export default function MyAccountDashboard({
   return (
     <>
       <main className="my-account">
-        <style>{styles}</style>
         <section className="my-account__intro">
           <div>
             <p className="my-account__eyebrow">HAICHUAN PRIVATE CLIENT</p>
@@ -441,6 +381,9 @@ export default function MyAccountDashboard({
           <a href="#my-profile">
             <span>04</span>个人资料
           </a>
+          <a href="#my-notifications">
+            <span>05</span>服务通知
+          </a>
         </nav>
 
         <section className="my-account__summary" aria-label="服务概览">
@@ -464,6 +407,12 @@ export default function MyAccountDashboard({
         </section>
 
         <div className="my-account__grid">
+          <CustomerNotificationsPanel
+            resource={notifications}
+            error={notificationError}
+            onRead={onReadNotification}
+            onReadAll={onReadAllNotifications}
+          />
           <section id="my-selections" className="my-account__panel">
             <div className="my-account__panel-head">
               <div>
@@ -642,229 +591,17 @@ export default function MyAccountDashboard({
             )}
           </section>
 
-          <section
-            id="my-orders"
-            className="my-account__panel my-account__panel--wide"
-          >
-            <div className="my-account__panel-head">
-              <div>
-                <p>ORDER ARCHIVE</p>
-                <h2>我的订单</h2>
-              </div>
-            </div>
-            {orders.length ? (
-              <div className="my-account__records">
-                {orders.slice(0, 4).map((order) => {
-                  // 履约进度（订单可视化）：四步推导自服务端时间戳
-                  const cancelled = order.status === "CANCELLED";
-                  const steps = [
-                    { label: "下单", done: true },
-                    { label: "收款", done: Boolean(order.paymentConfirmedAt) },
-                    { label: "发货", done: Boolean(order.shippedAt) },
-                    { label: "完成", done: Boolean(order.completedAt) },
-                  ];
-                  return (
-                    <article key={order.id}>
-                      <div>
-                        <small>
-                          {order.orderNo} ·{" "}
-                          {new Date(order.createdAt).toLocaleDateString(
-                            "zh-CN",
-                          )}
-                        </small>
-                        <h3>{order.items?.[0]?.product?.name || "珠宝作品"}</h3>
-                      </div>
-                      {/* 履约进度条 + 物流信息 */}
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 4,
-                          alignItems: "center",
-                          margin: "10px 0 6px",
-                        }}
-                        aria-label="订单进度"
-                      >
-                        {cancelled ? (
-                          <span style={{ fontSize: 11, color: "#8C3F3B" }}>
-                            ✕ 订单已取消
-                          </span>
-                        ) : (
-                          steps.map((step, index) => (
-                            <span
-                              key={step.label}
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 4,
-                                fontSize: 11,
-                                color: step.done ? "#181a1b" : "#6e7477",
-                              }}
-                            >
-                              {index > 0 && (
-                                <span
-                                  style={{
-                                    width: 18,
-                                    height: 1,
-                                    background: step.done
-                                      ? "#181a1b"
-                                      : "#dde1e2",
-                                    display: "inline-block",
-                                  }}
-                                />
-                              )}
-                              <span
-                                style={{
-                                  width: 7,
-                                  height: 7,
-                                  borderRadius: "50%",
-                                  background: step.done ? "#181a1b" : "#dde1e2",
-                                  display: "inline-block",
-                                }}
-                              />
-                              {step.label}
-                            </span>
-                          ))
-                        )}
-                      </div>
-                      {order.logisticsCompany && order.logisticsNo ? (
-                        <p
-                          style={{
-                            fontSize: 11,
-                            color: "#5f6568",
-                            margin: "0 0 6px",
-                            display: "flex",
-                            gap: 8,
-                            alignItems: "center",
-                          }}
-                        >
-                          <span>
-                            物流：{order.logisticsCompany} · 运单号{" "}
-                            {order.logisticsNo}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => toggleTracking(order.id)}
-                            style={{
-                              fontSize: 11,
-                              color: "#181a1b",
-                              background: "none",
-                              border: "none",
-                              cursor: "pointer",
-                              padding: 0,
-                            }}
-                          >
-                            {trackingOrderId === order.id
-                              ? "收起轨迹"
-                              : "查看轨迹"}
-                          </button>
-                        </p>
-                      ) : null}
-                      {trackingOrderId === order.id && (
-                        <div
-                          style={{
-                            background: "#f4f5f5",
-                            padding: 12,
-                            marginBottom: 8,
-                            fontSize: 12,
-                          }}
-                        >
-                          {trackingLoading ? (
-                            <p style={{ color: "#5f6568", margin: 0 }}>
-                              轨迹查询中…
-                            </p>
-                          ) : trackingData && trackingData.events.length ? (
-                            <>
-                              <p
-                                style={{ color: "#335f7d", margin: "0 0 8px" }}
-                              >
-                                {TRACK_STATE[trackingData.state] || "运输中"}
-                                {trackingData.carrier
-                                  ? ` · ${trackingData.carrier}`
-                                  : ""}
-                              </p>
-                              {trackingData.events.map((ev, i) => (
-                                <p
-                                  key={i}
-                                  style={{
-                                    margin: "0 0 6px",
-                                    color: i === 0 ? "#5f6568" : "#5f6568",
-                                  }}
-                                >
-                                  <span style={{ marginRight: 8 }}>
-                                    {ev.time}
-                                  </span>
-                                  {ev.context}
-                                </p>
-                              ))}
-                            </>
-                          ) : (
-                            <p style={{ color: "#5f6568", margin: 0 }}>
-                              暂无轨迹数据（物流查询服务可能未接入，请联系顾问）
-                            </p>
-                          )}
-                        </div>
-                      )}
-                      <div className="my-account__order-meta">
-                        <em>{orderStatus[order.status] || order.status}</em>
-                        <strong>
-                          ¥{Number(order.finalAmount).toLocaleString("zh-CN")}
-                        </strong>
-                        {order.status === "COMPLETED" && order.items?.length ? (
-                          <button
-                            type="button"
-                            className="my-account__summary-action"
-                            style={{
-                              padding: "6px 12px",
-                              fontSize: 12,
-                              minHeight: 0,
-                            }}
-                            onClick={() =>
-                              openReview({
-                                id: order.id,
-                                items: order.items || [],
-                              })
-                            }
-                          >
-                            评价作品
-                          </button>
-                        ) : null}
-                        {order.status === "PENDING_PAYMENT" &&
-                          (commerceEnabled ? (
-                            hasPendingProof(order.id) ? (
-                              <span style={{ fontSize: 11, color: "#7a531a" }}>
-                                凭证已提交·待审核
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                className="my-account__summary-action"
-                                style={{
-                                  padding: "6px 12px",
-                                  fontSize: 12,
-                                  minHeight: 0,
-                                }}
-                                onClick={() => setProofOrderId(order.id)}
-                                disabled={uploading}
-                              >
-                                上传付款凭证
-                              </button>
-                            )
-                          ) : (
-                            <span style={{ fontSize: 11, color: "#5f6568" }}>
-                              线上付款暂未开放·顾问将联系您
-                            </span>
-                          ))}
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            ) : (
-              <Empty>
-                暂未有订单记录。<Link to="/catalog">浏览珠宝作品 →</Link>
-              </Empty>
-            )}
-          </section>
+          <CustomerOrdersPanel
+            orders={orders}
+            commerceEnabled={commerceEnabled}
+            uploadingProof={uploading}
+            cancellingAfterSalesId={cancellingAfterSalesId}
+            onOpenReview={openReview}
+            onOpenAfterSales={openAfterSales}
+            onCancelAfterSales={cancelAfterSales}
+            onOpenProof={setProofOrderId}
+            onOpenPayment={setPaymentOrder}
+          />
 
           <section
             id="my-profile"
@@ -1015,6 +752,23 @@ export default function MyAccountDashboard({
         </div>
         <ForYouRecommendations />
       </main>
+      <CustomerPaymentDialog
+        open={paymentOrder !== null}
+        order={paymentOrder}
+        onClose={() => setPaymentOrder(null)}
+        onPaid={() => {
+          setPaymentOrder(null);
+          onRefresh?.();
+        }}
+      />
+      <CustomerAfterSalesDialog
+        order={afterSalesOrder}
+        onClose={() => setAfterSalesOrder(null)}
+        onSubmitted={() => {
+          setAfterSalesOrder(null);
+          onRefresh?.();
+        }}
+      />
       {commerceEnabled && (
         <Modal
           open={proofOrderId !== null}
@@ -1024,7 +778,7 @@ export default function MyAccountDashboard({
           destroyOnClose
         >
           <p style={{ color: "#5f6568", fontSize: 13, marginBottom: 16 }}>
-            请上传转账截图或凭证图片（JPG/PNG/WebP，≤10MB）。审核通过后订单进入发货流程。
+            此入口只用于已约定的特殊线下转账订单。请上传转账截图或凭证图片（JPG/PNG/WebP，≤10MB）；微信支付无需上传凭证。
           </p>
           <Upload
             accept="image/jpeg,image/png,image/webp,image/gif"
@@ -1054,108 +808,11 @@ export default function MyAccountDashboard({
         </Modal>
       )}
 
-      {/* 个人资料编辑 */}
-      <Modal
-        open={reviewOrder !== null}
-        title="评价作品"
-        onCancel={() => setReviewOrder(null)}
-        onOk={submitReview}
-        confirmLoading={submittingReview}
-        okText="提交评价"
-        cancelText="取消"
-        destroyOnClose
-      >
-        <p style={{ color: "#5f6568", fontSize: 13, marginBottom: 16 }}>
-          评价提交后经审核将在作品页展示，感谢您分享佩戴体验。
-        </p>
-        <div style={{ marginBottom: 16 }}>
-          <p style={{ fontSize: 13, marginBottom: 8 }}>选择作品</p>
-          <Select
-            style={{ width: "100%" }}
-            value={reviewProductId}
-            onChange={(value: number) => setReviewProductId(value)}
-            options={(reviewOrder?.items || []).map((item) => ({
-              value: item.productId,
-              label: item.product?.name || `作品 #${item.productId}`,
-            }))}
-          />
-        </div>
-        <div style={{ marginBottom: 16 }}>
-          <p style={{ fontSize: 13, marginBottom: 8 }}>星级</p>
-          <Rate value={reviewRating} onChange={setReviewRating} />
-        </div>
-        <div>
-          <p style={{ fontSize: 13, marginBottom: 8 }}>评价内容（5-500 字）</p>
-          <Input.TextArea
-            rows={4}
-            maxLength={500}
-            showCount
-            value={reviewContent}
-            onChange={(e) => setReviewContent(e.target.value)}
-            placeholder="工艺、佩戴感受、顾问服务体验…"
-          />
-        </div>
-        <div>
-          <p style={{ fontSize: 13, marginBottom: 8 }}>
-            晒单图（选填，最多 6 张）
-          </p>
-          <Upload
-            listType="picture-card"
-            accept="image/*"
-            multiple
-            showUploadList={false}
-            customRequest={uploadReviewImage}
-            disabled={reviewImages.length >= 6}
-          >
-            {reviewImages.length >= 6 ? null : (
-              <span style={{ fontSize: 20, color: "#181a1b" }}>+</span>
-            )}
-          </Upload>
-          {reviewImages.length > 0 ? (
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                flexWrap: "wrap",
-                marginTop: 8,
-              }}
-            >
-              {reviewImages.map((url) => (
-                <div key={url} style={{ position: "relative" }}>
-                  <img
-                    src={url}
-                    alt="晒单图"
-                    style={{ width: 64, height: 64, objectFit: "cover" }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setReviewImages((list) => list.filter((u) => u !== url))
-                    }
-                    style={{
-                      position: "absolute",
-                      top: -6,
-                      right: -6,
-                      width: 18,
-                      height: 18,
-                      borderRadius: "50%",
-                      border: "none",
-                      background: "rgba(0,0,0,.6)",
-                      color: "#fff",
-                      fontSize: 10,
-                      lineHeight: "18px",
-                      cursor: "pointer",
-                      padding: 0,
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </Modal>
+      <CustomerReviewDialog
+        order={reviewOrder}
+        onClose={() => setReviewOrder(null)}
+        onSubmitted={() => setReviewOrder(null)}
+      />
 
       <Modal
         open={closeOpen}
@@ -1264,11 +921,3 @@ export default function MyAccountDashboard({
     </>
   );
 }
-
-const styles = `
-.my-account{--ink:#181a1b!important;--soft:#5f6568!important;--line:#dde1e2!important;--gold:#181a1b!important}
-.my-account__summary-action{background:#f4f5f5!important}
-.my-account__panel--collection{background:#111315!important;border-color:#111315!important}
-.my-account__button{color:#181a1b!important}
-.my-account{--ink:#181a1b;--soft:#5f6568;--line:#dde1e2;--gold:#181a1b;max-width:1240px;margin:auto;padding:clamp(42px,7vw,96px) clamp(20px,5vw,64px) 112px;color:var(--ink)}.my-account__intro{display:flex;align-items:end;justify-content:space-between;gap:28px;padding-bottom:34px;border-bottom:1px solid var(--line)}.my-account__eyebrow,.my-account__panel-head p,.my-account__panel--collection>p{margin:0 0 12px;color:var(--gold);font:12px/1.2 "Cormorant Garamond","Noto Serif SC",serif;letter-spacing:.18em}.my-account h1,.my-account h2{margin:0;font-family:"Cormorant Garamond","Noto Serif SC",serif;font-weight:500;letter-spacing:.04em}.my-account h1{font-size:clamp(44px,6vw,68px);line-height:1}.my-account__greeting{margin:16px 0 0;color:var(--soft);font-size:14px}.my-account__sign-out{padding:0;border:0;background:none;color:var(--soft);font-size:13px;cursor:pointer}.my-account__sign-out:hover{color:var(--ink)}.my-account__shortcuts{display:flex;gap:26px;padding:18px 0;border-bottom:1px solid var(--line);overflow:auto}.my-account__shortcuts a{flex:none;color:var(--ink);font-size:13px;text-decoration:none}.my-account__shortcuts span{margin-right:7px;color:var(--gold);font:13px "Cormorant Garamond",serif}.my-account__summary{display:grid;grid-template-columns:repeat(3,1fr) minmax(150px,.8fr);margin:32px 0 18px;border:1px solid var(--line)}.my-account__summary>div,.my-account__summary-action{min-height:106px;padding:21px 24px;border-right:1px solid var(--line);display:grid;align-content:center;gap:6px}.my-account__summary strong{font:34px/1 "Cormorant Garamond",serif}.my-account__summary span{color:var(--soft);font-size:12px}.my-account__summary-action{background:#f4f5f5;color:var(--ink);font-size:13px;text-decoration:none}.my-account__summary-action b{color:var(--gold);font-size:17px;font-weight:400}.my-account__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.my-account__panel{min-height:250px;padding:30px;border:1px solid var(--line);background:#fff}.my-account__panel--wide{grid-column:span 2;min-height:auto}.my-account__panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.my-account__panel-head h2,.my-account__panel--collection h2{font-size:28px}.my-account__panel-head>a{color:var(--soft);font-size:12px;text-decoration:none}.my-account__panel-head>a:hover{color:var(--ink)}.my-account__records{margin-top:22px}.my-account__records article{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 0;border-top:1px solid var(--line)}.my-account__records small{display:block;color:var(--soft);font-size:11px}.my-account__records h3{margin:6px 0 0;font-size:14px;font-weight:500}.my-account__records em{font-style:normal;color:var(--gold);font-size:12px;white-space:nowrap}.my-account__order-meta{display:grid;justify-items:end;gap:8px}.my-account__order-meta strong{font:22px "Cormorant Garamond",serif}.my-account-empty{margin:44px 0 0;color:var(--soft);font-size:13px;line-height:1.8}.my-account-empty a{display:block;width:max-content;margin-top:10px;color:var(--ink);text-decoration:none;border-bottom:1px solid var(--gold)}.my-account__panel--collection{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;background:#181a1b;border-color:#181a1b;color:#fff}.my-account__panel--collection>p{color:#fff}.my-account__panel--collection>span{margin:15px 0 24px;max-width:280px;font-size:13px;line-height:1.8}.my-account__button{padding:12px 18px;background:#fff;color:#181a1b;text-decoration:none;font-size:13px}.my-account__panel--profile{display:grid;grid-template-columns:1.1fr 1fr;column-gap:32px}.my-account__panel--profile .my-account__panel-head{grid-column:span 2}.my-account dl{margin:22px 0 0}.my-account dl div{padding:11px 0;border-top:1px solid var(--line)}.my-account dt{color:var(--soft);font-size:11px}.my-account dd{margin:5px 0 0;font-size:14px}.my-account__address{margin-top:22px;padding-top:11px;border-top:1px solid var(--line);font-size:13px;line-height:1.8}.my-account__address p{margin:0 0 6px;color:var(--soft);font-size:11px}@media(max-width:720px){.my-account__intro{align-items:flex-start;flex-direction:column}.my-account__summary{grid-template-columns:repeat(2,1fr)}.my-account__summary-action{border-top:1px solid var(--line)}.my-account__grid{grid-template-columns:1fr}.my-account__panel--wide{grid-column:auto}.my-account__panel--profile{grid-template-columns:1fr}.my-account__panel--profile .my-account__panel-head{grid-column:auto}.my-account__shortcuts{gap:18px}.my-account__panel{min-height:0;padding:25px}}@media(max-width:420px){.my-account__summary>div,.my-account__summary-action{padding:18px}.my-account__summary strong{font-size:29px}.my-account__panel-head{display:block}.my-account__panel-head>a{display:inline-block;margin-top:12px}.my-account__records article{align-items:flex-start;flex-direction:column}.my-account__order-meta{justify-items:start}}
-`;

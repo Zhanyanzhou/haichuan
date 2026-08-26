@@ -1,0 +1,94 @@
+export type CustomerOrderItem = {
+  id: number;
+  productId: number;
+  quantity?: number;
+  product?: { name: string };
+};
+
+export type CustomerAfterSalesCase = {
+  id: number;
+  caseNo: string;
+  orderItemId?: number | null;
+  type: string;
+  status: string;
+  reason: string;
+  requestedRefundAmount?: number | string | null;
+  approvedRefundAmount?: number | string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CustomerOrder = {
+  id: number;
+  orderNo: string;
+  finalAmount: number | string;
+  status: string;
+  orderType?: string;
+  paymentMethod?: string | null;
+  createdAt: string;
+  paymentConfirmedAt?: string | null;
+  shippedAt?: string | null;
+  completedAt?: string | null;
+  logisticsCompany?: string | null;
+  logisticsNo?: string | null;
+  items?: CustomerOrderItem[];
+  payments?: Array<{
+    id: number;
+    status: string;
+    method?: string;
+    paymentNo?: string;
+    hasProof?: boolean;
+  }>;
+  fulfillments?: Array<{
+    id: number;
+    status: string;
+    carrier?: string | null;
+    trackingNo?: string | null;
+    shippedAt?: string | null;
+    deliveredAt?: string | null;
+  }>;
+  refunds?: Array<{
+    id: number;
+    refundNo: string;
+    amount: number | string;
+    reason?: string | null;
+    status: string;
+    createdAt: string;
+    completedAt?: string | null;
+  }>;
+  afterSalesCases?: CustomerAfterSalesCase[];
+  timeline?: Array<{
+    id: number;
+    eventType: string;
+    entityType: string;
+    fromStatus?: string | null;
+    toStatus?: string | null;
+    createdAt: string;
+  }>;
+};
+
+export type CustomerReviewOrder = {
+  id: number;
+  items: CustomerOrderItem[];
+};
+
+export type CustomerNotification = {
+  id: number;
+  type: string;
+  locale: "ZH_CN" | "EN";
+  title: string;
+  body: string;
+  actionUrl?: string | null;
+  status: "AVAILABLE" | "READ";
+  availableAt: string;
+  readAt?: string | null;
+  createdAt: string;
+};
+
+export type CustomerNotificationPage = {
+  list: CustomerNotification[];
+  total: number;
+  unreadCount: number;
+  page: number;
+  pageSize: number;
+};

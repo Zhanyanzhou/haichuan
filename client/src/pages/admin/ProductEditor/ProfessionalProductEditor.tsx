@@ -24,7 +24,6 @@ import {
   Switch,
   Table,
   Tag,
-  Tooltip,
   Upload,
 } from "antd";
 import dayjs from "dayjs";
@@ -713,12 +712,13 @@ export default function ProfessionalProductEditor() {
           ? `当前状态：${statusMeta[currentStatus].label}`
           : "尚未保存";
   const activeSkuCount = skus.filter((sku) => sku.isActive).length;
-  const derivedPrice = Number(Form.useWatch("derivedPrice", form) || 0);
+  // derivedPrice 由服务端按有效 SKU 派生，不对应可编辑控件；preserve 让 Form 仍能监听该只读字段。
+  const derivedPrice = Number(Form.useWatch("derivedPrice", { form, preserve: true }) || 0);
   const inventoryPolicyMessage = selectedInventoryPolicy === "SINGLE_UNIT"
     ? "一物一件：必须且只能保留 1 个有效 SKU；库存总量只能为 0 或 1；每次购买数量上限为 1。库存为 0 时仍可上架，但会显示售罄且不能加入购物车。"
     : "标准库存：可维护多个有效 SKU；库存为 0 时仍可上架，但直接购买商品会显示售罄且不能加入购物车。";
   const salesModeMessage = selectedSalesMode === "DIRECT_PURCHASE"
-    ? "直接购买由服务端核对：基础商品内容、至少一张可读取的非视频图片，以及所有有效 SKU 的交易价格、库存记录、配送方式和库存策略。"
+    ? `${!commerceEnabled ? "当前交易功能未启用；仍可维护直购商品事实，公开端不会开放加购或支付。" : ""}直接购买由服务端核对：基础商品内容、至少一张可读取的非视频图片，以及所有有效 SKU 的交易价格、库存记录、配送方式和库存策略。`
     : "当前销售方式发布时不要求交易价格、SKU 或正库存；服务端仍会核对基础商品内容、有效类目和至少一张可读取的非视频图片。";
 
   if (loading) {
@@ -778,6 +778,31 @@ export default function ProfessionalProductEditor() {
           <div className="pro-editor__title-row"><h2>基础信息</h2></div>
           <Form.Item name="condition" label="商品类型" className="pro-editor__horizontal-field"><Radio.Group><Radio value="NEW">全新</Radio><Radio value="SECOND_HAND">二手</Radio></Radio.Group></Form.Item>
           <Form.Item name="name" label="商品标题" className="pro-editor__horizontal-field" rules={[{ required: true, message: "请输入商品标题" }]}><Input maxLength={60} showCount /></Form.Item>
+          <Form.Item
+            name="shortDescription"
+            label="商品简介"
+            className="pro-editor__horizontal-field"
+            extra="公开商品至少需要 8 个有效字符。"
+            rules={[
+              { required: true, message: "请输入商品简介" },
+              { min: 8, message: "商品简介至少需要 8 个字符" },
+              { max: 500, message: "商品简介不能超过 500 个字符" },
+            ]}
+          >
+            <Input maxLength={500} showCount placeholder="概括商品的材质、设计和佩戴特点" />
+          </Form.Item>
+          <Form.Item
+            name="description"
+            label="商品说明"
+            className="pro-editor__horizontal-field"
+            extra="公开商品至少需要 20 个有效字符。"
+            rules={[
+              { required: true, message: "请输入商品说明" },
+              { min: 20, message: "商品说明至少需要 20 个字符" },
+            ]}
+          >
+            <Input.TextArea rows={4} maxLength={5000} showCount placeholder="介绍商品材质、设计、工艺与佩戴建议" />
+          </Form.Item>
           <Form.Item name="categoryId" label="当前类目" className="pro-editor__horizontal-field" rules={[{ required: true, message: "请选择珠宝类目" }]}><Select showSearch optionFilterProp="label" options={categories} placeholder="请选择珠宝类目" /></Form.Item>
           <div className="pro-editor__attribute-banner"><b>商品属性</b><span>已仅保留珠宝类目需要的结构化字段</span></div>
           <div className="pro-editor__attributes">
@@ -809,13 +834,13 @@ export default function ProfessionalProductEditor() {
         <section id="sales" className="pro-editor__card">
           <div className="pro-editor__title-row"><h2>销售信息</h2></div>
           <div className="pro-editor__sales-grid">
-            <Form.Item name="salesMode" label="销售方式" extra={!commerceEnabled ? "交易功能未启用，因此暂不可选择“直接购买”。" : undefined}><Radio.Group><Radio value="DISPLAY_ONLY">仅展示</Radio><Radio value="SELECTION">选款咨询</Radio><Radio value="APPOINTMENT">预约到店</Radio><Tooltip title={commerceEnabled ? undefined : "交易功能当前未启用"}><Radio value="DIRECT_PURCHASE" disabled={!commerceEnabled}>直接购买</Radio></Tooltip><Radio value="CUSTOM_INQUIRY">定制咨询</Radio></Radio.Group></Form.Item>
+            <Form.Item name="salesMode" label="销售方式" extra={!commerceEnabled ? "交易功能未启用；可维护“直接购买”商品事实，但不会开放加购、结算或支付。" : undefined}><Radio.Group><Radio value="DISPLAY_ONLY">仅展示</Radio><Radio value="SELECTION">选款咨询</Radio><Radio value="APPOINTMENT">预约到店</Radio><Radio value="DIRECT_PURCHASE">直接购买</Radio><Radio value="CUSTOM_INQUIRY">定制咨询</Radio></Radio.Group></Form.Item>
             <Form.Item label="SKU 派生最低价" className="pro-editor__money-field" extra="系统按已启用且价格大于 0 的 SKU 自动派生；交易价格请在 SKU 中维护。"><div className="pro-editor__derived-price">{currentProductId ? (derivedPrice > 0 ? `¥ ${derivedPrice.toFixed(2)}` : "—") : "保存商品后显示"}</div></Form.Item>
             {!currentProductId && selectedSalesMode === "DIRECT_PURCHASE" && <Form.Item name="initialSkuPrice" label="默认 SKU 直购价" className="pro-editor__money-field" extra="首次保存时创建默认 SKU；之后请在 SKU 列表中维护价格。"><InputNumber min={0} precision={2} suffix="元" /></Form.Item>}
             {!requiredOnly && <Form.Item name="craftFee" label="工费" className="pro-editor__money-field"><InputNumber min={0} precision={2} suffix="元" /></Form.Item>}
             <Form.Item label="库存策略"><Form.Item name="inventoryPolicy" noStyle><Radio.Group><Radio value="STANDARD">标准库存</Radio><Radio value="SINGLE_UNIT">一物一件</Radio></Radio.Group></Form.Item><span className="pro-editor__hint">{inventoryPolicyMessage}</span></Form.Item>
             <Form.Item label="库存扣减方式"><Radio checked>下单预占库存，确认收款后扣减</Radio><span className="pro-editor__hint">库存事实由库存模块统一管理，不在商品资料中直接修改。</span></Form.Item>
-            <Alert className="pro-editor__inventory-alert" type={selectedSalesMode === "DIRECT_PURCHASE" ? "warning" : "info"} showIcon message={salesModeMessage} action={selectedSalesMode === "DIRECT_PURCHASE" && commerceEnabled ? <Button size="small" onClick={() => navigate("/admin/inventory")}>前往库存管理</Button> : undefined} />
+            <Alert className="pro-editor__inventory-alert" type={selectedSalesMode === "DIRECT_PURCHASE" ? "warning" : "info"} showIcon message={salesModeMessage} action={selectedSalesMode === "DIRECT_PURCHASE" ? <Button size="small" onClick={() => navigate("/admin/inventory")}>前往库存管理</Button> : undefined} />
             {selectedInventoryPolicy === "SINGLE_UNIT" && currentProductId && activeSkuCount !== 1 && <Alert className="pro-editor__inventory-alert" type="error" showIcon message={`当前有 ${activeSkuCount} 个有效 SKU；一物一件必须且只能保留 1 个。保存时以服务端 409 校验结果为准。`} />}
             <Form.Item name="publishMode" label="上架时间"><Radio.Group><Radio value="IMMEDIATE">立刻上架</Radio><Radio value="SCHEDULED">定时上架</Radio><Radio value="WAREHOUSE">放入仓库</Radio></Radio.Group></Form.Item>
             <Form.Item noStyle shouldUpdate={(prev, next) => prev.publishMode !== next.publishMode}>{({ getFieldValue }) => getFieldValue("publishMode") === "SCHEDULED" ? <Form.Item name="scheduledPublishAt" label="定时上架时间" rules={[{ required: true }]}><DatePicker showTime disabledDate={(date) => date.isBefore(dayjs(), "day")} /></Form.Item> : null}</Form.Item>

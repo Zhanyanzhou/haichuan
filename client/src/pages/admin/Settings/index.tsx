@@ -22,8 +22,10 @@ function getToken(): string {
 interface BackupStatus {
   lastBackup: string | null;
   autoBackup: boolean;
+  storageMounted?: boolean;
   backupSchedule: string | null;
   totalBackups: number;
+  incompleteArtifactCount?: number;
   latestFiles?: Array<{ name: string; size: number }>;
   message: string;
 }
@@ -91,7 +93,7 @@ export default function Settings() {
               ) : status?.lastBackup ? (
                 <>
                   最近备份 {formatTime(status.lastBackup)}
-                  {status.totalBackups ? ` · 共 ${status.totalBackups} 份产物` : ""}
+                  {status.totalBackups ? ` · 共 ${status.totalBackups} 组完整备份` : ""}
                 </>
               ) : (
                 "暂无备份产物"
@@ -122,8 +124,8 @@ export default function Settings() {
                     : status?.message || "备份目录未挂载，自动备份状态未知"}
                 </p>
               </div>
-              <Tag color={status?.autoBackup ? "green" : "default"}>
-                {status?.autoBackup ? "运行中" : "未挂载"}
+              <Tag color={status?.autoBackup ? "green" : status?.storageMounted ? "orange" : "default"}>
+                {status?.autoBackup ? "最近成功" : status?.storageMounted ? "需检查" : "未挂载"}
               </Tag>
             </div>
 
@@ -144,8 +146,8 @@ export default function Settings() {
                   ))}
                 </ul>
                 <p className="text-xs leading-[18px] text-brand-muted mt-2">
-                  恢复演练：备份文件位于宿主机 ./backups（数据库 .sql.gz + 媒体 .tar.gz），
-                  请定期在测试环境做一次真实恢复验证。
+                  恢复演练：备份文件位于宿主机 ./backups（数据库 .sql.gz、媒体 .tar.gz
+                  与批次 .sha256 清单），恢复前必须先校验清单，并定期在隔离环境做真实恢复验证。
                 </p>
               </div>
             )}

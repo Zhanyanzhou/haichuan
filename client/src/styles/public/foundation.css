@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Ant Design portal 与登录页也必须服从全站功能色，不能回退到库默认蓝/红。 */
+.admin-login-page .ant-input-affix-wrapper:hover,
+.admin-login-page .ant-input-affix-wrapper-focused {
+  border-color: #181A1B !important;
+  box-shadow: 0 0 0 2px rgba(24, 26, 27, 0.1) !important;
+}
+.ant-message .anticon-close-circle,
+.ant-notification .anticon-close-circle {
+  color: #8C3F3B !important;
+}
+
+:root {
+  --hc-canvas: #ffffff;
+  --hc-canvas-subtle: #f4f5f5;
+  --hc-surface: #ffffff;
+  --hc-ink: #181a1b;
+  --hc-text-secondary: #5f6568;
+  --hc-text-muted: #6e7477;
+  --hc-line: #dde1e2;
+  --hc-line-strong: #b8bec1;
+  --hc-inverse: #111315;
+  --hc-inverse-text: #f7f8f8;
+
+  /* 兼容既有组件；新代码只使用 --hc-* 语义令牌。 */
+  --bg: var(--hc-canvas-subtle);
+  --surface: var(--hc-surface);
+  --text: var(--hc-ink);
+  --muted: var(--hc-text-secondary);
+  --gold: var(--hc-text-secondary);
+  --goldL: var(--hc-line);
+  --goldD: var(--hc-ink);
+  --line: rgba(24, 26, 27, 0.08);
+  --lineA: rgba(24, 26, 27, 0.16);
+  --brand-calligraphy: "STXingkai", "华文行楷", "FZKai-Z03S",
+    "KaiTi", "楷体", "Noto Serif SC", serif;
+  --brand-serif: "Cormorant Garamond", Garamond, "Times New Roman", serif;
+  --brand-ink: var(--hc-ink);
+  --brand-champagne: var(--hc-text-secondary);
+  --brand-lit: var(--hc-inverse-text);
+}
+
+/* ═══════ 管理后台专用变量 — 已迁移至 adminLuxury.css ═══════ */
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  width: 100%;
+}
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+body {
+  font-family:
+    system-ui,
+    -apple-system,
+    "PingFang SC",
+    "Microsoft YaHei",
+    "Noto Sans SC",
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 1.7;
+  overflow-x: hidden;
+}

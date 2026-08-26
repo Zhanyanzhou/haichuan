@@ -13,8 +13,27 @@ const createBody = productsService.slice(
 assert.match(createBody, /data\.status === "PUBLISHED"/);
 assert.match(createBody, /await this\.canPublish\(created\.id, tx\)/);
 
-const productEditor = read("client/src/pages/admin/ProductEditor/index.tsx");
-assert.match(productEditor, /initialValues=\{\{ status: "DRAFT", salesMode: "DISPLAY_ONLY", visibility: "MEMBER"/);
+const productEditor = read(
+  "client/src/pages/admin/ProductEditor/ProfessionalProductEditor.tsx",
+);
+const productEditorDefaults = productEditor.slice(
+  productEditor.indexOf("const defaultValues = {"),
+  productEditor.indexOf("function flattenCategories"),
+);
+assert.match(productEditorDefaults, /visibility:\s*"MEMBER"/);
+assert.match(productEditorDefaults, /salesMode:\s*"DISPLAY_ONLY"/);
+assert.match(
+  productEditor,
+  /useState<ProductStatus>\("DRAFT"\)/,
+);
+const createDraftBody = productEditor.slice(
+  productEditor.indexOf("      if (!productId) {"),
+  productEditor.indexOf(
+    '      if (!productId) throw new EditorUserError("商品创建失败，未返回商品标识");',
+  ),
+);
+assert.match(createDraftBody, /status:\s*"DRAFT"/);
+assert.match(createDraftBody, /publishMode:\s*"WAREHOUSE"/);
 
 const usersController = read("server/src/modules/users/users.controller.ts");
 assert.match(

@@ -5,6 +5,9 @@
  */
 export interface CatalogProduct {
   id: number;
+  /** 稳定公开引用，来自 Product.code。 */
+  code?: string;
+  /** 目录展示用货号别名；历史命名保留，值同 Product.code。 */
   sku: string;
   name: string;
   shortDescription?: string;

@@ -2,8 +2,8 @@
  * 页面级 SEO 元信息覆盖 Store
  *
  * 装修页面（Puck PageDocument）的 metadata 含 seoTitle / seoDescription / ogImage，
- * 前台 Home 加载已发布文档时写入本 store；PublicLayout 在站点级 SEO 之上叠加，
- * 页面级优先。页面卸载时 clear，回退到站点级（settingsApi）默认值。
+ * PublicLayout 直接读取已发布文档并给予最高优先级；本 store 保留代码页面、
+ * 商品详情、错误页等非 PageDocument SEO。页面卸载时 clear，回退到路由或站点默认值。
  */
 import { create } from 'zustand';
 
@@ -18,6 +18,22 @@ export interface PageMeta {
   noIndex?: boolean;
   /** 未设置时使用当前路径；null 表示本页不得输出 canonical。 */
   canonicalPath?: string | null;
+}
+
+/** 只读取 PageDocument 正式声明的 SEO 字段，不把其他 metadata 混入公开页面。 */
+export function getPageDocumentMeta(metadata: unknown): PageMeta {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
+  const value = metadata as Record<string, unknown>;
+  const title = typeof value.seoTitle === "string" ? value.seoTitle.trim() : "";
+  const description = typeof value.seoDescription === "string"
+    ? value.seoDescription.trim()
+    : "";
+  const image = typeof value.ogImage === "string" ? value.ogImage.trim() : "";
+  return {
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(image ? { image } : {}),
+  };
 }
 
 interface PageMetaState {

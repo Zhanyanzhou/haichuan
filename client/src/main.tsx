@@ -9,6 +9,8 @@ import {
 import App from './App';
 import './styles/globals.css';
 import './styles/adminLuxury.css';
+import './styles/adminDashboard.css';
+import './styles/adminCompatibility.css';
 
 /**
  * 2026-08-16 声明式 BrowserRouter → 数据路由迁移（批次 D 前置）：

@@ -10,6 +10,7 @@ import { expect, test, type Page } from "@playwright/test";
  */
 
 const useMock = process.env.VITE_USE_MOCK === "true";
+const analyticsConfigured = process.env.VITE_ANALYTICS_ENABLED === "true";
 
 // 明确禁止出现在前台的假值
 const FORBIDDEN_FAKE_VALUES = [
@@ -161,24 +162,95 @@ test.describe("隐私页面", () => {
 });
 
 test.describe("匿名行为分析", () => {
-  test("创建匿名会话标识", async ({ page }) => {
+  test("默认未开启时不显示偏好、不创建会话且不发送事件", async ({ page }) => {
+    test.skip(analyticsConfigured, "该用例验证生产安全默认关闭配置");
+    const analyticsRequests: Record<string, unknown>[] = [];
+    await page.context().clearCookies();
     await page.addInitScript(() => {
+      sessionStorage.removeItem("hc.analytics-session");
       localStorage.removeItem("_asid");
     });
+    await page.route("**/api/analytics/track", async (route) => {
+      analyticsRequests.push(route.request().postDataJSON());
+      await route.fulfill({ status: 204, body: "" });
+    });
+
     await page.goto("/catalog");
-    await expect.poll(() => page.evaluate(() => localStorage.getItem("_asid"))).toMatch(/^s_[a-z0-9]+$/);
+    const search = page.getByPlaceholder("搜索作品名称或编号");
+    await expect(search).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "分析数据偏好" }),
+    ).toHaveCount(0);
+
+    await search.fill("戒指");
+    await page.getByRole("button", { name: "搜索" }).click();
+    await page.waitForTimeout(250);
+
+    expect(analyticsRequests).toEqual([]);
+    expect(
+      await page.evaluate(() => sessionStorage.getItem("hc.analytics-session")),
+    ).toBeNull();
+    expect(await page.evaluate(() => localStorage.getItem("_asid"))).toBeNull();
   });
 
-  test("发送匿名 /analytics/track 请求", async ({ page }) => {
-    const analyticsRequests: string[] = [];
-    await page.route("**/api/analytics/track", (route) => route.fulfill({ status: 204, body: "" }));
-    page.on("request", (req) => {
-      if (req.url().includes("/analytics/track")) {
-        analyticsRequests.push(req.url());
-      }
+  test("显式开启后仍须同意，撤回后清除会话并停止发送", async ({ page }) => {
+    test.skip(!analyticsConfigured, "需要 VITE_ANALYTICS_ENABLED=true 的独立构建验证");
+    const analyticsRequests: Record<string, unknown>[] = [];
+    await page.context().clearCookies();
+    await page.addInitScript(() => {
+      sessionStorage.removeItem("hc.analytics-session");
+      localStorage.removeItem("_asid");
     });
+    await page.route("**/api/analytics/track", async (route) => {
+      analyticsRequests.push(route.request().postDataJSON());
+      await route.fulfill({ status: 204, body: "" });
+    });
+
     await page.goto("/catalog");
-    await expect.poll(() => analyticsRequests.length).toBeGreaterThan(0);
+    const search = page.getByPlaceholder("搜索作品名称或编号");
+    await expect(search).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "分析数据偏好" }),
+    ).toBeVisible();
+
+    await search.fill("戒指");
+    await page.getByRole("button", { name: "搜索" }).click();
+    await page.waitForTimeout(250);
+    expect(analyticsRequests).toEqual([]);
+    expect(
+      await page.evaluate(() => sessionStorage.getItem("hc.analytics-session")),
+    ).toBeNull();
+
+    await page.getByRole("button", { name: "同意匿名分析" }).click();
+    await expect.poll(() => analyticsRequests.length).toBe(1);
+    expect(analyticsRequests[0]).toMatchObject({
+      eventName: "page_view",
+      consentGranted: true,
+      consentVersion: "analytics-v1",
+      pagePath: "/catalog",
+    });
+    expect(String(analyticsRequests[0].sessionId)).toMatch(/^s_[a-z0-9]+$/);
+    await expect
+      .poll(() =>
+        page.evaluate(() => sessionStorage.getItem("hc.analytics-session")),
+      )
+      .toMatch(/^s_[a-z0-9]+$/);
+
+    await page
+      .getByRole("button", { name: "打开分析数据偏好设置" })
+      .click();
+    await page.getByRole("button", { name: "撤回同意" }).click();
+    expect(
+      await page.evaluate(() => sessionStorage.getItem("hc.analytics-session")),
+    ).toBeNull();
+    await expect
+      .poll(() => page.evaluate(() => decodeURIComponent(document.cookie)))
+      .toContain("hc_analytics_consent=analytics-v1:withdrawn");
+
+    await search.fill("项链");
+    await page.getByRole("button", { name: "搜索" }).click();
+    await page.waitForTimeout(250);
+    expect(analyticsRequests).toHaveLength(1);
   });
 });
 

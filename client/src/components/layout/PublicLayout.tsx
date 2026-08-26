@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { settingsApi } from "@/services/api";
-import { unwrapResponse } from "@/utils/unwrap";
-import { usePageMetaStore } from "@/store/pageMetaStore";
+import { getPageDocumentMeta, usePageMetaStore } from "@/store/pageMetaStore";
+import {
+  PublicSiteSettingsProvider,
+  usePublicSiteSettingsResource,
+} from "@/hooks/usePublicSiteSettings";
 import AnalyticsConsentBanner from "@/components/privacy/AnalyticsConsentBanner";
 import {
   buildPublicUrl,
@@ -19,6 +21,12 @@ import { usePublishedPageDocument } from "@/page-builder/runtime/usePublishedPag
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
 import StorefrontFooter from "./StorefrontFooter";
+import { normalizePublicProductReference } from "@/utils/publicProductPath";
+import { isNonIndexablePublicRoute } from "@/utils/publicSeoPolicy";
+import {
+  resolvePublicLocalePath,
+  withPublicLocalePath,
+} from "@/i18n/publicLocale";
 
 /** 幂等写入/更新 <meta> 标签（按 name 或 property 选择）。 */
 function upsertMeta(attr: "name" | "property", key: string, content: string) {
@@ -152,14 +160,16 @@ const AccountIcon = () => (
 
 export default function PublicLayout() {
   const location = useLocation();
+  const localizedPath = resolvePublicLocalePath(location.pathname);
+  const contentPathname = localizedPath.pathname;
   const mainRef = useRef<HTMLElement>(null);
   const previousPathRef = useRef(location.pathname);
-  const previewPageKey = location.pathname.match(/^\/preview\/([^/]+)$/)?.[1];
+  const previewPageKey = contentPathname.match(/^\/preview\/([^/]+)$/)?.[1];
   const previewPage = isEditorPageKey(previewPageKey)
     ? getEditorPage(previewPageKey)
     : undefined;
-  const isHome = location.pathname === "/" || previewPage?.key === "home";
-  const pageDefinition = getEditorPageByPath(location.pathname) ?? previewPage;
+  const isHome = contentPathname === "/" || previewPage?.key === "home";
+  const pageDefinition = getEditorPageByPath(contentPathname) ?? previewPage;
   const publishedHeaderDocument = usePublishedPageDocument(
     previewPage ? undefined : pageDefinition?.key,
   );
@@ -180,32 +190,40 @@ export default function PublicLayout() {
     ].some((action) => action?.href.startsWith("/contact")),
   );
   const hideFooterService =
-    location.pathname === "/custom"
-    || location.pathname === "/contact"
+    contentPathname === "/custom"
+    || contentPathname === "/contact"
     || fallbackHasContactAction;
   // 预览页由 PagePreview 读取草稿；不能再套一层公开发布文档装饰器。
   const decorationPage = previewPage ? undefined : isHome ? undefined : pageDefinition;
+  const decorationFallback = (() => {
+    const fallback = decorationPage?.publicFallback;
+    if (!fallback || decorationPage?.key !== "custom") return fallback;
+    const productRef = normalizePublicProductReference(
+      new URLSearchParams(location.search).get("productRef"),
+    );
+    const params = new URLSearchParams({ type: "custom" });
+    if (productRef) params.set("productRef", productRef);
+    return {
+      ...fallback,
+      primaryAction: {
+        ...fallback.primaryAction,
+        href: `${withPublicLocalePath("/contact", localizedPath.locale)}?${params.toString()}`,
+      },
+    };
+  })();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const [scrolled, setScrolled] = useState(false);
-  const [siteSettings, setSiteSettings] = useState<any>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    settingsApi
-      .getPublicSettings()
-      .then((res) => {
-        if (!cancelled) setSiteSettings(unwrapResponse<any>(res));
-      })
-      .catch(() => {
-        // 公共页面保留品牌默认值，设置接口不可用不阻断访问。
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const siteSettingsResource = usePublicSiteSettingsResource();
+  const siteSettings = siteSettingsResource.settings;
 
   const pageMeta = usePageMetaStore((s) => s.meta);
+  const nonIndexableRoute = isNonIndexablePublicRoute(location.pathname);
+  const publishedPageMeta = getPageDocumentMeta(
+    publishedHeaderDocument.status === "published" && publishedHeaderReadiness?.ready
+      ? publishedHeaderDocument.pageDocument?.metadata
+      : undefined,
+  );
 
   useEffect(() => {
     const siteName = siteSettings?.siteName || "海川珠宝";
@@ -214,18 +232,21 @@ export default function PublicLayout() {
       : undefined;
     const routeDescription = pageDefinition?.publicFallback?.description
       || pageDefinition?.description;
-    // 页面级 SEO 优先于站点级（装修页面可覆盖默认标题/描述）
+    // 已发布 PageDocument SEO 优先；代码页面设置只在没有装修文档时作为安全回退。
     const title =
-      pageMeta.title || routeTitle || siteSettings?.seoTitle || siteSettings?.siteName;
+      publishedPageMeta.title || pageMeta.title || routeTitle || siteSettings?.seoTitle || siteSettings?.siteName;
     const description =
+      publishedPageMeta.description ||
       pageMeta.description ||
       routeDescription ||
       siteSettings?.seoDescription ||
       siteSettings?.siteDescription;
     const keywords = siteSettings?.seoKeywords;
-    const noIndex = Boolean(previewPage || pageMeta.noIndex || pageDocumentUnavailable);
+    const noIndex = Boolean(
+      nonIndexableRoute || previewPage || pageMeta.noIndex || pageDocumentUnavailable,
+    );
     const canonicalPath =
-      previewPage || pageMeta.canonicalPath === null
+      nonIndexableRoute || previewPage || pageMeta.canonicalPath === null
         ? null
         : pageMeta.canonicalPath || location.pathname;
     const canonicalUrl = canonicalPath
@@ -233,17 +254,18 @@ export default function PublicLayout() {
       : null;
     // og:image/twitter:image 相对路径绝对化，避免社交爬虫解析失败
     let image: string | undefined;
-    if (pageMeta.image) {
-      if (/^https?:\/\//i.test(pageMeta.image)) {
-        image = pageMeta.image;
+    const pageImage = publishedPageMeta.image || pageMeta.image;
+    if (pageImage) {
+      if (/^https?:\/\//i.test(pageImage)) {
+        image = pageImage;
       } else {
         try {
           image = new URL(
-            pageMeta.image,
+            pageImage,
             publicSiteOrigin || window.location.origin,
           ).href;
         } catch {
-          image = pageMeta.image;
+          image = pageImage;
         }
       }
     }
@@ -273,7 +295,19 @@ export default function PublicLayout() {
     syncMeta("name", "twitter:title", title || siteName);
     syncMeta("name", "twitter:description", description);
     syncMeta("name", "twitter:image", image);
-  }, [siteSettings, pageMeta, location.pathname, previewPage, pageDocumentUnavailable, pageDefinition, isHome]);
+  }, [
+    siteSettings,
+    pageMeta,
+    publishedPageMeta.title,
+    publishedPageMeta.description,
+    publishedPageMeta.image,
+    location.pathname,
+    nonIndexableRoute,
+    previewPage,
+    pageDocumentUnavailable,
+    pageDefinition,
+    isHome,
+  ]);
 
   const siteName = siteSettings?.siteName || "海川珠宝";
   const contactPhone = siteSettings?.contactPhone?.trim() || "";
@@ -329,6 +363,7 @@ export default function PublicLayout() {
   };
 
   return (
+    <PublicSiteSettingsProvider resource={siteSettingsResource}>
     <div
       className={isHome ? "editorial-shell" : `site-shell${isOverlayHeader ? " site-shell--overlay" : ""}`}
       data-page-header-mode={resolvedHeaderMode}
@@ -464,15 +499,17 @@ export default function PublicLayout() {
         <PublishedPageDecoration
           pageKey={decorationPage?.key}
           pageLabel={decorationPage?.label}
+          documentResource={publishedHeaderDocument}
           replaceChildren={Boolean(decorationPage && !decorationPage.dynamic)}
-          publicFallback={decorationPage?.publicFallback}
+          publicFallback={decorationFallback}
         >
-          <Outlet />
+          <Outlet context={publishedHeaderDocument} />
         </PublishedPageDecoration>
       </main>
 
       <StorefrontFooter siteName={siteName} showService={!hideFooterService} />
       <AnalyticsConsentBanner />
     </div>
+    </PublicSiteSettingsProvider>
   );
 }

@@ -5,6 +5,7 @@ import { CheckCircleOutlined } from "@ant-design/icons";
 import { cartApi, customerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackBeginCheckout, trackOrderCreated } from "@/hooks/useAnalytics";
+import CustomerPaymentDialog from "@/components/commerce/CustomerPaymentDialog";
 
 type CartItem = {
   id: number;
@@ -16,18 +17,45 @@ type CartItem = {
 
 const getItemPrice = (item: CartItem) => Number(item.sku.price || 0);
 
+type CreatedOrder = { id: number; orderNo: string; finalAmount: number };
+const PENDING_PAYMENT_ORDER_KEY = "haichuan:pending-payment-order";
+
+function restorePendingPaymentOrder(): CreatedOrder | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const parsed = JSON.parse(
+      sessionStorage.getItem(PENDING_PAYMENT_ORDER_KEY) || "null",
+    ) as CreatedOrder | null;
+    return parsed && Number.isInteger(parsed.id) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function Checkout() {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [createdOrder, setCreatedOrder] = useState<{ id: number; orderNo: string; finalAmount: number } | null>(null);
+  const [createdOrder, setCreatedOrder] = useState<CreatedOrder | null>(
+    restorePendingPaymentOrder,
+  );
+  const returnedFromPayment =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("paymentReturn") === "1";
+  const [paymentOpen, setPaymentOpen] = useState(
+    Boolean(returnedFromPayment && restorePendingPaymentOrder()),
+  );
+  const [paymentInitialAction, setPaymentInitialAction] = useState<
+    "create" | "query"
+  >(returnedFromPayment ? "query" : "create");
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   // P0-1 联动：后端 checkout 已要求登录态；未登录需引导先登录/注册
   const customerToken = typeof window !== "undefined" ? localStorage.getItem("customerToken") : null;
   const [customer, setCustomer] = useState<{ name?: string; phone?: string; email?: string } | null>(null);
 
   // 结算契约对齐（P0 修复）：后端 checkout 仅接受 { address, items, customerEmail? }，
-  // 客户身份（姓名/手机号）来自登录态、支付方式固定线下转账。
+  // 客户身份（姓名/手机号）来自登录态；订单创建后由客户本人发起微信支付。
   // 前端不再展示后端会忽略的 customerName/customerPhone/paymentMethod 输入框，
   // 改为只读展示登录客户信息，仅收集收货地址（必要时邮箱）。
   const loadCustomer = useCallback(async () => {
@@ -73,7 +101,7 @@ export default function Checkout() {
     try {
       trackBeginCheckout(cartItems.length, total);
       // 结算契约对齐（P0）：仅传后端会使用的字段 { address, items, customerEmail? }。
-      // 客户身份（姓名/手机号）由后端从登录态取，支付方式后端固定线下转账。
+      // 客户身份（姓名/手机号）由后端从登录态取，支付场景由服务端按终端判断。
       const response = await customerApi.checkout({
         address: values.address,
         customerEmail: values.customerEmail || undefined,
@@ -82,15 +110,16 @@ export default function Checkout() {
       // P0-1 联动：后端 checkout 已改为要求登录态、不再签发 access token；返回仅含 order
       const result = unwrapResponse<{ order: { id: number; orderNo: string; finalAmount: number } }>(response);
       if (!result?.order) throw new Error("订单创建响应不完整");
-      try {
-        await cartApi.clear();
-      } catch {
-        message.warning("订单已创建，购物车将在下次访问时自动同步");
-      }
       trackOrderCreated(result.order.id, Number(result.order.finalAmount));
       setCreatedOrder(result.order);
+      sessionStorage.setItem(
+        PENDING_PAYMENT_ORDER_KEY,
+        JSON.stringify(result.order),
+      );
       setCartItems([]);
-      message.success("订单已创建，请完成线下转账并上传凭证");
+      setPaymentInitialAction("create");
+      setPaymentOpen(true);
+      message.success("订单已创建，请继续完成微信支付");
     } catch (error: any) {
       message.error(error?.message || "提交失败");
     } finally {
@@ -103,11 +132,41 @@ export default function Checkout() {
       <div className="min-h-screen bg-brand-bg flex items-center justify-center px-6">
         <div className="max-w-lg w-full text-center bg-brand-surface border border-brand-line p-10">
           <CheckCircleOutlined className="text-5xl text-brand-gold mb-4" />
-          <h1 className="text-2xl font-display mb-3">订单已创建</h1>
+          <h1 className="text-2xl font-display mb-3">
+            {paymentConfirmed ? "支付已确认" : "订单已创建"}
+          </h1>
           <p className="text-brand-muted">订单号：{createdOrder.orderNo}</p>
           <p className="price text-2xl mt-3">¥{Number(createdOrder.finalAmount).toLocaleString()}</p>
-          <p className="text-sm text-brand-muted mt-6 leading-6">库存已为您保留 24 小时，请在期限内按门店提供的账户完成线下转账，并在客户中心上传付款凭证。审核通过后，订单将进入发货流程。</p>
-          <Link to="/customer" className="btn btn-primary w-full mt-8">前往客户中心上传凭证</Link>
+          <p className="text-sm text-brand-muted mt-6 leading-6">
+            {paymentConfirmed
+              ? "微信支付已经由服务端确认，订单将进入拣货与发货流程。"
+              : "库存已为您保留至订单支付截止时间。请完成微信支付；最终结果以微信回调或服务端查单为准，请勿重复付款。"}
+          </p>
+          {!paymentConfirmed ? (
+            <button
+              type="button"
+              className="btn btn-primary w-full mt-8"
+              onClick={() => {
+                setPaymentInitialAction("create");
+                setPaymentOpen(true);
+              }}
+            >
+              继续微信支付
+            </button>
+          ) : null}
+          <Link to="/customer" className={`${paymentConfirmed ? "btn btn-primary" : "btn btn-secondary"} w-full mt-3`}>
+            查看我的订单
+          </Link>
+          <CustomerPaymentDialog
+            open={paymentOpen}
+            order={createdOrder}
+            initialAction={paymentInitialAction}
+            onClose={() => setPaymentOpen(false)}
+            onPaid={() => {
+              setPaymentConfirmed(true);
+              setPaymentOpen(false);
+            }}
+          />
         </div>
       </div>
     );
@@ -193,10 +252,15 @@ export default function Checkout() {
               <Input type="email" placeholder="用于接收订单通知" />
             </Form.Item>
             <div className="mb-6">
-              <span className="text-sm text-brand-muted">支付方式：线下转账（提交订单后请在客户中心上传付款凭证）</span>
+              <span className="text-sm text-brand-muted">
+                支付方式：微信支付（桌面端扫码，手机浏览器唤起微信）
+              </span>
+              <p className="mt-2 text-xs leading-5 text-brand-muted">
+                微信内网页的 JSAPI 支付尚未开放；请使用系统浏览器完成支付。
+              </p>
             </div>
             <button type="submit" className="btn btn-primary w-full" disabled={submitting}>
-              {submitting ? "提交中..." : `提交订单 ¥${total.toLocaleString()}`}
+              {submitting ? "提交中..." : `提交订单并支付 ¥${total.toLocaleString()}`}
             </button>
           </Form>
         </div>

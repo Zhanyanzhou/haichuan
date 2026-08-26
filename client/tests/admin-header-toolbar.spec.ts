@@ -98,6 +98,22 @@ test.describe("普通后台全局工具区", () => {
     expect(accountBox?.width).toBeGreaterThanOrEqual(40);
     expect(accountBox?.height).toBeGreaterThanOrEqual(40);
     expect(overflow).toBe(false);
+
+    const navigationTrigger = page.getByRole("button", {
+      name: "打开后台导航",
+    });
+    await expect(navigationTrigger).toHaveAttribute("aria-expanded", "false");
+    await navigationTrigger.click();
+    await expect(page.getByRole("navigation", { name: "后台导航" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "关闭后台导航" }),
+    ).toHaveAttribute("aria-expanded", "true");
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("navigation", { name: "后台导航" })).toBeHidden();
+    await expect(
+      page.getByRole("button", { name: "打开后台导航" }),
+    ).toBeFocused();
   });
 });
 

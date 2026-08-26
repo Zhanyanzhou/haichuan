@@ -12,6 +12,8 @@ export type CatalogDetailProduct = ReturnType<typeof publicProduct>;
 export type WriteObservation = {
   analytics: number;
   cart: number;
+  favorite: number;
+  inquiry: number;
   unexpected: number;
 };
 
@@ -121,6 +123,33 @@ const wrapped = (data: unknown) => ({
   timestamp: new Date(0).toISOString(),
 });
 
+export function publishedCatalogDocument() {
+  return {
+    id: 7901,
+    pageKey: "catalog",
+    puckData: {
+      content: [
+        {
+          type: "业务功能区",
+          props: {
+            id: "catalog-business-region",
+            pageKey: "catalog",
+            title: "选款工具与商品结果",
+            items: "关键词/货号搜索|条件筛选|排序与结果|快速查看|选款清单|提交询价",
+            locked: true,
+          },
+        },
+      ],
+      root: { props: {} },
+    },
+    metadata: {},
+    status: "PUBLISHED",
+    version: 1,
+    publishedAt: "2026-08-24T00:00:00.000Z",
+    updatedAt: "2026-08-24T00:00:00.000Z",
+  };
+}
+
 async function fulfill(route: Route, data: unknown, status = 200) {
   await route.fulfill({
     status,
@@ -141,10 +170,21 @@ export async function mockCatalogDetail(
     productsBarrier?: RouteBarrier;
     reviewsByProduct?: Record<number, { list: unknown[]; total: number; averageRating: number | null }>;
     allowCartWrite?: boolean;
+    allowFavoriteWrite?: boolean;
+    allowInquiryWrite?: boolean;
+    onInquiry?: (route: Route) => Promise<void> | void;
   },
 ) {
-  const productsById = new Map(options.products.map((product) => [product.id, product]));
-  const writes: WriteObservation = { analytics: 0, cart: 0, unexpected: 0 };
+  const findProduct = (reference: string) => options.products.find(
+    (product) => product.code === reference || String(product.id) === reference,
+  );
+  const writes: WriteObservation = {
+    analytics: 0,
+    cart: 0,
+    favorite: 0,
+    inquiry: 0,
+    unexpected: 0,
+  };
   await page.addInitScript(({ signedIn }) => {
     localStorage.removeItem("hc_selection_tray");
     if (signedIn) {
@@ -173,6 +213,19 @@ export async function mockCatalogDetail(
         writes.unexpected += 1;
         return route.abort();
       }
+      if (/\/customers\/me\/favorites\/\d+\/toggle$/.test(path) && method === "POST") {
+        writes.favorite += 1;
+        if (options.allowFavoriteWrite) return fulfill(route, { favorited: true });
+        writes.unexpected += 1;
+        return route.abort();
+      }
+      if (path.endsWith("/inquiries") && method === "POST") {
+        writes.inquiry += 1;
+        if (options.onInquiry) return options.onInquiry(route);
+        if (options.allowInquiryWrite) return fulfill(route, { id: writes.inquiry });
+        writes.unexpected += 1;
+        return route.abort();
+      }
       writes.unexpected += 1;
       return route.abort();
     }
@@ -189,12 +242,17 @@ export async function mockCatalogDetail(
       });
     }
     if (path.endsWith("/settings/public")) return fulfill(route, { siteName: "海川珠宝" });
-    if (path.endsWith("/page-modules/document/published")) return fulfill(route, null);
+    if (path.endsWith("/page-modules/document/published")) {
+      return fulfill(
+        route,
+        url.searchParams.get("pageKey") === "catalog" ? publishedCatalogDocument() : null,
+      );
+    }
     if (path.endsWith("/categories/tree")) {
       return fulfill(route, [{ id: 1, name: "戒指", slug: "rings", level: 1, parentId: null, children: [] }]);
     }
     if (path.endsWith("/attributes")) return fulfill(route, []);
-    if (path.endsWith("/customers/favorites")) return fulfill(route, []);
+    if (path.endsWith("/customers/me/favorites")) return fulfill(route, []);
     if (path.endsWith("/gold-price/latest")) return fulfill(route, { price: 500 });
     if (path.includes("/recommendations/")) return fulfill(route, []);
     const reviewMatch = path.match(/\/reviews\/product\/(\d+)$/);
@@ -220,13 +278,13 @@ export async function mockCatalogDetail(
         facets: { sizes: [] },
       });
     }
-    const detailMatch = path.match(/\/products\/(?:catalog|public)\/(\d+)$/);
+    const detailMatch = path.match(/\/products\/(?:catalog|public)\/([^/]+)$/);
     if (detailMatch) {
       if (options.productsBarrier) await options.productsBarrier.waitUntilReleased();
       if (options.productsStatus && options.productsStatus !== 200) {
         return fulfill(route, { statusCode: options.productsStatus, message: "detail unavailable" }, options.productsStatus);
       }
-      return fulfill(route, productsById.get(Number(detailMatch[1])) ?? null);
+      return fulfill(route, findProduct(decodeURIComponent(detailMatch[1])) ?? null);
     }
     return fulfill(route, null);
   });

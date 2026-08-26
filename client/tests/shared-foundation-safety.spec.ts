@@ -49,5 +49,7 @@ test("六个公开页面只接受已发布 PageDocument，缺失时使用安全�
   expect(publishedPageSource).toContain("内容暂不可用");
   expect(publishedPageSource).not.toContain("fallbackData");
   expect(publishedPageSource).not.toContain('createEditorPageDefault("products")');
-  expect(homeSource).not.toContain("<FallbackHome />");
+  expect(homeSource).not.toContain("FallbackHome");
+  expect(homeSource).not.toContain("productFocus");
+  expect(homeSource).not.toContain("/images/products/");
 });

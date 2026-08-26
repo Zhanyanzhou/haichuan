@@ -1,12 +1,8 @@
 // 前端 API 层：customer(认证/收藏/找回/SMS/合规)/marketing(含可用券)/reviews/recommendation 等
-import axios, { getAdapter } from "axios";
-import { notifyRequestError } from "@/services/requestErrorEvents";
-import type { ApiResponse, CategoryInput, CategorySortItem } from "@/types";
-import { useAuthStore } from "@/store/authStore";
+import { CONTENT_TEMPLATE_PAGE_METADATA } from "@/page-builder/generated/contentTemplates.generated";
 import {
   USE_MOCK,
   mockDelay,
-  mockCategories,
   mockProducts,
   mockOrders,
   mockUsers,
@@ -15,45 +11,80 @@ import {
   filterProducts,
   paginate,
 } from "./mockData";
+import api, {
+  clearCustomerSession,
+  customerAuthHeaders,
+  requestStatus,
+  type NormalizedRequestError,
+} from "./httpClient";
+import { mockResponse as mockRes } from "./mockResponse";
+import {
+  getBrowserPublicContentLocale,
+  type PublicContentLocale,
+} from "@/i18n/publicLocale";
 
-declare module "axios" {
-  interface AxiosRequestConfig {
-    /** 调用方已经提供就地 loading/error/retry 状态时，不再叠加全局错误浮层。 */
-    suppressGlobalError?: boolean;
-  }
+export {
+  publicPageDocumentStreamUrl,
+  publicProductStreamUrl,
+} from "./httpClient";
+export {
+  categoryApi,
+  type CategoryReferenceResult,
+} from "./clients/categoryClient";
+export {
+  attributeApi,
+  type AttributeCreateInput,
+  type AttributeUpdateInput,
+  type AttributeValueInput,
+} from "./clients/attributeClient";
+export {
+  tagApi,
+  type TagCreateInput,
+  type TagUpdateInput,
+} from "./clients/tagClient";
+export {
+  aiClassifyApi,
+  type AiClassifyConfirmationInput,
+  type AiClassifyRecordQuery,
+  type AiDescriptionInput,
+} from "./clients/aiClassifyClient";
+export {
+  shippingTemplateApi,
+  type ShippingFeeMode,
+  type ShippingTemplateCreateInput,
+  type ShippingTemplateUpdateInput,
+} from "./clients/shippingTemplateClient";
+export {
+  statisticsApi,
+  type TrendMetric,
+} from "./clients/statisticsClient";
+export { settingsApi } from "./clients/settingsClient";
+export { recommendationApi } from "./clients/recommendationClient";
+export {
+  customerAdminApi,
+  type CustomerAdminListQuery,
+} from "./clients/customerAdminClient";
+export {
+  inquiriesApi,
+  type InquiryListQuery,
+  type InquiryStatusUpdateInput,
+  type InquirySubmitInput,
+} from "./clients/inquiriesClient";
+export {
+  selectionInquiryApi,
+  type SelectionInquiryListQuery,
+  type SelectionInquiryUpdateInput,
+  type SelectionInquirySubmitItem,
+  type SelectionInquirySubmitInput,
+} from "./clients/selectionInquiryClient";
+export {
+  reviewApi,
+  type ReviewSubmitInput,
+  type ReviewListQuery,
+  type ReviewAdminListQuery,
+  type ReviewModerationInput,
+} from "./clients/reviewClient";
 
-  interface InternalAxiosRequestConfig {
-    suppressGlobalError?: boolean;
-  }
-}
-
-const api = axios.create({
-  baseURL: (import.meta as any).env?.VITE_API_BASE_URL || "/api",
-  timeout: 30000,
-  headers: { "Content-Type": "application/json" },
-});
-
-// In-flight 去重（2026-08-19）：并发中的相同幂等 GET 共享同一请求，完成后即忘。
-// 不做 TTL 缓存——发布/保存后立刻回读必须拿到新数据，只合并"同时在场"的重复。
-// 动机：StrictMode dev 双挂载与多组件并发拉 settings/public 等场景曾各发一份。
-// 注意：共享的是同一 response 对象，消费方须只读（unwrapResponse 即如此）。
-const inflightGets = new Map<string, Promise<unknown>>();
-const baseAdapter = getAdapter(api.defaults.adapter);
-api.defaults.adapter = async (config) => {
-  if ((config.method || "get").toLowerCase() !== "get") {
-    return baseAdapter(config);
-  }
-  const key = `${config.url}|${JSON.stringify(config.params ?? {})}`;
-  const hit = inflightGets.get(key);
-  if (hit) return hit as never;
-  const pending = Promise.resolve(baseAdapter(config)).finally(() =>
-    inflightGets.delete(key),
-  );
-  inflightGets.set(key, pending);
-  return pending as never;
-};
-
-type NormalizedRequestError = Error & { status?: number };
 type LifecycleMockProduct = {
   id: number;
   status: string;
@@ -61,98 +92,13 @@ type LifecycleMockProduct = {
   [key: string]: unknown;
 };
 
-function clearCustomerSession() {
-  localStorage.removeItem("customerToken");
-  localStorage.removeItem("customer");
-}
-
-function requestStatus(error: unknown): number | undefined {
-  return (error as NormalizedRequestError | undefined)?.status;
-}
-
-function mockRequestError(message: string, status: number): NormalizedRequestError {
+function mockRequestError(
+  message: string,
+  status: number,
+): NormalizedRequestError {
   const error = new Error(message) as NormalizedRequestError;
   error.status = status;
   return error;
-}
-
-// 受控目录 SSE：仅发变更信号（不返回商品数据），前端收到信号后用鉴权 catalog 接口重拉
-export const publicProductStreamUrl = `${((import.meta as any).env?.VITE_API_BASE_URL || "/api").replace(/\/$/, "")}/products/catalog/stream`;
-export const publicPageDocumentStreamUrl = `${((import.meta as any).env?.VITE_API_BASE_URL || "/api").replace(/\/$/, "")}/page-modules/document/stream`;
-
-// Request interceptor - attach token
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token && !config.headers.Authorization) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-// Response interceptor - unified error handling
-api.interceptors.response.use(
-  (response) => {
-    const data = response.data as ApiResponse<unknown>;
-    // 兼容后端 TransformInterceptor 格式
-    if (data && typeof data.code === "number" && data.code !== 200) {
-      if (!response.config.suppressGlobalError) {
-        notifyRequestError(data.message || "请求失败");
-      }
-      return Promise.reject(new Error(data.message || "Request failed"));
-    }
-    return response;
-  },
-  (error) => {
-    const suppressGlobalError = Boolean(error.config?.suppressGlobalError);
-    if (error.response?.status === 401) {
-      const customerToken = localStorage.getItem("customerToken");
-      const requestAuthorization = String(
-        error.config?.headers?.Authorization || "",
-      );
-      const isCustomerRequest = Boolean(
-        customerToken && requestAuthorization === `Bearer ${customerToken}`,
-      );
-      if (isCustomerRequest) clearCustomerSession();
-      else useAuthStore.getState().logout();
-
-      if (
-        !isCustomerRequest &&
-        window.location.pathname.startsWith("/admin") &&
-        !window.location.pathname.includes("/admin/login")
-      ) {
-        window.location.href = "/admin/login";
-      } else if (
-        isCustomerRequest &&
-        // 只有真正需要客户身份的页面才跳登录；公开浏览页会自动降级到游客目录。
-        /^\/(cart|checkout|partner)(\/|$)/.test(window.location.pathname)
-      ) {
-        const returnTo = window.location.pathname + window.location.search;
-        window.location.href = `/customer?returnTo=${encodeURIComponent(returnTo)}`;
-      }
-    } else if (!suppressGlobalError && error.response?.status === 403) {
-      notifyRequestError("没有权限执行此操作");
-    } else if (!suppressGlobalError && error.response?.status === 429) {
-      notifyRequestError("操作过于频繁，请稍后再试");
-    } else if (!suppressGlobalError && error.response?.status && error.response.status >= 500) {
-      notifyRequestError("服务器繁忙，请稍后再试");
-    }
-    const msg = error.response?.data?.message || error.message || "网络错误";
-    const normalized = new Error(msg) as NormalizedRequestError;
-    normalized.status = error.response?.status;
-    return Promise.reject(normalized);
-  },
-);
-
-// ===== Mock Response Wrapper =====
-function mockRes<T>(data: T): { data: ApiResponse<T> } {
-  return {
-    data: {
-      code: 200,
-      data,
-      message: "success",
-      timestamp: new Date().toISOString(),
-    },
-  };
 }
 
 // ===== Auth API =====
@@ -254,22 +200,6 @@ export interface ProductReferenceResult {
     | "NOT_FOUND"
     | "FORBIDDEN"
     | "RESOLVE_FAILED";
-}
-
-export interface CategoryReferenceResult {
-  slug: string;
-  id?: number;
-  name?: string;
-  level?: number;
-  coverImage?: string | null;
-  eligible: boolean;
-  reason:
-    | "AVAILABLE"
-    | "DELETED"
-    | "INACTIVE"
-    | "NO_PUBLIC_PRODUCT"
-    | "MISSING_COVER"
-    | "NOT_FOUND";
 }
 
 export const productApi = {
@@ -375,8 +305,18 @@ export const productApi = {
     return api.get("/products/counts");
   },
   getPublicList: async (params: any = {}, signal?: AbortSignal) => {
+    const locale: PublicContentLocale = params.locale ?? getBrowserPublicContentLocale();
     if (USE_MOCK) {
       await mockDelay();
+      if (locale === "en") {
+        return mockRes({
+          list: [],
+          total: 0,
+          page: Number(params.page) || 1,
+          pageSize: Number(params.pageSize) || 20,
+          facets: { sizes: [] },
+        });
+      }
       const idSet = params.ids
         ? new Set(
             String(params.ids)
@@ -404,19 +344,28 @@ export const productApi = {
       });
     }
     if (!localStorage.getItem("customerToken")) {
-      return api.get("/products/public", { params, signal });
+      return api.get("/products/public", {
+        params: { ...params, locale },
+        signal,
+        suppressGlobalError: true,
+      });
     }
     try {
       return await api.get("/products/catalog", {
-        params,
+        params: { ...params, locale },
         signal,
         headers: customerAuthHeaders(),
+        suppressGlobalError: true,
       });
     } catch (error) {
       if (requestStatus(error) !== 401) throw error;
       // 客户令牌失效时不把公开浏览变成登录墙，清理旧会话后降级到游客目录。
       clearCustomerSession();
-      return api.get("/products/public", { params, signal });
+      return api.get("/products/public", {
+        params: { ...params, locale },
+        signal,
+        suppressGlobalError: true,
+      });
     }
   },
   getById: async (id: number) => {
@@ -442,26 +391,40 @@ export const productApi = {
     }
     return api.put(`/products/${id}/attributes`, { attributeValueIds });
   },
-  getPublicById: async (id: string | number) => {
+  getPublicById: async (
+    id: string | number,
+    options: {
+      suppressGlobalError?: boolean;
+      locale?: PublicContentLocale;
+    } = {},
+  ) => {
+    const locale = options.locale ?? getBrowserPublicContentLocale();
+    const requestOptions = {
+      suppressGlobalError: options.suppressGlobalError,
+      params: { locale },
+    };
     if (USE_MOCK) {
       await mockDelay();
+      if (locale === "en") throw new Error("Requested locale is not published");
       const product = getMockProducts().find(
         (item) => (item.code === String(id) || item.id === Number(id)) && item.status === "PUBLISHED",
       );
       if (!product) throw new Error("商品当前不可浏览");
       return mockRes(product);
     }
+    const reference = encodeURIComponent(String(id));
     if (!localStorage.getItem("customerToken")) {
-      return api.get(`/products/public/${id}`);
+      return api.get(`/products/public/${reference}`, requestOptions);
     }
     try {
-      return await api.get(`/products/catalog/${id}`, {
+      return await api.get(`/products/catalog/${reference}`, {
         headers: customerAuthHeaders(),
+        ...requestOptions,
       });
     } catch (error) {
       if (requestStatus(error) !== 401) throw error;
       clearCustomerSession();
-      return api.get(`/products/public/${id}`);
+      return api.get(`/products/public/${reference}`, requestOptions);
     }
   },
   create: async (data: any) => {
@@ -793,129 +756,6 @@ export const productApi = {
   },
 };
 
-// ===== Shipping templates API =====
-export const shippingTemplateApi = {
-  list: async () => {
-    if (USE_MOCK) {
-      await mockDelay();
-      return mockRes([
-        {
-          id: 1,
-          name: "系统模板-珠宝默认模板",
-          carrier: "顺丰速运",
-          feeMode: "FREE",
-          baseFee: 0,
-          remoteSurcharge: 0,
-          insured: true,
-          signatureRequired: true,
-          isDefault: true,
-          isActive: true,
-        },
-      ]);
-    }
-    return api.get("/shipping-templates");
-  },
-  create: async (data: any) => {
-    if (USE_MOCK) {
-      await mockDelay(120);
-      return mockRes({ id: Date.now(), ...data, isDefault: false, isActive: true });
-    }
-    return api.post("/shipping-templates", data);
-  },
-  update: async (id: number, data: any) => {
-    if (USE_MOCK) {
-      await mockDelay(120);
-      return mockRes({ id, ...data });
-    }
-    return api.put(`/shipping-templates/${id}`, data);
-  },
-};
-
-// ===== Categories API =====
-export const categoryApi = {
-  getTree: async (signal?: AbortSignal) => {
-    if (USE_MOCK) {
-      await mockDelay();
-      return mockRes(mockCategories);
-    }
-    return api.get("/categories/tree", { signal });
-  },
-  getList: async () => {
-    if (USE_MOCK) {
-      await mockDelay();
-      return mockRes(mockCategories);
-    }
-    return api.get("/categories");
-  },
-  getManageTree: async (signal?: AbortSignal) => {
-    if (USE_MOCK) {
-      await mockDelay();
-      return mockRes(mockCategories);
-    }
-    return api.get("/categories/admin/tree", { signal });
-  },
-  resolveReferences: async (slugs: string[], signal?: AbortSignal) => {
-    if (USE_MOCK) {
-      await mockDelay();
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const flatten = (nodes: any[]): any[] =>
-        nodes.flatMap((node) => [node, ...flatten(node.children ?? [])]);
-      const bySlug = new Map(flatten(mockCategories as any[]).map((node) => [node.slug, node]));
-      return mockRes(slugs.map((slug): CategoryReferenceResult => {
-        const category = bySlug.get(slug);
-        if (!category) return { slug, eligible: false, reason: "NOT_FOUND" };
-        const reason: CategoryReferenceResult["reason"] = category.deletedAt
-          ? "DELETED"
-          : category.isActive === false
-            ? "INACTIVE"
-            : category.hasPublicProduct === false
-              ? "NO_PUBLIC_PRODUCT"
-              : !category.coverImage
-                ? "MISSING_COVER"
-                : "AVAILABLE";
-        return {
-          slug,
-          id: Number(category.id),
-          name: String(category.name || slug),
-          level: Number(category.level || 1),
-          coverImage: category.coverImage || null,
-          eligible: reason === "AVAILABLE",
-          reason,
-        };
-      }));
-    }
-    return api.post("/categories/admin/resolve-references", { slugs }, { signal });
-  },
-  create: async (data: CategoryInput) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes({ id: Date.now(), ...data });
-    }
-    return api.post("/categories", data);
-  },
-  update: async (id: number, data: CategoryInput) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes({ id, ...data });
-    }
-    return api.put(`/categories/${id}`, data);
-  },
-  delete: async (id: number) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes({ success: true });
-    }
-    return api.delete(`/categories/${id}`);
-  },
-  reorder: async (items: CategorySortItem[]) => {
-    if (USE_MOCK) {
-      await mockDelay(150);
-      return mockRes({ success: true, updated: items.length });
-    }
-    return api.post("/categories/reorder", { items });
-  },
-};
-
 // ===== Users API =====
 export const userApi = {
   getList: async (params: any) => {
@@ -1015,11 +855,6 @@ export const quotationApi = {
   remove: (id: number) => api.delete(`/quotations/${id}`),
 };
 
-const customerAuthHeaders = () => {
-  const token = localStorage.getItem("customerToken");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
-
 const CART_SESSION_STORAGE_KEY = "haichuan.cart-session-id";
 
 function getCartSessionId() {
@@ -1031,7 +866,10 @@ function getCartSessionId() {
   return sessionId;
 }
 
-const cartHeaders = () => ({ "x-session-id": getCartSessionId() });
+const cartHeaders = () => ({
+  ...customerAuthHeaders(),
+  "x-session-id": getCartSessionId(),
+});
 
 export const cartApi = {
   get: () => api.get("/cart", { headers: cartHeaders() }),
@@ -1068,13 +906,77 @@ export const customerApi = {
     api.post("/customers/forgot-password", data),
   resetPassword: (data: { token: string; password: string }) =>
     api.post("/customers/reset-password", data),
-  checkout: (data: any) => api.post("/customers/checkout", data),
+  checkout: (data: any) =>
+    api.post("/customers/checkout", data, {
+      headers: customerAuthHeaders(),
+    }),
+  getPaymentChannels: () =>
+    api.get("/customers/me/payment-channels", {
+      headers: customerAuthHeaders(),
+    }),
+  createOrderPayment: (orderId: number) =>
+    api.post(
+      `/customers/me/orders/${orderId}/payment`,
+      {},
+      { headers: customerAuthHeaders() },
+    ),
+  getOrderPayment: (orderId: number) =>
+    api.get(`/customers/me/orders/${orderId}/payment`, {
+      headers: customerAuthHeaders(),
+    }),
+  closeOrderPayment: (orderId: number) =>
+    api.post(
+      `/customers/me/orders/${orderId}/payment/close`,
+      {},
+      { headers: customerAuthHeaders() },
+    ),
   getProfile: () =>
     api.get("/customers/me", { headers: customerAuthHeaders() }),
   updateProfile: (data: { name?: string; email?: string }) =>
     api.put("/customers/me", data, { headers: customerAuthHeaders() }),
   getOrders: () =>
     api.get("/customers/me/orders", { headers: customerAuthHeaders() }),
+  getNotifications: (params?: { page?: number; pageSize?: number; unreadOnly?: boolean }) =>
+    api.get("/customers/me/notifications", {
+      headers: customerAuthHeaders(),
+      params: {
+        page: params?.page,
+        pageSize: params?.pageSize,
+        unreadOnly: params?.unreadOnly === undefined
+          ? undefined
+          : String(params.unreadOnly),
+      },
+      suppressGlobalError: true,
+    }),
+  markNotificationRead: (id: number) =>
+    api.put(
+      `/customers/me/notifications/${id}/read`,
+      {},
+      { headers: customerAuthHeaders(), suppressGlobalError: true },
+    ),
+  markAllNotificationsRead: () =>
+    api.put(
+      "/customers/me/notifications/read-all",
+      {},
+      { headers: customerAuthHeaders(), suppressGlobalError: true },
+    ),
+  createAfterSales: (
+    orderId: number,
+    data: {
+      orderItemId: number;
+      type: "REFUND" | "EXCHANGE" | "REPAIR";
+      reason: string;
+    },
+  ) =>
+    api.post(`/customers/me/orders/${orderId}/after-sales`, data, {
+      headers: customerAuthHeaders(),
+    }),
+  cancelAfterSales: (caseId: number) =>
+    api.post(
+      `/customers/me/after-sales/${caseId}/cancel`,
+      {},
+      { headers: customerAuthHeaders() },
+    ),
   getOrderTracking: (orderId: number) =>
     api.get(`/customers/me/orders/${orderId}/tracking`, {
       headers: customerAuthHeaders(),
@@ -1131,38 +1033,6 @@ export const customerApi = {
   },
 };
 
-// ===== 后台客户档案 API（只读运营视图，员工令牌由全局拦截器注入）=====
-export const customerAdminApi = {
-  /** 客户列表：分页 + 关键词（手机/姓名/邮箱）+ 状态筛选 */
-  list: (params: {
-    page?: number;
-    pageSize?: number;
-    keyword?: string;
-    status?: string;
-  }) => api.get("/customers/admin", { params }),
-  /** 客户 360° 详情：档案 + 消费聚合 + 最近订单 + 收藏 + 地址数 */
-  detail: (id: number) => api.get(`/customers/admin/${id}`),
-};
-
-// ===== Recommendations API（规则推荐，登录客户）=====
-export const recommendationApi = {
-  getHot: (limit = 12) =>
-    api.get("/recommendations/hot", {
-      params: { limit },
-      headers: customerAuthHeaders(),
-    }),
-  getForYou: (limit = 12) =>
-    api.get("/recommendations/for-you", {
-      params: { limit },
-      headers: customerAuthHeaders(),
-    }),
-  getSimilar: (productId: number, limit = 12) =>
-    api.get(`/recommendations/similar/${productId}`, {
-      params: { limit },
-      headers: customerAuthHeaders(),
-    }),
-};
-
 // ===== Partner Applications API（合作申请）=====
 export const partnerApi = {
   // 客户侧（用客户令牌）
@@ -1188,11 +1058,11 @@ export const paymentApi = {
     api.put(`/payments/${id}/approve`, { reviewNote }),
   reject: (id: number, reviewNote?: string) =>
     api.put(`/payments/${id}/reject`, { reviewNote }),
-  // 后台手动登记收款（定金/尾款/全款/补款，财务直接录入已到账收款）
+  // 异常线下实收；微信/支付宝到账只由服务端验签回调确认。
   createReceipt: (data: {
     orderId: number;
     amount: number;
-    method: string;
+    method: "bank_transfer" | "store";
     type: "DEPOSIT" | "BALANCE" | "FULL" | "SUPPLEMENT";
     paidAt?: string;
     gatewayTradeNo?: string;
@@ -1227,7 +1097,7 @@ export const refundApi = {
     paymentId?: number;
     amount: number;
     reason: string;
-    idempotencyKey?: string;
+    idempotencyKey: string;
     afterSalesCaseId?: number;
   }) => api.post("/refunds", data),
   review: (
@@ -1242,6 +1112,8 @@ export const refundApi = {
       reviewNote?: string;
     },
   ) => api.put(`/refunds/${id}/execute`, data),
+  startChannel: (id: number) => api.put(`/refunds/${id}/channel`),
+  queryChannel: (id: number) => api.get(`/refunds/${id}/channel`),
 };
 
 // ===== 售后 API =====
@@ -1250,8 +1122,8 @@ export const afterSalesApi = {
   getById: (id: number) => api.get(`/after-sales-cases/${id}`),
   create: (data: {
     orderId: number;
-    orderItemId?: number;
-    customerId?: number;
+    orderItemId: number;
+    customerId: number;
     type: "REFUND" | "EXCHANGE" | "REPAIR";
     reason: string;
     evidenceUrls?: string[];
@@ -1268,15 +1140,6 @@ export const afterSalesApi = {
   ) => api.put(`/after-sales-cases/${id}/review`, data),
   updateStatus: (id: number, data: { status: string; adminNote?: string }) =>
     api.put(`/after-sales-cases/${id}/status`, data),
-};
-
-// ===== Dashboard Statistics API =====
-export type TrendMetric = "orders" | "revenue" | "inquiries" | "pageViews";
-
-export const statisticsApi = {
-  getDashboard: () => api.get("/statistics/dashboard"),
-  getTrend: (days = 7, metric: TrendMetric = "orders") =>
-    api.get("/statistics/trend", { params: { days, metric } }),
 };
 
 // ===== Gold Price API =====
@@ -1355,295 +1218,6 @@ export const warehouseApi = {
   list: () => api.get("/warehouses"),
   create: (data: any) => api.post("/warehouses", data),
   update: (id: number, data: any) => api.put(`/warehouses/${id}`, data),
-};
-
-// ===== Tag API（标签字典）=====
-export const tagApi = {
-  list: () => api.get("/tags"),
-  create: (data: any) => api.post("/tags", data),
-  update: (id: number, data: any) => api.put(`/tags/${id}`, data),
-};
-
-// ===== AI Classify API =====
-export const aiClassifyApi = {
-  // 单张/批量识别：服务端 DTO 要求 JSON（imageUrl / imageUrls），非 multipart
-  classify: (data: { imageUrl: string }) =>
-    api.post("/ai-classify/single", data),
-  batchClassify: (data: { imageUrls: string[] }) =>
-    api.post("/ai-classify/batch", data),
-  generateDescription: (data: { productName: string; category: string; material: string; style?: string }) =>
-    api.post("/ai-classify/generate-description", data),
-  // 通用 AI 对话（产品文案/客户咨询/数据分析等，Kimi 驱动）
-  chat: (data: { message: string; systemPrompt?: string }) =>
-    api.post("/ai-classify/chat", data),
-  getReport: () => api.get("/ai-classify/report"),
-  getRecords: async (params: any) => {
-    if (USE_MOCK) {
-      await mockDelay();
-      const records = [
-        {
-          id: 1,
-          imageUrl: "",
-          predictedCategoryName: "平安扣",
-          confidence: 96.5,
-          status: "auto_confirmed",
-          createdAt: "2024-07-31 10:30",
-        },
-        {
-          id: 2,
-          imageUrl: "",
-          predictedCategoryName: "葫芦",
-          confidence: 82.3,
-          status: "pending_confirm",
-          createdAt: "2024-07-31 10:25",
-        },
-        {
-          id: 3,
-          imageUrl: "",
-          predictedCategoryName: "花戒",
-          confidence: 65.0,
-          status: "pending_review",
-          createdAt: "2024-07-31 10:20",
-        },
-        {
-          id: 4,
-          imageUrl: "",
-          predictedCategoryName: "锁包",
-          confidence: 93.1,
-          status: "auto_confirmed",
-          createdAt: "2024-07-31 09:15",
-        },
-        {
-          id: 5,
-          imageUrl: "",
-          predictedCategoryName: "佛公",
-          confidence: 88.7,
-          status: "pending_confirm",
-          confirmedCategoryName: "平安扣",
-          createdAt: "2024-07-30 16:00",
-        },
-      ];
-      return mockRes(
-        paginate(records, params.page || 1, params.pageSize || 20),
-      );
-    }
-    return api.get("/ai-classify/records", { params });
-  },
-  confirm: (
-    id: number,
-    data: { status: "confirmed" | "rejected"; confirmedCategoryId?: number },
-  ) => api.put(`/ai-classify/confirm/${id}`, data),
-};
-
-// ===== Settings API =====
-export const settingsApi = {
-  getPublicSettings: async () => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      // 联系信息以后台 SiteSettings 为唯一真实来源；mock 默认返回空，不编造电话/邮箱/地址。
-      // 测试需要具体值时在测试内拦截此接口注入。
-      return mockRes({
-        siteName: "海川珠宝",
-        seoTitle: "海川珠宝 - 高端珠宝臻品平台",
-        seoDescription: "高端珠宝臻品与一对一选款服务",
-        contactPhone: "",
-        contactEmail: "",
-        contactAddress: "",
-        businessHours: "",
-      });
-    }
-    return api.get("/settings/public");
-  },
-  getSettings: async () => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes({
-        siteName: "海川珠宝",
-        siteDesc: "高端珠宝产品管理平台",
-        logo: "",
-        autoBackup: true,
-        backupTime: "03:00",
-      });
-    }
-    return api.get("/settings");
-  },
-  updateSettings: async (data: any) => {
-    if (USE_MOCK) {
-      await mockDelay(300);
-      return mockRes(data);
-    }
-    return api.put("/settings", data);
-  },
-  getLogs: async (params?: { page?: number; pageSize?: number; keyword?: string; module?: string }) => {
-    if (USE_MOCK) {
-      await mockDelay();
-      return mockRes({ list: [], total: 0, page: 1, pageSize: 30 });
-    }
-    return api.get("/settings/logs", { params });
-  },
-  getFlags: async () => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes({
-        commerceEnabled: false,
-        cartEnabled: false,
-        paymentEnabled: false,
-        analyticsDashboardEnabled: true,
-      });
-    }
-    return api.get("/settings/flags");
-  },
-};
-
-// ===== Attribute API =====
-export const attributeApi = {
-  getPublic: async () => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes({ list: [] });
-    }
-    return api.get("/attributes");
-  },
-  getAll: async () => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes({ list: [] });
-    }
-    return api.get("/attributes/admin");
-  },
-  create: async (data: any) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes(data);
-    }
-    return api.post("/attributes", data);
-  },
-  update: async (id: number, data: any) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes(data);
-    }
-    return api.put(`/attributes/${id}`, data);
-  },
-  remove: async (id: number) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes({ id });
-    }
-    return api.delete(`/attributes/${id}`);
-  },
-  addValue: async (attributeId: number, data: any) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes(data);
-    }
-    return api.post(`/attributes/${attributeId}/values`, data);
-  },
-  updateValue: async (valueId: number, data: any) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes(data);
-    }
-    return api.put(`/attributes/values/${valueId}`, data);
-  },
-  removeValue: async (valueId: number) => {
-    if (USE_MOCK) {
-      await mockDelay(200);
-      return mockRes({ id: valueId });
-    }
-    return api.delete(`/attributes/values/${valueId}`);
-  },
-};
-
-// ===== SelectionInquiry API =====
-export const selectionInquiryApi = {
-  getList: async (params?: {
-    status?: string;
-    keyword?: string;
-    page?: number;
-    pageSize?: number;
-  }) => api.get("/selection-inquiries", { params }),
-  getDetail: async (id: number) => api.get(`/selection-inquiries/${id}`),
-  update: async (id: number, data: { status?: string; handlerId?: number }) =>
-    api.put(`/selection-inquiries/${id}`, data),
-  /** 客户提交选款咨询 */
-  submit: async (data: {
-    customerName?: string;
-    phone?: string;
-    email?: string;
-    wechat?: string;
-    message?: string;
-    privacyConsent: boolean;
-    items: Array<{
-      productId?: number;
-      productNameSnapshot: string;
-      productSkuSnapshot?: string;
-      productImageSnapshot?: string;
-    }>;
-  }) =>
-    api.post("/selection-inquiries", data, { headers: customerAuthHeaders() }),
-};
-
-// ===== Inquiries API =====
-export const inquiriesApi = {
-  getList: async (params?: {
-    page?: number;
-    pageSize?: number;
-    status?: string;
-  }) => {
-    if (USE_MOCK) {
-      await mockDelay(300);
-      return mockRes({ items: [], total: 0 });
-    }
-    return api.get("/inquiries", { params });
-  },
-  updateStatus: async (
-    id: number,
-    data: { status?: string; reply?: string; assignedTo?: number },
-  ) => {
-    if (USE_MOCK) {
-      await mockDelay(300);
-      return mockRes({ success: true });
-    }
-    if (data.reply)
-      return api.put(`/inquiries/${id}/reply`, { reply: data.reply });
-    if (data.assignedTo)
-      return api.put(`/inquiries/${id}/assign`, {
-        assignedTo: data.assignedTo,
-      });
-    return api.put(`/inquiries/${id}/reply`, data);
-  },
-  submit: async (data: {
-    name: string;
-    phone: string;
-    email?: string;
-    consultationType: string;
-    preferredContact: string;
-    preferredTime: string;
-    budgetRange?: string;
-    message: string;
-    privacyConsent: boolean;
-  }) => {
-    if (USE_MOCK) {
-      await mockDelay(500);
-      return mockRes({
-        id: Date.now(),
-        ...data,
-        status: "PENDING",
-        createdAt: new Date().toISOString(),
-      });
-    }
-    return api.post(
-      "/inquiries",
-      {
-        ...data,
-        customerName: data.name,
-        customerPhone: data.phone,
-        customerEmail: data.email,
-      },
-      { headers: customerAuthHeaders() },
-    );
-  },
 };
 
 // ===== Upload API =====
@@ -1802,6 +1376,37 @@ export type PersonalContentTemplate = {
   updatedAt: string;
 };
 
+type MockPublicPageDocument = Pick<
+  MockPageDocument,
+  "pageKey" | "puckData" | "metadata" | "status" | "version" | "publishedAt" | "updatedAt"
+>;
+
+function getMockPublicPageDocument(
+  document: MockPageDocument | null | undefined,
+): MockPublicPageDocument | null {
+  if (!document) return null;
+  const metadata = document.metadata;
+  const publicMetadata = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? Object.fromEntries(
+        CONTENT_TEMPLATE_PAGE_METADATA.publicFields.flatMap((field) => {
+          const value = metadata[field];
+          return typeof value === "string" && value.trim()
+            ? [[field, value.trim()]]
+            : [];
+        }),
+      )
+    : {};
+  return {
+    pageKey: document.pageKey,
+    puckData: cloneMockDocument(document.puckData),
+    metadata: publicMetadata,
+    status: document.status,
+    version: document.version,
+    publishedAt: document.publishedAt,
+    updatedAt: document.updatedAt,
+  };
+}
+
 const _mockPersonalContentTemplates: PersonalContentTemplate[] = [];
 
 export const personalContentTemplateApi = {
@@ -1884,13 +1489,28 @@ export const personalContentTemplateApi = {
 };
 
 export const pageDocumentApi = {
-  getPublished: async (pageKey = "home") => {
+  getPublished: async (
+    pageKey = "home",
+    locale: PublicContentLocale = getBrowserPublicContentLocale(),
+  ) => {
+    if (USE_MOCK) {
+      await mockDelay(120);
+      if (locale === "en") return mockRes(null);
+      const store = loadMockPageDocuments();
+      return mockRes(getMockPublicPageDocument(store.published[pageKey]));
+    }
+    return api.get("/page-modules/document/published", {
+      params: { pageKey, locale },
+      suppressGlobalError: true,
+    });
+  },
+  getPublishedAdmin: async (pageKey = "home") => {
     if (USE_MOCK) {
       await mockDelay(120);
       const store = loadMockPageDocuments();
       return mockRes(store.published[pageKey] || null);
     }
-    return api.get("/page-modules/document/published", {
+    return api.get("/page-modules/document/published/admin", {
       params: { pageKey },
       suppressGlobalError: true,
     });
@@ -1901,7 +1521,10 @@ export const pageDocumentApi = {
       const store = loadMockPageDocuments();
       return mockRes(store.drafts[pageKey] || store.published[pageKey] || null);
     }
-    return api.get("/page-modules/document/admin", { params: { pageKey } });
+    return api.get("/page-modules/document/admin", {
+      params: { pageKey },
+      suppressGlobalError: true,
+    });
   },
   discardDraft: async (pageKey = "home", expectedUpdatedAt?: string) => {
     if (USE_MOCK) {
@@ -1913,6 +1536,7 @@ export const pageDocumentApi = {
     }
     return api.delete("/page-modules/document/draft", {
       params: { pageKey, expectedUpdatedAt },
+      suppressGlobalError: true,
     });
   },
   save: async (data: {
@@ -1942,7 +1566,9 @@ export const pageDocumentApi = {
       persistMockPageDocuments();
       return mockRes(cloneMockDocument(document));
     }
-    return api.put("/page-modules/document", data);
+    return api.put("/page-modules/document", data, {
+      suppressGlobalError: true,
+    });
   },
   publish: async (
     pageKey = "home",
@@ -1975,6 +1601,8 @@ export const pageDocumentApi = {
       pageKey,
       userId,
       expectedUpdatedAt,
+    }, {
+      suppressGlobalError: true,
     });
   },
   validate: async (
@@ -1990,7 +1618,7 @@ export const pageDocumentApi = {
     return api.post(
       "/page-modules/document/validate",
       { pageKey, puckData, metadata },
-      { signal },
+      { signal, suppressGlobalError: true },
     );
   },
   getRevisions: async (pageKey = "home") => {
@@ -1999,7 +1627,10 @@ export const pageDocumentApi = {
       const store = loadMockPageDocuments();
       return mockRes(cloneMockDocument(store.revisions[pageKey] || []));
     }
-    return api.get("/page-modules/document/revisions", { params: { pageKey } });
+    return api.get("/page-modules/document/revisions", {
+      params: { pageKey },
+      suppressGlobalError: true,
+    });
   },
   restoreRevision: async (
     pageKey: string,
@@ -2039,6 +1670,8 @@ export const pageDocumentApi = {
     return api.put(`/page-modules/document/revisions/${version}/restore`, {
       pageKey,
       expectedUpdatedAt,
+    }, {
+      suppressGlobalError: true,
     });
   },
 };
@@ -2062,25 +1695,5 @@ export const marketingApi = {
     api.get("/marketing/coupons/usable", { params: { amountCents } }),
 };
 
-/* 商品评价 */
-export const reviewApi = {
-  submit: (data: {
-    orderId: number;
-    productId: number;
-    rating: number;
-    content: string;
-    imageUrls?: string[];
-  }) => api.post("/reviews", data, { headers: customerAuthHeaders() }),
-  mine: () => api.get("/reviews/me", { headers: customerAuthHeaders() }),
-  listForProduct: (
-    productId: number,
-    params?: { page?: number; pageSize?: number },
-  ) => api.get(`/reviews/product/${productId}`, { params }),
-  adminList: (params: any) => api.get("/reviews", { params }),
-  moderate: (
-    id: number,
-    data: { status: "APPROVED" | "REJECTED"; reply?: string },
-  ) => api.put(`/reviews/${id}/moderate`, data),
-};
 
 export default api;

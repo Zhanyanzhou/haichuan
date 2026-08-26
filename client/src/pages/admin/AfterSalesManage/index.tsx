@@ -89,11 +89,13 @@ export default function AfterSalesManage() {
     }
   };
 
-  const handleCreate = async (values: { orderId: number; type: AfterSalesType; reason: string; customerNote?: string; requestedRefundAmount?: number }) => {
+  const handleCreate = async (values: { orderId: number; orderItemId: number; customerId: number; type: AfterSalesType; reason: string; customerNote?: string; requestedRefundAmount?: number }) => {
     setCreating(true);
     try {
       await afterSalesApi.create({
         orderId: Number(values.orderId),
+        orderItemId: Number(values.orderItemId),
+        customerId: Number(values.customerId),
         type: values.type,
         reason: values.reason,
         customerNote: values.customerNote,
@@ -305,7 +307,13 @@ export default function AfterSalesManage() {
       >
         <Form form={createForm} layout="vertical" onFinish={handleCreate}>
           <Form.Item name="orderId" label="订单 ID" rules={[{ required: true, message: '请输入订单 ID' }]}>
-            <Input className="w-full" placeholder="请输入订单 ID（数字）" />
+            <Input type="number" min={1} step={1} className="w-full" placeholder="请输入订单 ID（数字）" />
+          </Form.Item>
+          <Form.Item name="customerId" label="客户 ID" rules={[{ required: true, message: '请输入订单所属客户 ID' }]}>
+            <Input type="number" min={1} step={1} className="w-full" placeholder="必须与订单所属客户一致" />
+          </Form.Item>
+          <Form.Item name="orderItemId" label="订单商品 ID" rules={[{ required: true, message: '请输入订单商品 ID' }]}>
+            <Input type="number" min={1} step={1} className="w-full" placeholder="必须是该订单内的商品行 ID" />
           </Form.Item>
           <Form.Item name="type" label="售后类型" rules={[{ required: true, message: '请选择售后类型' }]}>
             <Select options={[

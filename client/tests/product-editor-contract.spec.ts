@@ -78,6 +78,12 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page.getByRole("heading", { name: "图文描述" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "标准库存" })).toBeChecked();
     await expect(page.getByText(/当前销售方式发布时不要求交易价格、SKU 或正库存/)).toBeVisible();
+    const directPurchase = page.getByRole("radio", { name: "直接购买" });
+    await expect(directPurchase).toBeEnabled();
+    await directPurchase.click();
+    await expect(page.getByText(/仍可维护直购商品事实，公开端不会开放加购或支付/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "前往库存管理" })).toBeVisible();
+    await page.getByRole("radio", { name: "仅展示" }).click();
     await page.getByRole("button", { name: "基础信息" }).click();
     await page.getByRole("textbox", { name: "货号" }).fill("DUPLICATE-001");
     await page.getByRole("combobox", { name: "当前类目" }).click();
@@ -174,7 +180,7 @@ test.describe("商品编辑器现有接口契约", () => {
 
     await page.goto("/admin/products/9/edit");
     await expect(page.getByText("SKU 派生最低价", { exact: true })).toBeVisible();
-    await expect(page.getByText("¥ 6999.00", { exact: true })).toBeVisible();
+    await expect(page.locator(".pro-editor__derived-price")).toHaveText("¥ 6999.00");
     await expect(page.getByText("系统按已启用且价格大于 0 的 SKU 自动派生")).toBeVisible();
     await expect(page.getByText(/2 个有效 SKU；SKU 价格是直购成交价/)).toBeVisible();
 
@@ -292,6 +298,8 @@ test.describe("商品编辑器现有接口契约", () => {
       id: 21,
       code: "SINGLE-021",
       name: "一物一件测试商品",
+      shortDescription: "用于验证一物一件库存策略的完整商品简介",
+      description: "该商品 fixture 提供完整说明，以确保保存请求能够到达服务端并验证 409 冲突处理。",
       categoryId: 1,
       materialType: "AU750",
       price: 5200,

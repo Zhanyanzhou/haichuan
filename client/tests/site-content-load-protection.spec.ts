@@ -40,6 +40,7 @@ test.describe("店铺资料加载失败保护", () => {
 
     let settingsRequestCount = 0;
     let updateRequestCount = 0;
+    let lastUpdateBody: Record<string, unknown> | null = null;
     let releaseFailedRequest: (() => void) | undefined;
     const failedRequestGate = new Promise<void>((resolve) => {
       releaseFailedRequest = resolve;
@@ -48,6 +49,7 @@ test.describe("店铺资料加载失败保护", () => {
     await page.route("**/api/settings", async (route) => {
       if (route.request().method() === "PUT") {
         updateRequestCount += 1;
+        lastUpdateBody = route.request().postDataJSON();
         await route.fulfill({
           contentType: "application/json",
           body: JSON.stringify({ code: 200, data: route.request().postDataJSON(), message: "ok" }),
@@ -89,8 +91,18 @@ test.describe("店铺资料加载失败保护", () => {
     await expect(page.getByRole("button", { name: "保存设置" })).toBeEnabled();
 
     await page.getByLabel("网站名称").fill("已确认的店铺名称");
+    await page.getByLabel("门店地图链接").fill("javascript:alert(1)");
+    await page.getByRole("button", { name: "保存设置" }).click();
+    await expect(page.getByText("请输入以 http:// 或 https:// 开头的地图链接")).toBeVisible();
+    expect(updateRequestCount).toBe(0);
+
+    await page.getByLabel("门店地图链接").fill("https://maps.example.com/store");
     await page.getByRole("button", { name: "保存设置" }).click();
     await expect.poll(() => updateRequestCount).toBe(1);
+    expect(lastUpdateBody).toMatchObject({
+      siteName: "已确认的店铺名称",
+      storeMapUrl: "https://maps.example.com/store",
+    });
     await expect(page.getByText("店铺资料已保存")).toBeVisible();
     expect(antdConsoleProblems).toEqual([]);
   });

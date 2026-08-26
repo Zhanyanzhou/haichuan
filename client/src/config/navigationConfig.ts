@@ -171,7 +171,7 @@ export const navigationConfig: NavDomain[] = [
         items: [
           {
             key: "trade-payments",
-            label: "付款审核",
+            label: "支付记录",
             route: "/admin/trade/payments",
           },
           {

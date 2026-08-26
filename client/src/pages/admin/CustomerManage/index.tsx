@@ -17,6 +17,7 @@ import { HeartOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons
 import { customerAdminApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { AdminLoadingState } from "@/components/common/AdminDataStates";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
 /**
  * 客户档案管理（只读运营视图）
@@ -147,9 +148,13 @@ export default function CustomerManage() {
       const data = unwrapResponse<{ list: AdminCustomerRow[]; total: number }>(res);
       setRows(data?.list ?? []);
       setTotal(data?.total ?? 0);
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || "加载失败";
-      setError(typeof msg === "string" ? msg : "加载失败");
+    } catch (error: unknown) {
+      setError(
+        getSafeAdminErrorMessage(
+          error,
+          "客户档案加载失败，请稍后重新加载。",
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -169,9 +174,13 @@ export default function CustomerManage() {
     try {
       const res = await customerAdminApi.detail(id);
       setDetail(unwrapResponse<AdminCustomerDetail>(res));
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || "加载详情失败";
-      setDetailError(typeof msg === "string" ? msg : "加载详情失败");
+    } catch (error: unknown) {
+      setDetailError(
+        getSafeAdminErrorMessage(
+          error,
+          "客户详情加载失败，请稍后重新加载。",
+        ),
+      );
     } finally {
       setDetailLoading(false);
     }

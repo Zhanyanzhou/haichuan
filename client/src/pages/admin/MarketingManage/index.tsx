@@ -33,7 +33,7 @@ const PROMO_TYPE: Record<string, string> = {
 };
 const COUPON_TYPE: Record<string, string> = {
   fixed: "固定金额",
-  percent: "百分比",
+  percent: "立减比例（%）",
 };
 
 export default function MarketingManage() {
@@ -70,7 +70,7 @@ export default function MarketingManage() {
         type="info"
         showIcon
         message="优惠券已接入下单结算；促销活动当前仅作记录管理"
-        description="后台人工建单时可选可用券（服务端试算与核销，单一公式口径）；促销活动暂不自动改价。客户侧交易已开放（线下转账模式），结算下单时可使用优惠券。"
+        description="后台人工建单时可选可用券（服务端试算与核销，单一公式口径）；促销活动暂不自动改价。线上支付是客户标准零售主链，线下收款仅用于受限异常场景；真实渠道仍受交易开关与目标环境门禁约束。"
         style={{ maxWidth: 680, marginBottom: 20 }}
       />
       <Tabs
@@ -305,6 +305,8 @@ function CouponsTab() {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [stats, setStats] = useState<any>({});
+  const couponType = Form.useWatch("type", form) || "fixed";
+  const economicFieldsLocked = Number(editing?.usedCount || 0) > 0;
 
   const load = async () => {
     setLoading(true);
@@ -329,8 +331,14 @@ function CouponsTab() {
     setSaving(true);
     try {
       const values = await form.validateFields();
-      if (editing) await marketingApi.updateCoupon(editing.id, values);
-      else await marketingApi.createCoupon(values);
+      if (editing) {
+        await marketingApi.updateCoupon(
+          editing.id,
+          economicFieldsLocked ? { isActive: values.isActive } : values,
+        );
+      } else {
+        await marketingApi.createCoupon(values);
+      }
       message.success(editing ? "优惠券已更新" : "优惠券已创建");
       setModalOpen(false);
       setEditing(null);
@@ -464,7 +472,11 @@ function CouponsTab() {
                 icon={<EditOutlined />}
                 onClick={() => {
                   setEditing(r);
-                  form.setFieldsValue(r);
+                  form.setFieldsValue({
+                    ...r,
+                    startTime: r.startTime ? dayjs(r.startTime) : undefined,
+                    endTime: r.endTime ? dayjs(r.endTime) : undefined,
+                  });
                   setModalOpen(true);
                 }}
               >
@@ -486,8 +498,17 @@ function CouponsTab() {
         width={480}
       >
         <Form form={form} layout="vertical">
+          {economicFieldsLocked ? (
+            <Alert
+              type="info"
+              showIcon
+              message="该优惠券已有使用记录，经济条款已冻结"
+              description="如需调整名称、面值、门槛、发行量或有效期，请创建新券；当前仅可启用或停用。"
+              style={{ marginBottom: 16 }}
+            />
+          ) : null}
           <Form.Item name="name" label="名称" rules={[{ required: true }]}>
-            <Input />
+            <Input disabled={economicFieldsLocked} />
           </Form.Item>
           <Form.Item
             name="type"
@@ -496,34 +517,59 @@ function CouponsTab() {
             initialValue="fixed"
           >
             <Select
+              disabled={economicFieldsLocked}
               options={Object.entries(COUPON_TYPE).map(([k, v]) => ({
                 value: k,
                 label: v,
               }))}
             />
           </Form.Item>
-          <Form.Item name="value" label="面值" rules={[{ required: true }]}>
-            <InputNumber style={{ width: "100%" }} min={1} />
+          <Form.Item
+            name="value"
+            label={couponType === "percent" ? "立减比例（%）" : "固定减免金额（元）"}
+            extra={couponType === "percent" ? "10 表示减免订单金额的 10%" : undefined}
+            rules={[
+              { required: true },
+              couponType === "percent"
+                ? { type: "integer", min: 1, max: 99, message: "请输入 1-99 的整数立减比例" }
+                : { type: "number", min: 0.01, message: "请输入大于 0 的减免金额" },
+            ]}
+          >
+            <InputNumber
+              style={{ width: "100%" }}
+              min={couponType === "percent" ? 1 : 0.01}
+              max={couponType === "percent" ? 99 : undefined}
+              precision={couponType === "percent" ? 0 : 2}
+              disabled={economicFieldsLocked}
+            />
           </Form.Item>
           <Form.Item name="minAmount" label="最低消费" initialValue={0}>
-            <InputNumber style={{ width: "100%" }} min={0} />
+            <InputNumber style={{ width: "100%" }} min={0} precision={2} disabled={economicFieldsLocked} />
           </Form.Item>
           <Form.Item name="totalCount" label="发行量" initialValue={100}>
-            <InputNumber style={{ width: "100%" }} min={1} />
+            <InputNumber style={{ width: "100%" }} min={1} precision={0} disabled={economicFieldsLocked} />
           </Form.Item>
           <Form.Item
             name="startTime"
             label="开始时间"
             rules={[{ required: true }]}
           >
-            <DatePicker showTime style={{ width: "100%" }} />
+            <DatePicker showTime style={{ width: "100%" }} disabled={economicFieldsLocked} />
           </Form.Item>
           <Form.Item
             name="endTime"
             label="结束时间"
             rules={[{ required: true }]}
           >
-            <DatePicker showTime style={{ width: "100%" }} />
+            <DatePicker showTime style={{ width: "100%" }} disabled={economicFieldsLocked} />
+          </Form.Item>
+          <Form.Item name="isActive" label="状态" initialValue={true}>
+            <Select
+              options={[
+                { value: true, label: "启用" },
+                { value: false, label: "停用" },
+              ]}
+            />
           </Form.Item>
         </Form>
       </Modal>

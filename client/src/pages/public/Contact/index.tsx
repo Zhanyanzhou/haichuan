@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { inquiriesApi, settingsApi } from "@/services/api";
+import { inquiriesApi, productApi } from "@/services/api";
+import { requestStatus } from "@/services/httpClient";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackPageView, trackSubmitInquiry } from "@/hooks/useAnalytics";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { usePageDecorationState } from "@/page-builder/runtime/PublishedPageDecoration";
+import { normalizePublicProductReference } from "@/utils/publicProductPath";
+import { usePublicSiteSettings } from "@/hooks/usePublicSiteSettings";
 
 const T = {
   bg: "#FFFFFF",
@@ -42,6 +45,21 @@ const BUDGET_OPTIONS = [
   "30万以上",
   "暂不透露",
 ];
+
+const SOURCE_TYPE_TO_CONSULTATION: Record<string, string> = {
+  appointment: "到店咨询",
+  product: "选款建议",
+  "purchase-support": "选款建议",
+  custom: "高级定制",
+};
+
+type InquirySourceProduct = {
+  id: number;
+  code?: string | null;
+  name: string;
+};
+
+type ProductContextStatus = "none" | "loading" | "ready" | "unavailable" | "error";
 
 const REQUIRED_FIELDS = [
   "name",
@@ -126,48 +144,32 @@ const lblS: React.CSSProperties = {
   display: "block",
 };
 
-type SettingsStatus = "loading" | "loaded" | "error";
+export type ContactProps = {
+  mode?: "public" | "editor-preview";
+};
 
-function useSiteSettings() {
-  const [settings, setSettings] = useState<any>(null);
-  const [status, setStatus] = useState<SettingsStatus>("loading");
-  useEffect(() => {
-    let cancelled = false;
-    settingsApi
-      .getPublicSettings()
-      .then((res) => {
-        if (cancelled) return;
-        setSettings(unwrapResponse<any>(res));
-        setStatus("loaded");
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setStatus("error");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return { settings, status };
-}
-
-export default function Contact() {
-  const [searchParams] = useSearchParams();
-  const preselectedConsultationType =
-    searchParams.get("type") === "custom" ? "高级定制" : "";
+export default function Contact({ mode = "public" }: ContactProps = {}) {
+  const editorPreview = mode === "editor-preview";
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sourceType = searchParams.get("type") || "";
+  const preselectedConsultationType = SOURCE_TYPE_TO_CONSULTATION[sourceType] || "";
+  const rawProductRef = editorPreview ? null : searchParams.get("productRef");
+  const hasProductReference = rawProductRef !== null;
+  const productRef = normalizePublicProductReference(rawProductRef);
   const { active: hasPageDecoration } = usePageDecorationState();
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
   // SEO：联系页独立标题与描述
   useEffect(() => {
+    if (editorPreview) return;
     setPageMeta({
       title: "提交咨询需求 | 海川珠宝",
       description:
         "珠宝咨询需求提交页面。可提交选款、定制或旧款相关需求，具体服务与安排以实际沟通为准。",
     });
     return () => clearPageMeta();
-  }, [setPageMeta, clearPageMeta]);
-  const { settings: siteSettings, status: settingsStatus } = useSiteSettings();
+  }, [editorPreview, setPageMeta, clearPageMeta]);
+  const { settings: siteSettings, status: settingsStatus } = usePublicSiteSettings();
   // SiteSettings 是联系信息唯一真实来源；空值不显示，不使用假电话/邮箱/地址兜底。
   const contactPhone = siteSettings?.contactPhone?.trim() || "";
   const contactEmail = siteSettings?.contactEmail?.trim() || "";
@@ -189,7 +191,7 @@ export default function Contact() {
     { label: "服务时间", value: businessHours },
   ].filter((c) => c.value); // 只显示有真实值的条目
 
-  const savedCustomer = (() => {
+  const savedCustomer = editorPreview ? null : (() => {
     try {
       return JSON.parse(localStorage.getItem("customer") || "null") as {
         name?: string;
@@ -214,13 +216,58 @@ export default function Contact() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [sourceProduct, setSourceProduct] = useState<InquirySourceProduct | null>(null);
+  const [productContextStatus, setProductContextStatus] =
+    useState<ProductContextStatus>(hasProductReference ? "loading" : "none");
+  const [productContextRevision, setProductContextRevision] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
   const successHeadingRef = useRef<HTMLHeadingElement>(null);
   const submitPendingRef = useRef(false);
 
   useEffect(() => {
+    if (editorPreview) return;
     trackPageView();
-  }, []);
+  }, [editorPreview]);
+
+  useEffect(() => {
+    if (!hasProductReference) {
+      setSourceProduct(null);
+      setProductContextStatus("none");
+      return;
+    }
+    if (!productRef) {
+      setSourceProduct(null);
+      setProductContextStatus("unavailable");
+      return;
+    }
+    let cancelled = false;
+    setSourceProduct(null);
+    setProductContextStatus("loading");
+    productApi
+      .getPublicById(productRef, { suppressGlobalError: true })
+      .then((response) => {
+        if (cancelled) return;
+        const product = unwrapResponse<InquirySourceProduct>(response);
+        if (
+          !product
+          || !Number.isInteger(product.id)
+          || product.id <= 0
+          || !product.name?.trim()
+        ) {
+          setProductContextStatus("unavailable");
+          return;
+        }
+        setSourceProduct(product);
+        setProductContextStatus("ready");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setProductContextStatus(requestStatus(error) === 404 ? "unavailable" : "error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editorPreview, hasProductReference, productContextRevision, productRef]);
 
   useEffect(() => {
     if (submitted) successHeadingRef.current?.focus();
@@ -234,6 +281,15 @@ export default function Contact() {
         delete n[key];
         return n;
       });
+  };
+
+  const removeProductContext = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("productRef");
+    setSearchParams(next, { replace: true });
+    setSourceProduct(null);
+    setProductContextStatus("none");
+    setSubmitError("");
   };
 
   const focusInvalidField = (field: RequiredField) => {
@@ -268,6 +324,7 @@ export default function Contact() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (editorPreview) return;
     if (submitPendingRef.current || submitting) return;
     if (!validate()) return;
     submitPendingRef.current = true;
@@ -281,13 +338,24 @@ export default function Contact() {
         preferredContact: form.preferredContact,
         preferredTime: form.preferredTime,
         budgetRange: form.budgetRange || undefined,
+        productId: sourceProduct?.id,
         message: form.message.trim(),
         privacyConsent: form.privacyConsent,
       });
       trackSubmitInquiry();
       setSubmitted(true);
-    } catch (err: any) {
-      setSubmitError(err?.message || "提交失败，请稍后再试");
+    } catch (error) {
+      const status = requestStatus(error);
+      if (sourceProduct && (status === 400 || status === 404 || status === 422)) {
+        setProductContextStatus("unavailable");
+        setSubmitError("作品当前不可咨询，请移除作品后提交普通咨询。");
+      } else if (status === 429) {
+        setSubmitError("提交过于频繁，请稍后再试。");
+      } else if (status && status >= 400 && status < 500) {
+        setSubmitError("提交信息未通过校验，请检查后重试。");
+      } else {
+        setSubmitError("提交服务暂时不可用，请稍后再试。");
+      }
     } finally {
       submitPendingRef.current = false;
       setSubmitting(false);
@@ -391,7 +459,10 @@ export default function Contact() {
   }
 
   return (
-    <div style={{ background: T.bg }}>
+    <div
+      className={`contact-page${editorPreview ? " is-editor-preview" : ""}`}
+      style={{ background: T.bg }}
+    >
       {/* ═══ 标题区（紧凑） ═══ */}
       {!hasPageDecoration && <section
         style={{
@@ -588,6 +659,65 @@ export default function Contact() {
 
           {/* 右侧：表单 */}
           <div>
+            {hasProductReference && (
+              <section
+                className="contact-product-context"
+                aria-live="polite"
+                style={{
+                  border: `1px solid ${T.line}`,
+                  background: T.bg,
+                  padding: "16px 18px",
+                  marginBottom: 16,
+                }}
+              >
+                {productContextStatus === "loading" && (
+                  <p role="status" style={{ margin: 0, color: T.sec, fontSize: 13 }}>
+                    正在确认来源作品…
+                  </p>
+                )}
+                {productContextStatus === "ready" && sourceProduct && (
+                  <div>
+                    <p style={{ margin: "0 0 4px", color: T.light, fontSize: 11, letterSpacing: "0.1em" }}>
+                      本次咨询作品
+                    </p>
+                    <strong style={{ display: "block", color: T.txt, fontSize: 15, fontWeight: 500 }}>
+                      {sourceProduct.name}
+                    </strong>
+                    <p style={{ margin: "4px 0 12px", color: T.sec, fontSize: 12 }}>
+                      货号：{sourceProduct.code || "未提供"}
+                    </p>
+                    <button type="button" onClick={removeProductContext} className="contact-product-context__action">
+                      移除作品，改为普通咨询
+                    </button>
+                  </div>
+                )}
+                {productContextStatus === "unavailable" && (
+                  <div role="alert">
+                    <p style={{ margin: "0 0 10px", color: "#8C3F3B", fontSize: 13 }}>
+                      作品当前不可咨询。您可以移除作品后继续提交普通咨询。
+                    </p>
+                    <button type="button" onClick={removeProductContext} className="contact-product-context__action">
+                      移除作品上下文
+                    </button>
+                  </div>
+                )}
+                {productContextStatus === "error" && (
+                  <div role="alert">
+                    <p style={{ margin: "0 0 10px", color: "#8C3F3B", fontSize: 13 }}>
+                      来源作品暂时无法确认。您可以重试，或移除后提交普通咨询。
+                    </p>
+                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      <button type="button" onClick={() => setProductContextRevision((value) => value + 1)} className="contact-product-context__action">
+                        重新确认
+                      </button>
+                      <button type="button" onClick={removeProductContext} className="contact-product-context__action">
+                        移除作品上下文
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
             <form
               ref={formRef}
               className="contact-form"
@@ -894,20 +1024,26 @@ export default function Contact() {
               )}
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || (hasProductReference && productContextStatus !== "ready")}
                 style={{
                   width: "100%",
                   height: 46,
                   border: "none",
-                  cursor: submitting ? "not-allowed" : "pointer",
-                  background: submitting ? T.sec : T.gold,
+                  cursor: submitting || (hasProductReference && productContextStatus !== "ready") ? "not-allowed" : "pointer",
+                  background: submitting || (hasProductReference && productContextStatus !== "ready") ? T.sec : T.gold,
                   color: "#fff",
                   fontSize: 14,
                   letterSpacing: "0.08em",
-                  opacity: submitting ? 0.7 : 1,
+                  opacity: submitting || (hasProductReference && productContextStatus !== "ready") ? 0.7 : 1,
                 }}
               >
-                {submitting ? "正在提交…" : "提交需求"}
+                {submitting
+                  ? "正在提交…"
+                  : hasProductReference && productContextStatus === "loading"
+                    ? "正在确认来源作品…"
+                    : hasProductReference && productContextStatus !== "ready"
+                      ? "请先处理来源作品"
+                      : "提交需求"}
               </button>
             </form>
           </div>
@@ -969,6 +1105,27 @@ export default function Contact() {
       </section>
 
       <style>{`
+        .contact-page.is-editor-preview {
+          pointer-events: none;
+        }
+
+        .contact-product-context__action {
+          min-height: 44px;
+          border: 0;
+          padding: 0;
+          background: transparent;
+          color: ${T.txt};
+          font-size: 12px;
+          text-decoration: underline;
+          text-underline-offset: 3px;
+          cursor: pointer;
+        }
+
+        .contact-product-context__action:focus-visible {
+          outline: 2px solid ${T.txt};
+          outline-offset: 3px;
+        }
+
         .contact-form input:focus-visible,
         .contact-form select:focus-visible,
         .contact-form textarea:focus-visible {

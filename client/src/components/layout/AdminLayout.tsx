@@ -18,26 +18,11 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Outlet, useNavigate, useLocation, Link } from "react-router-dom";
 import { Button, Dropdown, Avatar, Drawer } from "antd";
 import {
-  StarOutlined,
-  TransactionOutlined,
-  ShoppingOutlined,
-  NotificationOutlined,
-  SendOutlined,
-  CustomerServiceOutlined,
-  ShopOutlined,
-  UsergroupAddOutlined,
-  AccountBookOutlined,
-  InsuranceOutlined,
-  BarChartOutlined,
-  SettingOutlined,
-  HomeOutlined,
   UserOutlined,
   LogoutOutlined,
   MenuOutlined,
   LeftOutlined,
   RightOutlined,
-  PushpinOutlined,
-  PushpinFilled,
   GlobalOutlined,
   ExportOutlined,
   DownOutlined,
@@ -57,23 +42,7 @@ import {
   type CommonNavItem,
 } from "@/utils/adminCommonNav";
 import { canAccessAdminRoute } from "@/config/adminRouteAccess";
-
-/* ═══════ 图标映射 ═══════ */
-const domainIcons: Record<string, React.ReactNode> = {
-  home: <HomeOutlined />,
-  star: <StarOutlined />,
-  transaction: <TransactionOutlined />,
-  shopping: <ShoppingOutlined />,
-  notification: <NotificationOutlined />,
-  send: <SendOutlined />,
-  "customer-service": <CustomerServiceOutlined />,
-  shop: <ShopOutlined />,
-  "usergroup-add": <UsergroupAddOutlined />,
-  "account-book": <AccountBookOutlined />,
-  insurance: <InsuranceOutlined />,
-  "bar-chart": <BarChartOutlined />,
-  setting: <SettingOutlined />,
-};
+import { AdminSidebar } from "./AdminSidebar";
 
 /** 浏览器放大或分屏时，优先释放侧栏空间，保证主操作区可用。 */
 const ADMIN_COMPACT_BREAKPOINT = 1024;
@@ -117,127 +86,6 @@ function useNavSections(role: string | undefined) {
         .sort((a, b) => a.order - b.order),
     }));
   }, [role]);
-}
-
-/* ═══════ 域名渲染 ═══════ */
-function SidebarDomainItem({
-  domain,
-  isActive,
-  isExpanded,
-  allItems,
-  location,
-  onDomainClick,
-  onToggle,
-  onItemClick,
-  onTogglePin,
-}: {
-  domain: NavDomain;
-  isActive: boolean;
-  isExpanded: boolean;
-  allItems: CommonNavItem[];
-  location: ReturnType<typeof useLocation>;
-  onDomainClick: (d: NavDomain) => void;
-  onToggle: (key: string) => void;
-  onItemClick: (route: string) => void;
-  onTogglePin: (route: string) => void;
-}) {
-  const hasChildren = allItems.length > 0;
-  const pinnedItemCount = allItems.filter((item) => item.pinned).length;
-
-  return (
-    <div className="admin-sidebar__domain">
-      <div
-        className={`admin-sidebar__domain-row${isActive ? " is-active" : ""}${domain.immersive ? " is-workspace" : ""}${domain.disabled ? " is-disabled" : ""}`}
-      >
-        <button
-          type="button"
-          className="admin-sidebar__domain-label"
-          onClick={() => onDomainClick(domain)}
-          disabled={domain.disabled}
-          title={domain.disabled ? "功能建设中" : domain.label}
-        >
-          <span className="admin-sidebar__domain-content">
-            <span className="admin-sidebar__domain-icon">
-              {domainIcons[domain.icon]}
-            </span>
-            <span className="admin-sidebar__domain-text">{domain.label}</span>
-          </span>
-        </button>
-        {hasChildren && (
-          <button
-            type="button"
-            className={`admin-sidebar__chevron${isExpanded ? " is-open" : ""}`}
-            onClick={() => onToggle(domain.key)}
-            aria-label={`${isExpanded ? "收起" : "展开"}${domain.label}`}
-            aria-expanded={isExpanded}
-          >
-            <RightOutlined />
-          </button>
-        )}
-      </div>
-
-      {isExpanded && allItems.length > 0 && (
-        <div
-          className="admin-sidebar__subnav"
-          aria-label={`${domain.label}功能菜单`}
-        >
-          {allItems.map((item) => {
-            const [itemPath, itemQuery = ""] = item.route.split("?");
-            const hasQueryMatch = allItems.some((candidate) => {
-              const [candidatePath, candidateQuery = ""] =
-                candidate.route.split("?");
-              return (
-                Boolean(candidateQuery) &&
-                candidatePath === location.pathname &&
-                `?${candidateQuery}` === location.search
-              );
-            });
-            const pathMatches =
-              location.pathname === itemPath ||
-              (itemPath !== "/admin" &&
-                location.pathname.startsWith(`${itemPath}/`));
-            const isItemActive =
-              pathMatches &&
-              (itemQuery
-                ? `?${itemQuery}` === location.search
-                : !hasQueryMatch);
-            const canPin = item.pinned || pinnedItemCount < 2;
-            return (
-              <div className="admin-sidebar__item-row" key={item.key}>
-                <button
-                  type="button"
-                  className={`admin-sidebar__item${isItemActive ? " is-active" : ""}`}
-                  onClick={() => onItemClick(item.route)}
-                  title={item.label}
-                >
-                  {item.label}
-                </button>
-                {domain.key === "common" && (
-                  <button
-                    type="button"
-                    className={`admin-sidebar__item-pin${item.pinned ? " is-pinned" : ""}`}
-                    onClick={() => onTogglePin(item.route)}
-                    aria-label={`${item.pinned ? "取消固定" : "固定"}${item.label}`}
-                    aria-pressed={item.pinned}
-                    title={
-                      canPin
-                        ? item.pinned
-                          ? "取消固定"
-                          : "固定到常用"
-                        : "最多固定 2 项"
-                    }
-                    disabled={!canPin}
-                  >
-                    {item.pinned ? <PushpinFilled /> : <PushpinOutlined />}
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
 }
 
 /* ═══════ 组件 ═══════ */
@@ -426,6 +274,11 @@ export default function AdminLayout() {
     [commonUserId],
   );
 
+  const handleLogout = useCallback(() => {
+    logout();
+    navigate("/admin/login");
+  }, [logout, navigate]);
+
   /* ── 用户菜单 ── */
   const userMenuItems = [
     {
@@ -435,102 +288,6 @@ export default function AdminLayout() {
       danger: true,
     },
   ];
-
-  /* ── 侧边栏渲染 ── */
-  const renderSidebar = ({
-    collapsed = false,
-    id,
-  }: {
-    collapsed?: boolean;
-    id?: string;
-  } = {}) => (
-    <aside
-      id={id}
-      className={`admin-sidebar${collapsed ? " is-collapsed" : ""}`}
-      aria-label="后台一级导航"
-      aria-hidden={collapsed || undefined}
-    >
-      {!collapsed ? (
-        <>
-          {/* 导航区 */}
-          <nav className="admin-sidebar__nav" aria-label="后台导航">
-            {sections.map((section) => {
-              const visibleDomains = section.domains;
-              if (visibleDomains.length === 0) return null;
-
-              return (
-                <div
-                  key={section.key}
-                  className={`admin-sidebar__section admin-sidebar__section--${section.key}`}
-                >
-                  {visibleDomains.map((domain) => {
-                    const isActive = navCtx?.domain.key === domain.key;
-                    const isExpanded = expandedDomains.has(domain.key);
-                    const allItems =
-                      domain.key === "common"
-                        ? commonItems.filter((item) =>
-                            canAccessAdminRoute(user?.role, item.route),
-                          )
-                        : domain.groups.flatMap((g) =>
-                            g.items
-                              .filter((i) => !i.featureFlag && !i.disabled)
-                              .map((i) => ({ ...i, pinned: false })),
-                          );
-
-                    return (
-                      <SidebarDomainItem
-                        key={domain.key}
-                        domain={domain}
-                        isActive={isActive}
-                        isExpanded={isExpanded}
-                        allItems={allItems}
-                        location={location}
-                        onDomainClick={handleDomainClick}
-                        onToggle={toggleDomain}
-                        onItemClick={handleItemClick}
-                        onTogglePin={handleToggleCommonPin}
-                      />
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </nav>
-
-          {/* 底部用户区 */}
-          <div className="admin-sidebar__footer">
-            <Dropdown
-              menu={{
-                items: userMenuItems,
-                onClick: ({ key }) => {
-                  if (key === "logout") {
-                    logout();
-                    navigate("/admin/login");
-                  }
-                },
-              }}
-              placement="topRight"
-            >
-              <div className="admin-sidebar__user">
-                <Avatar
-                  size={28}
-                  icon={<UserOutlined />}
-                  style={{
-                    backgroundColor: "var(--adm-gold-soft)",
-                    color: "var(--adm-action)",
-                    flexShrink: 0,
-                  }}
-                />
-                <span className="admin-sidebar__user-name">
-                  {user?.realName || "管理员"}
-                </span>
-              </div>
-            </Dropdown>
-          </div>
-        </>
-      ) : null}
-    </aside>
-  );
 
   return (
     <div
@@ -598,10 +355,7 @@ export default function AdminLayout() {
                 items: userMenuItems,
                 onClick: ({ key }) => {
                   setAccountMenuOpen(false);
-                  if (key === "logout") {
-                    logout();
-                    navigate("/admin/login");
-                  }
+                  if (key === "logout") handleLogout();
                 },
               }}
             >
@@ -636,11 +390,25 @@ export default function AdminLayout() {
       {/* ═══ Body ═══ */}
       <div className="admin-body">
         {/* 桌面端侧边栏 */}
-        {!isCompact &&
-          renderSidebar({
-            collapsed: desktopSidebarCollapsed,
-            id: "admin-navigation-sidebar",
-          })}
+        {!isCompact && (
+          <AdminSidebar
+            id="admin-navigation-sidebar"
+            collapsed={desktopSidebarCollapsed}
+            sections={sections}
+            activeDomainKey={navCtx?.domain.key}
+            expandedDomains={expandedDomains}
+            commonItems={commonItems}
+            pathname={location.pathname}
+            search={location.search}
+            role={user?.role}
+            userDisplayName={user?.realName || "管理员"}
+            onDomainClick={handleDomainClick}
+            onToggleDomain={toggleDomain}
+            onItemClick={handleItemClick}
+            onTogglePin={handleToggleCommonPin}
+            onLogout={handleLogout}
+          />
+        )}
 
         {!isCompact && (
           <button
@@ -672,7 +440,22 @@ export default function AdminLayout() {
             width={260}
             styles={{ body: { padding: 0 }, header: { display: "none" } }}
           >
-            {renderSidebar({ id: "admin-navigation-drawer" })}
+            <AdminSidebar
+              id="admin-navigation-drawer"
+              sections={sections}
+              activeDomainKey={navCtx?.domain.key}
+              expandedDomains={expandedDomains}
+              commonItems={commonItems}
+              pathname={location.pathname}
+              search={location.search}
+              role={user?.role}
+              userDisplayName={user?.realName || "管理员"}
+              onDomainClick={handleDomainClick}
+              onToggleDomain={toggleDomain}
+              onItemClick={handleItemClick}
+              onTogglePin={handleToggleCommonPin}
+              onLogout={handleLogout}
+            />
           </Drawer>
         )}
 

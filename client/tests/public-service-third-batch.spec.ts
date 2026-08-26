@@ -10,34 +10,6 @@ const viewports = [
   { name: "mobile", width: 390, height: 844 },
 ] as const;
 
-const customFaqs = [
-  {
-    q: "可以自带材料进行定制吗？",
-    a: "请在咨询中说明材料类型与现状，是否适合使用需在评估后确认。",
-  },
-  {
-    q: "旧款珠宝可以改造吗？",
-    a: "请提供作品现状与改造方向，是否适合翻新、调整或重新设计需在评估后确认。",
-  },
-  {
-    q: "周期与费用如何确认？",
-    a: "周期与费用受设计、材料与制作范围影响，均以沟通确认的方案为准。",
-  },
-  {
-    q: "设计与交付后的调整如何确认？",
-    a: "可在方案确认前提出调整需求；交付后的尺寸、保养或其他需求，以作品结构与实际评估为准。",
-  },
-];
-
-const craftItems = [
-  "材质需求",
-  "宝石需求",
-  "雕刻需求",
-  "镶嵌需求",
-  "表面效果",
-  "交付确认",
-];
-
 async function expectNoHorizontalOverflow(page: Page) {
   await expect.poll(() => page.evaluate(
     () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -76,54 +48,74 @@ async function fillRequiredContactFields(page: Page) {
   await page.locator("#cf-privacy-consent").check();
 }
 
+for (const scenario of [
+  "reduced-motion",
+  "reduced-motion-toggle",
+  "observer-unavailable",
+  "observer-constructor-fails",
+] as const) {
+  test(`Custom 未发布安全短页在 ${scenario} 时保持可见`, async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    if (scenario === "reduced-motion") {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+    } else if (scenario === "observer-unavailable") {
+      await page.addInitScript(() => {
+        Object.defineProperty(window, "IntersectionObserver", {
+          configurable: true,
+          value: undefined,
+        });
+      });
+    } else if (scenario === "observer-constructor-fails") {
+      await page.addInitScript(() => {
+        Object.defineProperty(window, "IntersectionObserver", {
+          configurable: true,
+          value: class BrokenIntersectionObserver {
+            constructor() {
+              throw new Error("deterministic observer constructor failure");
+            }
+          },
+        });
+      });
+    }
+    await mockPublicServiceThirdBatch(page);
+    await page.goto("/custom");
+    if (scenario === "reduced-motion-toggle") {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+    }
+
+    const fallback = page.locator('[data-production-fallback="safe-status"]');
+    await expect(fallback).toBeVisible();
+    await expect(fallback.getByRole("heading", { name: "珠宝定制" })).toBeVisible();
+    await expect(fallback.getByRole("link", { name: "提交定制咨询" }))
+      .toHaveAttribute("href", "/contact?type=custom");
+    await expect(page.locator(".custom-scroll-reveal")).toHaveCount(0);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    await expectNoHorizontalOverflow(page);
+    expect(pageErrors).toEqual([]);
+  });
+}
+
 for (const viewport of viewports) {
-  test(`Custom ${viewport.name} 安全文案、单一外部行动与定制预选`, async ({ page }) => {
+  test(`Custom ${viewport.name} 安全短页保留作品引用与定制预选`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     const writes = await mockPublicServiceThirdBatch(page);
-    await page.goto("/custom");
+    await page.goto("/custom?type=custom&productRef=HC-TEST-004");
 
     const main = page.locator("main");
-    const hero = main.getByRole("img", { name: "珠宝制作细节" });
-    await expect.poll(() => hero.evaluate((image: HTMLImageElement) =>
-      image.complete && image.naturalWidth > 0,
-    )).toBe(true);
-    await expect(main.locator('img[src^="data:image/svg"], img[src*="placeholder"]'))
-      .toHaveCount(0);
+    const fallback = main.locator('[data-production-fallback="safe-status"]');
+    await expect(fallback).toBeVisible();
+    await expect(fallback).toHaveAttribute("data-page-document-state", "unpublished");
+    await expect(fallback.getByRole("heading", { name: "珠宝定制" })).toBeVisible();
+    await expect(fallback).toContainText(
+      "定制内容正在整理。您可以先提交咨询需求，由珠宝顾问了解您的佩戴场景与偏好。",
+    );
     await expect(main).not.toContainText("HAICHUAN seed");
-
-    const craftSection = main.locator("section").filter({
-      has: page.getByRole("heading", { name: "材质与制作细节" }),
-    });
-    const craftListItems = craftSection.locator("ul > li");
-    await expect(craftListItems).toHaveCount(6);
-    await expect(craftListItems).toHaveText(craftItems);
-
-    const faqSection = main.locator("section").filter({
-      has: page.getByRole("heading", { name: "常见问题" }),
-    });
-    await expect(faqSection.getByRole("button")).toHaveCount(4);
-    for (const faq of customFaqs) {
-      await faqSection.getByRole("button", { name: faq.q }).click();
-      await expect(faqSection.getByText(faq.a, { exact: true })).toBeVisible();
-    }
-
-    for (const unsafeText of [
-      "预约私人顾问",
-      "一对一定制之旅",
-      "支持线上沟通",
-      "也可到店",
-      "售后与保养安排会在交付时与您说明",
-      "材质甄选，工艺传承",
-    ]) {
-      await expect(main).not.toContainText(unsafeText);
-    }
-
-    const heroAnchor = main.getByRole("link", { name: "了解定制服务" });
-    await expect(heroAnchor).toHaveAttribute("href", "#custom-services");
-    const externalActions = main.locator('a[href]:not([href^="#"])');
-    await expect(externalActions).toHaveCount(1);
-    const cta = main.getByRole("link", { name: "前往咨询", exact: true });
-    await expect(cta).toHaveAttribute("href", "/contact?type=custom");
+    const cta = fallback.getByRole("link", { name: "提交定制咨询", exact: true });
+    await expect(cta)
+      .toHaveAttribute("href", "/contact?type=custom&productRef=HC-TEST-004");
+    await expect(fallback.getByRole("link", { name: "浏览公开款式" }))
+      .toHaveAttribute("href", "/catalog");
     await expect(page.getByText("PRIVATE APPOINTMENT", { exact: true })).toHaveCount(0);
 
     if (viewport.name === "mobile") {
@@ -131,17 +123,18 @@ for (const viewport of viewports) {
       const box = await cta.boundingBox();
       expect(box).not.toBeNull();
       expect(box!.height).toBeGreaterThanOrEqual(48);
-      expect(box!.width).toBeGreaterThanOrEqual(340);
     }
     await expectNoHorizontalOverflow(page);
 
     await cta.click();
-    await expect(page).toHaveURL(/\/contact\?type=custom$/);
+    await expect(page).toHaveURL(/\/contact\?type=custom&productRef=HC-TEST-004$/);
     const routedMain = page.locator("#main-content");
     await expect(routedMain).toBeFocused();
     const routedMainFocus = await readFocusStyle(routedMain);
     expect(routedMainFocus.outlineStyle).toBe("none");
     await expect(page.locator("#cf-type")).toHaveValue("高级定制");
+    await expect(page.getByText("作品当前不可咨询。您可以移除作品后继续提交普通咨询。"))
+      .toBeVisible();
     await expect(page.getByText("PRIVATE APPOINTMENT", { exact: true })).toHaveCount(0);
     await expect(page.locator('input[id*="product"], select[id*="product"], textarea[id*="product"]'))
       .toHaveCount(0);

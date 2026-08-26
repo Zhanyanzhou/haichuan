@@ -1,0 +1,483 @@
+/* Left luxury drawer */
+.brand-drawer .ant-drawer-mask {
+  background: rgba(24, 26, 27, 0.35) !important;
+}
+.brand-drawer .ant-drawer-content-wrapper {
+  max-width: 24vw;
+  box-shadow: 12px 0 32px rgba(24, 26, 27, 0.04) !important;
+  transition-duration: 560ms !important;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+.brand-drawer .ant-drawer-content {
+  background: #fff !important;
+  border-right: 1px solid rgba(24, 26, 27, 0.1);
+}
+.brand-drawer .ant-drawer-body {
+  padding: 0 !important;
+}
+.brand-drawer__content {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 0 52px 34px;
+  color: #181a1b;
+}
+
+.brand-drawer__top {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 104px;
+}
+
+.brand-drawer__brand {
+  display: none;
+  color: #181a1b;
+  font-family: "Cormorant Garamond", Garamond, serif;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.brand-drawer__close {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  color: #181a1b;
+  font-family:
+    "Noto Sans SC",
+    "PingFang SC",
+    Microsoft YaHei,
+    serif;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+}
+
+.brand-drawer__close .anticon {
+  font-size: 18px;
+}
+.brand-drawer__close:hover,
+.brand-drawer__close:focus-visible {
+  opacity: 0.55;
+}
+
+.brand-drawer__nav {
+  display: flex;
+  flex-direction: column;
+  margin-top: 14px;
+}
+
+.brand-drawer__nav a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 70px;
+  color: #181a1b;
+  font-family:
+    "Noto Sans SC",
+    "PingFang SC",
+    Microsoft YaHei,
+    serif;
+  font-size: 21px;
+  font-weight: 400;
+  line-height: 1.28;
+  letter-spacing: 0.08em;
+  transition:
+    opacity 220ms ease,
+    transform 280ms ease;
+}
+
+.brand-drawer__nav a .anticon {
+  font-size: 16px;
+}
+.brand-drawer__nav a:hover,
+.brand-drawer__nav a:focus-visible {
+  transform: none;
+}
+.brand-drawer__nav a:hover {
+  opacity: 0.55;
+}
+.brand-drawer__nav a:focus-visible {
+  opacity: 1;
+  outline: none;
+}
+
+.brand-drawer__nav a:focus-visible > span {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 7px;
+}
+
+.brand-drawer__secondary {
+  display: flex;
+  flex-direction: column;
+  gap: 23px;
+  margin-top: 20px;
+  padding-top: 32px;
+  border-top: 1px solid rgba(24, 26, 27, 0.12);
+}
+
+.brand-drawer__secondary a {
+  width: fit-content;
+  color: #181a1b;
+  font-family:
+    "Noto Sans SC",
+    "PingFang SC",
+    Microsoft YaHei,
+    serif;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  transition: opacity 220ms ease;
+}
+
+.brand-drawer__secondary a:hover,
+.brand-drawer__secondary a:focus-visible {
+  opacity: 0.55;
+}
+
+.brand-drawer__utility {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: auto;
+  padding-top: 25px;
+  border-top: 1px solid rgba(24, 26, 27, 0.11);
+}
+.brand-drawer__utility a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #181a1b;
+  font-size: 16px;
+  letter-spacing: 0.1em;
+  transition: opacity 220ms ease;
+}
+
+.brand-drawer__utility a:hover,
+.brand-drawer__utility a:focus-visible {
+  opacity: 0.55;
+}
+
+/* PublicLayout's editorial menu drawer. It must remain outside the document
+   flow until opened; otherwise its navigation renders as unstyled text. */
+.brand-menu {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  visibility: hidden;
+  overflow: hidden;
+  pointer-events: none;
+  background: rgba(17, 19, 21, 0.48);
+  opacity: 0;
+  transition:
+    opacity 300ms ease,
+    visibility 300ms ease;
+}
+
+.brand-menu.is-open {
+  visibility: visible;
+  pointer-events: auto;
+  opacity: 1;
+}
+
+.brand-menu__inner {
+  display: flex;
+  flex-direction: column;
+  width: clamp(500px, 31vw, 560px);
+  height: 100svh;
+  max-height: 100svh;
+  padding: 0 60px 32px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  color: #181a1b;
+  background: #fff;
+  box-shadow: 18px 0 42px rgba(17, 19, 21, 0.08);
+  transform: translateX(-100%);
+  transition: transform 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.brand-menu.is-open .brand-menu__inner {
+  transform: translateX(0);
+}
+
+.nav-locked .site-header__left-group {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.brand-menu__top {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 34px;
+  min-height: 108px;
+  border-bottom: 1px solid rgba(24, 26, 27, 0.08);
+}
+
+.brand-menu__top-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 0;
+  color: #5f6568;
+  border: 0;
+  background: transparent;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 220ms ease;
+}
+
+.brand-menu__top-action svg {
+  width: 26px;
+  height: 26px;
+  stroke-width: 1.25;
+}
+
+.brand-menu__top-action:hover,
+.brand-menu__top-action:focus-visible {
+  color: #181a1b;
+}
+
+.brand-menu__top-action:focus-visible {
+  outline: 2px solid #181a1b;
+  outline-offset: 4px;
+}
+
+.brand-menu__eyebrow {
+  margin: 30px 0 10px;
+  color: var(--hc-text-muted);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.brand-menu__primary {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand-menu__primary a {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 14px;
+  min-height: 82px;
+  padding: 0;
+  color: #181a1b;
+  border-bottom: 1px solid rgba(24, 26, 27, 0.1);
+  text-decoration: none;
+  transition: color 220ms ease;
+}
+
+.brand-menu__primary a:focus-visible {
+  outline: 2px solid #181a1b;
+  outline-offset: 4px;
+}
+
+.brand-menu__index {
+  color: var(--hc-text-muted);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  transition: color 220ms ease;
+}
+
+.brand-menu__copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  transition: transform 260ms ease;
+}
+
+.brand-menu__label {
+  font-family: "Noto Serif SC", "Source Han Serif CN", serif;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: 0.06em;
+}
+
+.brand-menu__description {
+  color: var(--hc-text-secondary);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0.03em;
+}
+
+.brand-menu__arrow {
+  display: inline-flex;
+  color: #5f6568;
+  opacity: 0;
+  transform: translateX(-7px);
+  transition:
+    opacity 220ms ease,
+    transform 260ms ease;
+}
+
+.brand-menu__primary a:hover .brand-menu__copy,
+.brand-menu__primary a:focus-visible .brand-menu__copy {
+  transform: translateX(5px);
+}
+
+.brand-menu__primary a:hover .brand-menu__arrow,
+.brand-menu__primary a:focus-visible .brand-menu__arrow,
+.brand-menu__primary a.is-active .brand-menu__arrow {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.brand-menu__primary a.is-active .brand-menu__index {
+  color: #181a1b;
+}
+
+.brand-menu__service {
+  margin-top: 30px;
+}
+
+.brand-menu__service > p {
+  margin: 0 0 10px;
+  color: var(--hc-text-muted);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.brand-menu__service > a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 76px;
+  padding: 0 2px;
+  color: #181a1b;
+  border-top: 1px solid rgba(24, 26, 27, 0.14);
+  border-bottom: 1px solid rgba(24, 26, 27, 0.14);
+  text-decoration: none;
+}
+
+.brand-menu__service > a > span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.brand-menu__service strong {
+  font-family: "Noto Serif SC", "Source Han Serif CN", serif;
+  font-size: 17px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+}
+
+.brand-menu__service small {
+  color: var(--hc-text-secondary);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.brand-menu__service > a > svg {
+  color: #5f6568;
+  transition: transform 260ms ease;
+}
+
+.brand-menu__service > a:hover > svg,
+.brand-menu__service > a:focus-visible > svg {
+  transform: translateX(5px);
+}
+
+.brand-menu__service > a:focus-visible {
+  outline: 2px solid #181a1b;
+  outline-offset: 4px;
+}
+
+.brand-menu__footer {
+  margin-top: auto;
+  padding-top: 24px;
+  border-top: 1px solid rgba(24, 26, 27, 0.11);
+}
+
+.brand-menu__utility {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+}
+
+.brand-menu__utility a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: #5f6568;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-decoration: none;
+}
+
+.brand-menu__utility a:hover,
+.brand-menu__utility a:focus-visible {
+  color: #181a1b;
+}
+
+.brand-menu__utility a:focus-visible {
+  outline: 2px solid #181a1b;
+  outline-offset: 3px;
+}
+
+.brand-menu__categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.brand-menu__categories > span,
+.brand-menu__categories a {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.brand-menu__contact {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.brand-menu__contact a,
+.brand-menu__contact span {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #5f6568;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  line-height: 1.5;
+}
+
+.brand-menu__contact a {
+  min-height: 44px;
+}
+
+.brand-menu__contact a:hover {
+  opacity: 0.65;
+}
+
+.brand-menu__contact svg {
+  flex-shrink: 0;
+  color: var(--hc-text-secondary);
+}

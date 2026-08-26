@@ -1,0 +1,98 @@
+/* 首页 Puck surface：只收敛首页节奏与构图，不改变共享区块默认视觉。 */
+.hc-public-document[data-home-surface="true"] .hc-home-text-banner > .hc-section {
+  padding-block: 0 !important;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-text-banner .hc-phase1-text {
+  padding-block: 64px !important;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-text-banner .hc-phase1-text > [aria-hidden="true"]:first-child {
+  margin-bottom: 28px !important;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-text-banner .hc-phase1-text > [aria-hidden="true"]:last-child {
+  margin-top: 36px !important;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-product-row[data-home-product-count="1"] .homepage-product-row__grid {
+  grid-template-columns: minmax(0, min(100%, 560px)) !important;
+  justify-content: center;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-product-row[data-home-product-count="2"] .homepage-product-row__grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  max-width: 920px;
+  margin-inline: auto;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-product-row[data-home-product-count="3"] .homepage-product-row__grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-brand-points [data-content-role="copy"] {
+  max-width: 720px;
+  margin: 0 0 40px !important;
+  text-align: left !important;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-brand-points [data-content-role="copy"] p {
+  margin-inline: 0 !important;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-brand-points [data-content-role="points"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 0 32px !important;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-brand-points [data-content-role="points"] > div {
+  padding: 20px 0 !important;
+  border-top: 1px solid #DDE1E2;
+  text-align: left !important;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-brand-points [data-content-role="points"] > div p {
+  margin-inline: 0 !important;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-booking .hc-appointment {
+  min-height: 320px;
+}
+
+.hc-public-document[data-home-surface="true"] .hc-home-booking .hc-appointment__content {
+  padding-block: 64px;
+}
+
+@media (min-width: 768px) {
+  .hc-public-document[data-home-surface="true"] .hc-home-text-banner .hc-phase1-text {
+    padding-block: 96px !important;
+  }
+
+  .hc-public-document[data-home-surface="true"] .hc-home-brand-points .hc-section__inner {
+    padding-inline: 0 !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .hc-public-document[data-home-surface="true"] .hc-home-product-row .homepage-product-row__grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    max-width: none;
+  }
+
+  .hc-public-document[data-home-surface="true"] .hc-home-brand-points [data-content-role="copy"] {
+    margin-bottom: 24px !important;
+  }
+
+  .hc-public-document[data-home-surface="true"] .hc-home-brand-points [data-content-role="points"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0 !important;
+  }
+
+  .hc-public-document[data-home-surface="true"] .hc-home-brand-points [data-content-role="points"] > div {
+    padding: 18px 0 !important;
+  }
+
+  .hc-public-document[data-home-surface="true"] .hc-home-booking .hc-appointment__content {
+    padding-block: 56px;
+  }
+}

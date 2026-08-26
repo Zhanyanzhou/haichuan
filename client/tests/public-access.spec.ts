@@ -115,6 +115,41 @@ test.describe("游客公开浏览", () => {
     await expect(page.getByRole("heading", { name: "申请成为合作商家" })).toBeVisible();
   });
 
+  for (const viewport of [
+    { name: "desktop", width: 1440, height: 900 },
+    { name: "mobile", width: 390, height: 844 },
+  ]) {
+    test(`未登录我的账户只呈现一套会员入口 @ ${viewport.name}`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.route("**/api/customers/sms-requirements", (route) => route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data: { registerRequired: false } }),
+      }));
+      await page.route("**/api/customers/wechat/config**", (route) => route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data: { enabled: false } }),
+      }));
+
+      await page.goto("/customer");
+
+      await expect(page.getByRole("heading", { level: 1, name: /您的珠宝档案/ }))
+        .toBeVisible();
+      await expect(page.locator("#member-access-form")).toBeVisible();
+      await expect(page.getByRole("button", { name: "会员登录", exact: true }))
+        .toBeVisible();
+      await expect(page.getByText("账户首页", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("我的订单", { exact: true })).toHaveCount(0);
+
+      await page.getByRole("button", { name: "注册会员" }).click();
+      await expect(page.getByRole("button", { name: "创建会员账户" })).toBeVisible();
+      await expect(page.getByLabel("称呼")).toBeVisible();
+      await expect(page.getByLabel("邮箱（选填）")).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+    });
+  }
+
   for (const path of ["/cart", "/checkout"]) {
     test(`${path} 在交易关闭时降级至咨询页`, async ({ page }) => {
       await page.goto(path);

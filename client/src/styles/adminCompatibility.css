@@ -1,0 +1,77 @@
+
+/* ═══════════════════════════════════════════════
+   保留旧版兼容
+   ═══════════════════════════════════════════════ */
+.admin-shell {
+  --admin-bg: #ffffff;
+  --admin-line: #dde1e2;
+  --admin-accent: #181a1b;
+  --admin-ink: #181a1b;
+  --admin-muted: #6e7477;
+  --admin-subtle: #6E7477;
+  --admin-gold: #181a1b;
+  --admin-gold-soft: #eceeef;
+  --admin-action: #181a1b;
+  --admin-text-strong: #181A1B;
+  --admin-text: #5f6568;
+  --admin-success: #356348;
+  --admin-success-bg: #eff5f1;
+  --admin-warning: #7a531a;
+  --admin-warning-bg: #fbf4e8;
+  --admin-error: #8c3f3b;
+  --admin-error-bg: #faf0ef;
+  --admin-info: #335f7d;
+  --admin-info-bg: #eef4f7;
+}
+.admin-shell .lux-empty {
+  color: var(--admin-muted);
+}
+.admin-shell .lux-empty__desc {
+  color: var(--admin-subtle);
+}
+
+/* ═══════════════════════════════════════════════
+   响应式
+   ═══════════════════════════════════════════════ */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .admin-shell-v7 {
+    --adm-content-gutter: 20px;
+  }
+}
+
+@media (max-width: 767px) {
+  .admin-header {
+    padding: 0 12px;
+  }
+  .admin-header__site-link,
+  .admin-header__account {
+    min-width: 40px;
+    height: 40px;
+  }
+  .admin-header__account-group {
+    padding-left: 8px;
+  }
+  .admin-sidebar {
+    flex-basis: 100%;
+    width: 100%;
+  }
+  .admin-sidebar__nav {
+    padding: 20px 20px 14px;
+  }
+  .admin-sidebar__subnav {
+    margin-right: 6px;
+  }
+  .admin-sidebar__item,
+  .admin-sidebar__item-pin {
+    height: 40px;
+  }
+  .admin-sidebar__item {
+    font-size: 13px;
+  }
+  .admin-main {
+    padding: 18px 14px 28px;
+  }
+  .admin-breadcrumb {
+    padding: 0 14px;
+  }
+}

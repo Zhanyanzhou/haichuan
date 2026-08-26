@@ -1,5 +1,10 @@
 import { productPlaceholder } from '@/utils/placeholder';
 
+export {
+  filterProducts,
+  type MockProductFilterParams,
+} from "./mockProductQuery";
+
 // ===== Mock Data for Demo Mode (no backend required) =====
 // 只由显式 Vite mode 控制：development/production 均为真实接口，`--mode mock` 才启用。
 export const USE_MOCK = import.meta.env.MODE === 'mock';
@@ -109,66 +114,4 @@ export const mockDelay = (ms = 300) => new Promise((r) => setTimeout(r, ms));
 export function paginate<T>(list: T[], page: number, pageSize: number) {
   const start = (page - 1) * pageSize;
   return { list: list.slice(start, start + pageSize), total: list.length, page, pageSize };
-}
-
-// ===== Helper: Filter products =====
-export function filterProducts(products: typeof mockProducts, params: any) {
-  let result = [...products];
-  const csv = (value: unknown) =>
-    typeof value === 'string' ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
-  const materialLabel: Record<string, string> = {
-    GOLD_999: '足金999', GOLD_9999: '足金9999', AU750: '18K金', PT950: '铂金950',
-    S925: '银925', DIAMOND: '镶钻', JADE: '玉石', PEARL: '珍珠', COLOR_GEM: '彩宝', OTHER: '其他',
-  };
-  if (params.exactCode) result = result.filter((p) => p.code === params.exactCode);
-  if (params.keyword) {
-    const kw = params.keyword.toLowerCase();
-    result = result.filter((p) =>
-      p.name.toLowerCase().includes(kw) ||
-      p.code.toLowerCase().includes(kw) ||
-      p.category?.name?.toLowerCase().includes(kw) ||
-      (materialLabel[p.materialType] || p.materialType).toLowerCase().includes(kw),
-    );
-  }
-  if (params.categoryId) result = result.filter((p) => p.categoryId === +params.categoryId);
-  const categoryIds = new Set(csv(params.categoryIds).map(Number));
-  if (categoryIds.size) result = result.filter((p) => categoryIds.has(p.categoryId));
-  if (params.materialType) result = result.filter((p) => p.materialType === params.materialType);
-  const materialTypes = new Set(csv(params.materialTypes));
-  if (materialTypes.size) result = result.filter((p) => materialTypes.has(p.materialType));
-  const crafts = csv(params.craftTechniques);
-  if (crafts.length) {
-    result = result.filter((p) => {
-      const craft = Array.isArray(p.craftTechnique)
-        ? p.craftTechnique.join('、')
-        : typeof p.craftTechnique === 'string' ? p.craftTechnique : '';
-      return crafts.some((item) => craft.includes(item));
-    });
-  }
-  const sizes = new Set(csv(params.sizes));
-  if (sizes.size) result = result.filter((p) => Boolean(p.size && sizes.has(p.size)));
-  const ranges = csv(params.weightRanges).map((range) => {
-    const [min, max] = range.split(':').map((value) => value ? Number(value) : undefined);
-    return { min, max };
-  });
-  if (ranges.length) {
-    result = result.filter((p) => {
-      const weight = Number(p.goldWeight) > 0 ? Number(p.goldWeight) : Number(p.weight);
-      return ranges.some(({ min, max }) =>
-        Number.isFinite(min) && weight >= Number(min) && (max === undefined || weight < max),
-      );
-    });
-  }
-  if (params.status) result = result.filter((p) => p.status === params.status);
-  if (params.isHot === 'true') result = result.filter((p) => p.isHot);
-  if (params.isNew === 'true') result = result.filter((p) => p.isNew);
-  if (params.isRecommended === 'true') result = result.filter((p) => p.isRecommended);
-  if (params.sortBy === 'sortOrder') result.sort((a, b) => a.id - b.id);
-  if (params.sortBy === 'updated_desc') result.sort((a, b) => b.id - a.id);
-  if (params.sortBy === 'code_asc') result.sort((a, b) => a.code.localeCompare(b.code));
-  if (params.sortBy === 'price_asc') result.sort((a, b) => (a.price || 0) - (b.price || 0));
-  if (params.sortBy === 'price_desc') result.sort((a, b) => (b.price || 0) - (a.price || 0));
-  if (params.sortBy === 'price' && params.sortOrder === 'asc') result.sort((a, b) => (a.price || 0) - (b.price || 0));
-  if (params.sortBy === 'price' && params.sortOrder === 'desc') result.sort((a, b) => (b.price || 0) - (a.price || 0));
-  return result;
 }

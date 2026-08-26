@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Space, Table, Tag } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import { refundApi } from '@/services/api';
@@ -20,12 +20,15 @@ const STATUS_TABS: Array<{ key: string; label: string }> = [
   { key: 'all', label: '全部' },
   { key: 'PENDING', label: '待审核' },
   { key: 'APPROVED', label: '待执行' },
+  { key: 'PROCESSING', label: '渠道处理中' },
   { key: 'COMPLETED', label: '已完成' },
   { key: 'REJECTED', label: '已拒绝' },
+  { key: 'FAILED', label: '执行失败' },
 ];
 
 type RefundListItem = Refund & {
   order: { orderNo: string; customerName: string; customerPhone: string; finalAmount: number | string; status: string };
+  payment?: { id: number; paymentNo: string; method: string; status: string; amount: number | string } | null;
 };
 
 export default function RefundManage() {
@@ -44,7 +47,9 @@ export default function RefundManage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [channelLoadingId, setChannelLoadingId] = useState<number | null>(null);
   const [createForm] = Form.useForm();
+  const refundAttemptKey = useRef<string | null>(null);
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
@@ -82,14 +87,16 @@ export default function RefundManage() {
   const handleCreate = async (values: { orderId: number; amount: number; reason: string }) => {
     setCreating(true);
     try {
+      refundAttemptKey.current ??= `refund-${crypto.randomUUID()}`;
       await refundApi.create({
         orderId: Number(values.orderId),
         amount: Number(values.amount),
         reason: values.reason,
-        // 幂等键：同一笔订单+金额+时间窗口内去重
-        idempotencyKey: `refund-${values.orderId}-${values.amount}-${Date.now()}`,
+        // 同一次提交及网络重试复用同一键；关闭弹窗后才创建新的退款意图。
+        idempotencyKey: refundAttemptKey.current,
       });
       message.success('退款申请已创建');
+      refundAttemptKey.current = null;
       setCreateOpen(false);
       createForm.resetFields();
       void load();
@@ -109,8 +116,17 @@ export default function RefundManage() {
       okButtonProps: { danger: action === 'REJECTED' },
       onOk: async () => {
         try {
-          await refundApi.review(record.id, { action, reviewNote: reviewNote || undefined });
-          message.success(action === 'APPROVED' ? '已审核通过' : '已拒绝');
+          const response = await refundApi.review(record.id, { action, reviewNote: reviewNote || undefined });
+          const result = unwrapResponse<RefundListItem & {
+            channelAction?: { state?: string; message?: string };
+          }>(response);
+          if (action === 'APPROVED' && result?.channelAction?.state === 'DISABLED') {
+            message.warning(result.channelAction.message || '已审核通过，真实退款门禁当前关闭');
+          } else if (action === 'APPROVED' && result?.channelAction?.state === 'ATTENTION') {
+            message.warning(result.channelAction.message || '已审核通过，渠道退款结果待确认');
+          } else {
+            message.success(action === 'APPROVED' ? '已审核通过' : '已拒绝');
+          }
           void load();
         } catch (e: any) {
           message.error(getSafeAdminErrorMessage(e, '退款审核未完成，请重新加载后确认当前状态。'));
@@ -119,14 +135,39 @@ export default function RefundManage() {
     });
   };
 
+  const handleChannelRefund = async (record: RefundListItem) => {
+    setChannelLoadingId(record.id);
+    try {
+      const response = record.status === 'APPROVED'
+        ? await refundApi.startChannel(record.id)
+        : await refundApi.queryChannel(record.id);
+      const result = unwrapResponse<{ state?: string }>(response);
+      if (result?.state === 'SUCCESS') {
+        message.success('微信已确认原路退款成功');
+      } else if (result?.state === 'ABNORMAL') {
+        message.warning('微信退款异常，请保持原退款单并进行渠道对账');
+      } else if (result?.state === 'CLOSED') {
+        message.warning('微信退款已关闭，可在核对后重新创建退款申请');
+      } else {
+        message.info('微信退款处理中，稍后可继续查询');
+      }
+      await load();
+      if (detail?.id === record.id) await openDetail(record);
+    } catch (e: any) {
+      message.error(getSafeAdminErrorMessage(e, '原路退款操作未完成，请保留当前退款单并稍后查询。'));
+    } finally {
+      setChannelLoadingId(null);
+    }
+  };
+
   const handleExecute = (record: RefundListItem, action: 'COMPLETED' | 'FAILED') => {
     let gatewayRefundNo = '';
     Modal.confirm({
       title: action === 'COMPLETED' ? '确认退款已完成？' : '标记退款执行失败？',
       content: (
         <div>
-          <p className="text-sm text-brand-muted mb-2">{action === 'COMPLETED' ? '请填写银行/第三方退款流水号（可选），确认资金已退回客户。' : '执行失败后可重新执行。'}</p>
-          <Input placeholder="退款流水号（可选）" onChange={(e) => { gatewayRefundNo = e.target.value; }} />
+          <p className="text-sm text-brand-muted mb-2">{action === 'COMPLETED' ? '仅用于线下付款退款，请填写银行或门店退款流水号。' : '线下退款执行失败后可重新登记。'}</p>
+          <Input placeholder="退款流水号（完成时必填）" onChange={(e) => { gatewayRefundNo = e.target.value; }} />
         </div>
       ),
       okText: action === 'COMPLETED' ? '确认完成' : '标记失败',
@@ -148,7 +189,7 @@ export default function RefundManage() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="font-semibold text-brand-text">退款中心</h1>
-          <p className="text-sm text-brand-muted mt-1">退款申请 · 审核 · 人工执行（累计退款不超过已收款）</p>
+          <p className="text-sm text-brand-muted mt-1">退款申请与审核；在线付款必须原路退回，线下付款保留人工登记兜底</p>
         </div>
         <Space>
           <Input.Search
@@ -159,7 +200,18 @@ export default function RefundManage() {
             className="w-64"
             allowClear
           />
-          {isAdmin && <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>发起退款</Button>}
+          {isAdmin && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                refundAttemptKey.current = `refund-${crypto.randomUUID()}`;
+                setCreateOpen(true);
+              }}
+            >
+              发起退款
+            </Button>
+          )}
         </Space>
       </div>
 
@@ -217,10 +269,26 @@ export default function RefundManage() {
                     </>
                   )}
                   {isAdmin && (r.status === 'APPROVED' || r.status === 'PROCESSING') && (
-                    <>
-                      <Button size="small" type="primary" onClick={() => handleExecute(r, 'COMPLETED')}>完成</Button>
-                      <Button size="small" danger onClick={() => handleExecute(r, 'FAILED')}>失败</Button>
-                    </>
+                    r.payment?.method === 'wechat' ? (
+                      <Button
+                        size="small"
+                        type={r.status === 'APPROVED' ? 'primary' : 'default'}
+                        loading={channelLoadingId === r.id}
+                        onClick={() => void handleChannelRefund(r)}
+                        title="只发起或查询微信原路退款，不会人工标记成功"
+                      >
+                        {r.status === 'APPROVED' ? '发起原路退款' : '查询退款状态'}
+                      </Button>
+                    ) : r.payment?.method === 'alipay' ? (
+                      <Button size="small" disabled title="支付宝客户退款将在第二批接入">
+                        支付宝退款第二批
+                      </Button>
+                    ) : (
+                      <>
+                        <Button size="small" onClick={() => handleExecute(r, 'COMPLETED')}>补录线下退款</Button>
+                        <Button size="small" danger onClick={() => handleExecute(r, 'FAILED')}>记录线下退款失败</Button>
+                      </>
+                    )
                   )}
                 </Space>
               ),
@@ -254,7 +322,7 @@ export default function RefundManage() {
       <Modal
         title="发起退款"
         open={createOpen}
-        onCancel={() => { setCreateOpen(false); createForm.resetFields(); }}
+        onCancel={() => { setCreateOpen(false); refundAttemptKey.current = null; createForm.resetFields(); }}
         footer={null}
         destroyOnClose
       >

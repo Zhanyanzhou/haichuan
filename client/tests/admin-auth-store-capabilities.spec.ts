@@ -49,7 +49,7 @@ test.describe("后台页面统一从 authStore 读取角色", () => {
 
     for (const target of [
       { path: "/admin/trade/after-sales", action: "登记售后" },
-      { path: "/admin/trade/payments", action: "登记收款" },
+      { path: "/admin/trade/payments", action: "异常补录" },
       { path: "/admin/trade/refunds", action: "发起退款" },
     ]) {
       await page.goto(target.path);
@@ -71,7 +71,7 @@ test.describe("后台页面统一从 authStore 读取角色", () => {
 
     await page.goto("/admin/trade/payments");
     await expect(page).toHaveURL(/\/admin\/trade\/payments$/);
-    await expect(page.getByRole("button", { name: "登记收款" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "异常补录" })).toHaveCount(0);
 
     await page.goto("/admin/trade/refunds");
     await expect(page).toHaveURL(/\/admin\/trade\/refunds$/);
@@ -92,7 +92,7 @@ test.describe("后台页面统一从 authStore 读取角色", () => {
 
     await page.goto("/admin/trade/payments");
     await expect(page.getByText("抱歉，您没有访问此页面的权限")).toBeVisible();
-    await expect(page.getByText("付款审核", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("支付记录", { exact: true })).toHaveCount(0);
     expect(paymentRequests).toBe(0);
   });
 

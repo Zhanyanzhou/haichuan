@@ -6,15 +6,14 @@ import { unwrapResponse } from "@/utils/unwrap";
 import AccountExperience from "./AccountExperience";
 import MyAccountDashboard from "./MyAccountDashboard";
 import PartnerApplication from "@/pages/public/PartnerApplication";
+import type { CustomerNotificationPage, CustomerOrder } from "./types";
 
-type CustomerOrder = {
-  id: number;
-  orderNo: string;
-  finalAmount: number | string;
-  status: string;
-  createdAt: string;
-  items?: Array<{ productId: number; product?: { name: string } }>;
-  payments?: Array<{ id: number; status: string; proofUrl?: string | null }>;
+const EMPTY_NOTIFICATIONS: CustomerNotificationPage = {
+  list: [],
+  total: 0,
+  unreadCount: 0,
+  page: 1,
+  pageSize: 20,
 };
 
 function getRequestStatus(error: unknown): number | undefined {
@@ -33,6 +32,8 @@ export default function CustomerCenter() {
   const [addresses, setAddresses] = useState<any[]>([]);
   const [profile, setProfile] = useState<any>(null);
   const [partner, setPartner] = useState<any>(null);
+  const [notifications, setNotifications] = useState<CustomerNotificationPage>(EMPTY_NOTIFICATIONS);
+  const [notificationError, setNotificationError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -64,6 +65,21 @@ export default function CustomerCenter() {
     setAddresses([]);
     setProfile(null);
     setPartner(null);
+    setNotifications(EMPTY_NOTIFICATIONS);
+    setNotificationError(null);
+  }, []);
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      const response = await customerApi.getNotifications({ pageSize: 20 });
+      setNotifications(
+        unwrapResponse<CustomerNotificationPage>(response) || EMPTY_NOTIFICATIONS,
+      );
+      setNotificationError(null);
+    } catch {
+      setNotifications(EMPTY_NOTIFICATIONS);
+      setNotificationError("服务通知暂时无法加载，订单和账户功能不受影响。");
+    }
   }, []);
 
   const load = useCallback(async () => {
@@ -87,6 +103,7 @@ export default function CustomerCenter() {
       setProfile(unwrapResponse<any>(profileRes));
       setSelectionInquiries(unwrapResponse<any[]>(selectionsRes) || []);
       setInquiries(unwrapResponse<any[]>(inquiriesRes) || []);
+      void loadNotifications();
       // 合作商家状态独立容错：接口不可用（如后端未部署）时不影响账号页整体加载
       try {
         const partnerRes = await partnerApi.getMine();
@@ -103,7 +120,7 @@ export default function CustomerCenter() {
     } finally {
       setLoading(false);
     }
-  }, [clearSession]);
+  }, [clearSession, loadNotifications]);
 
   useEffect(() => {
     void load();
@@ -189,6 +206,24 @@ export default function CustomerCenter() {
           addresses={addresses}
           selectionInquiries={selectionInquiries}
           inquiries={inquiries}
+          notifications={notifications}
+          notificationError={notificationError}
+          onReadNotification={async (id) => {
+            try {
+              await customerApi.markNotificationRead(id);
+              await loadNotifications();
+            } catch {
+              message.error("通知状态更新失败，请稍后重试");
+            }
+          }}
+          onReadAllNotifications={async () => {
+            try {
+              await customerApi.markAllNotificationsRead();
+              await loadNotifications();
+            } catch {
+              message.error("通知状态更新失败，请稍后重试");
+            }
+          }}
           onSignOut={signOut}
           onRefresh={load}
         />
@@ -198,17 +233,10 @@ export default function CustomerCenter() {
 
   return (
     <AccountExperience
-      isSignedIn={false}
-      profile={profile}
-      orders={orders}
-      addresses={addresses}
-      selectionInquiries={selectionInquiries}
-      inquiries={inquiries}
       authLoading={authLoading}
       onLogin={(values) => completeAuth(customerApi.login(values))}
       onRegister={(values) => completeAuth(customerApi.register(values))}
       onWechatAuth={applyWechatAuth}
-      onSignOut={signOut}
     />
   );
 }

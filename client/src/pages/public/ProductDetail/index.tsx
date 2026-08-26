@@ -40,10 +40,14 @@ import {
 import { useReconnectingEventSource } from "@/hooks/useReconnectingEventSource";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { useSelectionStore } from "@/store/selectionStore";
+import {
+  publicProductInquiryPath,
+  publicProductPath,
+} from "@/utils/publicProductPath";
 
 /** 相似作品推荐（同分类/材质+热度加权；recommendations 模块首次接线启用） */
 function SimilarProducts({ productId }: { productId: number }) {
-  const [list, setList] = useState<Array<{ id: number; name: string; price?: number | string | null }>>([]);
+  const [list, setList] = useState<Array<{ id: number; code?: string | null; name: string; price?: number | string | null }>>([]);
 
   useEffect(() => {
     recommendationApi
@@ -62,7 +66,7 @@ function SimilarProducts({ productId }: { productId: number }) {
       </p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
         {list.map((item) => (
-          <Link key={item.id} to={`/products/${item.id}`} className="group">
+          <Link key={item.id} to={publicProductPath(item)} className="group">
             <div className="aspect-square bg-brand-bg overflow-hidden">
               <SecureImage
                 src={getListingImage(item as any)}
@@ -202,15 +206,15 @@ function ProductPrimaryAction({
   }
 
   if (product.salesMode === "APPOINTMENT") {
-    return <Link to="/contact" className={`${primaryClass} text-center`}>预约鉴赏此款</Link>;
+    return <Link to={publicProductInquiryPath(product, "appointment")} className={`${primaryClass} text-center`}>预约鉴赏此款</Link>;
   }
 
   if (product.salesMode === "CUSTOM_INQUIRY") {
-    return <Link to="/custom" className={`${primaryClass} text-center`}>咨询此款定制</Link>;
+    return <Link to={publicProductInquiryPath(product, "custom")} className={`${primaryClass} text-center`}>咨询此款定制</Link>;
   }
 
   if (product.salesMode !== "DIRECT_PURCHASE") {
-    return <Link to="/contact" className={`${primaryClass} text-center`}>咨询此款作品</Link>;
+    return <Link to={publicProductInquiryPath(product, "product")} className={`${primaryClass} text-center`}>咨询此款作品</Link>;
   }
 
   if (commerceFlagsLoading || !commerceFlags) {
@@ -223,13 +227,13 @@ function ProductPrimaryAction({
     return <button type="button" className={primaryClass} disabled>库存状态暂不可用</button>;
   }
   if (!canUseCart) {
-    return <Link to="/contact" className={`${primaryClass} text-center`}>购买暂未开放，联系顾问</Link>;
+    return <Link to={publicProductInquiryPath(product, "purchase-support")} className={`${primaryClass} text-center`}>购买暂未开放，联系顾问</Link>;
   }
   if (!isSignedIn) {
     return (
       <Link
         to="/customer"
-        state={{ returnTo: `/products/${product.id}` }}
+        state={{ returnTo: publicProductPath(product) }}
         className={`${primaryClass} text-center`}
       >
         登录后购买
@@ -286,24 +290,24 @@ export default function ProductDetail() {
   // 初始收藏态：拉一次心愿单判断当前作品是否在列（心愿单量级小，整表判断成本可忽略）。
   // 登录墙 return 之前 hooks 已执行，必须显式判断登录态，避免游客每次必发一个注定 401 的请求。
   useEffect(() => {
-    if (!id || !isSignedIn) return;
+    if (!product?.id || !isSignedIn) return;
     customerApi
       .getFavorites()
       .then((res: unknown) => {
         const list = unwrapResponse<Array<{ productId: number }>>(res) || [];
-        setFavorited(list.some((f) => f.productId === Number(id)));
+        setFavorited(list.some((f) => f.productId === product.id));
       })
       .catch(() => setFavorited(false));
-  }, [id, isSignedIn]);
+  }, [product?.id, isSignedIn]);
 
   const handleToggleFavorite = async () => {
-    if (favBusy || !id) return;
+    if (favBusy || !product?.id) return;
     setFavBusy(true);
     // 乐观更新，失败回滚
     const next = !favorited;
     setFavorited(next);
     try {
-      const res = await customerApi.toggleFavorite(Number(id));
+      const res = await customerApi.toggleFavorite(product.id);
       const result = unwrapResponse<{ favorited: boolean }>(res);
       setFavorited(Boolean(result?.favorited));
       message.success(result?.favorited ? "已加入心愿单" : "已移出心愿单");
@@ -374,7 +378,7 @@ export default function ProductDetail() {
   }, [product, setPageMeta, clearPageMeta]);
 
   // P1-35：带自动重连的 SSE（断线指数退避重连，避免实时刷新静默失效）
-  useReconnectingEventSource(USE_MOCK ? null : publicProductStreamUrl, () =>
+  useReconnectingEventSource(USE_MOCK ? null : publicProductStreamUrl(), () =>
     setRevision((value) => value + 1),
   );
 
@@ -391,11 +395,12 @@ export default function ProductDetail() {
   }, [product?.salesMode, commerceEnabled]);
 
   useEffect(() => {
-    if (id) {
-      trackPageView();
-      trackProductView(Number(id));
-    }
+    if (id) trackPageView();
   }, [id]);
+
+  useEffect(() => {
+    if (product?.id) trackProductView(product.id);
+  }, [product?.id]);
 
   if (loading)
     return (
@@ -441,8 +446,18 @@ export default function ProductDetail() {
     Boolean(selectedSku) &&
     displayPrice > 0;
   const displayGoldWeight = selectedSku?.goldWeight ?? product.goldWeight;
+  const publicSummary =
+    product.shortDescription?.trim() || product.description?.trim() || "";
   const detailBlocks = product.detailContent ?? [];
   const materialLabel = getMaterialLabel(product.materialType);
+  const numericGoldWeight = Number(displayGoldWeight);
+  const numericTotalWeight = Number(product.weight);
+  const hasDistinctTotalWeight = hasPublicFact(product.weight) && (
+    !hasPublicFact(displayGoldWeight)
+    || !Number.isFinite(numericGoldWeight)
+    || !Number.isFinite(numericTotalWeight)
+    || numericGoldWeight !== numericTotalWeight
+  );
   const publicFacts = [
     { label: "材质", value: hasPublicFact(materialLabel) ? materialLabel : "" },
     {
@@ -451,7 +466,7 @@ export default function ProductDetail() {
     },
     {
       label: "总重",
-      value: hasPublicFact(product.weight) ? `${product.weight}g` : "",
+      value: hasDistinctTotalWeight ? `${product.weight}g` : "",
     },
     { label: "尺寸", value: hasPublicFact(product.size) ? product.size!.trim() : "" },
     ...(product.craftTechnique ?? [])
@@ -603,9 +618,11 @@ export default function ProductDetail() {
               {product.code}
             </p>
 
-            <p className="body text-brand-muted mb-10 leading-[1.9] max-w-[42rem]">
-              {product.description}
-            </p>
+            {publicSummary ? (
+              <p className="body text-brand-muted mb-10 leading-[1.9] max-w-[42rem]">
+                {publicSummary}
+              </p>
+            ) : null}
 
             {/* 只显示来自公开事实源的非空事实，不以 0 或破折号填充。 */}
             {hasPublicFact(goldPrice?.price) || hasPublicFact(displayGoldWeight) ||

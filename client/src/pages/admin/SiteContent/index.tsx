@@ -28,7 +28,9 @@ interface SiteContentValues {
   contactPhone?: string;
   contactEmail?: string;
   contactAddress?: string;
+  storeName?: string;
   businessHours?: string;
+  storeMapUrl?: string;
   seoTitle?: string;
   seoDescription?: string;
   seoKeywords?: string;
@@ -41,7 +43,9 @@ const SITE_CONTENT_FIELDS: ReadonlyArray<keyof SiteContentValues> = [
   "contactPhone",
   "contactEmail",
   "contactAddress",
+  "storeName",
   "businessHours",
+  "storeMapUrl",
   "seoTitle",
   "seoDescription",
   "seoKeywords",
@@ -220,8 +224,27 @@ export default function SiteContent() {
             marginBottom: 20,
           }}
         >
+          <Form.Item name="storeName" label="门店名称">
+            <Input placeholder="用于门店信息模块；未配置时不会把网站名称直接当作实体门店" />
+          </Form.Item>
           <Form.Item name="businessHours" label="营业时间">
             <Input placeholder="周一至周日 10:00-22:00" />
+          </Form.Item>
+          <Form.Item
+            name="storeMapUrl"
+            label="门店地图链接"
+            extra="仅支持以 http:// 或 https:// 开头的高德、百度等地图分享链接"
+            rules={[
+              {
+                validator: async (_, value) => {
+                  const normalized = typeof value === "string" ? value.trim() : "";
+                  if (!normalized || /^https?:\/\//i.test(normalized)) return;
+                  throw new Error("请输入以 http:// 或 https:// 开头的地图链接");
+                },
+              },
+            ]}
+          >
+            <Input placeholder="https://..." />
           </Form.Item>
         </Card>
 

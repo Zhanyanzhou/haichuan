@@ -16,6 +16,23 @@ const statusMap: Record<string, { color: string; label: string }> = {
   PARTIAL_REFUND: { color: 'purple', label: '部分退款' },
 };
 
+const ONLINE_PAYMENT_METHODS = new Set(['wechat', 'alipay']);
+
+function isOnlinePayment(payment: Pick<Payment, 'method'>) {
+  return ONLINE_PAYMENT_METHODS.has(payment.method);
+}
+
+function getPaymentStatusMeta(payment: Pick<Payment, 'method' | 'status'>) {
+  if (!isOnlinePayment(payment)) return statusMap[payment.status];
+  return {
+    PENDING: { color: 'processing', label: '等待渠道确认' },
+    PAID: { color: 'green', label: '在线支付成功' },
+    FAILED: { color: 'default', label: '在线支付未完成' },
+    REFUNDED: { color: 'purple', label: '已原路退款' },
+    PARTIAL_REFUND: { color: 'purple', label: '部分原路退款' },
+  }[payment.status] ?? statusMap[payment.status];
+}
+
 type PaymentListItem = Payment & {
   order: { orderNo: string; customerName: string; customerPhone: string; status: string };
   reviewer?: { id: number; realName?: string; username: string } | null;
@@ -42,9 +59,9 @@ export default function PaymentReview() {
   const [receiptForm] = Form.useForm();
   const STATUS_TABS: Array<{ k: string; l: string }> = [
     { k: 'all', l: '全部' },
-    { k: 'PENDING', l: '待审核' },
-    { k: 'PAID', l: '已确认' },
-    { k: 'FAILED', l: '已驳回' },
+    { k: 'PENDING', l: '待处理' },
+    { k: 'PAID', l: '已到账' },
+    { k: 'FAILED', l: '未完成' },
   ];
 
   const load = useCallback(async () => {
@@ -116,7 +133,7 @@ export default function PaymentReview() {
     });
   };
 
-  // 手动登记收款（财务/管理员直接录入已到账收款）
+  // 异常线下实收；在线渠道由验签回调自动核销。
   const handleCreateReceipt = async () => {
     let values: any;
     try {
@@ -150,8 +167,8 @@ export default function PaymentReview() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-semibold text-brand-text">付款审核</h1>
-          <p className="text-sm text-brand-muted mt-1">线下转账凭证审核与收款确认（审核通过后订单自动进入待发货，库存实扣）</p>
+          <h1 className="font-semibold text-brand-text">支付记录</h1>
+          <p className="text-sm text-brand-muted mt-1">客户在线支付为标准主链；线下收款仅在异常补录中处理</p>
         </div>
         <Space>
           <Input.Search
@@ -164,7 +181,13 @@ export default function PaymentReview() {
           />
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>刷新</Button>
           {isAdmin && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => { receiptForm.resetFields(); setReceiptOpen(true); }}>登记收款</Button>
+            <Button
+              icon={<PlusOutlined />}
+              title="仅用于银行转账或门店收款等线下异常，不适用于微信或支付宝"
+              onClick={() => { receiptForm.resetFields(); setReceiptOpen(true); }}
+            >
+              异常补录
+            </Button>
           )}
         </Space>
       </div>
@@ -211,8 +234,21 @@ export default function PaymentReview() {
               ),
             },
             { title: '金额', dataIndex: 'amount', render: (value: number | string) => <span className="text-brand-gold font-medium">¥{Number(value).toLocaleString()}</span> },
-            { title: '状态', dataIndex: 'status', render: (value: string) => <Tag color={statusMap[value]?.color}>{statusMap[value]?.label || value}</Tag> },
-            { title: '凭证', render: (_: unknown, record: PaymentListItem) => record.proofUrl ? <Button size="small" icon={<EyeOutlined />} onClick={() => setProofPaymentId(record.id)}>查看</Button> : <span className="text-brand-muted">未提交</span> },
+            {
+              title: '状态',
+              render: (_: unknown, record: PaymentListItem) => {
+                const meta = getPaymentStatusMeta(record);
+                return <Tag color={meta?.color}>{meta?.label || record.status}</Tag>;
+              },
+            },
+            {
+              title: '凭证',
+              render: (_: unknown, record: PaymentListItem) => isOnlinePayment(record)
+                ? <span className="text-brand-muted">渠道自动确认</span>
+                : record.proofUrl
+                  ? <Button size="small" icon={<EyeOutlined />} onClick={() => setProofPaymentId(record.id)}>查看</Button>
+                  : <span className="text-brand-muted">未提交</span>,
+            },
             {
               title: '审核人', render: (_: unknown, record: PaymentListItem) => (
                 <div className="text-xs">
@@ -223,7 +259,7 @@ export default function PaymentReview() {
             },
             {
               title: '操作', render: (_: unknown, record: PaymentListItem) => (
-                isAdmin && record.status === 'PENDING' ? (
+                isAdmin && record.status === 'PENDING' && !isOnlinePayment(record) ? (
                   <Space>
                     <Button size="small" type="primary" icon={<CheckOutlined />} loading={reviewing} onClick={() => review(record, true)}>确认收款</Button>
                     <Button size="small" danger icon={<CloseOutlined />} onClick={() => review(record, false)}>驳回</Button>
@@ -240,14 +276,14 @@ export default function PaymentReview() {
         {proofPaymentId !== null && <SecureImage src={`/payments/${proofPaymentId}/proof`} alt="付款凭证" className="w-full" tokenKind="staff" />}
       </Modal>
 
-      {/* 手动登记收款（定金/尾款/全款/补款） */}
+      {/* 线下异常补录（定金/尾款/全款/补款）；在线支付不得进入此流程。 */}
       <Modal
-        title="登记收款"
+        title="线下收款异常补录"
         open={receiptOpen}
         onCancel={() => setReceiptOpen(false)}
         onOk={handleCreateReceipt}
         confirmLoading={receiptSubmitting}
-        okText="登记收款"
+        okText="确认补录"
         destroyOnClose
       >
         <Form form={receiptForm} layout="vertical" initialValues={{ type: 'FULL', method: 'bank_transfer' }}>
@@ -270,17 +306,15 @@ export default function PaymentReview() {
               <Select options={[
                 { value: 'bank_transfer', label: '银行转账' },
                 { value: 'store', label: '门店收款' },
-                { value: 'wechat', label: '微信' },
-                { value: 'alipay', label: '支付宝' },
               ]} />
             </Form.Item>
             <Form.Item name="paidAt" label="到账时间（选填）">
               <DatePicker showTime className="w-full" />
             </Form.Item>
           </div>
-          <Form.Item name="gatewayTradeNo" label="支付流水号（选填）"><Input maxLength={100} /></Form.Item>
+          <Form.Item name="gatewayTradeNo" label="线下收款流水号（选填）"><Input maxLength={100} /></Form.Item>
           <Form.Item name="reviewNote" label="备注（选填）"><Input.TextArea rows={2} maxLength={500} /></Form.Item>
-          <p className="text-xs text-brand-muted">登记后订单已收金额自动同步；全款/尾款会推动订单进入待发货并扣减库存。</p>
+          <p className="text-xs text-brand-muted">仅用于银行转账或门店收款等线下异常。补录后按累计实收同步订单；只有精确收足应收金额才会进入履约。微信/支付宝不可人工补录。</p>
         </Form>
       </Modal>
 
@@ -289,7 +323,10 @@ export default function PaymentReview() {
         {detail && (
           <Descriptions column={1} size="small" bordered>
             <Descriptions.Item label="付款单号"><code className="text-xs text-brand-gold">{detail.paymentNo}</code></Descriptions.Item>
-            <Descriptions.Item label="状态"><Tag color={statusMap[detail.status]?.color}>{statusMap[detail.status]?.label || detail.status}</Tag></Descriptions.Item>
+            <Descriptions.Item label="状态">{(() => {
+              const meta = getPaymentStatusMeta(detail);
+              return <Tag color={meta?.color}>{meta?.label || detail.status}</Tag>;
+            })()}</Descriptions.Item>
             <Descriptions.Item label="订单号">{detail.order.orderNo}</Descriptions.Item>
             <Descriptions.Item label="客户">{detail.order.customerName} · {detail.order.customerPhone}</Descriptions.Item>
             <Descriptions.Item label="金额"><span className="text-brand-gold font-medium">¥{Number(detail.amount).toLocaleString()}</span></Descriptions.Item>

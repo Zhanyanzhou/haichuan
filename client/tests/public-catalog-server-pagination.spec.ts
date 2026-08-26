@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { publishedCatalogDocument } from "./fixtures/public-catalog-detail";
 
 const products = Array.from({ length: 40 }, (_, index) => {
   const id = index + 1;
@@ -51,16 +52,19 @@ async function mockCatalogApi(page: Page) {
     localStorage.removeItem("customer");
     localStorage.removeItem("hc_selection_tray");
   });
-  await page.route("**/api/products/catalog/stream", (route) => route.abort());
-  await page.route("**/api/page-modules/document/stream", (route) => route.abort());
-  await page.route("**/api/page-modules/document/published?*", (route) =>
-    route.fulfill({
+  await page.route("**/api/products/catalog/stream**", (route) => route.abort());
+  await page.route("**/api/page-modules/document/stream**", (route) => route.abort());
+  await page.route("**/api/page-modules/document/published?*", (route) => {
+    const url = new URL(route.request().url());
+    return route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(wrapped(null)),
-    }),
-  );
-  await page.route("**/api/categories/tree", (route) =>
+      body: JSON.stringify(
+        wrapped(url.searchParams.get("pageKey") === "catalog" ? publishedCatalogDocument() : null),
+      ),
+    });
+  });
+  await page.route("**/api/categories/tree**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(wrapped(categories)) }),
   );
   await page.route("**/api/attributes", (route) =>

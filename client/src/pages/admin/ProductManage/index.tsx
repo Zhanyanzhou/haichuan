@@ -7,13 +7,9 @@ import {
   Dropdown,
   Input,
   Pagination,
-  Progress,
   Result,
   Select,
   Space,
-  Table,
-  Tag,
-  Tooltip,
 } from "antd";
 import {
   DownOutlined,
@@ -26,29 +22,19 @@ import {
   productApi,
   type ProductAdminQuery,
 } from "@/services/api";
-import { getMaterialLabel } from "@/utils/material";
-import { formatPrice } from "@/utils/format";
-import { getThumbnailImage } from "@/utils/productImage";
-import { SecureImage } from "@/components/common/SecureImage";
-import { productPlaceholder } from "@/utils/placeholder";
 import type { Category, Product, ProductStatus } from "@/types";
 import { unwrapResponse } from "@/utils/unwrap";
 import {
   ADMIN_COPY,
-  getAdminEmptyText,
   getSafeAdminErrorMessage,
 } from "@/constants/adminCopy";
+import ProductManageTable from "./ProductManageTable";
+import {
+  statusMeta,
+  statuses,
+  type ProductListItem,
+} from "./productManageModel";
 import "./ProductManage.css";
-
-type ProductListItem = Product & {
-  totalStock?: number;
-  publishedAt?: string | null;
-  completeness?: {
-    score: number;
-    isComplete: boolean;
-    missingFields: string[];
-  };
-};
 
 type ProductActionError = { status?: number };
 
@@ -84,44 +70,6 @@ function getProductActionErrorMessage(error: unknown, action: string): string {
   return `${action}未完成：网络连接或服务发生异常，请检查网络后重试。`;
 }
 
-const statusMeta: Record<ProductStatus, { label: string; color: string }> = {
-  DRAFT: { label: "草稿", color: "default" },
-  PUBLISHED: { label: "已上架", color: "green" },
-  OFFLINE: { label: "仓库中", color: "gold" },
-  ARCHIVED: { label: "回收站", color: "default" },
-};
-
-const statuses: ProductStatus[] = ["PUBLISHED", "OFFLINE", "DRAFT", "ARCHIVED"];
-const salesModeLabels: Record<string, string> = {
-  DISPLAY_ONLY: "仅展示",
-  SELECTION: "选款咨询",
-  APPOINTMENT: "预约到店",
-  DIRECT_PURCHASE: "直接购买",
-  CUSTOM_INQUIRY: "定制咨询",
-};
-const completenessFieldLabels: Record<string, string> = {
-  name: "商品标题",
-  code: "货号",
-  categoryId: "类目",
-  primaryImage: "商品主图",
-  salesMode: "销售方式",
-  materialType: "主要材质",
-  visibility: "可见范围",
-  detailContent: "商品详情",
-  derivedPrice: "SKU 派生最低价",
-  activeSku: "有效且有价的 SKU",
-  inventoryRecord: "SKU 库存记录",
-  deliveryMethods: "提取方式",
-  singleUnit: "一物一件 SKU 与库存约束",
-};
-
-function formatDate(value?: string) {
-  if (!value) return "—";
-  return new Date(value)
-    .toLocaleString("zh-CN", { hour12: false })
-    .replace(/\//g, "-");
-}
-
 export default function ProductManage() {
   const { message, modal } = AntdApp.useApp();
   const navigate = useNavigate();
@@ -135,7 +83,6 @@ export default function ProductManage() {
   const [activeStatus, setActiveStatus] = useState<ProductStatus | undefined>();
   const [titleKeyword, setTitleKeyword] = useState("");
   const [codeKeyword, setCodeKeyword] = useState("");
-  const [merchantCodeKeyword, setMerchantCodeKeyword] = useState("");
   // 支持来自分类管理「查看商品列表」的跳转：挂载时从 URL 读取 categoryId 预筛一次。
   // 用 lazy initializer 直接作为初始值，避免额外 effect 进入 loadProducts 依赖链造成 double 请求 / 429 风险。
   const [categoryId, setCategoryId] = useState<number | undefined>(() => {
@@ -157,7 +104,7 @@ export default function ProductManage() {
     NonNullable<ProductAdminQuery["sortBy"]>
   >("updated_desc");
 
-  const keyword = titleKeyword || codeKeyword || merchantCodeKeyword;
+  const keyword = titleKeyword || codeKeyword;
   // 必须用 useMemo 稳定引用：productIdSearch 被放进 loadProducts 的 useCallback 依赖，
   // 若每渲染都重建数组，会让 loadProducts 引用每次都变，触发数据获取 useEffect 无限循环（撞 60次/分限流 → 429 风暴）。
   const productIdSearch = useMemo(
@@ -170,9 +117,7 @@ export default function ProductManage() {
   );
   const isProductIdSearch =
     productIdSearch.length > 0 && productIdSearch.every((id) => /^\d+$/.test(id));
-  const hasFilters = Boolean(
-    titleKeyword || codeKeyword || merchantCodeKeyword || categoryId || activeStatus,
-  );
+  const hasFilters = Boolean(titleKeyword || codeKeyword || categoryId || activeStatus);
   // 资料完整度为后端计算字段（非 DB 列）；这里只展示当前页统计，不伪装成全量筛选。
   const visibleProducts = products;
   const qualityIssueCount = useMemo(
@@ -249,7 +194,7 @@ export default function ProductManage() {
         const cid = overrides?.categoryId ?? categoryId;
         if (cid) params.categoryId = cid;
         const kw = overrides?.keyword ?? debouncedKeyword;
-        if (isProductIdSearch && !titleKeyword && !merchantCodeKeyword) {
+        if (isProductIdSearch && !titleKeyword) {
           params.ids = productIdSearch.join(",");
         } else if (kw) {
           params.keyword = kw;
@@ -280,7 +225,6 @@ export default function ProductManage() {
       categoryId,
       debouncedKeyword,
       isProductIdSearch,
-      merchantCodeKeyword,
       page,
       pageSize,
       productIdSearch,
@@ -314,7 +258,6 @@ export default function ProductManage() {
   const resetFilters = () => {
     setTitleKeyword("");
     setCodeKeyword("");
-    setMerchantCodeKeyword("");
     setCategoryId(undefined);
     setActiveStatus(undefined);
     setSortBy("updated_desc");
@@ -668,229 +611,6 @@ export default function ProductManage() {
     }
   };
 
-  const columns = [
-      {
-        title: "商品名称",
-        key: "product",
-        width: 330,
-        render: (_: unknown, product: ProductListItem) => {
-          const image = getThumbnailImage(product as any);
-          return (
-            <div className="product-manage__product-cell">
-              <SecureImage
-                src={image}
-                fallback={productPlaceholder(product.id, product.name)}
-                alt=""
-                className="product-manage__thumbnail"
-                tokenKind="staff"
-              />
-              <div className="product-manage__product-copy">
-                <button
-                  type="button"
-                  onClick={() => openEdit(product)}
-                  className="product-manage__product-name"
-                >
-                  {product.name}
-                </button>
-                <div className="product-manage__product-meta">
-                  货号：{product.code}
-                </div>
-                <div className="product-manage__product-meta">
-                  {product.category?.name || "未分类"} ·{" "}
-                  {getMaterialLabel(product.materialType)}
-                </div>
-              </div>
-            </div>
-          );
-        },
-      },
-      {
-        title: "SKU 最低价",
-        key: "price",
-        width: 110,
-        render: (_: unknown, product: ProductListItem) => (
-          <span className="product-manage__price">
-            {Number(product.price) > 0 ? formatPrice(product.price) : "—"}
-          </span>
-        ),
-      },
-      {
-        title: "资料完整度",
-        key: "completeness",
-        width: 130,
-        render: (_: unknown, product: ProductListItem) => {
-          const c = product.completeness;
-          const missing = c?.missingFields?.map((field) => completenessFieldLabels[field] || field) || [];
-          return c ? (
-            <Tooltip title={c.isComplete ? "资料已完整" : missing.length ? `待补充：${missing.join("、")}` : "仍有资料待补充"}>
-              <Progress
-                size="small"
-                percent={c.score}
-                status={c.isComplete ? "success" : "active"}
-                format={() => `${c.score}%`}
-              />
-            </Tooltip>
-          ) : (
-            "—"
-          );
-        },
-      },
-      {
-        title: "库存",
-        key: "stock",
-        width: 190,
-        render: (_: unknown, product: ProductListItem) => (
-          <Space size={4} wrap>
-            <span>{product.totalStock ?? "—"}</span>
-            {product.salesMode === "DIRECT_PURCHASE" && product.totalStock === 0 && (
-              <Tag color="default">售罄 / 不可加入购物车</Tag>
-            )}
-          </Space>
-        ),
-      },
-      {
-        title: "累计销量",
-        key: "sales",
-        width: 108,
-        render: (_: unknown, product: ProductListItem) => product.salesCount || 0,
-      },
-      {
-        title: "销售方式",
-        key: "salesMode",
-        width: 120,
-        render: (_: unknown, product: ProductListItem) => (
-          <div>
-            <div>{salesModeLabels[product.salesMode || ""] || "—"}</div>
-            <span className="product-manage__product-meta">
-              {product.inventoryPolicy === "SINGLE_UNIT" ? "一物一件" : "标准库存"}
-            </span>
-          </div>
-        ),
-      },
-      {
-        title: "创建时间",
-        key: "created",
-        width: 165,
-        render: (_: unknown, product: ProductListItem) => formatDate(product.createdAt),
-      },
-      {
-        title: "发布时间",
-        key: "published",
-        width: 165,
-        render: (_: unknown, product: ProductListItem) =>
-          product.publishedAt ? formatDate(product.publishedAt) : "—",
-      },
-      {
-        title: "状态",
-        key: "status",
-        width: 92,
-        render: (_: unknown, product: ProductListItem) => {
-          const meta = statusMeta[product.status as ProductStatus] || { label: product.status || "未知状态", color: "default" as const };
-          return <Tag color={meta.color}>{meta.label}</Tag>;
-        },
-      },
-      {
-        title: "操作",
-        key: "actions",
-        fixed: "right" as const,
-        width: 210,
-        render: (_: unknown, product: Product) => {
-          const rowPending = pendingProductId === product.id;
-          return (
-          <Space className="product-manage__row-actions" size={10} wrap>
-            {product.status === "ARCHIVED" ? (
-              /* 回收站商品只读：仅提供查看与恢复为草稿，不提供编辑/发布/下架/软删除等操作 */
-              <>
-                <Button
-                  type="link"
-                  size="small"
-                  className="product-manage__action-link"
-                  onClick={() => openEdit(product)}
-                  disabled={rowPending}
-                >
-                  查看
-                </Button>
-                <Button
-                  type="link"
-                  size="small"
-                  className="product-manage__action-link"
-                  onClick={() => confirmRestore(product)}
-                  loading={rowPending}
-                  disabled={pendingProductId !== null && !rowPending}
-                >
-                  恢复草稿
-                </Button>
-              </>
-            ) : (
-              /* 正常商品：编辑/复制 + 上架下架 + 移入回收站（去掉了原来和移入回收站语义重复的「删除」） */
-              <>
-                <Button
-                  type="link"
-                  size="small"
-                  className="product-manage__action-link"
-                  onClick={() => openEdit(product)}
-                  disabled={rowPending}
-                >
-                  编辑商品
-                </Button>
-                <Button
-                  type="link"
-                  size="small"
-                  className="product-manage__action-link"
-                  onClick={() => void cloneProduct(product)}
-                  disabled={rowPending}
-                >
-                  复制
-                </Button>
-                {product.status === "PUBLISHED" ? (
-                  <Button
-                    type="link"
-                    size="small"
-                    className="product-manage__action-link"
-                    onClick={() => requestStatusChange(product, "OFFLINE")}
-                    loading={rowPending}
-                    disabled={pendingProductId !== null && !rowPending}
-                  >
-                    下架
-                  </Button>
-                ) : (
-                  <Button
-                    type="link"
-                    size="small"
-                    className="product-manage__action-link"
-                    onClick={() => requestStatusChange(product, "PUBLISHED")}
-                    loading={rowPending}
-                    disabled={pendingProductId !== null && !rowPending}
-                  >
-                    上架
-                  </Button>
-                )}
-                <Dropdown
-                  overlayClassName="product-manage__dropdown"
-                  disabled={pendingProductId !== null}
-                  menu={{
-                    items: [
-                      {
-                        key: "archive",
-                        label: "移入回收站",
-                        disabled: pendingProductId !== null,
-                        onClick: () => confirmArchive(product),
-                      },
-                    ],
-                  }}
-                >
-                  <Button type="link" size="small" className="product-manage__action-link" loading={rowPending}>
-                    更多 <DownOutlined />
-                  </Button>
-                </Dropdown>
-              </>
-            )}
-          </Space>
-          );
-        },
-      },
-  ];
-
   const tabs = [
     { key: "all", label: `全部（${counts.all ?? total}）` },
     ...statuses.map((status) => ({
@@ -1087,26 +807,19 @@ export default function ProductManage() {
           }
         />
       ) : (
-        <Table
-          rowKey="id"
+        <ProductManageTable
+          products={visibleProducts}
           loading={loading}
-          dataSource={visibleProducts}
-          columns={columns}
-          pagination={false}
-          className="product-manage__table"
-          scroll={{ x: 1500 }}
-          rowSelection={{
-            selectedRowKeys: selectedIds,
-            onChange: setSelectedIds,
-            getCheckboxProps: () => ({
-              disabled: batchProcessing || pendingProductId !== null,
-            }),
-          }}
-          locale={{
-            emptyText: hasFilters
-              ? getAdminEmptyText("商品", true)
-              : "暂无商品，点击“新建商品”开始添加。",
-          }}
+          selectedIds={selectedIds}
+          batchProcessing={batchProcessing}
+          pendingProductId={pendingProductId}
+          hasFilters={hasFilters}
+          onSelectionChange={setSelectedIds}
+          onOpenEdit={openEdit}
+          onClone={cloneProduct}
+          onRequestStatusChange={requestStatusChange}
+          onConfirmArchive={confirmArchive}
+          onConfirmRestore={confirmRestore}
         />
       )}
 

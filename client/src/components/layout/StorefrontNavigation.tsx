@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { settingsApi } from "@/services/api";
-import { unwrapResponse } from "@/utils/unwrap";
+import { usePublicSiteSettings } from "@/hooks/usePublicSiteSettings";
 
 type PublicSiteSettings = {
   siteName?: string;
@@ -56,6 +55,7 @@ export function resolveSiteLogo(logo?: string | null) {
 
 export const storefrontMenuLinks = [
   { label: "首页", description: "返回品牌首页", href: "/" },
+  { label: "珠宝作品", description: "浏览主题系列与编辑精选", href: "/products" },
   { label: "选款中心", description: "按品类与货号快速选款", href: "/catalog" },
   { label: "珠宝定制", description: "了解专属定制流程", href: "/custom" },
   { label: "关于海川", description: "认识海川珠宝与东方工艺", href: "/about" },
@@ -255,7 +255,7 @@ export function StorefrontMenuDrawer({
             <span>关闭</span>
           </button>
           <Link
-            to="/catalog"
+            to="/catalog#catalog-search-input"
             tabIndex={open ? 0 : -1}
             className="brand-menu__top-action"
             onClick={handleLink}
@@ -339,12 +339,12 @@ export default function StorefrontNavigation({
   const rootRef = useRef<HTMLDivElement>(null);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
-  const [fetchedSettings, setFetchedSettings] = useState<PublicSiteSettings | null>(null);
+  const sharedSettingsResource = usePublicSiteSettings(!siteSettings);
   const [uncontrolledMenuOpen, setUncontrolledMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const isControlled = menuOpen !== undefined;
   const isMenuOpen = isControlled ? menuOpen : uncontrolledMenuOpen;
-  const resolvedSettings = siteSettings ?? fetchedSettings;
+  const resolvedSettings = siteSettings ?? sharedSettingsResource.settings;
   const siteName = resolvedSettings?.siteName || "海川珠宝";
   const contactPhone = resolvedSettings?.contactPhone?.trim() || "";
   const contactAddress = resolvedSettings?.contactAddress?.trim() || "";
@@ -355,21 +355,6 @@ export default function StorefrontNavigation({
     if (!isControlled) setUncontrolledMenuOpen(open);
     onMenuOpenChange?.(open);
   }, [isControlled, onMenuOpenChange]);
-
-  useEffect(() => {
-    if (siteSettings) return;
-    let cancelled = false;
-    settingsApi.getPublicSettings()
-      .then((res) => {
-        if (!cancelled) setFetchedSettings(unwrapResponse<PublicSiteSettings>(res));
-      })
-      .catch(() => {
-        // 设置接口不可用时保留品牌默认值，避免导航阻断首页预览。
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [siteSettings]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -441,7 +426,7 @@ export default function StorefrontNavigation({
         >
           {isMenuOpen ? <><CloseIcon /><span className="site-menu-toggle__label">关闭</span></> : <><MenuIcon /><span className="site-menu-toggle__label">菜单</span></>}
         </button>
-        <Link to="/catalog" aria-label="搜索" className="site-header__nav-item" onClick={handlePreviewLink}>
+        <Link to="/catalog#catalog-search-input" aria-label="搜索" className="site-header__nav-item" onClick={handlePreviewLink}>
           <SearchIcon /><span className="site-header__nav-label hidden sm:inline">搜索</span>
         </Link>
       </div>

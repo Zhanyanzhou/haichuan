@@ -1,7 +1,8 @@
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { usePageMetaStore } from '@/store/pageMetaStore';
+import { normalizePublicProductReference } from '@/utils/publicProductPath';
 
 /* ═══════ 设计常量 ═══════ */
 const DARK = '#181A1B';
@@ -17,6 +18,19 @@ const fadeIn = {
   hidden: { opacity: 0, y: 32 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: 'easeOut' } },
 };
+
+function supportsScrollReveal() {
+  if (typeof window === 'undefined' || typeof window.IntersectionObserver !== 'function') {
+    return false;
+  }
+  try {
+    const observer = new window.IntersectionObserver(() => undefined);
+    observer.disconnect();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /* ═══════ 极简线性 SVG 图标 ═══════ */
 
@@ -121,8 +135,15 @@ const processSteps = [
 /* ═══════ 组件 ═══════ */
 
 export default function Custom() {
+  const [searchParams] = useSearchParams();
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
+  const reduceMotion = useReducedMotion();
+  const [observerAvailable] = useState(supportsScrollReveal);
+  const scrollRevealEnabled = !reduceMotion && observerAvailable;
+  const revealInitial = scrollRevealEnabled ? 'hidden' : 'visible';
+  const revealWhileInView = scrollRevealEnabled ? 'visible' : undefined;
+  const revealAnimate = scrollRevealEnabled ? undefined : 'visible';
   useEffect(() => {
     setPageMeta({
       title: '珠宝定制 | 海川珠宝',
@@ -132,6 +153,10 @@ export default function Custom() {
   }, [setPageMeta, clearPageMeta]);
 
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const productRef = normalizePublicProductReference(searchParams.get('productRef'));
+  const contactParams = new URLSearchParams({ type: 'custom' });
+  if (productRef) contactParams.set('productRef', productRef);
+  const contactPath = `/contact?${contactParams.toString()}`;
 
   const toggleFaq = (i: number) => setOpenFaq(openFaq === i ? null : i);
 
@@ -169,8 +194,10 @@ export default function Custom() {
         padding: 'clamp(60px, 8vw, 100px) 24px',
       }}>
         <motion.div
-          initial="hidden"
-          whileInView="visible"
+          className="custom-scroll-reveal"
+          initial={revealInitial}
+          whileInView={revealWhileInView}
+          animate={revealAnimate}
           viewport={{ once: true, margin: '-80px' }}
           variants={fadeIn}
         >
@@ -208,8 +235,10 @@ export default function Custom() {
           ].map((item, i) => (
             <motion.div
               key={item.title}
-              initial="hidden"
-              whileInView="visible"
+              className="custom-scroll-reveal"
+              initial={revealInitial}
+              whileInView={revealWhileInView}
+              animate={revealAnimate}
               viewport={{ once: true, margin: '-60px' }}
               variants={{ hidden: { opacity: 0, y: 28 }, visible: { opacity: 1, y: 0, transition: { duration: 0.6, delay: i * 0.15 } } }}
               style={{
@@ -256,8 +285,10 @@ export default function Custom() {
       }}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <motion.div
-            initial="hidden"
-            whileInView="visible"
+            className="custom-scroll-reveal"
+            initial={revealInitial}
+            whileInView={revealWhileInView}
+            animate={revealAnimate}
             viewport={{ once: true, margin: '-80px' }}
             variants={fadeIn}
             style={{ textAlign: 'center', marginBottom: 64 }}
@@ -280,8 +311,9 @@ export default function Custom() {
             {processSteps.map((step, i) => (
               <motion.li
                 key={step.num}
-                initial="hidden"
-                whileInView="visible"
+                initial={revealInitial}
+                whileInView={revealWhileInView}
+                animate={revealAnimate}
                 viewport={{ once: true, margin: '-80px' }}
                 variants={fadeIn}
                 style={{
@@ -291,7 +323,7 @@ export default function Custom() {
                   padding: 'clamp(28px, 4vw, 44px) 0',
                   borderTop: '1px solid rgba(24,26,27,0.18)',
                 }}
-                className="custom-process-row"
+                className="custom-process-row custom-scroll-reveal"
               >
                 <span
                   aria-hidden="true"
@@ -343,8 +375,10 @@ export default function Custom() {
         padding: 'clamp(60px, 8vw, 100px) 24px',
       }}>
         <motion.div
-          initial="hidden"
-          whileInView="visible"
+          className="custom-scroll-reveal"
+          initial={revealInitial}
+          whileInView={revealWhileInView}
+          animate={revealAnimate}
           viewport={{ once: true, margin: '-80px' }}
           variants={fadeIn}
           style={{ textAlign: 'center', marginBottom: 56 }}
@@ -377,8 +411,10 @@ export default function Custom() {
           {craftItems.map((title, i) => (
             <motion.li
               key={title}
-              initial="hidden"
-              whileInView="visible"
+              className="custom-scroll-reveal"
+              initial={revealInitial}
+              whileInView={revealWhileInView}
+              animate={revealAnimate}
               viewport={{ once: true, margin: '-40px' }}
               variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5, delay: i * 0.08 } } }}
               style={{
@@ -410,8 +446,10 @@ export default function Custom() {
         padding: 'clamp(60px, 8vw, 100px) 24px',
       }}>
         <motion.div
-          initial="hidden"
-          whileInView="visible"
+          className="custom-scroll-reveal"
+          initial={revealInitial}
+          whileInView={revealWhileInView}
+          animate={revealAnimate}
           viewport={{ once: true, margin: '-80px' }}
           variants={fadeIn}
           style={{ textAlign: 'center', marginBottom: 48 }}
@@ -504,8 +542,10 @@ export default function Custom() {
         textAlign: 'center',
       }}>
         <motion.div
-          initial="hidden"
-          whileInView="visible"
+          className="custom-scroll-reveal"
+          initial={revealInitial}
+          whileInView={revealWhileInView}
+          animate={revealAnimate}
           viewport={{ once: true, margin: '-60px' }}
           variants={fadeIn}
           style={{ maxWidth: 600, margin: '0 auto' }}
@@ -530,7 +570,7 @@ export default function Custom() {
           </p>
 
           <Link
-            to="/contact?type=custom"
+            to={contactPath}
             className="custom-final-cta"
             style={{
               display: 'inline-flex',
