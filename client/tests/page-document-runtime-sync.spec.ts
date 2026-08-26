@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { createContentTemplateMarker } from "../src/page-builder/generated/contentTemplates.generated";
 
 const useMock = process.env.VITE_USE_MOCK === "true";
 
@@ -41,7 +42,7 @@ function publishedTextDocument(pageKey: string, title: string, version: number) 
 }
 
 async function mockPublicShell(page: Page) {
-  await page.route("**/api/settings/public", (route) =>
+  await page.route("**/api/settings/public**", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -114,7 +115,250 @@ async function mockEmptyEditorApis(page: Page) {
 test.describe("PageDocument 前台与画布单一运行时", () => {
   test.skip(useMock, "本套件用 HTTP 与 EventSource 夹具验证运行时切换，VITE mock 会绕过这些边界");
 
-  test("未发布的纯品牌页保留代码兜底，不公开渲染编辑器种子", async ({ page }) => {
+  test("每个公开路由只读取一次当前 PageDocument 快照", async ({ page }) => {
+    await mockPublicShell(page);
+    await installControllableEventSource(page);
+    const requestCounts = new Map<string, number>();
+    let lastRequestAt = Date.now();
+    await page.route("**/api/page-modules/document/published?*", (route) => {
+      const pageKey = new URL(route.request().url()).searchParams.get("pageKey") || "unknown";
+      requestCounts.set(pageKey, (requestCounts.get(pageKey) || 0) + 1);
+      lastRequestAt = Date.now();
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse(null),
+      });
+    });
+
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "首页正在准备", level: 1 })).toBeVisible();
+    await expect.poll(() => Date.now() - lastRequestAt).toBeGreaterThanOrEqual(100);
+    expect(requestCounts.get("home")).toBe(1);
+
+    await page.goto("/custom");
+    await expect(page.getByRole("heading", { name: "珠宝定制", level: 1 })).toBeVisible();
+    await expect.poll(() => Date.now() - lastRequestAt).toBeGreaterThanOrEqual(100);
+    expect(requestCounts.get("custom")).toBe(1);
+  });
+
+  test("完整公开壳层共享同一份 SiteSettings 快照", async ({ page }) => {
+    let settingsReads = 0;
+    await page.route("**/api/settings/public**", (route) => {
+      settingsReads += 1;
+      const firstSnapshot = settingsReads === 1;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse({
+          siteName: firstSnapshot ? "旧快照站点" : "新快照站点",
+          storeName: firstSnapshot ? "旧快照门店" : "新快照门店",
+          contactAddress: firstSnapshot ? "旧快照地址" : "新快照地址",
+          businessHours: "10:00–18:00",
+          contactPhone: firstSnapshot ? "400-111-1111" : "400-222-2222",
+          storeMapUrl: firstSnapshot
+            ? "https://maps.example.com/old"
+            : "https://maps.example.com/new",
+        }),
+      });
+    });
+    await page.route("**/svg/site-settings-store.svg", (route) => route.fulfill({
+      status: 200,
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="#ecebe7"/></svg>',
+    }));
+    await page.route("**/api/page-modules/document/published?*", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse({
+          pageKey: "about",
+          puckData: {
+            content: [
+              {
+                type: "文字横幅",
+                props: {
+                  id: "shared-settings-intro",
+                  title: "共享设置快照",
+                  buttonText: "",
+                  linkUrl: "",
+                  targetType: "none",
+                  __contentTemplate: createContentTemplateMarker("文字横幅"),
+                },
+              },
+              {
+                type: "门店信息",
+                props: {
+                  id: "shared-settings-store",
+                  image: "/svg/site-settings-store.svg",
+                  __contentTemplate: createContentTemplateMarker("门店信息"),
+                },
+              },
+              {
+                type: "预约入口",
+                props: {
+                  id: "shared-settings-booking",
+                  title: "预约到访",
+                  buttonText: "联系我们",
+                  targetType: "page",
+                  linkUrl: "/contact",
+                  __contentTemplate: createContentTemplateMarker("预约入口"),
+                },
+              },
+            ],
+            root: { props: {} },
+          },
+          metadata: {},
+          status: "PUBLISHED",
+          version: 1,
+        }),
+      });
+    });
+
+    await page.goto("/about");
+    await expect(page.getByRole("heading", { name: "共享设置快照" })).toBeVisible();
+    await expect(page).toHaveTitle("关于海川 | 旧快照站点");
+    const storeInfo = page.locator('[data-content-template-contract="storeInfo"]');
+    const booking = page.locator('[data-content-template-contract="booking"]');
+    await expect(storeInfo).toContainText("旧快照门店");
+    await expect(storeInfo).toContainText("旧快照地址");
+    await expect(booking).toContainText("400-111-1111");
+    expect(settingsReads).toBe(1);
+
+    await booking.getByRole("link", { name: "联系我们" }).click();
+    await expect(page).toHaveURL(/\/contact$/);
+    const contactPage = page.locator(".contact-page");
+    await expect(contactPage).toContainText("400-111-1111");
+    await expect(contactPage).not.toContainText("400-222-2222");
+    expect(settingsReads).toBe(1);
+  });
+
+  test("首页发布事件同时刷新正文与 PageDocument SEO", async ({ page }) => {
+    await mockPublicShell(page);
+    await installControllableEventSource(page);
+    let published = publishedTextDocument("home", "首页旧版本", 1);
+    published.metadata = {
+      seoTitle: "首页旧 SEO",
+      seoDescription: "首页旧描述",
+    };
+    await page.route("**/api/page-modules/document/published?*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse(published),
+      }),
+    );
+
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "首页旧版本" })).toBeVisible();
+    await expect(page).toHaveTitle("首页旧 SEO");
+
+    published = publishedTextDocument("home", "首页新版本", 2);
+    published.metadata = {
+      seoTitle: "首页新 SEO",
+      seoDescription: "首页新描述",
+    };
+    await page.evaluate(() => {
+      (window as any).__emitPagePublish({
+        type: "page-document-published",
+        pageKey: "home",
+        version: 2,
+      });
+    });
+
+    await expect(page.getByRole("heading", { name: "首页新版本" })).toBeVisible();
+    await expect(page).toHaveTitle("首页新 SEO");
+    await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+      "content",
+      "首页新描述",
+    );
+  });
+
+  test("非首页标签页重新可见时补拉正文与 PageDocument SEO", async ({ page }) => {
+    await mockPublicShell(page);
+    await page.addInitScript(() => {
+      let visibilityState: DocumentVisibilityState = "visible";
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => visibilityState,
+      });
+      (window as any).__setVisibilityState = (next: DocumentVisibilityState) => {
+        visibilityState = next;
+        document.dispatchEvent(new Event("visibilitychange"));
+      };
+    });
+    let published = publishedTextDocument("custom", "定制旧版本", 3);
+    published.metadata = {
+      seoTitle: "定制旧 SEO",
+      seoDescription: "定制旧描述",
+    };
+    await page.route("**/api/page-modules/document/published?*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse(published),
+      }),
+    );
+
+    await page.goto("/custom");
+    await expect(page.getByRole("heading", { name: "定制旧版本" })).toBeVisible();
+    await expect(page).toHaveTitle("定制旧 SEO");
+
+    published = publishedTextDocument("custom", "定制新版本", 4);
+    published.metadata = {
+      seoTitle: "定制新 SEO",
+      seoDescription: "定制新描述",
+    };
+    await page.evaluate(() => {
+      (window as any).__setVisibilityState("hidden");
+      (window as any).__setVisibilityState("visible");
+    });
+
+    await expect(page.getByRole("heading", { name: "定制新版本" })).toBeVisible();
+    await expect(page).toHaveTitle("定制新 SEO");
+    await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+      "content",
+      "定制新描述",
+    );
+  });
+
+  test("公开页读取失败后重试会同步恢复正文与索引状态", async ({ page }) => {
+    await mockPublicShell(page);
+    let shouldFail = true;
+    const published = publishedTextDocument("custom", "重试后的定制内容", 8);
+    published.metadata = {
+      seoTitle: "已恢复的定制 SEO",
+      seoDescription: "公开快照恢复后应重新允许索引。",
+    };
+    await page.route("**/api/page-modules/document/published?*", (route) => {
+      if (shouldFail) {
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: apiResponse(null),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse(published),
+      });
+    });
+
+    await page.goto("/custom");
+    await expect(page.getByRole("heading", { name: "珠宝定制", level: 1 })).toBeVisible();
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex, nofollow");
+
+    shouldFail = false;
+    await page.getByRole("button", { name: "重新载入内容" }).click();
+
+    await expect(page.getByRole("heading", { name: "重试后的定制内容" })).toBeVisible();
+    await expect(page).toHaveTitle("已恢复的定制 SEO");
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "index, follow");
+  });
+
+  test("未发布的纯品牌页只显示安全短页，不回退到第二套硬编码品牌内容", async ({ page }) => {
     await mockPublicShell(page);
     await page.route("**/api/page-modules/document/published?*", (route) =>
       route.fulfill({
@@ -125,14 +369,68 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     );
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/custom");
+    for (const expectation of [
+      {
+        path: "/custom",
+        heading: "珠宝定制",
+        action: "提交定制咨询",
+        absentLegacyCopy: "常见问题",
+      },
+      {
+        path: "/about",
+        heading: "关于海川",
+        action: "进入选款中心",
+        absentLegacyCopy: "从作品开始，认识海川。",
+      },
+    ]) {
+      await page.goto(expectation.path);
+      const fallback = page.locator('[data-production-fallback="safe-status"]');
+      await expect(fallback).toHaveAttribute("data-page-document-state", "unpublished");
+      await expect(page.getByRole("heading", { name: expectation.heading, level: 1 })).toBeVisible();
+      await expect(page.getByRole("link", { name: expectation.action })).toBeVisible();
+      await expect(page.getByText(expectation.absentLegacyCopy, { exact: true })).toHaveCount(0);
+      await expect(page.locator("[data-content-template-module]")).toHaveCount(0);
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+        .toBe(true);
+    }
+  });
 
-    await expect(page.getByRole("heading", { name: "珠宝定制", level: 1 })).toBeVisible();
-    await expect(page.locator("[data-content-template-module]")).toHaveCount(0);
-    await expect(page.getByText("常见问题", { exact: true })).toBeVisible();
-    await expect
-      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
-      .toBe(true);
+  test("非首页装修页消费已发布 PageDocument SEO，而不是继续使用路由硬编码", async ({ page }) => {
+    await mockPublicShell(page);
+    const published = publishedTextDocument("custom", "已发布定制内容", 12);
+    published.metadata = {
+      seoTitle: "已发布定制 SEO 标题",
+      seoDescription: "该描述来自定制页已发布 PageDocument metadata。",
+      ogImage: "/images/custom-share.jpg",
+    };
+    await page.route("**/api/page-modules/document/published?*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse(published),
+      }),
+    );
+
+    await page.goto("/custom");
+    await expect(page.getByRole("heading", { name: "已发布定制内容" })).toBeVisible();
+    await expect(page).toHaveTitle("已发布定制 SEO 标题");
+    await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+      "content",
+      "该描述来自定制页已发布 PageDocument metadata。",
+    );
+    await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+      "content",
+      /\/images\/custom-share\.jpg$/,
+    );
+    await expect(page.locator('meta[name="twitter:image"]')).toHaveAttribute(
+      "content",
+      /\/images\/custom-share\.jpg$/,
+    );
+    await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute(
+      "content",
+      "summary_large_image",
+    );
   });
 
   test("发布接口失败或返回无效文档时不公开渲染编辑器种子", async ({ page }) => {
@@ -221,6 +519,44 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await expect(page.locator("main h1")).toHaveCount(1);
   });
 
+  test("服务端明确撤销旧快照发布资格后清除内存版本并进入安全短页", async ({ page }) => {
+    await mockPublicShell(page);
+    await installControllableEventSource(page);
+    let requiresRevalidation = false;
+    await page.route("**/api/page-modules/document/published?*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse(
+          requiresRevalidation
+            ? {
+                pageKey: "custom",
+                status: "INVALID",
+                invalidReason: "publication-revalidation-required",
+                version: 1,
+              }
+            : publishedTextDocument("custom", "旧的已展示版本", 1),
+        ),
+      }),
+    );
+
+    await page.goto("/custom");
+    await expect(page.getByRole("heading", { name: "旧的已展示版本" })).toBeVisible();
+
+    requiresRevalidation = true;
+    await page.evaluate(() => {
+      (window as any).__emitPagePublish({
+        type: "page-document-published",
+        pageKey: "custom",
+        version: 2,
+      });
+    });
+
+    await expect(page.getByRole("heading", { name: "旧的已展示版本" })).toHaveCount(0);
+    await expect(page.locator('[data-page-document-state="invalid"]')).toBeVisible();
+    await expect(page.getByRole("heading", { name: "珠宝定制", level: 1 })).toBeVisible();
+  });
+
   test("首页从未发布时不公开渲染代码种子，并显示可继续浏览的安全短页", async ({ page }) => {
     await mockPublicShell(page);
     const productRequests: string[] = [];
@@ -254,6 +590,30 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await expect(page.locator(".vca-home").getByText(/世家|传承|新闻|工艺/)).toHaveCount(0);
     await expect(page.locator('[data-page-header-mode="solid"]')).toBeVisible();
     expect(productRequests).toEqual([]);
+  });
+
+  test("首页旧发布版本需要重新审核时显示内容待完善状态且不提供无效重试", async ({ page }) => {
+    await mockPublicShell(page);
+    await page.route("**/api/page-modules/document/published?*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse({
+          pageKey: "home",
+          status: "INVALID",
+          invalidReason: "publication-revalidation-required",
+          version: 38,
+        }),
+      }),
+    );
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    await expect(page.locator('[data-page-document-state="invalid"]')).toBeVisible();
+    await expect(page.getByRole("heading", { name: "首页正在完善", level: 1 })).toBeVisible();
+    await expect(page.getByText("首页现有内容需要重新审核后才能公开。", { exact: false })).toBeVisible();
+    await expect(page.getByRole("button", { name: "重新载入内容" })).toHaveCount(0);
+    await expect(page.locator("[data-content-template-module]")).toHaveCount(0);
   });
 
   test("首页读取失败时显示重试状态，恢复后切换为未发布安全短页", async ({ page }) => {
@@ -948,6 +1308,56 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     });
   });
 
+  test("草稿预览读取失败时不伪装成推荐结构，并可重试恢复真实草稿", async ({ page }) => {
+    await installAdminSession(page);
+    await mockPublicShell(page);
+    let failDraftRead = true;
+    let draftReads = 0;
+    const previewDraft = {
+      ...publishedTextDocument("home", "重试后恢复的真实草稿", 7),
+      status: "DRAFT",
+      publishedAt: null,
+    };
+
+    await page.route("**/api/page-modules/document/admin**", async (route) => {
+      draftReads += 1;
+      if (failDraftRead) {
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: 503,
+            message: "PrismaClientKnownRequestError P2022 at page_modules.preview",
+          }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse(previewDraft),
+      });
+    });
+
+    await page.goto("/preview/home");
+    const previewError = page.getByRole("alert", { name: "草稿预览暂时无法载入" });
+    await expect(previewError).toBeVisible();
+    await expect(page.locator("[data-content-template-module]")).toHaveCount(0);
+    await expect(
+      page.getByText("PrismaClientKnownRequestError P2022 at page_modules.preview", {
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText("服务器繁忙，请稍后再试", { exact: true }),
+    ).toHaveCount(0);
+
+    failDraftRead = false;
+    await previewError.getByRole("button", { name: "重新载入草稿预览" }).click();
+    await expect(page.getByRole("heading", { name: "重试后恢复的真实草稿" })).toBeVisible();
+    await expect(previewError).toHaveCount(0);
+    expect(draftReads).toBeGreaterThanOrEqual(2);
+  });
+
   test("珠宝作品安全 fixture 保持六段编辑展陈且不出现找款工具", async ({ page }) => {
     await installAdminSession(page);
     await mockEmptyEditorApis(page);
@@ -1315,6 +1725,33 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await expect(main.getByText("不应公开展示的商品墙", { exact: true })).toHaveCount(0);
   });
 
+  test("公开运行时只消费根 content，不把旧 zones 隐藏内容突然公开", async ({ page }) => {
+    await mockPublicShell(page);
+    const aboutDocument = publishedTextDocument("about", "根内容仍然公开", 8);
+    (aboutDocument.puckData as any).zones = {
+      legacy: [{
+        type: "文字横幅",
+        props: {
+          id: "legacy-unreachable-zone-banner",
+          title: "旧 zones 中从未公开的内容",
+          body: "位置没有确定顺序，因此不能自动迁入根内容。",
+        },
+      }],
+    };
+    await page.route("**/api/page-modules/document/published?*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse(aboutDocument),
+      }),
+    );
+
+    await page.goto("/about");
+    const main = page.locator("main");
+    await expect(main.getByRole("heading", { name: "根内容仍然公开", level: 2 })).toBeVisible();
+    await expect(main.getByText("旧 zones 中从未公开的内容", { exact: true })).toHaveCount(0);
+  });
+
   test("选款中心读取旧发布快照时隐藏已禁止的商品展示模块且保留固定业务区", async ({ page }) => {
     await mockPublicShell(page);
     const legacyCatalogDocument = publishedTextDocument("catalog", "选款中心说明", 9);
@@ -1463,6 +1900,14 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
         .locator(".homepage-editor__storefront-frame")
         .evaluate((element) => Math.round(element.getBoundingClientRect().height)),
     ).toBeLessThan(10_000);
+
+    await page.goto("/admin/editor/contact");
+    const contactCanvas = page.frameLocator("iframe");
+    const contactPreview = contactCanvas.locator(".contact-page.is-editor-preview");
+    await expect(contactPreview).toBeVisible();
+    await expect(contactCanvas.locator(".contact-form")).toBeVisible();
+    await expect(contactPreview).toHaveCSS("pointer-events", "none");
+    await expect(contactCanvas.locator("[data-business-preview-step]")).toHaveCount(0);
   });
 
   test("编辑不同内容时顶栏主操作固定在右侧锚点", async ({ page }) => {

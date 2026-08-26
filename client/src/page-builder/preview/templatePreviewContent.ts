@@ -292,12 +292,6 @@ export const TEMPLATE_PREVIEW_CONTENT: Record<RegisteredContentTemplateKey, Prev
     ],
   },
   storeInfo: {
-    useSiteSettings: false,
-    storeName: "门店空间",
-    address: "地址信息将在此显示",
-    hours: "营业时间将在此显示",
-    phone: "",
-    mapUrl: "",
     image: salonWide,
   },
   testimonials: {

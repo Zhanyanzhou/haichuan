@@ -319,7 +319,6 @@ const rawPageTemplates: TemplateDefinition[] = [
             subtitle: "如需了解作品或定制，可提交具体需求进入咨询流程。",
             buttonText: "预约咨询",
             linkUrl: "/contact",
-            phone: "",
             altText: "",
             desktopFocusX: 50,
             desktopFocusY: 50,
@@ -539,7 +538,6 @@ const rawPageTemplates: TemplateDefinition[] = [
             subtitle: "说明品类、材质与佩戴需求，顾问将结合实际作品提供建议。",
             buttonText: "提交选款需求",
             linkUrl: "/contact",
-            phone: "",
             altText: "",
             desktopFocusX: 50,
             desktopFocusY: 50,
@@ -693,7 +691,6 @@ const rawPageTemplates: TemplateDefinition[] = [
             subtitle: "提交已知需求，具体服务范围与安排以实际沟通为准。",
             buttonText: "开始咨询",
             linkUrl: "/contact",
-            phone: "",
             altText: "",
             desktopFocusX: 50,
             desktopFocusY: 50,
@@ -773,8 +770,8 @@ const rawPageTemplates: TemplateDefinition[] = [
 /**
  * 取得可直接成为 PageDocument 的页面种子。
  *
- * 模板库卡片继续消费下方的空白结构版本；页面运行时与编辑器首次进入则共同
- * 消费这份已存在的推荐起点，避免“公开代码兜底”和“画布空白模板”两套页面。
+ * 模板库卡片继续消费下方的空白结构版本；编辑器首次进入消费这份推荐起点。
+ * 公开运行时只接受已发布 PageDocument，不能把编辑器种子当成品牌内容兜底。
  */
 export function createPageDocumentSeed(id: string): any | null {
   const template = rawPageTemplates.find((item) => item.id === id);

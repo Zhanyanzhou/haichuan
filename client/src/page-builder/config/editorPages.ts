@@ -4,6 +4,7 @@ import {
 } from "@/page-builder/templates/templates";
 import type { DesignMode } from "@/page-builder/designSystem/masters";
 import {
+  CONTENT_TEMPLATE_PAGE_PATHS,
   createContentTemplateMarker,
   getContentTemplateCompletion,
   getContentTemplateContract,
@@ -51,7 +52,7 @@ export const editorPages: EditorPageDefinition[] = [
     key: "home",
     label: "店铺首页",
     description: "品牌首屏与首页内容",
-    publicPath: "/",
+    publicPath: CONTENT_TEMPLATE_PAGE_PATHS.home,
     mode: "brand",
     headerMode: "overlay-light",
     publicFallback: {
@@ -66,15 +67,23 @@ export const editorPages: EditorPageDefinition[] = [
     key: "about",
     label: "关于海川",
     description: "品牌精神、审美、工艺与可核验背景",
-    publicPath: "/about",
+    publicPath: CONTENT_TEMPLATE_PAGE_PATHS.about,
     mode: "brand",
     headerMode: "overlay-light",
+    publicFallback: {
+      eyebrow: "ABOUT HAICHUAN",
+      title: "关于海川",
+      description:
+        "品牌、作品与工艺资料正在核验。您可以先浏览当前公开款式，或预约珠宝顾问了解更多。",
+      primaryAction: { label: "进入选款中心", href: "/catalog" },
+      secondaryAction: { label: "预约珠宝顾问", href: "/contact" },
+    },
   },
   {
     key: "products",
     label: "珠宝作品",
     description: "编辑式作品展陈；具体找款工具集中在选款中心",
-    publicPath: "/products",
+    publicPath: CONTENT_TEMPLATE_PAGE_PATHS.products,
     mode: "brand",
     headerMode: "solid",
     publicFallback: {
@@ -90,7 +99,7 @@ export const editorPages: EditorPageDefinition[] = [
     key: "catalog",
     label: "选款中心",
     description: "视觉页头 + 固定选款工具；筛选数据来自商品配置",
-    publicPath: "/catalog",
+    publicPath: CONTENT_TEMPLATE_PAGE_PATHS.catalog,
     mode: "commerce",
     headerMode: "solid",
     dynamic: true,
@@ -104,15 +113,23 @@ export const editorPages: EditorPageDefinition[] = [
     key: "custom",
     label: "珠宝定制",
     description: "统一的高级定制叙事；需求类型在咨询流程中处理",
-    publicPath: "/custom",
+    publicPath: CONTENT_TEMPLATE_PAGE_PATHS.custom,
     mode: "brand",
     headerMode: "overlay-light",
+    publicFallback: {
+      eyebrow: "BESPOKE SERVICE",
+      title: "珠宝定制",
+      description:
+        "定制内容正在整理。您可以先提交咨询需求，由珠宝顾问了解您的佩戴场景与偏好。",
+      primaryAction: { label: "提交定制咨询", href: "/contact?type=custom" },
+      secondaryAction: { label: "浏览公开款式", href: "/catalog" },
+    },
   },
   {
     key: "contact",
     label: "预约咨询",
     description: "视觉页头 + 固定预约表单与联系信息",
-    publicPath: "/contact",
+    publicPath: CONTENT_TEMPLATE_PAGE_PATHS.contact,
     mode: "brand",
     headerMode: "solid",
     dynamic: true,
@@ -208,7 +225,7 @@ export function createEditorPageDefault(key: EditorPageKey) {
   const page = getEditorPage(key);
   if (!page.businessRegion) return data;
 
-  data.content = placeBusinessRegion(key, data.content ?? [], {
+  data.content = placeBusinessRegion(data.content ?? [], {
     type: "业务功能区",
     props: {
       id: `${key}-business-region`,
@@ -221,17 +238,19 @@ export function createEditorPageDefault(key: EditorPageKey) {
 }
 
 function placeBusinessRegion(
-  key: EditorPageKey,
   content: any[],
   businessRegionBlock: any,
 ) {
-  const visualBlocks = content.filter(
+  const contentWithoutBusinessRegion = content.filter(
     (block: any) => block?.type !== "业务功能区",
   );
-  // 动态业务区始终紧随第一个受控品牌框架；这与机器合同的
-  // after-first-brand-block 位置语义一致，不把“必须是 Hero”写成第二套规则。
-  const insertionIndex = visualBlocks.length > 0 ? 1 : 0;
-  const nextContent = [...visualBlocks];
+  const firstVisibleBrandIndex = contentWithoutBusinessRegion.findIndex(
+    (block: any) =>
+      block?.props?.isVisible !== false && Boolean(getContentTemplateContract(block?.type || "")),
+  );
+  // 隐藏备选块和网站设置不参与公开顺序；固定业务区只跟随首个真正可见的品牌模块。
+  const insertionIndex = firstVisibleBrandIndex >= 0 ? firstVisibleBrandIndex + 1 : 0;
+  const nextContent = [...contentWithoutBusinessRegion];
   nextContent.splice(insertionIndex, 0, businessRegionBlock);
   return nextContent;
 }
@@ -274,21 +293,37 @@ function normalizePageCapabilities(key: EditorPageKey, data: any) {
   const rule = getContentTemplatePageRule(key);
   if (!rule) return data;
 
-  const isAllowed = (block: any) => block?.type === "业务功能区"
-    ? rule.businessRegionCount === 1
-    : isContentTemplateAllowedForPage(key, block?.type || "");
+  const isAllowed = (
+    block: any,
+    allowBusinessRegion: boolean,
+    allowTemplate: boolean,
+  ) => block?.type === "业务功能区"
+    ? allowBusinessRegion && rule.businessRegionCount === 1
+    : allowTemplate && isContentTemplateAllowedForPage(key, block?.type || "");
   let changed = false;
-  const filterBlocks = (blocks: unknown) => {
+  const filterBlocks = (
+    blocks: unknown,
+    allowBusinessRegion: boolean,
+    allowTemplate = true,
+  ) => {
     if (!Array.isArray(blocks)) return blocks;
-    const filtered = blocks.filter(isAllowed);
+    const filtered = blocks.filter((block) =>
+      isAllowed(block, allowBusinessRegion, allowTemplate));
     if (filtered.length !== blocks.length) changed = true;
     return filtered;
   };
 
-  const content = filterBlocks(data.content);
+  const content = filterBlocks(data.content, true);
   const zones = data.zones && typeof data.zones === "object"
     ? Object.fromEntries(
-        Object.entries(data.zones).map(([zone, blocks]) => [zone, filterBlocks(blocks)]),
+        Object.entries(data.zones).map(([zone, blocks]) => [
+          zone,
+          filterBlocks(
+            blocks,
+            false,
+            rule.contentPlacement !== "root-only",
+          ),
+        ]),
       )
     : data.zones;
   if (!changed) return data;
@@ -313,15 +348,15 @@ export function ensureEditorPageStructure(key: EditorPageKey, data: any) {
   const businessRegionBlock = {
     type: "业务功能区",
     props: {
+      ...(existingBusinessRegion?.props ?? {}),
       id: `${key}-business-region`,
       pageKey: key,
       ...page.businessRegion,
-      ...(existingBusinessRegion?.props ?? {}),
       locked: true,
     },
   };
   return {
     ...normalizedData,
-    content: placeBusinessRegion(key, content, businessRegionBlock),
+    content: placeBusinessRegion(content, businessRegionBlock),
   };
 }

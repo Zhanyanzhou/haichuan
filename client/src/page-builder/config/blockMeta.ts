@@ -17,7 +17,7 @@ import {
 
 /**
  * 模板是否可从模块库新建，只由机器合同的实施状态决定。
- * 当前 24 个运营模板均为 active；状态不会影响存量页面的公开渲染。
+ * 当前运营模板及其状态只认机器合同；状态不会影响存量页面的公开渲染。
  */
 export type ContentTemplateImplementationStatus =
   (typeof CONTENT_TEMPLATE_REGISTRY)[number]["implementationStatus"];
@@ -100,7 +100,7 @@ export const TEMPLATE_MEDIA_HINT: Record<string, string> = {
   卡片网格: "文字条目，无需图片",
   文字横幅: "纯文字，无需图片",
   视频区块: `封面 桌面 ${CONTENT_TEMPLATE_CONTRACTS.video.media[0].desktopRatio} + 手机 ${CONTENT_TEMPLATE_CONTRACTS.video.media[0].mobileRatio}`,
-  预约入口: "可选背景图 + 单一主行动，电话为次级联系信息",
+  预约入口: "可选背景图 + 单一主行动，统一联系电话为次级联系信息",
   资质证书: "证书图 3/2",
   定制流程: "01–05 文字编号，无需图片",
   服务承诺: "文字承诺条目，无需图片",
@@ -298,7 +298,7 @@ export const BLOCK_META: Record<string, BlockMeta> = {
     order: 6,
     type: "预约",
     badge: "转化",
-    description: "页面尾章的极简转化：一个明确预约入口，电话作次要选项。",
+    description: "页面尾章的极简转化：一个明确预约入口，统一联系电话作次要选项。",
     tags: ["预约", "咨询", "转化"],
     limit: 3,
     master: "conversion",

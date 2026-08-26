@@ -1,6 +1,6 @@
 /**
  * schema/modules/appointment.ts — 「预约入口」编辑区 Schema。
- * Conversion 母版:21:6 定比背景,1 主 CTA + 可选电话,双端焦点。
+ * Conversion 母版:21:6 定比背景,1 主 CTA + 统一联系电话,双端焦点。
  */
 import {
   APPOINTMENT_CONTRACT,
@@ -37,7 +37,11 @@ export const appointmentSchema: ModuleInspectorSchema = {
           key: "altText",
           label: "背景图替代文字",
           control: "text",
+          required: true,
           maxLength: APPOINTMENT_CONTRACT.content.limits.altText,
+          hint: "上传背景图后发布必填；纯色背景无需填写",
+          visibleWhen: ({ props }) =>
+            typeof props.backgroundImage === "string" && props.backgroundImage.trim().length > 0,
         },
       ],
     },
@@ -82,13 +86,6 @@ export const appointmentSchema: ModuleInspectorSchema = {
           key: "linkTarget",
           label: "主按钮点击后",
           control: "linkTarget",
-        },
-        {
-          key: "phone",
-          label: "咨询电话（可选）",
-          control: "text",
-          maxLength: APPOINTMENT_CONTRACT.content.limits.phone,
-          hint: "留空只显示主按钮",
         },
       ],
     },

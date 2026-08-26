@@ -1,11 +1,45 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：b2408b0caf77d48a255c2ad2eb0a1091f32f3ba93ff009ffcd9ef5b18dfee3bc
+ * SHA-256：5ed6616593c3e10ae89d9ea4ee6b732e3fb8cb20222202c9cf58fce7ea0ba3e5
  */
 
-export const CONTENT_TEMPLATE_REGISTRY_VERSION = 7;
-export const CONTENT_TEMPLATE_CONTRACT_VERSION = 4;
+export const CONTENT_TEMPLATE_REGISTRY_VERSION = 14;
+export const CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION = 5;
+export const CONTENT_TEMPLATE_CONTRACT_VERSION = 5;
+export const CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION = 2;
+export const CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY = "_contentPublication";
+
+export type ContentTemplatePublicationAttestation = {
+  gateVersion: number;
+  contractSchemaVersion: number;
+  registryVersion: number;
+};
+
+export function createContentTemplatePublicationAttestation(): ContentTemplatePublicationAttestation {
+  return {
+    gateVersion: CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION,
+    contractSchemaVersion: CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION,
+    registryVersion: CONTENT_TEMPLATE_REGISTRY_VERSION,
+  };
+}
+
+export function hasCurrentContentTemplatePublicationAttestation(metadata: unknown): boolean {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
+  const attestation = (metadata as Record<string, unknown>)[CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY];
+  if (!attestation || typeof attestation !== "object" || Array.isArray(attestation)) return false;
+  return (attestation as Record<string, unknown>).gateVersion
+    === CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION;
+}
+
+export function withoutContentTemplatePublicationAttestation(metadata: unknown): Record<string, unknown> {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
+  return Object.fromEntries(
+    Object.entries(metadata as Record<string, unknown>).filter(
+      ([key]) => key !== CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
+    ),
+  );
+}
 
 export type RegisteredContentTemplateKey = "hero" | "fullBleed" | "video" | "carousel" | "singlePoster" | "doublePoster" | "textBanner" | "journey" | "comparison" | "featuredProduct" | "productRow" | "gallery" | "wearingInspiration" | "categoryCards" | "sceneShopping" | "hotspot" | "brandPoints" | "servicePromises" | "certificates" | "storeInfo" | "testimonials" | "booking" | "limitedEvent" | "craftDetails";
 export type ContentTemplateKey = RegisteredContentTemplateKey;
@@ -57,9 +91,52 @@ export const CONTENT_TEMPLATE_ASSET_POLICY = {
   }
 } as const satisfies ContentTemplateAssetPolicy;
 
+export type ContentTemplatePageMetadataField = "seoTitle" | "seoDescription" | "ogImage" | "contentOwner";
+export type ContentTemplatePublicPageMetadataField = Exclude<ContentTemplatePageMetadataField, "contentOwner">;
+
+export type ContentTemplatePageMetadataContract = {
+  requiredForPublication: readonly ContentTemplatePageMetadataField[];
+  publicFields: readonly ContentTemplatePublicPageMetadataField[];
+  limits: Readonly<Record<ContentTemplatePageMetadataField, number>>;
+  mediaRights: {
+    maxItems: number;
+    fieldLimits: Readonly<Record<"assetUrl" | "source" | "authorizationId", number>>;
+  };
+};
+
+export const CONTENT_TEMPLATE_PAGE_METADATA = {
+  "limits": {
+    "contentOwner": 80,
+    "ogImage": 2048,
+    "seoDescription": 160,
+    "seoTitle": 60
+  },
+  "mediaRights": {
+    "fieldLimits": {
+      "assetUrl": 2048,
+      "authorizationId": 120,
+      "source": 120
+    },
+    "maxItems": 120
+  },
+  "publicFields": [
+    "seoTitle",
+    "seoDescription",
+    "ogImage"
+  ],
+  "requiredForPublication": [
+    "seoTitle",
+    "seoDescription",
+    "ogImage",
+    "contentOwner"
+  ]
+} as const satisfies ContentTemplatePageMetadataContract;
+
 export type ContentTemplatePageRule = {
   pageKey: string;
+  publicPath: string;
   pageRole: string;
+  contentPlacement: "root-only";
   allowedTemplateKeys: readonly ContentTemplateKey[];
   businessRegionCount: 0 | 1;
   businessRegionPosition?: "after-first-brand-block";
@@ -88,13 +165,15 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "booking"
     ],
     "businessRegionCount": 0,
+    "contentPlacement": "root-only",
     "headerMode": {
       "configured": "overlay-light",
       "fallback": "solid",
       "overlayRequiresFirstTemplate": "hero"
     },
     "pageKey": "about",
-    "pageRole": "brand-story"
+    "pageRole": "brand-story",
+    "publicPath": "/about"
   },
   "catalog": {
     "allowedTemplateKeys": [
@@ -105,12 +184,14 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
     ],
     "businessRegionCount": 1,
     "businessRegionPosition": "after-first-brand-block",
+    "contentPlacement": "root-only",
     "headerMode": {
       "configured": "solid",
       "fallback": "solid"
     },
     "pageKey": "catalog",
-    "pageRole": "selection-tool"
+    "pageRole": "selection-tool",
+    "publicPath": "/catalog"
   },
   "contact": {
     "allowedTemplateKeys": [
@@ -122,13 +203,15 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
     ],
     "businessRegionCount": 1,
     "businessRegionPosition": "after-first-brand-block",
+    "contentPlacement": "root-only",
     "headerMode": {
       "configured": "solid",
       "fallback": "solid",
       "overlayRequiresFirstTemplate": "hero"
     },
     "pageKey": "contact",
-    "pageRole": "conversion-support"
+    "pageRole": "conversion-support",
+    "publicPath": "/contact"
   },
   "custom": {
     "allowedTemplateKeys": [
@@ -150,13 +233,15 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "booking"
     ],
     "businessRegionCount": 0,
+    "contentPlacement": "root-only",
     "headerMode": {
       "configured": "overlay-light",
       "fallback": "solid",
       "overlayRequiresFirstTemplate": "hero"
     },
     "pageKey": "custom",
-    "pageRole": "brand-service"
+    "pageRole": "brand-service",
+    "publicPath": "/custom"
   },
   "home": {
     "allowedTemplateKeys": [
@@ -180,13 +265,15 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "limitedEvent"
     ],
     "businessRegionCount": 0,
+    "contentPlacement": "root-only",
     "headerMode": {
       "configured": "overlay-light",
       "fallback": "solid",
       "overlayRequiresFirstTemplate": "hero"
     },
     "pageKey": "home",
-    "pageRole": "brand-home"
+    "pageRole": "brand-home",
+    "publicPath": "/"
   },
   "products": {
     "allowedTemplateKeys": [
@@ -209,15 +296,28 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "limitedEvent"
     ],
     "businessRegionCount": 0,
+    "contentPlacement": "root-only",
     "headerMode": {
       "configured": "solid",
       "fallback": "solid",
       "overlayRequiresFirstTemplate": "hero"
     },
     "pageKey": "products",
-    "pageRole": "brand-showcase"
+    "pageRole": "brand-showcase",
+    "publicPath": "/products"
   }
 } as const satisfies Record<string, ContentTemplatePageRule>;
+
+export const CONTENT_TEMPLATE_PAGE_PATHS = {
+  "about": "/about",
+  "catalog": "/catalog",
+  "contact": "/contact",
+  "custom": "/custom",
+  "home": "/",
+  "products": "/products"
+} as const;
+export type ContentTemplatePagePath =
+  (typeof CONTENT_TEMPLATE_PAGE_PATHS)[keyof typeof CONTENT_TEMPLATE_PAGE_PATHS];
 
 export type MediaSlot = {
   key: string;
@@ -257,12 +357,25 @@ export type ContentTemplateEditableObject = {
   nodeIds?: readonly string[];
   kind: ContentTemplateEditableObjectKind;
   contentFieldKeys: readonly string[];
+  mediaFieldKeys?: readonly string[];
   altFieldKey?: string;
   altPolicy?: "required" | "derived" | "decorative" | "not-applicable";
   collectionFieldKeys?: readonly string[];
+  collectionMediaPolicies?: readonly {
+    collectionFieldKey: string;
+    mediaFieldKeys: readonly string[];
+    altPolicy: "required" | "derived" | "decorative" | "not-applicable";
+    altFieldKey?: string;
+    derivedAltFieldKey?: string;
+  }[];
+  collectionLinkPolicies?: readonly {
+    collectionFieldKey: string;
+    required: boolean;
+  }[];
   referenceFieldKey?: string;
   fieldScopes?: Readonly<Record<string, ContentTemplateResponsiveScope>>;
   capabilities: readonly ContentTemplateEditableCapability[];
+  capabilityViewports?: Partial<Record<ContentTemplateEditableCapability, readonly ("desktop" | "mobile")[]>>;
   responsive: Partial<Record<ContentTemplateEditableCapability, ContentTemplateResponsiveScope>>;
   constraints: ContentTemplateEditableConstraints;
 };
@@ -555,7 +668,17 @@ export type ContentTemplateIssue = {
 
 export type ContentTemplateCompletion = {
   material: { complete: boolean; missing: string[] };
-  content: { complete: boolean; missing: string[] };
+  content: {
+    complete: boolean;
+    missing: string[];
+    missingCollectionAltText: Array<{
+      roleId: string;
+      collectionFieldKey: string;
+      altFieldKey: string;
+      altPolicy: "required" | "derived";
+      index: number;
+    }>;
+  };
   collections: {
     complete: boolean;
     invalid: Array<{
@@ -577,6 +700,42 @@ export type ContentTemplateCompletion = {
     }>;
   };
   publish: { complete: boolean; issues: ContentTemplateIssue[] };
+};
+
+export type ContentTemplateMediaRight = {
+  assetUrl: string;
+  source: string;
+  authorizationId: string;
+};
+
+export type ContentTemplateMediaReference = {
+  url: string;
+  path: string;
+  field: string;
+  blockId?: string;
+  moduleType?: string;
+  index?: number;
+};
+
+export type ContentTemplateLinkTargetReference = {
+  path: string;
+  field: string;
+  required: boolean;
+  targetTypeFieldKey: string;
+  productCodeFieldKey: string;
+  productIdFieldKey: string;
+  linkUrlFieldKey: string;
+  legacyLinkFieldKey?: string;
+  actionTextFieldKey?: string;
+  targetType: unknown;
+  productCode: unknown;
+  productId: unknown;
+  linkUrl: unknown;
+  legacyLink?: unknown;
+  actionText?: unknown;
+  blockId?: string;
+  moduleType: string;
+  index?: number;
 };
 
 export const CONTENT_TEMPLATE_REGISTRY = [
@@ -783,7 +942,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "limits": {
         "altText": 80,
         "buttonText": 12,
-        "phone": 24,
         "subtitle": 90,
         "title": 32
       },
@@ -896,6 +1054,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "editableObjects": [
         {
           "altFieldKey": "altText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -943,6 +1102,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "altText"
           ],
           "kind": "media",
+          "mediaFieldKeys": [
+            "backgroundImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -956,8 +1118,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "layout",
-            "layer",
             "visibility",
             "typography"
           ],
@@ -967,18 +1127,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": true,
             "allowTypography": true,
             "allowZoom": false,
-            "allowedResize": [
-              "n",
-              "ne",
-              "e",
-              "se",
-              "s",
-              "sw",
-              "w",
-              "nw"
-            ],
+            "allowedResize": [],
             "layerRange": {
-              "max": 20,
+              "max": 0,
               "min": 0
             },
             "maxSize": {
@@ -989,10 +1140,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [
-              "x",
-              "y"
-            ],
+            "movementAxes": [],
             "safeAreaRequired": true
           },
           "contentFieldKeys": [
@@ -1007,8 +1155,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "responsive": {
             "content": "shared",
-            "layer": "viewport-specific",
-            "layout": "viewport-specific",
             "typography": "shared",
             "visibility": "shared"
           },
@@ -1018,8 +1164,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content",
             "link",
-            "layout",
-            "layer",
             "visibility",
             "typography"
           ],
@@ -1028,65 +1172,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowFocus": false,
             "allowHide": false,
             "allowTypography": true,
-            "allowZoom": false,
-            "allowedResize": [
-              "n",
-              "ne",
-              "e",
-              "se",
-              "s",
-              "sw",
-              "w",
-              "nw"
-            ],
-            "layerRange": {
-              "max": 20,
-              "min": 0
-            },
-            "maxSize": {
-              "height": 0.28,
-              "width": 0.72
-            },
-            "minSize": {
-              "height": 0.04,
-              "width": 0.08
-            },
-            "movementAxes": [
-              "x",
-              "y"
-            ],
-            "safeAreaRequired": true
-          },
-          "contentFieldKeys": [
-            "buttonText",
-            "targetType",
-            "productId",
-            "linkUrl"
-          ],
-          "kind": "action",
-          "nodeIds": [
-            "primaryAction",
-            "buttonText"
-          ],
-          "responsive": {
-            "content": "shared",
-            "layer": "viewport-specific",
-            "layout": "viewport-specific",
-            "link": "shared",
-            "typography": "shared",
-            "visibility": "shared"
-          },
-          "roleId": "primaryAction"
-        },
-        {
-          "capabilities": [
-            "content"
-          ],
-          "constraints": {
-            "allowAspectRatio": false,
-            "allowFocus": false,
-            "allowHide": false,
-            "allowTypography": false,
             "allowZoom": false,
             "allowedResize": [],
             "layerRange": {
@@ -1105,13 +1190,24 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "safeAreaRequired": true
           },
           "contentFieldKeys": [
-            "phone"
+            "buttonText",
+            "targetType",
+            "productCode",
+            "productId",
+            "linkUrl"
           ],
           "kind": "action",
+          "nodeIds": [
+            "primaryAction",
+            "buttonText"
+          ],
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "link": "shared",
+            "typography": "shared",
+            "visibility": "shared"
           },
-          "roleId": "secondaryContact"
+          "roleId": "primaryAction"
         }
       ],
       "layoutOverrides": {
@@ -1158,20 +1254,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "ivory"
             ],
             "maxLines": 2,
-            "placementPresets": [
-              "left",
-              "center"
-            ],
             "requiresSafeBand": true,
             "roleId": "title",
             "sizePresets": [
               "small",
               "standard",
               "large"
-            ],
-            "widthPresets": [
-              "narrow",
-              "standard"
             ]
           },
           {
@@ -1184,18 +1272,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "ivory"
             ],
             "maxLines": 3,
-            "placementPresets": [
-              "left",
-              "center"
-            ],
             "requiresSafeBand": true,
             "roleId": "subtitle",
             "sizePresets": [
               "small",
-              "standard"
-            ],
-            "widthPresets": [
-              "narrow",
               "standard"
             ]
           },
@@ -1209,18 +1289,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "ivory"
             ],
             "maxLines": 1,
-            "placementPresets": [
-              "left",
-              "center"
-            ],
             "requiresSafeBand": true,
             "roleId": "buttonText",
             "sizePresets": [
               "small",
-              "standard"
-            ],
-            "widthPresets": [
-              "narrow",
               "standard"
             ]
           }
@@ -1330,7 +1402,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           }
         ]
       },
-      "purpose": "页面尾章的预约主行动与次级联系方式",
+      "purpose": "页面尾章的预约主行动与统一联系电话",
       "visualRole": "feature-stage"
     },
     "roles": [
@@ -1377,14 +1449,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "kind": "contact",
         "required": false,
         "role": "marker",
-        "semantic": "optional-secondary-contact"
+        "semantic": "site-settings-secondary-contact"
       }
     ],
     "spacingPolicy": [
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 5,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "standard"
@@ -1864,6 +1936,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content",
             "items",
+            "link",
             "playback",
             "layout",
             "layer",
@@ -1874,6 +1947,23 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "collectionFieldKeys": [
             "images"
+          ],
+          "collectionLinkPolicies": [
+            {
+              "collectionFieldKey": "images",
+              "required": false
+            }
+          ],
+          "collectionMediaPolicies": [
+            {
+              "altFieldKey": "alt",
+              "altPolicy": "required",
+              "collectionFieldKey": "images",
+              "mediaFieldKeys": [
+                "url",
+                "mobileUrl"
+              ]
+            }
           ],
           "constraints": {
             "allowAspectRatio": true,
@@ -1924,6 +2014,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "items": "shared",
             "layer": "viewport-specific",
             "layout": "viewport-specific",
+            "link": "shared",
             "playback": "shared",
             "ratio": "shared",
             "zoom": "shared"
@@ -2255,6 +2346,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "collectionFieldKeys": [
             "categories"
+          ],
+          "collectionMediaPolicies": [
+            {
+              "altPolicy": "derived",
+              "collectionFieldKey": "categories",
+              "derivedAltFieldKey": "name",
+              "mediaFieldKeys": [
+                "image"
+              ]
+            }
           ],
           "constraints": {
             "allowAspectRatio": true,
@@ -2667,6 +2768,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "collectionFieldKeys": [
             "certificates"
           ],
+          "collectionMediaPolicies": [
+            {
+              "altPolicy": "derived",
+              "collectionFieldKey": "certificates",
+              "derivedAltFieldKey": "name",
+              "mediaFieldKeys": [
+                "imageUrl"
+              ]
+            }
+          ],
           "constraints": {
             "allowAspectRatio": true,
             "allowFocus": false,
@@ -3064,6 +3175,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "editableObjects": [
         {
           "altFieldKey": "beforeAltText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -3112,6 +3224,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "beforeAltText"
           ],
           "kind": "media",
+          "mediaFieldKeys": [
+            "beforeImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -3124,6 +3239,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "altFieldKey": "afterAltText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -3172,6 +3288,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "afterAltText"
           ],
           "kind": "media",
+          "mediaFieldKeys": [
+            "afterImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -3248,6 +3367,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "contentFieldKeys": [
             "actionText",
             "targetType",
+            "productCode",
             "productId",
             "linkUrl"
           ],
@@ -3512,10 +3632,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       },
       "maxCtas": 0,
       "requiredText": [
-        "title",
-        "leadAltText",
-        "detailOneAltText",
-        "detailTwoAltText"
+        "title"
       ]
     },
     "copyPlacementByViewport": {
@@ -3643,6 +3760,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "editableObjects": [
         {
           "altFieldKey": "leadAltText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -3693,6 +3811,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "leadAltText"
           ],
           "kind": "media",
+          "mediaFieldKeys": [
+            "leadImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -3765,6 +3886,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "altFieldKey": "detailOneAltText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -3815,6 +3937,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "detailOneAltText"
           ],
           "kind": "media",
+          "mediaFieldKeys": [
+            "detailImageOne"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -3830,6 +3955,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "altFieldKey": "detailTwoAltText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -3880,6 +4006,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "detailTwoAltText"
           ],
           "kind": "media",
+          "mediaFieldKeys": [
+            "detailImageTwo"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -4370,6 +4499,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "editableObjects": [
         {
           "altFieldKey": "mainAltText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -4420,6 +4550,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "mainAltText"
           ],
           "kind": "media",
+          "mediaFieldKeys": [
+            "mainImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -4435,6 +4568,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "altFieldKey": "detailAltText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -4485,6 +4619,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "detailAltText"
           ],
           "kind": "media",
+          "mediaFieldKeys": [
+            "detailImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -4501,8 +4638,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "layout",
-            "layer",
             "visibility",
             "typography"
           ],
@@ -4512,18 +4647,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": true,
             "allowTypography": true,
             "allowZoom": false,
-            "allowedResize": [
-              "n",
-              "ne",
-              "e",
-              "se",
-              "s",
-              "sw",
-              "w",
-              "nw"
-            ],
+            "allowedResize": [],
             "layerRange": {
-              "max": 20,
+              "max": 0,
               "min": 0
             },
             "maxSize": {
@@ -4534,10 +4660,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [
-              "x",
-              "y"
-            ],
+            "movementAxes": [],
             "safeAreaRequired": true
           },
           "contentFieldKeys": [
@@ -4549,8 +4672,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "kind": "text",
           "responsive": {
             "content": "shared",
-            "layer": "viewport-specific",
-            "layout": "viewport-specific",
             "typography": "shared",
             "visibility": "shared"
           },
@@ -4586,6 +4707,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "contentFieldKeys": [
             "actionText",
             "targetType",
+            "productCode",
             "productId",
             "linkUrl"
           ],
@@ -4871,7 +4993,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
@@ -5135,6 +5257,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "primaryText",
             "secondaryText",
             "secondaryTargetType",
+            "secondaryProductCode",
             "secondaryProductId",
             "secondaryLinkUrl"
           ],
@@ -5509,6 +5632,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "editableObjects": [
         {
           "altFieldKey": "altText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -5561,6 +5685,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "image": "viewport-specific"
           },
           "kind": "media",
+          "mediaFieldKeys": [
+            "image"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -5574,6 +5701,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "altFieldKey": "altText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -5626,6 +5754,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "mobileImage": "viewport-specific"
           },
           "kind": "media",
+          "mediaFieldKeys": [
+            "mobileImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -5640,8 +5771,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "layout",
-            "layer",
             "visibility",
             "typography"
           ],
@@ -5651,18 +5780,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": true,
             "allowTypography": true,
             "allowZoom": false,
-            "allowedResize": [
-              "n",
-              "ne",
-              "e",
-              "se",
-              "s",
-              "sw",
-              "w",
-              "nw"
-            ],
+            "allowedResize": [],
             "layerRange": {
-              "max": 20,
+              "max": 0,
               "min": 0
             },
             "maxSize": {
@@ -5673,10 +5793,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [
-              "x",
-              "y"
-            ],
+            "movementAxes": [],
             "safeAreaRequired": true
           },
           "contentFieldKeys": [
@@ -5687,8 +5804,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "kind": "text",
           "responsive": {
             "content": "shared",
-            "layer": "viewport-specific",
-            "layout": "viewport-specific",
             "typography": "shared",
             "visibility": "shared"
           },
@@ -5724,6 +5839,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "contentFieldKeys": [
             "buttonText",
             "targetType",
+            "productCode",
             "productId",
             "linkUrl"
           ],
@@ -5791,20 +5907,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "ivory"
             ],
             "maxLines": 4,
-            "placementPresets": [
-              "overlay",
-              "below"
-            ],
             "requiresSafeBand": true,
             "roleId": "copy",
             "sizePresets": [
               "small",
               "standard",
               "large"
-            ],
-            "widthPresets": [
-              "narrow",
-              "standard"
             ]
           }
         ]
@@ -5971,7 +6079,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "full"
@@ -6133,6 +6241,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content",
             "items",
+            "link",
             "layout",
             "layer",
             "ratio",
@@ -6141,6 +6250,22 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "collectionFieldKeys": [
             "items"
+          ],
+          "collectionLinkPolicies": [
+            {
+              "collectionFieldKey": "items",
+              "required": false
+            }
+          ],
+          "collectionMediaPolicies": [
+            {
+              "altFieldKey": "altText",
+              "altPolicy": "required",
+              "collectionFieldKey": "items",
+              "mediaFieldKeys": [
+                "image"
+              ]
+            }
           ],
           "constraints": {
             "allowAspectRatio": true,
@@ -6186,6 +6311,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "items": "shared",
             "layer": "viewport-specific",
             "layout": "viewport-specific",
+            "link": "shared",
             "ratio": "shared",
             "zoom": "shared"
           },
@@ -6445,8 +6571,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       },
       "maxCtas": 1,
       "requiredText": [
-        "title",
-        "altText"
+        "title"
       ]
     },
     "copyPlacementByViewport": {
@@ -6600,6 +6725,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "editableObjects": [
         {
           "altFieldKey": "altText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -6652,6 +6778,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "desktopImage": "viewport-specific"
           },
           "kind": "media",
+          "mediaFieldKeys": [
+            "desktopImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -6665,6 +6794,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "altFieldKey": "altText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -6717,6 +6847,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "mobileImage": "viewport-specific"
           },
           "kind": "media",
+          "mediaFieldKeys": [
+            "mobileImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -6736,6 +6869,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "capabilityViewports": {
+            "layer": [
+              "desktop"
+            ],
+            "layout": [
+              "desktop"
+            ]
+          },
           "constraints": {
             "allowAspectRatio": false,
             "allowFocus": false,
@@ -6800,6 +6941,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "capabilityViewports": {
+            "layer": [
+              "desktop"
+            ],
+            "layout": [
+              "desktop"
+            ]
+          },
           "constraints": {
             "allowAspectRatio": false,
             "allowFocus": false,
@@ -6837,6 +6986,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "contentFieldKeys": [
             "actionText",
             "targetType",
+            "productCode",
             "productId",
             "linkUrl"
           ],
@@ -7228,7 +7378,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 4,
+    "version": 5,
     "visualRole": "primary-stage",
     "visualWeight": "primary-stage",
     "width": "full"
@@ -7241,9 +7391,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "altText": 80
       },
       "maxCtas": 0,
-      "requiredText": [
-        "altText"
-      ]
+      "requiredText": []
     },
     "copyPlacementByViewport": {
       "desktop": "stacked",
@@ -7459,6 +7607,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "mobileImage": "viewport-specific"
           },
           "kind": "media",
+          "mediaFieldKeys": [
+            "image",
+            "mobileImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -7479,6 +7631,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "collectionFieldKeys": [
             "hotspots",
             "mobileHotspots"
+          ],
+          "collectionLinkPolicies": [
+            {
+              "collectionFieldKey": "hotspots",
+              "required": true
+            },
+            {
+              "collectionFieldKey": "mobileHotspots",
+              "required": true
+            }
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -7848,6 +8010,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "collectionFieldKeys": [
             "steps"
+          ],
+          "collectionMediaPolicies": [
+            {
+              "altPolicy": "derived",
+              "collectionFieldKey": "steps",
+              "derivedAltFieldKey": "name",
+              "mediaFieldKeys": [
+                "image"
+              ]
+            }
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -8227,6 +8399,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "eventImage"
           ],
           "kind": "media",
+          "mediaFieldKeys": [
+            "eventImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -8286,6 +8461,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "capabilityViewports": {
+            "layer": [
+              "desktop"
+            ],
+            "layout": [
+              "desktop"
+            ]
+          },
           "constraints": {
             "allowAspectRatio": false,
             "allowFocus": false,
@@ -8365,6 +8548,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "contentFieldKeys": [
             "buttonText",
             "targetType",
+            "productCode",
             "productId",
             "linkUrl"
           ],
@@ -8607,7 +8791,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -9200,6 +9384,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content",
             "items",
+            "link",
             "layout",
             "layer",
             "ratio",
@@ -9207,6 +9392,22 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "collectionFieldKeys": [
             "categories"
+          ],
+          "collectionLinkPolicies": [
+            {
+              "collectionFieldKey": "categories",
+              "required": true
+            }
+          ],
+          "collectionMediaPolicies": [
+            {
+              "altFieldKey": "altText",
+              "altPolicy": "required",
+              "collectionFieldKey": "categories",
+              "mediaFieldKeys": [
+                "image"
+              ]
+            }
           ],
           "constraints": {
             "allowAspectRatio": true,
@@ -9252,6 +9453,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "items": "shared",
             "layer": "viewport-specific",
             "layout": "viewport-specific",
+            "link": "shared",
             "ratio": "shared"
           },
           "roleId": "scenes"
@@ -9988,24 +10190,22 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           },
           {
             "nodeId": "copy",
-            "overlay": true,
             "rect": {
               "height": 0.25,
               "width": 0.833333,
               "x": 0.083333,
-              "y": 0.125
+              "y": 0.625
             },
             "role": "copy",
             "roleId": "copy"
           },
           {
             "nodeId": "action",
-            "overlay": true,
             "rect": {
               "height": 0.125,
               "width": 0.416667,
               "x": 0.25,
-              "y": 0.375
+              "y": 0.875
             },
             "role": "action",
             "roleId": "action"
@@ -10018,6 +10218,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "editableObjects": [
         {
           "altFieldKey": "altText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -10070,6 +10271,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "desktopImage": "viewport-specific"
           },
           "kind": "media",
+          "mediaFieldKeys": [
+            "desktopImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -10083,6 +10287,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "altFieldKey": "altText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -10135,6 +10340,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "mobileImage": "viewport-specific"
           },
           "kind": "media",
+          "mediaFieldKeys": [
+            "mobileImage"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -10154,6 +10362,14 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
+          "capabilityViewports": {
+            "layer": [
+              "desktop"
+            ],
+            "layout": [
+              "desktop"
+            ]
+          },
           "constraints": {
             "allowAspectRatio": false,
             "allowFocus": false,
@@ -10234,6 +10450,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "contentFieldKeys": [
             "actionText",
             "targetType",
+            "productCode",
             "productId",
             "linkUrl"
           ],
@@ -10427,19 +10644,17 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           },
           {
             "column": 1.999996,
-            "overlay": true,
             "role": "copy",
             "roleId": "copy",
-            "row": 2,
+            "row": 6,
             "rowSpan": 2,
             "span": 9.999996
           },
           {
             "column": 4,
-            "overlay": true,
             "role": "action",
             "roleId": "action",
-            "row": 4,
+            "row": 8,
             "rowSpan": 1,
             "span": 5.000004
           }
@@ -10513,7 +10728,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "standard"
@@ -10697,6 +10912,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "image"
           ],
           "kind": "media",
+          "mediaFieldKeys": [
+            "image"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -10706,125 +10924,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "zoom": "shared"
           },
           "roleId": "store"
-        },
-        {
-          "capabilities": [
-            "content"
-          ],
-          "constraints": {
-            "allowAspectRatio": false,
-            "allowFocus": false,
-            "allowHide": false,
-            "allowTypography": false,
-            "allowZoom": false,
-            "allowedResize": [],
-            "layerRange": {
-              "max": 0,
-              "min": 0
-            },
-            "maxSize": {
-              "height": 1,
-              "width": 1
-            },
-            "minSize": {
-              "height": 0.1,
-              "width": 0.12
-            },
-            "movementAxes": [],
-            "safeAreaRequired": false
-          },
-          "contentFieldKeys": [
-            "useSiteSettings",
-            "storeName",
-            "address",
-            "hours",
-            "phone"
-          ],
-          "fieldScopes": {
-            "address": "shared",
-            "hours": "shared",
-            "phone": "shared",
-            "storeName": "shared",
-            "useSiteSettings": "shared"
-          },
-          "kind": "collection",
-          "responsive": {
-            "content": "shared"
-          },
-          "roleId": "details"
-        },
-        {
-          "capabilities": [
-            "content"
-          ],
-          "constraints": {
-            "allowAspectRatio": false,
-            "allowFocus": false,
-            "allowHide": false,
-            "allowTypography": false,
-            "allowZoom": false,
-            "allowedResize": [],
-            "layerRange": {
-              "max": 0,
-              "min": 0
-            },
-            "maxSize": {
-              "height": 0.7,
-              "width": 0.92
-            },
-            "minSize": {
-              "height": 0.03,
-              "width": 0.08
-            },
-            "movementAxes": [],
-            "safeAreaRequired": true
-          },
-          "contentFieldKeys": [
-            "storeName"
-          ],
-          "kind": "text",
-          "responsive": {
-            "content": "shared"
-          },
-          "roleId": "copy"
-        },
-        {
-          "capabilities": [
-            "content",
-            "link"
-          ],
-          "constraints": {
-            "allowAspectRatio": false,
-            "allowFocus": false,
-            "allowHide": false,
-            "allowTypography": false,
-            "allowZoom": false,
-            "allowedResize": [],
-            "layerRange": {
-              "max": 0,
-              "min": 0
-            },
-            "maxSize": {
-              "height": 0.28,
-              "width": 0.72
-            },
-            "minSize": {
-              "height": 0.04,
-              "width": 0.08
-            },
-            "movementAxes": [],
-            "safeAreaRequired": true
-          },
-          "contentFieldKeys": [
-            "mapUrl",
-            "phone"
-          ],
-          "kind": "action",
-          "responsive": {
-            "content": "shared",
-            "link": "shared"
-          },
-          "roleId": "action"
         }
       ],
       "layoutOverrides": {
@@ -10852,7 +10951,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           }
         ]
       },
-      "primaryTask": "structured"
+      "primaryTask": "media"
     },
     "flow": "flow",
     "heightModeByViewport": {
@@ -11022,7 +11121,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -11148,6 +11247,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "collectionFieldKeys": [
             "testimonials"
+          ],
+          "collectionMediaPolicies": [
+            {
+              "altPolicy": "derived",
+              "collectionFieldKey": "testimonials",
+              "derivedAltFieldKey": "name",
+              "mediaFieldKeys": [
+                "image"
+              ]
+            }
           ],
           "constraints": {
             "allowAspectRatio": true,
@@ -11540,6 +11649,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "bgImage"
           ],
           "kind": "media",
+          "mediaFieldKeys": [
+            "bgImage"
+          ],
           "responsive": {
             "content": "shared"
           },
@@ -11548,8 +11660,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "layout",
-            "layer",
             "visibility",
             "typography"
           ],
@@ -11559,18 +11669,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": true,
             "allowTypography": true,
             "allowZoom": false,
-            "allowedResize": [
-              "n",
-              "ne",
-              "e",
-              "se",
-              "s",
-              "sw",
-              "w",
-              "nw"
-            ],
+            "allowedResize": [],
             "layerRange": {
-              "max": 20,
+              "max": 0,
               "min": 0
             },
             "maxSize": {
@@ -11581,10 +11682,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [
-              "x",
-              "y"
-            ],
+            "movementAxes": [],
             "safeAreaRequired": true
           },
           "contentFieldKeys": [
@@ -11595,8 +11693,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "kind": "text",
           "responsive": {
             "content": "shared",
-            "layer": "viewport-specific",
-            "layout": "viewport-specific",
             "typography": "shared",
             "visibility": "shared"
           },
@@ -11632,6 +11728,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "contentFieldKeys": [
             "buttonText",
             "targetType",
+            "productCode",
             "productId",
             "linkUrl"
           ],
@@ -11665,20 +11762,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "ivory"
             ],
             "maxLines": 6,
-            "placementPresets": [
-              "left",
-              "center"
-            ],
             "roleId": "copy",
             "sizePresets": [
               "small",
               "standard",
               "large"
-            ],
-            "widthPresets": [
-              "narrow",
-              "standard",
-              "wide"
             ]
           }
         ]
@@ -11825,7 +11913,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "grand"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "editorial"
@@ -12025,6 +12113,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "showControls"
           ],
           "kind": "video",
+          "mediaFieldKeys": [
+            "videoUrl",
+            "posterUrl"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -12103,6 +12195,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "contentFieldKeys": [
             "actionText",
             "targetType",
+            "productCode",
             "productId",
             "linkUrl"
           ],
@@ -12461,6 +12554,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "editableObjects": [
         {
           "altFieldKey": "altText",
+          "altPolicy": "required",
           "capabilities": [
             "content",
             "layout",
@@ -12509,6 +12603,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "altText"
           ],
           "kind": "media",
+          "mediaFieldKeys": [
+            "image"
+          ],
           "responsive": {
             "content": "shared",
             "fit": "shared",
@@ -12624,6 +12721,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "contentFieldKeys": [
             "actionText",
             "targetType",
+            "productCode",
             "productId",
             "linkUrl"
           ],
@@ -14744,7 +14842,7 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       ]
     },
     "moduleType": "预约入口",
-    "purpose": "页面尾章的预约主行动与次级联系方式",
+    "purpose": "页面尾章的预约主行动与统一联系电话",
     "visualRole": "feature-stage"
   },
   "brandPoints": {
@@ -16284,17 +16382,15 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
         },
         {
           "column": 1.999996,
-          "overlay": true,
           "role": "copy",
-          "row": 2,
+          "row": 6,
           "rowSpan": 2,
           "span": 9.999996
         },
         {
           "column": 4,
-          "overlay": true,
           "role": "action",
-          "row": 4,
+          "row": 8,
           "rowSpan": 1,
           "span": 5.000004
         }
@@ -16947,10 +17043,19 @@ export function sanitizeContentTemplateLayoutData(
       if (!isRecord(rawNode)) continue;
       const node: NonNullable<ContentTemplateInstanceOverridesV2["nodes"]>[string] = {};
       const constraints = editableObject.constraints;
+      const supportsOnViewport = (
+        capability: ContentTemplateEditableCapability,
+        viewport: "desktop" | "mobile",
+      ) => {
+        if (!contentTemplateObjectHasCapability(editableObject, capability)) return false;
+        const allowedViewports = editableObject.capabilityViewports?.[capability];
+        return !allowedViewports || allowedViewports.includes(viewport);
+      };
       if (constraints.allowHide && typeof rawNode.enabled === "boolean") node.enabled = rawNode.enabled;
       if (contentTemplateObjectHasCapability(editableObject, "layout") && isRecord(rawNode.rectByViewport)) {
         const rectByViewport: Partial<Record<"desktop" | "mobile", ContentTemplateVisualRect>> = {};
         for (const viewport of ["desktop", "mobile"] as const) {
+          if (!supportsOnViewport("layout", viewport)) continue;
           const safeArea = contract.defaultGeometryByViewport[viewport].safeArea;
           const rect = sanitizePersonalTemplateRect(rawNode.rectByViewport[viewport], constraints, safeArea);
           if (rect) rectByViewport[viewport] = rect;
@@ -16960,6 +17065,7 @@ export function sanitizeContentTemplateLayoutData(
       if (contentTemplateObjectHasCapability(editableObject, "layer") && isRecord(rawNode.zIndexByViewport)) {
         const zIndexByViewport: Partial<Record<"desktop" | "mobile", number>> = {};
         for (const viewport of ["desktop", "mobile"] as const) {
+          if (!supportsOnViewport("layer", viewport)) continue;
           const zIndex = Number(rawNode.zIndexByViewport[viewport]);
           if (Number.isInteger(zIndex) && zIndex >= constraints.layerRange.min && zIndex <= constraints.layerRange.max) {
             zIndexByViewport[viewport] = zIndex;
@@ -17064,6 +17170,39 @@ export function getContentTemplatePageRule(pageKey: string) {
   return (CONTENT_TEMPLATE_PAGE_RULES as Record<string, ContentTemplatePageRule | undefined>)[pageKey];
 }
 
+const CONTENT_TEMPLATE_PAGE_PATH_SET = new Set<string>(
+  Object.values(CONTENT_TEMPLATE_PAGE_PATHS),
+);
+
+/**
+ * 页面型 CTA 只允许跳转到 PageDocument 正式公开路由。
+ * 查询参数用于携带筛选或上下文；片段和尾斜杠没有稳定合同，因此拒绝。
+ */
+export function normalizeContentTemplatePageTarget(value: unknown): string | undefined {
+  if (
+    typeof value !== "string"
+    || !value.startsWith("/")
+    || value.startsWith("//")
+    || value.includes("#")
+  ) {
+    return undefined;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value, "https://haichuan.invalid");
+  } catch {
+    return undefined;
+  }
+
+  if (!CONTENT_TEMPLATE_PAGE_PATH_SET.has(parsed.pathname)) return undefined;
+  return parsed.pathname + parsed.search;
+}
+
+export function isContentTemplatePageTarget(value: unknown): value is string {
+  return normalizeContentTemplatePageTarget(value) !== undefined;
+}
+
 export function isContentTemplateAllowedForPage(pageKey: string, moduleType: string) {
   const rule = getContentTemplatePageRule(pageKey);
   const contract = getContentTemplateContract(moduleType);
@@ -17101,6 +17240,8 @@ function getCompatibilityRoleValue(
     case "热区图:sceneImage":
     case "门店信息:store":
       return values.image;
+    case "预约入口:bgImage":
+      return values.backgroundImage;
     case "限时活动:event":
       return values.eventImage;
     case "真实评价与实拍:authorizedPhoto": {
@@ -17135,6 +17276,203 @@ function getQuantifiedCollectionValue(
   );
   const arrayKey = populatedKey ?? candidateKeys.find((key) => Array.isArray(values[key]));
   return arrayKey ? { fieldKey: arrayKey, value: values[arrayKey] as unknown[] } : undefined;
+}
+
+/**
+ * 从机器合同声明的媒体字段提取单个可见区块所引用的素材。
+ * 不按属性名猜测，也不递归扫描任意字符串，避免把 alt、链接或业务字段误当素材。
+ */
+export function getContentTemplateMediaReferences(
+  moduleType: string,
+  props: unknown,
+  basePath = "props",
+): ContentTemplateMediaReference[] {
+  const contract = getContentTemplateContract(moduleType);
+  if (!contract || !isRecord(props) || props.isVisible === false) return [];
+  const blockId = hasNonEmptyText(props.id) ? props.id.trim() : undefined;
+  const references: ContentTemplateMediaReference[] = [];
+  const append = (value: unknown, field: string, path: string, index?: number) => {
+    if (!hasNonEmptyText(value)) return;
+    references.push({
+      url: value.trim(),
+      path,
+      field,
+      ...(blockId ? { blockId } : {}),
+      moduleType,
+      ...(index === undefined ? {} : { index }),
+    });
+  };
+
+  for (const object of contract.editorCapabilities.editableObjects) {
+    for (const field of object.mediaFieldKeys ?? []) {
+      append(props[field], field, basePath + "." + field);
+    }
+    for (const policy of object.collectionMediaPolicies ?? []) {
+      const collection = props[policy.collectionFieldKey];
+      if (!Array.isArray(collection)) continue;
+      collection.forEach((item, index) => {
+        if (!isRecord(item)) return;
+        for (const field of policy.mediaFieldKeys) {
+          append(
+            item[field],
+            field,
+            basePath + "." + policy.collectionFieldKey + "[" + index + "]." + field,
+            index,
+          );
+        }
+      });
+    }
+  }
+
+  const seen = new Set<string>();
+  return references.filter((reference) => {
+    const key = reference.path + "\u0000" + reference.url;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * 从机器合同提取公开 Renderer 会消费的行动目标。
+ * 顶层行动字段由 action editableObject 派生；集合条目只处理显式声明的
+ * collectionLinkPolicies，避免按属性名递归猜测业务去向。
+ */
+export function getContentTemplateLinkTargetReferences(
+  moduleType: string,
+  props: unknown,
+  basePath = "props",
+): ContentTemplateLinkTargetReference[] {
+  const contract = getContentTemplateContract(moduleType);
+  if (!contract || !isRecord(props) || props.isVisible === false) return [];
+  const blockId = hasNonEmptyText(props.id) ? props.id.trim() : undefined;
+  const references: ContentTemplateLinkTargetReference[] = [];
+  const append = (
+    values: Record<string, unknown>,
+    path: string,
+    field: string,
+    required: boolean,
+    prefix = "",
+    actionTextFieldKey?: string,
+    legacyLinkFieldKey?: string,
+    index?: number,
+  ) => {
+    const targetTypeFieldKey = prefix ? prefix + "TargetType" : "targetType";
+    const productCodeFieldKey = prefix ? prefix + "ProductCode" : "productCode";
+    const productIdFieldKey = prefix ? prefix + "ProductId" : "productId";
+    const linkUrlFieldKey = prefix ? prefix + "LinkUrl" : "linkUrl";
+    references.push({
+      path,
+      field,
+      required,
+      targetTypeFieldKey,
+      productCodeFieldKey,
+      productIdFieldKey,
+      linkUrlFieldKey,
+      ...(legacyLinkFieldKey ? { legacyLinkFieldKey } : {}),
+      ...(actionTextFieldKey ? { actionTextFieldKey } : {}),
+      targetType: values[targetTypeFieldKey],
+      productCode: values[productCodeFieldKey],
+      productId: values[productIdFieldKey],
+      linkUrl: values[linkUrlFieldKey],
+      ...(legacyLinkFieldKey ? { legacyLink: values[legacyLinkFieldKey] } : {}),
+      ...(actionTextFieldKey ? { actionText: values[actionTextFieldKey] } : {}),
+      ...(blockId ? { blockId } : {}),
+      moduleType,
+      ...(index === undefined ? {} : { index }),
+    });
+  };
+
+  for (const object of contract.editorCapabilities.editableObjects) {
+    if (object.kind === "action") {
+      const targetTypeFieldKey = object.contentFieldKeys.find(
+        (field) => field === "targetType" || field.endsWith("TargetType"),
+      );
+      if (targetTypeFieldKey) {
+        const prefix = targetTypeFieldKey === "targetType"
+          ? ""
+          : targetTypeFieldKey.slice(0, -"TargetType".length);
+        const actionTextFieldKey = prefix
+          ? prefix + "Text"
+          : object.contentFieldKeys.find(
+              (field) => field === "actionText" || field === "buttonText",
+            );
+        if (actionTextFieldKey) {
+          append(
+            props,
+            basePath,
+            actionTextFieldKey,
+            hasNonEmptyText(props[actionTextFieldKey]),
+            prefix,
+            actionTextFieldKey,
+          );
+        }
+      }
+    }
+    for (const policy of object.collectionLinkPolicies ?? []) {
+      const collection = props[policy.collectionFieldKey];
+      if (!Array.isArray(collection)) continue;
+      collection.forEach((item, index) => {
+        append(
+          isRecord(item) ? item : {},
+          basePath + "." + policy.collectionFieldKey + "[" + index + "]",
+          policy.collectionFieldKey,
+          policy.required,
+          "",
+          undefined,
+          "link",
+          index,
+        );
+      });
+    }
+  }
+
+  return references;
+}
+
+/** 当前 PageDocument 会进入公开页面的唯一素材 URL 集合（含 ogImage）。 */
+export function getPageDocumentMediaReferences(
+  puckData: unknown,
+  metadata?: unknown,
+  pageKey?: string,
+): ContentTemplateMediaReference[] {
+  const references: ContentTemplateMediaReference[] = [];
+  if (isRecord(metadata) && hasNonEmptyText(metadata.ogImage)) {
+    references.push({
+      url: metadata.ogImage.trim(),
+      path: "metadata.ogImage",
+      field: "ogImage",
+    });
+  }
+  if (isRecord(puckData)) {
+    const collectBlocks = (blocks: unknown, basePath: string) => {
+      if (!Array.isArray(blocks)) return;
+      blocks.forEach((block, index) => {
+        if (!isRecord(block) || typeof block.type !== "string") return;
+        references.push(
+          ...getContentTemplateMediaReferences(
+            block.type,
+            block.props,
+            basePath + "[" + index + "].props",
+          ),
+        );
+      });
+    };
+    collectBlocks(puckData.content, "content");
+    const pageRule = pageKey ? getContentTemplatePageRule(pageKey) : undefined;
+    if (pageRule?.contentPlacement !== "root-only" && isRecord(puckData.zones)) {
+      for (const [zoneKey, blocks] of Object.entries(puckData.zones)) {
+        collectBlocks(blocks, "zones." + zoneKey);
+      }
+    }
+  }
+
+  const seenUrls = new Set<string>();
+  return references.filter((reference) => {
+    if (seenUrls.has(reference.url)) return false;
+    seenUrls.add(reference.url);
+    return true;
+  });
 }
 
 export function createContentTemplateMarker(
@@ -17634,8 +17972,42 @@ export function getContentTemplateCompletion(
       slot.required &&
       !hasNonEmptyText(getCompatibilityRoleValue(moduleType, slot.key, values)))
     .map((slot) => slot.key);
-  const missingText = contract.contentBudget.requiredText
-    .filter((key) => !hasNonEmptyText(values[key]));
+  const missingRequiredAltText = contract.editorCapabilities.editableObjects.flatMap((object) => {
+    if (object.altPolicy !== "required" || !object.altFieldKey) return [];
+    const mediaValue = getCompatibilityRoleValue(moduleType, object.roleId, values);
+    return hasNonEmptyText(mediaValue) && !hasNonEmptyText(values[object.altFieldKey])
+      ? [object.altFieldKey]
+      : [];
+  });
+  const missingText = [...new Set([
+    ...contract.contentBudget.requiredText.filter((key) => !hasNonEmptyText(values[key])),
+    ...missingRequiredAltText,
+  ])];
+  const missingCollectionAltText = contract.editorCapabilities.editableObjects.flatMap((object) =>
+    (object.collectionMediaPolicies ?? []).flatMap((policy) => {
+      const altPolicy = policy.altPolicy;
+      if (altPolicy !== "required" && altPolicy !== "derived") return [];
+      const collection = values[policy.collectionFieldKey];
+      if (!Array.isArray(collection)) return [];
+      const altFieldKey = altPolicy === "required"
+        ? policy.altFieldKey
+        : policy.derivedAltFieldKey;
+      if (!altFieldKey) return [];
+      return collection.flatMap((item, index) => {
+        if (!isRecord(item)) return [];
+        const hasMedia = policy.mediaFieldKeys.some((field) => hasNonEmptyText(item[field]));
+        return hasMedia && !hasNonEmptyText(item[altFieldKey])
+          ? [{
+              roleId: object.roleId,
+              collectionFieldKey: policy.collectionFieldKey,
+              altFieldKey,
+              altPolicy,
+              index,
+            }]
+          : [];
+      });
+    }),
+  );
   const invalidCollections = contract.roles.flatMap((role) => {
     if (!role.quantity) return [];
     const collection = getQuantifiedCollectionValue(contract, role.id, values);
@@ -17670,7 +18042,11 @@ export function getContentTemplateCompletion(
   const issues = getContentTemplateIssues({ moduleType, props: values });
   return {
     material: { complete: missingMedia.length === 0, missing: missingMedia },
-    content: { complete: missingText.length === 0, missing: missingText },
+    content: {
+      complete: missingText.length === 0 && missingCollectionAltText.length === 0,
+      missing: missingText,
+      missingCollectionAltText,
+    },
     collections: { complete: invalidCollections.length === 0, invalid: invalidCollections },
     attestations: { complete: missingAttestations.length === 0, missing: missingAttestations },
     publish: {

@@ -9,7 +9,9 @@ import {
   CheckCircleFilled,
   ClockCircleOutlined,
   EditOutlined,
+  ExclamationCircleOutlined,
   FileTextOutlined,
+  ReloadOutlined,
   RollbackOutlined,
 } from "@ant-design/icons";
 import type {
@@ -24,7 +26,10 @@ export default function RevisionDrawer({
   loading,
   restoringVersion,
   draft,
+  error,
+  retryLabel,
   onClose,
+  onRetry,
   onRestore,
   onEditDraft,
 }: {
@@ -33,7 +38,10 @@ export default function RevisionDrawer({
   loading: boolean;
   restoringVersion: number | null;
   draft: PageDraftSnapshot | null;
+  error: string | null;
+  retryLabel: string;
   onClose: () => void;
+  onRetry: () => void;
   onRestore: (revision: PageDocumentRevision) => void;
   onEditDraft: () => void;
 }) {
@@ -53,6 +61,23 @@ export default function RevisionDrawer({
         </div>
       ) : (
         <div className="homepage-editor__revision-scroll">
+          {error ? (
+            <div className="homepage-editor__revision-error" role="alert">
+              <ExclamationCircleOutlined aria-hidden="true" />
+              <div>
+                <strong>版本操作未完成</strong>
+                <span>{error}</span>
+              </div>
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                onClick={onRetry}
+              >
+                {retryLabel}
+              </Button>
+            </div>
+          ) : null}
+
           {hasDraft ? (
             <article className="homepage-editor__revision-item is-draft">
               <div>
@@ -133,7 +158,7 @@ export default function RevisionDrawer({
             </div>
           ) : null}
 
-          {!hasDraft && revisions.length === 0 ? (
+          {!error && !hasDraft && revisions.length === 0 ? (
             <div className="homepage-editor__revision-empty">
               还没有发布版本。发布首页后，这里会保留可回滚的快照。
             </div>

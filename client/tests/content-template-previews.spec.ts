@@ -10,6 +10,7 @@ const screenshotDir = path.resolve("test-results/content-template-previews");
 const fullsizeScreenshotDir = path.resolve(
   "test-results/content-template-preview-fullsize",
 );
+const templateCount = CONTENT_TEMPLATE_REGISTRY.length;
 
 function gallery(viewport: "desktop" | "mobile", variant: "structure" | "renderer" = "renderer") {
   return `<!doctype html>
@@ -41,7 +42,7 @@ function gallery(viewport: "desktop" | "mobile", variant: "structure" | "rendere
 }
 
 for (const viewport of ["desktop", "mobile"] as const) {
-  test(`${viewport}：24 张模板库缩略图使用中性合同结构并保持统一卡片画幅`, async ({ page }) => {
+  test(`${viewport}：${templateCount} 张模板库缩略图使用中性合同结构并保持统一卡片画幅`, async ({ page }) => {
     await page.setViewportSize(viewport === "desktop"
       ? { width: 1440, height: 1000 }
       : { width: 390, height: 844 });
@@ -54,7 +55,6 @@ for (const viewport of ["desktop", "mobile"] as const) {
 
     const previews = page.locator('[data-preview-mode="structure"]');
     await expect(previews).toHaveCount(CONTENT_TEMPLATE_REGISTRY.length);
-    await expect(previews).toHaveCount(24);
     await expect(previews.locator("img")).toHaveCount(0);
 
     const outerHeights: number[] = [];
@@ -84,7 +84,7 @@ for (const viewport of ["desktop", "mobile"] as const) {
     expect(new Set(artboardRatios.map((ratio) => ratio.toFixed(2))).size).toBeGreaterThan(4);
   });
 
-  test(`${viewport}：24 张模板缩略图使用真实 Renderer 画幅并保留合同顺序`, async ({ page }) => {
+  test(`${viewport}：${templateCount} 张模板缩略图使用真实 Renderer 画幅并保留合同顺序`, async ({ page }) => {
     const runtimeErrors: string[] = [];
     page.on("pageerror", (error) => runtimeErrors.push(error.message));
     page.on("console", (message) => {
@@ -102,7 +102,9 @@ for (const viewport of ["desktop", "mobile"] as const) {
       contentType: "text/html; charset=utf-8",
       body: gallery(viewport),
     }));
-    await page.route("**/api/settings/public", (route) => route.fulfill({
+    await page.route("**/api/products/catalog/stream**", (route) => route.abort());
+    await page.route("**/api/page-modules/document/stream**", (route) => route.abort());
+    await page.route("**/api/settings/public**", (route) => route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ code: 200, data: {} }),
@@ -113,7 +115,14 @@ for (const viewport of ["desktop", "mobile"] as const) {
     await page.waitForTimeout(500);
     expect(runtimeErrors, "预览测试页不应出现运行时错误").toEqual([]);
     await expect(previews).toHaveCount(CONTENT_TEMPLATE_REGISTRY.length);
-    await expect(previews).toHaveCount(24);
+    const previewImageSources = await previews.locator("img[src]").evaluateAll((nodes) =>
+      nodes.map((node) => (node as HTMLImageElement).currentSrc || (node as HTMLImageElement).src),
+    );
+    expect(previewImageSources.length, "真实 Renderer 预览应加载艺术指导图片").toBeGreaterThan(0);
+    expect(
+      previewImageSources.every((source) => new URL(source).pathname.endsWith(".webp")),
+      "模板预览运行时只允许加载 WebP 派生图，不得把 PNG 母版带入浏览器",
+    ).toBe(true);
     await expect.poll(() => page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     )).toBe(true);
@@ -170,7 +179,7 @@ for (const viewport of ["desktop", "mobile"] as const) {
     });
   });
 
-  test(`${viewport}：24 个模板以同一预览内容生成全尺寸真实 Renderer 证据`, async ({ page }) => {
+  test(`${viewport}：${templateCount} 个模板以同一预览内容生成全尺寸真实 Renderer 证据`, async ({ page }) => {
     const runtimeErrors: string[] = [];
     page.on("pageerror", (error) => runtimeErrors.push(error.message));
     page.on("console", (message) => {
@@ -187,7 +196,9 @@ for (const viewport of ["desktop", "mobile"] as const) {
       contentType: "text/html; charset=utf-8",
       body: gallery(viewport),
     }));
-    await page.route("**/api/settings/public", (route) => route.fulfill({
+    await page.route("**/api/products/catalog/stream**", (route) => route.abort());
+    await page.route("**/api/page-modules/document/stream**", (route) => route.abort());
+    await page.route("**/api/settings/public**", (route) => route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ code: 200, data: {} }),

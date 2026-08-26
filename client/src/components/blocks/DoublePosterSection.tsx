@@ -94,6 +94,10 @@ export default function DoublePosterSection({ module, editMode }: Props) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    if (typeof IntersectionObserver !== "function") {
+      setVisible(true);
+      return;
+    }
     const o = new IntersectionObserver(([e]) => { if (e.isIntersecting) setVisible(true); }, { threshold: 0.06 });
     o.observe(el);
     return () => o.disconnect();
@@ -108,6 +112,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
       );
     };
     syncViewport();
+    if (typeof ResizeObserver !== "function") return;
     const observer = new ResizeObserver(syncViewport);
     observer.observe(element);
     return () => observer.disconnect();

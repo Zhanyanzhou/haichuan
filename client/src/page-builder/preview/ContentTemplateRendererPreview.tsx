@@ -36,8 +36,8 @@ function sanitizePreviewDefaults(value: unknown): unknown {
 }
 
 /**
- * 模板库缩略图直接缩放真实 Puck adapter + 合同根框架。
- * 它只提供裁切视窗，不重新描述角色坐标、顺序或比例。
+ * 结构缩略图与真实 Renderer 均消费同一机器合同。
+ * 调用方必须显式选择需要的证据层级；默认结构模式只用于轻量模板卡片。
  */
 export default function ContentTemplateRendererPreview({
   moduleType,

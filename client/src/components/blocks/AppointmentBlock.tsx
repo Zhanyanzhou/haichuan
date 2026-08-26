@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom';
 import { SecureImage } from '@/components/common/SecureImage';
-import { isSafeInternalPath, resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
+import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
 import { DesignSystemStyles } from '@/page-builder/designSystem/sectionShell';
 import { FONT_DISPLAY, FONT_SANS } from '@/page-builder/designSystem/tokens';
+import { usePublicSiteSettings } from '@/hooks/usePublicSiteSettings';
 
 interface AppointmentBlockProps {
   module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
@@ -11,12 +12,15 @@ interface AppointmentBlockProps {
 
 /**
  * 预约尾章 — Conversion 母版
- * schema v3 页面尾章：内容高度、唯一主行动、可选次级联系方式；不承载表单。
+ * schema v4 页面尾章：内容高度、唯一主行动、可选次级联系方式；不承载表单。
  * 背景图仅是可选氛围层，不参与根角色顺序。
+ * 次级联系电话只读自 SiteSettings，PageDocument 不保存经营事实副本。
  */
 export default function AppointmentBlock({ module, editMode }: AppointmentBlockProps) {
   const { content = {}, styleConfig = {} } = module;
-  const { backgroundImage, title, subtitle, buttonText, phone, altText } = content;
+  const { backgroundImage, title, subtitle, buttonText, altText } = content;
+  const siteSettingsResource = usePublicSiteSettings();
+
   const bgColor = '#FFFFFF';
   const textColor = '#181A1B';
   const mutedColor = '#5F6568';
@@ -25,17 +29,20 @@ export default function AppointmentBlock({ module, editMode }: AppointmentBlockP
   const desktopFocusY = Math.min(100, Math.max(0, Number(styleConfig.desktopFocusY ?? styleConfig.focusY ?? 50)));
   const mobileFocusX = Math.min(100, Math.max(0, Number(styleConfig.mobileFocusX ?? styleConfig.focusX ?? 50)));
   const mobileFocusY = Math.min(100, Math.max(0, Number(styleConfig.mobileFocusY ?? styleConfig.focusY ?? 50)));
-  // 跳转三件套优先,旧草稿裸 linkUrl 字段兜底
-  const targetUrl =
-    resolveLinkTargetUrl({
-      targetType: content.targetType,
-      productCode: content.productCode,
-      productId: content.productId,
-      linkUrl: content.linkUrl,
-    }) || (isSafeInternalPath(content.linkUrl) ? content.linkUrl : '');
-  const normalizedPhone = typeof phone === 'string' ? phone.trim() : '';
-  const validPhone = /^\+?[\d\s-]{6,20}$/.test(normalizedPhone);
-  const phoneHref = validPhone ? normalizedPhone.replace(/[^\d+]/g, '') : '';
+  // 旧草稿裸 linkUrl 仅在指向已登记公开页面时由统一解析器兼容。
+  const targetUrl = resolveLinkTargetUrl({
+    targetType: content.targetType,
+    productCode: content.productCode,
+    productId: content.productId,
+    linkUrl: content.linkUrl,
+  });
+  const unifiedPhone = siteSettingsResource.status === 'loaded'
+    ? String(siteSettingsResource.settings?.contactPhone || '').trim()
+    : '';
+  const phoneDigits = unifiedPhone.replace(/\D/g, '');
+  const phoneHref = phoneDigits.length >= 6 && phoneDigits.length <= 20
+    ? unifiedPhone.replace(/[^\d+]/g, '')
+    : '';
 
   if (!title && !editMode) return null;
 
@@ -111,10 +118,33 @@ export default function AppointmentBlock({ module, editMode }: AppointmentBlockP
           ) : buttonText && targetUrl ? (
             <Link data-content-role="primaryAction" data-editor-field="buttonText linkUrl" to={targetUrl} style={{ display: 'inline-block', paddingBottom: 6, borderBottom: '1px solid #181A1B', color: '#181A1B', fontSize: 'var(--hc-type-caption, 12px)', textDecoration: 'none', letterSpacing: '0.14em' }}>{buttonText}</Link>
           ) : null}
-          {phone && editMode ? (
-            <span className="hc-appointment__contact" data-content-role="secondaryContact" data-editor-field="phone" aria-invalid={!validPhone || undefined} style={{ fontSize: 'var(--hc-type-caption, 12px)', letterSpacing: '0.08em' }}>{phone}</span>
-          ) : phoneHref ? (
-            <a className="hc-appointment__contact" data-content-role="secondaryContact" data-editor-field="phone" href={`tel:${phoneHref}`} style={{ color: textColor, fontSize: 'var(--hc-type-caption, 12px)', letterSpacing: '0.08em', fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>{phone}</a>
+          {editMode && siteSettingsResource.status === 'loading' ? (
+            <span role="status" className="hc-appointment__contact" style={{ color: mutedColor, fontSize: 'var(--hc-type-caption, 12px)' }}>
+              正在读取统一联系电话…
+            </span>
+          ) : null}
+          {editMode && siteSettingsResource.status === 'error' ? (
+            <span role="status" className="hc-appointment__contact" style={{ color: mutedColor, fontSize: 'var(--hc-type-caption, 12px)' }}>
+              统一联系电话暂时无法读取，请稍后重试。
+            </span>
+          ) : null}
+          {editMode && siteSettingsResource.status === 'loaded' && !unifiedPhone ? (
+            <span role="status" className="hc-appointment__contact" style={{ color: mutedColor, fontSize: 'var(--hc-type-caption, 12px)' }}>
+              请先在「店铺资料」中维护联系电话。
+            </span>
+          ) : null}
+          {editMode && unifiedPhone ? (
+            <span className="hc-appointment__contact" data-content-role="secondaryContact" style={{ fontSize: 'var(--hc-type-caption, 12px)', letterSpacing: '0.08em' }}>
+              {unifiedPhone}
+            </span>
+          ) : !editMode && unifiedPhone && phoneHref ? (
+            <a className="hc-appointment__contact" data-content-role="secondaryContact" href={`tel:${phoneHref}`} style={{ color: textColor, fontSize: 'var(--hc-type-caption, 12px)', letterSpacing: '0.08em', fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+              {unifiedPhone}
+            </a>
+          ) : !editMode && unifiedPhone ? (
+            <span className="hc-appointment__contact" data-content-role="secondaryContact" style={{ color: textColor, fontSize: 'var(--hc-type-caption, 12px)', letterSpacing: '0.08em', fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+              {unifiedPhone}
+            </span>
           ) : null}
         </div>
       </div>

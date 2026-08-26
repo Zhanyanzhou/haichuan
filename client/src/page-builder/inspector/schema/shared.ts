@@ -39,6 +39,7 @@ export function altTextField(limit = 80): TextFieldDef {
     key: "altText",
     label: "图片替代文字",
     control: "text",
+    required: true,
     maxLength: limit,
     hint: "提升无障碍与搜索表现",
     placeholder: "如 足金镯面錾刻细节",

@@ -19,6 +19,7 @@ import {
   MobileOutlined,
   MoreOutlined,
   RedoOutlined,
+  ReloadOutlined,
   SaveOutlined,
   SendOutlined,
   SettingOutlined,
@@ -26,7 +27,11 @@ import {
   UploadOutlined,
 } from "@ant-design/icons";
 import type { EditorPageKey } from "@/page-builder/config/editorPages";
-import { createEditorPageDefault } from "@/page-builder/config/editorPages";
+import {
+  createEditorPageDefault,
+  ensureEditorPageStructure,
+  getEditorPage,
+} from "@/page-builder/config/editorPages";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { BLOCK_META } from "@/page-builder/config/blockMeta";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
@@ -126,11 +131,14 @@ export default function EditorToolbar({
   publishing,
   saving,
   hasPendingDraft,
+  publishedNeedsRevalidation,
   viewingPublished,
   previewMode,
   hasUnsavedChanges,
+  canPublish,
   publishValidationState,
   publishErrorCount,
+  publishSettingsErrorCount,
   draftSavedAtLabel,
   onPublish,
   onSaveDraft,
@@ -140,6 +148,7 @@ export default function EditorToolbar({
   onDiscardDraft,
   onOpenRevisions,
   onOpenPageSettings,
+  onRetryPublishValidation,
   onPreviewModeChange,
   onDataChange,
   onCanvasDataSync,
@@ -148,11 +157,14 @@ export default function EditorToolbar({
   publishing: boolean;
   saving: boolean;
   hasPendingDraft: boolean;
+  publishedNeedsRevalidation: boolean;
   viewingPublished: boolean;
   previewMode: boolean;
   hasUnsavedChanges: boolean;
+  canPublish: boolean;
   publishValidationState: "checking" | "current" | "stale" | "error";
   publishErrorCount: number;
+  publishSettingsErrorCount: number;
   draftSavedAtLabel: string | null;
   onPublish: (data: unknown, locateBlock: (blockIndex: number) => void) => void;
   onSaveDraft: (data: unknown) => void;
@@ -162,6 +174,7 @@ export default function EditorToolbar({
   onDiscardDraft: () => void;
   onOpenRevisions: () => void;
   onOpenPageSettings: () => void;
+  onRetryPublishValidation: () => void;
   onPreviewModeChange: (previewing: boolean) => void;
   onDataChange: (data: unknown) => void;
   /** 整页替换或历史导航后同步父层 data prop，不推进已保存草稿基线。 */
@@ -191,7 +204,9 @@ export default function EditorToolbar({
   const selectedLabel = selectedModule
     ? getModuleDisplayName(selectedModule.type, selectedModule.props)
     : null;
-  const publishUnavailableReason = viewingPublished
+  const publishUnavailableReason = !canPublish
+    ? "当前账号只能编辑草稿，需由管理员发布"
+    : viewingPublished
     ? "正在查看线上版本，无需重复发布"
     : publishValidationState === "checking"
       ? "正在核对发布资格"
@@ -366,6 +381,13 @@ export default function EditorToolbar({
         const text = await file.text();
         const raw = JSON.parse(text);
         const puck = raw?.puckData ?? raw;
+        const declaredPageKey = typeof raw?.pageKey === "string" ? raw.pageKey : null;
+        if (declaredPageKey && declaredPageKey !== pageKey) {
+          message.error(
+            `导入失败：该方案属于 ${declaredPageKey} 页面，不能覆盖当前 ${pageKey} 页面`,
+          );
+          return;
+        }
         if (
           !puck ||
           typeof puck !== "object" ||
@@ -376,8 +398,8 @@ export default function EditorToolbar({
           return;
         }
         // 未知模块类型直接拒绝,避免画布出现未注册坏块。
-        // 系统区块(业务功能区由动态页 ensureEditorPageStructure 固定附加,
-        // 网站全局设置随画布结构)不在 BLOCK_META,但导出 JSON 含它们,须一并放行
+        // 系统区块不在 BLOCK_META，但旧导出 JSON 可能含有；先识别为已知版本，
+        // 再由 ensureEditorPageStructure 按当前页面合同移除或重建。
         const knownTypes = new Set([
           ...Object.keys(BLOCK_META),
           "网站全局设置",
@@ -400,23 +422,65 @@ export default function EditorToolbar({
           return;
         }
         const migrated = migratePuckData(puck);
+        const structured = ensureEditorPageStructure(pageKey, migrated);
+        const listPageBlocks = (data: unknown) => {
+          if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+          const document = data as {
+            content?: unknown[];
+            zones?: Record<string, unknown>;
+          };
+          return [
+            ...(Array.isArray(document.content) ? document.content : []),
+            ...Object.values(document.zones ?? {}).flatMap((blocks) =>
+              Array.isArray(blocks) ? blocks : [],
+            ),
+          ].filter((block) => block && typeof block === "object" && !Array.isArray(block));
+        };
+        const importedBlocks = listPageBlocks(migrated);
+        const normalizedBlocks = listPageBlocks(structured);
+        const normalizedBrandBlocks = normalizedBlocks.filter(
+          (block) => (block as { type?: string }).type !== "业务功能区",
+        );
+        const removedBlockCount = Math.max(
+          0,
+          importedBlocks.length - normalizedBlocks.length,
+        );
+        if (normalizedBrandBlocks.length === 0) {
+          message.error("导入失败：当前页面能力过滤后没有可编辑的品牌内容模块");
+          return;
+        }
+        const pageLabel = getEditorPage(pageKey).label;
         modal.confirm({
           title: "导入装修方案？",
-          content:
-            "当前画布内容将被导入的方案整体替换；尚未保存的修改会丢失，发布前不影响线上页面。",
+          content: (
+            <div>
+              <p>
+                当前画布内容将被导入的方案整体替换；尚未保存的修改会丢失，发布前不影响线上页面。
+              </p>
+              {removedBlockCount > 0 ? (
+                <p>
+                  将移除 {removedBlockCount} 个不适用于{pageLabel}的系统或模板区块；固定业务区会按当前页面合同重新建立。
+                </p>
+              ) : null}
+            </div>
+          ),
           okText: "导入并替换画布",
           cancelText: "取消",
           onOk: () => {
-            dispatch({ type: "setData", data: migrated, recordHistory: true });
-            onCanvasDataSync(migrated);
-            message.success("方案已导入画布，请检查后保存草稿");
+            dispatch({ type: "setData", data: structured, recordHistory: true });
+            onCanvasDataSync(structured);
+            message.success(
+              removedBlockCount > 0
+                ? `方案已导入并移除 ${removedBlockCount} 个不适用区块，请检查后保存草稿`
+                : "方案已导入画布，请检查后保存草稿",
+            );
           },
         });
       } catch {
         message.error("导入失败：文件不是合法的 JSON");
       }
     },
-    [dispatch, message, modal, onCanvasDataSync],
+    [dispatch, message, modal, onCanvasDataSync, pageKey],
   );
 
   /* ── 套用推荐结构:整页替换为该页面的预置结构(模块全部可编辑,不锁定) ── */
@@ -472,14 +536,52 @@ export default function EditorToolbar({
       : [];
 
   const compactActionItems = [
+    ...(publishValidationState === "error" && !viewingPublished
+      ? [{
+          key: "retry-publish-validation",
+          icon: <ReloadOutlined />,
+          label: "重新检查发布资格",
+          onClick: onRetryPublishValidation,
+        }]
+      : []),
+    ...(publishValidationState === "current"
+      && publishSettingsErrorCount > 0
+      && !viewingPublished
+      ? [{
+          key: "complete-publish-settings",
+          icon: <SettingOutlined />,
+          label: `完善发布资料（${publishSettingsErrorCount}）`,
+          danger: true,
+          onClick: onOpenPageSettings,
+        }]
+      : []),
+    ...((publishValidationState === "error"
+      || (publishValidationState === "current" && publishSettingsErrorCount > 0))
+      && !viewingPublished
+      ? [{ type: "divider" as const }]
+      : []),
+    ...(publishedNeedsRevalidation
+      ? [{
+          key: "publication-revalidation",
+          icon: <SettingOutlined />,
+          label: "线上版本需重新审核",
+          danger: true,
+          onClick: onOpenPageSettings,
+        }]
+      : []),
+    ...(publishedNeedsRevalidation
+      ? [{ type: "divider" as const }]
+      : []),
     ...draftMenuItems,
     ...(draftMenuItems.length > 0 ? [{ type: "divider" as const }] : []),
-    {
-      key: "recommended",
-      icon: <LayoutOutlined />,
-      label: "套用推荐结构",
-      onClick: applyRecommendedStructure,
-    },
+    ...(!viewingPublished
+      ? [{
+          key: "recommended",
+          icon: <LayoutOutlined />,
+          label: "套用推荐结构",
+          onClick: applyRecommendedStructure,
+        }]
+      : []),
     {
       key: "revisions",
       icon: <HistoryOutlined />,
@@ -489,7 +591,7 @@ export default function EditorToolbar({
     {
       key: "settings",
       icon: <SettingOutlined />,
-      label: "SEO 设置",
+      label: "发布设置",
       onClick: onOpenPageSettings,
     },
     { type: "divider" as const },
@@ -499,17 +601,19 @@ export default function EditorToolbar({
       label: "导出方案 JSON",
       onClick: exportPageDecoration,
     },
-    {
-      key: "import",
-      icon: <UploadOutlined />,
-      label: "导入方案 JSON",
-      onClick: () => {
-        const input = document.getElementById(
-          "homepage-editor-import-file",
-        ) as HTMLInputElement | null;
-        input?.click();
-      },
-    },
+    ...(!viewingPublished
+      ? [{
+          key: "import",
+          icon: <UploadOutlined />,
+          label: "导入方案 JSON",
+          onClick: () => {
+            const input = document.getElementById(
+              "homepage-editor-import-file",
+            ) as HTMLInputElement | null;
+            input?.click();
+          },
+        }]
+      : []),
   ];
 
   const menuItems = compactActionItems.map((item) => {
@@ -577,6 +681,47 @@ export default function EditorToolbar({
       </div>
 
       <div className="homepage-editor__toolbar-left-context">
+        {!viewingPublished && publishValidationState === "error" ? (
+          <Button
+            type="text"
+            danger
+            size="small"
+            icon={<ReloadOutlined />}
+            onClick={onRetryPublishValidation}
+            aria-label="发布资格检查失败，重新检查"
+            title="当前草稿已保留；重新调用服务端发布预检"
+          >
+            重新检查发布资格
+          </Button>
+        ) : null}
+        {!viewingPublished
+        && publishValidationState === "current"
+        && publishSettingsErrorCount > 0 ? (
+          <Button
+            type="text"
+            danger
+            size="small"
+            icon={<SettingOutlined />}
+            onClick={onOpenPageSettings}
+            aria-label={`有 ${publishSettingsErrorCount} 项页面发布资料问题，打开发布设置`}
+            title="补齐内容责任、SEO 与当前公开素材授权"
+          >
+            发布资料待完善 {publishSettingsErrorCount}
+          </Button>
+        ) : null}
+        {publishedNeedsRevalidation ? (
+          <Button
+            type="text"
+            danger
+            size="small"
+            icon={<SettingOutlined />}
+            onClick={onOpenPageSettings}
+            aria-label="线上版本未通过当前正式内容门禁，打开发布设置"
+            title="旧线上快照缺少当前发布验收记录；补齐发布设置并重新发布前，公开端使用安全短页"
+          >
+            线上版本需重新审核
+          </Button>
+        ) : null}
         <DraftStatusBadge
           mode={getDraftStatusMode({
             saving,
@@ -614,7 +759,12 @@ export default function EditorToolbar({
               type="text"
               size="small"
               icon={<UndoOutlined />}
-              disabled={!history.hasPast || previewMode || historyTransactionPending}
+              disabled={
+                viewingPublished ||
+                !history.hasPast ||
+                previewMode ||
+                historyTransactionPending
+              }
               onClick={() => navigateHistory("back")}
               aria-label="撤销"
               title="撤销"
@@ -623,7 +773,12 @@ export default function EditorToolbar({
               type="text"
               size="small"
               icon={<RedoOutlined />}
-              disabled={!history.hasFuture || previewMode || historyTransactionPending}
+              disabled={
+                viewingPublished ||
+                !history.hasFuture ||
+                previewMode ||
+                historyTransactionPending
+              }
               onClick={() => navigateHistory("forward")}
               aria-label="重做"
               title="重做"
@@ -632,7 +787,12 @@ export default function EditorToolbar({
               type="text"
               size="small"
               icon={<CopyOutlined />}
-              disabled={!selectedModule || selectedLocked || previewMode}
+              disabled={
+                viewingPublished ||
+                !selectedModule ||
+                selectedLocked ||
+                previewMode
+              }
               onClick={duplicateSelected}
               aria-label="复制当前模块"
               title={selectedLocked ? "固定模块不能复制" : "复制当前模块"}
@@ -642,7 +802,12 @@ export default function EditorToolbar({
               danger
               size="small"
               icon={<DeleteOutlined />}
-              disabled={!selectedModule || selectedLocked || previewMode}
+              disabled={
+                viewingPublished ||
+                !selectedModule ||
+                selectedLocked ||
+                previewMode
+              }
               onClick={deleteSelected}
               aria-label="删除当前模块"
               title={selectedLocked ? "固定模块不能删除" : "删除当前模块"}
@@ -707,12 +872,22 @@ export default function EditorToolbar({
           placement="bottomRight"
           menu={{ items: menuItems, onClick: handleMenuClick }}
         >
-          <Button
-            className="homepage-editor__toolbar-more"
-            size="small"
-            icon={<MoreOutlined />}
-            aria-label="更多编辑操作"
-          >
+        <Button
+          className="homepage-editor__toolbar-more"
+          size="small"
+          danger={publishedNeedsRevalidation}
+          icon={<MoreOutlined />}
+          aria-label={
+            publishedNeedsRevalidation
+              ? "更多编辑操作，线上版本需重新审核"
+              : "更多编辑操作"
+          }
+          title={
+            publishedNeedsRevalidation
+              ? "线上版本需重新审核；打开菜单处理发布设置"
+              : "更多编辑操作"
+          }
+        >
             更多
           </Button>
         </Dropdown>

@@ -28,4 +28,4 @@ for (const template of contract.templates) {
 }
 assert.match(runtime, /ContentTemplateContractFrame[\s\S]*mode="public"/, "公开 Renderer 未接入统一合同根框架");
 assert.match(frame, /data-content-template-renderer="real"/, "统一合同根框架缺少真实 Renderer 标记");
-console.log("内容模板根构图、缩略图与 24 个真实 Renderer 注册一致。");
+console.log(`内容模板根构图、缩略图与 ${contract.templates.length} 个真实 Renderer 注册一致。`);

@@ -1,11 +1,9 @@
-import { useEffect, useState } from "react";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
-import { settingsApi } from "@/services/api";
-import { unwrapResponse } from "@/utils/unwrap";
+import { usePublicSiteSettings } from "@/hooks/usePublicSiteSettings";
 
 interface StoreInfoBlockProps {
   module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
@@ -23,37 +21,26 @@ const MUTED = "#6E7477";
  */
 export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps) {
   const { content = {}, styleConfig = {} } = module;
-  const { useSiteSettings = true, storeName, address, hours, phone, mapUrl, image } = content;
-  const [siteSettingsState, setSiteSettingsState] = useState<{
-    status: "loading" | "loaded" | "error";
-    value?: Record<string, unknown>;
-  }>({ status: "loading" });
-
-  useEffect(() => {
-    if (!useSiteSettings) return;
-    let cancelled = false;
-    setSiteSettingsState({ status: "loading" });
-    settingsApi.getPublicSettings()
-      .then((response) => {
-        if (!cancelled) {
-          setSiteSettingsState({ status: "loaded", value: unwrapResponse<Record<string, unknown>>(response) });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setSiteSettingsState({ status: "error" });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [useSiteSettings]);
-
-  const unifiedSettings = useSiteSettings && siteSettingsState.status === "loaded"
-    ? siteSettingsState.value
+  const { image } = content;
+  const siteSettingsResource = usePublicSiteSettings();
+  const unifiedSettings = siteSettingsResource.status === "loaded"
+    ? siteSettingsResource.settings
     : undefined;
-  const resolvedStoreName = unifiedSettings ? String(unifiedSettings.siteName || "") : storeName;
-  const resolvedAddress = unifiedSettings ? String(unifiedSettings.contactAddress || "") : address;
-  const resolvedHours = unifiedSettings ? String(unifiedSettings.businessHours || "") : hours;
-  const resolvedPhone = unifiedSettings ? String(unifiedSettings.contactPhone || "") : phone;
+  const resolvedAddress = String(unifiedSettings?.contactAddress || "");
+  const resolvedHours = String(unifiedSettings?.businessHours || "");
+  const resolvedPhone = String(unifiedSettings?.contactPhone || "");
+  const rawMapUrl = String(unifiedSettings?.storeMapUrl || "").trim();
+  const resolvedMapUrl = /^https?:\/\//i.test(rawMapUrl) ? rawMapUrl : "";
+  const hasVisitDetails = Boolean(
+    resolvedAddress || resolvedHours || resolvedPhone || resolvedMapUrl,
+  );
+  const configuredStoreName = String(unifiedSettings?.storeName || "");
+  const resolvedStoreName = configuredStoreName
+    || (hasVisitDetails ? String(unifiedSettings?.siteName || "") : "");
+  const hasStoreFacts = Boolean(
+    resolvedStoreName || hasVisitDetails,
+  );
+  const showCopy = Boolean(editMode || hasStoreFacts);
   const bgColor = styleConfig.bgColor || '#FFFFFF';
   // 槽位比例选项(契约派生):门店空间图属横构图物性,预设不含纯竖版
   const STORE_RATIO_DESKTOP = resolveContractAspectRatio("storeInfo", "store", content.imageRatio, "desktop");
@@ -65,16 +52,20 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
     { label: "CONTACT", value: resolvedPhone },
   ];
 
+  if (!editMode && !image && !hasStoreFacts) return null;
+
   return (
     <DecorSection master="editorial-split" background={bgColor}>
-      <div className="hc-store-info">
+      <div className={`hc-store-info${showCopy ? "" : " hc-store-info--media-only"}`}>
         <style>{`
           .hc-store-info {
             display: grid;
             grid-template-columns: 62fr 38fr;
             gap: clamp(28px, 4vw, 56px);
             align-items: stretch;
+            overflow: hidden;
           }
+          .hc-store-info--media-only { grid-template-columns: minmax(0, 1fr); }
           .hc-store-info__media { aspect-ratio: ${STORE_RATIO_DESKTOP}; overflow: hidden; background: #F4F5F5; }
           .hc-store-info__media img { width: 100%; height: 100%; object-fit: cover; display: block; }
           .hc-store-info__copy {
@@ -99,9 +90,10 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
             />
           )}
         </div>
+        {showCopy ? (
         <div className="hc-store-info__copy" data-content-role="copy">
           {resolvedStoreName ? (
-            <h2 data-editor-field="storeName"
+            <h2
               style={{
                 margin: 0,
                 fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`,
@@ -114,10 +106,24 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
               {resolvedStoreName}
             </h2>
           ) : null}
+          {editMode && siteSettingsResource.status === "loading" ? (
+            <p role="status" style={{ margin: 0, color: MUTED }}>
+              正在读取统一门店资料…
+            </p>
+          ) : null}
+          {editMode && siteSettingsResource.status === "error" ? (
+            <p role="status" style={{ margin: 0, color: MUTED }}>
+              统一门店资料暂时无法读取，请稍后重试。
+            </p>
+          ) : null}
+          {editMode && siteSettingsResource.status === "loaded" && !hasStoreFacts ? (
+            <p role="status" style={{ margin: 0, color: MUTED }}>
+              请先在「店铺资料」中维护门店名称、地址、营业时间和电话。
+            </p>
+          ) : null}
           <div data-content-role="details" style={{ display: "grid", gap: 14 }}>
             {infoRows.filter((row) => row.value).map((row) => (
               <p key={row.label}
-                data-editor-field={row.label === "ADDRESS" ? "address" : row.label === "HOURS" ? "hours" : "phone"}
                 style={{ margin: 0, display: "grid", gap: 4 }}
               >
                 <span
@@ -136,8 +142,13 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
               </p>
             ))}
           </div>
-          {mapUrl && (
-            <a data-content-role="action" data-editor-field="mapUrl" href={mapUrl} target="_blank" rel="noreferrer"
+          {resolvedMapUrl && (
+            <a
+              data-content-role="action"
+              href={resolvedMapUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={editMode ? (event) => event.preventDefault() : undefined}
               style={{
                 alignSelf: "flex-start",
                 display: "inline-block",
@@ -154,6 +165,7 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
             </a>
           )}
         </div>
+        ) : null}
       </div>
     </DecorSection>
   );

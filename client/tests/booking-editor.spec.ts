@@ -47,10 +47,18 @@ test.describe("Booking 黄金模板（独立属性面板与画布）", () => {
       contentType: "image/svg+xml",
       body: fixtureSvg,
     }));
+    await page.route("**/api/settings/public**", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: 200,
+        data: { contactPhone: "400-111-2222" },
+      }),
+    }));
     await page.goto("/__booking-editor");
   });
 
-  test("第一操作区即时更新画布，且始终只有一个主行动和次级电话", async ({ page }) => {
+  test("第一操作区即时更新画布，次级电话只读统一设置", async ({ page }) => {
     const firstTask = page.getByRole("region", { name: "核心文字和主行动" });
     await expect(firstTask.getByText("核心文字和主行动")).toBeVisible();
     const titleInput = firstTask.locator('[data-inspector-field="title"] input');
@@ -60,11 +68,24 @@ test.describe("Booking 黄金模板（独立属性面板与画布）", () => {
     await expect(canvas.locator('h2[data-editor-field="title"]')).toHaveText("预约私人鉴赏");
     await expect(canvas.locator('[data-content-role="primaryAction"]')).toHaveCount(1);
     await expect(canvas.locator('[data-content-role="secondaryContact"]')).toHaveCount(1);
+    await expect(canvas.locator('[data-content-role="secondaryContact"]')).toHaveText("400-111-2222");
+    await expect(firstTask.locator('[data-inspector-field="phone"]')).toHaveCount(0);
+    await expect(canvas.locator('[data-editor-field="phone"]')).toHaveCount(0);
+    await expect(canvas).not.toContainText("400-000-0000");
+    await expect(page.getByTestId("booking-migrated-state")).toContainText("legacy-root");
+    await expect(page.getByTestId("booking-migrated-state")).toContainText("legacy-zone");
+    await expect(page.getByTestId("booking-migrated-state")).not.toContainText("phone");
+    await expect(page.getByTestId("booking-migrated-state")).not.toContainText("400-000-0000");
+    await expect(page.getByTestId("booking-migrated-state")).toContainText(
+      '"productCode":"HC-LEGACY-001"',
+    );
+    await expect(page.getByTestId("booking-migrated-state")).toContainText(
+      '"productId":42',
+    );
+    await expect(page.getByTestId("booking-migrated-state")).toContainText(
+      '"linkUrl":"/not-a-route"',
+    );
     await expect(canvas.locator("form")).toHaveCount(0);
-
-    const phoneInput = firstTask.locator('[data-inspector-field="phone"] input');
-    await phoneInput.fill("not-a-phone");
-    await expect(canvas.locator('[data-content-role="secondaryContact"]')).toHaveAttribute("aria-invalid", "true");
   });
 
   test("比例、安全文字带与键盘画面调整保存为稀疏实例覆盖", async ({ page }) => {

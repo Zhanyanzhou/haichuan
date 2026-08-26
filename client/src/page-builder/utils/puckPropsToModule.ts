@@ -461,8 +461,8 @@ export function convertPuckProps(
           subtitle: props.subtitle,
           body: props.body,
           buttonText: props.buttonText,
-          // 三件套统一解析为最终跳转地址；旧草稿无 targetType 时按 linkUrl 推断，行为兼容
-          linkUrl: resolveLinkTargetUrl(props) || props.linkUrl || "",
+          // 三件套统一解析为最终跳转地址；旧草稿仅在指向已登记页面时按 linkUrl 推断。
+          linkUrl: resolveLinkTargetUrl(props),
         },
         {
           template: props.template || "imageLeft",
@@ -537,7 +537,6 @@ export function convertPuckProps(
           subtitle: props.subtitle,
           buttonText: props.buttonText,
           linkUrl: props.linkUrl,
-          phone: props.phone,
           altText: props.altText,
         },
         { template: props.tone || "ivory" },
@@ -594,12 +593,6 @@ export function convertPuckProps(
       return baseModule(
         "storeInfo",
         {
-          useSiteSettings: props.useSiteSettings !== false,
-          storeName: props.storeName,
-          address: props.address,
-          hours: props.hours,
-          phone: props.phone,
-          mapUrl: props.mapUrl,
           image: props.image,
           // 槽位比例选项:门店空间横构图,渲染端校验回退
           imageRatio: props.imageRatio || "3:2",

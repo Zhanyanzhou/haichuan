@@ -54,8 +54,8 @@ const EDITOR_SURFACE_CSS = `
 }
 .hc-contract-frame--editor[data-visual-panel-mode="design"][data-contract-tone="dark"] {
   --hc-contract-canvas: #181A1B;
-  --hc-contract-surface: #252829;
-  --hc-contract-surface-strong: #303436;
+  --hc-contract-surface: rgba(95, 101, 104, 0.18);
+  --hc-contract-surface-strong: rgba(95, 101, 104, 0.34);
   --hc-contract-ink: #F7F8F8;
   --hc-contract-muted: #DDE1E2;
   --hc-contract-line: #5F6568;
@@ -85,8 +85,8 @@ const EDITOR_SURFACE_CSS = `
 .hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="structured"] {
   background: #DDE1E2 !important;
 }
-.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="product"],
-.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="structured"] {
+.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="product"]:not([data-hc-keyboard-node]),
+.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="structured"]:not([data-hc-keyboard-node]) {
   position: relative;
 }
 .hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="media"] :where(img, picture, video, canvas, iframe),
@@ -98,12 +98,21 @@ const EDITOR_SURFACE_CSS = `
   [data-hc-template-slot-kind="text"],
   [data-hc-template-slot-kind="action"]
 ) {
-  position: relative;
   border-color: transparent !important;
   min-height: 32px;
   background: #F4F5F5 !important;
   color: transparent !important;
   text-shadow: none !important;
+}
+.hc-contract-frame--editor[data-visual-panel-mode="design"] :is(
+  [data-hc-template-slot-kind="text"],
+  [data-hc-template-slot-kind="action"]
+):not([data-hc-keyboard-node]) {
+  position: relative;
+}
+.hc-contract-frame--editor[data-visual-panel-mode="design"]
+  [data-hc-template-slot-kind="text"][data-hc-keyboard-node]:empty {
+  min-width: min(160px, 100%);
 }
 .hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind]::after {
   content: attr(data-hc-template-slot-label);
@@ -251,7 +260,7 @@ const EDITOR_SURFACE_CSS = `
 .hc-contract-frame--editor [data-hc-node-hud] button:hover,
 .hc-contract-frame--editor [data-hc-node-hud] button:focus-visible,
 .hc-contract-frame--editor [data-hc-node-hud] button[aria-pressed="true"] {
-  background: #EEF3F6;
+  background: #EEF4F7;
   color: #335F7D;
   outline: none;
 }
@@ -259,7 +268,7 @@ const EDITOR_SURFACE_CSS = `
   box-shadow: inset 0 0 0 1px #335F7D;
 }
 .hc-contract-frame--editor [data-hc-node-hud] button:disabled {
-  color: #9AA0A3;
+  color: #B8BEC1;
   cursor: not-allowed;
 }
 .hc-contract-frame--editor [data-hc-resize-handle] {
@@ -416,6 +425,16 @@ function getVisualNodeKind(
   if (kind === "text" || kind === "action" || kind === "product") return kind;
   if (kind === "collection") return "structured";
   return undefined;
+}
+
+function supportsCapabilityOnViewport(
+  object: ReturnType<typeof findContentTemplateEditableObject>,
+  capability: Parameters<typeof contentTemplateObjectHasCapability>[1],
+  viewport: "desktop" | "mobile",
+) {
+  if (!contentTemplateObjectHasCapability(object, capability)) return false;
+  const allowedViewports = object?.capabilityViewports?.[capability];
+  return !allowedViewports || allowedViewports.includes(viewport);
 }
 
 function getTemplateSlotLabel(kind: VisualNodeKind) {
@@ -607,6 +626,20 @@ function isHtmlElement(value: unknown): value is HTMLElement {
       typeof (value as HTMLElement).closest === "function" &&
       typeof (value as HTMLElement).getBoundingClientRect === "function",
   );
+}
+
+function getVisualRoleIdForViewport(
+  element: HTMLElement | null | undefined,
+  viewport: "desktop" | "mobile",
+) {
+  if (!element) return undefined;
+  return viewport === "mobile"
+    ? element.dataset.contentRoleMobile ||
+        element.dataset.contentRole ||
+        element.dataset.contentRoleDesktop
+    : element.dataset.contentRoleDesktop ||
+        element.dataset.contentRole ||
+        element.dataset.contentRoleMobile;
 }
 
 function findModuleFrameElement(element: HTMLElement, root: HTMLElement) {
@@ -802,6 +835,10 @@ function createInstanceCss(
       if (!editableObject || (!slotCapability && !textCapability)) continue;
       const hasCapability = (capability: Parameters<typeof contentTemplateObjectHasCapability>[1]) =>
         contentTemplateObjectHasCapability(editableObject, capability);
+      const hasCapabilityOnViewport = (
+        capability: Parameters<typeof contentTemplateObjectHasCapability>[1],
+        viewport: "desktop" | "mobile",
+      ) => supportsCapabilityOnViewport(editableObject, capability, viewport);
       const selector = slotCapability
         ? `${root} :is([data-content-role="${nodeId}"],[data-content-role-desktop="${nodeId}"],[data-content-role-mobile="${nodeId}"])`
         : `${root} :is([data-content-role="${nodeId}"],[data-content-role-desktop="${nodeId}"],[data-content-role-mobile="${nodeId}"],[data-editor-field~="${nodeId}"])`;
@@ -816,8 +853,10 @@ function createInstanceCss(
           ? numeric
           : undefined;
       };
-      const desktopZIndex = hasCapability("layer") ? safeZIndex(zIndexByViewport.desktop) : undefined;
-      const mobileZIndex = hasCapability("layer")
+      const desktopZIndex = hasCapabilityOnViewport("layer", "desktop")
+        ? safeZIndex(zIndexByViewport.desktop)
+        : undefined;
+      const mobileZIndex = hasCapabilityOnViewport("layer", "mobile")
         ? safeZIndex(zIndexByViewport.mobile)
         : undefined;
       const rectRule = (
@@ -833,10 +872,10 @@ function createInstanceCss(
         if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.0001 || y + height > 1.0001) return "";
         return `position:absolute!important;box-sizing:border-box!important;left:var(${visualNodeLayoutVar(nodeId, viewport, "left")},${x * 100}%)!important;top:var(${visualNodeLayoutVar(nodeId, viewport, "top")},${y * 100}%)!important;width:var(${visualNodeLayoutVar(nodeId, viewport, "width")},${width * 100}%)!important;height:var(${visualNodeLayoutVar(nodeId, viewport, "height")},${height * 100}%)!important;margin:0!important;max-width:none!important;max-height:none!important;z-index:${zIndex ?? 2}`;
       };
-      const desktopRect = hasCapability("layout")
+      const desktopRect = hasCapabilityOnViewport("layout", "desktop")
         ? rectRule(rectByViewport.desktop, desktopZIndex, "desktop")
         : "";
-      const mobileRect = hasCapability("layout")
+      const mobileRect = hasCapabilityOnViewport("layout", "mobile")
         ? rectRule(rectByViewport.mobile, mobileZIndex, "mobile")
         : "";
       if (desktopRect || mobileRect) rules.push(`${root}>:where(section,div){position:relative}`);
@@ -1223,10 +1262,13 @@ export default function ContentTemplateContractFrame({
   const [templateSlotOverlays, setTemplateSlotOverlays] = useState<TemplateSlotOverlayBox[]>([]);
   const [gesturePreview, setGesturePreview] = useState<GesturePreviewState | null>(null);
   const [gesturePhase, setGesturePhase] = useState<GesturePhase>("idle");
+  const [activeViewport, setActiveViewport] = useState<"desktop" | "mobile">("desktop");
   const blockId = typeof props?.id === "string" ? props.id : "";
   const selectedHere = mode === "editor" && selection?.blockId === blockId
     ? selection
     : null;
+  const panelModeHere = selectedHere ? panelMode : "content";
+  const editorModeHere = selectedHere ? editorMode : "select";
   const layoutCapabilities = contract?.editorCapabilities.layoutOverrides;
   const selectedSlot = selectedHere
     ? layoutCapabilities?.slots?.find((slot) => slot.roleId === selectedHere.nodeId)
@@ -1239,7 +1281,7 @@ export default function ContentTemplateContractFrame({
     : undefined;
   const canAdjustLayout = Boolean(
     (selectedSlot || selectedTextRole) &&
-      contentTemplateObjectHasCapability(selectedEditableObject, "layout"),
+      supportsCapabilityOnViewport(selectedEditableObject, "layout", activeViewport),
   );
   const canAdjustMediaView = Boolean(
     selectedSlot && (
@@ -1312,10 +1354,10 @@ export default function ContentTemplateContractFrame({
     }
     handledLayerCommandRef.current = layerCommand.revision;
     const editableObject = findContentTemplateEditableObject(contract, layerCommand.nodeId);
-    const allowedNode = contentTemplateObjectHasCapability(editableObject, "layer");
-    if (!allowedNode) return;
     const sourceWindow = rootRef.current?.ownerDocument.defaultView ?? window;
     const viewport = sourceWindow.innerWidth <= 767 ? "mobile" : "desktop";
+    const allowedNode = supportsCapabilityOnViewport(editableObject, "layer", viewport);
+    if (!allowedNode) return;
     const currentZIndex = resolveContractVisualNode(
       contract,
       propsRef.current,
@@ -1366,7 +1408,7 @@ export default function ContentTemplateContractFrame({
     const updateOverlay = () => {
       const rootBounds = root.getBoundingClientRect();
       const targetBounds = target.getBoundingClientRect();
-      const frameBounds = findFrameElement(target, root).getBoundingClientRect();
+      const frameBounds = findModuleFrameElement(target, root).getBoundingClientRect();
       const left = targetBounds.left - rootBounds.left;
       const top = targetBounds.top - rootBounds.top;
       const width = targetBounds.width;
@@ -1434,17 +1476,13 @@ export default function ContentTemplateContractFrame({
     root.querySelectorAll<HTMLElement>(
       "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
     ).forEach((element) => {
-      const nodeId = element.dataset.contentRole ||
-        element.dataset.contentRoleDesktop ||
-        element.dataset.contentRoleMobile ||
+      const nodeId = getVisualRoleIdForViewport(element, activeViewport) ||
         element.dataset.editorField?.split(/\s+/).find(Boolean);
       if (!nodeId || !allowedNodes.has(nodeId)) return;
       const ancestor = element.parentElement?.closest<HTMLElement>(
         "[data-content-role],[data-content-role-desktop],[data-content-role-mobile]",
       );
-      const ancestorNodeId = ancestor?.dataset.contentRole ||
-        ancestor?.dataset.contentRoleDesktop ||
-        ancestor?.dataset.contentRoleMobile;
+      const ancestorNodeId = getVisualRoleIdForViewport(ancestor, activeViewport);
       if (ancestorNodeId === nodeId && allowedNodes.has(ancestorNodeId)) return;
       const nodeKind = getVisualNodeKind(contract, nodeId);
       if (!nodeKind) return;
@@ -1480,11 +1518,11 @@ export default function ContentTemplateContractFrame({
         }
       });
     };
-  }, [blockId, contract, mode]);
+  }, [activeViewport, blockId, contract, mode]);
 
   useEffect(() => {
     const root = rootRef.current;
-    if (mode !== "editor" || panelMode !== "design" || !root) {
+    if (mode !== "editor" || panelModeHere !== "design" || !root) {
       setTemplateSlotOverlays([]);
       return;
     }
@@ -1530,7 +1568,7 @@ export default function ContentTemplateContractFrame({
       ownerWindow?.removeEventListener("resize", updateOverlays);
       ownerWindow?.removeEventListener("scroll", updateOverlays, true);
     };
-  }, [contract, mode, panelMode, props]);
+  }, [contract, mode, panelModeHere, props]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -1573,6 +1611,9 @@ export default function ContentTemplateContractFrame({
     let viewportWidth = ownerWindow?.innerWidth;
     const cancelOnViewportWidthChange = () => {
       const nextWidth = ownerWindow?.innerWidth;
+      if (nextWidth !== undefined) {
+        setActiveViewport(nextWidth <= 767 ? "mobile" : "desktop");
+      }
       if (nextWidth === viewportWidth) return;
       viewportWidth = nextWidth;
       cancelActiveGesture(true);
@@ -1580,6 +1621,7 @@ export default function ContentTemplateContractFrame({
     const cancelOnBlur = () => cancelActiveGesture(true);
     // Puck 会按内容高度同步调整 iframe。对象实时预览可能因此触发仅高度变化的
     // resize；这不是视口/断点变化，若在这里释放 pointer capture 会中断拖动。
+    cancelOnViewportWidthChange();
     ownerWindow?.addEventListener("resize", cancelOnViewportWidthChange);
     ownerWindow?.addEventListener("blur", cancelOnBlur);
     return () => {
@@ -1726,8 +1768,6 @@ export default function ContentTemplateContractFrame({
   const nodeSelector = (nodeId: string) =>
     `[data-hc-instance="${scopeId}"] :is([data-content-role="${nodeId}"],[data-content-role-desktop="${nodeId}"],[data-content-role-mobile="${nodeId}"],[data-editor-field~="${nodeId}"])`;
 
-  const findFrameElement = findModuleFrameElement;
-
   const collectSnapCandidates = (
     root: HTMLElement,
     frameElement: HTMLElement,
@@ -1753,7 +1793,10 @@ export default function ContentTemplateContractFrame({
     root.querySelectorAll<HTMLElement>(
       "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
     ).forEach((element) => {
-      if (element.getClientRects().length === 0 || findFrameElement(element, root) !== frameElement) return;
+      if (
+        element.getClientRects().length === 0
+        || findModuleFrameElement(element, root) !== frameElement
+      ) return;
       const nodeId =
         (viewport === "mobile"
           ? element.dataset.contentRoleMobile
@@ -1794,13 +1837,7 @@ export default function ContentTemplateContractFrame({
         "[data-content-role],[data-content-role-desktop],[data-content-role-mobile]",
       );
       if (roleElement) {
-        const nodeId =
-          (activeViewport === "mobile"
-            ? roleElement.dataset.contentRoleMobile
-            : roleElement.dataset.contentRoleDesktop) ||
-          roleElement.dataset.contentRole ||
-          roleElement.dataset.contentRoleDesktop ||
-          roleElement.dataset.contentRoleMobile;
+        const nodeId = getVisualRoleIdForViewport(roleElement, activeViewport);
         const kind = nodeId ? getVisualNodeKind(contract, nodeId) : undefined;
         if (nodeId && kind) {
           return {
@@ -1817,12 +1854,7 @@ export default function ContentTemplateContractFrame({
     const directRoleElement = target.closest<HTMLElement>(
       "[data-content-role],[data-content-role-desktop],[data-content-role-mobile]",
     );
-    const directRoleId = directRoleElement?.dataset.contentRole ||
-      (activeViewport === "mobile"
-        ? directRoleElement?.dataset.contentRoleMobile
-        : directRoleElement?.dataset.contentRoleDesktop) ||
-      directRoleElement?.dataset.contentRoleDesktop ||
-      directRoleElement?.dataset.contentRoleMobile;
+    const directRoleId = getVisualRoleIdForViewport(directRoleElement, activeViewport);
     const directVisualKind = directRoleId
       ? getVisualNodeKind(contract, directRoleId)
       : undefined;
@@ -1847,12 +1879,7 @@ export default function ContentTemplateContractFrame({
     const roleElement = target.closest<HTMLElement>(
       "[data-content-role],[data-content-role-desktop],[data-content-role-mobile]",
     );
-    const roleId = roleElement?.dataset.contentRole ||
-      (activeViewport === "mobile"
-        ? roleElement?.dataset.contentRoleMobile
-        : roleElement?.dataset.contentRoleDesktop) ||
-      roleElement?.dataset.contentRoleDesktop ||
-      roleElement?.dataset.contentRoleMobile;
+    const roleId = getVisualRoleIdForViewport(roleElement, activeViewport);
     if (!roleId || !roleElement) return null;
     const kind = getVisualNodeKind(contract, roleId);
     if (!kind) return null;
@@ -1882,11 +1909,47 @@ export default function ContentTemplateContractFrame({
     rect: { x: number; y: number; width: number; height: number },
     phase: "update" | "commit" = "commit",
   ) => {
-    const next = setVisualOverridePath(
+    let next = setVisualOverridePath(
       propsRef.current?.__instanceOverrides,
       ["nodes", drag.nodeId, "rectByViewport", drag.viewport],
       rect,
     );
+    const currentOverrides = resolveInstanceOverrides(contract, propsRef.current);
+    const currentFrame = isRecord(currentOverrides?.frame)
+      ? currentOverrides.frame
+      : {};
+    const currentAspectRatios = isRecord(currentFrame.aspectRatioByViewport)
+      ? currentFrame.aspectRatioByViewport
+      : {};
+    const currentAspectRatio = Number(
+      currentAspectRatios[drag.viewport] ?? currentFrame.aspectRatio,
+    );
+    const hasStableFrame = (
+      Number.isFinite(currentAspectRatio) &&
+      currentAspectRatio >= 0.25 &&
+      currentAspectRatio <= 4
+    ) || (
+      typeof currentFrame.heightPreset === "string" &&
+      contract.editorCapabilities.layoutOverrides?.framePresets?.includes(
+        currentFrame.heightPreset,
+      )
+    );
+    const liveAspectRatio = drag.frameWidth / Math.max(1, drag.frameHeight);
+    if (
+      !hasStableFrame &&
+      Number.isFinite(liveAspectRatio) &&
+      liveAspectRatio >= 0.25 &&
+      liveAspectRatio <= 4
+    ) {
+      // 文档流节点首次转为自由定位时会退出 grid/flex 布局。若不同时固定
+      // 当前真实框架比例，容器会因失去流内子项而收缩，使“只横移”伴随
+      // 纵向跳动和尺寸变化。比例和节点矩形在同一历史事务中提交。
+      next = setVisualOverridePath(
+        next,
+        ["frame", "aspectRatioByViewport", drag.viewport],
+        liveAspectRatio,
+      );
+    }
     if (phase === "update") {
       previewGesture(next);
       return;
@@ -1975,7 +2038,7 @@ export default function ContentTemplateContractFrame({
     const visualCapabilities = contract.editorCapabilities.layoutOverrides;
     const editableObject = findContentTemplateEditableObject(contract, node.nodeId);
     const layoutAllowed = Boolean(
-      contentTemplateObjectHasCapability(editableObject, "layout") && (
+      supportsCapabilityOnViewport(editableObject, "layout", activeViewport) && (
         visualCapabilities?.slots?.some((slot) => slot.roleId === node.nodeId) ||
         visualCapabilities?.textRoles?.some((role) => role.roleId === node.nodeId)
       ),
@@ -1992,7 +2055,7 @@ export default function ContentTemplateContractFrame({
       // 根框架前面会插入合同样式节点，firstElementChild 因此可能是零尺寸
       // <style>。从当前槽位向上找到框架的直接内容子节点，才能按真实模板
       // 构图计算初始矩形；否则会把文字错误扩成 100% × 100%。
-      const frameElement = findFrameElement(node.element, event.currentTarget);
+      const frameElement = findModuleFrameElement(node.element, event.currentTarget);
       const frameBounds = frameElement.getBoundingClientRect();
       const rootBounds = event.currentTarget.getBoundingClientRect();
       const snapCandidates = collectSnapCandidates(
@@ -2148,7 +2211,7 @@ export default function ContentTemplateContractFrame({
     const mediaFocusAllowed = mediaViewAllowed &&
       contentTemplateObjectHasCapability(editableObject, "focus") &&
       mediaSlot?.focusByViewport === true;
-    const layoutAllowed = contentTemplateObjectHasCapability(editableObject, "layout") && (
+    const layoutAllowed = supportsCapabilityOnViewport(editableObject, "layout", activeViewport) && (
       capabilities?.slots?.some((slot) => slot.roleId === node.nodeId) ||
       capabilities?.textRoles?.some((role) => role.roleId === node.nodeId)
     );
@@ -2194,7 +2257,7 @@ export default function ContentTemplateContractFrame({
       return;
     }
     if (activeMode !== "adjust-layout" || !layoutAllowed) return;
-    const frameElement = findFrameElement(node.element, event.currentTarget);
+    const frameElement = findModuleFrameElement(node.element, event.currentTarget);
     const frameBounds = frameElement.getBoundingClientRect();
     const nodeBounds = node.element.getBoundingClientRect();
     const effective = resolveExplicitVisualNode(contract, propsRef.current, node.nodeId, activeViewport);
@@ -2242,8 +2305,8 @@ export default function ContentTemplateContractFrame({
       startClientX: 0,
       startClientY: 0,
       startRect: rect,
-      frameWidth: 1,
-      frameHeight: 1,
+      frameWidth: Math.max(1, frameBounds.width),
+      frameHeight: Math.max(1, frameBounds.height),
       frameOffsetX: 0,
       frameOffsetY: 0,
       lockRatio: false,
@@ -2444,9 +2507,6 @@ export default function ContentTemplateContractFrame({
     cancelActiveGesture(true);
   };
 
-  const activeViewport = (rootRef.current?.ownerDocument.defaultView?.innerWidth ?? 1024) <= 767
-    ? "mobile" as const
-    : "desktop" as const;
   const selectedVisualNode = selectedHere
     ? resolveContractVisualNode(
         contract,
@@ -2545,8 +2605,8 @@ export default function ContentTemplateContractFrame({
         : typeof instanceLayout.compositionPreset === "string"
           ? instanceLayout.compositionPreset
           : undefined}
-      data-visual-editor-mode={mode === "editor" ? editorMode : undefined}
-      data-visual-panel-mode={mode === "editor" ? panelMode : undefined}
+      data-visual-editor-mode={mode === "editor" ? editorModeHere : undefined}
+      data-visual-panel-mode={mode === "editor" ? panelModeHere : undefined}
       data-visual-selected-node={selectedHere?.nodeId}
       data-hc-snap-active={activeGuides.x || activeGuides.y ? "true" : undefined}
       data-hc-gesture-phase={mode === "editor" && gesturePhase !== "idle" ? gesturePhase : undefined}
@@ -2573,9 +2633,9 @@ export default function ContentTemplateContractFrame({
         <span role="status" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>{liveMessage}</span>
       ) : null}
       {renderedChild}
-      {(editorMode === "adjust-layout" || activeGuides.x || activeGuides.y || (selectedHere && selectionOverlay) || templateSlotOverlays.length > 0) ? (
+      {((selectedHere && editorMode === "adjust-layout") || activeGuides.x || activeGuides.y || (selectedHere && selectionOverlay) || templateSlotOverlays.length > 0) ? (
         <div data-hc-editor-overlay>
-          {mode === "editor" && editorMode === "adjust-layout" ? (
+          {selectedHere && editorMode === "adjust-layout" ? (
             <span aria-hidden="true" data-hc-layout-grid />
           ) : null}
           {templateSlotOverlays.map((slot, index) => (

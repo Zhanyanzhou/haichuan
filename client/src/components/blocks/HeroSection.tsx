@@ -298,10 +298,10 @@ export default function HeroSection({
           inset: 0;
           z-index: 2;
           pointer-events: none;
-          background: linear-gradient(90deg, rgba(10, 12, 13, 0.58) 0%, rgba(10, 12, 13, 0.26) 38%, rgba(10, 12, 13, 0) 68%);
+          background: linear-gradient(90deg, rgba(16, 18, 19, 0.58) 0%, rgba(16, 18, 19, 0.26) 38%, rgba(16, 18, 19, 0) 68%);
         }
         .hc-phase1-hero__copy-shade[data-align="center"] {
-          background: linear-gradient(0deg, rgba(10, 12, 13, 0.54) 0%, rgba(10, 12, 13, 0.12) 38%, rgba(10, 12, 13, 0) 68%);
+          background: linear-gradient(0deg, rgba(16, 18, 19, 0.54) 0%, rgba(16, 18, 19, 0.12) 38%, rgba(16, 18, 19, 0) 68%);
         }
         .hc-phase1-hero--edit .hc-phase1-hero__copy-band {
           pointer-events: auto;

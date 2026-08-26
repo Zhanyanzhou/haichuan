@@ -14,12 +14,21 @@ import { fromEvent, interval, map, merge, Observable, startWith } from "rxjs";
 import {
   CONTENT_TEMPLATE_ASSET_POLICY,
   CONTENT_TEMPLATE_BY_MODULE_TYPE,
+  CONTENT_TEMPLATE_PAGE_METADATA,
+  CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
+  createContentTemplatePublicationAttestation,
   getContentTemplatePageRule,
   getContentTemplateIssues,
   getContentTemplateCompletion,
+  getContentTemplateLinkTargetReferences,
+  getContentTemplateMediaReferences,
+  getPageDocumentMediaReferences,
+  hasCurrentContentTemplatePublicationAttestation,
+  isContentTemplatePageTarget,
   isContentTemplateAllowedForPage,
   sanitizeContentTemplateDefaultContent,
   sanitizeContentTemplateLayoutData,
+  withoutContentTemplatePublicationAttestation,
   type ContentTemplateDefaultContentValue,
   type ContentTemplateIssue,
 } from "./content-template-contract";
@@ -121,13 +130,11 @@ const PUCK_TEXT_FIELD_LIMITS: Record<string, number> = {
   phone: 30,
 };
 
-/**
- * 发布校验：页面 SEO/OG 字段长度上限（字段名 → 最大字符数）。
- * 与搜索引擎/社交分享的常见展示宽度对齐，宽松取值。
- */
-const PUCK_SEO_LIMITS: Record<string, number> = {
-  seoTitle: 120,
-  seoDescription: 320,
+const PAGE_METADATA_FIELD_LABELS: Readonly<Record<string, string>> = {
+  seoTitle: "页面标题",
+  seoDescription: "页面描述",
+  ogImage: "社交分享图",
+  contentOwner: "内容责任团队 / 岗位",
 };
 
 /**
@@ -148,15 +155,39 @@ const PLACEHOLDER_MARKERS = [
  * 不能被复制进账号私有模板。模块级清单用于保留普通营销文案与展示配置，
  * 同时阻断门店、评价、资质、活动权益等结构化事实快照。
  */
+const STORE_INFO_PAGE_DOCUMENT_FACT_FIELDS: ReadonlySet<string> = new Set([
+  "useSiteSettings",
+  "storeName",
+  "address",
+  "hours",
+  "phone",
+  "mapUrl",
+  "storeMapUrl",
+]);
+
+const APPOINTMENT_PAGE_DOCUMENT_FACT_FIELDS: ReadonlySet<string> = new Set([
+  "phone",
+]);
+
+const PAGE_DOCUMENT_FACT_FIELDS_BY_MODULE: Readonly<Record<string, ReadonlySet<string>>> = {
+  门店信息: STORE_INFO_PAGE_DOCUMENT_FACT_FIELDS,
+  预约入口: APPOINTMENT_PAGE_DOCUMENT_FACT_FIELDS,
+};
+
+const PAGE_DOCUMENT_FACT_SOURCE_LABEL_BY_MODULE: Readonly<Record<string, string>> = {
+  门店信息: "统一门店资料",
+  预约入口: "统一联系电话",
+};
+
 const PERSONAL_TEMPLATE_FACT_FIELDS_BY_MODULE: Readonly<Record<string, ReadonlySet<string>>> = {
   定制流程: new Set(["steps"]),
   分类卡片: new Set(["categories"]),
   按场景选购: new Set(["categories"]),
   服务承诺: new Set(["cards"]),
   资质证书: new Set(["certificates"]),
-  门店信息: new Set(["useSiteSettings", "storeName", "address", "hours", "phone", "mapUrl"]),
+  门店信息: STORE_INFO_PAGE_DOCUMENT_FACT_FIELDS,
   真实评价与实拍: new Set(["testimonials"]),
-  预约入口: new Set(["phone"]),
+  预约入口: APPOINTMENT_PAGE_DOCUMENT_FACT_FIELDS,
   限时活动: new Set(["targetDate", "benefits"]),
 };
 
@@ -492,11 +523,26 @@ export class PageModulesService {
     return this.prisma.pageDocument.findUnique({ where: { pageKey } });
   }
 
+  private getPublicPageMetadata(metadata: unknown): Record<string, string> {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      return {};
+    }
+    const source = metadata as Record<string, unknown>;
+    return Object.fromEntries(
+      CONTENT_TEMPLATE_PAGE_METADATA.publicFields.flatMap((field) => {
+        const value = source[field];
+        return typeof value === "string" && value.trim()
+          ? [[field, value.trim()]]
+          : [];
+      }),
+    );
+  }
+
   /**
    * 前台只能读取最后一次已发布的快照。编辑草稿会覆盖 PageDocument，
    * 因此不能直接把草稿文档暴露给公共接口。
    */
-  async getPublishedPageDocument(pageKey: string) {
+  private async getPublishedPageDocumentSnapshot(pageKey: string) {
     const document = await this.prisma.pageDocument.findUnique({
       where: { pageKey },
     });
@@ -521,6 +567,43 @@ export class PageModulesService {
     };
   }
 
+  async getPublishedPageDocument(pageKey: string) {
+    const snapshot = await this.getPublishedPageDocumentSnapshot(pageKey);
+    if (!snapshot) return null;
+    if (!hasCurrentContentTemplatePublicationAttestation(snapshot.metadata)) {
+      return {
+        pageKey: snapshot.pageKey,
+        status: "INVALID",
+        invalidReason: "publication-revalidation-required",
+        publishedAt: snapshot.publishedAt,
+        updatedAt: snapshot.updatedAt,
+        version: snapshot.version,
+      };
+    }
+    return {
+      pageKey: snapshot.pageKey,
+      puckData: snapshot.puckData,
+      // 公开端只需要 SEO 字段；内容责任人与其他后台元数据不得随页面响应泄漏。
+      metadata: this.getPublicPageMetadata(snapshot.metadata),
+      status: snapshot.status,
+      publishedAt: snapshot.publishedAt,
+      updatedAt: snapshot.updatedAt,
+      version: snapshot.version,
+    };
+  }
+
+  /** 后台编辑器需要完整发布元数据，才能正确比较草稿并还原线上版本。 */
+  async getPublishedPageDocumentForAdmin(pageKey: string) {
+    const snapshot = await this.getPublishedPageDocumentSnapshot(pageKey);
+    if (!snapshot) return null;
+    return {
+      ...snapshot,
+      metadata: withoutContentTemplatePublicationAttestation(snapshot.metadata),
+      publicationAttested:
+        hasCurrentContentTemplatePublicationAttestation(snapshot.metadata),
+    };
+  }
+
   async savePageDocument(
     pageKey: string,
     puckData: any,
@@ -528,12 +611,35 @@ export class PageModulesService {
     editorVersion?: string,
     expectedUpdatedAt?: string,
   ) {
+    const pageRule = getContentTemplatePageRule(pageKey);
+    if (!pageRule) {
+      throw new BadRequestException(`页面标识「${pageKey}」未在页面合同注册`);
+    }
+    if (
+      pageRule.contentPlacement === "root-only"
+      && puckData?.zones !== undefined
+      && (
+        !puckData.zones
+        || typeof puckData.zones !== "object"
+        || Array.isArray(puckData.zones)
+        || Object.values(puckData.zones).some(
+          (blocks) => !Array.isArray(blocks) || blocks.length > 0,
+        )
+      )
+    ) {
+      throw new BadRequestException(
+        "页面内容模块只能位于根内容 content，不能放入插槽 zones",
+      );
+    }
+    const normalizedPuckData = this.normalizePageDocumentPuckData(puckData);
     // 区块合同版本只存在于 puckData.props.__contentTemplate。页面级摘要仅兼容旧数据读取，
     // 普通保存不得重新写入，更不能借用 schemaVersion/templateVersion 标记区块合同。
+    const metadataWithoutPublicationAttestation =
+      withoutContentTemplatePublicationAttestation(metadata);
     const metadataWithoutContract =
       metadata && typeof metadata === "object" && !Array.isArray(metadata)
         ? Object.fromEntries(
-            Object.entries(metadata).filter(
+            Object.entries(metadataWithoutPublicationAttestation).filter(
               ([key]) => key !== "contentTemplateContract",
             ),
           )
@@ -553,7 +659,7 @@ export class PageModulesService {
       const updated = await this.prisma.pageDocument.updateMany({
         where: { pageKey, updatedAt: existing.updatedAt },
         data: {
-          puckData,
+          puckData: normalizedPuckData,
           metadata: metadataWithoutContract,
           editorVersion,
           status: "DRAFT",
@@ -569,7 +675,7 @@ export class PageModulesService {
     return this.prisma.pageDocument.create({
       data: {
         pageKey,
-        puckData,
+        puckData: normalizedPuckData,
         metadata: metadataWithoutContract,
         editorVersion,
         schemaVersion: 1,
@@ -591,6 +697,7 @@ export class PageModulesService {
         where: { pageKey },
       });
       if (!doc) throw new Error("Page document not found");
+      const normalizedPuckData = this.normalizePageDocumentPuckData(doc.puckData);
       const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
       if (expected && doc.updatedAt.getTime() !== expected.getTime()) {
         throw new ConflictException(
@@ -599,7 +706,7 @@ export class PageModulesService {
       }
       const validation = await this.collectPageDocumentValidation(
         tx,
-        doc.puckData,
+        normalizedPuckData,
         doc.metadata,
         pageKey,
       );
@@ -623,13 +730,18 @@ export class PageModulesService {
       });
       const nextVersion = (lastRev?.version || 0) + 1;
       const publishedAt = new Date();
+      const revisionMetadata = {
+        ...withoutContentTemplatePublicationAttestation(doc.metadata),
+        [CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY]:
+          createContentTemplatePublicationAttestation(),
+      };
 
       await tx.pageDocumentRevision.create({
         data: {
           documentId: doc.id,
           version: nextVersion,
-          puckData: doc.puckData as any,
-          metadata: doc.metadata as any,
+          puckData: normalizedPuckData as any,
+          metadata: revisionMetadata as any,
           status: "published",
           publishedBy: userId,
           publishedAt,
@@ -647,6 +759,7 @@ export class PageModulesService {
       const published = await tx.pageDocument.update({
         where: { id: doc.id },
         data: {
+          puckData: normalizedPuckData as any,
           status: "PUBLISHED",
           publishedAt,
           publishedBy: userId,
@@ -699,11 +812,11 @@ export class PageModulesService {
     pageKey: string,
   ): Promise<{ valid: boolean; errors: string[]; issues: ContentTemplateIssue[] }> {
     const issues = [
-      ...this.collectContentTemplateIssues(puckData),
+      ...this.collectContentTemplateIssues(puckData, pageKey),
       ...(await this.collectPuckDataErrors(db, puckData, pageKey)),
-      ...this.collectMetadataErrors(metadata).map((message) =>
-        this.createServerValidationIssue(message, "metadata"),
-      ),
+      ...(await this.collectSiteSettingsReadinessIssues(db, puckData, pageKey)),
+      ...this.collectMetadataIssues(metadata),
+      ...this.collectMediaRightsIssues(puckData, metadata, pageKey),
     ];
     const errors = issues
       .filter((issue) => issue.severity === "error")
@@ -711,7 +824,10 @@ export class PageModulesService {
     return { valid: errors.length === 0, errors, issues };
   }
 
-  private collectContentTemplateIssues(puckData: unknown): ContentTemplateIssue[] {
+  private collectContentTemplateIssues(
+    puckData: unknown,
+    pageKey: string,
+  ): ContentTemplateIssue[] {
     if (!puckData || typeof puckData !== "object") return [];
     const document = puckData as {
       content?: unknown;
@@ -738,7 +854,12 @@ export class PageModulesService {
         collectBlock(block, `content[${index}]`),
       );
     }
-    if (document.zones && typeof document.zones === "object") {
+    const pageRule = getContentTemplatePageRule(pageKey);
+    if (
+      pageRule?.contentPlacement !== "root-only"
+      && document.zones
+      && typeof document.zones === "object"
+    ) {
       Object.entries(document.zones).forEach(([zoneKey, blocks]) => {
         if (!Array.isArray(blocks)) return;
         blocks.forEach((block, index) =>
@@ -766,6 +887,146 @@ export class PageModulesService {
       path,
       message,
     };
+  }
+
+  /**
+   * 正式联系与门店资料只读自 SiteSetting；PageDocument 只决定是否使用相关展示区块。
+   * 缺少可选资料不会改变既有发布资格，但必须把公开端的真实降级结果反馈给运营。
+   */
+  private async collectSiteSettingsReadinessIssues(
+    db: any,
+    puckData: unknown,
+    pageKey: string,
+  ): Promise<ContentTemplateIssue[]> {
+    if (!puckData || typeof puckData !== "object" || Array.isArray(puckData)) return [];
+    const document = puckData as {
+      content?: unknown;
+      zones?: Record<string, unknown>;
+    };
+    const rootContent = Array.isArray(document.content) ? document.content : [];
+    const blocks: Array<{
+      type?: unknown;
+      props?: Record<string, unknown>;
+      path: string;
+    }> = rootContent.map((block, index) => ({
+      ...(block && typeof block === "object" && !Array.isArray(block)
+        ? block as { type?: unknown; props?: Record<string, unknown> }
+        : {}),
+      path: `content[${index}]`,
+    }));
+    const pageRule = getContentTemplatePageRule(pageKey);
+    if (
+      pageRule?.contentPlacement !== "root-only"
+      && document.zones
+      && typeof document.zones === "object"
+      && !Array.isArray(document.zones)
+    ) {
+      for (const [zoneKey, zoneBlocks] of Object.entries(document.zones)) {
+        if (!Array.isArray(zoneBlocks)) continue;
+        zoneBlocks.forEach((block, index) => {
+          blocks.push({
+            ...(block && typeof block === "object" && !Array.isArray(block)
+              ? block as { type?: unknown; props?: Record<string, unknown> }
+              : {}),
+            path: `zones.${zoneKey}[${index}]`,
+          });
+        });
+      }
+    }
+
+    const visibleStoreBlocks = blocks.filter(
+      (block) => block.type === "门店信息" && block.props?.isVisible !== false,
+    );
+    const visibleAppointmentBlocks = blocks.filter(
+      (block) => block.type === "预约入口" && block.props?.isVisible !== false,
+    );
+    const contactBusinessRegion = pageKey === "contact"
+      ? blocks.find(
+          (block) =>
+            block.type === "业务功能区"
+            && block.props?.pageKey === "contact",
+        )
+      : undefined;
+    if (
+      visibleStoreBlocks.length === 0
+      && visibleAppointmentBlocks.length === 0
+      && !contactBusinessRegion
+    ) return [];
+
+    const stored = await db.siteSetting.findUnique({ where: { key: "site" } });
+    const settings = stored?.value && typeof stored.value === "object" && !Array.isArray(stored.value)
+      ? stored.value as Record<string, unknown>
+      : {};
+    const hasText = (field: string) => this.isNonEmptyString(settings[field]);
+    const mapUrl = hasText("storeMapUrl") ? String(settings.storeMapUrl).trim() : "";
+    const hasStoreFacts = [
+      "storeName",
+      "contactAddress",
+      "businessHours",
+      "contactPhone",
+    ].some(hasText) || /^https?:\/\//i.test(mapUrl);
+    const hasContactSummary = [
+      "contactPhone",
+      "contactEmail",
+      "contactAddress",
+      "businessHours",
+    ].some(hasText);
+    const issues: ContentTemplateIssue[] = [];
+
+    if (contactBusinessRegion && !hasContactSummary) {
+      issues.push({
+        code: "page-validation-site-settings-readiness",
+        severity: "warning",
+        layer: "page",
+        blockId: this.isNonEmptyString(contactBusinessRegion.props?.id)
+          ? contactBusinessRegion.props.id
+          : undefined,
+        path: "siteSettings.contact",
+        message:
+          "统一联系资料尚未配置；公开联系页仍可提交咨询，但不会显示服务热线、邮箱、地址或服务时间。请先到「店铺资料」维护。",
+      });
+    }
+
+    if (!hasStoreFacts) {
+      for (const block of visibleStoreBlocks) {
+        const props = block.props ?? {};
+        const blockId = this.isNonEmptyString(props.id) ? props.id : undefined;
+        const displayName = this.isNonEmptyString(props.moduleName)
+          ? props.moduleName.trim()
+          : "门店信息";
+        const hasImage = this.isNonEmptyString(props.image);
+        issues.push({
+          code: "page-validation-site-settings-readiness",
+          severity: "warning",
+          layer: "page",
+          ...(blockId ? { blockId } : {}),
+          path: `${block.path}.props.image`,
+          message: hasImage
+            ? `「${displayName}」尚未配置统一门店资料；公开端将仅显示门店图片。请先到「店铺资料」维护门店名称、地址、营业时间、电话或地图链接。`
+            : `「${displayName}」的统一门店资料与门店图片均未配置；该模块在公开端不会显示。请补充门店图片，或到「店铺资料」维护正式门店资料。`,
+        });
+      }
+    }
+
+    if (!hasText("contactPhone")) {
+      for (const block of visibleAppointmentBlocks) {
+        const props = block.props ?? {};
+        const blockId = this.isNonEmptyString(props.id) ? props.id : undefined;
+        const displayName = this.isNonEmptyString(props.moduleName)
+          ? props.moduleName.trim()
+          : "预约入口";
+        issues.push({
+          code: "page-validation-site-settings-readiness",
+          severity: "warning",
+          layer: "page",
+          ...(blockId ? { blockId } : {}),
+          path: "siteSettings.contactPhone",
+          message: `「${displayName}」的统一联系电话尚未配置；公开端将不显示次级电话，主预约入口仍可使用。请先到「店铺资料」维护联系电话。`,
+        });
+      }
+    }
+
+    return issues;
   }
 
   private async collectPuckDataErrors(
@@ -796,6 +1057,8 @@ export class PageModulesService {
     const pageRule = getContentTemplatePageRule(pageKey);
     if (!/^[a-z0-9-]{1,50}$/i.test(pageKey)) {
       errors.push("页面标识不合法");
+    } else if (!pageRule) {
+      errors.push(`页面标识「${pageKey}」未在页面合同注册`);
     }
 
     if (!puckData || typeof puckData !== "object") {
@@ -856,6 +1119,22 @@ export class PageModulesService {
         errors.push(`${label}：区块 ID 不能为空`);
       }
 
+      const prohibitedFactFields = PAGE_DOCUMENT_FACT_FIELDS_BY_MODULE[type];
+      if (prohibitedFactFields) {
+        const sourceLabel = PAGE_DOCUMENT_FACT_SOURCE_LABEL_BY_MODULE[type] || "统一业务资料";
+        for (const field of prohibitedFactFields) {
+          if (!Object.prototype.hasOwnProperty.call(props, field)) continue;
+          const errorIndex = errors.push(
+            `${label}：${field} 属于${sourceLabel}，PageDocument 不得保存业务事实副本`,
+          ) - 1;
+          errorContexts[errorIndex] = {
+            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+            path: `${path}.props.${field}`,
+            field,
+          };
+        }
+      }
+
       // 编辑器说明区不会进入前台；隐藏区块也不应因未完成内容阻断其他模块发布。
       if (EDITOR_ONLY_COMPONENTS.has(type) || props.isVisible === false) {
         attachBlockContext(props);
@@ -898,6 +1177,17 @@ export class PageModulesService {
           field,
         };
       }
+      for (const missingAlt of completion?.content.missingCollectionAltText ?? []) {
+        const errorIndex = errors.push(
+          `${label}：第 ${missingAlt.index + 1} 项${missingAlt.altPolicy === "derived" ? "替代文字来源" : "替代文字"}不能为空`,
+        ) - 1;
+        errorContexts[errorIndex] = {
+          blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+          path: `${path}.props.${missingAlt.collectionFieldKey}[${missingAlt.index}].${missingAlt.altFieldKey}`,
+          field: missingAlt.collectionFieldKey,
+          index: missingAlt.index,
+        };
+      }
       for (const collection of completion?.collections.invalid ?? []) {
         const errorIndex = errors.push(
           `${label}：${collection.fieldKey} 数量应为 ${collection.min}–${collection.max} 项，当前为 ${collection.count} 项`,
@@ -934,95 +1224,164 @@ export class PageModulesService {
         );
       };
 
-      for (const field of PUCK_IMAGE_FIELDS) {
-        validateAsset(props[field], `${label}：${field} 图片`);
+      if (contentTemplate) {
+        for (const reference of getContentTemplateMediaReferences(
+          type,
+          props,
+          `${path}.props`,
+        )) {
+          validateAsset(reference.url, `${label}：${reference.field} 素材`);
+        }
+      } else {
+        // 非模板兼容分支才使用旧字段表；正式内容模板统一由机器合同派生。
+        for (const field of PUCK_IMAGE_FIELDS) {
+          validateAsset(props[field], `${label}：${field} 图片`);
+        }
+        validateAsset(props.videoUrl, `${label}：videoUrl 视频`);
       }
 
-      validateAsset(props.videoUrl, `${label}：videoUrl 视频`);
-
-      for (const field of PUCK_LINK_FIELDS) {
+      for (const field of contentTemplate ? ["mapUrl"] : PUCK_LINK_FIELDS) {
         const value = props[field];
         if (this.isNonEmptyString(value) && !this.isSafeLink(value)) {
           errors.push(`${label}：${field} 链接不合法`);
         }
       }
 
-      if (contentTemplate?.supportsLinkTarget) {
-        const targetType = typeof props.targetType === "string" ? props.targetType : "";
-        const linkUrl = typeof props.linkUrl === "string" ? props.linkUrl.trim() : "";
-        const productCode = this.isNonEmptyString(props.productCode) ? props.productCode.trim() : "";
-        const productId = Number(props.productId);
-        // 老版本没有 targetType 时保持旧 linkUrl 行为，任何新合同状态都必须完整。
-        if (targetType === "none" && linkUrl) {
-          errors.push(`${label}：不跳转时不能保留 linkUrl`);
-        } else if (targetType === "product") {
+      for (const reference of getContentTemplateLinkTargetReferences(
+        type,
+        props,
+        `${path}.props`,
+      )) {
+        const itemLabel = reference.index === undefined
+          ? label
+          : `${label}：第 ${reference.index + 1} 项`;
+        const contextField = (field: string) =>
+          reference.index === undefined ? field : reference.field;
+        const pushLinkError = (message: string, field: string) => {
+          const errorIndex = errors.push(`${itemLabel}：${message}`) - 1;
+          errorContexts[errorIndex] = {
+            blockId: reference.blockId,
+            path: `${reference.path}.${field}`,
+            field: contextField(field),
+            ...(reference.index === undefined ? {} : { index: reference.index }),
+          };
+        };
+        const targetType = this.isNonEmptyString(reference.targetType)
+          ? reference.targetType.trim()
+          : "";
+        const productCode = this.isNonEmptyString(reference.productCode)
+          ? reference.productCode.trim()
+          : "";
+        const hasProductIdValue = reference.productId !== undefined
+          && reference.productId !== null
+          && String(reference.productId).trim() !== "";
+        const productId = Number(reference.productId);
+        // 历史 LinkTargetField 用 0 表示“未选择商品”；它不是业务引用。
+        // 其他非空值（含负数和非数字）仍作为残留进入后续错误分支。
+        const hasProductIdTarget = hasProductIdValue && productId !== 0;
+        const linkUrl = this.isNonEmptyString(reference.linkUrl)
+          ? reference.linkUrl.trim()
+          : "";
+        const legacyLink = this.isNonEmptyString(reference.legacyLink)
+          ? reference.legacyLink.trim()
+          : "";
+        const hasProductTarget = Boolean(productCode || hasProductIdTarget);
+        const hasPageTarget = Boolean(linkUrl || legacyLink);
+        const inferredTargetType = targetType || (
+          hasProductTarget && !hasPageTarget
+            ? "product"
+            : hasPageTarget && !hasProductTarget
+              ? "page"
+              : "none"
+        );
+        const hasActionText = this.isNonEmptyString(reference.actionText);
+
+        if (!targetType && hasProductTarget && hasPageTarget) {
+          pushLinkError("旧版行动目标同时包含商品与页面去向，请重新选择唯一去向", reference.targetTypeFieldKey);
+          continue;
+        }
+        if (!["none", "product", "page"].includes(inferredTargetType)) {
+          pushLinkError("行动目标类型不合法", reference.targetTypeFieldKey);
+          continue;
+        }
+        if (reference.actionTextFieldKey) {
+          if (hasActionText && inferredTargetType === "none") {
+            pushLinkError("已填写行动文案，必须设置有效去向", reference.targetTypeFieldKey);
+          } else if (!hasActionText && inferredTargetType !== "none") {
+            pushLinkError("已设置行动去向，必须填写行动文案", reference.actionTextFieldKey);
+          }
+        } else if (reference.required && inferredTargetType === "none") {
+          pushLinkError("该公开条目必须设置有效去向", reference.targetTypeFieldKey);
+        }
+
+        if (inferredTargetType === "none") {
+          if (hasProductTarget || hasPageTarget) {
+            pushLinkError("不跳转时不能保留商品或页面去向", reference.targetTypeFieldKey);
+          }
+          continue;
+        }
+
+        if (inferredTargetType === "product") {
+          if (hasPageTarget) {
+            pushLinkError("商品跳转不能同时保留页面链接", reference.linkUrlFieldKey);
+            continue;
+          }
+          if (productCode && hasProductIdTarget) {
+            pushLinkError("商品跳转只能保留一个商品编号", reference.productCodeFieldKey);
+            continue;
+          }
           if (productCode) {
             productCodes.add(productCode);
             const references = productCodeReferences.get(productCode) ?? [];
             references.push({
-              blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
-              path: `${path}.productCode`,
-              label,
-              field: "productCode",
+              blockId: reference.blockId,
+              path: `${reference.path}.${reference.productCodeFieldKey}`,
+              label: itemLabel,
+              field: contextField(reference.productCodeFieldKey),
+              ...(reference.index === undefined ? {} : { index: reference.index }),
             });
             productCodeReferences.set(productCode, references);
           } else if (!Number.isInteger(productId) || productId <= 0) {
-            errors.push(`${label}：商品跳转必须选择有效商品`);
+            pushLinkError("商品跳转必须选择有效商品", reference.productIdFieldKey);
           } else {
             productIds.add(productId);
             const references = productReferences.get(productId) ?? [];
             references.push({
-              blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
-              path: `${path}.productId`,
-              label,
-              field: "productId",
+              blockId: reference.blockId,
+              path: `${reference.path}.${reference.productIdFieldKey}`,
+              label: itemLabel,
+              field: contextField(reference.productIdFieldKey),
+              ...(reference.index === undefined ? {} : { index: reference.index }),
             });
             productReferences.set(productId, references);
           }
-        } else if (targetType === "page") {
-          if (!linkUrl) {
-            errors.push(`${label}：站内页面跳转必须填写 linkUrl`);
-          } else if (!linkUrl.startsWith("/") || linkUrl.startsWith("//")) {
-            // 三件套 page 态是受控通道(UI 明确"不开放外部链接"),
-            // 收紧到站内路径,防止外链通过发布后在前台被静默丢弃成死链
-            errors.push(`${label}：站内页面跳转仅支持站内路径，不开放外部链接`);
-          }
-        } else if (targetType && !["none", "product", "page"].includes(targetType)) {
-          errors.push(`${label}：targetType 不合法`);
+          continue;
+        }
+
+        if (hasProductTarget) {
+          pushLinkError("页面跳转不能同时保留商品编号", reference.productCodeFieldKey);
+          continue;
+        }
+        if (linkUrl && legacyLink && linkUrl !== legacyLink) {
+          pushLinkError("页面跳转存在两个不同链接，请重新选择唯一去向", reference.linkUrlFieldKey);
+          continue;
+        }
+        const effectiveLink = linkUrl || legacyLink;
+        const linkField = linkUrl
+          ? reference.linkUrlFieldKey
+          : reference.legacyLinkFieldKey || reference.linkUrlFieldKey;
+        if (!effectiveLink) {
+          pushLinkError("站内页面跳转必须填写链接", reference.linkUrlFieldKey);
+        } else if (!isContentTemplatePageTarget(effectiveLink)) {
+          pushLinkError(
+            "页面去向未在公开页面合同登记；商品详情请使用商品目标",
+            linkField,
+          );
         }
       }
 
       if (type === "视频区块" && !this.isNonEmptyString(props.videoUrl)) {
         errors.push(`${label}：videoUrl 视频地址不能为空`);
-      }
-
-      if (type === "预约入口") {
-        const legacyLink = this.isNonEmptyString(props.linkUrl)
-          ? props.linkUrl.trim()
-          : "";
-        const hasPrimaryTarget =
-          (props.targetType === "page" && legacyLink.startsWith("/") && !legacyLink.startsWith("//")) ||
-          props.targetType === "product" ||
-          (!props.targetType && legacyLink.startsWith("/") && !legacyLink.startsWith("//"));
-        if (!hasPrimaryTarget) {
-          const errorIndex = errors.push(`${label}：主行动必须设置有效的站内去向`) - 1;
-          errorContexts[errorIndex] = {
-            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
-            path: `${path}.props.linkUrl`,
-            field: "linkUrl",
-          };
-        }
-        if (
-          this.isNonEmptyString(props.phone) &&
-          !/^\+?[\d\s-]{6,20}$/.test(props.phone.trim())
-        ) {
-          const errorIndex = errors.push(`${label}：咨询电话格式不正确`) - 1;
-          errorContexts[errorIndex] = {
-            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
-            path: `${path}.props.phone`,
-            field: "phone",
-          };
-        }
       }
 
       if (type === "首屏主视觉") {
@@ -1260,24 +1619,6 @@ export class PageModulesService {
           props.images.forEach((item: any, index: number) => {
             if (!this.isNonEmptyString(item?.url)) {
               errors.push(`${label}：第 ${index + 1} 张轮播图片不能为空`);
-            } else {
-              validateAsset(item.url, `${label}：第 ${index + 1} 张轮播图片`);
-            }
-            validateAsset(
-              item?.mobileUrl,
-              `${label}：第 ${index + 1} 张轮播图移动端图片`,
-            );
-            // 条目级跳转:新三件套 linkUrl 与旧裸 link 都做安全校验
-            for (const itemLinkField of ["link", "linkUrl"]) {
-              if (
-                this.isNonEmptyString(item?.[itemLinkField]) &&
-                !this.isSafeLink(item[itemLinkField])
-              ) {
-                errors.push(
-                  `${label}：第 ${index + 1} 张轮播链接不合法`,
-                );
-                break;
-              }
             }
           });
         }
@@ -1303,13 +1644,15 @@ export class PageModulesService {
         type === "分类卡片" &&
         Array.isArray(props.categorySlugs) &&
         props.categorySlugs.length > 0;
-      if (!usesCategoryReferences) {
-        validateNestedAssets(props.categories, "分类卡片的", ["image"]);
+      if (!contentTemplate) {
+        if (!usesCategoryReferences) {
+          validateNestedAssets(props.categories, "分类卡片的", ["image"]);
+        }
+        validateNestedAssets(props.items, "画廊图片的", ["image"]);
+        validateNestedAssets(props.certificates, "证书的", ["imageUrl"]);
+        validateNestedAssets(props.steps, "定制步骤的", ["image"]);
+        validateNestedAssets(props.testimonials, "评价的", ["image"]);
       }
-      validateNestedAssets(props.items, "画廊图片的", ["image"]);
-      validateNestedAssets(props.certificates, "证书的", ["imageUrl"]);
-      validateNestedAssets(props.steps, "定制步骤的", ["image"]);
-      validateNestedAssets(props.testimonials, "评价的", ["image"]);
 
       // 作品画廊:每张图片必填(与画廊契约一致)
       if (type === "作品画廊" && Array.isArray(props.items)) {
@@ -1320,24 +1663,9 @@ export class PageModulesService {
         });
       }
 
-      if (type === "热区图" && Array.isArray(props.hotspots)) {
-        props.hotspots.forEach((item: any, index: number) => {
-          for (const itemLinkField of ["link", "linkUrl"]) {
-            if (
-              this.isNonEmptyString(item?.[itemLinkField]) &&
-              !this.isSafeLink(item[itemLinkField])
-            ) {
-              errors.push(
-                `${label}：第 ${index + 1} 个热区链接不合法`,
-              );
-              break;
-            }
-          }
-        });
-      }
-      // 分类入口(分类卡片/按场景选购)条目级跳转安全校验
+      // 分类卡片的正式形态使用 categorySlugs；这里只保留旧手填分类入口的安全兜底。
       if (
-        (type === "按场景选购" || (type === "分类卡片" && !usesCategoryReferences)) &&
+        type === "分类卡片" && !usesCategoryReferences &&
         Array.isArray(props.categories)
       ) {
         props.categories.forEach((item: any, index: number) => {
@@ -1382,7 +1710,8 @@ export class PageModulesService {
         ).length
       : 0;
     const visibleZoneCount =
-      puckData.zones && typeof puckData.zones === "object"
+      pageRule?.contentPlacement !== "root-only"
+      && puckData.zones && typeof puckData.zones === "object"
         ? Object.values(puckData.zones).reduce(
             (count: number, zoneBlocks: unknown) =>
               count +
@@ -1409,7 +1738,8 @@ export class PageModulesService {
 
     const orderedVisibleBlocks = [
       ...(Array.isArray(puckData.content) ? puckData.content : []),
-      ...(puckData.zones && typeof puckData.zones === "object"
+      ...(pageRule?.contentPlacement !== "root-only"
+        && puckData.zones && typeof puckData.zones === "object"
         ? Object.values(puckData.zones).flatMap((blocks) =>
             Array.isArray(blocks) ? blocks : [],
           )
@@ -1423,22 +1753,57 @@ export class PageModulesService {
     );
     if (pageRule) {
       const rootContent = Array.isArray(puckData.content) ? puckData.content : [];
-      const businessRegions = rootContent.filter(
+      if (
+        pageRule.contentPlacement === "root-only"
+        && puckData.zones
+        && typeof puckData.zones === "object"
+      ) {
+        for (const [zoneKey, zoneBlocks] of Object.entries(puckData.zones)) {
+          if (!Array.isArray(zoneBlocks) || zoneBlocks.length === 0) continue;
+          const errorIndex = errors.push(
+            "页面内容模块只能位于页面根内容 content，不能放入插槽 zones",
+          ) - 1;
+          errorContexts[errorIndex] = {
+            path: `zones[${JSON.stringify(zoneKey)}]`,
+          };
+        }
+      }
+      const rootBusinessRegions = rootContent.filter(
         (block: any) => block?.type === "业务功能区",
       );
+      const zoneBusinessRegions = puckData.zones && typeof puckData.zones === "object"
+        ? Object.values(puckData.zones).flatMap((blocks) =>
+            Array.isArray(blocks)
+              ? blocks.filter((block: any) => block?.type === "业务功能区")
+              : [],
+          )
+        : [];
+      const businessRegions = [...rootBusinessRegions, ...zoneBusinessRegions];
       if (businessRegions.length !== pageRule.businessRegionCount) {
         errors.push(
           `页面角色 ${pageRule.pageRole} 要求固定业务区数量为 ${pageRule.businessRegionCount}，当前为 ${businessRegions.length}`,
         );
+      }
+      if (zoneBusinessRegions.length > 0) {
+        errors.push("固定业务区只能位于页面根内容，不能放入插槽 zones");
       }
       businessRegions.forEach((block: any) => {
         if (block?.props?.pageKey !== pageKey || block?.props?.locked !== true) {
           errors.push("固定业务区必须属于当前页面且保持锁定");
         }
       });
+      const semanticRootContent = rootContent.filter((block: any) =>
+        block?.type === "业务功能区" || (
+          block
+          && typeof block === "object"
+          && block.props?.isVisible !== false
+          && !EDITOR_ONLY_COMPONENTS.has(block.type)
+          && Boolean(CONTENT_TEMPLATE_BY_MODULE_TYPE[block.type])
+        ),
+      );
       if (
         pageRule.businessRegionPosition === "after-first-brand-block"
-        && rootContent.findIndex((block: any) => block?.type === "业务功能区") !== 1
+        && semanticRootContent.findIndex((block: any) => block?.type === "业务功能区") !== 1
       ) {
         errors.push("固定业务区必须紧随首个品牌框架模块之后");
       }
@@ -1477,6 +1842,7 @@ export class PageModulesService {
           errors.push(`插槽 ${zoneKey}：内容必须是数组`);
           return;
         }
+        if (pageRule?.contentPlacement === "root-only") return;
         zoneBlocks.forEach((block: any, index: number) => {
           validateBlock(
             block,
@@ -1491,10 +1857,10 @@ export class PageModulesService {
       // 发布文档对游客公开，关联商品必须与游客公开目录保持一致。
       const products = await db.product.findMany({
         where: {
-          id: { in: [...productIds] },
-          deletedAt: null,
-          status: "PUBLISHED",
-          visibility: "PUBLIC",
+            id: { in: [...productIds] },
+            deletedAt: null,
+            status: "PUBLISHED",
+            visibility: "PUBLIC",
         },
         select: {
           id: true,
@@ -1535,10 +1901,10 @@ export class PageModulesService {
     if (productCodes.size > 0) {
       const products = await db.product.findMany({
         where: {
-          code: { in: [...productCodes] },
-          deletedAt: null,
-          status: "PUBLISHED",
-          visibility: "PUBLIC",
+            code: { in: [...productCodes] },
+            deletedAt: null,
+            status: "PUBLISHED",
+            visibility: "PUBLIC",
         },
         select: {
           code: true,
@@ -1577,7 +1943,11 @@ export class PageModulesService {
           slug: true,
           coverImage: true,
           products: {
-            where: { deletedAt: null, status: "PUBLISHED", visibility: "PUBLIC" },
+            where: {
+              deletedAt: null,
+              status: "PUBLISHED",
+              visibility: "PUBLIC",
+            },
             take: 1,
             select: { id: true },
           },
@@ -1630,18 +2000,157 @@ export class PageModulesService {
   }
 
   /**
+   * 草稿允许内容未完成，但不允许重新持久化已废弃的经营事实副本。
+   * 只清理已登记模块的明确遗留键；媒体、布局、样式与历史发布快照均不受影响。
+   */
+  private removePageDocumentBusinessFactCopies(puckData: any): any {
+    if (!puckData || typeof puckData !== "object" || Array.isArray(puckData)) {
+      return puckData;
+    }
+    const document = puckData as Record<string, unknown>;
+    const sanitizeBlock = (block: unknown): unknown => {
+      if (!block || typeof block !== "object" || Array.isArray(block)) return block;
+      const value = block as Record<string, unknown>;
+      const fields = typeof value.type === "string"
+        ? PAGE_DOCUMENT_FACT_FIELDS_BY_MODULE[value.type]
+        : undefined;
+      if (!fields || !value.props || typeof value.props !== "object") {
+        return block;
+      }
+      const props = { ...(value.props as Record<string, unknown>) };
+      let touched = false;
+      for (const field of fields) {
+        if (!Object.prototype.hasOwnProperty.call(props, field)) continue;
+        delete props[field];
+        touched = true;
+      }
+      return touched ? { ...value, props } : block;
+    };
+
+    return {
+      ...document,
+      ...(Array.isArray(document.content)
+        ? { content: document.content.map(sanitizeBlock) }
+        : {}),
+      ...(document.zones && typeof document.zones === "object" && !Array.isArray(document.zones)
+        ? {
+            zones: Object.fromEntries(
+              Object.entries(document.zones).map(([zoneKey, blocks]) => [
+                zoneKey,
+                Array.isArray(blocks) ? blocks.map(sanitizeBlock) : blocks,
+              ]),
+            ),
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * PageDocument 写入口共用的当前合同规范化。业务事实副本先按既有规则剥离，
+   * 实例覆盖再交给机器合同白名单清洗；旧版本印记仍保留，历史 revision 不回写。
+   */
+  private normalizePageDocumentPuckData(puckData: any): any {
+    const withoutBusinessFacts = this.removePageDocumentBusinessFactCopies(puckData);
+    if (
+      !withoutBusinessFacts ||
+      typeof withoutBusinessFacts !== "object" ||
+      Array.isArray(withoutBusinessFacts)
+    ) {
+      return withoutBusinessFacts;
+    }
+
+    const document = withoutBusinessFacts as Record<string, unknown>;
+    const normalizeBlock = (block: unknown): unknown => {
+      if (!block || typeof block !== "object" || Array.isArray(block)) return block;
+      const value = block as Record<string, unknown>;
+      if (
+        typeof value.type !== "string" ||
+        !Object.prototype.hasOwnProperty.call(CONTENT_TEMPLATE_BY_MODULE_TYPE, value.type) ||
+        !value.props ||
+        typeof value.props !== "object" ||
+        Array.isArray(value.props)
+      ) {
+        return block;
+      }
+      const props = value.props as Record<string, unknown>;
+      if (!Object.prototype.hasOwnProperty.call(props, "__instanceOverrides")) {
+        return block;
+      }
+
+      const normalizedOverrides = sanitizeContentTemplateLayoutData(
+        value.type,
+        props.__instanceOverrides,
+      );
+      const nextProps = { ...props };
+      if (normalizedOverrides) {
+        nextProps.__instanceOverrides = normalizedOverrides;
+      } else {
+        delete nextProps.__instanceOverrides;
+      }
+      return { ...value, props: nextProps };
+    };
+
+    return {
+      ...document,
+      ...(Array.isArray(document.content)
+        ? { content: document.content.map(normalizeBlock) }
+        : {}),
+      ...(document.zones && typeof document.zones === "object" && !Array.isArray(document.zones)
+        ? {
+            zones: Object.fromEntries(
+              Object.entries(document.zones).map(([zoneKey, blocks]) => [
+                zoneKey,
+                Array.isArray(blocks) ? blocks.map(normalizeBlock) : blocks,
+              ]),
+            ),
+          }
+        : {}),
+    };
+  }
+
+  /**
    * 校验页面 SEO/OG 元数据（存于 doc.metadata，不在 puckData 内）。
    * 与 collectPuckDataErrors 并列，作为发布校验单一源的一部分；
    * 前端预检与后端发布兜底都调用，规则一致。
    */
-  private collectMetadataErrors(metadata: unknown): string[] {
-    const errors: string[] = [];
-    if (!metadata || typeof metadata !== "object") return errors;
-    const m = metadata as Record<string, unknown>;
-    for (const [field, limit] of Object.entries(PUCK_SEO_LIMITS)) {
+  private collectMetadataIssues(metadata: unknown): ContentTemplateIssue[] {
+    const issues: ContentTemplateIssue[] = [];
+    if (typeof metadata !== "object" || Array.isArray(metadata)) {
+      return [this.createServerValidationIssue("页面设置：metadata 格式不正确", "metadata")];
+    }
+    const m = (metadata ?? {}) as Record<string, unknown>;
+    const requiredFields = new Set<string>(CONTENT_TEMPLATE_PAGE_METADATA.requiredForPublication);
+    for (const field of CONTENT_TEMPLATE_PAGE_METADATA.requiredForPublication) {
+      const limit = CONTENT_TEMPLATE_PAGE_METADATA.limits[field];
       const value = m[field];
+      const label = PAGE_METADATA_FIELD_LABELS[field] || field;
+      if (value === undefined || value === null || (typeof value === "string" && !value.trim())) {
+        if (requiredFields.has(field)) {
+          issues.push(this.createServerValidationIssue(
+            `页面设置：${label}（${field}）不能为空`,
+            `metadata.${field}`,
+            undefined,
+            field,
+          ));
+        }
+        continue;
+      }
+      if (typeof value !== "string") {
+        issues.push(this.createServerValidationIssue(
+          `页面设置：${field} 必须是字符串`,
+          `metadata.${field}`,
+          undefined,
+          field,
+        ));
+        continue;
+      }
       if (typeof value === "string" && value.length > limit) {
-        errors.push(`页面设置：${field} 过长（${value.length}/${limit} 字）`);
+        issues.push(this.createServerValidationIssue(
+          `页面设置：${field} 过长（${value.length}/${limit} 字）`,
+          `metadata.${field}`,
+          undefined,
+          field,
+        ));
       }
     }
     const ogImage = m.ogImage;
@@ -1650,9 +2159,152 @@ export class PageModulesService {
       ogImage.trim() &&
       !this.isSafeAssetUrl(ogImage)
     ) {
-      errors.push("页面设置：ogImage 分享图地址不合法");
+      issues.push(this.createServerValidationIssue(
+        "页面设置：ogImage 分享图地址不合法",
+        "metadata.ogImage",
+        undefined,
+        "ogImage",
+      ));
+    } else if (typeof ogImage === "string" && ogImage.trim()) {
+      const missingUploadErrors: string[] = [];
+      this.collectMissingUploadError(
+        ogImage.trim(),
+        "页面设置：ogImage 分享图",
+        new Set<string>(),
+        missingUploadErrors,
+      );
+      for (const message of missingUploadErrors) {
+        issues.push(this.createServerValidationIssue(
+          message,
+          "metadata.ogImage",
+          undefined,
+          "ogImage",
+        ));
+      }
     }
-    return errors;
+    return issues;
+  }
+
+  /**
+   * 正式素材授权随 PageDocument 草稿保存，但不进入公开 metadata 白名单。
+   * 每个当前可见素材 URL 必须有一条精确匹配的来源与授权编号；相同 URL 只需一条。
+   */
+  private collectMediaRightsIssues(
+    puckData: unknown,
+    metadata: unknown,
+    pageKey: string,
+  ): ContentTemplateIssue[] {
+    const references = getPageDocumentMediaReferences(puckData, metadata, pageKey);
+    if (references.length === 0) return [];
+    const issues: ContentTemplateIssue[] = [];
+    const source = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? metadata as Record<string, unknown>
+      : {};
+    const rights = source.mediaRights;
+    if (!Array.isArray(rights)) {
+      return [this.createServerValidationIssue(
+        "页面设置：请为当前公开素材补齐来源与授权编号",
+        "metadata.mediaRights",
+        undefined,
+        "mediaRights",
+      )];
+    }
+
+    const contract = CONTENT_TEMPLATE_PAGE_METADATA.mediaRights;
+    if (rights.length > contract.maxItems) {
+      issues.push(this.createServerValidationIssue(
+        `页面设置：素材授权记录过多（${rights.length}/${contract.maxItems} 条）`,
+        "metadata.mediaRights",
+        undefined,
+        "mediaRights",
+      ));
+    }
+
+    const validRights = new Map<string, number>();
+    rights.slice(0, contract.maxItems).forEach((raw, index) => {
+      const basePath = `metadata.mediaRights[${index}]`;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        issues.push(this.createServerValidationIssue(
+          `页面设置：第 ${index + 1} 条素材授权记录格式不正确`,
+          basePath,
+          undefined,
+          "mediaRights",
+          index,
+        ));
+        return;
+      }
+      const record = raw as Record<string, unknown>;
+      let complete = true;
+      for (const field of ["assetUrl", "source", "authorizationId"] as const) {
+        const value = record[field];
+        const limit = contract.fieldLimits[field];
+        const label = field === "assetUrl"
+          ? "素材地址"
+          : field === "source"
+            ? "素材来源"
+            : "授权编号";
+        if (typeof value !== "string" || !value.trim()) {
+          complete = false;
+          issues.push(this.createServerValidationIssue(
+            `页面设置：第 ${index + 1} 条${label}不能为空`,
+            `${basePath}.${field}`,
+            undefined,
+            field,
+            index,
+          ));
+        } else if (value.length > limit) {
+          complete = false;
+          issues.push(this.createServerValidationIssue(
+            `页面设置：第 ${index + 1} 条${label}过长（${value.length}/${limit} 字）`,
+            `${basePath}.${field}`,
+            undefined,
+            field,
+            index,
+          ));
+        }
+      }
+      const assetUrl = typeof record.assetUrl === "string"
+        ? record.assetUrl.trim()
+        : "";
+      if (assetUrl && !this.isSafeAssetUrl(assetUrl)) {
+        complete = false;
+        issues.push(this.createServerValidationIssue(
+          `页面设置：第 ${index + 1} 条素材地址不合法`,
+          `${basePath}.assetUrl`,
+          undefined,
+          "assetUrl",
+          index,
+        ));
+      }
+      if (!complete || !assetUrl) return;
+      const previousIndex = validRights.get(assetUrl);
+      if (previousIndex !== undefined) {
+        issues.push(this.createServerValidationIssue(
+          `页面设置：第 ${index + 1} 条素材授权与第 ${previousIndex + 1} 条重复`,
+          `${basePath}.assetUrl`,
+          undefined,
+          "assetUrl",
+          index,
+        ));
+        return;
+      }
+      validRights.set(assetUrl, index);
+    });
+
+    for (const reference of references) {
+      if (validRights.has(reference.url)) continue;
+      const displayUrl = reference.url.length > 80
+        ? `${reference.url.slice(0, 77)}…`
+        : reference.url;
+      issues.push(this.createServerValidationIssue(
+        `页面设置：素材「${displayUrl}」缺少来源或授权编号`,
+        "metadata.mediaRights",
+        reference.blockId,
+        "mediaRights",
+        reference.index,
+      ));
+    }
+    return issues;
   }
 
   private isSafeAssetUrl(value: string): boolean {
@@ -1746,8 +2398,8 @@ export class PageModulesService {
     const updated = await this.prisma.pageDocument.updateMany({
       where: { pageKey, updatedAt: doc.updatedAt },
       data: {
-        puckData: revision.puckData as any,
-        metadata: revision.metadata as any,
+        puckData: this.removePageDocumentBusinessFactCopies(revision.puckData) as any,
+        metadata: withoutContentTemplatePublicationAttestation(revision.metadata) as any,
         status: "DRAFT",
         editorVersion: doc.editorVersion,
       },
@@ -1841,7 +2493,7 @@ export class PageModulesService {
         pageKey: input.pageKey,
         name,
         puckData: input.puckData,
-        metadata: (input.metadata ?? {}) as any,
+        metadata: withoutContentTemplatePublicationAttestation(input.metadata) as any,
         createdBy: input.createdBy ?? null,
       },
     });
@@ -1866,7 +2518,9 @@ export class PageModulesService {
       data.name = name;
     }
     if (input.puckData !== undefined) data.puckData = input.puckData;
-    if (input.metadata !== undefined) data.metadata = input.metadata;
+    if (input.metadata !== undefined) {
+      data.metadata = withoutContentTemplatePublicationAttestation(input.metadata);
+    }
     return this.prisma.pageScheme.update({ where: { id }, data: data as any });
   }
 
@@ -1900,7 +2554,7 @@ export class PageModulesService {
         where: { pageKey, updatedAt: doc.updatedAt },
         data: {
           puckData: latestRevision.puckData as any,
-          metadata: latestRevision.metadata as any,
+          metadata: withoutContentTemplatePublicationAttestation(latestRevision.metadata) as any,
           status: "PUBLISHED",
         },
       });

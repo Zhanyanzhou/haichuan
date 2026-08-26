@@ -1,3 +1,7 @@
+import {
+  normalizeContentTemplatePageTarget,
+} from "@/page-builder/generated/contentTemplates.generated";
+
 export type LinkTargetType = "none" | "product" | "page";
 
 export interface LinkTargetValue {
@@ -14,7 +18,7 @@ export function normalizeLinkTargetType(value: LinkTargetValue): LinkTargetType 
   if (typeof value.productCode === "string" && value.productCode.trim()) return "product";
   const productId = Number(value.productId);
   if (Number.isInteger(productId) && productId > 0) return "product";
-  if (isSafeInternalPath(value.linkUrl)) return "page";
+  if (normalizeContentTemplatePageTarget(value.linkUrl)) return "page";
   return "none";
 }
 
@@ -50,7 +54,9 @@ export function resolveLinkTargetUrl(value: LinkTargetValue): string {
   if (targetType === "product" && Number.isInteger(productId) && productId > 0) {
     return `/products/${productId}`;
   }
-  if (targetType === "page" && isSafeInternalPath(value.linkUrl)) return value.linkUrl;
+  if (targetType === "page") {
+    return normalizeContentTemplatePageTarget(value.linkUrl) ?? "";
+  }
   return "";
 }
 
@@ -66,7 +72,7 @@ export function resolveItemLinkUrl(
   if (item.targetType != null || item.productCode != null || item.productId != null) {
     return resolveLinkTargetUrl(item);
   }
-  return isSafeInternalPath(item.link) ? item.link : "";
+  return normalizeContentTemplatePageTarget(item.link) ?? "";
 }
 
 /**
@@ -89,7 +95,7 @@ export function resolvePrefixedLinkTarget(
       linkUrl: props[`${prefix}LinkUrl`],
     });
   }
-  return legacyKey && isSafeInternalPath(props[legacyKey])
-    ? props[legacyKey]
+  return legacyKey
+    ? normalizeContentTemplatePageTarget(props[legacyKey]) ?? ""
     : "";
 }

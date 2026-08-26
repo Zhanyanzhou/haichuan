@@ -29,6 +29,7 @@ import {
   UpdatePersonalContentTemplateDto,
   ValidatePageDocumentDto,
 } from "./dto";
+import { requirePublishedPublicContentLocale } from "../../common/content-locale";
 
 @ApiTags("页面模块")
 @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
@@ -84,13 +85,29 @@ export class PageModulesController {
   // 发布后立即回读必须拿到新版本，禁止浏览器/中间代理启发式缓存该 JSON。
   @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "获取已发布页面文档（前台）" })
-  getPublishedDocument(@Query("pageKey") pageKey: string) {
+  getPublishedDocument(
+    @Query("pageKey") pageKey: string,
+    @Query("locale") locale?: string,
+  ) {
+    requirePublishedPublicContentLocale(locale);
     return this.service.getPublishedPageDocument(pageKey || "home");
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Get("document/published/admin")
+  @Header("Cache-Control", "no-store")
+  @ApiOperation({ summary: "获取已发布页面文档（后台完整快照）" })
+  getPublishedAdminDocument(@Query("pageKey") pageKey: string) {
+    return this.service.getPublishedPageDocumentForAdmin(pageKey || "home");
   }
 
   @Public()
   @Sse("document/stream")
-  pageDocumentChangeStream(): Observable<MessageEvent> {
+  pageDocumentChangeStream(
+    @Query("locale") locale?: string,
+  ): Observable<MessageEvent> {
+    requirePublishedPublicContentLocale(locale);
     return this.service.publicChangeStream();
   }
 

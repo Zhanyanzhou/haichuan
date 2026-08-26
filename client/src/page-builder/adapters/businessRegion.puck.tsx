@@ -23,6 +23,7 @@ const BusinessRegionCanvasContext = createContext<BusinessRegionCanvasState>({
 });
 
 const CatalogPreview = lazy(() => import("@/pages/public/Catalog"));
+const ContactPreview = lazy(() => import("@/pages/public/Contact"));
 
 export function BusinessRegionCanvasProvider({
   hasLeadingDecoration,
@@ -146,21 +147,29 @@ function BusinessRegionFallback({ pageKey, title, description, items }: Business
   );
 }
 
-/** 选款中心画布直接消费公开页组件；其他动态页面暂保留显式结构说明。 */
+/** 动态业务页画布直接消费公开组件的安全预览模式，避免结构说明与前台真实体验漂移。 */
 function BusinessRegionPreview(props: BusinessRegionPuckProps) {
   const { hasLeadingDecoration } = useContext(BusinessRegionCanvasContext);
-  if (props.pageKey !== "catalog") {
-    return <BusinessRegionFallback {...props} />;
+  if (props.pageKey === "catalog") {
+    return (
+      <Suspense fallback={<BusinessRegionFallback {...props} />}>
+        <CatalogPreview
+          mode="editor-preview"
+          hasLeadingDecoration={hasLeadingDecoration}
+        />
+      </Suspense>
+    );
   }
 
-  return (
-    <Suspense fallback={<BusinessRegionFallback {...props} />}>
-      <CatalogPreview
-        mode="editor-preview"
-        hasLeadingDecoration={hasLeadingDecoration}
-      />
-    </Suspense>
-  );
+  if (props.pageKey === "contact") {
+    return (
+      <Suspense fallback={<BusinessRegionFallback {...props} />}>
+        <ContactPreview mode="editor-preview" />
+      </Suspense>
+    );
+  }
+
+  return <BusinessRegionFallback {...props} />;
 }
 
 export const businessRegionPuckConfig = {

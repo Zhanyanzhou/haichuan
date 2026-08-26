@@ -11,7 +11,6 @@ export interface AppointmentPuckProps {
   subtitle: string;
   buttonText: string;
   linkUrl: string;
-  phone: string;
   altText: string;
   desktopFocusX: number;
   desktopFocusY: number;
@@ -32,7 +31,6 @@ export const appointmentPuckConfig = {
     subtitle: "一对一珠宝顾问，为您安排专属服务",
     buttonText: "立即预约",
     linkUrl: "/contact",
-    phone: "",
     altText: "",
     desktopFocusX: 50,
     desktopFocusY: 50,

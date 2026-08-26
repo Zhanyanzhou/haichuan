@@ -16,7 +16,11 @@ import { registerOverlayPortal } from "@puckeditor/core";
 import { ROOT_ZONE, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
 
-export default function CanvasSelectionDock() {
+export default function CanvasSelectionDock({
+  readOnly = false,
+}: {
+  readOnly?: boolean;
+}) {
   const { modal } = AntdApp.useApp();
   const portalRef = useRef<HTMLDivElement>(null);
   const lastDockPositionRef = useRef<{ left: number; top: number } | null>(null);
@@ -182,6 +186,7 @@ export default function CanvasSelectionDock() {
   }, [componentId, dockHost, selectedIndex]);
 
   const moveSelected = (direction: -1 | 1) => {
+    if (readOnly) return;
     const targetIndex = selectedIndex + direction;
     if (
       !selectedModule ||
@@ -207,6 +212,7 @@ export default function CanvasSelectionDock() {
   };
 
   const deleteSelected = () => {
+    if (readOnly) return;
     if (!selectedModule || selectedLocked) return;
     const displayName = getModuleDisplayName(
       selectedModule.type || componentType,
@@ -230,7 +236,7 @@ export default function CanvasSelectionDock() {
     });
   };
 
-  return selectedModule && dockHost
+  return selectedModule && dockHost && !readOnly
     ? createPortal(
         <div
           ref={portalRef}

@@ -20,6 +20,7 @@ export default function LayerRail({
   onToggleNavigationPreview,
   scrollSpyIndex,
   publishIssues,
+  readOnly = false,
 }: {
   navigationPreviewOpen: boolean;
   onToggleNavigationPreview: () => void;
@@ -29,6 +30,7 @@ export default function LayerRail({
     message: string;
     severity: "error" | "warning" | "info";
   }>;
+  readOnly?: boolean;
 }) {
   const { message, modal } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
@@ -117,7 +119,7 @@ export default function LayerRail({
   };
 
   const handleLayerClick = (index: number, event: React.MouseEvent) => {
-    if (event.shiftKey || event.ctrlKey || event.metaKey) {
+    if (!readOnly && (event.shiftKey || event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       const locked = Boolean(content[index]?.props?.locked);
       setMultiIndices((prev) => {
@@ -149,6 +151,7 @@ export default function LayerRail({
 
   /* 整组上移/下移：保持组内相对顺序，跳过锁定模块与边界 */
   const batchMove = (direction: -1 | 1) => {
+    if (readOnly) return;
     const picked = [...multiIndices].sort((a, b) => (direction === -1 ? a - b : b - a));
     const next = [...content];
     let moved = false;
@@ -170,6 +173,7 @@ export default function LayerRail({
   };
 
   const batchDelete = () => {
+    if (readOnly) return;
     const deletable = multiIndices.filter((i) => !content[i]?.props?.locked);
     if (deletable.length === 0) {
       message.info("所选模块均为固定业务区，不能删除");
@@ -197,6 +201,7 @@ export default function LayerRail({
   };
 
   const reorderLayer = (from: number, to: number) => {
+    if (readOnly) return;
     if (
       from === to ||
       from < 0 ||
@@ -225,6 +230,7 @@ export default function LayerRail({
   };
 
   const toggleLayerVisibility = (index: number) => {
+    if (readOnly) return;
     const target = content[index];
     if (!target || target.props?.locked) return;
     const nextVisible = target.props?.isVisible === false;
@@ -246,6 +252,7 @@ export default function LayerRail({
   };
 
   const deleteLayer = (index: number) => {
+    if (readOnly) return;
     const target = content[index];
     if (!target || target.props?.locked) return;
     modal.confirm({
@@ -320,7 +327,7 @@ export default function LayerRail({
                     ) : (
                       <p>{issue.message}</p>
                     )}
-                    {canHide && (
+                    {canHide && !readOnly && (
                       <button
                         type="button"
                         className="homepage-editor__publish-issue-hide"
@@ -336,7 +343,7 @@ export default function LayerRail({
             </div>
           </section>
         )}
-        {multiActive && (
+        {multiActive && !readOnly && (
           <div className="homepage-editor__layer-batch">
             <span>已选 {multiIndices.length} 项</span>
             <button type="button" onClick={() => batchMove(-1)}>上移</button>
@@ -366,18 +373,20 @@ export default function LayerRail({
               data-layer-index={index}
               className={`homepage-editor__layer-item${active ? " is-active" : ""}${inView ? " is-in-view" : ""}${multiSelected ? " is-multi-selected" : ""}${visible ? "" : " is-hidden"}${draggingIndex === index ? " is-dragging" : ""}${dropIndex === index ? " is-drop-target" : ""}`}
               data-layer-visible={visible ? "true" : "false"}
-              draggable={!item.props?.locked}
+              draggable={!readOnly && !item.props?.locked}
               onDragStart={(event) => {
-                if (item.props?.locked) return;
+                if (readOnly || item.props?.locked) return;
                 event.dataTransfer.effectAllowed = "move";
                 setDraggingIndex(index);
               }}
               onDragOver={(event) => {
+                if (readOnly) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
                 setDropIndex(index);
               }}
               onDrop={(event) => {
+                if (readOnly) return;
                 event.preventDefault();
                 if (draggingIndex !== null) reorderLayer(draggingIndex, index);
                 setDraggingIndex(null);
@@ -403,7 +412,7 @@ export default function LayerRail({
                   aria-label="拖动调整顺序"
                 />
               </button>
-              {!item.props?.locked ? (
+              {!readOnly && !item.props?.locked ? (
                 <div
                   className="homepage-editor__layer-actions"
                   role="group"

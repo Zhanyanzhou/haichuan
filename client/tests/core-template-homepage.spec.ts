@@ -198,7 +198,6 @@ const puckData = {
         subtitle: "由珠宝顾问根据场景、预算与风格，协助筛选适合的作品。",
         buttonText: "立即预约",
         linkUrl: "/contact",
-        phone: "400-888-2026",
         altText: "海川珠宝预约鉴赏",
         focusX: 50,
         focusY: 50,

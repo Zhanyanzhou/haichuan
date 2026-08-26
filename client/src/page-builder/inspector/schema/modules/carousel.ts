@@ -50,7 +50,7 @@ export const carouselSchema: ModuleInspectorSchema = {
               placeholder: "上传手机端轮播图",
               showSpecCheck: true,
             },
-            { key: "alt", label: "替代文字", control: "text" },
+            { key: "alt", label: "替代文字", control: "text", required: true },
             {
               key: "linkTarget",
               label: "跳转链接",

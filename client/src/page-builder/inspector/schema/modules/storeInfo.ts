@@ -13,7 +13,7 @@ const storeInfoRatioControl = ratioField("storeInfo", "store", { key: "imageRati
 export const storeInfoSchema: ModuleInspectorSchema = {
   moduleType: "门店信息",
   displayName: "门店信息",
-  purpose: "门店空间、地址、营业时间与联系方式。",
+  purpose: "门店空间与统一到访信息；业务事实由「店铺资料」维护。",
   defaults: { ...storeInfoPuckConfig.defaultProps },
   sections: [
     {
@@ -36,39 +36,9 @@ export const storeInfoSchema: ModuleInspectorSchema = {
       id: "store-info-content",
       title: "内容",
       layer: "content",
+      description: "门店名称、地址、营业时间、电话和地图链接统一在「店铺资料」维护，此处不保存副本。",
       fields: [
         moduleNameField("门店信息"),
-        {
-          key: "useSiteSettings",
-          label: "使用站点统一门店信息",
-          control: "switch",
-          hint: "开启后读取「站点内容」中的名称、地址、营业时间和电话，避免多页重复维护。",
-        },
-        {
-          key: "storeName",
-          label: "门店名称",
-          control: "text",
-          required: true,
-          maxLength: 24,
-          placeholder: "如 海川珠宝",
-          visibleWhen: (ctx) => ctx.props.useSiteSettings === false,
-        },
-        { key: "address", label: "地址", control: "text", visibleWhen: (ctx) => ctx.props.useSiteSettings === false },
-        { key: "hours", label: "营业时间", control: "text", visibleWhen: (ctx) => ctx.props.useSiteSettings === false },
-      ],
-    },
-    {
-      id: "store-info-contact",
-      title: "行动与关联",
-      layer: "interaction",
-      fields: [
-        { key: "phone", label: "联系电话", control: "text", visibleWhen: (ctx) => ctx.props.useSiteSettings === false },
-        {
-          key: "mapUrl",
-          label: "地图链接（可选）",
-          control: "text",
-          hint: "高德/百度地图分享链接",
-        },
       ],
     },
     ...(storeInfoRatioControl ? [{

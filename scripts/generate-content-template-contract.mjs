@@ -85,6 +85,16 @@ function validateDefaultGeometry(template) {
       invariant(rect && [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite), `${template.key}.defaultGeometryByViewport.${device}.${zone.nodeId}.rect 缺失`);
       invariant(rect.x >= 0 && rect.y >= 0 && rect.width > 0 && rect.height > 0 && rect.x + rect.width <= 1.000001 && rect.y + rect.height <= 1.000001, `${template.key}.defaultGeometryByViewport.${device}.${zone.nodeId}.rect 越界`);
     }
+    if (template.copyPlacementByViewport?.[device] === "stacked") {
+      const overlaidFlowRoles = geometry.zones.filter((zone) => {
+        const role = rolesById.get(zone.roleId);
+        return zone.overlay === true && (role?.kind === "text" || role?.kind === "action");
+      });
+      invariant(
+        overlaidFlowRoles.length === 0,
+        `${template.key}.defaultGeometryByViewport.${device} 堆叠文字与行动不得声明 overlay`,
+      );
+    }
   }
 }
 
@@ -125,10 +135,21 @@ function validatePageRules(rules) {
   invariant(Array.isArray(rules) && rules.length === 6, "pageRules 必须覆盖 6 个装修页面");
   const pageKeys = rules.map((rule) => rule.pageKey);
   invariant(new Set(pageKeys).size === pageKeys.length, "pageRules.pageKey 不得重复");
+  const publicPaths = rules.map((rule) => rule.publicPath);
+  invariant(new Set(publicPaths).size === publicPaths.length, "pageRules.publicPath 不得重复");
   const templatesByKey = new Map(source.templates.map((template) => [template.key, template]));
   for (const rule of rules) {
     invariant(/^[a-z0-9-]+$/i.test(rule.pageKey), `pageRules.${rule.pageKey}.pageKey 无效`);
+    const expectedPublicPath = rule.pageKey === "home" ? "/" : "/" + rule.pageKey;
+    invariant(
+      rule.publicPath === expectedPublicPath,
+      `pageRules.${rule.pageKey}.publicPath 必须是 ${expectedPublicPath}`,
+    );
     invariant(typeof rule.pageRole === "string" && rule.pageRole.length > 0, `pageRules.${rule.pageKey}.pageRole 缺失`);
+    invariant(
+      rule.contentPlacement === "root-only",
+      `pageRules.${rule.pageKey}.contentPlacement 必须为 root-only`,
+    );
     invariant(
       Array.isArray(rule.allowedTemplateKeys)
         && rule.allowedTemplateKeys.length > 0
@@ -165,6 +186,58 @@ function validatePageRules(rules) {
       .filter((template) => template.implementationStatus === "active")
       .every((template) => reachableTemplateKeys.has(template.key)),
     "每个 active 模板必须至少适用于一个真实页面角色",
+  );
+}
+
+function validatePageMetadata(metadata) {
+  invariant(metadata && typeof metadata === "object" && !Array.isArray(metadata), "pageMetadata 缺失");
+  const publicFields = ["seoTitle", "seoDescription", "ogImage"];
+  const supportedFields = [...publicFields, "contentOwner"];
+  invariant(
+    Array.isArray(metadata.requiredForPublication)
+      && metadata.requiredForPublication.length === supportedFields.length
+      && supportedFields.every((field) => metadata.requiredForPublication.includes(field))
+      && new Set(metadata.requiredForPublication).size === metadata.requiredForPublication.length,
+    "pageMetadata.requiredForPublication 必须完整声明三项公开 SEO 与内部 contentOwner",
+  );
+  invariant(
+    Array.isArray(metadata.publicFields)
+      && metadata.publicFields.length === publicFields.length
+      && publicFields.every((field) => metadata.publicFields.includes(field))
+      && new Set(metadata.publicFields).size === metadata.publicFields.length,
+    "pageMetadata.publicFields 只能完整声明三项公开 SEO 字段",
+  );
+  invariant(
+    metadata.limits && typeof metadata.limits === "object" && !Array.isArray(metadata.limits),
+    "pageMetadata.limits 缺失",
+  );
+  invariant(
+    Object.keys(metadata.limits).length === supportedFields.length
+      && supportedFields.every((field) => Number.isInteger(metadata.limits[field]) && metadata.limits[field] > 0),
+    "pageMetadata.limits 必须完整声明三项公开 SEO 与内部 contentOwner 的正整数上限",
+  );
+  invariant(
+    metadata.mediaRights
+      && typeof metadata.mediaRights === "object"
+      && !Array.isArray(metadata.mediaRights),
+    "pageMetadata.mediaRights 缺失",
+  );
+  invariant(
+    Number.isInteger(metadata.mediaRights.maxItems)
+      && metadata.mediaRights.maxItems > 0,
+    "pageMetadata.mediaRights.maxItems 必须是正整数",
+  );
+  const mediaRightFields = ["assetUrl", "source", "authorizationId"];
+  invariant(
+    metadata.mediaRights.fieldLimits
+      && typeof metadata.mediaRights.fieldLimits === "object"
+      && !Array.isArray(metadata.mediaRights.fieldLimits)
+      && Object.keys(metadata.mediaRights.fieldLimits).length === mediaRightFields.length
+      && mediaRightFields.every(
+        (field) => Number.isInteger(metadata.mediaRights.fieldLimits[field])
+          && metadata.mediaRights.fieldLimits[field] > 0,
+      ),
+    "pageMetadata.mediaRights.fieldLimits 必须完整声明素材地址、来源与授权编号上限",
   );
 }
 
@@ -291,6 +364,7 @@ for (const template of source.templates) {
   validateUnifiedRoot(template);
 }
 validatePageRules(source.pageRules);
+validatePageMetadata(source.pageMetadata);
 
 // 权威 JSON 从 schema v4 起以归一化 defaultGeometryByViewport 声明双端根构图。
 // 以下仅为既有 TypeScript 消费面的只读派生形状，不能反写或形成第二份合同。
@@ -305,6 +379,18 @@ source.previewProfiles = Object.fromEntries(source.templates.map((template) => [
   mobile: toLegacyPreviewViewport(template, "mobile", template.preview.mobile),
 }]));
 for (const template of source.templates) {
+  for (const object of template.editorCapabilities?.editableObjects ?? []) {
+    if (object.kind !== "media" && object.kind !== "video") continue;
+    // 媒体字段由同一 editableObjects.contentFieldKeys 只读派生：仅 media/video
+    // 对象中以 image/url 结尾的字段才是可发布素材；alt、标签和播放参数不会误入。
+    object.mediaFieldKeys = object.contentFieldKeys.filter((field) =>
+      /(?:image|url)/i.test(field) && !/alt/i.test(field),
+    );
+    invariant(
+      object.mediaFieldKeys.length > 0,
+      `${template.key}.editableObjects.${object.roleId} 未派生出媒体字段`,
+    );
+  }
   template.media = template.roles
     .filter((role) => role.kind === "media")
     .map((role) => ({
@@ -368,6 +454,10 @@ function invariant(condition, message) {
 
 invariant(Number.isInteger(source.contractSchemaVersion) && source.contractSchemaVersion > 0, "contractSchemaVersion 必须是正整数");
 invariant(Number.isInteger(source.registryVersion) && source.registryVersion > 0, "registryVersion 必须是正整数");
+invariant(
+  Number.isInteger(source.publicationGateVersion) && source.publicationGateVersion > 0,
+  "publicationGateVersion 必须是正整数",
+);
 invariant(Array.isArray(source.templates), "templates 必须是数组");
 invariant(source.templates.length === source.expectedTemplateCount, `模板注册数应为 ${source.expectedTemplateCount}，实际为 ${source.templates.length}`);
 invariant(source.previewProfiles && typeof source.previewProfiles === "object" && !Array.isArray(source.previewProfiles), "previewProfiles 必须是对象");
@@ -476,9 +566,12 @@ for (const template of source.templates) {
       invariant(altPolicies.has(object.altPolicy), `${template.key}.editableObjects.${object.roleId}.altPolicy 不合法`);
     }
     if (object.kind === "media" || object.kind === "video") {
-      invariant(Boolean(object.altFieldKey || object.altPolicy), `${template.key}.editableObjects.${object.roleId} 必须声明 altFieldKey 或 altPolicy`);
+      invariant(Boolean(object.altPolicy), `${template.key}.editableObjects.${object.roleId} 必须明确声明 altPolicy`);
       if (object.altPolicy === "required") {
         invariant(Boolean(object.altFieldKey), `${template.key}.editableObjects.${object.roleId} 的 required altPolicy 必须绑定 altFieldKey`);
+      }
+      if (object.altFieldKey) {
+        invariant(object.altPolicy === "required", `${template.key}.editableObjects.${object.roleId} 声明 altFieldKey 时必须使用 required altPolicy`);
       }
     }
     if (object.referenceFieldKey) {
@@ -490,9 +583,70 @@ for (const template of source.templates) {
     if (object.collectionFieldKeys !== undefined) {
       invariant(Array.isArray(object.collectionFieldKeys) && object.collectionFieldKeys.length > 0, `${template.key}.editableObjects.${object.roleId}.collectionFieldKeys 必须是非空数组`);
     }
+    if (object.collectionMediaPolicies !== undefined) {
+      invariant(object.kind === "collection", `${template.key}.editableObjects.${object.roleId}.collectionMediaPolicies 仅适用于 collection`);
+      invariant(Array.isArray(object.collectionMediaPolicies) && object.collectionMediaPolicies.length > 0, `${template.key}.editableObjects.${object.roleId}.collectionMediaPolicies 必须是非空数组`);
+      const policyKeys = new Set();
+      for (const policy of object.collectionMediaPolicies) {
+        invariant((object.collectionFieldKeys ?? []).includes(policy.collectionFieldKey), `${template.key}.editableObjects.${object.roleId}.collectionMediaPolicies.collectionFieldKey 未映射 collectionFieldKeys`);
+        invariant(Array.isArray(policy.mediaFieldKeys) && policy.mediaFieldKeys.length > 0, `${template.key}.editableObjects.${object.roleId}.collectionMediaPolicies.mediaFieldKeys 必须是非空数组`);
+        invariant(policy.mediaFieldKeys.every((field) => /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(field)), `${template.key}.editableObjects.${object.roleId}.collectionMediaPolicies.mediaFieldKeys 含非法字段`);
+        invariant(new Set(policy.mediaFieldKeys).size === policy.mediaFieldKeys.length, `${template.key}.editableObjects.${object.roleId}.collectionMediaPolicies.mediaFieldKeys 不得重复`);
+        invariant(altPolicies.has(policy.altPolicy), `${template.key}.editableObjects.${object.roleId}.collectionMediaPolicies.altPolicy 不合法`);
+        if (policy.altPolicy === "required") {
+          invariant(/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(policy.altFieldKey ?? ""), `${template.key}.editableObjects.${object.roleId}.collectionMediaPolicies.required 必须绑定合法 altFieldKey`);
+          invariant(policy.derivedAltFieldKey === undefined, `${template.key}.editableObjects.${object.roleId}.collectionMediaPolicies.required 不得声明 derivedAltFieldKey`);
+        }
+        if (policy.altPolicy === "derived") {
+          invariant(/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(policy.derivedAltFieldKey ?? ""), `${template.key}.editableObjects.${object.roleId}.collectionMediaPolicies.derived 必须绑定合法 derivedAltFieldKey`);
+          invariant(policy.altFieldKey === undefined, `${template.key}.editableObjects.${object.roleId}.collectionMediaPolicies.derived 不得声明 altFieldKey`);
+        }
+        const policyKey = `${policy.collectionFieldKey}:${policy.mediaFieldKeys.join(",")}`;
+        invariant(!policyKeys.has(policyKey), `${template.key}.editableObjects.${object.roleId}.collectionMediaPolicies 不得重复`);
+        policyKeys.add(policyKey);
+      }
+    }
+    if (object.collectionLinkPolicies !== undefined) {
+      invariant(object.kind === "collection", `${template.key}.editableObjects.${object.roleId}.collectionLinkPolicies 仅适用于 collection`);
+      invariant(Array.isArray(object.collectionLinkPolicies) && object.collectionLinkPolicies.length > 0, `${template.key}.editableObjects.${object.roleId}.collectionLinkPolicies 必须是非空数组`);
+      invariant(object.capabilities.includes("link"), `${template.key}.editableObjects.${object.roleId}.collectionLinkPolicies 缺少 link 能力`);
+      const policyKeys = new Set();
+      for (const policy of object.collectionLinkPolicies) {
+        invariant((object.collectionFieldKeys ?? []).includes(policy.collectionFieldKey), `${template.key}.editableObjects.${object.roleId}.collectionLinkPolicies.collectionFieldKey 未映射 collectionFieldKeys`);
+        invariant(typeof policy.required === "boolean", `${template.key}.editableObjects.${object.roleId}.collectionLinkPolicies.required 必须是布尔值`);
+        invariant(!policyKeys.has(policy.collectionFieldKey), `${template.key}.editableObjects.${object.roleId}.collectionLinkPolicies 不得重复`);
+        policyKeys.add(policy.collectionFieldKey);
+      }
+    }
+    if (object.kind === "action") {
+      const targetTypeFields = object.contentFieldKeys.filter((field) => field === "targetType" || field.endsWith("TargetType"));
+      invariant(targetTypeFields.length === 1, `${template.key}.editableObjects.${object.roleId} 必须声明唯一行动目标类型字段`);
+      const targetTypeField = targetTypeFields[0];
+      const prefix = targetTypeField === "targetType" ? "" : targetTypeField.slice(0, -"TargetType".length);
+      const actionTextField = prefix
+        ? `${prefix}Text`
+        : object.contentFieldKeys.find((field) => field === "actionText" || field === "buttonText");
+      invariant(Boolean(actionTextField) && object.contentFieldKeys.includes(actionTextField), `${template.key}.editableObjects.${object.roleId} 缺少行动文案字段`);
+      for (const field of [
+        prefix ? `${prefix}ProductCode` : "productCode",
+        prefix ? `${prefix}ProductId` : "productId",
+        prefix ? `${prefix}LinkUrl` : "linkUrl",
+      ]) {
+        invariant(object.contentFieldKeys.includes(field), `${template.key}.editableObjects.${object.roleId} 缺少行动目标字段 ${field}`);
+      }
+      invariant(object.capabilities.includes("link"), `${template.key}.editableObjects.${object.roleId} 缺少 link 能力`);
+    }
     invariant(Array.isArray(object.capabilities), `${template.key}.editableObjects.${object.roleId}.capabilities 必须是数组`);
     invariant(new Set(object.capabilities).size === object.capabilities.length, `${template.key}.editableObjects.${object.roleId}.capabilities 不得重复`);
     invariant(object.capabilities.every((capability) => editableObjectCapabilities.has(capability)), `${template.key}.editableObjects.${object.roleId}.capabilities 含未知能力`);
+    if (object.capabilityViewports !== undefined) {
+      invariant(object.capabilityViewports && typeof object.capabilityViewports === "object" && !Array.isArray(object.capabilityViewports), `${template.key}.editableObjects.${object.roleId}.capabilityViewports 必须是对象`);
+      for (const [capability, viewports] of Object.entries(object.capabilityViewports)) {
+        invariant(object.capabilities.includes(capability), `${template.key}.editableObjects.${object.roleId}.capabilityViewports.${capability} 未声明对应能力`);
+        invariant(Array.isArray(viewports) && viewports.length > 0, `${template.key}.editableObjects.${object.roleId}.capabilityViewports.${capability} 必须是非空数组`);
+        invariant(new Set(viewports).size === viewports.length && viewports.every((viewport) => rootDevices.includes(viewport)), `${template.key}.editableObjects.${object.roleId}.capabilityViewports.${capability} 包含无效设备`);
+      }
+    }
     const constraints = object.constraints;
     invariant(constraints && typeof constraints === "object" && !Array.isArray(constraints), `${template.key}.editableObjects.${object.roleId}.constraints 缺失`);
     invariant(
@@ -552,6 +706,15 @@ for (const template of source.templates) {
       );
     }
   }
+  const policyAltFields = new Set(
+    editableObjects
+      .filter((object) => object.altPolicy === "required" && object.altFieldKey)
+      .map((object) => object.altFieldKey),
+  );
+  invariant(
+    template.contentBudget.requiredText.every((field) => !policyAltFields.has(field)),
+    `${template.key}.contentBudget.requiredText 不得重复声明由 altPolicy 管理的替代文字`,
+  );
   const referenceFields = template.editorCapabilities.referenceFields ?? [];
   invariant(Array.isArray(referenceFields), `${template.key}.editorCapabilities.referenceFields 必须是数组`);
   for (const reference of referenceFields) {
@@ -601,8 +764,14 @@ for (const template of source.templates) {
     invariant(knownTextRole, `${template.key}.layoutOverrides.textRoles 引用了未知角色 ${textRole.roleId}`);
     const editableObject = editableObjects.find((object) => (object.nodeIds ?? [object.roleId]).includes(textRole.roleId));
     invariant(editableObject, `${template.key}.${textRole.roleId} 文字角色缺少 editableObjects 映射`);
+    const requiredTextCapabilities = [
+      "visibility",
+      "typography",
+      textRole.placementPresets?.length || textRole.widthPresets?.length ? "layout" : undefined,
+      textRole.placementPresets?.length || textRole.widthPresets?.length ? "layer" : undefined,
+    ].filter(Boolean);
     invariant(
-      ["layout", "layer", "visibility", "typography"].every((capability) => editableObject.capabilities.includes(capability)),
+      requiredTextCapabilities.every((capability) => editableObject.capabilities.includes(capability)),
       `${template.key}.${textRole.roleId} editableObjects 能力未覆盖文字布局`,
     );
   }
@@ -626,6 +795,7 @@ const registry = source.templates.map(({ key, moduleType, displayName, category,
 }));
 const contractMap = Object.fromEntries(source.templates.map(({ category: _category, implementationStatus: _status, skeleton: _skeleton, ...contract }) => [contract.key, contract]));
 const pageRuleMap = Object.fromEntries(source.pageRules.map((rule) => [rule.pageKey, rule]));
+const pagePathMap = Object.fromEntries(source.pageRules.map((rule) => [rule.pageKey, rule.publicPath]));
 const templateSkeletonMap = Object.fromEntries(source.templates.map(({ key, moduleType, displayName, category, skeleton }) => [key, {
   key,
   moduleType,
@@ -650,7 +820,41 @@ const generated = `/**
  */
 
 export const CONTENT_TEMPLATE_REGISTRY_VERSION = ${source.registryVersion};
+export const CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION = ${source.contractSchemaVersion};
 export const CONTENT_TEMPLATE_CONTRACT_VERSION = ${contractVersion};
+export const CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION = ${source.publicationGateVersion};
+export const CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY = "_contentPublication";
+
+export type ContentTemplatePublicationAttestation = {
+  gateVersion: number;
+  contractSchemaVersion: number;
+  registryVersion: number;
+};
+
+export function createContentTemplatePublicationAttestation(): ContentTemplatePublicationAttestation {
+  return {
+    gateVersion: CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION,
+    contractSchemaVersion: CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION,
+    registryVersion: CONTENT_TEMPLATE_REGISTRY_VERSION,
+  };
+}
+
+export function hasCurrentContentTemplatePublicationAttestation(metadata: unknown): boolean {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
+  const attestation = (metadata as Record<string, unknown>)[CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY];
+  if (!attestation || typeof attestation !== "object" || Array.isArray(attestation)) return false;
+  return (attestation as Record<string, unknown>).gateVersion
+    === CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION;
+}
+
+export function withoutContentTemplatePublicationAttestation(metadata: unknown): Record<string, unknown> {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
+  return Object.fromEntries(
+    Object.entries(metadata as Record<string, unknown>).filter(
+      ([key]) => key !== CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
+    ),
+  );
+}
 
 export type RegisteredContentTemplateKey = ${registeredKeys};
 export type ContentTemplateKey = RegisteredContentTemplateKey;
@@ -675,9 +879,26 @@ export type ContentTemplateAssetPolicy = {
 
 export const CONTENT_TEMPLATE_ASSET_POLICY = ${JSON.stringify(source.assetPolicy, sortReplacer, 2)} as const satisfies ContentTemplateAssetPolicy;
 
+export type ContentTemplatePageMetadataField = "seoTitle" | "seoDescription" | "ogImage" | "contentOwner";
+export type ContentTemplatePublicPageMetadataField = Exclude<ContentTemplatePageMetadataField, "contentOwner">;
+
+export type ContentTemplatePageMetadataContract = {
+  requiredForPublication: readonly ContentTemplatePageMetadataField[];
+  publicFields: readonly ContentTemplatePublicPageMetadataField[];
+  limits: Readonly<Record<ContentTemplatePageMetadataField, number>>;
+  mediaRights: {
+    maxItems: number;
+    fieldLimits: Readonly<Record<"assetUrl" | "source" | "authorizationId", number>>;
+  };
+};
+
+export const CONTENT_TEMPLATE_PAGE_METADATA = ${JSON.stringify(source.pageMetadata, sortReplacer, 2)} as const satisfies ContentTemplatePageMetadataContract;
+
 export type ContentTemplatePageRule = {
   pageKey: string;
+  publicPath: string;
   pageRole: string;
+  contentPlacement: "root-only";
   allowedTemplateKeys: readonly ContentTemplateKey[];
   businessRegionCount: 0 | 1;
   businessRegionPosition?: "after-first-brand-block";
@@ -689,6 +910,10 @@ export type ContentTemplatePageRule = {
 };
 
 export const CONTENT_TEMPLATE_PAGE_RULES = ${JSON.stringify(pageRuleMap, sortReplacer, 2)} as const satisfies Record<string, ContentTemplatePageRule>;
+
+export const CONTENT_TEMPLATE_PAGE_PATHS = ${JSON.stringify(pagePathMap, sortReplacer, 2)} as const;
+export type ContentTemplatePagePath =
+  (typeof CONTENT_TEMPLATE_PAGE_PATHS)[keyof typeof CONTENT_TEMPLATE_PAGE_PATHS];
 
 export type MediaSlot = {
   key: string;
@@ -728,12 +953,25 @@ export type ContentTemplateEditableObject = {
   nodeIds?: readonly string[];
   kind: ContentTemplateEditableObjectKind;
   contentFieldKeys: readonly string[];
+  mediaFieldKeys?: readonly string[];
   altFieldKey?: string;
   altPolicy?: "required" | "derived" | "decorative" | "not-applicable";
   collectionFieldKeys?: readonly string[];
+  collectionMediaPolicies?: readonly {
+    collectionFieldKey: string;
+    mediaFieldKeys: readonly string[];
+    altPolicy: "required" | "derived" | "decorative" | "not-applicable";
+    altFieldKey?: string;
+    derivedAltFieldKey?: string;
+  }[];
+  collectionLinkPolicies?: readonly {
+    collectionFieldKey: string;
+    required: boolean;
+  }[];
   referenceFieldKey?: string;
   fieldScopes?: Readonly<Record<string, ContentTemplateResponsiveScope>>;
   capabilities: readonly ContentTemplateEditableCapability[];
+  capabilityViewports?: Partial<Record<ContentTemplateEditableCapability, readonly ("desktop" | "mobile")[]>>;
   responsive: Partial<Record<ContentTemplateEditableCapability, ContentTemplateResponsiveScope>>;
   constraints: ContentTemplateEditableConstraints;
 };
@@ -1026,7 +1264,17 @@ export type ContentTemplateIssue = {
 
 export type ContentTemplateCompletion = {
   material: { complete: boolean; missing: string[] };
-  content: { complete: boolean; missing: string[] };
+  content: {
+    complete: boolean;
+    missing: string[];
+    missingCollectionAltText: Array<{
+      roleId: string;
+      collectionFieldKey: string;
+      altFieldKey: string;
+      altPolicy: "required" | "derived";
+      index: number;
+    }>;
+  };
   collections: {
     complete: boolean;
     invalid: Array<{
@@ -1048,6 +1296,42 @@ export type ContentTemplateCompletion = {
     }>;
   };
   publish: { complete: boolean; issues: ContentTemplateIssue[] };
+};
+
+export type ContentTemplateMediaRight = {
+  assetUrl: string;
+  source: string;
+  authorizationId: string;
+};
+
+export type ContentTemplateMediaReference = {
+  url: string;
+  path: string;
+  field: string;
+  blockId?: string;
+  moduleType?: string;
+  index?: number;
+};
+
+export type ContentTemplateLinkTargetReference = {
+  path: string;
+  field: string;
+  required: boolean;
+  targetTypeFieldKey: string;
+  productCodeFieldKey: string;
+  productIdFieldKey: string;
+  linkUrlFieldKey: string;
+  legacyLinkFieldKey?: string;
+  actionTextFieldKey?: string;
+  targetType: unknown;
+  productCode: unknown;
+  productId: unknown;
+  linkUrl: unknown;
+  legacyLink?: unknown;
+  actionText?: unknown;
+  blockId?: string;
+  moduleType: string;
+  index?: number;
 };
 
 export const CONTENT_TEMPLATE_REGISTRY = ${JSON.stringify(registry, sortReplacer, 2)} as const;
@@ -1299,10 +1583,19 @@ export function sanitizeContentTemplateLayoutData(
       if (!isRecord(rawNode)) continue;
       const node: NonNullable<ContentTemplateInstanceOverridesV2["nodes"]>[string] = {};
       const constraints = editableObject.constraints;
+      const supportsOnViewport = (
+        capability: ContentTemplateEditableCapability,
+        viewport: "desktop" | "mobile",
+      ) => {
+        if (!contentTemplateObjectHasCapability(editableObject, capability)) return false;
+        const allowedViewports = editableObject.capabilityViewports?.[capability];
+        return !allowedViewports || allowedViewports.includes(viewport);
+      };
       if (constraints.allowHide && typeof rawNode.enabled === "boolean") node.enabled = rawNode.enabled;
       if (contentTemplateObjectHasCapability(editableObject, "layout") && isRecord(rawNode.rectByViewport)) {
         const rectByViewport: Partial<Record<"desktop" | "mobile", ContentTemplateVisualRect>> = {};
         for (const viewport of ["desktop", "mobile"] as const) {
+          if (!supportsOnViewport("layout", viewport)) continue;
           const safeArea = contract.defaultGeometryByViewport[viewport].safeArea;
           const rect = sanitizePersonalTemplateRect(rawNode.rectByViewport[viewport], constraints, safeArea);
           if (rect) rectByViewport[viewport] = rect;
@@ -1312,6 +1605,7 @@ export function sanitizeContentTemplateLayoutData(
       if (contentTemplateObjectHasCapability(editableObject, "layer") && isRecord(rawNode.zIndexByViewport)) {
         const zIndexByViewport: Partial<Record<"desktop" | "mobile", number>> = {};
         for (const viewport of ["desktop", "mobile"] as const) {
+          if (!supportsOnViewport("layer", viewport)) continue;
           const zIndex = Number(rawNode.zIndexByViewport[viewport]);
           if (Number.isInteger(zIndex) && zIndex >= constraints.layerRange.min && zIndex <= constraints.layerRange.max) {
             zIndexByViewport[viewport] = zIndex;
@@ -1416,6 +1710,39 @@ export function getContentTemplatePageRule(pageKey: string) {
   return (CONTENT_TEMPLATE_PAGE_RULES as Record<string, ContentTemplatePageRule | undefined>)[pageKey];
 }
 
+const CONTENT_TEMPLATE_PAGE_PATH_SET = new Set<string>(
+  Object.values(CONTENT_TEMPLATE_PAGE_PATHS),
+);
+
+/**
+ * 页面型 CTA 只允许跳转到 PageDocument 正式公开路由。
+ * 查询参数用于携带筛选或上下文；片段和尾斜杠没有稳定合同，因此拒绝。
+ */
+export function normalizeContentTemplatePageTarget(value: unknown): string | undefined {
+  if (
+    typeof value !== "string"
+    || !value.startsWith("/")
+    || value.startsWith("//")
+    || value.includes("#")
+  ) {
+    return undefined;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value, "https://haichuan.invalid");
+  } catch {
+    return undefined;
+  }
+
+  if (!CONTENT_TEMPLATE_PAGE_PATH_SET.has(parsed.pathname)) return undefined;
+  return parsed.pathname + parsed.search;
+}
+
+export function isContentTemplatePageTarget(value: unknown): value is string {
+  return normalizeContentTemplatePageTarget(value) !== undefined;
+}
+
 export function isContentTemplateAllowedForPage(pageKey: string, moduleType: string) {
   const rule = getContentTemplatePageRule(pageKey);
   const contract = getContentTemplateContract(moduleType);
@@ -1453,6 +1780,8 @@ function getCompatibilityRoleValue(
     case "热区图:sceneImage":
     case "门店信息:store":
       return values.image;
+    case "预约入口:bgImage":
+      return values.backgroundImage;
     case "限时活动:event":
       return values.eventImage;
     case "真实评价与实拍:authorizedPhoto": {
@@ -1487,6 +1816,203 @@ function getQuantifiedCollectionValue(
   );
   const arrayKey = populatedKey ?? candidateKeys.find((key) => Array.isArray(values[key]));
   return arrayKey ? { fieldKey: arrayKey, value: values[arrayKey] as unknown[] } : undefined;
+}
+
+/**
+ * 从机器合同声明的媒体字段提取单个可见区块所引用的素材。
+ * 不按属性名猜测，也不递归扫描任意字符串，避免把 alt、链接或业务字段误当素材。
+ */
+export function getContentTemplateMediaReferences(
+  moduleType: string,
+  props: unknown,
+  basePath = "props",
+): ContentTemplateMediaReference[] {
+  const contract = getContentTemplateContract(moduleType);
+  if (!contract || !isRecord(props) || props.isVisible === false) return [];
+  const blockId = hasNonEmptyText(props.id) ? props.id.trim() : undefined;
+  const references: ContentTemplateMediaReference[] = [];
+  const append = (value: unknown, field: string, path: string, index?: number) => {
+    if (!hasNonEmptyText(value)) return;
+    references.push({
+      url: value.trim(),
+      path,
+      field,
+      ...(blockId ? { blockId } : {}),
+      moduleType,
+      ...(index === undefined ? {} : { index }),
+    });
+  };
+
+  for (const object of contract.editorCapabilities.editableObjects) {
+    for (const field of object.mediaFieldKeys ?? []) {
+      append(props[field], field, basePath + "." + field);
+    }
+    for (const policy of object.collectionMediaPolicies ?? []) {
+      const collection = props[policy.collectionFieldKey];
+      if (!Array.isArray(collection)) continue;
+      collection.forEach((item, index) => {
+        if (!isRecord(item)) return;
+        for (const field of policy.mediaFieldKeys) {
+          append(
+            item[field],
+            field,
+            basePath + "." + policy.collectionFieldKey + "[" + index + "]." + field,
+            index,
+          );
+        }
+      });
+    }
+  }
+
+  const seen = new Set<string>();
+  return references.filter((reference) => {
+    const key = reference.path + "\\u0000" + reference.url;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * 从机器合同提取公开 Renderer 会消费的行动目标。
+ * 顶层行动字段由 action editableObject 派生；集合条目只处理显式声明的
+ * collectionLinkPolicies，避免按属性名递归猜测业务去向。
+ */
+export function getContentTemplateLinkTargetReferences(
+  moduleType: string,
+  props: unknown,
+  basePath = "props",
+): ContentTemplateLinkTargetReference[] {
+  const contract = getContentTemplateContract(moduleType);
+  if (!contract || !isRecord(props) || props.isVisible === false) return [];
+  const blockId = hasNonEmptyText(props.id) ? props.id.trim() : undefined;
+  const references: ContentTemplateLinkTargetReference[] = [];
+  const append = (
+    values: Record<string, unknown>,
+    path: string,
+    field: string,
+    required: boolean,
+    prefix = "",
+    actionTextFieldKey?: string,
+    legacyLinkFieldKey?: string,
+    index?: number,
+  ) => {
+    const targetTypeFieldKey = prefix ? prefix + "TargetType" : "targetType";
+    const productCodeFieldKey = prefix ? prefix + "ProductCode" : "productCode";
+    const productIdFieldKey = prefix ? prefix + "ProductId" : "productId";
+    const linkUrlFieldKey = prefix ? prefix + "LinkUrl" : "linkUrl";
+    references.push({
+      path,
+      field,
+      required,
+      targetTypeFieldKey,
+      productCodeFieldKey,
+      productIdFieldKey,
+      linkUrlFieldKey,
+      ...(legacyLinkFieldKey ? { legacyLinkFieldKey } : {}),
+      ...(actionTextFieldKey ? { actionTextFieldKey } : {}),
+      targetType: values[targetTypeFieldKey],
+      productCode: values[productCodeFieldKey],
+      productId: values[productIdFieldKey],
+      linkUrl: values[linkUrlFieldKey],
+      ...(legacyLinkFieldKey ? { legacyLink: values[legacyLinkFieldKey] } : {}),
+      ...(actionTextFieldKey ? { actionText: values[actionTextFieldKey] } : {}),
+      ...(blockId ? { blockId } : {}),
+      moduleType,
+      ...(index === undefined ? {} : { index }),
+    });
+  };
+
+  for (const object of contract.editorCapabilities.editableObjects) {
+    if (object.kind === "action") {
+      const targetTypeFieldKey = object.contentFieldKeys.find(
+        (field) => field === "targetType" || field.endsWith("TargetType"),
+      );
+      if (targetTypeFieldKey) {
+        const prefix = targetTypeFieldKey === "targetType"
+          ? ""
+          : targetTypeFieldKey.slice(0, -"TargetType".length);
+        const actionTextFieldKey = prefix
+          ? prefix + "Text"
+          : object.contentFieldKeys.find(
+              (field) => field === "actionText" || field === "buttonText",
+            );
+        if (actionTextFieldKey) {
+          append(
+            props,
+            basePath,
+            actionTextFieldKey,
+            hasNonEmptyText(props[actionTextFieldKey]),
+            prefix,
+            actionTextFieldKey,
+          );
+        }
+      }
+    }
+    for (const policy of object.collectionLinkPolicies ?? []) {
+      const collection = props[policy.collectionFieldKey];
+      if (!Array.isArray(collection)) continue;
+      collection.forEach((item, index) => {
+        append(
+          isRecord(item) ? item : {},
+          basePath + "." + policy.collectionFieldKey + "[" + index + "]",
+          policy.collectionFieldKey,
+          policy.required,
+          "",
+          undefined,
+          "link",
+          index,
+        );
+      });
+    }
+  }
+
+  return references;
+}
+
+/** 当前 PageDocument 会进入公开页面的唯一素材 URL 集合（含 ogImage）。 */
+export function getPageDocumentMediaReferences(
+  puckData: unknown,
+  metadata?: unknown,
+  pageKey?: string,
+): ContentTemplateMediaReference[] {
+  const references: ContentTemplateMediaReference[] = [];
+  if (isRecord(metadata) && hasNonEmptyText(metadata.ogImage)) {
+    references.push({
+      url: metadata.ogImage.trim(),
+      path: "metadata.ogImage",
+      field: "ogImage",
+    });
+  }
+  if (isRecord(puckData)) {
+    const collectBlocks = (blocks: unknown, basePath: string) => {
+      if (!Array.isArray(blocks)) return;
+      blocks.forEach((block, index) => {
+        if (!isRecord(block) || typeof block.type !== "string") return;
+        references.push(
+          ...getContentTemplateMediaReferences(
+            block.type,
+            block.props,
+            basePath + "[" + index + "].props",
+          ),
+        );
+      });
+    };
+    collectBlocks(puckData.content, "content");
+    const pageRule = pageKey ? getContentTemplatePageRule(pageKey) : undefined;
+    if (pageRule?.contentPlacement !== "root-only" && isRecord(puckData.zones)) {
+      for (const [zoneKey, blocks] of Object.entries(puckData.zones)) {
+        collectBlocks(blocks, "zones." + zoneKey);
+      }
+    }
+  }
+
+  const seenUrls = new Set<string>();
+  return references.filter((reference) => {
+    if (seenUrls.has(reference.url)) return false;
+    seenUrls.add(reference.url);
+    return true;
+  });
 }
 
 export function createContentTemplateMarker(
@@ -1986,8 +2512,42 @@ export function getContentTemplateCompletion(
       slot.required &&
       !hasNonEmptyText(getCompatibilityRoleValue(moduleType, slot.key, values)))
     .map((slot) => slot.key);
-  const missingText = contract.contentBudget.requiredText
-    .filter((key) => !hasNonEmptyText(values[key]));
+  const missingRequiredAltText = contract.editorCapabilities.editableObjects.flatMap((object) => {
+    if (object.altPolicy !== "required" || !object.altFieldKey) return [];
+    const mediaValue = getCompatibilityRoleValue(moduleType, object.roleId, values);
+    return hasNonEmptyText(mediaValue) && !hasNonEmptyText(values[object.altFieldKey])
+      ? [object.altFieldKey]
+      : [];
+  });
+  const missingText = [...new Set([
+    ...contract.contentBudget.requiredText.filter((key) => !hasNonEmptyText(values[key])),
+    ...missingRequiredAltText,
+  ])];
+  const missingCollectionAltText = contract.editorCapabilities.editableObjects.flatMap((object) =>
+    (object.collectionMediaPolicies ?? []).flatMap((policy) => {
+      const altPolicy = policy.altPolicy;
+      if (altPolicy !== "required" && altPolicy !== "derived") return [];
+      const collection = values[policy.collectionFieldKey];
+      if (!Array.isArray(collection)) return [];
+      const altFieldKey = altPolicy === "required"
+        ? policy.altFieldKey
+        : policy.derivedAltFieldKey;
+      if (!altFieldKey) return [];
+      return collection.flatMap((item, index) => {
+        if (!isRecord(item)) return [];
+        const hasMedia = policy.mediaFieldKeys.some((field) => hasNonEmptyText(item[field]));
+        return hasMedia && !hasNonEmptyText(item[altFieldKey])
+          ? [{
+              roleId: object.roleId,
+              collectionFieldKey: policy.collectionFieldKey,
+              altFieldKey,
+              altPolicy,
+              index,
+            }]
+          : [];
+      });
+    }),
+  );
   const invalidCollections = contract.roles.flatMap((role) => {
     if (!role.quantity) return [];
     const collection = getQuantifiedCollectionValue(contract, role.id, values);
@@ -2022,7 +2582,11 @@ export function getContentTemplateCompletion(
   const issues = getContentTemplateIssues({ moduleType, props: values });
   return {
     material: { complete: missingMedia.length === 0, missing: missingMedia },
-    content: { complete: missingText.length === 0, missing: missingText },
+    content: {
+      complete: missingText.length === 0 && missingCollectionAltText.length === 0,
+      missing: missingText,
+      missingCollectionAltText,
+    },
     collections: { complete: invalidCollections.length === 0, invalid: invalidCollections },
     attestations: { complete: missingAttestations.length === 0, missing: missingAttestations },
     publish: {

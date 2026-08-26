@@ -5,7 +5,6 @@
  */
 
 import {
-  isSafeInternalPath,
   normalizeLinkTargetType,
   resolveItemLinkUrl,
   resolveLinkTargetUrl,
@@ -225,7 +224,6 @@ export interface AppointmentContractProps {
   /** 跳转三件套(2026-08-18 P1-3) */
   targetType?: string;
   productId?: number | string;
-  phone?: string;
   backgroundImage?: string;
   altText?: string;
 }
@@ -399,7 +397,7 @@ export function evaluateGalleryContract(
 
 export const APPOINTMENT_CONTRACT = {
   type: "预约入口",
-  purpose: "以一个明确主行动引导访客进入预约咨询；电话仅作为次要联系入口。",
+  purpose: "以一个明确主行动引导访客进入预约咨询；统一联系电话仅作为次要联系入口。",
   canvas: {
     heightMode: "content",
     minHeight: 380,
@@ -407,7 +405,7 @@ export const APPOINTMENT_CONTRACT = {
     heightModeByViewport: CONTENT_TEMPLATE_CONTRACTS.booking.heightModeByViewport,
   },
   content: {
-    limits: { title: 24, subtitle: 72, buttonText: 10, altText: 80, phone: 30 },
+    limits: { title: 24, subtitle: 72, buttonText: 10, altText: 80 },
   },
   defaults: { linkUrl: "/contact", tone: "ivory" },
 } as const;
@@ -544,14 +542,13 @@ function evaluateLinkTarget(value: LinkTargetValue): {
   const targetType = normalizeLinkTargetType(value);
   if (targetType === "none") return { ready: true };
   if (targetType === "product") {
-    const productId = Number(value.productId);
-    return Number.isInteger(productId) && productId > 0
+    return resolveLinkTargetUrl(value)
       ? { ready: true }
       : { ready: false, error: "请选择跳转商品" };
   }
-  return isSafeInternalPath(value.linkUrl)
+  return resolveLinkTargetUrl(value)
     ? { ready: true }
-    : { ready: false, error: "请选择站内页面" };
+    : { ready: false, error: "请选择已登记的公开页面" };
 }
 
 export function evaluateHeroContract(
@@ -726,21 +723,18 @@ export function evaluateCategoryCardsContract(
 export function evaluateAppointmentContract(
   props: AppointmentContractProps,
 ): ModuleContractStatus {
-  // 跳转三件套优先,旧 linkUrl 下拉值兜底
-  const targetUrl =
-    resolveLinkTargetUrl({
-      targetType: props.targetType,
-      productId: props.productId,
-      linkUrl: props.linkUrl,
-    }) || (isSafeInternalPath(props.linkUrl) ? props.linkUrl : "");
+  // 旧 linkUrl 仅在指向已登记公开页面时由统一解析器兼容。
+  const targetUrl = resolveLinkTargetUrl({
+    targetType: props.targetType,
+    productId: props.productId,
+    linkUrl: props.linkUrl,
+  });
   const checks = [hasText(props.title), hasText(props.buttonText), Boolean(targetUrl)];
   const errors: string[] = [];
   const warnings: string[] = [];
   if (!hasText(props.title)) errors.push("请填写预约标题");
   if (!hasText(props.buttonText)) errors.push("请填写预约按钮文字");
   if (!targetUrl) errors.push("请选择预约咨询站内页面");
-  if (hasText(props.phone) && !/^\+?[\d\s-]{6,20}$/.test(String(props.phone)))
-    errors.push("咨询电话格式不正确");
   if (!hasText(props.subtitle)) warnings.push("建议说明服务方式或响应时间");
   if (hasText(props.backgroundImage) && !hasText(props.altText))
     warnings.push("建议填写背景图片替代文字");

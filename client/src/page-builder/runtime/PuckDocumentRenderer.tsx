@@ -32,7 +32,10 @@ import { getListingImage } from "@/utils/productImage";
 import { unwrapResponse } from "@/utils/unwrap";
 import { convertPuckProps } from "@/page-builder/utils/puckPropsToModule";
 import { createCatalogCategoryUrl, resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
-import { getContentTemplateIssues } from "@/page-builder/generated/contentTemplates.generated";
+import {
+  getContentTemplateIssues,
+  sanitizeContentTemplateLayoutData,
+} from "@/page-builder/generated/contentTemplates.generated";
 import ContentTemplateContractFrame from "@/page-builder/runtime/ContentTemplateContractFrame";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
@@ -283,7 +286,7 @@ function subscribeProductStream(onTick: () => void): () => void {
       retryTimer: null,
     };
     const open = () => {
-      const stream = new EventSource(publicProductStreamUrl);
+      const stream = new EventSource(publicProductStreamUrl());
       stream.onmessage = () => {
         handle.retry = 0;
         handle.listeners.forEach((cb) => cb());
@@ -310,6 +313,17 @@ function subscribeProductStream(onTick: () => void): () => void {
       productStreamHandle = null;
     }
   };
+}
+
+function usePublicProductRevision(active: boolean) {
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    if (USE_MOCK || !active) return;
+    return subscribeProductStream(() => setRevision((value) => value + 1));
+  }, [active]);
+
+  return revision;
 }
 
 function ResolvedProductRowBlock({
@@ -339,7 +353,7 @@ function ResolvedProductRowBlock({
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(productCodes.length + productIds.length > 0);
   const [error, setError] = useState(false);
-  const [revision, setRevision] = useState(0);
+  const revision = usePublicProductRevision(productCodes.length + productIds.length > 0);
 
   useEffect(() => {
     if (productCodes.length === 0 && productIds.length === 0) {
@@ -380,11 +394,6 @@ function ResolvedProductRowBlock({
       controller.abort();
     };
   }, [codesKey, idsKey, productCodes, productIds, revision]);
-
-  useEffect(() => {
-    if (USE_MOCK || productCodes.length + productIds.length === 0) return;
-    return subscribeProductStream(() => setRevision((value) => value + 1));
-  }, [productCodes.length, productIds.length]);
 
   if (productCodes.length === 0 && productIds.length === 0) return null;
   if (loading) {
@@ -456,6 +465,7 @@ function ResolvedFeaturedProductBlock({
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(Boolean(productCode) || (!codeOnly && productId > 0));
   const [error, setError] = useState(false);
+  const revision = usePublicProductRevision(hasValidProductId);
 
   useEffect(() => {
     if (!productCode && (codeOnly || !Number.isInteger(productId) || productId <= 0)) {
@@ -483,7 +493,7 @@ function ResolvedFeaturedProductBlock({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; controller.abort(); };
-  }, [codeOnly, productCode, productId]);
+  }, [codeOnly, productCode, productId, revision]);
 
   if (!hasValidProductId) {
     if (!editMode) return null;
@@ -516,6 +526,7 @@ function ResolvedLookbookBlock({ props }: { props: Record<string, any> }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(productCodes.length + productIds.length > 0);
   const [error, setError] = useState(false);
+  const revision = usePublicProductRevision(productCodes.length + productIds.length > 0);
 
   useEffect(() => {
     if (!idsKey && !codesKey) {
@@ -544,7 +555,7 @@ function ResolvedLookbookBlock({ props }: { props: Record<string, any> }) {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; controller.abort(); };
-  }, [codesKey, idsKey, productCodes, productIds]);
+  }, [codesKey, idsKey, productCodes, productIds, revision]);
 
   if (loading) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="正在加载关联商品" />;
   if (error) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="关联商品暂时加载失败" />;
@@ -630,9 +641,18 @@ function renderBlock(
 
   if (props.isVisible === false) return null;
 
+  const renderValidationProps = props.__instanceOverrides === undefined
+    ? props
+    : {
+        ...props,
+        __instanceOverrides: sanitizeContentTemplateLayoutData(
+          block.type || "",
+          props.__instanceOverrides,
+        ),
+      };
   const templateIssue = getContentTemplateIssues({
     moduleType: block.type,
-    props,
+    props: renderValidationProps,
     blockId: props.id,
     path: `content[${index}].props.__contentTemplate`,
   }).find((issue) => issue.severity === "error");

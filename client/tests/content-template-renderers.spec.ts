@@ -5,6 +5,8 @@ import {
   CONTENT_TEMPLATE_CONTRACTS,
   CONTENT_TEMPLATE_REGISTRY,
   createContentTemplateMarker,
+  getContentTemplateIssues,
+  sanitizeContentTemplateLayoutData,
   type ContentTemplateContract,
 } from "../src/page-builder/generated/contentTemplates.generated";
 
@@ -21,12 +23,12 @@ const fixtureSvg = `
 `;
 
 const mediaByType: Record<string, Record<string, unknown>> = {
-  首屏主视觉: { desktopImage: image("hero"), mobileImage: image("hero") },
-  全屏出血图: { image: image("full-bleed"), mobileImage: image("full-bleed") },
+  首屏主视觉: { desktopImage: image("hero"), mobileImage: image("hero"), altText: "首屏主视觉替代文字哨兵" },
+  全屏出血图: { image: image("full-bleed"), mobileImage: image("full-bleed"), altText: "全屏出血图替代文字哨兵" },
   视频区块: { videoUrl: "/media/contract-test.mp4", posterUrl: image("video"), aspectRatio: "4:5" },
   轮播图: { images: [1, 2, 3].map((id) => ({ url: image("carousel"), mobileUrl: image("carousel"), alt: `轮播测试图 ${id}`, link: "" })) },
-  单图海报: { desktopImage: image("single-poster"), mobileImage: image("single-poster") },
-  双图海报: { mainImage: image("double-poster"), detailImage: image("featured-product") },
+  单图海报: { desktopImage: image("single-poster"), mobileImage: image("single-poster"), altText: "单图海报替代文字哨兵" },
+  双图海报: { mainImage: image("double-poster"), detailImage: image("featured-product"), mainAltText: "双图海报主图替代文字哨兵", detailAltText: "双图海报细节图替代文字哨兵" },
   工艺细节: {
     leadImage: image("craft-lead"),
     leadAltText: "工艺主图测试替代文字",
@@ -35,21 +37,29 @@ const mediaByType: Record<string, Record<string, unknown>> = {
     detailImageTwo: image("craft-detail-two"),
     detailTwoAltText: "工艺细节图二测试替代文字",
   },
-  定制流程: { steps: [1, 2, 3].map((id) => ({ number: `0${id}`, name: `步骤 ${id}`, desc: "安全测试说明", image: "" })) },
-  改款对比: { beforeImage: image("before-after"), afterImage: image("before-after") },
+  定制流程: { steps: [1, 2, 3].map((id) => ({ number: `0${id}`, name: `步骤 ${id}`, desc: "安全测试说明", image: image("journey") })) },
+  改款对比: { beforeImage: image("before-after"), afterImage: image("before-after"), beforeAltText: "改款前替代文字哨兵", afterAltText: "改款后替代文字哨兵" },
   单品焦点推荐: { productCode: "SAFE-1" },
   产品展示行: { productCodes: ["SAFE-1", "SAFE-2", "SAFE-3"], layout: "grid-3", mobileColumns: 2 },
   作品画廊: { items: [1, 2, 3, 4].map((id) => ({ image: image("asymmetric-gallery"), altText: `画廊测试图 ${id}`, caption: `FIG. 0${id}`, link: "" })) },
   佩戴灵感: { image: image("lookbook"), altText: "佩戴灵感替代文字哨兵", productCodes: ["SAFE-1", "SAFE-2"] },
   分类卡片: { categorySlugs: ["safe-1", "safe-2", "safe-3"] },
-  按场景选购: { categories: [1, 2, 3].map((id) => ({ name: `场景 ${id}`, image: image("occasion-guide"), link: "/products", description: "安全测试说明" })) },
+  按场景选购: { categories: [1, 2, 3].map((id) => ({ name: `场景 ${id}`, image: image("occasion-guide"), altText: `场景入口替代文字 ${id}`, link: "/products", description: "安全测试说明" })) },
   热区图: { image: image("hotspot"), mobileImage: image("hotspot"), altText: "热区导购场景替代文字", hotspots: [{ x: 42, y: 42, width: 12, height: 12, link: "/products", label: "热点" }] },
   卡片网格: { cards: [1, 2, 3].map((id) => ({ icon: `0${id}`, title: `要点 ${id}`, body: "安全测试说明" })) },
   服务承诺: { cards: [1, 2, 3].map((id) => ({ icon: `0${id}`, title: `服务 ${id}`, body: "已确认前仅作测试" })) },
   资质证书: { certificates: [1, 2].map((id) => ({ imageUrl: image("certificate"), name: `证书 ${id}`, desc: "内部测试材料", verificationConfirmed: true })) },
-  门店信息: { image: image("store-info"), useSiteSettings: true, storeName: "备用测试门店", address: "备用测试地址", hours: "10:00–18:00", phone: "400-000-0000" },
+  门店信息: {
+    image: image("store-info"),
+    useSiteSettings: false,
+    storeName: "备用测试门店",
+    address: "备用测试地址",
+    hours: "10:00–18:00",
+    phone: "400-000-0000",
+    mapUrl: "https://legacy.invalid/store",
+  },
   真实评价与实拍: { testimonials: [{ name: "测试署名", meta: "已授权测试", content: "这是一条不涉及真实顾客的安全测试引语。", image: image("testimonial"), authorizationConfirmed: true }] },
-  预约入口: { backgroundImage: image("booking"), title: "预约鉴赏", subtitle: "安全测试说明", buttonText: "预约鉴赏", linkUrl: "/contact", phone: "400-000-0000", bgColor: "#171717", tone: "dark" },
+  预约入口: { backgroundImage: image("booking"), altText: "预约背景替代文字哨兵", title: "预约鉴赏", subtitle: "安全测试说明", buttonText: "预约鉴赏", linkUrl: "/contact", phone: "400-000-0000", bgColor: "#171717", tone: "dark" },
   限时活动: { eventImage: image("limited-offer"), title: "活动测试标题", body: "安全测试说明", targetDate: "2099-12-31T23:59:59", buttonText: "查看说明", linkUrl: "/about" },
 };
 
@@ -71,6 +81,7 @@ const createBlocks = (): FixtureBlock[] => CONTENT_TEMPLATE_REGISTRY.map((entry,
     __contentTemplate: createContentTemplateMarker(entry.moduleType),
   },
 }));
+const templateCount = CONTENT_TEMPLATE_REGISTRY.length;
 
 const products = [1, 2, 3].map((id) => ({
   id,
@@ -172,16 +183,20 @@ async function seed(page: Page) {
     body: fixtureSvg,
   }));
   await page.route("**/api/analytics/track", (route) => route.fulfill({ status: 204, body: "" }));
-  await page.route("**/api/settings/public", (route) => route.fulfill({
+  await page.route("**/api/products/catalog/stream**", (route) => route.abort());
+  await page.route("**/api/page-modules/document/stream**", (route) => route.abort());
+  await page.route("**/api/settings/public**", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({
       code: 200,
       data: {
-        siteName: "统一来源测试门店",
+        siteName: "统一来源测试品牌",
+        storeName: "统一来源测试门店",
         contactAddress: "统一来源测试地址",
         businessHours: "09:00–17:00",
         contactPhone: "400-111-2222",
+        storeMapUrl: "https://maps.example.com/unified-store",
       },
     }),
   }));
@@ -194,7 +209,7 @@ async function seed(page: Page) {
     contentType: "application/json",
     body: JSON.stringify({ code: 200, data: { list: products, total: products.length } }),
   }));
-  await page.route("**/api/categories/tree", (route) => route.fulfill({
+  await page.route("**/api/categories/tree**", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({
@@ -210,10 +225,116 @@ async function seed(page: Page) {
   }));
 }
 
-test.describe("24 个内容模板真实 Renderer（确定性 UI）", () => {
+test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）`, () => {
   test.beforeEach(async ({ page }) => {
     await seed(page);
     await page.emulateMedia({ reducedMotion: "reduce" });
+  });
+
+  test("原始发布门禁保留失效覆盖错误，公开净化器只保留合同允许设备", () => {
+    const rawTextBannerOverrides = {
+      version: 2 as const,
+      nodes: {
+        copy: {
+          rectByViewport: {
+            desktop: { x: 0.08, y: 0.56, width: 0.48, height: 0.18 },
+            mobile: { x: 0.06, y: 0.38, width: 0.88, height: 0.2 },
+          },
+          zIndexByViewport: { desktop: 3, mobile: 4 },
+        },
+      },
+    };
+    const rawIssues = getContentTemplateIssues({
+      moduleType: "文字横幅",
+      props: {
+        __contentTemplate: createContentTemplateMarker("文字横幅"),
+        __instanceOverrides: rawTextBannerOverrides,
+      },
+    });
+    expect(rawIssues.some((issue) =>
+      issue.severity === "error" && issue.path.includes("rectByViewport"),
+    )).toBe(true);
+    expect(sanitizeContentTemplateLayoutData("文字横幅", rawTextBannerOverrides)?.nodes)
+      .toBeUndefined();
+
+    const heroOverrides = {
+      version: 2 as const,
+      nodes: {
+        title: {
+          rectByViewport: rawTextBannerOverrides.nodes.copy.rectByViewport,
+          zIndexByViewport: rawTextBannerOverrides.nodes.copy.zIndexByViewport,
+        },
+      },
+    };
+    const sanitizedHero = sanitizeContentTemplateLayoutData("首屏主视觉", heroOverrides);
+    expect(sanitizedHero?.nodes?.title?.rectByViewport?.desktop).toBeDefined();
+    expect(sanitizedHero?.nodes?.title?.rectByViewport?.mobile).toBeUndefined();
+    expect(sanitizedHero?.nodes?.title?.zIndexByViewport?.desktop).toBe(3);
+    expect(sanitizedHero?.nodes?.title?.zIndexByViewport?.mobile).toBeUndefined();
+  });
+
+  test("浏览器缺少观察器 API 时双图海报仍显示核心媒体", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "IntersectionObserver", {
+        configurable: true,
+        value: undefined,
+      });
+      Object.defineProperty(window, "ResizeObserver", {
+        configurable: true,
+        value: undefined,
+      });
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/__content-template-renderers");
+
+    const doublePoster = page.locator('[data-content-template-contract="doublePoster"]');
+    await expect(doublePoster.locator('[data-content-role="mainImage"]')).toHaveCSS("opacity", "1");
+    await expect(doublePoster.locator('[data-content-role="detailImage"]')).toBeVisible();
+  });
+
+  test("公开 Renderer 不生成未登记页面死链，并保留登记页面查询参数", async ({ page }) => {
+    const blocks: FixtureBlock[] = [
+      {
+        type: "首屏主视觉",
+        props: {
+          id: "invalid-page-target",
+          desktopImage: image("hero"),
+          mobileImage: image("hero"),
+          altText: "页面目标门禁测试主视觉",
+          title: "未登记页面目标",
+          actionText: "不应生成死链",
+          targetType: "page",
+          linkUrl: "/not-a-route",
+          __contentTemplate: createContentTemplateMarker("首屏主视觉"),
+        },
+      },
+      {
+        type: "文字横幅",
+        props: {
+          id: "valid-page-target",
+          title: "登记页面目标",
+          buttonText: "进入筛选结果",
+          targetType: "page",
+          linkUrl: "/catalog?category=12",
+          __contentTemplate: createContentTemplateMarker("文字横幅"),
+        },
+      },
+    ];
+    await page.unroute(/\/__content-template-renderers(?:\?.*)?$/);
+    await page.route(/\/__content-template-renderers(?:\?.*)?$/, (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: rendererFixturePage(blocks),
+    }));
+
+    await page.goto("/__content-template-renderers");
+    await expect(page.getByText("未登记页面目标")).toBeVisible();
+    await expect(page.getByRole("link", { name: "不应生成死链" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "进入筛选结果" })).toHaveAttribute(
+      "href",
+      "/catalog?category=12",
+    );
   });
 
   for (const viewport of [
@@ -223,11 +344,11 @@ test.describe("24 个内容模板真实 Renderer（确定性 UI）", () => {
     { name: "tablet-portrait", contractViewport: "desktop", width: 768, height: 1024 },
     { name: "mobile", contractViewport: "mobile", width: 390, height: 844 },
   ]) {
-    test(`${viewport.name}：24 个真实 Renderer、真实角色顺序、比例、高度与无横向溢出`, async ({ page }) => {
+    test(`${viewport.name}：${templateCount} 个真实 Renderer、真实角色顺序、比例、高度与无横向溢出`, async ({ page }) => {
       await page.setViewportSize(viewport);
       await page.goto("/__content-template-renderers");
       const renderers = page.locator('[data-content-template-renderer="real"]');
-      await expect(renderers).toHaveCount(24);
+      await expect(renderers).toHaveCount(templateCount);
       // 商品 Renderer 在 mock 模式仍沿真实异步解析路径；先等待稳定角色落点，
       // 再读取全量 DOM 顺序，避免把合法 loading 状态误判为合同缺失。
       await expect(page.locator('[data-content-template-contract="featuredProduct"] [data-content-role="product"]')).toBeAttached();
@@ -308,14 +429,33 @@ test.describe("24 个内容模板真实 Renderer（确定性 UI）", () => {
     await expect(page.locator('[data-content-template-contract="hotspot"] [data-content-role="hotspots"]').first()).toBeVisible();
     await expect(page.locator('[data-content-template-contract="wearingInspiration"] img').first()).toHaveAttribute("alt", "佩戴灵感替代文字哨兵");
     await expect(page.locator('[data-content-template-contract="hotspot"] img').first()).toHaveAttribute("alt", "热区导购场景替代文字");
+    await expect(page.locator('[data-content-template-contract="hero"] img:visible').first()).toHaveAttribute("alt", "首屏主视觉替代文字哨兵");
+    await expect(page.locator('[data-content-template-contract="fullBleed"] img').first()).toHaveAttribute("alt", "全屏出血图替代文字哨兵");
+    await expect(page.locator('[data-content-template-contract="singlePoster"] img:visible').first()).toHaveAttribute("alt", "单图海报替代文字哨兵");
+    await expect(page.locator('[data-content-template-contract="doublePoster"] [data-content-role="mainImage"] img').first()).toHaveAttribute("alt", "双图海报主图替代文字哨兵");
+    await expect(page.locator('[data-content-template-contract="doublePoster"] [data-content-role="detailImage"] img').first()).toHaveAttribute("alt", "双图海报细节图替代文字哨兵");
+    await expect(page.locator('[data-content-template-contract="comparison"]').getByRole("img", { name: "改款前替代文字哨兵" })).toBeVisible();
+    await expect(page.locator('[data-content-template-contract="comparison"]').getByRole("img", { name: "改款后替代文字哨兵" })).toBeVisible();
+    await expect(page.locator('[data-content-template-contract="booking"]').getByRole("img", { name: "预约背景替代文字哨兵" })).toBeVisible();
+    await expect(page.locator('[data-content-template-contract="carousel"]').getByRole("img", { name: "轮播测试图 1" })).toBeVisible();
+    await expect(page.locator('[data-content-template-contract="gallery"]').getByRole("img", { name: "画廊测试图 1" })).toBeVisible();
+    await expect(page.locator('[data-content-template-contract="sceneShopping"]').getByRole("img", { name: "场景入口替代文字 1" })).toBeVisible();
+    await expect(page.locator('[data-content-template-contract="journey"]').getByRole("img", { name: "步骤 1" })).toBeVisible();
+    await expect(page.locator('[data-content-template-contract="certificates"]').getByRole("img", { name: "证书 1" })).toBeVisible();
+    await expect(page.locator('[data-content-template-contract="testimonials"]').getByRole("img", { name: "测试署名" })).toBeVisible();
     await expect(page.locator('[data-content-template-contract="storeInfo"]')).toContainText("统一来源测试门店");
+    await expect(page.locator('[data-content-template-contract="storeInfo"]')).not.toContainText("备用测试门店");
     await expect(page.locator('[data-content-template-contract="storeInfo"]')).not.toContainText("备用测试地址");
+    await expect(page.locator('[data-content-template-contract="storeInfo"] [data-content-role="action"]'))
+      .toHaveAttribute("href", "https://maps.example.com/unified-store");
 
     const testimonialRoles = await page.locator('[data-content-template-contract="testimonials"] [data-content-role]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-content-role")));
     expect(testimonialRoles).toEqual(["authorizedPhoto", "mainQuote", "attribution"]);
     const booking = page.locator('[data-content-template-contract="booking"]');
     await expect(booking.locator("form")).toHaveCount(0);
     await expect(booking.locator('[data-content-role="primaryAction"]')).toHaveCount(1);
+    await expect(booking.locator('[data-content-role="secondaryContact"]')).toHaveText("400-111-2222");
+    await expect(booking).not.toContainText("400-000-0000");
 
     await expect
       .poll(() => page.locator('[data-content-template-contract="categoryCards"] a').evaluateAll(
@@ -341,6 +481,113 @@ test.describe("24 个内容模板真实 Renderer（确定性 UI）", () => {
     ]);
     expect(mobileVideoCopyBox?.top ?? 0, "手机端视频说明应堆叠在媒体下方")
       .toBeGreaterThanOrEqual((mobileVideoMediaBox?.bottom ?? 0) - 1);
+  });
+
+  test("商品变更后单品推荐与佩戴灵感重新核对公开资格", async ({ page }) => {
+    await page.addInitScript(() => {
+      const sources: Array<{ onmessage: ((event: { data: string }) => void) | null }> = [];
+      class TestEventSource {
+        onmessage: ((event: { data: string }) => void) | null = null;
+        onerror: (() => void) | null = null;
+
+        constructor(_url: string) {
+          sources.push(this);
+        }
+
+        close() {}
+      }
+
+      (window as any).EventSource = TestEventSource;
+      (window as any).__getProductStreamCount = () => sources.length;
+      (window as any).__emitProductChange = () => {
+        sources.forEach((source) => source.onmessage?.({ data: "{}" }));
+      };
+    });
+
+    const blocks: FixtureBlock[] = [
+      {
+        type: "单品焦点推荐",
+        props: {
+          id: "live-featured-product",
+          title: "实时主推作品",
+          productCode: "SAFE-1",
+          __contentTemplate: createContentTemplateMarker("单品焦点推荐"),
+        },
+      },
+      {
+        type: "佩戴灵感",
+        props: {
+          id: "live-lookbook-products",
+          title: "实时佩戴灵感",
+          image: image("lookbook"),
+          altText: "实时佩戴灵感测试图",
+          productCodes: ["SAFE-1", "SAFE-2"],
+          __contentTemplate: createContentTemplateMarker("佩戴灵感"),
+        },
+      },
+    ];
+    let activeProducts = products.slice(0, 2);
+    let productReads = 0;
+    await page.unroute(/\/__content-template-renderers(?:\?.*)?$/);
+    await page.route(/\/__content-template-renderers(?:\?.*)?$/, (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: rendererFixturePage(blocks),
+    }));
+    await page.unroute("**/api/products/public?*");
+    await page.route("**/api/products/public?*", (route) => {
+      productReads += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: 200,
+          data: { list: activeProducts, total: activeProducts.length },
+        }),
+      });
+    });
+
+    await page.goto("/__content-template-renderers");
+    const featured = page.locator('[data-content-template-contract="featuredProduct"]');
+    const lookbook = page.locator('[data-content-template-contract="wearingInspiration"]');
+    await expect(featured).toContainText("测试作品 1");
+    await expect(lookbook).toContainText("测试作品 1");
+    await expect(lookbook).toContainText("测试作品 2");
+    await expect.poll(() => page.evaluate(() => (window as any).__getProductStreamCount())).toBe(1);
+    const readsBeforeChange = productReads;
+
+    activeProducts = [];
+    await page.evaluate(() => {
+      (window as any).__emitProductChange();
+    });
+
+    await expect(page.getByText("所选主推商品已下架或暂不可展示")).toBeVisible();
+    await expect(featured).not.toContainText("测试作品 1");
+    await expect(lookbook).not.toContainText("测试作品 1");
+    await expect(lookbook).not.toContainText("测试作品 2");
+    expect(productReads).toBeGreaterThan(readsBeforeChange);
+  });
+
+  test("未配置门店资料时不把网站名称伪装成门店名称", async ({ page }) => {
+    await page.unroute("**/api/settings/public**");
+    await page.route("**/api/settings/public**", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: 200,
+        data: { siteName: "仅用于网站的品牌名称" },
+      }),
+    }));
+    await page.goto("/__content-template-renderers");
+
+    const storeInfo = page.locator('[data-content-template-contract="storeInfo"]');
+    await expect(storeInfo.locator('[data-content-role="store"]')).toBeVisible();
+    await expect(storeInfo.locator('[data-content-role="copy"]')).toHaveCount(0);
+    await expect(storeInfo).not.toContainText("仅用于网站的品牌名称");
+
+    const booking = page.locator('[data-content-template-contract="booking"]');
+    await expect(booking.locator('[data-content-role="secondaryContact"]')).toHaveCount(0);
+    await expect(booking).not.toContainText("400-000-0000");
   });
 
   test("重复预览区域不会把真实集合容器压缩到第一张卡片", async ({ page }) => {
@@ -386,7 +633,7 @@ test.describe("24 个内容模板真实 Renderer（确定性 UI）", () => {
     }
   });
 
-  test("24 模板声明的可视编辑槽位具有真实 DOM 落点", async ({ page }) => {
+  test(`${templateCount} 模板声明的可视编辑槽位具有真实 DOM 落点`, async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1200 });
     await page.goto("/__content-template-renderers");
     for (const entry of CONTENT_TEMPLATE_REGISTRY) {
@@ -481,6 +728,68 @@ test.describe("24 个内容模板真实 Renderer（确定性 UI）", () => {
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
     )).toBe(true);
     await expect(page.locator('[data-content-template-contract="booking"] [data-content-role="primaryAction"]')).toBeVisible();
+  });
+
+  test("公开 Renderer 只在合同允许的设备消费旧位置与层级覆盖", async ({ page }) => {
+    const overriddenBlocks = createBlocks().filter((block) =>
+      ["首屏主视觉", "文字横幅", "预约入口"].includes(block.type),
+    );
+    const hero = overriddenBlocks.find((block) => block.type === "首屏主视觉")!;
+    const textBanner = overriddenBlocks.find((block) => block.type === "文字横幅")!;
+    const booking = overriddenBlocks.find((block) => block.type === "预约入口")!;
+    const legacyNode = {
+      rectByViewport: {
+        desktop: { x: 0.08, y: 0.56, width: 0.48, height: 0.18 },
+        mobile: { x: 0.06, y: 0.38, width: 0.88, height: 0.2 },
+      },
+      zIndexByViewport: { desktop: 3, mobile: 4 },
+    };
+    const heroLegacyNode = {
+      ...legacyNode,
+      typography: { safeBand: "dark" },
+    };
+    hero.props.__instanceOverrides = {
+      version: 2,
+      nodes: { title: heroLegacyNode, actionText: heroLegacyNode },
+    };
+    textBanner.props.__instanceOverrides = {
+      version: 2,
+      nodes: { copy: legacyNode },
+    };
+    booking.props.__instanceOverrides = {
+      version: 2,
+      nodes: { title: legacyNode, buttonText: legacyNode },
+    };
+    await page.route(/\/__content-template-renderers(?:\?.*)?$/, (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: rendererFixturePage(overriddenBlocks),
+    }));
+
+    const positions = async () => ({
+      heroTitle: await page.locator('[data-content-template-contract="hero"] [data-editor-field~="title"]').evaluate((node) => getComputedStyle(node).position),
+      heroAction: await page.locator('[data-content-template-contract="hero"] [data-editor-field~="actionText"]').evaluate((node) => getComputedStyle(node).position),
+      textCopy: await page.locator('[data-content-template-contract="textBanner"] [data-content-role="copy"]').evaluate((node) => getComputedStyle(node).position),
+      bookingTitle: await page.locator('[data-content-template-contract="booking"] [data-editor-field~="title"]').evaluate((node) => getComputedStyle(node).position),
+      bookingAction: await page.locator('[data-content-template-contract="booking"] [data-editor-field~="buttonText"]').evaluate((node) => getComputedStyle(node).position),
+    });
+
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await page.goto("/__content-template-renderers");
+    const desktop = await positions();
+    expect(desktop.heroTitle).toBe("absolute");
+    expect(desktop.heroAction).toBe("absolute");
+    expect(desktop.textCopy).not.toBe("absolute");
+    expect(desktop.bookingTitle).not.toBe("absolute");
+    expect(desktop.bookingAction).not.toBe("absolute");
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobile = await positions();
+    expect(mobile.heroTitle).not.toBe("absolute");
+    expect(mobile.heroAction).not.toBe("absolute");
+    expect(mobile.textCopy).not.toBe("absolute");
+    expect(mobile.bookingTitle).not.toBe("absolute");
+    expect(mobile.bookingAction).not.toBe("absolute");
   });
 
   test("全部模板保留桌面、中间宽度与手机截图证据", async ({ page }) => {

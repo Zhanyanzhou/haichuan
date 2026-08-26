@@ -20,6 +20,7 @@ import {
   DeleteOutlined,
   DragOutlined,
   EditOutlined,
+  EyeOutlined,
   ExclamationCircleOutlined,
   LeftOutlined,
   MenuOutlined,
@@ -28,6 +29,8 @@ import {
 } from "@ant-design/icons";
 import { Puck, type PuckAction, type UiState } from "@puckeditor/core";
 import { useNavigate } from "react-router-dom";
+import { canAccessAdminRoute } from "@/config/adminRouteAccess";
+import { useAuthStore } from "@/store/authStore";
 import "@puckeditor/core/puck.css";
 import { puckConfig } from "@/page-builder/config/puckConfig";
 import { BusinessRegionCanvasProvider } from "@/page-builder/adapters/businessRegion.puck";
@@ -42,7 +45,6 @@ import {
 import {
   pageDocumentApi,
   personalContentTemplateApi,
-  settingsApi,
   type PersonalContentTemplate,
 } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -54,6 +56,11 @@ import {
 } from "@/page-builder/templates/blockTemplateStore";
 import StorefrontNavigation from "@/components/layout/StorefrontNavigation";
 import StorefrontFooter from "@/components/layout/StorefrontFooter";
+import {
+  PublicSiteSettingsProvider,
+  usePublicSiteSettings,
+  usePublicSiteSettingsResource,
+} from "@/hooks/usePublicSiteSettings";
 import SchemaInspectorPanel from "@/page-builder/inspector/SchemaInspectorPanel";
 import DoublePosterInspector from "@/page-builder/inspector/panels/DoublePosterInspector";
 import { getInspectorSchema } from "@/page-builder/inspector/schema/registry";
@@ -75,6 +82,7 @@ import {
   isContentTemplateAllowedForPage,
   sanitizeContentTemplateDefaultContent,
   sanitizeContentTemplateLayoutData,
+  type ContentTemplateMediaRight,
 } from "@/page-builder/generated/contentTemplates.generated";
 import { isVisualRecord } from "@/page-builder/runtime/visualLayout";
 import {
@@ -222,23 +230,7 @@ function insertPreparedBlock(
 }
 
 function EditorCanvasFooter() {
-  const [siteSettings, setSiteSettings] = useState<any>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    settingsApi
-      .getPublicSettings()
-      .then((res) => {
-        if (!cancelled) setSiteSettings(unwrapResponse<any>(res));
-      })
-      .catch(() => {
-        // 画布页脚仅作预览，接口不可用时回落品牌默认值，不阻断编辑。
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
+  const { settings: siteSettings } = usePublicSiteSettings();
   const siteName = siteSettings?.siteName || "海川珠宝";
   return <StorefrontFooter siteName={siteName} preview />;
 }
@@ -252,6 +244,7 @@ function EditorCanvasShell({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const siteSettingsResource = usePublicSiteSettingsResource();
   const currentViewport = useHomepagePuck(
     (state) => state.appState.ui.viewports.current,
   );
@@ -308,6 +301,7 @@ function EditorCanvasShell({
   }, [menuOpen]);
 
   return (
+    <PublicSiteSettingsProvider resource={siteSettingsResource}>
     <div
       ref={rootRef}
       className="homepage-editor__storefront-frame"
@@ -341,6 +335,7 @@ function EditorCanvasShell({
       </BusinessRegionCanvasProvider>
       <EditorCanvasFooter />
     </div>
+    </PublicSiteSettingsProvider>
   );
 }
 
@@ -819,10 +814,10 @@ function PreviewCard({
   );
 }
 
-/** 内容模板复用真实 adapter 与合同根框架；非合同模块仍保留旧分类图示。 */
+/** 内容模板卡片使用机器合同结构缩略图；非合同模块仍保留旧分类图示。 */
 function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; viewport?: "desktop" | "mobile" }) {
   if (getContentTemplatePreview(name)) {
-    return <ContentTemplateRendererPreview moduleType={name} viewport={viewport} />;
+    return <ContentTemplateRendererPreview moduleType={name} viewport={viewport} variant="structure" />;
   }
   const kind = BLOCK_PREVIEW_KIND[name] ?? "hero";
   let content: ReactNode;
@@ -2212,6 +2207,7 @@ function TemplateLibrary({
                                   moduleType={template.moduleType}
                                   viewport={previewViewport}
                                   layoutData={template.layoutData}
+                                  variant="structure"
                                 />
                                 <span className="homepage-editor__template-badge" style={{ background: "#181A1B" }}>我的</span>
                                 <span className="homepage-editor__template-add">点击添加</span>
@@ -2582,6 +2578,37 @@ type PublishValidationIssue = {
 
 type PublishValidationState = "checking" | "current" | "stale" | "error";
 
+function resolvePublishValidationIssues(result: {
+  errors?: string[];
+  issues?: PublishValidationIssue[];
+}): PublishValidationIssue[] {
+  const structuredIssues = result.issues ?? [];
+  const structuredErrorMessages = new Set(
+    structuredIssues
+      .filter((issue) => issue.severity === "error")
+      .map((issue) => issue.message),
+  );
+  const fallbackErrors = (result.errors ?? [])
+    .filter((message) => !structuredErrorMessages.has(message))
+    .map((message) => ({
+      message,
+      severity: "error" as const,
+    }));
+  return [...structuredIssues, ...fallbackErrors];
+}
+
+function isPageSettingsPublishIssue(issue: PublishValidationIssue): boolean {
+  return issue.severity === "error" && (
+    issue.path === "metadata"
+    || issue.path?.startsWith("metadata.")
+    || issue.message.startsWith("页面设置：")
+  );
+}
+
+function isSiteSettingsPublishIssue(issue: PublishValidationIssue): boolean {
+  return issue.path === "siteSettings" || issue.path?.startsWith("siteSettings.") === true;
+}
+
 function EditorBody({
   onSaveAsTemplate,
   pageKey,
@@ -2591,6 +2618,7 @@ function EditorBody({
   hasUnsavedChanges,
   saving,
   previewMode,
+  viewingPublished,
   onSaveDraft,
   publishIssues,
   validationState,
@@ -2603,6 +2631,7 @@ function EditorBody({
   hasUnsavedChanges: boolean;
   saving: boolean;
   previewMode: boolean;
+  viewingPublished: boolean;
   onSaveDraft: (data: unknown) => void;
   publishIssues: PublishValidationIssue[];
   validationState: PublishValidationState;
@@ -2718,6 +2747,7 @@ function EditorBody({
   }, [pageKey]);
   useEffect(() => {
     const handleVisualEdit = (event: MessageEvent<CanvasVisualEditMessage>) => {
+      if (viewingPublished) return;
       const detail = event.data;
       if (
         event.origin !== window.location.origin ||
@@ -2781,7 +2811,7 @@ function EditorBody({
     };
     window.addEventListener("message", handleVisualEdit);
     return () => window.removeEventListener("message", handleVisualEdit);
-  }, [dispatch]);
+  }, [dispatch, viewingPublished]);
   const viewportWidth =
     currentViewport.width === "100%"
       ? RESPONSIVE_CANVAS.desktop.width
@@ -3066,14 +3096,27 @@ function EditorBody({
 
   return (
     <main
-      className={`homepage-editor__body${isInspecting ? " is-inspecting" : ""}${previewMode ? " is-previewing" : ""}`}
+      className={`homepage-editor__body${isInspecting ? " is-inspecting" : ""}${previewMode ? " is-previewing" : ""}${viewingPublished ? " is-viewing-published" : ""}`}
     >
-      <TemplateLibrary
-        pageKey={pageKey}
-        onInsertTemplate={handleTemplateActivate}
-        onTemplatePointerDragMove={handleTemplatePointerDragMove}
-        onTemplatePointerDragEnd={handleTemplatePointerDragEnd}
-      />
+      {viewingPublished ? (
+        <aside
+          className="homepage-editor__library homepage-editor__library--readonly"
+          aria-label="模板组件库（线上版本只读）"
+        >
+          <div className="homepage-editor__readonly-panel" role="status">
+            <EyeOutlined />
+            <strong>线上版本仅供查看</strong>
+            <span>返回草稿后才能添加或导入模块。</span>
+          </div>
+        </aside>
+      ) : (
+        <TemplateLibrary
+          pageKey={pageKey}
+          onInsertTemplate={handleTemplateActivate}
+          onTemplatePointerDragMove={handleTemplatePointerDragMove}
+          onTemplatePointerDragEnd={handleTemplatePointerDragEnd}
+        />
+      )}
 
       <aside
         className={`homepage-editor__structure-workspace${structureCollapsed ? " is-collapsed" : ""}`}
@@ -3102,6 +3145,7 @@ function EditorBody({
               onToggleNavigationPreview={toggleNavigationPreview}
               scrollSpyIndex={scrollSpyIndex}
               publishIssues={publishIssues}
+              readOnly={viewingPublished}
             />
           </>
         )}
@@ -3225,14 +3269,22 @@ function EditorBody({
                 <RightOutlined />
               </button>
             </div>
-            <InspectorPanel
-              hasUnsavedChanges={hasUnsavedChanges}
-              saving={saving}
-              onSaveDraft={() => onSaveDraft(appData)}
-              onSaveAsTemplate={onSaveAsTemplate}
-              publishIssues={publishIssues}
-              validationState={validationState}
-            />
+            {viewingPublished ? (
+              <div className="homepage-editor__properties-empty-state homepage-editor__readonly-panel">
+                <EyeOutlined />
+                <strong>线上版本仅供查看</strong>
+                <span>点击顶部“返回编辑”恢复进入前的草稿和未保存修改。</span>
+              </div>
+            ) : (
+              <InspectorPanel
+                hasUnsavedChanges={hasUnsavedChanges}
+                saving={saving}
+                onSaveDraft={() => onSaveDraft(appData)}
+                onSaveAsTemplate={onSaveAsTemplate}
+                publishIssues={publishIssues}
+                validationState={validationState}
+              />
+            )}
           </div>
         )}
       </div>
@@ -3247,6 +3299,9 @@ export default function HomepageConfig({
 }) {
   const { message, modal } = AntdApp.useApp();
   const navigate = useNavigate();
+  const adminRole = useAuthStore((state) => state.user?.role);
+  const canPublish = adminRole === "SUPER_ADMIN" || adminRole === "ADMIN";
+  const canEditSiteContent = canAccessAdminRoute(adminRole, "/admin/site-content");
   const [data, setData] = useState<any>(() => createEditorPageDefault(pageKey));
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -3255,6 +3310,10 @@ export default function HomepageConfig({
   );
   const [publishValidationState, setPublishValidationState] =
     useState<PublishValidationState>("stale");
+  const publishSettingsErrorCount = useMemo(
+    () => publishIssues.filter(isPageSettingsPublishIssue).length,
+    [publishIssues],
+  );
   const [validationRevision, setValidationRevision] = useState(0);
   const validationRequestRef = useRef(0);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -3263,6 +3322,13 @@ export default function HomepageConfig({
   const [revisionsLoading, setRevisionsLoading] = useState(false);
   const [revisions, setRevisions] = useState<PageDocumentRevision[]>([]);
   const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
+  const [revisionFailure, setRevisionFailure] = useState<{
+    message: string;
+    revision?: PageDocumentRevision;
+  } | null>(null);
+  const [draftDiscardError, setDraftDiscardError] = useState<string | null>(
+    null,
+  );
   const [draftSnapshot, setDraftSnapshot] = useState<PageDraftSnapshot | null>(
     null,
   );
@@ -3274,6 +3340,10 @@ export default function HomepageConfig({
   const activePageKeyRef = useRef(pageKey);
   const latestData = useRef<any>(data);
   const preserveSavedBaselineOnDataSyncRef = useRef(false);
+  const controlledCanvasStateRef = useRef<{
+    hasUnsavedChanges: boolean;
+    baselineSignature: string | null;
+  } | null>(null);
   const [canvasDataSyncVersion, setCanvasDataSyncVersion] = useState(0);
   const pageSessionCacheRef = useRef<Record<string, PageSessionCache>>({});
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -3282,7 +3352,15 @@ export default function HomepageConfig({
   const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
   // 是否存在尚未发布的草稿修改。
   const [hasPendingDraft, setHasPendingDraft] = useState(false);
+  const [publishedNeedsRevalidation, setPublishedNeedsRevalidation] = useState(false);
   const pendingDraftRef = useRef<any>(null);
+  const editingDraftSnapshotRef = useRef<{
+    data: any;
+    metadata: Record<string, any>;
+    hasUnsavedChanges: boolean;
+    hasPendingDraft: boolean;
+    savedSignature: string;
+  } | null>(null);
   const publishedBaselineRef = useRef<any>(null);
   const publishedDataRef = useRef<any>(null);
   // 当前画布是否展示线上已发布版本（“查看线上版本”模式）。
@@ -3291,6 +3369,10 @@ export default function HomepageConfig({
   const viewingPublishedRef = useRef(false);
   // 线上版本的 metadata，供“查看线上版本”时还原。
   const publishedMetadataRef = useRef<Record<string, any>>({});
+  const hasProtectedUnsavedChanges =
+    hasUnsavedChanges ||
+    (viewingPublished &&
+      editingDraftSnapshotRef.current?.hasUnsavedChanges === true);
 
   useEffect(() => {
     activePageKeyRef.current = pageKey;
@@ -3321,11 +3403,13 @@ export default function HomepageConfig({
                 moduleType={blockType}
                 viewport="desktop"
                 layoutData={layoutData}
+                variant="renderer"
               />
               <ContentTemplateRendererPreview
                 moduleType={blockType}
                 viewport="mobile"
                 layoutData={layoutData}
+                variant="renderer"
               />
             </div>
             <label style={{ fontSize: 12, color: "var(--adm-text-strong)" }}>
@@ -3470,14 +3554,18 @@ export default function HomepageConfig({
       setLoadedPageKey(null);
       setHasUnsavedChanges(false);
       setHasPendingDraft(false);
+      setPublishedNeedsRevalidation(false);
       setViewingPublished(false);
       setPublishIssues([]);
       setPublishValidationState("stale");
       setRevisions([]);
       setDraftSnapshot(null);
+      setRevisionFailure(null);
+      setDraftDiscardError(null);
       setRevisionsOpen(false);
       setPageSettingsOpen(false);
       pendingDraftRef.current = null;
+      editingDraftSnapshotRef.current = null;
       publishedBaselineRef.current = null;
       publishedDataRef.current = null;
       publishedMetadataRef.current = {};
@@ -3509,7 +3597,7 @@ export default function HomepageConfig({
         // 同时拉取线上已发布版本与后台草稿:存在未发布草稿差异时默认进入草稿继续编辑,
         // 否则展示线上版本(与下方 displayPuck 判定一致,2026-08-18 P1.5 核对)。
         const [publishedResponse, adminResponse] = await Promise.all([
-          pageDocumentApi.getPublished(pageKey),
+          pageDocumentApi.getPublishedAdmin(pageKey),
           pageDocumentApi.getAdmin(pageKey),
         ]);
         if (cancelled) return;
@@ -3519,6 +3607,9 @@ export default function HomepageConfig({
         const draftPuck = adminDoc?.puckData ?? null;
 
         const nextHasPublished = Boolean(publishedPuck);
+        setPublishedNeedsRevalidation(
+          nextHasPublished && publishedDoc?.publicationAttested === false,
+        );
         // 草稿差异判定须同时比较 content 与 metadata：
         // 仅改 SEO 等 metadata 而未动内容的草稿，此前会被误判为“与线上一致”，
         // 导致刷新后既不提示草稿、也不提供“继续编辑草稿”入口。
@@ -3630,6 +3721,18 @@ export default function HomepageConfig({
 
   const trackEditorData = useCallback((nextData: unknown) => {
     latestData.current = nextData;
+    const controlledState = controlledCanvasStateRef.current;
+    if (controlledState) {
+      controlledCanvasStateRef.current = null;
+      // Puck 会在整页替换时补齐默认字段。服务端草稿采用归一化结果
+      // 建立新基线；从线上比较返回时则恢复进入前的已保存基线与脏状态。
+      dataSignatureRef.current =
+        controlledState.baselineSignature ?? dataSignature(nextData);
+      setHasUnsavedChanges(controlledState.hasUnsavedChanges);
+      setPublishValidationState("stale");
+      setValidationRevision((revision) => revision + 1);
+      return;
+    }
     // 规范化比较(忽略 block id/键序/非 content 字段):
     // Puck 首帧会 normalize 画布数据,JSON 全等会让每次进入编辑器都误报"有未保存修改"
     const changed = dataSignature(nextData) !== dataSignatureRef.current;
@@ -3675,14 +3778,14 @@ export default function HomepageConfig({
             errors: string[];
             issues?: PublishValidationIssue[];
           }>(response);
-          setPublishIssues(
-            result.issues ??
-              result.errors.map((message) => ({ message, severity: "error" as const })),
-          );
+          setPublishIssues(resolvePublishValidationIssues(result));
           setPublishValidationState("current");
         })
         .catch((error) => {
           if (controller.signal.aborted || requestId !== validationRequestRef.current) return;
+          // 失败时不能继续把上一轮问题伪装成当前结论；草稿仍完整保留，
+          // 运营可从工具栏原位重试同一个服务端预检。
+          setPublishIssues([]);
           setPublishValidationState("error");
           if (import.meta.env.DEV) console.warn("[PageDocument validate]", error);
         });
@@ -3727,6 +3830,16 @@ export default function HomepageConfig({
               undefined,
           });
           const savedDocument = unwrapResponse<any>(response);
+          // 服务端会在保存时移除旧联系电话、门店资料等业务事实副本。
+          // 后续画布、缓存与发布校验必须以服务端回包为准，否则当前会话会继续
+          // 持有已经从数据库清除的旧字段，直到刷新页面后才恢复一致。
+          const persistedData = savedDocument?.puckData ?? editableData;
+          const persistedMetadata =
+            savedDocument?.metadata &&
+            typeof savedDocument.metadata === "object" &&
+            !Array.isArray(savedDocument.metadata)
+              ? savedDocument.metadata
+              : requestedMetadata;
           const updatedAt =
             typeof savedDocument?.updatedAt === "string"
               ? savedDocument.updatedAt
@@ -3734,26 +3847,39 @@ export default function HomepageConfig({
                 new Date().toISOString();
           const lastSavedAt = formatEditorTime(updatedAt);
           pageSessionCacheRef.current[targetPageKey] = {
-            data: editableData,
-            metadata: requestedMetadata,
+            data: persistedData,
+            metadata: persistedMetadata,
             lastSaved: lastSavedAt,
             updatedAt,
           };
-          dataSignatureRef.current = dataSignature(editableData);
 
           if (!isActivePage()) return true;
-          const hasNewerLocalChanges =
+          const hasNewerLocalData =
             JSON.stringify(latestData.current) !== JSON.stringify(editableData);
+          const hasNewerLocalMetadata =
+            JSON.stringify(latestMetadata.current) !==
+            JSON.stringify(requestedMetadata);
+          const hasNewerLocalChanges =
+            hasNewerLocalData || hasNewerLocalMetadata;
+          dataSignatureRef.current = dataSignature(persistedData);
           if (hasNewerLocalChanges) {
             setHasUnsavedChanges(true);
           } else {
-            setData(editableData);
-            latestData.current = editableData;
+            setData(persistedData);
+            latestData.current = persistedData;
+            setMetadata(persistedMetadata);
+            latestMetadata.current = persistedMetadata;
             setHasUnsavedChanges(false);
           }
+          const pendingData = hasNewerLocalChanges
+            ? latestData.current
+            : persistedData;
+          const pendingMetadata = hasNewerLocalChanges
+            ? latestMetadata.current
+            : persistedMetadata;
           setHasPendingDraft(
             publishedBaselineRef.current != null &&
-              canonicalizePageContent(editableData, requestedMetadata) !==
+              canonicalizePageContent(pendingData, pendingMetadata) !==
                 publishedBaselineRef.current,
           );
           setViewingPublished(false);
@@ -3791,6 +3917,11 @@ export default function HomepageConfig({
     [initialLoading, loadError, loadedPageKey, message, modal, pageKey],
   );
 
+  const retryPublishValidation = useCallback(() => {
+    setPublishValidationState("stale");
+    setValidationRevision((revision) => revision + 1);
+  }, []);
+
   // 2026-08-16 批次 D（用户决策）：2 秒自动保存已移除，改为显式保存模型——
   // 手动"保存草稿" + UnsavedChangesGuard（路由级离开拦截，三选项）+ beforeunload 三层。
   // 历史 reason：自动保存曾作为 SPA 跳转的静默兜底，用户判定其无价值且干扰草稿管理。
@@ -3823,14 +3954,14 @@ export default function HomepageConfig({
 
   // 未保存改动时拦截关闭/刷新，避免误丢
   useEffect(() => {
-    if (!hasUnsavedChanges) return;
+    if (!hasProtectedUnsavedChanges) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [hasUnsavedChanges]);
+  }, [hasProtectedUnsavedChanges]);
 
   // 草稿保护（2026-08-16 起的显式保存模型）：
   // 1. useBlocker（UnsavedChangesGuard）：SPA 路由跳转弹三选项（保存并离开/直接离开/继续编辑）；
@@ -3839,6 +3970,7 @@ export default function HomepageConfig({
 
   const loadRevisions = useCallback(async () => {
     setRevisionsLoading(true);
+    setRevisionFailure(null);
     try {
       // 同时拉取版本历史与后台草稿：存在与最新发布版本不同的草稿时，在抽屉顶部展示“编辑草稿”入口。
       const [revisionsResponse, adminResponse] = await Promise.all([
@@ -3870,13 +4002,16 @@ export default function HomepageConfig({
           : null,
       );
     } catch (error) {
-      message.error(
-        error instanceof Error ? error.message : "版本列表加载失败",
-      );
+      setRevisionFailure({
+        message: getEditorErrorMessage(
+          error,
+          "版本列表加载失败，请稍后重试",
+        ),
+      });
     } finally {
       setRevisionsLoading(false);
     }
-  }, [message, pageKey]);
+  }, [pageKey]);
 
   const applyDraftToCanvas = useCallback(
     (puckData: any, draftMetadata?: Record<string, any>) => {
@@ -3884,6 +4019,11 @@ export default function HomepageConfig({
         pageKey,
         migratePuckData(puckData),
       );
+      controlledCanvasStateRef.current = {
+        hasUnsavedChanges: false,
+        baselineSignature: null,
+      };
+      preserveSavedBaselineOnDataSyncRef.current = true;
       setData(structured);
       latestData.current = structured;
       dataSignatureRef.current = dataSignature(structured);
@@ -3893,6 +4033,8 @@ export default function HomepageConfig({
       }
       setHasUnsavedChanges(false);
       pendingDraftRef.current = null;
+      editingDraftSnapshotRef.current = null;
+      viewingPublishedRef.current = false;
       setViewingPublished(false);
     },
     [pageKey],
@@ -3922,7 +4064,57 @@ export default function HomepageConfig({
     }
   }, [pageKey, applyDraftToCanvas, message]);
 
+  const returnToEditingDraft = useCallback(() => {
+    const snapshot = editingDraftSnapshotRef.current;
+    if (!snapshot) {
+      // 首次进入且后台草稿与线上内容完全一致时没有独立快照；当前画布、
+      // metadata 与乐观锁基线已经由初次加载建立。返回编辑应直接复用它们，
+      // 不能再发一次 GET，把一次瞬时读取失败变成无法退出的只读态。
+      viewingPublishedRef.current = false;
+      setViewingPublished(false);
+      message.success("已进入编辑模式，当前线上内容保持不变");
+      return;
+    }
+    controlledCanvasStateRef.current = {
+      hasUnsavedChanges: snapshot.hasUnsavedChanges,
+      baselineSignature: snapshot.savedSignature,
+    };
+    preserveSavedBaselineOnDataSyncRef.current = true;
+    setData(snapshot.data);
+    latestData.current = snapshot.data;
+    setMetadata(snapshot.metadata);
+    latestMetadata.current = snapshot.metadata;
+    dataSignatureRef.current = snapshot.savedSignature;
+    setHasUnsavedChanges(snapshot.hasUnsavedChanges);
+    setHasPendingDraft(snapshot.hasPendingDraft);
+    viewingPublishedRef.current = false;
+    setViewingPublished(false);
+    editingDraftSnapshotRef.current = null;
+    message.success(
+      snapshot.hasUnsavedChanges
+        ? "已返回草稿，未保存修改保持不变"
+        : "已返回未发布草稿",
+    );
+  }, [message]);
+
+  const openPageSettingsForEditing = useCallback(() => {
+    if (viewingPublishedRef.current) {
+      if (editingDraftSnapshotRef.current) {
+        returnToEditingDraft();
+      } else {
+        // 首次打开且没有独立草稿时，当前线上内容就是新草稿的编辑基线。
+        viewingPublishedRef.current = false;
+        setViewingPublished(false);
+      }
+    }
+    setPageSettingsOpen(true);
+  }, [returnToEditingDraft]);
+
   const editPendingDraft = useCallback(() => {
+    if (viewingPublishedRef.current && editingDraftSnapshotRef.current) {
+      returnToEditingDraft();
+      return;
+    }
     if (hasUnsavedChanges) {
       modal.confirm({
         title: "加载未发布草稿？",
@@ -3934,31 +4126,61 @@ export default function HomepageConfig({
       return;
     }
     void loadDraftIntoCanvas();
-  }, [hasUnsavedChanges, loadDraftIntoCanvas, modal]);
+  }, [hasUnsavedChanges, loadDraftIntoCanvas, modal, returnToEditingDraft]);
 
-  const applyPublishedToCanvas = useCallback(() => {
+  const applyPublishedToCanvas = useCallback(async () => {
+    // 若运营刚点过保存，先让该请求完整推进缓存和乐观锁，再建立比较快照。
+    // 否则保存回包会在进入线上视图后把线上画布误标成草稿修改。
+    await Promise.resolve(saveQueueRef.current).catch(() => {});
     if (!publishedDataRef.current) return;
+    const savedPage = pageSessionCacheRef.current[pageKey];
+    const currentHasUnsavedChanges = savedPage
+      ? canonicalizePageContent(
+          latestData.current,
+          latestMetadata.current,
+        ) !== canonicalizePageContent(savedPage.data, savedPage.metadata)
+      : hasUnsavedChanges;
+    const currentHasPendingDraft =
+      publishedBaselineRef.current != null &&
+      canonicalizePageContent(
+        latestData.current,
+        latestMetadata.current,
+      ) !== publishedBaselineRef.current;
+    editingDraftSnapshotRef.current = {
+      data: latestData.current,
+      metadata: latestMetadata.current,
+      hasUnsavedChanges: currentHasUnsavedChanges,
+      hasPendingDraft: currentHasPendingDraft,
+      savedSignature: dataSignatureRef.current,
+    };
+    controlledCanvasStateRef.current = {
+      hasUnsavedChanges: false,
+      baselineSignature: null,
+    };
+    preserveSavedBaselineOnDataSyncRef.current = true;
     setData(publishedDataRef.current);
     latestData.current = publishedDataRef.current;
     dataSignatureRef.current = dataSignature(publishedDataRef.current);
     setMetadata(publishedMetadataRef.current);
     latestMetadata.current = publishedMetadataRef.current;
     setHasUnsavedChanges(false);
+    viewingPublishedRef.current = true;
     setViewingPublished(true);
-  }, []);
+  }, [hasUnsavedChanges, pageKey]);
 
   const viewPublishedVersion = useCallback(() => {
     if (hasUnsavedChanges) {
       modal.confirm({
         title: "查看线上版本？",
-        content: "画布上存在未保存修改，查看线上版本会暂时离开当前编辑内容。",
+        content:
+          "画布上存在未保存修改。查看期间线上版本只读；返回编辑时会恢复当前草稿和未保存修改。",
         okText: "查看线上版本",
         cancelText: "取消",
         onOk: applyPublishedToCanvas,
       });
       return;
     }
-    applyPublishedToCanvas();
+    void applyPublishedToCanvas();
   }, [hasUnsavedChanges, applyPublishedToCanvas, modal]);
 
   const discardDraftToPublished = useCallback(() => {
@@ -3971,6 +4193,7 @@ export default function HomepageConfig({
       cancelText: "取消",
       onOk: async () => {
         if (!publishedDataRef.current) return;
+        setDraftDiscardError(null);
         // 排空在途保存(如页面设置触发的静默保存):
         // 否则 in-flight 保存会在丢弃完成后回写草稿,让被丢弃的修改"复活"。
         await Promise.resolve(saveQueueRef.current).catch(() => {});
@@ -3981,11 +4204,16 @@ export default function HomepageConfig({
         try {
           await pageDocumentApi.discardDraft(pageKey, expectedUpdatedAt);
         } catch (error) {
-          message.error(
-            error instanceof Error ? error.message : "放弃草稿失败，请刷新后重试",
+          setDraftDiscardError(
+            getEditorErrorMessage(error, "放弃草稿失败，请稍后重试"),
           );
           return;
         }
+        controlledCanvasStateRef.current = {
+          hasUnsavedChanges: false,
+          baselineSignature: null,
+        };
+        preserveSavedBaselineOnDataSyncRef.current = true;
         setData(publishedDataRef.current);
         latestData.current = publishedDataRef.current;
         dataSignatureRef.current = dataSignature(publishedDataRef.current);
@@ -3995,6 +4223,8 @@ export default function HomepageConfig({
         setHasPendingDraft(false);
         setViewingPublished(false);
         pendingDraftRef.current = null;
+        editingDraftSnapshotRef.current = null;
+        viewingPublishedRef.current = false;
         message.success("已放弃草稿，当前内容与线上版本一致");
         // 重拉 admin 文档建立新的乐观锁与保存基准
         try {
@@ -4019,18 +4249,29 @@ export default function HomepageConfig({
   }, [loadRevisions]);
 
   const savePageSettings = useCallback(
-    (next: {
+    async (next: {
       seoTitle?: string;
       seoDescription?: string;
       ogImage?: string;
+      contentOwner?: string;
+      mediaRights?: ContentTemplateMediaRight[];
     }) => {
       const merged = { ...latestMetadata.current, ...next };
       setMetadata(merged);
       latestMetadata.current = merged;
-      setPageSettingsOpen(false);
-      void saveDraft(latestData.current, { silent: true });
+      // 发布设置已经进入当前内存草稿；即使持久化失败也必须触发离开保护，
+      // 不能关闭抽屉后把内容负责人、SEO 或授权编号静默丢失。
+      setHasUnsavedChanges(true);
+      setPublishValidationState("stale");
+      setValidationRevision((revision) => revision + 1);
+      const saved = await saveDraft(latestData.current, { silent: true });
+      if (saved) {
+        setPageSettingsOpen(false);
+        message.success("页面发布设置已保存");
+      }
+      return saved;
     },
-    [saveDraft],
+    [message, saveDraft],
   );
 
   const restoreRevision = useCallback(
@@ -4038,17 +4279,27 @@ export default function HomepageConfig({
       modal.confirm({
         title: `恢复版本 ${revision.version}？`,
         content:
-          "恢复后会覆盖当前后台草稿，但不会立即影响前台首页。确认后可继续编辑或重新发布。",
+          hasProtectedUnsavedChanges
+            ? "当前画布的未保存修改和后台草稿都会被该历史版本覆盖；未保存修改无法恢复。此操作不会立即影响前台。"
+            : "恢复后会覆盖当前后台草稿，但不会立即影响前台首页。确认后可继续编辑或重新发布。",
         okText: "恢复到草稿",
         cancelText: "取消",
         onOk: async () => {
+          setRestoringVersion(revision.version);
+          // 与放弃草稿一致，先排空已确认的在途保存，再读取最新乐观锁。
+          // 这样恢复不会与稍早发出的保存请求争用旧 expectedUpdatedAt。
+          await Promise.resolve(saveQueueRef.current).catch(() => {});
           const expectedUpdatedAt =
             pageSessionCacheRef.current[pageKey]?.updatedAt;
           if (!expectedUpdatedAt) {
-            message.error("当前页面版本标识缺失，请刷新页面后再恢复");
+            setRevisionFailure({
+              message: "当前页面版本标识缺失，请刷新页面后再恢复",
+              revision,
+            });
+            setRestoringVersion(null);
             return;
           }
-          setRestoringVersion(revision.version);
+          setRevisionFailure(null);
           try {
             const response = await pageDocumentApi.restoreRevision(
               pageKey,
@@ -4057,24 +4308,38 @@ export default function HomepageConfig({
             );
             const document = unwrapResponse<any>(response);
             if (document?.puckData) {
-              setData(document.puckData);
-              latestData.current = document.puckData;
+              const restoredData = ensureEditorPageStructure(
+                pageKey,
+                migratePuckData(document.puckData),
+              );
+              controlledCanvasStateRef.current = {
+                hasUnsavedChanges: false,
+                baselineSignature: null,
+              };
+              preserveSavedBaselineOnDataSyncRef.current = true;
+              setData(restoredData);
+              latestData.current = restoredData;
+              // 恢复接口已经把该版本写成服务端草稿；Puck 随后的 setData 回调
+              // 不应把这次受控整页替换误判为尚未保存的本地编辑。
+              dataSignatureRef.current = dataSignature(restoredData);
               const restoredMetadata = document.metadata || {};
               setMetadata(restoredMetadata);
               latestMetadata.current = restoredMetadata;
               setHasUnsavedChanges(false);
               setHasPendingDraft(
                 publishedBaselineRef.current != null &&
-                  canonicalizePageContent(document.puckData, restoredMetadata) !==
+                  canonicalizePageContent(restoredData, restoredMetadata) !==
                     publishedBaselineRef.current,
               );
               setViewingPublished(false);
               pendingDraftRef.current = null;
+              editingDraftSnapshotRef.current = null;
+              viewingPublishedRef.current = false;
               const restoredUpdatedAt =
                 document.updatedAt || new Date().toISOString();
               const restoredLastSaved = formatEditorTime(restoredUpdatedAt);
               pageSessionCacheRef.current[pageKey] = {
-                data: document.puckData,
+                data: restoredData,
                 metadata: restoredMetadata,
                 lastSaved: restoredLastSaved,
                 updatedAt: restoredUpdatedAt,
@@ -4083,22 +4348,30 @@ export default function HomepageConfig({
             message.success(`已恢复版本 ${revision.version} 到草稿`);
             setRevisionsOpen(false);
           } catch (error) {
-            message.error(
-              error instanceof Error ? error.message : "版本恢复失败",
-            );
+            setRevisionFailure({
+              message: getEditorErrorMessage(
+                error,
+                "版本恢复失败，请稍后重试",
+              ),
+              revision,
+            });
           } finally {
             setRestoringVersion(null);
           }
         },
       });
     },
-    [message, modal, pageKey],
+    [hasProtectedUnsavedChanges, message, modal, pageKey],
   );
 
   const publishHome = async (
     nextData: unknown,
     locateBlock?: (blockIndex: number) => void,
   ) => {
+    if (!canPublish) {
+      message.warning("当前账号只能编辑草稿，请通知管理员审核并发布");
+      return;
+    }
     if (
       publishing ||
       initialLoading ||
@@ -4133,7 +4406,7 @@ export default function HomepageConfig({
       );
     } catch (error) {
       message.error(
-        error instanceof Error ? error.message : "发布前校验失败，请稍后重试",
+        getEditorErrorMessage(error, "发布前校验失败，请稍后重试"),
       );
       setPublishing(false);
       return;
@@ -4146,15 +4419,16 @@ export default function HomepageConfig({
           content?: Array<{ type?: string; props?: Record<string, unknown> }>;
         }
       )?.content ?? [];
+    const currentIssues = resolvePublishValidationIssues(validation ?? {});
+    const actionableIssues = currentIssues.filter(
+      (issue) => issue.severity !== "info",
+    );
 
     if (validation && !validation.valid && validation.errors?.length) {
-      const errorIssues: PublishValidationIssue[] = validation.issues?.filter(
+      const errorIssues: PublishValidationIssue[] = actionableIssues.filter(
         (issue) => issue.severity === "error",
-      ) ?? validation.errors.map<PublishValidationIssue>((message) => ({
-        message,
-        severity: "error",
-      }));
-      setPublishIssues(errorIssues);
+      );
+      setPublishIssues(actionableIssues);
       const firstIssue = errorIssues.find((issue) => issue.blockId);
       const firstBlockIndex = firstIssue?.blockId
         ? blocks.findIndex((block) => block.props?.id === firstIssue.blockId)
@@ -4169,7 +4443,11 @@ export default function HomepageConfig({
       );
       return;
     }
-    setPublishIssues([]);
+    const warningIssues = actionableIssues.filter(
+      (issue) => issue.severity === "warning",
+    );
+    const hasSiteSettingsWarnings = warningIssues.some(isSiteSettingsPublishIssue);
+    setPublishIssues(warningIssues);
 
     const usesMobileFallback = blocks.some(
       (block) =>
@@ -4180,13 +4458,48 @@ export default function HomepageConfig({
         Boolean(block.props?.desktopImage || block.props?.image) &&
         !block.props?.mobileImage,
     );
-    modal.confirm({
+    const publishImpactCopy = usesMobileFallback
+      ? "部分模块未上传移动端图片，移动端会复用对应桌面图，可能产生裁切。你仍可发布。"
+      : pageKey === "home"
+        ? "发布后，当前店铺首页将立即更新为本次编辑内容。"
+        : `发布后，${pageLabel}将立即更新为本次编辑内容。`;
+    let publishConfirmation: { destroy: () => void } | null = null;
+    const openSiteContent = () => {
+      publishConfirmation?.destroy();
+      navigate("/admin/site-content");
+    };
+    publishConfirmation = modal.confirm({
       title: pageKey === "home" ? "确认发布首页？" : `确认发布${pageLabel}？`,
-      content: usesMobileFallback
-        ? "部分模块未上传移动端图片，移动端会复用对应桌面图，可能产生裁切。你仍可发布。"
-        : pageKey === "home"
-          ? "发布后，当前店铺首页将立即更新为本次编辑内容。"
-          : `发布后，${pageLabel}将立即更新为本次编辑内容。`,
+      content: (
+        <div>
+          {warningIssues.length > 0 ? (
+            <section aria-label="发布提示">
+              <p style={{ margin: "0 0 8px", fontWeight: 600 }}>
+                以下 {warningIssues.length} 项提示不会阻断发布，但会影响公开端显示：
+              </p>
+              <ul style={{ margin: "0 0 14px", paddingInlineStart: 20 }}>
+                {warningIssues.map((issue, index) => (
+                  <li key={`${issue.path ?? ""}-${issue.message}-${index}`}>
+                    {issue.message}
+                  </li>
+                ))}
+              </ul>
+              {hasSiteSettingsWarnings ? (
+                canEditSiteContent ? (
+                  <Button size="small" onClick={openSiteContent}>
+                    前往店铺资料
+                  </Button>
+                ) : (
+                  <p style={{ margin: "0 0 14px" }}>
+                    当前账号没有店铺资料维护权限，请联系管理员处理。
+                  </p>
+                )
+              ) : null}
+            </section>
+          ) : null}
+          <p style={{ margin: 0 }}>{publishImpactCopy}</p>
+        </div>
+      ),
       okText: "确认发布",
       cancelText: "继续检查",
       onOk: async () => {
@@ -4194,15 +4507,45 @@ export default function HomepageConfig({
         try {
           const saved = await saveDraft(editableData, { silent: true });
           if (!saved) return;
+          const persistedDraft = pageSessionCacheRef.current[pageKey];
+          const publishData = persistedDraft?.data ?? latestData.current;
+          const publishMetadata =
+            persistedDraft?.metadata ?? latestMetadata.current;
+          const publishSourceSignature = canonicalizePageContent(
+            publishData,
+            publishMetadata,
+          );
+          if (
+            canonicalizePageContent(
+              latestData.current,
+              latestMetadata.current,
+            ) !== publishSourceSignature
+          ) {
+            message.warning(
+              "保存期间页面又发生了修改；新修改已保留但尚未保存，请再次确认后发布",
+            );
+            return;
+          }
           const publishResponse = await pageDocumentApi.publish(
             pageKey,
             undefined,
-            pageSessionCacheRef.current[pageKey]?.updatedAt || undefined,
+            persistedDraft?.updatedAt || undefined,
           );
           const publishedDocument = unwrapResponse<any>(publishResponse);
+          const publishedData = publishedDocument?.puckData ?? publishData;
+          const publishedMetadata =
+            publishedDocument?.metadata &&
+            typeof publishedDocument.metadata === "object" &&
+            !Array.isArray(publishedDocument.metadata)
+              ? publishedDocument.metadata
+              : publishMetadata;
+          const publishedBaseline = canonicalizePageContent(
+            publishedData,
+            publishedMetadata,
+          );
           pageSessionCacheRef.current[pageKey] = {
-            data: editableData,
-            metadata: latestMetadata.current,
+            data: publishedData,
+            metadata: publishedMetadata,
             lastSaved: formatEditorTime(
               publishedDocument?.updatedAt || new Date(),
             ),
@@ -4211,25 +4554,46 @@ export default function HomepageConfig({
               pageSessionCacheRef.current[pageKey]?.updatedAt ||
               null,
           };
-          setData(editableData);
-          latestData.current = editableData;
-          setHasUnsavedChanges(false);
-          setHasPendingDraft(false);
+
+          if (pageKey !== activePageKeyRef.current) return;
+          const hasNewerLocalChanges =
+            canonicalizePageContent(
+              latestData.current,
+              latestMetadata.current,
+            ) !== publishSourceSignature;
+          dataSignatureRef.current = dataSignature(publishedData);
+          if (hasNewerLocalChanges) {
+            setHasUnsavedChanges(true);
+            setHasPendingDraft(
+              canonicalizePageContent(
+                latestData.current,
+                latestMetadata.current,
+              ) !== publishedBaseline,
+            );
+          } else {
+            setData(publishedData);
+            latestData.current = publishedData;
+            setMetadata(publishedMetadata);
+            latestMetadata.current = publishedMetadata;
+            setHasUnsavedChanges(false);
+            setHasPendingDraft(false);
+          }
           setViewingPublished(false);
-          publishedBaselineRef.current = canonicalizePageContent(
-            editableData,
-            latestMetadata.current,
-          );
+          publishedBaselineRef.current = publishedBaseline;
           pendingDraftRef.current = null;
           // 线上基线同步推进：发布后「查看线上版本」必须看到刚发布的内容，
           // 而不是发布前的旧线上版。
-          publishedDataRef.current = editableData;
-          publishedMetadataRef.current = { ...latestMetadata.current };
+          publishedDataRef.current = publishedData;
+          publishedMetadataRef.current = { ...publishedMetadata };
+          editingDraftSnapshotRef.current = null;
+          setPublishedNeedsRevalidation(false);
           void loadRevisions();
           message.success(
-            pageKey === "home"
-              ? "店铺首页已发布，前台页面将立即读取最新版本"
-              : `${pageLabel}已发布，前台页面将立即读取最新版本`,
+            hasNewerLocalChanges
+              ? `${pageLabel}已发布；发布期间的新修改仍保留为未保存内容`
+              : pageKey === "home"
+                ? "店铺首页已发布，前台页面将立即读取最新版本"
+                : `${pageLabel}已发布，前台页面将立即读取最新版本`,
           );
         } catch (error) {
           message.error(getEditorErrorMessage(error, "发布失败，请稍后重试"));
@@ -4248,17 +4612,52 @@ export default function HomepageConfig({
         loading={revisionsLoading}
         restoringVersion={restoringVersion}
         draft={draftSnapshot}
+        error={revisionFailure?.message ?? null}
+        retryLabel={
+          revisionFailure?.revision
+            ? `重新恢复版本 ${revisionFailure.revision.version}`
+            : "重新加载"
+        }
         onClose={() => setRevisionsOpen(false)}
+        onRetry={() => {
+          if (revisionFailure?.revision) {
+            restoreRevision(revisionFailure.revision);
+            return;
+          }
+          void loadRevisions();
+        }}
         onRestore={restoreRevision}
         onEditDraft={editDraftFromRevisions}
       />
 
       <PageSettingsDrawer
         open={pageSettingsOpen}
+        pageKey={pageKey}
         metadata={metadata}
+        puckData={data}
         onClose={() => setPageSettingsOpen(false)}
         onSave={savePageSettings}
       />
+
+      {draftDiscardError ? (
+        <div className="homepage-editor__draft-action-error" role="alert">
+          <ExclamationCircleOutlined aria-hidden="true" />
+          <div>
+            <strong>草稿仍然保留</strong>
+            <span>{draftDiscardError}</span>
+          </div>
+          <Button size="small" onClick={discardDraftToPublished}>
+            重新放弃草稿
+          </Button>
+          <Button
+            size="small"
+            type="text"
+            onClick={() => setDraftDiscardError(null)}
+          >
+            关闭
+          </Button>
+        </div>
+      ) : null}
 
       {loadError ? (
         <div className="homepage-editor__load-error" role="alert">
@@ -4295,7 +4694,17 @@ export default function HomepageConfig({
           data={data}
           ui={INITIAL_EDITOR_UI}
           viewports={VIEWPORT_PRESETS}
-          permissions={{ drag: false }}
+          permissions={
+            viewingPublished
+              ? {
+                  drag: false,
+                  duplicate: false,
+                  delete: false,
+                  edit: false,
+                  insert: false,
+                }
+              : { drag: false }
+          }
           iframe={{ enabled: true, waitForStyles: true, syncHostStyles: true }}
           onPublish={(nextData) => {
             setData(nextData);
@@ -4308,19 +4717,22 @@ export default function HomepageConfig({
             pageKey={pageKey}
             canvasDataSyncVersion={canvasDataSyncVersion}
           />
-          <CanvasSelectionDock />
+          <CanvasSelectionDock readOnly={viewingPublished} />
           <EditorToolbar
             pageKey={pageKey}
             publishing={publishing}
             saving={saving}
             hasPendingDraft={hasPendingDraft}
+            publishedNeedsRevalidation={publishedNeedsRevalidation}
             viewingPublished={viewingPublished}
             previewMode={previewMode}
             hasUnsavedChanges={hasUnsavedChanges}
+            canPublish={canPublish}
             publishValidationState={publishValidationState}
             publishErrorCount={
               publishIssues.filter((issue) => issue.severity === "error").length
             }
+            publishSettingsErrorCount={publishSettingsErrorCount}
             draftSavedAtLabel={
               pageSessionCacheRef.current[pageKey]?.lastSaved ?? null
             }
@@ -4332,14 +4744,12 @@ export default function HomepageConfig({
             onViewPublishedVersion={viewPublishedVersion}
             onDiscardDraft={discardDraftToPublished}
             onOpenRevisions={openRevisions}
-            onOpenPageSettings={() => setPageSettingsOpen(true)}
+            onOpenPageSettings={openPageSettingsForEditing}
+            onRetryPublishValidation={retryPublishValidation}
             onPreviewModeChange={setPreviewMode}
             onDataChange={trackEditorData}
             onCanvasDataSync={syncCanvasDataWithoutAdvancingSavedBaseline}
-            onExitViewing={() => {
-              viewingPublishedRef.current = false;
-              setViewingPublished(false);
-            }}
+            onExitViewing={returnToEditingDraft}
           />
           <EditorBody
             onSaveAsTemplate={saveBlockAsTemplate}
@@ -4350,6 +4760,7 @@ export default function HomepageConfig({
             hasUnsavedChanges={hasUnsavedChanges}
             saving={saving}
             previewMode={previewMode}
+            viewingPublished={viewingPublished}
             onSaveDraft={(nextData) => {
               void saveDraft(nextData);
             }}
@@ -4359,13 +4770,19 @@ export default function HomepageConfig({
         </Puck>
       )}
       <UnsavedChangesGuard
-        hasUnsavedChanges={hasUnsavedChanges}
+        hasUnsavedChanges={hasProtectedUnsavedChanges}
         disabled={
           initialLoading || Boolean(loadError) || loadedPageKey !== pageKey
         }
-        onSaveAndLeave={async () =>
-          Boolean(await saveDraft(latestData.current))
-        }
+        onSaveAndLeave={async () => {
+          const protectedDraft = editingDraftSnapshotRef.current;
+          if (viewingPublishedRef.current && protectedDraft) {
+            const protectedData = protectedDraft.data;
+            returnToEditingDraft();
+            return Boolean(await saveDraft(protectedData));
+          }
+          return Boolean(await saveDraft(latestData.current));
+        }}
       />
     </div>
   );

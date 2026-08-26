@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import ProductReferencesField from "@/page-builder/fields/ProductReferencesField";
 import { editorPages } from "@/page-builder/config/editorPages";
+import { isContentTemplatePageTarget } from "@/page-builder/generated/contentTemplates.generated";
 import {
-  isSafeInternalPath,
   normalizeLinkTargetType,
   type LinkTargetType,
   type LinkTargetValue,
@@ -25,7 +25,8 @@ interface LinkTargetFieldProps extends LinkTargetValue {
 /**
  * 链接字段(紧凑一行式,2026-08-18 P1-3 统一形态):
  * 分段「不跳转 | 商品 | 页面」+ 行内对应选择器。
- * 页面态用 datalist —— 可选导航页,也可手输任意站内路径(拒绝外链)。
+ * 页面态用 datalist 提供正式 PageDocument 路由；允许附带查询参数，
+ * 但不存在的路径、商品详情和其他非内容页会立即提示并在发布时被拒绝。
  * compact 供 arrayFields 条目内嵌;keyPrefix 供同模块第二链接(如次按钮)。
  */
 export default function LinkTargetField({
@@ -107,9 +108,7 @@ export default function LinkTargetField({
 
   const pathInvalid =
     normalizedTargetType === "page" &&
-    typeof linkUrl === "string" &&
-    linkUrl.length > 0 &&
-    !isSafeInternalPath(linkUrl);
+    !isContentTemplatePageTarget(linkUrl);
 
   return (
     <>
@@ -171,7 +170,7 @@ export default function LinkTargetField({
             list={`link-target-pages-${id}`}
             value={linkUrl || ""}
             onChange={(event) => onChange({ [key("LinkUrl")]: event.target.value })}
-            placeholder="选择页面或输入 / 开头的站内路径"
+            placeholder="选择公开页面，或为页面添加查询参数"
             autoComplete="off"
             aria-invalid={pathInvalid}
           />
@@ -182,7 +181,9 @@ export default function LinkTargetField({
           </datalist>
           {pathInvalid ? (
             <span className="homepage-editor__inspector-hint" role="alert">
-              仅支持站内路径（以 / 开头），不开放外部链接。
+              {linkUrl
+                ? "该路径不是可发布的公开页面；商品详情请使用「商品」目标。"
+                : "请选择机器合同登记的公开页面。"}
             </span>
           ) : null}
         </div>

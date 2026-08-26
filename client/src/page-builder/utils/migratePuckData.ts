@@ -46,7 +46,7 @@ function focusFallback(props: Record<string, any>) {
  * 条目级链接归一(2026-08-18 P1-3):
  * 旧条目的裸 link 站内路径在编辑器载入时补写跳转三件套,
  * 让统一链接字段的面板正确回显;原 link 字段保留不删,旧渲染兼容无忧。
- * 幂等:已有三件套痕迹(targetType/productId)的条目不动。
+ * 幂等:已有目标字段痕迹(targetType/productCode/productId)的条目不动。
  */
 const ITEM_LINK_ARRAYS: Record<string, string[]> = {
   轮播图: ["images"],
@@ -56,16 +56,65 @@ const ITEM_LINK_ARRAYS: Record<string, string[]> = {
   热区图: ["desktopHotspots", "mobileHotspots", "hotspots"],
 };
 
+/**
+ * 门店资料与预约联系电话属于经营事实，只能由 SiteSettings 提供。
+ * 编辑器载入旧草稿时移除 PageDocument 中已废弃的副本；公开历史版本仍可渲染，
+ * 但对应 Renderer 不再采用这些值。
+ */
+const LEGACY_STORE_FACT_FIELDS = [
+  "useSiteSettings",
+  "storeName",
+  "address",
+  "hours",
+  "phone",
+  "mapUrl",
+  "storeMapUrl",
+] as const;
+
+const LEGACY_PAGE_DOCUMENT_FACT_FIELDS_BY_MODULE: Readonly<Record<string, readonly string[]>> = {
+  门店信息: LEGACY_STORE_FACT_FIELDS,
+  预约入口: ["phone"],
+};
+
+function removeLegacyBusinessFacts(block: PuckBlock): PuckBlock {
+  const fields = LEGACY_PAGE_DOCUMENT_FACT_FIELDS_BY_MODULE[block?.type ?? ""];
+  if (!fields || !block.props) return block;
+  const nextProps = { ...block.props };
+  let touched = false;
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(nextProps, field)) continue;
+    delete nextProps[field];
+    touched = true;
+  }
+  return touched ? { ...block, props: nextProps } : block;
+}
+
 function normalizeItemLinkTarget(item: Record<string, any>) {
-  if (item?.targetType != null || item?.productId != null) return item;
+  if (item?.targetType != null || item?.productCode != null || item?.productId != null) return item;
   const link = isSafeInternalPath(item?.link) ? item.link : "";
   if (!link) return item;
-  const productMatch = /^\/products\/(\d+)$/.exec(link);
+  const productMatch = /^\/products\/([^/?#]+)$/.exec(link);
+  let productReference = "";
+  if (productMatch) {
+    try {
+      productReference = decodeURIComponent(productMatch[1]).trim();
+    } catch {
+      productReference = "";
+    }
+  }
+  const legacyProductId = /^\d+$/.test(productReference)
+    ? Number(productReference)
+    : 0;
+  const hasProductTarget = Boolean(productReference) && (
+    !/^\d+$/.test(productReference)
+    || (Number.isInteger(legacyProductId) && legacyProductId > 0)
+  );
   return {
     ...item,
-    targetType: productMatch ? "product" : "page",
-    productId: productMatch ? Number(productMatch[1]) : 0,
-    linkUrl: productMatch ? "" : link,
+    targetType: hasProductTarget ? "product" : "page",
+    productCode: hasProductTarget && !legacyProductId ? productReference : "",
+    productId: hasProductTarget ? legacyProductId : 0,
+    linkUrl: hasProductTarget ? "" : link,
   };
 }
 
@@ -197,7 +246,7 @@ export function migratePuckData<T extends PuckDocument>(data: T): T {
   };
   if (Array.isArray(next.content)) {
     next.content = next.content.map((block) =>
-      normalizeItemLinks(unlock(migrateBlock(block))),
+      removeLegacyBusinessFacts(normalizeItemLinks(unlock(migrateBlock(block)))),
     );
   }
   if (next.zones && typeof next.zones === "object") {
@@ -205,7 +254,9 @@ export function migratePuckData<T extends PuckDocument>(data: T): T {
       Object.entries(next.zones).map(([zoneKey, blocks]) => [
         zoneKey,
         Array.isArray(blocks)
-          ? blocks.map((block) => normalizeItemLinks(unlock(migrateBlock(block))))
+          ? blocks.map((block) =>
+              removeLegacyBusinessFacts(normalizeItemLinks(unlock(migrateBlock(block)))),
+            )
           : blocks,
       ]),
     );

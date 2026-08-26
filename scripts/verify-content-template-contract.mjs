@@ -20,11 +20,42 @@ const commercialPurposes = ["品牌展示", "商品销售", "活动转化", "内
 const devices = ["desktop", "mobile"];
 
 assert.equal(contract.contractSchemaVersion, 5, "必须使用含商业目的的归一化双端几何合同 schema v5");
-assert.equal(contract.templates.length, 24, "必须注册 24 个运营模板");
-assert.equal(contract.activeTemplateCount, 24, "24 个运营模板必须全部处于 active 状态");
-assert.equal(contract.templates.filter((template) => template.implementationStatus === "active").length, 24, "不得错误隐藏可运营模板");
-assert.deepEqual(categories.map((category) => contract.templates.filter((template) => template.category === category).length), [4, 6, 4, 3, 6, 1], "六类数量必须保持 4/6/4/3/6/1");
+assert.equal(
+  contract.templates.length,
+  contract.expectedTemplateCount,
+  "运营模板注册数必须与机器合同 expectedTemplateCount 一致",
+);
+assert.equal(
+  contract.templates.filter((template) => template.implementationStatus === "active").length,
+  contract.activeTemplateCount,
+  "active 模板数必须与机器合同 activeTemplateCount 一致",
+);
+assert.deepEqual(
+  [...new Set(contract.templates.map((template) => template.category))].sort(),
+  [...categories].sort(),
+  "机器合同必须覆盖六类运营模板，不得在验证脚本复制各类数量",
+);
 const reachableTemplateKeys = new Set(contract.pageRules.flatMap((rule) => rule.allowedTemplateKeys));
+assert.deepEqual(
+  [...new Set(contract.pageRules.map((rule) => rule.contentPlacement))],
+  ["root-only"],
+  "六个装修页面只能把正式内容放在公开 Renderer 实际消费的根 content",
+);
+assert.deepEqual(
+  contract.pageMetadata,
+  {
+    requiredForPublication: ["seoTitle", "seoDescription", "ogImage", "contentOwner"],
+    publicFields: ["seoTitle", "seoDescription", "ogImage"],
+    limits: { seoTitle: 60, seoDescription: 160, ogImage: 2048, contentOwner: 80 },
+    mediaRights: {
+      maxItems: 120,
+      fieldLimits: { assetUrl: 2048, source: 120, authorizationId: 120 },
+    },
+  },
+  "六个装修页面必须共享一份正式内容责任、公开 SEO 与素材授权发布合同",
+);
+assert.match(client, /getPageDocumentMediaReferences/, "客户端生成产物必须提供 PageDocument 媒体引用提取器");
+assert.match(server, /getPageDocumentMediaReferences/, "服务端生成产物必须提供 PageDocument 媒体引用提取器");
 const getGeometryOrder = (template, device) => {
   const roleIds = new Set(template.defaultGeometryByViewport[device].zones.map((zone) => zone.roleId));
   const rolesById = new Map(template.roles.map((role) => [role.id, role]));
@@ -100,10 +131,24 @@ for (const template of contract.templates) {
     assert.ok(object.constraints.maxSize.width <= 1 && object.constraints.maxSize.height <= 1, `${template.key}.${object.roleId}: 最大尺寸越界`);
     assert.ok(object.constraints.allowedResize.every((direction) => ["n", "ne", "e", "se", "s", "sw", "w", "nw"].includes(direction)), `${template.key}.${object.roleId}: 缩放方向无效`);
     if (["media", "video"].includes(object.kind)) {
-      assert.ok(object.altFieldKey || object.altPolicy, `${template.key}.${object.roleId}: 媒体对象必须声明替代文字字段或策略`);
+      assert.ok(object.altPolicy, `${template.key}.${object.roleId}: 媒体对象必须明确声明替代文字策略`);
       if (object.altPolicy === "required") {
         assert.ok(object.altFieldKey, `${template.key}.${object.roleId}: required 替代文字策略必须绑定字段`);
-        assert.ok(template.contentBudget.requiredText.includes(object.altFieldKey), `${template.key}.${object.roleId}: required 替代文字必须进入发布必填文本`);
+        assert.ok(!template.contentBudget.requiredText.includes(object.altFieldKey), `${template.key}.${object.roleId}: 替代文字必填只应由 altPolicy 派生，不得在 requiredText 重复声明`);
+      }
+      if (object.altFieldKey) assert.equal(object.altPolicy, "required", `${template.key}.${object.roleId}: 显式替代文字字段必须进入发布必填策略`);
+    }
+    for (const policy of object.collectionMediaPolicies ?? []) {
+      assert.equal(object.kind, "collection", `${template.key}.${object.roleId}: 条目媒体策略只能用于 collection`);
+      assert.ok(object.collectionFieldKeys?.includes(policy.collectionFieldKey), `${template.key}.${object.roleId}: 条目媒体策略必须映射 collectionFieldKeys`);
+      assert.ok(Array.isArray(policy.mediaFieldKeys) && policy.mediaFieldKeys.length > 0, `${template.key}.${object.roleId}: 条目媒体策略必须声明媒体字段`);
+      if (policy.altPolicy === "required") {
+        assert.ok(policy.altFieldKey, `${template.key}.${object.roleId}: required 条目媒体策略必须绑定替代文字字段`);
+        assert.equal(policy.derivedAltFieldKey, undefined, `${template.key}.${object.roleId}: required 条目媒体策略不得声明派生字段`);
+      }
+      if (policy.altPolicy === "derived") {
+        assert.ok(policy.derivedAltFieldKey, `${template.key}.${object.roleId}: derived 条目媒体策略必须绑定派生字段`);
+        assert.equal(policy.altFieldKey, undefined, `${template.key}.${object.roleId}: derived 条目媒体策略不得声明独立替代文字字段`);
       }
     }
   }
@@ -183,9 +228,41 @@ assert.deepEqual(byKey.productRow.editorCapabilities.referenceFields, [{ kind: "
 assert.deepEqual(byKey.categoryCards.editorCapabilities.referenceFields, [{ kind: "category", key: "categorySlugs", legacyKey: "categories", min: 2, max: 4 }], "分类卡必须保存真实 Category.slug");
 assert.deepEqual(
   byKey.hero.contentBudget.requiredText,
-  ["title", "altText"],
-  "公开 Hero 必须保留真实 DOM 标题与图片替代文字",
+  ["title"],
+  "公开 Hero 的普通必填文案只保留真实 DOM 标题，替代文字由媒体 altPolicy 管理",
 );
+assert.equal(
+  byKey.hero.editorCapabilities.editableObjects.find((object) => object.roleId === "desktopImage")?.altPolicy,
+  "required",
+  "公开 Hero 图片替代文字必须由媒体对象发布策略强制要求",
+);
+assert.deepEqual(
+  byKey.carousel.editorCapabilities.editableObjects.find((object) => object.roleId === "frames")?.collectionMediaPolicies,
+  [{ collectionFieldKey: "images", mediaFieldKeys: ["url", "mobileUrl"], altPolicy: "required", altFieldKey: "alt" }],
+  "轮播图必须逐项填写替代文字，桌面图与手机图共用同一语义",
+);
+assert.deepEqual(
+  byKey.gallery.editorCapabilities.editableObjects.find((object) => object.roleId === "works")?.collectionMediaPolicies,
+  [{ collectionFieldKey: "items", mediaFieldKeys: ["image"], altPolicy: "required", altFieldKey: "altText" }],
+  "作品画廊必须逐项填写替代文字",
+);
+assert.deepEqual(
+  byKey.sceneShopping.editorCapabilities.editableObjects.find((object) => object.roleId === "scenes")?.collectionMediaPolicies,
+  [{ collectionFieldKey: "categories", mediaFieldKeys: ["image"], altPolicy: "required", altFieldKey: "altText" }],
+  "手工场景入口必须逐项填写替代文字",
+);
+for (const [templateKey, roleId, collectionFieldKey, mediaFieldKey, derivedAltFieldKey] of [
+  ["journey", "steps", "steps", "image", "name"],
+  ["categoryCards", "categories", "categories", "image", "name"],
+  ["certificates", "certificates", "certificates", "imageUrl", "name"],
+  ["testimonials", "authorizedPhoto", "testimonials", "image", "name"],
+]) {
+  assert.deepEqual(
+    byKey[templateKey].editorCapabilities.editableObjects.find((object) => object.roleId === roleId)?.collectionMediaPolicies,
+    [{ collectionFieldKey, mediaFieldKeys: [mediaFieldKey], altPolicy: "derived", derivedAltFieldKey }],
+    `${templateKey}: 条目图片必须从同一条目业务名称派生替代文字`,
+  );
+}
 assert.equal(
   byKey.hero.roles.find((role) => role.id === "mobileImage")?.required,
   true,
@@ -221,6 +298,9 @@ for (const generated of [client, server]) {
   assert.ok(generated.includes("sizePreset?: string;") && generated.includes("positionPreset?: string;"), "V2 必须声明并校验尺寸/位置预设");
   assert.ok(generated.includes("export type ContentTemplateCommercialPurpose =") && generated.includes('"commercialPurpose"'), "客户端与服务端必须共享商业目的合同");
 }
+for (const generated of [client, server]) {
+  assert.match(generated, /CONTENT_TEMPLATE_PAGE_METADATA/, "客户端与服务端生成产物必须包含正式 SEO 合同");
+}
 assert.doesNotMatch(blockMetaSource, /category:\s*"(?:品牌展示|商品销售|活动转化|内容传播|信任建立)"/, "BLOCK_META 商业分类必须从机器合同派生，不得手写第二份事实");
 assert.doesNotMatch(previewSource, /<img\b|https?:\/\//, "中性预览不得引入外部图片");
-console.log("内容模板统一合同验证通过：24 个模板的商业目的、双端归一化几何、直接操作约束、语义角色和 CTA 门禁一致。");
+console.log(`内容模板统一合同验证通过：${contract.templates.length} 个模板的商业目的、双端归一化几何、直接操作约束、语义角色和 CTA 门禁一致。`);

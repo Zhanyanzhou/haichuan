@@ -51,6 +51,7 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
           key: "beforeAltText",
           label: "改款前替代文字",
           control: "text",
+          required: true,
           maxLength: BEFORE_AFTER_CONTRACT.content.limits.altText,
         },
         {
@@ -73,6 +74,7 @@ export const beforeAfterSchema: ModuleInspectorSchema = {
           key: "afterAltText",
           label: "改款后替代文字",
           control: "text",
+          required: true,
           maxLength: BEFORE_AFTER_CONTRACT.content.limits.altText,
         },
       ],

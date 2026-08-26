@@ -5,7 +5,7 @@ import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
-import { isSafeInternalPath, resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
+import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 
 interface LimitedOfferBlockProps {
   module: { content: Record<string, any>; styleConfig?: Record<string, any> };
@@ -53,14 +53,13 @@ export default function LimitedOfferBlock({
     buttonText,
     benefits = [],
   } = content;
-  // 跳转三件套优先,旧草稿裸 linkUrl 字段兜底
-  const targetUrl =
-    resolveLinkTargetUrl({
-      targetType: content.targetType,
-      productCode: content.productCode,
-      productId: content.productId,
-      linkUrl: content.linkUrl,
-    }) || (isSafeInternalPath(content.linkUrl) ? content.linkUrl : "");
+  // 旧草稿裸 linkUrl 仅在指向已登记公开页面时由统一解析器兼容。
+  const targetUrl = resolveLinkTargetUrl({
+    targetType: content.targetType,
+    productCode: content.productCode,
+    productId: content.productId,
+    linkUrl: content.linkUrl,
+  });
   const benefitLabels = Array.isArray(benefits)
     ? benefits
         .map((benefit) =>

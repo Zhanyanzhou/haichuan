@@ -34,8 +34,8 @@ function makeHeroDraft() {
             title: "东方之形，自有光华",
             subtitle: "以东方美学，铸当代珠宝",
             actionText: "探索系列",
-            targetType: "url",
-            linkUrl: "/collections",
+            targetType: "page",
+            linkUrl: "/products",
             productId: 0,
             categoryId: 0,
             desktopFocusX: 50,
@@ -281,6 +281,28 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await expect(field(inspector, "desktopImage")).toHaveCount(1);
     await expect(field(inspector, "altText")).toHaveCount(1);
   });
+
+  for (const viewport of [
+    { name: "桌面", width: 1600, height: 1000 },
+    { name: "移动窄屏", width: 390, height: 844 },
+  ]) {
+    test(`${viewport.name}页面目标即时拒绝未登记路径并接受页面查询参数`, async ({ page }) => {
+      const inspector = await openHeroInspector(page, viewport);
+      await selectObject(inspector, "actionText", "行动文字");
+
+      const pageTarget = inspector.locator('input[list^="link-target-pages-"]');
+      await expect(pageTarget).toBeVisible();
+      await pageTarget.fill("/not-a-route");
+      await expect(pageTarget).toHaveAttribute("aria-invalid", "true");
+      await expect(inspector.getByRole("alert")).toContainText(
+        "该路径不是可发布的公开页面",
+      );
+
+      await pageTarget.fill("/catalog?category=12");
+      await expect(pageTarget).toHaveAttribute("aria-invalid", "false");
+      await expect(inspector.getByRole("alert")).toHaveCount(0);
+    });
+  }
 
   test("product 对象只显示商品选择字段，不回退模块级内容", async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 1000 });

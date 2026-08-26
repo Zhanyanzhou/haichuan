@@ -1,12 +1,15 @@
 {
   "contractSchemaVersion": 5,
-  "registryVersion": 7,
+  "registryVersion": 14,
   "expectedTemplateCount": 24,
   "activeTemplateCount": 24,
+  "publicationGateVersion": 2,
   "pageRules": [
     {
       "pageKey": "home",
+      "publicPath": "/",
       "pageRole": "brand-home",
+      "contentPlacement": "root-only",
       "allowedTemplateKeys": [
         "hero",
         "fullBleed",
@@ -36,7 +39,9 @@
     },
     {
       "pageKey": "products",
+      "publicPath": "/products",
       "pageRole": "brand-showcase",
+      "contentPlacement": "root-only",
       "allowedTemplateKeys": [
         "hero",
         "fullBleed",
@@ -65,7 +70,9 @@
     },
     {
       "pageKey": "catalog",
+      "publicPath": "/catalog",
       "pageRole": "selection-tool",
+      "contentPlacement": "root-only",
       "allowedTemplateKeys": [
         "fullBleed",
         "singlePoster",
@@ -81,7 +88,9 @@
     },
     {
       "pageKey": "custom",
+      "publicPath": "/custom",
       "pageRole": "brand-service",
+      "contentPlacement": "root-only",
       "allowedTemplateKeys": [
         "hero",
         "fullBleed",
@@ -109,7 +118,9 @@
     },
     {
       "pageKey": "about",
+      "publicPath": "/about",
       "pageRole": "brand-story",
+      "contentPlacement": "root-only",
       "allowedTemplateKeys": [
         "hero",
         "fullBleed",
@@ -134,7 +145,9 @@
     },
     {
       "pageKey": "contact",
+      "publicPath": "/contact",
       "pageRole": "conversion-support",
+      "contentPlacement": "root-only",
       "allowedTemplateKeys": [
         "hero",
         "fullBleed",
@@ -151,6 +164,33 @@
       }
     }
   ],
+  "pageMetadata": {
+    "requiredForPublication": [
+      "seoTitle",
+      "seoDescription",
+      "ogImage",
+      "contentOwner"
+    ],
+    "publicFields": [
+      "seoTitle",
+      "seoDescription",
+      "ogImage"
+    ],
+    "limits": {
+      "seoTitle": 60,
+      "seoDescription": 160,
+      "ogImage": 2048,
+      "contentOwner": 80
+    },
+    "mediaRights": {
+      "maxItems": 120,
+      "fieldLimits": {
+        "assetUrl": 2048,
+        "source": 120,
+        "authorizationId": 120
+      }
+    }
+  },
   "assetPolicy": {
     "classes": [
       "product",
@@ -193,6 +233,7 @@
               "altText"
             ],
             "altFieldKey": "altText",
+            "altPolicy": "required",
             "fieldScopes": {
               "desktopImage": "viewport-specific",
               "altText": "shared"
@@ -258,6 +299,7 @@
               "altText"
             ],
             "altFieldKey": "altText",
+            "altPolicy": "required",
             "fieldScopes": {
               "mobileImage": "viewport-specific",
               "altText": "shared"
@@ -336,6 +378,14 @@
               "visibility",
               "typography"
             ],
+            "capabilityViewports": {
+              "layout": [
+                "desktop"
+              ],
+              "layer": [
+                "desktop"
+              ]
+            },
             "responsive": {
               "content": "shared",
               "layout": "viewport-specific",
@@ -388,6 +438,7 @@
             "contentFieldKeys": [
               "actionText",
               "targetType",
+              "productCode",
               "productId",
               "linkUrl"
             ],
@@ -399,6 +450,14 @@
               "visibility",
               "typography"
             ],
+            "capabilityViewports": {
+              "layout": [
+                "desktop"
+              ],
+              "layer": [
+                "desktop"
+              ]
+            },
             "responsive": {
               "content": "shared",
               "link": "shared",
@@ -617,7 +676,7 @@
       "category": "视觉展示",
       "commercialPurpose": "品牌展示",
       "implementationStatus": "active",
-      "version": 4,
+      "version": 5,
       "master": "cinematic-hero",
       "visualRole": "primary-stage",
       "visualWeight": "primary-stage",
@@ -713,8 +772,7 @@
           "altText": 80
         },
         "requiredText": [
-          "title",
-          "altText"
+          "title"
         ],
         "maxCtas": 1
       },
@@ -882,6 +940,7 @@
               "altText"
             ],
             "altFieldKey": "altText",
+            "altPolicy": "required",
             "fieldScopes": {
               "image": "viewport-specific",
               "altText": "shared"
@@ -947,6 +1006,7 @@
               "altText"
             ],
             "altFieldKey": "altText",
+            "altPolicy": "required",
             "fieldScopes": {
               "mobileImage": "viewport-specific",
               "altText": "shared"
@@ -1014,15 +1074,11 @@
             ],
             "capabilities": [
               "content",
-              "layout",
-              "layer",
               "visibility",
               "typography"
             ],
             "responsive": {
               "content": "shared",
-              "layout": "viewport-specific",
-              "layer": "viewport-specific",
               "visibility": "shared",
               "typography": "shared"
             },
@@ -1035,23 +1091,11 @@
                 "width": 0.92,
                 "height": 0.7
               },
-              "movementAxes": [
-                "x",
-                "y"
-              ],
-              "allowedResize": [
-                "n",
-                "ne",
-                "e",
-                "se",
-                "s",
-                "sw",
-                "w",
-                "nw"
-              ],
+              "movementAxes": [],
+              "allowedResize": [],
               "layerRange": {
                 "min": 0,
-                "max": 20
+                "max": 0
               },
               "allowHide": true,
               "allowAspectRatio": false,
@@ -1071,6 +1115,7 @@
             "contentFieldKeys": [
               "buttonText",
               "targetType",
+              "productCode",
               "productId",
               "linkUrl"
             ],
@@ -1150,14 +1195,6 @@
           "textRoles": [
             {
               "roleId": "copy",
-              "placementPresets": [
-                "overlay",
-                "below"
-              ],
-              "widthPresets": [
-                "narrow",
-                "standard"
-              ],
               "sizePresets": [
                 "small",
                 "standard",
@@ -1182,7 +1219,7 @@
       "category": "视觉展示",
       "commercialPurpose": "品牌展示",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "immersive-image",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -1494,6 +1531,7 @@
             "contentFieldKeys": [
               "actionText",
               "targetType",
+              "productCode",
               "productId",
               "linkUrl"
             ],
@@ -1793,9 +1831,27 @@
             "collectionFieldKeys": [
               "images"
             ],
+            "collectionMediaPolicies": [
+              {
+                "collectionFieldKey": "images",
+                "mediaFieldKeys": [
+                  "url",
+                  "mobileUrl"
+                ],
+                "altPolicy": "required",
+                "altFieldKey": "alt"
+              }
+            ],
+            "collectionLinkPolicies": [
+              {
+                "collectionFieldKey": "images",
+                "required": false
+              }
+            ],
             "capabilities": [
               "content",
               "items",
+              "link",
               "playback",
               "layout",
               "layer",
@@ -1807,6 +1863,7 @@
             "responsive": {
               "content": "shared",
               "items": "shared",
+              "link": "shared",
               "playback": "shared",
               "layout": "viewport-specific",
               "layer": "viewport-specific",
@@ -2075,6 +2132,7 @@
               "altText"
             ],
             "altFieldKey": "altText",
+            "altPolicy": "required",
             "fieldScopes": {
               "desktopImage": "viewport-specific",
               "altText": "shared"
@@ -2140,6 +2198,7 @@
               "altText"
             ],
             "altFieldKey": "altText",
+            "altPolicy": "required",
             "fieldScopes": {
               "mobileImage": "viewport-specific",
               "altText": "shared"
@@ -2213,6 +2272,14 @@
               "visibility",
               "typography"
             ],
+            "capabilityViewports": {
+              "layout": [
+                "desktop"
+              ],
+              "layer": [
+                "desktop"
+              ]
+            },
             "responsive": {
               "content": "shared",
               "layout": "viewport-specific",
@@ -2265,6 +2332,7 @@
             "contentFieldKeys": [
               "actionText",
               "targetType",
+              "productCode",
               "productId",
               "linkUrl"
             ],
@@ -2380,7 +2448,7 @@
       "category": "图文内容",
       "commercialPurpose": "内容传播",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "editorial-split",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -2588,11 +2656,10 @@
               "role": "copy",
               "rect": {
                 "x": 0.083333,
-                "y": 0.125,
+                "y": 0.625,
                 "width": 0.833333,
                 "height": 0.25
-              },
-              "overlay": true
+              }
             },
             {
               "nodeId": "action",
@@ -2600,11 +2667,10 @@
               "role": "action",
               "rect": {
                 "x": 0.25,
-                "y": 0.375,
+                "y": 0.875,
                 "width": 0.416667,
                 "height": 0.125
-              },
-              "overlay": true
+              }
             }
           ]
         }
@@ -2623,6 +2689,7 @@
               "mainAltText"
             ],
             "altFieldKey": "mainAltText",
+            "altPolicy": "required",
             "capabilities": [
               "content",
               "layout",
@@ -2688,6 +2755,7 @@
               "detailAltText"
             ],
             "altFieldKey": "detailAltText",
+            "altPolicy": "required",
             "capabilities": [
               "content",
               "layout",
@@ -2756,15 +2824,11 @@
             ],
             "capabilities": [
               "content",
-              "layout",
-              "layer",
               "visibility",
               "typography"
             ],
             "responsive": {
               "content": "shared",
-              "layout": "viewport-specific",
-              "layer": "viewport-specific",
               "visibility": "shared",
               "typography": "shared"
             },
@@ -2777,23 +2841,11 @@
                 "width": 0.92,
                 "height": 0.7
               },
-              "movementAxes": [
-                "x",
-                "y"
-              ],
-              "allowedResize": [
-                "n",
-                "ne",
-                "e",
-                "se",
-                "s",
-                "sw",
-                "w",
-                "nw"
-              ],
+              "movementAxes": [],
+              "allowedResize": [],
               "layerRange": {
                 "min": 0,
-                "max": 20
+                "max": 0
               },
               "allowHide": true,
               "allowAspectRatio": false,
@@ -2813,6 +2865,7 @@
             "contentFieldKeys": [
               "actionText",
               "targetType",
+              "productCode",
               "productId",
               "linkUrl"
             ],
@@ -2935,7 +2988,7 @@
       "category": "图文内容",
       "commercialPurpose": "内容传播",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "editorial-story",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -3210,15 +3263,11 @@
             ],
             "capabilities": [
               "content",
-              "layout",
-              "layer",
               "visibility",
               "typography"
             ],
             "responsive": {
               "content": "shared",
-              "layout": "viewport-specific",
-              "layer": "viewport-specific",
               "visibility": "shared",
               "typography": "shared"
             },
@@ -3231,23 +3280,11 @@
                 "width": 0.92,
                 "height": 0.7
               },
-              "movementAxes": [
-                "x",
-                "y"
-              ],
-              "allowedResize": [
-                "n",
-                "ne",
-                "e",
-                "se",
-                "s",
-                "sw",
-                "w",
-                "nw"
-              ],
+              "movementAxes": [],
+              "allowedResize": [],
               "layerRange": {
                 "min": 0,
-                "max": 20
+                "max": 0
               },
               "allowHide": true,
               "allowAspectRatio": false,
@@ -3267,6 +3304,7 @@
             "contentFieldKeys": [
               "buttonText",
               "targetType",
+              "productCode",
               "productId",
               "linkUrl"
             ],
@@ -3311,15 +3349,6 @@
           "textRoles": [
             {
               "roleId": "copy",
-              "placementPresets": [
-                "left",
-                "center"
-              ],
-              "widthPresets": [
-                "narrow",
-                "standard",
-                "wide"
-              ],
               "sizePresets": [
                 "small",
                 "standard",
@@ -3344,7 +3373,7 @@
       "category": "图文内容",
       "commercialPurpose": "内容传播",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "editorial-text",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -3539,6 +3568,16 @@
             ],
             "collectionFieldKeys": [
               "steps"
+            ],
+            "collectionMediaPolicies": [
+              {
+                "collectionFieldKey": "steps",
+                "mediaFieldKeys": [
+                  "image"
+                ],
+                "altPolicy": "derived",
+                "derivedAltFieldKey": "name"
+              }
             ],
             "capabilities": [
               "content",
@@ -3780,6 +3819,7 @@
               "beforeAltText"
             ],
             "altFieldKey": "beforeAltText",
+            "altPolicy": "required",
             "capabilities": [
               "content",
               "layout",
@@ -3840,6 +3880,7 @@
               "afterAltText"
             ],
             "altFieldKey": "afterAltText",
+            "altPolicy": "required",
             "capabilities": [
               "content",
               "layout",
@@ -3937,6 +3978,7 @@
             "contentFieldKeys": [
               "actionText",
               "targetType",
+              "productCode",
               "productId",
               "linkUrl"
             ],
@@ -4358,6 +4400,7 @@
               "primaryText",
               "secondaryText",
               "secondaryTargetType",
+              "secondaryProductCode",
               "secondaryProductId",
               "secondaryLinkUrl"
             ],
@@ -5023,9 +5066,26 @@
             "collectionFieldKeys": [
               "items"
             ],
+            "collectionMediaPolicies": [
+              {
+                "collectionFieldKey": "items",
+                "mediaFieldKeys": [
+                  "image"
+                ],
+                "altPolicy": "required",
+                "altFieldKey": "altText"
+              }
+            ],
+            "collectionLinkPolicies": [
+              {
+                "collectionFieldKey": "items",
+                "required": false
+              }
+            ],
             "capabilities": [
               "content",
               "items",
+              "link",
               "layout",
               "layer",
               "ratio",
@@ -5035,6 +5095,7 @@
             "responsive": {
               "content": "shared",
               "items": "shared",
+              "link": "shared",
               "layout": "viewport-specific",
               "layer": "viewport-specific",
               "ratio": "shared",
@@ -5386,6 +5447,7 @@
               "altText"
             ],
             "altFieldKey": "altText",
+            "altPolicy": "required",
             "capabilities": [
               "content",
               "layout",
@@ -5523,6 +5585,7 @@
             "contentFieldKeys": [
               "actionText",
               "targetType",
+              "productCode",
               "productId",
               "linkUrl"
             ],
@@ -5812,6 +5875,16 @@
             ],
             "collectionFieldKeys": [
               "categories"
+            ],
+            "collectionMediaPolicies": [
+              {
+                "collectionFieldKey": "categories",
+                "mediaFieldKeys": [
+                  "image"
+                ],
+                "altPolicy": "derived",
+                "derivedAltFieldKey": "name"
+              }
             ],
             "referenceFieldKey": "categorySlugs",
             "capabilities": [
@@ -6134,9 +6207,26 @@
             "collectionFieldKeys": [
               "categories"
             ],
+            "collectionMediaPolicies": [
+              {
+                "collectionFieldKey": "categories",
+                "mediaFieldKeys": [
+                  "image"
+                ],
+                "altPolicy": "required",
+                "altFieldKey": "altText"
+              }
+            ],
+            "collectionLinkPolicies": [
+              {
+                "collectionFieldKey": "categories",
+                "required": true
+              }
+            ],
             "capabilities": [
               "content",
               "items",
+              "link",
               "layout",
               "layer",
               "ratio",
@@ -6145,6 +6235,7 @@
             "responsive": {
               "content": "shared",
               "items": "shared",
+              "link": "shared",
               "layout": "viewport-specific",
               "layer": "viewport-specific",
               "ratio": "shared",
@@ -6548,6 +6639,16 @@
               "hotspots",
               "mobileHotspots"
             ],
+            "collectionLinkPolicies": [
+              {
+                "collectionFieldKey": "hotspots",
+                "required": true
+              },
+              {
+                "collectionFieldKey": "mobileHotspots",
+                "required": true
+              }
+            ],
             "capabilities": [
               "content",
               "items",
@@ -6699,9 +6800,7 @@
         "limits": {
           "altText": 80
         },
-        "requiredText": [
-          "altText"
-        ],
+        "requiredText": [],
         "maxCtas": 0
       },
       "allowedControls": [],
@@ -7449,6 +7548,16 @@
             "collectionFieldKeys": [
               "certificates"
             ],
+            "collectionMediaPolicies": [
+              {
+                "collectionFieldKey": "certificates",
+                "mediaFieldKeys": [
+                  "imageUrl"
+                ],
+                "altPolicy": "derived",
+                "derivedAltFieldKey": "name"
+              }
+            ],
             "capabilities": [
               "content",
               "items",
@@ -7760,7 +7869,7 @@
     {
       "key": "storeInfo",
       "editorCapabilities": {
-        "primaryTask": "structured",
+        "primaryTask": "media",
         "editableObjects": [
           {
             "roleId": "store",
@@ -7819,125 +7928,6 @@
               "allowTypography": false,
               "safeAreaRequired": false
             }
-          },
-          {
-            "roleId": "details",
-            "kind": "collection",
-            "contentFieldKeys": [
-              "useSiteSettings",
-              "storeName",
-              "address",
-              "hours",
-              "phone"
-            ],
-            "fieldScopes": {
-              "useSiteSettings": "shared",
-              "storeName": "shared",
-              "address": "shared",
-              "hours": "shared",
-              "phone": "shared"
-            },
-            "capabilities": [
-              "content"
-            ],
-            "responsive": {
-              "content": "shared"
-            },
-            "constraints": {
-              "minSize": {
-                "width": 0.12,
-                "height": 0.1
-              },
-              "maxSize": {
-                "width": 1,
-                "height": 1
-              },
-              "movementAxes": [],
-              "allowedResize": [],
-              "layerRange": {
-                "min": 0,
-                "max": 0
-              },
-              "allowHide": false,
-              "allowAspectRatio": false,
-              "allowFocus": false,
-              "allowZoom": false,
-              "allowTypography": false,
-              "safeAreaRequired": false
-            }
-          },
-          {
-            "roleId": "copy",
-            "kind": "text",
-            "contentFieldKeys": [
-              "storeName"
-            ],
-            "capabilities": [
-              "content"
-            ],
-            "responsive": {
-              "content": "shared"
-            },
-            "constraints": {
-              "minSize": {
-                "width": 0.08,
-                "height": 0.03
-              },
-              "maxSize": {
-                "width": 0.92,
-                "height": 0.7
-              },
-              "movementAxes": [],
-              "allowedResize": [],
-              "layerRange": {
-                "min": 0,
-                "max": 0
-              },
-              "allowHide": false,
-              "allowAspectRatio": false,
-              "allowFocus": false,
-              "allowZoom": false,
-              "allowTypography": false,
-              "safeAreaRequired": true
-            }
-          },
-          {
-            "roleId": "action",
-            "kind": "action",
-            "contentFieldKeys": [
-              "mapUrl",
-              "phone"
-            ],
-            "capabilities": [
-              "content",
-              "link"
-            ],
-            "responsive": {
-              "content": "shared",
-              "link": "shared"
-            },
-            "constraints": {
-              "minSize": {
-                "width": 0.08,
-                "height": 0.04
-              },
-              "maxSize": {
-                "width": 0.72,
-                "height": 0.28
-              },
-              "movementAxes": [],
-              "allowedResize": [],
-              "layerRange": {
-                "min": 0,
-                "max": 0
-              },
-              "allowHide": false,
-              "allowAspectRatio": false,
-              "allowFocus": false,
-              "allowZoom": false,
-              "allowTypography": false,
-              "safeAreaRequired": true
-            }
           }
         ],
         "layoutOverrides": {
@@ -7971,7 +7961,7 @@
       "category": "服务信息",
       "commercialPurpose": "信任建立",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "store-visit",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -8192,6 +8182,16 @@
             ],
             "collectionFieldKeys": [
               "testimonials"
+            ],
+            "collectionMediaPolicies": [
+              {
+                "collectionFieldKey": "testimonials",
+                "mediaFieldKeys": [
+                  "image"
+                ],
+                "altPolicy": "derived",
+                "derivedAltFieldKey": "name"
+              }
             ],
             "capabilities": [
               "content",
@@ -8478,6 +8478,7 @@
               "altText"
             ],
             "altFieldKey": "altText",
+            "altPolicy": "required",
             "capabilities": [
               "content",
               "layout",
@@ -8543,15 +8544,11 @@
             ],
             "capabilities": [
               "content",
-              "layout",
-              "layer",
               "visibility",
               "typography"
             ],
             "responsive": {
               "content": "shared",
-              "layout": "viewport-specific",
-              "layer": "viewport-specific",
               "visibility": "shared",
               "typography": "shared"
             },
@@ -8564,23 +8561,11 @@
                 "width": 0.92,
                 "height": 0.7
               },
-              "movementAxes": [
-                "x",
-                "y"
-              ],
-              "allowedResize": [
-                "n",
-                "ne",
-                "e",
-                "se",
-                "s",
-                "sw",
-                "w",
-                "nw"
-              ],
+              "movementAxes": [],
+              "allowedResize": [],
               "layerRange": {
                 "min": 0,
-                "max": 20
+                "max": 0
               },
               "allowHide": true,
               "allowAspectRatio": false,
@@ -8600,71 +8585,21 @@
             "contentFieldKeys": [
               "buttonText",
               "targetType",
+              "productCode",
               "productId",
               "linkUrl"
             ],
             "capabilities": [
               "content",
               "link",
-              "layout",
-              "layer",
               "visibility",
               "typography"
             ],
             "responsive": {
               "content": "shared",
               "link": "shared",
-              "layout": "viewport-specific",
-              "layer": "viewport-specific",
               "visibility": "shared",
               "typography": "shared"
-            },
-            "constraints": {
-              "minSize": {
-                "width": 0.08,
-                "height": 0.04
-              },
-              "maxSize": {
-                "width": 0.72,
-                "height": 0.28
-              },
-              "movementAxes": [
-                "x",
-                "y"
-              ],
-              "allowedResize": [
-                "n",
-                "ne",
-                "e",
-                "se",
-                "s",
-                "sw",
-                "w",
-                "nw"
-              ],
-              "layerRange": {
-                "min": 0,
-                "max": 20
-              },
-              "allowHide": false,
-              "allowAspectRatio": false,
-              "allowFocus": false,
-              "allowZoom": false,
-              "allowTypography": true,
-              "safeAreaRequired": true
-            }
-          },
-          {
-            "roleId": "secondaryContact",
-            "kind": "action",
-            "contentFieldKeys": [
-              "phone"
-            ],
-            "capabilities": [
-              "content"
-            ],
-            "responsive": {
-              "content": "shared"
             },
             "constraints": {
               "minSize": {
@@ -8685,7 +8620,7 @@
               "allowAspectRatio": false,
               "allowFocus": false,
               "allowZoom": false,
-              "allowTypography": false,
+              "allowTypography": true,
               "safeAreaRequired": true
             }
           }
@@ -8726,14 +8661,6 @@
           "textRoles": [
             {
               "roleId": "title",
-              "placementPresets": [
-                "left",
-                "center"
-              ],
-              "widthPresets": [
-                "narrow",
-                "standard"
-              ],
               "sizePresets": [
                 "small",
                 "standard",
@@ -8752,14 +8679,6 @@
             },
             {
               "roleId": "subtitle",
-              "placementPresets": [
-                "left",
-                "center"
-              ],
-              "widthPresets": [
-                "narrow",
-                "standard"
-              ],
               "sizePresets": [
                 "small",
                 "standard"
@@ -8777,14 +8696,6 @@
             },
             {
               "roleId": "buttonText",
-              "placementPresets": [
-                "left",
-                "center"
-              ],
-              "widthPresets": [
-                "narrow",
-                "standard"
-              ],
               "sizePresets": [
                 "small",
                 "standard"
@@ -8808,7 +8719,7 @@
       "category": "服务信息",
       "commercialPurpose": "活动转化",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 5,
       "master": "booking-epilogue",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -8869,7 +8780,7 @@
           "kind": "contact",
           "required": false,
           "emphasis": "secondary",
-          "semantic": "optional-secondary-contact"
+          "semantic": "site-settings-secondary-contact"
         }
       ],
       "order": {
@@ -8894,7 +8805,6 @@
           "title": 32,
           "subtitle": 90,
           "buttonText": 12,
-          "phone": 24,
           "altText": 80
         },
         "requiredText": [
@@ -8906,7 +8816,7 @@
       "allowedControls": [],
       "supportsLinkTarget": true,
       "preview": {
-        "purpose": "页面尾章的预约主行动与次级联系方式",
+        "purpose": "页面尾章的预约主行动与统一联系电话",
         "visualRole": "feature-stage"
       },
       "defaultGeometryByViewport": {
@@ -9123,6 +9033,14 @@
               "visibility",
               "typography"
             ],
+            "capabilityViewports": {
+              "layout": [
+                "desktop"
+              ],
+              "layer": [
+                "desktop"
+              ]
+            },
             "responsive": {
               "content": "shared",
               "layout": "viewport-specific",
@@ -9175,6 +9093,7 @@
             "contentFieldKeys": [
               "buttonText",
               "targetType",
+              "productCode",
               "productId",
               "linkUrl"
             ],
@@ -9270,7 +9189,7 @@
       "category": "活动内容",
       "commercialPurpose": "活动转化",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "event-stage",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -9489,6 +9408,7 @@
               "leadAltText"
             ],
             "altFieldKey": "leadAltText",
+            "altPolicy": "required",
             "capabilities": [
               "content",
               "layout",
@@ -9611,6 +9531,7 @@
               "detailOneAltText"
             ],
             "altFieldKey": "detailOneAltText",
+            "altPolicy": "required",
             "capabilities": [
               "content",
               "layout",
@@ -9676,6 +9597,7 @@
               "detailTwoAltText"
             ],
             "altFieldKey": "detailTwoAltText",
+            "altPolicy": "required",
             "capabilities": [
               "content",
               "layout",
@@ -9971,10 +9893,7 @@
           "detailTwoAltText": 80
         },
         "requiredText": [
-          "title",
-          "leadAltText",
-          "detailOneAltText",
-          "detailTwoAltText"
+          "title"
         ],
         "maxCtas": 0
       },

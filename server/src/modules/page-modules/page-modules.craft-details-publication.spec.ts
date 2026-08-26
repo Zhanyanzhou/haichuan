@@ -2,6 +2,7 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { PageModulesService } from "./page-modules.service";
+import { makeFormalPageMetadata } from "./page-modules.spec-fixtures";
 
 function createService() {
   return new PageModulesService({} as PrismaService);
@@ -45,37 +46,65 @@ function makeCraftDetails(overrides: Record<string, unknown> = {}) {
 }
 
 test("工艺细节具备标题、三张图片与三组替代文字时通过发布素材门禁", async () => {
+  const document = makeCraftDetails();
   const result = await createService().validatePageDocument(
     "about",
-    makeCraftDetails(),
-    {},
+    document,
+    makeFormalPageMetadata(document),
   );
 
   assert.equal(result.valid, true);
   assert.deepEqual(result.errors, []);
 });
 
-test("工艺细节缺少任一核心图片或替代文字时逐字段阻断并定位区块", async () => {
+test("工艺细节分别对缺失核心图片和已配置图片的缺失替代文字逐字段阻断", async () => {
+  const missingImageDocument = makeCraftDetails({
+    leadImage: "",
+    detailImageTwo: "",
+  });
+  const missingImageResult = await createService().validatePageDocument(
+    "about",
+    missingImageDocument,
+    makeFormalPageMetadata(missingImageDocument),
+  );
+
+  assert.equal(missingImageResult.valid, false);
+  for (const field of ["leadImage", "detailImageTwo"]) {
+    assert.ok(missingImageResult.errors.some((message) => message.includes(`${field} 图片不能为空`)));
+    const issue = missingImageResult.issues.find((item) => item.field === field);
+    assert.equal(issue?.blockId, "craft-details-publication-gate");
+  }
+
+  const missingAltDocument = makeCraftDetails({
+    leadAltText: "",
+    detailTwoAltText: "",
+  });
+  const missingAltResult = await createService().validatePageDocument(
+    "about",
+    missingAltDocument,
+    makeFormalPageMetadata(missingAltDocument),
+  );
+
+  assert.equal(missingAltResult.valid, false);
+  for (const field of ["leadAltText", "detailTwoAltText"]) {
+    assert.ok(missingAltResult.errors.some((message) => message.includes(`${field} 内容不能为空`)));
+    const issue = missingAltResult.issues.find((item) => item.field === field);
+    assert.equal(issue?.blockId, "craft-details-publication-gate");
+  }
+});
+
+test("机器合同派生的工艺媒体也会拒绝不存在的本地上传文件", async () => {
+  const document = makeCraftDetails({
+    leadImage: "/uploads/__r5-missing__/craft-lead.webp",
+  });
   const result = await createService().validatePageDocument(
     "about",
-    makeCraftDetails({
-      leadImage: "",
-      detailImageTwo: "",
-      leadAltText: "",
-      detailTwoAltText: "",
-    }),
-    {},
+    document,
+    makeFormalPageMetadata(document),
   );
 
   assert.equal(result.valid, false);
-  for (const field of ["leadImage", "detailImageTwo"]) {
-    assert.ok(result.errors.some((message) => message.includes(`${field} 图片不能为空`)));
-  }
-  for (const field of ["leadAltText", "detailTwoAltText"]) {
-    assert.ok(result.errors.some((message) => message.includes(`${field} 内容不能为空`)));
-  }
-  for (const field of ["leadImage", "detailImageTwo", "leadAltText", "detailTwoAltText"]) {
-    const issue = result.issues.find((item) => item.field === field);
-    assert.equal(issue?.blockId, "craft-details-publication-gate");
-  }
+  assert.ok(result.errors.some(
+    (message) => message.includes("leadImage") && message.includes("上传图片文件不存在"),
+  ));
 });

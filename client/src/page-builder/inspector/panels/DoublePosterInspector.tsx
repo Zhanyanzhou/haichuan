@@ -80,6 +80,16 @@ const OBJECT_LABELS: Record<ObjectId, string> = {
 const isObjectId = (value: string): value is ObjectId =>
   Object.prototype.hasOwnProperty.call(OBJECT_LABELS, value);
 
+function supportsCapabilityOnViewport(
+  object: ReturnType<typeof getContentTemplateEditableObject>,
+  capability: "layout" | "layer",
+  viewport: VisualViewport,
+) {
+  if (!object?.capabilities.includes(capability)) return false;
+  const allowedViewports = object.capabilityViewports?.[capability];
+  return !allowedViewports || allowedViewports.includes(viewport);
+}
+
 const DOUBLE_POSTER_DESIGN_CAPABILITIES = new Set([
   "layout",
   "layer",
@@ -367,6 +377,8 @@ export default function DoublePosterInspector({
   };
 
   const renderLayerOrder = (roleId: ObjectId) => {
+    const editableObject = getContentTemplateEditableObject(editor.moduleType, roleId);
+    if (!supportsCapabilityOnViewport(editableObject, "layer", viewport)) return null;
     const overrides = isVisualRecord(props.__instanceOverrides)
       ? props.__instanceOverrides
       : {};
@@ -591,6 +603,27 @@ export default function DoublePosterInspector({
   /* ---------------- 文案级设计控件 ---------------- */
 
   const renderCopyDesign = () => {
+    const editableObject = getContentTemplateEditableObject(editor.moduleType, "copy");
+    const usesManagedFlow = !supportsCapabilityOnViewport(
+      editableObject,
+      "layout",
+      viewport,
+    );
+    const overrides = isVisualRecord(props.__instanceOverrides)
+      ? props.__instanceOverrides
+      : {};
+    const nodes = isVisualRecord(overrides.nodes) ? overrides.nodes : {};
+    const copyNode = isVisualRecord(nodes.copy) ? nodes.copy : {};
+    const rectByViewport = isVisualRecord(copyNode.rectByViewport)
+      ? copyNode.rectByViewport
+      : {};
+    const zIndexByViewport = isVisualRecord(copyNode.zIndexByViewport)
+      ? copyNode.zIndexByViewport
+      : {};
+    const hasManagedFlowPositionOverride = usesManagedFlow && (
+      Object.prototype.hasOwnProperty.call(rectByViewport, viewport) ||
+      Object.prototype.hasOwnProperty.call(zIndexByViewport, viewport)
+    );
     const typography = resolveVisualNode(props, "copy", viewport).typography ?? {};
     const sizePresets = copyRole?.sizePresets ?? ["small", "standard", "large"];
     const alignPresets = copyRole?.align ?? ["left", "center"];
@@ -726,6 +759,36 @@ export default function DoublePosterInspector({
             }}
           />
         </label>
+
+        {usesManagedFlow ? (
+          <div className="homepage-editor__design-scope-note" role="note">
+            <strong>位置由模板流式布局控制</strong>
+            <span>保持主图、说明、细节图与行动入口的固定阅读顺序；文字显隐与排版仍可独立调整。</span>
+            {hasManagedFlowPositionOverride ? (
+              <button
+                type="button"
+                className="homepage-editor__inline-reset"
+                disabled={editor.historyTransactionPending}
+                onClick={() => editor.updateHistoryTransaction((currentProps) => {
+                  let next = currentProps.__instanceOverrides;
+                  next = setVisualOverridePath(
+                    next,
+                    ["nodes", "copy", "rectByViewport", viewport],
+                    undefined,
+                  );
+                  next = setVisualOverridePath(
+                    next,
+                    ["nodes", "copy", "zIndexByViewport", viewport],
+                    undefined,
+                  );
+                  return { __instanceOverrides: next };
+                })}
+              >
+                恢复{viewport === "mobile" ? "移动端" : "桌面端"}模板布局
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         {renderLayerOrder("copy")}
         <InspectorDisclosure label="高级设置">

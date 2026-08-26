@@ -275,6 +275,14 @@ test("旧模板采用新版默认构图，合法覆盖保留且新版非法几�
   const legacyOverrides = {
     version: 2,
     nodes: {
+      mobileImage: {
+        rectByViewport: {
+          mobile: { x: -0.2, y: 0.7, width: 1.4, height: 0.5 },
+        },
+        mediaView: {
+          focusByViewport: { mobile: { x: 61, y: 48 } },
+        },
+      },
       title: {
         rectByViewport: {
           desktop: { x: -1, y: 0.5, width: 2, height: 0.1 },
@@ -297,13 +305,18 @@ test("旧模板采用新版默认构图，合法覆盖保留且新版非法几�
   ));
 
   const sanitized = sanitizeContentTemplateLayoutData("首屏主视觉", legacyOverrides);
-  assert.deepEqual(
-    sanitized?.nodes?.title?.rectByViewport?.mobile,
-    { x: 0.2, y: 0.62, width: 0.6, height: 0.12 },
-  );
+  assert.equal(sanitized?.nodes?.title?.rectByViewport?.mobile, undefined);
   assert.deepEqual(
     sanitized?.nodes?.title?.rectByViewport?.desktop,
     { x: 0.035, y: 0.5, width: 0.92, height: 0.1 },
+  );
+  assert.deepEqual(
+    sanitized?.nodes?.mobileImage?.rectByViewport?.mobile,
+    { x: 0, y: 0.5, width: 1, height: 0.5 },
+  );
+  assert.deepEqual(
+    sanitized?.nodes?.mobileImage?.mediaView?.focusByViewport?.mobile,
+    { x: 61, y: 48 },
   );
 });
 

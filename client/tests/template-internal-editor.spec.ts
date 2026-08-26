@@ -119,6 +119,29 @@ function makeHeroDraft() {
   };
 }
 
+function makeLegacyHeroOverrideDraft() {
+  const draft = makeHeroDraft();
+  const props = draft.puckData.content[0].props as Record<string, any>;
+  props.__contentTemplate = { key: "hero", version: 2 };
+  props.__instanceOverrides = {
+    version: 2,
+    nodes: {
+      title: {
+        rectByViewport: {
+          desktop: { x: 0.12, y: 0.5, width: 0.6, height: 0.12 },
+          mobile: { x: 0.2, y: 0.62, width: 0.6, height: 0.12 },
+        },
+      },
+      mobileImage: {
+        rectByViewport: {
+          mobile: { x: 0, y: 0, width: 0.94, height: 1 },
+        },
+      },
+    },
+  };
+  return draft;
+}
+
 function makeSinglePosterDraft({ emptyCopy = false }: { emptyCopy?: boolean } = {}) {
   const draft = makeEmptyDraft();
   return {
@@ -142,6 +165,175 @@ function makeSinglePosterDraft({ emptyCopy = false }: { emptyCopy?: boolean } = 
             subtitle: emptyCopy ? "" : "验证完整编辑器中的文案区域拖动。",
             actionText: "",
             targetType: "none",
+          },
+        },
+      ],
+    },
+  };
+}
+
+function makeFullBleedDraft() {
+  const draft = makeEmptyDraft();
+  return {
+    ...draft,
+    id: 9605,
+    pageKey: "products",
+    puckData: {
+      ...draft.puckData,
+      content: [
+        {
+          type: "全屏出血图",
+          props: {
+            id: "template-editor-full-bleed-copy",
+            image: "/svg/template-hero.svg",
+            mobileImage: "/svg/template-hero.svg",
+            eyebrow: "EDITORIAL",
+            title: "通栏图下方说明",
+            subtitle: "验证真实编辑器中的说明带首次微调。",
+            buttonText: "",
+            targetType: "none",
+            altText: "通栏珠宝图片",
+          },
+        },
+      ],
+    },
+  };
+}
+
+function makeDoublePosterDraft() {
+  const draft = makeEmptyDraft();
+  return {
+    ...draft,
+    id: 9606,
+    pageKey: "products",
+    puckData: {
+      ...draft.puckData,
+      content: [
+        {
+          type: "双图海报",
+          props: {
+            id: "template-editor-double-poster-copy",
+            number: "02",
+            label: "EDITORIAL",
+            title: "双图海报说明",
+            description: "验证主图、说明与细节图固定骨架中的首次微调。",
+            mainImage: "/svg/template-hero.svg",
+            detailImage: "/svg/template-hero.svg",
+            actionText: "",
+            targetType: "none",
+            mainAltText: "双图海报主图",
+            detailAltText: "双图海报细节图",
+          },
+        },
+      ],
+    },
+  };
+}
+
+function makeLimitedEventDraft() {
+  const draft = makeEmptyDraft();
+  return {
+    ...draft,
+    id: 9607,
+    pageKey: "products",
+    puckData: {
+      ...draft.puckData,
+      content: [
+        {
+          type: "限时活动",
+          props: {
+            id: "template-editor-limited-event-copy",
+            eventImage: "/svg/template-hero.svg",
+            eyebrow: "CAMPAIGN",
+            title: "限时活动说明",
+            body: "验证活动视觉、倒计时与说明区域中的首次微调。",
+            targetDate: "2030-12-31T23:59:59.000Z",
+            benefits: [{ value: "预约优先" }],
+            buttonText: "",
+            linkUrl: "",
+            bgColor: "#FFFFFF",
+          },
+        },
+      ],
+    },
+  };
+}
+
+function makeHeroMovementDraft() {
+  const draft = makeEmptyDraft();
+  return {
+    ...draft,
+    id: 9608,
+    pageKey: "products",
+    puckData: {
+      ...draft.puckData,
+      content: [
+        {
+          type: "首屏主视觉",
+          props: {
+            id: "template-editor-hero-movement",
+            desktopImage: "/svg/template-hero.svg",
+            mobileImage: "/svg/template-hero.svg",
+            altText: "首屏珠宝主视觉",
+            eyebrow: "THE HOUSE",
+            title: "首屏叙事标题",
+            subtitle: "验证桌面安全区与移动堆叠阅读顺序。",
+            actionText: "探索作品",
+            targetType: "page",
+            linkUrl: "/products",
+          },
+        },
+      ],
+    },
+  };
+}
+
+function makeTextBannerMovementDraft() {
+  const draft = makeEmptyDraft();
+  return {
+    ...draft,
+    id: 9609,
+    pageKey: "products",
+    puckData: {
+      ...draft.puckData,
+      content: [
+        {
+          type: "文字横幅",
+          props: {
+            id: "template-editor-text-banner-movement",
+            eyebrow: "EDITORIAL",
+            title: "留白中的章节声明",
+            body: "验证纯文字模板只使用受控对齐和留白预设。",
+            buttonText: "了解更多",
+            targetType: "page",
+            linkUrl: "/about",
+            template: "center",
+            spacing: "normal",
+          },
+        },
+      ],
+    },
+  };
+}
+
+function makeBookingMovementDraft() {
+  const draft = makeEmptyDraft();
+  return {
+    ...draft,
+    id: 9610,
+    pageKey: "products",
+    puckData: {
+      ...draft.puckData,
+      content: [
+        {
+          type: "预约入口",
+          props: {
+            id: "template-editor-booking-movement",
+            title: "预约鉴赏",
+            subtitle: "由珠宝顾问安排一对一服务。",
+            buttonText: "立即预约",
+            targetType: "page",
+            linkUrl: "/contact",
           },
         },
       ],
@@ -238,6 +430,201 @@ async function mockEditorApis(
     }
     return route.fulfill(json({}));
   });
+}
+
+async function expectFullShellFirstNodeNudgeStable({
+  page,
+  draft,
+  contractKey,
+  nodeId = "copy",
+  forbiddenWrites,
+}: {
+  page: Page;
+  draft: Record<string, any>;
+  contractKey: string;
+  nodeId?: string;
+  forbiddenWrites: string[];
+}) {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await authenticateAdmin(page);
+  await mockEditorApis(page, draft, forbiddenWrites);
+  await page.goto("/admin/editor/products");
+  await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+  const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+  const root = canvas.locator(`[data-content-template-contract="${contractKey}"]`).first();
+  const node = root.locator(`[data-hc-keyboard-node="${nodeId}"]:visible`).first();
+  await expect(node).toBeVisible();
+  await node.click();
+  await root.locator(`[data-hc-node-hud][data-node-id="${nodeId}"]`)
+    .getByRole("button", { name: "调整对象区域" }).click();
+  await expect(root).toHaveAttribute("data-visual-editor-mode", "adjust-layout");
+
+  const before = await node.boundingBox();
+  if (!before) throw new Error(`${contractKey}.${nodeId} 没有键盘微调前尺寸`);
+  const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+  const readInstanceStyle = async () =>
+    (await instanceStyle.count()) > 0
+      ? (await instanceStyle.textContent()) ?? ""
+      : "";
+  const initialStyle = await readInstanceStyle();
+  const undo = page.getByRole("button", { name: "撤销" });
+  await expect(undo).toBeDisabled();
+
+  await node.press("ArrowRight");
+  await expect.poll(readInstanceStyle).not.toBe(initialStyle);
+  expect(await readInstanceStyle()).toContain("aspect-ratio:");
+  const after = await node.boundingBox();
+  if (!after) throw new Error(`${contractKey}.${nodeId} 键盘微调后没有尺寸`);
+  const geometryEvidence = JSON.stringify({ contractKey, nodeId, before, after });
+  expect(after.x - before.x, geometryEvidence).toBeGreaterThan(1);
+  expect(after.x - before.x, geometryEvidence).toBeLessThanOrEqual(24);
+  expect(Math.abs(after.y - before.y), geometryEvidence).toBeLessThanOrEqual(3);
+  expect(Math.abs(after.width - before.width), geometryEvidence).toBeLessThanOrEqual(3);
+  expect(Math.abs(after.height - before.height), geometryEvidence).toBeLessThanOrEqual(3);
+
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect.poll(readInstanceStyle).toBe(initialStyle);
+}
+
+async function expectManagedFlowNodes({
+  page,
+  draft,
+  contractKey,
+  viewport,
+  nodeIds,
+  forbiddenWrites,
+}: {
+  page: Page;
+  draft: Record<string, any>;
+  contractKey: string;
+  viewport: "desktop" | "mobile";
+  nodeIds: string[];
+  forbiddenWrites: string[];
+}) {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await authenticateAdmin(page);
+  await mockEditorApis(page, draft, forbiddenWrites);
+  await page.goto("/admin/editor/products");
+  await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+  const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+  if (viewport === "mobile") {
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect.poll(() => canvas.locator("html").evaluate(() => window.innerWidth))
+      .toBeLessThanOrEqual(480);
+  }
+  const root = canvas.locator(`[data-content-template-contract="${contractKey}"]`).first();
+  const inspector = page.getByRole("region", { name: "属性面板" });
+  const objectPicker = inspector.getByRole("combobox", { name: "选择编辑对象" });
+  const copyToOther = inspector.getByRole("button", {
+    name: `复制到${viewport === "desktop" ? "移动端" : "桌面端"}`,
+  });
+  const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+  const readInstanceStyle = async () =>
+    (await instanceStyle.count()) > 0
+      ? (await instanceStyle.textContent()) ?? ""
+      : "";
+  const initialStyle = await readInstanceStyle();
+
+  for (const nodeId of nodeIds) {
+    await objectPicker.selectOption(nodeId);
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    await expect(inspector.getByText(/位置由(?:移动端堆叠|模板流式布局控制)/)).toBeVisible();
+    await expect(inspector.getByRole("group", { name: /快速定位/ })).toHaveCount(0);
+    await expect(copyToOther).toBeDisabled();
+    await expect(root.locator(`[data-hc-node-hud][data-node-id="${nodeId}"]`)).toHaveCount(0);
+  }
+
+  await expect.poll(readInstanceStyle).toBe(initialStyle);
+  await expect(page.getByRole("button", { name: "撤销" })).toBeDisabled();
+}
+
+async function expectManagedFlowLegacyRecovery({
+  page,
+  draft,
+  contractKey,
+  viewport,
+  nodeId,
+  nodeSelector,
+  resetLabel,
+  forbiddenWrites,
+}: {
+  page: Page;
+  draft: Record<string, any>;
+  contractKey: string;
+  viewport: "desktop" | "mobile";
+  nodeId: string;
+  nodeSelector: string;
+  resetLabel: string;
+  forbiddenWrites: string[];
+}) {
+  draft.puckData.content[0].props.__instanceOverrides = {
+    version: 2,
+    nodes: {
+      [nodeId]: {
+        rectByViewport: {
+          desktop: { x: 0.08, y: 0.56, width: 0.48, height: 0.18 },
+          mobile: { x: 0.06, y: 0.38, width: 0.88, height: 0.2 },
+        },
+        zIndexByViewport: { desktop: 3, mobile: 4 },
+      },
+    },
+  };
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await authenticateAdmin(page);
+  await mockEditorApis(page, draft, forbiddenWrites);
+  await page.goto("/admin/editor/products");
+  await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+  const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+  if (viewport === "mobile") {
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect.poll(() => canvas.locator("html").evaluate(() => window.innerWidth))
+      .toBeLessThanOrEqual(480);
+  }
+  const root = canvas.locator(`[data-content-template-contract="${contractKey}"]`).first();
+  const visualNode = root.locator(nodeSelector).first();
+  await expect(visualNode).toBeVisible();
+  const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+  const styleText = (await instanceStyle.count()) > 0
+    ? (await instanceStyle.textContent()) ?? ""
+    : "";
+  const activeMediaCondition = viewport === "mobile"
+    ? "(max-width:767px)"
+    : "(min-width:768px)";
+  const activeNodeRule = styleText.split("@media ").slice(1).some((mediaRule) =>
+    mediaRule.startsWith(activeMediaCondition) &&
+    mediaRule.includes(`"${nodeId}"`) &&
+    (mediaRule.includes("position:absolute!important") || mediaRule.includes("z-index:")),
+  );
+  expect(activeNodeRule, JSON.stringify({ contractKey, nodeId, viewport, styleText })).toBe(false);
+  const beforeReset = await visualNode.boundingBox();
+  if (!beforeReset) throw new Error(`${contractKey}.${nodeId} 恢复前没有可见几何`);
+  const inspector = page.getByRole("region", { name: "属性面板" });
+  await inspector.getByRole("combobox", { name: "选择编辑对象" }).selectOption(nodeId);
+  await inspector.getByRole("tab", { name: "模板编辑" }).click();
+  const reset = inspector.getByRole("button", { name: resetLabel });
+  const undo = page.getByRole("button", { name: "撤销" });
+  const redo = page.getByRole("button", { name: "重做" });
+  await expect(reset).toBeVisible();
+  await expect(undo).toBeDisabled();
+  await reset.click();
+  await expect(reset).toHaveCount(0);
+  await expect(undo).toBeEnabled();
+  const afterReset = await visualNode.boundingBox();
+  if (!afterReset) throw new Error(`${contractKey}.${nodeId} 恢复后没有可见几何`);
+  const geometryEvidence = JSON.stringify({ contractKey, nodeId, viewport, beforeReset, afterReset });
+  expect(Math.abs(afterReset.x - beforeReset.x), geometryEvidence).toBeLessThanOrEqual(32);
+  expect(Math.abs(afterReset.y - beforeReset.y), geometryEvidence).toBeLessThanOrEqual(32);
+  expect(Math.abs(afterReset.width - beforeReset.width), geometryEvidence).toBeLessThanOrEqual(32);
+  expect(Math.abs(afterReset.height - beforeReset.height), geometryEvidence).toBeLessThanOrEqual(32);
+  await undo.click();
+  await expect(reset).toBeVisible();
+  await expect(redo).toBeEnabled();
+  await redo.click();
+  await expect(reset).toHaveCount(0);
 }
 
 async function openComponentFixture(page: Page) {
@@ -694,7 +1081,7 @@ test.describe("模板内部编辑器（真实产品组件集成；不含后端�
     expect(await undo.isDisabled()).toBe(undoDisabledBefore);
   });
 
-  test("Desktop/Mobile 布局值分别写入同一模块实例", async ({ page }) => {
+  test("Hero 标题只写入 Desktop 布局，Mobile 保持合同托管", async ({ page }) => {
     const canvas = page.frameLocator("iframe");
     const title = canvas.locator('[data-hc-keyboard-node="title"]:visible').first();
     await title.click();
@@ -715,17 +1102,13 @@ test.describe("模板内部编辑器（真实产品组件集成；不含后端�
     const inheritedMobile = heroOverrides(await readFixtureData(page));
     expect(inheritedMobile?.nodes?.title?.rectByViewport?.mobile).toBeUndefined();
     await title.click();
-    await root.locator('[data-hc-node-hud][data-node-id="title"]')
-      .getByRole("button", { name: "调整对象区域" }).click();
+    await expect(root.locator('[data-hc-node-hud][data-node-id="title"]')).toHaveCount(0);
+    const beforeManagedKey = heroOverrides(await readFixtureData(page));
     await title.press("ArrowDown");
-
-    await expect.poll(async () =>
-      heroOverrides(await readFixtureData(page))?.nodes?.title?.rectByViewport
-        ?.mobile,
-    ).not.toEqual(undefined);
     const afterMobile = heroOverrides(await readFixtureData(page));
+    expect(afterMobile).toEqual(beforeManagedKey);
     expect(afterMobile?.nodes?.title?.rectByViewport?.desktop).toEqual(desktopRect);
-    expect(afterMobile?.nodes?.title?.rectByViewport?.mobile).not.toEqual(desktopRect);
+    expect(afterMobile?.nodes?.title?.rectByViewport?.mobile).toBeUndefined();
 
     await page.getByRole("button", { name: /桌面端布局/ }).click();
     await expect(page.getByTestId("viewport-state")).toHaveText("desktop");
@@ -968,6 +1351,146 @@ test.describe("完整后台壳（确定性 UI / 自有 API 网络夹具）", () 
     expect(forbiddenWrites).toEqual([]);
   });
 
+  test("Hero 移动主图可由鼠标选择并用键盘调整焦点，Undo/Redo 精确往返", async ({
+    page,
+  }) => {
+    const forbiddenWrites: string[] = [];
+    const draft = makeHeroDraft();
+    Object.assign(draft.puckData.content[0].props, {
+      eyebrow: "HCPUCK 移动端眉题",
+      title: "HCPUCK 移动端主标题",
+      subtitle: "HCPUCK 移动端正文",
+      __contentTemplate: { key: "hero", version: 5 },
+      __instanceOverrides: {
+        version: 2,
+        frame: {
+          aspectRatioByViewport: { mobile: 0.8 },
+        },
+        nodes: {
+          mobileImage: {
+            rectByViewport: {
+              mobile: { x: 0, y: 0, width: 1, height: 1 },
+            },
+          },
+        },
+      },
+    });
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await page.route("**/svg/template-hero.svg", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "image/svg+xml",
+        body: fixtureSvg,
+      }),
+    );
+    await mockEditorApis(page, draft, forbiddenWrites);
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    await expect.poll(() => canvas.locator("html").evaluate(() => window.innerWidth))
+      .toBeLessThanOrEqual(480);
+    const root = canvas.locator('[data-content-template-contract="hero"]').first();
+    const mobileImage = root.locator(
+      '[data-hc-keyboard-node="mobileImage"][data-content-role-mobile="mobileImage"]:visible',
+    ).first();
+    await expect(mobileImage).toBeVisible();
+    await expect.poll(() => mobileImage.locator("img").evaluate((image) =>
+      (image as HTMLImageElement).naturalWidth,
+    )).toBeGreaterThan(0);
+
+    const title = root.locator('[data-hc-keyboard-node="title"]:visible').first();
+    const subtitle = root.locator('[data-hc-keyboard-node="subtitle"]:visible').first();
+    await title.click();
+    await expect(root).toHaveAttribute("data-visual-selected-node", "title");
+
+    const mediaBox = await mobileImage.boundingBox();
+    if (!mediaBox) throw new Error("移动端 Hero 主图没有可点击尺寸");
+    const mediaHit = await mobileImage.evaluate((media) => {
+      const bounds = media.getBoundingClientRect();
+      const target = document.elementFromPoint(
+        bounds.left + bounds.width * 0.84,
+        bounds.top + bounds.height * 0.72,
+      );
+      return {
+        insideMedia: Boolean(target && media.contains(target)),
+        field: target instanceof HTMLElement ? target.closest<HTMLElement>("[data-editor-field]")
+          ?.dataset.editorField : undefined,
+      };
+    });
+    expect(mediaHit).toEqual({
+      insideMedia: true,
+      field: "desktopImage mobileImage",
+    });
+    await page.mouse.click(
+      mediaBox.x + mediaBox.width * 0.84,
+      mediaBox.y + mediaBox.height * 0.72,
+    );
+    await expect(root).toHaveAttribute("data-visual-selected-node", "mobileImage");
+
+    await subtitle.click();
+    await expect(root).toHaveAttribute("data-visual-selected-node", "subtitle");
+
+    const inspector = page.getByRole("region", { name: "属性面板" });
+    await inspector.getByRole("combobox", { name: "选择编辑对象" })
+      .selectOption("mobileImage");
+    await expect(root).toHaveAttribute("data-visual-selected-node", "mobileImage");
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    await mobileImage.focus();
+    await mobileImage.press("Enter");
+    await expect(root).toHaveAttribute("data-visual-editor-mode", "adjust-media");
+    await expect(root).toHaveAttribute("data-hc-media-focus-enabled", "true");
+
+    const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+    const readInstanceStyle = async () =>
+      (await instanceStyle.count()) > 0
+        ? (await instanceStyle.textContent()) ?? ""
+        : "";
+    const initialStyle = await readInstanceStyle();
+    await mobileImage.press("ArrowRight");
+    await expect.poll(readInstanceStyle).not.toBe(initialStyle);
+    const movedStyle = await readInstanceStyle();
+    expect(movedStyle).toContain("object-position:51% 50%!important");
+
+    const undo = page.getByRole("button", { name: "撤销" });
+    const redo = page.getByRole("button", { name: "重做" });
+    await expect(undo).toBeEnabled();
+    await undo.click();
+    await expect.poll(readInstanceStyle).toBe(initialStyle);
+    await expect(redo).toBeEnabled();
+    await redo.click();
+    await expect.poll(readInstanceStyle).toBe(movedStyle);
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("旧 version=2 Hero 文档保留合法覆盖并在移动端忽略非法标题位置", async ({
+    page,
+  }) => {
+    const forbiddenWrites: string[] = [];
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, makeLegacyHeroOverrideDraft(), forbiddenWrites);
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const root = canvas.locator('[data-content-template-contract="hero"]').first();
+    const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+    const readInstanceStyle = async () => (await instanceStyle.textContent()) ?? "";
+    await expect.poll(readInstanceStyle).toContain("--hc-node-title-desktop-left");
+    await expect.poll(readInstanceStyle).not.toContain("--hc-node-title-mobile-left");
+    await expect.poll(readInstanceStyle).toContain("--hc-node-mobileImage-mobile-width,94%");
+
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect.poll(() => canvas.locator("html").evaluate(() => window.innerWidth))
+      .toBeLessThanOrEqual(480);
+    await expect(root.locator('[data-hc-keyboard-node="mobileImage"]:visible')).toBeVisible();
+    await expect(root.locator('[data-hc-node-hud][data-node-id="title"]')).toHaveCount(0);
+    expect(forbiddenWrites).toEqual([]);
+  });
+
   test("singlePoster.copy 桌面端指针拖动提交一条可撤销历史", async ({
     page,
   }) => {
@@ -1028,7 +1551,94 @@ test.describe("完整后台壳（确定性 UI / 自有 API 网络夹具）", () 
     expect(forbiddenWrites).toEqual([]);
   });
 
-  test("singlePoster.copy 移动端拖动保留桌面覆盖并独立撤销", async ({ page }) => {
+  test("singlePoster.copy 首次键盘微调不改变纵向位置或对象尺寸", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, makeSinglePosterDraft(), forbiddenWrites);
+    await page.goto("/admin/editor/products");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const root = canvas.locator('[data-content-template-contract="singlePoster"]').first();
+    const copy = root.locator('[data-hc-keyboard-node="copy"]:visible').first();
+    await copy.click();
+    await root.locator('[data-hc-node-hud][data-node-id="copy"]')
+      .getByRole("button", { name: "调整对象区域" }).click();
+    await expect(root).toHaveAttribute("data-visual-editor-mode", "adjust-layout");
+
+    const before = await copy.boundingBox();
+    if (!before) throw new Error("singlePoster.copy 没有键盘微调前尺寸");
+    const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+    const readInstanceStyle = async () =>
+      (await instanceStyle.count()) > 0
+        ? (await instanceStyle.textContent()) ?? ""
+        : "";
+    const initialStyle = await readInstanceStyle();
+    const undo = page.getByRole("button", { name: "撤销" });
+    await expect(undo).toBeDisabled();
+
+    await copy.press("ArrowRight");
+    await expect.poll(readInstanceStyle).not.toBe(initialStyle);
+    const after = await copy.boundingBox();
+    if (!after) throw new Error("singlePoster.copy 键盘微调后没有尺寸");
+    const geometryEvidence = JSON.stringify({ before, after });
+    expect(after.x - before.x, geometryEvidence).toBeGreaterThan(1);
+    expect(after.x - before.x, geometryEvidence).toBeLessThanOrEqual(24);
+    expect(Math.abs(after.y - before.y), geometryEvidence).toBeLessThanOrEqual(3);
+    expect(Math.abs(after.width - before.width), geometryEvidence).toBeLessThanOrEqual(3);
+    expect(Math.abs(after.height - before.height), geometryEvidence).toBeLessThanOrEqual(3);
+
+    await expect(undo).toBeEnabled();
+    await undo.click();
+    await expect.poll(readInstanceStyle).toBe(initialStyle);
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("singlePoster.copy 移动端堆叠模式拒绝自由定位并保持当前视觉几何", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, makeSinglePosterDraft(), forbiddenWrites);
+    await page.goto("/admin/editor/products");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const root = canvas.locator('[data-content-template-contract="singlePoster"]').first();
+    const copy = root.locator('[data-hc-keyboard-node="copy"]:visible').first();
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect.poll(() => canvas.locator("html").evaluate(() => window.innerWidth))
+      .toBeLessThanOrEqual(480);
+    await copy.click();
+    const hud = root.locator('[data-hc-node-hud][data-node-id="copy"]');
+    await expect(hud).toHaveCount(0);
+
+    const before = await copy.boundingBox();
+    if (!before) throw new Error("移动端 singlePoster.copy 没有键盘微调前尺寸");
+    const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+    const readInstanceStyle = async () =>
+      (await instanceStyle.count()) > 0
+        ? (await instanceStyle.textContent()) ?? ""
+        : "";
+    const initialStyle = await readInstanceStyle();
+    const undo = page.getByRole("button", { name: "撤销" });
+    await expect(undo).toBeDisabled();
+
+    await copy.press("ArrowRight");
+    await expect.poll(readInstanceStyle).toBe(initialStyle);
+    const after = await copy.boundingBox();
+    if (!after) throw new Error("移动端 singlePoster.copy 键盘微调后没有尺寸");
+    const geometryEvidence = JSON.stringify({ before, after });
+    expect(Math.abs(after.x - before.x), geometryEvidence).toBeLessThanOrEqual(1);
+    expect(Math.abs(after.y - before.y), geometryEvidence).toBeLessThanOrEqual(3);
+    expect(Math.abs(after.width - before.width), geometryEvidence).toBeLessThanOrEqual(3);
+    expect(Math.abs(after.height - before.height), geometryEvidence).toBeLessThanOrEqual(3);
+
+    await expect(undo).toBeDisabled();
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("singlePoster.copy 移动端堆叠模式可撤销恢复旧覆盖且保留桌面位置", async ({ page }) => {
     const forbiddenWrites: string[] = [];
     const draft = makeSinglePosterDraft();
     draft.puckData.content[0].props.__instanceOverrides = {
@@ -1037,7 +1647,9 @@ test.describe("完整后台壳（确定性 UI / 自有 API 网络夹具）", () 
         copy: {
           rectByViewport: {
             desktop: { x: 0.12, y: 0.58, width: 0.28, height: 0.2 },
+            mobile: { x: 0.1, y: 0.16, width: 0.8, height: 0.24 },
           },
+          zIndexByViewport: { mobile: 4 },
         },
       },
     };
@@ -1052,46 +1664,33 @@ test.describe("完整后台壳（确定性 UI / 自有 API 网络夹具）", () 
     const copy = root.locator('[data-hc-keyboard-node="copy"]:visible').first();
     const instanceStyle = root.locator("style[data-hc-instance-overrides]");
     const readInstanceStyle = async () => (await instanceStyle.textContent()) ?? "";
-    const desktopOnlyStyle = await readInstanceStyle();
-    expect(desktopOnlyStyle).toContain("min-width:768px");
-    expect(desktopOnlyStyle).not.toContain("max-width:767px");
+    const safeDesktopOnlyStyle = await readInstanceStyle();
+    expect(safeDesktopOnlyStyle).toContain("min-width:768px");
+    expect(safeDesktopOnlyStyle).not.toContain("max-width:767px");
 
     await page.getByRole("button", { name: /移动端布局/ }).click();
     await expect.poll(() => canvas.locator("html").evaluate(() => window.innerWidth))
       .toBeLessThanOrEqual(480);
-    await expect.poll(readInstanceStyle).toBe(desktopOnlyStyle);
+    await expect.poll(readInstanceStyle).toBe(safeDesktopOnlyStyle);
     await copy.click();
-    await root.locator('[data-hc-node-hud][data-node-id="copy"]')
-      .getByRole("button", { name: "调整对象区域" }).click();
-    const initialMobileBox = await copy.boundingBox();
-    if (!initialMobileBox) throw new Error("移动端 singlePoster.copy 没有可拖动尺寸");
-
+    const hud = root.locator('[data-hc-node-hud][data-node-id="copy"]');
+    await expect(hud).toHaveCount(0);
+    const inspector = page.getByRole("region", { name: "属性面板" });
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    await expect(inspector.getByText("位置由移动端堆叠模板控制")).toBeVisible();
+    await expect(inspector.getByRole("group", { name: /快速定位/ })).toHaveCount(0);
+    await expect(inspector.getByRole("button", { name: "复制到桌面端" })).toBeDisabled();
     const undo = page.getByRole("button", { name: "撤销" });
-    const redo = page.getByRole("button", { name: "重做" });
+    const reset = inspector.getByRole("button", { name: "恢复移动端堆叠" });
+    await expect(reset).toBeVisible();
     await expect(undo).toBeDisabled();
-    await page.keyboard.down("Alt");
-    await page.mouse.move(
-      initialMobileBox.x + initialMobileBox.width / 2,
-      initialMobileBox.y + initialMobileBox.height / 2,
-    );
-    await page.mouse.down();
-    await page.mouse.move(
-      initialMobileBox.x + initialMobileBox.width / 2 - 24,
-      initialMobileBox.y + initialMobileBox.height / 2 + 18,
-      { steps: 10 },
-    );
-    await page.mouse.up();
-    await page.keyboard.up("Alt");
-
-    await expect.poll(readInstanceStyle).not.toBe(desktopOnlyStyle);
-    const mobileMovedStyle = await readInstanceStyle();
-    expect(mobileMovedStyle).toContain("min-width:768px");
-    expect(mobileMovedStyle).toContain("max-width:767px");
+    await reset.click();
+    await expect(reset).toHaveCount(0);
+    await expect.poll(readInstanceStyle).toBe(safeDesktopOnlyStyle);
+    await expect(undo).toBeEnabled();
     await undo.click();
-    await expect.poll(readInstanceStyle).toBe(desktopOnlyStyle);
-    await expect(undo).toBeDisabled();
-    await redo.click();
-    await expect.poll(readInstanceStyle).toBe(mobileMovedStyle);
+    await expect(reset).toBeVisible();
+    await expect.poll(readInstanceStyle).toBe(safeDesktopOnlyStyle);
     expect(forbiddenWrites).toEqual([]);
   });
 
@@ -1148,6 +1747,406 @@ test.describe("完整后台壳（确定性 UI / 自有 API 网络夹具）", () 
     await expect(undo).toBeDisabled();
     await redo.click();
     await expect.poll(readInstanceStyle).toBe(movedStyle);
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("fullBleed.copy 流式说明带在桌面和移动端拒绝自由定位", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, makeFullBleedDraft(), forbiddenWrites);
+    await page.goto("/admin/editor/products");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const root = canvas.locator('[data-content-template-contract="fullBleed"]').first();
+    const copy = root.locator('[data-hc-keyboard-node="copy"]:visible').first();
+    await expect(copy).toBeVisible();
+    await copy.click();
+    await expect(root.locator('[data-hc-node-hud][data-node-id="copy"]')).toHaveCount(0);
+    const inspector = page.getByRole("region", { name: "属性面板" });
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    await expect(inspector.getByText("位置由模板流式布局控制")).toBeVisible();
+    await expect(inspector.getByRole("group", { name: /快速定位/ })).toHaveCount(0);
+    await expect(inspector.getByRole("group", { name: /图层顺序/ })).toHaveCount(0);
+
+    const before = await copy.boundingBox();
+    if (!before) throw new Error("fullBleed.copy 没有桌面端键盘操作前尺寸");
+    const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+    const readInstanceStyle = async () =>
+      (await instanceStyle.count()) > 0
+        ? (await instanceStyle.textContent()) ?? ""
+        : "";
+    const initialStyle = await readInstanceStyle();
+    const undo = page.getByRole("button", { name: "撤销" });
+    await expect(undo).toBeDisabled();
+
+    await copy.press("ArrowRight");
+    await expect.poll(readInstanceStyle).toBe(initialStyle);
+    const after = await copy.boundingBox();
+    if (!after) throw new Error("fullBleed.copy 桌面端键盘操作后没有尺寸");
+    const geometryEvidence = JSON.stringify({ before, after });
+    expect(Math.abs(after.x - before.x), geometryEvidence).toBeLessThanOrEqual(1);
+    expect(Math.abs(after.y - before.y), geometryEvidence).toBeLessThanOrEqual(3);
+    expect(Math.abs(after.width - before.width), geometryEvidence).toBeLessThanOrEqual(3);
+    expect(Math.abs(after.height - before.height), geometryEvidence).toBeLessThanOrEqual(3);
+    await expect(undo).toBeDisabled();
+
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect.poll(() => canvas.locator("html").evaluate(() => window.innerWidth))
+      .toBeLessThanOrEqual(480);
+    await copy.click();
+    await expect(root.locator('[data-hc-node-hud][data-node-id="copy"]')).toHaveCount(0);
+    const mobileBefore = await copy.boundingBox();
+    if (!mobileBefore) throw new Error("fullBleed.copy 没有移动端键盘操作前尺寸");
+    await copy.press("ArrowRight");
+    await expect.poll(readInstanceStyle).toBe(initialStyle);
+    const mobileAfter = await copy.boundingBox();
+    if (!mobileAfter) throw new Error("fullBleed.copy 移动端键盘操作后没有尺寸");
+    const mobileGeometryEvidence = JSON.stringify({ before: mobileBefore, after: mobileAfter });
+    expect(Math.abs(mobileAfter.x - mobileBefore.x), mobileGeometryEvidence).toBeLessThanOrEqual(1);
+    expect(Math.abs(mobileAfter.y - mobileBefore.y), mobileGeometryEvidence).toBeLessThanOrEqual(3);
+    expect(Math.abs(mobileAfter.width - mobileBefore.width), mobileGeometryEvidence).toBeLessThanOrEqual(3);
+    expect(Math.abs(mobileAfter.height - mobileBefore.height), mobileGeometryEvidence).toBeLessThanOrEqual(3);
+    await expect(undo).toBeDisabled();
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("fullBleed.copy 旧双端位置覆盖可逐端撤销恢复", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    const draft = makeFullBleedDraft();
+    draft.puckData.content[0].props.__instanceOverrides = {
+      version: 2,
+      nodes: {
+        copy: {
+          rectByViewport: {
+            desktop: { x: 0.08, y: 0.56, width: 0.68, height: 0.22 },
+            mobile: { x: 0.08, y: 0.58, width: 0.84, height: 0.24 },
+          },
+          zIndexByViewport: { desktop: 3, mobile: 4 },
+        },
+      },
+    };
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, draft, forbiddenWrites);
+    await page.goto("/admin/editor/products");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const root = canvas.locator('[data-content-template-contract="fullBleed"]').first();
+    const copy = root.locator('[data-hc-keyboard-node="copy"]:visible').first();
+    const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+    const readInstanceStyle = async () =>
+      (await instanceStyle.count()) > 0
+        ? (await instanceStyle.textContent()) ?? ""
+        : "";
+    await expect.poll(readInstanceStyle).toBe("");
+
+    await copy.click();
+    const inspector = page.getByRole("region", { name: "属性面板" });
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    await expect(inspector.getByText("位置由模板流式布局控制")).toBeVisible();
+    const undo = page.getByRole("button", { name: "撤销" });
+    const redo = page.getByRole("button", { name: "重做" });
+    const desktopReset = inspector.getByRole("button", { name: "恢复桌面端模板布局" });
+    await expect(desktopReset).toBeVisible();
+    await expect(undo).toBeDisabled();
+    await desktopReset.click();
+    await expect(desktopReset).toHaveCount(0);
+    await expect(undo).toBeEnabled();
+    await undo.click();
+    await expect(desktopReset).toBeVisible();
+    await expect(redo).toBeEnabled();
+    await redo.click();
+    await expect(desktopReset).toHaveCount(0);
+
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect.poll(() => canvas.locator("html").evaluate(() => window.innerWidth))
+      .toBeLessThanOrEqual(480);
+    await copy.click();
+    const mobileReset = inspector.getByRole("button", { name: "恢复移动端模板布局" });
+    await expect(mobileReset).toBeVisible();
+    await mobileReset.click();
+    await expect(mobileReset).toHaveCount(0);
+    await expect.poll(readInstanceStyle).toBe("");
+    await expect(undo).toBeEnabled();
+    await undo.click();
+    await expect(mobileReset).toBeVisible();
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  for (const scenario of [
+    {
+      contractKey: "hero",
+      nodeId: "title",
+      createDraft: makeHeroMovementDraft,
+    },
+    {
+      contractKey: "limitedEvent",
+      nodeId: "copy",
+      createDraft: makeLimitedEventDraft,
+    },
+    {
+      contractKey: "craftDetails",
+      nodeId: "copy",
+      createDraft: () => ({ ...makeCraftDetailsDraft(), pageKey: "products" }),
+    },
+  ]) {
+    test(`${scenario.contractKey}.${scenario.nodeId} 首次键盘微调不改变纵向位置或对象尺寸`, async ({ page }) => {
+      const forbiddenWrites: string[] = [];
+      await expectFullShellFirstNodeNudgeStable({
+        page,
+        draft: scenario.createDraft(),
+        contractKey: scenario.contractKey,
+        nodeId: scenario.nodeId,
+        forbiddenWrites,
+      });
+      expect(forbiddenWrites).toEqual([]);
+    });
+  }
+
+  for (const scenario of [
+    {
+      contractKey: "hero",
+      viewport: "mobile" as const,
+      createDraft: makeHeroMovementDraft,
+      nodeIds: ["eyebrow", "title", "subtitle", "actionText"],
+    },
+    {
+      contractKey: "textBanner",
+      viewport: "desktop" as const,
+      createDraft: makeTextBannerMovementDraft,
+      nodeIds: ["copy"],
+    },
+    {
+      contractKey: "textBanner",
+      viewport: "mobile" as const,
+      createDraft: makeTextBannerMovementDraft,
+      nodeIds: ["copy"],
+    },
+    {
+      contractKey: "booking",
+      viewport: "desktop" as const,
+      createDraft: makeBookingMovementDraft,
+      nodeIds: ["title", "subtitle", "buttonText"],
+    },
+    {
+      contractKey: "booking",
+      viewport: "mobile" as const,
+      createDraft: makeBookingMovementDraft,
+      nodeIds: ["title", "subtitle", "buttonText"],
+    },
+  ]) {
+    test(`${scenario.contractKey} ${scenario.viewport} 固定阅读顺序拒绝自由定位`, async ({ page }) => {
+      const forbiddenWrites: string[] = [];
+      await expectManagedFlowNodes({
+        page,
+        draft: scenario.createDraft(),
+        contractKey: scenario.contractKey,
+        viewport: scenario.viewport,
+        nodeIds: scenario.nodeIds,
+        forbiddenWrites,
+      });
+      expect(forbiddenWrites).toEqual([]);
+    });
+  }
+
+  for (const scenario of [
+    {
+      name: "hero.actionText 移动端堆叠",
+      contractKey: "hero",
+      viewport: "mobile" as const,
+      createDraft: makeHeroMovementDraft,
+      nodeId: "actionText",
+      nodeSelector: '[data-editor-field~="actionText"]',
+      resetLabel: "恢复移动端堆叠",
+    },
+    {
+      name: "textBanner.copy 桌面端",
+      contractKey: "textBanner",
+      viewport: "desktop" as const,
+      createDraft: makeTextBannerMovementDraft,
+      nodeId: "copy",
+      nodeSelector: '[data-content-role="copy"]',
+      resetLabel: "恢复桌面端模板布局",
+    },
+    {
+      name: "textBanner.copy 移动端",
+      contractKey: "textBanner",
+      viewport: "mobile" as const,
+      createDraft: makeTextBannerMovementDraft,
+      nodeId: "copy",
+      nodeSelector: '[data-content-role="copy"]',
+      resetLabel: "恢复移动端模板布局",
+    },
+    {
+      name: "booking.buttonText 桌面端",
+      contractKey: "booking",
+      viewport: "desktop" as const,
+      createDraft: makeBookingMovementDraft,
+      nodeId: "buttonText",
+      nodeSelector: '[data-editor-field~="buttonText"]',
+      resetLabel: "恢复桌面端模板布局",
+    },
+    {
+      name: "booking.buttonText 移动端",
+      contractKey: "booking",
+      viewport: "mobile" as const,
+      createDraft: makeBookingMovementDraft,
+      nodeId: "buttonText",
+      nodeSelector: '[data-editor-field~="buttonText"]',
+      resetLabel: "恢复移动端模板布局",
+    },
+  ]) {
+    test(`${scenario.name}旧位置覆盖可撤销恢复`, async ({ page }) => {
+      const forbiddenWrites: string[] = [];
+      await expectManagedFlowLegacyRecovery({
+        page,
+        draft: scenario.createDraft(),
+        contractKey: scenario.contractKey,
+        viewport: scenario.viewport,
+        nodeId: scenario.nodeId,
+        nodeSelector: scenario.nodeSelector,
+        resetLabel: scenario.resetLabel,
+        forbiddenWrites,
+      });
+      expect(forbiddenWrites).toEqual([]);
+    });
+  }
+
+  test("doublePoster.copy 不可拆分骨架在桌面和移动端拒绝自由定位", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, makeDoublePosterDraft(), forbiddenWrites);
+    await page.goto("/admin/editor/products");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const root = canvas.locator('[data-content-template-contract="doublePoster"]').first();
+    const copy = root.locator('[data-hc-keyboard-node="copy"]:visible').first();
+    const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+    const readInstanceStyle = async () =>
+      (await instanceStyle.count()) > 0
+        ? (await instanceStyle.textContent()) ?? ""
+        : "";
+    const initialStyle = await readInstanceStyle();
+    const undo = page.getByRole("button", { name: "撤销" });
+
+    await copy.click();
+    await expect(root.locator('[data-hc-node-hud][data-node-id="copy"]')).toHaveCount(0);
+    const inspector = page.getByRole("region", { name: "属性面板" });
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    await expect(inspector.getByText("位置由模板流式布局控制")).toBeVisible();
+    await expect(inspector.getByRole("group", { name: /快速定位/ })).toHaveCount(0);
+    await expect(inspector.getByRole("group", { name: /图层顺序/ })).toHaveCount(0);
+    const desktopBefore = await copy.boundingBox();
+    if (!desktopBefore) throw new Error("doublePoster.copy 没有桌面端操作前尺寸");
+    await copy.press("ArrowRight");
+    await expect.poll(readInstanceStyle).toBe(initialStyle);
+    const desktopAfter = await copy.boundingBox();
+    if (!desktopAfter) throw new Error("doublePoster.copy 没有桌面端操作后尺寸");
+    expect(desktopAfter).toEqual(desktopBefore);
+    await expect(undo).toBeDisabled();
+
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect.poll(() => canvas.locator("html").evaluate(() => window.innerWidth))
+      .toBeLessThanOrEqual(480);
+    await copy.click();
+    await expect(root.locator('[data-hc-node-hud][data-node-id="copy"]')).toHaveCount(0);
+    const mobileBefore = await copy.boundingBox();
+    if (!mobileBefore) throw new Error("doublePoster.copy 没有移动端操作前尺寸");
+    await copy.press("ArrowRight");
+    await expect.poll(readInstanceStyle).toBe(initialStyle);
+    const mobileAfter = await copy.boundingBox();
+    if (!mobileAfter) throw new Error("doublePoster.copy 没有移动端操作后尺寸");
+    expect(mobileAfter).toEqual(mobileBefore);
+    await expect(undo).toBeDisabled();
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  for (const recoveryViewport of ["desktop", "mobile"] as const) {
+    test(`doublePoster.copy 专用属性面板可撤销恢复${recoveryViewport === "mobile" ? "移动端" : "桌面端"}旧位置覆盖`, async ({ page }) => {
+      const forbiddenWrites: string[] = [];
+      const draft = makeDoublePosterDraft();
+      draft.puckData.content[0].props.__instanceOverrides = {
+        version: 2,
+        nodes: {
+          copy: {
+            rectByViewport: {
+              desktop: { x: 0.62, y: 0.48, width: 0.32, height: 0.24 },
+              mobile: { x: 0.06, y: 0.38, width: 0.88, height: 0.24 },
+            },
+            zIndexByViewport: { desktop: 3, mobile: 4 },
+          },
+        },
+      };
+      await page.setViewportSize({ width: 1600, height: 1000 });
+      await authenticateAdmin(page);
+      await mockEditorApis(page, draft, forbiddenWrites);
+      await page.goto("/admin/editor/products");
+      await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+      const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+      if (recoveryViewport === "mobile") {
+        await page.getByRole("button", { name: /移动端布局/ }).click();
+        await expect.poll(() => canvas.locator("html").evaluate(() => window.innerWidth))
+          .toBeLessThanOrEqual(480);
+      }
+      const inspector = page.getByRole("region", { name: "属性面板" });
+      await inspector.getByRole("combobox", { name: "选择编辑对象" }).selectOption("copy");
+      await inspector.getByRole("tab", { name: "模板编辑" }).click();
+      const reset = inspector.getByRole("button", {
+        name: `恢复${recoveryViewport === "mobile" ? "移动端" : "桌面端"}模板布局`,
+      });
+      const undo = page.getByRole("button", { name: "撤销" });
+      await expect(reset).toBeVisible();
+      await expect(inspector.getByRole("group", { name: /图层顺序/ })).toHaveCount(0);
+      await expect(undo).toBeDisabled();
+      await reset.click();
+      await expect(reset).toHaveCount(0);
+      await expect(undo).toBeEnabled();
+      await undo.click();
+      await expect(reset).toBeVisible();
+      expect(forbiddenWrites).toEqual([]);
+    });
+  }
+
+  test("limitedEvent.copy 移动端堆叠模式拒绝自由定位", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await authenticateAdmin(page);
+    await mockEditorApis(page, makeLimitedEventDraft(), forbiddenWrites);
+    await page.goto("/admin/editor/products");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const root = canvas.locator('[data-content-template-contract="limitedEvent"]').first();
+    const copy = root.locator('[data-hc-keyboard-node="copy"]:visible').first();
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect.poll(() => canvas.locator("html").evaluate(() => window.innerWidth))
+      .toBeLessThanOrEqual(480);
+    await copy.click();
+    await expect(root.locator('[data-hc-node-hud][data-node-id="copy"]')).toHaveCount(0);
+    const inspector = page.getByRole("region", { name: "属性面板" });
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    await expect(inspector.getByText("位置由移动端堆叠模板控制")).toBeVisible();
+    await expect(inspector.getByRole("group", { name: /快速定位/ })).toHaveCount(0);
+    const instanceStyle = root.locator("style[data-hc-instance-overrides]");
+    const readInstanceStyle = async () =>
+      (await instanceStyle.count()) > 0
+        ? (await instanceStyle.textContent()) ?? ""
+        : "";
+    const initialStyle = await readInstanceStyle();
+    const before = await copy.boundingBox();
+    if (!before) throw new Error("limitedEvent.copy 没有移动端操作前尺寸");
+    await copy.press("ArrowRight");
+    await expect.poll(readInstanceStyle).toBe(initialStyle);
+    const after = await copy.boundingBox();
+    if (!after) throw new Error("limitedEvent.copy 没有移动端操作后尺寸");
+    expect(after).toEqual(before);
+    await expect(page.getByRole("button", { name: "撤销" })).toBeDisabled();
     expect(forbiddenWrites).toEqual([]);
   });
 

@@ -10,6 +10,12 @@ const {
 } = require("../server/dist/modules/page-modules/page-modules.service.js");
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const contentTemplateContract = JSON.parse(
+  await readFile(
+    path.join(root, "contracts/page-builder/content-templates.contract.json"),
+    "utf8",
+  ),
+);
 const oldPublishedAt = new Date("2026-08-11T10:07:45.021Z");
 let clock = new Date("2026-08-13T12:09:32.840Z").getTime();
 let lockCount = 0;
@@ -17,6 +23,17 @@ let lockCount = 0;
 const clone = (value) => structuredClone(value);
 const nextUpdatedAt = () => new Date(++clock);
 const image = "https://example.com/jewelry.jpg";
+const validMetadata = (title = "海川珠宝正式页面") => ({
+  seoTitle: title,
+  seoDescription: `${title}的公开页面说明，仅用于页面搭建器发布门禁测试。`,
+  ogImage: image,
+  contentOwner: "品牌内容组",
+  mediaRights: [{
+    assetUrl: image,
+    source: "发布脚本测试素材",
+    authorizationId: "TEST-PUBLISH-MEDIA-1",
+  }],
+});
 const validData = (title, marker = undefined) => ({
   content: [
     {
@@ -45,7 +62,7 @@ const state = {
     templateId: "existing-page-template",
     templateVersion: 4,
     puckData: validData("当前草稿"),
-    metadata: {},
+    metadata: validMetadata("当前草稿"),
     status: "DRAFT",
     publishedAt: oldPublishedAt,
     publishedBy: 1,
@@ -58,7 +75,7 @@ const state = {
       documentId: 3,
       version: 17,
       puckData: validData("旧版首页"),
-      metadata: {},
+      metadata: validMetadata("旧版首页"),
       status: "published",
       publishedBy: 1,
       publishedAt: oldPublishedAt,
@@ -68,6 +85,12 @@ const state = {
 };
 
 const db = {
+  siteSetting: {
+    findUnique: async () => ({
+      key: "site",
+      value: { contactPhone: "400-111-2222" },
+    }),
+  },
   pageDocument: {
     findUnique: async ({ where }) =>
       state.document?.pageKey === where.pageKey ||
@@ -257,7 +280,7 @@ assert.ok(
 const validProductsResult = await service.validatePageDocument(
   "products",
   validData("珠宝作品"),
-  {},
+  validMetadata("珠宝作品"),
 );
 assert.equal(
   validProductsResult.valid,
@@ -277,7 +300,7 @@ productsWithBusinessRegion.content.push({
 const productsWithBusinessRegionResult = await service.validatePageDocument(
   "products",
   productsWithBusinessRegion,
-  {},
+  validMetadata("珠宝作品"),
 );
 assert.equal(productsWithBusinessRegionResult.valid, false);
 assert.ok(
@@ -312,7 +335,7 @@ const unfinishedProductsResult = await service.validatePageDocument(
     ],
     root: { props: {} },
   },
-  {},
+  validMetadata("珠宝作品"),
 );
 assert.equal(unfinishedProductsResult.valid, false);
 assert.ok(
@@ -346,7 +369,7 @@ const validCatalogFrame = {
   ],
   root: { props: {} },
 };
-const validCatalogFrameResult = await service.validatePageDocument("catalog", validCatalogFrame, {});
+const validCatalogFrameResult = await service.validatePageDocument("catalog", validCatalogFrame, validMetadata("选款中心"));
 assert.equal(
   validCatalogFrameResult.valid,
   true,
@@ -358,7 +381,7 @@ catalogWithoutBusinessRegion.content.splice(1, 1);
 const catalogWithoutBusinessRegionResult = await service.validatePageDocument(
   "catalog",
   catalogWithoutBusinessRegion,
-  {},
+  validMetadata("选款中心"),
 );
 assert.equal(catalogWithoutBusinessRegionResult.valid, false);
 assert.ok(
@@ -389,7 +412,7 @@ for (const pageKey of ["custom", "about"]) {
     ],
     root: { props: {} },
   };
-  const unfinishedBrandPageResult = await service.validatePageDocument(pageKey, unfinishedBrandPage, {});
+  const unfinishedBrandPageResult = await service.validatePageDocument(pageKey, unfinishedBrandPage, validMetadata(`${pageKey} 页面`));
   assert.equal(unfinishedBrandPageResult.valid, false);
   assert.ok(
     unfinishedBrandPageResult.errors.some((error) => error.includes("图片不能为空")),
@@ -563,6 +586,139 @@ assert.ok(
   "非法实例颜色必须定位到具体颜色键",
 );
 
+const requiredAltCases = [
+  {
+    pageKey: "home",
+    type: "全屏出血图",
+    props: { id: "alt-full-bleed", image, mobileImage: image, altText: "" },
+    altFields: ["altText"],
+  },
+  {
+    pageKey: "home",
+    type: "单图海报",
+    props: { id: "alt-single-poster", title: "正式海报", desktopImage: image, mobileImage: image, altText: "" },
+    altFields: ["altText"],
+  },
+  {
+    pageKey: "home",
+    type: "双图海报",
+    props: { id: "alt-double-poster", mainImage: image, detailImage: image, mainAltText: "", detailAltText: "" },
+    altFields: ["detailAltText", "mainAltText"],
+  },
+  {
+    pageKey: "custom",
+    type: "改款对比",
+    props: { id: "alt-comparison", title: "改款记录", beforeImage: image, afterImage: image, beforeAltText: "", afterAltText: "" },
+    altFields: ["afterAltText", "beforeAltText"],
+  },
+  {
+    pageKey: "home",
+    type: "佩戴灵感",
+    props: { id: "alt-wearing", image, altText: "", productCodes: ["ALT-1"] },
+    altFields: ["altText"],
+  },
+  {
+    pageKey: "home",
+    type: "预约入口",
+    props: { id: "alt-booking", title: "预约鉴赏", buttonText: "立即预约", linkUrl: "/contact", backgroundImage: image, altText: "" },
+    altFields: ["altText"],
+  },
+];
+
+for (const testCase of requiredAltCases) {
+  const pageData = validData(`${testCase.type}替代文字门禁`);
+  pageData.content.push({ type: testCase.type, props: testCase.props });
+  const missingAltResult = await service.validatePageDocument(testCase.pageKey, pageData, validMetadata(`${testCase.type}测试页`));
+  assert.equal(missingAltResult.valid, false, `${testCase.type} 配置公开媒体但缺少替代文字时必须阻止发布`);
+  assert.deepEqual(
+    missingAltResult.issues
+      .filter((issue) => issue.blockId === testCase.props.id && testCase.altFields.includes(issue.field))
+      .map((issue) => issue.field)
+      .sort(),
+    [...testCase.altFields].sort(),
+    `${testCase.type} 替代文字问题必须定位到实际字段`,
+  );
+
+  const completeAltData = clone(pageData);
+  for (const field of testCase.altFields) {
+    completeAltData.content[1].props[field] = `${testCase.type}${field}正式替代文字`;
+  }
+  const completeAltResult = await service.validatePageDocument(testCase.pageKey, completeAltData, validMetadata(`${testCase.type}测试页`));
+  assert.equal(completeAltResult.valid, true, `${testCase.type} 补齐替代文字后应通过发布门禁：${JSON.stringify(completeAltResult.errors)}`);
+}
+
+const collectionAltData = validData("集合媒体替代文字门禁");
+collectionAltData.content.push(
+  {
+    type: "轮播图",
+    props: {
+      id: "alt-carousel",
+      images: [
+        { url: image, mobileUrl: image, alt: "首张轮播正式替代文字" },
+        { url: image, alt: "" },
+      ],
+    },
+  },
+  {
+    type: "作品画廊",
+    props: {
+      id: "alt-gallery",
+      title: "正式作品画廊",
+      items: [
+        { image, altText: "作品一" },
+        { image, altText: "" },
+        { image, altText: "作品三" },
+      ],
+    },
+  },
+  {
+    type: "按场景选购",
+    props: {
+      id: "alt-scenes",
+      title: "按场景选购",
+      categories: [
+        { image, name: "日常佩戴", altText: "日常佩戴珠宝", targetType: "page", linkUrl: "/catalog" },
+        { image, name: "重要礼赠", altText: "", targetType: "page", linkUrl: "/catalog" },
+      ],
+    },
+  },
+);
+const missingCollectionAltResult = await service.validatePageDocument("home", collectionAltData, validMetadata("集合媒体测试页"));
+assert.equal(missingCollectionAltResult.valid, false, "集合媒体任一公开图片缺少替代文字时必须阻止发布");
+assert.deepEqual(
+  missingCollectionAltResult.issues
+    .filter((issue) => ["alt-carousel", "alt-gallery", "alt-scenes"].includes(issue.blockId))
+    .map((issue) => ({ blockId: issue.blockId, field: issue.field, index: issue.index, path: issue.path }))
+    .filter((issue) => issue.path.endsWith(".alt") || issue.path.endsWith(".altText")),
+  [
+    { blockId: "alt-carousel", field: "images", index: 1, path: "content[1].props.images[1].alt" },
+    { blockId: "alt-gallery", field: "items", index: 1, path: "content[2].props.items[1].altText" },
+    { blockId: "alt-scenes", field: "categories", index: 1, path: "content[3].props.categories[1].altText" },
+  ],
+  "集合媒体替代文字问题必须定位到区块、集合字段、数组下标和条目字段",
+);
+const completeCollectionAltData = clone(collectionAltData);
+completeCollectionAltData.content[1].props.images[1].alt = "第二张轮播正式替代文字";
+completeCollectionAltData.content[2].props.items[1].altText = "作品二";
+completeCollectionAltData.content[3].props.categories[1].altText = "重要礼赠珠宝";
+const completeCollectionAltResult = await service.validatePageDocument("home", completeCollectionAltData, validMetadata("集合媒体测试页"));
+assert.equal(completeCollectionAltResult.valid, true, `集合媒体补齐替代文字后应通过发布门禁：${JSON.stringify(completeCollectionAltResult.errors)}`);
+
+const bookingWithoutImageData = validData("预约纯色背景");
+bookingWithoutImageData.content.push({
+  type: "预约入口",
+  props: {
+    id: "booking-without-image",
+    title: "预约鉴赏",
+    buttonText: "立即预约",
+    linkUrl: "/contact",
+    backgroundImage: "",
+    altText: "",
+  },
+});
+const bookingWithoutImageResult = await service.validatePageDocument("home", bookingWithoutImageData, validMetadata("预约测试页"));
+assert.equal(bookingWithoutImageResult.valid, true, "预约入口使用纯色背景时不应强制填写不存在图片的替代文字");
+
 const bookingFrameData = {
   content: [
     validData("首页首屏").content[0],
@@ -574,6 +730,7 @@ const bookingFrameData = {
         buttonText: "立即预约",
         linkUrl: "/contact",
         backgroundImage: image,
+        altText: "预约鉴赏空间背景",
         __contentTemplate: { key: "booking", version: 2 },
         __instanceOverrides: {
           version: 2,
@@ -673,7 +830,7 @@ const incompleteCollectionData = {
   root: { props: {} },
   zones: {},
 };
-const incompleteCollectionResult = await service.validatePageDocument("custom", incompleteCollectionData, {});
+const incompleteCollectionResult = await service.validatePageDocument("custom", incompleteCollectionData, validMetadata("定制测试页"));
 assert.equal(incompleteCollectionResult.valid, false, "集合数量不足时必须由服务端发布门禁阻止");
 assert.deepEqual(
   incompleteCollectionResult.issues
@@ -697,12 +854,32 @@ completeCollectionData.content[2].props.certificates = [1, 2].map((number) => ({
   desc: "仅用于发布门禁测试",
   verificationConfirmed: true,
 }));
-const completeCollectionResult = await service.validatePageDocument("custom", completeCollectionData, {});
+const completeCollectionResult = await service.validatePageDocument("custom", completeCollectionData, validMetadata("定制测试页"));
 assert.equal(completeCollectionResult.valid, true, "满足合同数量范围的集合应通过发布门禁");
+
+for (const derivedCase of [
+  { blockIndex: 1, itemField: "steps", itemIndex: 1, sourceField: "name", blockId: "custom-journey" },
+  { blockIndex: 2, itemField: "certificates", itemIndex: 1, sourceField: "name", blockId: "custom-certificates" },
+  { blockIndex: 3, itemField: "testimonials", itemIndex: 0, sourceField: "name", blockId: "custom-testimonials" },
+]) {
+  const missingDerivedAltData = clone(completeCollectionData);
+  missingDerivedAltData.content[derivedCase.blockIndex].props[derivedCase.itemField][derivedCase.itemIndex][derivedCase.sourceField] = "";
+  const missingDerivedAltResult = await service.validatePageDocument("custom", missingDerivedAltData, validMetadata("定制测试页"));
+  assert.equal(missingDerivedAltResult.valid, false, `${derivedCase.blockId} 的图片替代文字派生来源缺失时必须阻止发布`);
+  assert.ok(
+    missingDerivedAltResult.issues.some((issue) =>
+      issue.blockId === derivedCase.blockId
+        && issue.field === derivedCase.itemField
+        && issue.index === derivedCase.itemIndex
+        && issue.path.endsWith(`${derivedCase.itemField}[${derivedCase.itemIndex}].${derivedCase.sourceField}`),
+    ),
+    `${derivedCase.blockId} 的派生替代文字问题必须定位到具体条目名称字段`,
+  );
+}
 
 const unverifiedCertificateData = clone(completeCollectionData);
 unverifiedCertificateData.content[2].props.certificates[1].verificationConfirmed = false;
-const unverifiedCertificateResult = await service.validatePageDocument("custom", unverifiedCertificateData, {});
+const unverifiedCertificateResult = await service.validatePageDocument("custom", unverifiedCertificateData, validMetadata("定制测试页"));
 assert.equal(unverifiedCertificateResult.valid, false, "未确认核验的证书条目不得发布");
 assert.ok(
   unverifiedCertificateResult.issues.some((issue) =>
@@ -716,7 +893,7 @@ assert.ok(
 
 const unauthorizedTestimonialData = clone(completeCollectionData);
 unauthorizedTestimonialData.content[3].props.testimonials[0].authorizationConfirmed = false;
-const unauthorizedTestimonialResult = await service.validatePageDocument("custom", unauthorizedTestimonialData, {});
+const unauthorizedTestimonialResult = await service.validatePageDocument("custom", unauthorizedTestimonialData, validMetadata("定制测试页"));
 assert.equal(unauthorizedTestimonialResult.valid, false, "未确认书面授权的顾客评价不得发布");
 assert.ok(
   unauthorizedTestimonialResult.issues.some((issue) =>
@@ -730,7 +907,7 @@ assert.ok(
 
 const placeholderClaimData = clone(completeCollectionData);
 placeholderClaimData.content[2].props.title = "证书信息待确认";
-const placeholderClaimResult = await service.validatePageDocument("custom", placeholderClaimData, {});
+const placeholderClaimResult = await service.validatePageDocument("custom", placeholderClaimData, validMetadata("定制测试页"));
 assert.equal(placeholderClaimResult.valid, false, "带待确认标记的高风险默认文案不得发布");
 assert.ok(
   placeholderClaimResult.issues.some((issue) => issue.blockId === "custom-certificates" && issue.field === "title"),
@@ -767,6 +944,41 @@ assert.deepEqual(
   "分类发布资格错误必须精确定位到区块、字段和数组项",
 );
 
+const incompleteSeoResult = await service.validatePageDocument(
+  "home",
+  validData("SEO 待完善页面"),
+  {},
+);
+assert.equal(incompleteSeoResult.valid, false, "正式页面缺少内容责任、SEO 标题、描述或分享图时必须阻止发布");
+assert.deepEqual(
+  incompleteSeoResult.issues
+    .filter((issue) => issue.path.startsWith("metadata."))
+    .map((issue) => ({ field: issue.field, path: issue.path })),
+  [
+    { field: "seoTitle", path: "metadata.seoTitle" },
+    { field: "seoDescription", path: "metadata.seoDescription" },
+    { field: "ogImage", path: "metadata.ogImage" },
+    { field: "contentOwner", path: "metadata.contentOwner" },
+    { field: "mediaRights", path: "metadata.mediaRights" },
+  ],
+  "正式内容发布问题必须定位到页面设置的具体字段",
+);
+
+state.document.puckData = validData("SEO 待完善页面");
+state.document.metadata = {};
+const revisionsBeforeSeoRejectedPublish = state.revisions.length;
+await assert.rejects(
+  () => service.publishPageDocument("home", 1, state.document.updatedAt.toISOString()),
+  /页面发布校验失败/,
+  "服务端发布必须阻止内容责任或 SEO 未完成的草稿",
+);
+assert.equal(
+  state.revisions.length,
+  revisionsBeforeSeoRejectedPublish,
+  "SEO 未完成时不得写入发布 revision",
+);
+state.document.metadata = validMetadata("当前草稿");
+
 state.document.puckData = mismatchedData;
 const revisionsBeforeRejectedPublish = state.revisions.length;
 await assert.rejects(
@@ -783,22 +995,80 @@ state.document.puckData = validData("当前草稿");
 
 const publicBeforeSave = await service.getPublishedPageDocument("home");
 assert.equal(publicBeforeSave.version, 17);
-assert.equal(publicBeforeSave.puckData.content[0].props.title, "旧版首页");
+assert.equal(publicBeforeSave.status, "INVALID");
+assert.equal(publicBeforeSave.invalidReason, "publication-revalidation-required");
+assert.equal("puckData" in publicBeforeSave, false, "旧发布快照未经当前门禁复核时不得继续公开 Puck 内容");
 assert.equal(
   publicBeforeSave.updatedAt.toISOString(),
   oldPublishedAt.toISOString(),
 );
+const adminPublishedBeforeSave = await service.getPublishedPageDocumentForAdmin("home");
+assert.equal(adminPublishedBeforeSave.puckData.content[0].props.title, "旧版首页");
+assert.equal(adminPublishedBeforeSave.publicationAttested, false);
 
 const firstClientRevision = state.document.updatedAt.toISOString();
+const incompleteAltDraft = validData("替代文字待完善草稿");
+incompleteAltDraft.content.push({
+  type: "单图海报",
+  props: {
+    id: "draft-single-poster",
+    title: "草稿海报",
+    desktopImage: image,
+    mobileImage: image,
+    altText: "",
+  },
+});
+incompleteAltDraft.content.push({
+  type: "轮播图",
+  props: {
+    id: "draft-carousel",
+    images: [
+      { url: image, alt: "首张轮播正式替代文字" },
+      { url: image, alt: "" },
+    ],
+  },
+});
+const savedIncompleteAltDraft = await service.savePageDocument(
+  "home",
+  incompleteAltDraft,
+  {},
+  "0.22.4",
+  firstClientRevision,
+);
+assert.equal(
+  savedIncompleteAltDraft.puckData.content[1].props.altText,
+  "",
+  "草稿保存必须保留尚待完善的替代文字状态，不能把发布门禁错误应用到编辑过程",
+);
+assert.equal(
+  savedIncompleteAltDraft.puckData.content[2].props.images[1].alt,
+  "",
+  "集合媒体草稿也必须保留尚待完善的条目替代文字状态",
+);
+const incompleteAltDraftValidation = await service.validatePageDocument(
+  "home",
+  savedIncompleteAltDraft.puckData,
+  savedIncompleteAltDraft.metadata,
+);
+assert.equal(incompleteAltDraftValidation.valid, false, "同一份草稿在发布前必须因替代文字缺失而被阻断");
+assert.ok(
+  incompleteAltDraftValidation.issues.some((issue) =>
+    issue.blockId === "draft-carousel"
+      && issue.path.endsWith("images[1].alt"),
+  ),
+  "集合媒体草稿的发布问题必须定位到具体条目替代文字",
+);
+
 const saved = await service.savePageDocument(
   "home",
   validData("新版首页", { key: "hero", version: 1 }),
   {
-    seoTitle: "新版首页",
+    ...validMetadata("新版首页"),
     contentTemplateContract: { version: 999, templates: [{ id: "hero", version: 999 }] },
+    _contentPublication: { gateVersion: 999 },
   },
   "0.22.4",
-  firstClientRevision,
+  savedIncompleteAltDraft.updatedAt.toISOString(),
 );
 assert.equal(saved.status, "DRAFT");
 assert.deepEqual(saved.puckData.content[0].props.__contentTemplate, {
@@ -812,6 +1082,11 @@ assert.equal(
   Object.hasOwn(saved.metadata, "contentTemplateContract"),
   false,
   "普通保存不得重新写入旧页面级合同摘要",
+);
+assert.equal(
+  Object.hasOwn(saved.metadata, "_contentPublication"),
+  false,
+  "普通保存不得接受客户端伪造的发布验收印记",
 );
 
 await assert.rejects(
@@ -833,7 +1108,8 @@ assert.equal(
 
 const publicAfterSave = await service.getPublishedPageDocument("home");
 assert.equal(publicAfterSave.version, 17);
-assert.equal(publicAfterSave.puckData.content[0].props.title, "旧版首页");
+assert.equal(publicAfterSave.status, "INVALID");
+assert.equal("puckData" in publicAfterSave, false);
 assert.equal(
   publicAfterSave.updatedAt.toISOString(),
   oldPublishedAt.toISOString(),
@@ -849,9 +1125,34 @@ await service.publishPageDocument(
   state.document.updatedAt.toISOString(),
 );
 const publicAfterPublish = await service.getPublishedPageDocument("home");
-assert.equal(lockCount, 2, "每次发布尝试都必须先锁定页面文档");
+assert.equal(lockCount, 3, "每次发布尝试都必须先锁定页面文档");
 assert.equal(publicAfterPublish.version, 18);
 assert.equal(publicAfterPublish.puckData.content[0].props.title, "新版首页");
+assert.deepEqual(
+  publicAfterPublish.metadata,
+  {
+    seoTitle: "新版首页",
+    seoDescription: "新版首页的公开页面说明，仅用于页面搭建器发布门禁测试。",
+    ogImage: image,
+  },
+  "公开页面快照只返回 SEO 白名单，不泄漏内部内容责任",
+);
+assert.equal("publishedBy" in publicAfterPublish, false, "公开页面快照不得泄漏后台发布账号 ID");
+assert.equal("id" in publicAfterPublish, false, "公开页面快照不得泄漏内部文档主键");
+assert.equal(
+  state.revisions.at(-1).metadata.contentOwner,
+  "品牌内容组",
+  "发布历史必须保留内部内容责任，供后台追踪与恢复",
+);
+assert.deepEqual(
+  state.revisions.at(-1).metadata._contentPublication,
+  {
+    gateVersion: contentTemplateContract.publicationGateVersion,
+    contractSchemaVersion: contentTemplateContract.contractSchemaVersion,
+    registryVersion: contentTemplateContract.registryVersion,
+  },
+  "发布成功必须由服务端写入当前正式内容门禁验收印记",
+);
 assert.equal(
   publicAfterPublish.updatedAt.toISOString(),
   publicAfterPublish.publishedAt.toISOString(),

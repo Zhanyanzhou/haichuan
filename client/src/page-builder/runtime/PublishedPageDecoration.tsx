@@ -6,14 +6,13 @@ import {
   type ReactNode,
 } from "react";
 import { Link } from "react-router-dom";
-import { usePagePublishStream } from "@/hooks/usePagePublishStream";
 import StaleDocumentNotice from "./StaleDocumentNotice";
 import {
   getPublishedPageReadiness,
   isRenderablePublishedBrandBlock,
 } from "./publishedPageReadiness";
 import {
-  usePublishedPageDocument,
+  type PublishedPageDocumentResource,
   type PublishedPageDocumentStatus,
 } from "./usePublishedPageDocument";
 
@@ -32,8 +31,9 @@ export type PublicPageFallbackContent = {
 type PublishedPageDecorationProps = {
   pageKey?: string;
   pageLabel?: string;
+  documentResource: PublishedPageDocumentResource;
   children?: ReactNode;
-  /** 关于与定制等纯品牌页：有发布内容时替换代码兜底页。 */
+  /** 关于与定制等纯品牌页：只有有效发布内容才能替换安全短页。 */
   replaceChildren?: boolean;
   /** 未发布、无效或读取失败时的公开安全短页；与编辑器 seed 完全隔离。 */
   publicFallback?: PublicPageFallbackContent;
@@ -85,7 +85,7 @@ export function PublicPageFallback({
         placeItems: "center",
         padding: "clamp(88px, 12vw, 168px) 24px",
         textAlign: "center",
-        background: "#F7F6F2",
+        background: "#F7F8F8",
         color: "#181A1B",
       }}
     >
@@ -187,15 +187,12 @@ export function PublicPageFallback({
 export default function PublishedPageDecoration({
   pageKey,
   pageLabel,
+  documentResource,
   children,
   replaceChildren = false,
   publicFallback,
 }: PublishedPageDecorationProps) {
-  const { pageDocument, status, stale, refresh } = usePublishedPageDocument(pageKey);
-
-  usePagePublishStream(pageKey, () => {
-    void refresh();
-  });
+  const { pageDocument, status, stale, refresh } = documentResource;
 
   const hasPublishedDocument = Boolean(
     status === "published" && pageDocument?.puckData,
@@ -266,8 +263,9 @@ export default function PublishedPageDecoration({
   }
 
   if (!hasPublishedDocument || !hasRenderablePageContent || !content.length) {
-    // Catalog、Contact 等固定业务页，以及已有安全代码页，均不由装修失败遮蔽。
-    if (!replaceChildren || (children != null && !publicFallback)) {
+    // Catalog、Contact 等固定业务页不由装修失败遮蔽；纯品牌页不得回退到
+    // 另一套硬编码品牌长页，否则会绕开 PageDocument 发布与正式内容门禁。
+    if (!replaceChildren) {
       return withDecorationState(
         <div data-page-document-state={effectiveStatus} data-production-fallback="code-content">
           {children}

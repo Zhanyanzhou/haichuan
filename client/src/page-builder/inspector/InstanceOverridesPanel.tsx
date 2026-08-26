@@ -135,6 +135,15 @@ function isRecord(value: unknown): value is OverrideRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function supportsLayoutOnViewport(
+  object: ReturnType<typeof getContentTemplateEditableObject>,
+  viewport: VisualViewport,
+) {
+  if (!object?.capabilities.includes("layout")) return false;
+  const allowedViewports = object.capabilityViewports?.layout;
+  return !allowedViewports || allowedViewports.includes(viewport);
+}
+
 export default function InstanceOverridesPanel({
   moduleType,
   props,
@@ -166,6 +175,16 @@ export default function InstanceOverridesPanel({
   const selectedEditableObject = selectedNodeId
     ? getContentTemplateEditableObject(moduleType, selectedNodeId)
     : undefined;
+  const selectedFlowObject = selectedEditableObject &&
+    (selectedEditableObject.kind === "text" || selectedEditableObject.kind === "action");
+  const selectedObjectUsesManagedFlow = Boolean(selectedFlowObject) &&
+    !supportsLayoutOnViewport(selectedEditableObject, viewport);
+  const targetViewport: VisualViewport = viewport === "desktop" ? "mobile" : "desktop";
+  const selectedObjectTargetUsesManagedFlow = Boolean(selectedFlowObject) &&
+    !supportsLayoutOnViewport(selectedEditableObject, targetViewport);
+  const canCopyCurrentViewportToOther = !selectedEditableObject ||
+    !selectedFlowObject ||
+    (!selectedObjectUsesManagedFlow && !selectedObjectTargetUsesManagedFlow);
   const supportsObjectAppearance = Boolean(
     selectedEditableObject && ["media", "video", "product", "collection"].includes(
       selectedEditableObject.kind,
@@ -226,14 +245,18 @@ export default function InstanceOverridesPanel({
     : showSlots && !showText
     ? "位置与焦点按当前端独立保存"
     : showText && !showSlots
-      ? "位置与尺寸按当前端独立保存"
+      ? selectedObjectUsesManagedFlow
+        ? "当前端按模板保持流式堆叠"
+        : "位置与尺寸按当前端独立保存"
       : "桌面端与移动端构图互不覆盖";
   const viewportDesignLabel = showSurface
     ? "配色、圆角、阴影与留白作用于整个模板"
     : showAppearance
       ? "对象外观不会改变槽位位置和内容"
     : selectedNodeId
-    ? `位置与层级作用于当前${deviceLabel}${showSlots ? "；图片焦点也按设备保存" : ""}`
+    ? selectedObjectUsesManagedFlow
+      ? `当前${deviceLabel}由模板控制阅读顺序，可继续调整排版与显隐`
+      : `位置与层级作用于当前${deviceLabel}${showSlots ? "；图片焦点也按设备保存" : ""}`
     : `整体比例作用于当前${deviceLabel}`;
 
   const apply = (path: string[], value: unknown) => {
@@ -271,7 +294,6 @@ export default function InstanceOverridesPanel({
     });
   };
   const copyCurrentViewportToOther = () => {
-    const targetViewport: VisualViewport = viewport === "desktop" ? "mobile" : "desktop";
     const entries: Array<{ path: string[]; value: unknown }> = [];
     if (showLayout) {
       entries.push({
@@ -538,7 +560,7 @@ export default function InstanceOverridesPanel({
         </button>
         {!showSurface && !showAppearance ? <button
           type="button"
-          disabled={historyTransactionPending}
+          disabled={historyTransactionPending || !canCopyCurrentViewportToOther}
           onClick={copyCurrentViewportToOther}
         >
           复制到{viewport === "desktop" ? "移动端" : "桌面端"}
@@ -789,9 +811,34 @@ export default function InstanceOverridesPanel({
         const value: OverrideRecord = isRecord(rawValue) ? rawValue : {};
         const typography = isRecord(value.typography) ? value.typography : {};
         const visualNode = resolveVisualNode(props, role.roleId, viewport);
+        const editableTextObject = getContentTemplateEditableObject(moduleType, role.roleId);
+        const hasRenderableText = editableTextObject?.contentFieldKeys.some((fieldKey) =>
+          typeof props[fieldKey] === "string" && props[fieldKey].trim().length > 0,
+        ) ?? false;
         const enabled = typeof value.enabled === "boolean"
           ? value.enabled
-          : typeof props[role.roleId] === "string" && props[role.roleId].trim().length > 0;
+          : hasRenderableText;
+        const usesManagedFlow = !supportsLayoutOnViewport(editableTextObject, viewport);
+        const otherViewport = viewport === "mobile" ? "desktop" : "mobile";
+        const supportsLayoutOnOtherViewport = supportsLayoutOnViewport(
+          editableTextObject,
+          otherViewport,
+        );
+        const managedFlowTitle = supportsLayoutOnOtherViewport
+          ? `位置由${viewport === "mobile" ? "移动端堆叠" : "桌面端"}模板控制`
+          : "位置由模板流式布局控制";
+        const managedFlowDescription = supportsLayoutOnOtherViewport
+          ? `保持图片、文字、行动的阅读顺序；${otherViewport === "mobile" ? "移动端" : "桌面端"}仍可独立调整对象位置。`
+          : "保持模板既定的内容顺序；文字显隐与排版仍可独立调整。";
+        const managedFlowResetLabel = supportsLayoutOnOtherViewport
+          ? `恢复${viewport === "mobile" ? "移动端堆叠" : "桌面端模板布局"}`
+          : `恢复${viewport === "mobile" ? "移动端" : "桌面端"}模板布局`;
+        const rectByViewport = isRecord(value.rectByViewport) ? value.rectByViewport : {};
+        const zIndexByViewport = isRecord(value.zIndexByViewport) ? value.zIndexByViewport : {};
+        const hasManagedFlowPositionOverride = usesManagedFlow && (
+          Object.prototype.hasOwnProperty.call(rectByViewport, viewport) ||
+          Object.prototype.hasOwnProperty.call(zIndexByViewport, viewport)
+        );
         const currentWidth = visualNode.rect?.width;
         const currentPosition = visualNode.rect
           ? visualNode.rect.x < 0.2
@@ -846,7 +893,7 @@ export default function InstanceOverridesPanel({
             </label>
             {enabled ? (
               <>
-                {role.widthPresets?.length ? (
+                {!usesManagedFlow && role.widthPresets?.length ? (
                   <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${ROLE_LABELS[role.roleId] ?? role.roleId}宽度`}>
                     <span>文字宽度</span>
                     <div className="homepage-editor__text-width-cards">
@@ -875,7 +922,7 @@ export default function InstanceOverridesPanel({
                   "size",
                 )}
                 {renderVisualChoices("文字对齐", ["nodes", role.roleId, "typography", "align"], typography.align, role.align, "align")}
-                <div
+                {!usesManagedFlow ? <div
                   className="homepage-editor__visual-preset-group"
                   role="group"
                   data-inspector-control="position"
@@ -920,7 +967,35 @@ export default function InstanceOverridesPanel({
                       );
                     })}
                   </div>
-                </div>
+                </div> : (
+                  <div className="homepage-editor__design-scope-note" role="note">
+                    <strong>{managedFlowTitle}</strong>
+                    <span>{managedFlowDescription}</span>
+                    {hasManagedFlowPositionOverride ? (
+                      <button
+                        type="button"
+                        className="homepage-editor__inline-reset"
+                        disabled={historyTransactionPending}
+                        onClick={() => updateHistoryTransaction((currentProps) => {
+                          let next = currentProps.__instanceOverrides;
+                          next = setVisualOverridePath(
+                            next,
+                            ["nodes", role.roleId, "rectByViewport", viewport],
+                            undefined,
+                          );
+                          next = setVisualOverridePath(
+                            next,
+                            ["nodes", role.roleId, "zIndexByViewport", viewport],
+                            undefined,
+                          );
+                          return { __instanceOverrides: next };
+                        })}
+                      >
+                        {managedFlowResetLabel}
+                      </button>
+                    ) : null}
+                  </div>
+                )}
                 {role.colorTokens?.length ? (
                   <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${ROLE_LABELS[role.roleId] ?? role.roleId}颜色`}>
                     <span>文字颜色</span>
@@ -940,11 +1015,11 @@ export default function InstanceOverridesPanel({
                     </div>
                   </div>
                 ) : null}
-                {renderSelectedNodeGeometry(role.roleId)}
+                {!usesManagedFlow ? renderSelectedNodeGeometry(role.roleId) : null}
                 {role.placementPresets?.length || role.maxLines || role.requiresSafeBand ? (
                   <InspectorDisclosure label="高级设置">
                     <div className="homepage-editor__advanced-settings-grid">
-                      {role.placementPresets?.length ? (
+                      {!usesManagedFlow && role.placementPresets?.length ? (
                         <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${ROLE_LABELS[role.roleId] ?? role.roleId}位置`}>
                           <span>精确位置</span>
                           <div className="homepage-editor__position-cards">

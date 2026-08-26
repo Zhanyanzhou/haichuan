@@ -2,6 +2,7 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { PageModulesService } from "./page-modules.service";
+import { makeFormalPageMetadata } from "./page-modules.spec-fixtures";
 
 function createService() {
   return new PageModulesService({} as PrismaService);
@@ -30,10 +31,11 @@ function makeHero(overrides: Record<string, unknown> = {}) {
 }
 
 test("首屏具备真实标题、双端素材与替代文字时通过发布素材门禁", async () => {
+  const document = makeHero();
   const result = await createService().validatePageDocument(
     "home",
-    makeHero(),
-    {},
+    document,
+    makeFormalPageMetadata(document),
   );
 
   assert.equal(result.valid, true);
@@ -41,10 +43,11 @@ test("首屏具备真实标题、双端素材与替代文字时通过发布素�
 });
 
 test("首屏缺少标题、手机图或替代文字时发布校验逐字段阻断并定位区块", async () => {
+  const document = makeHero({ title: "", mobileImage: "", altText: "" });
   const result = await createService().validatePageDocument(
     "home",
-    makeHero({ title: "", mobileImage: "", altText: "" }),
-    {},
+    document,
+    makeFormalPageMetadata(document),
   );
 
   assert.equal(result.valid, false);

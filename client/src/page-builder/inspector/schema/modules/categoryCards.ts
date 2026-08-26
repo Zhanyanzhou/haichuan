@@ -86,6 +86,7 @@ export function makeCategoryCardsSchema(
                 key: "altText",
                 label: "替代文字",
                 control: "text",
+                required: true,
                 maxLength: CATEGORY_CARDS_CONTRACT.content.limits.altText,
               },
               {

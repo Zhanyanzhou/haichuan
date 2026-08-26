@@ -51,8 +51,8 @@ function makeHeroDraft() {
             title: "设计与工艺",
             subtitle: "以克制的版式讲述珠宝工艺",
             actionText: "进入珠宝作品",
-            targetType: "url",
-            linkUrl: "/collections",
+            targetType: "page",
+            linkUrl: "/products",
             desktopFocusX: 50,
             desktopFocusY: 50,
             mobileFocusX: 50,
@@ -167,6 +167,27 @@ function makeDoublePosterDraft() {
     targetType: "page",
     linkUrl: "/custom",
   });
+}
+
+function makeDoublePosterWithSiblingDraft() {
+  const draft = makeDoublePosterDraft();
+  const sibling = makeHeroDraft().puckData.content[0];
+  return {
+    ...draft,
+    puckData: {
+      ...draft.puckData,
+      content: [
+        ...draft.puckData.content,
+        {
+          ...sibling,
+          props: {
+            ...sibling.props,
+            id: "redesign-hero-sibling",
+          },
+        },
+      ],
+    },
+  };
 }
 
 function makeVideoDraft() {
@@ -418,6 +439,40 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     expect(forbiddenWrites).toEqual([]);
   });
 
+  test("公开媒体替代文字在 Inspector 中与合同发布门禁一致标为必填", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    const { inspector } = await openEditor(page, {
+      draft: makeDoublePosterDraft(),
+      forbiddenWrites,
+    });
+
+    for (const [nodeId, fieldKey] of [
+      ["mainImage", "mainAltText"],
+      ["detailImage", "detailAltText"],
+    ] as const) {
+      await selectObject(inspector, nodeId);
+      const field = inspector.locator(`[data-inspector-field="${fieldKey}"]`);
+      await expect(field).toBeVisible();
+      await expect(field.locator("label")).toContainText("必填");
+    }
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("集合媒体条目替代文字在 Inspector 中标为必填", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    const { inspector } = await openEditor(page, {
+      draft: makeCollectionDraft(),
+      forbiddenWrites,
+    });
+
+    await selectObject(inspector, "works");
+    const altField = inspector.locator(".homepage-editor__item-fields .homepage-editor__inspector-field")
+      .filter({ hasText: "替代文字" });
+    await expect(altField).toHaveCount(1);
+    await expect(altField.locator("label")).toContainText("必填");
+    expect(forbiddenWrites).toEqual([]);
+  });
+
   test("内容编辑保留真实画面，模板编辑才显示图片与文字槽位", async ({ page }, testInfo) => {
     const forbiddenWrites: string[] = [];
     const { frame, inspector } = await openEditor(page, {
@@ -482,6 +537,40 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     await expect(root).toHaveAttribute("data-visual-panel-mode", "content");
     await expect(image).toHaveCSS("visibility", "visible");
     await expect(image).toHaveCSS("opacity", "1");
+    expect(forbiddenWrites).toEqual([]);
+  });
+
+  test("双图文的模板编辑辅助层只作用于当前模块", async ({ page }) => {
+    const forbiddenWrites: string[] = [];
+    const { frame, inspector } = await openEditor(page, {
+      forbiddenWrites,
+      draft: makeDoublePosterWithSiblingDraft(),
+      viewport: { width: 1920, height: 1200 },
+    });
+    const selectedRoot = frame.locator('[data-content-template-module="双图海报"]').first();
+    const siblingRoot = frame.locator('[data-content-template-module="首屏主视觉"]').first();
+    const siblingImage = siblingRoot.locator('[data-content-role-desktop="desktopImage"] img').first();
+
+    await selectedRoot.locator('[data-hc-keyboard-node="mainImage"]:visible').click();
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+
+    await expect(selectedRoot).toHaveAttribute("data-visual-panel-mode", "design");
+    await expect(selectedRoot.locator("[data-hc-template-slot-box]").first()).toBeVisible();
+    await expect(siblingRoot).toHaveAttribute("data-visual-panel-mode", "content");
+    await expect(siblingRoot.locator("[data-hc-template-slot-box]")).toHaveCount(0);
+    await expect(siblingImage).toHaveCSS("opacity", "1");
+    await expect(
+      frame.locator('[data-content-template-module][data-visual-panel-mode="design"]'),
+    ).toHaveCount(1);
+
+    await selectedRoot
+      .locator('[data-hc-node-hud][data-node-id="mainImage"]')
+      .getByRole("button", { name: "调整对象区域" })
+      .click();
+    await expect(selectedRoot).toHaveAttribute("data-visual-editor-mode", "adjust-layout");
+    await expect(selectedRoot.locator("[data-hc-layout-grid]")).toBeVisible();
+    await expect(siblingRoot).toHaveAttribute("data-visual-editor-mode", "select");
+    await expect(siblingRoot.locator("[data-hc-layout-grid]")).toHaveCount(0);
     expect(forbiddenWrites).toEqual([]);
   });
 
@@ -794,9 +883,11 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
 
     const target = inspector.getByRole("group", { name: "点击后前往" });
     await target.getByRole("button", { name: "页面" }).click();
-    const pageTarget = inspector.getByPlaceholder("选择页面或输入 / 开头的站内路径");
+    const pageTarget = inspector.getByRole("combobox", { name: /站内页面/ });
     await pageTarget.fill("https://outside.invalid/qa");
-    await expect(inspector.getByRole("alert")).toHaveText("仅支持站内路径（以 / 开头），不开放外部链接。");
+    await expect(inspector.getByRole("alert")).toHaveText(
+      "该路径不是可发布的公开页面；商品详情请使用「商品」目标。",
+    );
     await pageTarget.fill("/catalog?source=editor-qa");
     await expect(pageTarget).toHaveValue("/catalog?source=editor-qa");
     await expect(inspector.getByRole("alert")).toHaveCount(0);
@@ -1093,7 +1184,7 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     expect(forbiddenWrites).toEqual([]);
   });
 
-  test("Desktop/Mobile 默认、独立和对象重置可观测", async ({ page }) => {
+  test("Desktop 自定义、Mobile 托管和对象重置可观测", async ({ page }) => {
     const forbiddenWrites: string[] = [];
     const { inspector } = await openEditor(page, { forbiddenWrites });
     await selectObject(inspector, "title");
@@ -1103,16 +1194,18 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     await expect(summary).toHaveAttribute("data-desktop-state", "custom");
     await expect(summary).toHaveAttribute("data-mobile-state", "base");
     await page.getByRole("button", { name: /移动端布局/ }).click();
+    await selectObject(inspector, "title");
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
     await expect(summary).toHaveAttribute("data-active-device", "mobile");
-    const mobileX = inspector.getByRole("slider", { name: "横向位置（移动端）" });
-    await mobileX.focus();
-    await mobileX.press("ArrowRight");
-    await inspector.getByRole("group", { name: "图层顺序（移动端）" }).getByRole("button", {
-      name: "上移一层",
-    }).click();
-    await expect(summary).toHaveAttribute("data-mobile-state", "independent");
-    await inspector.getByRole("button", { name: "恢复移动端默认位置" }).click();
-    await expect(summary).toHaveAttribute("data-mobile-state", "partial");
+    await expect(inspector.getByText("位置由移动端堆叠模板控制")).toBeVisible();
+    await expect(inspector.getByRole("slider", { name: "横向位置（移动端）" })).toHaveCount(0);
+    await expect(inspector.getByRole("group", { name: "图层顺序（移动端）" })).toHaveCount(0);
+    await expect(summary).toHaveAttribute("data-mobile-state", "base");
+    await page.getByRole("button", { name: /桌面端布局/ }).click();
+    await selectObject(inspector, "title");
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    await expect(summary).toHaveAttribute("data-active-device", "desktop");
+    await expect(summary).toHaveAttribute("data-desktop-state", "custom");
     await inspector.getByRole("button", { name: "恢复主标题设计默认" }).click();
     await expect(summary).toHaveAttribute("data-desktop-state", "base");
     await expect(summary).toHaveAttribute("data-mobile-state", "base");

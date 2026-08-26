@@ -62,6 +62,7 @@ export const gallerySchema: ModuleInspectorSchema = {
               key: "altText",
               label: "替代文字",
               control: "text",
+              required: true,
               maxLength: GALLERY_CONTRACT.content.limits.altText,
             },
             {

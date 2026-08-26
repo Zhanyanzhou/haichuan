@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePagePublishStream } from "@/hooks/usePagePublishStream";
 import { pageDocumentApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import type { PuckBlock, PuckDocument } from "./PuckDocumentRenderer";
+import { getBrowserPublicContentLocale } from "@/i18n/publicLocale";
 
 export type PublishedPageDocumentStatus =
   | "idle"
@@ -26,6 +28,10 @@ type PublishedPageDocumentState = {
   stale: boolean;
 };
 
+export type PublishedPageDocumentResource = PublishedPageDocumentState & {
+  refresh: (showLoading?: boolean) => Promise<void>;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -35,6 +41,16 @@ function isPuckBlock(value: unknown): value is PuckBlock {
     && typeof value.type === "string"
     && value.type.trim().length > 0
     && isRecord(value.props);
+}
+
+function isExplicitlyInvalidPublishedPageDocument(
+  value: unknown,
+  pageKey: string,
+) {
+  return isRecord(value)
+    && value.pageKey === pageKey
+    && value.status === "INVALID"
+    && value.invalidReason === "publication-revalidation-required";
 }
 
 /**
@@ -68,7 +84,10 @@ export function isPublishedPageDocument(
  * - 请求失败 = error；
  * - 已经展示过有效快照后刷新失败，不清空最后一次有效公开结果。
  */
-export function usePublishedPageDocument(pageKey?: string) {
+export function usePublishedPageDocument(
+  pageKey?: string,
+): PublishedPageDocumentResource {
+  const locale = getBrowserPublicContentLocale();
   const [state, setState] = useState<PublishedPageDocumentState>({
     pageKey: undefined,
     pageDocument: null,
@@ -116,7 +135,7 @@ export function usePublishedPageDocument(pageKey?: string) {
     }
 
     try {
-      const response = await pageDocumentApi.getPublished(pageKey);
+      const response = await pageDocumentApi.getPublished(pageKey, locale);
       const pageDocument = unwrapResponse<unknown>(response);
       if (!mountedRef.current || requestIdRef.current !== requestId) return;
 
@@ -136,6 +155,19 @@ export function usePublishedPageDocument(pageKey?: string) {
             stale: false,
           });
         }
+        return;
+      }
+
+      // 服务端明确判定旧 revision 未通过当前正式内容门禁时，不能继续展示
+      // 内存中的旧快照；这与暂时断网不同，必须立即进入安全降级。
+      if (isExplicitlyInvalidPublishedPageDocument(pageDocument, pageKey)) {
+        lastValidRef.current = null;
+        setState({
+          pageKey,
+          pageDocument: null,
+          status: "invalid",
+          stale: false,
+        });
         return;
       }
 
@@ -183,13 +215,31 @@ export function usePublishedPageDocument(pageKey?: string) {
         });
       }
     }
-  }, [pageKey]);
+  }, [locale, pageKey]);
 
   useEffect(() => {
     if (lastValidRef.current?.pageKey !== pageKey) {
       lastValidRef.current = null;
     }
     void refresh(true);
+  }, [pageKey, refresh]);
+
+  usePagePublishStream(pageKey, () => {
+    void refresh(false);
+  }, locale);
+
+  // 页面重新可见时主动对齐 revision，弥补断网、合盖或后台标签页期间错过的发布事件。
+  useEffect(() => {
+    if (!pageKey) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refresh(false);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [pageKey, refresh]);
 
   return { ...state, refresh };
