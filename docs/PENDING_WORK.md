@@ -7,7 +7,7 @@
 >
 > - 当前项目仍在开发中期；真实开发库、完整经营闭环、支付和上线门禁均未完成，不能再沿用本文“唯一技术阻塞”或“代码全部完成”的旧总结。
 > - `CUSTOMER_COMMERCE_ENABLED`、购物车与支付安全默认关闭；后台外部网关收款也须在独立真实资金批准前冻结。
-> - 当前新增 `InventoryPolicy` migration 的目标数据库与执行状态未确认；不得以旧“无 drift”结果执行迁移或回填。
+> - 当前正式 migration 已与 Schema/共享合同测试对齐，但目标数据库与 `_prisma_migrations` 状态仍未确认；不得以临时库或旧“无 drift”结果执行现有/目标数据库迁移或回填。
 > - A 组验证命令 → 已由 `docs/VERIFICATION_RUNBOOK.md` 取代并**全部实跑通过**（2026-08-15：静态门禁/迁移无 drift/五容器+恢复演练/Playwright 59 过/admin 后台回归）
 > - C-5 CORS 默认域名 → 已解决：生产强制 `CORS_ORIGIN` 环境变量，缺失即拒绝启动
 > - E-1 Playwright 入 CI → 已完成（quality.yml 新增 e2e-public job）
@@ -104,7 +104,6 @@
 | E-4  | `nest build` 可用性（历史 P2-2）      | 未核实                                                      | 需本机 `cd server && npm run build` 确认                                                            |
 | E-5  | prisma generate DLL 锁定（历史 P2-3） | 环境项                                                      | Windows 文件锁，停服务后重试                                                                        |
 | E-6  | 产品名称快照编码（历史 P2-5）         | 未核实                                                      | 需真实商品数据测试                                                                                  |
-| E-7  | 首页 FallbackHome 静态精选作品        | `productFocus` 引用真实图片但未关联商品库                   | 运营发布真实 Puck 文档后自动覆盖；或后续将 FallbackHome 改为从公开 API 拉取                         |
 | E-8  | homeCampaign.ts 营销文案 TODO（5 处） | 编辑文案占位，非事实声称                                    | 运营提供最终 verified copy 后替换                                                                   |
 | E-9  | Custom 页摄影占位（3 处 TODO）        | 流程/材质/案例图占位                                        | 运营提供真实摄影后替换                                                                              |
 | E-10 | `storeInfo.puck.tsx` 已清空默认值     | ✓ 已处理，但运营添加该区块时仍需手填                        | 编辑器内提示已足够                                                                                  |

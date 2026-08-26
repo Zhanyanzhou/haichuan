@@ -1,0 +1,520 @@
+# 海川珠宝 Working Tree 路径级收敛清单
+# snapshot_branch=codex/release-curation-20260814 snapshot_head=ea38fdc tracked_changes=218 untracked_files=298 staged=0
+# 本文件本身计入 untracked_files；状态来自 git status --porcelain=v1 -uall。历史 migration draft 已完成可恢复清理，备份、素材和未裁决删除差异仍受各自保护门约束。
+status	batch	consumer_or_role	replacement_or_target	protection	path
+_D	B06-puck-registry14	Puck 演进区域待完整交互复核	尚未最终裁决	puck-delete-hold	client/src/page-builder/inspector/InspectorQuickActions.tsx
+_D	B06-puck-registry14	Puck 演进区域待完整交互复核	尚未最终裁决	puck-delete-hold	client/src/page-builder/preview/previewGeometry.ts
+_D	B08-exact-legacy-decision	当前运行时零消费者	Ant Tag/Catalog/ProfessionalProductEditor/PageDocument	approved-deletion	client/src/components/common/AdminStatusTag.tsx
+_D	B08-exact-legacy-decision	当前运行时零消费者	Ant Tag/Catalog/ProfessionalProductEditor/PageDocument	approved-deletion	client/src/components/common/FilterPanel.tsx
+_D	B08-exact-legacy-decision	当前运行时零消费者	Ant Tag/Catalog/ProfessionalProductEditor/PageDocument	approved-deletion	client/src/pages/admin/ProductEditor/index.tsx
+_D	B08-exact-legacy-decision	当前运行时零消费者	Ant Tag/Catalog/ProfessionalProductEditor/PageDocument	approved-deletion	client/src/pages/public/ProductList/index.tsx
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/admin-auth-store-capabilities.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/admin-header-toolbar.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/booking-editor.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/content-template-previews.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/content-template-renderers.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/core-template-homepage.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/editor-draft-recovery.admin.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/editor-visual-redesign-acceptance.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/fixtures/booking-editor.tsx
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/fixtures/public-catalog-detail.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/inspector-context-panel.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/page-document-runtime-sync.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/page-publish-validation.admin.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/privacy-trust.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/product-editor-contract.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/public-access.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/responsive-public.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/public-catalog-detail-foundation.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/public-catalog-server-pagination.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/public-sales-mode.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/public-service-third-batch.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/shared-foundation-safety.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/site-content-load-protection.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/site-maturity-foundation.spec.ts
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	scripts/generate-content-template-contract.mjs
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	scripts/verify-admin-ui-standards.mjs
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	scripts/verify-batch1-safety.mjs
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	scripts/verify-content-template-contract.mjs
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	scripts/verify-content-template-skeletons.mjs
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	scripts/verify-inquiry-privacy-consent.mjs
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	scripts/verify-page-builder-publish.mjs
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	scripts/verify-selection-inquiry-security.mjs
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	scripts/verify-trade-concurrency.mjs
+_M	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	scripts/verify-trade-contract.mjs
+_M	B02-release-schema	本地/容器运行合同	显式配置且资金默认关闭	config-change-approved	.env.example
+_M	B02-release-schema	本地/容器运行合同	显式配置且资金默认关闭	config-change-approved	client/Dockerfile
+_M	B02-release-schema	本地/容器运行合同	显式配置且资金默认关闭	config-change-approved	client/nginx.conf
+_M	B02-release-schema	本地/容器运行合同	显式配置且资金默认关闭	config-change-approved	docker-compose.yml
+_M	B02-release-schema	本地/容器运行合同	显式配置且资金默认关闭	config-change-approved	server/scripts/backup.sh
+_M	B02-release-schema	Prisma/正式 migration/合同测试	Schema 与正式 migration	database-apply-approval	server/prisma/schema.prisma
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/common/filters/http-exception.filter.ts
+_M	B03-input-permission	通知日志隐私边界	保留发送结果合同且不记录联系方式/原始错误	privacy-fix-reviewed	server/src/common/mailer/mailer.service.ts
+_M	B03-input-permission	通知日志隐私边界	保留发送结果合同且不记录联系方式/原始错误	privacy-fix-reviewed	server/src/common/sms/sms.service.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/analytics/analytics.controller.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/analytics/analytics.service.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/analytics/dto/track-event.dto.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/attributes/attributes.controller.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/attributes/attributes.service.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/auth/auth.controller.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/auth/jwt.strategy.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/cart/cart.controller.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/cart/cart.inventory-policy.spec.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/cart/cart.service.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/categories/categories.controller.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/categories/categories.service.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/inquiries/dto/create-inquiry.dto.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/inquiries/inquiries.module.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/inquiries/inquiries.service.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/inventory/warehouse.controller.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/leads/leads.controller.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/leads/leads.service.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/partner-applications/dto/create-partner-application.dto.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/partner-applications/dto/review-partner-application.dto.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/partner-applications/partner-applications.controller.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/partner-applications/partner-applications.service.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/products/dto/add-product-image.dto.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/products/dto/index.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/products/dto/public-product-query.dto.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/products/products.controller.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/products/products.media-integrity.spec.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/products/products.public-query.spec.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/products/products.service.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/products/tags.controller.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/settings/dto/update-settings.dto.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/settings/settings.controller.ts
+_M	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/settings/settings.service.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	client/src/pages/admin/AfterSalesManage/index.tsx
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	client/src/pages/public/Checkout/index.tsx
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/payment-gateway/payment-gateway.module.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/payment-gateway/payment-gateway.service.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/after-sales/after-sales.module.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/after-sales/after-sales.service.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/after-sales/dto/after-sales.dto.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/customers/customer-auth.guard.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/customers/customers.controller.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/customers/customers.service.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/customers/dto/checkout.dto.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/customers/optional-customer-auth.guard.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/fulfillment/fulfillment.service.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/marketing/marketing.controller.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/marketing/marketing.service.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/orders/orders.inventory-release.spec.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/orders/orders.service.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/payments/payments.controller.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/payments/payments.module.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/payments/payments.service.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/payments/payments.transaction-gate.spec.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/quotations/dto/quotation.dto.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/quotations/quotations.controller.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/quotations/quotations.safety.spec.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/quotations/quotations.service.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/refunds/dto/refund.dto.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/refunds/refunds.controller.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/refunds/refunds.module.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/refunds/refunds.service.ts
+_M	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/trade-events/trade-events.constants.ts
+_M	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/components/blocks/AppointmentBlock.tsx
+_M	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/components/blocks/DoublePosterSection.tsx
+_M	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/components/blocks/HeroSection.tsx
+_M	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/components/blocks/LimitedOfferBlock.tsx
+_M	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/components/blocks/StoreInfoBlock.tsx
+_M	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/components/layout/PublicLayout.tsx
+_M	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/components/layout/StorefrontFooter.tsx
+_M	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/components/layout/StorefrontNavigation.tsx
+_M	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/pages/public/Contact/index.tsx
+_M	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/pages/public/Custom/index.tsx
+_M	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/pages/public/Home/index.tsx
+_M	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/pages/public/ProductDetail/index.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/adapters/appointment.puck.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/adapters/businessRegion.puck.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/adapters/storeInfo.puck.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/config/blockContracts.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/config/blockMeta.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/config/editorPages.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/generated/contentTemplates.generated.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/inspector/InstanceOverridesPanel.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/inspector/LinkTargetField.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/inspector/panels/DoublePosterInspector.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/inspector/schema/modules/appointment.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/inspector/schema/modules/beforeAfter.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/inspector/schema/modules/carousel.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/inspector/schema/modules/categoryCards.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/inspector/schema/modules/doublePoster.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/inspector/schema/modules/gallery.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/inspector/schema/modules/storeInfo.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/inspector/schema/shared.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview/ContentTemplateRendererPreview.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview/templatePreviewContent.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/runtime/ContentTemplateContractFrame.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/runtime/PublishedPageDecoration.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/runtime/PuckDocumentRenderer.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/runtime/usePublishedPageDocument.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/templates/templates.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/utils/linkTarget.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/utils/migratePuckData.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/utils/puckPropsToModule.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/pages/admin/HomepageConfig/components/CanvasSelectionDock.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/pages/admin/HomepageConfig/components/EditorToolbar.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/pages/admin/HomepageConfig/components/LayerRail.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/pages/admin/HomepageConfig/components/PageSettingsDrawer.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/pages/admin/HomepageConfig/components/RevisionDrawer.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/pages/admin/HomepageConfig/editor.css
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/pages/admin/HomepageConfig/index.tsx
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/tests/template-internal-editor.spec.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	contracts/page-builder/content-templates.contract.json
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	server/src/modules/page-modules/generated/contentTemplates.generated.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	server/src/modules/page-modules/page-modules.controller.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	server/src/modules/page-modules/page-modules.craft-details-publication.spec.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	server/src/modules/page-modules/page-modules.hero-publication.spec.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	server/src/modules/page-modules/page-modules.personal-templates.spec.ts
+_M	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	server/src/modules/page-modules/page-modules.service.ts
+_M	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/api.ts
+_M	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/mockData.ts
+_M	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/types/index.ts
+_M	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/components/layout/AdminLayout.tsx
+_M	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/CategoryManage/index.tsx
+_M	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/Dashboard/index.tsx
+_M	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/ProductManage/index.tsx
+_M	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/ProductManage/ProductManage.css
+_M	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/Catalog/index.tsx
+_M	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/CustomerCenter/AccountExperience.tsx
+_M	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/CustomerCenter/index.tsx
+_M	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/CustomerCenter/MyAccountDashboard.tsx
+_M	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/styles/adminLuxury.css
+_M	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/styles/globals.css
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/acceptance/end-to-end-flow-matrix.md
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/acceptance/feature-completion-matrix.md
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/acceptance/puck-published-content-audit.md
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/architecture/data-source-map.md
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/architecture/page-builder-boundary.md
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/COMPONENTS.md
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/CURRENT_STATE.md
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/DECISIONS.md
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/OPERATIONS_READINESS.md
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/PENDING_WORK.md
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/PROJECT_GUARDRAILS.md
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/PUBLIC_ACCESS_MATRIX.md
+_M	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/VERIFICATION_RUNBOOK.md
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/App.tsx
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/config/navigationConfig.ts
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/data/catalogData.ts
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/hooks/useProductData.ts
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/main.tsx
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/pages/admin/CustomerManage/index.tsx
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/pages/admin/LeadManage/index.tsx
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/pages/admin/MarketingManage/index.tsx
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/pages/admin/OrderManage/index.tsx
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/pages/admin/PaymentReview/index.tsx
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/pages/admin/ProductEditor/ProfessionalProductEditor.tsx
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/pages/admin/RefundManage/index.tsx
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/pages/admin/Settings/index.tsx
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/pages/admin/SiteContent/index.tsx
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/store/pageMetaStore.ts
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	package.json
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	PROJECT_RULES.md
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	server/src/app.module.ts
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	server/src/common/interceptors/transform.interceptor.ts
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	server/src/main.ts
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	server/src/modules/recommendations/recommendations.service.ts
+_M	B11-other-current-work	按路径消费者复核	不做无关重构	normal	server/src/modules/wechat-auth/wechat-auth.controller.ts
+??	B00-protected-recovery	已退役 migration draft 的字节等价恢复副本	正式 migration 序列	protected-backup	.codex-artifacts/migration-draft-backups/20260826/20260824120000_add_mature_site_shared_foundation/migration.sql
+??	B00-protected-recovery	已退役 migration draft 的字节等价恢复副本	正式 migration 序列	protected-backup	.codex-artifacts/migration-draft-backups/20260826/20260825134000_add_personal_template_content_defaults/migration.sql
+??	B00-protected-recovery	migration draft 备份来源、哈希与恢复说明	正式 migration 序列	protected-backup	.codex-artifacts/migration-draft-backups/20260826/README.md
+??	B00-protected-recovery	本地 PageDocument 恢复资产	无；仅人工恢复	protected-backup	.codex-artifacts/page-document-backups/2026-08-25T02-29-14-641Z.json
+??	B00-protected-recovery	本地 PageDocument 恢复资产	无；仅人工恢复	protected-backup	.codex-artifacts/page-document-backups/2026-08-25T02-47-06-416Z.json
+??	B00-protected-recovery	本地 PageDocument 恢复资产	无；仅人工恢复	protected-backup	.codex-artifacts/page-document-backups/2026-08-25T02-51-05-052Z.json
+??	B00-protected-recovery	本地 PageDocument 恢复资产	无；仅人工恢复	protected-backup	.codex-artifacts/page-document-backups/2026-08-25T02-53-42-495Z.json
+??	B00-protected-recovery	本地 PageDocument 恢复资产	无；仅人工恢复	protected-backup	.codex-artifacts/page-document-backups/2026-08-25T03-03-32-111Z.json
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/attribute-manage.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/category-manage.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/customer-admin-client.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/inquiry-context.admin.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/lead-follow-up-contract.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/mock-product-query.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/product-metadata-clients.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/recommendation-client.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/review-client.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/settings-client.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/shipping-template-client.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/statistics-client.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/trade-safety-ui.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	client/tests/warehouse-manage.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	server/src/common/observability/request-id-envelope.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	server/src/common/observability/request-id.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	server/src/common/shared-foundation.contract.spec.ts
+??	B01-verification-authority	根测试/目标合同/浏览器夹具	正式源码与机器合同	test-evidence	server/src/common/time/business-date.spec.ts
+??	B02-release-schema	本地/容器运行合同	显式配置且资金默认关闭	config-change-approved	docs/audits/2026-08-25-r0-r1-release-foundation/environment-contract.csv
+??	B02-release-schema	本地/容器运行合同	显式配置且资金默认关闭	config-change-approved	scripts/verify-environment-contract.mjs
+??	B02-release-schema	Prisma/正式 migration/合同测试	Schema 与正式 migration	database-apply-approval	server/prisma/migrations/20260824230000_add_product_media_asset_compatibility/migration.sql
+??	B02-release-schema	Prisma/正式 migration/合同测试	Schema 与正式 migration	database-apply-approval	server/prisma/migrations/20260825215500_add_release_foundation_schema/migration.sql
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/common/errors/api-error.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/common/filters/http-exception.filter.security.spec.ts
+??	B03-input-permission	通知日志隐私回归合同	邮件/短信降级、拒绝与异常路径	test-evidence	server/src/common/privacy/notification-log-privacy.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/common/security/session-security.guard.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/common/security/session-security.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/common/security/session-security.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/analytics/analytics.consent.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/attributes/attributes.input-boundary.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/attributes/dto/attribute.dto.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/cart/cart.input-boundary.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/cart/dto/cart-item.dto.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/categories/categories.input-boundary.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/categories/dto/category.dto.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/inquiries/inquiries.product-context.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/inventory/dto/warehouse.dto.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/inventory/warehouse.input-boundary.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/leads/dto/lead.dto.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/leads/lead.constants.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/leads/leads.follow-up-integrity.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/leads/leads.input-boundary.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/partner-applications/dto/partner-application-query.dto.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/partner-applications/partner-applications.input-boundary.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/partner-applications/partner-applications.integrity.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/products/dto/tag.dto.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/products/product-eligibility.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/products/product-eligibility.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/products/tags.input-boundary.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/settings/settings.backup-status.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	test-evidence	server/src/modules/settings/settings.read-only.spec.ts
+??	B03-input-permission	DTO/Guard/Service/安全错误合同	现有 Nest 分层	normal	server/src/modules/settings/settings.store-map.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	client/src/components/commerce/CustomerPaymentDialog.tsx
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/idempotency/idempotency-key.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/idempotency/idempotency-key.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/idempotency/idempotency.module.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/marketing/coupon-calculation.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/outbox/outbox.module.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/outbox/outbox.service.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/outbox/outbox.service.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/payment-gateway/payment-gateway.refund.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/payment-gateway/wechat-pay.client.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/payment-gateway/wechat-pay.client.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/trade/document-number-retry.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/common/trade/document-number-retry.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/after-sales/after-sales.admin-create.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/after-sales/after-sales.customer-flow.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/after-sales/after-sales.refund-link.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/after-sales/customer-after-sales.controller.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/customers/customers.checkout.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/fulfillment/fulfillment.consistency.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/marketing/dto/coupon.dto.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/marketing/dto/promotion.dto.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/marketing/marketing.coupon-safety.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/marketing/marketing.promotion-input.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/orders/orders.checkout-consistency.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/orders/orders.coupon-consistency.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/orders/orders.customer-visibility.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/orders/orders.payment-fulfillment.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/payments/customer-payments.controller.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/payments/customer-payments.controller.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/payments/dto/payment.dto.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/payments/payments.customer-flow.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/quotations/quotations.number-retry.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/quotations/quotations.scope.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/refunds/refund-notifications.controller.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/refunds/refund-notifications.controller.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/refunds/refunds.consistency.spec.ts
+??	B04-standard-retail	订单/履约/返券/售后/支付安全边界	现有 Service+Prisma 事务事实源	high-risk-reviewed	server/src/modules/refunds/refunds.online-flow.spec.ts
+??	B05-public-catalog-content	公开路由/商品发现/咨询/PageDocument	/catalog + /products PageDocument	content-license-gate	client/src/components/layout/AdminSidebar.tsx
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/carousel-bracelet-wide-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/category-bracelet-square-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/comparison-after-square-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/comparison-before-square-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/craft-video-wide-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/detail-earrings-portrait-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/doubleposter-main-wide-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/fullbleed-necklace-wide-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/hero-wide-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/hotspot-three-products-wide-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/limited-event-wide-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/product-ring-square-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/salon-wide-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	client/src/page-builder/preview-assets/quiet-light-court-v1/wearing-portrait-v1.png
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	server/src/modules/page-modules/page-modules.appointment-source.spec.ts
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	server/src/modules/page-modules/page-modules.page-contract.spec.ts
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	server/src/modules/page-modules/page-modules.page-document-normalization.spec.ts
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	server/src/modules/page-modules/page-modules.site-settings-readiness.spec.ts
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	server/src/modules/page-modules/page-modules.spec-fixtures.ts
+??	B06-puck-registry14	编辑器/预览/公开 Renderer/服务端 PageDocument	schema5 registry14 机器合同	draft-protected	server/src/modules/page-modules/page-modules.store-info-source.spec.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/clients/aiClassifyClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/clients/attributeClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/clients/categoryClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/clients/customerAdminClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/clients/inquiriesClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/clients/recommendationClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/clients/reviewClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/clients/selectionInquiryClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/clients/settingsClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/clients/shippingTemplateClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/clients/statisticsClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/clients/tagClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/httpClient.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/mockProductQuery.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/services/mockResponse.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/types/api.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/types/auth.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/types/catalog.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/types/commerce.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/types/inquiry.ts
+??	B07-frontend-clients	前后台领域消费者	httpClient + services/clients；api.ts 兼容门面	atomic-with-consumers	client/src/types/orders.ts
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/CategoryManage/CategoryDetailPanel.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/CategoryManage/CategoryFormModal.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/CategoryManage/categoryManageModel.ts
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/CategoryManage/CategoryTreePanel.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/Dashboard/DashboardAlertsSection.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/Dashboard/DashboardMetricCards.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/Dashboard/dashboardModel.ts
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/Dashboard/DashboardTrendSection.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/ProductManage/productManageModel.ts
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/admin/ProductManage/ProductManageTable.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/Catalog/catalogCategories.ts
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/Catalog/CatalogFilterDrawer.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/Catalog/CatalogFilters.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/Catalog/CatalogProductSurface.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/Catalog/catalogQuery.ts
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/Catalog/CatalogSearch.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/Catalog/catalogTokens.ts
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/Catalog/SelectionTray.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/Catalog/useCatalogDialog.ts
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/CustomerCenter/AccountExperience.css
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/CustomerCenter/CustomerAfterSalesDialog.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/CustomerCenter/CustomerOrdersPanel.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/CustomerCenter/CustomerReviewDialog.tsx
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/CustomerCenter/MyAccountDashboard.css
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/pages/public/CustomerCenter/types.ts
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/styles/adminCompatibility.css
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/styles/adminDashboard.css
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/styles/public/brand-menu.css
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/styles/public/commerce.css
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/styles/public/editorial-home.css
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/styles/public/foundation.css
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/styles/public/home-surface.css
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/styles/public/legacy-header-antd.css
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/styles/public/navigation.css
+??	B07-frontend-splits	对应路由容器/后台或公开页面	新子文件必须与旧容器原子验收	atomic-with-container	client/src/styles/public/site-shell.css
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-24-proven-mvp-evidence-ledger.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/AUDIT.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/cleanup-ledger.csv
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/evidence-manifest.json
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/functional-closure.csv
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/program-completion-reconciliation-2026-08-26.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/program-status.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/public-discovery-selection-consultation-audit.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/public-product-readiness-inventory.csv
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r1-attribute-input-boundary-2026-08-26.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r1-category-tag-input-boundary-2026-08-26.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r1-lead-input-boundary-2026-08-26.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r1-marketing-coupon-input-decision-2026-08-26.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r1-partner-state-2026-08-26.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r1-product-media-input-boundary-2026-08-26.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r1-warehouse-input-boundary-2026-08-26.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r2-decision-gate.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r2-reconciliation-contract.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r2-review-media-decision.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r3-advanced-custom-product-rules-decision-2026-08-26.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r4-partner-wax-product-rules-decision-2026-08-26.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r5-brand-page-convergence-decision.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r5-product-quality-live-audit-2026-08-26/README.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r5-public-product-quality-and-inquiry-context-decision.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r6-current-size-and-cleanup-reconciliation-2026-08-26.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r6-decision-gate.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/r6-orders-service-decomposition-decision.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/remaining-work-register.csv
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-project-convergence-cleanup/remediation-plan.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-r0-r1-release-foundation/input-boundary-ledger.csv
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-r0-r1-release-foundation/migration-gap.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-r0-r1-release-foundation/migration-verification.json
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-r0-r1-release-foundation/R0-R1-REPORT.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-r0-r1-release-foundation/tls-production-entry-plan.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/audits/2026-08-25-r0-r1-release-foundation/verification-manifest.json
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/P0_TASK_OWNERSHIP.md
+??	B09-authority-docs	工程状态/决策/验收消费者	当前代码与新鲜证据优先	history-context	docs/plans/2026-08-26-mature-site-m1-preflight.md
+??	B09-authority-docs	状态与收敛审计	无	normal	docs/plans/convergence-path-manifest-2026-08-26.tsv
+??	B09-authority-docs	当前批次状态与剩余审批门	无	normal	docs/plans/2026-08-26-convergence-execution-state.md
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/puck-persistence-acceptance/20260826-readonly-shell/.last-run.json
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/puck-persistence-acceptance/20260826-readonly-shell/editor-visual-redesign-acc-2f7e5-1-四框顺序与边界不因对象、HUD、页签或设备切换改变-public-chromium/attachments/source-aligned-1672x941-dd6cf0aaa2e25bb728b6f64e6925ba95b9551a3a.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/puck-persistence-acceptance/20260826-readonly-shell/editor-visual-redesign-acc-2f7e5-1-四框顺序与边界不因对象、HUD、页签或设备切换改变-public-chromium/source-aligned-1672x941.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/puck-restricted-validation/20260826-port-5187/.last-run.json
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-admin-css-after-compact.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-admin-css-after-desktop.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-admin-css-after-mobile.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-admin-css-after-tablet.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-admin-css-before-compact.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-admin-css-before-desktop.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-admin-css-before-mobile.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-admin-css-before-tablet.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-admin-layout-compact-open.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-admin-layout-desktop.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-catalog-filter-after-desktop.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-catalog-filter-after-mobile.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-catalog-filter-before-desktop.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-catalog-filter-before-mobile.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-product-css-after-desktop.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-product-css-after-mobile.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-product-css-before-desktop.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/r6-product-css-before-mobile.png
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/retail-acceptance-20260826/acceptance-results.json
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/retail-acceptance-20260826/acceptance-runner-failure.json
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/retail-acceptance-20260826/acceptance-runner.cjs
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/retail-acceptance-20260826/acceptance-summary.md
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/retail-acceptance-20260826/implementation-and-acceptance-report.md
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/retail-acceptance-20260826/start-server.ps1
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/retail-consistency-20260826-b1/acceptance-results.json
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/retail-consistency-20260826-b1/acceptance-runner.cjs
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/retail-consistency-20260826-b1/prisma-isolated/package.json
+??	B10-evidence-assets	隔离验收/审计证据	可再生产物或审计附件	evidence-review	.codex-artifacts/retail-consistency-20260826-b1/start-server.ps1
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	client/public/images/editorial/haichuan-light-and-line-concept-v1/light-and-line-bracelet-concept-v1.webp
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	client/public/images/editorial/haichuan-light-and-line-concept-v1/light-and-line-detail-concept-v1.webp
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	client/public/images/editorial/haichuan-light-and-line-concept-v1/light-and-line-earring-concept-v1.webp
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	client/public/images/editorial/haichuan-light-and-line-concept-v1/light-and-line-hero-desktop-concept-v1.webp
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	client/public/images/editorial/haichuan-light-and-line-concept-v1/light-and-line-hero-mobile-concept-v1.webp
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	client/public/images/editorial/haichuan-light-and-line-concept-v1/light-and-line-loop-pair-concept-v1.webp
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	client/public/images/editorial/haichuan-light-and-line-concept-v1/light-and-line-necklace-concept-v1.webp
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	client/public/images/editorial/haichuan-light-and-line-concept-v1/light-and-line-transition-concept-v1.webp
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	client/public/images/editorial/haichuan-light-and-line-concept-v1/README.md
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/product-flow-screenshots/01-home-current.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/product-flow-screenshots/02-catalog-results.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/product-flow-screenshots/03-product-detail.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/product-flow-screenshots/04-contact-from-product.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/product-flow-screenshots/05-contact-mobile.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/r5-product-quality-live-audit-2026-08-26/01-catalog-desktop.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/r5-product-quality-live-audit-2026-08-26/02-catalog-desktop-data-quality.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/r5-product-quality-live-audit-2026-08-26/02b-catalog-desktop-corrupt-records.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/r5-product-quality-live-audit-2026-08-26/03-product-detail-corrupt-desktop.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/r5-product-quality-live-audit-2026-08-26/04-catalog-mobile.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/r5-product-quality-live-audit-2026-08-26/05-catalog-mobile-data-quality.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/r5-product-quality-live-audit-2026-08-26/06-product-detail-mobile.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/real-admin-dashboard.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/real-admin-orders.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/real-catalog-desktop.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/real-catalog-mobile.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/real-custom-desktop-scrolled.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/real-custom-desktop.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/real-custom-mobile-scrolled.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/real-custom-mobile.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/real-home-desktop.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/real-home-mobile.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/real-product-desktop.png
+??	B10-evidence-assets	运行时或预览媒体	正式页面使用前核对来源与授权	license-review	docs/audits/2026-08-25-project-convergence-cleanup/real-product-mobile.png
+??	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/hooks/usePublicSiteSettings.tsx
+??	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/utils/publicProductPath.ts
+??	B11-other-current-work	按路径消费者复核	不做无关重构	normal	client/src/utils/publicSeoPolicy.ts
+??	B11-other-current-work	按路径消费者复核	不做无关重构	normal	server/src/common/observability/request-id.ts
+??	B11-other-current-work	按路径消费者复核	不做无关重构	normal	server/src/common/time/business-date.ts
+??	B11-other-current-work	按路径消费者复核	不做无关重构	normal	server/src/modules/wechat-auth/dto/bind-wechat.dto.ts
+??	B09-authority-docs	剩余闭环批准与执行边界	当前代码与新鲜证据优先	normal	docs/plans/2026-08-26-closure-approval-packet.md
+_M	B12-en-a-locale-safety	PageDocument 发布流显式携带 locale	同语言公开内容合同	route-contract	client/src/hooks/usePagePublishStream.ts
+_M	B13-reliable-notifications	客户通知服务注册	可靠通知第一批	transaction-boundary	server/src/modules/customers/customers.module.ts
+??	B12-en-a-locale-safety	英文未发布路由响应与水合门禁	EN-B 正式同语言发布前保持关闭	route-contract	client/src/components/common/EnglishPublicRouteGate.tsx
+??	B12-en-a-locale-safety	公开语言路径和可用性单一前端合同	EN-B 正式同语言发布前保持关闭	route-contract	client/src/i18n/publicLocale.ts
+??	B13-reliable-notifications	客户中心站内通知面板	客户本人通知 API	ui-consumer	client/src/pages/public/CustomerCenter/CustomerNotificationsPanel.tsx
+??	B01-verification-authority	EN-A 与通知隔离浏览器回归	正式路由和客户 API	test-evidence	client/tests/closure-locale-notifications.spec.ts
+??	B01-verification-authority	公开内容 locale 服务端合同测试	正式公开控制器	test-evidence	server/src/common/content-locale.spec.ts
+??	B12-en-a-locale-safety	服务端公开 locale 严格拒绝中文回退	EN-B 同语言事实源	route-contract	server/src/common/content-locale.ts
+??	B13-reliable-notifications	默认关闭的 Outbox 外部投递 worker	目标环境验收前不得开启	external-delivery-gate	server/src/common/notifications/reliable-notification-delivery.worker.ts
+??	B13-reliable-notifications	订单与每笔付款事务内通知事实	Notification Delivery Outbox	transaction-boundary	server/src/common/notifications/reliable-notification-intent.service.ts
+??	B13-reliable-notifications	可靠通知全局模块	订单与客户模块	transaction-boundary	server/src/common/notifications/reliable-notifications.module.ts
+??	B01-verification-authority	通知原子性 隐私 注销与租约恢复测试	可靠通知第一批	test-evidence	server/src/common/notifications/reliable-notifications.spec.ts
+??	B01-verification-authority	客户通知本人范围测试	客户通知 API	test-evidence	server/src/modules/customers/customer-notifications.service.spec.ts
+??	B13-reliable-notifications	客户本人通知查询和已读语义	客户中心面板	privacy-boundary	server/src/modules/customers/customer-notifications.service.ts
+??	B13-reliable-notifications	客户通知分页与未读筛选 DTO	客户通知 API	input-boundary	server/src/modules/customers/dto/customer-notification-query.dto.ts
