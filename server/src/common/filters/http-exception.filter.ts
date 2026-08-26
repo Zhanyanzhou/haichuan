@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
+import { ApiError, type ApiErrorDetails } from '../errors/api-error';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -17,18 +18,28 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
-    const isProduction = process.env.NODE_ENV === 'production';
-
+    const requestId = (request as Request & { id?: unknown }).id;
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string = '服务器内部错误';
+    let errorCode = 'INTERNAL_ERROR';
+    let details: ApiErrorDetails | undefined;
 
-    if (exception instanceof HttpException) {
+    if (exception instanceof ApiError) {
+      status = exception.getStatus();
+      message = exception.message;
+      errorCode = exception.errorCode;
+      details = exception.details;
+    }
+    else if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
       message =
         typeof exceptionResponse === 'string'
           ? exceptionResponse
           : (exceptionResponse as any).message || exception.message;
+      errorCode = status === HttpStatus.BAD_REQUEST
+        ? 'VALIDATION_ERROR'
+        : `HTTP_${status}`;
     }
     // Prisma 已知异常映射
     else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
@@ -36,35 +47,42 @@ export class HttpExceptionFilter implements ExceptionFilter {
         case 'P2002': // 唯一约束冲突
           status = HttpStatus.CONFLICT;
           message = '数据已存在，请勿重复创建';
+          errorCode = 'DATABASE_CONFLICT';
           break;
         case 'P2025': // 记录未找到
           status = HttpStatus.NOT_FOUND;
           message = '请求的资源不存在';
+          errorCode = 'RESOURCE_NOT_FOUND';
           break;
         case 'P2003': // 外键约束
           status = HttpStatus.BAD_REQUEST;
           message = '关联数据不存在，请先创建关联记录';
+          errorCode = 'RELATION_NOT_FOUND';
           break;
         case 'P2014': // 违反关系约束
           status = HttpStatus.BAD_REQUEST;
           message = '数据关系不合法';
+          errorCode = 'RELATION_CONFLICT';
           break;
         default:
           status = HttpStatus.INTERNAL_SERVER_ERROR;
-          message = isProduction ? '服务器内部错误' : `数据库错误: ${exception.code}`;
+          message = '服务器内部错误';
+          errorCode = 'DATABASE_ERROR';
           break;
       }
     }
     // Prisma 校验异常 — 透传真实消息便于调试
     else if (exception instanceof Prisma.PrismaClientValidationError) {
       status = HttpStatus.BAD_REQUEST;
-      message = isProduction ? '请求参数格式错误' : `参数校验失败: ${exception.message}`;
+      message = '请求参数格式错误';
+      errorCode = 'VALIDATION_ERROR';
       this.logger.error('Prisma 校验异常', exception.stack);
     }
     // Prisma 连接异常
     else if (exception instanceof Prisma.PrismaClientInitializationError) {
       status = HttpStatus.SERVICE_UNAVAILABLE;
       message = '数据库连接失败，请稍后重试';
+      errorCode = 'DATABASE_UNAVAILABLE';
     }
     // ServeStaticModule 使用的 Express NotFoundError 不是 Nest HttpException，
     // 但会携带 status/statusCode。保留 4xx，避免缺失静态文件被误记为 500。
@@ -74,8 +92,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
       if (typeof externalStatus === 'number' && externalStatus >= 400 && externalStatus < 500) {
         status = externalStatus;
         message = status === HttpStatus.NOT_FOUND ? '请求的资源不存在' : '请求不合法';
+        errorCode = status === HttpStatus.NOT_FOUND ? 'RESOURCE_NOT_FOUND' : `HTTP_${status}`;
       } else {
-        message = isProduction ? '服务器内部错误' : exception.message;
+        message = '服务器内部错误';
+        errorCode = 'INTERNAL_ERROR';
       }
     }
 
@@ -94,6 +114,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
       message: Array.isArray(message) ? message.join("；") : message,
       timestamp: new Date().toISOString(),
       path: request.url,
+      ...(typeof requestId === 'string' ? { requestId } : {}),
+      errorCode,
+      ...(details ? { details } : {}),
     });
   }
 }

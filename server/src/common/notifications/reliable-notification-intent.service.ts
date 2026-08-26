@@ -1,0 +1,168 @@
+import { Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { createHash } from "node:crypto";
+import { OutboxService } from "../outbox/outbox.service";
+
+type NotificationTransaction = Prisma.TransactionClient;
+
+type OrderNotificationSnapshot = {
+  id: number;
+  orderNo: string;
+  customerId: number | null;
+  customerEmail: string | null;
+  finalAmount: Prisma.Decimal | number | string;
+};
+
+type PaymentNotificationSnapshot = OrderNotificationSnapshot & {
+  paymentId: number;
+  paymentAmount: Prisma.Decimal | number | string;
+  cumulativePaidCents: number;
+};
+
+function normalizedEmail(value: string | null): string | null {
+  const email = value?.trim().toLowerCase();
+  return email || null;
+}
+
+function destinationHash(email: string): string {
+  return createHash("sha256").update(email).digest("hex");
+}
+
+function moneyToCents(value: Prisma.Decimal | number | string): number {
+  const amount = Number(value);
+  const cents = Math.round(amount * 100);
+  if (!Number.isFinite(amount) || !Number.isSafeInteger(cents)) {
+    throw new Error("Notification amount is invalid");
+  }
+  return cents;
+}
+
+function moneyText(cents: number): string {
+  return `¥${(cents / 100).toFixed(2)}`;
+}
+
+@Injectable()
+export class ReliableNotificationIntentService {
+  constructor(private readonly outbox: OutboxService) {}
+
+  async enqueueOrderCreated(
+    tx: NotificationTransaction,
+    order: OrderNotificationSnapshot,
+  ) {
+    if (!order.customerId) return null;
+    const now = new Date();
+    const finalCents = moneyToCents(order.finalAmount);
+    return this.createServiceIntent(tx, {
+      customerId: order.customerId,
+      type: "SERVICE_ORDER_CREATED",
+      title: "订单已创建",
+      body: `订单 ${order.orderNo} 已创建，应付金额 ${moneyText(finalCents)}。`,
+      actionUrl: "/customer?section=orders",
+      destinationEmail: order.customerEmail,
+      payload: { orderId: order.id },
+      outboxPayload: { orderId: order.id },
+      deduplicationKey: `order.created:${order.id}`,
+      occurredAt: now,
+    });
+  }
+
+  async enqueuePaymentConfirmed(
+    tx: NotificationTransaction,
+    payment: PaymentNotificationSnapshot,
+  ) {
+    if (!payment.customerId) return null;
+    const now = new Date();
+    const paymentCents = moneyToCents(payment.paymentAmount);
+    const finalCents = moneyToCents(payment.finalAmount);
+    const remainingCents = Math.max(0, finalCents - payment.cumulativePaidCents);
+    return this.createServiceIntent(tx, {
+      customerId: payment.customerId,
+      type: "SERVICE_PAYMENT_CONFIRMED",
+      title: "付款已确认",
+      body: `订单 ${payment.orderNo} 本次确认收款 ${moneyText(paymentCents)}，累计已收 ${moneyText(payment.cumulativePaidCents)}，剩余应收 ${moneyText(remainingCents)}。`,
+      actionUrl: "/customer?section=orders",
+      destinationEmail: payment.customerEmail,
+      payload: {
+        orderId: payment.id,
+        paymentId: payment.paymentId,
+        paymentCents,
+        cumulativePaidCents: payment.cumulativePaidCents,
+        remainingCents,
+      },
+      outboxPayload: {
+        orderId: payment.id,
+        paymentId: payment.paymentId,
+      },
+      deduplicationKey: `payment.confirmed:${payment.paymentId}`,
+      occurredAt: now,
+    });
+  }
+
+  private async createServiceIntent(
+    tx: NotificationTransaction,
+    input: {
+      customerId: number;
+      type: string;
+      title: string;
+      body: string;
+      actionUrl: string;
+      destinationEmail: string | null;
+      payload: Prisma.InputJsonValue;
+      outboxPayload: Record<string, number>;
+      deduplicationKey: string;
+      occurredAt: Date;
+    },
+  ) {
+    const notification = await tx.notification.create({
+      data: {
+        customerId: input.customerId,
+        type: input.type,
+        locale: "ZH_CN",
+        title: input.title,
+        body: input.body,
+        actionUrl: input.actionUrl,
+        payload: input.payload,
+        status: "AVAILABLE",
+        availableAt: input.occurredAt,
+      },
+    });
+
+    await tx.notificationDelivery.create({
+      data: {
+        notificationId: notification.id,
+        channel: "IN_APP",
+        status: "DELIVERED",
+        provider: "internal",
+        sentAt: input.occurredAt,
+        deliveredAt: input.occurredAt,
+      },
+    });
+
+    const email = normalizedEmail(input.destinationEmail);
+    if (email) {
+      await tx.notificationDelivery.create({
+        data: {
+          notificationId: notification.id,
+          channel: "EMAIL",
+          status: "PENDING",
+          destinationHash: destinationHash(email),
+        },
+      });
+    }
+
+    await this.outbox.enqueue(tx, {
+      aggregateType: "Notification",
+      aggregateId: String(notification.id),
+      eventType: "notification.delivery.requested",
+      payload: {
+        notificationId: notification.id,
+        ...input.outboxPayload,
+      },
+      deduplicationKey: input.deduplicationKey,
+      occurredAt: input.occurredAt,
+      availableAt: input.occurredAt,
+    });
+
+    return notification;
+  }
+}

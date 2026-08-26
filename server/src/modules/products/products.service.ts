@@ -29,6 +29,7 @@ import { ProductMediaService } from "./product-media.service";
 import { ProductAccessService } from "./product-access.service";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { createHash } from "node:crypto";
+import { resolveCustomerProductVisibilities } from "./product-eligibility";
 
 const PRODUCT_QUALITY_GATE_VERSION = "p0-product-quality-v1";
 const FORBIDDEN_PUBLIC_CONTENT =
@@ -104,7 +105,6 @@ const CUSTOMER_FACING_LIST_SELECT = {
   price: true,
   weight: true,
   size: true,
-  craftTechnique: true,
   salesMode: true,
   inventoryPolicy: true,
   isHot: true,
@@ -137,6 +137,11 @@ const CUSTOMER_FACING_LIST_SELECT = {
   },
   primaryImage: { select: CUSTOMER_FACING_IMAGE_SELECT },
   listingImage: { select: CUSTOMER_FACING_IMAGE_SELECT },
+} satisfies Prisma.ProductSelect;
+
+const CUSTOMER_FACING_PUBLIC_DETAIL_SELECT = {
+  ...CUSTOMER_FACING_LIST_SELECT,
+  craftTechnique: true,
 } satisfies Prisma.ProductSelect;
 
 const CUSTOMER_FACING_DETAIL_SELECT = {
@@ -740,10 +745,7 @@ export class ProductsService {
    * 因此审核暂停即便旧 JWT 未过期，也会在下一次请求立即生效。
    */
   resolveVisibleVisibilities(customer: any): ProductVisibility[] {
-    const isPartner =
-      customer?.accountType === "PARTNER" &&
-      customer?.partnerStatus === "APPROVED";
-    return isPartner ? ["PUBLIC", "MEMBER", "PARTNER"] : ["PUBLIC", "MEMBER"];
+    return resolveCustomerProductVisibilities(customer);
   }
 
   /** 会员目录：按客户可见范围过滤，并使用与游客一致的安全字段白名单。 */
@@ -964,6 +966,7 @@ export class ProductsService {
   private toCustomerFacingProduct(
     product: any,
     mediaScope: "public" | "catalog",
+    includePublicCraftTechnique = false,
   ): Record<string, unknown> {
     const productId = product.id;
     const mapImage = (img: any) => {
@@ -1003,7 +1006,6 @@ export class ProductsService {
       price: canShowPrice && Number(product.price) > 0 ? product.price : null,
       weight: product.weight,
       size: product.size,
-      craftTechnique: product.craftTechnique,
       salesMode: product.salesMode,
       inventoryPolicy: product.inventoryPolicy,
       isAvailableForPurchase: canShowPrice && availableStock > 0,
@@ -1030,6 +1032,10 @@ export class ProductsService {
         ? mapImage(product.listingImage)
         : null,
     };
+
+    if (includePublicCraftTechnique) {
+      response.craftTechnique = product.craftTechnique;
+    }
 
     if (Object.prototype.hasOwnProperty.call(product, "description")) {
       response.description = product.description;
@@ -1235,8 +1241,8 @@ export class ProductsService {
   async findPublicById(reference: string | number) {
     const value = String(reference).trim();
     if (!value) return null;
-    // 游客详情：仅返回列表级字段（不含 description/gemInfo/craftTechnique/skus），
-    // 防止未登录抓取工艺细节、价格与规格；完整详情需登录后走 catalog/:id。
+    // 游客详情在公开列表白名单上仅追加已获准的工艺字段；
+    // description/gemInfo/SKU 与履约细节仍只在登录目录详情返回。
     const publicWhere = {
       deletedAt: null,
       status: "PUBLISHED" as const,
@@ -1247,16 +1253,18 @@ export class ProductsService {
         ...publicWhere,
         code: value,
       },
-      select: CUSTOMER_FACING_LIST_SELECT,
+      select: CUSTOMER_FACING_PUBLIC_DETAIL_SELECT,
     });
     const legacyId = Number(value);
     if (!product && Number.isInteger(legacyId) && legacyId > 0) {
       product = await this.prisma.product.findFirst({
         where: { ...publicWhere, id: legacyId },
-        select: CUSTOMER_FACING_LIST_SELECT,
+        select: CUSTOMER_FACING_PUBLIC_DETAIL_SELECT,
       });
     }
-    return product ? this.toCustomerFacingProduct(product, "public") : null;
+    return product
+      ? this.toCustomerFacingProduct(product, "public", true)
+      : null;
   }
 
   /** 会员目录详情：查询本身完成越权过滤，不再调用返回后台字段的 findById。 */

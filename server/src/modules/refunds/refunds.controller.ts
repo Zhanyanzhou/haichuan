@@ -60,4 +60,24 @@ export class RefundsController {
       { type: 'ADMIN', id: user?.id, name: user?.realName || user?.username },
     );
   }
+
+  /** 发起或按同一商户退款单号重试微信原路退款；不会人工标记成功。 */
+  @ApiBearerAuth()
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Put(':id/channel')
+  startChannel(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.refundsService.startOnlineRefund(+id, {
+      type: 'ADMIN',
+      id: user?.id,
+      name: user?.realName || user?.username,
+    });
+  }
+
+  /** 主动查询原渠道退款状态；查询到成功时会走与通知相同的核销管线。 */
+  @ApiBearerAuth()
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Get(':id/channel')
+  queryChannel(@Param('id') id: string) {
+    return this.refundsService.queryOnlineRefund(+id);
+  }
 }

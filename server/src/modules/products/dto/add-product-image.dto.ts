@@ -10,6 +10,8 @@ import {
   Min,
 } from "class-validator";
 
+const PRODUCT_IMAGE_TYPES = ["FRONT", "SIDE", "TOP", "DETAIL", "WEARING"];
+
 export class AddProductImageDto {
   @IsOptional()
   @IsString({ message: "图片地址必须是字符串" })
@@ -22,7 +24,7 @@ export class AddProductImageDto {
   storageKey?: string;
 
   @IsOptional()
-  @IsIn(["FRONT", "SIDE", "TOP", "DETAIL", "WEARING"], {
+  @IsIn(PRODUCT_IMAGE_TYPES, {
     message: "图片类型不正确",
   })
   type?: string;
@@ -70,4 +72,16 @@ export class AddProductImageDto {
   @Transform(({ obj, key, value }) => obj?.[key] ?? value, { toClassOnly: true })
   @IsBoolean({ message: "视频标记必须是布尔值" })
   isVideo?: boolean;
+}
+
+export class UpdateProductImageDto {
+  @IsOptional()
+  @IsIn(PRODUCT_IMAGE_TYPES, { message: "图片类型不正确" })
+  type?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: "图片排序必须是整数" })
+  @Min(0, { message: "图片排序不能小于0" })
+  sortOrder?: number;
 }

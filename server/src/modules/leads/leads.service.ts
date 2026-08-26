@@ -4,14 +4,7 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
-
-const LEAD_STATUSES = [
-  "PENDING",
-  "CONTACTED",
-  "FOLLOWING",
-  "COMPLETED",
-  "INVALID",
-];
+import { LEAD_TYPES, LEAD_STATUSES } from "./lead.constants";
 
 const LEAD_STATUS_TRANSITIONS: Record<string, readonly string[]> = {
   PENDING: ["CONTACTED", "INVALID"],
@@ -214,7 +207,7 @@ export class LeadsService {
       status?: string;
       internalNote?: string;
       assignedTo?: number;
-      nextFollowUpAt?: string;
+      nextFollowUpAt?: string | null;
     },
   ) {
     if (leadType !== "inquiry" && leadType !== "selection") {
@@ -237,7 +230,7 @@ export class LeadsService {
     const idField = leadType === "inquiry" ? "assignedTo" : "handledBy";
     const payload: any = {};
     if (data.status !== undefined) {
-      if (!LEAD_STATUSES.includes(data.status)) {
+      if (!LEAD_STATUSES.includes(data.status as (typeof LEAD_STATUSES)[number])) {
         throw new UnprocessableEntityException("线索状态不合法");
       }
       if (!LEAD_STATUS_TRANSITIONS[current.status]?.includes(data.status)) {
@@ -272,9 +265,26 @@ export class LeadsService {
     leadId: number;
     content: string;
     contactMethod?: string;
-    nextFollowUpAt?: string;
+    nextFollowUpAt?: string | null;
     createdBy?: number;
   }) {
+    if (!LEAD_TYPES.includes(data.leadType as (typeof LEAD_TYPES)[number])) {
+      throw new UnprocessableEntityException("线索类型不合法");
+    }
+    if (!Number.isInteger(data.leadId) || data.leadId <= 0) {
+      throw new UnprocessableEntityException("线索编号不合法");
+    }
+    const lead = data.leadType === "inquiry"
+      ? await this.prisma.inquiry.findUnique({
+          where: { id: data.leadId },
+          select: { id: true },
+        })
+      : await this.prisma.selectionInquiry.findUnique({
+          where: { id: data.leadId },
+          select: { id: true },
+        });
+    if (!lead) throw new NotFoundException("线索不存在");
+
     return this.prisma.leadFollowUp.create({
       data: {
         leadType: data.leadType,
@@ -284,7 +294,7 @@ export class LeadsService {
         nextFollowUpAt: data.nextFollowUpAt
           ? new Date(data.nextFollowUpAt)
           : null,
-        createdBy: data.createdBy || null,
+        createdBy: data.createdBy ?? null,
       },
     });
   }

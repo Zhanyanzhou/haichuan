@@ -28,6 +28,7 @@
     "test:trade-state": "node scripts/verify-trade-state-machine.mjs",
     "test:trade-concurrency": "node scripts/verify-trade-concurrency.mjs",
     "test:trade-contract": "node scripts/verify-trade-contract.mjs",
+    "verify:environment-contract": "node scripts/verify-environment-contract.mjs",
     "db:migrate": "cd server && npx prisma migrate dev",
     "db:seed": "cd server && npx prisma db seed",
     "db:studio": "cd server && npx prisma studio",

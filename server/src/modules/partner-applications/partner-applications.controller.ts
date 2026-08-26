@@ -5,6 +5,7 @@ import {
   Put,
   Body,
   Param,
+  ParseIntPipe,
   Query,
   Req,
   UseGuards,
@@ -14,6 +15,7 @@ import { Throttle } from '@nestjs/throttler';
 import { PartnerApplicationsService } from './partner-applications.service';
 import { CreatePartnerApplicationDto } from './dto/create-partner-application.dto';
 import { ReviewPartnerApplicationDto } from './dto/review-partner-application.dto';
+import { PartnerApplicationQueryDto } from './dto/partner-application-query.dto';
 import { CustomerAuthGuard } from '../customers/customer-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -61,9 +63,7 @@ export class PartnerApplicationsController {
   @Roles('CUSTOMER_SERVICE', 'ADMIN', 'SUPER_ADMIN')
   @Get()
   @ApiOperation({ summary: '合作申请列表（按状态筛选、分页）' })
-  list(
-    @Query() query: { page?: string; pageSize?: string; status?: string; keyword?: string },
-  ) {
+  list(@Query() query: PartnerApplicationQueryDto) {
     return this.service.findAll(query);
   }
 
@@ -71,8 +71,8 @@ export class PartnerApplicationsController {
   @Roles('CUSTOMER_SERVICE', 'ADMIN', 'SUPER_ADMIN')
   @Get(':id')
   @ApiOperation({ summary: '合作申请详情' })
-  detail(@Param('id') id: string) {
-    return this.service.findById(+id);
+  detail(@Param('id', ParseIntPipe) id: number) {
+    return this.service.findById(id);
   }
 
   @ApiBearerAuth()
@@ -81,10 +81,10 @@ export class PartnerApplicationsController {
   @ApiOperation({ summary: '审核合作申请（通过/补充/驳回/暂停）' })
   review(
     @Req() request: any,
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() dto: ReviewPartnerApplicationDto,
   ) {
     // request.user 由全局 JwtAuthGuard 注入（员工身份）
-    return this.service.review(+id, dto.action, dto.reviewNote, request.user);
+    return this.service.review(id, dto.action, dto.reviewNote, request.user);
   }
 }

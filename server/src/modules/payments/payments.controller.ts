@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PaymentsService } from './payments.service';
 import { UploadService } from '../upload/upload.service';
 import type { OnlinePayProvider } from '../../common/payment-gateway/payment-gateway.service';
+import { CreateManualReceiptDto } from './dto/payment.dto';
 
 // 付款审核角色边界（P0 修复，对应任务优先问题 #5）：
 // - 查看（列表/详情）：SUPER_ADMIN、ADMIN、CUSTOMER_SERVICE（客服需跟进客户付款状态）；
@@ -72,7 +73,7 @@ export class PaymentsController {
       response.type('text').send(result.ok ? 'success' : 'fail');
     } else {
       response.status(result.ok ? 200 : 500).json(
-        result.ok ? { code: 'SUCCESS', message: 'OK' } : { code: 'FAIL', message: '验签失败' },
+        result.ok ? { code: 'SUCCESS', message: 'OK' } : { code: 'FAIL', message: '通知未处理完成' },
       );
     }
   }
@@ -131,18 +132,10 @@ export class PaymentsController {
     });
   }
 
-  // 后台手动登记收款（财务/管理员直接录入已到账收款：定金/尾款/全款/补款）
+  // 异常线下实收登记；不得用此入口伪造微信/支付宝网关到账。
   @Post('receipt')
   @Roles('SUPER_ADMIN', 'ADMIN', 'FINANCE')
-  createReceipt(@Body() body: {
-    orderId: number;
-    amount: number;
-    method: string;
-    type: 'DEPOSIT' | 'BALANCE' | 'FULL' | 'SUPPLEMENT';
-    paidAt?: string;
-    gatewayTradeNo?: string;
-    reviewNote?: string;
-  }, @CurrentUser() user: any) {
+  createReceipt(@Body() body: CreateManualReceiptDto, @CurrentUser() user: any) {
     return this.paymentsService.createReceipt(body, {
       type: 'ADMIN' as const,
       id: user?.id,

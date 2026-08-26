@@ -18,9 +18,9 @@ export class CreateRefundDto {
   @IsString() @MaxLength(500)
   reason!: string;
 
-  @IsOptional() @IsString() @MaxLength(64) @Matches(/^[A-Za-z0-9_\-:]{1,64}$/, { message: '幂等键格式不合法' })
+  @IsString() @MaxLength(64) @Matches(/^[A-Za-z0-9_\-:]{1,64}$/, { message: '幂等键格式不合法' })
   /** 幂等键：同键重复提交只会创建一次，防重复退款 */
-  idempotencyKey?: string;
+  idempotencyKey!: string;
 
   @IsOptional() @IsInt()
   afterSalesCaseId?: number;
@@ -35,7 +35,7 @@ export class ReviewRefundDto {
   reviewNote?: string;
 }
 
-/** 退款执行 DTO（人工标记完成/失败） */
+/** 线下退款执行 DTO；在线退款不能通过此入口人工标记完成。 */
 export class ExecuteRefundDto {
   @IsEnum(['COMPLETED', 'FAILED'])
   action!: string;

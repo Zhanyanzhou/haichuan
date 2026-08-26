@@ -14,6 +14,7 @@ import {
   NotFoundException,
   MessageEvent,
   Sse,
+  ParseIntPipe,
 } from "@nestjs/common";
 import {
   ApiTags,
@@ -42,11 +43,13 @@ import {
   AdminProductQueryDto,
   ResolveProductReferencesDto,
   AddProductImageDto,
+  UpdateProductImageDto,
 } from "./dto";
 import { join } from "path";
 import { stat } from "node:fs/promises";
 import { Observable } from "rxjs";
 import { ProductStatus } from "@prisma/client";
+import { requirePublishedPublicContentLocale } from "../../common/content-locale";
 const sharp = require("sharp");
 
 @ApiTags("产品管理")
@@ -92,12 +95,14 @@ export class ProductsController {
   @Get("public")
   @ApiOperation({ summary: "公开商品列表（仅 PUBLIC + PUBLISHED 安全字段）" })
   findPublic(@Query() query: PublicProductQueryDto) {
+    requirePublishedPublicContentLocale(query.locale);
     return this.productsService.findPublic(query);
   }
 
   @Public()
   @Sse("public/stream")
-  publicChangeStream(): Observable<MessageEvent> {
+  publicChangeStream(@Query("locale") locale?: string): Observable<MessageEvent> {
+    requirePublishedPublicContentLocale(locale);
     // 旧公开 SSE 保留向后兼容：仅发变更信号，不返回商品数据。前端应迁移到 catalog/stream。
     return this.productsService.publicChangeStream();
   }
@@ -105,7 +110,11 @@ export class ProductsController {
   @Public()
   @Get("public/:id")
   @ApiOperation({ summary: "公开商品详情（仅 PUBLIC + PUBLISHED 安全字段）" })
-  async findPublicById(@Param("id") id: string) {
+  async findPublicById(
+    @Param("id") id: string,
+    @Query("locale") locale?: string,
+  ) {
+    requirePublishedPublicContentLocale(locale);
     const product = await this.productsService.findPublicById(id);
     if (!product) throw new NotFoundException("商品当前不可浏览");
     return product;
@@ -150,12 +159,14 @@ export class ProductsController {
     description: "按 id 集合拉取（首页/区块用）",
   })
   findCatalog(@Req() request: any, @Query() query: PublicProductQueryDto) {
+    requirePublishedPublicContentLocale(query.locale);
     return this.productsService.findCatalog(query, request.customer);
   }
 
   @Public()
   @Sse("catalog/stream")
-  catalogChangeStream(): Observable<MessageEvent> {
+  catalogChangeStream(@Query("locale") locale?: string): Observable<MessageEvent> {
+    requirePublishedPublicContentLocale(locale);
     // SSE 无法携带 Bearer 头（浏览器 EventSource 限制），此处不鉴权；
     // 安全性由"只发变更信号、绝不返回商品数据"保证：前端收到信号后用鉴权 catalog 接口重拉。
     return this.productsService.publicChangeStream();
@@ -165,7 +176,12 @@ export class ProductsController {
   @UseGuards(CustomerAuthGuard)
   @Get("catalog/:id")
   @ApiOperation({ summary: "受控商品详情（登录后访问，按可见范围过滤）" })
-  async findCatalogById(@Req() request: any, @Param("id") id: string) {
+  async findCatalogById(
+    @Req() request: any,
+    @Param("id") id: string,
+    @Query("locale") locale?: string,
+  ) {
+    requirePublishedPublicContentLocale(locale);
     const product = await this.productsService.findCatalogById(
       id,
       request.customer,
@@ -317,11 +333,11 @@ export class ProductsController {
   @Put(":id/images/:imageId")
   @ApiOperation({ summary: "更新图片信息（类型/排序）" })
   updateImage(
-    @Param("id") id: string,
-    @Param("imageId") imageId: string,
-    @Body() body: any,
+    @Param("id", ParseIntPipe) id: number,
+    @Param("imageId", ParseIntPipe) imageId: number,
+    @Body() body: UpdateProductImageDto,
   ) {
-    return this.productsService.updateImage(+id, +imageId, body);
+    return this.productsService.updateImage(id, imageId, body);
   }
 
   @UseGuards(JwtAuthGuard)

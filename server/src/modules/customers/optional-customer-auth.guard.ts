@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { extractAccessToken } from '../../common/security/session-security';
 
 /**
  * 公开接口可匿名访问；携带客户令牌时，验证后把客户资料挂到请求中。
@@ -14,10 +15,7 @@ export class OptionalCustomerAuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const authorization = request.headers.authorization;
-    const token = typeof authorization === 'string' && authorization.startsWith('Bearer ')
-      ? authorization.slice(7)
-      : null;
+    const token = extractAccessToken(request, 'customer');
     if (!token) return true;
 
     try {

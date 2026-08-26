@@ -1,5 +1,5 @@
 // 交易域并发、金额与幂等静态契约测试
-// 验证：付款审核乐观锁（防双扣库存）、退款金额校验（防超额）、幂等键、整数分金额计算。
+// 验证：支付核销乐观锁（防双扣库存）、退款金额校验（防超额）、幂等键、整数分金额计算。
 // 运行：node scripts/verify-trade-concurrency.mjs
 // 说明：本脚本通过静态分析后端源码验证并发/幂等/金额不变式；
 //       行为级并发测试（真实数据库事务）需在本地环境执行，见最终报告。
@@ -27,23 +27,26 @@ function check(name, fn) {
 
 console.log("交易域并发 / 金额 / 幂等契约测试\n");
 
-// ── 付款审核乐观锁（防双扣库存，验收项 #8）──
+// ── 支付核销乐观锁（防双扣库存，验收项 #8）──
 const ordersSrc = await readSrc("server/src/modules/orders/orders.service.ts");
 
-check("付款审核：使用 updateMany + status:PENDING 条件更新（乐观锁）", () => {
-  assert.ok(/tx\.payment\.updateMany\(\s*\{[^}]*where:\s*\{\s*id:\s*paymentId,\s*status:\s*['"]PENDING['"]/.test(ordersSrc.replace(/\n/g, " ").replace(/\s+/g, " ")),
-    "approveOfflinePayment 必须用条件更新推进 PENDING→PAID");
+check("支付核销：使用 updateMany + status:PENDING 条件更新（乐观锁）", () => {
+  const approveMatch = ordersSrc.match(/async confirmPaymentSettlement[\s\S]*?async recordManualReceipt/);
+  assert.ok(approveMatch, "未找到 confirmPaymentSettlement 方法");
+  assert.ok(approveMatch[0].includes("tx.payment.updateMany"), "付款确认必须使用条件更新");
+  assert.ok(approveMatch[0].includes("status: { in: allowedStatuses }"), "付款确认必须限定可核销状态");
+  assert.ok(approveMatch[0].includes('["PENDING", "FAILED"]'), "网关恢复集合必须包含 PENDING");
 });
 
-check("付款审核：并发命中 0 时抛错（杜绝双扣库存）", () => {
+check("支付核销：并发命中 0 时抛错（杜绝双扣库存）", () => {
   assert.ok(/updated\.count\s*===\s*0/.test(ordersSrc), "必须检查 updated.count === 0");
   assert.ok(/该付款记录已被处理，请刷新后重试/.test(ordersSrc), "并发失败需返回明确中文提示");
 });
 
-check("付款审核：整个流程在 Prisma 事务内", () => {
-  const approveMatch = ordersSrc.match(/async approveOfflinePayment[\s\S]*?\n  \}/);
-  assert.ok(approveMatch, "未找到 approveOfflinePayment 方法");
-  assert.ok(approveMatch[0].includes("$transaction"), "approveOfflinePayment 必须在事务内");
+check("支付核销：整个流程在 Prisma 事务内", () => {
+  const approveMatch = ordersSrc.match(/async confirmPaymentSettlement[\s\S]*?\n  \}/);
+  assert.ok(approveMatch, "未找到 confirmPaymentSettlement 方法");
+  assert.ok(approveMatch[0].includes("$transaction"), "confirmPaymentSettlement 必须在事务内");
 });
 
 check("付款驳回：同样使用乐观锁", () => {
@@ -59,11 +62,10 @@ check("库存释放：仅处理 releasedAt=null 且 consumedAt=null 的预占（
 });
 
 check("库存消费：仅处理 releasedAt=null 且 consumedAt=null 的预占（防重复消费）", () => {
-  // consumeStockReservations 的 where 条件
-  const consumeMatch = ordersSrc.match(/consumeStockReservations[\s\S]*?updateMany\(\s*\{([^}]+)\}/);
+  const consumeMatch = ordersSrc.match(/private async consumeStockReservations[\s\S]*?\n  \}/);
   assert.ok(consumeMatch, "未找到 consumeStockReservations");
-  assert.ok(consumeMatch[1].includes("releasedAt: null"), "消费必须过滤 releasedAt=null");
-  assert.ok(consumeMatch[1].includes("consumedAt: null"), "消费必须过滤 consumedAt=null");
+  assert.ok(consumeMatch[0].includes("releasedAt: null"), "消费必须过滤 releasedAt=null");
+  assert.ok(consumeMatch[0].includes("consumedAt: null"), "消费必须过滤 consumedAt=null");
 });
 
 check("库存预占：原子条件更新 quantity>=deduction（防超卖）", () => {
@@ -99,13 +101,15 @@ check("退款：累计退款不超过已确认收款（整数分校验）", () =
   assert.ok(/退款金额超过可退额度/.test(refundsSrc), "超额退款必须有中文提示");
 });
 
-check("退款：用整数分计算（Math.round(amount*100)）", () => {
-  assert.ok(refundsSrc.includes("Math.round(data.amount * 100)"), "退款金额必须转整数分");
-  assert.ok(refundsSrc.includes("Math.round(Number(p.amount) * 100)"), "已收款必须转整数分");
+check("退款：金额统一通过 moneyToCents 转为整数分", () => {
+  assert.ok(refundsSrc.includes("private moneyToCents"), "缺少统一整数分转换入口");
+  assert.ok(refundsSrc.includes("this.moneyToCents(data.amount, '退款金额')"), "退款金额必须转整数分");
+  assert.ok(refundsSrc.includes("this.moneyToCents(payment.amount)"), "已收款必须转整数分");
 });
 
 check("退款：支持幂等键（idempotencyKey 防重复创建）", () => {
-  assert.ok(refundsSrc.includes("idempotencyKey") && refundsSrc.includes("findUnique({ where: { idempotencyKey"), "幂等键查询缺失");
+  assert.ok(refundsSrc.includes("idempotencyKey") && refundsSrc.includes("where: { idempotencyKey: data.idempotencyKey }"), "幂等键查询缺失");
+  assert.ok(refundsSrc.includes("assertSameIdempotentRequest"), "同键不同请求必须冲突");
 });
 
 check("退款：审核与执行使用乐观锁（状态条件更新）", () => {
@@ -117,7 +121,8 @@ check("退款：审核与执行使用乐观锁（状态条件更新）", () => {
 
 check("退款：审核通过时再次校验金额（防审核期间超额）", () => {
   const reviewMatch = refundsSrc.match(/async review[\s\S]*?\n  \}/);
-  assert.ok(reviewMatch[0].includes("getActiveRefundCents(refund.orderId, refundId)"), "review 必须在通过时重新校验金额");
+  assert.ok(reviewMatch[0].includes("getActiveRefundCents(tx, refund.orderId, refundId)"), "review 必须在同一事务重新校验订单退款额度");
+  assert.ok(reviewMatch[0].includes("getPaymentActiveRefundCents"), "review 必须重新校验原 Payment 额度");
 });
 
 // ── 内联等价：整数分金额累加 ──

@@ -11,6 +11,23 @@ import path from "node:path";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const readSrc = (rel) => readFile(path.join(root, rel), "utf8");
 
+async function readExportedTypeSurface(entry, visited = new Set()) {
+  const normalized = entry.replaceAll("\\", "/");
+  if (visited.has(normalized)) return "";
+  visited.add(normalized);
+  const source = await readSrc(normalized);
+  const chunks = [source];
+  for (const match of source.matchAll(
+    /export\s+(?:type\s+)?\*\s+from\s+["'](\.[^"']+)["']/g,
+  )) {
+    const target = path.posix.normalize(
+      path.posix.join(path.posix.dirname(normalized), `${match[1]}.ts`),
+    );
+    chunks.push(await readExportedTypeSurface(target, visited));
+  }
+  return chunks.join("\n");
+}
+
 let passed = 0;
 function check(name, fn) {
   try {
@@ -34,6 +51,15 @@ const customersService = await readSrc(
   "server/src/modules/customers/customers.service.ts",
 );
 const customerApi = await readSrc("client/src/services/api.ts");
+const customerAfterSalesController = await readSrc(
+  "server/src/modules/after-sales/customer-after-sales.controller.ts",
+);
+const afterSalesDto = await readSrc(
+  "server/src/modules/after-sales/dto/after-sales.dto.ts",
+);
+const afterSalesService = await readSrc(
+  "server/src/modules/after-sales/after-sales.service.ts",
+);
 const uploadController = await readSrc(
   "server/src/modules/upload/upload.controller.ts",
 );
@@ -97,6 +123,47 @@ check("客户账户：订单号不可兑换访问令牌", () => {
     !customerApi.includes("accessByOrder"),
     "前端不可调用订单号访问接口",
   );
+});
+
+check("客户售后：本人认证入口与后台售后入口隔离", () => {
+  assert.ok(
+    customerAfterSalesController.includes("@UseGuards(CustomerAuthGuard)"),
+    "客户售后必须使用 CustomerAuthGuard",
+  );
+  assert.ok(
+    customerAfterSalesController.includes("@Public()"),
+    "客户售后必须绕过后台全局 JWT 后再执行客户认证",
+  );
+  assert.ok(
+    !customerAfterSalesController.includes("CustomerCommerceGuard"),
+    "交易暂停时仍应允许客户查看并处理历史售后",
+  );
+});
+
+check("客户售后：DTO 只接收订单商品、类型和原因", () => {
+  const customerDto = afterSalesDto.match(
+    /export class CreateCustomerAfterSalesDto \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(customerDto, "缺少 CreateCustomerAfterSalesDto");
+  for (const field of ["orderItemId", "type", "reason"]) {
+    assert.ok(customerDto.includes(field), `客户售后 DTO 缺少 ${field}`);
+  }
+  for (const field of [
+    "customerId",
+    "requestedRefundAmount",
+    "evidenceUrls",
+    "adminNote",
+  ]) {
+    assert.ok(!customerDto.includes(field), `客户售后 DTO 不可含 ${field}`);
+  }
+});
+
+check("客户售后：服务端校验归属、商品、状态并串行化重复申请", () => {
+  assert.ok(afterSalesService.includes("await this.lockOrder(tx, orderId)"));
+  assert.ok(afterSalesService.includes("where: { id: orderId, customerId }"));
+  assert.ok(afterSalesService.includes("item.id === data.orderItemId"));
+  assert.ok(afterSalesService.includes("ACTIVE_AFTER_SALES_STATUSES"));
+  assert.ok(afterSalesService.includes("requestedRefundAmount: null"));
 });
 
 check("付款凭证：新上传文件使用私有存储且读取需要鉴权", () => {
@@ -202,10 +269,25 @@ check("结算页：前端不再提交后端忽略的 customerName/phone/paymentM
 const ordersService = await readSrc(
   "server/src/modules/orders/orders.service.ts",
 );
+const productEligibility = await readSrc(
+  "server/src/modules/products/product-eligibility.ts",
+);
+const directPurchaseBaseWhereBlock = productEligibility.match(
+  /export function directPurchaseProductBaseWhere\(\): Prisma\.ProductWhereInput \{[\s\S]*?\n\}/,
+)?.[0];
+const directPurchaseCreateBlock = ordersService.match(
+  /async create\(data:[\s\S]*?\n  async createFromQuotation/,
+)?.[0];
 
 check("下单：仅 DIRECT_PURCHASE 商品可下单（非直接购买被拒绝）", () => {
   assert.ok(
-    /salesMode:\s*['"]DIRECT_PURCHASE['"]/.test(ordersService),
+    ordersService.includes("directPurchaseProductBaseWhere") &&
+      ordersService.includes("directPurchaseProductWhere"),
+    "订单服务必须使用共享的直接购买商品门禁",
+  );
+  assert.ok(
+    directPurchaseBaseWhereBlock &&
+      /salesMode:\s*['"]DIRECT_PURCHASE['"]/.test(directPurchaseBaseWhereBlock),
     "必须校验 salesMode=DIRECT_PURCHASE",
   );
   assert.ok(
@@ -216,10 +298,14 @@ check("下单：仅 DIRECT_PURCHASE 商品可下单（非直接购买被拒绝�
 
 check("下单：商品必须 PUBLISHED 且未软删除", () => {
   assert.ok(
-    /status:\s*['"]PUBLISHED['"]/.test(ordersService),
+    directPurchaseBaseWhereBlock &&
+      /status:\s*['"]PUBLISHED['"]/.test(directPurchaseBaseWhereBlock),
     "必须校验商品 PUBLISHED",
   );
-  assert.ok(ordersService.includes("deletedAt: null"), "必须过滤软删除商品");
+  assert.ok(
+    directPurchaseBaseWhereBlock?.includes("deletedAt: null"),
+    "必须过滤软删除商品",
+  );
 });
 
 check("下单：SKU 必须 isActive", () => {
@@ -232,6 +318,13 @@ check("下单：库存不足时拒绝（无超卖）", () => {
     "必须校验库存充足",
   );
   assert.ok(/库存不足/.test(ordersService), "库存不足必须有明确提示");
+});
+
+check("固定价直购：成交价只认 SKU.price 且不读取金价", () => {
+  assert.ok(directPurchaseCreateBlock, "未找到标准零售 create 方法");
+  assert.ok(directPurchaseCreateBlock.includes("Number(sku.price)"), "固定价必须读取 ProductSKU.price");
+  assert.ok(!directPurchaseCreateBlock.includes("goldPrice"), "固定价直购不得依赖金价查询");
+  assert.ok(directPurchaseCreateBlock.includes("lockedGoldPrice: null"), "固定价订单不得伪造金价锁定语义");
 });
 
 // ── 双下单入口职责（DECISIONS D.7）──
@@ -384,6 +477,8 @@ check(
     assert.ok(apiSrc.includes("fulfillmentApi"), "缺少 fulfillmentApi");
     assert.ok(apiSrc.includes("refundApi"), "缺少 refundApi");
     assert.ok(apiSrc.includes("afterSalesApi"), "缺少 afterSalesApi");
+    assert.ok(apiSrc.includes("createAfterSales"), "缺少客户售后申请 API");
+    assert.ok(apiSrc.includes("cancelAfterSales"), "缺少客户售后撤销 API");
     const orderApiBlock = apiSrc.match(
       /export const orderApi\s*=\s*\{[\s\S]*?\n\};/,
     );
@@ -391,7 +486,7 @@ check(
   },
 );
 
-const typesSrc = await readSrc("client/src/types/index.ts");
+const typesSrc = await readExportedTypeSurface("client/src/types/index.ts");
 check("前端类型：交易域扩展类型已定义", () => {
   for (const t of [
     "TradeEvent",

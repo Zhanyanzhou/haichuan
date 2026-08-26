@@ -23,7 +23,7 @@ test("员工确认报价在读取或写入数据库前被拒绝", async () => {
   const service = new QuotationsService(prisma as unknown as PrismaService);
 
   await assert.rejects(
-    () => service.changeStatus(1, "CONFIRMED"),
+    () => service.changeStatus(1, "CONFIRMED", { id: 1, role: "ADMIN" }),
     ForbiddenException,
   );
   assert.equal(databaseCalls, 0);

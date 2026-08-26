@@ -40,7 +40,7 @@ const SORT_OPTIONS = [
   "code_asc",
 ] as const;
 
-const POSITIVE_ID_CSV = /^\d+(?:,\d+)*$/;
+const POSITIVE_ID_CSV = /^[1-9]\d*(?:,[1-9]\d*)*$/;
 const NON_EMPTY_CSV = /^[^,]+(?:,[^,]+)*$/;
 const MATERIAL_TYPE_CSV = new RegExp(
   `^(?:${MATERIAL_TYPES.join("|")})(?:,(?:${MATERIAL_TYPES.join("|")}))*$`,
@@ -50,6 +50,10 @@ const WEIGHT_RANGE_CSV =
 
 /** 游客与客户商品目录共用的只读查询参数。 */
 export class PublicProductQueryDto {
+  @IsOptional()
+  @IsIn(["zh-CN", "en"])
+  locale?: "zh-CN" | "en";
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

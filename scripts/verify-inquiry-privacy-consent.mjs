@@ -9,7 +9,7 @@ import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const readSrc = (rel) => readFile(path.join(root, rel), "utf8");
-const [inquiryDto, inquiryService, selectionDto, selectionController, selectionService, schema, migration, contact, catalog] = await Promise.all([
+const [inquiryDto, inquiryService, selectionDto, selectionController, selectionService, schema, migration, contact, selectionTray] = await Promise.all([
   readSrc("server/src/modules/inquiries/dto/create-inquiry.dto.ts"),
   readSrc("server/src/modules/inquiries/inquiries.service.ts"),
   readSrc("server/src/modules/selection-inquiry/dto/create-selection-inquiry.dto.ts"),
@@ -18,7 +18,7 @@ const [inquiryDto, inquiryService, selectionDto, selectionController, selectionS
   readSrc("server/prisma/schema.prisma"),
   readSrc("server/prisma/migrations/20260816110000_add_inquiry_privacy_consent_audit/migration.sql"),
   readSrc("client/src/pages/public/Contact/index.tsx"),
-  readSrc("client/src/pages/public/Catalog/index.tsx"),
+  readSrc("client/src/pages/public/Catalog/SelectionTray.tsx"),
 ]);
 
 const checks = [
@@ -39,7 +39,10 @@ const checks = [
   ["两条写入均由服务端盖版本与时间", () => {
     for (const source of [inquiryService, selectionService]) {
       assert.match(source, /privacyConsentVersion:\s*PRIVACY_CONSENT_VERSION/);
-      assert.match(source, /privacyConsentedAt:\s*new Date\(\)/);
+      assert.match(
+        source,
+        /privacyConsentedAt(?::\s*new Date\(\)|\s*=\s*new Date\(\)[\s\S]*?privacyConsentedAt,)/,
+      );
     }
   }],
   ["两张表与迁移包含审计字段，迁移不倒填历史记录", () => {
@@ -50,7 +53,7 @@ const checks = [
   }],
   ["两个公开表单都实际传递勾选值", () => {
     assert.match(contact, /privacyConsent:\s*form\.privacyConsent/);
-    assert.match(catalog, /privacyConsent:\s*form\.privacyConsent/);
+    assert.match(selectionTray, /privacyConsent:\s*form\.privacyConsent/);
   }],
 ];
 

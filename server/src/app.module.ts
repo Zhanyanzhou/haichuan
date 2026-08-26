@@ -44,6 +44,11 @@ import { AuditLogInterceptor } from "./common/interceptors/audit-log.interceptor
 import { HealthController } from "./common/health/health.controller";
 import { LoggerModule } from "nestjs-pino";
 import { ShippingTemplatesModule } from "./modules/shipping-templates/shipping-templates.module";
+import { IdempotencyModule } from "./common/idempotency/idempotency.module";
+import { OutboxModule } from "./common/outbox/outbox.module";
+import { ReliableNotificationsModule } from "./common/notifications/reliable-notifications.module";
+import { SessionSecurityGuard } from "./common/security/session-security.guard";
+import { resolveRequestId } from "./common/observability/request-id";
 
 @Module({
   controllers: [HealthController],
@@ -54,6 +59,11 @@ import { ShippingTemplatesModule } from "./modules/shipping-templates/shipping-t
     // 避免打印 Authorization / Cookie 等敏感请求头。
     LoggerModule.forRoot({
       pinoHttp: {
+        genReqId: (req, res) => {
+          const requestId = resolveRequestId(req.headers["x-request-id"]);
+          res.setHeader("X-Request-Id", requestId);
+          return requestId;
+        },
         transport:
           process.env.NODE_ENV !== "production"
             ? {
@@ -71,10 +81,12 @@ import { ShippingTemplatesModule } from "./modules/shipping-templates/shipping-t
         },
         serializers: {
           req: (req: {
+            id?: string;
             method: string;
             url: string;
             remoteAddress?: string;
           }) => ({
+            requestId: req.id,
             method: req.method,
             url: req.url,
             remoteAddress: req.remoteAddress,
@@ -128,6 +140,9 @@ import { ShippingTemplatesModule } from "./modules/shipping-templates/shipping-t
     RecommendationsModule,
     ReviewsModule,
     ShippingTemplatesModule,
+    IdempotencyModule,
+    OutboxModule,
+    ReliableNotificationsModule,
   ],
   providers: [
     // 默认认证、默认角色判定：新增接口必须显式标注 @Public() 才允许匿名访问。
@@ -135,6 +150,8 @@ import { ShippingTemplatesModule } from "./modules/shipping-templates/shipping-t
     { provide: APP_GUARD, useClass: RolesGuard },
     // 全局启用 ThrottlerGuard
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Bearer 调用保持兼容；只有实际使用 Cookie 鉴权的写请求才要求 CSRF + 精确 Origin。
+    { provide: APP_GUARD, useClass: SessionSecurityGuard },
     { provide: APP_INTERCEPTOR, useClass: AuditLogInterceptor },
   ],
 })

@@ -244,13 +244,58 @@ export class CustomersService {
    */
   async checkout(
     customerId: number,
-    data: { address: string; items: { skuId: number; quantity: number }[]; customerEmail?: string },
+    data: {
+      address: string;
+      items: { skuId: number; quantity: number }[];
+      customerEmail?: string;
+      couponId?: number;
+    },
   ) {
-    const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        accountType: true,
+        partnerStatus: true,
+      },
+    });
     if (!customer) throw new NotFoundException('客户不存在');
 
     const address = data.address?.trim();
     if (!address || address.length > 500) throw new BadRequestException('请提供有效的收货地址');
+
+    const cartRows = await this.prisma.cart.findMany({
+      where: { userId: customer.id },
+      select: { skuId: true, quantity: true },
+    });
+    const cartItemsBySku = new Map<number, number>();
+    for (const item of cartRows) {
+      cartItemsBySku.set(
+        item.skuId,
+        (cartItemsBySku.get(item.skuId) ?? 0) + item.quantity,
+      );
+    }
+    if (cartItemsBySku.size === 0) {
+      throw new ConflictException('购物车为空或已完成结算，请刷新后确认');
+    }
+    const submittedItemsBySku = new Map<number, number>();
+    for (const item of data.items) {
+      submittedItemsBySku.set(
+        item.skuId,
+        (submittedItemsBySku.get(item.skuId) ?? 0) + item.quantity,
+      );
+    }
+    if (
+      submittedItemsBySku.size !== cartItemsBySku.size ||
+      [...cartItemsBySku].some(
+        ([skuId, quantity]) => submittedItemsBySku.get(skuId) !== quantity,
+      )
+    ) {
+      throw new ConflictException('购物车已发生变化，请刷新后重新确认');
+    }
 
     const order = await this.ordersService.create({
       customerId: customer.id,
@@ -258,10 +303,11 @@ export class CustomersService {
       customerPhone: customer.phone,
       customerEmail: data.customerEmail?.trim() || customer.email || undefined,
       address,
-      items: data.items,
-      paymentMethod: 'bank_transfer',
+      items: [...cartItemsBySku].map(([skuId, quantity]) => ({ skuId, quantity })),
+      couponId: data.couponId,
+      checkoutCustomer: customer,
+      operator: { type: 'CUSTOMER', id: customer.id, name: customer.name || customer.phone },
     });
-    await this.prisma.customer.update({ where: { id: customer.id }, data: { lastOrderAt: new Date() } });
     return { order };
   }
 
@@ -375,11 +421,11 @@ export class CustomersService {
   // ===== 合规（个保法可携带权 + 注销权）=====
 
   /**
-   * 导出我的全部个人数据（JSON，可携带权）：资料/地址/订单(含收款状态)/咨询/选款/收藏/评价。
+   * 导出我的全部个人数据（JSON，可携带权）：资料/地址/订单(含收款状态)/咨询/选款/收藏/评价/服务通知。
    * 不含任何他人数据与内部凭据（passwordHash/审核备注等一律排除）。
    */
   async exportMyData(customerId: number) {
-    const [profile, addresses, orders, inquiries, selectionInquiries, favorites, reviews] =
+    const [profile, addresses, orders, inquiries, selectionInquiries, favorites, reviews, notifications] =
       await Promise.all([
         this.prisma.customer.findUnique({
           where: { id: customerId },
@@ -418,6 +464,21 @@ export class CustomersService {
           where: { customerId },
           select: { product: { select: { id: true, name: true } }, rating: true, content: true, status: true, createdAt: true },
         }),
+        this.prisma.notification.findMany({
+          where: { customerId },
+          select: {
+            type: true,
+            locale: true,
+            title: true,
+            body: true,
+            actionUrl: true,
+            status: true,
+            availableAt: true,
+            readAt: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
       ]);
     return {
       exportedAt: new Date().toISOString(),
@@ -428,6 +489,7 @@ export class CustomersService {
       selectionInquiries,
       favorites,
       reviews,
+      notifications,
     };
   }
 
@@ -453,6 +515,21 @@ export class CustomersService {
     await this.prisma.$transaction([
       this.prisma.customerAddress.deleteMany({ where: { customerId } }),
       this.prisma.customerFavorite.deleteMany({ where: { customerId } }),
+      this.prisma.notificationDelivery.updateMany({
+        where: {
+          notification: { customerId },
+          status: { in: ['PENDING', 'SENDING', 'FAILED'] },
+        },
+        data: {
+          status: 'CANCELLED',
+          nextAttemptAt: null,
+          lastErrorCode: 'CUSTOMER_ACCOUNT_CLOSED',
+        },
+      }),
+      this.prisma.notification.updateMany({
+        where: { customerId, status: { not: 'ARCHIVED' } },
+        data: { status: 'ARCHIVED' },
+      }),
       this.prisma.customer.update({
         where: { id: customerId },
         data: {

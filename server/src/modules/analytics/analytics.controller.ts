@@ -18,8 +18,8 @@ export class AnalyticsController {
   @Public()
   @Post('track')
   async track(@Body() body: TrackEventDto) {
-    await this.service.track(body);
-    return { ok: true };
+    const accepted = await this.service.track(body);
+    return { accepted };
   }
 
   @Get('events')

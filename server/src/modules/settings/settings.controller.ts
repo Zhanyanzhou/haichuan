@@ -7,6 +7,7 @@ import { Public } from "../../common/decorators/public.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
+import { requirePublishedPublicContentLocale } from "../../common/content-locale";
 
 @ApiTags("系统设置")
 @ApiBearerAuth()
@@ -19,7 +20,8 @@ export class SettingsController {
   @Public()
   @ApiOperation({ summary: "获取前台可见的店铺资料" })
   @Get("public")
-  async getPublicSettings() {
+  async getPublicSettings(@Query("locale") locale?: string) {
+    requirePublishedPublicContentLocale(locale);
     const settings = await this.settingsService.getSettings();
     return {
       siteName: settings.siteName,
@@ -30,7 +32,9 @@ export class SettingsController {
       contactPhone: settings.contactPhone,
       contactEmail: settings.contactEmail,
       contactAddress: settings.contactAddress,
+      storeName: settings.storeName,
       businessHours: settings.businessHours,
+      storeMapUrl: settings.storeMapUrl,
     };
   }
 

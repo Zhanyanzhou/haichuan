@@ -6,8 +6,15 @@ import {
   ForbiddenException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { Prisma, QuotationStatus } from '@prisma/client';
+import { Prisma, QuotationStatus, Role } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { businessDateKey } from '../../common/time/business-date';
+import { runWithDocumentNumberRetry } from '../../common/trade/document-number-retry';
+
+export interface QuotationActor {
+  id: number;
+  role: Role;
+}
 
 /**
  * 报价管理服务：员工可维护草稿、提交待确认和取消。
@@ -19,7 +26,7 @@ export class QuotationsService {
   /** 报价单状态机 */
   private static VALID_TRANSITIONS: Record<QuotationStatus, QuotationStatus[]> = {
     DRAFT: ['PENDING_CONFIRM', 'CANCELLED'],
-    PENDING_CONFIRM: ['CONFIRMED', 'CANCELLED', 'DRAFT'],
+    PENDING_CONFIRM: ['CONFIRMED', 'CANCELLED'],
     CONFIRMED: ['CONVERTED', 'CANCELLED'],
     EXPIRED: [],
     CANCELLED: [],
@@ -28,9 +35,40 @@ export class QuotationsService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  private isAdministrator(actor: QuotationActor) {
+    return actor?.role === 'SUPER_ADMIN' || actor?.role === 'ADMIN';
+  }
+
+  private accessScope(actor: QuotationActor): { salesConsultantId?: number } {
+    if (this.isAdministrator(actor)) return {};
+    if (actor?.role === 'SALES_CONSULTANT' && Number.isInteger(actor.id) && actor.id > 0) {
+      return { salesConsultantId: actor.id };
+    }
+    throw new ForbiddenException('无权访问报价单');
+  }
+
+  private async resolveSalesConsultantId(
+    requestedId: number | undefined,
+    actor: QuotationActor,
+  ): Promise<number | undefined> {
+    if (!this.isAdministrator(actor)) {
+      this.accessScope(actor);
+      return actor.id;
+    }
+    if (requestedId === undefined) return undefined;
+    const consultant = await this.prisma.user.findUnique({
+      where: { id: requestedId },
+      select: { id: true, role: true, status: true },
+    });
+    if (!consultant || consultant.role !== 'SALES_CONSULTANT' || consultant.status !== 'ACTIVE') {
+      throw new BadRequestException('销售顾问不存在、已停用或角色不正确');
+    }
+    return consultant.id;
+  }
+
   /** 生成报价单号：QT + 日期 + 4 位日内流水 */
   private async generateQuoteNo(tx: Prisma.TransactionClient): Promise<string> {
-    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const date = businessDateKey();
     const prefix = `QT${date}`;
     const latest = await tx.quotation.findFirst({
       where: { quoteNo: { startsWith: prefix } },
@@ -78,12 +116,19 @@ export class QuotationsService {
     });
   }
 
-  async findAll(params: { page?: number; pageSize?: number; status?: string; keyword?: string; salesConsultantId?: number }) {
+  async findAll(
+    params: { page?: number; pageSize?: number; status?: string; keyword?: string; salesConsultantId?: number },
+    actor: QuotationActor,
+  ) {
     const page = Math.max(Number(params.page) || 1, 1);
     const pageSize = Math.min(Math.max(Number(params.pageSize) || 20, 1), 100);
     const where: Prisma.QuotationWhereInput = {};
     if (params.status && params.status !== 'all') where.status = params.status as QuotationStatus;
-    if (params.salesConsultantId) where.salesConsultantId = Number(params.salesConsultantId);
+    if (this.isAdministrator(actor)) {
+      if (params.salesConsultantId) where.salesConsultantId = Number(params.salesConsultantId);
+    } else {
+      Object.assign(where, this.accessScope(actor));
+    }
     if (params.keyword) {
       where.OR = [
         { quoteNo: { contains: params.keyword } },
@@ -108,9 +153,9 @@ export class QuotationsService {
     return { list, total, page, pageSize };
   }
 
-  async findById(id: number) {
-    const quotation = await this.prisma.quotation.findUnique({
-      where: { id },
+  async findById(id: number, actor: QuotationActor) {
+    const quotation = await this.prisma.quotation.findFirst({
+      where: { id, ...this.accessScope(actor) },
       include: {
         items: {
           include: {
@@ -137,35 +182,39 @@ export class QuotationsService {
     depositAmount?: number;
     validUntil?: Date;
     items: Array<{ skuId?: number; productId?: number; productName: string; productImage?: string; spec?: string; quantity: number; unitPrice: number; quotedPrice: number }>;
-  }) {
+  }, actor: QuotationActor) {
     if (!data.items?.length) throw new BadRequestException('报价单至少包含一个商品');
     if (!data.customerName?.trim() || !data.customerPhone?.trim()) {
       throw new BadRequestException('请提供客户姓名和手机号');
     }
     const amounts = this.computeAmounts(data.items);
     const items = this.buildItemData(data.items);
+    const salesConsultantId = await this.resolveSalesConsultantId(data.salesConsultantId, actor);
 
-    return this.prisma.$transaction(async (tx) => {
-      const quotation = await tx.quotation.create({
-        data: {
-          quoteNo: await this.generateQuoteNo(tx),
-          customerId: data.customerId || null,
-          customerName: data.customerName.trim(),
-          customerPhone: data.customerPhone.trim(),
-          customerEmail: data.customerEmail?.trim() || null,
-          salesConsultantId: data.salesConsultantId ?? null,
-          status: 'DRAFT',
-          totalAmount: amounts.totalAmount,
-          discountAmount: amounts.discountAmount,
-          finalAmount: amounts.finalAmount,
-          depositAmount: new Prisma.Decimal(Math.round(Number(data.depositAmount || 0) * 100)).div(100),
-          validUntil: data.validUntil || null,
-          remark: data.remark?.trim() || null,
-          items: { create: items },
-        },
-        include: { items: true },
-      });
-      return quotation;
+    return runWithDocumentNumberRetry({
+      targetMarkers: ['quoteNo', 'quote_no', 'quotations_quote_no_key'],
+      documentLabel: '报价单',
+      runTransaction: () => this.prisma.$transaction(async (tx) =>
+        tx.quotation.create({
+          data: {
+            quoteNo: await this.generateQuoteNo(tx),
+            customerId: data.customerId || null,
+            customerName: data.customerName.trim(),
+            customerPhone: data.customerPhone.trim(),
+            customerEmail: data.customerEmail?.trim() || null,
+            salesConsultantId: salesConsultantId ?? null,
+            status: 'DRAFT',
+            totalAmount: amounts.totalAmount,
+            discountAmount: amounts.discountAmount,
+            finalAmount: amounts.finalAmount,
+            depositAmount: new Prisma.Decimal(Math.round(Number(data.depositAmount || 0) * 100)).div(100),
+            validUntil: data.validUntil || null,
+            remark: data.remark?.trim() || null,
+            items: { create: items },
+          },
+          include: { items: true },
+        }),
+      ),
     });
   }
 
@@ -179,8 +228,10 @@ export class QuotationsService {
     depositAmount?: number;
     validUntil?: Date;
     items?: Array<{ skuId?: number; productId?: number; productName: string; productImage?: string; spec?: string; quantity: number; unitPrice: number; quotedPrice: number }>;
-  }) {
-    const quotation = await this.prisma.quotation.findUnique({ where: { id } });
+  }, actor: QuotationActor) {
+    const quotation = await this.prisma.quotation.findFirst({
+      where: { id, ...this.accessScope(actor) },
+    });
     if (!quotation) throw new NotFoundException('报价单不存在');
     if (quotation.status !== 'DRAFT') throw new BadRequestException('只有草稿状态的报价单可以编辑');
 
@@ -188,7 +239,9 @@ export class QuotationsService {
     if (data.customerName !== undefined) updateData.customerName = data.customerName.trim();
     if (data.customerPhone !== undefined) updateData.customerPhone = data.customerPhone.trim();
     if (data.customerEmail !== undefined) updateData.customerEmail = data.customerEmail.trim() || null;
-    if (data.salesConsultantId !== undefined) updateData.salesConsultantId = data.salesConsultantId ?? null;
+    if (this.isAdministrator(actor) && data.salesConsultantId !== undefined) {
+      updateData.salesConsultantId = await this.resolveSalesConsultantId(data.salesConsultantId, actor);
+    }
     if (data.remark !== undefined) updateData.remark = data.remark?.trim() || null;
     if (data.depositAmount !== undefined) updateData.depositAmount = new Prisma.Decimal(Math.round(Number(data.depositAmount) * 100)).div(100);
     if (data.validUntil !== undefined) updateData.validUntil = data.validUntil || null;
@@ -200,34 +253,48 @@ export class QuotationsService {
       updateData.discountAmount = amounts.discountAmount;
       updateData.finalAmount = amounts.finalAmount;
       const newItems = this.buildItemData(data.items);
-      return this.prisma.$transaction(async (tx) => {
-        await tx.quotationItem.deleteMany({ where: { quotationId: id } });
-        return tx.quotation.update({ where: { id }, data: { ...updateData, items: { create: newItems } }, include: { items: true } });
-      });
+      return this.prisma.$transaction((tx) =>
+        tx.quotation.update({
+          where: { id, ...this.accessScope(actor) },
+          data: {
+            ...updateData,
+            items: { deleteMany: {}, create: newItems },
+          },
+          include: { items: true },
+        }),
+      );
     }
 
-    return this.prisma.quotation.update({ where: { id }, data: updateData, include: { items: true } });
+    return this.prisma.quotation.update({
+      where: { id, ...this.accessScope(actor) },
+      data: updateData,
+      include: { items: true },
+    });
   }
 
   /** 推进报价单状态（乐观锁） */
-  async changeStatus(id: number, newStatus: QuotationStatus) {
+  async changeStatus(id: number, newStatus: QuotationStatus, actor: QuotationActor) {
     if (newStatus === 'CONFIRMED') {
       throw new ForbiddenException(
         '后台员工不能代替客户确认报价；客户本人确认能力尚未开放',
       );
     }
-    const quotation = await this.prisma.quotation.findUnique({ where: { id } });
+    const quotation = await this.prisma.quotation.findFirst({
+      where: { id, ...this.accessScope(actor) },
+    });
     if (!quotation) throw new NotFoundException('报价单不存在');
     const allowed = QuotationsService.VALID_TRANSITIONS[quotation.status];
     if (!allowed || !allowed.includes(newStatus)) {
       throw new BadRequestException(`报价单状态不能从 ${quotation.status} 变更为 ${newStatus}`);
     }
     const updated = await this.prisma.quotation.updateMany({
-      where: { id, status: quotation.status },
+      where: { id, status: quotation.status, ...this.accessScope(actor) },
       data: { status: newStatus },
     });
     if (updated.count === 0) throw new ConflictException('报价单状态已变化，请刷新后重试');
-    return this.prisma.quotation.findUnique({ where: { id } });
+    return this.prisma.quotation.findFirst({
+      where: { id, ...this.accessScope(actor) },
+    });
   }
 
   /**
@@ -246,12 +313,16 @@ export class QuotationsService {
     );
   }
 
-  async remove(id: number) {
-    const quotation = await this.prisma.quotation.findUnique({ where: { id } });
+  async remove(id: number, actor: QuotationActor) {
+    const quotation = await this.prisma.quotation.findFirst({
+      where: { id, ...this.accessScope(actor) },
+    });
     if (!quotation) throw new NotFoundException('报价单不存在');
-    if (quotation.status !== 'DRAFT' && quotation.status !== 'CANCELLED') {
-      throw new BadRequestException('只有草稿或已取消的报价单可以删除');
+    if (quotation.status !== 'DRAFT') {
+      throw new BadRequestException('只有从未提交的草稿报价单可以删除');
     }
-    return this.prisma.quotation.delete({ where: { id } });
+    return this.prisma.quotation.delete({
+      where: { id, ...this.accessScope(actor) },
+    });
   }
 }

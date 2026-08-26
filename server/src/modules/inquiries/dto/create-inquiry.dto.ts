@@ -8,6 +8,8 @@ import {
   Equals,
   Matches,
   MaxLength,
+  IsInt,
+  IsPositive,
 } from 'class-validator';
 
 /** 公开咨询提交：在 service 之前拦截非法/超长输入（原 body:any 零校验） */
@@ -45,6 +47,11 @@ export class CreateInquiryDto {
   @IsString()
   @MaxLength(30)
   budgetRange?: string;
+
+  @IsOptional()
+  @IsInt({ message: '作品标识不正确' })
+  @IsPositive({ message: '作品标识不正确' })
+  productId?: number;
 
   @IsString()
   @IsNotEmpty({ message: '请填写咨询内容' })

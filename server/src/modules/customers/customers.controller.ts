@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -19,6 +20,12 @@ import {
   ResetPasswordDto,
   UpdateCustomerProfileDto,
 } from './dto/customer-auth.dto';
+import {
+  buildClearSessionCookieHeaders,
+  buildSessionCookieHeaders,
+} from '../../common/security/session-security';
+import { CustomerNotificationsService } from './customer-notifications.service';
+import { CustomerNotificationQueryDto } from './dto/customer-notification-query.dto';
 
 // 交易域认证说明（P0 修复）：
 // JwtAuthGuard 已被注册为全局守卫（见 app.module.ts APP_GUARD），
@@ -32,6 +39,7 @@ export class CustomersController {
   constructor(
     private readonly customersService: CustomersService,
     private readonly ordersService: OrdersService,
+    private readonly customerNotifications: CustomerNotificationsService,
   ) {}
 
   // 游客下单已关闭（DECISIONS D.7）：checkout 必须先 login/register，不再签发 access token
@@ -46,15 +54,31 @@ export class CustomersController {
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('register')
-  register(@Body() dto: CustomerRegisterDto) {
-    return this.customersService.register(dto);
+  async register(@Req() request: any, @Res({ passthrough: true }) response: Response, @Body() dto: CustomerRegisterDto) {
+    const result = await this.customersService.register(dto);
+    if (request.headers?.['x-session-mode'] === 'cookie') {
+      response.setHeader('Set-Cookie', buildSessionCookieHeaders('customer', result.accessToken, 24 * 60 * 60).headers);
+    }
+    return result;
   }
 
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login')
-  login(@Body() dto: CustomerLoginDto) {
-    return this.customersService.login(dto);
+  async login(@Req() request: any, @Res({ passthrough: true }) response: Response, @Body() dto: CustomerLoginDto) {
+    const result = await this.customersService.login(dto);
+    if (request.headers?.['x-session-mode'] === 'cookie') {
+      response.setHeader('Set-Cookie', buildSessionCookieHeaders('customer', result.accessToken, 24 * 60 * 60).headers);
+    }
+    return result;
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Post('logout')
+  logout(@Res({ passthrough: true }) response: Response) {
+    response.setHeader('Set-Cookie', buildClearSessionCookieHeaders('customer'));
+    return { success: true };
   }
 
   // 密码找回：3/min 收紧——防止用找回流程轰炸他人邮箱
@@ -108,6 +132,30 @@ export class CustomersController {
   @Get('me/orders')
   getOrders(@Req() request: any) {
     return this.ordersService.findForCustomer(request.customer.id);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Get('me/notifications')
+  getNotifications(
+    @Req() request: any,
+    @Query() query: CustomerNotificationQueryDto,
+  ) {
+    return this.customerNotifications.list(request.customer.id, query);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Put('me/notifications/read-all')
+  markAllNotificationsRead(@Req() request: any) {
+    return this.customerNotifications.markAllRead(request.customer.id);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Put('me/notifications/:id/read')
+  markNotificationRead(@Req() request: any, @Param('id', ParseIntPipe) id: number) {
+    return this.customerNotifications.markRead(request.customer.id, id);
   }
 
   // 物流轨迹：客户查询自己已发货订单的快递轨迹（快递100，未配置凭据时 503）

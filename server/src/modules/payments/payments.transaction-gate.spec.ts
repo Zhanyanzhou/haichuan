@@ -1,6 +1,6 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { PaymentGatewayService } from "../../common/payment-gateway/payment-gateway.service";
@@ -76,12 +76,13 @@ test("总开关关闭期间仍处理关闭前已创建交易的有效回调", as
           id: 9,
           paymentNo: "PAY-OLD",
           amount: 88,
+          method: "alipay",
           status: "PENDING",
         }),
       },
     } as unknown as PrismaService,
     {
-      approveOfflinePayment: async (paymentId: number) => {
+      confirmPaymentSettlement: async (paymentId: number) => {
         approvedPaymentId = paymentId;
       },
     } as never,
@@ -103,4 +104,187 @@ test("总开关关闭期间仍处理关闭前已创建交易的有效回调", as
 
   assert.deepEqual(result, { ok: true });
   assert.equal(approvedPaymentId, 9);
+});
+
+test("已验签成功但本地核销失败时不确认通知，保留渠道重试机会", async () => {
+  const payment = {
+    id: 9,
+    paymentNo: "PAY-RETRY",
+    amount: 88,
+    method: "wechat",
+    status: "PENDING",
+  };
+  const service = new PaymentsService(
+    {
+      payment: {
+        findUnique: async () => payment,
+      },
+    } as unknown as PrismaService,
+    {
+      confirmPaymentSettlement: async () => {
+        throw new Error("database unavailable");
+      },
+    } as never,
+    {
+      verifyNotification: async () => ({
+        verified: true,
+        paid: true,
+        paymentNo: "PAY-RETRY",
+        gatewayTradeNo: "WX-RETRY",
+        amountYuan: "88.00",
+        raw: { event: "paid" },
+      }),
+    } as never,
+    {} as ConfigService,
+  );
+
+  assert.deepEqual(await service.settleFromGateway("wechat", {}, "{}"), {
+    ok: false,
+  });
+});
+
+test("已进入部分退款或全额退款的 Payment 收到重复支付回调时保持幂等", async () => {
+  let approvalCalls = 0;
+  const service = new PaymentsService(
+    {
+      payment: {
+        findUnique: async () => ({
+          id: 9,
+          paymentNo: "PAY-REFUNDED",
+          amount: 88,
+          method: "wechat",
+          status: "PARTIAL_REFUND",
+        }),
+      },
+    } as unknown as PrismaService,
+    {
+      confirmPaymentSettlement: async () => {
+        approvalCalls += 1;
+      },
+    } as never,
+    {
+      verifyNotification: async () => ({
+        verified: true,
+        paid: true,
+        paymentNo: "PAY-REFUNDED",
+        amountYuan: "88.00",
+      }),
+    } as never,
+    {} as ConfigService,
+  );
+
+  assert.deepEqual(await service.settleFromGateway("wechat", {}, "{}"), { ok: true });
+  assert.equal(approvalCalls, 0);
+});
+
+test("同一订单已有同渠道同金额待支付交易时复用原商户单号", async () => {
+  let gatewayCreateCalls = 0;
+  let localCreateCalls = 0;
+  const tx = {
+    $queryRaw: async () => [{ id: 1 }],
+    order: {
+      findUnique: async () => ({
+        id: 1,
+        orderNo: "ORD-1",
+        status: "PENDING_PAYMENT",
+        finalAmount: 100,
+      }),
+      update: async () => undefined,
+    },
+    payment: {
+      findFirst: async () => ({
+        id: 7,
+        paymentNo: "PAY-PENDING",
+        amount: 100,
+        method: "wechat",
+        status: "PENDING",
+      }),
+      findMany: async () => [],
+      create: async () => {
+        localCreateCalls += 1;
+        throw new Error("不应创建第二笔本地 Payment");
+      },
+    },
+    inventoryReservation: {
+      findFirst: async () => ({ expiresAt: new Date(Date.now() + 60_000) }),
+    },
+  };
+  const service = new PaymentsService(
+    {
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    } as unknown as PrismaService,
+    {} as never,
+    {
+      isTransactionCreationEnabled: () => true,
+      isAvailable: () => true,
+      createPayment: async () => {
+        gatewayCreateCalls += 1;
+        return { provider: "wechat", scene: "native", qrCode: "weixin://pay" };
+      },
+    } as never,
+    { get: (key: string) => key === "SITE_BASE_URL" ? "https://shop.example.test" : undefined } as ConfigService,
+  );
+
+  const result = await service.createChannelPayment(1, "wechat", { type: "ADMIN", id: 1 });
+  assert.equal(result.payment.paymentNo, "PAY-PENDING");
+  assert.equal(result.reused, true);
+  assert.equal(gatewayCreateCalls, 1);
+  assert.equal(localCreateCalls, 0);
+});
+
+test("渠道预下单结果不确定时保留原 PENDING 商户单号，禁止生成第二个可支付单号", async () => {
+  let uncertainPaymentId: number | null = null;
+  let uncertainStatus: string | undefined;
+  const tx = {
+    $queryRaw: async () => [{ id: 1 }],
+    order: {
+      findUnique: async () => ({
+        id: 1,
+        orderNo: "ORD-1",
+        status: "PENDING_PAYMENT",
+        finalAmount: 100,
+      }),
+      update: async () => undefined,
+    },
+    payment: {
+      findFirst: async () => null,
+      findMany: async () => [],
+      create: async () => ({
+        id: 12,
+        paymentNo: "PAY-12",
+        amount: 100,
+      }),
+    },
+    inventoryReservation: {
+      findFirst: async () => ({ expiresAt: new Date(Date.now() + 60_000) }),
+    },
+  };
+  const service = new PaymentsService(
+    {
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+      payment: {
+        updateMany: async ({ where, data }: { where: { id: number }; data: { status?: string } }) => {
+          uncertainPaymentId = where.id;
+          uncertainStatus = data.status;
+          return { count: 1 };
+        },
+      },
+    } as unknown as PrismaService,
+    {} as never,
+    {
+      isTransactionCreationEnabled: () => true,
+      isAvailable: () => true,
+      createPayment: async () => {
+        throw new Error("gateway timeout");
+      },
+    } as never,
+    { get: (key: string) => key === "SITE_BASE_URL" ? "https://shop.example.test" : undefined } as ConfigService,
+  );
+
+  await assert.rejects(
+    () => service.createChannelPayment(1, "wechat", { type: "ADMIN", id: 1 }),
+    /gateway timeout/,
+  );
+  assert.equal(uncertainPaymentId, 12);
+  assert.equal(uncertainStatus, undefined);
 });

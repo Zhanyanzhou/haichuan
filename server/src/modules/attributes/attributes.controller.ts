@@ -6,11 +6,18 @@ import {
   Delete,
   Param,
   Body,
+  ParseIntPipe,
 } from "@nestjs/common";
 import { ApiTags, ApiOperation, ApiBearerAuth } from "@nestjs/swagger";
 import { AttributesService } from "./attributes.service";
 import { Public } from "../../common/decorators/public.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
+import {
+  CreateAttributeDto,
+  CreateAttributeValueDto,
+  UpdateAttributeDto,
+  UpdateAttributeValueDto,
+} from "./dto/attribute.dto";
 
 @ApiTags("商品属性字典")
 @Controller("attributes")
@@ -36,7 +43,7 @@ export class AttributesController {
   @ApiBearerAuth()
   @Post()
   @ApiOperation({ summary: "新增属性" })
-  create(@Body() body: any) {
+  create(@Body() body: CreateAttributeDto) {
     return this.attributesService.create(body);
   }
 
@@ -44,39 +51,48 @@ export class AttributesController {
   @ApiBearerAuth()
   @Put(":id")
   @ApiOperation({ summary: "编辑属性" })
-  update(@Param("id") id: string, @Body() body: any) {
-    return this.attributesService.update(+id, body);
+  update(
+    @Param("id", ParseIntPipe) id: number,
+    @Body() body: UpdateAttributeDto,
+  ) {
+    return this.attributesService.update(id, body);
   }
 
   @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
   @ApiBearerAuth()
   @Delete(":id")
   @ApiOperation({ summary: "停用属性" })
-  remove(@Param("id") id: string) {
-    return this.attributesService.remove(+id);
+  remove(@Param("id", ParseIntPipe) id: number) {
+    return this.attributesService.remove(id);
   }
 
   @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
   @ApiBearerAuth()
   @Post(":id/values")
   @ApiOperation({ summary: "新增属性值" })
-  addValue(@Param("id") id: string, @Body() body: any) {
-    return this.attributesService.addValue(+id, body);
+  addValue(
+    @Param("id", ParseIntPipe) id: number,
+    @Body() body: CreateAttributeValueDto,
+  ) {
+    return this.attributesService.addValue(id, body);
   }
 
   @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
   @ApiBearerAuth()
   @Put("values/:valueId")
   @ApiOperation({ summary: "编辑属性值" })
-  updateValue(@Param("valueId") valueId: string, @Body() body: any) {
-    return this.attributesService.updateValue(+valueId, body);
+  updateValue(
+    @Param("valueId", ParseIntPipe) valueId: number,
+    @Body() body: UpdateAttributeValueDto,
+  ) {
+    return this.attributesService.updateValue(valueId, body);
   }
 
   @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
   @ApiBearerAuth()
   @Delete("values/:valueId")
   @ApiOperation({ summary: "停用属性值" })
-  removeValue(@Param("valueId") valueId: string) {
-    return this.attributesService.removeValue(+valueId);
+  removeValue(@Param("valueId", ParseIntPipe) valueId: number) {
+    return this.attributesService.removeValue(valueId);
   }
 }

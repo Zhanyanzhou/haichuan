@@ -62,3 +62,116 @@ test("SINGLE_UNIT 购物车数量上限为 1", async () => {
   );
   assert.equal(created(), 1);
 });
+
+type MemoryCart = {
+  id: number;
+  userId: number | null;
+  sessionId: string | null;
+  skuId: number;
+  productId: number;
+  quantity: number;
+  inventoryPolicy: "STANDARD" | "SINGLE_UNIT";
+};
+
+function createMergeService(initialRows: MemoryCart[]) {
+  const rows = initialRows.map((row) => ({ ...row }));
+  const matches = (row: MemoryCart, where: Record<string, any>) => {
+    if ("id" in where && row.id !== where.id) return false;
+    if ("userId" in where && row.userId !== where.userId) return false;
+    if ("sessionId" in where && row.sessionId !== where.sessionId) return false;
+    if (where.skuId?.in && !where.skuId.in.includes(row.skuId)) return false;
+    return true;
+  };
+  const cart = {
+    findMany: async ({ where }: { where: Record<string, any> }) =>
+      rows.filter((row) => matches(row, where)).map((row) => ({
+        ...row,
+        product: { id: row.productId, name: "test", code: "test", images: [] },
+        sku: {
+          id: row.skuId,
+          skuCode: `sku-${row.skuId}`,
+          price: 1,
+          product: { inventoryPolicy: row.inventoryPolicy },
+        },
+      })),
+    update: async ({ where, data }: { where: { id: number }; data: { quantity: number } }) => {
+      const row = rows.find((item) => item.id === where.id);
+      if (!row) throw new Error("cart row not found");
+      row.quantity = data.quantity;
+      return { ...row };
+    },
+    updateMany: async ({ where, data }: {
+      where: Record<string, any>;
+      data: { userId: number; sessionId: null; quantity: number };
+    }) => {
+      const matched = rows.filter((row) => matches(row, where));
+      for (const row of matched) Object.assign(row, data);
+      return { count: matched.length };
+    },
+    deleteMany: async ({ where }: { where: Record<string, any> }) => {
+      const ids = rows.filter((row) => matches(row, where)).map((row) => row.id);
+      for (const id of ids) rows.splice(rows.findIndex((row) => row.id === id), 1);
+      return { count: ids.length };
+    },
+  };
+  const prisma = {
+    cart,
+    $transaction: async (callback: (client: any) => Promise<any>) => callback({ cart }),
+  };
+  return {
+    service: new CartService(
+      prisma as unknown as PrismaService,
+      {} as ProductsService,
+    ),
+    rows,
+  };
+}
+
+test("有效客户与当前 session 共存时原子认领游客购物车", async () => {
+  const { service, rows } = createMergeService([
+    { id: 1, userId: null, sessionId: "cart-session", skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
+  ]);
+
+  const cart = await service.getCart({ userId: 5, sessionId: "cart-session" });
+
+  assert.equal(cart.length, 1);
+  assert.equal(rows[0].userId, 5);
+  assert.equal(rows[0].sessionId, null);
+});
+
+test("合并重复 SINGLE_UNIT SKU 时仅保留一件", async () => {
+  const { service, rows } = createMergeService([
+    { id: 1, userId: null, sessionId: "cart-session", skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
+    { id: 2, userId: 5, sessionId: null, skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
+  ]);
+
+  await service.getCart({ userId: 5, sessionId: "cart-session" });
+
+  assert.deepEqual(rows.map(({ id, userId, sessionId, quantity }) => ({ id, userId, sessionId, quantity })), [
+    { id: 2, userId: 5, sessionId: null, quantity: 1 },
+  ]);
+});
+
+test("合并普通 SKU 时数量不超过购物车上限", async () => {
+  const { service, rows } = createMergeService([
+    { id: 1, userId: null, sessionId: "cart-session", skuId: 10, productId: 1, quantity: 5, inventoryPolicy: "STANDARD" },
+    { id: 2, userId: 5, sessionId: null, skuId: 10, productId: 1, quantity: 98, inventoryPolicy: "STANDARD" },
+  ]);
+
+  await service.getCart({ userId: 5, sessionId: "cart-session" });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].quantity, 99);
+});
+
+test("无客户身份时不能认领其他 session 的购物车", async () => {
+  const { service, rows } = createMergeService([
+    { id: 1, userId: null, sessionId: "owner-session", skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
+  ]);
+
+  const cart = await service.getCart({ sessionId: "other-session" });
+
+  assert.equal(cart.length, 0);
+  assert.equal(rows[0].userId, null);
+  assert.equal(rows[0].sessionId, "owner-session");
+});

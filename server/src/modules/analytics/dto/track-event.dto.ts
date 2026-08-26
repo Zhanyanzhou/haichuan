@@ -6,6 +6,8 @@ import {
   IsObject,
   IsIn,
   MaxLength,
+  IsBoolean,
+  Equals,
 } from 'class-validator';
 
 export const PUBLIC_ANALYTICS_EVENT_NAMES = [
@@ -22,9 +24,20 @@ export const PUBLIC_ANALYTICS_EVENT_NAMES = [
   'begin_checkout',
   'order_created',
 ] as const;
+export const PUBLIC_ANALYTICS_CONSENT_VERSION = 'analytics-v1';
 
 /** 公开埋点上报：限制字段长度，防止超长字符串撑爆 DB 列或 metadata */
 export class TrackEventDto {
+  @IsBoolean()
+  @Equals(true)
+  consentGranted!: true;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(50)
+  @Equals(PUBLIC_ANALYTICS_CONSENT_VERSION)
+  consentVersion!: string;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)

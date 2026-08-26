@@ -17,11 +17,74 @@ const DEFAULT_SETTINGS = {
   contactPhone: '',
   contactEmail: '',
   contactAddress: '',
+  storeName: '',
+  businessHours: '',
+  storeMapUrl: '',
   paymentMethods: ['transfer'],
   logisticsCompanies: ['顺丰速运', '京东物流', 'EMS'],
 };
 
 const LEGACY_PLACEHOLDER_LOGOS = new Set(['/favicon.svg', '/images/brand-logo.svg']);
+const MIN_DATABASE_BACKUP_BYTES = 1024;
+const DEFAULT_BACKUP_INTERVAL_SECONDS = 86400;
+
+type BackupArtifact = { name: string; size: number; mtime: Date };
+
+type BackupSet = {
+  timestamp: string;
+  database: BackupArtifact;
+  uploads: BackupArtifact;
+  privateMedia: BackupArtifact;
+  manifest: BackupArtifact;
+};
+
+export function summarizeBackupArtifacts(
+  files: BackupArtifact[],
+  intervalSeconds: number,
+  now = new Date(),
+) {
+  const databasePattern = /^jewelry_db_(\d{8}_\d{6})\.sql\.gz$/;
+  const artifactsByName = new Map(files.map((file) => [file.name, file]));
+  const completeSets: BackupSet[] = [];
+  const consumedArtifacts = new Set<string>();
+
+  for (const database of files) {
+    const match = databasePattern.exec(database.name);
+    if (!match || database.size < MIN_DATABASE_BACKUP_BYTES) continue;
+    const timestamp = match[1];
+    const uploads = artifactsByName.get(`jewelry_media_${timestamp}_uploads.tar.gz`);
+    const privateMedia = artifactsByName.get(`jewelry_media_${timestamp}_private-media.tar.gz`);
+    const manifest = artifactsByName.get(`jewelry_db_${timestamp}.sha256`);
+    if (
+      !uploads || uploads.size <= 0
+      || !privateMedia || privateMedia.size <= 0
+      || !manifest || manifest.size <= 0
+    ) continue;
+    completeSets.push({ timestamp, database, uploads, privateMedia, manifest });
+    consumedArtifacts.add(database.name);
+    consumedArtifacts.add(uploads.name);
+    consumedArtifacts.add(privateMedia.name);
+    consumedArtifacts.add(manifest.name);
+  }
+
+  completeSets.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  const latest = completeSets[0] ?? null;
+  const normalizedInterval = Number.isFinite(intervalSeconds) && intervalSeconds > 0
+    ? intervalSeconds
+    : DEFAULT_BACKUP_INTERVAL_SECONDS;
+  const freshnessWindowMs = normalizedInterval * 2 * 1000;
+  const latestTime = latest
+    ? latest.manifest.mtime.getTime()
+    : 0;
+  const isFresh = latestTime > 0 && now.getTime() - latestTime <= freshnessWindowMs;
+
+  return {
+    completeSets,
+    latest,
+    isFresh,
+    incompleteArtifactCount: files.filter((file) => !consumedArtifacts.has(file.name)).length,
+  };
+}
 
 function normalizeSettings(settings: any) {
   const logo = typeof settings?.logo === 'string' ? settings.logo.trim() : '';
@@ -59,13 +122,9 @@ export class SettingsService {
     });
     if (stored) return normalizeSettings(stored.value) as Record<string, unknown>;
 
-    const value = this.loadLegacyFile();
-    const created = await this.prisma.siteSetting.upsert({
-      where: { key: SETTINGS_KEY },
-      create: { key: SETTINGS_KEY, value },
-      update: {},
-    });
-    return normalizeSettings(created.value) as Record<string, unknown>;
+    // GET（包括公开 settings）必须保持只读。首次持久化只发生在显式 PUT；
+    // 这样目标环境的只读盘点不会因为空库读取而创建 SiteSetting 记录。
+    return normalizeSettings(this.loadLegacyFile()) as Record<string, unknown>;
   }
 
   async updateSettings(data: object, userId?: number) {
@@ -89,38 +148,65 @@ export class SettingsService {
     const dir = process.env.BACKUP_DIR || '/backups';
     try {
       const entries = await fs.promises.readdir(dir);
-      const files: { name: string; size: number; mtime: Date }[] = [];
+      const files: BackupArtifact[] = [];
       for (const name of entries) {
-        // backup.sh 产物两类：数据库 dump（*.sql.gz）与媒体归档（*.tar.gz）
-        if (!/\.(sql\.gz|tar\.gz)$/.test(name)) continue;
+        // 只识别 backup.sh 的数据库、媒体与批次 SHA-256 完成清单。
+        if (!/\.(sql\.gz|tar\.gz|sha256)$/.test(name)) continue;
         const stat = await fs.promises.stat(path.join(dir, name));
         if (stat.isFile()) files.push({ name, size: stat.size, mtime: stat.mtime });
       }
-      files.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
-      const intervalHours = Math.max(1, Math.round(Number(process.env.BACKUP_INTERVAL_SECONDS || 86400) / 3600));
-      const schedule = `backup 容器每 ${intervalHours} 小时一轮（保留 7 天）`;
+      const configuredInterval = Number(process.env.BACKUP_INTERVAL_SECONDS || DEFAULT_BACKUP_INTERVAL_SECONDS);
+      const intervalSeconds = Number.isFinite(configuredInterval) && configuredInterval > 0
+        ? configuredInterval
+        : DEFAULT_BACKUP_INTERVAL_SECONDS;
+      const intervalHours = Math.max(1, Math.round(intervalSeconds / 3600));
+      const schedule = `backup 容器目标每 ${intervalHours} 小时一轮（保留 7 天）`;
+      const summary = summarizeBackupArtifacts(files, intervalSeconds);
       if (files.length === 0) {
         return {
           lastBackup: null,
-          autoBackup: true,
+          autoBackup: false,
+          storageMounted: true,
           backupSchedule: schedule,
           totalBackups: 0,
           message: `备份目录已挂载（${dir}），但暂无备份产物；请确认 backup 容器已启动，详见 docker logs jewelry-backup。`,
         };
       }
+      if (!summary.latest) {
+        return {
+          lastBackup: null,
+          autoBackup: false,
+          storageMounted: true,
+          backupSchedule: schedule,
+          totalBackups: 0,
+          incompleteArtifactCount: summary.incompleteArtifactCount,
+          message: `备份目录中有 ${files.length} 个产物，但没有数据库、uploads 与 private-media 同批且有效的完整备份组。`,
+        };
+      }
+      const latestFiles = [
+        summary.latest.database,
+        summary.latest.uploads,
+        summary.latest.privateMedia,
+        summary.latest.manifest,
+      ];
       return {
-        lastBackup: files[0].mtime.toISOString(),
-        autoBackup: true,
+        lastBackup: new Date(Math.max(...latestFiles.map((file) => file.mtime.getTime()))).toISOString(),
+        autoBackup: summary.isFresh,
+        storageMounted: true,
         backupSchedule: schedule,
-        totalBackups: files.length,
-        latestFiles: files.slice(0, 5).map((f) => ({ name: f.name, size: f.size })),
-        message: `最近备份：${files[0].name}，共 ${files.length} 份产物。`,
+        totalBackups: summary.completeSets.length,
+        incompleteArtifactCount: summary.incompleteArtifactCount,
+        latestFiles: latestFiles.map((file) => ({ name: file.name, size: file.size })),
+        message: summary.isFresh
+          ? `最近完整备份批次：${summary.latest.timestamp}，共 ${summary.completeSets.length} 组。`
+          : `最近完整备份批次 ${summary.latest.timestamp} 已超过两个计划周期；请检查 backup 容器并创建新鲜恢复点。`,
       };
     } catch (error: any) {
       if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') {
         return {
           lastBackup: null,
           autoBackup: false,
+          storageMounted: false,
           backupSchedule: null,
           totalBackups: 0,
           message: '备份目录未挂载到 server 容器（本地开发环境属正常）；生产部署请确认 ./backups 已只读挂载。',

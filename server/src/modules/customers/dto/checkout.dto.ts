@@ -17,8 +17,9 @@ export class CheckoutItemDto {
  *
  * 契约对齐（P0 修复）：
  * - 客户身份（姓名/手机号）由后端从登录态 Customer 记录取，不由前端传入；
- * - 支付方式当前固定线下转账（bank_transfer），不由前端选择；
- * - 前端仅提交收货地址、商品行与可选邮箱。
+ * - 支付渠道不由结算 DTO 指定；订单创建后由认证客户在独立支付入口发起已开放渠道；
+ * - 前端仅提交收货地址、商品行、可选邮箱与可选优惠券 ID；
+ * - couponId 只引用现有优惠券，资格、额度与金额仍由订单事务校验。
  */
 export class CheckoutDto {
   @IsString()
@@ -29,6 +30,11 @@ export class CheckoutDto {
   @IsString()
   @MaxLength(100)
   customerEmail?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  couponId?: number;
 
   @IsArray()
   @ArrayMinSize(1)

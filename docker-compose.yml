@@ -48,11 +48,58 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      PORT: "3000"
+      HOST: "0.0.0.0"
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-"7d"}
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
       # 线上交易总开关（默认关闭；获 D.2 批准后才显式设为 true）
       CUSTOMER_COMMERCE_ENABLED: ${CUSTOMER_COMMERCE_ENABLED:-"false"}
+      # 可选能力一律显式注入；缺失时由服务端按各自合同关闭或诚实降级。
+      WECHAT_APP_ID: ${WECHAT_APP_ID:-""}
+      WECHAT_APP_SECRET: ${WECHAT_APP_SECRET:-""}
+      WECHAT_REDIRECT_URI: ${WECHAT_REDIRECT_URI:-""}
+      ANALYTICS_INGESTION_ENABLED: ${ANALYTICS_INGESTION_ENABLED:-"false"}
+      ANALYTICS_DATASET: ${ANALYTICS_DATASET:-"test"}
+      ANALYTICS_RETENTION_DAYS: ${ANALYTICS_RETENTION_DAYS:-"90"}
+      ANALYTICS_RETENTION_ENABLED: ${ANALYTICS_RETENTION_ENABLED:-"false"}
+      ANALYTICS_DASHBOARD_ENABLED: ${ANALYTICS_DASHBOARD_ENABLED:-"true"}
+      GOLD_PRICE_API_URL: ${GOLD_PRICE_API_URL:-""}
+      KIMI_API_KEY: ${KIMI_API_KEY:-""}
+      KIMI_BASE_URL: ${KIMI_BASE_URL:-""}
+      KIMI_MODEL: ${KIMI_MODEL:-"moonshot-v1-8k"}
+      SMTP_HOST: ${SMTP_HOST:-""}
+      SMTP_PORT: ${SMTP_PORT:-"465"}
+      SMTP_USER: ${SMTP_USER:-""}
+      SMTP_PASS: ${SMTP_PASS:-""}
+      SMTP_FROM: ${SMTP_FROM:-""}
+      SITE_BASE_URL: ${SITE_BASE_URL:-""}
+      # 通知事实始终随业务事务写入；这里只控制事务外真实邮件消费者，默认关闭。
+      NOTIFICATION_DELIVERY_ENABLED: ${NOTIFICATION_DELIVERY_ENABLED:-"false"}
+      PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: ${PAYMENT_GATEWAY_TRANSACTIONS_ENABLED:-"false"}
+      PAYMENT_GATEWAY_REFUNDS_ENABLED: ${PAYMENT_GATEWAY_REFUNDS_ENABLED:-"false"}
+      ALIPAY_APP_ID: ${ALIPAY_APP_ID:-""}
+      ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY:-""}
+      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:-""}
+      ALIPAY_GATEWAY: ${ALIPAY_GATEWAY:-"https://openapi.alipay.com/gateway.do"}
+      WECHAT_PAY_APP_ID: ${WECHAT_PAY_APP_ID:-""}
+      WECHAT_MCH_ID: ${WECHAT_MCH_ID:-""}
+      WECHAT_MCH_CERT_SERIAL_NO: ${WECHAT_MCH_CERT_SERIAL_NO:-""}
+      WECHAT_PLATFORM_CERT_PATH: ${WECHAT_PLATFORM_CERT_PATH:-""}
+      WECHAT_MCH_PRIVATE_KEY_PATH: ${WECHAT_MCH_PRIVATE_KEY_PATH:-""}
+      WECHAT_API_V3_KEY: ${WECHAT_API_V3_KEY:-""}
+      KUAIDI100_CUSTOMER: ${KUAIDI100_CUSTOMER:-""}
+      KUAIDI100_KEY: ${KUAIDI100_KEY:-""}
+      ALIYUN_SMS_ACCESS_KEY_ID: ${ALIYUN_SMS_ACCESS_KEY_ID:-""}
+      ALIYUN_SMS_ACCESS_KEY_SECRET: ${ALIYUN_SMS_ACCESS_KEY_SECRET:-""}
+      ALIYUN_SMS_SIGN_NAME: ${ALIYUN_SMS_SIGN_NAME:-""}
+      ALIYUN_SMS_TEMPLATE_CODE: ${ALIYUN_SMS_TEMPLATE_CODE:-""}
+      SMS_VERIFICATION_REQUIRED: ${SMS_VERIFICATION_REQUIRED:-"false"}
+      PRODUCT_MEDIA_ROOT: /app/private-media/products
+      PRODUCT_MEDIA_ROOT_LEGACY: /app/migration-source/product-images
+      BACKUP_DIR: /backups
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-"86400"}
     # P0-3：不对宿主机暴露 3000（仅 nginx 反代 /api 与 /uploads → server:3000，见 nginx.conf）
     expose:
       - "3000"
@@ -82,6 +129,7 @@ services:
       dockerfile: Dockerfile
       args:
         # Vite 公开配置在构建时固化；不得把服务端密钥作为 build arg 传入。
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-"/api"}
         VITE_PUBLIC_SITE_ORIGIN: ${VITE_PUBLIC_SITE_ORIGIN:-""}
         VITE_ANALYTICS_ENABLED: ${VITE_ANALYTICS_ENABLED:-"false"}
     container_name: jewelry-client
@@ -142,7 +190,8 @@ services:
   # ===== 存活监控告警（OR-1：uptime-kuma 自托管，零外部账号依赖）=====
   # 面板仅绑定 127.0.0.1:3001（浏览器访问 http://127.0.0.1:3001，远程经 SSH 隧道）。
   # 首次部署后在 UI 中手动添加监控项：
-  #   http://server:3000/api/health  （后端+数据库就绪）
+  #   http://server:3000/api/health  （后端进程存活，不检查数据库）
+  #   http://server:3000/api/ready   （后端与数据库就绪）
   #   http://client:80/              （前台可达）
   # 通知渠道在 UI 配置（邮件/企业微信/webhook 均可）。
   # 备份容器与磁盘水位无 HTTP 端点，由 backup.sh 输出告警日志（docker logs jewelry-backup 巡检）。

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ProductAccessService } from '../products/product-access.service';
-import { ProductsService } from '../products/products.service';
+import { customerFacingProductWhere } from '../products/product-eligibility';
 
 /**
  * 规则推荐系统（可解释、可调权重）
@@ -26,17 +26,13 @@ export class RecommendationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly productAccess: ProductAccessService,
-    private readonly productsService: ProductsService,
   ) {}
 
   /** 热门商品 */
   async getHot(customer: any, limit = this.defaultLimit) {
-    const visibilities = this.productsService.resolveVisibleVisibilities(customer);
     const candidates = await this.prisma.product.findMany({
       where: {
-        deletedAt: null,
-        status: 'PUBLISHED',
-        visibility: { in: visibilities },
+        ...customerFacingProductWhere(customer),
       },
       select: { id: true, isHot: true, isRecommended: true },
       take: 300,
@@ -59,7 +55,6 @@ export class RecommendationsService {
 
   /** 猜你喜欢：基于客户近期浏览分类推荐 */
   async getForYou(customer: any, limit = this.defaultLimit) {
-    const visibilities = this.productsService.resolveVisibleVisibilities(customer);
     const recentLogs = await this.prisma.productAccessLog.findMany({
       where: {
         customerId: customer.id,
@@ -82,9 +77,7 @@ export class RecommendationsService {
     const categoryIds = [...new Set(recentProducts.map((p) => p.categoryId))];
     const candidates = await this.prisma.product.findMany({
       where: {
-        deletedAt: null,
-        status: 'PUBLISHED',
-        visibility: { in: visibilities },
+        ...customerFacingProductWhere(customer),
         categoryId: { in: categoryIds },
         id: { notIn: recentProductIds },
       },
@@ -109,22 +102,17 @@ export class RecommendationsService {
 
   /** 相似商品：同分类 / 同材质 */
   async getSimilar(productId: number, customer: any, limit = this.defaultLimit) {
-    const visibilities = this.productsService.resolveVisibleVisibilities(customer);
     const base = await this.prisma.product.findFirst({
       where: {
         id: productId,
-        deletedAt: null,
-        status: 'PUBLISHED',
-        visibility: { in: visibilities },
+        ...customerFacingProductWhere(customer),
       },
       select: { categoryId: true, materialType: true },
     });
     if (!base) return [];
     const candidates = await this.prisma.product.findMany({
       where: {
-        deletedAt: null,
-        status: 'PUBLISHED',
-        visibility: { in: visibilities },
+        ...customerFacingProductWhere(customer),
         id: { not: productId },
         OR: [{ categoryId: base.categoryId }, { materialType: base.materialType }],
       },
@@ -159,7 +147,7 @@ export class RecommendationsService {
   ) {
     if (orderedIds.length === 0) return [];
     const products = await this.prisma.product.findMany({
-      where: { id: { in: orderedIds }, deletedAt: null, status: 'PUBLISHED' },
+      where: { id: { in: orderedIds }, ...customerFacingProductWhere(customer) },
       select: this.catalogSelect(),
     });
     const map = new Map(products.map((p: any) => [p.id, p]));

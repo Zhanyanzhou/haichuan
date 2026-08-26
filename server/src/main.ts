@@ -40,6 +40,7 @@ async function bootstrap() {
   app.enableCors({
     origin: corsOrigin,
     credentials: true,
+    exposedHeaders: ["X-Request-Id"],
   });
 
   app.useGlobalPipes(

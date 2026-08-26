@@ -19,8 +19,8 @@
 #
 # 一致性说明:
 #   数据库: --single-transaction（InnoDB 一致性快照，不锁表）
-#   媒体卷: tar 归档非原子，备份瞬间正在写入的文件可能进入下一个归档，
-#           对图片/凭证类只增不改的存储可接受。
+#   媒体卷: 源目录快照仍不是跨文件原子，但所有输出先写 *.partial，
+#           通过 gzip/tar 校验后才发布；SHA-256 清单最后原子改名，作为整批完成标记。
 # ============================================
 
 set -e
@@ -41,9 +41,36 @@ RETENTION_DAYS="${RETENTION_DAYS:-7}"
 # 日期
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 FILENAME="${DB_NAME}_${TIMESTAMP}.sql.gz"
+FINAL_PATH="${BACKUP_DIR}/${FILENAME}"
+PARTIAL_PATH="${FINAL_PATH}.partial"
+MANIFEST_FILENAME="${DB_NAME}_${TIMESTAMP}.sha256"
+MANIFEST_FINAL_PATH="${BACKUP_DIR}/${MANIFEST_FILENAME}"
+MANIFEST_PARTIAL_PATH="${MANIFEST_FINAL_PATH}.partial"
 
 # 创建备份目录
 mkdir -p "$BACKUP_DIR"
+
+MEDIA_FINAL_PATHS=()
+MEDIA_PARTIAL_PATHS=()
+PUBLISHED_PATHS=()
+PUBLISH_COMPLETE=false
+
+cleanup_incomplete_backup() {
+  rm -f -- "$PARTIAL_PATH" "$MANIFEST_PARTIAL_PATH"
+  for partial in "${MEDIA_PARTIAL_PATHS[@]}"; do
+    rm -f -- "$partial"
+  done
+  if [ "$PUBLISH_COMPLETE" != "true" ]; then
+    for published in "${PUBLISHED_PATHS[@]}"; do
+      rm -f -- "$published"
+    done
+  fi
+}
+
+# 重定向会在命令失败前创建空文件；清单发布前的任何退出都清理本批产物。
+trap cleanup_incomplete_backup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # ---------- 1. 数据库 ----------
 echo "📦 开始备份数据库: ${DB_NAME} ..."
@@ -58,9 +85,11 @@ mysqldump \
   --routines \
   --triggers \
   --add-drop-table \
-  "$DB_NAME" | gzip > "$BACKUP_DIR/$FILENAME"
+  "$DB_NAME" | gzip > "$PARTIAL_PATH"
 
-echo "✅ 数据库备份完成: $BACKUP_DIR/$FILENAME"
+gzip -t "$PARTIAL_PATH"
+test -s "$PARTIAL_PATH"
+echo "✅ 数据库备份暂存并校验完成: $PARTIAL_PATH"
 
 # ---------- 2. 媒体卷（uploads / private-media，含付款凭证） ----------
 if [ -n "$MEDIA_DIRS" ]; then
@@ -68,46 +97,75 @@ if [ -n "$MEDIA_DIRS" ]; then
   IFS=':' read -ra DIRS <<< "$MEDIA_DIRS"
   for dir in "${DIRS[@]}"; do
     if [ ! -d "$dir" ]; then
-      echo "⚠️  目录不存在，跳过: $dir"
-      continue
+      echo "🚨 ERROR: 已配置的媒体目录不存在，整批备份失败: $dir"
+      exit 1
     fi
     # 用目录名区分归档: jewelry_media_20260814_020000_uploads.tar.gz
     # 纯 bash 替换做白名单清洗（tr -c 会把 basename 的尾部换行也映射成 '_'，导致 uploads_.tar.gz）
     dirname_part=$(basename "$dir")
     dirname_part=${dirname_part//[^a-zA-Z0-9_.-]/_}
     media_file="${BACKUP_DIR}/${MEDIA_PREFIX}_${TIMESTAMP}_${dirname_part}.tar.gz"
+    media_partial="${media_file}.partial"
+    MEDIA_FINAL_PATHS+=("$media_file")
+    MEDIA_PARTIAL_PATHS+=("$media_partial")
     # tar 退出码 1 = 读取期间文件变更（"file changed as we read it"），归档仍完整生成。
     # 按本脚本头部一致性说明，对只增不改的图片/凭证存储可接受；>1 才是真实失败。
     set +e
-    tar -czf "$media_file" -C "$(dirname "$dir")" "$(basename "$dir")"
+    tar -czf "$media_partial" -C "$(dirname "$dir")" "$(basename "$dir")"
     tar_status=$?
     set -e
     if [ "$tar_status" -gt 1 ]; then
-      echo "🚨 ERROR: tar 退出码 ${tar_status}，媒体归档失败: $media_file"
-      rm -f "$media_file"
+      echo "🚨 ERROR: tar 退出码 ${tar_status}，媒体归档失败: $media_partial"
       exit "$tar_status"
-    elif [ "$tar_status" -eq 1 ]; then
-      echo "⚠️  tar 退出码 1（读取期间文件变更，归档已生成，按设计接受）: $media_file ($(du -h "$media_file" | cut -f1))"
+    fi
+    test -s "$media_partial"
+    tar -tzf "$media_partial" >/dev/null
+    if [ "$tar_status" -eq 1 ]; then
+      echo "⚠️  tar 退出码 1（读取期间文件变更），归档校验通过并暂存: $media_partial"
     else
-      echo "✅ 媒体备份完成: $media_file ($(du -h "$media_file" | cut -f1))"
+      echo "✅ 媒体备份暂存并校验完成: $media_partial"
     fi
   done
 else
   echo "ℹ️  未设置 MEDIA_DIRS，跳过媒体备份（容器内运行时由 compose 注入）"
 fi
 
-# ---------- 3. 清理过期备份 ----------
+# ---------- 3. 批次提交（清单最后发布，作为完整备份组的提交标记） ----------
+: > "$MANIFEST_PARTIAL_PATH"
+db_checksum=$(sha256sum "$PARTIAL_PATH" | awk '{print $1}')
+printf '%s  %s\n' "$db_checksum" "$(basename "$FINAL_PATH")" >> "$MANIFEST_PARTIAL_PATH"
+for index in "${!MEDIA_PARTIAL_PATHS[@]}"; do
+  media_checksum=$(sha256sum "${MEDIA_PARTIAL_PATHS[$index]}" | awk '{print $1}')
+  printf '%s  %s\n' "$media_checksum" "$(basename "${MEDIA_FINAL_PATHS[$index]}")" >> "$MANIFEST_PARTIAL_PATH"
+done
+test -s "$MANIFEST_PARTIAL_PATH"
+
+mv -f -- "$PARTIAL_PATH" "$FINAL_PATH"
+PUBLISHED_PATHS+=("$FINAL_PATH")
+for index in "${!MEDIA_PARTIAL_PATHS[@]}"; do
+  mv -f -- "${MEDIA_PARTIAL_PATHS[$index]}" "${MEDIA_FINAL_PATHS[$index]}"
+  PUBLISHED_PATHS+=("${MEDIA_FINAL_PATHS[$index]}")
+done
+mv -f -- "$MANIFEST_PARTIAL_PATH" "$MANIFEST_FINAL_PATH"
+PUBLISHED_PATHS+=("$MANIFEST_FINAL_PATH")
+
+(cd "$BACKUP_DIR" && sha256sum -c "$MANIFEST_FILENAME")
+PUBLISH_COMPLETE=true
+echo "✅ 完整备份批次已发布并复验: $MANIFEST_FINAL_PATH"
+
+# ---------- 4. 清理过期备份 ----------
 echo "🧹 清理 ${RETENTION_DAYS} 天前的备份 ..."
 find "$BACKUP_DIR" -name "${DB_NAME}_*.sql.gz" -mtime +"$RETENTION_DAYS" -delete
+find "$BACKUP_DIR" -name "${DB_NAME}_*.sha256" -mtime +"$RETENTION_DAYS" -delete
 find "$BACKUP_DIR" -name "${MEDIA_PREFIX}_*.tar.gz" -mtime +"$RETENTION_DAYS" -delete
 
-# ---------- 4. 磁盘水位检查（超阈值输出告警日志，供日志采集/人工巡检发现） ----------
+# ---------- 5. 磁盘水位检查（超阈值输出告警日志，供日志采集/人工巡检发现） ----------
 disk_use=$(df -P "$BACKUP_DIR" | awk 'NR==2 {gsub("%",""); print $5}')
 if [ -n "$disk_use" ] && [ "$disk_use" -ge "$DISK_WARN_PCT" ]; then
   echo "🚨 WARN: 备份目标磁盘使用率 ${disk_use}% ≥ 阈值 ${DISK_WARN_PCT}%，请清理或扩容！"
 fi
 
-# ---------- 5. 清单 ----------
+# ---------- 6. 清单 ----------
 echo "📊 当前备份列表:"
 ls -lh "$BACKUP_DIR" | grep -E "$DB_NAME|$MEDIA_PREFIX" || echo "(空)"
 

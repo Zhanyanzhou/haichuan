@@ -1,8 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { TradeEventsService } from '../trade-events/trade-events.service';
 import { TRADE_ENTITY_TYPE, TRADE_EVENT_TYPE, type OperatorContext } from '../trade-events/trade-events.constants';
-import type { FulfillmentStatus, Prisma } from '@prisma/client';
+import { Prisma, type FulfillmentStatus } from '@prisma/client';
 
 /**
  * 履约服务：管理拣货→复核→发货→送达生命周期。
@@ -17,6 +17,13 @@ export class FulfillmentService {
     private readonly prisma: PrismaService,
     private readonly tradeEvents: TradeEventsService,
   ) {}
+
+  private async lockOrder(tx: Prisma.TransactionClient, orderId: number) {
+    const rows = await tx.$queryRaw<Array<{ id: number }>>(
+      Prisma.sql`SELECT id FROM orders WHERE id = ${orderId} FOR UPDATE`,
+    );
+    if (rows.length === 0) throw new NotFoundException('订单不存在');
+  }
 
   async findAll(params: { page?: number; pageSize?: number; status?: string; keyword?: string }) {
     const page = Math.max(Number(params.page) || 1, 1);
@@ -92,7 +99,13 @@ export class FulfillmentService {
 
       await tx.order.update({
         where: { id: fulfillment.orderId },
-        data: { status: 'SHIPPED', logisticsCompany: carrier, logisticsNo: trackingNo, shippedAt: now },
+        data: {
+          status: 'SHIPPED',
+          deliveryStatus: 'SHIPPED',
+          logisticsCompany: carrier,
+          logisticsNo: trackingNo,
+          shippedAt: now,
+        },
       });
 
       await this.tradeEvents.record(tx, {
@@ -111,16 +124,58 @@ export class FulfillmentService {
     dto: { status: string; abnormalReason?: string; internalNote?: string },
     operator: OperatorContext,
   ) {
+    // 事务外只定位不可变 orderId，避免 MySQL 在订单锁前建立旧的一致性读快照。
+    const fulfillmentRef = await this.prisma.fulfillment.findUnique({
+      where: { id: fulfillmentId },
+      select: { orderId: true },
+    });
+    if (!fulfillmentRef) throw new NotFoundException('履约单不存在');
+
     return this.prisma.$transaction(async (tx) => {
-      const fulfillment = await tx.fulfillment.findUnique({ where: { id: fulfillmentId } });
-      if (!fulfillment) throw new NotFoundException('履约单不存在');
+      await this.lockOrder(tx, fulfillmentRef.orderId);
+      const fulfillment = await tx.fulfillment.findUnique({
+        where: { id: fulfillmentId },
+        include: { order: true },
+      });
+      if (!fulfillment || fulfillment.orderId !== fulfillmentRef.orderId) {
+        throw new NotFoundException('履约单不存在');
+      }
 
       const newStatus = dto.status as FulfillmentStatus;
       const now = new Date();
 
       if (newStatus === 'DELIVERED') {
-        if (fulfillment.status !== 'SHIPPED') throw new BadRequestException('只有已发货的履约单可标记送达');
-        await tx.fulfillment.update({ where: { id: fulfillmentId }, data: { status: 'DELIVERED', deliveredAt: now } });
+        // 重复物流回调幂等：不重复推进、不重复记录事件；同时可修复历史上已送达但订单未同步的事实。
+        if (fulfillment.status === 'DELIVERED') {
+          await tx.order.updateMany({
+            where: { id: fulfillment.orderId, status: 'SHIPPED' },
+            data: {
+              deliveryStatus: 'RECEIVED',
+              receivedAt: fulfillment.deliveredAt ?? now,
+            },
+          });
+          return tx.fulfillment.findUnique({ where: { id: fulfillmentId } });
+        }
+        if (fulfillment.status !== 'SHIPPED') {
+          throw new BadRequestException('只有已发货的履约单可标记送达');
+        }
+        if (fulfillment.order.status !== 'SHIPPED') {
+          throw new ConflictException('订单状态已变化，不能标记送达');
+        }
+        const delivered = await tx.fulfillment.updateMany({
+          where: { id: fulfillmentId, status: 'SHIPPED' },
+          data: { status: 'DELIVERED', deliveredAt: now },
+        });
+        if (delivered.count === 0) {
+          throw new ConflictException('履约单状态已变化，请刷新后重试');
+        }
+        const orderSynced = await tx.order.updateMany({
+          where: { id: fulfillment.orderId, status: 'SHIPPED' },
+          data: { deliveryStatus: 'RECEIVED', receivedAt: now },
+        });
+        if (orderSynced.count === 0) {
+          throw new ConflictException('订单状态已变化，不能标记送达');
+        }
         await this.tradeEvents.record(tx, {
           orderId: fulfillment.orderId, entityType: TRADE_ENTITY_TYPE.FULFILLMENT, entityId: fulfillmentId,
           eventType: TRADE_EVENT_TYPE.FULFMENT_DELIVERED, fromStatus: fulfillment.status, toStatus: 'DELIVERED', operator,

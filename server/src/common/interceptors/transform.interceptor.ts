@@ -13,6 +13,7 @@ export interface ApiResponse<T> {
   data: T;
   message: string;
   timestamp: string;
+  requestId?: string;
 }
 
 // 与 @nestjs/common 的 SSE_METADATA 一致（@Sse 装饰器在 handler 上标记 '__sse__'）。
@@ -41,13 +42,18 @@ export class TransformInterceptor<T>
         // 二进制响应（受控媒体端点直接返回 Buffer）：跳过 JSON 包装，保持字节流原样返回
         if (Buffer.isBuffer(data)) return data as any;
         // handler 已用 @Res() 手动结束响应（如受控媒体文件流）：跳过包装，避免 write-after-end
-        const response = context.switchToHttp().getResponse();
+        const http = context.switchToHttp();
+        const response = http.getResponse();
         if (response?.writableEnded) return data;
+        const request = http.getRequest<{ id?: unknown }>();
+        const requestId =
+          typeof request?.id === "string" ? request.id : undefined;
         return {
           code: 200,
           data,
           message: 'success',
           timestamp: new Date().toISOString(),
+          ...(requestId ? { requestId } : {}),
         };
       }),
     );

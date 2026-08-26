@@ -5,7 +5,9 @@ import {
   Request,
   Body,
   Get,
+  Res,
 } from "@nestjs/common";
+import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { Throttle } from "@nestjs/throttler";
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiBody } from "@nestjs/swagger";
@@ -15,6 +17,10 @@ import { Public } from "../../common/decorators/public.decorator";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { RegisterDto } from "./dto/register.dto";
+import {
+  buildClearSessionCookieHeaders,
+  buildSessionCookieHeaders,
+} from "../../common/security/session-security";
 
 @ApiTags("认证")
 @Controller("auth")
@@ -37,8 +43,20 @@ export class AuthController {
       },
     },
   })
-  async login(@Request() req: any) {
-    return this.authService.login(req.user);
+  async login(@Request() req: any, @Res({ passthrough: true }) response: Response) {
+    const result = await this.authService.login(req.user);
+    if (req.headers?.["x-session-mode"] === "cookie") {
+      const cookie = buildSessionCookieHeaders("admin", result.accessToken, 7 * 24 * 60 * 60);
+      response.setHeader("Set-Cookie", cookie.headers);
+    }
+    return result;
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post("logout")
+  logout(@Res({ passthrough: true }) response: Response) {
+    response.setHeader("Set-Cookie", buildClearSessionCookieHeaders("admin"));
+    return { success: true };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

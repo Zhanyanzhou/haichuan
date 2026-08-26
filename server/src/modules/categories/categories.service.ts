@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
 
 @Injectable()
 export class CategoriesService {
@@ -213,7 +214,7 @@ export class CategoriesService {
     return parent;
   }
 
-  private categoryData(data: any, level: 1 | 2 | 3) {
+  private categoryData(data: CreateCategoryDto | UpdateCategoryDto, level: 1 | 2 | 3) {
     const name = data.name === undefined ? undefined : String(data.name).trim();
     const slug = data.slug === undefined ? undefined : String(data.slug).trim();
     const sortOrder = data.sortOrder === undefined ? undefined : Number(data.sortOrder);
@@ -250,8 +251,8 @@ export class CategoriesService {
     }
   }
 
-  async create(data: any) {
-    const hasParent = data.parentId !== undefined && data.parentId !== null && data.parentId !== '';
+  async create(data: CreateCategoryDto) {
+    const hasParent = data.parentId !== undefined && data.parentId !== null;
 
     // 创建一级类目（parentId 为空）
     if (!hasParent) {
@@ -295,7 +296,7 @@ export class CategoriesService {
     });
   }
 
-  async update(id: number, data: any) {
+  async update(id: number, data: UpdateCategoryDto) {
     const category = await this.prisma.category.findUnique({ where: { id } });
     if (!category) throw new NotFoundException('类目不存在');
     if (data.level !== undefined && Number(data.level) !== category.level) {
@@ -305,8 +306,7 @@ export class CategoriesService {
     if (
       category.level === 1 &&
       data.parentId !== undefined &&
-      data.parentId !== null &&
-      data.parentId !== ''
+      data.parentId !== null
     ) {
       throw new BadRequestException('一级类目不支持调整归属');
     }

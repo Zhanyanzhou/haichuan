@@ -5,6 +5,12 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import type {
+  CreateAttributeDto,
+  CreateAttributeValueDto,
+  UpdateAttributeDto,
+  UpdateAttributeValueDto,
+} from "./dto/attribute.dto";
 
 @Injectable()
 export class AttributesService {
@@ -41,7 +47,7 @@ export class AttributesService {
     });
   }
 
-  async create(body: any) {
+  async create(body: CreateAttributeDto) {
     const name = String(body?.name ?? "").trim();
     const key = String(body?.key ?? "")
       .trim()
@@ -65,7 +71,7 @@ export class AttributesService {
     });
   }
 
-  async update(id: number, body: any) {
+  async update(id: number, body: UpdateAttributeDto) {
     await this.ensureAttribute(id);
     return this.prisma.attribute.update({
       where: { id },
@@ -93,7 +99,7 @@ export class AttributesService {
     });
   }
 
-  async addValue(attributeId: number, body: any) {
+  async addValue(attributeId: number, body: CreateAttributeValueDto) {
     await this.ensureAttribute(attributeId);
     const value = String(body?.value ?? "").trim();
     if (!value) throw new BadRequestException("属性值不能为空");
@@ -106,7 +112,7 @@ export class AttributesService {
     });
   }
 
-  async updateValue(valueId: number, body: any) {
+  async updateValue(valueId: number, body: UpdateAttributeValueDto) {
     const val = await this.prisma.attributeValue.findUnique({
       where: { id: valueId },
     });

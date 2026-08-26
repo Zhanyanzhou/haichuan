@@ -98,11 +98,64 @@ test("公开目录：Facet 只继承公开性与分类边界，不被当前材�
   assert.equal(facetCall.where.status, "PUBLISHED");
 });
 
+test("公开目录：工艺只用于服务端筛选，不进入匿名列表响应", async () => {
+  let listSelect: Record<string, unknown> | undefined;
+  const prisma = {
+    product: {
+      findMany: async (args: any) => {
+        listSelect = args.select;
+        return [{
+          id: 88,
+          code: "HC-REAL-088",
+          name: "海川典藏足金戒指",
+          categoryId: 3,
+          shortDescription: "足金匠作戒指",
+          materialType: "GOLD_999",
+          goldWeight: 8.8,
+          price: 12800,
+          weight: 9.2,
+          size: "圈口 14",
+          craftTechnique: ["古法", "錾刻"],
+          salesMode: "DIRECT_PURCHASE",
+          inventoryPolicy: "SINGLE_UNIT",
+          isHot: false,
+          isNew: true,
+          isRecommended: false,
+          isLimited: true,
+          isCustom: false,
+          category: { id: 3, name: "戒指" },
+          productAttributes: [],
+          images: [],
+          primaryImage: null,
+          listingImage: null,
+          skus: [{ inventories: [{ quantity: 1 }] }],
+        }];
+      },
+      count: async () => 1,
+    },
+  };
+  const service = new ProductsService(
+    prisma as unknown as PrismaService,
+    { isProductMediaReadable: () => false } as never,
+    {} as never,
+  );
+
+  const result = await service.findPublic({});
+
+  assert.equal(listSelect?.craftTechnique, undefined);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(result.list[0], "craftTechnique"),
+    false,
+  );
+});
+
 test("公开目录查询 DTO：非法分页、ID 列表、材质与重量区间均拒绝", async () => {
   const dto = plainToInstance(PublicProductQueryDto, {
     page: "0",
     pageSize: "2001",
-    ids: "1,not-an-id",
+    ids: "0",
+    categoryIds: "1,0",
+    attributeValueIds: "0",
     materialTypes: "GOLD_999,UNKNOWN",
     weightRanges: "bad-range",
   });
@@ -110,8 +163,97 @@ test("公开目录查询 DTO：非法分页、ID 列表、材质与重量区间�
   const fields = new Set(errors.map((error) => error.property));
   assert.deepEqual(
     fields,
-    new Set(["page", "pageSize", "ids", "materialTypes", "weightRanges"]),
+    new Set([
+      "page",
+      "pageSize",
+      "ids",
+      "categoryIds",
+      "attributeValueIds",
+      "materialTypes",
+      "weightRanges",
+    ]),
   );
+});
+
+test("游客统一详情返回真实展示价、规格、库存状态与公开媒体且不泄露内部字段", async () => {
+  let findFirstArgs: any;
+  const prisma = {
+    product: {
+      findFirst: async (args: any) => {
+        findFirstArgs = args;
+        return {
+          id: 88,
+          code: "HC-REAL-088",
+          name: "海川典藏足金戒指",
+          categoryId: 3,
+          shortDescription: "足金匠作戒指",
+          materialType: "GOLD_999",
+          goldWeight: 8.8,
+          price: 12800,
+          weight: 9.2,
+          size: "圈口 14",
+          craftTechnique: ["古法", "錾刻"],
+          salesMode: "DIRECT_PURCHASE",
+          inventoryPolicy: "SINGLE_UNIT",
+          isHot: false,
+          isNew: true,
+          isRecommended: false,
+          isLimited: true,
+          isCustom: false,
+          category: { id: 3, name: "戒指" },
+          productAttributes: [],
+          images: [{
+            id: 501,
+            url: "/uploads/internal-product-88.jpg",
+            storageKey: "private/product-88.jpg",
+            type: "FRONT",
+            sortOrder: 0,
+            isVideo: false,
+            width: 1200,
+            height: 1500,
+          }],
+          primaryImage: null,
+          listingImage: null,
+          skus: [{ inventories: [{ quantity: 1 }] }],
+          status: "PUBLISHED",
+          visibility: "PUBLIC",
+          publicationQualityStatus: "READY",
+          viewCount: 99,
+        };
+      },
+    },
+  };
+  const service = new ProductsService(
+    prisma as unknown as PrismaService,
+    { isProductMediaReadable: (image: any) => Boolean(image?.storageKey) } as never,
+    {} as never,
+  );
+
+  const result = await service.findPublicById("HC-REAL-088");
+
+  assert.deepEqual(findFirstArgs.where, {
+    deletedAt: null,
+    status: "PUBLISHED",
+    visibility: "PUBLIC",
+    code: "HC-REAL-088",
+  });
+  assert.equal(findFirstArgs.select.price, true);
+  assert.deepEqual(findFirstArgs.select.skus.select.inventories, {
+    select: { quantity: true },
+  });
+  assert.equal(result?.price, 12800);
+  assert.equal(result?.isAvailableForPurchase, true);
+  assert.equal(result?.materialType, "GOLD_999");
+  assert.equal(result?.goldWeight, 8.8);
+  assert.equal(result?.size, "圈口 14");
+  assert.deepEqual(result?.craftTechnique, ["古法", "錾刻"]);
+  assert.equal(
+    (result?.images as Array<{ mediaUrl: string }>)[0].mediaUrl,
+    "/products/public/88/media/501",
+  );
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /storageKey|internal-product|viewCount|publicationQualityStatus/);
+  assert.equal(Object.prototype.hasOwnProperty.call(result, "skus"), false);
 });
 
 test("装修商品引用解析：保持输入顺序并区分删除、下架、缺图和不存在", async () => {
@@ -122,6 +264,7 @@ test("装修商品引用解析：保持输入顺序并区分删除、下架、�
       name: "公开商品",
       price: 1100,
       status: "PUBLISHED",
+      publicationQualityStatus: "READY",
       visibility: "PUBLIC",
       deletedAt: null,
       category: { id: 1, name: "戒指" },
@@ -135,6 +278,7 @@ test("装修商品引用解析：保持输入顺序并区分删除、下架、�
       name: "已删除商品",
       price: 1200,
       status: "PUBLISHED",
+      publicationQualityStatus: "READY",
       visibility: "PUBLIC",
       deletedAt: new Date("2026-08-01T00:00:00.000Z"),
       category: { id: 1, name: "戒指" },
@@ -148,6 +292,7 @@ test("装修商品引用解析：保持输入顺序并区分删除、下架、�
       name: "缺图商品",
       price: 1300,
       status: "PUBLISHED",
+      publicationQualityStatus: "READY",
       visibility: "PUBLIC",
       deletedAt: null,
       category: { id: 2, name: "项链" },
@@ -161,6 +306,7 @@ test("装修商品引用解析：保持输入顺序并区分删除、下架、�
       name: "旧引用下架商品",
       price: 2200,
       status: "OFFLINE",
+      publicationQualityStatus: "READY",
       visibility: "PUBLIC",
       deletedAt: null,
       category: { id: 3, name: "耳饰" },

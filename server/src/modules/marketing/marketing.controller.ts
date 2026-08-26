@@ -1,9 +1,11 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, Query, UseGuards, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { MarketingService } from './marketing.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { CreatePromotionDto, UpdatePromotionDto } from './dto/promotion.dto';
+import { CreateCouponDto, UpdateCouponDto } from './dto/coupon.dto';
 
 @ApiTags('营销管理')
 @ApiBearerAuth()
@@ -17,10 +19,10 @@ export class MarketingController {
   @Get('promotions') getPromotions() { return this.marketingService.getPromotions(); }
 
   @ApiOperation({ summary: '创建促销活动' })
-  @Post('promotions') createPromotion(@Body() b: any) { return this.marketingService.createPromotion(b); }
+  @Post('promotions') createPromotion(@Body() dto: CreatePromotionDto) { return this.marketingService.createPromotion(dto); }
 
   @ApiOperation({ summary: '更新促销活动' })
-  @Put('promotions/:id') updatePromotion(@Param('id') id: string, @Body() b: any) { return this.marketingService.updatePromotion(+id, b); }
+  @Put('promotions/:id') updatePromotion(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePromotionDto) { return this.marketingService.updatePromotion(id, dto); }
 
   @ApiOperation({ summary: '删除促销活动' })
   @Delete('promotions/:id') deletePromotion(@Param('id') id: string) { return this.marketingService.deletePromotion(+id); }
@@ -39,8 +41,8 @@ export class MarketingController {
   @Get('coupons/stats') getCouponStats() { return this.marketingService.getCouponStats(); }
 
   @ApiOperation({ summary: '创建优惠券' })
-  @Post('coupons') createCoupon(@Body() b: any) { return this.marketingService.createCoupon(b); }
+  @Post('coupons') createCoupon(@Body() dto: CreateCouponDto) { return this.marketingService.createCoupon(dto); }
 
   @ApiOperation({ summary: '更新优惠券' })
-  @Put('coupons/:id') updateCoupon(@Param('id') id: string, @Body() b: any) { return this.marketingService.updateCoupon(+id, b); }
+  @Put('coupons/:id') updateCoupon(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateCouponDto) { return this.marketingService.updateCoupon(id, dto); }
 }

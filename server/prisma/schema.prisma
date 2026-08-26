@@ -42,6 +42,15 @@ model User {
   // 交易中心：销售顾问关联的订单与报价单
   salesConsultantOrders     Order[]              @relation("OrderSalesConsultant")
   quotationsAsConsultant    Quotation[]          @relation("QuotationSalesConsultant")
+  adminRefreshSessions      AdminRefreshSession[]
+  uploadedMediaAssets       MediaAsset[]         @relation("MediaAssetUploader")
+  submittedPageLocales      PageDocumentLocalization[] @relation("PageLocaleSubmitter")
+  reviewedPageLocales       PageDocumentLocalization[] @relation("PageLocaleReviewer")
+  publishedPageLocales      PageDocumentLocalization[] @relation("PageLocalePublisher")
+  reviewedPriceApplications PartnerPriceApplication[] @relation("PartnerPriceApplicationReviewer")
+  createdPriceAgreements    PartnerPriceAgreement[] @relation("PartnerPriceAgreementCreator")
+  createdQuotationVersions  QuotationVersion[]   @relation("QuotationVersionCreator")
+  createdDesignFileVersions CooperationDesignFileVersion[] @relation("DesignFileVersionCreator")
   personalContentTemplates PersonalContentTemplate[]
 
   @@map("users")
@@ -84,6 +93,7 @@ model Category {
   parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
   children Category[] @relation("CategoryTree")
   products Product[]
+  translations CategoryTranslation[]
 
   @@map("categories")
 }
@@ -164,6 +174,10 @@ model Product {
   accessLogs            ProductAccessLog[]
   quotationItems        QuotationItem[]
   shippingTemplate      ShippingTemplate?       @relation(fields: [shippingTemplateId], references: [id], onDelete: SetNull)
+  translations          ProductTranslation[]
+  cooperationDesignFiles CooperationDesignFile[]
+  seoSnapshots          SeoSnapshot[]
+  quotationVersionItems QuotationVersionItem[]
 
   @@index([categoryId])
   @@index([status])
@@ -305,6 +319,8 @@ model ProductImage {
   derivedImages ProductImage[] @relation("SourceImage")
   primaryOf     Product[]      @relation("PrimaryImage")
   listingOf     Product[]      @relation("ListingImage")
+  mediaAssetId  Int?           @map("media_asset_id")
+  mediaAsset    MediaAsset?    @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
 
   @@map("product_images")
 }
@@ -338,6 +354,7 @@ model ProductSKU {
   cartItems      Cart[]
   reservations   InventoryReservation[]
   quotationItems QuotationItem[]
+  quotationVersionItems QuotationVersionItem[]
 
   @@map("product_skus")
 }
@@ -551,6 +568,8 @@ model Order {
   fulfillments    Fulfillment[]
   afterSalesCases AfterSalesCase[]
   tradeEvents     TradeEvent[]
+  paymentPlans    PaymentPlan[]
+  logisticsEvents LogisticsEvent[]
   user            User?                  @relation(fields: [userId], references: [id])
   customer        Customer?              @relation(fields: [customerId], references: [id])
   couponId        Int?                   @map("coupon_id")
@@ -602,6 +621,14 @@ model Customer {
   partnerApplications PartnerApplication[]
   productAccessLogs   ProductAccessLog[]
   quotations          Quotation[]
+  customerRefreshSessions CustomerRefreshSession[]
+  consentRecords         ConsentRecord[]
+  notifications          Notification[]
+  notificationPreferences NotificationPreference[]
+  partnerPriceApplications PartnerPriceApplication[]
+  partnerPriceAgreements  PartnerPriceAgreement[]
+  cooperationDesignFiles  CooperationDesignFile[]
+  acceptedQuotationVersions QuotationVersion[] @relation("QuotationVersionAcceptedByCustomer")
 
   @@index([partnerStatus])
   @@map("customers")
@@ -913,6 +940,7 @@ model Fulfillment {
 
   order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   creator User? @relation("FulfillmentCreator", fields: [createdBy], references: [id])
+  logisticsEvents LogisticsEvent[]
 
   @@index([orderId])
   @@index([status])
@@ -1152,6 +1180,9 @@ model PageDocument {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
+  revisions       PageDocumentRevision[]
+  localizations   PageDocumentLocalization[]
+
   @@index([status])
   @@map("page_documents")
 }
@@ -1168,6 +1199,9 @@ model PageDocumentRevision {
   publishedBy Int?      @map("published_by")
   publishedAt DateTime? @map("published_at")
   createdAt   DateTime  @default(now()) @map("created_at")
+
+  document         PageDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  publishedLocales PageDocumentLocalization[] @relation("PageLocalePublishedRevision")
 
   @@unique([documentId, version])
   @@map("page_document_revisions")
@@ -1189,6 +1223,27 @@ model PageScheme {
   @@unique([pageKey, name])
   @@index([pageKey])
   @@map("page_schemes")
+}
+
+// ========== 账号私有内容模板 ==========
+model PersonalContentTemplate {
+  id              Int      @id @default(autoincrement())
+  ownerId         Int      @map("owner_id")
+  name            String   @db.VarChar(100)
+  moduleType      String   @map("module_type") @db.VarChar(100)
+  contractKey     String   @map("contract_key") @db.VarChar(50)
+  contractVersion Int      @map("contract_version")
+  layoutData      Json     @map("layout_data")
+  // 运营明确选择后保存的合同白名单默认内容；禁止复制价格、库存、客户及其他业务事实。
+  contentDefaults Json?    @map("content_defaults")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, name])
+  @@index([ownerId, updatedAt])
+  @@map("personal_content_templates")
 }
 
 // ========== 选款咨询 ==========
@@ -1259,6 +1314,7 @@ model LeadFollowUp {
 
 model AnalyticsEvent {
   id         Int      @id @default(autoincrement())
+  dataset    AnalyticsDataset @default(TEST)
   eventName  String   @db.VarChar(50)
   occurredAt DateTime @default(now()) @map("occurred_at")
   pagePath   String?  @map("page_path") @db.VarChar(300)
@@ -1269,11 +1325,18 @@ model AnalyticsEvent {
   sessionId  String?  @map("session_id") @db.VarChar(100)
   customerId Int?     @map("customer_id")
   metadata   Json?
+  retentionExpiresAt DateTime @map("retention_expires_at")
 
   @@index([eventName, occurredAt]) // dashboard page_view 复合查询（最左前缀覆盖纯 eventName）
   @@index([occurredAt])
   @@index([sessionId])
+  @@index([dataset, retentionExpiresAt], map: "analytics_events_retention_idx")
   @@map("analytics_events")
+}
+
+enum AnalyticsDataset {
+  PRODUCTION
+  TEST
 }
 
 // ========== 合作商家申请（受控商家体系）==========
@@ -1391,6 +1454,7 @@ model Quotation {
   customer        Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
   salesConsultant User?           @relation("QuotationSalesConsultant", fields: [salesConsultantId], references: [id], onDelete: SetNull)
   convertedOrder  Order?          @relation("QuotationConvertedOrder", fields: [convertedOrderId], references: [id], onDelete: SetNull)
+  versions        QuotationVersion[]
 
   @@index([status])
   @@index([customerPhone])
@@ -1429,23 +1493,610 @@ model QuotationItem {
   @@map("quotation_items")
 }
 
-// ========== 账号私有内容模板 ==========
-model PersonalContentTemplate {
-  id              Int      @id @default(autoincrement())
-  ownerId         Int      @map("owner_id")
-  name            String   @db.VarChar(100)
-  moduleType      String   @map("module_type") @db.VarChar(100)
-  contractKey     String   @map("contract_key") @db.VarChar(50)
-  contractVersion Int      @map("contract_version")
-  layoutData      Json     @map("layout_data")
-  // 运营明确选择后保存的合同白名单默认内容；禁止复制价格、库存、客户及其他业务事实。
-  contentDefaults Json?    @map("content_defaults")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+// ========== P0 成熟网站共享数据合同（2026-08-24，仅加法式；migration 未执行）==========
 
-  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+enum ContentLocale {
+  ZH_CN @map("zh-CN")
+  EN    @map("en")
+}
 
-  @@unique([ownerId, name])
-  @@index([ownerId, updatedAt])
-  @@map("personal_content_templates")
+enum ContentReviewStatus {
+  DRAFT
+  IN_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum MediaAssetStatus {
+  PENDING
+  READY
+  QUARANTINED
+  ARCHIVED
+}
+
+enum MediaAccessLevel {
+  PUBLIC
+  CUSTOMER
+  STAFF
+  PRIVATE
+}
+
+enum ConsentPurpose {
+  SERVICE_PRIVACY
+  MARKETING
+  ANALYTICS
+}
+
+enum ConsentDecision {
+  GRANTED
+  DENIED
+  WITHDRAWN
+}
+
+enum NotificationChannel {
+  IN_APP
+  SMS
+  EMAIL
+}
+
+enum NotificationStatus {
+  PENDING
+  AVAILABLE
+  READ
+  ARCHIVED
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  SENDING
+  SENT
+  DELIVERED
+  FAILED
+  CANCELLED
+  SUPPRESSED
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum PriceApplicationStatus {
+  PENDING
+  NEEDS_SUPPLEMENT
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum WaxType {
+  RED
+  PURPLE
+}
+
+enum QuoteChannel {
+  RETAIL
+  CUSTOM
+  PARTNER_WAX
+}
+
+enum QuoteVersionStatus {
+  DRAFT
+  ISSUED
+  ACCEPTED
+  SUPERSEDED
+  EXPIRED
+  CANCELLED
+}
+
+enum PaymentPlanStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentInstallmentStatus {
+  PENDING
+  DUE
+  PAID
+  WAIVED
+  CANCELLED
+}
+
+enum CooperationFileStatus {
+  DRAFT
+  SUBMITTED
+  CONFIRMED
+  SUPERSEDED
+  REJECTED
+}
+
+enum LogisticsEventSource {
+  MANUAL
+  KUAIDI100
+  CARRIER
+}
+
+model ProductTranslation {
+  id               Int           @id @default(autoincrement())
+  productId        Int           @map("product_id")
+  locale           ContentLocale
+  name             String        @db.VarChar(200)
+  shortDescription String?       @map("short_description") @db.VarChar(500)
+  description      String?       @db.Text
+  detailContent    Json?         @map("detail_content")
+  seoTitle         String?       @map("seo_title") @db.VarChar(200)
+  seoDescription   String?       @map("seo_description") @db.VarChar(500)
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, locale])
+  @@index([locale])
+  @@map("product_translations")
+}
+
+model CategoryTranslation {
+  id             Int           @id @default(autoincrement())
+  categoryId     Int           @map("category_id")
+  locale         ContentLocale
+  name           String        @db.VarChar(100)
+  seoTitle       String?       @map("seo_title") @db.VarChar(200)
+  seoDescription String?       @map("seo_description") @db.VarChar(500)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, locale])
+  @@index([locale])
+  @@map("category_translations")
+}
+
+model MediaAsset {
+  id              Int              @id @default(autoincrement())
+  storageKey      String           @unique @map("storage_key") @db.VarChar(300)
+  originalName    String?          @map("original_name") @db.VarChar(255)
+  mimeType        String           @map("mime_type") @db.VarChar(100)
+  byteSize        Int              @map("byte_size")
+  checksumSha256  String           @map("checksum_sha256") @db.Char(64)
+  width           Int?
+  height          Int?
+  durationMs      Int?             @map("duration_ms")
+  altText         String?          @map("alt_text") @db.VarChar(500)
+  locale          ContentLocale?
+  accessLevel     MediaAccessLevel @default(PRIVATE) @map("access_level")
+  status          MediaAssetStatus @default(PENDING)
+  uploadedBy      Int?             @map("uploaded_by")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  uploader           User?                          @relation("MediaAssetUploader", fields: [uploadedBy], references: [id], onDelete: SetNull)
+  variants           MediaVariant[]
+  productImages      ProductImage[]
+  designFileVersions CooperationDesignFileVersion[]
+
+  @@index([status, accessLevel])
+  @@index([checksumSha256])
+  @@index([uploadedBy])
+  @@map("media_assets")
+}
+
+model MediaVariant {
+  id             Int      @id @default(autoincrement())
+  assetId        Int      @map("asset_id")
+  variantKey     String   @map("variant_key") @db.VarChar(50)
+  storageKey     String   @unique @map("storage_key") @db.VarChar(300)
+  mimeType       String   @map("mime_type") @db.VarChar(100)
+  byteSize       Int      @map("byte_size")
+  checksumSha256 String   @map("checksum_sha256") @db.Char(64)
+  width          Int?
+  height         Int?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  asset MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, variantKey])
+  @@map("media_variants")
+}
+
+model AdminRefreshSession {
+  id             Int       @id @default(autoincrement())
+  userId         Int       @map("user_id")
+  tokenHash      String    @unique @map("token_hash") @db.Char(64)
+  familyId       String    @map("family_id") @db.Char(36)
+  expiresAt      DateTime  @map("expires_at")
+  lastUsedAt     DateTime? @map("last_used_at")
+  revokedAt      DateTime? @map("revoked_at")
+  replacedByHash String?   @map("replaced_by_hash") @db.Char(64)
+  userAgentHash  String?   @map("user_agent_hash") @db.Char(64)
+  ipHash         String?   @map("ip_hash") @db.Char(64)
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt, expiresAt])
+  @@index([familyId])
+  @@map("admin_refresh_sessions")
+}
+
+model CustomerRefreshSession {
+  id             Int       @id @default(autoincrement())
+  customerId     Int       @map("customer_id")
+  tokenHash      String    @unique @map("token_hash") @db.Char(64)
+  familyId       String    @map("family_id") @db.Char(36)
+  expiresAt      DateTime  @map("expires_at")
+  lastUsedAt     DateTime? @map("last_used_at")
+  revokedAt      DateTime? @map("revoked_at")
+  replacedByHash String?   @map("replaced_by_hash") @db.Char(64)
+  userAgentHash  String?   @map("user_agent_hash") @db.Char(64)
+  ipHash         String?   @map("ip_hash") @db.Char(64)
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, revokedAt, expiresAt])
+  @@index([familyId])
+  @@map("customer_refresh_sessions")
+}
+
+model ConsentRecord {
+  id              Int             @id @default(autoincrement())
+  customerId      Int?            @map("customer_id")
+  anonymousIdHash String?         @map("anonymous_id_hash") @db.Char(64)
+  purpose         ConsentPurpose
+  decision        ConsentDecision
+  policyVersion   String          @map("policy_version") @db.VarChar(50)
+  locale          ContentLocale
+  source          String          @db.VarChar(50)
+  decidedAt       DateTime        @default(now()) @map("decided_at")
+  expiresAt       DateTime?       @map("expires_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([customerId, purpose, decidedAt])
+  @@index([anonymousIdHash, purpose, decidedAt])
+  @@map("consent_records")
+}
+
+model Notification {
+  id          Int                @id @default(autoincrement())
+  customerId  Int                @map("customer_id")
+  type        String             @db.VarChar(80)
+  locale      ContentLocale
+  title       String             @db.VarChar(200)
+  body        String             @db.Text
+  actionUrl   String?            @map("action_url") @db.VarChar(500)
+  payload     Json?
+  status      NotificationStatus @default(PENDING)
+  availableAt DateTime           @default(now()) @map("available_at")
+  readAt      DateTime?          @map("read_at")
+  createdAt   DateTime           @default(now()) @map("created_at")
+
+  customer  Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@index([customerId, status, availableAt])
+  @@map("notifications")
+}
+
+model NotificationDelivery {
+  id              Int                        @id @default(autoincrement())
+  notificationId  Int                        @map("notification_id")
+  channel         NotificationChannel
+  status          NotificationDeliveryStatus @default(PENDING)
+  destinationHash String?                    @map("destination_hash") @db.Char(64)
+  provider        String?                    @db.VarChar(50)
+  providerRef     String?                    @map("provider_ref") @db.VarChar(200)
+  attempts        Int                        @default(0)
+  nextAttemptAt   DateTime?                  @map("next_attempt_at")
+  sentAt          DateTime?                  @map("sent_at")
+  deliveredAt     DateTime?                  @map("delivered_at")
+  failedAt        DateTime?                  @map("failed_at")
+  lastErrorCode   String?                    @map("last_error_code") @db.VarChar(100)
+  createdAt       DateTime                   @default(now()) @map("created_at")
+  updatedAt       DateTime                   @updatedAt @map("updated_at")
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, channel])
+  @@index([status, nextAttemptAt])
+  @@map("notification_deliveries")
+}
+
+model NotificationPreference {
+  id         Int                 @id @default(autoincrement())
+  customerId Int                 @map("customer_id")
+  channel    NotificationChannel
+  topic      String              @db.VarChar(80)
+  enabled    Boolean             @default(true)
+  createdAt  DateTime            @default(now()) @map("created_at")
+  updatedAt  DateTime            @updatedAt @map("updated_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, channel, topic])
+  @@map("notification_preferences")
+}
+
+model OutboxEvent {
+  id               Int          @id @default(autoincrement())
+  aggregateType    String       @map("aggregate_type") @db.VarChar(80)
+  aggregateId      String       @map("aggregate_id") @db.VarChar(100)
+  eventType        String       @map("event_type") @db.VarChar(120)
+  payload          Json
+  deduplicationKey String?      @unique @map("deduplication_key") @db.VarChar(128)
+  status           OutboxStatus @default(PENDING)
+  occurredAt       DateTime     @default(now()) @map("occurred_at")
+  availableAt      DateTime     @default(now()) @map("available_at")
+  lockedAt         DateTime?    @map("locked_at")
+  lockedBy         String?      @map("locked_by") @db.VarChar(100)
+  processedAt      DateTime?    @map("processed_at")
+  attempts         Int          @default(0)
+  lastErrorCode    String?      @map("last_error_code") @db.VarChar(100)
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  @@index([status, availableAt])
+  @@index([aggregateType, aggregateId, occurredAt])
+  @@map("outbox_events")
+}
+
+model PageDocumentLocalization {
+  id                  Int                 @id @default(autoincrement())
+  documentId          Int                 @map("document_id")
+  locale              ContentLocale
+  puckData            Json                @map("puck_data")
+  metadata            Json                @default("{}")
+  reviewStatus        ContentReviewStatus @default(DRAFT) @map("review_status")
+  contentHash         String              @map("content_hash") @db.Char(64)
+  submittedBy         Int?                @map("submitted_by")
+  submittedAt         DateTime?           @map("submitted_at")
+  reviewedBy          Int?                @map("reviewed_by")
+  reviewedAt          DateTime?           @map("reviewed_at")
+  reviewNote          String?             @map("review_note") @db.Text
+  publishedRevisionId Int?                @map("published_revision_id")
+  publishedHash       String?             @map("published_hash") @db.Char(64)
+  publishedBy         Int?                @map("published_by")
+  publishedAt         DateTime?           @map("published_at")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+
+  document          PageDocument          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  submittedByUser    User?                 @relation("PageLocaleSubmitter", fields: [submittedBy], references: [id], onDelete: SetNull)
+  reviewedByUser     User?                 @relation("PageLocaleReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  publishedByUser    User?                 @relation("PageLocalePublisher", fields: [publishedBy], references: [id], onDelete: SetNull)
+  publishedRevision PageDocumentRevision? @relation("PageLocalePublishedRevision", fields: [publishedRevisionId], references: [id], onDelete: SetNull)
+  seoSnapshots       SeoSnapshot[]
+
+  @@unique([documentId, locale])
+  @@index([locale, reviewStatus])
+  @@index([publishedRevisionId])
+  @@map("page_document_localizations")
+}
+
+model PartnerPriceApplication {
+  id                  Int                    @id @default(autoincrement())
+  customerId          Int                    @map("customer_id")
+  requestedRedRate    Decimal?               @map("requested_red_rate") @db.Decimal(10, 2)
+  requestedPurpleRate Decimal?               @map("requested_purple_rate") @db.Decimal(10, 2)
+  reason              String?                @db.Text
+  status              PriceApplicationStatus @default(PENDING)
+  reviewerId          Int?                   @map("reviewer_id")
+  reviewNote          String?                @map("review_note") @db.Text
+  submittedAt         DateTime               @default(now()) @map("submitted_at")
+  reviewedAt          DateTime?              @map("reviewed_at")
+  createdAt           DateTime               @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  reviewer User?    @relation("PartnerPriceApplicationReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([customerId, submittedAt])
+  @@index([status, submittedAt])
+  @@map("partner_price_applications")
+}
+
+model PartnerPriceAgreement {
+  id             Int       @id @default(autoincrement())
+  customerId     Int       @map("customer_id")
+  version        Int
+  currency       String    @default("CNY") @db.Char(3)
+  redWaxRate     Decimal   @map("red_wax_rate") @db.Decimal(10, 2)
+  purpleWaxRate  Decimal   @map("purple_wax_rate") @db.Decimal(10, 2)
+  effectiveFrom  DateTime  @map("effective_from")
+  effectiveUntil DateTime? @map("effective_until")
+  reason         String?   @db.Text
+  createdBy      Int?      @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  creator  User?    @relation("PartnerPriceAgreementCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([customerId, version])
+  @@index([customerId, effectiveFrom, effectiveUntil], map: "partner_price_agreements_customer_effective_idx")
+  @@map("partner_price_agreements")
+}
+
+model CooperationDesignFile {
+  id             Int      @id @default(autoincrement())
+  customerId     Int      @map("customer_id")
+  productId      Int?     @map("product_id")
+  referenceNo    String   @unique @map("reference_no") @db.VarChar(50)
+  currentVersion Int      @default(0) @map("current_version")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product  Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  versions CooperationDesignFileVersion[]
+
+  @@index([customerId, createdAt])
+  @@map("cooperation_design_files")
+}
+
+model CooperationDesignFileVersion {
+  id               Int                   @id @default(autoincrement())
+  designFileId     Int                   @map("design_file_id")
+  version          Int
+  mediaAssetId     Int                   @map("media_asset_id")
+  status           CooperationFileStatus @default(DRAFT)
+  targetGoldWeight Decimal?              @map("target_gold_weight") @db.Decimal(10, 3)
+  redWaxWeight     Decimal?              @map("red_wax_weight") @db.Decimal(10, 3)
+  purpleWaxWeight  Decimal?              @map("purple_wax_weight") @db.Decimal(10, 3)
+  checksumSha256   String                @map("checksum_sha256") @db.Char(64)
+  createdBy        Int?                  @map("created_by")
+  confirmedAt      DateTime?             @map("confirmed_at")
+  createdAt        DateTime              @default(now()) @map("created_at")
+
+  designFile        CooperationDesignFile @relation(fields: [designFileId], references: [id], onDelete: Cascade)
+  mediaAsset        MediaAsset            @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+  creator           User?                 @relation("DesignFileVersionCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  quotationVersions QuotationVersion[]
+
+  @@unique([designFileId, version])
+  @@map("cooperation_design_file_versions")
+}
+
+model QuotationVersion {
+  id                   Int                @id @default(autoincrement())
+  quotationId          Int                @map("quotation_id")
+  version              Int
+  channel              QuoteChannel
+  status               QuoteVersionStatus @default(DRAFT)
+  currency             String             @default("CNY") @db.Char(3)
+  subtotalAmount       Decimal            @map("subtotal_amount") @db.Decimal(12, 2)
+  discountAmount       Decimal            @default(0) @map("discount_amount") @db.Decimal(12, 2)
+  feeAmount            Decimal            @default(0) @map("fee_amount") @db.Decimal(12, 2)
+  totalAmount          Decimal            @map("total_amount") @db.Decimal(12, 2)
+  validUntil           DateTime?          @map("valid_until")
+  contentHash          String             @map("content_hash") @db.Char(64)
+  designFileVersionId  Int?               @map("design_file_version_id")
+  createdBy            Int?               @map("created_by")
+  issuedAt             DateTime?          @map("issued_at")
+  acceptedByCustomerId Int?               @map("accepted_by_customer_id")
+  acceptedAt           DateTime?          @map("accepted_at")
+  createdAt            DateTime           @default(now()) @map("created_at")
+
+  quotation          Quotation                     @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  designFileVersion  CooperationDesignFileVersion? @relation(fields: [designFileVersionId], references: [id], onDelete: Restrict)
+  creator            User?                         @relation("QuotationVersionCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  acceptedByCustomer Customer?                     @relation("QuotationVersionAcceptedByCustomer", fields: [acceptedByCustomerId], references: [id], onDelete: SetNull)
+  items              QuotationVersionItem[]
+  paymentPlans       PaymentPlan[]
+
+  @@unique([quotationId, version])
+  @@index([status, validUntil])
+  @@map("quotation_versions")
+}
+
+model QuotationVersionItem {
+  id                 Int      @id @default(autoincrement())
+  quotationVersionId Int      @map("quotation_version_id")
+  productId          Int?     @map("product_id")
+  skuId              Int?     @map("sku_id")
+  waxType            WaxType? @map("wax_type")
+  description        String   @db.VarChar(500)
+  quantity           Int      @default(1)
+  unitPrice          Decimal  @map("unit_price") @db.Decimal(12, 2)
+  subtotal           Decimal  @db.Decimal(12, 2)
+  pricingSnapshot    Json     @map("pricing_snapshot")
+
+  quotationVersion QuotationVersion @relation(fields: [quotationVersionId], references: [id], onDelete: Cascade)
+  product          Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
+  sku              ProductSKU?      @relation(fields: [skuId], references: [id], onDelete: SetNull)
+
+  @@index([quotationVersionId])
+  @@map("quotation_version_items")
+}
+
+model PaymentPlan {
+  id                 Int               @id @default(autoincrement())
+  quotationVersionId Int?              @map("quotation_version_id")
+  orderId            Int?              @map("order_id")
+  currency           String            @default("CNY") @db.Char(3)
+  totalAmount        Decimal           @map("total_amount") @db.Decimal(12, 2)
+  status             PaymentPlanStatus @default(DRAFT)
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
+
+  quotationVersion QuotationVersion?        @relation(fields: [quotationVersionId], references: [id], onDelete: Restrict)
+  order            Order?                   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  installments     PaymentPlanInstallment[]
+
+  @@index([quotationVersionId])
+  @@index([orderId])
+  @@map("payment_plans")
+}
+
+model PaymentPlanInstallment {
+  id            Int                      @id @default(autoincrement())
+  paymentPlanId Int                      @map("payment_plan_id")
+  sequence      Int
+  label         String                   @db.VarChar(100)
+  amount        Decimal                  @db.Decimal(12, 2)
+  dueAt         DateTime?                @map("due_at")
+  status        PaymentInstallmentStatus @default(PENDING)
+  paidAt        DateTime?                @map("paid_at")
+  paymentId     Int?                     @map("payment_id")
+  createdAt     DateTime                 @default(now()) @map("created_at")
+
+  paymentPlan PaymentPlan @relation(fields: [paymentPlanId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentPlanId, sequence])
+  @@index([status, dueAt])
+  @@map("payment_plan_installments")
+}
+
+model LogisticsEvent {
+  id             Int                  @id @default(autoincrement())
+  orderId        Int                  @map("order_id")
+  fulfillmentId  Int?                 @map("fulfillment_id")
+  source         LogisticsEventSource
+  carrierCode    String?              @map("carrier_code") @db.VarChar(50)
+  trackingNoHash String?              @map("tracking_no_hash") @db.Char(64)
+  eventCode      String               @map("event_code") @db.VarChar(80)
+  description    String               @db.VarChar(500)
+  location       String?              @db.VarChar(200)
+  occurredAt     DateTime             @map("occurred_at")
+  externalId     String?              @map("external_id") @db.VarChar(150)
+  rawPayload     Json?                @map("raw_payload")
+  createdAt      DateTime             @default(now()) @map("created_at")
+
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fulfillment Fulfillment? @relation(fields: [fulfillmentId], references: [id], onDelete: SetNull)
+
+  @@unique([source, externalId])
+  @@index([orderId, occurredAt])
+  @@map("logistics_events")
+}
+
+model SeoSnapshot {
+  id                 Int           @id @default(autoincrement())
+  pageLocalizationId Int?          @map("page_localization_id")
+  productId          Int?          @map("product_id")
+  locale             ContentLocale
+  routePath          String        @map("route_path") @db.VarChar(500)
+  title              String        @db.VarChar(200)
+  description        String?       @db.VarChar(500)
+  canonicalUrl       String        @map("canonical_url") @db.VarChar(500)
+  robots             String        @default("index,follow") @db.VarChar(100)
+  structuredData     Json?         @map("structured_data")
+  contentHash        String        @map("content_hash") @db.Char(64)
+  generatedAt        DateTime      @default(now()) @map("generated_at")
+  publishedAt        DateTime?     @map("published_at")
+
+  pageLocalization PageDocumentLocalization? @relation(fields: [pageLocalizationId], references: [id], onDelete: Cascade)
+  product          Product?                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([locale, routePath, contentHash])
+  @@index([pageLocalizationId, publishedAt])
+  @@index([productId, locale, publishedAt])
+  @@map("seo_snapshots")
 }

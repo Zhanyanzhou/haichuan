@@ -4,8 +4,14 @@ import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
-import { PaymentGatewayService, type OnlinePayProvider } from '../../common/payment-gateway/payment-gateway.service';
+import {
+  PaymentGatewayService,
+  type OnlinePayProvider,
+  type QueryPayResult,
+} from '../../common/payment-gateway/payment-gateway.service';
+import type { WechatPayScene } from '../../common/payment-gateway/wechat-pay.client';
 import type { OperatorContext } from '../trade-events/trade-events.constants';
+import { businessDateKey } from '../../common/time/business-date';
 
 @Injectable()
 export class PaymentsService {
@@ -20,13 +26,29 @@ export class PaymentsService {
 
   /** 商户单号生成（与 orders.service.createPaymentNo 同格式：PAY+日期+随机段） */
   private createPaymentNo(): string {
-    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const date = businessDateKey();
     return `PAY${date}${randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
+  }
+
+  private moneyToCents(value: Prisma.Decimal | number | string) {
+    const amount = Number(value);
+    const cents = Math.round(amount * 100);
+    if (!Number.isFinite(amount) || !Number.isSafeInteger(cents)) {
+      throw new BadRequestException('支付金额无效');
+    }
+    return cents;
   }
 
   /** 在线支付通道可用性（后台收款按钮按此渲染可选项） */
   availableChannels() {
     return this.paymentGateway.availableChannels();
+  }
+
+  /** R2 首发只向客户开放微信；支付宝仍保留后台适配器并在第二批接入客户旅程。 */
+  availableCustomerChannels() {
+    return this.paymentGateway
+      .availableChannels()
+      .filter((channel) => channel.provider === 'wechat');
   }
 
   async findAll(params: { page?: number; pageSize?: number; status?: string; type?: string; method?: string; keyword?: string; startDate?: string; endDate?: string }) {
@@ -83,19 +105,19 @@ export class PaymentsService {
   }
 
   approve(id: number, reviewerId: number, reviewNote?: string, operator?: OperatorContext) {
-    return this.ordersService.approveOfflinePayment(id, reviewerId, reviewNote, operator);
+    return this.ordersService.confirmPaymentSettlement(id, reviewerId, reviewNote, operator);
   }
 
   reject(id: number, reviewerId: number, reviewNote?: string, operator?: OperatorContext) {
     return this.ordersService.rejectOfflinePayment(id, reviewerId, reviewNote, operator);
   }
 
-  /** 后台手动登记收款（财务直接录入一笔已到账收款：定金/尾款/全款/补款） */
+  /** 异常线下实收登记；在线渠道到账只由 settleFromGateway 核销。 */
   createReceipt(
     data: {
       orderId: number;
       amount: number;
-      method: string;
+      method: 'bank_transfer' | 'store';
       type: 'DEPOSIT' | 'BALANCE' | 'FULL' | 'SUPPLEMENT';
       paidAt?: string | Date;
       gatewayTradeNo?: string;
@@ -116,6 +138,40 @@ export class PaymentsService {
     method: OnlinePayProvider,
     operator: OperatorContext,
   ) {
+    return this.createOnlinePayment(orderId, method, operator, {
+      scene: 'native',
+    });
+  }
+
+  /** 客户本人从自己的订单发起微信支付；终端场景与 IP 只由服务端请求上下文决定。 */
+  async createCustomerPayment(
+    customerId: number,
+    orderId: number,
+    context: {
+      scene: WechatPayScene;
+      clientIp?: string;
+      h5Type?: 'Wap' | 'iOS' | 'Android';
+    },
+  ) {
+    return this.createOnlinePayment(
+      orderId,
+      'wechat',
+      { type: 'CUSTOMER', id: customerId },
+      { ...context, customerId },
+    );
+  }
+
+  private async createOnlinePayment(
+    orderId: number,
+    method: OnlinePayProvider,
+    operator: OperatorContext,
+    context: {
+      scene: WechatPayScene;
+      customerId?: number;
+      clientIp?: string;
+      h5Type?: 'Wap' | 'iOS' | 'Android';
+    },
+  ) {
     if (!this.paymentGateway.isTransactionCreationEnabled()) {
       throw new ServiceUnavailableException(
         '在线资金交易当前已关闭，不能发起新的支付网关交易',
@@ -125,8 +181,16 @@ export class PaymentsService {
       throw new ServiceUnavailableException(
         method === 'alipay'
           ? '支付宝通道未配置（ALIPAY_APP_ID/ALIPAY_PRIVATE_KEY/ALIPAY_PUBLIC_KEY），请先由运维接入'
-          : '微信支付通道未配置（WECHAT_* 五项），请先由运维接入',
+          : '微信支付通道未配置（AppID、商户号、商户证书序列号、平台证书、商户私钥、APIv3 Key），请先由运维接入',
       );
+    }
+    if (
+      context.scene === 'h5' &&
+      (!context.clientIp ||
+        context.clientIp === '127.0.0.1' ||
+        context.clientIp === '::1')
+    ) {
+      throw new BadRequestException('微信 H5 支付无法识别真实客户 IP，请检查反向代理配置');
     }
     const siteBase = (this.configService.get<string>('SITE_BASE_URL') || '').replace(/\/+$/, '');
     if (!siteBase || siteBase.includes('localhost')) {
@@ -135,55 +199,348 @@ export class PaymentsService {
       throw new BadRequestException('请先配置 SITE_BASE_URL 为正式域名，网关异步回调才能到达本服务');
     }
 
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      include: { payments: { where: { status: 'PAID' }, select: { amount: true } } },
+    const prepared = await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: number }>>(
+        Prisma.sql`SELECT id FROM orders WHERE id = ${orderId} FOR UPDATE`,
+      );
+      if (locked.length === 0) throw new NotFoundException('订单不存在');
+
+      const order = await tx.order.findUnique({ where: { id: orderId } });
+      if (!order) throw new NotFoundException('订单不存在');
+      if (
+        context.customerId !== undefined &&
+        order.customerId !== context.customerId
+      ) {
+        throw new NotFoundException('订单不存在或无权操作');
+      }
+      if (order.status !== 'PENDING_PAYMENT') {
+        throw new BadRequestException('当前订单状态不支持发起在线收款');
+      }
+
+      const pendingPayment = await tx.payment.findFirst({
+        where: {
+          orderId,
+          status: 'PENDING',
+        },
+        select: {
+          id: true,
+          paymentNo: true,
+          amount: true,
+          method: true,
+          status: true,
+        },
+      });
+
+      const confirmedPayments = await tx.payment.findMany({
+        where: {
+          orderId,
+          status: { in: ['PAID', 'PARTIAL_REFUND', 'REFUNDED'] },
+        },
+        select: { amount: true },
+      });
+      const paidCents = confirmedPayments.reduce(
+        (sum, payment) => sum + this.moneyToCents(payment.amount),
+        0,
+      );
+      const dueCents = this.moneyToCents(order.finalAmount) - paidCents;
+      if (dueCents <= 0) {
+        throw new BadRequestException('订单已收齐款项，无需再次收款');
+      }
+
+      if (pendingPayment && pendingPayment.method !== method) {
+        throw new BadRequestException(
+          `订单已有 ${pendingPayment.method} 待支付交易 ${pendingPayment.paymentNo}，请先查询或关闭该交易`,
+        );
+      }
+      if (
+        pendingPayment &&
+        this.moneyToCents(pendingPayment.amount) !== dueCents
+      ) {
+        throw new BadRequestException(
+          `待支付交易 ${pendingPayment.paymentNo} 的金额与当前应收不一致，请先关闭并对账`,
+        );
+      }
+
+      const payment = pendingPayment ?? (await tx.payment.create({
+          data: {
+            paymentNo: this.createPaymentNo(),
+            orderId,
+            amount: new Prisma.Decimal(dueCents).div(100),
+            method,
+            type: paidCents === 0 ? 'FULL' : 'BALANCE',
+            status: 'PENDING',
+          },
+        }));
+      await tx.order.update({
+        where: { id: orderId },
+        data: { paymentMethod: method },
+      });
+      const reservation = await tx.inventoryReservation.findFirst({
+        where: {
+          orderId,
+          consumedAt: null,
+          releasedAt: null,
+        },
+        orderBy: { expiresAt: 'asc' },
+        select: { expiresAt: true },
+      });
+      if (!reservation || reservation.expiresAt.getTime() <= Date.now()) {
+        throw new BadRequestException('订单库存保留已到期，请重新下单');
+      }
+      return {
+        order,
+        payment,
+        dueCents,
+        timeExpire: reservation.expiresAt.toISOString(),
+        reused: Boolean(pendingPayment),
+      };
     });
-    if (!order) throw new NotFoundException('订单不存在');
-    if (order.status !== 'PENDING_PAYMENT') {
-      throw new BadRequestException('当前订单状态不支持发起在线收款');
+
+    let result;
+    try {
+      result = await this.paymentGateway.createPayment(method, {
+        paymentNo: prepared.payment.paymentNo,
+        amountYuan: (prepared.dueCents / 100).toFixed(2),
+        subject: `海川珠宝订单 ${prepared.order.orderNo}`,
+        notifyUrl: `${siteBase}/api/payments/notify/${method}`,
+        scene: context.scene,
+        clientIp: context.clientIp,
+        h5Type: context.h5Type,
+        appName: '海川珠宝',
+        appUrl: siteBase,
+        timeExpire: prepared.timeExpire,
+      });
+    } catch (error) {
+      // 预下单发生网络异常时无法证明渠道未受理。保留同一个 PENDING 商户单号，
+      // 后续只能用原单号重试/查单/关单，避免生成第二个可支付单号导致重复付款。
+      await this.prisma.payment.updateMany({
+        where: { id: prepared.payment.id, status: 'PENDING' },
+        data: {
+          reviewNote: '渠道预下单结果未确认；必须复用原商户单号查单、重试或关单',
+        },
+      });
+      throw error;
     }
-    const paidCents = order.payments.reduce(
-      (sum, p) => sum + Math.round(Number(p.amount) * 100),
-      0,
-    );
-    const dueCents = Math.round(Number(order.finalAmount) * 100) - paidCents;
-    if (dueCents <= 0) throw new BadRequestException('订单已收齐款项，无需再次收款');
 
-    const payment = await this.prisma.payment.create({
-      data: {
-        paymentNo: this.createPaymentNo(),
-        orderId,
-        // Decimal 字段按分取整后回退到元（两位小数），避免浮点放大误差
-        amount: Math.round(dueCents) / 100,
-        method,
-        type: paidCents === 0 ? 'FULL' : 'BALANCE',
-        status: 'PENDING',
-      },
-    });
-
-    const result = await this.paymentGateway.createPayment(method, {
-      paymentNo: payment.paymentNo,
-      amountYuan: (dueCents / 100).toFixed(2),
-      subject: `海川珠宝订单 ${order.orderNo}`,
-      notifyUrl: `${siteBase}/api/payments/notify/${method}`,
-    });
+    const payUrl =
+      result.scene === 'h5' && result.payUrl
+        ? `${result.payUrl}${result.payUrl.includes('?') ? '&' : '?'}redirect_url=${encodeURIComponent(`${siteBase}/checkout?paymentReturn=1&orderId=${orderId}`)}`
+        : result.payUrl;
 
     this.logger.log(
-      `订单 #${orderId} 发起 ${method} 收款 ${payment.paymentNo}，金额 ${(dueCents / 100).toFixed(2)} 元（操作者 ${operator.type}:${operator.id ?? '-'}）`,
+      `订单 #${orderId} 发起 ${method} 收款 ${prepared.payment.paymentNo}，金额 ${(prepared.dueCents / 100).toFixed(2)} 元（操作者 ${operator.type}:${operator.id ?? '-'}）`,
     );
     return {
-      payment: { id: payment.id, paymentNo: payment.paymentNo, amount: payment.amount },
+      payment: {
+        id: prepared.payment.id,
+        paymentNo: prepared.payment.paymentNo,
+        amount: prepared.payment.amount,
+      },
       provider: method,
+      scene: result.scene,
       qrCode: result.qrCode,
-      payUrl: result.payUrl,
+      payUrl,
+      reused: prepared.reused,
     };
+  }
+
+  private customerPaymentState(status: string) {
+    if (['PAID', 'PARTIAL_REFUND', 'REFUNDED'].includes(status)) return 'PAID' as const;
+    if (status === 'FAILED') return 'FAILED' as const;
+    return 'PENDING' as const;
+  }
+
+  private async getCustomerOnlinePayment(customerId: number, orderId: number) {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, customerId },
+      select: { id: true, orderNo: true, status: true },
+    });
+    if (!order) throw new NotFoundException('订单不存在或无权操作');
+    const payment = await this.prisma.payment.findFirst({
+      where: {
+        orderId,
+        method: { in: ['wechat', 'alipay'] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { order, payment };
+  }
+
+  private async settleVerifiedPayment(
+    provider: OnlinePayProvider,
+    fact: {
+      paymentNo: string;
+      gatewayTradeNo?: string;
+      amountYuan?: string;
+      raw?: unknown;
+    },
+    source: 'callback' | 'query',
+  ): Promise<'PAID' | 'ATTENTION' | 'MISSING'> {
+    const payment = await this.prisma.payment.findUnique({
+      where: { paymentNo: fact.paymentNo },
+    });
+    if (!payment) {
+      this.logger.error(`${provider} ${source} 商户单号 ${fact.paymentNo} 无对应 Payment，疑似环境不匹配`);
+      return 'MISSING';
+    }
+    if (payment.method !== provider) {
+      this.logger.error(`${provider} ${source} 与本地付款方式 ${payment.method} 不一致：${payment.paymentNo}`);
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: { reviewNote: `渠道不符告警：${provider} 事实不能核销 ${payment.method} 付款` },
+      }).catch(() => undefined);
+      return 'ATTENTION';
+    }
+    if (['PAID', 'PARTIAL_REFUND', 'REFUNDED'].includes(payment.status)) {
+      return 'PAID';
+    }
+    if (
+      !fact.amountYuan ||
+      this.moneyToCents(fact.amountYuan) !== this.moneyToCents(payment.amount)
+    ) {
+      this.logger.error(
+        `${provider} ${source} 金额不符：商户单 ${payment.paymentNo} 本地 ${payment.amount} 元 / 渠道 ${fact.amountYuan ?? '缺失'} 元，已拒绝自动核销`,
+      );
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: { reviewNote: `金额不符告警：渠道 ${fact.amountYuan ?? '缺失'} 元 ≠ 本地 ${payment.amount} 元，请人工对账` },
+      }).catch(() => undefined);
+      return 'ATTENTION';
+    }
+    if (!fact.gatewayTradeNo) {
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: { reviewNote: '渠道已返回支付成功但缺少渠道交易号，请人工对账' },
+      }).catch(() => undefined);
+      return 'ATTENTION';
+    }
+
+    try {
+      await this.ordersService.confirmPaymentSettlement(
+        payment.id,
+        null,
+        `${provider} 网关${source === 'callback' ? '回调' : '主动查单'}自动核销`,
+        { type: 'SYSTEM' as const },
+        {
+          tradeNo: fact.gatewayTradeNo,
+          notify: (fact.raw ?? {}) as Prisma.InputJsonValue,
+        },
+      );
+      this.logger.log(`${provider} ${source} 核销成功：${payment.paymentNo}`);
+      return 'PAID';
+    } catch (error) {
+      const current = await this.prisma.payment.findUnique({
+        where: { id: payment.id },
+        select: { status: true },
+      });
+      if (current && ['PAID', 'PARTIAL_REFUND', 'REFUNDED'].includes(current.status)) {
+        return 'PAID';
+      }
+      this.logger.error(
+        `${provider} ${source} 核销异常（${payment.paymentNo}）：${error instanceof Error ? error.message : error}`,
+      );
+      return 'ATTENTION';
+    }
+  }
+
+  private async applyCustomerQuery(
+    payment: { id: number; paymentNo: string; method: string; status: string },
+    query: QueryPayResult,
+  ) {
+    if (query.state === 'SUCCESS') {
+      const state = await this.settleVerifiedPayment(
+        'wechat',
+        {
+          paymentNo: payment.paymentNo,
+          gatewayTradeNo: query.gatewayTradeNo,
+          amountYuan: query.amountYuan,
+          raw: query.raw,
+        },
+        'query',
+      );
+      return state === 'PAID' ? 'PAID' as const : 'ATTENTION' as const;
+    }
+    if (['CLOSED', 'REVOKED', 'PAYERROR'].includes(query.state)) {
+      await this.prisma.payment.updateMany({
+        where: { id: payment.id, status: 'PENDING' },
+        data: {
+          status: 'FAILED',
+          reviewNote: `微信支付状态：${query.state}`,
+        },
+      });
+      return 'FAILED' as const;
+    }
+    if (query.state === 'NOTPAY' || query.state === 'USERPAYING') {
+      return 'PENDING' as const;
+    }
+    return 'ATTENTION' as const;
+  }
+
+  /** 客户查自己的订单付款；成功事实会复用与异步回调相同的核销管线。 */
+  async queryCustomerPayment(customerId: number, orderId: number) {
+    const { order, payment } = await this.getCustomerOnlinePayment(customerId, orderId);
+    if (!payment) return { orderId: order.id, state: 'NONE' as const };
+    const localState = this.customerPaymentState(payment.status);
+    if (localState !== 'PENDING') {
+      return {
+        orderId: order.id,
+        state: localState,
+        payment: {
+          id: payment.id,
+          paymentNo: payment.paymentNo,
+          amount: payment.amount,
+        },
+      };
+    }
+    if (payment.method !== 'wechat') {
+      return { orderId: order.id, state: 'ATTENTION' as const };
+    }
+    const query = await this.paymentGateway.queryPayment('wechat', payment.paymentNo);
+    const state = await this.applyCustomerQuery(payment, query);
+    return {
+      orderId: order.id,
+      state,
+      gatewayState: query.state,
+      payment: {
+        id: payment.id,
+        paymentNo: payment.paymentNo,
+        amount: payment.amount,
+      },
+    };
+  }
+
+  /** 关单前必须先查单；正在支付或已成功时绝不直接关闭。 */
+  async closeCustomerPayment(customerId: number, orderId: number) {
+    const { order, payment } = await this.getCustomerOnlinePayment(customerId, orderId);
+    if (!payment) return { orderId: order.id, state: 'NONE' as const };
+    const localState = this.customerPaymentState(payment.status);
+    if (localState !== 'PENDING') return { orderId: order.id, state: localState };
+    if (payment.method !== 'wechat') {
+      throw new BadRequestException('当前支付渠道不支持客户关单');
+    }
+    const query = await this.paymentGateway.queryPayment('wechat', payment.paymentNo);
+    const reconciled = await this.applyCustomerQuery(payment, query);
+    if (reconciled === 'PAID') return { orderId: order.id, state: 'PAID' as const };
+    if (query.state === 'USERPAYING') {
+      throw new BadRequestException('微信正在处理该笔支付，请稍后查单，不要重复支付');
+    }
+    if (query.state === 'NOTPAY') {
+      await this.paymentGateway.closePayment('wechat', payment.paymentNo);
+      await this.prisma.payment.updateMany({
+        where: { id: payment.id, status: 'PENDING' },
+        data: { status: 'FAILED', reviewNote: '客户结束本次微信支付，渠道关单成功' },
+      });
+      return { orderId: order.id, state: 'FAILED' as const };
+    }
+    if (reconciled === 'FAILED') return { orderId: order.id, state: 'FAILED' as const };
+    throw new BadRequestException('当前渠道状态需要对账，暂不能关闭支付');
   }
 
   /**
    * 网关异步回调核销：验签 → 幂等 → 金额强校验（防篡改）→ 复用订单核销管线。
    * 返回给控制器的应答体：支付宝要纯文本 success/fail；微信要 JSON {code}。
-   * 核销异常一律记录并以"成功"应答（防网关无限重试），问题留给人工在对账/日志中处理。
+   * 只有本地核销已完成或命中已支付幂等状态才确认通知；其余结果返回失败，
+   * 让渠道继续重试，避免数据库瞬时异常把真实到账永久留在待支付状态。
    */
   async settleFromGateway(
     provider: OnlinePayProvider,
@@ -198,43 +555,16 @@ export class PaymentsService {
     // 非支付成功事件（如退款通知）：确认收到即可
     if (!verified.paid || !verified.paymentNo) return { ok: true };
 
-    const payment = await this.prisma.payment.findUnique({
-      where: { paymentNo: verified.paymentNo },
-    });
-    if (!payment) {
-      this.logger.error(`${provider} 回调商户单号 ${verified.paymentNo} 无对应 Payment，疑似环境不匹配`);
-      return { ok: true };
-    }
-    // 幂等：重复回调直接确认
-    if (payment.status === 'PAID') return { ok: true };
-
-    // 金额强校验：回调金额与本地创建金额不一致 → 不核销，记录在案人工介入
-    if (Number(verified.amountYuan || 0) !== Number(payment.amount)) {
-      this.logger.error(
-        `${provider} 回调金额不符：商户单 ${payment.paymentNo} 本地 ${payment.amount} 元 / 回调 ${verified.amountYuan} 元，已拒绝自动核销`,
-      );
-      await this.prisma.payment.update({
-        where: { id: payment.id },
-        data: { reviewNote: `金额不符告警：回调 ${verified.amountYuan} 元 ≠ 本地 ${payment.amount} 元，请人工对账` },
-      }).catch(() => undefined);
-      return { ok: true };
-    }
-
-    try {
-      await this.ordersService.approveOfflinePayment(
-        payment.id,
-        null,
-        `${provider} 网关自动核销`,
-        { type: 'SYSTEM' as const },
-        { tradeNo: verified.gatewayTradeNo || '', notify: (verified.raw ?? {}) as Prisma.InputJsonValue },
-      );
-      this.logger.log(`${provider} 回调核销成功：${payment.paymentNo}`);
-    } catch (error) {
-      // 常见为订单状态已变化（并发人工审核先行）：记录并以成功应答防重试风暴
-      this.logger.error(
-        `${provider} 回调核销异常（${payment.paymentNo}）：${error instanceof Error ? error.message : error}`,
-      );
-    }
-    return { ok: true };
+    const settlement = await this.settleVerifiedPayment(
+      provider,
+      {
+        paymentNo: verified.paymentNo,
+        gatewayTradeNo: verified.gatewayTradeNo,
+        amountYuan: verified.amountYuan,
+        raw: verified.raw,
+      },
+      'callback',
+    );
+    return { ok: settlement === 'PAID' };
   }
 }

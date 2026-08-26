@@ -7,7 +7,9 @@ import { ConfigService } from '@nestjs/config';
  * - SMTP_* 未配置 → isAvailable()=false，send() 返回 { delivered:false, reason:'not_configured' }，
  *   绝不假报成功（吸取"假备份"教训）；调用方据此向用户展示真实状态。
  * - send() 永不抛错：通知是尽力而为（best-effort），邮件失败不得影响业务主流程。
- * - 发送失败返回 { delivered:false, reason:'send_failed' } 并记录错误日志。
+ * - 订单、咨询等业务通知必须由调用方声明 requireNotificationDeliveryEnabled，
+ *   并受 NOTIFICATION_DELIVERY_ENABLED 总门禁约束；密码重置等账户安全邮件不受该门禁影响。
+ * - 发送失败返回 { delivered:false, reason:'send_failed' }；日志不记录收件地址、主题或提供商原始错误。
  */
 @Injectable()
 export class MailerService {
@@ -40,6 +42,8 @@ export class MailerService {
       secure: port === 465, // 465 隐式 TLS；587/25 走 STARTTLS 由 nodemailer 自动协商
       auth: { user, pass },
       connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 60_000,
     });
     this.logger.log(`SMTP 邮件服务初始化成功: ${host}:${port}`);
   }
@@ -51,13 +55,26 @@ export class MailerService {
   /**
    * 发送 HTML 邮件。永不抛错，结果以返回值表达。
    */
-  async send(params: {
-    to: string;
-    subject: string;
-    html: string;
-  }): Promise<{ delivered: boolean; reason?: string }> {
+  async send(
+    params: {
+      to: string;
+      subject: string;
+      html: string;
+    },
+    options: { requireNotificationDeliveryEnabled?: boolean } = {},
+  ): Promise<{ delivered: boolean; reason?: string }> {
+    if (
+      options.requireNotificationDeliveryEnabled
+      && this.configService
+        .get<string>('NOTIFICATION_DELIVERY_ENABLED')
+        ?.trim()
+        .toLowerCase() !== 'true'
+    ) {
+      this.logger.warn('[业务通知未发送·外部投递门禁关闭]');
+      return { delivered: false, reason: 'delivery_disabled' };
+    }
     if (!this.transporter) {
-      this.logger.warn(`[邮件未发送·SMTP 未配置] -> ${params.to} | ${params.subject}`);
+      this.logger.warn('[邮件未发送·SMTP 未配置]');
       return { delivered: false, reason: 'not_configured' };
     }
     try {
@@ -68,10 +85,8 @@ export class MailerService {
         html: params.html,
       });
       return { delivered: true };
-    } catch (error) {
-      this.logger.error(
-        `邮件发送失败 -> ${params.to} | ${params.subject}: ${error instanceof Error ? error.message : error}`,
-      );
+    } catch {
+      this.logger.error('邮件发送失败（收件地址、主题与提供商错误已脱敏）');
       return { delivered: false, reason: 'send_failed' };
     }
   }

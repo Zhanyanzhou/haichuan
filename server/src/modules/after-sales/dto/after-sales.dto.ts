@@ -6,16 +6,16 @@ export const AfterSalesStatusValues = [
   'REQUESTED', 'APPROVED', 'REJECTED', 'RETURNING', 'QC_PASSED', 'QC_FAILED', 'COMPLETED', 'CANCELLED',
 ] as const;
 
-/** 售后申请 DTO（后台代客创建，或未来客户提交复用） */
+/** 后台代客创建售后 DTO；客户入口使用更窄的独立 DTO。 */
 export class CreateAfterSalesDto {
-  @IsInt() @Min(1)
+  @Type(() => Number) @IsInt() @Min(1)
   orderId!: number;
 
-  @IsOptional() @IsInt()
-  orderItemId?: number;
+  @Type(() => Number) @IsInt() @Min(1)
+  orderItemId!: number;
 
-  @IsOptional() @IsInt()
-  customerId?: number;
+  @Type(() => Number) @IsInt() @Min(1)
+  customerId!: number;
 
   @IsEnum(AfterSalesTypeValues)
   type!: string;
@@ -32,6 +32,21 @@ export class CreateAfterSalesDto {
 
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(9999999999.99)
   requestedRefundAmount?: number;
+}
+
+/** 客户本人售后申请：订单、客户和退款金额均由服务端事实决定。 */
+export class CreateCustomerAfterSalesDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  orderItemId!: number;
+
+  @IsEnum(AfterSalesTypeValues)
+  type!: string;
+
+  @IsString()
+  @MaxLength(500)
+  reason!: string;
 }
 
 /** 售后审核 DTO */

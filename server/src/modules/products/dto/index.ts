@@ -5,4 +5,4 @@ export { CreateSkuDto, UpdateSkuDto } from "./sku.dto";
 export { PublicProductQueryDto } from "./public-product-query.dto";
 export { AdminProductQueryDto } from "./admin-product-query.dto";
 export { ResolveProductReferencesDto } from "./resolve-product-references.dto";
-export { AddProductImageDto } from "./add-product-image.dto";
+export { AddProductImageDto, UpdateProductImageDto } from "./add-product-image.dto";

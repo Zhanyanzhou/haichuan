@@ -2,12 +2,14 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { MailerService } from '../../common/mailer/mailer.service';
 import { PRIVACY_CONSENT_VERSION } from '../../common/privacy/privacy-consent';
+import { ProductsService } from '../products/products.service';
 
 @Injectable()
 export class InquiriesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailer: MailerService,
+    private readonly productsService: ProductsService,
   ) {}
 
   async findAll(params: any) {
@@ -27,8 +29,29 @@ export class InquiriesService {
       throw new BadRequestException('请阅读并同意隐私说明');
     }
     const customer = data.customer;
+    const productId = data.productId;
+    if (
+      productId !== undefined
+      && (!Number.isInteger(productId) || productId <= 0)
+    ) {
+      throw new BadRequestException('作品信息不正确，请返回作品页后重试');
+    }
+    if (productId !== undefined) {
+      // 只信任已验证令牌派生出的 customer；游客仅可关联 PUBLIC，
+      // 会员和已审核合作客户沿用商品目录的同一套可见性边界。
+      const visibleProductIds = await this.productsService.filterVisibleProductIds(
+        [productId],
+        customer,
+      );
+      if (!visibleProductIds.has(productId)) {
+        throw new BadRequestException(
+          '作品当前不可咨询，请移除作品后提交普通咨询',
+        );
+      }
+    }
     return this.prisma.inquiry.create({
       data: {
+        productId: productId ?? null,
         customerId: customer?.id || null,
         customerName: customer?.name || data.customerName || data.name,
         customerPhone: customer?.phone || data.customerPhone || data.phone,
@@ -71,7 +94,7 @@ export class InquiriesService {
             <div style="background:#f9f7f4;padding:16px;border-radius:6px;margin:16px 0;white-space:pre-wrap;">${escapeHtml(reply)}</div>
             <p>如需继续沟通，欢迎<a href="${this.mailer.getSiteBaseUrl()}/customer">登录客户中心</a>查看详情，或直接回复本封邮件外的常用联系方式。</p>
           `),
-        })
+        }, { requireNotificationDeliveryEnabled: true })
         .catch(() => undefined);
     }
     return updated;

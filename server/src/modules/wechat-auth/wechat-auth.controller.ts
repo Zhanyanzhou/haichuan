@@ -7,6 +7,7 @@ import {
   type WechatCallbackOutcome,
   type WechatCallbackResult,
 } from "./wechat-auth.service";
+import { BindWechatDto } from "./dto/bind-wechat.dto";
 
 @Controller("customers/wechat")
 export class WechatAuthController {
@@ -48,8 +49,7 @@ export class WechatAuthController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post("bind")
   bind(
-    @Body()
-    body: { bindToken: string; phone: string; password: string; name?: string },
+    @Body() body: BindWechatDto,
   ) {
     return this.wechatAuth.bindWechat(body);
   }

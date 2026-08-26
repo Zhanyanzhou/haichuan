@@ -75,6 +75,7 @@ const methodBody = (src, name) => {
 };
 
 const productsService = stripComments(await readSrc("server/src/modules/products/products.service.ts"));
+const productEligibility = stripComments(await readSrc("server/src/modules/products/product-eligibility.ts"));
 const selectionService = stripComments(await readSrc("server/src/modules/selection-inquiry/selection-inquiry.service.ts"));
 const selectionController = stripComments(await readSrc("server/src/modules/selection-inquiry/selection-inquiry.controller.ts"));
 const selectionModule = stripComments(await readSrc("server/src/modules/selection-inquiry/selection-inquiry.module.ts"));
@@ -125,13 +126,26 @@ check("一致性：filterVisibleProductIds 委托给 resolveVisibleProductSnapsh
   assert.ok(/resolveVisibleProductSnapshots/.test(filterMethod[0]), "filterVisibleProductIds 必须委托 resolveVisibleProductSnapshots，避免可见性逻辑重复");
 });
 
-check("合作商家可见范围：resolveVisibleVisibilities 仅在 accountType=PARTNER 且 partnerStatus=APPROVED 时含 PARTNER", () => {
-  const resolveBlock = productsService.match(/resolveVisibleVisibilities\s*\([^)]*\)\s*:\s*ProductVisibility\[\]\s*\{[\s\S]*?\n  \}/);
-  assert.ok(resolveBlock, "未定位 resolveVisibleVisibilities 方法体");
-  assert.ok(/accountType\s*===?\s*"PARTNER"/.test(resolveBlock[0]), "必须判定 accountType=PARTNER");
-  assert.ok(/partnerStatus\s*===?\s*"APPROVED"/.test(resolveBlock[0]), "必须判定 partnerStatus=APPROVED");
-  assert.ok(/\[\s*"PUBLIC",\s*"MEMBER",\s*"PARTNER"\s*\]/.test(resolveBlock[0]), "合作商家可见范围含 PARTNER");
-  assert.ok(/\[\s*"PUBLIC",\s*"MEMBER"\s*\]/.test(resolveBlock[0]), "非合作商家降级为 PUBLIC+MEMBER");
+check("可见性单一来源：ProductsService 委托共享 resolveCustomerProductVisibilities", () => {
+  const resolveMethod = methodBody(productsService, "resolveVisibleVisibilities");
+  assert.ok(resolveMethod, "未定位 resolveVisibleVisibilities 方法体");
+  assert.ok(
+    /import\s+\{\s*resolveCustomerProductVisibilities\s*\}\s+from\s+["']\.\/product-eligibility["']/.test(productsService),
+    "ProductsService 必须从 product-eligibility 导入共享可见性 helper",
+  );
+  assert.ok(
+    /return\s+resolveCustomerProductVisibilities\(customer\)/.test(resolveMethod[0]),
+    "resolveVisibleVisibilities 必须直接委托共享 helper，不能复制合作商家判断",
+  );
+});
+
+check("合作商家可见范围：共享 helper 仅在 accountType=PARTNER 且 partnerStatus=APPROVED 时含 PARTNER", () => {
+  const helperMethod = methodBody(productEligibility, "resolveCustomerProductVisibilities");
+  assert.ok(helperMethod, "未定位共享 resolveCustomerProductVisibilities 方法体");
+  assert.ok(/accountType\s*===?\s*"PARTNER"/.test(helperMethod[0]), "必须判定 accountType=PARTNER");
+  assert.ok(/partnerStatus\s*===?\s*"APPROVED"/.test(helperMethod[0]), "必须判定 partnerStatus=APPROVED");
+  assert.ok(/\[\s*"PUBLIC",\s*"MEMBER",\s*"PARTNER"\s*\]/.test(helperMethod[0]), "合作商家可见范围含 PARTNER");
+  assert.ok(/\[\s*"PUBLIC",\s*"MEMBER"\s*\]/.test(helperMethod[0]), "非合作商家降级为 PUBLIC+MEMBER");
 });
 
 // ── 选款咨询服务：提交前服务端复核 ──

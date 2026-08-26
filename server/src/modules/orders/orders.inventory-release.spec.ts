@@ -103,21 +103,32 @@ test("预占后切换为 SINGLE_UNIT 时最多只恢复 1 件", async () => {
 test("订单取消调用统一原子释放入口", async () => {
   let releaseCalls = 0;
   let updatedStatus: string | undefined;
+  const order = {
+    id: 1,
+    status: "PENDING_PAYMENT",
+    paidAmount: 0,
+    orderNo: "ORD-1",
+    customerEmail: null,
+    customerName: "测试客户",
+  };
   const tx = {
+    $queryRaw: async () => [{ id: 1 }],
     order: {
-      update: async (args: { data: { status: string } }) => {
+      findUnique: async () => order,
+      updateMany: async (args: { data: { status: string } }) => {
         updatedStatus = args.data.status;
-        return {
-          orderNo: "ORD-1",
-          customerEmail: null,
-          customerName: "测试客户",
-        };
+        order.status = args.data.status;
+        return { count: 1 };
       },
     },
+    payment: { findFirst: async () => null },
+    fulfillment: { findFirst: async () => null },
   };
   const prisma = {
     order: {
-      findUnique: async () => ({ status: "PENDING_PAYMENT" }),
+      findUnique: async () => {
+        throw new Error("取消不得在事务外读取订单状态");
+      },
     },
     $transaction: async (callback: (client: typeof tx) => unknown) =>
       callback(tx),
@@ -147,10 +158,14 @@ test("超时取消调用统一原子释放入口", async () => {
       findFirst: async () => ({
         id: 1,
         reservedAt: new Date("2026-08-20T00:00:00Z"),
+        paidAmount: 0,
+        couponId: null,
+        status: "PENDING_PAYMENT",
         payments: [],
       }),
-      update: async (args: { data: { status: string } }) => {
+      updateMany: async (args: { data: { status: string } }) => {
         updatedStatus = args.data.status;
+        return { count: 1 };
       },
     },
   };

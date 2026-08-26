@@ -3,10 +3,9 @@ import { PaymentGatewayService } from "./payment-gateway.service";
 
 /**
  * 在线支付网关层（交易解冻筹备）。
- * 支付宝/微信凭据由运维单独接入：填 .env 的 ALIPAY_*、WECHAT_* 即生效；
- * 未配置时 isAvailable()=false，创建支付抛 503 诚实提示，回调验签一律拒绝。
- * SDK 依赖（alipay-sdk / wechatpay-node-v3）为惰性 require：
- * 依赖未安装时服务可启动（编译不依赖其类型），仅在线支付能力不可用。
+ * 支付宝/微信凭据由运维单独接入；支付与退款分别受安全默认关闭的资金门禁控制。
+ * 未配置时创建资金操作抛 503，既有交易的查单与验签通知仍按已配置适配器处理。
+ * 支付宝继续使用已安装 SDK；微信 APIv3 使用项目内最小客户端并验证应答签名。
  */
 @Global()
 @Module({

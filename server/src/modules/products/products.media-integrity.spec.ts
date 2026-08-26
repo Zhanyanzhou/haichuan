@@ -4,7 +4,8 @@ import { test } from "node:test";
 import { plainToInstance } from "class-transformer";
 import { validate } from "class-validator";
 import { PrismaService } from "../../common/prisma/prisma.service";
-import { AddProductImageDto } from "./dto";
+import { AddProductImageDto, UpdateProductImageDto } from "./dto";
+import { ValidationPipe } from "@nestjs/common";
 import { ProductsService } from "./products.service";
 
 const readableMedia = {
@@ -53,6 +54,26 @@ test("新增图片 DTO 拒绝负数、小数和错误布尔类型", async () => 
   assert.deepEqual(
     new Set(errors.map((error) => error.property)),
     new Set(["sortOrder", "width", "fileSize", "isVideo"]),
+  );
+});
+
+test("更新图片 DTO 只接受现有类型与非负整数排序", async () => {
+  const pipe = new ValidationPipe({
+    whitelist: true,
+    transform: true,
+    transformOptions: { enableImplicitConversion: true },
+  });
+  const dto = await pipe.transform(
+    { type: "DETAIL", sortOrder: "2", url: "/uploads/forged.jpg", isMain: true },
+    { type: "body", metatype: UpdateProductImageDto },
+  );
+  assert.deepEqual({ ...dto }, { type: "DETAIL", sortOrder: 2 });
+
+  await assert.rejects(
+    pipe.transform(
+      { type: "BACK", sortOrder: -1.5 },
+      { type: "body", metatype: UpdateProductImageDto },
+    ),
   );
 });
 
