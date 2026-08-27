@@ -120,6 +120,34 @@ test("页面发布设置草稿可留空，但发布预检要求内容责任与�
   assert.ok(invalidValidation.errors.some((message) => message.includes("contentOwner 必须是字符串")));
 });
 
+test("发布预检拒绝正在完善、内容建设中和即将上线等发布占位文案", async () => {
+  const service = createService();
+  const document = makeHomeDocument();
+  document.content[0].props.title = "品牌内容建设中";
+  const metadata = {
+    ...makeFormalMetadata(),
+    seoDescription: "作品资料正在完善，请稍后再来。",
+  };
+
+  const result = await service.validatePageDocument("home", document, metadata);
+
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some(
+    (issue) => issue.path === "content[0].props.title" && issue.message.includes("占位内容"),
+  ));
+  assert.ok(result.issues.some(
+    (issue) => issue.path === "metadata.seoDescription" && issue.message.includes("占位内容"),
+  ));
+
+  document.content[0].props.title = "珠宝作品";
+  metadata.seoDescription = "品牌故事即将上线";
+  const launchResult = await service.validatePageDocument("home", document, metadata);
+  assert.equal(launchResult.valid, false);
+  assert.ok(launchResult.issues.some(
+    (issue) => issue.path === "metadata.seoDescription" && issue.message.includes("占位内容"),
+  ));
+});
+
 test("公开 PageDocument metadata 只返回 SEO 白名单，不泄漏内部内容责任", async () => {
   const metadata = {
     ...makeFormalMetadata(),

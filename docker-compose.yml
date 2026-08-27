@@ -8,7 +8,7 @@ x-logging: &default-logging
 services:
   # ===== 数据库 =====
   mysql:
-    image: mysql:8.0
+    image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
     container_name: jewelry-mysql
     restart: unless-stopped
     logging: *default-logging
@@ -37,9 +37,14 @@ services:
 
   # ===== 后端 NestJS 服务 =====
   server:
+    image: "${SERVER_IMAGE:-2-server:latest}"
     build:
       context: ./server
       dockerfile: Dockerfile
+      args:
+        BUILD_REVISION: "${RELEASE_GIT_SHA:-local}"
+        BUILD_SOURCE: "${RELEASE_SOURCE:-local}"
+        MIGRATION_BUNDLE_SHA256: "${MIGRATION_BUNDLE_SHA256:-local}"
     container_name: jewelry-server
     restart: unless-stopped
     logging: *default-logging
@@ -52,54 +57,53 @@ services:
       HOST: "0.0.0.0"
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-"7d"}
+      JWT_EXPIRES_IN: "${JWT_EXPIRES_IN:-7d}"
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
       # 线上交易总开关（默认关闭；获 D.2 批准后才显式设为 true）
-      CUSTOMER_COMMERCE_ENABLED: ${CUSTOMER_COMMERCE_ENABLED:-"false"}
+      CUSTOMER_COMMERCE_ENABLED: "${CUSTOMER_COMMERCE_ENABLED:-false}"
       # 可选能力一律显式注入；缺失时由服务端按各自合同关闭或诚实降级。
-      WECHAT_APP_ID: ${WECHAT_APP_ID:-""}
-      WECHAT_APP_SECRET: ${WECHAT_APP_SECRET:-""}
-      WECHAT_REDIRECT_URI: ${WECHAT_REDIRECT_URI:-""}
-      ANALYTICS_INGESTION_ENABLED: ${ANALYTICS_INGESTION_ENABLED:-"false"}
-      ANALYTICS_DATASET: ${ANALYTICS_DATASET:-"test"}
-      ANALYTICS_RETENTION_DAYS: ${ANALYTICS_RETENTION_DAYS:-"90"}
-      ANALYTICS_RETENTION_ENABLED: ${ANALYTICS_RETENTION_ENABLED:-"false"}
-      ANALYTICS_DASHBOARD_ENABLED: ${ANALYTICS_DASHBOARD_ENABLED:-"true"}
-      GOLD_PRICE_API_URL: ${GOLD_PRICE_API_URL:-""}
-      KIMI_API_KEY: ${KIMI_API_KEY:-""}
-      KIMI_BASE_URL: ${KIMI_BASE_URL:-""}
-      KIMI_MODEL: ${KIMI_MODEL:-"moonshot-v1-8k"}
-      SMTP_HOST: ${SMTP_HOST:-""}
-      SMTP_PORT: ${SMTP_PORT:-"465"}
-      SMTP_USER: ${SMTP_USER:-""}
-      SMTP_PASS: ${SMTP_PASS:-""}
-      SMTP_FROM: ${SMTP_FROM:-""}
-      SITE_BASE_URL: ${SITE_BASE_URL:-""}
+      WECHAT_APP_ID: "${WECHAT_APP_ID:-}"
+      WECHAT_APP_SECRET: "${WECHAT_APP_SECRET:-}"
+      WECHAT_REDIRECT_URI: "${WECHAT_REDIRECT_URI:-}"
+      ANALYTICS_INGESTION_ENABLED: "${ANALYTICS_INGESTION_ENABLED:-false}"
+      ANALYTICS_DATASET: "${ANALYTICS_DATASET:-test}"
+      ANALYTICS_RETENTION_DAYS: "${ANALYTICS_RETENTION_DAYS:-90}"
+      ANALYTICS_RETENTION_ENABLED: "${ANALYTICS_RETENTION_ENABLED:-false}"
+      ANALYTICS_DASHBOARD_ENABLED: "${ANALYTICS_DASHBOARD_ENABLED:-true}"
+      GOLD_PRICE_API_URL: "${GOLD_PRICE_API_URL:-}"
+      KIMI_API_KEY: "${KIMI_API_KEY:-}"
+      KIMI_BASE_URL: "${KIMI_BASE_URL:-}"
+      KIMI_MODEL: "${KIMI_MODEL:-moonshot-v1-8k}"
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-465}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASS: "${SMTP_PASS:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+      SITE_BASE_URL: "${SITE_BASE_URL:-}"
       # 通知事实始终随业务事务写入；这里只控制事务外真实邮件消费者，默认关闭。
-      NOTIFICATION_DELIVERY_ENABLED: ${NOTIFICATION_DELIVERY_ENABLED:-"false"}
-      PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: ${PAYMENT_GATEWAY_TRANSACTIONS_ENABLED:-"false"}
-      PAYMENT_GATEWAY_REFUNDS_ENABLED: ${PAYMENT_GATEWAY_REFUNDS_ENABLED:-"false"}
-      ALIPAY_APP_ID: ${ALIPAY_APP_ID:-""}
-      ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY:-""}
-      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:-""}
-      ALIPAY_GATEWAY: ${ALIPAY_GATEWAY:-"https://openapi.alipay.com/gateway.do"}
-      WECHAT_PAY_APP_ID: ${WECHAT_PAY_APP_ID:-""}
-      WECHAT_MCH_ID: ${WECHAT_MCH_ID:-""}
-      WECHAT_MCH_CERT_SERIAL_NO: ${WECHAT_MCH_CERT_SERIAL_NO:-""}
-      WECHAT_PLATFORM_CERT_PATH: ${WECHAT_PLATFORM_CERT_PATH:-""}
-      WECHAT_MCH_PRIVATE_KEY_PATH: ${WECHAT_MCH_PRIVATE_KEY_PATH:-""}
-      WECHAT_API_V3_KEY: ${WECHAT_API_V3_KEY:-""}
-      KUAIDI100_CUSTOMER: ${KUAIDI100_CUSTOMER:-""}
-      KUAIDI100_KEY: ${KUAIDI100_KEY:-""}
-      ALIYUN_SMS_ACCESS_KEY_ID: ${ALIYUN_SMS_ACCESS_KEY_ID:-""}
-      ALIYUN_SMS_ACCESS_KEY_SECRET: ${ALIYUN_SMS_ACCESS_KEY_SECRET:-""}
-      ALIYUN_SMS_SIGN_NAME: ${ALIYUN_SMS_SIGN_NAME:-""}
-      ALIYUN_SMS_TEMPLATE_CODE: ${ALIYUN_SMS_TEMPLATE_CODE:-""}
-      SMS_VERIFICATION_REQUIRED: ${SMS_VERIFICATION_REQUIRED:-"false"}
+      NOTIFICATION_DELIVERY_ENABLED: "${NOTIFICATION_DELIVERY_ENABLED:-false}"
+      PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: "${PAYMENT_GATEWAY_TRANSACTIONS_ENABLED:-false}"
+      PAYMENT_GATEWAY_REFUNDS_ENABLED: "${PAYMENT_GATEWAY_REFUNDS_ENABLED:-false}"
+      ALIPAY_APP_ID: "${ALIPAY_APP_ID:-}"
+      ALIPAY_PRIVATE_KEY: "${ALIPAY_PRIVATE_KEY:-}"
+      ALIPAY_PUBLIC_KEY: "${ALIPAY_PUBLIC_KEY:-}"
+      ALIPAY_GATEWAY: "${ALIPAY_GATEWAY:-https://openapi.alipay.com/gateway.do}"
+      WECHAT_PAY_APP_ID: "${WECHAT_PAY_APP_ID:-}"
+      WECHAT_MCH_ID: "${WECHAT_MCH_ID:-}"
+      WECHAT_MCH_CERT_SERIAL_NO: "${WECHAT_MCH_CERT_SERIAL_NO:-}"
+      WECHAT_PLATFORM_CERT_PATH: "${WECHAT_PLATFORM_CERT_PATH:-}"
+      WECHAT_MCH_PRIVATE_KEY_PATH: "${WECHAT_MCH_PRIVATE_KEY_PATH:-}"
+      WECHAT_API_V3_KEY: "${WECHAT_API_V3_KEY:-}"
+      KUAIDI100_CUSTOMER: "${KUAIDI100_CUSTOMER:-}"
+      KUAIDI100_KEY: "${KUAIDI100_KEY:-}"
+      ALIYUN_SMS_ACCESS_KEY_ID: "${ALIYUN_SMS_ACCESS_KEY_ID:-}"
+      ALIYUN_SMS_ACCESS_KEY_SECRET: "${ALIYUN_SMS_ACCESS_KEY_SECRET:-}"
+      ALIYUN_SMS_SIGN_NAME: "${ALIYUN_SMS_SIGN_NAME:-}"
+      ALIYUN_SMS_TEMPLATE_CODE: "${ALIYUN_SMS_TEMPLATE_CODE:-}"
+      SMS_VERIFICATION_REQUIRED: "${SMS_VERIFICATION_REQUIRED:-false}"
       PRODUCT_MEDIA_ROOT: /app/private-media/products
-      PRODUCT_MEDIA_ROOT_LEGACY: /app/migration-source/product-images
       BACKUP_DIR: /backups
-      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-"86400"}
+      BACKUP_INTERVAL_SECONDS: "${BACKUP_INTERVAL_SECONDS:-86400}"
     # P0-3：不对宿主机暴露 3000（仅 nginx 反代 /api 与 /uploads → server:3000，见 nginx.conf）
     expose:
       - "3000"
@@ -124,14 +128,18 @@ services:
 
   # ===== 前端 Nginx 服务 =====
   client:
+    image: "${CLIENT_IMAGE:-2-client:latest}"
     build:
       context: ./client
       dockerfile: Dockerfile
       args:
+        BUILD_REVISION: "${RELEASE_GIT_SHA:-local}"
+        BUILD_SOURCE: "${RELEASE_SOURCE:-local}"
+        MIGRATION_BUNDLE_SHA256: "${MIGRATION_BUNDLE_SHA256:-local}"
         # Vite 公开配置在构建时固化；不得把服务端密钥作为 build arg 传入。
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-"/api"}
-        VITE_PUBLIC_SITE_ORIGIN: ${VITE_PUBLIC_SITE_ORIGIN:-""}
-        VITE_ANALYTICS_ENABLED: ${VITE_ANALYTICS_ENABLED:-"false"}
+        VITE_API_BASE_URL: "${VITE_API_BASE_URL:-/api}"
+        VITE_PUBLIC_SITE_ORIGIN: "${VITE_PUBLIC_SITE_ORIGIN:-}"
+        VITE_ANALYTICS_ENABLED: "${VITE_ANALYTICS_ENABLED:-false}"
     container_name: jewelry-client
     restart: unless-stopped
     logging: *default-logging
@@ -153,7 +161,7 @@ services:
   # 启动即执行一轮备份（部署即可验证），此后每 BACKUP_INTERVAL_SECONDS 一轮，保留 7 天。
   # 产出在宿主机 ./backups（建议纳入宿主机异地同步，如 rsync/对象存储）。
   backup:
-    image: mysql:8.0
+    image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
     container_name: jewelry-backup
     restart: unless-stopped
     logging: *default-logging
@@ -196,7 +204,7 @@ services:
   # 通知渠道在 UI 配置（邮件/企业微信/webhook 均可）。
   # 备份容器与磁盘水位无 HTTP 端点，由 backup.sh 输出告警日志（docker logs jewelry-backup 巡检）。
   uptime-kuma:
-    image: louislam/uptime-kuma:1
+    image: louislam/uptime-kuma:1@sha256:3d632903e6af34139a37f18055c4f1bfd9b7205ae1138f1e5e8940ddc1d176f9
     container_name: jewelry-uptime-kuma
     restart: unless-stopped
     logging: *default-logging

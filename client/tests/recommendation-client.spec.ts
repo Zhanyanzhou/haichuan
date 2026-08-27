@@ -1,7 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { publicProduct } from "./fixtures/public-catalog-detail";
-
-const CUSTOMER_TOKEN = "recommendation-client-test-token";
+import { installCustomerSession } from "./fixtures/session-auth";
 
 const wrapped = (data: unknown) => ({
   code: 200,
@@ -19,17 +18,13 @@ async function fulfill(route: Route, data: unknown) {
 }
 
 async function signInCustomer(page: Page) {
-  await page.addInitScript(({ token }) => {
-    localStorage.setItem("customerToken", token);
-    localStorage.setItem(
-      "customer",
-      JSON.stringify({ id: 7, name: "推荐合同测试客户" }),
-    );
-  }, { token: CUSTOMER_TOKEN });
+  await installCustomerSession(page, {
+    id: 7,
+    name: "推荐合同测试客户",
+  });
 }
 
-test("商品详情以客户令牌请求 8 条相似作品并渲染结果", async ({ page }) => {
-  await signInCustomer(page);
+test("商品详情以客户 Cookie 会话请求 8 条相似作品并渲染结果", async ({ page }) => {
   const detail = publicProduct(12, "DISPLAY_ONLY");
   const similar = {
     ...publicProduct(22, "DISPLAY_ONLY"),
@@ -57,6 +52,7 @@ test("商品详情以客户令牌请求 8 条相似作品并渲染结果", async
     if (path.endsWith("/settings/public")) return fulfill(route, { siteName: "海川珠宝" });
     return fulfill(route, null);
   });
+  await signInCustomer(page);
 
   const requestPromise = page.waitForRequest((request) =>
     new URL(request.url()).pathname.endsWith("/recommendations/similar/12"),
@@ -65,13 +61,13 @@ test("商品详情以客户令牌请求 8 条相似作品并渲染结果", async
   const request = await requestPromise;
 
   expect(new URL(request.url()).searchParams.get("limit")).toBe("8");
-  expect(request.headers().authorization).toBe(`Bearer ${CUSTOMER_TOKEN}`);
+  expect(request.headers().authorization).toBeUndefined();
+  expect(request.headers()["x-session-domain"]).toBe("customer");
   await expect(page.getByText("相关作品", { exact: true })).toBeVisible();
   await expect(page.getByText("相似推荐合同作品", { exact: true })).toBeVisible();
 });
 
-test("客户中心以客户令牌请求 6 条猜你喜欢并渲染结果", async ({ page }) => {
-  await signInCustomer(page);
+test("客户中心以客户 Cookie 会话请求 6 条猜你喜欢并渲染结果", async ({ page }) => {
   const recommendation = {
     id: 31,
     code: "HC-REC-031",
@@ -110,6 +106,7 @@ test("客户中心以客户令牌请求 6 条猜你喜欢并渲染结果", async
     if (path.endsWith("/settings/public")) return fulfill(route, { siteName: "海川珠宝" });
     return fulfill(route, null);
   });
+  await signInCustomer(page);
 
   const requestPromise = page.waitForRequest((request) =>
     new URL(request.url()).pathname.endsWith("/recommendations/for-you"),
@@ -118,7 +115,8 @@ test("客户中心以客户令牌请求 6 条猜你喜欢并渲染结果", async
   const request = await requestPromise;
 
   expect(new URL(request.url()).searchParams.get("limit")).toBe("6");
-  expect(request.headers().authorization).toBe(`Bearer ${CUSTOMER_TOKEN}`);
+  expect(request.headers().authorization).toBeUndefined();
+  expect(request.headers()["x-session-domain"]).toBe("customer");
   await expect(page.getByRole("region", { name: "为你推荐" })).toBeVisible();
   await expect(page.getByText("客户中心推荐合同作品", { exact: true })).toBeVisible();
 });

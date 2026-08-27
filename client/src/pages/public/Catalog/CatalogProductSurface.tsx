@@ -9,6 +9,7 @@ import { trackAddToSelection, trackRemoveFromSelection } from "@/hooks/useAnalyt
 import { salesModeCta, salesModeRoute } from "@/store/featureFlags";
 import { catalogTokens as T } from "./catalogTokens";
 import useCatalogDialog from "./useCatalogDialog";
+import { App as AntdApp } from "antd";
 /* ══════════════════════════════════════
    组件：产品卡片（梵克雅宝矩阵风格）
    ══════════════════════════════════════ */
@@ -84,11 +85,16 @@ function ProductCard({
   onQuickView: (p: CatalogProduct, trigger: HTMLButtonElement) => void;
   commerceAllowed: boolean;
 }) {
+  const { message } = AntdApp.useApp();
   const toggle = useSelectionStore((s) => s.toggle);
   const sel = useSelectionStore((s) => s.isSelected)(product.id);
 
   const handleToggle = () => {
-    toggle(product.id);
+    const result = toggle(product.id);
+    if (result === "limit") {
+      message.warning("每次最多选择 20 款作品");
+      return;
+    }
     if (sel) trackRemoveFromSelection(product.id);
     else trackAddToSelection(product.id);
   };
@@ -98,7 +104,7 @@ function ProductCard({
   const allImages: string[] =
     product.images && product.images.length > 0
       ? product.images.filter(Boolean)
-      : [getListingImage(product as any)];
+      : [getListingImage(product)];
   const currentImg = allImages[imgIdx] || allImages[0] || "";
 
   // 鼠标左右半区切换图片
@@ -378,13 +384,18 @@ export function QuickView({
   returnFocusRef: RefObject<HTMLElement | null>;
   commerceAllowed: boolean;
 }) {
+  const { message } = AntdApp.useApp();
   const toggle = useSelectionStore((s) => s.toggle);
   const isSelected = useSelectionStore((s) => s.isSelected);
   const { dialogRef, initialFocusRef } = useCatalogDialog(onClose, returnFocusRef);
   if (!product) return null;
   const sel = isSelected(product.id);
   const handleToggle = () => {
-    toggle(product.id);
+    const result = toggle(product.id);
+    if (result === "limit") {
+      message.warning("每次最多选择 20 款作品");
+      return;
+    }
     if (sel) trackRemoveFromSelection(product.id);
     else trackAddToSelection(product.id);
   };
@@ -451,7 +462,7 @@ export function QuickView({
           }}
         >
           <SecureImage
-            src={getListingImage(product as any)}
+            src={getListingImage(product)}
             alt={product.sku}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />

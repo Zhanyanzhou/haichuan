@@ -23,7 +23,7 @@ export interface HotspotPuckProps {
 export const hotspotPuckConfig = {
   label: "热区图",
   render: (props: HotspotPuckProps) => (
-    <HotspotBlock module={convertPuckProps("热区图", props as any) as any} editMode />
+    <HotspotBlock module={convertPuckProps("热区图", props)!} editMode />
   ),
   defaultProps: {
     image: "",
@@ -33,6 +33,6 @@ export const hotspotPuckConfig = {
     mobileHotspots: [],
     locked: false,
   } satisfies HotspotPuckProps,
-  resolvePermissions: (data: any) =>
+  resolvePermissions: (data: { props?: HotspotPuckProps }) =>
     data.props?.locked ? { delete: false, drag: false } : {},
 };

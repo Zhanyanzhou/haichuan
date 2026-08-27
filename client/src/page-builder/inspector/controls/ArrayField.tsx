@@ -11,12 +11,13 @@ import type {
   ArrayFieldDef,
   InspectorContext,
 } from "../schema/types";
+import type { PuckProps } from "../../types";
 
 interface ArrayFieldProps {
   def: ArrayFieldDef;
   value: unknown;
   ctx: InspectorContext;
-  onChange: (next: Array<Record<string, any>>) => void;
+  onChange: (next: PuckProps[]) => void;
   moduleType?: string;
 }
 
@@ -27,15 +28,17 @@ export default function ArrayField({
   onChange,
   moduleType,
 }: ArrayFieldProps) {
-  const items: Array<Record<string, any>> = Array.isArray(value)
-    ? (value as Array<Record<string, any>>)
+  const items: PuckProps[] = Array.isArray(value)
+    ? value.filter((item): item is PuckProps => Boolean(
+        item && typeof item === "object" && !Array.isArray(item),
+      ))
     : [];
   const [activeIndex, setActiveIndex] = useState(0);
   const safeIndex = Math.min(activeIndex, Math.max(items.length - 1, 0));
   const activeItem = items[safeIndex] ?? null;
   const atMax = def.maxItems !== undefined && items.length >= def.maxItems;
 
-  const updateItem = (patch: Record<string, any>) => {
+  const updateItem = (patch: PuckProps) => {
     if (!activeItem) return;
     onChange(
       items.map((item, index) =>

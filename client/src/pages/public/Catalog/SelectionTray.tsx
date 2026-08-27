@@ -1,14 +1,16 @@
 import { useCallback, useRef, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
-import { message } from "antd";
+import { App as AntdApp } from "antd";
 import { useSelectionStore } from "@/store/selectionStore";
 import type { CatalogProduct } from "@/data/catalogData";
 import { getListingImage } from "@/utils/productImage";
 import { SecureImage } from "@/components/common/SecureImage";
 import { selectionInquiryApi } from "@/services/api";
+import { createIdempotencyKey } from "@/utils/idempotency";
 import { trackSubmitSelection } from "@/hooks/useAnalytics";
 import { catalogTokens as T } from "./catalogTokens";
 import useCatalogDialog from "./useCatalogDialog";
+import { useCustomerAuthStore } from "@/store/customerAuthStore";
 export type SelectionLookupState = "loading" | "error" | "ready";
 
 export default function SelectionTray({
@@ -20,6 +22,7 @@ export default function SelectionTray({
   lookupState: SelectionLookupState;
   onRetry: () => void;
 }) {
+  const { message } = AntdApp.useApp();
   const ids = useSelectionStore((s) => s.selectedIds);
   const clear = useSelectionStore((s) => s.clear);
   const [open, setOpen] = useState(false);
@@ -33,6 +36,7 @@ export default function SelectionTray({
     resolveTrayButton,
   );
   const [submitting, setSubmitting] = useState(false);
+  const idempotencyKeyRef = useRef(createIdempotencyKey());
   const [form, setForm] = useState({
     customerName: "",
     phone: "",
@@ -41,19 +45,8 @@ export default function SelectionTray({
     message: "",
     privacyConsent: false,
   });
-  const account = (() => {
-    try {
-      return JSON.parse(localStorage.getItem("customer") || "null") as {
-        name?: string;
-        phone?: string;
-      } | null;
-    } catch {
-      return null;
-    }
-  })();
-  const isSignedIn = Boolean(
-    localStorage.getItem("customerToken") && account?.phone,
-  );
+  const account = useCustomerAuthStore((state) => state.customer);
+  const isSignedIn = useCustomerAuthStore((state) => state.isLoggedIn);
 
   if (!ids.size) return null;
 
@@ -132,20 +125,24 @@ export default function SelectionTray({
     }
     setSubmitting(true);
     try {
-      await selectionInquiryApi.submit({
-        customerName: isSignedIn ? undefined : form.customerName.trim(),
-        phone: isSignedIn ? undefined : form.phone.trim(),
-        email: form.email.trim() || undefined,
-        wechat: form.wechat.trim() || undefined,
-        message: form.message.trim() || undefined,
-        privacyConsent: form.privacyConsent,
-        items: selected.map((p) => ({
-          productId: p.id,
-          productNameSnapshot: p.name || p.sku,
-          productSkuSnapshot: p.sku,
-          productImageSnapshot: p.images?.[0] || "",
-        })),
-      });
+      await selectionInquiryApi.submit(
+        {
+          customerName: isSignedIn ? undefined : form.customerName.trim(),
+          phone: isSignedIn ? undefined : form.phone.trim(),
+          email: form.email.trim() || undefined,
+          wechat: form.wechat.trim() || undefined,
+          message: form.message.trim() || undefined,
+          privacyConsent: form.privacyConsent,
+          items: selected.map((p) => ({
+            productId: p.id,
+            productNameSnapshot: p.name || p.sku,
+            productSkuSnapshot: p.sku,
+            productImageSnapshot: p.images?.[0] || "",
+          })),
+        },
+        idempotencyKeyRef.current,
+      );
+      idempotencyKeyRef.current = createIdempotencyKey();
       trackSubmitSelection(selected.length);
       message.success(
         `已提交 ${selected.length} 款作品的选款咨询，我们的珠宝顾问将尽快与您联系`,
@@ -226,7 +223,7 @@ export default function SelectionTray({
                 }}
               >
                 <SecureImage
-                  src={p.images?.[0] || getListingImage(p as any)}
+                  src={p.images?.[0] || getListingImage(p)}
                   alt={p.sku}
                   style={{ width: "100%", height: "100%", objectFit: "contain" }}
                 />
@@ -332,7 +329,7 @@ export default function SelectionTray({
                   }}
                 >
                   <SecureImage
-                    src={p.images?.[0] || getListingImage(p as any)}
+                    src={p.images?.[0] || getListingImage(p)}
                     alt={p.sku}
                     style={{
                       width: "100%",

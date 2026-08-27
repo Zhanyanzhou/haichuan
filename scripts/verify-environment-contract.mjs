@@ -67,15 +67,24 @@ function sequenceEntries(block, sequenceName) {
     .map((line) => line.slice(2).trim());
 }
 
-const serverSource = walk(
+const serverSourceFiles = walk(
   "server/src",
   (file) => file.endsWith(".ts") && !/\.(?:spec|test)\.ts$/.test(file),
-)
+);
+const serverSource = serverSourceFiles
+  .filter((file) => !/[\\/]cli[\\/]/.test(file))
+  .map(read)
+  .join("\n");
+const oneShotCliSource = serverSourceFiles
+  .filter((file) => /[\\/]cli[\\/]/.test(file))
   .map(read)
   .join("\n");
 const serverRuntimeKeys = collectMatches(serverSource, [
   /process\.env\.([A-Z][A-Z0-9_]*)/g,
   /(?:this\.)?(?:configService|config)\s*\.\s*get(?:<[^>]*>)?\s*\(\s*["']([A-Z][A-Z0-9_]*)["']/g,
+]);
+const oneShotCliKeys = collectMatches(oneShotCliSource, [
+  /process\.env\.([A-Z][A-Z0-9_]*)/g,
 ]);
 for (const key of collectMatches(read("server/prisma/schema.prisma"), [
   /env\(["']([A-Z][A-Z0-9_]*)["']\)/g,
@@ -107,6 +116,9 @@ const clientComposeBlock = serviceBlock(compose, "client");
 const clientComposeKeys = collectMatches(clientComposeBlock, [
   /^\s+(VITE_[A-Z][A-Z0-9_]*):/gm,
 ]);
+const composeInterpolationKeys = collectMatches(compose, [
+  /\$\{([A-Z][A-Z0-9_]*)(?::[-?][^}]*)?\}/g,
+]);
 const dockerfileBuildKeys = collectMatches(read("client/Dockerfile"), [
   /^ARG\s+(VITE_[A-Z][A-Z0-9_]*)/gm,
 ]);
@@ -116,7 +128,6 @@ const internalServerKeys = new Set([
   "PORT",
   "HOST",
   "PRODUCT_MEDIA_ROOT",
-  "PRODUCT_MEDIA_ROOT_LEGACY",
   "BACKUP_DIR",
 ]);
 const operationalKeys = new Set([
@@ -138,11 +149,20 @@ const secretKeys = new Set([
   "KUAIDI100_KEY",
   "ALIYUN_SMS_ACCESS_KEY_ID",
   "ALIYUN_SMS_ACCESS_KEY_SECRET",
+  "BOOTSTRAP_ADMIN_PASSWORD",
+  "DEMO_ADMIN_PASSWORD",
 ]);
 const releaseFoundationKeys = new Set([
   "NOTIFICATION_DELIVERY_ENABLED",
   "PAYMENT_GATEWAY_REFUNDS_ENABLED",
   "WECHAT_MCH_CERT_SERIAL_NO",
+]);
+const releaseDeploymentKeys = new Set([
+  "SERVER_IMAGE",
+  "CLIENT_IMAGE",
+  "RELEASE_GIT_SHA",
+  "RELEASE_SOURCE",
+  "MIGRATION_BUNDLE_SHA256",
 ]);
 const wechatPaymentCertificatePathKeys = new Set([
   "WECHAT_PLATFORM_CERT_PATH",
@@ -163,7 +183,12 @@ requireSubset(
   new Set([...serverRuntimeKeys].filter((key) => !internalServerKeys.has(key))),
   envExampleKeys,
 );
-requireSubset("seed 环境变量未记录在 .env.example", seedKeys, envExampleKeys);
+requireSubset(
+  "seed 环境变量未记录在 .env.example",
+  new Set([...seedKeys].filter((key) => !internalServerKeys.has(key))),
+  envExampleKeys,
+);
+requireSubset("one-shot CLI 环境变量未记录在 .env.example", oneShotCliKeys, envExampleKeys);
 requireSubset("client build 变量未记录在 .env.example", clientBuildKeys, envExampleKeys);
 requireSubset("client build 变量未传入 compose build args", clientBuildKeys, clientComposeKeys);
 requireSubset("client build 变量未声明为 Dockerfile ARG", clientBuildKeys, dockerfileBuildKeys);
@@ -177,24 +202,34 @@ requireSubset(
   releaseFoundationKeys,
   envExampleKeys,
 );
+requireSubset(
+  "不可变发布变量未被 compose 消费",
+  releaseDeploymentKeys,
+  composeInterpolationKeys,
+);
+requireSubset(
+  "不可变发布变量未记录在 .env.example",
+  releaseDeploymentKeys,
+  envExampleKeys,
+);
 
 const releaseFoundationComposeContracts = [
   {
     key: "NOTIFICATION_DELIVERY_ENABLED",
     pattern:
-      /^\s{6}NOTIFICATION_DELIVERY_ENABLED:\s*\$\{NOTIFICATION_DELIVERY_ENABLED:-"false"\}\s*$/m,
+      /^\s{6}NOTIFICATION_DELIVERY_ENABLED:\s*"\$\{NOTIFICATION_DELIVERY_ENABLED:-false\}"\s*$/m,
     message: "通知外部投递消费者必须显式注入并安全默认 false",
   },
   {
     key: "PAYMENT_GATEWAY_REFUNDS_ENABLED",
     pattern:
-      /^\s{6}PAYMENT_GATEWAY_REFUNDS_ENABLED:\s*\$\{PAYMENT_GATEWAY_REFUNDS_ENABLED:-"false"\}\s*$/m,
+      /^\s{6}PAYMENT_GATEWAY_REFUNDS_ENABLED:\s*"\$\{PAYMENT_GATEWAY_REFUNDS_ENABLED:-false\}"\s*$/m,
     message: "退款网关开关必须显式注入并安全默认 false",
   },
   {
     key: "WECHAT_MCH_CERT_SERIAL_NO",
     pattern:
-      /^\s{6}WECHAT_MCH_CERT_SERIAL_NO:\s*\$\{WECHAT_MCH_CERT_SERIAL_NO:-""\}\s*$/m,
+      /^\s{6}WECHAT_MCH_CERT_SERIAL_NO:\s*"\$\{WECHAT_MCH_CERT_SERIAL_NO:-\}"\s*$/m,
     message: "微信商户 API 证书序列号必须显式注入并保持空默认值",
   },
 ];
@@ -254,8 +289,10 @@ for (const key of releaseFoundationKeys) {
 const knownExampleKeys = new Set([
   ...serverRuntimeKeys,
   ...seedKeys,
+  ...oneShotCliKeys,
   ...clientBuildKeys,
   ...operationalKeys,
+  ...releaseDeploymentKeys,
 ]);
 const staleExampleKeys = sorted(
   [...envExampleKeys].filter((key) => !knownExampleKeys.has(key)),
@@ -264,9 +301,19 @@ if (staleExampleKeys.length) {
   errors.push(`.env.example 存在零消费变量: ${staleExampleKeys.join(", ")}`);
 }
 
+const nonRuntimeKeys = new Set([
+  ...[...seedKeys].filter((key) => !serverRuntimeKeys.has(key)),
+  ...oneShotCliKeys,
+]);
+for (const key of nonRuntimeKeys) {
+  if (serverComposeKeys.has(key)) {
+    errors.push(`seed/one-shot 变量不得注入长期运行的 server service: ${key}`);
+  }
+}
+
 for (const key of secretKeys) {
   if (!envExampleKeys.has(key)) continue;
-  if (!compose.includes(`\${${key}`)) {
+  if (!nonRuntimeKeys.has(key) && !compose.includes(`\${${key}`)) {
     errors.push(`secret 未通过 compose 变量插值注入: ${key}`);
   }
   if (clientComposeBlock.includes(key) || read("client/Dockerfile").includes(key)) {
@@ -277,9 +324,12 @@ for (const key of secretKeys) {
 const summary = {
   serverRuntimeKeys: sorted(serverRuntimeKeys),
   serverComposeKeys: sorted(serverComposeKeys),
+  seedKeys: sorted(seedKeys),
+  oneShotCliKeys: sorted(oneShotCliKeys),
   clientBuildKeys: sorted(clientBuildKeys),
   envExampleKeyCount: envExampleKeys.size,
   releaseFoundationKeys: sorted(releaseFoundationKeys),
+  releaseDeploymentKeys: sorted(releaseDeploymentKeys),
   runtimeFileContracts: {
     wechatPaymentCertificatePathKeys: sorted(wechatPaymentCertificatePathKeys),
     readOnlyMounts: wechatCertificateMounts,

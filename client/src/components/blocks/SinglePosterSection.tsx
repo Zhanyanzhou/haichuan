@@ -23,9 +23,9 @@ interface Props { module?: PageModule; editMode?: boolean; }
 
 /** 单图文 · 画廊海报式(P1) — 图 ≥75% 主导偏右,签名束贴左下;移动端 4:5 叠字同构。 */
 export default function SinglePosterSection({ module, editMode }: Props) {
-  const c = module?.content as (PageModule['content'] & Record<string, any>) | undefined;
+  const c = module?.content;
   const l = module?.layoutConfig;
-  const s = module?.styleConfig as (PageModule['styleConfig'] & Record<string, any>) | undefined;
+  const s = module?.styleConfig;
 
   const desktopImg = c?.desktopImage || c?.mobileImage;
   const mobileImg = c?.mobileImage || c?.desktopImage;

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Alert, Form, Input, Modal, Select, message } from "antd";
+import { useState } from "react";
+import { Alert, App as AntdApp, Form, Input, Modal, Select } from "antd";
 import { customerApi } from "@/services/api";
 import type { CustomerOrder } from "./types";
 
@@ -60,6 +60,7 @@ export default function CustomerAfterSalesDialog({
   onClose,
   onSubmitted,
 }: CustomerAfterSalesDialogProps) {
+  const { message } = AntdApp.useApp();
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +68,6 @@ export default function CustomerAfterSalesDialog({
   const close = () => {
     if (submitting) return;
     setError(null);
-    form.resetFields();
     onClose();
   };
 
@@ -92,7 +92,6 @@ export default function CustomerAfterSalesDialog({
         reason: values.reason.trim(),
       });
       message.success("售后申请已提交，我们会尽快处理");
-      form.resetFields();
       onSubmitted();
     } catch (requestError) {
       setError(
@@ -108,19 +107,7 @@ export default function CustomerAfterSalesDialog({
 
   const requestableItems = order ? getRequestableAfterSalesItems(order) : [];
 
-  useEffect(() => {
-    if (!order) {
-      setError(null);
-      form.resetFields();
-      return;
-    }
-    const initialItem = getRequestableAfterSalesItems(order)[0];
-    form.setFieldsValue({
-      orderItemId: initialItem?.id,
-      type: "REFUND",
-      reason: "",
-    });
-  }, [form, order]);
+  const initialItem = requestableItems[0];
 
   return (
     <Modal
@@ -132,7 +119,7 @@ export default function CustomerAfterSalesDialog({
       okButtonProps={{ disabled: submitting }}
       okText="提交申请"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       <p className="my-account__after-sales-intro">
         请选择需要服务的订单商品并说明原因。退款金额将在售后审核时根据订单与处理结果核定，无需在此填写。
@@ -145,7 +132,16 @@ export default function CustomerAfterSalesDialog({
           style={{ marginBottom: 16 }}
         />
       ) : null}
-      <Form form={form} layout="vertical">
+      <Form
+        form={form}
+        layout="vertical"
+        preserve={false}
+        initialValues={{
+          orderItemId: initialItem?.id,
+          type: "REFUND",
+          reason: "",
+        }}
+      >
         <Form.Item
           name="orderItemId"
           label="订单商品"

@@ -11,6 +11,7 @@ import {
   getPageDocumentMediaReferences,
   type ContentTemplateMediaRight,
 } from "@/page-builder/generated/contentTemplates.generated";
+import type { PuckProps } from "@/page-builder/types";
 
 export default function PageSettingsDrawer({
   open,
@@ -22,7 +23,7 @@ export default function PageSettingsDrawer({
 }: {
   open: boolean;
   pageKey: string;
-  metadata: Record<string, any>;
+  metadata: PuckProps;
   puckData: unknown;
   onClose: () => void;
   onSave: (next: {
@@ -42,10 +43,10 @@ export default function PageSettingsDrawer({
 
   useEffect(() => {
     if (open) {
-      setSeoTitle(metadata?.seoTitle || "");
-      setSeoDescription(metadata?.seoDescription || "");
-      setOgImage(metadata?.ogImage || "");
-      setContentOwner(metadata?.contentOwner || "");
+      setSeoTitle(typeof metadata?.seoTitle === "string" ? metadata.seoTitle : "");
+      setSeoDescription(typeof metadata?.seoDescription === "string" ? metadata.seoDescription : "");
+      setOgImage(typeof metadata?.ogImage === "string" ? metadata.ogImage : "");
+      setContentOwner(typeof metadata?.contentOwner === "string" ? metadata.contentOwner : "");
       setMediaRights(
         Array.isArray(metadata?.mediaRights)
           ? metadata.mediaRights.flatMap((item: unknown) => {

@@ -1,21 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 async function authenticate(page: Page) {
-  await page.addInitScript(() => {
-    const user = {
-      id: 1,
-      username: "inquiry-context-admin",
-      realName: "咨询测试管理员",
-      role: "ADMIN",
-    };
-    localStorage.setItem("token", "inquiry-context-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: { token: "inquiry-context-token", user, isLoggedIn: true },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "inquiry-context-admin",
+    realName: "咨询测试管理员",
+    role: "ADMIN",
   });
 }
 
@@ -29,6 +19,7 @@ test("普通咨询详情展示服务端关联的来源作品与货号", async ({
   await authenticate(page);
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === "/api/auth/profile") return route.fallback();
     if (path.endsWith("/leads/inquiry/17")) {
       await route.fulfill({
         contentType: "application/json",

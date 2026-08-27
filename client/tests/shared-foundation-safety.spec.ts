@@ -39,6 +39,25 @@ test("分析必须显式配置并获得访客同意", () => {
   expect(analyticsBannerSource).toContain("同意匿名分析");
 });
 
+test("标准电商事件齐全且 purchase 不复用订单创建语义", () => {
+  for (const eventName of [
+    "view_item_list",
+    "view_item",
+    "search",
+    "add_to_cart",
+    "remove_from_cart",
+    "view_cart",
+    "begin_checkout",
+    "add_payment_info",
+    "purchase",
+    "refund",
+  ]) {
+    expect(analyticsSource).toContain(`"${eventName}"`);
+  }
+  expect(analyticsSource).toContain('fire("order_created"');
+  expect(analyticsSource).toContain('fireOnce("purchase"');
+});
+
 test("六个公开页面只接受已发布 PageDocument，缺失时使用安全空状态", () => {
   for (const key of ["home", "products", "catalog", "custom", "about", "contact"]) {
     expect(editorPagesSource).toContain(`key: "${key}"`);

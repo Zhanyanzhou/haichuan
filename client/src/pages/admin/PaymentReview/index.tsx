@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag } from 'antd';
+import { App as AntdApp, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { SecureImage } from '@/components/common/SecureImage';
 import { paymentApi } from '@/services/api';
@@ -38,7 +38,18 @@ type PaymentListItem = Payment & {
   reviewer?: { id: number; realName?: string; username: string } | null;
 };
 
+type ReceiptFormValues = {
+  orderId: number;
+  amount: number;
+  method: 'bank_transfer' | 'store';
+  type: 'DEPOSIT' | 'BALANCE' | 'FULL' | 'SUPPLEMENT';
+  paidAt?: { toISOString: () => string };
+  gatewayTradeNo?: string;
+  reviewNote?: string;
+};
+
 export default function PaymentReview() {
+  const { message, modal } = AntdApp.useApp();
   const role = useAuthStore((state) => state.user?.role);
   const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
   const [list, setList] = useState<PaymentListItem[]>([]);
@@ -56,7 +67,7 @@ export default function PaymentReview() {
   const [reviewing, setReviewing] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [receiptSubmitting, setReceiptSubmitting] = useState(false);
-  const [receiptForm] = Form.useForm();
+  const [receiptForm] = Form.useForm<ReceiptFormValues>();
   const STATUS_TABS: Array<{ k: string; l: string }> = [
     { k: 'all', l: '全部' },
     { k: 'PENDING', l: '待处理' },
@@ -100,7 +111,7 @@ export default function PaymentReview() {
 
   const review = (payment: PaymentListItem, approved: boolean) => {
     let reviewNote = '';
-    Modal.confirm({
+    modal.confirm({
       title: approved ? '确认已收到线下转账？' : '驳回该付款凭证？',
       icon: null,
       content: (
@@ -123,7 +134,7 @@ export default function PaymentReview() {
           }
           await load();
           if (detail?.id === payment.id) void openDetail(payment);
-        } catch (e: any) {
+        } catch (e: unknown) {
           // 并发审核失败时后端返回明确中文错误（"该付款记录已被处理，请刷新后重试"）
           message.error(getSafeAdminErrorMessage(e, '付款凭证审核未完成，请重新加载后确认当前状态。'));
         } finally {
@@ -135,7 +146,7 @@ export default function PaymentReview() {
 
   // 异常线下实收；在线渠道由验签回调自动核销。
   const handleCreateReceipt = async () => {
-    let values: any;
+    let values: ReceiptFormValues;
     try {
       values = await receiptForm.validateFields();
     } catch {
@@ -148,15 +159,14 @@ export default function PaymentReview() {
         amount: Number(values.amount),
         method: values.method,
         type: values.type,
-        paidAt: values.paidAt ? values.paidAt.format('YYYY-MM-DD HH:mm') : undefined,
+        paidAt: values.paidAt ? values.paidAt.toISOString() : undefined,
         gatewayTradeNo: values.gatewayTradeNo || undefined,
         reviewNote: values.reviewNote || undefined,
       });
       message.success('收款已登记，订单金额已同步');
       setReceiptOpen(false);
-      receiptForm.resetFields();
       void load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, '收款登记失败，请核对金额和付款信息后重试。'));
     } finally {
       setReceiptSubmitting(false);
@@ -184,7 +194,7 @@ export default function PaymentReview() {
             <Button
               icon={<PlusOutlined />}
               title="仅用于银行转账或门店收款等线下异常，不适用于微信或支付宝"
-              onClick={() => { receiptForm.resetFields(); setReceiptOpen(true); }}
+              onClick={() => setReceiptOpen(true)}
             >
               异常补录
             </Button>
@@ -284,9 +294,9 @@ export default function PaymentReview() {
         onOk={handleCreateReceipt}
         confirmLoading={receiptSubmitting}
         okText="确认补录"
-        destroyOnClose
+        destroyOnHidden
       >
-        <Form form={receiptForm} layout="vertical" initialValues={{ type: 'FULL', method: 'bank_transfer' }}>
+        <Form form={receiptForm} layout="vertical" initialValues={{ type: 'FULL', method: 'bank_transfer' }} preserve={false}>
           <Form.Item name="orderId" label="订单 ID" rules={[{ required: true, message: '请输入订单 ID' }]}>
             <InputNumber min={1} className="w-full" placeholder="对应的订单 ID" />
           </Form.Item>

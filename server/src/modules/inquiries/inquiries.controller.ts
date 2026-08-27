@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Param, Query, Body, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Param, Query, Body, Req, UseGuards, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { InquiriesService } from './inquiries.service';
 import { CreateInquiryDto } from './dto/create-inquiry.dto';
@@ -8,6 +8,8 @@ import { OptionalCustomerAuthGuard } from '../customers/optional-customer-auth.g
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Throttle } from '@nestjs/throttler';
+import { BoundedListQueryDto } from '../../common/dto/bounded-list-query.dto';
+import type { OptionalCustomerRequest } from '../../common/security/authenticated-principal';
 
 @ApiTags('咨询管理')
 @Controller('inquiries')
@@ -18,12 +20,22 @@ export class InquiriesController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: '查询咨询列表' })
-  @Get() findAll(@Query() q: any) { return this.inquiriesService.findAll(q); }
+  @Get() findAll(@Query() q: BoundedListQueryDto) { return this.inquiriesService.findAll(q); }
 
   @ApiOperation({ summary: '提交咨询（公开接口）' })
   // P0-6：公开写端点收紧限流（5/min），依赖 trust proxy 生效后按真实客户端 IP 计数
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  @Public() @UseGuards(OptionalCustomerAuthGuard) @Post() create(@Req() request: any, @Body() dto: CreateInquiryDto) { return this.inquiriesService.create({ ...dto, customer: request.customer }); }
+  @Public() @UseGuards(OptionalCustomerAuthGuard) @Post() create(
+    @Req() request: OptionalCustomerRequest,
+    @Body() dto: CreateInquiryDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.inquiriesService.create({
+      ...dto,
+      customer: request.customer,
+      idempotencyKey,
+    });
+  }
 
   @ApiBearerAuth()
   @ApiOperation({ summary: '分配咨询处理人' })

@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 const appMode = process.env.PLAYWRIGHT_APP_MODE === "mock" ? "mock" : "development";
 
@@ -380,26 +381,9 @@ function makeCraftDetailsDraft() {
 }
 
 async function authenticateAdmin(page: Page) {
-  await page.goto("/admin/login");
-  await page.evaluate(() => {
-    const user = {
-      id: 1,
-      username: "template-editor-ui-test",
-      realName: "装修 UI 测试管理员",
-      role: "SUPER_ADMIN",
-    };
-    localStorage.setItem("token", "template-editor-ui-test-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token: "template-editor-ui-test-token",
-          user,
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "template-editor-ui-test",
+    realName: "装修 UI 测试管理员",
   });
 }
 
@@ -412,6 +396,7 @@ async function mockEditorApis(
     const request = route.request();
     const url = request.url();
     const pathname = new URL(url).pathname;
+    if (pathname === "/api/auth/profile") return route.fallback();
     if (isForbiddenEditorWrite(request.method(), url)) {
       forbiddenWrites.push(`${request.method()} ${pathname}`);
       return route.fulfill({ status: 409, contentType: "application/json", body: "{}" });
@@ -2349,6 +2334,7 @@ test.describe("完整后台壳（确定性 UI / 自有 API 网络夹具）", () 
     await authenticateAdmin(page);
     await page.route("**/api/**", async (route) => {
       const url = route.request().url();
+      if (url.includes("/auth/profile")) return route.fallback();
       if (url.includes("/page-modules/document/validate")) {
         return route.fulfill(json({ valid: true, errors: [] }));
       }
@@ -2454,6 +2440,7 @@ test.describe("完整后台壳（确定性 UI / 自有 API 网络夹具）", () 
     await page.route("**/api/**", async (route) => {
       const request = route.request();
       const url = request.url();
+      if (url.includes("/auth/profile")) return route.fallback();
       if (url.includes("/page-modules/document/validate")) {
         return route.fulfill(json({ valid: true, errors: [] }));
       }

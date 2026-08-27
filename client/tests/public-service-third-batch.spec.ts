@@ -141,7 +141,7 @@ for (const viewport of viewports) {
     await expectWriteGate(writes);
   });
 
-  test(`Contact ${viewport.name} 空联系方式、未知 type、首错焦点与双栏顺序`, async ({ page }) => {
+  test(`Contact ${viewport.name} 空联系方式、未知 type、首错焦点与 DOM 一致顺序`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     const writes = await mockPublicServiceThirdBatch(page);
     await page.goto(viewport.name === "desktop" ? "/contact" : "/contact?type=unknown");
@@ -165,7 +165,8 @@ for (const viewport of viewports) {
     ]);
     expect(informationBox && formBox).toBeTruthy();
     if (viewport.name === "mobile") {
-      expect(formBox!.y).toBeLessThan(informationBox!.y);
+      // 移动端不再用 CSS order 把表单视觉前置；视觉、DOM 与键盘顺序统一。
+      expect(informationBox!.y).toBeLessThan(formBox!.y);
     } else {
       expect(informationBox!.x).toBeLessThan(formBox!.x);
     }

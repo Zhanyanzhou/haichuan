@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Modal, QRCode, Spin, message } from "antd";
+import { Alert, App as AntdApp, Modal, QRCode, Spin } from "antd";
 import { customerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { trackAddPaymentInfo, trackPurchase } from "@/hooks/useAnalytics";
+import { getRequestErrorMessage } from "@/services/httpClient";
 
 export type CustomerPaymentOrder = {
   id: number;
@@ -41,6 +43,7 @@ export default function CustomerPaymentDialog({
   onClose,
   onPaid,
 }: Props) {
+  const { message, modal } = AntdApp.useApp();
   const [creating, setCreating] = useState(false);
   const [checking, setChecking] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -55,6 +58,7 @@ export default function CustomerPaymentDialog({
         sessionStorage.removeItem("haichuan:pending-payment-order");
         setStatusText("支付已确认，订单正在进入履约流程");
         message.success("微信支付已确认");
+        if (order) trackPurchase(order.id, Number(order.finalAmount));
         onPaid?.();
         return true;
       }
@@ -75,7 +79,7 @@ export default function CustomerPaymentDialog({
       );
       return false;
     },
-    [onPaid],
+    [message, onPaid, order],
   );
 
   const checkPayment = useCallback(async () => {
@@ -85,12 +89,11 @@ export default function CustomerPaymentDialog({
     try {
       const response = await customerApi.getOrderPayment(order.id);
       return applyStatus(unwrapResponse<PaymentStatusResult>(response));
-    } catch (requestError: any) {
-      setError(
-        requestError?.response?.data?.message ||
-          requestError?.message ||
-          "支付状态暂时无法查询，请稍后重试。",
-      );
+    } catch (requestError: unknown) {
+      setError(getRequestErrorMessage(
+        requestError,
+        "支付状态暂时无法查询，请稍后重试。",
+      ));
       return true;
     } finally {
       setChecking(false);
@@ -113,6 +116,7 @@ export default function CustomerPaymentDialog({
       const response = await customerApi.createOrderPayment(order.id);
       const payment = unwrapResponse<CreatePaymentResult>(response);
       setResult(payment);
+      trackAddPaymentInfo(order.id, Number(order.finalAmount), payment.provider);
       if (payment.scene === "h5") {
         if (!payment.payUrl) throw new Error("微信 H5 支付链接缺失");
         setStatusText("正在前往微信支付…");
@@ -121,12 +125,11 @@ export default function CustomerPaymentDialog({
       }
       if (!payment.qrCode) throw new Error("微信支付二维码内容缺失");
       setStatusText("请使用微信扫描二维码完成支付");
-    } catch (requestError: any) {
-      setError(
-        requestError?.response?.data?.message ||
-          requestError?.message ||
-          "微信支付暂时无法发起，请稍后重试。",
-      );
+    } catch (requestError: unknown) {
+      setError(getRequestErrorMessage(
+        requestError,
+        "微信支付暂时无法发起，请稍后重试。",
+      ));
       setStatusText("支付未发起");
     } finally {
       setCreating(false);
@@ -165,7 +168,7 @@ export default function CustomerPaymentDialog({
 
   const closePayment = () => {
     if (!order) return;
-    Modal.confirm({
+    modal.confirm({
       title: "结束本次微信支付？",
       content: "系统会先向微信查单；只有确认未支付时才会关单。订单本身仍保留，可稍后重新支付。",
       okText: "查单并结束",
@@ -175,12 +178,11 @@ export default function CustomerPaymentDialog({
         try {
           const response = await customerApi.closeOrderPayment(order.id);
           applyStatus(unwrapResponse<PaymentStatusResult>(response));
-        } catch (requestError: any) {
-          setError(
-            requestError?.response?.data?.message ||
-              requestError?.message ||
-              "本次支付暂时无法结束，请稍后查单。",
-          );
+        } catch (requestError: unknown) {
+          setError(getRequestErrorMessage(
+            requestError,
+            "本次支付暂时无法结束，请稍后查单。",
+          ));
         } finally {
           setClosing(false);
         }
@@ -193,7 +195,7 @@ export default function CustomerPaymentDialog({
       open={open}
       title="微信支付"
       footer={null}
-      destroyOnClose
+      destroyOnHidden
       onCancel={onClose}
       width={440}
     >

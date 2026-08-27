@@ -13,6 +13,7 @@ import {
   message,
 } from "antd";
 import { partnerApi } from "@/services/api";
+import type { PartnerApplicationInput, PartnerApplicationStatus } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 
 // 合作商家入驻协议（草案，待法务终审；页面内可读，供申请人勾选同意）
@@ -58,7 +59,10 @@ type PartnerState = {
     partnerStatus?: string;
     partnerApprovedAt?: string | null;
   } | null;
-  latest?: any;
+  latest?: (PartnerApplicationInput & {
+    reviewNote?: string | null;
+    status?: PartnerApplicationStatus;
+  }) | null;
 } | null;
 
 export default function PartnerApplication() {
@@ -78,7 +82,7 @@ export default function PartnerApplication() {
     setLoading(true);
     try {
       const res = await partnerApi.getMine();
-      const data = unwrapResponse<any>(res);
+      const data = unwrapResponse<PartnerState>(res);
       setState(data || null);
       const latest = data?.latest;
       if (latest) {
@@ -105,7 +109,7 @@ export default function PartnerApplication() {
     void load();
   }, [load]);
 
-  const onSubmit = async (values: any) => {
+  const onSubmit = async (values: PartnerApplicationInput) => {
     setSubmitting(true);
     try {
       const payload = { ...values, agreementAccepted: true };
@@ -119,8 +123,8 @@ export default function PartnerApplication() {
       }
       message.success("合作申请已提交，请等待审核");
       await load();
-    } catch (e: any) {
-      message.error(e?.response?.data?.message || e?.message || "提交失败");
+    } catch {
+      message.error("提交失败，请检查填写内容后重试");
     } finally {
       setSubmitting(false);
     }

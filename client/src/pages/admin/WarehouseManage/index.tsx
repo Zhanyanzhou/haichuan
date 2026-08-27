@@ -9,17 +9,18 @@ import {
   Input,
   Select,
   Switch,
-  message,
+  App as AntdApp,
   Space,
 } from "antd";
 import { PlusOutlined, ReloadOutlined, EditOutlined } from "@ant-design/icons";
-import { warehouseApi } from "@/services/api";
+import { warehouseApi, type WarehouseType } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import AdminPageHeader from "@/components/common/AdminPageHeader";
 import { AdminLoadingState, AdminEmptyState, AdminErrorState } from "@/components/common/AdminDataStates";
+import type { TagProps } from "antd";
 
-const TYPE_META: Record<string, { label: string; color: string }> = {
+const TYPE_META: Record<string, { label: string; color: TagProps["color"] }> = {
   SHOWROOM: { label: "展厅", color: "gold" },
   FACTORY: { label: "工厂", color: "blue" },
   STORE: { label: "门店", color: "green" },
@@ -28,7 +29,7 @@ const TYPE_META: Record<string, { label: string; color: string }> = {
 type WarehouseRow = {
   id: number;
   name: string;
-  type: string;
+  type: WarehouseType;
   address?: string | null;
   contact?: string | null;
   phone?: string | null;
@@ -37,6 +38,7 @@ type WarehouseRow = {
 };
 
 export default function WarehouseManage() {
+  const { message } = AntdApp.useApp();
   const [list, setList] = useState<WarehouseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -50,9 +52,9 @@ export default function WarehouseManage() {
     setError("");
     try {
       const res = await warehouseApi.list();
-      const data = unwrapResponse<WarehouseRow[]>(res);
-      setList(Array.isArray(data) ? data : (data as any)?.list || []);
-    } catch (e: any) {
+      const data = unwrapResponse<WarehouseRow[] | { list?: WarehouseRow[] }>(res);
+      setList(Array.isArray(data) ? data : data?.list || []);
+    } catch (e: unknown) {
       setError(getSafeAdminErrorMessage(e, "仓库列表加载失败，请稍后重新加载。"));
       setList([]);
     } finally {
@@ -95,7 +97,7 @@ export default function WarehouseManage() {
       }
       setModalOpen(false);
       void load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "仓库保存失败，请检查填写内容后重试。"));
     } finally {
       setSaving(false);
@@ -107,7 +109,7 @@ export default function WarehouseManage() {
       await warehouseApi.update(record.id, { isActive });
       message.success(isActive ? "仓库已启用" : "仓库已停用");
       void load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "仓库状态更新失败，请重新加载后重试。"));
     }
   };
@@ -146,7 +148,7 @@ export default function WarehouseManage() {
                 width: 90,
                 render: (v: string) => {
                   const meta = TYPE_META[v] || { label: v, color: "default" };
-                  return <Tag color={meta.color as any}>{meta.label}</Tag>;
+                  return <Tag color={meta.color}>{meta.label}</Tag>;
                 },
               },
               { title: "地址", dataIndex: "address", ellipsis: true, render: (v: string) => v || "—" },
@@ -185,6 +187,7 @@ export default function WarehouseManage() {
       </Card>
 
       <Modal
+        forceRender
         title={editing ? "编辑仓库" : "新建仓库"}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}

@@ -4,12 +4,17 @@ import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 
 interface CardGridBlockProps {
   module: {
-    content: Record<string, any>;
-    layoutConfig?: Record<string, any>;
-    styleConfig?: Record<string, any>;
+    content: { title?: string; subtitle?: string; cards?: CardGridItem[]; layout?: string };
+    styleConfig?: { bgColor?: string };
   };
   editMode?: boolean;
   contentTemplateKey?: "brandPoints" | "servicePromises";
+}
+
+interface CardGridItem {
+  icon?: string;
+  title?: string;
+  body?: string;
 }
 
 /**
@@ -81,7 +86,7 @@ export default function CardGridBlock({
             gap: cols === 2 ? 40 : 24,
           }}
         >
-          {cards.map((card: any, i: number) => (
+          {cards.map((card, i) => (
             <div key={i} style={{ textAlign: "center", padding: "16px 12px" }}>
               {card.icon && (
                 <div

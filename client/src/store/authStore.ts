@@ -1,46 +1,37 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import type { User } from '@/types';
 
 interface AuthState {
-  token: string | null;
   user: User | null;
+  status: 'unknown' | 'authenticated' | 'anonymous';
   isLoggedIn: boolean;
-  setAuth: (token: string, user: User) => void;
+  setAuth: (user: User) => void;
+  markAnonymous: () => void;
   logout: () => void;
   updateUser: (user: Partial<User>) => void;
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      token: null,
-      user: null,
-      isLoggedIn: false,
+// 旧版本曾把长期 Bearer token 持久化到 localStorage。加载新会话实现时只清理
+// 这些已废弃的认证副本；“记住用户名”等非凭据偏好不受影响。
+if (typeof window !== 'undefined') {
+  localStorage.removeItem('token');
+  localStorage.removeItem('customerToken');
+  localStorage.removeItem('customer');
+  localStorage.removeItem('jewelry-auth');
+}
 
-      setAuth: (token: string, user: User) => {
-        localStorage.setItem('token', token);
-        set({ token, user, isLoggedIn: true });
-      },
+export const useAuthStore = create<AuthState>()((set) => ({
+  user: null,
+  status: 'unknown',
+  isLoggedIn: false,
 
-      logout: () => {
-        localStorage.removeItem('token');
-        set({ token: null, user: null, isLoggedIn: false });
-      },
+  setAuth: (user: User) => set({ user, status: 'authenticated', isLoggedIn: true }),
+  markAnonymous: () => set({ user: null, status: 'anonymous', isLoggedIn: false }),
+  logout: () => set({ user: null, status: 'anonymous', isLoggedIn: false }),
 
-      updateUser: (userData: Partial<User>) => {
-        set((state) => ({
-          user: state.user ? { ...state.user, ...userData } : null,
-        }));
-      },
-    }),
-    {
-      name: 'jewelry-auth',
-      partialize: (state) => ({
-        token: state.token,
-        user: state.user,
-        isLoggedIn: state.isLoggedIn,
-      }),
-    },
-  ),
-);
+  updateUser: (userData: Partial<User>) => {
+    set((state) => ({
+      user: state.user ? { ...state.user, ...userData } : null,
+    }));
+  },
+}));

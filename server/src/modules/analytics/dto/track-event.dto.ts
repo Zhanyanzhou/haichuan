@@ -12,6 +12,8 @@ import {
 
 export const PUBLIC_ANALYTICS_EVENT_NAMES = [
   'page_view',
+  'view_item_list',
+  'view_item',
   'product_view',
   'search',
   'filter',
@@ -21,8 +23,13 @@ export const PUBLIC_ANALYTICS_EVENT_NAMES = [
   'submit_inquiry',
   'cta_click',
   'add_to_cart',
+  'remove_from_cart',
+  'view_cart',
   'begin_checkout',
+  'add_payment_info',
   'order_created',
+  'purchase',
+  'refund',
 ] as const;
 export const PUBLIC_ANALYTICS_CONSENT_VERSION = 'analytics-v1';
 

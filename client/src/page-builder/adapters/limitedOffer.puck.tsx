@@ -16,7 +16,7 @@ export interface LimitedOfferPuckProps {
 
 export const limitedOfferPuckConfig = {
   render: (props: LimitedOfferPuckProps) => {
-    const module = convertPuckProps("限时活动", props as any);
+    const module = convertPuckProps("限时活动", props);
     return <LimitedOfferBlock module={module as NonNullable<typeof module>} />;
   },
   defaultProps: {
@@ -31,5 +31,5 @@ export const limitedOfferPuckConfig = {
     bgColor: "#FFFFFF",
     locked: false,
   } satisfies LimitedOfferPuckProps,
-  resolvePermissions: (data: any) => data.props?.locked ? { delete: false, drag: false } : {},
+  resolvePermissions: (data: { props?: LimitedOfferPuckProps }) => data.props?.locked ? { delete: false, drag: false } : {},
 };

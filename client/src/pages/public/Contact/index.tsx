@@ -8,6 +8,9 @@ import { usePageMetaStore } from "@/store/pageMetaStore";
 import { usePageDecorationState } from "@/page-builder/runtime/PublishedPageDecoration";
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { usePublicSiteSettings } from "@/hooks/usePublicSiteSettings";
+import { useStructuredData } from "@/hooks/useStructuredData";
+import { useCustomerAuthStore } from "@/store/customerAuthStore";
+import { createIdempotencyKey } from "@/utils/idempotency";
 
 const T = {
   bg: "#FFFFFF",
@@ -150,6 +153,18 @@ export type ContactProps = {
 
 export default function Contact({ mode = "public" }: ContactProps = {}) {
   const editorPreview = mode === "editor-preview";
+  useStructuredData("contact-faq", editorPreview ? null : {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: FAQS.map((faq) => ({
+      "@type": "Question",
+      name: faq.q,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: faq.a,
+      },
+    })),
+  });
   const [searchParams, setSearchParams] = useSearchParams();
   const sourceType = searchParams.get("type") || "";
   const preselectedConsultationType = SOURCE_TYPE_TO_CONSULTATION[sourceType] || "";
@@ -191,17 +206,8 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     { label: "服务时间", value: businessHours },
   ].filter((c) => c.value); // 只显示有真实值的条目
 
-  const savedCustomer = editorPreview ? null : (() => {
-    try {
-      return JSON.parse(localStorage.getItem("customer") || "null") as {
-        name?: string;
-        phone?: string;
-        email?: string;
-      } | null;
-    } catch {
-      return null;
-    }
-  })();
+  const authenticatedCustomer = useCustomerAuthStore((state) => state.customer);
+  const savedCustomer = editorPreview ? null : authenticatedCustomer;
   const [form, setForm] = useState({
     name: savedCustomer?.name || "",
     phone: savedCustomer?.phone || "",
@@ -223,6 +229,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
   const formRef = useRef<HTMLFormElement>(null);
   const successHeadingRef = useRef<HTMLHeadingElement>(null);
   const submitPendingRef = useRef(false);
+  const idempotencyKeyRef = useRef(createIdempotencyKey());
 
   useEffect(() => {
     if (editorPreview) return;
@@ -273,7 +280,10 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     if (submitted) successHeadingRef.current?.focus();
   }, [submitted]);
 
-  const set = (key: string, value: any) => {
+  const set = <Key extends keyof typeof form>(
+    key: Key,
+    value: (typeof form)[Key],
+  ) => {
     setForm((f) => ({ ...f, [key]: value }));
     if (errors[key])
       setErrors((e) => {
@@ -331,17 +341,21 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     setSubmitting(true);
     setSubmitError("");
     try {
-      await inquiriesApi.submit({
-        name: form.name.trim(),
-        phone: form.phone.trim(),
-        consultationType: form.consultationType,
-        preferredContact: form.preferredContact,
-        preferredTime: form.preferredTime,
-        budgetRange: form.budgetRange || undefined,
-        productId: sourceProduct?.id,
-        message: form.message.trim(),
-        privacyConsent: form.privacyConsent,
-      });
+      await inquiriesApi.submit(
+        {
+          name: form.name.trim(),
+          phone: form.phone.trim(),
+          consultationType: form.consultationType,
+          preferredContact: form.preferredContact,
+          preferredTime: form.preferredTime,
+          budgetRange: form.budgetRange || undefined,
+          productId: sourceProduct?.id,
+          message: form.message.trim(),
+          privacyConsent: form.privacyConsent,
+        },
+        idempotencyKeyRef.current,
+      );
+      idempotencyKeyRef.current = createIdempotencyKey();
       trackSubmitInquiry();
       setSubmitted(true);
     } catch (error) {
@@ -744,6 +758,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                   </label>
                   <input
                     id="cf-name"
+                    aria-required="true"
                     aria-invalid={errors.name ? true : undefined}
                     aria-describedby={errors.name ? ERROR_IDS.name : undefined}
                     style={{
@@ -773,6 +788,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                   </label>
                   <input
                     id="cf-phone"
+                    aria-required="true"
                     aria-invalid={errors.phone ? true : undefined}
                     aria-describedby={errors.phone ? ERROR_IDS.phone : undefined}
                     style={{
@@ -814,6 +830,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                   </label>
                   <select
                     id="cf-type"
+                    aria-required="true"
                     aria-invalid={errors.consultationType ? true : undefined}
                     aria-describedby={
                       errors.consultationType
@@ -882,6 +899,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                   </label>
                   <select
                     id="cf-time"
+                    aria-required="true"
                     aria-invalid={errors.preferredTime ? true : undefined}
                     aria-describedby={
                       errors.preferredTime ? ERROR_IDS.preferredTime : undefined
@@ -939,6 +957,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                 </label>
                 <textarea
                   id="cf-message"
+                  aria-required="true"
                   aria-invalid={errors.message ? true : undefined}
                   aria-describedby={errors.message ? ERROR_IDS.message : undefined}
                   style={{
@@ -979,6 +998,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                   <input
                     id="cf-privacy-consent"
                     type="checkbox"
+                    aria-required="true"
                     checked={form.privacyConsent}
                     onChange={(e) => set("privacyConsent", e.target.checked)}
                     aria-invalid={errors.privacyConsent ? true : undefined}
@@ -1135,8 +1155,6 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
 
         @media (max-width: 767px) {
           .contact-grid { grid-template-columns: 1fr !important; }
-          .contact-grid > div:first-child { order: 2; }
-          .contact-grid > div:last-child { order: 1; }
           .contact-row { grid-template-columns: 1fr !important; }
         }
       `}</style>

@@ -7,15 +7,6 @@ test.describe("商品编辑器关键回归", () => {
 
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
-      localStorage.setItem("token", "mock-jwt-token");
-      localStorage.setItem("jewelry-auth", JSON.stringify({
-        state: {
-          token: "mock-jwt-token",
-          user: { id: 1, username: "mock-admin", role: "SUPER_ADMIN", name: "Mock Admin" },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }));
       localStorage.removeItem("haichuan.mock-products");
     });
     await page.goto("/admin/products/new");
@@ -88,6 +79,9 @@ test.describe("商品编辑器关键回归", () => {
       id: 1,
       code: "PUBLISHED-001",
       name: "已上架测试商品",
+      summary: "用于回归验证的已上架珠宝商品",
+      shortDescription: "用于回归验证的已上架珠宝商品",
+      description: "用于验证已发布商品保存时保持发布状态，并满足当前公开商品资料完整度合同。",
       categoryId: 53,
       materialType: "GOLD_999",
       price: 5280,

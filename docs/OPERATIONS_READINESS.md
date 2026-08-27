@@ -160,7 +160,7 @@
 | 迁移执行    | 生产库 migrate status 未确认（批次 B drop_content_slots 等 deploy 状态未知）                                                                                  | P0                 |
 | CDN         | 无接入（ali-oss 依赖零使用=死依赖）；nginx 无 gzip/expires；Prisma 无连接池调参                                                                               | P2/P3              |
 | 性能承载    | Catalog/Search 仍 2000 全量拉取（服务端分页已具备；有意决策保联想/托盘交互，触发条件=商品超阈值或补 suggest 端点）                                            | P3                 |
-| 文档滞后    | DECISIONS D.1（库存已单轨仍写双轨）/D.3（flag 已服务端化）/DEPLOYMENT.md（仍画 redis+443）/PROJECT.md/PENDING_WORK.md/CLEANUP_PLAN.md                         | P1                 |
+| 文档滞后    | DECISIONS D.1（库存已单轨仍写双轨）/D.3（flag 已服务端化）/DEPLOYMENT.md（仍画 redis+443）/PROJECT.md/PENDING_WORK.md                                         | P1                 |
 
 ### ❌ 缺失
 

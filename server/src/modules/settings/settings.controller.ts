@@ -8,6 +8,7 @@ import { Roles } from "../../common/decorators/roles.decorator";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { requirePublishedPublicContentLocale } from "../../common/content-locale";
+import { BoundedListQueryDto } from "../../common/dto/bounded-list-query.dto";
 
 @ApiTags("系统设置")
 @ApiBearerAuth()
@@ -61,7 +62,7 @@ export class SettingsController {
 
   @ApiOperation({ summary: "获取系统日志" })
   @Get("logs")
-  getLogs(@Query() query: any) {
+  getLogs(@Query() query: BoundedListQueryDto) {
     return this.settingsService.getLogs(query);
   }
 

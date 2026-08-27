@@ -2,6 +2,7 @@ import {
   createContentTemplateMarker,
   getContentTemplateContract,
 } from "../generated/contentTemplates.generated";
+import type { PuckProps } from "../types";
 
 /**
  * blockTemplateStore.ts — 区块模板 localStorage 持久化
@@ -12,7 +13,7 @@ export interface BlockTemplate {
   id: string;
   name: string;
   type: string;
-  props: Record<string, any>;
+  props: PuckProps;
   createdAt: string;
   templateId?: string;
   templateVersion?: number;
@@ -21,7 +22,17 @@ export interface BlockTemplate {
 function readAll(): BlockTemplate[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is BlockTemplate => Boolean(
+          item && typeof item === "object" && !Array.isArray(item)
+          && typeof (item as { id?: unknown }).id === "string"
+          && typeof (item as { name?: unknown }).name === "string"
+          && typeof (item as { type?: unknown }).type === "string"
+          && (item as { props?: unknown }).props !== null
+          && typeof (item as { props?: unknown }).props === "object",
+        ))
+      : [];
   } catch { return []; }
 }
 
@@ -31,7 +42,7 @@ function writeAll(list: BlockTemplate[]): void {
 
 export const blockTemplateStore = {
   getAll: readAll,
-  save(name: string, type: string, props: Record<string, any>): BlockTemplate {
+  save(name: string, type: string, props: PuckProps): BlockTemplate {
     const contract = getContentTemplateContract(type);
     const marker = createContentTemplateMarker(type);
     const t: BlockTemplate = {

@@ -8,6 +8,7 @@ import { USE_MOCK } from "@/services/mockData";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getMaterialLabel } from "@/utils/material";
 import { type CatalogProduct } from "@/data/catalogData";
+import type { InventoryPolicy, SalesMode } from "@/types";
 import { useReconnectingEventSource } from "./useReconnectingEventSource";
 
 /** 真实分类节点 */
@@ -20,9 +21,144 @@ export interface RealCategory {
   children?: RealCategory[];
 }
 
+type PublicProductMedia = {
+  mediaUrl?: string;
+  url?: string;
+};
+
+type PublicProductSummary = {
+  id: number;
+  categoryId: number;
+  code?: string;
+  name?: string;
+  shortDescription?: string;
+  materialType?: string;
+  craftTechnique?: string[] | string;
+  goldWeight?: number | string;
+  weight?: number | string;
+  size?: string;
+  salesMode?: SalesMode;
+  inventoryPolicy?: InventoryPolicy;
+  isAvailableForPurchase?: boolean;
+  price?: number | string;
+  category?: { name?: string };
+  listingImage?: PublicProductMedia;
+  primaryImage?: PublicProductMedia;
+  images?: PublicProductMedia[];
+};
+
+type PublicProductPayload = {
+  list: PublicProductSummary[];
+  total: number;
+  facets: { sizes: string[] };
+};
+
+const SALES_MODES = new Set<SalesMode>([
+  "DISPLAY_ONLY",
+  "SELECTION",
+  "APPOINTMENT",
+  "DIRECT_PURCHASE",
+  "CUSTOM_INQUIRY",
+]);
+const INVENTORY_POLICIES = new Set<InventoryPolicy>(["STANDARD", "SINGLE_UNIT"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function optionalNumberLike(value: unknown): number | string | undefined {
+  return typeof value === "number" || typeof value === "string" ? value : undefined;
+}
+
+function parsePublicMedia(value: unknown): PublicProductMedia | undefined {
+  if (!isRecord(value)) return undefined;
+  const mediaUrl = optionalString(value.mediaUrl);
+  const url = optionalString(value.url);
+  return mediaUrl || url ? { mediaUrl, url } : undefined;
+}
+
+function parsePublicProduct(value: unknown): PublicProductSummary | null {
+  if (!isRecord(value)) return null;
+  const id = Number(value.id);
+  const categoryId = Number(value.categoryId);
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(categoryId) || categoryId <= 0) {
+    return null;
+  }
+  const salesMode = SALES_MODES.has(value.salesMode as SalesMode)
+    ? (value.salesMode as SalesMode)
+    : undefined;
+  const inventoryPolicy = INVENTORY_POLICIES.has(value.inventoryPolicy as InventoryPolicy)
+    ? (value.inventoryPolicy as InventoryPolicy)
+    : undefined;
+  const category = isRecord(value.category)
+    ? { name: optionalString(value.category.name) }
+    : undefined;
+  const craftTechnique = Array.isArray(value.craftTechnique)
+    ? value.craftTechnique.filter((item): item is string => typeof item === "string")
+    : optionalString(value.craftTechnique);
+  return {
+    id,
+    categoryId,
+    code: optionalString(value.code),
+    name: optionalString(value.name),
+    shortDescription: optionalString(value.shortDescription),
+    materialType: optionalString(value.materialType),
+    craftTechnique,
+    goldWeight: optionalNumberLike(value.goldWeight),
+    weight: optionalNumberLike(value.weight),
+    size: optionalString(value.size),
+    salesMode,
+    inventoryPolicy,
+    isAvailableForPurchase:
+      typeof value.isAvailableForPurchase === "boolean"
+        ? value.isAvailableForPurchase
+        : undefined,
+    price: optionalNumberLike(value.price),
+    category,
+    listingImage: parsePublicMedia(value.listingImage),
+    primaryImage: parsePublicMedia(value.primaryImage),
+    images: Array.isArray(value.images)
+      ? value.images
+          .map(parsePublicMedia)
+          .filter((image): image is PublicProductMedia => Boolean(image))
+      : [],
+  };
+}
+
+function parsePublicProductPayload(value: unknown): PublicProductPayload {
+  const rawList = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.list)
+      ? value.list
+      : [];
+  const list = rawList
+    .map(parsePublicProduct)
+    .filter((product): product is PublicProductSummary => Boolean(product));
+  const totalValue = isRecord(value) ? value.total : undefined;
+  const total = typeof totalValue === "number" && Number.isFinite(totalValue)
+    ? totalValue
+    : list.length;
+  const facetValue = isRecord(value) && isRecord(value.facets)
+    ? value.facets.sizes
+    : undefined;
+  return {
+    list,
+    total,
+    facets: {
+      sizes: Array.isArray(facetValue)
+        ? facetValue.filter((size): size is string => typeof size === "string")
+        : [],
+    },
+  };
+}
+
 /** 转换 API 产品 → CatalogProduct（使用真实 categoryId） */
 function mapApiProduct(
-  p: any,
+  p: PublicProductSummary,
   categoryById: Map<number, RealCategory>,
 ): CatalogProduct {
   const lineage: RealCategory[] = [];
@@ -41,7 +177,7 @@ function mapApiProduct(
   const orderedImages = [
     listingUrl,
     primaryUrl,
-    ...(p.images || []).map((img: any) => img.mediaUrl || img.url || ""),
+    ...(p.images || []).map((img) => img.mediaUrl || img.url || ""),
   ].filter(Boolean);
 
   return {
@@ -52,7 +188,7 @@ function mapApiProduct(
     shortDescription: p.shortDescription || "",
     primaryCategoryId: String(primaryCategory?.id || p.categoryId || ""),
     secondaryCategoryId: String(secondaryCategory?.id || p.categoryId || ""),
-    material: getMaterialLabel(p.materialType),
+    material: getMaterialLabel(p.materialType || ""),
     craft: Array.isArray(p.craftTechnique)
       ? p.craftTechnique.filter((item: unknown) => typeof item === "string").join("、")
       : typeof p.craftTechnique === "string"
@@ -243,14 +379,14 @@ export function useProductData(
           productApi.getPublicList(params),
           loadCategories ? categoryApi.getTree() : Promise.resolve(null),
         ]);
-        const data = unwrapResponse<any>(prodRes);
-        const list: any[] = data?.list || data || [];
+        const data = parsePublicProductPayload(unwrapResponse<unknown>(prodRes));
+        const list = data.list;
 
         // 构建分类映射: categoryId → name
         const categoryById = new Map<number, RealCategory>();
         const catData = catRes ? unwrapResponse<unknown>(catRes) : [];
         const cats = Array.isArray(catData) ? (catData as RealCategory[]) : [];
-        const walkCats = (nodes: any[]) => {
+        const walkCats = (nodes: RealCategory[]) => {
           for (const n of nodes) {
             if (n.id) categoryById.set(n.id, n);
             if (n.children) walkCats(n.children);
@@ -258,15 +394,11 @@ export function useProductData(
         };
         walkCats(Array.isArray(cats) ? cats : []);
 
-        const mapped = list.map((p: any) => mapApiProduct(p, categoryById));
+        const mapped = list.map((product) => mapApiProduct(product, categoryById));
         if (!cancelled) {
           setApiProducts(mapped);
-          setTotal(typeof data?.total === "number" ? data.total : mapped.length);
-          setFacets({
-            sizes: Array.isArray(data?.facets?.sizes)
-              ? data.facets.sizes.filter((size: unknown) => typeof size === "string")
-              : [],
-          });
+          setTotal(data.total);
+          setFacets(data.facets);
           if (loadCategories) {
             setCategories(cats);
             setCategoriesLoaded(true);

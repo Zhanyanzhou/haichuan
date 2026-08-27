@@ -1,30 +1,14 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 const wrapped = (data: unknown) =>
   JSON.stringify({ code: 200, data, message: "ok" });
 
 async function authenticateAdmin(page: Page) {
-  await page.addInitScript(() => {
-    const user = {
-      id: 1,
-      username: "operating-foundation-admin",
-      realName: "经营底座测试管理员",
-      role: "ADMIN",
-      status: "ACTIVE",
-      createdAt: "2026-08-22T00:00:00.000Z",
-    };
-    localStorage.setItem("token", "operating-foundation-test-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token: "operating-foundation-test-token",
-          user,
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "operating-foundation-admin",
+    realName: "经营底座测试管理员",
+    role: "SUPER_ADMIN",
   });
 }
 
@@ -52,6 +36,7 @@ test.describe("后台经营底座第一批状态", () => {
 
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/api/auth/profile")) return route.fallback();
       if (url.pathname.endsWith("/api/warehouses")) {
         await fulfillJson(route, [{ id: 1, name: "深圳展厅" }]);
         return;
@@ -114,6 +99,7 @@ test.describe("后台经营底座第一批状态", () => {
     await authenticateAdmin(page);
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/api/auth/profile")) return route.fallback();
       await fulfillJson(
         route,
         path.endsWith("/api/inventory")
@@ -141,6 +127,7 @@ test.describe("后台经营底座第一批状态", () => {
     await page.route("**/api/**", async (route) => {
       const request = route.request();
       const path = new URL(request.url()).pathname;
+      if (path.endsWith("/api/auth/profile")) return route.fallback();
       if (path.endsWith("/api/warehouses")) {
         await fulfillJson(route, [{ id: 1, name: "深圳展厅" }]);
         return;
@@ -224,6 +211,7 @@ test.describe("后台经营底座第一批状态", () => {
 
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/api/auth/profile")) return route.fallback();
       if (!path.endsWith("/api/users")) {
         await fulfillJson(route, {});
         return;
@@ -304,6 +292,7 @@ test.describe("后台经营底座第一批状态", () => {
 
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/api/auth/profile")) return route.fallback();
       if (!path.includes("/api/gold-price/")) {
         await fulfillJson(route, {});
         return;

@@ -92,3 +92,44 @@ export type CustomerNotificationPage = {
   page: number;
   pageSize: number;
 };
+
+export type CustomerProfile = {
+  id: number;
+  name: string | null;
+  phone: string;
+  email: string | null;
+};
+
+export type CustomerAddress = {
+  id: number;
+  recipientName: string;
+  recipientPhone: string;
+  province?: string | null;
+  city?: string | null;
+  district?: string | null;
+  detail: string;
+};
+
+export type CustomerSelectionInquiry = {
+  id: number;
+  status: string;
+  createdAt: string;
+  items?: Array<{ productNameSnapshot: string }>;
+};
+
+export type CustomerInquiry = {
+  id: number;
+  status: string;
+  createdAt: string;
+  consultationType?: string | null;
+  product?: { name?: string | null } | null;
+};
+
+export type CustomerPartnerState = {
+  customer?: {
+    accountType?: string;
+    partnerStatus?: string;
+    partnerApprovedAt?: string | null;
+  } | null;
+  latest?: { reviewNote?: string | null } | null;
+} | null;

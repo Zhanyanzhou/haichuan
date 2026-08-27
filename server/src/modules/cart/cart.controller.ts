@@ -5,6 +5,7 @@ import { OptionalCustomerAuthGuard } from '../customers/optional-customer-auth.g
 import { Public } from '../../common/decorators/public.decorator';
 import { CustomerCommerceGuard } from '../../common/guards/customer-commerce.guard';
 import { AddCartItemDto, UpdateCartItemDto } from './dto/cart-item.dto';
+import type { OptionalCustomerRequest } from '../../common/security/authenticated-principal';
 
 @ApiTags('购物车')
 @Controller('cart')
@@ -19,31 +20,31 @@ export class CartController {
 
   @Get()
   @ApiOperation({ summary: '获取购物车' })
-  getCart(@Req() req: any, @Headers('x-session-id') sessionId?: string) {
+  getCart(@Req() req: OptionalCustomerRequest, @Headers('x-session-id') sessionId?: string) {
     return this.cartService.getCart({ userId: req.customer?.id, sessionId, customer: req.customer });
   }
 
   @Post()
   @ApiOperation({ summary: '添加商品到购物车' })
-  addItem(@Req() req: any, @Body() body: AddCartItemDto, @Headers('x-session-id') sessionId?: string) {
+  addItem(@Req() req: OptionalCustomerRequest, @Body() body: AddCartItemDto, @Headers('x-session-id') sessionId?: string) {
     return this.cartService.addItem({ ...body, userId: req.customer?.id, sessionId, customer: req.customer });
   }
 
   @Put(':id')
   @ApiOperation({ summary: '更新购物车商品数量' })
-  updateQuantity(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() body: UpdateCartItemDto, @Headers('x-session-id') sessionId?: string) {
+  updateQuantity(@Req() req: OptionalCustomerRequest, @Param('id', ParseIntPipe) id: number, @Body() body: UpdateCartItemDto, @Headers('x-session-id') sessionId?: string) {
     return this.cartService.updateQuantity(id, body.quantity, { userId: req.customer?.id, sessionId, customer: req.customer });
   }
 
   @Delete(':id')
   @ApiOperation({ summary: '从购物车移除商品' })
-  removeItem(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Headers('x-session-id') sessionId?: string) {
+  removeItem(@Req() req: OptionalCustomerRequest, @Param('id', ParseIntPipe) id: number, @Headers('x-session-id') sessionId?: string) {
     return this.cartService.removeItem(id, { userId: req.customer?.id, sessionId, customer: req.customer });
   }
 
   @Delete()
   @ApiOperation({ summary: '清空购物车' })
-  clearCart(@Req() req: any, @Headers('x-session-id') sessionId?: string) {
+  clearCart(@Req() req: OptionalCustomerRequest, @Headers('x-session-id') sessionId?: string) {
     return this.cartService.clearCart({ userId: req.customer?.id, sessionId, customer: req.customer });
   }
 }

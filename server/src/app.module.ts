@@ -48,6 +48,7 @@ import { IdempotencyModule } from "./common/idempotency/idempotency.module";
 import { OutboxModule } from "./common/outbox/outbox.module";
 import { ReliableNotificationsModule } from "./common/notifications/reliable-notifications.module";
 import { SessionSecurityGuard } from "./common/security/session-security.guard";
+import { SessionSecurityModule } from "./common/security/session-security.module";
 import { resolveRequestId } from "./common/observability/request-id";
 
 @Module({
@@ -103,6 +104,7 @@ import { resolveRequestId } from "./common/observability/request-id";
       },
     ]),
     PrismaModule,
+    SessionSecurityModule,
     KimiModule,
     MailerModule,
     PaymentGatewayModule,

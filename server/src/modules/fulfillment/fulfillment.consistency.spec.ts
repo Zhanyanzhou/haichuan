@@ -13,18 +13,23 @@ test('履约中心发货同时同步订单主状态与发货维度', async () =>
     order: { id: 9, status: 'PENDING_SHIP' },
   };
   const tx = {
+    $queryRaw: async () => [{ id: fulfillment.orderId }],
     fulfillment: {
       findUnique: async () => fulfillment,
       updateMany: async () => ({ count: 1 }),
     },
     order: {
-      update: async ({ data }: { data: Record<string, unknown> }) => {
+      updateMany: async ({ data }: { data: Record<string, unknown> }) => {
         Object.assign(orderUpdate, data);
+        return { count: 1 };
       },
     },
   };
   const service = new FulfillmentService(
     {
+      fulfillment: {
+        findUnique: async () => ({ orderId: fulfillment.orderId }),
+      },
       $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
     } as unknown as PrismaService,
     { record: async () => undefined } as never,
@@ -62,14 +67,28 @@ function createDeliveryHarness() {
     fulfillment: {
       findUnique: async () => fulfillment,
       updateMany: async ({ where, data }: any) => {
-        if (where.status !== fulfillment.status) return { count: 0 };
+        const allowed = Array.isArray(where.status?.in)
+          ? where.status.in
+          : [where.status];
+        if (!allowed.includes(fulfillment.status)) return { count: 0 };
         Object.assign(fulfillment, data);
         return { count: 1 };
       },
     },
     order: {
       updateMany: async ({ where, data }: any) => {
-        if (where.status !== order.status) return { count: 0 };
+        const allowedStatus = Array.isArray(where.status?.in)
+          ? where.status.in
+          : [where.status];
+        const allowedDelivery = Array.isArray(where.deliveryStatus?.in)
+          ? where.deliveryStatus.in
+          : where.deliveryStatus === undefined
+            ? [order.deliveryStatus]
+            : [where.deliveryStatus];
+        if (
+          !allowedStatus.includes(order.status) ||
+          !allowedDelivery.includes(order.deliveryStatus)
+        ) return { count: 0 };
         Object.assign(order, data);
         return { count: 1 };
       },
@@ -135,4 +154,25 @@ test('并发或重复送达幂等且只记录一次送达事件', async () => {
   assert.equal(harness.order.deliveryStatus, 'RECEIVED');
   assert.equal(harness.order.status, 'SHIPPED');
   assert.equal(harness.events.length, 1);
+});
+
+test('物流异常只能从已发货进入，且可在送达后恢复订单签收维度', async () => {
+  const harness = createDeliveryHarness();
+
+  await harness.service.updateStatus(
+    1,
+    { status: 'ABNORMAL', abnormalReason: '中转延误' },
+    { type: 'ADMIN', id: 1 },
+  );
+  assert.equal(harness.fulfillment.status, 'ABNORMAL');
+  assert.equal(harness.order.deliveryStatus, 'ABNORMAL');
+
+  await harness.service.updateStatus(
+    1,
+    { status: 'DELIVERED' },
+    { type: 'ADMIN', id: 1 },
+  );
+  assert.equal(harness.fulfillment.status, 'DELIVERED');
+  assert.equal(harness.order.deliveryStatus, 'RECEIVED');
+  assert.equal(harness.events.length, 2);
 });

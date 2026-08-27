@@ -133,6 +133,7 @@ export class RefundsService {
   private async assertAfterSalesRefundRequest(
     tx: Prisma.TransactionClient,
     data: { orderId: number; amount: number; afterSalesCaseId?: number },
+    excludeRefundId?: number,
   ) {
     if (!data.afterSalesCaseId) return;
     const caseRecord = await tx.afterSalesCase.findFirst({
@@ -167,6 +168,7 @@ export class RefundsService {
       where: {
         afterSalesCaseId: caseRecord.id,
         status: { in: [...ACTIVE_REFUND_STATUSES] },
+        ...(excludeRefundId ? { id: { not: excludeRefundId } } : {}),
       },
       select: { amount: true },
     });
@@ -406,6 +408,15 @@ export class RefundsService {
 
       // 审核通过时再次校验金额（防止审核期间其它退款已完成）
       if (action === 'APPROVED') {
+        await this.assertAfterSalesRefundRequest(
+          tx,
+          {
+            orderId: refund.orderId,
+            amount: Number(refund.amount),
+            afterSalesCaseId: refund.afterSalesCaseId ?? undefined,
+          },
+          refund.id,
+        );
         const paidCents = await this.getPaidCents(tx, refund.orderId);
         const activeCents = await this.getActiveRefundCents(tx, refund.orderId, refundId);
         const thisCents = this.moneyToCents(refund.amount);
@@ -763,7 +774,7 @@ export class RefundsService {
     await this.prisma.$transaction(async (tx) => {
       const refund = await tx.refund.findUnique({ where: { id: refundId } });
       if (!refund || refund.status !== 'PROCESSING') return;
-      await this.tradeEvents.record(tx, {
+      await this.tradeEvents.recordBestEffort(tx, {
         orderId: refund.orderId,
         entityType: TRADE_ENTITY_TYPE.REFUND,
         entityId: refund.id,
@@ -1034,7 +1045,13 @@ export class RefundsService {
   /**
    * 登记线下退款执行结果。在线支付禁止人工标记完成，必须由后续原渠道退款管线推进。
    */
-  async execute(refundId: number, action: 'COMPLETED' | 'FAILED', gatewayRefundNo: string | undefined, operator: OperatorContext) {
+  async execute(
+    refundId: number,
+    action: 'COMPLETED' | 'FAILED',
+    gatewayRefundNo: string | undefined,
+    operator: OperatorContext,
+    reviewNote?: string,
+  ) {
     return this.prisma.$transaction(async (tx) => {
       const refundRef = await tx.refund.findUnique({
         where: { id: refundId },
@@ -1049,6 +1066,7 @@ export class RefundsService {
       });
       if (!refund) throw new NotFoundException('退款记录不存在');
       const reference = gatewayRefundNo?.trim();
+      const executionNote = reviewNote?.trim();
       if (refund.status === 'COMPLETED' && action === 'COMPLETED') {
         if (reference && refund.gatewayRefundNo && reference !== refund.gatewayRefundNo) {
           throw new ConflictException('退款已用另一流水号完成，请勿重复登记');
@@ -1074,8 +1092,12 @@ export class RefundsService {
         }
         await this.completeRefund(tx, refund, reference, operator, {
           manualOffline: true,
+          ...(executionNote ? { executionNote } : {}),
         });
       } else {
+        if (!executionNote) {
+          throw new BadRequestException('线下退款执行失败必须填写失败原因');
+        }
         // 执行失败：保持 APPROVED/PROCESSING 可重新执行（退款失败多为操作性问题，不应成死锁终态）。
         // 乐观锁仅记录本次失败尝试（processedBy/processedAt），不推进状态、不覆盖审核备注 reviewNote；
         // 失败原因记入事件时间线，便于追溯与重试。
@@ -1087,7 +1109,7 @@ export class RefundsService {
         await this.tradeEvents.record(tx, {
           orderId: refund.orderId, entityType: TRADE_ENTITY_TYPE.REFUND, entityId: refundId,
           eventType: TRADE_EVENT_TYPE.REFUND_EXECUTE_FAILED, fromStatus: refund.status, toStatus: refund.status,
-          operator, reason: reference ? `执行失败：${reference}` : '执行失败',
+          operator, reason: executionNote,
           metadata: { refundReference: reference || null },
         });
       }

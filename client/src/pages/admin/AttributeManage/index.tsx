@@ -10,7 +10,7 @@ import {
   InputNumber,
   Switch,
   Space,
-  message,
+  App as AntdApp,
   Popconfirm,
 } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
@@ -37,6 +37,7 @@ interface Attr {
 }
 
 export default function AttributeManage() {
+  const { message } = AntdApp.useApp();
   const [list, setList] = useState<Attr[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Attr | null>(null);
@@ -57,7 +58,7 @@ export default function AttributeManage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [message]);
 
   useEffect(() => {
     void load();
@@ -83,7 +84,7 @@ export default function AttributeManage() {
       message.success("属性已保存");
       setAttrModalOpen(false);
       load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "属性保存失败，请检查填写内容后重试。"));
     }
   };
@@ -93,7 +94,7 @@ export default function AttributeManage() {
       await attributeApi.remove(id);
       message.success("属性已停用");
       load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "属性停用失败，请重新加载后重试。"));
     }
   };
@@ -124,7 +125,7 @@ export default function AttributeManage() {
       }
       setValueModalOpen(false);
       load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "属性值保存失败，请检查填写内容后重试。"));
     }
   };
@@ -134,7 +135,7 @@ export default function AttributeManage() {
       await attributeApi.removeValue(valueId);
       message.success("已停用属性值");
       load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "属性值停用失败，请重新加载后重试。"));
     }
   };
@@ -164,7 +165,7 @@ export default function AttributeManage() {
     {
       title: "操作",
       width: 180,
-      render: (_: any, r: Attr) => (
+      render: (_: unknown, r: Attr) => (
         <Space>
           <Button
             size="small"
@@ -268,7 +269,7 @@ export default function AttributeManage() {
         open={attrModalOpen}
         onOk={submitAttr}
         onCancel={() => setAttrModalOpen(false)}
-        destroyOnClose
+        forceRender
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -314,7 +315,7 @@ export default function AttributeManage() {
         open={valueModalOpen}
         onOk={submitValue}
         onCancel={() => setValueModalOpen(false)}
-        destroyOnClose
+        forceRender
       >
         <Form form={valueForm} layout="vertical">
           <Form.Item

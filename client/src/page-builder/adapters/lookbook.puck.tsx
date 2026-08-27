@@ -43,8 +43,8 @@ function LookbookPreview(props: LookbookPuckProps) {
   }, [codes, codesKey, ids, idsKey]);
 
   const module = useMemo(() => {
-    const result = convertPuckProps("佩戴灵感", props as any);
-    if (result) (result as any).content.products = toProducts(props.__previewProducts ?? products);
+    const result = convertPuckProps("佩戴灵感", props);
+    if (result) result.content.products = toProducts(props.__previewProducts ?? products);
     return result;
   }, [products, props]);
   return module ? <LookbookBlock module={module} editMode /> : null;
@@ -66,5 +66,5 @@ export const lookbookPuckConfig = {
     bgColor: "#FFFFFF",
     locked: false,
   } satisfies LookbookPuckProps,
-  resolvePermissions: (data: any) => data.props?.locked ? { delete: false, drag: false } : {},
+  resolvePermissions: (data: { props?: LookbookPuckProps }) => data.props?.locked ? { delete: false, drag: false } : {},
 };

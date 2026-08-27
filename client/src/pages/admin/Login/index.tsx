@@ -8,6 +8,7 @@ import { authApi } from '@/services/api';
 import { USE_MOCK } from '@/services/mockData';
 import { unwrapResponse } from '@/utils/unwrap';
 import { ADMIN_COLORS } from '@/styles/antdTheme';
+import type { User } from '@/types';
 
 /* ═══════ 局部视觉令牌 — 仅作用于登录页 ═══════ */
 const TOKENS = {
@@ -41,7 +42,7 @@ export default function Login() {
   const navigate = useNavigate();
   const setAuth = useAuthStore((s) => s.setAuth);
 
-  // 页面加载时恢复记住的用户名
+  // 页面加载时恢复记住的账号；密码和会话令牌不写入 Web Storage。
   useEffect(() => {
     const saved = localStorage.getItem(REMEMBER_KEY);
     if (saved) {
@@ -56,10 +57,11 @@ export default function Login() {
     setLoading(true);
     try {
       const res = await authApi.login(values);
-      const data = unwrapResponse<{ accessToken: string; user: any }>(res);
-      setAuth(data.accessToken, data.user);
+      const data = unwrapResponse<{ user: User }>(res);
+      if (!data?.user) throw new Error('账户认证失败');
+      setAuth(data.user);
 
-      // 记住用户名
+      // 仅记住账号；登录状态由服务端 HttpOnly Cookie 会话保持。
       if (remember) {
         localStorage.setItem(REMEMBER_KEY, values.username);
       } else {
@@ -67,8 +69,9 @@ export default function Login() {
       }
 
       navigate('/admin/dashboard');
-    } catch (err: any) {
-      if (err.message?.includes('Network') || err.message?.includes('网络')) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : '';
+      if (errorMessage.includes('Network') || errorMessage.includes('网络')) {
         setError('暂时无法连接服务器，请稍后重试');
       } else {
         setError('账号或密码不正确，请检查后重试');
@@ -130,7 +133,7 @@ export default function Login() {
         ) : null}
 
         {/* ═══ 表单 ═══ */}
-        <Form form={form} onFinish={onFinish} autoComplete="off" layout="vertical" size="large">
+        <Form form={form} onFinish={onFinish} autoComplete="on" layout="vertical" size="large">
 
           {/* 用户名 */}
           <Form.Item
@@ -145,6 +148,7 @@ export default function Login() {
             <Input
               ref={usernameInputRef}
               id="admin-login-username"
+              autoComplete="username"
               prefix={<UserOutlined style={{ color: TOKENS.placeholder }} />}
               placeholder="输入用户名"
               autoFocus
@@ -176,6 +180,7 @@ export default function Login() {
             <Input.Password
               ref={passwordInputRef}
               id="admin-login-password"
+              autoComplete="current-password"
               prefix={<LockOutlined style={{ color: TOKENS.placeholder }} />}
               placeholder="输入密码"
               onChange={(e) => {
@@ -200,14 +205,14 @@ export default function Login() {
             />
           </Form.Item>
 
-          {/* 记住我 */}
+          {/* 只记住账号，不在前端持久化密码或令牌。 */}
           <div className="flex items-center mb-5 -mt-1">
             <Checkbox
               checked={remember}
               onChange={(e) => setRemember(e.target.checked)}
               style={{ color: TOKENS.muted, fontSize: 13 }}
             >
-              <span style={{ color: TOKENS.muted, fontSize: 13 }}>记住我</span>
+              <span style={{ color: TOKENS.muted, fontSize: 13 }}>记住账号</span>
             </Checkbox>
           </div>
 

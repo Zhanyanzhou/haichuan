@@ -119,8 +119,8 @@ export default function DoublePosterSection({ module, editMode }: Props) {
   }, []);
 
   const defaults = { number: "", label: "", title: "", description: "", href: "" };
-  const c = module?.content as (PageModule['content'] & Record<string, any>) | undefined;
-  const s = module?.styleConfig as (PageModule['styleConfig'] & Record<string, any>) | undefined;
+  const c = module?.content;
+  const s = module?.styleConfig;
   // 槽位比例选项(契约派生):主图/细节图各自独立选择,保持"主横副竖"对话结构
   const mainRatio = {
     desktop: resolveContractAspectRatio("doublePoster", "mainImage", c?.mainImageRatio, "desktop"),

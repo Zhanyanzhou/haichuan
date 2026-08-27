@@ -889,10 +889,10 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  border: 1px solid #f0c7c7;
+  border: 1px solid var(--adm-error-border);
   border-radius: 6px;
-  background: #fff7f7;
-  color: #8f2020;
+  background: var(--adm-error-bg);
+  color: var(--adm-error);
 }
 .homepage-editor__revision-error {
   padding: 12px;
@@ -907,7 +907,7 @@
 }
 .homepage-editor__revision-error strong,
 .homepage-editor__draft-action-error strong {
-  color: #681818;
+  color: var(--adm-error);
   font-size: 13px;
 }
 .homepage-editor__revision-error span,

@@ -71,8 +71,17 @@ function toProductRow(product: Product): ProductRow {
   };
 }
 
-function normalizeProductList(data: any): Product[] {
-  return data?.list || data?.items || data || [];
+type ProductListPayload = {
+  list?: Product[];
+  items?: Product[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
+};
+
+function normalizeProductList(data: ProductListPayload | Product[]): Product[] {
+  if (Array.isArray(data)) return data;
+  return data.list ?? data.items ?? [];
 }
 
 /** Puck ExternalField 兼容的 fetchList 函数 */
@@ -111,7 +120,7 @@ export async function fetchProductList({
       ? String(normalizedIds || normalizedCodes).split(",").length
       : (pageSize ?? 20),
   }, signal);
-  const data = unwrapResponse<any>(res);
+  const data = unwrapResponse<ProductListPayload | Product[]>(res);
   const list = normalizeProductList(data).map(toProductRow);
   if (!normalizedIds && !normalizedCodes) return list;
 
@@ -164,12 +173,13 @@ export async function fetchProductPage(input: {
     visibility: input.visibility,
     sortBy: "updated_desc",
   }, input.signal);
-  const data = unwrapResponse<any>(response);
+  const data = unwrapResponse<ProductListPayload | Product[]>(response);
+  const pageData = Array.isArray(data) ? {} : data;
   const value = {
     rows: normalizeProductList(data).map(toProductRow),
-    total: Number(data?.total) || 0,
-    page: Number(data?.page) || input.page,
-    pageSize: Number(data?.pageSize) || input.pageSize,
+    total: Number(pageData.total) || 0,
+    page: Number(pageData.page) || input.page,
+    pageSize: Number(pageData.pageSize) || input.pageSize,
   };
   productPageCache.set(cacheKey, { at: Date.now(), value });
   trimCache(productPageCache, 50);

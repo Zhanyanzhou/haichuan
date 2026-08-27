@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 const publicRoutes = [
   "/",
@@ -112,15 +113,11 @@ test("后台登录页最终计算颜色符合后台标准", async ({ page }) => 
 });
 
 test("后台代表页面在确定性失败态下仍符合颜色标准", async ({ page }) => {
-  await page.addInitScript(() => {
-    const user = { id: 1, username: "ui-color-audit", role: "SUPER_ADMIN" };
-    localStorage.setItem("token", "ui-color-audit-token");
-    localStorage.setItem("jewelry-auth", JSON.stringify({
-      state: { token: "ui-color-audit-token", user, isLoggedIn: true },
-      version: 0,
-    }));
-  });
+  await installAdminSession(page, { username: "ui-color-audit" });
   await page.route("**/api/**", async (route) => {
+    if (new URL(route.request().url()).pathname === "/api/auth/profile") {
+      return route.fallback();
+    }
     await route.fulfill({
       status: 503,
       contentType: "application/json",

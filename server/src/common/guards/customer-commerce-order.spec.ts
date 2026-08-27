@@ -54,7 +54,7 @@ test('Compose 与示例配置默认关闭交易', () => {
 
   assert.match(
     compose,
-    /CUSTOMER_COMMERCE_ENABLED:\s*\$\{CUSTOMER_COMMERCE_ENABLED:-"false"\}/,
+    /CUSTOMER_COMMERCE_ENABLED:\s*"\$\{CUSTOMER_COMMERCE_ENABLED:-false\}"/,
   );
   assert.match(exampleEnv, /^CUSTOMER_COMMERCE_ENABLED=false$/m);
 });

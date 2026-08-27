@@ -91,15 +91,15 @@ function ProductRowPreview(props: ProductRowPuckProps) {
     };
   }, [productCodes, productIds]);
 
-  // P1-32：原 `convertPuckProps(...) as any || toModule(...) as any` 因 `as any` 优先级高于 `||`、
+  // P1-32：原转换表达式中的断言优先级高于 `||`，
   // 且 convertPuckProps 恒返回 truthy 基础结构，导致右侧 toModule（含已拉取的 products）被短路，
   // 编辑预览恒显示空占位。改为显式合并：把预览商品注入 module.content.products。
   const merged = convertPuckProps("产品展示行", { ...props, productIds, productCodes });
   const displayProducts = previewProducts ?? products;
   if (merged && displayProducts.length > 0) {
-    // PageModuleContent 类型未声明 products（产品展示行专用扩展字段），用 as any 赋值
-    merged.content = { ...merged.content, products: toCards(displayProducts) } as any;
+    merged.content = { ...merged.content, products: toCards(displayProducts) };
   }
+  if (!merged) return null;
   return (
     <>
       {loading ? (
@@ -112,7 +112,7 @@ function ProductRowPreview(props: ProductRowPuckProps) {
           商品预览刷新失败，已保留上次成功结果
         </p>
       ) : null}
-      <ProductRowBlock module={merged as any} editMode />
+      <ProductRowBlock module={merged} editMode />
     </>
   );
 }
@@ -134,7 +134,7 @@ export const productRowPuckConfig = {
     buttonText: "查看详情",
     locked: false,
   } satisfies ProductRowPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: ProductRowPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

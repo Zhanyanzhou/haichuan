@@ -36,7 +36,7 @@ export interface DoublePosterPuckProps {
 
 export const doublePosterPuckConfig = {
   render: (props: DoublePosterPuckProps) => (
-    <DoublePosterSection module={convertPuckProps("双图海报", props as any)!} editMode />
+    <DoublePosterSection module={convertPuckProps("双图海报", props)!} editMode />
   ),
   defaultProps: {
     number: "",
@@ -59,7 +59,7 @@ export const doublePosterPuckConfig = {
     __contentTemplate: createContentTemplateMarker("双图海报"),
     locked: false,
   } satisfies DoublePosterPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: DoublePosterPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

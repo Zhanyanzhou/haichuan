@@ -13,6 +13,12 @@ const ACTIVE_AFTER_SALES_STATUSES: AfterSalesStatus[] = [
   'QC_PASSED',
   'QC_FAILED',
 ];
+const NON_TERMINAL_OR_COMPLETED_REFUND_STATUSES = [
+  'PENDING',
+  'APPROVED',
+  'PROCESSING',
+  'COMPLETED',
+] as const;
 
 const CUSTOMER_AFTER_SALES_SELECT = {
   id: true,
@@ -160,6 +166,12 @@ export class AfterSalesService {
           customerId: true,
           orderType: true,
           status: true,
+          paidAmount: true,
+          refundedAmount: true,
+          items: {
+            where: { id: data.orderItemId },
+            select: { subtotal: true },
+          },
         },
       });
       if (!order) {
@@ -169,6 +181,33 @@ export class AfterSalesService {
         throw new BadRequestException('该订单不支持标准零售售后');
       }
       this.validateCustomerCaseType(order.status, data.type);
+      if (data.type === 'REFUND' && data.requestedRefundAmount !== undefined) {
+        const requestedCents = this.moneyToCents(
+          data.requestedRefundAmount,
+          '申请退款金额',
+        );
+        const paidCents = this.moneyToCents(order.paidAmount, '订单已收金额');
+        const refundedCents = this.moneyToCents(
+          order.refundedAmount,
+          '订单已退金额',
+        );
+        const itemCents = this.moneyToCents(
+          order.items[0]?.subtotal ?? 0,
+          '订单商品金额',
+        );
+        const maxCents = Math.min(itemCents, paidCents - refundedCents);
+        if (requestedCents <= 0 || requestedCents > maxCents) {
+          throw new BadRequestException(
+            `申请退款金额超过当前商品可退额度，最多可申请 ¥${(Math.max(maxCents, 0) / 100).toFixed(2)}`,
+          );
+        }
+      } else if (
+        data.type !== 'REFUND' &&
+        data.requestedRefundAmount !== undefined &&
+        this.moneyToCents(data.requestedRefundAmount, '申请退款金额') > 0
+      ) {
+        throw new BadRequestException('换货或维修工单不能填写退款金额');
+      }
 
       const activeCase = await tx.afterSalesCase.findFirst({
         where: {
@@ -337,9 +376,31 @@ export class AfterSalesService {
     approvedRefundAmount: number | undefined,
     operator: OperatorContext,
   ) {
+    const caseRef = await this.prisma.afterSalesCase.findUnique({
+      where: { id: caseId },
+      select: { orderId: true },
+    });
+    if (!caseRef) throw new NotFoundException('售后工单不存在');
+
     return this.prisma.$transaction(async (tx) => {
-      const caseRecord = await tx.afterSalesCase.findUnique({ where: { id: caseId } });
-      if (!caseRecord) throw new NotFoundException('售后工单不存在');
+      await this.lockOrder(tx, caseRef.orderId);
+      const caseRecord = await tx.afterSalesCase.findUnique({
+        where: { id: caseId },
+        include: {
+          order: {
+            select: {
+              paidAmount: true,
+              refundedAmount: true,
+              items: {
+                select: { id: true, subtotal: true },
+              },
+            },
+          },
+        },
+      });
+      if (!caseRecord || caseRecord.orderId !== caseRef.orderId) {
+        throw new NotFoundException('售后工单不存在');
+      }
       if (caseRecord.status !== 'REQUESTED') {
         throw new BadRequestException('只有已申请的售后工单可以审核');
       }
@@ -357,6 +418,21 @@ export class AfterSalesService {
             this.moneyToCents(caseRecord.requestedRefundAmount, '申请退款金额')
         ) {
           throw new BadRequestException('审核退款金额不能超过客户申请金额');
+        }
+        const refundableOrderCents =
+          this.moneyToCents(caseRecord.order.paidAmount, '订单已收金额') -
+          this.moneyToCents(caseRecord.order.refundedAmount, '订单已退金额');
+        const itemCents = this.moneyToCents(
+          caseRecord.order.items.find((item) => item.id === caseRecord.orderItemId)
+            ?.subtotal ?? 0,
+          '订单商品金额',
+        );
+        const approvedCents = this.moneyToCents(candidate, '审核退款金额');
+        const maxCents = Math.min(refundableOrderCents, itemCents);
+        if (approvedCents > maxCents) {
+          throw new BadRequestException(
+            `审核退款金额超过当前商品可退额度，最多可退 ¥${(Math.max(maxCents, 0) / 100).toFixed(2)}`,
+          );
         }
         effectiveApprovedRefundAmount = new Prisma.Decimal(candidate);
       } else if (
@@ -395,9 +471,18 @@ export class AfterSalesService {
 
   /** 推进售后状态（逆向物流/质检/完成/取消） */
   async updateStatus(caseId: number, status: string, adminNote: string | undefined, operator: OperatorContext) {
+    const caseRef = await this.prisma.afterSalesCase.findUnique({
+      where: { id: caseId },
+      select: { orderId: true },
+    });
+    if (!caseRef) throw new NotFoundException('售后工单不存在');
+
     return this.prisma.$transaction(async (tx) => {
+      await this.lockOrder(tx, caseRef.orderId);
       const caseRecord = await tx.afterSalesCase.findUnique({ where: { id: caseId } });
-      if (!caseRecord) throw new NotFoundException('售后工单不存在');
+      if (!caseRecord || caseRecord.orderId !== caseRef.orderId) {
+        throw new NotFoundException('售后工单不存在');
+      }
 
       const newStatus = status as AfterSalesStatus;
       const allowed: Record<string, AfterSalesStatus[]> = {
@@ -412,6 +497,23 @@ export class AfterSalesService {
       };
       if (!allowed[caseRecord.status]?.includes(newStatus)) {
         throw new BadRequestException(`售后状态不能从 ${caseRecord.status} 变更为 ${newStatus}`);
+      }
+      if (caseRecord.type === 'REFUND' && newStatus === 'COMPLETED') {
+        throw new BadRequestException('退款类售后只能在关联退款按审核额度完成后自动结案');
+      }
+      if (caseRecord.type === 'REFUND' && newStatus === 'CANCELLED') {
+        const linkedRefund = await tx.refund.findFirst({
+          where: {
+            afterSalesCaseId: caseId,
+            status: { in: [...NON_TERMINAL_OR_COMPLETED_REFUND_STATUSES] },
+          },
+          select: { refundNo: true },
+        });
+        if (linkedRefund) {
+          throw new ConflictException(
+            `售后已关联退款 ${linkedRefund.refundNo}，请先完成退款对账，不能直接取消`,
+          );
+        }
       }
 
       const updated = await tx.afterSalesCase.updateMany({

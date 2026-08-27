@@ -3,13 +3,10 @@ import type { CSSProperties } from "react";
 import { SecureImage } from "@/components/common/SecureImage";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { PRODUCT_ROW_CONTRACT } from "@/page-builder/config/blockContracts";
+import type { PageModuleProductItem, RenderablePageModule } from "@/types/pageModule";
 
 interface ProductRowBlockProps {
-  module: {
-    content: Record<string, any>;
-    layoutConfig?: Record<string, any>;
-    styleConfig?: Record<string, any>;
-  };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 
@@ -83,7 +80,7 @@ export default function ProductRowBlock({
         : "clamp(24px, 2.8vw, 38px)";
 
   if (!products.length && !editMode) return null;
-  const displayProducts = products.length > 0
+  const displayProducts: PageModuleProductItem[] = products.length > 0
     ? products
     : Array.from({ length: cols }, (_, index) => ({ __empty: true, id: `empty-${index}` }));
 
@@ -150,7 +147,7 @@ export default function ProductRowBlock({
           gap: gap != null ? `${gap}px` : displayMode === "album" ? (cols === 2 ? 40 : 28) : (cols === 2 ? 32 : 20),
         } as CSSProperties}
       >
-        {displayProducts.map((p: any, i: number) => p.__empty ? (
+        {displayProducts.map((p, i) => p.__empty ? (
           <div key={p.id} className="homepage-product-row__empty-card" aria-label={`待选择商品 ${i + 1}`}>
             <div style={{ aspectRatio: ratio, display: "grid", placeItems: "center", marginBottom: 16, border: "1px solid #DDE1E2", background: "#F7F8F8" }}>
               <div style={{ textAlign: "center", color: "#6E7477" }}>

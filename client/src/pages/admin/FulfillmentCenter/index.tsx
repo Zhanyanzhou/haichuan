@@ -97,8 +97,8 @@ export default function FulfillmentCenter() {
       setDispatchTarget(null);
       dispatchForm.resetFields();
       void load();
-    } catch (e: any) {
-      message.error(getSafeAdminErrorMessage(e, '发货登记失败，请核对物流信息后重试。'));
+    } catch (error: unknown) {
+      message.error(getSafeAdminErrorMessage(error, '发货登记失败，请核对物流信息后重试。'));
     } finally {
       setDispatching(false);
     }
@@ -114,8 +114,8 @@ export default function FulfillmentCenter() {
           await fulfillmentApi.updateStatus(id, { status: 'DELIVERED' });
           message.success('已标记送达');
           void load();
-        } catch (e: any) {
-          message.error(getSafeAdminErrorMessage(e, '送达状态更新失败，请重新加载后重试。'));
+        } catch (error: unknown) {
+          message.error(getSafeAdminErrorMessage(error, '送达状态更新失败，请重新加载后重试。'));
         }
       },
     });
@@ -134,8 +134,8 @@ export default function FulfillmentCenter() {
       setAbnormalTarget(null);
       setAbnormalReason('');
       void load();
-    } catch (e: any) {
-      message.error(getSafeAdminErrorMessage(e, '物流异常登记失败，请检查原因后重试。'));
+    } catch (error: unknown) {
+      message.error(getSafeAdminErrorMessage(error, '物流异常登记失败，请检查原因后重试。'));
     } finally {
       setSubmitting(false);
     }
@@ -273,7 +273,7 @@ export default function FulfillmentCenter() {
         open={!!dispatchTarget}
         onCancel={() => { setDispatchTarget(null); dispatchForm.resetFields(); }}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={dispatchForm} layout="vertical" onFinish={handleDispatch}>
           <Form.Item name="carrier" label="承运商" rules={[{ required: true, message: '请填写承运商' }]}>

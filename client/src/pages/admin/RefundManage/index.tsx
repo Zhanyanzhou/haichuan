@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Space, Table, Tag } from 'antd';
+import { App as AntdApp, Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Space, Table, Tag } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import { refundApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
@@ -32,6 +32,7 @@ type RefundListItem = Refund & {
 };
 
 export default function RefundManage() {
+  const { message, modal } = AntdApp.useApp();
   // 仅 ADMIN 可执行写操作；前端按角色隐藏按钮（后端 @Roles 是最终边界）
   const role = useAuthStore((state) => state.user?.role);
   const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
@@ -98,9 +99,8 @@ export default function RefundManage() {
       message.success('退款申请已创建');
       refundAttemptKey.current = null;
       setCreateOpen(false);
-      createForm.resetFields();
       void load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, '退款申请创建失败，请检查订单和退款信息后重试。'));
     } finally {
       setCreating(false);
@@ -109,7 +109,7 @@ export default function RefundManage() {
 
   const handleReview = (record: RefundListItem, action: 'APPROVED' | 'REJECTED') => {
     let reviewNote = '';
-    Modal.confirm({
+    modal.confirm({
       title: action === 'APPROVED' ? '审核通过该退款？' : '拒绝该退款？',
       content: <Input.TextArea placeholder="审核备注（可选）" onChange={(e) => { reviewNote = e.target.value; }} rows={3} />,
       okText: action === 'APPROVED' ? '确认通过' : '确认拒绝',
@@ -128,7 +128,7 @@ export default function RefundManage() {
             message.success(action === 'APPROVED' ? '已审核通过' : '已拒绝');
           }
           void load();
-        } catch (e: any) {
+        } catch (e: unknown) {
           message.error(getSafeAdminErrorMessage(e, '退款审核未完成，请重新加载后确认当前状态。'));
         }
       },
@@ -153,7 +153,7 @@ export default function RefundManage() {
       }
       await load();
       if (detail?.id === record.id) await openDetail(record);
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, '原路退款操作未完成，请保留当前退款单并稍后查询。'));
     } finally {
       setChannelLoadingId(null);
@@ -161,23 +161,31 @@ export default function RefundManage() {
   };
 
   const handleExecute = (record: RefundListItem, action: 'COMPLETED' | 'FAILED') => {
-    let gatewayRefundNo = '';
-    Modal.confirm({
+    let executionInput = '';
+    modal.confirm({
       title: action === 'COMPLETED' ? '确认退款已完成？' : '标记退款执行失败？',
       content: (
         <div>
           <p className="text-sm text-brand-muted mb-2">{action === 'COMPLETED' ? '仅用于线下付款退款，请填写银行或门店退款流水号。' : '线下退款执行失败后可重新登记。'}</p>
-          <Input placeholder="退款流水号（完成时必填）" onChange={(e) => { gatewayRefundNo = e.target.value; }} />
+          <Input
+            placeholder={action === 'COMPLETED' ? '退款流水号（必填）' : '失败原因（必填）'}
+            onChange={(e) => { executionInput = e.target.value; }}
+          />
         </div>
       ),
       okText: action === 'COMPLETED' ? '确认完成' : '标记失败',
       okButtonProps: { danger: action === 'FAILED' },
       onOk: async () => {
         try {
-          await refundApi.execute(record.id, { action, gatewayRefundNo: gatewayRefundNo || undefined });
+          await refundApi.execute(record.id, {
+            action,
+            ...(action === 'COMPLETED'
+              ? { gatewayRefundNo: executionInput || undefined }
+              : { reviewNote: executionInput || undefined }),
+          });
           message.success(action === 'COMPLETED' ? '退款已完成' : '已标记失败');
           void load();
-        } catch (e: any) {
+        } catch (e: unknown) {
           message.error(getSafeAdminErrorMessage(e, '退款执行状态更新失败，请重新加载后重试。'));
         }
       },
@@ -322,11 +330,11 @@ export default function RefundManage() {
       <Modal
         title="发起退款"
         open={createOpen}
-        onCancel={() => { setCreateOpen(false); refundAttemptKey.current = null; createForm.resetFields(); }}
+        onCancel={() => { setCreateOpen(false); refundAttemptKey.current = null; }}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
-        <Form form={createForm} layout="vertical" onFinish={handleCreate}>
+        <Form form={createForm} layout="vertical" onFinish={handleCreate} preserve={false}>
           <Form.Item name="orderId" label="订单 ID" rules={[{ required: true, message: '请输入订单 ID' }]}>
             <InputNumber className="w-full" placeholder="请输入订单 ID（数字）" min={1} />
           </Form.Item>
@@ -341,7 +349,7 @@ export default function RefundManage() {
           </Form.Item>
           <div className="text-xs text-brand-muted mb-3">系统将校验：累计退款不超过该订单已确认收款金额。重复提交同一笔将自动去重。</div>
           <div className="flex justify-end gap-2">
-            <Button onClick={() => { setCreateOpen(false); createForm.resetFields(); }}>取消</Button>
+            <Button onClick={() => setCreateOpen(false)}>取消</Button>
             <Button type="primary" htmlType="submit" loading={creating}>提交申请</Button>
           </div>
         </Form>

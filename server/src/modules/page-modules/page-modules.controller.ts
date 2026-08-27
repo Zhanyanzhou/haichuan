@@ -30,6 +30,7 @@ import {
   ValidatePageDocumentDto,
 } from "./dto";
 import { requirePublishedPublicContentLocale } from "../../common/content-locale";
+import type { StaffRequest } from "../../common/security/authenticated-principal";
 
 @ApiTags("页面模块")
 @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
@@ -43,8 +44,8 @@ export class PageModulesController {
   @ApiBearerAuth()
   @Get("personal-content-templates")
   @ApiOperation({ summary: "获取当前账号的布局模板" })
-  getPersonalContentTemplates(@Req() req: any) {
-    return this.service.getPersonalContentTemplates(req.user?.id);
+  getPersonalContentTemplates(@Req() req: StaffRequest) {
+    return this.service.getPersonalContentTemplates(req.user.id);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -53,9 +54,9 @@ export class PageModulesController {
   @ApiOperation({ summary: "保存当前账号的布局模板" })
   createPersonalContentTemplate(
     @Body() body: CreatePersonalContentTemplateDto,
-    @Req() req: any,
+    @Req() req: StaffRequest,
   ) {
-    return this.service.createPersonalContentTemplate(req.user?.id, body);
+    return this.service.createPersonalContentTemplate(req.user.id, body);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -65,17 +66,17 @@ export class PageModulesController {
   updatePersonalContentTemplate(
     @Param("id") id: string,
     @Body() body: UpdatePersonalContentTemplateDto,
-    @Req() req: any,
+    @Req() req: StaffRequest,
   ) {
-    return this.service.updatePersonalContentTemplate(req.user?.id, +id, body);
+    return this.service.updatePersonalContentTemplate(req.user.id, +id, body);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Delete("personal-content-templates/:id")
   @ApiOperation({ summary: "删除当前账号的布局模板" })
-  deletePersonalContentTemplate(@Param("id") id: string, @Req() req: any) {
-    return this.service.deletePersonalContentTemplate(req.user?.id, +id);
+  deletePersonalContentTemplate(@Param("id") id: string, @Req() req: StaffRequest) {
+    return this.service.deletePersonalContentTemplate(req.user.id, +id);
   }
 
   // ========== Puck 页面文档（PageDocument）API ==========
@@ -144,11 +145,11 @@ export class PageModulesController {
   @ApiOperation({ summary: "发布页面文档" })
   publishDocument(
     @Body() body: PublishPageDocumentDto,
-    @Req() req: any,
+    @Req() req: StaffRequest,
   ) {
     return this.service.publishPageDocument(
       body?.pageKey || "home",
-      req.user?.id,
+      req.user.id,
       body?.expectedUpdatedAt,
     );
   }

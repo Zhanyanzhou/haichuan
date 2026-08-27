@@ -35,8 +35,11 @@ export const selectionInquiryApi = {
   getDetail: (id: number) => api.get(`/selection-inquiries/${id}`),
   update: (id: number, data: SelectionInquiryUpdateInput) =>
     api.put(`/selection-inquiries/${id}`, data),
-  submit: (data: SelectionInquirySubmitInput) =>
+  submit: (data: SelectionInquirySubmitInput, idempotencyKey?: string) =>
     api.post("/selection-inquiries", data, {
-      headers: customerAuthHeaders(),
+      headers: {
+        ...customerAuthHeaders(),
+        ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+      },
     }),
 };

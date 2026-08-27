@@ -6,6 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CreateLeadFollowUpDto, UpdateLeadDto } from './dto/lead.dto';
+import type { LeadListQuery } from './leads.service';
 
 @ApiTags('统一线索管理')
 @Controller('leads')
@@ -17,7 +18,7 @@ export class LeadsController {
 
   @Get()
   @ApiOperation({ summary: '获取统一线索列表' })
-  findAll(@Query() q: any) {
+  findAll(@Query() q: LeadListQuery) {
     return this.service.findAll(q);
   }
 
@@ -33,8 +34,9 @@ export class LeadsController {
     @Param('type') type: string,
     @Param('id', ParseIntPipe) id: number,
     @Body() body: UpdateLeadDto,
+    @CurrentUser() user: { id?: number },
   ) {
-    return this.service.updateLead(type, id, body);
+    return this.service.updateLead(type, id, body, user?.id);
   }
 
   @Post(':type/:id/follow-up')

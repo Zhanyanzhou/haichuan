@@ -46,6 +46,7 @@ import {
   getModuleDisplayName,
   type ViewportPreset,
 } from "../editor-utils";
+import type { PuckProps } from "@/page-builder/types";
 
 export const VIEWPORT_PRESETS: ViewportPreset[] = [
   // 平板档已移除（2026-08-16 用户决策）：平板继承桌面布局无独立编辑价值，
@@ -194,7 +195,7 @@ export default function EditorToolbar({
   const currentViewport = viewports.current;
   const content = appData.content as Array<{
     type: string;
-    props: Record<string, any>;
+    props: PuckProps;
   }>;
   const selectedIndex = content.findIndex(
     (item) => item.props?.id === selectedItem?.props?.id,

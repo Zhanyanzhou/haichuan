@@ -63,7 +63,7 @@ export default function ProductManageTable({
         key: "product",
         width: 330,
         render: (_: unknown, product: ProductListItem) => {
-          const image = getThumbnailImage(product as any);
+          const image = getThumbnailImage(product);
           return (
             <div className="product-manage__product-cell">
               <SecureImage

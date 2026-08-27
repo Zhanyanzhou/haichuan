@@ -2,14 +2,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  App as AntdApp,
   Modal,
   Upload,
-  message,
   Form,
   Input,
   Button,
 } from "antd";
 import { customerApi } from "@/services/api";
+import { getRequestErrorMessage } from "@/services/httpClient";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useCommerceEnabled } from "@/store/featureFlags";
 import { SecureImage } from "@/components/common/SecureImage";
@@ -29,42 +30,21 @@ import type {
   CustomerNotificationPage,
   CustomerOrder,
   CustomerReviewOrder,
+  CustomerAddress,
+  CustomerInquiry,
+  CustomerPartnerState,
+  CustomerProfile,
+  CustomerSelectionInquiry,
 } from "./types";
 import "./MyAccountDashboard.css";
 
 type AccountDashboardProps = {
-  profile: { name?: string; phone?: string; email?: string } | null;
+  profile: CustomerProfile | null;
   orders: CustomerOrder[];
-  addresses: Array<{
-    id: number;
-    recipientName: string;
-    recipientPhone: string;
-    province?: string;
-    city?: string;
-    district?: string;
-    detail: string;
-  }>;
-  selectionInquiries: Array<{
-    id: number;
-    status: string;
-    createdAt: string;
-    items?: Array<{ productNameSnapshot: string }>;
-  }>;
-  inquiries: Array<{
-    id: number;
-    status: string;
-    createdAt: string;
-    consultationType?: string;
-    product?: { name?: string };
-  }>;
-  partner: {
-    customer?: {
-      accountType?: string;
-      partnerStatus?: string;
-      partnerApprovedAt?: string | null;
-    } | null;
-    latest?: { reviewNote?: string | null } | null;
-  } | null;
+  addresses: CustomerAddress[];
+  selectionInquiries: CustomerSelectionInquiry[];
+  inquiries: CustomerInquiry[];
+  partner: CustomerPartnerState;
   notifications: CustomerNotificationPage;
   notificationError: string | null;
   onReadNotification: (id: number) => Promise<void>;
@@ -72,6 +52,8 @@ type AccountDashboardProps = {
   onSignOut: () => void;
   onRefresh?: () => void;
 };
+
+type AccountAddress = AccountDashboardProps["addresses"][number];
 
 const inquiryStatus: Record<string, string> = {
   PENDING: "待顾问联系",
@@ -117,6 +99,7 @@ export default function MyAccountDashboard({
   onSignOut,
   onRefresh,
 }: AccountDashboardProps) {
+  const { message, modal } = AntdApp.useApp();
   const name = profile?.name || "海川贵宾";
   const commerceEnabled = useCommerceEnabled();
   const partnerStatus = partner?.customer?.partnerStatus || "NONE";
@@ -148,7 +131,11 @@ export default function MyAccountDashboard({
   useEffect(() => {
     customerApi
       .getFavorites()
-      .then((res) => setFavorites(unwrapResponse<any>(res) || []))
+      .then((res) =>
+        setFavorites(
+          unwrapResponse<typeof favorites>(res) || [],
+        ),
+      )
       .catch(() => setFavorites([]));
   }, []);
 
@@ -200,8 +187,8 @@ export default function MyAccountDashboard({
       link.download = `haichuan-my-data-${new Date().toISOString().slice(0, 10)}.json`;
       link.click();
       URL.revokeObjectURL(url);
-    } catch (e: any) {
-      message.error(e?.message || "导出失败，请稍后重试");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "导出失败，请稍后重试"));
     } finally {
       setExportingData(false);
     }
@@ -217,8 +204,8 @@ export default function MyAccountDashboard({
       await customerApi.closeAccount({ password: closePassword });
       message.success("账户已注销");
       onSignOut();
-    } catch (e: any) {
-      message.error(e?.response?.data?.message || e?.message || "注销失败");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "注销失败"));
     } finally {
       setClosing(false);
     }
@@ -238,7 +225,7 @@ export default function MyAccountDashboard({
   };
 
   const cancelAfterSales = (caseRecord: CustomerAfterSalesCase) => {
-    Modal.confirm({
+    modal.confirm({
       title: "撤销售后申请？",
       content: "撤销后本次申请将结束；如仍需服务，可以重新提交。",
       okText: "确认撤销",
@@ -277,15 +264,14 @@ export default function MyAccountDashboard({
       message.success("付款凭证已提交，等待审核");
       setProofOrderId(null);
       onRefresh?.();
-    } catch (e: any) {
-      message.error(e?.message || "凭证上传失败");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "凭证上传失败"));
     } finally {
       setUploading(false);
     }
   };
 
   const openProfileEdit = () => {
-    profileForm.setFieldsValue({ name: profile?.name, email: profile?.email });
     setProfileEditOpen(true);
   };
 
@@ -300,8 +286,8 @@ export default function MyAccountDashboard({
       message.success("资料已更新");
       setProfileEditOpen(false);
       onRefresh?.();
-    } catch (e: any) {
-      message.error(e?.message || "保存失败");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "保存失败"));
     } finally {
       setSavingProfile(false);
     }
@@ -309,13 +295,11 @@ export default function MyAccountDashboard({
 
   const openAddressCreate = () => {
     setEditingAddressId(null);
-    addressForm.resetFields();
     setAddressOpen(true);
   };
 
-  const openAddressEdit = (addr: any) => {
+  const openAddressEdit = (addr: AccountAddress) => {
     setEditingAddressId(addr.id);
-    addressForm.setFieldsValue(addr);
     setAddressOpen(true);
   };
 
@@ -331,8 +315,8 @@ export default function MyAccountDashboard({
       message.success(editingAddressId ? "地址已更新" : "地址已添加");
       setAddressOpen(false);
       onRefresh?.();
-    } catch (e: any) {
-      message.error(e?.message || "保存失败");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "保存失败"));
     } finally {
       setSavingAddress(false);
     }
@@ -343,14 +327,14 @@ export default function MyAccountDashboard({
       await customerApi.deleteAddress(id);
       message.success("地址已删除");
       onRefresh?.();
-    } catch (e: any) {
-      message.error(e?.message || "删除失败");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "删除失败"));
     }
   };
 
   return (
     <>
-      <main className="my-account">
+      <div className="my-account">
         <section className="my-account__intro">
           <div>
             <p className="my-account__eyebrow">HAICHUAN PRIVATE CLIENT</p>
@@ -751,7 +735,7 @@ export default function MyAccountDashboard({
           </section>
         </div>
         <ForYouRecommendations />
-      </main>
+      </div>
       <CustomerPaymentDialog
         open={paymentOrder !== null}
         order={paymentOrder}
@@ -775,7 +759,7 @@ export default function MyAccountDashboard({
           title="上传付款凭证"
           onCancel={() => setProofOrderId(null)}
           footer={null}
-          destroyOnClose
+          destroyOnHidden
         >
           <p style={{ color: "#5f6568", fontSize: 13, marginBottom: 16 }}>
             此入口只用于已约定的特殊线下转账订单。请上传转账截图或凭证图片（JPG/PNG/WebP，≤10MB）；微信支付无需上传凭证。
@@ -826,7 +810,7 @@ export default function MyAccountDashboard({
         okText="确认注销"
         okButtonProps={{ danger: true }}
         cancelText="再想想"
-        destroyOnClose
+        destroyOnHidden
       >
         <div className="space-y-3">
           <p style={{ color: "#8C3F3B", fontSize: 13 }}>
@@ -851,6 +835,14 @@ export default function MyAccountDashboard({
         confirmLoading={savingProfile}
         okText="保存"
         cancelText="取消"
+        afterOpenChange={(open) => {
+          if (open) {
+            profileForm.setFieldsValue({
+              name: profile?.name,
+              email: profile?.email,
+            });
+          }
+        }}
       >
         <Form form={profileForm} layout="vertical">
           <Form.Item
@@ -875,6 +867,14 @@ export default function MyAccountDashboard({
         confirmLoading={savingAddress}
         okText="保存"
         cancelText="取消"
+        afterOpenChange={(open) => {
+          if (!open) return;
+          const address = editingAddressId
+            ? addresses.find((item) => item.id === editingAddressId)
+            : undefined;
+          if (address) addressForm.setFieldsValue(address);
+          else addressForm.resetFields();
+        }}
       >
         <Form form={addressForm} layout="vertical">
           <div

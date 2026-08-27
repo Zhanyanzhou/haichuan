@@ -6,9 +6,10 @@ import { SecureImage } from "@/components/common/SecureImage";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { getContractRoleRatio } from "@/page-builder/config/blockContracts";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
+import type { RenderablePageModule } from "@/types/pageModule";
 
 interface LimitedOfferBlockProps {
-  module: { content: Record<string, any>; styleConfig?: Record<string, any> };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 
@@ -19,13 +20,14 @@ type RemainingTime = {
   seconds: string;
 };
 
-function getTargetTimestamp(targetDate: string): number {
+function getTargetTimestamp(targetDate?: string): number {
+  if (!targetDate) return Number.NaN;
   return new Date(
     targetDate?.includes("T") ? targetDate : targetDate?.replace(" ", "T"),
   ).getTime();
 }
 
-function getRemainingTime(targetDate: string): RemainingTime | null {
+function getRemainingTime(targetDate?: string): RemainingTime | null {
   const target = getTargetTimestamp(targetDate);
   if (!Number.isFinite(target)) return null;
   const remaining = Math.max(0, target - Date.now());

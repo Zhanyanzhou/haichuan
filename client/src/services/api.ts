@@ -10,6 +10,7 @@ import {
   mockGoldPriceHistory,
   filterProducts,
   paginate,
+  type MockProductFilterParams,
 } from "./mockData";
 import api, {
   clearCustomerSession,
@@ -22,6 +23,17 @@ import {
   getBrowserPublicContentLocale,
   type PublicContentLocale,
 } from "@/i18n/publicLocale";
+import { useCustomerAuthStore } from "@/store/customerAuthStore";
+import type {
+  DeliveryStatus,
+  CustomStage,
+  OrderStatus,
+  OrderType,
+  PaymentStatus,
+  ProductStatus,
+  QuotationStatus,
+  User,
+} from "@/types";
 
 export {
   publicPageDocumentStreamUrl,
@@ -85,12 +97,211 @@ export {
   type ReviewModerationInput,
 } from "./clients/reviewClient";
 
-type LifecycleMockProduct = {
+type MutableMockProductImage = {
   id: number;
-  status: string;
-  deletedAt?: string | null;
+  productId: number;
+  url?: string;
+  mediaUrl?: string;
+  type: string;
+  sortOrder: number;
+  isVideo: boolean;
   [key: string]: unknown;
 };
+
+type MutableMockProductSku = {
+  id: number;
+  productId: number;
+  isActive: boolean;
+  [key: string]: unknown;
+};
+
+type MutableMockProductCertificate = {
+  id: number;
+  productId: number;
+  [key: string]: unknown;
+};
+
+type MutableMockProductTag = {
+  id: number;
+  productId: number;
+  tagName: string;
+  [key: string]: unknown;
+};
+
+type MutableMockProduct = {
+  id: number;
+  code: string;
+  name: string;
+  categoryId: number;
+  category?: { id: number; name: string } | null;
+  materialType: string;
+  price?: number | null;
+  size?: string | null;
+  status: string;
+  visibility?: string;
+  deletedAt?: string | null;
+  images: MutableMockProductImage[];
+  primaryImage?: MutableMockProductImage | string | null;
+  listingImage?: MutableMockProductImage | string | null;
+  skus: MutableMockProductSku[];
+  certificates: MutableMockProductCertificate[] | null;
+  tags: MutableMockProductTag[];
+  [key: string]: unknown;
+};
+
+const mutableMockProducts = mockProducts as unknown as MutableMockProduct[];
+
+export type ProductPublicQuery = MockProductFilterParams & {
+  page?: number;
+  pageSize?: number;
+  ids?: string;
+  codes?: string;
+  locale?: PublicContentLocale;
+};
+
+export type ProductWriteInput = Record<string, unknown> & {
+  code?: string;
+  name?: string;
+  categoryId?: number;
+  materialType?: string;
+  price?: number | null;
+  status?: ProductStatus;
+  isHot?: boolean;
+  isNew?: boolean;
+  isRecommended?: boolean;
+  isLimited?: boolean;
+  isCustom?: boolean;
+};
+
+export type ProductSkuWriteInput = Record<string, unknown> & {
+  skuCode?: string;
+  material?: string;
+  size?: string;
+  goldWeight?: number;
+  price?: number;
+  isActive?: boolean;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function identifiedRecords(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is Record<string, unknown> & { id: number } =>
+      isRecord(item) && typeof item.id === "number",
+  );
+}
+
+function normalizeMockProduct(value: unknown): MutableMockProduct | null {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "number" ||
+    typeof value.code !== "string" ||
+    typeof value.name !== "string" ||
+    typeof value.categoryId !== "number" ||
+    typeof value.materialType !== "string" ||
+    typeof value.status !== "string"
+  ) {
+    return null;
+  }
+
+  const productId = value.id;
+  const images: MutableMockProductImage[] = identifiedRecords(value.images).map(
+    (image) => ({
+      ...image,
+      id: image.id,
+      productId:
+        typeof image.productId === "number" ? image.productId : productId,
+      url: typeof image.url === "string" ? image.url : undefined,
+      mediaUrl:
+        typeof image.mediaUrl === "string" ? image.mediaUrl : undefined,
+      type: typeof image.type === "string" ? image.type : "FRONT",
+      sortOrder:
+        typeof image.sortOrder === "number" ? image.sortOrder : image.id,
+      isVideo: image.isVideo === true,
+    }),
+  );
+  const skus: MutableMockProductSku[] = identifiedRecords(value.skus).map(
+    (sku) => ({
+      ...sku,
+      id: sku.id,
+      productId: typeof sku.productId === "number" ? sku.productId : productId,
+      isActive: sku.isActive !== false,
+    }),
+  );
+  const certificates: MutableMockProductCertificate[] | null =
+    value.certificates === null
+      ? null
+      : identifiedRecords(value.certificates).map((certificate) => ({
+          ...certificate,
+          id: certificate.id,
+          productId:
+            typeof certificate.productId === "number"
+              ? certificate.productId
+              : productId,
+        }));
+  const tags: MutableMockProductTag[] = identifiedRecords(value.tags)
+    .filter(
+      (tag): tag is Record<string, unknown> & { id: number; tagName: string } =>
+        typeof tag.tagName === "string",
+    )
+    .map((tag) => ({
+      ...tag,
+      id: tag.id,
+      productId: typeof tag.productId === "number" ? tag.productId : productId,
+      tagName: tag.tagName,
+    }));
+  const category = isRecord(value.category)
+    && typeof value.category.id === "number"
+    && typeof value.category.name === "string"
+    ? { id: value.category.id, name: value.category.name }
+    : null;
+
+  return {
+    ...value,
+    id: productId,
+    code: value.code,
+    name: value.name,
+    categoryId: value.categoryId,
+    category,
+    materialType: value.materialType,
+    price: typeof value.price === "number" ? value.price : null,
+    size: typeof value.size === "string" ? value.size : null,
+    status: value.status,
+    visibility:
+      typeof value.visibility === "string" ? value.visibility : undefined,
+    deletedAt:
+      typeof value.deletedAt === "string" || value.deletedAt === null
+        ? value.deletedAt
+        : undefined,
+    images,
+    primaryImage: normalizeMockMediaPointer(value.primaryImage),
+    listingImage: normalizeMockMediaPointer(value.listingImage),
+    skus,
+    certificates,
+    tags,
+  };
+}
+
+function normalizeMockMediaPointer(
+  value: unknown,
+): MutableMockProductImage | string | null | undefined {
+  if (typeof value === "string" || value === null) return value;
+  const [image] = identifiedRecords([value]);
+  if (!image) return undefined;
+  return {
+    ...image,
+    id: image.id,
+    productId: typeof image.productId === "number" ? image.productId : 0,
+    url: typeof image.url === "string" ? image.url : undefined,
+    mediaUrl: typeof image.mediaUrl === "string" ? image.mediaUrl : undefined,
+    type: typeof image.type === "string" ? image.type : "FRONT",
+    sortOrder: typeof image.sortOrder === "number" ? image.sortOrder : image.id,
+    isVideo: image.isVideo === true,
+  };
+}
 
 function mockRequestError(
   message: string,
@@ -99,6 +310,13 @@ function mockRequestError(
   const error = new Error(message) as NormalizedRequestError;
   error.status = status;
   return error;
+}
+
+export interface StaffRegisterInput {
+  username: string;
+  password: string;
+  realName?: string;
+  phone?: string;
 }
 
 // ===== Auth API =====
@@ -112,40 +330,49 @@ export const authApi = {
       }
       throw new Error("用户名或密码错误");
     }
-    return api.post("/auth/login", data);
+    return api.post("/auth/login", data, {
+      headers: { "X-Session-Mode": "cookie" },
+    });
   },
-  register: (data: any) => api.post("/auth/register", data),
+  register: (data: StaffRegisterInput) => api.post("/auth/register", data),
+  logout: () => api.post("/auth/session/logout", undefined, {
+    headers: { "X-Session-Mode": "cookie" },
+  }),
   getProfile: async () => {
     if (USE_MOCK) {
       await mockDelay();
       return mockRes(mockUsers[0]);
     }
-    return api.get("/auth/profile");
+    return api.get("/auth/profile", { suppressGlobalError: true });
   },
 };
 
 // ===== Products API =====
 const MOCK_PRODUCTS_STORAGE_KEY = "haichuan.mock-products";
 
-function getMockProducts() {
-  if (typeof window === "undefined") return mockProducts;
+function getMockProducts(): MutableMockProduct[] {
+  const products = mutableMockProducts;
+  if (typeof window === "undefined") return products;
   try {
     const saved = window.localStorage.getItem(MOCK_PRODUCTS_STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed)) {
-        mockProducts.length = 0;
-        mockProducts.push(...(parsed as any[]));
+        const normalized = parsed
+          .map(normalizeMockProduct)
+          .filter((product): product is MutableMockProduct => product !== null);
+        products.length = 0;
+        products.push(...normalized);
       }
     }
   } catch {
     // 模拟数据损坏时回退到代码中的初始样本。
   }
-  return mockProducts;
+  return products;
 }
 
-function findActiveMockProduct(id: number): LifecycleMockProduct | undefined {
-  return (getMockProducts() as unknown as LifecycleMockProduct[]).find(
+function findActiveMockProduct(id: number): MutableMockProduct | undefined {
+  return getMockProducts().find(
     (product) => product.id === id && !product.deletedAt,
   );
 }
@@ -155,7 +382,7 @@ function persistMockProducts() {
   try {
     window.localStorage.setItem(
       MOCK_PRODUCTS_STORAGE_KEY,
-      JSON.stringify(mockProducts),
+      JSON.stringify(mutableMockProducts),
     );
   } catch {
     // 本地存储不可用不应影响商品编辑主流程。
@@ -217,11 +444,11 @@ export const productApi = {
       const codeSet = params?.codes
         ? new Set(String(params.codes).split(",").map((code) => code.trim()).filter(Boolean))
         : null;
-      const availableProducts = (
-        getMockProducts() as unknown as LifecycleMockProduct[]
-      ).filter((product) => !product.deletedAt);
+      const availableProducts = getMockProducts().filter(
+        (product) => !product.deletedAt,
+      );
       const filtered = filterProducts(
-        availableProducts as typeof mockProducts,
+        availableProducts,
         params,
       ).filter(
         (product) =>
@@ -240,13 +467,15 @@ export const productApi = {
     }
     return api.get("/products", { params, signal });
   },
+  getMediaList: (params: { page?: number; pageSize?: number; keyword?: string }) =>
+    api.get("/products/admin/media", { params }),
   resolveReferences: async (input: { codes?: string[]; legacyIds?: number[] }, signal?: AbortSignal) => {
     if (USE_MOCK) {
       await mockDelay();
-      const products = getMockProducts() as unknown as LifecycleMockProduct[];
-      const mapProduct = (product: LifecycleMockProduct | undefined, reference: { code?: string; legacyId?: number }): ProductReferenceResult => {
+      const products = getMockProducts();
+      const mapProduct = (product: MutableMockProduct | undefined, reference: { code?: string; legacyId?: number }): ProductReferenceResult => {
         if (!product) return { ...reference, eligible: false, reason: "NOT_FOUND" };
-        const image = (product as any).listingImage || (product as any).primaryImage || (product as any).images?.[0];
+        const image = product.listingImage || product.primaryImage || product.images[0];
         const reason: ProductReferenceResult["reason"] = product.deletedAt
           ? "DELETED"
           : product.status === "OFFLINE"
@@ -255,7 +484,7 @@ export const productApi = {
               ? "DRAFT"
               : product.status === "ARCHIVED"
                 ? "ARCHIVED"
-                : (product as any).visibility && (product as any).visibility !== "PUBLIC"
+                : product.visibility && product.visibility !== "PUBLIC"
                   ? "NON_PUBLIC"
                   : !image
                     ? "MISSING_IMAGE"
@@ -272,8 +501,8 @@ export const productApi = {
                 ? null
                 : undefined,
           status: product.status,
-          visibility: (product as any).visibility,
-          category: (product as any).category,
+          visibility: product.visibility,
+          category: product.category ?? undefined,
           thumbnail: typeof image === "string" ? image : image?.mediaUrl || image?.url || "",
           eligible: reason === "AVAILABLE",
           reason,
@@ -289,22 +518,20 @@ export const productApi = {
   getCounts: async () => {
     if (USE_MOCK) {
       await mockDelay();
-      const products = (
-        getMockProducts() as unknown as LifecycleMockProduct[]
-      ).filter((product) => !product.deletedAt);
+      const products = getMockProducts().filter((product) => !product.deletedAt);
       const counts: Record<string, number> = {
         all: products.filter((product) => product.status !== "ARCHIVED").length,
       };
       ["PUBLISHED", "OFFLINE", "DRAFT", "ARCHIVED"].forEach((status) => {
         counts[status] = products.filter(
-          (p: any) => p.status === status,
+          (product) => product.status === status,
         ).length;
       });
       return mockRes(counts);
     }
     return api.get("/products/counts");
   },
-  getPublicList: async (params: any = {}, signal?: AbortSignal) => {
+  getPublicList: async (params: ProductPublicQuery = {}, signal?: AbortSignal) => {
     const locale: PublicContentLocale = params.locale ?? getBrowserPublicContentLocale();
     if (USE_MOCK) {
       await mockDelay();
@@ -328,6 +555,7 @@ export const productApi = {
       const filtered = filterProducts(getMockProducts(), {
         ...params,
         status: "PUBLISHED",
+        publicPriceOnly: true,
       }).filter((product) => !idSet || idSet.has(product.id));
       const facetProducts = filterProducts(getMockProducts(), {
         status: "PUBLISHED",
@@ -343,7 +571,7 @@ export const productApi = {
         },
       });
     }
-    if (!localStorage.getItem("customerToken")) {
+    if (!useCustomerAuthStore.getState().isLoggedIn) {
       return api.get("/products/public", {
         params: { ...params, locale },
         signal,
@@ -413,7 +641,7 @@ export const productApi = {
       return mockRes(product);
     }
     const reference = encodeURIComponent(String(id));
-    if (!localStorage.getItem("customerToken")) {
+    if (!useCustomerAuthStore.getState().isLoggedIn) {
       return api.get(`/products/public/${reference}`, requestOptions);
     }
     try {
@@ -427,14 +655,19 @@ export const productApi = {
       return api.get(`/products/public/${reference}`, requestOptions);
     }
   },
-  create: async (data: any) => {
+  create: async (data: ProductWriteInput) => {
     if (USE_MOCK) {
       await mockDelay(200);
       const products = getMockProducts();
       const id = Math.max(0, ...products.map((product) => product.id)) + 1;
-      const product: Record<string, unknown> = {
+      const product: MutableMockProduct = {
         id,
         ...data,
+        code: data.code ?? "",
+        name: data.name ?? `未命名商品-${id}`,
+        categoryId: data.categoryId ?? 0,
+        materialType: data.materialType ?? "OTHER",
+        price: data.price ?? null,
         status: data.status || "DRAFT",
         isHot: data.isHot ?? false,
         isNew: data.isNew ?? false,
@@ -449,16 +682,16 @@ export const productApi = {
         tags: [],
         createdAt: new Date().toISOString(),
       };
-      products.push(product as any);
+      products.push(product);
       persistMockProducts();
       return mockRes(product);
     }
     return api.post("/products", data);
   },
-  update: async (id: number, data: any) => {
+  update: async (id: number, data: ProductWriteInput) => {
     if (USE_MOCK) {
       await mockDelay(200);
-      const product = getMockProducts().find((item) => item.id === id) as any;
+      const product = getMockProducts().find((item) => item.id === id);
       if (!product) throw new Error("商品不存在");
       Object.assign(product, data);
       persistMockProducts();
@@ -513,7 +746,7 @@ export const productApi = {
       await mockDelay(200);
       const product = getMockProducts().find(
         (item) => item.id === productId,
-      ) as any;
+      );
       if (!product) throw new Error("商品不存在");
       const image = {
         id: Date.now(),
@@ -538,8 +771,9 @@ export const productApi = {
       await mockDelay(200);
       const product = getMockProducts().find(
         (item) => item.id === productId,
-      ) as any;
-      const image = product?.images.find((item: any) => item.id === imageId);
+      );
+      if (!product) throw new Error("商品不存在");
+      const image = product.images.find((item) => item.id === imageId);
       if (!image) throw new Error("商品图片不存在");
       Object.assign(image, data);
       persistMockProducts();
@@ -552,10 +786,10 @@ export const productApi = {
       await mockDelay(200);
       const product = getMockProducts().find(
         (item) => item.id === productId,
-      ) as any;
+      );
       if (!product) throw new Error("商品不存在");
       product.images = product.images.filter(
-        (item: any) => item.id !== imageId,
+        (item) => item.id !== imageId,
       );
       persistMockProducts();
       return mockRes({ success: true });
@@ -567,15 +801,16 @@ export const productApi = {
       await mockDelay(200);
       const product = getMockProducts().find(
         (item) => item.id === productId,
-      ) as any;
-      const image = product?.images.find((item: any) => item.id === imageId);
+      );
+      if (!product) throw new Error("商品不存在");
+      const image = product.images.find((item) => item.id === imageId);
       if (!image) throw new Error("商品图片不存在");
-      product.images.forEach((item: any) => {
+      product.images.forEach((item) => {
         if (item.type === "FRONT") item.type = "SIDE";
       });
       image.type = "FRONT";
       image.sortOrder = 0;
-      product.images.sort((a: any, b: any) => a.sortOrder - b.sortOrder);
+      product.images.sort((a, b) => a.sortOrder - b.sortOrder);
       persistMockProducts();
       return mockRes(image);
     }
@@ -585,7 +820,7 @@ export const productApi = {
   /* 状态操作 */
   publish: async (id: number) => {
     if (USE_MOCK) {
-      const product = getMockProducts().find((item) => item.id === id) as any;
+      const product = getMockProducts().find((item) => item.id === id);
       if (!product) throw new Error("商品不存在");
       product.status = "PUBLISHED";
       persistMockProducts();
@@ -595,7 +830,7 @@ export const productApi = {
   },
   unpublish: async (id: number) => {
     if (USE_MOCK) {
-      const product = getMockProducts().find((item) => item.id === id) as any;
+      const product = getMockProducts().find((item) => item.id === id);
       if (!product) throw new Error("商品不存在");
       product.status = "OFFLINE";
       persistMockProducts();
@@ -603,10 +838,10 @@ export const productApi = {
     }
     return api.put(`/products/${id}/status`, { status: "OFFLINE" });
   },
-  updateStatus: async (id: number, status: string) => {
+  updateStatus: async (id: number, status: ProductStatus) => {
     if (USE_MOCK) {
       await mockDelay(200);
-      const product = getMockProducts().find((item) => item.id === id) as any;
+      const product = getMockProducts().find((item) => item.id === id);
       if (!product) throw new Error("商品不存在");
       product.status = status;
       persistMockProducts();
@@ -628,7 +863,7 @@ export const productApi = {
       await mockDelay(200);
       const product = getMockProducts().find(
         (item) => item.id === productId,
-      ) as any;
+      );
       if (!product) throw new Error("商品不存在");
       product.tags = tags.map((tagName, i) => ({
         id: Date.now() + i,
@@ -654,7 +889,7 @@ export const productApi = {
       await mockDelay(200);
       const product = getMockProducts().find(
         (item) => item.id === productId,
-      ) as any;
+      );
       if (!product) throw new Error("商品不存在");
       const cert = { id: Date.now(), productId, ...data };
       if (!product.certificates) product.certificates = [];
@@ -678,8 +913,8 @@ export const productApi = {
       await mockDelay(200);
       const product = getMockProducts().find(
         (item) => item.id === productId,
-      ) as any;
-      const cert = product?.certificates?.find((c: any) => c.id === certId);
+      );
+      const cert = product?.certificates?.find((certificate) => certificate.id === certId);
       if (!cert) throw new Error("证书不存在");
       Object.assign(cert, data);
       persistMockProducts();
@@ -692,10 +927,10 @@ export const productApi = {
       await mockDelay(200);
       const product = getMockProducts().find(
         (item) => item.id === productId,
-      ) as any;
+      );
       if (!product) throw new Error("商品不存在");
       product.certificates = (product.certificates || []).filter(
-        (c: any) => c.id !== certId,
+        (certificate) => certificate.id !== certId,
       );
       persistMockProducts();
       return mockRes({ success: true });
@@ -711,12 +946,12 @@ export const productApi = {
     }
     return api.get(`/products/${productId}/skus`);
   },
-  createSku: async (productId: number, data: any) => {
+  createSku: async (productId: number, data: ProductSkuWriteInput) => {
     if (USE_MOCK) {
       await mockDelay(200);
       const product = getMockProducts().find(
         (item) => item.id === productId,
-      ) as any;
+      );
       if (!product) throw new Error("商品不存在");
       const sku = { id: Date.now(), productId, isActive: true, ...data };
       if (!product.skus) product.skus = [];
@@ -726,13 +961,13 @@ export const productApi = {
     }
     return api.post(`/products/${productId}/skus`, data);
   },
-  updateSku: async (productId: number, skuId: number, data: any) => {
+  updateSku: async (productId: number, skuId: number, data: ProductSkuWriteInput) => {
     if (USE_MOCK) {
       await mockDelay(200);
       const product = getMockProducts().find(
         (item) => item.id === productId,
-      ) as any;
-      const sku = product?.skus?.find((s: any) => s.id === skuId);
+      );
+      const sku = product?.skus?.find((item) => item.id === skuId);
       if (!sku) throw new Error("SKU不存在");
       Object.assign(sku, data);
       persistMockProducts();
@@ -745,10 +980,10 @@ export const productApi = {
       await mockDelay(200);
       const product = getMockProducts().find(
         (item) => item.id === productId,
-      ) as any;
+      );
       if (!product) throw new Error("商品不存在");
       // 与真实后端一致：彻底删除而非停用
-      product.skus = (product.skus || []).filter((s: any) => s.id !== skuId);
+      product.skus = product.skus.filter((item) => item.id !== skuId);
       persistMockProducts();
       return mockRes({ id: skuId });
     }
@@ -757,8 +992,34 @@ export const productApi = {
 };
 
 // ===== Users API =====
+export interface UserListQuery {
+  page?: number;
+  pageSize?: number;
+  keyword?: string;
+  role?: User["role"];
+  status?: User["status"];
+}
+
+export interface CreateUserInput {
+  username: string;
+  password: string;
+  realName?: string;
+  phone?: string;
+  email?: string;
+  role?: User["role"];
+}
+
+export interface UpdateUserInput {
+  realName?: string;
+  phone?: string;
+  email?: string;
+  role?: User["role"];
+  status?: User["status"];
+  password?: string;
+}
+
 export const userApi = {
-  getList: async (params: any) => {
+  getList: async (params: UserListQuery) => {
     if (USE_MOCK) {
       await mockDelay();
       return mockRes(
@@ -768,14 +1029,25 @@ export const userApi = {
     return api.get("/users", { params });
   },
   getById: (id: number) => api.get(`/users/${id}`),
-  create: async (data: any) => {
+  getAssignable: async () => {
+    if (USE_MOCK) {
+      await mockDelay();
+      return mockRes(mockUsers.map((user) => ({
+        id: user.id,
+        name: user.realName || user.username,
+        role: user.role,
+      })));
+    }
+    return api.get("/users/assignable");
+  },
+  create: async (data: CreateUserInput) => {
     if (USE_MOCK) {
       await mockDelay(200);
       return mockRes({ id: Date.now(), ...data });
     }
     return api.post("/users", data);
   },
-  update: async (id: number, data: any) => {
+  update: async (id: number, data: UpdateUserInput) => {
     if (USE_MOCK) {
       await mockDelay(200);
       return mockRes({ id, ...data });
@@ -786,8 +1058,42 @@ export const userApi = {
 };
 
 // ===== Orders API =====
+export interface OrderListQuery {
+  page?: number;
+  pageSize?: number;
+  status?: "all" | OrderStatus;
+  keyword?: string;
+  productKeyword?: string;
+  startDate?: string;
+  endDate?: string;
+  minAmount?: number;
+  maxAmount?: number;
+  customerId?: number;
+  orderType?: "all" | OrderType;
+  deliveryStatus?: "all" | DeliveryStatus;
+  salesConsultantId?: number;
+  source?: string;
+  paymentStatus?: "all" | PaymentStatus;
+}
+
+export interface CreateOrderInput {
+  customerId?: number;
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  address: string;
+  paymentMethod?: string;
+  couponId?: number;
+  items: Array<{ skuId: number; quantity: number }>;
+}
+
+export interface UpdateOrderStatusInput {
+  status: OrderStatus;
+  internalNote?: string;
+}
+
 export const orderApi = {
-  getList: async (params: any) => {
+  getList: async (params: OrderListQuery) => {
     if (USE_MOCK) {
       await mockDelay();
       return mockRes(
@@ -798,12 +1104,12 @@ export const orderApi = {
   },
   getById: (id: number) => api.get(`/orders/${id}`),
   /** 后台人工建单（需 admin 角色） */
-  create: (data: any) => api.post("/orders", data),
+  create: (data: CreateOrderInput) => api.post("/orders", data),
   getAnomalies: () => api.get("/orders/anomalies"),
   getTradeOverview: () => api.get("/orders/trade-overview"),
   /** 导出订单（与当前筛选一致；仅 ADMIN） */
-  exportList: (params: any) => api.get("/orders/export", { params }),
-  updateStatus: async (id: number, data: any) => {
+  exportList: (params: OrderListQuery) => api.get("/orders/export", { params }),
+  updateStatus: async (id: number, data: UpdateOrderStatusInput) => {
     if (USE_MOCK) {
       await mockDelay(200);
       return mockRes({ id, ...data });
@@ -827,26 +1133,62 @@ export const orderApi = {
       finalAmount?: number;
       depositAmount?: number;
       balanceAmount?: number;
-      reason?: string;
+      reason: string;
     },
   ) => api.put(`/orders/${id}/amount`, data),
   updateAddress: (id: number, address: string) =>
     api.put(`/orders/${id}/address`, { address }),
-  updateNote: (id: number, internalNote: string) =>
+  updateNote: (id: number, internalNote?: string) =>
     api.put(`/orders/${id}/note`, { internalNote }),
   confirmReceive: (id: number) => api.put(`/orders/${id}/receive`),
   updateConsultant: (id: number, salesConsultantId: number | null) =>
     api.put(`/orders/${id}/consultant`, { salesConsultantId }),
-  advanceCustomStage: (id: number, stage: string) =>
+  advanceCustomStage: (id: number, stage: CustomStage) =>
     api.put(`/orders/${id}/custom-stage`, { stage }),
 };
 
 // ===== 报价管理 API =====
+export interface QuotationListQuery {
+  page?: number;
+  pageSize?: number;
+  status?: "all" | QuotationStatus;
+  keyword?: string;
+  salesConsultantId?: number;
+}
+
+export interface QuotationItemInput {
+  skuId?: number;
+  productId?: number;
+  productName: string;
+  productImage?: string;
+  spec?: string;
+  quantity: number;
+  unitPrice: number;
+  quotedPrice: number;
+}
+
+export interface CreateQuotationInput {
+  customerId?: number;
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  salesConsultantId?: number;
+  remark?: string;
+  depositAmount?: number;
+  validUntil?: string;
+  items: QuotationItemInput[];
+}
+
+export type UpdateQuotationInput = Partial<
+  Omit<CreateQuotationInput, "customerId">
+>;
+
 export const quotationApi = {
-  getList: (params: any) => api.get("/quotations", { params }),
+  getList: (params: QuotationListQuery) => api.get("/quotations", { params }),
   getById: (id: number) => api.get(`/quotations/${id}`),
-  create: (data: any) => api.post("/quotations", data),
-  update: (id: number, data: any) => api.put(`/quotations/${id}`, data),
+  create: (data: CreateQuotationInput) => api.post("/quotations", data),
+  update: (id: number, data: UpdateQuotationInput) =>
+    api.put(`/quotations/${id}`, data),
   submit: (id: number) => api.put(`/quotations/${id}/submit`),
   confirm: (id: number) => api.put(`/quotations/${id}/confirm`),
   cancel: (id: number) => api.put(`/quotations/${id}/cancel`),
@@ -881,6 +1223,23 @@ export const cartApi = {
   clear: () => api.delete("/cart", { headers: cartHeaders() }),
 };
 
+export type CustomerCheckoutRequest = {
+  address: string;
+  customerEmail?: string;
+  items: Array<{ skuId: number; quantity: number }>;
+};
+
+export type CustomerAddressInput = {
+  recipientName: string;
+  recipientPhone: string;
+  province: string;
+  city: string;
+  district: string;
+  detailAddress: string;
+  postalCode?: string;
+  isDefault?: boolean;
+};
+
 export const customerApi = {
   register: (data: {
     phone: string;
@@ -888,9 +1247,16 @@ export const customerApi = {
     name: string;
     email?: string;
     smsCode?: string;
-  }) => api.post("/customers/register", data),
+  }) => api.post("/customers/register", data, {
+    headers: { ...customerAuthHeaders(), "X-Session-Mode": "cookie" },
+  }),
   login: (data: { phone: string; password: string }) =>
-    api.post("/customers/login", data),
+    api.post("/customers/login", data, {
+      headers: { ...customerAuthHeaders(), "X-Session-Mode": "cookie" },
+    }),
+  logout: () => api.post("/customers/session/logout", undefined, {
+    headers: { ...customerAuthHeaders(), "X-Session-Mode": "cookie" },
+  }),
   wechatConfig: (origin?: string) =>
     api.get("/customers/wechat/config", { params: origin ? { origin } : {} }),
   wechatBind: (data: {
@@ -898,7 +1264,9 @@ export const customerApi = {
     phone: string;
     password: string;
     name?: string;
-  }) => api.post("/customers/wechat/bind", data),
+  }) => api.post("/customers/wechat/bind", data, {
+    headers: { ...customerAuthHeaders(), "X-Session-Mode": "cookie" },
+  }),
   smsRequirements: () => api.get("/customers/sms-requirements"),
   requestSmsCode: (data: { phone: string }) =>
     api.post("/customers/sms-code", data),
@@ -906,7 +1274,7 @@ export const customerApi = {
     api.post("/customers/forgot-password", data),
   resetPassword: (data: { token: string; password: string }) =>
     api.post("/customers/reset-password", data),
-  checkout: (data: any) =>
+  checkout: (data: CustomerCheckoutRequest) =>
     api.post("/customers/checkout", data, {
       headers: customerAuthHeaders(),
     }),
@@ -931,7 +1299,7 @@ export const customerApi = {
       { headers: customerAuthHeaders() },
     ),
   getProfile: () =>
-    api.get("/customers/me", { headers: customerAuthHeaders() }),
+    api.get("/customers/me", { headers: customerAuthHeaders(), suppressGlobalError: true }),
   updateProfile: (data: { name?: string; email?: string }) =>
     api.put("/customers/me", data, { headers: customerAuthHeaders() }),
   getOrders: () =>
@@ -989,11 +1357,11 @@ export const customerApi = {
     api.get("/customers/me/inquiries", { headers: customerAuthHeaders() }),
   getAddresses: () =>
     api.get("/customers/me/addresses", { headers: customerAuthHeaders() }),
-  createAddress: (data: any) =>
+  createAddress: (data: CustomerAddressInput) =>
     api.post("/customers/me/addresses", data, {
       headers: customerAuthHeaders(),
     }),
-  updateAddress: (id: number, data: any) =>
+  updateAddress: (id: number, data: CustomerAddressInput) =>
     api.put(`/customers/me/addresses/${id}`, data, {
       headers: customerAuthHeaders(),
     }),
@@ -1034,25 +1402,80 @@ export const customerApi = {
 };
 
 // ===== Partner Applications API（合作申请）=====
+export interface PartnerApplicationInput {
+  applicantName: string;
+  applicantPhone: string;
+  companyName?: string;
+  city?: string;
+  businessType?: string;
+  channelType?: string;
+  businessDescription?: string;
+  expectedPurchaseRange?: string;
+  contactWechat?: string;
+  agreementAccepted: boolean;
+}
+
+export type PartnerApplicationStatus =
+  | "PENDING"
+  | "NEEDS_SUPPLEMENT"
+  | "APPROVED"
+  | "REJECTED"
+  | "SUSPENDED";
+
+export interface PartnerApplicationListQuery {
+  page?: number;
+  pageSize?: number;
+  status?: PartnerApplicationStatus;
+  keyword?: string;
+}
+
 export const partnerApi = {
   // 客户侧（用客户令牌）
   getMine: () =>
     api.get("/partner-applications/me", { headers: customerAuthHeaders() }),
-  submit: (data: any) =>
+  submit: (data: PartnerApplicationInput) =>
     api.post("/partner-applications", data, { headers: customerAuthHeaders() }),
-  resubmit: (data: any) =>
+  resubmit: (data: PartnerApplicationInput) =>
     api.put("/partner-applications/me", data, {
       headers: customerAuthHeaders(),
     }),
   // 后台（员工令牌，全局 interceptor 自动注入 Authorization）
-  adminGetList: (params: any) => api.get("/partner-applications", { params }),
+  adminGetList: (params: PartnerApplicationListQuery) =>
+    api.get("/partner-applications", { params }),
   adminGetById: (id: number) => api.get(`/partner-applications/${id}`),
-  adminReview: (id: number, data: { action: string; reviewNote?: string }) =>
+  adminReview: (
+    id: number,
+    data: {
+      action: PartnerApplicationStatus;
+      reviewNote?: string;
+    },
+  ) =>
     api.put(`/partner-applications/${id}/review`, data),
 };
 
+interface BaseTradeListQuery {
+  page?: number;
+  pageSize?: number;
+  status?: string;
+  keyword?: string;
+}
+
+export interface PaymentListQuery extends BaseTradeListQuery {
+  type?: string;
+  method?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export type FulfillmentListQuery = BaseTradeListQuery;
+export type RefundListQuery = BaseTradeListQuery;
+
+export interface AfterSalesListQuery extends BaseTradeListQuery {
+  type?: string;
+}
+
 export const paymentApi = {
-  getList: (params: any) => api.get("/payments", { params }),
+  getList: (params: PaymentListQuery) => api.get("/payments", { params }),
   getById: (id: number) => api.get(`/payments/${id}`),
   approve: (id: number, reviewNote?: string) =>
     api.put(`/payments/${id}/approve`, { reviewNote }),
@@ -1072,7 +1495,7 @@ export const paymentApi = {
 
 // ===== 履约 API =====
 export const fulfillmentApi = {
-  getList: (params: any) => api.get("/fulfillments", { params }),
+  getList: (params: FulfillmentListQuery) => api.get("/fulfillments", { params }),
   getById: (id: number) => api.get(`/fulfillments/${id}`),
   dispatch: (
     id: number,
@@ -1090,7 +1513,7 @@ export const fulfillmentApi = {
 
 // ===== 退款 API =====
 export const refundApi = {
-  getList: (params: any) => api.get("/refunds", { params }),
+  getList: (params: RefundListQuery) => api.get("/refunds", { params }),
   getById: (id: number) => api.get(`/refunds/${id}`),
   create: (data: {
     orderId: number;
@@ -1118,7 +1541,7 @@ export const refundApi = {
 
 // ===== 售后 API =====
 export const afterSalesApi = {
-  getList: (params: any) => api.get("/after-sales-cases", { params }),
+  getList: (params: AfterSalesListQuery) => api.get("/after-sales-cases", { params }),
   getById: (id: number) => api.get(`/after-sales-cases/${id}`),
   create: (data: {
     orderId: number;
@@ -1143,6 +1566,15 @@ export const afterSalesApi = {
 };
 
 // ===== Gold Price API =====
+export interface GoldPriceHistoryQuery {
+  days?: number;
+}
+
+export interface ManualGoldPriceInput {
+  price: number;
+  remark?: string;
+}
+
 export const goldPriceApi = {
   getLatest: async () => {
     if (USE_MOCK) {
@@ -1151,7 +1583,7 @@ export const goldPriceApi = {
     }
     return api.get("/gold-price/latest");
   },
-  getHistory: async (params: any) => {
+  getHistory: async (params: GoldPriceHistoryQuery) => {
     if (USE_MOCK) {
       await mockDelay();
       return mockRes(mockGoldPriceHistory);
@@ -1162,7 +1594,7 @@ export const goldPriceApi = {
     if (USE_MOCK) return mockRes({ autoFetchConfigured: false });
     return api.get("/gold-price/automation-status");
   },
-  updateManually: async (data: any) => {
+  updateManually: async (data: ManualGoldPriceInput) => {
     if (USE_MOCK) {
       await mockDelay(200);
       return mockRes({ ...mockGoldPrice, price: data.price, source: "MANUAL" });
@@ -1178,8 +1610,16 @@ type InventoryStockUpdateInput = {
   remark?: string;
 };
 
+export interface InventoryListQuery {
+  page?: number;
+  pageSize?: number;
+  keyword?: string;
+  status?: string;
+  warehouseId?: number;
+}
+
 export const inventoryApi = {
-  getList: async (params: any) => {
+  getList: async (params: InventoryListQuery) => {
     if (USE_MOCK) {
       await mockDelay();
       const items = mockProducts.flatMap((p) =>
@@ -1214,10 +1654,25 @@ export const inventoryApi = {
 };
 
 // ===== Warehouse API（仓库管理）=====
+export type WarehouseType = "SHOWROOM" | "FACTORY" | "STORE";
+
+export interface CreateWarehouseInput {
+  name: string;
+  type?: WarehouseType;
+  address?: string;
+  contact?: string;
+  phone?: string;
+}
+
+export interface UpdateWarehouseInput extends Partial<CreateWarehouseInput> {
+  isActive?: boolean;
+}
+
 export const warehouseApi = {
   list: () => api.get("/warehouses"),
-  create: (data: any) => api.post("/warehouses", data),
-  update: (id: number, data: any) => api.put(`/warehouses/${id}`, data),
+  create: (data: CreateWarehouseInput) => api.post("/warehouses", data),
+  update: (id: number, data: UpdateWarehouseInput) =>
+    api.put(`/warehouses/${id}`, data),
 };
 
 // ===== Upload API =====
@@ -1267,11 +1722,11 @@ export const uploadApi = {
 // 插槽写侧从未有入口、HOME_HERO 永远为空，首页统一走 Puck PageDocument。
 
 // ===== Puck PageDocument API =====
-type MockPageDocument = {
+export type PageDocumentResource = {
   id: number;
   pageKey: string;
-  puckData: any;
-  metadata?: any;
+  puckData: unknown;
+  metadata?: Record<string, unknown>;
   editorVersion?: string;
   status: "DRAFT" | "PUBLISHED";
   version: number;
@@ -1279,12 +1734,13 @@ type MockPageDocument = {
   publishedBy?: number | null;
   createdAt: string;
   updatedAt: string;
+  publicationAttested?: boolean;
 };
 
 type MockPageDocumentStore = {
-  drafts: Record<string, MockPageDocument>;
-  published: Record<string, MockPageDocument>;
-  revisions: Record<string, MockPageDocument[]>;
+  drafts: Record<string, PageDocumentResource>;
+  published: Record<string, PageDocumentResource>;
+  revisions: Record<string, PageDocumentResource[]>;
 };
 
 const MOCK_PAGE_DOCUMENTS_STORAGE_KEY = "haichuan.mock-page-documents";
@@ -1340,14 +1796,14 @@ function nextMockDocumentVersion(pageKey: string) {
 
 function createMockPageDocument(data: {
   pageKey: string;
-  puckData: any;
-  metadata?: any;
+  puckData: unknown;
+  metadata?: Record<string, unknown>;
   editorVersion?: string;
   status?: "DRAFT" | "PUBLISHED";
   version?: number;
   publishedAt?: string | null;
   publishedBy?: number | null;
-}): MockPageDocument {
+}): PageDocumentResource {
   const now = new Date().toISOString();
   return {
     id: Date.now(),
@@ -1377,12 +1833,12 @@ export type PersonalContentTemplate = {
 };
 
 type MockPublicPageDocument = Pick<
-  MockPageDocument,
+  PageDocumentResource,
   "pageKey" | "puckData" | "metadata" | "status" | "version" | "publishedAt" | "updatedAt"
 >;
 
 function getMockPublicPageDocument(
-  document: MockPageDocument | null | undefined,
+  document: PageDocumentResource | null | undefined,
 ): MockPublicPageDocument | null {
   if (!document) return null;
   const metadata = document.metadata;
@@ -1541,8 +1997,8 @@ export const pageDocumentApi = {
   },
   save: async (data: {
     pageKey: string;
-    puckData: any;
-    metadata?: any;
+    puckData: unknown;
+    metadata?: Record<string, unknown>;
     editorVersion?: string;
     expectedUpdatedAt?: string;
   }) => {
@@ -1552,7 +2008,7 @@ export const pageDocumentApi = {
       const previous =
         store.drafts[data.pageKey] || store.published[data.pageKey];
       const now = new Date().toISOString();
-      const document: MockPageDocument = {
+      const document: PageDocumentResource = {
         ...(previous || createMockPageDocument(data)),
         puckData: cloneMockDocument(data.puckData),
         metadata: data.metadata,
@@ -1581,7 +2037,7 @@ export const pageDocumentApi = {
       const draft = store.drafts[pageKey];
       if (!draft) throw new Error("请先保存页面草稿");
       const now = new Date().toISOString();
-      const published: MockPageDocument = {
+      const published: PageDocumentResource = {
         ...cloneMockDocument(draft),
         status: "PUBLISHED",
         version: nextMockDocumentVersion(pageKey),
@@ -1607,8 +2063,8 @@ export const pageDocumentApi = {
   },
   validate: async (
     pageKey = "home",
-    puckData?: any,
-    metadata?: any,
+    puckData?: unknown,
+    metadata?: Record<string, unknown>,
     signal?: AbortSignal,
   ) => {
     if (USE_MOCK) {
@@ -1677,17 +2133,47 @@ export const pageDocumentApi = {
 };
 
 // ===== Marketing API =====
+export type PromotionType = "FULL_REDUCTION" | "DISCOUNT" | "GIFT";
+
+export interface CreatePromotionInput {
+  name: string;
+  type: PromotionType;
+  rule: Record<string, unknown>;
+  startTime: string;
+  endTime: string;
+  description?: string;
+  isActive?: boolean;
+}
+
+export type UpdatePromotionInput = Partial<CreatePromotionInput>;
+
+export type CouponType = "fixed" | "percent";
+
+export interface CreateCouponInput {
+  name: string;
+  type: CouponType;
+  value: number;
+  minAmount?: number;
+  totalCount?: number;
+  startTime: string;
+  endTime: string;
+  isActive?: boolean;
+}
+
+export type UpdateCouponInput = Partial<CreateCouponInput>;
+
 export const marketingApi = {
   /* 促销活动 */
   getPromotions: () => api.get("/marketing/promotions"),
-  createPromotion: (data: any) => api.post("/marketing/promotions", data),
-  updatePromotion: (id: number, data: any) =>
+  createPromotion: (data: CreatePromotionInput) =>
+    api.post("/marketing/promotions", data),
+  updatePromotion: (id: number, data: UpdatePromotionInput) =>
     api.put(`/marketing/promotions/${id}`, data),
   deletePromotion: (id: number) => api.delete(`/marketing/promotions/${id}`),
   /* 优惠券 */
   getCoupons: () => api.get("/marketing/coupons"),
-  createCoupon: (data: any) => api.post("/marketing/coupons", data),
-  updateCoupon: (id: number, data: any) =>
+  createCoupon: (data: CreateCouponInput) => api.post("/marketing/coupons", data),
+  updateCoupon: (id: number, data: UpdateCouponInput) =>
     api.put(`/marketing/coupons/${id}`, data),
   getCouponStats: () => api.get("/marketing/coupons/stats"),
   /* 建单可用券（按订单金额试算折扣，营销生效） */

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 const attributes = [
   {
@@ -20,24 +21,9 @@ const attributes = [
 ];
 
 async function authenticateAttributeEditor(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("token", "attribute-manage-test-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token: "attribute-manage-test-token",
-          user: {
-            id: 1,
-            username: "attribute-editor",
-            role: "SUPER_ADMIN",
-            name: "属性编辑员",
-          },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "attribute-editor",
+    realName: "属性编辑员",
   });
 }
 
@@ -51,6 +37,7 @@ test("属性字典加载与新建请求保持现有管理端合同", async ({ pa
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path === "/api/auth/profile") return route.fallback();
     if (path === "/api/attributes" && request.method() === "POST") {
       writes.push({
         headers: request.headers(),
@@ -83,7 +70,7 @@ test("属性字典加载与新建请求保持现有管理端合同", async ({ pa
   await expect(page.getByText("material", { exact: true })).toBeVisible();
 
   await page.evaluate(() => {
-    document.cookie = "hc_admin_csrf=attribute-csrf-token; path=/";
+    document.cookie = "hc_csrf=attribute-csrf-token; path=/";
   });
   await page.getByRole("button", { name: "新建属性" }).click();
   const dialog = page.getByRole("dialog", { name: "新建属性" });
@@ -92,9 +79,7 @@ test("属性字典加载与新建请求保持现有管理端合同", async ({ pa
   await dialog.getByRole("button", { name: "OK", exact: true }).click();
 
   await expect.poll(() => writes.length).toBe(1);
-  expect(writes[0].headers.authorization).toBe(
-    "Bearer attribute-manage-test-token",
-  );
+  expect(writes[0].headers.authorization).toBeUndefined();
   expect(writes[0].headers["x-csrf-token"]).toBe("attribute-csrf-token");
   expect(writes[0].body).toMatchObject({
     name: "工艺",

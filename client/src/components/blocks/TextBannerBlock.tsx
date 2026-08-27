@@ -8,13 +8,10 @@ import {
   ContentTemplateLayoutStyles,
   templateLayoutVars,
 } from "@/page-builder/layout/contentTemplateLayouts";
+import type { RenderablePageModule } from "@/types/pageModule";
 
 interface TextBannerBlockProps {
-  module: {
-    content: Record<string, any>;
-    layoutConfig?: Record<string, any>;
-    styleConfig?: Record<string, any>;
-  };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 
@@ -23,7 +20,7 @@ export default function TextBannerBlock({
   module,
   editMode,
 }: TextBannerBlockProps) {
-  const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
+  const { content, layoutConfig, styleConfig } = module;
   const { eyebrow, title, body, buttonText, bgImage } = content;
   const targetUrl = resolveLinkTargetUrl({
     targetType: content.targetType,

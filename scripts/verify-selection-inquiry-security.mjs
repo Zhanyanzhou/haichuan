@@ -130,7 +130,7 @@ check("可见性单一来源：ProductsService 委托共享 resolveCustomerProdu
   const resolveMethod = methodBody(productsService, "resolveVisibleVisibilities");
   assert.ok(resolveMethod, "未定位 resolveVisibleVisibilities 方法体");
   assert.ok(
-    /import\s+\{\s*resolveCustomerProductVisibilities\s*\}\s+from\s+["']\.\/product-eligibility["']/.test(productsService),
+    /import\s*\{[^}]*\bresolveCustomerProductVisibilities\b[^}]*\}\s*from\s*["']\.\/product-eligibility["']/.test(productsService),
     "ProductsService 必须从 product-eligibility 导入共享可见性 helper",
   );
   assert.ok(

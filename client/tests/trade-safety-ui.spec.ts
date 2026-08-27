@@ -1,32 +1,37 @@
 import { expect, test, type Page } from '@playwright/test';
 
 async function authenticateAdmin(page: Page) {
-  await page.addInitScript(() => {
-    const user = {
-      id: 1,
-      username: 'trade-safety-admin',
-      realName: '交易安全测试管理员',
-      role: 'ADMIN',
-      status: 'ACTIVE',
-      createdAt: '2026-08-25T00:00:00.000Z',
-    };
-    localStorage.setItem('token', 'trade-safety-token');
-    localStorage.setItem(
-      'jewelry-auth',
-      JSON.stringify({
-        state: { token: 'trade-safety-token', user, isLoggedIn: true },
-        version: 0,
+  await page.route('**/api/auth/profile', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        code: 200,
+        message: 'ok',
+        data: {
+          id: 1,
+          username: 'trade-safety-admin',
+          realName: '交易安全测试管理员',
+          role: 'ADMIN',
+          status: 'ACTIVE',
+          createdAt: '2026-08-25T00:00:00.000Z',
+        },
       }),
-    );
-  });
+    }),
+  );
 }
 
 async function mockEmptyAdminApis(page: Page) {
-  await page.route('**/api/**', (route) => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ code: 200, data: { list: [], total: 0 }, message: 'ok' }),
-  }));
+  await page.route('**/api/**', (route) => {
+    if (new URL(route.request().url()).pathname.endsWith('/auth/profile')) {
+      return route.fallback();
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 200, data: { list: [], total: 0 }, message: 'ok' }),
+    });
+  });
 }
 
 test.describe('交易后台不把人工操作伪装成在线资金结果', () => {
@@ -154,10 +159,6 @@ async function mockCustomerWechatCheckout(
   page: Page,
   scene: 'native' | 'h5',
 ) {
-  await page.addInitScript(() => {
-    localStorage.setItem('customerToken', 'customer-payment-test');
-    sessionStorage.clear();
-  });
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -178,6 +179,7 @@ async function mockCustomerWechatCheckout(
         quantity: 1,
         product: { name: '支付测试戒指' },
         sku: { price: 8800 },
+        availability: { available: true, status: 'AVAILABLE', message: null },
       }]);
     }
     if (path.endsWith('/customers/me') && method === 'GET') {
@@ -239,10 +241,6 @@ async function mockCustomerTradeTimeline(
   page: Page,
   options: { withTracking?: boolean; trackingFails?: boolean } = {},
 ) {
-  await page.addInitScript(() => {
-    localStorage.setItem('customerToken', 'customer-timeline-test');
-    localStorage.setItem('customer', JSON.stringify({ id: 7, name: '测试客户' }));
-  });
   await page.route('**/api/**', (route) => {
     const path = new URL(route.request().url()).pathname;
     const data = (value: unknown) => route.fulfill({
@@ -378,10 +376,6 @@ async function mockCustomerReview(
   let lastReviewBody: Record<string, unknown> | null = null;
   const uploadedImage = 'data:image/png;base64,iVBORw0KGgo=';
 
-  await page.addInitScript(() => {
-    localStorage.setItem('customerToken', 'customer-review-test');
-    localStorage.setItem('customer', JSON.stringify({ id: 18, name: '评价测试客户' }));
-  });
   await page.route('**/api/**', (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -513,10 +507,6 @@ async function mockCustomerAfterSales(
     releaseFirstCreate = resolve;
   });
 
-  await page.addInitScript(() => {
-    localStorage.setItem('customerToken', 'customer-after-sales-test');
-    localStorage.setItem('customer', JSON.stringify({ id: 7, name: '售后测试客户' }));
-  });
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;

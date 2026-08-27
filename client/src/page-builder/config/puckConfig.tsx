@@ -185,6 +185,6 @@ export const puckConfig: Config<MyComponents> = {
     }),
   },
   /** 与区块模板库保持一致：按页面经营目标分类，而非技术组件类型。 */
-  categories: getCategoryComponents() as any,
+  categories: getCategoryComponents() as Config<MyComponents>["categories"],
   root: { render: ({ children }) => <div>{children}</div>, fields: {} },
 };

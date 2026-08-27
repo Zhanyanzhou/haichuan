@@ -33,8 +33,24 @@ import { AdminErrorState } from "@/components/common/AdminDataStates";
 import { SecureImage } from "@/components/common/SecureImage";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import { categoryApi, productApi, shippingTemplateApi, uploadApi } from "@/services/api";
+import type {
+  ProductSkuWriteInput,
+  ProductWriteInput,
+  ShippingTemplateCreateInput,
+} from "@/services/api";
 import { useCommerceEnabled } from "@/store/featureFlags";
-import type { InventoryPolicy, MaterialType, ProductDetailBlock, ProductImage, ProductSKU, ProductStatus, SalesMode, ShippingTemplate } from "@/types";
+import type {
+  Category,
+  InventoryPolicy,
+  MaterialType,
+  Product,
+  ProductDetailBlock,
+  ProductImage,
+  ProductSKU,
+  ProductStatus,
+  SalesMode,
+  ShippingTemplate,
+} from "@/types";
 import { unwrapResponse } from "@/utils/unwrap";
 import UnsavedChangesGuard from "../HomepageConfig/components/UnsavedChangesGuard";
 import "./ProfessionalProductEditor.css";
@@ -45,9 +61,107 @@ type MediaChoice = { key: string; label: string; src?: string; imageId?: number;
 class EditorUserError extends Error {}
 
 type EditorRequestError = Error & { status?: number; response?: { status?: number } };
-type ProductSubmitFailure = { message: string; field?: string };
+type ProductSubmitFailure<Field extends string = string> = {
+  message: string;
+  field?: Field;
+};
 
-function getProductSubmitFailure(error: unknown): ProductSubmitFailure {
+type ProductEditorGemInfo = {
+  type?: string;
+  carat?: number;
+  clarity?: string;
+  color?: string;
+  cut?: string;
+  quantity?: number;
+  certificateAuthority?: string;
+  certificateNumber?: string;
+  certificateQueryUrl?: string;
+  brand?: string;
+  collection?: string;
+  style?: string;
+  occasion?: string;
+  condition?: string;
+};
+
+type ProductEditorRecord = Omit<Product, "gemInfo"> & {
+  gemInfo?: ProductEditorGemInfo | null;
+  primaryImageId?: number | null;
+  publishMode?: "IMMEDIATE" | "SCHEDULED" | "WAREHOUSE";
+  scheduledPublishAt?: string | null;
+};
+
+type ProductEditorFormValues = {
+  name?: string;
+  code: string;
+  categoryId: number;
+  shortDescription?: string | null;
+  description?: string | null;
+  materialType: MaterialType;
+  goldWeight?: number;
+  craftFee?: number;
+  weight?: number;
+  size?: string | null;
+  gemType?: string;
+  gemCarat?: number;
+  gemClarity?: string;
+  gemColor?: string;
+  gemCut?: string;
+  gemQuantity?: number;
+  certificateAuthority?: string;
+  certificateNumber?: string;
+  certificateQueryUrl?: string;
+  brand?: string;
+  collection?: string;
+  style?: string;
+  occasion?: string;
+  condition?: string;
+  craftTechnique?: string[];
+  visibility?: Product["visibility"];
+  salesMode: SalesMode;
+  inventoryPolicy: InventoryPolicy;
+  purchaseRegion?: Product["purchaseRegion"];
+  publishMode: "IMMEDIATE" | "SCHEDULED" | "WAREHOUSE";
+  scheduledPublishAt?: { toISOString: () => string } | null;
+  fulfillmentType?: Product["fulfillmentType"];
+  dispatchTime?: Product["dispatchTime"];
+  shippingTemplateId?: number | null;
+  deliveryMethods?: string[];
+  requiresInsuredShipping?: boolean;
+  requiresSignature?: boolean;
+  includesCertificate?: boolean;
+  packageType?: string | null;
+  customLeadTime?: string | null;
+  isHot?: boolean;
+  isNew?: boolean;
+  isRecommended?: boolean;
+  isLimited?: boolean;
+  isCustom?: boolean;
+  price?: number | string | null;
+  initialSkuPrice?: number | string | null;
+  derivedPrice?: number | string | null;
+};
+
+type UploadedProductMedia = {
+  storageKey: string;
+  url?: string;
+  width?: number;
+  height?: number;
+  mimeType?: string;
+  fileSize?: number;
+};
+
+type FormValidationError = {
+  errorFields: Array<{ name?: string | number | Array<string | number> }>;
+};
+
+function isFormValidationError(error: unknown): error is FormValidationError {
+  if (typeof error !== "object" || error === null) return false;
+  return Array.isArray((error as { errorFields?: unknown }).errorFields);
+}
+
+function getProductSubmitFailure(error: unknown): ProductSubmitFailure<
+  "code" | "categoryId" | "shippingTemplateId" | "scheduledPublishAt" | "name"
+> {
   const requestError = error as EditorRequestError | undefined;
   const status = requestError?.status ?? requestError?.response?.status;
   const serverMessage = requestError?.message?.trim() || "";
@@ -86,7 +200,7 @@ function getProductSubmitFailure(error: unknown): ProductSubmitFailure {
   return { message: getSafeAdminErrorMessage(error, "商品保存失败，请检查填写内容后重试。") };
 }
 
-function getSkuSubmitFailure(error: unknown): ProductSubmitFailure {
+function getSkuSubmitFailure(error: unknown): ProductSubmitFailure<"skuCode"> {
   const requestError = error as EditorRequestError | undefined;
   const status = requestError?.status ?? requestError?.response?.status;
   const serverMessage = requestError?.message?.trim() || "";
@@ -122,7 +236,7 @@ const salesModeLabelsForPreview: Record<SalesMode, string> = {
   CUSTOM_INQUIRY: "定制咨询",
 };
 
-const defaultValues = {
+const defaultValues: Partial<ProductEditorFormValues> = {
   condition: "NEW",
   materialType: "GOLD_999",
   visibility: "MEMBER",
@@ -139,7 +253,7 @@ const defaultValues = {
   packageType: "品牌礼盒",
 };
 
-function flattenCategories(nodes: any[], prefix = ""): { value: number; label: string }[] {
+function flattenCategories(nodes: Category[], prefix = ""): { value: number; label: string }[] {
   return (nodes || []).flatMap((node) => {
     const label = `${prefix}${node.name}`;
     return [{ value: node.id, label }, ...flattenCategories(node.children || [], `${label} / `)];
@@ -153,7 +267,7 @@ export default function ProfessionalProductEditor() {
   const editingId = id && Number.isInteger(parsedEditingId) && parsedEditingId > 0 ? parsedEditingId : null;
   const navigate = useNavigate();
   const commerceEnabled = useCommerceEnabled();
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<ProductEditorFormValues>();
   const [active, setActive] = useState("media");
   const [requiredOnly, setRequiredOnly] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -174,9 +288,9 @@ export default function ProfessionalProductEditor() {
   const [templates, setTemplates] = useState<ShippingTemplate[]>([]);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewValues, setPreviewValues] = useState<any>({});
-  const [templateForm] = Form.useForm();
-  const [skuForm] = Form.useForm();
+  const [previewValues, setPreviewValues] = useState<Partial<ProductEditorFormValues>>({});
+  const [templateForm] = Form.useForm<ShippingTemplateCreateInput>();
+  const [skuForm] = Form.useForm<ProductSkuWriteInput>();
   const [skus, setSkus] = useState<ProductSKU[]>([]);
   const [skuModalOpen, setSkuModalOpen] = useState(false);
   const [editingSku, setEditingSku] = useState<ProductSKU | null>(null);
@@ -192,7 +306,7 @@ export default function ProfessionalProductEditor() {
       key: `saved-${item.id}`,
       imageId: item.id,
       label: `已上传图片 #${item.id}`,
-      src: (item as any).mediaUrl || item.url,
+      src: item.mediaUrl || item.url,
     })),
     ...pendingMedia.map((item, index) => ({ key: item.key, label: `待上传图片 ${index + 1}`, src: item.preview, pending: true })),
   ], [images, pendingMedia]);
@@ -224,13 +338,13 @@ export default function ProfessionalProductEditor() {
       .then(([categoryRes, templateRes, productRes]) => {
         if (!mounted) return;
         const loadedTemplates = unwrapResponse<ShippingTemplate[]>(templateRes);
-        setCategories(flattenCategories(unwrapResponse<any[]>(categoryRes)));
+        setCategories(flattenCategories(unwrapResponse<Category[]>(categoryRes)));
         setTemplates(loadedTemplates);
         if (!editingId) {
           const preferred = loadedTemplates.find((item) => item.isDefault) || loadedTemplates[0];
           if (preferred) form.setFieldValue("shippingTemplateId", preferred.id);
         } else if (productRes) {
-          const product = unwrapResponse<any>(productRes);
+          const product = unwrapResponse<ProductEditorRecord>(productRes);
           const loadedStatus = (product.status || "DRAFT") as ProductStatus;
           setCurrentStatus(loadedStatus);
           setImages(product.images || []);
@@ -333,9 +447,9 @@ export default function ProfessionalProductEditor() {
     const mediaToUpload = [...pendingMedia];
     for (let index = 0; index < mediaToUpload.length; index += 1) {
       const media = mediaToUpload[index];
-      const uploaded = unwrapResponse<any[]>(await uploadApi.uploadProductImage(media.file))[0];
+      const uploaded = unwrapResponse<UploadedProductMedia[]>(await uploadApi.uploadProductImage(media.file))[0];
       if (!uploaded?.storageKey) throw new EditorUserError("图片上传失败，请重新选择图片后重试");
-      const created = unwrapResponse<any>(await productApi.addImage(productId, {
+      const created = unwrapResponse<ProductImage>(await productApi.addImage(productId, {
         storageKey: uploaded.storageKey,
         url: uploaded.url,
         type: index === 0 && images.length === 0 ? "FRONT" : "DETAIL",
@@ -357,7 +471,7 @@ export default function ProfessionalProductEditor() {
     return idMap;
   };
 
-  const buildContentPayload = (values: any) => ({
+  const buildContentPayload = (values: ProductEditorFormValues): ProductWriteInput => ({
     name: values.name?.trim() || `未命名商品-${values.code}`,
     code: values.code,
     categoryId: values.categoryId,
@@ -399,7 +513,7 @@ export default function ProfessionalProductEditor() {
   });
 
   const refreshProduct = async (productId: number) => {
-    const refreshed = unwrapResponse<any>(await productApi.getById(productId));
+    const refreshed = unwrapResponse<ProductEditorRecord>(await productApi.getById(productId));
     setCurrentStatus((refreshed.status || "DRAFT") as ProductStatus);
     setImages(refreshed.images || []);
     setPrimaryImageId(refreshed.primaryImageId ?? refreshed.primaryImage?.id ?? null);
@@ -483,7 +597,7 @@ export default function ProfessionalProductEditor() {
         const hasInitialSkuPrice = values.initialSkuPrice !== undefined
           && values.initialSkuPrice !== null
           && values.initialSkuPrice !== "";
-        const created = unwrapResponse<any>(await productApi.create({
+        const created = unwrapResponse<ProductEditorRecord>(await productApi.create({
           ...contentPayload,
           ...(hasInitialSkuPrice ? {
             skus: [{
@@ -510,8 +624,7 @@ export default function ProfessionalProductEditor() {
         ...block,
         imageId: pendingMediaKey ? idMap.get(pendingMediaKey) : block.imageId,
       })).filter((block) => block.type === "TEXT" ? Boolean(block.text?.trim()) : Boolean(block.imageId));
-      const updatePayload: any = { ...contentPayload, detailContent };
-      delete updatePayload.code;
+      const { code: _code, ...updatePayload } = { ...contentPayload, detailContent };
       await productApi.update(productId, updatePayload);
       if (currentStatus === "PUBLISHED") {
         // 对已上架商品重新执行发布门禁，但不改变其业务状态。
@@ -540,8 +653,8 @@ export default function ProfessionalProductEditor() {
       messageApi.success(successMessage);
       if (!editingId) navigate(`/admin/products/${productId}/edit`, { replace: true });
       return true;
-    } catch (error: any) {
-      if (Array.isArray(error?.errorFields)) {
+    } catch (error: unknown) {
+      if (isFormValidationError(error)) {
         const firstField = error.errorFields[0]?.name;
         messageApi.warning(requiresFullValidation ? "请检查并修正标红字段" : "保存草稿至少需要选择类目并填写货号");
         if (firstField) {
@@ -568,7 +681,7 @@ export default function ProfessionalProductEditor() {
 
   const refreshSkus = async () => {
     if (!currentProductId) return;
-    const result = unwrapResponse<any>(await productApi.getById(currentProductId));
+    const result = unwrapResponse<ProductEditorRecord>(await productApi.getById(currentProductId));
     setSkus(result.skus || []);
     form.setFieldValue("derivedPrice", result.price);
   };
@@ -602,8 +715,8 @@ export default function ProfessionalProductEditor() {
       setSkuModalOpen(false);
       setEditingSku(null);
       messageApi.success(editingSku ? "SKU 已更新" : "SKU 已创建");
-    } catch (error: any) {
-      if (!Array.isArray(error?.errorFields)) {
+    } catch (error: unknown) {
+      if (!isFormValidationError(error)) {
         const failure = getSkuSubmitFailure(error);
         if (failure.field) skuForm.setFields([{ name: failure.field, errors: [failure.message] }]);
         messageApi.error(failure.message);
@@ -683,8 +796,8 @@ export default function ProfessionalProductEditor() {
       templateForm.resetFields();
       markDirty();
       messageApi.success("运费模板已创建并选中");
-    } catch (error: any) {
-      if (!Array.isArray(error?.errorFields)) {
+    } catch (error: unknown) {
+      if (!isFormValidationError(error)) {
         messageApi.error(getSafeAdminErrorMessage(error, "运费模板保存失败，请检查填写内容后重试。"));
       }
     } finally {

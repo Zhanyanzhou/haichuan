@@ -21,11 +21,12 @@ import type {
 } from "./schema/types";
 import { getContentTemplateContract } from "../generated/contentTemplates.generated";
 import { resolveVisualNode } from "../runtime/visualLayout";
+import type { PuckProps } from "../types";
 
 interface FieldRendererProps {
   def: FieldDef;
   ctx: InspectorContext;
-  update: (patch: Record<string, any>) => void;
+  update: (patch: PuckProps) => void;
   moduleType?: string;
   onRequestVisualEdit?: (nodeId: string) => void;
 }
@@ -184,13 +185,17 @@ export default function FieldRenderer({ def, ctx, update, moduleType, onRequestV
         prefix
           ? ctx.props[`${prefix}${suffix}`]
           : ctx.props[suffix.charAt(0).toLowerCase() + suffix.slice(1)];
+      const targetType = readKey("TargetType");
+      const productCode = readKey("ProductCode");
+      const productId = readKey("ProductId");
+      const linkUrl = readKey("LinkUrl");
       return (
         <LinkTargetField
           id={String(ctx.props.id ?? def.key)}
-          targetType={readKey("TargetType")}
-          productCode={readKey("ProductCode")}
-          productId={readKey("ProductId")}
-          linkUrl={readKey("LinkUrl")}
+          targetType={typeof targetType === "string" ? targetType : undefined}
+          productCode={typeof productCode === "string" ? productCode : undefined}
+          productId={typeof productId === "string" || typeof productId === "number" ? productId : undefined}
+          linkUrl={typeof linkUrl === "string" ? linkUrl : undefined}
           onChange={update}
           label={def.linkLabel ?? def.label}
           description={
@@ -203,24 +208,23 @@ export default function FieldRenderer({ def, ctx, update, moduleType, onRequestV
     }
 
     case "productReferences":
+      {
+      const legacyValue = def.legacyKey ? ctx.props[def.legacyKey] : undefined;
+      const legacyIds = Array.isArray(legacyValue)
+        ? legacyValue.map(Number).filter((item) => Number.isInteger(item) && item > 0)
+        : Number(legacyValue) > 0
+          ? [Number(legacyValue)]
+          : [];
       return (
         <ProductReferencesField
           value={
             Array.isArray(value)
-              ? value
+              ? value.filter((item): item is string => typeof item === "string")
               : typeof value === "string" && value
                 ? [value]
                 : []
           }
-          legacyIds={
-            def.legacyKey
-              ? Array.isArray(ctx.props[def.legacyKey])
-                ? ctx.props[def.legacyKey]
-                : Number(ctx.props[def.legacyKey]) > 0
-                  ? [Number(ctx.props[def.legacyKey])]
-                  : []
-              : []
-          }
+          legacyIds={legacyIds}
           minProducts={def.minItems}
           maxProducts={def.maxItems}
           onChange={(codes, legacyIds) =>
@@ -236,6 +240,7 @@ export default function FieldRenderer({ def, ctx, update, moduleType, onRequestV
           }
         />
       );
+      }
 
     case "categoryReferences":
       return (

@@ -27,6 +27,10 @@ import {
   resolvePublicLocalePath,
   withPublicLocalePath,
 } from "@/i18n/publicLocale";
+import { useCustomerAuthStore, type CustomerAccount } from "@/store/customerAuthStore";
+import { customerApi } from "@/services/api";
+import { unwrapResponse } from "@/utils/unwrap";
+import { useStructuredData } from "@/hooks/useStructuredData";
 
 /** 幂等写入/更新 <meta> 标签（按 name 或 property 选择）。 */
 function upsertMeta(attr: "name" | "property", key: string, content: string) {
@@ -216,6 +220,56 @@ export default function PublicLayout() {
   const [scrolled, setScrolled] = useState(false);
   const siteSettingsResource = usePublicSiteSettingsResource();
   const siteSettings = siteSettingsResource.settings;
+  const customerAuthStatus = useCustomerAuthStore((state) => state.status);
+  const setCustomerAuth = useCustomerAuthStore((state) => state.setAuth);
+  const markCustomerAnonymous = useCustomerAuthStore((state) => state.markAnonymous);
+  const needsCustomerIdentity =
+    contentPathname === "/catalog" || /^\/products\/[^/]+$/.test(contentPathname);
+
+  const organizationLogo = (() => {
+    const logo = siteSettings?.logo?.trim();
+    if (!logo) return undefined;
+    if (/^https:\/\//i.test(logo)) return logo;
+    return buildPublicUrl(publicSiteOrigin, logo) || undefined;
+  })();
+  useStructuredData("organization", {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: siteSettings?.siteName || "海川珠宝",
+    ...(publicSiteOrigin ? { url: publicSiteOrigin } : {}),
+    ...(organizationLogo ? { logo: organizationLogo } : {}),
+    ...(siteSettings?.contactPhone?.trim()
+      ? { telephone: siteSettings.contactPhone.trim() }
+      : {}),
+    ...(siteSettings?.contactEmail?.trim()
+      ? { email: siteSettings.contactEmail.trim() }
+      : {}),
+    ...(siteSettings?.contactAddress?.trim()
+      ? { address: siteSettings.contactAddress.trim() }
+      : {}),
+  });
+
+  // 选款和作品详情会根据客户身份选择公开/会员事实。HttpOnly Cookie 无法由
+  // JavaScript 自行探测，因此刷新这两类页面时通过最小 profile 请求恢复会话。
+  useEffect(() => {
+    if (!needsCustomerIdentity || customerAuthStatus !== "unknown") return;
+
+    let active = true;
+    customerApi.getProfile()
+      .then((response) => {
+        if (!active) return;
+        const customer = unwrapResponse<CustomerAccount>(response);
+        if (customer && Number.isInteger(customer.id)) setCustomerAuth(customer);
+        else markCustomerAnonymous();
+      })
+      .catch(() => {
+        if (active) markCustomerAnonymous();
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [customerAuthStatus, markCustomerAnonymous, needsCustomerIdentity, setCustomerAuth]);
 
   const pageMeta = usePageMetaStore((s) => s.meta);
   const nonIndexableRoute = isNonIndexablePublicRoute(location.pathname);
@@ -503,7 +557,13 @@ export default function PublicLayout() {
           replaceChildren={Boolean(decorationPage && !decorationPage.dynamic)}
           publicFallback={decorationFallback}
         >
-          <Outlet context={publishedHeaderDocument} />
+          {needsCustomerIdentity && customerAuthStatus === "unknown" ? (
+            <div className="flex min-h-[40vh] items-center justify-center" role="status">
+              正在确认账户状态…
+            </div>
+          ) : (
+            <Outlet context={publishedHeaderDocument} />
+          )}
         </PublishedPageDecoration>
       </main>
 

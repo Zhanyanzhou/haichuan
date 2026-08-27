@@ -23,7 +23,7 @@ export interface GalleryPuckProps {
 
 export const galleryPuckConfig = {
   render: (props: GalleryPuckProps) => (
-    <AsymmetricGalleryBlock module={convertPuckProps("作品画廊", props as any) as any} editMode />
+    <AsymmetricGalleryBlock module={convertPuckProps("作品画廊", props)!} editMode />
   ),
   defaultProps: {
     title: "系列作品",
@@ -37,7 +37,7 @@ export const galleryPuckConfig = {
     bgColor: "#FFFFFF",
     locked: false,
   } satisfies GalleryPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: GalleryPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

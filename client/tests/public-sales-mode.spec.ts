@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { publishedCatalogDocument } from "./fixtures/public-catalog-detail";
+import { installCustomerSession } from "./fixtures/session-auth";
 
 type SalesMode =
   | "DISPLAY_ONLY"
@@ -121,8 +122,6 @@ async function mockPublicSales(
     paymentEnabled: true,
   };
   await page.addInitScript(() => {
-    localStorage.setItem("customerToken", "sales-mode-ui-test");
-    localStorage.setItem("customer", JSON.stringify({ id: 1, name: "测试客户" }));
     localStorage.removeItem("hc_selection_tray");
   });
   await page.route("**/api/**", async (route) => {
@@ -209,6 +208,7 @@ async function mockPublicSales(
     }
     return fulfill(route, null);
   });
+  await installCustomerSession(page, { id: 1, name: "测试客户" });
 }
 
 test("Catalog 消费服务端销售模式、派生价格和售罄状态", async ({ page }) => {
@@ -231,7 +231,9 @@ test("Catalog 消费服务端销售模式、派生价格和售罄状态", async 
   await expect(displayOnlyCard.getByText("仅展示", { exact: true })).toHaveCount(0);
   await expect(displayOnlyCard.getByRole("link", { name: "查看作品" }))
     .toHaveAttribute("href", "/products/HC-3");
-  await expect(page.getByText("图片暂不可用").first()).toBeVisible();
+  const placeholderImage = page.locator('img[src="/images/system/product-placeholder.svg"]').first();
+  await expect(placeholderImage).toBeVisible();
+  await expect.poll(() => placeholderImage.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => Array.from(document.images)
     .filter((image) => {
       const rect = image.getBoundingClientRect();
@@ -318,6 +320,7 @@ test("SINGLE_UNIT 在详情和购物车都固定数量上限 1", async ({ page }
       quantity: 1,
       product: { name: single.name, goldWeight: single.goldWeight },
       sku: { material: "AU750", goldWeight: 5.2, price: 12800 },
+      availability: { available: true, status: "AVAILABLE", message: null },
     }],
   });
 
@@ -332,10 +335,10 @@ test("SINGLE_UNIT 在详情和购物车都固定数量上限 1", async ({ page }
 
 test("四种非直购模式只提供真实可达的浏览、选款、预约或定制入口", async ({ page }) => {
   const cases = [
-    { id: 20, mode: "DISPLAY_ONLY" as const, text: "咨询此款作品", href: "/contact" },
+    { id: 20, mode: "DISPLAY_ONLY" as const, text: "咨询此款作品", href: "/contact?type=product&productRef=HC-20" },
     { id: 21, mode: "SELECTION" as const, text: "加入选款", href: null },
-    { id: 22, mode: "APPOINTMENT" as const, text: "预约鉴赏此款", href: "/contact" },
-    { id: 23, mode: "CUSTOM_INQUIRY" as const, text: "咨询此款定制", href: "/custom" },
+    { id: 22, mode: "APPOINTMENT" as const, text: "预约鉴赏此款", href: "/contact?type=appointment&productRef=HC-22" },
+    { id: 23, mode: "CUSTOM_INQUIRY" as const, text: "咨询此款定制", href: "/custom?type=custom&productRef=HC-23" },
   ];
   await mockPublicSales(page, { products: cases.map((item) => product(item.id, item.mode)) });
 
@@ -384,6 +387,7 @@ test("购物车更新 409 与重复点击都不产生假数量", async ({ page }
       quantity: 1,
       product: { name: standard.name, goldWeight: standard.goldWeight, inventoryPolicy: "STANDARD" },
       sku: { material: "AU750", goldWeight: 5.2, price: 12800 },
+      availability: { available: true, status: "AVAILABLE", message: null },
     }],
     updateStatus: 409,
     requestCounts,
@@ -410,7 +414,7 @@ test("购物车加载与错误状态可理解且可重试", async ({ page }) => 
   });
   await page.goto("/cart");
   await cartBarrier.reached;
-  await expect(page.getByText("加载中...")).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("购物车加载中…");
   cartBarrier.release();
   await expect(page.getByText("购物车暂时无法加载")).toBeVisible();
   await page.getByRole("button", { name: "重新加载" }).click();
@@ -436,6 +440,36 @@ test("库存策略无法读取时安全暂停增量与结算", async ({ page }) 
   await expect(page.getByRole("button", { name: "暂不可结算" })).toBeDisabled();
 });
 
+test("购物车读取到下架或库存变化时解释原因并阻止结算", async ({ page }) => {
+  const stale = product(39, "DIRECT_PURCHASE", { available: true });
+  await mockPublicSales(page, {
+    products: [stale],
+    cartItems: [{
+      id: 93,
+      productId: stale.id,
+      skuId: stale.skus[0].id,
+      quantity: 1,
+      product: {
+        name: stale.name,
+        goldWeight: stale.goldWeight,
+        inventoryPolicy: "STANDARD",
+      },
+      sku: { material: "AU750", goldWeight: 5.2, price: 12800 },
+      availability: {
+        available: false,
+        status: "PRODUCT_UNAVAILABLE",
+        message: "商品已下架或不再支持直接购买，请移除后重新选购",
+      },
+    }],
+  });
+
+  await page.goto("/cart");
+
+  await expect(page.getByText("商品已下架或不再支持直接购买，请移除后重新选购")).toBeVisible();
+  await expect(page.getByRole("button", { name: `增加${stale.name}数量` })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "暂不可结算" })).toBeDisabled();
+});
+
 test("购物车与支付开关关闭时不能进入交易或创建订单", async ({ page }) => {
   const requestCounts = { add: 0, update: 0, checkout: 0 };
   await mockPublicSales(page, {
@@ -449,7 +483,8 @@ test("购物车与支付开关关闭时不能进入交易或创建订单", async
   await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
 
   await page.goto("/products/40");
-  await expect(page.getByRole("link", { name: "购买暂未开放，联系顾问" })).toHaveAttribute("href", "/contact");
+  await expect(page.getByRole("link", { name: "购买暂未开放，联系顾问" }))
+    .toHaveAttribute("href", "/contact?type=purchase-support&productRef=HC-40");
   await expect(page.getByRole("button", { name: /加入购物车/ })).toHaveCount(0);
 
   await page.goto("/cart");
@@ -504,6 +539,7 @@ for (const viewport of [
         quantity: 1,
         product: { name: single.name, goldWeight: single.goldWeight },
         sku: { material: "AU750", goldWeight: 5.2, price: 12800 },
+        availability: { available: true, status: "AVAILABLE", message: null },
       }],
     });
     await page.setViewportSize({ width: viewport.width, height: viewport.height });

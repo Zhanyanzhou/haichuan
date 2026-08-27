@@ -175,3 +175,74 @@ test("无客户身份时不能认领其他 session 的购物车", async () => {
   assert.equal(rows[0].userId, null);
   assert.equal(rows[0].sessionId, "owner-session");
 });
+
+test("读取购物车会重新核对商品、SKU、数量与库存并返回可解释状态", async () => {
+  const baseItem = (id: number) => ({
+    id,
+    userId: 5,
+    sessionId: null,
+    productId: id,
+    skuId: id * 10,
+    quantity: 1,
+    createdAt: new Date(),
+    product: {
+      id,
+      name: `商品${id}`,
+      code: `HC-${id}`,
+      materialType: "GOLD_999",
+      goldWeight: 1,
+      price: 100,
+      inventoryPolicy: "STANDARD",
+      status: "PUBLISHED",
+      visibility: "PUBLIC",
+      salesMode: "DIRECT_PURCHASE",
+      deletedAt: null,
+      images: [],
+    },
+    sku: {
+      id: id * 10,
+      productId: id,
+      skuCode: `SKU-${id}`,
+      material: "GOLD_999",
+      size: null,
+      price: 100,
+      goldWeight: 1,
+      isActive: true,
+      inventories: [{ quantity: 3 }],
+    },
+  });
+  const rows = [
+    baseItem(1),
+    { ...baseItem(2), product: { ...baseItem(2).product, status: "OFFLINE" } },
+    { ...baseItem(3), sku: { ...baseItem(3).sku, isActive: false } },
+    { ...baseItem(4), sku: { ...baseItem(4).sku, inventories: [{ quantity: 0 }] } },
+    { ...baseItem(5), quantity: 4 },
+    {
+      ...baseItem(6),
+      quantity: 2,
+      product: { ...baseItem(6).product, inventoryPolicy: "SINGLE_UNIT" },
+    },
+  ];
+  const service = new CartService(
+    {
+      cart: { findMany: async () => rows },
+    } as unknown as PrismaService,
+    {} as ProductsService,
+  );
+
+  const cart = await service.getCart({ userId: 5 });
+
+  assert.deepEqual(
+    cart.map((item) => item.availability.status),
+    [
+      "AVAILABLE",
+      "PRODUCT_UNAVAILABLE",
+      "SKU_UNAVAILABLE",
+      "OUT_OF_STOCK",
+      "INSUFFICIENT_STOCK",
+      "QUANTITY_INVALID",
+    ],
+  );
+  assert.equal(cart[0].availability.available, true);
+  assert.ok(cart.slice(1).every((item) => !item.availability.available));
+});

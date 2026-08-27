@@ -4,8 +4,18 @@ import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceho
 import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 
 interface TestimonialBlockProps {
-  module: { content: Record<string, any>; styleConfig?: Record<string, any> };
+  module: {
+    content: { testimonials?: TestimonialItem[]; aspectRatio?: string };
+    styleConfig?: { bgColor?: string };
+  };
   editMode?: boolean;
+}
+
+interface TestimonialItem {
+  image?: string;
+  content?: string;
+  name?: string;
+  meta?: string;
 }
 
 const GOLD = "#6E7477";
@@ -23,7 +33,7 @@ export default function TestimonialBlock({ module, editMode }: TestimonialBlockP
   const TESTIMONIAL_RATIO = resolveContractAspectRatio("testimonials", "authorizedPhoto", content.aspectRatio, "desktop");
   const visibleList = editMode
     ? list
-    : list.filter((item: any) => Boolean(item?.image && item?.content));
+    : list.filter((item) => Boolean(item.image && item.content));
 
   if (!visibleList.length && !editMode) return null;
 
@@ -67,7 +77,7 @@ export default function TestimonialBlock({ module, editMode }: TestimonialBlockP
             .hc-voices__quote { font-size: 21px; }
           }
         `}</style>
-        {visibleList.map((item: any, index: number) => (
+        {visibleList.map((item, index) => (
           <div key={`${item.name}-${index}`} className="hc-voices__row">
             <figure className="hc-voices__figure" style={{ margin: 0, minWidth: 0 }} data-content-role="authorizedPhoto" data-editor-field={`testimonials.${index}.image`}>
               <div className="hc-voices__image">

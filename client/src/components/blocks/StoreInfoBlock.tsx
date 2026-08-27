@@ -4,9 +4,10 @@ import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 import { usePublicSiteSettings } from "@/hooks/usePublicSiteSettings";
+import type { RenderablePageModule } from "@/types/pageModule";
 
 interface StoreInfoBlockProps {
-  module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 

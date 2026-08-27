@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Card, Table, Tag, Button, Popover, Tooltip, Input, Select, Space } from 'antd';
+import type { TableColumnsType } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { settingsApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
@@ -7,6 +8,14 @@ import AdminPageHeader from '@/components/common/AdminPageHeader';
 import { AdminLoadingState, AdminEmptyState, AdminErrorState } from '@/components/common/AdminDataStates';
 import type { PaginatedResult } from '@/types';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
+
+interface AuditLogRow {
+  id: number;
+  createdAt: string;
+  action: string;
+  detail: string | null;
+  user?: { username?: string | null; realName?: string | null } | null;
+}
 
 /** 详情列：JSON 结构化摘要 + Popover 查看全文；纯文本 ellipsis + Tooltip（审计 P3 体验项） */
 function DetailCell({ value }: { value: string | null }) {
@@ -50,7 +59,7 @@ function DetailCell({ value }: { value: string | null }) {
 export default function AuditLogs() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<AuditLogRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState('');
@@ -61,18 +70,18 @@ export default function AuditLogs() {
     setLoading(true); setError('');
     try {
       const res = await settingsApi.getLogs({ page: p, pageSize: 30, keyword: keyword || undefined, module });
-      const data = unwrapResponse<PaginatedResult<any>>(res);
+      const data = unwrapResponse<PaginatedResult<AuditLogRow>>(res);
       setLogs(data?.list || []);
       setTotal(data?.total || 0);
-    } catch (e: any) { setError(getSafeAdminErrorMessage(e, '操作日志加载失败，请稍后重新加载。')); }
+    } catch (error: unknown) { setError(getSafeAdminErrorMessage(error, '操作日志加载失败，请稍后重新加载。')); }
     finally { setLoading(false); }
   }, [page, keyword, module]);
 
   useEffect(() => { void load(); }, [load]);
 
-  const columns = [
+  const columns: TableColumnsType<AuditLogRow> = [
     { title: '时间', dataIndex: 'createdAt', width: 160, render: (v: string) => <span style={{ fontSize: 12, lineHeight: '18px', color: 'var(--adm-muted)', fontVariantNumeric: 'tabular-nums' }}>{v}</span> },
-    { title: '操作人', dataIndex: 'user', render: (u: any) => <span style={{ fontWeight: 500, color: 'var(--adm-ink)' }}>{u?.realName || u?.username || '系统'}</span> },
+    { title: '操作人', dataIndex: 'user', render: (user: AuditLogRow['user']) => <span style={{ fontWeight: 500, color: 'var(--adm-ink)' }}>{user?.realName || user?.username || '系统'}</span> },
     { title: '操作', dataIndex: 'action', width: 120, render: (v: string) => <Tag>{v}</Tag> },
     { title: '详情', dataIndex: 'detail', render: (v: string) => <DetailCell value={v} /> },
   ];

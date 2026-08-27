@@ -3,20 +3,7 @@ import { Button, Tag, message } from "antd";
 import { DatabaseOutlined, LoadingOutlined } from "@ant-design/icons";
 import { unwrapResponse } from "@/utils/unwrap";
 import { AdminLoadingState } from "@/components/common/AdminDataStates";
-
-/** 获取 token（兼容多种存储方式） */
-function getToken(): string {
-  try {
-    const raw = localStorage.getItem("jewelry-auth");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return parsed?.state?.token || "";
-    }
-  } catch {
-    // Ignore invalid serialized authentication and try the legacy key.
-  }
-  return localStorage.getItem("token") || "";
-}
+import { settingsApi } from "@/services/api";
 
 /** 服务端 /settings/backup 真实返回（读 backup 容器产物目录） */
 interface BackupStatus {
@@ -49,14 +36,9 @@ export default function Settings() {
   const fetchStatus = useCallback(async () => {
     setChecking(true);
     try {
-      const res = await fetch("/api/settings/backup", {
-        method: "GET",
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await settingsApi.getBackupStatus();
       // 展示服务端真实状态：读 backup 容器产物目录，不假报成功
-      const body = await res.json().catch(() => null);
-      const payload = unwrapResponse<BackupStatus>(body) ?? body ?? null;
+      const payload = unwrapResponse<BackupStatus>(res) ?? null;
       setStatus(payload);
       if (payload?.lastBackup) {
         message.success(`最近备份：${formatTime(payload.lastBackup)}`);

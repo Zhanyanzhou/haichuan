@@ -17,6 +17,9 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { BoundedListQueryDto } from '../../common/dto/bounded-list-query.dto';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
+import type OpenAI from 'openai';
 import {
   ClassifyImageDto,
   ClassifyBatchDto,
@@ -65,7 +68,7 @@ export class AiClassifyController {
 
   @Get('records')
   @ApiOperation({ summary: '获取分类记录' })
-  async getRecords(@Query() query: any) {
+  async getRecords(@Query() query: BoundedListQueryDto) {
     return this.aiClassifyService.getRecords(query);
   }
 
@@ -73,7 +76,7 @@ export class AiClassifyController {
   async confirm(
     @Param('id') id: string,
     @Body() dto: ConfirmClassifyDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: StaffPrincipal,
   ) {
     return this.aiClassifyService.confirmClassification(+id, {
       status: dto.status,
@@ -98,7 +101,7 @@ export class AiClassifyController {
     if (!this.kimiService.isAvailable()) {
       throw new ServiceUnavailableException('AI 服务未配置，请先设置 KIMI_API_KEY 环境变量');
     }
-    const messages: any[] = [];
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
     if (dto.systemPrompt) {
       messages.push({ role: 'system', content: dto.systemPrompt });
     }
@@ -116,7 +119,7 @@ export class AiClassifyController {
     if (!this.kimiService.isAvailable()) {
       throw new ServiceUnavailableException('AI 服务未配置，请先设置 KIMI_API_KEY 环境变量');
     }
-    const messages: any[] = [
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       {
         role: 'system',
         content: '你是一位专业的珠宝首饰文案策划师，擅长撰写精美的产品描述。请用优雅、专业的语言描述产品。',

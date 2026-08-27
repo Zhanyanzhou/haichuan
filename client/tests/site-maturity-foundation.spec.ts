@@ -64,10 +64,22 @@ test("Docker 构建只传递公开 Vite 配置且 Nginx 二次隔离非公开页
   expect(dockerfile).toContain('ARG VITE_PUBLIC_SITE_ORIGIN=""');
   expect(dockerfile).toContain('ARG VITE_ANALYTICS_ENABLED="false"');
   expect(compose).toContain("VITE_PUBLIC_SITE_ORIGIN:");
-  expect(compose).not.toMatch(/args:[\s\S]{0,500}(JWT_SECRET|DATABASE_URL)/);
+  const buildArgumentBlocks = Array.from(
+    compose.matchAll(/^\s{6}args:\r?\n((?:^\s{8}.+(?:\r?\n|$))*)/gm),
+    (match) => match[1],
+  );
+  expect(buildArgumentBlocks.length).toBeGreaterThan(0);
+  for (const buildArguments of buildArgumentBlocks) {
+    expect(buildArguments).not.toMatch(/JWT_SECRET|DATABASE_URL/);
+  }
   expect(nginx).toContain("location = /__templates");
   expect(nginx).toContain("TemplateGallery-");
   expect(nginx).toContain("location ~* ^/en(/|$)");
+  expect(nginx).toMatch(
+    /location ~\* \^\/en\(\/\|\$\) \{\s*return 404;/,
+  );
+  expect(nginx).toContain("error_page 404 /404.html;");
+  expect(nginx).toContain("location = /404.html");
   expect(nginx).toContain(
     "location ~* ^/(admin|preview|customer|cart|checkout|partner)(/|$)",
   );
@@ -107,6 +119,62 @@ test("未知公开路径呈现可恢复的品牌 404 且禁止索引", async ({ 
   await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
 });
 
+test("失效作品页禁止索引且不输出 Product 结构化数据", async ({ page }) => {
+  await page.route("**/api/products/public/definitely-not-published**", (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ code: 404, data: null, message: "not found" }),
+    }),
+  );
+  await page.goto("/products/definitely-not-published");
+
+  await expect(
+    page.getByRole("heading", { level: 1, name: "作品暂不可浏览" }),
+  ).toBeVisible();
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
+    "content",
+    /noindex,\s*nofollow/,
+  );
+  await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
+  await expect(
+    page.locator('script[data-structured-data="product"]'),
+  ).toHaveCount(0);
+  await expect(
+    page.locator('script[data-structured-data="product-breadcrumb"]'),
+  ).toHaveCount(0);
+});
+
+test("联系页输出事实型 Organization 与 FAQ Schema 并标记必填语义", async ({ page }) => {
+  await page.goto("/contact");
+
+  await expect(
+    page.locator('script[data-structured-data="organization"]'),
+  ).toHaveCount(1);
+  await expect(
+    page.locator('script[data-structured-data="contact-faq"]'),
+  ).toHaveCount(1);
+
+  const schemaTypes = await page
+    .locator('script[type="application/ld+json"][data-structured-data]')
+    .evaluateAll((scripts) => scripts.map((script) => {
+      const value = JSON.parse(script.textContent || "{}") as { "@type"?: string };
+      return value["@type"];
+    }));
+  expect(schemaTypes).toEqual(expect.arrayContaining(["Organization", "FAQPage"]));
+
+  for (const id of [
+    "cf-name",
+    "cf-phone",
+    "cf-type",
+    "cf-time",
+    "cf-message",
+    "cf-privacy-consent",
+  ]) {
+    await expect(page.locator(`#${id}`)).toHaveAttribute("aria-required", "true");
+  }
+});
+
 test("404 在 390px 视口无横向溢出且键盘焦点清晰", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/missing-on-mobile");
@@ -117,6 +185,14 @@ test("404 在 390px 视口无横向溢出且键盘焦点清晰", async ({ page }
     () => document.documentElement.scrollWidth - window.innerWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("客户中心只暴露公共布局的单一 main 地标", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/customer");
+
+  await expect(page.locator("main")).toHaveCount(1);
+  await expect(page.locator("h1")).toHaveCount(1);
 });
 
 for (const viewport of [

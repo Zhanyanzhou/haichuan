@@ -6,8 +6,9 @@
  */
 import { businessRegionPuckConfig } from "../../../adapters/businessRegion.puck";
 import type { ModuleInspectorSchema } from "../types";
+import type { PuckProps } from "../../../types";
 
-function BusinessRegionSummary({ props }: { props: Record<string, any> }) {
+function BusinessRegionSummary({ props }: { props: PuckProps }) {
   const items = String(props.items ?? "")
     .split("|")
     .filter(Boolean);

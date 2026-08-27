@@ -1,6 +1,5 @@
 import { expect, test, type Page, type Request, type Route } from "@playwright/test";
-
-const ADMIN_TOKEN = "customer-admin-client-test-token";
+import { installAdminSession } from "./fixtures/session-auth";
 
 const customer = {
   id: 42,
@@ -54,24 +53,10 @@ const detail = {
 };
 
 async function authenticateCustomerService(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("token", "customer-admin-client-test-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token: "customer-admin-client-test-token",
-          user: {
-            id: 1,
-            username: "customer-service-test",
-            role: "CUSTOMER_SERVICE",
-            name: "客户服务合同测试员",
-          },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "customer-service-test",
+    realName: "客户服务合同测试员",
+    role: "CUSTOMER_SERVICE",
   });
 }
 
@@ -95,7 +80,7 @@ function isCustomerAdminRequest(request: Request, suffix: string) {
   return new URL(request.url()).pathname.endsWith(suffix);
 }
 
-test("客户档案只读页沿用员工 Bearer，并保留筛选与详情合同", async ({ page }) => {
+test("客户档案只读页沿用员工 Cookie 会话，并保留筛选与详情合同", async ({ page }) => {
   await authenticateCustomerService(page);
   const listRequests: Request[] = [];
   const detailRequests: Request[] = [];
@@ -103,6 +88,7 @@ test("客户档案只读页沿用员工 Bearer，并保留筛选与详情合同"
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path.endsWith("/auth/profile")) return route.fallback();
     if (path.endsWith("/customers/admin/42")) {
       detailRequests.push(request);
       return fulfill(route, detail);
@@ -124,7 +110,7 @@ test("客户档案只读页沿用员工 Bearer，并保留筛选与详情合同"
   await page.goto("/admin/customers");
   await expect(page.getByRole("heading", { name: "客户管理" })).toBeVisible();
   await expect(page.getByText("客户档案合同样本", { exact: true })).toBeVisible();
-  expect(listRequests[0].headers().authorization).toBe(`Bearer ${ADMIN_TOKEN}`);
+  expect(listRequests[0].headers().authorization).toBeUndefined();
   expect(new URL(listRequests[0].url()).searchParams.get("page")).toBe("1");
   expect(new URL(listRequests[0].url()).searchParams.get("pageSize")).toBe("20");
 
@@ -147,7 +133,7 @@ test("客户档案只读页沿用员工 Bearer，并保留筛选与详情合同"
 
   await page.getByRole("button", { name: "查看档案" }).click();
   await expect.poll(() => detailRequests.length).toBe(1);
-  expect(detailRequests[0].headers().authorization).toBe(`Bearer ${ADMIN_TOKEN}`);
+  expect(detailRequests[0].headers().authorization).toBeUndefined();
   expect(isCustomerAdminRequest(detailRequests[0], "/customers/admin/42")).toBe(true);
   const drawer = page.getByRole("dialog", { name: "客户档案 #42" });
   await expect(drawer).toBeVisible();
@@ -161,6 +147,7 @@ test("客户档案列表失败只显示安全本地文案并保留重试入口",
 
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/auth/profile")) return route.fallback();
     if (path.endsWith("/customers/admin")) return fail(route, internalMessage);
     if (path.endsWith("/settings/flags")) {
       return fulfill(route, {
@@ -184,6 +171,7 @@ test("客户档案详情失败不暴露服务端异常并可就地重试", async
 
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/auth/profile")) return route.fallback();
     if (path.endsWith("/customers/admin/42")) return fail(route, internalMessage);
     if (path.endsWith("/customers/admin")) {
       return fulfill(route, { list: [customer], total: 1 });

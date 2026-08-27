@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   createContentTemplateMarker,
   getContentTemplateContract,
@@ -70,7 +70,15 @@ function ContentTemplateRealRendererPreview({
 }: ContentTemplateRendererPreviewProps) {
   const profile = getContentTemplatePreview(moduleType);
   const contract = getContentTemplateContract(moduleType);
-  const component = (puckConfig.components as Record<string, any>)[moduleType];
+  const component = (
+    puckConfig.components as unknown as Record<
+      string,
+      {
+        render?: (props: Record<string, unknown>) => ReactNode;
+        defaultProps?: Record<string, unknown>;
+      }
+    >
+  )[moduleType];
   const frameRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<HTMLDivElement>(null);
   const sourceWidth = viewport === "mobile" ? 390 : 1200;

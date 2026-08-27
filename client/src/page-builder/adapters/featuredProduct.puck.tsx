@@ -60,8 +60,8 @@ function FeaturedProductPreview(props: FeaturedProductPuckProps) {
   }, [productCode, productId]);
 
   const module = useMemo(() => {
-    const result = convertPuckProps("单品焦点推荐", props as any);
-    if (result) (result as any).content.product = toProduct(props.__previewProduct ?? product);
+    const result = convertPuckProps("单品焦点推荐", props);
+    if (result) result.content.product = toProduct(props.__previewProduct ?? product);
     return result;
   }, [product, props]);
 
@@ -99,5 +99,5 @@ export const featuredProductPuckConfig = {
     bgColor: "#FFFFFF",
     locked: false,
   } satisfies FeaturedProductPuckProps,
-  resolvePermissions: (data: any) => data.props?.locked ? { delete: false, drag: false } : {},
+  resolvePermissions: (data: { props?: FeaturedProductPuckProps }) => data.props?.locked ? { delete: false, drag: false } : {},
 };

@@ -14,7 +14,8 @@ import {
   Space,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { partnerApi } from "@/services/api";
+import type { TagProps } from "antd";
+import { partnerApi, type PartnerApplicationStatus } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
@@ -26,7 +27,7 @@ const STATUS_OPTIONS = [
   { value: "SUSPENDED", label: "已暂停", color: "default" },
 ];
 
-const STATUS_META: Record<string, { label: string; color: string }> =
+const STATUS_META: Record<string, { label: string; color: TagProps["color"] }> =
   Object.fromEntries(STATUS_OPTIONS.map((o) => [o.value, o]));
 
 /** 手机号掩码：138****1234（列表中不必要暴露完整号码） */
@@ -62,7 +63,7 @@ export default function PartnerApplications() {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+  const [statusFilter, setStatusFilter] = useState<PartnerApplicationStatus | undefined>(undefined);
   const [keyword, setKeyword] = useState("");
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState<ApplicationRow | null>(null);
@@ -73,7 +74,7 @@ export default function PartnerApplications() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = unwrapResponse(
+      const res = unwrapResponse<{ list?: ApplicationRow[]; total?: number }>(
         await partnerApi.adminGetList({
           page,
           pageSize,
@@ -81,9 +82,9 @@ export default function PartnerApplications() {
           keyword,
         }),
       );
-      setData((res?.list as ApplicationRow[]) || []);
+      setData(res?.list || []);
       setTotal(res?.total || 0);
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "合作申请列表加载失败，请稍后重新加载。"));
     } finally {
       setLoading(false);
@@ -96,10 +97,10 @@ export default function PartnerApplications() {
 
   const openDetail = async (row: ApplicationRow) => {
     try {
-      const full = unwrapResponse(await partnerApi.adminGetById(row.id));
-      setDetail(full as ApplicationRow);
+      const full = unwrapResponse<ApplicationRow>(await partnerApi.adminGetById(row.id));
+      setDetail(full);
       setDetailOpen(true);
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "合作申请详情加载失败，请稍后重新加载。"));
     }
   };
@@ -114,7 +115,7 @@ export default function PartnerApplications() {
       setReviewing(null);
       reviewForm.resetFields();
       await load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "审核提交失败，请检查审核意见后重试。"));
     } finally {
       setSubmitting(false);
@@ -139,7 +140,7 @@ export default function PartnerApplications() {
       width: 100,
       render: (s) => {
         const meta = STATUS_META[s] || { label: s, color: "default" };
-        return <Tag color={meta.color as any}>{meta.label}</Tag>;
+        return <Tag color={meta.color}>{meta.label}</Tag>;
       },
     },
     {
@@ -226,7 +227,7 @@ export default function PartnerApplications() {
         {detail && (
           <Descriptions column={1} bordered size="small">
             <Descriptions.Item label="状态">
-              <Tag color={(STATUS_META[detail.status]?.color as any) || "default"}>
+              <Tag color={STATUS_META[detail.status]?.color || "default"}>
                 {STATUS_META[detail.status]?.label || detail.status}
               </Tag>
             </Descriptions.Item>

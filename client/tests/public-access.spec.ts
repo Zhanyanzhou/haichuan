@@ -4,6 +4,7 @@ import {
   type APIRequestContext,
   type Page,
 } from "@playwright/test";
+import { installCustomerSession } from "./fixtures/session-auth";
 
 const publicRoutes = [
   "/products",
@@ -12,6 +13,7 @@ const publicRoutes = [
   "/search",
 ];
 const apiBaseURL = process.env.PLAYWRIGHT_API_BASE_URL?.replace(/\/$/, "");
+const customerStorageState = process.env.PLAYWRIGHT_CUSTOMER_STORAGE_STATE;
 const useMock = process.env.VITE_USE_MOCK === "true";
 
 const forbiddenProductFields = [
@@ -104,12 +106,12 @@ test.describe("游客公开浏览", () => {
     await page.goto("/partner");
     await expect.poll(() => new URL(page.url()).pathname).toBe("/customer");
 
-    await page.addInitScript(() => localStorage.setItem("customerToken", "partner-route-test"));
     await page.route("**/api/**", (route) => route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ code: 200, data: null, message: "success" }),
     }));
+    await installCustomerSession(page, { id: 7, name: "合作申请测试客户" });
     await page.goto("/partner");
     await expect(page).toHaveURL(/\/customer\?section=partner$/);
     await expect(page.getByRole("heading", { name: "申请成为合作商家" })).toBeVisible();
@@ -190,22 +192,16 @@ test.describe("游客公开浏览", () => {
     await expect(page).toHaveURL(/\/catalog(?:[?#]|$)/);
   });
 
-  test("存在客户令牌时优先请求会员目录", async ({ page }) => {
+  test("存在客户 Cookie 会话时优先请求会员目录", async ({ page }) => {
     test.skip(useMock, "模拟数据模式不发送商品网络请求");
-    await page.addInitScript(() => {
-      localStorage.setItem(
-        "customerToken",
-        "public-access-contract-test-token",
-      );
-    });
+    await installCustomerSession(page, { id: 7, name: "目录合同测试客户" });
     const requestPromise = page.waitForRequest((request) =>
-      request.url().includes("/api/products/catalog"),
+      new URL(request.url()).pathname === "/api/products/catalog",
     );
     await page.goto("/catalog");
     const request = await requestPromise;
-    expect(request.headers().authorization).toBe(
-      "Bearer public-access-contract-test-token",
-    );
+    expect(request.headers().authorization).toBeUndefined();
+    expect(request.headers()["x-session-domain"]).toBe("customer");
   });
 });
 
@@ -277,19 +273,17 @@ test.describe("真实接口公开数据契约", () => {
     }
   });
 
-  test("带会员令牌的目录响应仍使用安全字段白名单", async ({ request }) => {
-    const customerToken = process.env.PLAYWRIGHT_CUSTOMER_TOKEN;
-    test.skip(!customerToken, "设置 PLAYWRIGHT_CUSTOMER_TOKEN 后验证会员目录");
-    await expectSafeCatalogResponse(request, customerToken!);
+  test("带客户 Cookie 会话的目录响应仍使用安全字段白名单", async ({ request }) => {
+    test.skip(!customerStorageState, "设置 PLAYWRIGHT_CUSTOMER_STORAGE_STATE 后验证会员目录");
+    await expectSafeCatalogResponse(request);
   });
 });
 
 async function expectSafeCatalogResponse(
   request: APIRequestContext,
-  customerToken: string,
 ) {
   const response = await request.get(apiUrl("/products/catalog"), {
-    headers: { Authorization: `Bearer ${customerToken}` },
+    headers: { "X-Session-Domain": "customer" },
     params: { page: 1, pageSize: 20 },
   });
   expect(response.status()).toBe(200);

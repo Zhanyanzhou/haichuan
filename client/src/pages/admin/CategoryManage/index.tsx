@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Key } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Form, message } from "antd";
+import { App as AntdApp, Button, Form } from "antd";
 import { FolderOpenOutlined, PlusOutlined } from "@ant-design/icons";
 import { categoryApi } from "@/services/api";
 import type { Category, CategoryInput, CategorySortItem } from "@/types";
@@ -24,6 +24,7 @@ import {
 import "./CategoryManage.css";
 
 export default function CategoryManage() {
+  const { message } = AntdApp.useApp();
   const navigate = useNavigate();
   const [tree, setTree] = useState<CatTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -159,7 +160,7 @@ export default function CategoryManage() {
     setEditing(null);
     form.resetFields();
     form.setFieldsValue({
-      parentId: parentId ?? null,
+      parentId: parentId ?? 0,
       sortOrder: 0,
       isActive: true,
     });
@@ -168,7 +169,7 @@ export default function CategoryManage() {
 
   const openEdit = (node: CatTreeNode) => {
     setEditing(node);
-    form.setFieldsValue({ ...node, parentId: node.parentId ?? null });
+    form.setFieldsValue({ ...node, parentId: node.parentId ?? 0 });
     setModalOpen(true);
   };
 
@@ -191,14 +192,14 @@ export default function CategoryManage() {
     try {
       if (editing) {
         // 编辑:仅非一级才允许带 parentId(一级不支持改归属)
-        if (editing.level !== 1 && values.parentId != null) {
+        if (editing.level !== 1 && Number(values.parentId) > 0) {
           payload.parentId = values.parentId;
         }
         await categoryApi.update(editing.id, payload);
         message.success("分类已更新");
       } else {
-        // 新增:parentId 为 null → 一级;否则二级
-        if (values.parentId != null) payload.parentId = values.parentId;
+        // 新增:parentId 为 0 → 一级;正整数为二级
+        if (Number(values.parentId) > 0) payload.parentId = values.parentId;
         const res = await categoryApi.create(payload);
         const created = unwrapResponse<Category>(res);
         message.success("分类已创建");

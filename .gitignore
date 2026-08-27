@@ -17,7 +17,6 @@ _local_backups/
 backups/
 *.tsbuildinfo
 design-qa/
-/design-qa.md
 design-qa-assets/
 nav-design-qa/
 nav-audit-assets/
@@ -64,7 +63,6 @@ artifacts/
 server/scripts/tmp-*.cjs
 /docker_check.cmd
 /docker_out.txt
-/codex-handoff.md
 /_audio-check.ps1
 
 # Playwright MCP 浏览器工具的快照/日志产物

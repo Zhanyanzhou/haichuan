@@ -5,8 +5,19 @@ import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 
 interface CertificateBlockProps {
-  module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
+  module: {
+    content: { title?: string; subtitle?: string; aspectRatio?: string; certificates?: CertificateItem[] };
+    styleConfig?: { bgColor?: string };
+  };
   editMode?: boolean;
+}
+
+interface CertificateItem {
+  imageUrl?: string;
+  name?: string;
+  desc?: string;
+  focusX?: number;
+  focusY?: number;
 }
 
 const INK = "#181A1B";
@@ -93,7 +104,7 @@ export default function CertificateBlock({ module, editMode }: CertificateBlockP
             .hc-cert-gallery__frame { aspect-ratio: ${CERTIFICATE_RATIO_MOBILE}; }
           }
         `}</style>
-        {list.map((cert: any, i: number) => (
+        {list.map((cert, i) => (
           <figure key={i} style={{ margin: 0, minWidth: 0 }}>
             <div data-editor-field={`certificates.${i}.imageUrl`} className="hc-cert-gallery__frame">
               {cert.imageUrl ? (

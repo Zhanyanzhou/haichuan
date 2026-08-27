@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 type QuotationStatus =
   | "DRAFT"
@@ -63,27 +64,10 @@ function createQuotation(
 }
 
 async function authenticateAdmin(page: Page) {
-  await page.addInitScript(() => {
-    const user = {
-      id: 1,
-      username: "quotation-safety-admin",
-      realName: "报价安全测试管理员",
-      role: "ADMIN",
-      status: "ACTIVE",
-      createdAt: "2026-08-23T00:00:00.000Z",
-    };
-    localStorage.setItem("token", "quotation-safety-test-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token: "quotation-safety-test-token",
-          user,
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "quotation-safety-admin",
+    realName: "报价安全测试管理员",
+    role: "ADMIN",
   });
 }
 
@@ -93,6 +77,7 @@ async function mockQuotationApis(page: Page) {
   await page.route("**/api/**", async (route: Route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path === "/api/auth/profile") return route.fallback();
 
     if (/\/quotations\/\d+\/(confirm|convert)$/.test(path)) {
       dangerousRequests.push(`${request.method()} ${path}`);

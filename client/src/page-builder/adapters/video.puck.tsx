@@ -28,7 +28,7 @@ export interface VideoPuckProps {
 export const videoPuckConfig = {
   label: "单视频",
   render: (props: VideoPuckProps) => (
-    <VideoBlock module={convertPuckProps("视频区块", props as any) as any} />
+    <VideoBlock module={convertPuckProps("视频区块", props)!} />
   ),
   defaultProps: {
     videoUrl: "",
@@ -51,6 +51,6 @@ export const videoPuckConfig = {
     focusY: 50,
     locked: false,
   } satisfies VideoPuckProps,
-  resolvePermissions: (data: any) =>
+  resolvePermissions: (data: { props?: VideoPuckProps }) =>
     data.props?.locked ? { delete: false, drag: false } : {},
 };

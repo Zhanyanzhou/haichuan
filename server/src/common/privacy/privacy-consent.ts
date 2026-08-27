@@ -4,4 +4,4 @@
  * 该值只由服务端落库，客户端不得自行决定版本或时间。更新隐私说明时，
  * 应先同步更新公开说明中的版本标识，再提升该常量并完成发布验收。
  */
-export const PRIVACY_CONSENT_VERSION = "privacy-v1";
+export const PRIVACY_CONSENT_VERSION = "privacy-v2";

@@ -77,9 +77,12 @@ export class KimiService implements OnModuleInit {
         content: response.choices[0]?.message?.content || "",
         usage: response.usage,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       // P1-23：详细错误仅记日志，对外抛通用异常，避免泄露 baseURL/状态等内部信息
-      this.logger.error("Kimi API 调用失败", error?.stack || error);
+      this.logger.error(
+        "Kimi API 调用失败",
+        error instanceof Error ? error.stack : String(error),
+      );
       throw new ServiceUnavailableException("AI 服务暂时不可用，请稍后重试");
     }
   }
@@ -127,8 +130,11 @@ export class KimiService implements OnModuleInit {
         content: response.choices[0]?.message?.content || "",
         usage: response.usage,
       };
-    } catch (error: any) {
-      this.logger.error("Kimi 图片识别失败", error?.stack || error);
+    } catch (error: unknown) {
+      this.logger.error(
+        "Kimi 图片识别失败",
+        error instanceof Error ? error.stack : String(error),
+      );
       throw new ServiceUnavailableException("AI 图片识别服务暂时不可用，请稍后重试");
     }
   }
@@ -137,7 +143,7 @@ export class KimiService implements OnModuleInit {
    * JSON 格式结构化输出
    * 强制 Kimi 以 JSON 格式返回，适合分类、提取等场景
    */
-  async chatJSON<T = any>(
+  async chatJSON<T = unknown>(
     messages: OpenAI.Chat.ChatCompletionMessageParam[],
     options?: {
       temperature?: number;

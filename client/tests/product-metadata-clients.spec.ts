@@ -1,24 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 async function authenticateProductEditor(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("token", "product-metadata-test-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token: "product-metadata-test-token",
-          user: {
-            id: 1,
-            username: "product-metadata-editor",
-            role: "SUPER_ADMIN",
-            name: "商品资料编辑员",
-          },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "product-metadata-editor",
+    realName: "商品资料编辑员",
   });
 }
 
@@ -40,6 +26,7 @@ test("标签字典加载与新建请求保持商品元数据合同", async ({ pa
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path === "/api/auth/profile") return route.fallback();
     if (path === "/api/tags" && request.method() === "POST") {
       writes.push({
         headers: request.headers(),
@@ -77,7 +64,7 @@ test("标签字典加载与新建请求保持商品元数据合同", async ({ pa
   await expect(page.getByText("3", { exact: true })).toBeVisible();
 
   await page.evaluate(() => {
-    document.cookie = "hc_admin_csrf=product-metadata-csrf; path=/";
+    document.cookie = "hc_csrf=product-metadata-csrf; path=/";
   });
   await page.getByRole("button", { name: "新建标签" }).click();
   const dialog = page.getByRole("dialog", { name: "新建标签" });
@@ -86,9 +73,7 @@ test("标签字典加载与新建请求保持商品元数据合同", async ({ pa
   await dialog.getByRole("button", { name: /保\s*存/ }).click();
 
   await expect.poll(() => writes.length).toBe(1);
-  expect(writes[0].headers.authorization).toBe(
-    "Bearer product-metadata-test-token",
-  );
+  expect(writes[0].headers.authorization).toBeUndefined();
   expect(writes[0].headers["x-csrf-token"]).toBe("product-metadata-csrf");
   expect(writes[0].body).toMatchObject({
     name: "节日赠礼",
@@ -108,6 +93,7 @@ test("AI 分类记录、报告与人工确认保持现有请求合同", async ({
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path === "/api/auth/profile") return route.fallback();
     if (
       path === "/api/ai-classify/confirm/7" &&
       request.method() === "PUT"
@@ -155,15 +141,13 @@ test("AI 分类记录、报告与人工确认保持现有请求合同", async ({
   await expect(page.getByText("95%", { exact: true })).toBeVisible();
 
   await page.evaluate(() => {
-    document.cookie = "hc_admin_csrf=product-metadata-csrf; path=/";
+    document.cookie = "hc_csrf=product-metadata-csrf; path=/";
   });
   await page.getByRole("button", { name: "确认结果" }).click();
 
   await expect.poll(() => confirmations.length).toBe(1);
   expect(confirmations[0].url).toBe("/api/ai-classify/confirm/7");
-  expect(confirmations[0].headers.authorization).toBe(
-    "Bearer product-metadata-test-token",
-  );
+  expect(confirmations[0].headers.authorization).toBeUndefined();
   expect(confirmations[0].headers["x-csrf-token"]).toBe(
     "product-metadata-csrf",
   );

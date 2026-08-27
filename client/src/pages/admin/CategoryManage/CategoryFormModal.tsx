@@ -1,4 +1,5 @@
 import {
+  App as AntdApp,
   Form,
   Input,
   InputNumber,
@@ -7,7 +8,6 @@ import {
   Space,
   Switch,
   Upload,
-  message,
   type FormInstance,
   type UploadProps,
 } from "antd";
@@ -33,6 +33,7 @@ function CategoryImageUpload({
   value,
   onChange,
 }: Readonly<{ value?: string; onChange?: (url: string) => void }>) {
+  const { message } = AntdApp.useApp();
   const beforeUpload: NonNullable<UploadProps["beforeUpload"]> = async (
     file,
   ) => {
@@ -87,7 +88,7 @@ export default function CategoryFormModal({
   return (
     <Modal
       className="cat-modal"
-      destroyOnClose
+      forceRender
       title={editing ? "编辑分类" : "新建分类"}
       open={open}
       onCancel={onCancel}
@@ -101,7 +102,7 @@ export default function CategoryFormModal({
         <Form.Item name="parentId" label="父级分类">
           <Select
             options={[
-              { value: null, label: "—— 作为一级分类 ——" },
+              { value: 0, label: "—— 作为一级分类 ——" },
               ...primaryCategories.map((category) => ({
                 value: category.id,
                 label: category.name,

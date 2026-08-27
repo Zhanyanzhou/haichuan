@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type RefObject,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { App as AntdApp, Button, Input, Spin } from "antd";
@@ -27,7 +28,7 @@ import {
   RightOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
-import { Puck, type PuckAction, type UiState } from "@puckeditor/core";
+import { Puck, type Data, type PuckAction, type UiState } from "@puckeditor/core";
 import { useNavigate } from "react-router-dom";
 import { canAccessAdminRoute } from "@/config/adminRouteAccess";
 import { useAuthStore } from "@/store/authStore";
@@ -45,6 +46,7 @@ import {
 import {
   pageDocumentApi,
   personalContentTemplateApi,
+  type PageDocumentResource,
   type PersonalContentTemplate,
 } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -131,6 +133,11 @@ import {
   canonicalizePuckContent,
   canonicalizePageContent,
 } from "./editor-utils";
+import {
+  isPuckDocument,
+  type PuckDocument,
+  type PuckProps,
+} from "@/page-builder/types";
 
 const HiddenPuckHeader = () => <span style={{ display: "none" }} />;
 
@@ -164,6 +171,17 @@ const CANVAS_SCROLL_SPY_TOP_OFFSET = 24;
 let blockIdSequence = 0;
 const PERSONAL_TEMPLATE_CHANGED_EVENT = "haichuan:personal-template-changed";
 
+type CanvasComponentConfig = {
+  label?: string;
+  render: (props: PuckProps) => ReactNode;
+  [key: string]: unknown;
+};
+
+type EditorPuckBlock = {
+  type: string;
+  props: PuckProps & { id: string };
+};
+
 /**
  * 脏标记比较签名:只取 content 的规范化形态(忽略 block id 与键序、不含 zones/ui)。
  * JSON 全等比较会让 Puck 首帧 normalize(补默认键/重排)被误判为用户修改,
@@ -173,9 +191,19 @@ function dataSignature(data: unknown): string {
   return canonicalizePuckContent(data);
 }
 
+function normalizePuckMetadata(value: unknown): PuckProps {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as PuckProps
+    : {};
+}
+
+function getPuckDocument(value: unknown): PuckDocument | null {
+  return isPuckDocument(value) ? value : null;
+}
+
 function createBlockContent(type: string): {
   type: string;
-  props: Record<string, any>;
+  props: PuckProps;
 } {
   const component = (
     puckConfig.components as Record<
@@ -204,7 +232,7 @@ function createBlockContent(type: string): {
  */
 function insertPreparedBlock(
   dispatch: (action: PuckAction) => void,
-  block: { type: string; props: Record<string, any> },
+  block: { type: string; props: PuckProps },
   destinationIndex: number,
 ) {
   const id = String(block.props.id);
@@ -308,7 +336,7 @@ function EditorCanvasShell({
       style={
         {
           "--homepage-editor-preview-height": `${previewViewportHeight}px`,
-        } as any
+        } as CSSProperties
       }
     >
       <StorefrontNavigation
@@ -350,7 +378,7 @@ function CanvasMediaGuard({
   children,
 }: {
   blockType: string;
-  blockProps: Record<string, any>;
+  blockProps: PuckProps;
   children: ReactNode;
 }) {
   const hasMissingAsset = useHasMissingAssets(blockProps);
@@ -562,7 +590,7 @@ function CanvasPageDataSynchronizer({
   pageKey,
   canvasDataSyncVersion,
 }: {
-  data: any;
+  data: PuckDocument;
   pageKey: EditorPageKey;
   canvasDataSyncVersion: number;
 }) {
@@ -600,7 +628,7 @@ function CanvasPageDataSynchronizer({
     // Puck 已以同一份数据挂载时不重复执行昂贵的整页替换；页面切换时
     // currentDataSignature 与目标签名不同，仍会走 setData 完成必要同步。
     if (currentDataSignature === dataSignature) return;
-    dispatch({ type: "setData", data });
+    dispatch({ type: "setData", data: data as Partial<Data> });
     dispatch({ type: "setUi", ui: { itemSelector: null } });
   }, [canvasDataSyncVersion, currentDataSignature, data, dataSignature, dispatch, pageKey]);
 
@@ -2416,7 +2444,7 @@ function InspectorPanel({
   hasUnsavedChanges: boolean;
   saving: boolean;
   onSaveDraft: () => void;
-  onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
+  onSaveAsTemplate: (type: string, props: PuckProps) => void;
   publishIssues: PublishValidationIssue[];
   validationState: PublishValidationState;
 }) {
@@ -2623,7 +2651,7 @@ function EditorBody({
   publishIssues,
   validationState,
 }: {
-  onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
+  onSaveAsTemplate: (type: string, props: PuckProps) => void;
   pageKey: EditorPageKey;
   contentReady: boolean;
   pageLabel: string;
@@ -2737,7 +2765,7 @@ function EditorBody({
   const canvasRef = useRef<HTMLDivElement>(null);
   const previewFrameRef = useRef<HTMLDivElement>(null);
   const visualEditStartRef = useRef(
-    new Map<string, { index: number; item: any }>(),
+    new Map<string, { index: number; item: EditorPuckBlock }>(),
   );
   useEffect(() => {
     appDataRef.current = appData;
@@ -2769,7 +2797,7 @@ function EditorBody({
       if (contentIndex < 0) return;
       const current = currentAppData.content[contentIndex] as {
         type: string;
-        props: { id: string; [key: string]: any };
+        props: PuckProps & { id: string };
       };
       const nextItem = {
         ...current,
@@ -3302,7 +3330,7 @@ export default function HomepageConfig({
   const adminRole = useAuthStore((state) => state.user?.role);
   const canPublish = adminRole === "SUPER_ADMIN" || adminRole === "ADMIN";
   const canEditSiteContent = canAccessAdminRoute(adminRole, "/admin/site-content");
-  const [data, setData] = useState<any>(() => createEditorPageDefault(pageKey));
+  const [data, setData] = useState<PuckDocument>(() => createEditorPageDefault(pageKey));
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishIssues, setPublishIssues] = useState<PublishValidationIssue[]>(
@@ -3338,7 +3366,7 @@ export default function HomepageConfig({
   const [loadAttempt, setLoadAttempt] = useState(0);
   const hasInitializedEditorRef = useRef(false);
   const activePageKeyRef = useRef(pageKey);
-  const latestData = useRef<any>(data);
+  const latestData = useRef<PuckDocument>(data);
   const preserveSavedBaselineOnDataSyncRef = useRef(false);
   const controlledCanvasStateRef = useRef<{
     hasUnsavedChanges: boolean;
@@ -3347,28 +3375,28 @@ export default function HomepageConfig({
   const [canvasDataSyncVersion, setCanvasDataSyncVersion] = useState(0);
   const pageSessionCacheRef = useRef<Record<string, PageSessionCache>>({});
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const dataSignatureRef = useRef("");  const [metadata, setMetadata] = useState<Record<string, any>>({});
-  const latestMetadata = useRef<Record<string, any>>({});
+  const dataSignatureRef = useRef("");  const [metadata, setMetadata] = useState<PuckProps>({});
+  const latestMetadata = useRef<PuckProps>({});
   const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
   // 是否存在尚未发布的草稿修改。
   const [hasPendingDraft, setHasPendingDraft] = useState(false);
   const [publishedNeedsRevalidation, setPublishedNeedsRevalidation] = useState(false);
-  const pendingDraftRef = useRef<any>(null);
+  const pendingDraftRef = useRef<PuckDocument | null>(null);
   const editingDraftSnapshotRef = useRef<{
-    data: any;
-    metadata: Record<string, any>;
+    data: PuckDocument;
+    metadata: PuckProps;
     hasUnsavedChanges: boolean;
     hasPendingDraft: boolean;
     savedSignature: string;
   } | null>(null);
-  const publishedBaselineRef = useRef<any>(null);
-  const publishedDataRef = useRef<any>(null);
+  const publishedBaselineRef = useRef<string | null>(null);
+  const publishedDataRef = useRef<PuckDocument | null>(null);
   // 当前画布是否展示线上已发布版本（“查看线上版本”模式）。
   const [viewingPublished, setViewingPublished] = useState(false);
   // 供画布编辑回调读取最新“查看线上版本”状态，避免闭包过期。
   const viewingPublishedRef = useRef(false);
   // 线上版本的 metadata，供“查看线上版本”时还原。
-  const publishedMetadataRef = useRef<Record<string, any>>({});
+  const publishedMetadataRef = useRef<PuckProps>({});
   const hasProtectedUnsavedChanges =
     hasUnsavedChanges ||
     (viewingPublished &&
@@ -3384,7 +3412,7 @@ export default function HomepageConfig({
   }, [viewingPublished]);
 
   const saveBlockAsTemplate = useCallback(
-    (blockType: string, blockProps: Record<string, any>) => {
+    (blockType: string, blockProps: PuckProps) => {
       const moduleDisplayName = getModuleDisplayName(blockType);
       const layoutData = extractContentTemplateLayoutData(blockType, blockProps);
       if (!layoutData) {
@@ -3498,12 +3526,12 @@ export default function HomepageConfig({
           ),
         },
         components: Object.fromEntries(
-          Object.entries(puckConfig.components).map(([type, component]) => [
+          (Object.entries(puckConfig.components) as unknown as Array<[string, CanvasComponentConfig]>).map(([type, component]) => [
             type,
             {
-              ...(component as any),
-              label: BLOCK_META[type]?.name ?? (component as any).label ?? type,
-              render: (props: Record<string, any>) => {
+              ...component,
+              label: BLOCK_META[type]?.name ?? component.label ?? type,
+              render: (props: PuckProps) => {
                 if (props.isVisible === false) {
                   return (
                     <div className="homepage-editor__hidden-block">
@@ -3514,16 +3542,17 @@ export default function HomepageConfig({
                 // 与公开端同一套渲染规则（2026-08-21 对齐）：
                 // 旧色值规范化此前只在公开端生效，老数据两端颜色可能不同；
                 // 素材缺失检测同理，见 CanvasMediaGuard。
-                const normalizedProps = normalizeLegacyRenderColors(
-                  props,
-                ) as Record<string, any>;
-                const rendered = (component as any).render(normalizedProps);
+                const normalized = normalizeLegacyRenderColors(props);
+                const normalizedProps: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
+                  ? normalized as PuckProps
+                  : {};
+                const rendered = component.render(normalizedProps);
                 // 画布内统一注入 editMode，让 block 区分编辑预览与前台发布
-                const editableBlock = isValidElement(rendered)
-                  ? cloneElement(rendered, { editMode: true } as any)
+                const editableBlock = isValidElement<{ editMode?: boolean }>(rendered)
+                  ? cloneElement(rendered, { editMode: true })
                   : rendered;
                 return (
-                  <CanvasBlockAnchor blockId={props.id} blockType={type}>
+                  <CanvasBlockAnchor blockId={String(props.id ?? "")} blockType={type}>
                     <CanvasMediaGuard
                       blockType={type}
                       blockProps={normalizedProps}
@@ -3601,10 +3630,10 @@ export default function HomepageConfig({
           pageDocumentApi.getAdmin(pageKey),
         ]);
         if (cancelled) return;
-        const publishedDoc = unwrapResponse<any>(publishedResponse);
-        const adminDoc = unwrapResponse<any>(adminResponse);
-        const publishedPuck = publishedDoc?.puckData ?? null;
-        const draftPuck = adminDoc?.puckData ?? null;
+        const publishedDoc = unwrapResponse<PageDocumentResource | null>(publishedResponse);
+        const adminDoc = unwrapResponse<PageDocumentResource | null>(adminResponse);
+        const publishedPuck = getPuckDocument(publishedDoc?.puckData);
+        const draftPuck = getPuckDocument(adminDoc?.puckData);
 
         const nextHasPublished = Boolean(publishedPuck);
         setPublishedNeedsRevalidation(
@@ -3619,7 +3648,7 @@ export default function HomepageConfig({
           canonicalizePageContent(draftPuck, adminDoc?.metadata) !==
             canonicalizePageContent(publishedPuck, publishedDoc?.metadata);
 
-        publishedMetadataRef.current = publishedDoc?.metadata || {};
+        publishedMetadataRef.current = normalizePuckMetadata(publishedDoc?.metadata);
 
         // 展示基准（2026-08-21 用户决策，取代 2026-08-19 已发布优先）：
         // 存在与线上不同的未发布草稿时优先展示草稿——画布应始终等于最新编辑内容，
@@ -3628,9 +3657,10 @@ export default function HomepageConfig({
         if (publishedPuck || draftPuck) {
           const viewingPublishedNow =
             Boolean(publishedPuck) && !nextHasPendingDraft;
-          const displayPuck = nextHasPendingDraft
+          const displayPuck = nextHasPendingDraft && draftPuck
             ? draftPuck
-            : publishedPuck || draftPuck;
+            : publishedPuck ?? draftPuck;
+          if (!displayPuck) return;
           // 旧模板类型(分割面板/图文混排/礼赠指南)在此迁移为新体系类型;
           // 公开渲染器仍保留旧类型分支,已发布历史版本不受影响。
           serverData = ensureEditorPageStructure(
@@ -3639,8 +3669,8 @@ export default function HomepageConfig({
           );
           // 查看线上版本时 metadata 以线上文档为准；草稿文档仅作乐观锁与保存基准。
           const displayMetadata = viewingPublishedNow
-            ? publishedDoc?.metadata || {}
-            : adminDoc?.metadata || {};
+            ? normalizePuckMetadata(publishedDoc?.metadata)
+            : normalizePuckMetadata(adminDoc?.metadata);
           setData(serverData);
           latestData.current = serverData;
           dataSignatureRef.current = dataSignature(serverData);
@@ -3669,13 +3699,13 @@ export default function HomepageConfig({
         }
 
         setHasPendingDraft(nextHasPendingDraft);
-        pendingDraftRef.current = nextHasPendingDraft
+        pendingDraftRef.current = nextHasPendingDraft && draftPuck
           ? ensureEditorPageStructure(pageKey, migratePuckData(draftPuck))
           : null;
-        publishedBaselineRef.current = nextHasPublished
+        publishedBaselineRef.current = publishedPuck
           ? canonicalizePageContent(publishedPuck, publishedDoc?.metadata)
           : null;
-        publishedDataRef.current = nextHasPublished
+        publishedDataRef.current = publishedPuck
           ? ensureEditorPageStructure(pageKey, migratePuckData(publishedPuck))
           : null;
       } catch (error) {
@@ -3711,23 +3741,27 @@ export default function HomepageConfig({
 
   const syncCanvasDataWithoutAdvancingSavedBaseline = useCallback(
     (nextData: unknown) => {
+      const nextDocument = getPuckDocument(nextData);
+      if (!nextDocument) return;
       preserveSavedBaselineOnDataSyncRef.current = true;
-      setData(nextData);
-      latestData.current = nextData;
+      setData(nextDocument);
+      latestData.current = nextDocument;
       setCanvasDataSyncVersion((version) => version + 1);
     },
     [],
   );
 
   const trackEditorData = useCallback((nextData: unknown) => {
-    latestData.current = nextData;
+    const nextDocument = getPuckDocument(nextData);
+    if (!nextDocument) return;
+    latestData.current = nextDocument;
     const controlledState = controlledCanvasStateRef.current;
     if (controlledState) {
       controlledCanvasStateRef.current = null;
       // Puck 会在整页替换时补齐默认字段。服务端草稿采用归一化结果
       // 建立新基线；从线上比较返回时则恢复进入前的已保存基线与脏状态。
       dataSignatureRef.current =
-        controlledState.baselineSignature ?? dataSignature(nextData);
+        controlledState.baselineSignature ?? dataSignature(nextDocument);
       setHasUnsavedChanges(controlledState.hasUnsavedChanges);
       setPublishValidationState("stale");
       setValidationRevision((revision) => revision + 1);
@@ -3735,7 +3769,7 @@ export default function HomepageConfig({
     }
     // 规范化比较(忽略 block id/键序/非 content 字段):
     // Puck 首帧会 normalize 画布数据,JSON 全等会让每次进入编辑器都误报"有未保存修改"
-    const changed = dataSignature(nextData) !== dataSignatureRef.current;
+    const changed = dataSignature(nextDocument) !== dataSignatureRef.current;
     setHasUnsavedChanges(changed);
     setPublishValidationState("stale");
     setValidationRevision((revision) => revision + 1);
@@ -3810,10 +3844,10 @@ export default function HomepageConfig({
         if (!options.silent) message.warning("页面内容仍在加载，请稍后再保存");
         return false;
       }
-      const requestedData = nextData ?? latestData.current;
+      const requestedData = getPuckDocument(nextData) ?? latestData.current;
       const requestedMetadata = latestMetadata.current;
       const save = async (): Promise<boolean> => {
-        const editableData = requestedData ?? latestData.current;
+        const editableData = requestedData;
         const isActivePage = () => targetPageKey === activePageKeyRef.current;
         // 手动保存才点亮按钮 loading 与成功提示；自动保存（silent）完全静默、不打扰。
         if (isActivePage() && !options.silent) {
@@ -3829,11 +3863,11 @@ export default function HomepageConfig({
               pageSessionCacheRef.current[targetPageKey]?.updatedAt ||
               undefined,
           });
-          const savedDocument = unwrapResponse<any>(response);
+          const savedDocument = unwrapResponse<PageDocumentResource | null>(response);
           // 服务端会在保存时移除旧联系电话、门店资料等业务事实副本。
           // 后续画布、缓存与发布校验必须以服务端回包为准，否则当前会话会继续
           // 持有已经从数据库清除的旧字段，直到刷新页面后才恢复一致。
-          const persistedData = savedDocument?.puckData ?? editableData;
+          const persistedData = getPuckDocument(savedDocument?.puckData) ?? editableData;
           const persistedMetadata =
             savedDocument?.metadata &&
             typeof savedDocument.metadata === "object" &&
@@ -3980,8 +4014,8 @@ export default function HomepageConfig({
       const revisionList =
         unwrapResponse<PageDocumentRevision[]>(revisionsResponse) || [];
       setRevisions(revisionList);
-      const adminDoc = unwrapResponse<any>(adminResponse);
-      const draftPuck = adminDoc?.puckData ?? null;
+      const adminDoc = unwrapResponse<PageDocumentResource | null>(adminResponse);
+      const draftPuck = getPuckDocument(adminDoc?.puckData);
       const hasDraft = Boolean(draftPuck);
       const latestPublishedPuck = revisionList[0]?.puckData ?? null;
       const latestPublishedMetadata = revisionList[0]?.metadata ?? null;
@@ -4014,10 +4048,12 @@ export default function HomepageConfig({
   }, [pageKey]);
 
   const applyDraftToCanvas = useCallback(
-    (puckData: any, draftMetadata?: Record<string, any>) => {
+    (puckData: unknown, draftMetadata?: PuckProps) => {
+      const document = getPuckDocument(puckData);
+      if (!document) return;
       const structured = ensureEditorPageStructure(
         pageKey,
-        migratePuckData(puckData),
+        migratePuckData(document),
       );
       controlledCanvasStateRef.current = {
         hasUnsavedChanges: false,
@@ -4050,8 +4086,8 @@ export default function HomepageConfig({
   const loadDraftIntoCanvas = useCallback(async () => {
     try {
       const adminResponse = await pageDocumentApi.getAdmin(pageKey);
-      const adminDoc = unwrapResponse<any>(adminResponse);
-      const draftPuck = adminDoc?.puckData ?? null;
+      const adminDoc = unwrapResponse<PageDocumentResource | null>(adminResponse);
+      const draftPuck = getPuckDocument(adminDoc?.puckData);
       if (!draftPuck) {
         message.info("暂无可编辑的草稿");
         return;
@@ -4229,7 +4265,7 @@ export default function HomepageConfig({
         // 重拉 admin 文档建立新的乐观锁与保存基准
         try {
           const adminResponse = await pageDocumentApi.getAdmin(pageKey);
-          const adminDoc = unwrapResponse<any>(adminResponse);
+          const adminDoc = unwrapResponse<PageDocumentResource | null>(adminResponse);
           pageSessionCacheRef.current[pageKey] = {
             data: publishedDataRef.current,
             metadata: publishedMetadataRef.current,
@@ -4306,11 +4342,12 @@ export default function HomepageConfig({
               revision.version,
               expectedUpdatedAt,
             );
-            const document = unwrapResponse<any>(response);
-            if (document?.puckData) {
+            const document = unwrapResponse<PageDocumentResource | null>(response);
+            const restoredPuck = getPuckDocument(document?.puckData);
+            if (restoredPuck) {
               const restoredData = ensureEditorPageStructure(
                 pageKey,
-                migratePuckData(document.puckData),
+                migratePuckData(restoredPuck),
               );
               controlledCanvasStateRef.current = {
                 hasUnsavedChanges: false,
@@ -4322,7 +4359,7 @@ export default function HomepageConfig({
               // 恢复接口已经把该版本写成服务端草稿；Puck 随后的 setData 回调
               // 不应把这次受控整页替换误判为尚未保存的本地编辑。
               dataSignatureRef.current = dataSignature(restoredData);
-              const restoredMetadata = document.metadata || {};
+              const restoredMetadata = normalizePuckMetadata(document?.metadata);
               setMetadata(restoredMetadata);
               latestMetadata.current = restoredMetadata;
               setHasUnsavedChanges(false);
@@ -4336,7 +4373,7 @@ export default function HomepageConfig({
               editingDraftSnapshotRef.current = null;
               viewingPublishedRef.current = false;
               const restoredUpdatedAt =
-                document.updatedAt || new Date().toISOString();
+                document?.updatedAt || new Date().toISOString();
               const restoredLastSaved = formatEditorTime(restoredUpdatedAt);
               pageSessionCacheRef.current[pageKey] = {
                 data: restoredData,
@@ -4531,8 +4568,8 @@ export default function HomepageConfig({
             undefined,
             persistedDraft?.updatedAt || undefined,
           );
-          const publishedDocument = unwrapResponse<any>(publishResponse);
-          const publishedData = publishedDocument?.puckData ?? publishData;
+          const publishedDocument = unwrapResponse<PageDocumentResource | null>(publishResponse);
+          const publishedData = getPuckDocument(publishedDocument?.puckData) ?? publishData;
           const publishedMetadata =
             publishedDocument?.metadata &&
             typeof publishedDocument.metadata === "object" &&
@@ -4691,7 +4728,7 @@ export default function HomepageConfig({
         <Puck
           key="homepage-editor-canvas"
           config={editorConfig}
-          data={data}
+          data={data as Partial<Data>}
           ui={INITIAL_EDITOR_UI}
           viewports={VIEWPORT_PRESETS}
           permissions={

@@ -43,6 +43,7 @@ import {
 } from "@/utils/adminCommonNav";
 import { canAccessAdminRoute } from "@/config/adminRouteAccess";
 import { AdminSidebar } from "./AdminSidebar";
+import { authApi } from "@/services/api";
 
 /** 浏览器放大或分屏时，优先释放侧栏空间，保证主操作区可用。 */
 const ADMIN_COMPACT_BREAKPOINT = 1024;
@@ -275,8 +276,10 @@ export default function AdminLayout() {
   );
 
   const handleLogout = useCallback(() => {
-    logout();
-    navigate("/admin/login");
+    void authApi.logout().finally(() => {
+      logout();
+      navigate("/admin/login");
+    });
   }, [logout, navigate]);
 
   /* ── 用户菜单 ── */

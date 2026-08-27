@@ -143,11 +143,11 @@ export default function ProductManage() {
       };
       walk(unwrapResponse<Category[]>(response) || []);
       setCategoryOptions(options);
-    } catch (err: any) {
-      reportUnexpectedProductActionError(err, "加载分类");
+    } catch (error: unknown) {
+      reportUnexpectedProductActionError(error, "加载分类");
       message.error(
         getSafeAdminErrorMessage(
-          err,
+          error,
           "分类数据加载失败，请刷新页面后重试。",
         ),
       );
@@ -162,11 +162,11 @@ export default function ProductManage() {
       const response = await productApi.getCounts();
       const data = unwrapResponse<Record<string, number>>(response);
       setCounts(data || {});
-    } catch (err: any) {
-      reportUnexpectedProductActionError(err, "加载统计数量");
+    } catch (error: unknown) {
+      reportUnexpectedProductActionError(error, "加载统计数量");
       message.error(
         getSafeAdminErrorMessage(
-          err,
+          error,
           "商品统计数量加载失败，请刷新页面后重试。",
         ),
       );
@@ -206,7 +206,7 @@ export default function ProductManage() {
         if (requestId !== productRequestIdRef.current) return;
         setProducts(data?.list || []);
         setTotal(data?.total || 0);
-      } catch (requestError: any) {
+      } catch (requestError: unknown) {
         if (requestId !== productRequestIdRef.current) return;
         setError(
           getSafeAdminErrorMessage(
@@ -600,7 +600,7 @@ export default function ProductManage() {
       } else {
         message.error("复制失败：服务端未返回有效的商品数据，请重试");
       }
-    } catch (requestError: any) {
+    } catch (requestError: unknown) {
       reportUnexpectedProductActionError(requestError, "复制商品");
       message.error(
         getSafeAdminErrorMessage(

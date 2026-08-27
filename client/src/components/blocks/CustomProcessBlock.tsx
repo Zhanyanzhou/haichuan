@@ -3,8 +3,19 @@ import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 
 interface CustomProcessBlockProps {
-  module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
+  module: {
+    content: { title?: string; subtitle?: string; steps?: CustomProcessStep[] };
+    styleConfig?: { bgColor?: string };
+  };
   editMode?: boolean;
+}
+
+interface CustomProcessStep {
+  number?: string;
+  image?: string;
+  en?: string;
+  name?: string;
+  desc?: string;
 }
 
 const INK = "#181A1B";
@@ -114,7 +125,7 @@ export default function CustomProcessBlock({ module, editMode }: CustomProcessBl
             .hc-journey__en { margin-top: 6px; }
           }
         `}</style>
-        {list.map((step: any, i: number) => (
+        {list.map((step, i) => (
           <li key={step.number || i} className="hc-journey__step" data-editor-field={`steps.${i}`}>
             {step.image ? (
               <img className="hc-journey__image" src={step.image} alt={step.name || ""} loading="lazy" decoding="async" />

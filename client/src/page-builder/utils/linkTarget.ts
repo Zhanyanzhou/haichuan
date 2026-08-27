@@ -80,19 +80,20 @@ export function resolveItemLinkUrl(
  * 有三件套痕迹(用户在新面板操作过)完全信任,仅旧数据(无三件套)回退裸字段。
  */
 export function resolvePrefixedLinkTarget(
-  props: Record<string, any>,
+  props: Record<string, unknown>,
   prefix: string,
   legacyKey?: string,
 ): string {
   const targetType = props[`${prefix}TargetType`];
   const productCode = props[`${prefix}ProductCode`];
   const productId = props[`${prefix}ProductId`];
+  const linkUrl = props[`${prefix}LinkUrl`];
   if (targetType != null || productCode != null || productId != null) {
     return resolveLinkTargetUrl({
-      targetType,
-      productCode,
-      productId,
-      linkUrl: props[`${prefix}LinkUrl`],
+      targetType: typeof targetType === "string" ? targetType : undefined,
+      productCode: typeof productCode === "string" ? productCode : undefined,
+      productId: typeof productId === "string" || typeof productId === "number" ? productId : undefined,
+      linkUrl: typeof linkUrl === "string" ? linkUrl : undefined,
     });
   }
   return legacyKey

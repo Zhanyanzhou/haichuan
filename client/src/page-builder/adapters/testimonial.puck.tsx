@@ -11,7 +11,7 @@ export interface TestimonialPuckProps {
 
 export const testimonialPuckConfig = {
   render: (props: TestimonialPuckProps) => {
-    const module = convertPuckProps("真实评价与实拍", props as any);
+    const module = convertPuckProps("真实评价与实拍", props);
     return <TestimonialBlock module={module as NonNullable<typeof module>} editMode />;
   },
   defaultProps: {
@@ -21,5 +21,5 @@ export const testimonialPuckConfig = {
     bgColor: "#FFFFFF",
     locked: false,
   } satisfies TestimonialPuckProps,
-  resolvePermissions: (data: any) => data.props?.locked ? { delete: false, drag: false } : {},
+  resolvePermissions: (data: { props?: TestimonialPuckProps }) => data.props?.locked ? { delete: false, drag: false } : {},
 };

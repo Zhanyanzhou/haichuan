@@ -19,6 +19,10 @@ import { PartnerApplicationQueryDto } from './dto/partner-application-query.dto'
 import { CustomerAuthGuard } from '../customers/customer-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import type {
+  CustomerRequest,
+  StaffRequest,
+} from '../../common/security/authenticated-principal';
 
 // 鉴权说明：全局 JwtAuthGuard 拒绝客户令牌。
 // - 客户侧接口用 @Public() 旁通全局守卫，再由方法级 CustomerAuthGuard 完成客户鉴权；
@@ -33,7 +37,7 @@ export class PartnerApplicationsController {
   @UseGuards(CustomerAuthGuard)
   @Get('me')
   @ApiOperation({ summary: '获取我的最近申请与当前合作状态' })
-  getMyApplication(@Req() request: any) {
+  getMyApplication(@Req() request: CustomerRequest) {
     return this.service.findMyLatest(request.customer.id);
   }
 
@@ -42,7 +46,7 @@ export class PartnerApplicationsController {
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post()
   @ApiOperation({ summary: '提交合作申请' })
-  submit(@Req() request: any, @Body() dto: CreatePartnerApplicationDto) {
+  submit(@Req() request: CustomerRequest, @Body() dto: CreatePartnerApplicationDto) {
     return this.service.submit(request.customer.id, dto);
   }
 
@@ -51,7 +55,7 @@ export class PartnerApplicationsController {
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Put('me')
   @ApiOperation({ summary: '补充资料 / 被驳回后重新提交（新建历史版本）' })
-  resubmit(@Req() request: any, @Body() dto: CreatePartnerApplicationDto) {
+  resubmit(@Req() request: CustomerRequest, @Body() dto: CreatePartnerApplicationDto) {
     // 与 submit 同逻辑：新增一条历史记录，保留旧版本
     return this.service.submit(request.customer.id, dto);
   }
@@ -80,7 +84,7 @@ export class PartnerApplicationsController {
   @Put(':id/review')
   @ApiOperation({ summary: '审核合作申请（通过/补充/驳回/暂停）' })
   review(
-    @Req() request: any,
+    @Req() request: StaffRequest,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ReviewPartnerApplicationDto,
   ) {

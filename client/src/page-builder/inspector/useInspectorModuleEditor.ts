@@ -17,18 +17,19 @@ import {
   cloneModuleProps,
   getInspectorDevice,
 } from "../../pages/admin/HomepageConfig/editor-utils";
+import type { PuckProps } from "../types";
 
 export interface InspectorModuleEditor {
   moduleType: string;
-  props: Record<string, any>;
+  props: PuckProps;
   device: "desktop" | "mobile";
   /** 是否存在未保存的本模块修改（相对基线浅比较） */
   dirty: boolean;
   /** 写入 props 补丁（即时同步画布） */
-  update: (patch: Record<string, any>) => void;
+  update: (patch: PuckProps) => void;
   /** 将一次恢复操作写成明确的 before/after 历史事务。 */
   updateHistoryTransaction: (
-    patch: Record<string, any> | ((props: Record<string, any>) => Record<string, any>),
+    patch: PuckProps | ((props: PuckProps) => PuckProps),
   ) => void;
   /** 恢复事务闭合期间为 true，供恢复按钮阻止重复提交。 */
   historyTransactionPending: boolean;
@@ -54,12 +55,12 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
   );
   const historyTransactionRef = useRef(0);
 
-  const props = (selectedItem?.props || {}) as Record<string, any>;
+  const props = (selectedItem?.props || {}) as PuckProps;
   const moduleType = selectedItem?.type || "";
-  const selectedKey = props.id || moduleType;
+  const selectedKey = typeof props.id === "string" ? props.id : moduleType;
   const content = appData.content as Array<{
     type: string;
-    props: { id: string; [key: string]: any };
+    props: PuckProps & { id: string };
   }>;
   const index = useMemo(
     () => content.findIndex((item) => item.props?.id === props.id),
@@ -69,7 +70,7 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
   // 基线 = 面板打开（或上次撤销后重新记录）时的 props 快照。
   // 保存模型为「顶栏保存 + 2 秒静默自动保存」，无面板级 saving 信号；
   // 撤销在自动保存防抖窗口内最有价值，历史修改由发布版本兜底。
-  const baselineRef = useRef<Map<string, Record<string, any>>>(new Map());
+  const baselineRef = useRef<Map<string, PuckProps>>(new Map());
 
   useEffect(() => {
     if (!selectedItem || !selectedKey) return;
@@ -83,7 +84,7 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
 
   if (!selectedItem) return null;
 
-  const update = (patch: Record<string, any>) => {
+  const update = (patch: PuckProps) => {
     if (index < 0 || historyTransactionPending) return;
     const nextItem = {
       ...content[index],

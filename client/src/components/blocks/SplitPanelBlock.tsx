@@ -1,13 +1,10 @@
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
+import type { RenderablePageModule } from "@/types/pageModule";
 
 interface SplitPanelBlockProps {
-  module: {
-    content: Record<string, any>;
-    layoutConfig?: Record<string, any>;
-    styleConfig?: Record<string, any>;
-  };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 
@@ -21,7 +18,7 @@ export default function SplitPanelBlock({
   module,
   editMode,
 }: SplitPanelBlockProps) {
-  const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
+  const { content, layoutConfig, styleConfig } = module;
   const { image, title, subtitle, body, buttonText, linkUrl } = content;
   const template = layoutConfig.template || "imageLeft";
   const split = layoutConfig.split || "50-50";

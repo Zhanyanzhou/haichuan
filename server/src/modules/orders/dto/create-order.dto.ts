@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, MaxLength, Min, Validate, ValidateNested, ArrayMinSize, ArrayMaxSize, ValidatorConstraint, ValidatorConstraintInterface, ValidationArguments } from 'class-validator';
-import { CustomStage } from '@prisma/client';
+import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength, Validate, ValidateNested, ArrayMinSize, ArrayMaxSize, ValidatorConstraint, ValidatorConstraintInterface, ValidationArguments } from 'class-validator';
+import { CustomStage, OrderStatus } from '@prisma/client';
 
 /** 单品数量上限，与 OrdersService.normalizeItems 保持一致 */
 const MAX_ITEM_QUANTITY = 99;
@@ -98,8 +98,8 @@ export class ShipOrderDto {
 /** 订单状态变更 DTO（仅允许 COMPLETED / CANCELLED 等非交易关键转换；
  *  PENDING_SHIP 由付款审核进入，SHIPPED 由专用发货接口进入） */
 export class UpdateOrderStatusDto {
-  @IsString()
-  status!: string;
+  @IsEnum(OrderStatus)
+  status!: OrderStatus;
 
   @IsOptional()
   @IsString()
@@ -111,28 +111,38 @@ export class UpdateOrderStatusDto {
 export class UpdateOrderAmountDto {
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99_999_999.99)
   discountAmount?: number;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(-99_999_999.99)
+  @Max(99_999_999.99)
   adjustmentAmount?: number;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(9_999_999_999.99)
   finalAmount?: number;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99_999_999.99)
   depositAmount?: number;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99_999_999.99)
   balanceAmount?: number;
 
-  @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(500)
-  reason?: string;
+  reason!: string;
 }
 
 /** 修改收货地址 DTO（已发货/已完成订单不可改） */

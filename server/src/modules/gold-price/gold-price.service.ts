@@ -7,6 +7,10 @@ import { Cron, CronExpression } from "@nestjs/schedule";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 @Injectable()
 export class GoldPriceService {
   private readonly logger = new Logger(GoldPriceService.name);
@@ -147,8 +151,9 @@ export class GoldPriceService {
         data: { price, source: "AUTO", remark: source, recordDate: new Date() },
       });
       this.logger.log(`金价自动更新成功：¥${price}/g（${source}）`);
-    } catch (e: any) {
-      this.logger.error(`金价自动更新失败（${source}）：${e?.message || e}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`金价自动更新失败（${source}）：${message}`);
     } finally {
       clearTimeout(timer);
     }
@@ -160,7 +165,8 @@ export class GoldPriceService {
    * （goldPrice/latestPrice/au9999/Au9999）。数据源字段映射可按实际返回调整。
    */
   private extractPrice(data: unknown): number | null {
-    const pick = (obj: any): number | null => {
+    const pick = (value: unknown): number | null => {
+      if (!isRecord(value)) return null;
       for (const key of [
         "price",
         "goldPrice",
@@ -168,7 +174,7 @@ export class GoldPriceService {
         "au9999",
         "Au9999",
       ]) {
-        const n = Number(obj?.[key]);
+        const n = Number(value[key]);
         if (Number.isFinite(n) && n > 0) return n;
       }
       return null;
@@ -185,9 +191,8 @@ export class GoldPriceService {
     const direct = pick(data);
     if (direct) return direct;
 
-    const inner = (data as any)?.data;
-    if (inner && typeof inner === "object") {
-      return this.extractPrice(inner);
+    if (isRecord(data) && data.data !== undefined) {
+      return this.extractPrice(data.data);
     }
     return null;
   }

@@ -30,7 +30,7 @@ export interface EffectiveVisualNode {
   };
 }
 
-type UnknownRecord = Record<string, any>;
+type UnknownRecord = Record<string, unknown>;
 
 export function isVisualRecord(value: unknown): value is UnknownRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -103,18 +103,23 @@ export function resolveVisualNode(
         : undefined,
       typography: typography
         ? {
-            sizeLevel: ["xs", "sm", "md", "lg", "xl"].includes(typography.sizeLevel)
-              ? typography.sizeLevel
+            sizeLevel: typeof typography.sizeLevel === "string"
+              && ["xs", "sm", "md", "lg", "xl"].includes(typography.sizeLevel)
+              ? typography.sizeLevel as EffectiveVisualNode["typography"] extends infer T
+                ? T extends { sizeLevel?: infer S } ? S : never
+                : never
               : undefined,
-            align: ["left", "center", "right"].includes(typography.align)
-              ? typography.align
+            align: typeof typography.align === "string"
+              && ["left", "center", "right"].includes(typography.align)
+              ? typography.align as "left" | "center" | "right"
               : undefined,
             color: typeof typography.color === "string" ? typography.color : undefined,
             maxLines: Number.isFinite(Number(typography.maxLines))
               ? clamp(typography.maxLines, 1, 12, 4)
               : undefined,
-            safeBand: ["none", "light", "dark"].includes(typography.safeBand)
-              ? typography.safeBand
+            safeBand: typeof typography.safeBand === "string"
+              && ["none", "light", "dark"].includes(typography.safeBand)
+              ? typography.safeBand as "none" | "light" | "dark"
               : undefined,
             lineHeight: Number.isFinite(Number(typography.lineHeight))
               ? clamp(typography.lineHeight, 1, 2.5, 1.5)
@@ -222,7 +227,7 @@ export function setVisualOverridePath(
   let cursor = root;
   for (const key of path.slice(0, -1)) {
     cursor[key] = isVisualRecord(cursor[key]) ? { ...cursor[key] } : {};
-    cursor = cursor[key];
+    cursor = cursor[key] as UnknownRecord;
   }
   const leaf = path[path.length - 1];
   if (value === undefined || value === "") delete cursor[leaf];

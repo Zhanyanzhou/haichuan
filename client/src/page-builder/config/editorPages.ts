@@ -11,6 +11,7 @@ import {
   getContentTemplatePageRule,
   isContentTemplateAllowedForPage,
 } from "@/page-builder/generated/contentTemplates.generated";
+import type { PuckBlock, PuckDocument } from "@/page-builder/types";
 
 export const EDITOR_PAGE_KEYS = [
   "home",
@@ -238,14 +239,14 @@ export function createEditorPageDefault(key: EditorPageKey) {
 }
 
 function placeBusinessRegion(
-  content: any[],
-  businessRegionBlock: any,
+  content: PuckBlock[],
+  businessRegionBlock: PuckBlock,
 ) {
   const contentWithoutBusinessRegion = content.filter(
-    (block: any) => block?.type !== "业务功能区",
+    (block) => block?.type !== "业务功能区",
   );
   const firstVisibleBrandIndex = contentWithoutBusinessRegion.findIndex(
-    (block: any) =>
+    (block) =>
       block?.props?.isVisible !== false && Boolean(getContentTemplateContract(block?.type || "")),
   );
   // 隐藏备选块和网站设置不参与公开顺序；固定业务区只跟随首个真正可见的品牌模块。
@@ -259,11 +260,11 @@ function placeBusinessRegion(
  * 已发布的旧「关于海川」曾使用大面积金黄色山水与室内图。
  * 仅迁移这两个已知资源地址；新上传或重新发布的视觉不会被改写。
  */
-function migrateLegacyAboutVisuals(key: EditorPageKey, data: any) {
+function migrateLegacyAboutVisuals<T extends PuckDocument>(key: EditorPageKey, data: T): T {
   if (key !== "about" || !Array.isArray(data?.content)) return data;
 
   let changed = false;
-  const content = data.content.map((block: any) => {
+  const content = data.content.map((block) => {
     const desktopImage = block?.props?.desktopImage;
     const replacement = typeof desktopImage === "string"
       ? LEGACY_ABOUT_VISUALS[desktopImage]
@@ -281,20 +282,20 @@ function migrateLegacyAboutVisuals(key: EditorPageKey, data: any) {
     };
   });
 
-  return changed ? { ...data, content } : data;
+  return (changed ? { ...data, content } : data) as T;
 }
 
 /**
  * 旧发布文档可能包含当前页面能力矩阵已禁止的模块。
  * 读取时过滤副本，不回写或升级原始草稿/发布快照。
  */
-function normalizePageCapabilities(key: EditorPageKey, data: any) {
+function normalizePageCapabilities<T extends PuckDocument>(key: EditorPageKey, data: T): T {
   if (!data || typeof data !== "object") return data;
   const rule = getContentTemplatePageRule(key);
   if (!rule) return data;
 
   const isAllowed = (
-    block: any,
+    block: PuckBlock,
     allowBusinessRegion: boolean,
     allowTemplate: boolean,
   ) => block?.type === "业务功能区"
@@ -307,7 +308,8 @@ function normalizePageCapabilities(key: EditorPageKey, data: any) {
     allowTemplate = true,
   ) => {
     if (!Array.isArray(blocks)) return blocks;
-    const filtered = blocks.filter((block) =>
+    const filtered = blocks.filter((block): block is PuckBlock =>
+      Boolean(block && typeof block === "object" && !Array.isArray(block)) &&
       isAllowed(block, allowBusinessRegion, allowTemplate));
     if (filtered.length !== blocks.length) changed = true;
     return filtered;
@@ -327,11 +329,11 @@ function normalizePageCapabilities(key: EditorPageKey, data: any) {
       )
     : data.zones;
   if (!changed) return data;
-  return { ...data, content, ...(data.zones ? { zones } : {}) };
+  return { ...data, content, ...(data.zones ? { zones } : {}) } as T;
 }
 
 /** 规范化已知旧视觉，并为既有草稿补齐固定业务区。 */
-export function ensureEditorPageStructure(key: EditorPageKey, data: any) {
+export function ensureEditorPageStructure<T extends PuckDocument>(key: EditorPageKey, data: T): T {
   const normalizedData = normalizePageCapabilities(
     key,
     migrateLegacyAboutVisuals(key, data),
@@ -342,7 +344,7 @@ export function ensureEditorPageStructure(key: EditorPageKey, data: any) {
     ? normalizedData.content
     : [];
   const existingBusinessRegion = content.find(
-    (block: any) => block.type === "业务功能区",
+    (block) => block.type === "业务功能区",
   );
 
   const businessRegionBlock = {
@@ -358,5 +360,5 @@ export function ensureEditorPageStructure(key: EditorPageKey, data: any) {
   return {
     ...normalizedData,
     content: placeBusinessRegion(content, businessRegionBlock),
-  };
+  } as T;
 }

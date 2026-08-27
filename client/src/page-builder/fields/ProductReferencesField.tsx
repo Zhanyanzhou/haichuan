@@ -113,9 +113,10 @@ export default function ProductReferencesField({
       .then((rows) => {
         if (!controller.signal.aborted) setSelectedRows(rows);
       })
-      .catch((requestError) => {
+      .catch((requestError: unknown) => {
         if (!controller.signal.aborted && codes.length + oldIds.length > 0) {
-          setSelectedError((requestError as any)?.response?.status === 403 ? "FORBIDDEN" : "RESOLVE_FAILED");
+          const status = (requestError as { response?: { status?: unknown } })?.response?.status;
+          setSelectedError(status === 403 ? "FORBIDDEN" : "RESOLVE_FAILED");
         }
       })
       .finally(() => {
@@ -144,9 +145,10 @@ export default function ProductReferencesField({
           setResults(result.rows);
           setTotal(result.total);
         })
-        .catch((requestError) => {
+        .catch((requestError: unknown) => {
           if (version !== requestVersion.current || controller.signal.aborted) return;
-          setError((requestError as any)?.response?.status === 403 ? "FORBIDDEN" : "LOAD_FAILED");
+          const status = (requestError as { response?: { status?: unknown } })?.response?.status;
+          setError(status === 403 ? "FORBIDDEN" : "LOAD_FAILED");
         })
         .finally(() => {
           if (version === requestVersion.current && !controller.signal.aborted) setLoading(false);

@@ -36,7 +36,7 @@ export interface FullBleedPuckProps {
 
 export const fullBleedPuckConfig = {
   render: (props: FullBleedPuckProps) => (
-    <FullBleedBlock module={convertPuckProps("全屏出血图", props as any) as any} editMode />
+    <FullBleedBlock module={convertPuckProps("全屏出血图", props)!} editMode />
   ),
   defaultProps: {
     image: "",
@@ -58,7 +58,7 @@ export const fullBleedPuckConfig = {
     __contentTemplate: createContentTemplateMarker("全屏出血图"),
     locked: false,
   } satisfies FullBleedPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: FullBleedPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

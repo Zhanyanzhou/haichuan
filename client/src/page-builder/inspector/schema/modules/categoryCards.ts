@@ -11,12 +11,13 @@ import { categoryCardsPuckConfig } from "../../../adapters/categoryCards.puck";
 import { puckConfig } from "../../../config/puckConfig";
 import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
+import type { PuckProps } from "../../../types";
 
 interface CategoryCardsVariant {
   moduleType: "分类卡片" | "按场景选购";
   displayName: string;
   purpose: string;
-  defaults?: Record<string, any>;
+  defaults?: PuckProps;
 }
 
 export function makeCategoryCardsSchema(

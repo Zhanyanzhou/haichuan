@@ -21,7 +21,7 @@ export interface SplitPanelPuckProps {
 
 export const splitPanelPuckConfig = {
   render: (props: SplitPanelPuckProps) => (
-    <SplitPanelBlock module={convertPuckProps("分割面板", props as any) as any} editMode />
+    <SplitPanelBlock module={convertPuckProps("分割面板", props)!} editMode />
   ),
   defaultProps: {
     image: "",
@@ -36,7 +36,7 @@ export const splitPanelPuckConfig = {
     textBg: "#fff",
     locked: false,
   } satisfies SplitPanelPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: SplitPanelPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

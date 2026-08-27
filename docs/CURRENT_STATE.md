@@ -118,7 +118,7 @@ products, categories, auth, users, orders, inventory, inquiries, selection-inqui
 
 ## C. 数据库与运行版本（待目标环境验证）
 
-- 当前 Schema gap 由正式 migration 序列承接，包括 `20260824230000_add_product_media_asset_compatibility` 与 `20260825215500_add_release_foundation_schema`；共享基础合同测试已直接读取正式 migration，并验证前向变更、三类回填、Schema 覆盖和 MySQL 标识符长度。两个零消费者历史 draft 已在保留字节等价恢复副本后从 `server/prisma/migration-drafts/` 清理，恢复资产位于 `.codex-artifacts/migration-draft-backups/20260826/`；正式 migration 与 checksum 未改动。
+- 2026-08-27 对当前本机 `jewelry_db` 的只读 `prisma migrate status` 显示：仓库 41 个 migration、已应用 39 个，待应用 `20260825110000_add_personal_content_template_content_defaults` 与 `20260825215500_add_release_foundation_schema`。这只描述本机候选库，不代表目标生产库；目标数据库身份和 ledger 仍未提供，未经批准不执行 migration、不改 checksum、不回填。
 - 全新、无宿主端口、无持久卷的一次性 MySQL 8.0 已从空库顺序应用正式目录 41/41 个 SQL，形成 70 张表；第 41 个 migration 的 21/21 个关键表及目标外键均核验存在，容器随后删除且剩余 0。该演练没有写 `_prisma_migrations`，不能代替目标数据库升级路径。目标数据库和 `_prisma_migrations` 状态仍未确认；在获得精确目标与授权前，不执行 migration、不改 checksum、不连接或回填现有数据库。
 - 当前运行后端可能早于工作树最新构建，因而旧 API 响应不能直接证明当前源码缺少能力；同样，源码和构建通过也不能证明运行数据库已经兼容。
 - 真实游客目录当前只有 3 条不适合品牌验收的测试商品，且均为 `DISPLAY_ONLY`；没有可用于验证直购、售罄、0 库存或 `SINGLE_UNIT` 的代表性公开数据。
@@ -183,7 +183,7 @@ products, categories, auth, users, orders, inventory, inquiries, selection-inqui
 11. **报价确认与转单安全暂停** — 当前后台员工不能代客户确认，转单在客户本人确认状态机、不可变报价快照和所需 Schema 获批实现前返回安全拒绝；这不是完整经营闭环。
 12. **客户通知只有第一批本地候选，不能外推为真实送达闭环** — 认证客户的订单创建和每笔支付确认已在业务事务内原子写 Notification/NotificationDelivery/OutboxEvent，客户 API 绑定本人，Worker 具备抢占、租约、有限重试和保守的未知结果处理；外部投递默认关闭。目标库 migration、真实 MySQL 抢占、授权测试收件人、SMTP 配置、送达/退信，以及发货、退款、售后、咨询等后续事件仍未闭合；旧直接邮件路径尚未统一迁移。
 13. **英文站只有 EN-A 安全轨道，正式英文内容尚未实现** — `/en` 及其子路由当前由外层门禁返回不可用页面，不请求中文业务事实；公开 API 与 SSE 显式携带 locale，服务端 `en` 在访问事实源前返回 unavailable，Nginx 候选配置为初始响应添加 `noindex, nofollow`。虽然候选 Schema 已有 PageDocumentLocalization/ProductTranslation/CategoryTranslation/SeoSnapshot，但 PageDocumentRevision 没有 locale/contentHash，publishedRevisionId 无法可靠证明同语言不可变修订；该设计必须在目标库状态明确后、migration 执行前处理。不能用机器翻译、自动回退或空页伪装完成。
-14. **发布基础仍缺恢复与安全初始化闭环** — 当前仓库只有备份脚本，没有可执行恢复脚本；备份默认同宿主机、明文、7 天保留且媒体归档非原子。完整 seed 会创建默认仓库和已发布样例商品，不适合作为生产首管理员初始化。微信支付证书路径已进入变量合同，但 Compose 尚无证书目录只读挂载；TLS/443 也未实施。这些问题不影响当前本地构建，却阻断隔离候选环境和正式发布。
+14. **发布基础已有安全入口，但尚未完成目标环境闭环** — 仓库已具备受控 `restore.sh` 与一次性首管理员 CLI，2026-08-27 的 Bash 语法检查通过；但尚未在目标环境的独立空库和空媒体卷执行恢复演练。备份仍默认同宿主机、明文、7 天保留且媒体归档非原子。微信支付证书路径已进入变量合同，但 Compose 尚无证书目录只读挂载；TLS/443 也未实施。这些问题不影响当前本地构建，却阻断隔离候选环境和正式发布。
 
 ### 已过时的历史结论（以代码事实为准）
 

@@ -8,6 +8,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { MailerService } from '../../common/mailer/mailer.service';
 import { SmsService } from '../../common/sms/sms.service';
 import { OrdersService } from '../orders/orders.service';
+import { RefreshSessionService, type SessionMetadata } from '../../common/security/refresh-session.service';
 
 type AddressInput = {
   recipientName: string;
@@ -28,6 +29,7 @@ export class CustomersService {
     private readonly jwtService: JwtService,
     private readonly mailer: MailerService,
     private readonly sms: SmsService,
+    private readonly refreshSessions: RefreshSessionService,
   ) {}
 
   private normalizePhone(phone: string) {
@@ -37,7 +39,10 @@ export class CustomersService {
   }
 
   private issueAccessToken(customerId: number) {
-    return this.jwtService.sign({ sub: customerId, type: 'customer' }, { expiresIn: '24h' });
+    return this.jwtService.sign(
+      { sub: customerId, type: 'customer', tokenUse: 'access' },
+      { expiresIn: '15m' },
+    );
   }
 
   private validatePassword(password: string) {
@@ -113,28 +118,34 @@ export class CustomersService {
   }
 
   /** 校验并作废注册验证码（一次性；哈希绑定手机号，换号无效） */
-  private async consumeSmsCode(phone: string, smsCode: string) {
+  private async consumeSmsCode(
+    tx: Prisma.TransactionClient,
+    phone: string,
+    smsCode: string,
+    now: Date,
+  ) {
     const codeHash = createHash('sha256')
       .update(`${phone}:${smsCode.trim()}`)
       .digest('hex');
-    const record = await this.prisma.customerSmsCode.findFirst({
-      where: { phone, codeHash, usedAt: null, expiresAt: { gte: new Date() } },
+    const record = await tx.customerSmsCode.findFirst({
+      where: { phone, codeHash, usedAt: null, expiresAt: { gte: now } },
       orderBy: { createdAt: 'desc' },
     });
     if (!record) throw new BadRequestException('短信验证码错误或已过期');
-    await this.prisma.customerSmsCode.update({
-      where: { id: record.id },
-      data: { usedAt: new Date() },
+    const claimed = await tx.customerSmsCode.updateMany({
+      where: { id: record.id, usedAt: null, expiresAt: { gte: now } },
+      data: { usedAt: now },
     });
+    if (claimed.count !== 1) throw new BadRequestException('短信验证码错误或已过期');
   }
 
-  async register(data: { phone: string; password: string; name?: string; email?: string; smsCode?: string }) {
+  async register(
+    data: { phone: string; password: string; name?: string; email?: string; smsCode?: string },
+    sessionMetadata?: SessionMetadata,
+  ) {
     const phone = this.normalizePhone(data.phone);
-    // 手机验真（开关式）：SMS_VERIFICATION_REQUIRED=true 时强制校验一次性验证码
-    if (this.sms.isRegisterVerificationRequired()) {
-      if (!data.smsCode?.trim()) throw new BadRequestException('请输入短信验证码');
-      await this.consumeSmsCode(phone, data.smsCode);
-    }
+    const smsRequired = this.sms.isRegisterVerificationRequired();
+    if (smsRequired && !data.smsCode?.trim()) throw new BadRequestException('请输入短信验证码');
     const name = data.name?.trim();
     const email = data.email?.trim();
     if (!name || name.length > 50) throw new BadRequestException('请填写有效的称呼');
@@ -142,17 +153,34 @@ export class CustomersService {
       throw new BadRequestException('请填写正确的邮箱地址');
     }
     const password = this.validatePassword(data.password);
-    const existing = await this.prisma.customer.findUnique({ where: { phone } });
-    if (existing?.passwordHash) throw new ConflictException('该手机号已注册，请直接登录');
-
     const passwordHash = await bcrypt.hash(password, 12);
-    const customer = existing
-      ? await this.prisma.customer.update({
-          where: { id: existing.id },
-          data: { name, email: email || existing.email, passwordHash, status: 'ACTIVE' },
-        })
-      : await this.prisma.customer.create({ data: { phone, name, email: email || null, passwordHash } });
-    return this.accountResponse(customer);
+    const now = new Date();
+    const created = await this.prisma.$transaction(async (tx) => {
+      if (smsRequired) {
+        await this.consumeSmsCode(tx, phone, data.smsCode!, now);
+      }
+      const existing = await tx.customer.findUnique({ where: { phone } });
+      if (existing?.passwordHash) throw new ConflictException('该手机号已注册，请直接登录');
+      const customer = existing
+        ? tx.customer.update({
+            where: { id: existing.id },
+            data: { name, email: email || existing.email, passwordHash, status: 'ACTIVE' },
+          })
+        : tx.customer.create({ data: { phone, name, email: email || null, passwordHash } });
+      const resolvedCustomer = await customer;
+      const refreshSession = sessionMetadata
+        ? await this.refreshSessions.issueCustomerInTransaction(
+            tx,
+            resolvedCustomer.id,
+            sessionMetadata,
+          )
+        : undefined;
+      return { customer: resolvedCustomer, refreshSession };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return {
+      ...this.accountResponse(created.customer),
+      refreshSession: created.refreshSession,
+    };
   }
 
   async login(data: { phone: string; password: string }) {
@@ -162,6 +190,15 @@ export class CustomersService {
       throw new UnauthorizedException('手机号或密码不正确');
     }
     if (customer.status === 'DISABLED') throw new UnauthorizedException('该账户已被停用');
+    return this.accountResponse(customer);
+  }
+
+  async resume(customerId: number) {
+    const customer = await this.prisma.customer.findFirst({
+      where: { id: customerId, status: 'ACTIVE' },
+      select: { id: true, phone: true, name: true, email: true },
+    });
+    if (!customer) throw new UnauthorizedException('客户登录已失效');
     return this.accountResponse(customer);
   }
 
@@ -226,14 +263,25 @@ export class CustomersService {
     const newPassword = this.validatePassword(password);
     const tokenHash = createHash('sha256').update(token).digest('hex');
     const record = await this.prisma.customerPasswordResetToken.findUnique({ where: { tokenHash } });
-    if (!record || record.usedAt || record.expiresAt < new Date()) {
+    const now = new Date();
+    if (!record || record.usedAt || record.expiresAt < now) {
       throw new BadRequestException('重置链接无效或已过期，请重新发起找回');
     }
     const passwordHash = await bcrypt.hash(newPassword, 12);
-    await this.prisma.$transaction([
-      this.prisma.customer.update({ where: { id: record.customerId }, data: { passwordHash } }),
-      this.prisma.customerPasswordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
-    ]);
+    await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.customerPasswordResetToken.updateMany({
+        where: { id: record.id, usedAt: null, expiresAt: { gte: now } },
+        data: { usedAt: now },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('重置链接无效或已过期，请重新发起找回');
+      }
+      await tx.customer.update({ where: { id: record.customerId }, data: { passwordHash } });
+      await tx.customerRefreshSession.updateMany({
+        where: { customerId: record.customerId, revokedAt: null },
+        data: { revokedAt: now },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return { message: '密码已重置，请使用新密码登录' };
   }
 
@@ -529,6 +577,10 @@ export class CustomersService {
       this.prisma.notification.updateMany({
         where: { customerId, status: { not: 'ARCHIVED' } },
         data: { status: 'ARCHIVED' },
+      }),
+      this.prisma.customerRefreshSession.updateMany({
+        where: { customerId, revokedAt: null },
+        data: { revokedAt: new Date() },
       }),
       this.prisma.customer.update({
         where: { id: customerId },

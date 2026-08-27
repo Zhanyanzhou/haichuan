@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Descriptions, Drawer, Form, Input, message, Modal, Select, Space, Table, Tag } from 'antd';
+import { App as AntdApp, Button, Descriptions, Drawer, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import { afterSalesApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
@@ -37,6 +37,7 @@ type AfterSalesListItem = AfterSalesCase & {
 };
 
 export default function AfterSalesManage() {
+  const { message, modal } = AntdApp.useApp();
   const role = useAuthStore((state) => state.user?.role);
   // 与 after-sales.controller 类级 @Roles 一致：客服可登记、审核并推进售后。
   const canManageAfterSales = role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'CUSTOMER_SERVICE';
@@ -103,9 +104,8 @@ export default function AfterSalesManage() {
       });
       message.success('售后工单已创建');
       setCreateOpen(false);
-      createForm.resetFields();
       void load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, '售后工单创建失败，请检查必填信息后重试。'));
     } finally {
       setCreating(false);
@@ -115,7 +115,7 @@ export default function AfterSalesManage() {
   const handleReview = (record: AfterSalesListItem, action: 'APPROVED' | 'REJECTED') => {
     let adminNote = '';
     let approvedRefundAmount: number | undefined;
-    Modal.confirm({
+    modal.confirm({
       title: action === 'APPROVED' ? '审核通过该售后工单？' : '驳回该售后工单？',
       content: (
         <div className="space-y-2">
@@ -136,7 +136,7 @@ export default function AfterSalesManage() {
           });
           message.success(action === 'APPROVED' ? '已审核通过' : '已驳回');
           void load();
-        } catch (e: any) {
+        } catch (e: unknown) {
           message.error(getSafeAdminErrorMessage(e, '售后审核未完成，请重新加载工单后重试。'));
         }
       },
@@ -158,7 +158,7 @@ export default function AfterSalesManage() {
     }
     if (nextOptions.length === 0) return;
     let nextStatus = nextOptions[0].value;
-    Modal.confirm({
+    modal.confirm({
       title: '更新售后状态',
       content: (
         <div className="space-y-2">
@@ -171,7 +171,7 @@ export default function AfterSalesManage() {
           await afterSalesApi.updateStatus(record.id, { status: nextStatus, adminNote: adminNote || undefined });
           message.success('状态已更新');
           void load();
-        } catch (e: any) {
+        } catch (e: unknown) {
           message.error(getSafeAdminErrorMessage(e, '售后状态更新失败，请重新加载工单后重试。'));
         }
       },
@@ -301,11 +301,11 @@ export default function AfterSalesManage() {
       <Modal
         title="登记售后工单"
         open={createOpen}
-        onCancel={() => { setCreateOpen(false); createForm.resetFields(); }}
+        onCancel={() => setCreateOpen(false)}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
-        <Form form={createForm} layout="vertical" onFinish={handleCreate}>
+        <Form form={createForm} layout="vertical" onFinish={handleCreate} preserve={false}>
           <Form.Item name="orderId" label="订单 ID" rules={[{ required: true, message: '请输入订单 ID' }]}>
             <Input type="number" min={1} step={1} className="w-full" placeholder="请输入订单 ID（数字）" />
           </Form.Item>
@@ -332,7 +332,7 @@ export default function AfterSalesManage() {
             <Input.TextArea rows={2} />
           </Form.Item>
           <div className="flex justify-end gap-2">
-            <Button onClick={() => { setCreateOpen(false); createForm.resetFields(); }}>取消</Button>
+            <Button onClick={() => setCreateOpen(false)}>取消</Button>
             <Button type="primary" htmlType="submit" loading={creating}>创建工单</Button>
           </div>
         </Form>

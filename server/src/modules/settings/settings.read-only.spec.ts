@@ -17,6 +17,9 @@ test("读取缺失的 SiteSettings 返回安全默认值且不写数据库", asy
   const settings = await service.getSettings();
 
   assert.equal(settings.siteName, "海川珠宝");
+  assert.equal(settings.siteDescription, "珠宝作品与顾问服务");
+  assert.equal(settings.seoTitle, "海川珠宝");
+  assert.equal(settings.seoDescription, "浏览珠宝作品，了解定制与顾问服务。");
   assert.equal(settings.contactPhone, "");
   assert.equal(upsertCalls, 0);
 });

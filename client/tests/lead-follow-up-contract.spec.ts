@@ -1,24 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
+import { installAdminSession } from './fixtures/session-auth';
 
 async function authenticateCustomerService(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem('token', 'lead-follow-up-test-token');
-    localStorage.setItem(
-      'jewelry-auth',
-      JSON.stringify({
-        state: {
-          token: 'lead-follow-up-test-token',
-          user: {
-            id: 7,
-            username: 'customer-service-7',
-            role: 'CUSTOMER_SERVICE',
-            name: '客服七号',
-          },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    id: 7,
+    username: 'customer-service-7',
+    realName: '客服七号',
+    role: 'CUSTOMER_SERVICE',
   });
 }
 
@@ -35,6 +23,7 @@ test('线索跟进请求保持员工鉴权和最小请求体合同', async ({ pa
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path === '/api/auth/profile') return route.fallback();
     if (
       path === '/api/leads/inquiry/17/follow-up' &&
       request.method() === 'POST'
@@ -100,14 +89,12 @@ test('线索跟进请求保持员工鉴权和最小请求体合同', async ({ pa
     .getByPlaceholder('添加内部备注或跟进记录...')
     .fill('已电话确认到店时间');
   await page.evaluate(() => {
-    document.cookie = 'hc_admin_csrf=lead-csrf-token; path=/';
+    document.cookie = 'hc_csrf=lead-csrf-token; path=/';
   });
   await drawer.getByRole('button', { name: '添加跟进' }).click();
 
   await expect.poll(() => writes.length).toBe(1);
-  expect(writes[0].headers.authorization).toBe(
-    'Bearer lead-follow-up-test-token',
-  );
+  expect(writes[0].headers.authorization).toBeUndefined();
   expect(writes[0].headers['x-csrf-token']).toBe('lead-csrf-token');
   expect(writes[0].body).toEqual({
     content: '已电话确认到店时间',

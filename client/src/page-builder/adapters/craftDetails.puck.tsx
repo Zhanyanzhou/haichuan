@@ -31,7 +31,7 @@ export interface CraftDetailsPuckProps {
 
 export const craftDetailsPuckConfig = {
   render: (props: CraftDetailsPuckProps) => (
-    <CraftDetailsBlock module={convertPuckProps("工艺细节", props as any)!} editMode />
+    <CraftDetailsBlock module={convertPuckProps("工艺细节", props)!} editMode />
   ),
   defaultProps: {
     eyebrow: "CRAFT STUDY",
@@ -56,7 +56,7 @@ export const craftDetailsPuckConfig = {
     __contentTemplate: createContentTemplateMarker("工艺细节"),
     locked: false,
   } satisfies CraftDetailsPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: CraftDetailsPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

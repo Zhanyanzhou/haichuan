@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Card, Upload, Table, Tag, Button, Space, message, Row, Col, Input } from 'antd';
+import { App as AntdApp, Card, Upload, Table, Tag, Button, Space, Row, Col, Input } from 'antd';
 import { InboxOutlined, RobotOutlined, CheckCircleOutlined, ThunderboltOutlined, SendOutlined } from '@ant-design/icons';
 import { aiClassifyApi, uploadApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
 import type { RcFile } from 'antd/es/upload';
+import type { UploadProps } from 'antd';
 
 const { Dragger } = Upload;
 
@@ -20,11 +21,26 @@ const chatQuickPrompts = [
   '分析近期高热度珠宝品类的共同特点',
 ];
 
+interface AIClassificationRecord {
+  id: number;
+  predictedCategoryId: number;
+  predictedCategoryName?: string;
+  confidence: number;
+  status: string;
+  createdAt: string;
+}
+
+interface AIClassificationReport {
+  accuracy?: number | string;
+  todayCount?: number;
+}
+
 export default function AIClassify() {
-  const [records, setRecords] = useState<any[]>([]);
+  const { message } = AntdApp.useApp();
+  const [records, setRecords] = useState<AIClassificationRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [report, setReport] = useState<any>(null);
+  const [report, setReport] = useState<AIClassificationReport | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
@@ -37,7 +53,7 @@ export default function AIClassify() {
     setLoading(true);
     try {
       const res = await aiClassifyApi.getRecords({ page, pageSize });
-      const data = unwrapResponse(res);
+      const data = unwrapResponse<{ list?: AIClassificationRecord[]; total?: number }>(res);
       setRecords(data?.list || []);
       setTotal(data?.total || 0);
     } catch { setRecords([]); }
@@ -47,13 +63,13 @@ export default function AIClassify() {
   const loadReport = async () => {
     try {
       const res = await aiClassifyApi.getReport();
-      setReport(unwrapResponse(res));
+      setReport(unwrapResponse<AIClassificationReport>(res));
     } catch { /* 报告拉取失败不影响页面 */ }
   };
 
   useEffect(() => { void loadRecords(); void loadReport(); }, [loadRecords]);
 
-  const customUpload = async (options: any) => {
+  const customUpload: NonNullable<UploadProps['customRequest']> = async (options) => {
     setUploading(true);
     try {
       const file = options.file as RcFile;
@@ -64,14 +80,14 @@ export default function AIClassify() {
       await aiClassifyApi.classify({ imageUrl: url });
       message.success('识别完成');
       loadRecords();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, '图片上传或识别失败，请检查文件格式和网络后重试。'));
     } finally {
       setUploading(false);
     }
   };
 
-  const handleConfirm = async (record: any) => {
+  const handleConfirm = async (record: AIClassificationRecord) => {
     try {
       await aiClassifyApi.confirm(record.id, {
         status: 'confirmed',
@@ -79,7 +95,7 @@ export default function AIClassify() {
       });
       message.success('识别结果已确认');
       loadRecords();
-    } catch (e: any) { message.error(getSafeAdminErrorMessage(e, '识别结果确认失败，请重新加载后重试。')); }
+    } catch (e: unknown) { message.error(getSafeAdminErrorMessage(e, '识别结果确认失败，请重新加载后重试。')); }
   };
 
   const handleReject = async (id: number) => {
@@ -87,7 +103,7 @@ export default function AIClassify() {
       await aiClassifyApi.confirm(id, { status: 'rejected' });
       message.success('识别结果已驳回');
       loadRecords();
-    } catch (e: any) { message.error(getSafeAdminErrorMessage(e, '识别结果驳回失败，请重新加载后重试。')); }
+    } catch (e: unknown) { message.error(getSafeAdminErrorMessage(e, '识别结果驳回失败，请重新加载后重试。')); }
   };
 
   const sendChat = async (text?: string) => {
@@ -103,7 +119,7 @@ export default function AIClassify() {
         ...prev,
         { role: 'assistant', content: data?.content?.trim() || '（AI 未返回内容）' },
       ]);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setChatList((prev) => [
         ...prev,
         { role: 'assistant', content: getSafeAdminErrorMessage(e, 'AI 服务暂时不可用，请稍后重试。') },
@@ -175,7 +191,7 @@ export default function AIClassify() {
             { title: '置信度', dataIndex: 'confidence', width: 100, render: (v: number) => <span className="font-sans font-bold" style={{ color: v > 90 ? "var(--adm-success)" : v > 70 ? "var(--adm-warning)" : "var(--adm-error)" }}>{v}%</span> },
             { title: '状态', dataIndex: 'status', width: 120, render: (v: string) => { const s = sm[v]; return <Tag color={s?.c}>{s?.t}</Tag>; } },
             { title: '时间', dataIndex: 'createdAt', width: 150 },
-            { title: '操作', width: 168, render: (_: any, r: any) => r.status === 'pending_confirm' ? <Space><Button size="small" type="primary" onClick={() => handleConfirm(r)}>确认结果</Button><Button size="small" onClick={() => handleReject(r.id)}>驳回结果</Button></Space> : null },
+            { title: '操作', width: 168, render: (_: unknown, r: AIClassificationRecord) => r.status === 'pending_confirm' ? <Space><Button size="small" type="primary" onClick={() => handleConfirm(r)}>确认结果</Button><Button size="small" onClick={() => handleReject(r.id)}>驳回结果</Button></Space> : null },
           ]} />
       </Card>
     </div>

@@ -268,7 +268,14 @@ export class UploadService {
     }[]
   > {
     if (!files || files.length === 0) throw new BadRequestException('未选择图片');
-    const results: any[] = [];
+    const results: Array<{
+      storageKey: string;
+      type: string;
+      width?: number;
+      height?: number;
+      mimeType: string;
+      fileSize: number;
+    }> = [];
     for (let i = 0; i < files.length; i++) {
       const result = await this.uploadPrivateImage(files[i]);
       results.push({ ...result, type: imageTypes[i] || 'FRONT' });
@@ -317,8 +324,9 @@ export class UploadService {
       } else {
         await pipeline.jpeg({ quality: 90 }).toFile(outputPath);
       }
-    } catch (err: any) {
-      throw new BadRequestException(`图片裁切失败: ${err.message}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "未知错误";
+      throw new BadRequestException(`图片裁切失败: ${message}`);
     }
 
     const relativePath = join('products', 'derived', filename).replace(/\\/g, '/');
@@ -370,8 +378,9 @@ export class UploadService {
       } else {
         await pipeline.jpeg({ quality: 90 }).toFile(outputPath);
       }
-    } catch (err: any) {
-      throw new BadRequestException(`图片裁切失败: ${err.message}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "未知错误";
+      throw new BadRequestException(`图片裁切失败: ${message}`);
     }
 
     const outStat = await stat(outputPath);

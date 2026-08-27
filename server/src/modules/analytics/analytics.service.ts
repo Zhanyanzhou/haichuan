@@ -1,14 +1,21 @@
 import { Injectable } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { PUBLIC_ANALYTICS_CONSENT_VERSION } from "./dto/track-event.dto";
 
 const MAX_METADATA_BYTES = 2048;
 const METADATA_FIELDS_BY_EVENT: Record<string, string[]> = {
   filter: ["filterType", "value"],
+  view_item_list: ["itemCount", "listId"],
   add_to_cart: ["quantity"],
+  remove_from_cart: ["quantity"],
+  view_cart: ["itemCount", "amount"],
   begin_checkout: ["itemCount", "amount"],
+  add_payment_info: ["orderId", "amount", "paymentMethod"],
   order_created: ["orderId", "amount"],
+  purchase: ["orderId", "amount"],
+  refund: ["refundId", "orderId", "amount"],
   submit_selection: ["count"],
   cta_click: ["label"],
 };
@@ -16,7 +23,7 @@ const METADATA_FIELDS_BY_EVENT: Record<string, string[]> = {
 function sanitizeMetadata(
   eventName: string,
   metadata: Record<string, unknown> | undefined,
-) {
+): Prisma.InputJsonObject | undefined {
   if (!metadata) return undefined;
   const allowedFields = METADATA_FIELDS_BY_EVENT[eventName] || [];
   const sanitized: Record<string, string | number> = {};
@@ -92,7 +99,7 @@ export class AnalyticsService {
           deviceType: event.deviceType || null,
           sessionId: event.sessionId || null,
           customerId: null,
-          metadata: safeMeta as any,
+          metadata: safeMeta,
           occurredAt: new Date(),
           retentionExpiresAt: new Date(Date.now() + retentionDays() * 86_400_000),
         },
@@ -112,7 +119,7 @@ export class AnalyticsService {
     const { eventName, page = 1, pageSize = 50, hours = 24 } = params;
     const _p = +page,
       _ps = +pageSize;
-    const where: any = {};
+    const where: Prisma.AnalyticsEventWhereInput = {};
     const dataset = configuredDataset();
     if (!dataset) return { list: [], total: 0, page: _p, pageSize: _ps };
     where.dataset = dataset;

@@ -99,8 +99,8 @@ export default function GoldPrice() {
       message.success('金价已更新');
       setModalOpen(false);
       void load();
-    } catch (e: any) {
-      message.error(getSafeAdminErrorMessage(e, '金价更新失败，请核对输入后重试。'));
+    } catch (error: unknown) {
+      message.error(getSafeAdminErrorMessage(error, '金价更新失败，请核对输入后重试。'));
     }
   };
 

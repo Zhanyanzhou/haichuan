@@ -13,21 +13,22 @@ interface SecureImageProps {
   tokenKind?: "auto" | "customer" | "staff";
 }
 
-// 防御式读取:非 Vite 运行环境(测试/SSR)下 import.meta.env 不存在,不使模块加载即崩
-const API_BASE = ((import.meta as any).env?.VITE_API_BASE_URL || "/api").replace(
+// Vite 会在构建和测试时注入类型化 env；未配置时安全降级到同源 /api。
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api").replace(
   /\/$/,
   "",
 );
 
-function pickToken(kind: SecureImageProps["tokenKind"]): string | null {
-  if (kind === "staff") return localStorage.getItem("token");
-  if (kind === "customer") return localStorage.getItem("customerToken");
-  // auto：客户页优先客户令牌，后台页回退员工令牌
-  return localStorage.getItem("customerToken") || localStorage.getItem("token");
+function pickSessionDomain(kind: SecureImageProps["tokenKind"]): "admin" | "customer" {
+  if (kind === "staff") return "admin";
+  if (kind === "customer") return "customer";
+  return typeof window !== "undefined" && window.location.pathname.startsWith("/admin")
+    ? "admin"
+    : "customer";
 }
 
 /**
- * 受控媒体图片：用 Bearer 令牌拉取 Blob 显示，覆盖商品媒体和付款凭证。
+ * 受控媒体图片：用 HttpOnly Cookie 会话拉取 Blob 显示，覆盖商品媒体和付款凭证。
  * - 组件卸载或 src 替换时 URL.revokeObjectURL，避免内存泄漏；
  * - loading 显示骨架占位，失败显示"图片暂不可用"，不白屏；
  * - 不把媒体二进制或真实存储路径写进持久化状态。
@@ -68,11 +69,13 @@ export function SecureImage({
     }
 
     setStatus("loading");
-    // 公开商品媒体不发送任何令牌，避免把客户身份无意义地带到可缓存资源请求。
-    const token = isPublicProductMedia ? null : pickToken(tokenKind);
+    // 公开商品媒体不发送身份域标记；受控媒体显式选择员工或客户 Cookie，
+    // 避免同一浏览器同时登录两种身份时发生歧义。
+    const sessionDomain = pickSessionDomain(tokenKind);
     const fullUrl = `${API_BASE}${src}`;
     fetch(fullUrl, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: "include",
+      headers: isPublicProductMedia ? {} : { "X-Session-Domain": sessionDomain },
     })
       .then(async (res) => {
         if (!res.ok) throw new Error(String(res.status));

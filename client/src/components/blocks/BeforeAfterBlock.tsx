@@ -6,9 +6,10 @@ import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
+import type { RenderablePageModule } from "@/types/pageModule";
 
 interface BeforeAfterBlockProps {
-  module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 

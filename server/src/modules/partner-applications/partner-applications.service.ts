@@ -146,7 +146,7 @@ export class PartnerApplicationsService {
   async findAll(params: PartnerApplicationQueryDto) {
     const page = Math.max(1, Number(params.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 20));
-    const where: any = {};
+    const where: Prisma.PartnerApplicationWhereInput = {};
     if (params.status) where.status = params.status;
     if (params.keyword) {
       where.OR = [

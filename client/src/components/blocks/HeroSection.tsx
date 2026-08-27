@@ -31,10 +31,8 @@ export default function HeroSection({
 }: Props) {
   const rm = useReducedMotion();
 
-  const c = module?.content as
-    (PageModule["content"] & Record<string, any>) | undefined;
-  const s = module?.styleConfig as
-    (PageModule["styleConfig"] & Record<string, any>) | undefined;
+  const c = module?.content;
+  const s = module?.styleConfig;
   const l = module?.layoutConfig;
 
   // 未上传某一端时复用另一端已配置图片，不再引入活动素材兜底。

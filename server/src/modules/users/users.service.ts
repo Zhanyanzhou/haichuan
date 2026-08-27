@@ -1,7 +1,10 @@
 import { ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { assertStaffPassword } from './staff-password-policy';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 
 @Injectable()
 export class UsersService {
@@ -9,7 +12,7 @@ export class UsersService {
 
   async findAll(params: { page?: number; pageSize?: number; keyword?: string; role?: string }) {
     const { page = 1, pageSize = 20, keyword, role } = params;
-    const where: any = {};
+    const where: Prisma.UserWhereInput = {};
     if (keyword) {
       where.OR = [
         { username: { contains: keyword } },
@@ -17,7 +20,7 @@ export class UsersService {
         { phone: { contains: keyword } },
       ];
     }
-    if (role) where.role = role;
+    if (role) where.role = role as Role;
 
     const _page = +page, _pageSize = +pageSize;
     const [list, total, roleRows] = await Promise.all([
@@ -85,15 +88,9 @@ export class UsersService {
     return user;
   }
 
-  async create(data: {
-    username: string;
-    password: string;
-    realName?: string;
-    phone?: string;
-    email?: string;
-    role?: string;
-  }) {
-    const hashedPassword = await bcrypt.hash(data.password, 10);
+  async create(data: CreateUserDto) {
+    assertStaffPassword(data.password);
+    const hashedPassword = await bcrypt.hash(data.password, 12);
     return this.prisma.user.create({
       data: {
         username: data.username,
@@ -101,7 +98,7 @@ export class UsersService {
         realName: data.realName,
         phone: data.phone,
         email: data.email,
-        role: (data.role as any) || 'EDITOR',
+        role: data.role || 'EDITOR',
       },
       select: {
         id: true,
@@ -118,15 +115,8 @@ export class UsersService {
 
   async update(
     id: number,
-    data: {
-      realName?: string;
-      phone?: string;
-      email?: string;
-      role?: string;
-      status?: string;
-      password?: string;
-    },
-    currentUser: { id: number; role?: string },
+    data: UpdateUserDto,
+    currentUser: Pick<StaffPrincipal, 'id' | 'role'>,
   ) {
     return this.prisma.$transaction(async (tx) => {
       const target = await tx.user.findUnique({
@@ -162,13 +152,18 @@ export class UsersService {
         }
       }
 
-      const updateData: any = { ...data };
+      const updateData: Prisma.UserUpdateInput = {
+        ...(data.realName !== undefined ? { realName: data.realName } : {}),
+        ...(data.phone !== undefined ? { phone: data.phone } : {}),
+        ...(data.email !== undefined ? { email: data.email } : {}),
+        ...(data.role !== undefined ? { role: data.role } : {}),
+        ...(data.status !== undefined ? { status: data.status } : {}),
+      };
       if (data.password) {
-        updateData.password = await bcrypt.hash(data.password, 10);
-      } else {
-        delete updateData.password;
+        assertStaffPassword(data.password);
+        updateData.password = await bcrypt.hash(data.password, 12);
       }
-      return tx.user.update({
+      const updated = await tx.user.update({
         where: { id },
         data: updateData,
         select: {
@@ -181,10 +176,21 @@ export class UsersService {
           status: true,
         },
       });
+      if (
+        data.password !== undefined ||
+        data.status !== undefined ||
+        data.role !== undefined
+      ) {
+        await tx.adminRefreshSession.updateMany({
+          where: { userId: id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      return updated;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  async delete(id: number, currentUser: { id: number; role?: string }) {
+  async delete(id: number, currentUser: Pick<StaffPrincipal, 'id' | 'role'>) {
     return this.prisma.$transaction(async (tx) => {
       const target = await tx.user.findUnique({
         where: { id },
@@ -202,7 +208,7 @@ export class UsersService {
           throw new UnprocessableEntityException('系统必须保留至少一个启用中的超级管理员账号');
         }
       }
-      return tx.user.update({
+      const updated = await tx.user.update({
         where: { id },
         data: { status: 'DISABLED' },
         select: {
@@ -213,6 +219,11 @@ export class UsersService {
           status: true,
         },
       });
+      await tx.adminRefreshSession.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      return updated;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 }

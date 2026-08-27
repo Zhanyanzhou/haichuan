@@ -3,6 +3,14 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { MailerService } from '../../common/mailer/mailer.service';
 import { PRIVACY_CONSENT_VERSION } from '../../common/privacy/privacy-consent';
 import { ProductsService } from '../products/products.service';
+import { Prisma } from '@prisma/client';
+import { CreateInquiryDto } from './dto/create-inquiry.dto';
+import type { CustomerPrincipal } from '../../common/security/authenticated-principal';
+import {
+  assertMatchingSubmission,
+  isUniqueConstraintError,
+  prepareLeadIdempotency,
+} from '../leads/lead-submission';
 
 @Injectable()
 export class InquiriesService {
@@ -12,9 +20,13 @@ export class InquiriesService {
     private readonly productsService: ProductsService,
   ) {}
 
-  async findAll(params: any) {
+  async findAll(params: {
+    page?: number;
+    pageSize?: number;
+    status?: string;
+  }) {
     const { page = 1, pageSize = 20, status } = params;
-    const where: any = {};
+    const where: Prisma.InquiryWhereInput = {};
     if (status) where.status = status;
     const [list, total] = await Promise.all([
       this.prisma.inquiry.findMany({ where, skip: (+page - 1) * +pageSize, take: +pageSize, orderBy: { createdAt: 'desc' }, include: { product: { select: { name: true } }, assignee: { select: { realName: true } } } }),
@@ -23,13 +35,26 @@ export class InquiriesService {
     return { list, total, page: +page, pageSize: +pageSize };
   }
 
-  async create(data: any) {
+  async create(
+    data: CreateInquiryDto & {
+      customer?: CustomerPrincipal;
+      name?: string;
+      phone?: string;
+      email?: string;
+      idempotencyKey?: string;
+    },
+  ) {
     // 终线守卫：内部调用绕过 DTO 时也不得保存未同意的个人信息。
     if (data.privacyConsent !== true) {
       throw new BadRequestException('请阅读并同意隐私说明');
     }
     const customer = data.customer;
     const productId = data.productId;
+    const customerName = customer?.name?.trim() || data.customerName?.trim() || data.name?.trim();
+    const customerPhone = customer?.phone || data.customerPhone?.trim() || data.phone?.trim();
+    if (!customerName || !customerPhone) {
+      throw new BadRequestException('请填写有效的称呼和手机号码');
+    }
     if (
       productId !== undefined
       && (!Number.isInteger(productId) || productId <= 0)
@@ -49,24 +74,110 @@ export class InquiriesService {
         );
       }
     }
-    return this.prisma.inquiry.create({
-      data: {
-        productId: productId ?? null,
-        customerId: customer?.id || null,
-        customerName: customer?.name || data.customerName || data.name,
-        customerPhone: customer?.phone || data.customerPhone || data.phone,
-        customerEmail: customer?.email || data.customerEmail || data.email,
-        consultationType: data.consultationType,
-        preferredContact: data.preferredContact,
-        preferredTime: data.preferredTime,
-        budgetRange: data.budgetRange,
-        message: data.message,
-        privacyConsent: true,
-        privacyConsentVersion: PRIVACY_CONSENT_VERSION,
-        privacyConsentedAt: new Date(),
-        status: 'PENDING',
-      },
+    const customerEmail = customer?.email || data.customerEmail?.trim() || data.email?.trim() || null;
+    const idempotency = prepareLeadIdempotency(data.idempotencyKey, {
+      sourceType: 'INQUIRY',
+      customerId: customer?.id || null,
+      customerName,
+      customerPhone,
+      customerEmail,
+      productId: productId ?? null,
+      consultationType: data.consultationType || null,
+      preferredContact: data.preferredContact || null,
+      preferredTime: data.preferredTime || null,
+      budgetRange: data.budgetRange || null,
+      message: data.message,
+      privacyConsentVersion: PRIVACY_CONSENT_VERSION,
     });
+
+    const create = async () => this.prisma.$transaction(async (transaction) => {
+      if (idempotency.idempotencyKeyHash) {
+        const existing = await transaction.lead.findUnique({
+          where: { idempotencyKeyHash: idempotency.idempotencyKeyHash },
+          select: {
+            sourceType: true,
+            submissionFingerprint: true,
+            inquiryId: true,
+          },
+        });
+        if (existing) {
+          assertMatchingSubmission(
+            existing,
+            'INQUIRY',
+            idempotency.submissionFingerprint,
+          );
+          if (!existing.inquiryId) {
+            throw new BadRequestException('幂等提交记录不完整');
+          }
+          return transaction.inquiry.findUniqueOrThrow({
+            where: { id: existing.inquiryId },
+          });
+        }
+      }
+
+      return transaction.inquiry.create({
+        data: {
+          productId: productId ?? null,
+          customerId: customer?.id || null,
+          customerName,
+          customerPhone,
+          customerEmail,
+          consultationType: data.consultationType,
+          preferredContact: data.preferredContact,
+          preferredTime: data.preferredTime,
+          budgetRange: data.budgetRange,
+          message: data.message,
+          privacyConsent: true,
+          privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+          privacyConsentedAt: new Date(),
+          status: 'PENDING',
+          lead: {
+            create: {
+              sourceType: 'INQUIRY',
+              customerId: customer?.id || null,
+              customerName,
+              phone: customerPhone,
+              email: customerEmail,
+              idempotencyKeyHash: idempotency.idempotencyKeyHash,
+              submissionFingerprint: idempotency.submissionFingerprint,
+              activities: {
+                create: {
+                  type: 'CREATED',
+                  content: '公开咨询已提交',
+                  currentStatus: 'PENDING',
+                },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    try {
+      return await create();
+    } catch (error) {
+      if (!idempotency.idempotencyKeyHash || !isUniqueConstraintError(error)) {
+        throw error;
+      }
+      const existing = await this.prisma.lead.findUnique({
+        where: { idempotencyKeyHash: idempotency.idempotencyKeyHash },
+        select: {
+          sourceType: true,
+          submissionFingerprint: true,
+          inquiryId: true,
+        },
+      });
+      if (!existing) throw error;
+      assertMatchingSubmission(
+        existing,
+        'INQUIRY',
+        idempotency.submissionFingerprint,
+      );
+      if (!existing.inquiryId) throw error;
+      return this.prisma.inquiry.findUniqueOrThrow({
+        where: { id: existing.inquiryId },
+      });
+    }
   }
 
   async assign(id: number, assignedTo: number) {

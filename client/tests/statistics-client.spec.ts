@@ -1,25 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 async function authenticateDashboardAdmin(page: Page) {
-  await page.addInitScript(() => {
-    const token = "statistics-client-test-token";
-    localStorage.setItem("token", token);
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token,
-          user: {
-            id: 1,
-            username: "statistics-auditor",
-            role: "SUPER_ADMIN",
-            name: "统计审计员",
-          },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "statistics-auditor",
+    realName: "统计审计员",
   });
 }
 
@@ -36,6 +21,7 @@ test.describe("后台统计客户端现有合同", () => {
     await page.route("**/api/**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
+      if (url.pathname === "/api/auth/profile") return route.fallback();
       let data: unknown = {};
 
       if (url.pathname === "/api/statistics/dashboard") {
@@ -106,9 +92,7 @@ test.describe("后台统计客户端现有合同", () => {
     );
 
     await expect.poll(() => dashboardHeaders.length).toBe(1);
-    expect(dashboardHeaders[0].authorization).toBe(
-      "Bearer statistics-client-test-token",
-    );
+    expect(dashboardHeaders[0].authorization).toBeUndefined();
     await expect
       .poll(() =>
         trendRequests.some(
@@ -135,11 +119,7 @@ test.describe("后台统计客户端现有合同", () => {
         ),
       )
       .toBe(true);
-    expect(
-      trendRequests.every(
-        (request) =>
-          request.authorization === "Bearer statistics-client-test-token",
-      ),
-    ).toBe(true);
+    expect(trendRequests.every((request) => request.authorization === undefined))
+      .toBe(true);
   });
 });

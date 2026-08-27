@@ -20,19 +20,20 @@ export function formatViewportSize(preset: ViewportPreset) {
   return `${preset.displayWidth ?? preset.width} × ${preset.height}`;
 }
 
-export function cloneModuleProps<T extends Record<string, any>>(props: T): T {
+export function cloneModuleProps<T extends Record<string, unknown>>(props: T): T {
   return JSON.parse(JSON.stringify(props)) as T;
 }
 
 /** 递归按键名排序，消除对象键序差异导致的误判。 */
-function sortObjectKeys(value: any): any {
+function sortObjectKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortObjectKeys);
   if (value && typeof value === "object") {
-    const sorted: Record<string, any> = {};
-    Object.keys(value)
+    const record = value as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    Object.keys(record)
       .sort()
       .forEach((key) => {
-        sorted[key] = sortObjectKeys(value[key]);
+        sorted[key] = sortObjectKeys(record[key]);
       });
     return sorted;
   }
@@ -46,13 +47,18 @@ function sortObjectKeys(value: any): any {
  */
 export function canonicalizePuckContent(puck: unknown): string {
   if (!puck || typeof puck !== "object" || Array.isArray(puck)) return "";
-  const document = puck as Record<string, any>;
+  const document = puck as Record<string, unknown>;
   const normalizeBlocks = (blocks: unknown) =>
     Array.isArray(blocks)
-      ? blocks.map((block: any) => {
-          const props = { ...(block?.props || {}) };
+      ? blocks.map((block) => {
+          const record = block && typeof block === "object" && !Array.isArray(block)
+            ? block as Record<string, unknown>
+            : {};
+          const props = record.props && typeof record.props === "object" && !Array.isArray(record.props)
+            ? { ...record.props as Record<string, unknown> }
+            : {};
           delete props.id;
-          return { type: block?.type, props: sortObjectKeys(props) };
+          return { type: record.type, props: sortObjectKeys(props) };
         })
       : [];
   const zones =
@@ -64,7 +70,7 @@ export function canonicalizePuckContent(puck: unknown): string {
             .sort()
             .map((zoneKey) => [
               zoneKey,
-              normalizeBlocks(document.zones[zoneKey]),
+              normalizeBlocks((document.zones as Record<string, unknown>)[zoneKey]),
             ]),
         )
       : {};
@@ -99,7 +105,7 @@ export function canonicalizePageContent(
 export function getModuleDisplayName(
   type: string,
   // 保留第二参以兼容历史调用签名；模块名固定取模板显示名，不再读取 props。
-  _props?: Record<string, any>,
+  _props?: Record<string, unknown>,
 ) {
   // 2026-08-16 用户决策：模块名固定为模板显示名，忽略历史自定义 moduleName。
   return BLOCK_META[type]?.name ?? type;

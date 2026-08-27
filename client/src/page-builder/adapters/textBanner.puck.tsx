@@ -30,7 +30,7 @@ export interface TextBannerPuckProps {
 export const textBannerPuckConfig = {
   render: (props: TextBannerPuckProps) => (
     <TextBannerBlock
-      module={convertPuckProps("文字横幅", props as any) as any}
+      module={convertPuckProps("文字横幅", props)!}
       editMode
     />
   ),
@@ -48,7 +48,7 @@ export const textBannerPuckConfig = {
     __contentTemplate: createContentTemplateMarker("文字横幅"),
     locked: false,
   } satisfies TextBannerPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: TextBannerPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

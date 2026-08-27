@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { message } from 'antd';
 import { customerApi } from '@/services/api';
+import { getRequestErrorMessage } from '@/services/httpClient';
 
 /**
  * 找回密码（第一步）：输入注册邮箱，系统发送一次性重置链接（30 分钟有效）。
@@ -23,8 +24,8 @@ export default function ForgotPassword() {
     try {
       await customerApi.forgotPassword({ email: email.trim() });
       setSent(true);
-    } catch (e: any) {
-      message.error(e?.response?.data?.message || e?.message || '提交失败，请稍后重试');
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, '提交失败，请稍后重试'));
     } finally {
       setSubmitting(false);
     }

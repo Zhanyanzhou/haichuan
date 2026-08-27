@@ -4,6 +4,23 @@ type TestedRole = "ADMIN" | "WAREHOUSE" | "CUSTOMER_SERVICE";
 
 const orders = [
   {
+    id: 100,
+    orderNo: "HC-PENDING-PAYMENT",
+    customerName: "待付款客户",
+    customerPhone: "13800000000",
+    address: "测试地址零",
+    totalAmount: 8000,
+    discountAmount: 0,
+    finalAmount: 8000,
+    paidAmount: 0,
+    status: "PENDING_PAYMENT",
+    orderType: "SPOT",
+    deliveryStatus: "PENDING_SHIP",
+    payments: [],
+    items: [],
+    createdAt: "2026-08-22T00:30:00.000Z",
+  },
+  {
     id: 101,
     orderNo: "HC-PENDING-SHIP",
     customerName: "待发货客户",
@@ -34,6 +51,7 @@ const orders = [
     deliveryStatus: "SHIPPED",
     logisticsCompany: "顺丰速运",
     logisticsNo: "SF-TEST-102",
+    fulfillments: [{ id: 202, status: "SHIPPED" }],
     items: [],
     createdAt: "2026-08-22T02:00:00.000Z",
   },
@@ -55,31 +73,44 @@ const orders = [
     items: [],
     createdAt: "2026-08-22T03:00:00.000Z",
   },
+  {
+    id: 104,
+    orderNo: "HC-RECEIVED",
+    customerName: "已签收客户",
+    customerPhone: "13800000004",
+    address: "测试地址四",
+    totalAmount: 22000,
+    discountAmount: 0,
+    finalAmount: 22000,
+    paidAmount: 22000,
+    status: "SHIPPED",
+    orderType: "SPOT",
+    deliveryStatus: "RECEIVED",
+    fulfillments: [{ id: 204, status: "DELIVERED" }],
+    items: [],
+    createdAt: "2026-08-22T04:00:00.000Z",
+  },
 ] as const;
 
 async function authenticate(page: Page, role: TestedRole) {
-  await page.addInitScript((currentRole) => {
-    const user = {
-      id: 1,
-      username: `capability-${currentRole.toLowerCase()}`,
-      realName: "权限矩阵测试用户",
-      role: currentRole,
-      status: "ACTIVE",
-      createdAt: "2026-08-22T00:00:00.000Z",
-    };
-    localStorage.setItem("token", "capability-ui-test-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token: "capability-ui-test-token",
-          user,
-          isLoggedIn: true,
+  await page.route("**/api/auth/profile", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: 200,
+        message: "ok",
+        data: {
+          id: 1,
+          username: `capability-${role.toLowerCase()}`,
+          realName: "权限矩阵测试用户",
+          role,
+          status: "ACTIVE",
+          createdAt: "2026-08-22T00:00:00.000Z",
         },
-        version: 0,
       }),
-    );
-  }, role);
+    }),
+  );
 }
 
 async function mockOrderApis(page: Page) {
@@ -89,6 +120,10 @@ async function mockOrderApis(page: Page) {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
+    if (request.method() === "GET" && path.endsWith("/auth/profile")) {
+      await route.fallback();
+      return;
+    }
     const isMutation = ["POST", "PUT", "PATCH", "DELETE"].includes(
       request.method(),
     );
@@ -170,23 +205,35 @@ test.describe("订单管理前端 capability 矩阵", () => {
     ).toBeVisible();
     await expect(
       rowFor(page, "HC-PENDING-SHIP").getByRole("button", { name: /取\s*消/ }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       rowFor(page, "HC-SHIPPED").getByRole("button", { name: /完\s*成/ }),
+    ).toHaveCount(0);
+    await expect(
+      rowFor(page, "HC-PENDING-PAYMENT").getByRole("button", { name: /取\s*消/ }),
     ).toBeVisible();
-    await rowFor(page, "HC-SHIPPED").getByRole("button", { name: /完\s*成/ }).click();
+    await expect(
+      rowFor(page, "HC-RECEIVED").getByRole("button", { name: /完\s*成/ }),
+    ).toBeVisible();
+    await rowFor(page, "HC-RECEIVED").getByRole("button", { name: /完\s*成/ }).click();
     const completeConfirm = page.getByRole("dialog", { name: "确认完成该订单？" });
     await expect(completeConfirm).toBeVisible();
     await completeConfirm.getByRole("button", { name: /取\s*消/ }).click();
 
-    const customDialog = await openDetail(page, "HC-CUSTOM");
+    const pendingPaymentDialog = await openDetail(page, "HC-PENDING-PAYMENT");
     for (const action of [
       "修改金额",
       "修改地址",
       "修改备注",
       "修改顾问",
-      "推进定制阶段",
     ]) {
+      await expect(pendingPaymentDialog.getByRole("button", { name: action })).toBeVisible();
+    }
+    await closeDetail(page);
+
+    const customDialog = await openDetail(page, "HC-CUSTOM");
+    await expect(customDialog.getByRole("button", { name: "修改金额" })).toHaveCount(0);
+    for (const action of ["修改地址", "修改备注", "修改顾问", "推进定制阶段"]) {
       await expect(customDialog.getByRole("button", { name: action })).toBeVisible();
     }
     await closeDetail(page);
@@ -242,7 +289,13 @@ test.describe("订单管理前端 capability 矩阵", () => {
 
     await expect(page.getByRole("button", { name: "导出" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "人工建单" })).toHaveCount(0);
-    for (const orderNo of ["HC-PENDING-SHIP", "HC-SHIPPED", "HC-CUSTOM"]) {
+    for (const orderNo of [
+      "HC-PENDING-PAYMENT",
+      "HC-PENDING-SHIP",
+      "HC-SHIPPED",
+      "HC-CUSTOM",
+      "HC-RECEIVED",
+    ]) {
       const row = rowFor(page, orderNo);
       await expect(row.getByRole("button", { name: "发货" })).toHaveCount(0);
       await expect(row.getByRole("button", { name: /完\s*成/ })).toHaveCount(0);

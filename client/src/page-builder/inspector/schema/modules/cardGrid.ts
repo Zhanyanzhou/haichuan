@@ -14,13 +14,14 @@ import { cardGridPuckConfig } from "../../../adapters/cardGrid.puck";
 import { puckConfig } from "../../../config/puckConfig";
 import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, moduleNameField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
+import type { PuckProps } from "../../../types";
 
 interface CardGridSchemaVariant {
   moduleType: "卡片网格" | "服务承诺";
   displayName: string;
   purpose: string;
   /** 缺省时取 adapter defaultProps（卡片网格）；服务承诺取 puckConfig 注册的变体 defaults */
-  defaults?: Record<string, any>;
+  defaults?: PuckProps;
 }
 
 export function makeCardGridSchema(
@@ -146,5 +147,7 @@ export const servicePromiseSchema = makeCardGridSchema({
   moduleType: "服务承诺",
   displayName: "服务承诺",
   purpose: "集中呈现保养、售后、配送与鉴定等服务信息",
-  defaults: puckConfig.components["服务承诺"]?.defaultProps,
+  defaults: puckConfig.components["服务承诺"]?.defaultProps
+    ? { ...puckConfig.components["服务承诺"].defaultProps }
+    : undefined,
 });

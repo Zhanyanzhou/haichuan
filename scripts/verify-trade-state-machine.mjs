@@ -210,9 +210,11 @@ check("履约：dispatch 校验订单必须已付款（PENDING_SHIP）", () => {
   );
 });
 
-check("履约：标记送达仅允许 SHIPPED 状态", () => {
+check("履约：标记送达仅允许 SHIPPED 或 ABNORMAL 状态", () => {
   assert.ok(
-    /只有已发货的履约单可标记送达/.test(fulfillmentSrc),
+    /\[\s*['"]SHIPPED['"]\s*,\s*['"]ABNORMAL['"]\s*\]\.includes\(fulfillment\.status\)/.test(
+      fulfillmentSrc,
+    ),
     "送达状态守卫缺失",
   );
 });

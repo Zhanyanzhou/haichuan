@@ -1,4 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
+import { installCustomerSession, readSessionHeaders } from "./fixtures/session-auth";
 
 function apiResponse(data: unknown) {
   return JSON.stringify({ code: 200, data, message: "success" });
@@ -39,13 +40,17 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
   });
 
-  test("已登录客户只能通过本人令牌读取并更新服务通知", async ({ page }) => {
+  test("已登录客户只能通过本人 Cookie 会话读取并更新服务通知", async ({ page }) => {
     let notificationStatus = "AVAILABLE";
-    const notificationRequests: Array<{ method: string; authorization: string | undefined }> = [];
+    const notificationRequests: Array<{
+      method: string;
+      authorization: string | undefined;
+      csrf: string | undefined;
+      sessionDomain: string | undefined;
+    }> = [];
 
     await page.addInitScript(() => {
-      localStorage.setItem("customerToken", "closure-customer-token");
-      localStorage.setItem("customer", JSON.stringify({ id: 7, name: "测试会员" }));
+      document.cookie = "hc_csrf=closure-customer-csrf; path=/";
     });
 
     await page.route("**/api/**", async (route: Route) => {
@@ -57,7 +62,7 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
       if (path === "/api/customers/me/notifications") {
         notificationRequests.push({
           method: request.method(),
-          authorization: request.headers().authorization,
+          ...readSessionHeaders(request),
         });
         data = {
           list: [{
@@ -78,12 +83,10 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
       } else if (path === "/api/customers/me/notifications/91/read") {
         notificationRequests.push({
           method: request.method(),
-          authorization: request.headers().authorization,
+          ...readSessionHeaders(request),
         });
         notificationStatus = "READ";
         data = { id: 91, status: "READ" };
-      } else if (path === "/api/customers/me") {
-        data = { id: 7, name: "测试会员", phone: "" };
       } else if (path === "/api/settings/flags") {
         data = { commerceEnabled: false, cartEnabled: false, paymentEnabled: false };
       } else if (path === "/api/settings/public") {
@@ -98,6 +101,7 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
         body: apiResponse(data),
       });
     });
+    await installCustomerSession(page, { id: 7, name: "测试会员" });
 
     await page.goto("/customer");
 
@@ -111,8 +115,18 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
     ).toHaveCount(0);
 
     expect(notificationRequests).toEqual(expect.arrayContaining([
-      { method: "GET", authorization: "Bearer closure-customer-token" },
-      { method: "PUT", authorization: "Bearer closure-customer-token" },
+      {
+        method: "GET",
+        authorization: undefined,
+        csrf: undefined,
+        sessionDomain: "customer",
+      },
+      {
+        method: "PUT",
+        authorization: undefined,
+        csrf: "closure-customer-csrf",
+        sessionDomain: "customer",
+      },
     ]));
   });
 });

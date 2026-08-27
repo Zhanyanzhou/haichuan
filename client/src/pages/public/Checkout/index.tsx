@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Form, Input, Spin, message } from "antd";
+import { App as AntdApp, Form, Input, Spin } from "antd";
 import { CheckCircleOutlined } from "@ant-design/icons";
 import { cartApi, customerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackBeginCheckout, trackOrderCreated } from "@/hooks/useAnalytics";
 import CustomerPaymentDialog from "@/components/commerce/CustomerPaymentDialog";
+import { useCustomerAuthStore } from "@/store/customerAuthStore";
+import { getRequestErrorMessage } from "@/services/httpClient";
 
 type CartItem = {
   id: number;
@@ -13,11 +15,20 @@ type CartItem = {
   quantity: number;
   product: { name: string };
   sku: { price: number | string };
+  availability?: {
+    available: boolean;
+    status: string;
+    message: string | null;
+  };
 };
 
 const getItemPrice = (item: CartItem) => Number(item.sku.price || 0);
 
 type CreatedOrder = { id: number; orderNo: string; finalAmount: number };
+type CheckoutFormValues = {
+  address: string;
+  customerEmail?: string;
+};
 const PENDING_PAYMENT_ORDER_KEY = "haichuan:pending-payment-order";
 
 function restorePendingPaymentOrder(): CreatedOrder | null {
@@ -33,6 +44,7 @@ function restorePendingPaymentOrder(): CreatedOrder | null {
 }
 
 export default function Checkout() {
+  const { message } = AntdApp.useApp();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -51,7 +63,7 @@ export default function Checkout() {
   >(returnedFromPayment ? "query" : "create");
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   // P0-1 联动：后端 checkout 已要求登录态；未登录需引导先登录/注册
-  const customerToken = typeof window !== "undefined" ? localStorage.getItem("customerToken") : null;
+  const isSignedIn = useCustomerAuthStore((state) => state.isLoggedIn);
   const [customer, setCustomer] = useState<{ name?: string; phone?: string; email?: string } | null>(null);
 
   // 结算契约对齐（P0 修复）：后端 checkout 仅接受 { address, items, customerEmail? }，
@@ -59,14 +71,14 @@ export default function Checkout() {
   // 前端不再展示后端会忽略的 customerName/customerPhone/paymentMethod 输入框，
   // 改为只读展示登录客户信息，仅收集收货地址（必要时邮箱）。
   const loadCustomer = useCallback(async () => {
-    if (!customerToken) return;
+    if (!isSignedIn) return;
     try {
       const res = await customerApi.getProfile();
       setCustomer(unwrapResponse<{ name?: string; phone?: string; email?: string }>(res));
     } catch {
       // 客户信息加载失败不阻断结算；后端会用登录态的客户资料。
     }
-  }, [customerToken]);
+  }, [isSignedIn]);
 
   const loadCart = useCallback(async () => {
     setLoading(true);
@@ -91,10 +103,17 @@ export default function Checkout() {
     (sum, item) => sum + getItemPrice(item) * item.quantity,
     0,
   );
+  const hasUnverifiedCartItem = cartItems.some(
+    (item) => item.availability?.available !== true,
+  );
 
-  const handleSubmit = async (values: any) => {
+  const handleSubmit = async (values: CheckoutFormValues) => {
     if (cartItems.length === 0) {
       message.warning("购物车为空");
+      return;
+    }
+    if (hasUnverifiedCartItem) {
+      message.warning("购物车中的商品状态已变化，请返回购物车处理后再结算");
       return;
     }
     setSubmitting(true);
@@ -120,8 +139,8 @@ export default function Checkout() {
       setPaymentInitialAction("create");
       setPaymentOpen(true);
       message.success("订单已创建，请继续完成微信支付");
-    } catch (error: any) {
-      message.error(error?.message || "提交失败");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "提交失败"));
     } finally {
       setSubmitting(false);
     }
@@ -172,7 +191,7 @@ export default function Checkout() {
     );
   }
 
-  if (!customerToken) {
+  if (!isSignedIn) {
     return (
       <div className="min-h-screen bg-brand-bg flex items-center justify-center px-6">
         <div className="max-w-lg w-full text-center bg-brand-surface border border-brand-line p-10">
@@ -188,13 +207,18 @@ export default function Checkout() {
   }
 
   if (loading) {
-    return <div className="min-h-screen bg-brand-bg flex items-center justify-center"><Spin size="large" /></div>;
+    return (
+      <div className="min-h-screen bg-brand-bg flex items-center justify-center">
+        <h1 className="sr-only">结算</h1>
+        <div role="status" aria-label="结算信息加载中"><Spin size="large" /></div>
+      </div>
+    );
   }
 
   if (loadError) {
     return (
       <div className="min-h-screen bg-brand-bg flex items-center justify-center px-6">
-        <div className="text-center"><p className="text-xl font-display mb-4">结算信息暂时无法加载</p><button type="button" onClick={() => void loadCart()} className="btn btn-primary">重新加载</button></div>
+        <div className="text-center" role="alert"><h1 className="text-xl font-display mb-4">结算信息暂时无法加载</h1><button type="button" onClick={() => void loadCart()} className="btn btn-primary">重新加载</button></div>
       </div>
     );
   }
@@ -204,8 +228,22 @@ export default function Checkout() {
       <div className="min-h-screen bg-brand-bg flex items-center justify-center">
         <div className="text-center">
           <CheckCircleOutlined className="text-5xl text-brand-gold mb-4" />
-          <p className="text-xl font-display text-brand-text mb-4">购物车为空</p>
+          <h1 className="text-xl font-display text-brand-text mb-4">购物车为空</h1>
           <Link to="/catalog" className="btn btn-primary">继续选购</Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (hasUnverifiedCartItem) {
+    return (
+      <div className="min-h-screen bg-brand-bg flex items-center justify-center px-6">
+        <div className="max-w-lg w-full text-center bg-brand-surface border border-brand-line p-10">
+          <h1 className="text-2xl font-display mb-3">商品状态需要重新确认</h1>
+          <p className="text-brand-muted mb-6 leading-6">
+            购物车中有商品已下架、规格或库存发生变化，或当前服务未能返回可验证状态。请先处理购物车后再提交订单。
+          </p>
+          <Link to="/cart" className="btn btn-primary">返回购物车处理</Link>
         </div>
       </div>
     );

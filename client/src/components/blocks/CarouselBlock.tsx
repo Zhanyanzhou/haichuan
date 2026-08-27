@@ -10,11 +10,27 @@ import {
 
 interface CarouselBlockProps {
   module: {
-    content: Record<string, any>;
-    layoutConfig?: Record<string, any>;
-    styleConfig?: Record<string, any>;
+    content: {
+      images?: CarouselItem[];
+      autoPlay?: boolean;
+      interval?: number;
+      showDots?: boolean;
+      showArrows?: boolean;
+    };
+    layoutConfig?: { desktopRatio?: string; mobileRatio?: string };
   };
   editMode?: boolean;
+}
+
+interface CarouselItem {
+  url?: string;
+  mobileUrl?: string;
+  alt?: string;
+  link?: unknown;
+  targetType?: string;
+  productCode?: string;
+  productId?: string | number;
+  linkUrl?: string;
 }
 
 /**
@@ -43,7 +59,7 @@ export default function CarouselBlock({
 
   const [current, setCurrent] = useState(0);
   const validImages = (Array.isArray(images) ? images : []).filter(
-    (img: any) => img?.url,
+    (img) => Boolean(img.url),
   );
 
   const next = useCallback(() => {
@@ -195,7 +211,7 @@ export default function CarouselBlock({
             gap: 8,
           }}
         >
-          {validImages.map((_: any, i: number) => (
+          {validImages.map((_, i) => (
             <button
               key={i}
               onClick={() => setCurrent(i)}

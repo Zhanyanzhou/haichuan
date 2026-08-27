@@ -4,18 +4,19 @@ import { GALLERY_CONTRACT, resolveContractAspectRatio } from "@/page-builder/con
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { resolveItemLinkUrl } from "@/page-builder/utils/linkTarget";
+import type { RenderablePageModule } from "@/types/pageModule";
 
 interface GalleryItem {
   image?: string;
   altText?: string;
   caption?: string;
-  link?: string;
+  link?: unknown;
   focusX?: number;
   focusY?: number;
 }
 
 interface GalleryBlockProps {
-  module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 

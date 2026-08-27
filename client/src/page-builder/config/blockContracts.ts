@@ -661,7 +661,7 @@ export function evaluateFeaturedProductContract(
   if (!hasText(props.summary))
     warnings.push("建议补充作品材质、工艺或设计卖点");
   // 次行动三件套:有三件套痕迹即不回退旧裸 secondaryLink(防切回不跳转后复活)
-  const secondaryUrl = resolvePrefixedLinkTarget(props as Record<string, any>, "secondary", "secondaryLink");
+  const secondaryUrl = resolvePrefixedLinkTarget(props as Record<string, unknown>, "secondary", "secondaryLink");
   if (hasText(props.secondaryText) && !secondaryUrl) {
     errors.push("次要行动已显示，请选择站内页面");
   }
@@ -988,11 +988,13 @@ export function evaluateCardGridContract(
     );
   const hasPlaceholder = cards.some((card) =>
     [card.title, card.body].some(
-      (text) => hasText(text) && /待确认|待配置|请填写/.test(text as string),
+      (text) =>
+        hasText(text) &&
+        /待确认|待配置|请填写|正在完善|内容建设中|即将上线/.test(text as string),
     ),
   );
   if (hasPlaceholder)
-    warnings.push("仍有占位文案（待确认/待配置），发布前请替换为正式内容");
+    warnings.push("仍有占位文案，发布前请替换为正式内容");
   return {
     completed: checks.filter(Boolean).length,
     total: checks.length,

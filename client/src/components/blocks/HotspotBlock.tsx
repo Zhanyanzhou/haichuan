@@ -4,6 +4,7 @@ import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceho
 import { HOTSPOT_CONTRACT } from "@/page-builder/config/blockContracts";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { resolveItemLinkUrl } from "@/page-builder/utils/linkTarget";
+import type { RenderablePageModule } from "@/types/pageModule";
 
 interface HotspotItem {
   x: number; // 左边距百分比
@@ -15,11 +16,7 @@ interface HotspotItem {
 }
 
 interface HotspotBlockProps {
-  module: {
-    content: Record<string, any>;
-    layoutConfig?: Record<string, any>;
-    styleConfig?: Record<string, any>;
-  };
+  module: RenderablePageModule;
   editMode?: boolean;
   /** 编辑模式下，热区变更回调（可选，供 Puck 字段绑定） */
   onHotspotsChange?: (hotspots: HotspotItem[], device: "desktop" | "mobile") => void;

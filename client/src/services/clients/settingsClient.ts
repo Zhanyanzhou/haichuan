@@ -43,8 +43,8 @@ export const settingsApi = {
       // 测试需要具体值时在测试内拦截此接口注入。
       return mockResponse({
         siteName: "海川珠宝",
-        seoTitle: "海川珠宝 - 高端珠宝臻品平台",
-        seoDescription: "高端珠宝臻品与一对一选款服务",
+        seoTitle: "海川珠宝",
+        seoDescription: "浏览珠宝作品，了解定制与顾问服务。",
         contactPhone: "",
         contactEmail: "",
         contactAddress: "",
@@ -63,7 +63,7 @@ export const settingsApi = {
       await mockDelay(200);
       return mockResponse({
         siteName: "海川珠宝",
-        siteDesc: "高端珠宝产品管理平台",
+        siteDesc: "珠宝作品与顾问服务",
         logo: "",
         autoBackup: true,
         backupTime: "03:00",
@@ -85,6 +85,7 @@ export const settingsApi = {
     }
     return api.get("/settings/logs", { params });
   },
+  getBackupStatus: () => api.get("/settings/backup"),
   getFlags: async () => {
     if (USE_MOCK) {
       await mockDelay(200);

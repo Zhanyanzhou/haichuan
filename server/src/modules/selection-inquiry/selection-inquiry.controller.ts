@@ -6,6 +6,7 @@ import {
   Param,
   Query,
   Body,
+  Headers,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -17,6 +18,8 @@ import { Roles } from "../../common/decorators/roles.decorator";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Throttle } from "@nestjs/throttler";
 import { CreateSelectionInquiryDto } from "./dto/create-selection-inquiry.dto";
+import { BoundedListQueryDto } from "../../common/dto/bounded-list-query.dto";
+import type { OptionalCustomerRequest } from "../../common/security/authenticated-principal";
 
 @Controller("selection-inquiries")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -25,14 +28,12 @@ export class SelectionInquiryController {
   constructor(private readonly service: SelectionInquiryService) {}
 
   @Get()
-  findAll(@Query() q: any) {
-    const page = q.page ? +q.page : 1;
-    const pageSize = q.pageSize ? +q.pageSize : 20;
+  findAll(@Query() q: BoundedListQueryDto) {
     return this.service.findAll({
       status: q.status,
       keyword: q.keyword,
-      page,
-      pageSize,
+      page: q.page,
+      pageSize: q.pageSize,
     });
   }
 
@@ -42,10 +43,15 @@ export class SelectionInquiryController {
   @UseGuards(OptionalCustomerAuthGuard)
   @Post()
   create(
-    @Req() request: any,
+    @Req() request: OptionalCustomerRequest,
     @Body() body: CreateSelectionInquiryDto,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    return this.service.create({ ...body, customer: request.customer });
+    return this.service.create({
+      ...body,
+      customer: request.customer,
+      idempotencyKey,
+    });
   }
 
   @Get(":id")

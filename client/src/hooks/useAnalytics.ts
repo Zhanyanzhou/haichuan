@@ -6,8 +6,7 @@
  * 采集静默失败：不阻塞页面、不向用户报错、失败不重试。
  */
 
-const ANALYTICS_CONFIGURED =
-  (import.meta as any).env?.VITE_ANALYTICS_ENABLED === "true";
+const ANALYTICS_CONFIGURED = import.meta.env.VITE_ANALYTICS_ENABLED === "true";
 const ANALYTICS_CONSENT_COOKIE = "hc_analytics_consent";
 const ANALYTICS_SESSION_KEY = "hc.analytics-session";
 const ANALYTICS_CONSENT_VERSION = "analytics-v1";
@@ -80,6 +79,7 @@ function ensureSessionId(): string {
 }
 
 const pending = new Map<string, number>();
+const ANALYTICS_ONCE_PREFIX = "hc.analytics-once:";
 
 /** 同一事件 1 秒节流，避免重复埋点刷屏 */
 function shouldSend(key: string, throttleMs = 1000): boolean {
@@ -92,7 +92,7 @@ function shouldSend(key: string, throttleMs = 1000): boolean {
 
 async function send(event: Record<string, unknown>) {
   try {
-    const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || "/api";
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api";
     await fetch(`${baseUrl}/analytics/track`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -115,18 +115,47 @@ async function send(event: Record<string, unknown>) {
   }
 }
 
-function fire(eventName: string, payload?: Record<string, unknown>) {
-  if (!ANALYTICS_CONFIGURED || !hasAnalyticsConsent()) return;
-  if (!shouldSend(eventName)) return;
+function fire(
+  eventName: string,
+  payload?: Record<string, unknown>,
+  throttleKey = eventName,
+): boolean {
+  if (!ANALYTICS_CONFIGURED || !hasAnalyticsConsent()) return false;
+  if (!shouldSend(throttleKey)) return false;
   void send({ eventName, ...(payload || {}) });
+  return true;
+}
+
+function fireOnce(
+  eventName: string,
+  eventKey: string,
+  payload?: Record<string, unknown>,
+) {
+  if (!ANALYTICS_CONFIGURED || !hasAnalyticsConsent()) return;
+  const storageKey = `${ANALYTICS_ONCE_PREFIX}${eventName}:${eventKey}`;
+  try {
+    if (sessionStorage.getItem(storageKey) === "1") return;
+  } catch {
+    // 存储不可用时仍允许本次事件；带业务键的节流继续防止瞬时重复。
+  }
+  if (!fire(eventName, payload, `${eventName}:${eventKey}`)) return;
+  try {
+    sessionStorage.setItem(storageKey, "1");
+  } catch {
+    // 请求已经发出；不因去重标记无法持久化而回退业务。
+  }
 }
 
 export function trackPageView() {
   fire("page_view");
 }
 
-export function trackProductView(productId: number) {
-  fire("product_view", { productId });
+export function trackViewItem(productId: number) {
+  fire("view_item", { productId });
+}
+
+export function trackViewItemList(itemCount: number, listId = "catalog") {
+  fire("view_item_list", { metadata: { itemCount, listId } });
 }
 
 export function trackSearch(term: string) {
@@ -145,12 +174,42 @@ export function trackAddToCart(productId: number, quantity: number) {
   fire("add_to_cart", { productId, metadata: { quantity } });
 }
 
+export function trackRemoveFromCart(productId: number, quantity: number) {
+  fire("remove_from_cart", { productId, metadata: { quantity } });
+}
+
+export function trackViewCart(itemCount: number, amount: number) {
+  fire("view_cart", { metadata: { itemCount, amount } });
+}
+
 export function trackBeginCheckout(itemCount: number, amount: number) {
   fire("begin_checkout", { metadata: { itemCount, amount } });
 }
 
 export function trackOrderCreated(orderId: number, amount: number) {
   fire("order_created", { metadata: { orderId, amount } });
+}
+
+export function trackAddPaymentInfo(
+  orderId: number,
+  amount: number,
+  paymentMethod: string,
+) {
+  fireOnce("add_payment_info", String(orderId), {
+    metadata: { orderId, amount, paymentMethod },
+  });
+}
+
+/** purchase 只允许在服务端已确认 PAID 后触发，不能由订单创建或前端跳转替代。 */
+export function trackPurchase(orderId: number, amount: number) {
+  fireOnce("purchase", String(orderId), { metadata: { orderId, amount } });
+}
+
+/** 客户看见服务端 COMPLETED 退款事实时按会话去重记录。 */
+export function trackRefund(refundId: number, orderId: number, amount: number) {
+  fireOnce("refund", String(refundId), {
+    metadata: { refundId, orderId, amount },
+  });
 }
 
 export function trackRemoveFromSelection(productId: number) {

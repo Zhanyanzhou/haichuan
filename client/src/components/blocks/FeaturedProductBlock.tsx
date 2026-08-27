@@ -5,13 +5,10 @@ import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts
 import { resolvePrefixedLinkTarget, isSafeInternalPath } from "@/page-builder/utils/linkTarget";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
+import type { RenderablePageModule } from "@/types/pageModule";
 
 interface FeaturedProductBlockProps {
-  module: {
-    content: Record<string, any>;
-    layoutConfig?: Record<string, any>;
-    styleConfig?: Record<string, any>;
-  };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 

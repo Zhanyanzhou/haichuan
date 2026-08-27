@@ -1,6 +1,6 @@
 # 海川珠宝 · 部署指南
 
-> 最后更新：2026-08-23（生产 Compose 与 migration 执行门禁收敛）
+> 最后更新：2026-08-27（migration 历史签认与不可变镜像发布合同）
 >
 > **执行门禁（2026-08-23）**：本文是历史部署操作参考，不表示当前项目已可上线，也不授权部署、修改 `.env`、执行 migration 或接入真实支付。操作前必须以当前 `docker-compose.yml`、`.env.example`、Prisma migration 状态和 `docs/CURRENT_STATE.md` 重新取证，并按 `AGENTS.md` 获得针对精确环境的批准。
 
@@ -9,11 +9,11 @@
 ```
 VPS (Ubuntu 22.04)
 ├── Docker Compose（五服务，docker-compose.yml 为唯一事实来源）
-│   ├── mysql:8.0        (仅容器网络，不对宿主机暴露；管理走 SSH 隧道/ exec)
-│   ├── server (NestJS)  (仅容器网络，nginx 反代 /api 与 /uploads)
-│   ├── client (Nginx)   (80 端口对外，静态资源 + 反代 + CSP/安全响应头)
-│   ├── backup           (mysql:8.0 镜像复用，每日 DB+媒体卷备份至 ./backups)
-│   └── uptime-kuma      (127.0.0.1:3001，存活监控，远程经 SSH 隧道访问)
+│   ├── mysql:8.0@sha256 (仅容器网络，不对宿主机暴露；管理走 SSH 隧道/ exec)
+│   ├── server@sha256    (NestJS，仅容器网络，nginx 反代 /api 与 /uploads)
+│   ├── client@sha256    (Nginx，80 端口对外，静态资源 + 反代 + CSP/安全响应头)
+│   ├── backup           (固定 digest 的 mysql:8.0 镜像复用，每日 DB+媒体卷备份至 ./backups)
+│   └── uptime-kuma      (固定 digest；127.0.0.1:3001，远程经 SSH 隧道访问)
 └── 数据卷
     ├── mysql_data / uploads_data / private_media_data（付款凭证）
     └── ./backups（宿主机目录，建议异地同步——3-2-1 原则）
@@ -105,10 +105,11 @@ MYSQL_PASSWORD=你设置的应用密码
 DATABASE_URL=mysql://jewelry_user:你设置的应用密码@mysql:3306/jewelry_db
 JWT_SECRET=$(openssl rand -hex 32)   # 自动生成随机密钥
 CORS_ORIGIN=https://你的域名（或 http://服务器IP）
-BOOTSTRAP_ADMIN_PASSWORD=管理员初始密码
 ```
 
 **可选变量**（AI 分类、OSS 上传等暂不需要可注释掉）。
+
+`ALLOW_DEMO_SEED`、`DEMO_ADMIN_PASSWORD` 只属于本地 Demo Seed，候选和生产环境必须保持关闭/空值。`BOOTSTRAP_ADMIN_USERNAME`、`BOOTSTRAP_ADMIN_PASSWORD`、`BOOTSTRAP_ADMIN_REAL_NAME` 只在首次管理员一次性进程中临时提供，不得写入长期运行服务的 Compose 环境，也不得长期保存在目标 `.env`。
 
 ---
 
@@ -126,28 +127,99 @@ mkdir -p client/public/images/products
 
 ---
 
+## 备份恢复门禁
+
+`server/scripts/backup.sh` 会为同一批次发布一个 `.sql.gz`、零个或多个媒体 `.tar.gz`，最后发布 `.sha256` 清单。只有清单存在且 `sha256sum -c` 全部通过的批次才可进入恢复候选。
+
+`server/scripts/restore.sh` 是人工、一次性的恢复入口，不挂载到任何长期运行服务，也不会由 Compose 自动触发。它采用以下安全默认值：
+
+- 目标数据库必须由获批的恢复操作预先创建，并且必须为空；禁止对当前业务库原位覆盖。
+- 媒体目标目录必须预先存在且为空；禁止覆盖或合并已有媒体。
+- 恢复清单只能引用同一 `BACKUP_DIR` 下的安全文件名，数据库与媒体在写入前必须通过 SHA-256、gzip/tar 和归档路径校验。
+- 必须提供与目标库精确匹配的 `RESTORE_CONFIRM=RESTORE:<目标库名>`。仅恢复数据库还必须显式设置 `RESTORE_DATABASE_ONLY=true`。
+- 脚本不会创建、删除或切换数据库，不会修改 Compose、数据卷、`.env` 或正在运行的服务。
+
+生产恢复不是日常维护命令。执行前必须针对精确环境批准：备份清单、恢复目标库、空媒体目标卷、停写窗口、负责人、回退方式以及恢复成功后的流量切换。恢复容器至少需要 MySQL 8 客户端、`bash`、`gzip`、`tar`、`sha256sum`，并以只读方式挂载备份目录和恢复脚本；数据库密码只能通过受控环境注入，禁止写入命令历史或日志。
+
+恢复入口的环境合同如下；占位符不能直接用于生产：
+
+```bash
+DB_HOST=<目标 MySQL 主机>
+DB_PORT=3306
+DB_USER=<恢复专用用户>
+DB_PASS=<通过受控环境注入，不回显>
+DB_NAME=<已存在的空恢复库>
+BACKUP_DIR=/backups
+RESTORE_MANIFEST=<已核验批次>.sha256
+MEDIA_TARGET_DIRS=/media/uploads:/media/private-media
+RESTORE_CONFIRM=RESTORE:<与 DB_NAME 完全一致>
+bash /usr/local/bin/restore.sh
+```
+
+恢复完成后必须独立核验，不得只采信脚本退出码：核对表数量、关键表行数或 checksum、`_prisma_migrations` 历史、两类媒体文件数量与哈希；再让候选服务指向恢复目标，验证 `/api/ready`、前台首页、后台登录和本次批准的核心业务路径。任何一步失败，都不得清理原库或切换流量；应保留日志、废弃本次隔离恢复目标，并从新的空库和空媒体目录重新开始。
+
+当前仓库中的 `./backups` 仍是单机、本地、明文保留点，不构成异地灾备。正式上线前还需要落实加密异地副本、访问控制、保留策略、恢复时限（RTO）和可接受数据丢失窗口（RPO），并在目标部署环境完成一次有记录的恢复演练。
+
+---
+
 ## 第六步：启动服务
 
-生产操作必须显式指定基础 Compose 文件，避免 Docker Compose 自动合并仅供本地开发的 `docker-compose.override.yml`。但启动新服务不是发布流程的第一步；获得精确环境的部署与 migration 批准后，必须按以下顺序执行：
+生产操作必须显式指定基础 Compose 文件，避免 Docker Compose 自动合并仅供本地开发的 `docker-compose.override.yml`。`Release Images` 工作流只能手动触发：它从精确 Git commit 构建 server/client，附加 OCI revision 与 migration bundle 标签，生成 SBOM、provenance 和签名证明，并输出含两个完整 digest 引用的 `release-manifest.json`。工作流存在不等于制品已经发布；仍须由获批人员对指定 commit 和正式前端构建参数手动执行。
+
+生产主机禁止从工作区源码构建，也禁止以浮动 tag 部署。获得精确环境的部署与 migration 批准后，必须按以下顺序执行：
 
 1. 记录待发布版本和当前运行版本；为数据库、`uploads_data`、`private_media_data` 建立同一发布批次的部署前备份，核对备份产物可读，并记录可恢复的回滚点。只有备份文件、保留位置和恢复步骤，不等于恢复演练已经通过。
-2. 在目标数据库上核验 migration 历史和待应用清单；仓库 migration 目录不能证明目标库状态。当前运行时镜像通过 `npm ci --omit=dev` 排除了位于 `devDependencies` 的 Prisma CLI，因此禁止执行旧命令 `docker compose exec server npx prisma migrate deploy`，也禁止依赖 `npx` 临时下载未锁定 CLI。
-3. 等待独立 migration runner 的版本、锁文件、目标数据库、负责人和回退方案获得批准。runner 必须按 `server/package-lock.json` 锁定依赖，先执行 migration 状态核验；只有待应用清单与批准范围一致时，才在同一 runner 中执行获批 migration。独立 runner 尚未获批前，本指南不提供可执行的生产 migration 命令。
-4. migration 成功并留存记录后，才启动新服务：
+2. 下载本次工作流产出的 `release-manifest.json`，独立核对 commit、构建参数、证明和负责人；随后运行 `node scripts/verify-release-images.mjs --manifest <清单路径>`。把清单中的完整 `server.reference`、`client.reference`、`gitSha` 与 `migrationBundleSha256` 分别写入受控部署环境的 `SERVER_IMAGE`、`CLIENT_IMAGE`、`RELEASE_GIT_SHA`、`MIGRATION_BUNDLE_SHA256`，并设置 `RELEASE_SOURCE`。两个镜像变量必须形如 `ghcr.io/...@sha256:<64位摘要>`。
+3. 拉取并在启动前验证本地镜像摘要及 OCI 标签；任一不匹配都停止：
 
 ```bash
 cd haichuan
-docker compose -f docker-compose.yml up -d --build
+node scripts/verify-release-images.mjs --manifest release-manifest.json
+docker compose -f docker-compose.yml pull server client
+node scripts/verify-release-images.mjs --runtime
 ```
 
-5. 检查容器状态与启动日志：
+4. 在目标数据库上核验 migration 历史和待应用清单；仓库 migration 目录不能证明目标库状态。`release-preflight` 会把 migration 文件哈希、`_prisma_migrations` ledger 和唯一遗留签认的结构合同共同纳入阻断门禁。已应用 migration 一律不可修改；`server/prisma/migration-integrity-exceptions.json` 只允许审计确认的精确三方匹配，不是通用忽略清单。
+5. 当前运行时镜像通过 `npm ci --omit=dev` 排除了位于 `devDependencies` 的 Prisma CLI，因此禁止执行 `docker compose exec server npx prisma migrate deploy`，也禁止依赖 `npx` 临时下载未锁定 CLI。等待独立 migration runner 的版本、锁文件、目标数据库、待应用清单、负责人和回退方案逐项获批；只有清单与批准范围一致时，才在同一 runner 中执行获批 migration。本文不授权或提供生产 migration 命令。
+6. migration 成功并留存记录后，才以已验证 digest 启动新服务；`--no-build` 是生产硬门禁：
+
+```bash
+docker compose -f docker-compose.yml up -d --no-build --pull always
+```
+
+7. 检查容器状态与启动日志：
 
 ```bash
 docker compose -f docker-compose.yml ps
 docker compose -f docker-compose.yml logs --tail=200 server client
 ```
 
-6. 依次验证 `/api/health`（进程存活）、`/api/ready`（数据库就绪）、前台首页、后台登录及本次批准开放的业务路径；任一失败都停止放量，并按记录的版本、数据库和媒体回滚点执行已批准的回退方案。回退应用版本不能自动逆转数据库 migration。
+8. 仅当目标库确认没有启用中的 `SUPER_ADMIN` 时，使用新镜像内置的一次性 CLI 创建首管理员。用户名和密码只通过当前 shell 临时传入；命令不会创建商品、仓库、分类、PageDocument 或 SiteSettings，已有启用超管、用户名冲突、弱密码和并发重复执行都会拒绝，成功创建与审计记录属于同一事务：
+
+```bash
+read -r -p "首管理员用户名: " BOOTSTRAP_ADMIN_USERNAME
+read -r -s -p "首管理员密码: " BOOTSTRAP_ADMIN_PASSWORD
+echo
+export BOOTSTRAP_ADMIN_USERNAME BOOTSTRAP_ADMIN_PASSWORD
+docker compose -f docker-compose.yml run --rm --no-deps \
+  -e BOOTSTRAP_ADMIN_USERNAME \
+  -e BOOTSTRAP_ADMIN_PASSWORD \
+  server node dist/cli/bootstrap-admin.js
+unset BOOTSTRAP_ADMIN_USERNAME BOOTSTRAP_ADMIN_PASSWORD
+```
+
+命令退出非零时不得改用完整 Seed、SQL 手工提权或重复覆盖账号；保留脱敏错误代码，核对目标库与已有管理员状态后重新审批。初始化成功后由负责人首次登录，在「店铺资料」写入并复核正式联系方式，再通过现有页面编辑器分别保存、预检和发布 `home`、`about`、`products`、`catalog`、`custom`、`contact` 六页真实内容。
+
+9. 正式内容完成后运行只读发布前门禁。它会先检查 migration ledger、仓库文件哈希和遗留结构签认，再检查启用超管、已知占位管理员资料、5 条已知 Demo 商品、持久化 SiteSettings、四项联系资料，以及六页最新发布 revision 的当前合同签认和服务端重新验证；输出不包含密码、联系方式值或页面正文：
+
+```bash
+docker compose -f docker-compose.yml exec -T server \
+  node dist/cli/release-preflight.js
+```
+
+只有 `technicalReady=true` 且命令退出 0 才能进入人工 Go/No-Go；它不代替联系方式真实性、运营主体、法务文案、媒体商用权利、正式域名、TLS、监控、异地备份或目标环境验收。
+
+10. 依次验证 `/api/health`（进程存活）、`/api/ready`（数据库就绪）、前台首页、后台登录及本次批准开放的业务路径；任一失败都停止放量，并按记录的版本、数据库和媒体回滚点执行已批准的回退方案。回退应用版本不能自动逆转数据库 migration。
 
 ---
 
@@ -189,8 +261,8 @@ curl --fail --show-error http://服务器IP/api/ready
 # 编辑 .env 修改 CORS_ORIGIN
 CORS_ORIGIN=https://你的域名
 
-# 重启服务
-docker compose -f docker-compose.yml up -d
+# 仍须使用已验证的 digest 制品；禁止因配置变化回退到现场构建
+docker compose -f docker-compose.yml up -d --no-build --pull always
 ```
 
 ---
@@ -219,5 +291,5 @@ docker compose -f docker-compose.yml logs --tail=200 backup
 1. 国内 VPS 同样装 Docker + Git
 2. 克隆仓库（需确保网络可达 GitHub，否则用 Gitee 镜像）
 3. 复制 `.env` 和产品图片
-4. 完成备份、回滚点和获批 migration 门禁后，执行 `docker compose -f docker-compose.yml up -d`
+4. 完成发布清单、digest/OCI 标签、备份、回滚点和获批 migration 门禁后，执行 `docker compose -f docker-compose.yml up -d --no-build --pull always`
 5. 域名备案 + CDN 加速（国内必须）

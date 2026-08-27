@@ -9,7 +9,7 @@ import {
   Input,
   InputNumber,
   Switch,
-  message,
+  App as AntdApp,
   Space,
 } from "antd";
 import { PlusOutlined, ReloadOutlined, EditOutlined } from "@ant-design/icons";
@@ -30,6 +30,7 @@ type TagRow = {
 };
 
 export default function TagManage() {
+  const { message } = AntdApp.useApp();
   const [list, setList] = useState<TagRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -43,10 +44,15 @@ export default function TagManage() {
     setError("");
     try {
       const res = await tagApi.list();
-      const data = unwrapResponse<TagRow[]>(res);
-      setList(Array.isArray(data) ? data : (data as any)?.list || []);
-    } catch (e: any) {
-      setError(getSafeAdminErrorMessage(e, "标签字典加载失败，请稍后重新加载。"));
+      const data = unwrapResponse<unknown>(res);
+      const list = Array.isArray(data)
+        ? data as TagRow[]
+        : typeof data === "object" && data !== null && Array.isArray((data as { list?: unknown }).list)
+          ? (data as { list: TagRow[] }).list
+          : [];
+      setList(list);
+    } catch (error: unknown) {
+      setError(getSafeAdminErrorMessage(error, "标签字典加载失败，请稍后重新加载。"));
       setList([]);
     } finally {
       setLoading(false);
@@ -86,8 +92,8 @@ export default function TagManage() {
       }
       setModalOpen(false);
       void load();
-    } catch (e: any) {
-      message.error(getSafeAdminErrorMessage(e, "标签保存失败，请检查名称和标识后重试。"));
+    } catch (error: unknown) {
+      message.error(getSafeAdminErrorMessage(error, "标签保存失败，请检查名称和标识后重试。"));
     } finally {
       setSaving(false);
     }
@@ -98,8 +104,8 @@ export default function TagManage() {
       await tagApi.update(record.id, { isActive });
       message.success(isActive ? "标签已启用" : "标签已停用");
       void load();
-    } catch (e: any) {
-      message.error(getSafeAdminErrorMessage(e, "标签状态更新失败，请重新加载后重试。"));
+    } catch (error: unknown) {
+      message.error(getSafeAdminErrorMessage(error, "标签状态更新失败，请重新加载后重试。"));
     }
   };
 
@@ -166,6 +172,7 @@ export default function TagManage() {
       </Card>
 
       <Modal
+        forceRender
         title={editing ? "编辑标签" : "新建标签"}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}

@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test";
+import { installCustomerSession } from "./session-auth";
 
 export type FixtureSalesMode =
   | "DISPLAY_ONLY"
@@ -187,13 +188,7 @@ export async function mockCatalogDetail(
   };
   await page.addInitScript(({ signedIn }) => {
     localStorage.removeItem("hc_selection_tray");
-    if (signedIn) {
-      localStorage.setItem("customerToken", "catalog-detail-fixture");
-      localStorage.setItem("customer", JSON.stringify({ id: 1, name: "测试客户" }));
-    } else {
-      localStorage.removeItem("customerToken");
-      localStorage.removeItem("customer");
-    }
+    if (!signedIn) localStorage.removeItem("customer");
   }, { signedIn: options.signedIn === true });
 
   await page.route("**/api/**", async (route) => {
@@ -288,6 +283,9 @@ export async function mockCatalogDetail(
     }
     return fulfill(route, null);
   });
+  if (options.signedIn) {
+    await installCustomerSession(page, { id: 1, name: "测试客户" });
+  }
 
   return writes;
 }

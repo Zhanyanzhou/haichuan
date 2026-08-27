@@ -2,7 +2,7 @@ import {
   Controller, Post, Get, UseInterceptors, UploadedFiles, UploadedFile,
   UseGuards, Body, BadRequestException, Param, Req, Res,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { diskStorage, memoryStorage } from 'multer';
@@ -18,6 +18,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { CustomerAuthGuard } from '../customers/customer-auth.guard';
 import { Throttle } from '@nestjs/throttler';
 import { CustomerCommerceGuard } from '../../common/guards/customer-commerce.guard';
+import type { CustomerRequest } from '../../common/security/authenticated-principal';
 
 const videoStorage = diskStorage({
   destination: (_req, _file, callback) => {
@@ -32,7 +33,7 @@ const imageMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const imageUploadOptions = {
   storage: memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (_req: any, file: Express.Multer.File, callback: (error: Error | null, acceptFile: boolean) => void) => {
+  fileFilter: (_req: Request, file: Express.Multer.File, callback: (error: Error | null, acceptFile: boolean) => void) => {
     if (!imageMimeTypes.includes(file.mimetype)) {
       return callback(new BadRequestException('仅支持 JPEG、PNG、WebP 或 GIF 图片'), false);
     }
@@ -62,7 +63,7 @@ export class UploadController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('payment-proof')
   @UseInterceptors(FileInterceptor('file', imageUploadOptions))
-  async uploadPaymentProof(@Req() request: any, @UploadedFile() file: Express.Multer.File) {
+  async uploadPaymentProof(@Req() request: CustomerRequest, @UploadedFile() file: Express.Multer.File) {
     return this.uploadService.uploadPrivatePaymentProof(request.customer.id, file);
   }
 
@@ -70,7 +71,7 @@ export class UploadController {
   @UseGuards(CustomerAuthGuard)
   @Get('payment-proofs/:orderId')
   async getPaymentProof(
-    @Req() request: any,
+    @Req() request: CustomerRequest,
     @Param('orderId') orderId: string,
     @Res() response: Response,
   ) {

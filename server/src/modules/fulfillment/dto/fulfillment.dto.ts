@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 /** 履约状态（与 Prisma FulfillmentStatus 一致） */
 export const FulfillmentStatusValues = [
@@ -40,15 +40,15 @@ export class UpdateFulfillmentStatusDto {
 
 /** 履约列表查询 DTO */
 export class FulfillmentQueryDto {
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
-  page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10_000)
+  page = 1;
 
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
-  pageSize?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100)
+  pageSize = 20;
 
   @IsOptional() @IsEnum(FulfillmentStatusValues)
   status?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional() @IsString() @MaxLength(100)
   keyword?: string;
 }

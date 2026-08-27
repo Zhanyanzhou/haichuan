@@ -7,6 +7,8 @@ import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ManualGoldPriceDto } from './dto/manual-gold-price.dto';
+import { GoldPriceHistoryQueryDto } from './dto/gold-price-history-query.dto';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 
 @ApiTags('金价管理')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -25,7 +27,7 @@ export class GoldPriceController {
   @Public()
   @Get('history')
   @ApiOperation({ summary: '获取金价历史' })
-  getHistory(@Query() query: any) {
+  getHistory(@Query() query: GoldPriceHistoryQueryDto) {
     return this.goldPriceService.getHistory(query);
   }
 
@@ -41,7 +43,7 @@ export class GoldPriceController {
   @ApiOperation({ summary: '手动录入金价' })
   async updateManually(
     @Body() dto: ManualGoldPriceDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: StaffPrincipal,
   ) {
     return this.goldPriceService.updateManually({
       price: dto.price,

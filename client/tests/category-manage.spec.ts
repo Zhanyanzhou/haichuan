@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 const categoryTree = [
   {
@@ -35,24 +36,9 @@ const categoryTree = [
 ];
 
 async function authenticateCategoryEditor(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("token", "category-manage-test-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token: "category-manage-test-token",
-          user: {
-            id: 1,
-            username: "category-editor",
-            role: "SUPER_ADMIN",
-            name: "分类编辑员",
-          },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "category-editor",
+    realName: "分类编辑员",
   });
 }
 
@@ -62,6 +48,7 @@ test.describe("分类管理现有交互合同", () => {
 
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
+      if (path === "/api/auth/profile") return route.fallback();
       let data: unknown = {};
       if (path === "/api/categories/admin/tree") data = categoryTree;
       if (path === "/api/settings/flags") {
@@ -100,7 +87,7 @@ test.describe("分类管理现有交互合同", () => {
     await expect(page).toHaveURL(/\/admin\/products\?categoryId=2$/);
   });
 
-  test("分类写请求沿用员工令牌、CSRF Cookie 与原请求体", async ({ page }) => {
+  test("分类写请求沿用员工 Cookie 会话、CSRF 与原请求体", async ({ page }) => {
     await authenticateCategoryEditor(page);
     const categoryWrites: Array<{
       headers: Record<string, string>;
@@ -110,6 +97,7 @@ test.describe("分类管理现有交互合同", () => {
     await page.route("**/api/**", async (route) => {
       const request = route.request();
       const path = new URL(request.url()).pathname;
+      if (path === "/api/auth/profile") return route.fallback();
       if (path === "/api/categories" && request.method() === "POST") {
         categoryWrites.push({
           headers: request.headers(),
@@ -133,7 +121,7 @@ test.describe("分类管理现有交互合同", () => {
     await page.goto("/admin/categories");
     await expect(page.getByRole("heading", { name: "分类管理" })).toBeVisible();
     await page.evaluate(() => {
-      document.cookie = "hc_admin_csrf=category-csrf-token; path=/";
+      document.cookie = "hc_csrf=category-csrf-token; path=/";
     });
 
     await page.getByRole("button", { name: "新建一级分类" }).click();
@@ -143,9 +131,7 @@ test.describe("分类管理现有交互合同", () => {
     await createDialog.getByRole("button", { name: /保\s*存/ }).click();
 
     await expect.poll(() => categoryWrites.length).toBe(1);
-    expect(categoryWrites[0].headers.authorization).toBe(
-      "Bearer category-manage-test-token",
-    );
+    expect(categoryWrites[0].headers.authorization).toBeUndefined();
     expect(categoryWrites[0].headers["x-csrf-token"]).toBe(
       "category-csrf-token",
     );

@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 const appMode = process.env.PLAYWRIGHT_APP_MODE === "mock" ? "mock" : "development";
 
@@ -99,6 +100,7 @@ function makeFeaturedProductDraft() {
 async function mockEditorApis(page: Page, draft = makeHeroDraft()) {
   await page.route("**/api/**", async (route) => {
     const url = route.request().url();
+    if (url.includes("/auth/profile")) return route.fallback();
     if (url.includes("/page-modules/document/validate")) {
       return route.fulfill(json({ valid: true, errors: [] }));
     }
@@ -135,26 +137,9 @@ async function mockEditorApis(page: Page, draft = makeHeroDraft()) {
 }
 
 async function authenticateAdmin(page: Page) {
-  await page.goto("/admin/login");
-  await page.evaluate(() => {
-    const user = {
-      id: 1,
-      username: "inspector-context-ui-test",
-      realName: "属性面板 UI 测试管理员",
-      role: "SUPER_ADMIN",
-    };
-    localStorage.setItem("token", "inspector-context-ui-test-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token: "inspector-context-ui-test-token",
-          user,
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "inspector-context-ui-test",
+    realName: "属性面板 UI 测试管理员",
   });
 }
 
@@ -410,7 +395,7 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     ).toEqual([]);
   });
 
-  test("Desktop / Mobile 使用独立默认与覆盖，并可按设备重置", async ({ page }) => {
+  test("Desktop 标题保留独立覆盖，Mobile 固定阅读顺序不暴露自由几何", async ({ page }) => {
     const inspector = await openHeroInspector(page);
     await selectObject(inspector, "title", "标题");
     await inspector.getByRole("tab", { name: "模板编辑" }).click();
@@ -432,34 +417,20 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     const mobileGeometry = inspector.locator(
       '[data-visual-geometry-node="title"][data-visual-geometry-viewport="mobile"]',
     );
-    await expect(mobileGeometry).toBeVisible();
-    const mobileX = inspector.getByRole("slider", {
-      name: "横向位置（移动端）",
-    });
-    await expect(mobileX).toHaveValue("16");
+    await expect(mobileGeometry).toHaveCount(0);
     await expect(inspector.locator('[data-device-state="mobile-default"]')).toBeVisible();
-    const mobileLayer = inspector.getByRole("group", {
-      name: "图层顺序（移动端）",
-    });
-    await expect(mobileLayer).toContainText("当前层级 2");
+    await expect(inspector.getByText("位置由移动端堆叠模板控制")).toBeVisible();
+    await expect(inspector.getByRole("slider", { name: "横向位置（移动端）" })).toHaveCount(0);
 
-    await setRangeValue(mobileX, 27);
-    await mobileLayer.getByRole("button", { name: "上移一层" }).click();
-    await expect(mobileLayer).toContainText("当前层级 3");
-    await expect(inspector.locator('[data-device-state="mobile-independent"]')).toBeVisible();
     await page.getByRole("button", { name: /桌面端布局/ }).click();
+    await inspector.getByRole("button", { name: "精确位置与尺寸" }).click();
     await expect(desktopX).toHaveValue("22");
     await expect(desktopLayer).toContainText("当前层级 5");
-    await page.getByRole("button", { name: /移动端布局/ }).click();
-    await expect(mobileX).toHaveValue("27");
-    await expect(mobileLayer).toContainText("当前层级 3");
 
-    await inspector.getByRole("button", { name: "恢复移动端默认位置" }).click();
-    await expect(mobileX).toHaveValue("16");
+    await inspector.getByRole("button", { name: "恢复桌面端默认位置" }).click();
+    await expect(desktopX).toHaveValue("25");
     await inspector.getByRole("button", { name: "恢复主标题设计默认" }).click();
-    await expect(
-      inspector.getByRole("slider", { name: "横向位置（移动端）" }),
-    ).toHaveValue("16");
+    await expect(desktopLayer).toContainText("当前层级 2");
   });
 
   test("键盘可切换内容/设计并进入对象选择，焦点可见", async ({ page }) => {

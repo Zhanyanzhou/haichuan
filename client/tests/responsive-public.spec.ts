@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installCustomerSession } from "./fixtures/session-auth";
 
 const apiResponse = (data: unknown) => JSON.stringify({ code: 200, data, message: "success" });
 
@@ -45,7 +46,6 @@ async function expectInteractiveElementsWithinViewport(page: import("@playwright
 }
 
 async function mockEmptyCommerceState(page: import("@playwright/test").Page) {
-  await page.addInitScript(() => localStorage.setItem("customerToken", "catalog-link-test"));
   await page.route("**/api/**", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -71,6 +71,7 @@ async function mockEmptyCommerceState(page: import("@playwright/test").Page) {
     contentType: "application/json",
     body: apiResponse({ name: "测试客户" }),
   }));
+  await installCustomerSession(page, { id: 1, name: "测试客户" });
 }
 
 async function mockPublishedHeaderDocuments(
@@ -125,6 +126,41 @@ test.describe("公开页面响应式边界", () => {
       await expectInteractiveElementsWithinViewport(page);
     });
   }
+});
+
+test.describe("客户中心移动端首屏层级", () => {
+  test.use({ viewport: { width: 375, height: 812 } });
+
+  test("账户标题保持两行且主要入口不被超大排印推出首屏", async ({ page }) => {
+    await page.route("**/api/customers/profile", (route) =>
+      route.fulfill({ status: 401, contentType: "application/json", body: apiResponse(null) }),
+    );
+    await page.route("**/api/customers/session/refresh", (route) =>
+      route.fulfill({ status: 401, contentType: "application/json", body: apiResponse(null) }),
+    );
+    await page.goto("/customer");
+    await page.evaluate(() => document.fonts.ready);
+
+    const heading = page.getByRole("heading", {
+      level: 1,
+      name: "您的珠宝档案， 值得被悉心珍藏。",
+    });
+    await expect(heading).toBeVisible();
+    await expect
+      .poll(() =>
+        heading.evaluate((element) => {
+          const style = window.getComputedStyle(element);
+          return element.getBoundingClientRect().height / Number.parseFloat(style.lineHeight);
+        }),
+      )
+      .toBeLessThanOrEqual(2.1);
+
+    const primaryEntry = page.getByRole("button", { name: "会员登录 / 注册" });
+    await expect(primaryEntry).toBeVisible();
+    await expect
+      .poll(() => primaryEntry.evaluate((element) => element.getBoundingClientRect().bottom))
+      .toBeLessThan(600);
+  });
 });
 
 test.describe("公开页面导航一致性", () => {
@@ -201,13 +237,29 @@ test.describe("公开页面导航一致性", () => {
   test("购物车空态的去选购入口进入选款中心", async ({ page }) => {
     await mockEmptyCommerceState(page);
     await page.goto("/cart");
+    await expect(page.getByRole("main").getByRole("heading", { level: 1, name: "购物车为空" })).toHaveCount(1);
     await expect(page.getByRole("link", { name: "去选购" })).toHaveAttribute("href", "/catalog");
   });
 
   test("结算空态的继续选购入口进入选款中心", async ({ page }) => {
     await mockEmptyCommerceState(page);
     await page.goto("/checkout");
+    await expect(page.getByRole("main").getByRole("heading", { level: 1, name: "购物车为空" })).toHaveCount(1);
     await expect(page.getByRole("link", { name: "继续选购" })).toHaveAttribute("href", "/catalog");
+  });
+
+  test("390px 交易空态保留单一页面标题且没有横向溢出", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockEmptyCommerceState(page);
+
+    for (const path of ["/cart", "/checkout"]) {
+      await page.goto(path);
+      const main = page.getByRole("main");
+      await expect(main).toHaveCount(1);
+      await expect(main.getByRole("heading", { level: 1 })).toHaveCount(1);
+      await expectNoHorizontalOverflow(page);
+      await expectInteractiveElementsWithinViewport(page);
+    }
   });
 
   test("六个品牌页面使用一致导航骨架与正确的首屏颜色语境", async ({ page }) => {

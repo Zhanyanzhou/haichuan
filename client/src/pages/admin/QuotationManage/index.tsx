@@ -19,10 +19,17 @@ import {
 import { PlusOutlined, ReloadOutlined, EyeOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
+import type { FormInstance } from "antd";
 import { productApi, quotationApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
-import type { PaginatedResult, Quotation, QuotationStatus } from "@/types";
+import type {
+  PaginatedResult,
+  Product,
+  ProductSKU,
+  Quotation,
+  QuotationStatus,
+} from "@/types";
 
 const { Text } = Typography;
 
@@ -36,7 +43,7 @@ const STATUS_META: Record<QuotationStatus, { c: string; t: string }> = {
   CONVERTED: { c: "green", t: "已转订单" },
 };
 
-const STATUS_TABS: Array<{ k: string; l: string }> = [
+const STATUS_TABS: Array<{ k: "all" | QuotationStatus; l: string }> = [
   { k: "all", l: "全部" },
   { k: "DRAFT", l: "草稿" },
   { k: "PENDING_CONFIRM", l: "待确认" },
@@ -81,8 +88,31 @@ interface ItemFormValue {
   quotedPrice: number;
 }
 
+interface QuotationFormValues {
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  salesConsultantId?: number;
+  remark?: string;
+  depositAmount?: number;
+  validUntil?: Dayjs;
+  items: ItemFormValue[];
+}
+
+type ProductSearchResult = Pick<Product, "id" | "name" | "code">;
+type SkuSearchResult = Pick<
+  ProductSKU,
+  "id" | "isActive" | "material" | "size" | "skuCode" | "price"
+>;
+
 /** 报价商品行：关联商品 + SKU 两级选择器，选中后自动填充行内字段 */
-function LinkedSkuSelector({ fieldName, form }: { fieldName: number; form: any }) {
+function LinkedSkuSelector({
+  fieldName,
+  form,
+}: {
+  fieldName: number;
+  form: FormInstance<QuotationFormValues>;
+}) {
   const [productOptions, setProductOptions] = useState<
     { value: number; label: string; name: string }[]
   >([]);
@@ -98,7 +128,7 @@ function LinkedSkuSelector({ fieldName, form }: { fieldName: number; form: any }
     setProductSearching(true);
     try {
       const res = await productApi.getList({ keyword: kw, page: 1, pageSize: 20 });
-      const data = unwrapResponse<{ list: any[] }>(res);
+      const data = unwrapResponse<{ list?: ProductSearchResult[] }>(res);
       setProductOptions((data?.list || []).map((p) => ({
         value: p.id,
         label: `${p.name} · ${p.code || ""}`.trim(),
@@ -119,7 +149,7 @@ function LinkedSkuSelector({ fieldName, form }: { fieldName: number; form: any }
     setSkuLoading(true);
     try {
       const res = await productApi.getSkus(pid);
-      const list = unwrapResponse<any[]>(res) || [];
+      const list = unwrapResponse<SkuSearchResult[]>(res) || [];
       setSkuOptions(
         list.filter((s) => s.isActive).map((s) => ({
           value: s.id,
@@ -186,7 +216,7 @@ export default function QuotationManage() {
   const [loadError, setLoadError] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | QuotationStatus>("all");
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
 
@@ -195,7 +225,7 @@ export default function QuotationManage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<QuotationFormValues>();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -225,7 +255,7 @@ export default function QuotationManage() {
     try {
       const res = await quotationApi.getById(id);
       setDetail(unwrapResponse<QuotationDetail>(res));
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "报价单详情加载失败，请稍后重新加载。"));
     } finally {
       setDetailLoading(false);
@@ -252,7 +282,7 @@ export default function QuotationManage() {
           message.success(`已${label}`);
           void load();
           if (detail?.id === record.id) void reloadDetail(record.id);
-        } catch (e: any) {
+        } catch (e: unknown) {
           message.error(getSafeAdminErrorMessage(e, "报价单状态更新失败，请重新加载后确认当前状态。"));
         }
       },
@@ -271,7 +301,7 @@ export default function QuotationManage() {
           message.success("报价单已删除");
           void load();
           if (detail?.id === record.id) setDetail(null);
-        } catch (e: any) {
+        } catch (e: unknown) {
           message.error(getSafeAdminErrorMessage(e, "报价单删除失败，请重新加载后确认当前状态。"));
         }
       },
@@ -302,13 +332,13 @@ export default function QuotationManage() {
       });
       setEditingId(record.id);
       setCreateOpen(true);
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "报价单列表加载失败，请稍后重新加载。"));
     }
   };
 
   const handleSave = async () => {
-    let values: any;
+    let values: QuotationFormValues;
     try {
       values = await form.validateFields();
     } catch {
@@ -323,8 +353,8 @@ export default function QuotationManage() {
         salesConsultantId: values.salesConsultantId || undefined,
         remark: values.remark || undefined,
         depositAmount: values.depositAmount || 0,
-        validUntil: values.validUntil ? (values.validUntil as Dayjs).toISOString() : undefined,
-        items: (values.items as ItemFormValue[]).map((it) => ({
+        validUntil: values.validUntil ? values.validUntil.toISOString() : undefined,
+        items: values.items.map((it) => ({
           productName: it.productName,
           productImage: it.productImage || undefined,
           spec: it.spec || undefined,
@@ -346,7 +376,7 @@ export default function QuotationManage() {
       form.resetFields();
       setEditingId(null);
       void load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, editingId ? "报价单更新失败，请检查填写内容后重试。" : "报价单创建失败，请检查填写内容后重试。"));
     } finally {
       setSubmitting(false);

@@ -40,6 +40,9 @@ test("员工删除接口仅 SUPER_ADMIN，服务端实际执行 DISABLED 而非�
         deleted = true;
       },
     },
+    adminRefreshSession: {
+      updateMany: async () => ({ count: 1 }),
+    },
   };
   const prisma = {
     $transaction: async (callback: (client: any) => Promise<any>) => callback(tx),

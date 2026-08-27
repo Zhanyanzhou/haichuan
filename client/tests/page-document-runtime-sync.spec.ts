@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession as installMockAdminSession } from "./fixtures/session-auth";
 import { createContentTemplateMarker } from "../src/page-builder/generated/contentTemplates.generated";
 
 const useMock = process.env.VITE_USE_MOCK === "true";
@@ -74,19 +75,16 @@ async function installControllableEventSource(page: Page) {
 }
 
 async function installAdminSession(page: Page) {
-  await page.addInitScript(() => {
-    const user = { id: 1, username: "page-sync-audit", role: "SUPER_ADMIN" };
-    localStorage.setItem("token", "page-sync-audit-token");
-    localStorage.setItem("jewelry-auth", JSON.stringify({
-      state: { token: "page-sync-audit-token", user, isLoggedIn: true },
-      version: 0,
-    }));
+  await installMockAdminSession(page, {
+    username: "page-sync-audit",
+    realName: "页面同步测试管理员",
   });
 }
 
 async function mockEmptyEditorApis(page: Page) {
   await page.route("**/api/**", (route) => {
     const url = route.request().url();
+    if (url.includes("/auth/profile")) return route.fallback();
     if (url.includes("/page-modules/document/validate")) {
       return route.fulfill({
         status: 200,
@@ -891,6 +889,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await page.route("**/api/**", async (route) => {
       const request = route.request();
       const url = request.url();
+      if (url.includes("/auth/profile")) return route.fallback();
       if (url.includes("/page-modules/document/validate")) {
         return route.fulfill({
           status: 200,

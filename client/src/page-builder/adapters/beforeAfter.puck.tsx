@@ -29,7 +29,7 @@ export interface BeforeAfterPuckProps {
 export const beforeAfterPuckConfig = {
   render: (props: BeforeAfterPuckProps) => (
     <BeforeAfterBlock
-      module={convertPuckProps("改款对比", props as any) as any}
+      module={convertPuckProps("改款对比", props)!}
       editMode
     />
   ),
@@ -53,7 +53,7 @@ export const beforeAfterPuckConfig = {
     bgColor: "#FFFFFF",
     locked: false,
   } satisfies BeforeAfterPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: BeforeAfterPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

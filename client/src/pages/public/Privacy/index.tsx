@@ -45,7 +45,8 @@ const SECTIONS = [
   {
     title: "信息保存",
     items: [
-      "咨询与选款记录在服务关系存续期间及合理的服务回溯期内保存。",
+      "待处理、已联系和跟进中的咨询与选款记录，在提供顾问服务所需期间保存。",
+      "已完成的咨询与选款记录自完成之日起保存 12 个月；标记为无效的记录自标记之日起保存 30 天。到期后进入受控清理流程；法律法规要求继续保留的除外。",
       "会员账户信息在账户有效期间保存；账户删除后，我们会在合理期限内移除或匿名化您的可识别信息。",
       "技术日志仅用于安全与稳定性目的，保存期限不超过排查所需的合理周期。",
       "法律法规另有要求的，依照相应要求执行。",
@@ -62,7 +63,7 @@ const SECTIONS = [
   },
   {
     title: "本地存储",
-    body: "网站在您的浏览器中保存登录令牌、本地选款清单，以及一个用于匿名统计的会话标识，用于保持登录状态、跨页面选款与了解访问情况。这些数据保存在您的设备上，您可以在浏览器设置中随时清除。",
+    body: "登录会话由浏览器以 HttpOnly Cookie 管理，页面脚本不能读取其中的会话凭证。浏览器本地存储仅用于保存尚未提交的选款清单和匿名统计会话标识，您可以在浏览器设置中随时清除这些本地数据。",
   },
   {
     title: "未成年人",
@@ -94,7 +95,10 @@ export default function Privacy() {
       .getPublicSettings()
       .then((res) => {
         if (cancelled) return;
-        const s = unwrapResponse<any>(res);
+        const s = unwrapResponse<{
+          contactPhone?: string | null;
+          contactEmail?: string | null;
+        }>(res);
         setContact({
           phone: s?.contactPhone?.trim() || "",
           email: s?.contactEmail?.trim() || "",
@@ -278,7 +282,7 @@ export default function Privacy() {
               lineHeight: 1.7,
             }}
           >
-            隐私说明版本：privacy-v1.1；最后更新于 2026-08-21。如本说明与实际代码行为不一致，以实际代码行为为准；我们会及时更新本说明。
+            隐私说明版本：privacy-v2；最后更新于 2026-08-27。
           </p>
         </div>
       </section>

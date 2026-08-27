@@ -17,7 +17,7 @@ export interface CarouselPuckProps {
 export const carouselPuckConfig = {
   label: "轮播图海报",
   render: (props: CarouselPuckProps) => (
-    <CarouselBlock module={convertPuckProps("轮播图", props as any) as any} editMode />
+    <CarouselBlock module={convertPuckProps("轮播图", props)!} editMode />
   ),
   defaultProps: {
     images: [
@@ -45,6 +45,6 @@ export const carouselPuckConfig = {
     mobileRatio: CAROUSEL_CONTRACT.defaults.mobileRatio,
     locked: false,
   } satisfies CarouselPuckProps,
-  resolvePermissions: (data: any) =>
+  resolvePermissions: (data: { props?: CarouselPuckProps }) =>
     data.props?.locked ? { delete: false, drag: false } : {},
 };

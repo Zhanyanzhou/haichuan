@@ -12,14 +12,18 @@
 
 import type { ProductImage } from '@/types';
 
+const PRODUCT_PLACEHOLDER = '/images/system/product-placeholder.svg';
+
 /** ProductImage 对象判断 */
-function isImageObj(img: any): img is ProductImage {
-  return typeof img === 'object' && img !== null && ('url' in img || 'mediaUrl' in img);
+function isImageObj(img: unknown): img is ProductImage {
+  if (typeof img !== 'object' || img === null) return false;
+  const candidate = img as Partial<ProductImage>;
+  return typeof candidate.url === 'string' || typeof candidate.mediaUrl === 'string';
 }
 
 /** 优先 mediaUrl（受控媒体端点），回退 url（admin 接口/历史数据） */
-function pickImgUrl(img: any): string {
-  if (!img) return '';
+function pickImgUrl(img: unknown): string {
+  if (!isImageObj(img)) return '';
   return img.mediaUrl || img.url || '';
 }
 
@@ -38,7 +42,7 @@ function firstImageUrl(images?: ProductImage[] | string[]): string {
   const first = images[0];
   if (isImageObj(first)) {
     // ProductImage[] — 优先 FRONT
-    const front = images.find(img => isImageObj(img) && img.type === 'FRONT') as any | undefined;
+    const front = images.find(img => isImageObj(img) && img.type === 'FRONT');
     if (pickImgUrl(front)) return pickImgUrl(front);
     if (pickImgUrl(first)) return pickImgUrl(first);
   } else if (typeof first === 'string') {
@@ -57,26 +61,26 @@ type ProductLike = {
  * 获取列表图 URL（Catalog / 推荐）——自动请求 480px 缩放版，替代原图直出
  */
 export function getListingImage(product: ProductLike): string {
-  if (!product) return '/images/products/placeholder.svg';
+  if (!product) return PRODUCT_PLACEHOLDER;
   const listing = pickImgUrl(product.listingImage);
   if (listing) return withResize(listing, 480);
   const primary = pickImgUrl(product.primaryImage);
   if (primary) return withResize(primary, 480);
   const fromImages = firstImageUrl(product.images);
   if (fromImages) return withResize(fromImages, 480);
-  return '/images/products/placeholder.svg';
+  return PRODUCT_PLACEHOLDER;
 }
 
 /**
  * 获取详情主图 URL（ProductDetail）——1200px：灯箱清晰度与带宽的平衡点
  */
 export function getPrimaryImage(product: ProductLike): string {
-  if (!product) return '/images/products/placeholder.svg';
+  if (!product) return PRODUCT_PLACEHOLDER;
   const primary = pickImgUrl(product.primaryImage);
   if (primary) return withResize(primary, 1200);
   const fromImages = firstImageUrl(product.images);
   if (fromImages) return withResize(fromImages, 1200);
-  return '/images/products/placeholder.svg';
+  return PRODUCT_PLACEHOLDER;
 }
 
 /**

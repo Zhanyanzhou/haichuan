@@ -58,14 +58,14 @@ export class PublicProductQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(1_000_000)
+  @Max(10_000)
   page?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(2_000)
+  @Max(100)
   pageSize?: number;
 
   @IsOptional()
@@ -84,14 +84,14 @@ export class PublicProductQueryDto {
   /** 商品 ID 集合，仅用于按已知商品定向取数。 */
   @IsOptional()
   @IsString()
-  @MaxLength(10_000)
+  @MaxLength(2_000)
   @Matches(POSITIVE_ID_CSV, { message: "ids 必须是正整数逗号列表" })
   ids?: string;
 
   /** 新 PageDocument 使用的稳定商品 code 集合。 */
   @IsOptional()
   @IsString()
-  @MaxLength(10_000)
+  @MaxLength(2_000)
   @Matches(NON_EMPTY_CSV, { message: "codes 必须是非空逗号列表" })
   codes?: string;
 

@@ -32,15 +32,24 @@ const checks = [
     assert.match(controller, /@Query\(["']origin["']\)\s+origin\?:\s*string/);
     assert.match(controller, /buildQrConnectUrl\(origin\)/);
   }],
-  ["state 关联父页 origin，非法来源降级为 null", () => {
-    assert.match(service, /parentOrigin:\s*normalizeParentOrigin\(parentOrigin\)/);
+  ["state 只关联 CORS 白名单内的父页 origin，并使用限时签名", () => {
+    assert.match(service, /normalizeParentOrigin\(parentOrigin,\s*allowedOrigins\)/);
     assert.match(service, /\[["']http:["'],\s*["']https:["']\]\.includes\(url\.protocol\)/);
     assert.match(service, /url\.origin\s*!==\s*value/);
+    assert.match(service, /allowedOrigins\.includes\(url\.origin\)/);
+    assert.match(service, /buildSignedState\(normalizedOrigin,\s*allowedOrigins\)/);
+    assert.match(service, /createHmac\(["']sha256["'],\s*stateSigningKey\(\)\)/);
+    assert.match(service, /Date\.now\(\)\s*-\s*issuedAt\s*>\s*STATE_TTL_MS/);
+    assert.match(service, /timingSafeEqual\(supplied,\s*expected\)/);
   }],
   ["回调校验 state 后取回父页 origin 并随结果返回", () => {
-    assert.match(service, /const\s*record\s*=\s*state\s*\?\s*this\.states\.get\(state\)\s*:\s*undefined/);
-    assert.match(service, /this\.states\.delete\(state\)/);
-    assert.match(service, /const\s*\{\s*parentOrigin\s*\}\s*=\s*record/);
+    assert.match(service, /parentOrigin\s*=\s*verifySignedState\(/);
+    assert.match(
+      service,
+      /resolveCorsOrigins\(process\.env\.NODE_ENV,\s*process\.env\.CORS_ORIGIN\)/,
+    );
+    assert.match(service, /result:\s*\{\s*kind:\s*["']error["'],\s*message:\s*["']登录状态已失效，请重新扫码["']\s*\}[\s\S]*?parentOrigin:\s*null/);
+    assert.doesNotMatch(service, /this\.states\.(get|set|delete)\(/);
     assert.match(service, /Promise<WechatCallbackOutcome>/);
   }],
   ["前端只接受自身嵌入的扫码 iframe 发来的消息", () => {

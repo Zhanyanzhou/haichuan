@@ -1,26 +1,12 @@
 import { expect, test } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 const useMock = process.env.VITE_USE_MOCK === "true";
 
 async function authenticateAdmin(page: import("@playwright/test").Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("token", "mock-jwt-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token: "mock-jwt-token",
-          user: {
-            id: 1,
-            username: "mock-admin",
-            role: "SUPER_ADMIN",
-            realName: "Mock Admin",
-          },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "mock-admin",
+    realName: "Mock Admin",
   });
 }
 

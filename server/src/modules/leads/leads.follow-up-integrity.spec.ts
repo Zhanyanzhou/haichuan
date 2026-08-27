@@ -33,14 +33,28 @@ test('跟进控制器只把当前登录员工 ID 交给服务层', async () => {
 });
 
 test('跟进记录只为现存线索写入并使用服务端提供的员工 ID', async () => {
-  const writes: unknown[] = [];
+  const activityWrites: unknown[] = [];
+  const legacyWrites: unknown[] = [];
   const prisma = {
-    inquiry: { findUnique: async () => ({ id: 17 }) },
-    selectionInquiry: { findUnique: async () => null },
+    $transaction: async (callback: (transaction: unknown) => unknown) => callback(prisma),
+    lead: {
+      findFirst: async () => ({
+        id: 41,
+        sourceType: 'INQUIRY',
+        inquiryId: 17,
+        selectionInquiryId: null,
+      }),
+    },
+    leadActivity: {
+      create: async (args: unknown) => {
+        activityWrites.push(args);
+        return { id: 1 };
+      },
+    },
     leadFollowUp: {
       create: async (args: unknown) => {
-        writes.push(args);
-        return { id: 1 };
+        legacyWrites.push(args);
+        return { id: 2 };
       },
     },
   };
@@ -54,7 +68,19 @@ test('跟进记录只为现存线索写入并使用服务端提供的员工 ID',
     createdBy: 7,
   });
 
-  assert.deepEqual(writes, [
+  assert.deepEqual(activityWrites, [
+    {
+      data: {
+        leadId: 41,
+        type: 'FOLLOW_UP',
+        content: '已电话确认',
+        contactMethod: 'phone',
+        nextFollowUpAt: null,
+        createdBy: 7,
+      },
+    },
+  ]);
+  assert.deepEqual(legacyWrites, [
     {
       data: {
         leadType: 'inquiry',
@@ -71,8 +97,7 @@ test('跟进记录只为现存线索写入并使用服务端提供的员工 ID',
 test('跟进记录拒绝不存在的线索且不会形成孤立写入', async () => {
   let createCalls = 0;
   const prisma = {
-    inquiry: { findUnique: async () => null },
-    selectionInquiry: { findUnique: async () => null },
+    lead: { findFirst: async () => null },
     leadFollowUp: {
       create: async () => {
         createCalls += 1;

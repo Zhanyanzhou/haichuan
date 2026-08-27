@@ -161,55 +161,33 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
   });
 });
 
-test.describe("Custom 无图安全版式（Mock）", () => {
+test.describe("Custom 未发布文档安全短页（Mock）", () => {
   for (const viewport of [
-    { name: "desktop", width: 1440, height: 900, processColumns: 2, craftColumns: 3 },
-    { name: "mobile", width: 390, height: 844, processColumns: 1, craftColumns: 1 },
+    { name: "desktop", width: 1440, height: 900 },
+    { name: "mobile", width: 390, height: 844 },
   ]) {
-    test(`${viewport.name} 保留真实 Hero 并使用无占位媒体的流程与工艺布局`, async ({ page }) => {
+    test(`${viewport.name} 不回退硬编码长页或占位媒体，并保留可达咨询入口`, async ({ page }) => {
       await mockServiceApis(page);
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await page.goto("/custom");
 
-      const hero = page.getByRole("img", { name: "珠宝制作细节" });
-      await expect(hero).toHaveAttribute("src", "/images/錾刻.png");
-      await expect.poll(() => hero.evaluate((image: HTMLImageElement) => image.naturalWidth))
-        .toBeGreaterThan(0);
-
-      const process = page.locator("section").filter({
-        has: page.getByRole("heading", { name: "从灵感到交付" }),
-      });
-      const processItems = process.locator("ol > li");
-      await expect(processItems).toHaveCount(4);
-      await expect(process.locator("img")).toHaveCount(0);
-
-      const craft = page.locator("section").filter({
-        has: page.getByRole("heading", { name: "材质与制作细节" }),
-      });
-      const craftItems = craft.locator("ul > li");
-      await expect(craftItems).toHaveCount(6);
-      await expect(craft.locator("img")).toHaveCount(0);
-      await expect(page.locator('main img[src^="data:image/svg"]')).toHaveCount(0);
+      const fallback = page.locator('[data-production-fallback="safe-status"]');
+      await expect(fallback).toBeVisible();
+      await expect(fallback).toHaveAttribute("data-page-document-state", "unpublished");
+      await expect(fallback.getByRole("heading", { name: "珠宝定制" })).toBeVisible();
+      await expect(page.locator("main img")).toHaveCount(0);
+      await expect(page.locator(".custom-scroll-reveal")).toHaveCount(0);
       await expect(page.locator("main")).not.toContainText("HAICHUAN seed");
 
-      const processColumnCount = await processItems.first().evaluate((item) =>
-        getComputedStyle(item).gridTemplateColumns.split(" ").length,
-      );
-      const craftColumnCount = await craft.locator("ul").evaluate((list) =>
-        getComputedStyle(list).gridTemplateColumns.split(" ").length,
-      );
-      expect(processColumnCount).toBe(viewport.processColumns);
-      expect(craftColumnCount).toBe(viewport.craftColumns);
-
-      const cta = page.getByRole("link", { name: "前往咨询", exact: true });
-      await expect(cta).toHaveCount(1);
+      const cta = fallback.getByRole("link", { name: "提交定制咨询", exact: true });
       await expect(cta).toHaveAttribute("href", "/contact?type=custom");
-      await expect(page.getByRole("link", { name: "联系客服", exact: true })).toHaveCount(0);
+      await expect(fallback.getByRole("link", { name: "浏览公开款式" }))
+        .toHaveAttribute("href", "/catalog");
       if (viewport.width === 390) {
         await cta.scrollIntoViewIfNeeded();
         const box = await cta.boundingBox();
         expect(box?.height).toBeGreaterThanOrEqual(48);
-        expect(box?.width).toBeGreaterThanOrEqual(340);
+        expect(box?.width).toBeGreaterThanOrEqual(44);
       }
       await expectNoHorizontalOverflow(page);
     });

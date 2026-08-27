@@ -145,6 +145,9 @@ const PLACEHOLDER_MARKERS = [
   "待确认",
   "待配置",
   "请填写",
+  "正在完善",
+  "内容建设中",
+  "即将上线",
   CONTENT_TEMPLATE_ASSET_POLICY.placeholder.label,
   CONTENT_TEMPLATE_ASSET_POLICY.placeholder.badge,
   CONTENT_TEMPLATE_ASSET_POLICY.placeholder.status,
@@ -193,6 +196,47 @@ const PERSONAL_TEMPLATE_FACT_FIELDS_BY_MODULE: Readonly<Record<string, ReadonlyS
 
 const PERSONAL_TEMPLATE_MEDIA_KEY = /(?:image|poster|videoUrl)$/i;
 const PERSONAL_TEMPLATE_PRODUCT_ID_KEY = /productId$/i;
+
+type PageDocumentRecord = Record<string, unknown> & {
+  content?: unknown;
+  zones?: unknown;
+};
+
+type PageValidationDb = Pick<
+  Prisma.TransactionClient,
+  "siteSetting" | "product" | "category"
+>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+type VisiblePuckBlock = Record<string, unknown> & {
+  type: string;
+  props: Record<string, unknown>;
+};
+
+function isVisiblePuckBlock(value: unknown): value is VisiblePuckBlock {
+  return (
+    isRecord(value) &&
+    typeof value.type === "string" &&
+    isRecord(value.props) &&
+    value.props.isVisible !== false &&
+    !EDITOR_ONLY_COMPONENTS.has(value.type)
+  );
+}
+
+function isBusinessRegionBlock(value: unknown): value is VisiblePuckBlock {
+  return (
+    isRecord(value) &&
+    value.type === "业务功能区" &&
+    isRecord(value.props)
+  );
+}
+
+function toInputJsonValue(value: unknown): Prisma.InputJsonValue {
+  return value as Prisma.InputJsonValue;
+}
 
 @Injectable()
 export class PageModulesService {
@@ -606,8 +650,8 @@ export class PageModulesService {
 
   async savePageDocument(
     pageKey: string,
-    puckData: any,
-    metadata?: any,
+    puckData: Record<string, unknown>,
+    metadata?: Record<string, unknown>,
     editorVersion?: string,
     expectedUpdatedAt?: string,
   ) {
@@ -659,8 +703,8 @@ export class PageModulesService {
       const updated = await this.prisma.pageDocument.updateMany({
         where: { pageKey, updatedAt: existing.updatedAt },
         data: {
-          puckData: normalizedPuckData,
-          metadata: metadataWithoutContract,
+          puckData: toInputJsonValue(normalizedPuckData),
+          metadata: toInputJsonValue(metadataWithoutContract),
           editorVersion,
           status: "DRAFT",
         },
@@ -675,8 +719,8 @@ export class PageModulesService {
     return this.prisma.pageDocument.create({
       data: {
         pageKey,
-        puckData: normalizedPuckData,
-        metadata: metadataWithoutContract,
+        puckData: toInputJsonValue(normalizedPuckData),
+        metadata: toInputJsonValue(metadataWithoutContract),
         editorVersion,
         schemaVersion: 1,
       },
@@ -740,8 +784,8 @@ export class PageModulesService {
         data: {
           documentId: doc.id,
           version: nextVersion,
-          puckData: normalizedPuckData as any,
-          metadata: revisionMetadata as any,
+          puckData: toInputJsonValue(normalizedPuckData),
+          metadata: toInputJsonValue(revisionMetadata),
           status: "published",
           publishedBy: userId,
           publishedAt,
@@ -759,7 +803,7 @@ export class PageModulesService {
       const published = await tx.pageDocument.update({
         where: { id: doc.id },
         data: {
-          puckData: normalizedPuckData as any,
+          puckData: toInputJsonValue(normalizedPuckData),
           status: "PUBLISHED",
           publishedAt,
           publishedBy: userId,
@@ -778,8 +822,8 @@ export class PageModulesService {
 
   async validatePageDocument(
     pageKey: string,
-    puckDataOverride?: any,
-    metadataOverride?: any,
+    puckDataOverride?: unknown,
+    metadataOverride?: unknown,
   ) {
     let puckData = puckDataOverride;
     let metadata = metadataOverride;
@@ -806,9 +850,9 @@ export class PageModulesService {
   }
 
   private async collectPageDocumentValidation(
-    db: any,
-    puckData: any,
-    metadata: any,
+    db: PageValidationDb,
+    puckData: unknown,
+    metadata: unknown,
     pageKey: string,
   ): Promise<{ valid: boolean; errors: string[]; issues: ContentTemplateIssue[] }> {
     const issues = [
@@ -894,7 +938,7 @@ export class PageModulesService {
    * 缺少可选资料不会改变既有发布资格，但必须把公开端的真实降级结果反馈给运营。
    */
   private async collectSiteSettingsReadinessIssues(
-    db: any,
+    db: PageValidationDb,
     puckData: unknown,
     pageKey: string,
   ): Promise<ContentTemplateIssue[]> {
@@ -1030,8 +1074,8 @@ export class PageModulesService {
   }
 
   private async collectPuckDataErrors(
-    db: any,
-    puckData: any,
+    db: PageValidationDb,
+    input: unknown,
     pageKey = "",
   ): Promise<ContentTemplateIssue[]> {
     const errors: string[] = [];
@@ -1061,15 +1105,16 @@ export class PageModulesService {
       errors.push(`页面标识「${pageKey}」未在页面合同注册`);
     }
 
-    if (!puckData || typeof puckData !== "object") {
+    if (!isRecord(input)) {
       return [this.createServerValidationIssue("页面数据为空或格式不正确")];
     }
+    const puckData: PageDocumentRecord = input;
 
     if (!Array.isArray(puckData.content)) {
       errors.push("页面内容 content 必须是数组");
     }
 
-    const validateBlock = (block: any, path: string, displayPath: string) => {
+    const validateBlock = (block: unknown, path: string, displayPath: string) => {
       const errorStartIndex = errors.length;
       const attachBlockContext = (props?: Record<string, unknown>) => {
         const blockId = this.isNonEmptyString(props?.id) ? props.id : undefined;
@@ -1077,7 +1122,7 @@ export class PageModulesService {
           errorContexts[index] ??= { blockId, path };
         }
       };
-      if (!block || typeof block !== "object") {
+      if (!isRecord(block)) {
         errors.push(`${displayPath}：区块格式不正确`);
         attachBlockContext();
         return;
@@ -1102,7 +1147,7 @@ export class PageModulesService {
         );
       }
 
-      if (!props || typeof props !== "object") {
+      if (!isRecord(props)) {
         errors.push(`${displayPath}「${type}」：配置 props 不能为空`);
         attachBlockContext();
         return;
@@ -1385,8 +1430,15 @@ export class PageModulesService {
       }
 
       if (type === "首屏主视觉") {
-        const instanceOverrides = props.__instanceOverrides;
-        const legacyCopyOverride = instanceOverrides?.textRoles?.copy;
+        const instanceOverrides = isRecord(props.__instanceOverrides)
+          ? props.__instanceOverrides
+          : undefined;
+        const textRoles = isRecord(instanceOverrides?.textRoles)
+          ? instanceOverrides.textRoles
+          : undefined;
+        const legacyCopyOverride = isRecord(textRoles?.copy)
+          ? textRoles.copy
+          : undefined;
         if (
           instanceOverrides?.version === 1 &&
           legacyCopyOverride?.enabled === true &&
@@ -1411,9 +1463,13 @@ export class PageModulesService {
             subtitle: "副标题",
             actionText: "行动文字",
           };
+          const nodes = isRecord(instanceOverrides.nodes)
+            ? instanceOverrides.nodes
+            : {};
           for (const [roleId, roleLabel] of Object.entries(roleLabels)) {
+            const roleNode = isRecord(nodes[roleId]) ? nodes[roleId] : undefined;
             if (
-              instanceOverrides?.nodes?.[roleId]?.enabled === true &&
+              roleNode?.enabled === true &&
               !this.isNonEmptyString(props[roleId])
             ) {
               const errorIndex = errors.push(
@@ -1507,7 +1563,7 @@ export class PageModulesService {
         if (codes.length > 0) {
           if (new Set(codes).size !== codes.length) {
             const errorIndex = errors.push(`${label}：商品引用不能重复`) - 1;
-            errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.productCodes`, field: "productCodes" };
+            errorContexts[errorIndex] = { blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productCodes`, field: "productCodes" };
           }
           codes.forEach((code: string, index: number) => {
             productCodes.add(code);
@@ -1520,7 +1576,7 @@ export class PageModulesService {
         } else {
           if (new Set(props.productIds.map(Number)).size !== props.productIds.length) {
             const errorIndex = errors.push(`${label}：商品引用不能重复`) - 1;
-            errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.productIds`, field: "productIds" };
+            errorContexts[errorIndex] = { blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productIds`, field: "productIds" };
           }
           for (const [index, id] of props.productIds.entries()) {
             const numericId = Number(id);
@@ -1572,7 +1628,7 @@ export class PageModulesService {
         if (codes.length > 0) {
           if (codes.length > 4 || new Set(codes).size !== codes.length) {
             const errorIndex = errors.push(`${label}：关联商品必须是不重复的 1–4 件商品`) - 1;
-            errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.productCodes`, field: "productCodes" };
+            errorContexts[errorIndex] = { blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productCodes`, field: "productCodes" };
           }
           codes.forEach((code: string, index: number) => {
             productCodes.add(code);
@@ -1585,7 +1641,7 @@ export class PageModulesService {
         } else {
           if (props.productIds.length < 1 || props.productIds.length > 4 || new Set(props.productIds.map(Number)).size !== props.productIds.length) {
             const errorIndex = errors.push(`${label}：关联商品必须是不重复的 1–4 件商品`) - 1;
-            errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.productIds`, field: "productIds" };
+            errorContexts[errorIndex] = { blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productIds`, field: "productIds" };
           }
           for (const [index, id] of props.productIds.entries()) {
             const numericId = Number(id);
@@ -1609,15 +1665,15 @@ export class PageModulesService {
 
       if (
         type === "限时活动" &&
-        !Number.isFinite(new Date(props.targetDate).getTime())
+        !Number.isFinite(new Date(String(props.targetDate)).getTime())
       ) {
         errors.push(`${label}：结束时间必须是有效的 ISO 日期时间`);
       }
 
       if (type === "轮播图") {
         if (Array.isArray(props.images)) {
-          props.images.forEach((item: any, index: number) => {
-            if (!this.isNonEmptyString(item?.url)) {
+          props.images.forEach((item: unknown, index: number) => {
+            if (!isRecord(item) || !this.isNonEmptyString(item.url)) {
               errors.push(`${label}：第 ${index + 1} 张轮播图片不能为空`);
             }
           });
@@ -1630,20 +1686,21 @@ export class PageModulesService {
         fields: string[],
       ) => {
         if (!Array.isArray(items)) return;
-        items.forEach((item, index) => {
+        items.forEach((item: unknown, index) => {
           fields.forEach((field) => {
             validateAsset(
-              item?.[field],
+              isRecord(item) ? item[field] : undefined,
               `${label}：第 ${index + 1} 个${itemLabel}${field}`,
             );
           });
         });
       };
 
+      const categorySlugValues = Array.isArray(props.categorySlugs)
+        ? props.categorySlugs
+        : [];
       const usesCategoryReferences =
-        type === "分类卡片" &&
-        Array.isArray(props.categorySlugs) &&
-        props.categorySlugs.length > 0;
+        type === "分类卡片" && categorySlugValues.length > 0;
       if (!contentTemplate) {
         if (!usesCategoryReferences) {
           validateNestedAssets(props.categories, "分类卡片的", ["image"]);
@@ -1656,8 +1713,8 @@ export class PageModulesService {
 
       // 作品画廊:每张图片必填(与画廊契约一致)
       if (type === "作品画廊" && Array.isArray(props.items)) {
-        props.items.forEach((item: any, index: number) => {
-          if (!this.isNonEmptyString(item?.image)) {
+        props.items.forEach((item: unknown, index: number) => {
+          if (!isRecord(item) || !this.isNonEmptyString(item.image)) {
             errors.push(`${label}：第 ${index + 1} 张画廊图片不能为空`);
           }
         });
@@ -1668,10 +1725,11 @@ export class PageModulesService {
         type === "分类卡片" && !usesCategoryReferences &&
         Array.isArray(props.categories)
       ) {
-        props.categories.forEach((item: any, index: number) => {
+        props.categories.forEach((item: unknown, index: number) => {
+          if (!isRecord(item)) return;
           for (const itemLinkField of ["link", "linkUrl"]) {
             if (
-              this.isNonEmptyString(item?.[itemLinkField]) &&
+              this.isNonEmptyString(item[itemLinkField]) &&
               !this.isSafeLink(item[itemLinkField])
             ) {
               errors.push(
@@ -1683,12 +1741,12 @@ export class PageModulesService {
         });
       }
       if (usesCategoryReferences) {
-        const slugs = props.categorySlugs
+        const slugs = categorySlugValues
           .map((slug: unknown) => String(slug).trim())
           .filter(Boolean);
         if (new Set(slugs).size !== slugs.length) {
           const errorIndex = errors.push(`${label}：分类引用不能重复`) - 1;
-          errorContexts[errorIndex] = { blockId: props.id, path: `${path}.props.categorySlugs`, field: "categorySlugs" };
+          errorContexts[errorIndex] = { blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.categorySlugs`, field: "categorySlugs" };
         }
         slugs.forEach((slug: string, index: number) => {
           categorySlugs.add(slug);
@@ -1701,28 +1759,16 @@ export class PageModulesService {
     };
 
     const visibleContentCount = Array.isArray(puckData.content)
-      ? puckData.content.filter(
-          (block: any) =>
-            block &&
-            typeof block === "object" &&
-            block.props?.isVisible !== false &&
-            !EDITOR_ONLY_COMPONENTS.has(block.type),
-        ).length
+      ? puckData.content.filter(isVisiblePuckBlock).length
       : 0;
     const visibleZoneCount =
       pageRule?.contentPlacement !== "root-only"
-      && puckData.zones && typeof puckData.zones === "object"
+      && isRecord(puckData.zones)
         ? Object.values(puckData.zones).reduce(
             (count: number, zoneBlocks: unknown) =>
               count +
               (Array.isArray(zoneBlocks)
-                ? zoneBlocks.filter(
-                    (block: any) =>
-                      block &&
-                      typeof block === "object" &&
-                      block.props?.isVisible !== false &&
-                      !EDITOR_ONLY_COMPONENTS.has(block.type),
-                  ).length
+                ? zoneBlocks.filter(isVisiblePuckBlock).length
                 : 0),
             0,
           )
@@ -1739,24 +1785,17 @@ export class PageModulesService {
     const orderedVisibleBlocks = [
       ...(Array.isArray(puckData.content) ? puckData.content : []),
       ...(pageRule?.contentPlacement !== "root-only"
-        && puckData.zones && typeof puckData.zones === "object"
+        && isRecord(puckData.zones)
         ? Object.values(puckData.zones).flatMap((blocks) =>
             Array.isArray(blocks) ? blocks : [],
           )
         : []),
-    ].filter(
-      (block: any) =>
-        block &&
-        typeof block === "object" &&
-        block.props?.isVisible !== false &&
-        !EDITOR_ONLY_COMPONENTS.has(block.type),
-    );
+    ].filter(isVisiblePuckBlock);
     if (pageRule) {
       const rootContent = Array.isArray(puckData.content) ? puckData.content : [];
       if (
         pageRule.contentPlacement === "root-only"
-        && puckData.zones
-        && typeof puckData.zones === "object"
+        && isRecord(puckData.zones)
       ) {
         for (const [zoneKey, zoneBlocks] of Object.entries(puckData.zones)) {
           if (!Array.isArray(zoneBlocks) || zoneBlocks.length === 0) continue;
@@ -1769,12 +1808,12 @@ export class PageModulesService {
         }
       }
       const rootBusinessRegions = rootContent.filter(
-        (block: any) => block?.type === "业务功能区",
+        isBusinessRegionBlock,
       );
-      const zoneBusinessRegions = puckData.zones && typeof puckData.zones === "object"
+      const zoneBusinessRegions = isRecord(puckData.zones)
         ? Object.values(puckData.zones).flatMap((blocks) =>
             Array.isArray(blocks)
-              ? blocks.filter((block: any) => block?.type === "业务功能区")
+              ? blocks.filter(isBusinessRegionBlock)
               : [],
           )
         : [];
@@ -1787,23 +1826,20 @@ export class PageModulesService {
       if (zoneBusinessRegions.length > 0) {
         errors.push("固定业务区只能位于页面根内容，不能放入插槽 zones");
       }
-      businessRegions.forEach((block: any) => {
-        if (block?.props?.pageKey !== pageKey || block?.props?.locked !== true) {
+      businessRegions.forEach((block) => {
+        if (block.props.pageKey !== pageKey || block.props.locked !== true) {
           errors.push("固定业务区必须属于当前页面且保持锁定");
         }
       });
-      const semanticRootContent = rootContent.filter((block: any) =>
-        block?.type === "业务功能区" || (
-          block
-          && typeof block === "object"
-          && block.props?.isVisible !== false
-          && !EDITOR_ONLY_COMPONENTS.has(block.type)
-          && Boolean(CONTENT_TEMPLATE_BY_MODULE_TYPE[block.type])
+      const semanticRootContent = rootContent.filter((block) =>
+        isBusinessRegionBlock(block) || (
+          isVisiblePuckBlock(block) &&
+          Boolean(CONTENT_TEMPLATE_BY_MODULE_TYPE[block.type])
         ),
       );
       if (
         pageRule.businessRegionPosition === "after-first-brand-block"
-        && semanticRootContent.findIndex((block: any) => block?.type === "业务功能区") !== 1
+        && semanticRootContent.findIndex(isBusinessRegionBlock) !== 1
       ) {
         errors.push("固定业务区必须紧随首个品牌框架模块之后");
       }
@@ -1817,7 +1853,7 @@ export class PageModulesService {
       }
     }
     const primaryStageIndexes = orderedVisibleBlocks
-      .map((block: any, index: number) =>
+      .map((block, index) =>
         CONTENT_TEMPLATE_BY_MODULE_TYPE[block.type]?.visualRole === "primary-stage"
           ? index
           : -1,
@@ -1831,19 +1867,19 @@ export class PageModulesService {
     }
 
     if (Array.isArray(puckData.content)) {
-      puckData.content.forEach((block: any, index: number) => {
+      puckData.content.forEach((block: unknown, index: number) => {
         validateBlock(block, `content[${index}]`, `第 ${index + 1} 个区块`);
       });
     }
 
-    if (puckData.zones && typeof puckData.zones === "object") {
+    if (isRecord(puckData.zones)) {
       Object.entries(puckData.zones).forEach(([zoneKey, zoneBlocks]) => {
         if (!Array.isArray(zoneBlocks)) {
           errors.push(`插槽 ${zoneKey}：内容必须是数组`);
           return;
         }
         if (pageRule?.contentPlacement === "root-only") return;
-        zoneBlocks.forEach((block: any, index: number) => {
+        zoneBlocks.forEach((block: unknown, index: number) => {
           validateBlock(
             block,
             `zones[${JSON.stringify(zoneKey)}][${index}]`,
@@ -1915,8 +1951,8 @@ export class PageModulesService {
       });
       const publicProductCodes = new Set(
         products
-          .filter((item: { listingImageId: number | null; primaryImageId: number | null; images: Array<{ id: number }> }) => Boolean(item.listingImageId || item.primaryImageId || item.images.length))
-          .map((item: { code: string }) => item.code),
+          .filter((item) => Boolean(item.listingImageId || item.primaryImageId || item.images.length))
+          .map((item) => item.code),
       );
       for (const code of productCodes) {
         if (publicProductCodes.has(code)) continue;
@@ -1953,7 +1989,7 @@ export class PageModulesService {
           },
         },
       });
-      const byId = new Map(categories.map((category: { id: number }) => [category.id, category]));
+      const byId = new Map(categories.map((category) => [category.id, category]));
       const publicBranchIds = new Set<number>();
       for (const category of categories) {
         if (!category.products.length) continue;
@@ -1965,8 +2001,8 @@ export class PageModulesService {
       }
       const eligibleSlugs = new Set(
         categories
-          .filter((category: { id: number; coverImage: string | null }) => publicBranchIds.has(category.id) && Boolean(category.coverImage))
-          .map((category: { slug: string }) => category.slug),
+          .filter((category) => publicBranchIds.has(category.id) && Boolean(category.coverImage))
+          .map((category) => category.slug),
       );
       for (const slug of categorySlugs) {
         if (eligibleSlugs.has(slug)) continue;
@@ -2003,7 +2039,7 @@ export class PageModulesService {
    * 草稿允许内容未完成，但不允许重新持久化已废弃的经营事实副本。
    * 只清理已登记模块的明确遗留键；媒体、布局、样式与历史发布快照均不受影响。
    */
-  private removePageDocumentBusinessFactCopies(puckData: any): any {
+  private removePageDocumentBusinessFactCopies(puckData: unknown): unknown {
     if (!puckData || typeof puckData !== "object" || Array.isArray(puckData)) {
       return puckData;
     }
@@ -2049,7 +2085,7 @@ export class PageModulesService {
    * PageDocument 写入口共用的当前合同规范化。业务事实副本先按既有规则剥离，
    * 实例覆盖再交给机器合同白名单清洗；旧版本印记仍保留，历史 revision 不回写。
    */
-  private normalizePageDocumentPuckData(puckData: any): any {
+  private normalizePageDocumentPuckData(puckData: unknown): unknown {
     const withoutBusinessFacts = this.removePageDocumentBusinessFactCopies(puckData);
     if (
       !withoutBusinessFacts ||
@@ -2147,6 +2183,17 @@ export class PageModulesService {
       if (typeof value === "string" && value.length > limit) {
         issues.push(this.createServerValidationIssue(
           `页面设置：${field} 过长（${value.length}/${limit} 字）`,
+          `metadata.${field}`,
+          undefined,
+          field,
+        ));
+      }
+      if (
+        typeof value === "string" &&
+        PLACEHOLDER_MARKERS.some((marker) => value.includes(marker))
+      ) {
+        issues.push(this.createServerValidationIssue(
+          `页面设置：${label}（${field}）仍是占位内容，请填写正式文案`,
           `metadata.${field}`,
           undefined,
           field,
@@ -2398,8 +2445,12 @@ export class PageModulesService {
     const updated = await this.prisma.pageDocument.updateMany({
       where: { pageKey, updatedAt: doc.updatedAt },
       data: {
-        puckData: this.removePageDocumentBusinessFactCopies(revision.puckData) as any,
-        metadata: withoutContentTemplatePublicationAttestation(revision.metadata) as any,
+        puckData: toInputJsonValue(
+          this.removePageDocumentBusinessFactCopies(revision.puckData),
+        ),
+        metadata: toInputJsonValue(
+          withoutContentTemplatePublicationAttestation(revision.metadata),
+        ),
         status: "DRAFT",
         editorVersion: doc.editorVersion,
       },
@@ -2451,9 +2502,12 @@ export class PageModulesService {
       name: row.name,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-      blockCount: Array.isArray((row.puckData as any)?.content)
-        ? (row.puckData as any).content.filter(
-            (block: any) => block?.type && block.type !== "业务功能区",
+      blockCount: isRecord(row.puckData) && Array.isArray(row.puckData.content)
+        ? row.puckData.content.filter(
+            (block) =>
+              isRecord(block) &&
+              typeof block.type === "string" &&
+              block.type !== "业务功能区",
           ).length
         : 0,
     }));
@@ -2468,8 +2522,8 @@ export class PageModulesService {
   async savePageScheme(input: {
     pageKey: string;
     name: string;
-    puckData: any;
-    metadata?: any;
+    puckData: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
     createdBy?: number | null;
   }) {
     const name = (input.name || "").trim();
@@ -2492,8 +2546,10 @@ export class PageModulesService {
       data: {
         pageKey: input.pageKey,
         name,
-        puckData: input.puckData,
-        metadata: withoutContentTemplatePublicationAttestation(input.metadata) as any,
+        puckData: toInputJsonValue(input.puckData),
+        metadata: toInputJsonValue(
+          withoutContentTemplatePublicationAttestation(input.metadata),
+        ),
         createdBy: input.createdBy ?? null,
       },
     });
@@ -2501,11 +2557,15 @@ export class PageModulesService {
 
   async updatePageScheme(
     id: number,
-    input: { name?: string; puckData?: any; metadata?: any },
+    input: {
+      name?: string;
+      puckData?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    },
   ) {
     const scheme = await this.prisma.pageScheme.findUnique({ where: { id } });
     if (!scheme) throw new BadRequestException("装修方案不存在");
-    const data: Record<string, unknown> = {};
+    const data: Prisma.PageSchemeUpdateInput = {};
     if (typeof input.name === "string") {
       const name = input.name.trim();
       if (!name) throw new BadRequestException("方案名称不能为空");
@@ -2517,11 +2577,15 @@ export class PageModulesService {
       }
       data.name = name;
     }
-    if (input.puckData !== undefined) data.puckData = input.puckData;
-    if (input.metadata !== undefined) {
-      data.metadata = withoutContentTemplatePublicationAttestation(input.metadata);
+    if (input.puckData !== undefined) {
+      data.puckData = toInputJsonValue(input.puckData);
     }
-    return this.prisma.pageScheme.update({ where: { id }, data: data as any });
+    if (input.metadata !== undefined) {
+      data.metadata = toInputJsonValue(
+        withoutContentTemplatePublicationAttestation(input.metadata),
+      );
+    }
+    return this.prisma.pageScheme.update({ where: { id }, data });
   }
 
   async deletePageScheme(id: number) {
@@ -2553,8 +2617,10 @@ export class PageModulesService {
       const restored = await this.prisma.pageDocument.updateMany({
         where: { pageKey, updatedAt: doc.updatedAt },
         data: {
-          puckData: latestRevision.puckData as any,
-          metadata: withoutContentTemplatePublicationAttestation(latestRevision.metadata) as any,
+          puckData: toInputJsonValue(latestRevision.puckData),
+          metadata: toInputJsonValue(
+            withoutContentTemplatePublicationAttestation(latestRevision.metadata),
+          ),
           status: "PUBLISHED",
         },
       });

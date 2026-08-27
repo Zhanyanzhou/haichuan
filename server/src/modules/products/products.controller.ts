@@ -48,8 +48,14 @@ import {
 import { join } from "path";
 import { stat } from "node:fs/promises";
 import { Observable } from "rxjs";
-import { ProductStatus } from "@prisma/client";
+import { ProductStatus, type ProductImage } from "@prisma/client";
+import type { Response } from "express";
 import { requirePublishedPublicContentLocale } from "../../common/content-locale";
+import { BoundedListQueryDto } from "../../common/dto/bounded-list-query.dto";
+import type {
+  CustomerOrStaffRequest,
+  CustomerRequest,
+} from "../../common/security/authenticated-principal";
 const sharp = require("sharp");
 
 @ApiTags("产品管理")
@@ -91,6 +97,13 @@ export class ProductsController {
     return this.productsService.getPublicationQualityReport();
   }
 
+  @Get("admin/media")
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "分页获取商品媒体库" })
+  listMedia(@Query() query: BoundedListQueryDto) {
+    return this.productsService.listMedia(query);
+  }
+
   @Public()
   @Get("public")
   @ApiOperation({ summary: "公开商品列表（仅 PUBLIC + PUBLISHED 安全字段）" })
@@ -128,7 +141,7 @@ export class ProductsController {
   @Get("public/:productId/media/:imageId")
   @ApiOperation({ summary: "公开商品媒体（仅 PUBLIC + PUBLISHED；?width=480/800/1200 动态缩放）" })
   servePublicMedia(
-    @Res({ passthrough: false }) response: any,
+    @Res({ passthrough: false }) response: Response,
     @Param("productId") productId: string,
     @Param("imageId") imageId: string,
     @Query("width") width?: string,
@@ -158,7 +171,7 @@ export class ProductsController {
     required: false,
     description: "按 id 集合拉取（首页/区块用）",
   })
-  findCatalog(@Req() request: any, @Query() query: PublicProductQueryDto) {
+  findCatalog(@Req() request: CustomerRequest, @Query() query: PublicProductQueryDto) {
     requirePublishedPublicContentLocale(query.locale);
     return this.productsService.findCatalog(query, request.customer);
   }
@@ -177,7 +190,7 @@ export class ProductsController {
   @Get("catalog/:id")
   @ApiOperation({ summary: "受控商品详情（登录后访问，按可见范围过滤）" })
   async findCatalogById(
-    @Req() request: any,
+    @Req() request: CustomerRequest,
     @Param("id") id: string,
     @Query("locale") locale?: string,
   ) {
@@ -200,8 +213,8 @@ export class ProductsController {
   @Get("catalog/:productId/media/:imageId")
   @ApiOperation({ summary: "受控商品媒体（需鉴权，PARTNER 商品对客户加水印；?width=480/800/1200）" })
   async getCatalogMedia(
-    @Req() request: any,
-    @Res({ passthrough: false }) response: any,
+    @Req() request: CustomerOrStaffRequest,
+    @Res({ passthrough: false }) response: Response,
     @Param("productId") productId: string,
     @Param("imageId") imageId: string,
     @Query("width") width?: string,
@@ -362,7 +375,7 @@ export class ProductsController {
     if (!product) throw new NotFoundException("商品不存在");
 
     const sourceImg = product.images?.find(
-      (img: any) => img.id === +sourceImageId,
+      (image) => image.id === +sourceImageId,
     );
     if (!sourceImg) throw new NotFoundException("源图片不属于该商品");
 
@@ -393,7 +406,7 @@ export class ProductsController {
     }
 
     // 优先私有裁切（新上传图片走私有存储）；无 storageKey 回退旧 uploads 裁切（迁移兼容）
-    let derived: any;
+    let derived: ProductImage;
     if (sourceImg.storageKey) {
       const result = await this.uploadService.cropPrivateImage(
         sourceImg.storageKey,

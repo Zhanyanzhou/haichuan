@@ -52,7 +52,15 @@ export function normalizeLegacyRenderColors(value: unknown): unknown {
 }
 
 /** 收集区块 props 中所有指向本站 /uploads/ 的素材地址。 */
-export function getLocalUploadUrls(props: Record<string, any>): string[] {
+type AssetRecord = Record<string, unknown>;
+
+function asAssetRecord(value: unknown): AssetRecord | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as AssetRecord
+    : undefined;
+}
+
+export function getLocalUploadUrls(props: AssetRecord): string[] {
   const urls = new Set<string>();
   const collect = (value: unknown) => {
     if (typeof value === "string" && value.startsWith(LOCAL_UPLOAD_PREFIX)) {
@@ -62,33 +70,34 @@ export function getLocalUploadUrls(props: Record<string, any>): string[] {
 
   BLOCK_ASSET_FIELDS.forEach((field) => collect(props[field]));
   if (Array.isArray(props.images)) {
-    props.images.forEach((item: any) => {
-      collect(item?.url);
-      collect(item?.mobileUrl);
+    props.images.forEach((item) => {
+      const record = asAssetRecord(item);
+      collect(record?.url);
+      collect(record?.mobileUrl);
     });
   }
   if (Array.isArray(props.categories)) {
-    props.categories.forEach((item: any) => collect(item?.image));
+    props.categories.forEach((item) => collect(asAssetRecord(item)?.image));
   }
   if (Array.isArray(props.items)) {
     // 作品画廊条目图
-    props.items.forEach((item: any) => collect(item?.image));
+    props.items.forEach((item) => collect(asAssetRecord(item)?.image));
   }
   if (Array.isArray(props.certificates)) {
-    props.certificates.forEach((item: any) => collect(item?.imageUrl));
+    props.certificates.forEach((item) => collect(asAssetRecord(item)?.imageUrl));
   }
   if (Array.isArray(props.steps)) {
-    props.steps.forEach((item: any) => collect(item?.image));
+    props.steps.forEach((item) => collect(asAssetRecord(item)?.image));
   }
   if (Array.isArray(props.testimonials)) {
-    props.testimonials.forEach((item: any) => collect(item?.image));
+    props.testimonials.forEach((item) => collect(asAssetRecord(item)?.image));
   }
 
   return [...urls];
 }
 
 /** HEAD 探测区块引用的本地素材是否仍然存在（素材被删后两端都显示占位）。 */
-export function useHasMissingAssets(props: Record<string, any>): boolean {
+export function useHasMissingAssets(props: AssetRecord): boolean {
   const urlsKey = useMemo(
     () => getLocalUploadUrls(props || {}).join("\n"),
     [props],

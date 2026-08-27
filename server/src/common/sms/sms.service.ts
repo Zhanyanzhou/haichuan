@@ -1,6 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+type SmsClient = {
+  sendSms: (request: {
+    phoneNumbers: string;
+    signName: string;
+    templateCode: string;
+    templateParam: string;
+  }) => Promise<{ body?: { code?: string } }>;
+};
+
 function safeProviderCode(value: unknown): string {
   if (typeof value !== 'string') return 'UNKNOWN';
   const normalized = value.trim().toUpperCase();
@@ -16,7 +25,7 @@ function safeProviderCode(value: unknown): string {
 @Injectable()
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
-  private client: any = null;
+  private client: SmsClient | null = null;
   private signName = '';
   private templateCode = '';
 

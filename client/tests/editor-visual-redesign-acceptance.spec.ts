@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 /**
  * 图 1（1672x941）重设计的真实前端验收合同。
@@ -224,19 +225,9 @@ function makeCollectionDraft() {
 }
 
 async function authenticateAdmin(page: Page) {
-  await page.goto("/admin/login");
-  await page.evaluate(() => {
-    const user = {
-      id: 1,
-      username: "editor-redesign-qa",
-      realName: "视觉编辑器 QA",
-      role: "SUPER_ADMIN",
-    };
-    localStorage.setItem("token", "editor-redesign-qa-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({ state: { token: "editor-redesign-qa-token", user, isLoggedIn: true }, version: 0 }),
-    );
+  await installAdminSession(page, {
+    username: "editor-redesign-qa",
+    realName: "视觉编辑器 QA",
   });
 }
 
@@ -245,6 +236,7 @@ async function mockEditorApis(page: Page, draft: EditorDraft, forbiddenWrites: s
     const request = route.request();
     const url = request.url();
     const pathname = new URL(url).pathname;
+    if (pathname === "/api/auth/profile") return route.fallback();
     if (
       ["POST", "PUT", "PATCH", "DELETE"].includes(request.method()) &&
       /\/page-modules\/document(?:\/publish|\/draft)?$/.test(pathname)

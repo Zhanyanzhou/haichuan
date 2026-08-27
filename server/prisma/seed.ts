@@ -1,17 +1,22 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import {
+  DemoSeedPolicyError,
+  resolveDemoSeedConfig,
+} from '../src/cli/demo-seed-policy';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 开始初始化数据...');
+  const demoConfig = resolveDemoSeedConfig({
+    NODE_ENV: process.env.NODE_ENV,
+    ALLOW_DEMO_SEED: process.env.ALLOW_DEMO_SEED,
+    DEMO_ADMIN_PASSWORD: process.env.DEMO_ADMIN_PASSWORD,
+  });
+  console.log('🌱 开始写入仅限本地开发的 Demo 数据...');
 
-  // Create admin user
-  const bootstrapAdminPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD;
-  if (!bootstrapAdminPassword) {
-    throw new Error('BOOTSTRAP_ADMIN_PASSWORD 环境变量未设置');
-  }
-  const adminPassword = await bcrypt.hash(bootstrapAdminPassword, 10);
+  // Demo 管理员只服务于显式启用的本地 Seed；生产首管理员使用独立 one-shot CLI。
+  const adminPassword = await bcrypt.hash(demoConfig.adminPassword, 10);
   const admin = await prisma.user.upsert({
     where: { username: 'admin' },
     update: {},
@@ -25,7 +30,7 @@ async function main() {
       status: 'ACTIVE',
     },
   });
-  console.log('✅ 管理员账号已初始化，请使用运行时提供的密码登录');
+  console.log('✅ Demo 管理员账号已初始化，请使用本地 Demo 密码登录');
 
   // Create default categories
   const mainCategories = [
@@ -161,7 +166,7 @@ async function main() {
   const dangle = await prisma.category.findUnique({ where: { slug: 'dangle' } });
   const gourd = await prisma.category.findUnique({ where: { slug: 'gourd' } });
 
-  // Create sample products
+  // Create Demo products
   const sampleProducts: Prisma.ProductUncheckedCreateInput[] = [
     {
       code: 'HC-ZD-001', name: '星云系列 · 足金平安扣吊坠',
@@ -217,14 +222,19 @@ async function main() {
       create: p,
     });
   }
-  console.log('✅ 产品种子数据初始化完成（5条）');
+  console.log('✅ Demo 产品数据初始化完成（5条）');
 
-  console.log('🎉 初始化完成!');
+  console.log('🎉 Demo 数据初始化完成!');
 }
 
 main()
   .catch((e) => {
-    console.error('❌ 初始化失败:', e);
+    const known = e instanceof DemoSeedPolicyError;
+    console.error(JSON.stringify({
+      ok: false,
+      code: known ? e.code : 'demo-seed-execution-failed',
+      message: known ? e.message : 'Demo Seed 执行失败；未输出底层异常或连接信息',
+    }));
     process.exit(1);
   })
   .finally(async () => {

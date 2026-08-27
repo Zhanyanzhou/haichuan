@@ -25,33 +25,35 @@ model User {
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   operationLogs             OperationLog[]
-  aiClassifyRecords         AIClassifyRecord[]   @relation("Operator")
-  inquiries                 Inquiry[]            @relation("AssignedTo")
+  aiClassifyRecords         AIClassifyRecord[]             @relation("Operator")
+  inquiries                 Inquiry[]                      @relation("AssignedTo")
   Order                     Order[]
-  selectionInquiries        SelectionInquiry[]   @relation("Handler")
-  leadFollowUps             LeadFollowUp[]       @relation("Creator")
+  selectionInquiries        SelectionInquiry[]             @relation("Handler")
+  leadFollowUps             LeadFollowUp[]                 @relation("Creator")
+  assignedLeads             Lead[]                         @relation("LeadAssignee")
+  leadActivities            LeadActivity[]                 @relation("LeadActivityCreator")
   // 交易域审核/执行人关联（命名关系，避免与既有 User 关系冲突）
-  paymentReviews            Payment[]            @relation("PaymentReviewer")
-  refundRequests            Refund[]             @relation("RefundRequester")
-  refundReviews             Refund[]             @relation("RefundReviewer")
-  refundProcessings         Refund[]             @relation("RefundProcessor")
-  fulfillmentCreators       Fulfillment[]        @relation("FulfillmentCreator")
-  afterSalesHandlers        AfterSalesCase[]     @relation("AfterSalesHandler")
+  paymentReviews            Payment[]                      @relation("PaymentReviewer")
+  refundRequests            Refund[]                       @relation("RefundRequester")
+  refundReviews             Refund[]                       @relation("RefundReviewer")
+  refundProcessings         Refund[]                       @relation("RefundProcessor")
+  fulfillmentCreators       Fulfillment[]                  @relation("FulfillmentCreator")
+  afterSalesHandlers        AfterSalesCase[]               @relation("AfterSalesHandler")
   // 合作申请审核人关联（命名关系，避免与既有 User 关系冲突）
-  partnerApplicationReviews PartnerApplication[] @relation("PartnerApplicationReviewer")
+  partnerApplicationReviews PartnerApplication[]           @relation("PartnerApplicationReviewer")
   // 交易中心：销售顾问关联的订单与报价单
-  salesConsultantOrders     Order[]              @relation("OrderSalesConsultant")
-  quotationsAsConsultant    Quotation[]          @relation("QuotationSalesConsultant")
+  salesConsultantOrders     Order[]                        @relation("OrderSalesConsultant")
+  quotationsAsConsultant    Quotation[]                    @relation("QuotationSalesConsultant")
   adminRefreshSessions      AdminRefreshSession[]
-  uploadedMediaAssets       MediaAsset[]         @relation("MediaAssetUploader")
-  submittedPageLocales      PageDocumentLocalization[] @relation("PageLocaleSubmitter")
-  reviewedPageLocales       PageDocumentLocalization[] @relation("PageLocaleReviewer")
-  publishedPageLocales      PageDocumentLocalization[] @relation("PageLocalePublisher")
-  reviewedPriceApplications PartnerPriceApplication[] @relation("PartnerPriceApplicationReviewer")
-  createdPriceAgreements    PartnerPriceAgreement[] @relation("PartnerPriceAgreementCreator")
-  createdQuotationVersions  QuotationVersion[]   @relation("QuotationVersionCreator")
+  uploadedMediaAssets       MediaAsset[]                   @relation("MediaAssetUploader")
+  submittedPageLocales      PageDocumentLocalization[]     @relation("PageLocaleSubmitter")
+  reviewedPageLocales       PageDocumentLocalization[]     @relation("PageLocaleReviewer")
+  publishedPageLocales      PageDocumentLocalization[]     @relation("PageLocalePublisher")
+  reviewedPriceApplications PartnerPriceApplication[]      @relation("PartnerPriceApplicationReviewer")
+  createdPriceAgreements    PartnerPriceAgreement[]        @relation("PartnerPriceAgreementCreator")
+  createdQuotationVersions  QuotationVersion[]             @relation("QuotationVersionCreator")
   createdDesignFileVersions CooperationDesignFileVersion[] @relation("DesignFileVersionCreator")
-  personalContentTemplates PersonalContentTemplate[]
+  personalContentTemplates  PersonalContentTemplate[]
 
   @@map("users")
 }
@@ -90,9 +92,9 @@ model Category {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
-  children Category[] @relation("CategoryTree")
-  products Product[]
+  parent       Category?             @relation("CategoryTree", fields: [parentId], references: [id])
+  children     Category[]            @relation("CategoryTree")
+  products     Product[]
   translations CategoryTranslation[]
 
   @@map("categories")
@@ -101,83 +103,83 @@ model Category {
 // ========== 产品管理（核心） ==========
 
 model Product {
-  id                      Int                    @id @default(autoincrement())
-  code                    String                 @unique @db.VarChar(50) // 产品编码/货号
-  name                    String                 @db.VarChar(200)
-  shortDescription        String?                @map("short_description") @db.VarChar(500) // 简介
-  description             String?                @db.Text
-  categoryId              Int                    @map("category_id")
-  materialType            MaterialType           @default(GOLD_999) @map("material_type")
-  goldWeight              Decimal?               @default(0) @map("gold_weight") @db.Decimal(8, 2) // 金重(g)
-  craftFee                Decimal?               @default(0) @map("craft_fee") @db.Decimal(10, 2) // 工费
-  price                   Decimal?               @default(0) @db.Decimal(10, 2) // 有效且有价 SKU 的派生最低价缓存，禁止作为成交价事实源
-  priceMin                Decimal?               @default(0) @map("price_min") @db.Decimal(10, 2)
-  priceMax                Decimal?               @default(0) @map("price_max") @db.Decimal(10, 2)
-  weight                  Decimal?               @default(0) @db.Decimal(8, 2) // 总重量(g)
-  size                    String?                @db.VarChar(100) // 尺寸规格
-  gemInfo                 Json?                  @map("gem_info") // 宝石信息JSON
-  craftTechnique          Json?                  @map("craft_technique") // 工艺技法JSON
-  detailContent           Json?                  @map("detail_content") // 模块化详情：图片/文字块
-  status                  ProductStatus          @default(DRAFT)
-  publicationQualityStatus ProductPublicationQualityStatus @default(QUARANTINED) @map("publication_quality_status")
-  publicationQualityHash   String?                @map("publication_quality_hash") @db.Char(64)
-  publicationQualityCheckedAt DateTime?           @map("publication_quality_checked_at")
+  id                          Int                             @id @default(autoincrement())
+  code                        String                          @unique @db.VarChar(50) // 产品编码/货号
+  name                        String                          @db.VarChar(200)
+  shortDescription            String?                         @map("short_description") @db.VarChar(500) // 简介
+  description                 String?                         @db.Text
+  categoryId                  Int                             @map("category_id")
+  materialType                MaterialType                    @default(GOLD_999) @map("material_type")
+  goldWeight                  Decimal?                        @default(0) @map("gold_weight") @db.Decimal(8, 2) // 金重(g)
+  craftFee                    Decimal?                        @default(0) @map("craft_fee") @db.Decimal(10, 2) // 工费
+  price                       Decimal?                        @default(0) @db.Decimal(10, 2) // 有效且有价 SKU 的派生最低价缓存，禁止作为成交价事实源
+  priceMin                    Decimal?                        @default(0) @map("price_min") @db.Decimal(10, 2)
+  priceMax                    Decimal?                        @default(0) @map("price_max") @db.Decimal(10, 2)
+  weight                      Decimal?                        @default(0) @db.Decimal(8, 2) // 总重量(g)
+  size                        String?                         @db.VarChar(100) // 尺寸规格
+  gemInfo                     Json?                           @map("gem_info") // 宝石信息JSON
+  craftTechnique              Json?                           @map("craft_technique") // 工艺技法JSON
+  detailContent               Json?                           @map("detail_content") // 模块化详情：图片/文字块
+  status                      ProductStatus                   @default(DRAFT)
+  publicationQualityStatus    ProductPublicationQualityStatus @default(QUARANTINED) @map("publication_quality_status")
+  publicationQualityHash      String?                         @map("publication_quality_hash") @db.Char(64)
+  publicationQualityCheckedAt DateTime?                       @map("publication_quality_checked_at")
   // 商品可见范围分级（受控产品库核心字段）
   // PUBLIC=公开宣传款（本期不迁移旧商品到此）；MEMBER=登录会员可见（默认）；
   // PARTNER=仅审核通过的合作商家可见；INTERNAL=仅后台员工可见，前台永不展示。
-  visibility              ProductVisibility      @default(MEMBER)
-  salesMode               SalesMode              @default(DISPLAY_ONLY) @map("sales_mode")
-  inventoryPolicy         InventoryPolicy        @default(STANDARD) @map("inventory_policy")
-  purchaseRegion          ProductPurchaseRegion  @default(MAINLAND) @map("purchase_region")
-  publishMode             ProductPublishMode     @default(WAREHOUSE) @map("publish_mode")
-  scheduledPublishAt      DateTime?              @map("scheduled_publish_at")
-  scheduledPublishError   String?                @map("scheduled_publish_error") @db.VarChar(500)
-  fulfillmentType         ProductFulfillmentType @default(IN_STOCK) @map("fulfillment_type")
-  dispatchTime            ProductDispatchTime    @default(WITHIN_48_HOURS) @map("dispatch_time")
-  shippingTemplateId      Int?                   @map("shipping_template_id")
-  deliveryMethods         Json?                  @map("delivery_methods")
-  requiresInsuredShipping Boolean                @default(true) @map("requires_insured_shipping")
-  requiresSignature       Boolean                @default(true) @map("requires_signature")
-  includesCertificate     Boolean                @default(true) @map("includes_certificate")
-  packageType             String?                @map("package_type") @db.VarChar(100)
-  customLeadTime          String?                @map("custom_lead_time") @db.VarChar(100)
-  sortOrder               Int                    @default(0) @map("sort_order")
-  isHot                   Boolean                @default(false) @map("is_hot")
-  isNew                   Boolean                @default(false) @map("is_new")
-  isRecommended           Boolean                @default(false) @map("is_recommended")
-  isLimited               Boolean                @default(false) @map("is_limited")
-  isCustom                Boolean                @default(false) @map("is_custom")
-  multiDiscount           Boolean                @default(false) @map("multi_discount")
-  viewCount               Int                    @default(0) @map("view_count")
-  salesCount              Int                    @default(0) @map("sales_count")
-  publishedAt             DateTime?              @map("published_at")
-  deletedAt               DateTime?              @map("deleted_at")
-  createdAt               DateTime               @default(now()) @map("created_at")
-  updatedAt               DateTime               @updatedAt @map("updated_at")
+  visibility                  ProductVisibility               @default(MEMBER)
+  salesMode                   SalesMode                       @default(DISPLAY_ONLY) @map("sales_mode")
+  inventoryPolicy             InventoryPolicy                 @default(STANDARD) @map("inventory_policy")
+  purchaseRegion              ProductPurchaseRegion           @default(MAINLAND) @map("purchase_region")
+  publishMode                 ProductPublishMode              @default(WAREHOUSE) @map("publish_mode")
+  scheduledPublishAt          DateTime?                       @map("scheduled_publish_at")
+  scheduledPublishError       String?                         @map("scheduled_publish_error") @db.VarChar(500)
+  fulfillmentType             ProductFulfillmentType          @default(IN_STOCK) @map("fulfillment_type")
+  dispatchTime                ProductDispatchTime             @default(WITHIN_48_HOURS) @map("dispatch_time")
+  shippingTemplateId          Int?                            @map("shipping_template_id")
+  deliveryMethods             Json?                           @map("delivery_methods")
+  requiresInsuredShipping     Boolean                         @default(true) @map("requires_insured_shipping")
+  requiresSignature           Boolean                         @default(true) @map("requires_signature")
+  includesCertificate         Boolean                         @default(true) @map("includes_certificate")
+  packageType                 String?                         @map("package_type") @db.VarChar(100)
+  customLeadTime              String?                         @map("custom_lead_time") @db.VarChar(100)
+  sortOrder                   Int                             @default(0) @map("sort_order")
+  isHot                       Boolean                         @default(false) @map("is_hot")
+  isNew                       Boolean                         @default(false) @map("is_new")
+  isRecommended               Boolean                         @default(false) @map("is_recommended")
+  isLimited                   Boolean                         @default(false) @map("is_limited")
+  isCustom                    Boolean                         @default(false) @map("is_custom")
+  multiDiscount               Boolean                         @default(false) @map("multi_discount")
+  viewCount                   Int                             @default(0) @map("view_count")
+  salesCount                  Int                             @default(0) @map("sales_count")
+  publishedAt                 DateTime?                       @map("published_at")
+  deletedAt                   DateTime?                       @map("deleted_at")
+  createdAt                   DateTime                        @default(now()) @map("created_at")
+  updatedAt                   DateTime                        @updatedAt @map("updated_at")
 
-  category              Category                @relation(fields: [categoryId], references: [id])
-  images                ProductImage[]
-  primaryImageId        Int?                    @map("primary_image_id")
-  listingImageId        Int?                    @map("listing_image_id")
-  primaryImage          ProductImage?           @relation("PrimaryImage", fields: [primaryImageId], references: [id], onDelete: SetNull)
-  listingImage          ProductImage?           @relation("ListingImage", fields: [listingImageId], references: [id], onDelete: SetNull)
-  skus                  ProductSKU[]
-  tags                  ProductTag[]
-  productAttributes     ProductAttributeValue[]
-  certificates          Certificate[]
-  inquiries             Inquiry[]
-  favorites             CustomerFavorite[]
-  reviews               ProductReview[]
-  orderItems            OrderItem[]
-  cartItems             Cart[]
-  selectionInquiryItems SelectionInquiryItem[]
-  accessLogs            ProductAccessLog[]
-  quotationItems        QuotationItem[]
-  shippingTemplate      ShippingTemplate?       @relation(fields: [shippingTemplateId], references: [id], onDelete: SetNull)
-  translations          ProductTranslation[]
+  category               Category                @relation(fields: [categoryId], references: [id])
+  images                 ProductImage[]
+  primaryImageId         Int?                    @map("primary_image_id")
+  listingImageId         Int?                    @map("listing_image_id")
+  primaryImage           ProductImage?           @relation("PrimaryImage", fields: [primaryImageId], references: [id], onDelete: SetNull)
+  listingImage           ProductImage?           @relation("ListingImage", fields: [listingImageId], references: [id], onDelete: SetNull)
+  skus                   ProductSKU[]
+  tags                   ProductTag[]
+  productAttributes      ProductAttributeValue[]
+  certificates           Certificate[]
+  inquiries              Inquiry[]
+  favorites              CustomerFavorite[]
+  reviews                ProductReview[]
+  orderItems             OrderItem[]
+  cartItems              Cart[]
+  selectionInquiryItems  SelectionInquiryItem[]
+  accessLogs             ProductAccessLog[]
+  quotationItems         QuotationItem[]
+  shippingTemplate       ShippingTemplate?       @relation(fields: [shippingTemplateId], references: [id], onDelete: SetNull)
+  translations           ProductTranslation[]
   cooperationDesignFiles CooperationDesignFile[]
-  seoSnapshots          SeoSnapshot[]
-  quotationVersionItems QuotationVersionItem[]
+  seoSnapshots           SeoSnapshot[]
+  quotationVersionItems  QuotationVersionItem[]
 
   @@index([categoryId])
   @@index([status])
@@ -348,12 +350,12 @@ model ProductSKU {
   isActive    Boolean      @default(true) @map("is_active")
   createdAt   DateTime     @default(now()) @map("created_at")
 
-  product        Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
-  inventories    Inventory[]
-  orderItems     OrderItem[]
-  cartItems      Cart[]
-  reservations   InventoryReservation[]
-  quotationItems QuotationItem[]
+  product               Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
+  inventories           Inventory[]
+  orderItems            OrderItem[]
+  cartItems             Cart[]
+  reservations          InventoryReservation[]
+  quotationItems        QuotationItem[]
   quotationVersionItems QuotationVersionItem[]
 
   @@map("product_skus")
@@ -611,24 +613,25 @@ model Customer {
   createdAt           DateTime                     @default(now()) @map("created_at")
   updatedAt           DateTime                     @updatedAt @map("updated_at")
 
-  addresses           CustomerAddress[]
-  favorites           CustomerFavorite[]
-  reviews             ProductReview[]
-  orders              Order[]
-  inquiries           Inquiry[]
-  selectionInquiries  SelectionInquiry[]
-  afterSalesCases     AfterSalesCase[]
-  partnerApplications PartnerApplication[]
-  productAccessLogs   ProductAccessLog[]
-  quotations          Quotation[]
-  customerRefreshSessions CustomerRefreshSession[]
-  consentRecords         ConsentRecord[]
-  notifications          Notification[]
-  notificationPreferences NotificationPreference[]
-  partnerPriceApplications PartnerPriceApplication[]
-  partnerPriceAgreements  PartnerPriceAgreement[]
-  cooperationDesignFiles  CooperationDesignFile[]
-  acceptedQuotationVersions QuotationVersion[] @relation("QuotationVersionAcceptedByCustomer")
+  addresses                 CustomerAddress[]
+  favorites                 CustomerFavorite[]
+  reviews                   ProductReview[]
+  orders                    Order[]
+  inquiries                 Inquiry[]
+  selectionInquiries        SelectionInquiry[]
+  leads                     Lead[]
+  afterSalesCases           AfterSalesCase[]
+  partnerApplications       PartnerApplication[]
+  productAccessLogs         ProductAccessLog[]
+  quotations                Quotation[]
+  customerRefreshSessions   CustomerRefreshSession[]
+  consentRecords            ConsentRecord[]
+  notifications             Notification[]
+  notificationPreferences   NotificationPreference[]
+  partnerPriceApplications  PartnerPriceApplication[]
+  partnerPriceAgreements    PartnerPriceAgreement[]
+  cooperationDesignFiles    CooperationDesignFile[]
+  acceptedQuotationVersions QuotationVersion[]        @relation("QuotationVersionAcceptedByCustomer")
 
   @@index([partnerStatus])
   @@map("customers")
@@ -938,8 +941,8 @@ model Fulfillment {
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @updatedAt @map("updated_at")
 
-  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  creator User? @relation("FulfillmentCreator", fields: [createdBy], references: [id])
+  order           Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  creator         User?            @relation("FulfillmentCreator", fields: [createdBy], references: [id])
   logisticsEvents LogisticsEvent[]
 
   @@index([orderId])
@@ -1053,6 +1056,7 @@ model Inquiry {
   product  Product?  @relation(fields: [productId], references: [id])
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   assignee User?     @relation("AssignedTo", fields: [assignedTo], references: [id])
+  lead     Lead?
 
   @@index([status])
   @@index([customerId, createdAt])
@@ -1180,8 +1184,8 @@ model PageDocument {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  revisions       PageDocumentRevision[]
-  localizations   PageDocumentLocalization[]
+  revisions     PageDocumentRevision[]
+  localizations PageDocumentLocalization[]
 
   @@index([status])
   @@map("page_documents")
@@ -1200,7 +1204,7 @@ model PageDocumentRevision {
   publishedAt DateTime? @map("published_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  document         PageDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  document         PageDocument               @relation(fields: [documentId], references: [id], onDelete: Cascade)
   publishedLocales PageDocumentLocalization[] @relation("PageLocalePublishedRevision")
 
   @@unique([documentId, version])
@@ -1270,6 +1274,7 @@ model SelectionInquiry {
   items    SelectionInquiryItem[]
   customer Customer?              @relation(fields: [customerId], references: [id], onDelete: SetNull)
   handler  User?                  @relation("Handler", fields: [handledBy], references: [id])
+  lead     Lead?
 
   @@index([status])
   @@index([customerId, createdAt])
@@ -1310,22 +1315,103 @@ model LeadFollowUp {
   @@map("lead_follow_ups")
 }
 
+enum LeadSourceType {
+  INQUIRY
+  SELECTION_INQUIRY
+}
+
+enum LeadStatus {
+  PENDING
+  CONTACTED
+  FOLLOWING
+  COMPLETED
+  INVALID
+}
+
+enum LeadActivityType {
+  CREATED
+  ASSIGNED
+  STATUS_CHANGED
+  FOLLOW_UP
+  REPLY
+  NOTE
+}
+
+// 统一线索运营事实。原 Inquiry / SelectionInquiry 继续保存原始提交内容，
+// 本表只维护跨来源一致的分配、联系、跟进、完结和留存状态。
+model Lead {
+  id                    Int            @id @default(autoincrement())
+  sourceType            LeadSourceType @map("source_type")
+  inquiryId             Int?           @unique @map("inquiry_id")
+  selectionInquiryId    Int?           @unique @map("selection_inquiry_id")
+  customerId            Int?           @map("customer_id")
+  customerName          String         @map("customer_name") @db.VarChar(50)
+  phone                 String?        @db.VarChar(20)
+  email                 String?        @db.VarChar(100)
+  wechat                String?        @db.VarChar(50)
+  status                LeadStatus     @default(PENDING)
+  assignedTo            Int?           @map("assigned_to")
+  internalNote          String?        @map("internal_note") @db.Text
+  nextFollowUpAt        DateTime?      @map("next_follow_up_at")
+  closedAt              DateTime?      @map("closed_at")
+  retentionUntil        DateTime?      @map("retention_until")
+  idempotencyKeyHash    String?        @unique @map("idempotency_key_hash") @db.Char(64)
+  submissionFingerprint String?        @map("submission_fingerprint") @db.Char(64)
+  createdAt             DateTime       @default(now()) @map("created_at")
+  updatedAt             DateTime       @updatedAt @map("updated_at")
+
+  inquiry          Inquiry?          @relation(fields: [inquiryId], references: [id], onDelete: Restrict)
+  selectionInquiry SelectionInquiry? @relation(fields: [selectionInquiryId], references: [id], onDelete: Restrict)
+  customer         Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  assignee         User?             @relation("LeadAssignee", fields: [assignedTo], references: [id], onDelete: SetNull)
+  activities       LeadActivity[]
+
+  @@index([sourceType, createdAt])
+  @@index([status, createdAt])
+  @@index([assignedTo, status, nextFollowUpAt])
+  @@index([customerId, createdAt])
+  @@index([retentionUntil])
+  @@map("leads")
+}
+
+model LeadActivity {
+  id                 Int              @id @default(autoincrement())
+  leadId             Int              @map("lead_id")
+  type               LeadActivityType
+  content            String?          @db.Text
+  contactMethod      String?          @map("contact_method") @db.VarChar(30)
+  previousStatus     LeadStatus?      @map("previous_status")
+  currentStatus      LeadStatus?      @map("current_status")
+  nextFollowUpAt     DateTime?        @map("next_follow_up_at")
+  createdBy          Int?             @map("created_by")
+  idempotencyKeyHash String?          @unique @map("idempotency_key_hash") @db.Char(64)
+  metadata           Json?
+  createdAt          DateTime         @default(now()) @map("created_at")
+
+  lead    Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  creator User? @relation("LeadActivityCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([leadId, createdAt])
+  @@index([createdBy, createdAt])
+  @@map("lead_activities")
+}
+
 // ========== 统一行为事件采集 ==========
 
 model AnalyticsEvent {
-  id         Int      @id @default(autoincrement())
-  dataset    AnalyticsDataset @default(TEST)
-  eventName  String   @db.VarChar(50)
-  occurredAt DateTime @default(now()) @map("occurred_at")
-  pagePath   String?  @map("page_path") @db.VarChar(300)
-  productId  Int?     @map("product_id")
-  searchTerm String?  @map("search_term") @db.VarChar(200)
-  source     String?  @db.VarChar(50)
-  deviceType String?  @map("device_type") @db.VarChar(20)
-  sessionId  String?  @map("session_id") @db.VarChar(100)
-  customerId Int?     @map("customer_id")
-  metadata   Json?
-  retentionExpiresAt DateTime @map("retention_expires_at")
+  id                 Int              @id @default(autoincrement())
+  dataset            AnalyticsDataset @default(TEST)
+  eventName          String           @db.VarChar(50)
+  occurredAt         DateTime         @default(now()) @map("occurred_at")
+  pagePath           String?          @map("page_path") @db.VarChar(300)
+  productId          Int?             @map("product_id")
+  searchTerm         String?          @map("search_term") @db.VarChar(200)
+  source             String?          @db.VarChar(50)
+  deviceType         String?          @map("device_type") @db.VarChar(20)
+  sessionId          String?          @map("session_id") @db.VarChar(100)
+  customerId         Int?             @map("customer_id")
+  metadata           Json?
+  retentionExpiresAt DateTime         @map("retention_expires_at")
 
   @@index([eventName, occurredAt]) // dashboard page_view 复合查询（最左前缀覆盖纯 eventName）
   @@index([occurredAt])
@@ -1451,9 +1537,9 @@ model Quotation {
   updatedAt         DateTime        @updatedAt @map("updated_at")
 
   items           QuotationItem[]
-  customer        Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  salesConsultant User?           @relation("QuotationSalesConsultant", fields: [salesConsultantId], references: [id], onDelete: SetNull)
-  convertedOrder  Order?          @relation("QuotationConvertedOrder", fields: [convertedOrderId], references: [id], onDelete: SetNull)
+  customer        Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  salesConsultant User?              @relation("QuotationSalesConsultant", fields: [salesConsultantId], references: [id], onDelete: SetNull)
+  convertedOrder  Order?             @relation("QuotationConvertedOrder", fields: [convertedOrderId], references: [id], onDelete: SetNull)
   versions        QuotationVersion[]
 
   @@index([status])
@@ -1660,22 +1746,22 @@ model CategoryTranslation {
 }
 
 model MediaAsset {
-  id              Int              @id @default(autoincrement())
-  storageKey      String           @unique @map("storage_key") @db.VarChar(300)
-  originalName    String?          @map("original_name") @db.VarChar(255)
-  mimeType        String           @map("mime_type") @db.VarChar(100)
-  byteSize        Int              @map("byte_size")
-  checksumSha256  String           @map("checksum_sha256") @db.Char(64)
-  width           Int?
-  height          Int?
-  durationMs      Int?             @map("duration_ms")
-  altText         String?          @map("alt_text") @db.VarChar(500)
-  locale          ContentLocale?
-  accessLevel     MediaAccessLevel @default(PRIVATE) @map("access_level")
-  status          MediaAssetStatus @default(PENDING)
-  uploadedBy      Int?             @map("uploaded_by")
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
+  id             Int              @id @default(autoincrement())
+  storageKey     String           @unique @map("storage_key") @db.VarChar(300)
+  originalName   String?          @map("original_name") @db.VarChar(255)
+  mimeType       String           @map("mime_type") @db.VarChar(100)
+  byteSize       Int              @map("byte_size")
+  checksumSha256 String           @map("checksum_sha256") @db.Char(64)
+  width          Int?
+  height         Int?
+  durationMs     Int?             @map("duration_ms")
+  altText        String?          @map("alt_text") @db.VarChar(500)
+  locale         ContentLocale?
+  accessLevel    MediaAccessLevel @default(PRIVATE) @map("access_level")
+  status         MediaAssetStatus @default(PENDING)
+  uploadedBy     Int?             @map("uploaded_by")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
 
   uploader           User?                          @relation("MediaAssetUploader", fields: [uploadedBy], references: [id], onDelete: SetNull)
   variants           MediaVariant[]
@@ -1780,7 +1866,7 @@ model Notification {
   readAt      DateTime?          @map("read_at")
   createdAt   DateTime           @default(now()) @map("created_at")
 
-  customer  Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer   Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
   deliveries NotificationDelivery[]
 
   @@index([customerId, status, availableAt])
@@ -1870,11 +1956,11 @@ model PageDocumentLocalization {
   updatedAt           DateTime            @updatedAt @map("updated_at")
 
   document          PageDocument          @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  submittedByUser    User?                 @relation("PageLocaleSubmitter", fields: [submittedBy], references: [id], onDelete: SetNull)
-  reviewedByUser     User?                 @relation("PageLocaleReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
-  publishedByUser    User?                 @relation("PageLocalePublisher", fields: [publishedBy], references: [id], onDelete: SetNull)
+  submittedByUser   User?                 @relation("PageLocaleSubmitter", fields: [submittedBy], references: [id], onDelete: SetNull)
+  reviewedByUser    User?                 @relation("PageLocaleReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  publishedByUser   User?                 @relation("PageLocalePublisher", fields: [publishedBy], references: [id], onDelete: SetNull)
   publishedRevision PageDocumentRevision? @relation("PageLocalePublishedRevision", fields: [publishedRevisionId], references: [id], onDelete: SetNull)
-  seoSnapshots       SeoSnapshot[]
+  seoSnapshots      SeoSnapshot[]
 
   @@unique([documentId, locale])
   @@index([locale, reviewStatus])
@@ -1933,8 +2019,8 @@ model CooperationDesignFile {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  product  Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  customer Customer                       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product  Product?                       @relation(fields: [productId], references: [id], onDelete: SetNull)
   versions CooperationDesignFileVersion[]
 
   @@index([customerId, createdAt])
@@ -2093,7 +2179,7 @@ model SeoSnapshot {
   publishedAt        DateTime?     @map("published_at")
 
   pageLocalization PageDocumentLocalization? @relation(fields: [pageLocalizationId], references: [id], onDelete: Cascade)
-  product          Product?                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product          Product?                  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([locale, routePath, contentHash])
   @@index([pageLocalizationId, publishedAt])

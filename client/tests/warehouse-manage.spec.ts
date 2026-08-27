@@ -1,24 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
+import { installAdminSession } from './fixtures/session-auth';
 
 async function authenticateWarehouseOperator(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem('token', 'warehouse-manage-test-token');
-    localStorage.setItem(
-      'jewelry-auth',
-      JSON.stringify({
-        state: {
-          token: 'warehouse-manage-test-token',
-          user: {
-            id: 1,
-            username: 'warehouse-operator',
-            role: 'SUPER_ADMIN',
-            name: '仓库管理员',
-          },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: 'warehouse-operator',
+    realName: '仓库管理员',
   });
 }
 
@@ -32,6 +18,7 @@ test('仓库管理加载与新建请求保持当前员工合同', async ({ page 
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path === '/api/auth/profile') return route.fallback();
     if (path === '/api/warehouses' && request.method() === 'POST') {
       writes.push({
         headers: request.headers(),
@@ -76,7 +63,7 @@ test('仓库管理加载与新建请求保持当前员工合同', async ({ page 
   await expect(page.getByText('5', { exact: true })).toBeVisible();
 
   await page.evaluate(() => {
-    document.cookie = 'hc_admin_csrf=warehouse-csrf-token; path=/';
+    document.cookie = 'hc_csrf=warehouse-csrf-token; path=/';
   });
   await page.getByRole('button', { name: '新建仓库' }).click();
   const dialog = page.getByRole('dialog', { name: '新建仓库' });
@@ -85,9 +72,7 @@ test('仓库管理加载与新建请求保持当前员工合同', async ({ page 
   await dialog.getByRole('button', { name: /保\s*存/ }).click();
 
   await expect.poll(() => writes.length).toBe(1);
-  expect(writes[0].headers.authorization).toBe(
-    'Bearer warehouse-manage-test-token',
-  );
+  expect(writes[0].headers.authorization).toBeUndefined();
   expect(writes[0].headers['x-csrf-token']).toBe('warehouse-csrf-token');
   expect(writes[0].body).toEqual({
     name: '广州展厅',

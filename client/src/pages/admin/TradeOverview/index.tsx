@@ -40,9 +40,9 @@ export default function TradeOverview() {
     try {
       const res = await orderApi.getTradeOverview();
       setData(unwrapResponse<TradeOverviewData>(res));
-    } catch (e: any) {
+    } catch (error: unknown) {
       setLoadError(true);
-      message.error(getSafeAdminErrorMessage(e, "交易概览加载失败，请稍后重新加载。"));
+      message.error(getSafeAdminErrorMessage(error, "交易概览加载失败，请稍后重新加载。"));
     } finally {
       setLoading(false);
     }

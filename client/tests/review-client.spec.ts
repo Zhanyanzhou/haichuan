@@ -1,36 +1,20 @@
 import { expect, test, type Page, type Request } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 import {
   mockCatalogDetail,
   publicProduct,
 } from "./fixtures/public-catalog-detail";
 
-const ADMIN_TOKEN = "review-client-admin-token";
 const CSRF_TOKEN = "review-client-csrf-token";
 
 async function authenticateReviewAdmin(page: Page) {
-  await page.addInitScript(
-    ({ adminToken, csrfToken }) => {
-      localStorage.setItem("token", adminToken);
-      localStorage.setItem(
-        "jewelry-auth",
-        JSON.stringify({
-          state: {
-            token: adminToken,
-            user: {
-              id: 1,
-              username: "review-auditor",
-              role: "SUPER_ADMIN",
-              name: "评价审核员",
-            },
-            isLoggedIn: true,
-          },
-          version: 0,
-        }),
-      );
-      document.cookie = `hc_admin_csrf=${csrfToken}; Path=/`;
-    },
-    { adminToken: ADMIN_TOKEN, csrfToken: CSRF_TOKEN },
-  );
+  await installAdminSession(page, {
+    username: "review-auditor",
+    realName: "评价审核员",
+  });
+  await page.addInitScript((csrfToken) => {
+    document.cookie = `hc_csrf=${csrfToken}; Path=/`;
+  }, CSRF_TOKEN);
 }
 
 function response(data: unknown) {
@@ -61,6 +45,7 @@ test("评价管理沿用员工鉴权、筛选参数和审核写请求合同", as
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/auth/profile") return route.fallback();
     if (url.pathname === "/api/reviews" && request.method() === "GET") {
       listRequests.push(request);
       return route.fulfill(response({ list: [review], total: 1 }));
@@ -93,7 +78,7 @@ test("评价管理沿用员工鉴权、筛选参数和审核写请求合同", as
   expect(listUrl.searchParams.get("page")).toBe("1");
   expect(listUrl.searchParams.get("pageSize")).toBe("20");
   expect(listUrl.searchParams.get("status")).toBe("PENDING");
-  expect(listRequests[0].headers().authorization).toBe(`Bearer ${ADMIN_TOKEN}`);
+  expect(listRequests[0].headers().authorization).toBeUndefined();
 
   await page.getByRole("button", { name: /通\s*过/ }).click();
   await expect(page.getByText("已通过，评价将在作品页展示", { exact: true }))
@@ -101,7 +86,7 @@ test("评价管理沿用员工鉴权、筛选参数和审核写请求合同", as
   await expect.poll(() => moderationRequests.length).toBe(1);
 
   const moderationRequest = moderationRequests[0];
-  expect(moderationRequest.headers().authorization).toBe(`Bearer ${ADMIN_TOKEN}`);
+  expect(moderationRequest.headers().authorization).toBeUndefined();
   expect(moderationRequest.headers()["x-csrf-token"]).toBe(CSRF_TOKEN);
   expect(moderationRequest.postDataJSON()).toEqual({ status: "APPROVED" });
 });

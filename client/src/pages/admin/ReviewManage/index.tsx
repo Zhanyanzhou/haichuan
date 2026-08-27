@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, Input, Modal, Rate, Select, Space, Table, Tag, message } from 'antd';
+import { App as AntdApp, Button, Input, Modal, Rate, Select, Space, Table, Tag } from 'antd';
 import { reviewApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
@@ -24,6 +24,7 @@ interface ReviewRow {
 }
 
 export default function ReviewManage() {
+  const { message } = AntdApp.useApp();
   const [list, setList] = useState<ReviewRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -60,7 +61,7 @@ export default function ReviewManage() {
       setReplyTarget(null);
       setReplyText('');
       void load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, '评价审核未完成，请重新加载后确认当前状态。'));
     } finally {
       setHandling(false);
@@ -196,7 +197,7 @@ export default function ReviewManage() {
         title={`回复并审核 · ${replyTarget?.product?.name || ''}`}
         onCancel={() => setReplyTarget(null)}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <div className="space-y-4">
           <div className="bg-brand-bg p-3 text-sm">

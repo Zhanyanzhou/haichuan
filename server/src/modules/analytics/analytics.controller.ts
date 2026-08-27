@@ -6,6 +6,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Throttle } from '@nestjs/throttler';
+import { BoundedListQueryDto } from '../../common/dto/bounded-list-query.dto';
 
 @Controller('analytics')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -23,7 +24,7 @@ export class AnalyticsController {
   }
 
   @Get('events')
-  async getEvents(@Query() q: any) {
+  async getEvents(@Query() q: BoundedListQueryDto) {
     return this.service.getEvents(q);
   }
 }

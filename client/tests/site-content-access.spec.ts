@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 type TestedRole =
   | "SUPER_ADMIN"
@@ -10,27 +11,11 @@ type TestedRole =
   | "FINANCE";
 
 async function authenticate(page: Page, role: TestedRole) {
-  await page.addInitScript((currentRole) => {
-    const token = `site-content-${currentRole.toLowerCase()}-token`;
-    localStorage.setItem("token", token);
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token,
-          user: {
-            id: 1,
-            username: `site-content-${currentRole.toLowerCase()}`,
-            realName: "店铺资料权限测试用户",
-            role: currentRole,
-            status: "ACTIVE",
-          },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
-  }, role);
+  await installAdminSession(page, {
+    username: `site-content-${role.toLowerCase()}`,
+    realName: "店铺资料权限测试用户",
+    role,
+  });
 }
 
 async function mockSettings(page: Page, onRequest?: () => void) {

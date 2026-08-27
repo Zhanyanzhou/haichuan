@@ -1,5 +1,9 @@
 node_modules
 dist
 uploads
+private-media
+migration-source
+migration-output
+.diagnostics
 .env
 .env.*

@@ -8,6 +8,7 @@ import {
   MaterialType, ProductStatus, ProductVisibility, SalesMode,
   ProductPurchaseRegion, ProductPublishMode, ProductFulfillmentType,
   ProductDispatchTime, InventoryPolicy,
+  Prisma,
 } from '@prisma/client';
 import { CreateSkuDto } from './sku.dto';
 
@@ -93,10 +94,13 @@ export class CreateProductDto {
   size?: string;
 
   @IsOptional()
-  gemInfo?: any;
+  gemInfo?: Prisma.InputJsonObject;
 
   @IsOptional()
-  craftTechnique?: any;
+  @IsArray({ message: '制作工艺必须是数组' })
+  @ArrayMaxSize(50, { message: '制作工艺不能超过50项' })
+  @IsString({ each: true, message: '制作工艺必须是字符串' })
+  craftTechnique?: string[];
 
   @IsOptional()
   @IsArray()

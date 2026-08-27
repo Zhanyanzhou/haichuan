@@ -6,8 +6,10 @@ import {
   Body,
   Get,
   Res,
+  Req,
+  UnauthorizedException,
 } from "@nestjs/common";
-import type { Response } from "express";
+import type { Request as ExpressRequest, Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { Throttle } from "@nestjs/throttler";
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiBody } from "@nestjs/swagger";
@@ -20,12 +22,19 @@ import { RegisterDto } from "./dto/register.dto";
 import {
   buildClearSessionCookieHeaders,
   buildSessionCookieHeaders,
+  extractRefreshCookieToken,
+  requestSessionMetadata,
 } from "../../common/security/session-security";
+import { RefreshSessionService } from "../../common/security/refresh-session.service";
+import type { StaffRequest } from "../../common/security/authenticated-principal";
 
 @ApiTags("认证")
 @Controller("auth")
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private refreshSessions: RefreshSessionService,
+  ) {}
 
   @Public()
   // 限流说明：ThrottlerGuard 已由 APP_GUARD 全局注册（先于方法级 guard 执行），此处无需重复
@@ -43,25 +52,67 @@ export class AuthController {
       },
     },
   })
-  async login(@Request() req: any, @Res({ passthrough: true }) response: Response) {
+  async login(@Request() req: StaffRequest, @Res({ passthrough: true }) response: Response) {
     const result = await this.authService.login(req.user);
     if (req.headers?.["x-session-mode"] === "cookie") {
-      const cookie = buildSessionCookieHeaders("admin", result.accessToken, 7 * 24 * 60 * 60);
+      const session = await this.refreshSessions.issueAdmin(
+        result.user.id,
+        requestSessionMetadata(req),
+      );
+      const cookie = buildSessionCookieHeaders(
+        "admin",
+        result.accessToken,
+        session.refreshToken,
+      );
       response.setHeader("Set-Cookie", cookie.headers);
+      return { user: result.user };
     }
     return result;
   }
 
-  @UseGuards(JwtAuthGuard)
-  @Post("logout")
-  logout(@Res({ passthrough: true }) response: Response) {
+  @Public()
+  @Post("session/refresh")
+  async refresh(
+    @Req() request: ExpressRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const refreshToken = extractRefreshCookieToken(
+      request.headers?.cookie,
+      "admin",
+    );
+    if (!refreshToken) throw new UnauthorizedException("刷新会话不存在");
+    const rotated = await this.refreshSessions.rotateAdmin(
+      refreshToken,
+      requestSessionMetadata(request),
+    );
+    const result = await this.authService.resume(rotated.userId);
+    response.setHeader(
+      "Set-Cookie",
+      buildSessionCookieHeaders(
+        "admin",
+        result.accessToken,
+        rotated.refreshToken,
+      ).headers,
+    );
+    return { user: result.user };
+  }
+
+  @Public()
+  @Post(["logout", "session/logout"])
+  async logout(
+    @Req() request: ExpressRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    await this.refreshSessions.revokeAdmin(
+      extractRefreshCookieToken(request.headers?.cookie, "admin"),
+    );
     response.setHeader("Set-Cookie", buildClearSessionCookieHeaders("admin"));
     return { success: true };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
-  @Roles("SUPER_ADMIN", "ADMIN")
+  @Roles("SUPER_ADMIN")
   @Post("register")
   @ApiOperation({ summary: "用户注册" })
   async register(@Body() dto: RegisterDto) {
@@ -72,7 +123,7 @@ export class AuthController {
   @ApiBearerAuth()
   @Get("profile")
   @ApiOperation({ summary: "获取当前用户信息" })
-  getProfile(@Request() req: any) {
+  getProfile(@Request() req: StaffRequest) {
     return req.user;
   }
 }

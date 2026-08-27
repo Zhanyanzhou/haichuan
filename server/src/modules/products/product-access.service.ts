@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, ProductAccessEventType } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 /**
@@ -60,10 +60,10 @@ export class ProductAccessService {
         });
         return { counted: true };
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       // 审计日志失败不应阻断商品浏览主流程，仅记录错误
       this.logger.error(
-        `recordDetailView 失败 customer=${customerId} product=${productId}: ${error?.message}`,
+        `recordDetailView 失败 customer=${customerId} product=${productId}: ${error instanceof Error ? error.message : String(error)}`,
       );
       return { counted: false };
     }
@@ -76,7 +76,7 @@ export class ProductAccessService {
   async recordEvent(
     customerId: number,
     productId: number,
-    eventType: string,
+    eventType: ProductAccessEventType,
     source?: string,
     metadata?: Record<string, unknown>,
   ): Promise<void> {
@@ -86,15 +86,15 @@ export class ProductAccessService {
         data: {
           customerId,
           productId,
-          eventType: eventType as any,
+          eventType,
           source: source ?? null,
           metadata: safeMetadata as Prisma.InputJsonValue | undefined,
           occurredAt: new Date(),
         },
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.logger.error(
-        `recordEvent 失败 customer=${customerId} product=${productId} event=${eventType}: ${error?.message}`,
+        `recordEvent 失败 customer=${customerId} product=${productId} event=${eventType}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -130,8 +130,10 @@ export class ProductAccessService {
       const map = new Map<number, number>();
       for (const row of rows) map.set(Number(row.productId), Number(row.score));
       return map;
-    } catch (error: any) {
-      this.logger.error(`getHotScores 失败: ${error?.message}`);
+    } catch (error: unknown) {
+      this.logger.error(
+        `getHotScores 失败: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return new Map();
     }
   }

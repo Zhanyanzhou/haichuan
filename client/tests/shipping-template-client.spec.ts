@@ -1,24 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 async function authenticateProductEditor(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("token", "shipping-template-test-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token: "shipping-template-test-token",
-          user: {
-            id: 1,
-            username: "shipping-template-editor",
-            role: "SUPER_ADMIN",
-            name: "运费模板编辑员",
-          },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "shipping-template-editor",
+    realName: "运费模板编辑员",
   });
 }
 
@@ -33,6 +19,7 @@ test("商品编辑器加载并新建运费模板时保持请求合同", async ({
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path === "/api/auth/profile") return route.fallback();
     if (path === "/api/shipping-templates" && request.method() === "GET") {
       listRequests += 1;
     }
@@ -82,7 +69,7 @@ test("商品编辑器加载并新建运费模板时保持请求合同", async ({
   await page.getByRole("button", { name: "物流服务" }).click();
   await page.getByRole("checkbox", { name: "物流配送" }).check();
   await page.evaluate(() => {
-    document.cookie = "hc_admin_csrf=shipping-template-csrf; path=/";
+    document.cookie = "hc_csrf=shipping-template-csrf; path=/";
   });
   await page
     .locator(".pro-editor__template-line")
@@ -95,9 +82,7 @@ test("商品编辑器加载并新建运费模板时保持请求合同", async ({
   await dialog.getByRole("button", { name: /保\s*存\s*模\s*板/ }).click();
 
   await expect.poll(() => writes.length).toBe(1);
-  expect(writes[0].headers.authorization).toBe(
-    "Bearer shipping-template-test-token",
-  );
+  expect(writes[0].headers.authorization).toBeUndefined();
   expect(writes[0].headers["x-csrf-token"]).toBe("shipping-template-csrf");
   expect(writes[0].body).toEqual({
     name: "珠宝顺丰保价模板",

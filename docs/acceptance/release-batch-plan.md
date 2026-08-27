@@ -108,7 +108,7 @@ git -c core.safecrlf=false diff --ignore-space-at-eol --stat
 | 项目 | 内容 |
 | --- | --- |
 | 目标 | 单独审阅运行时与开发工具边界，使功能批次不夹带依赖升级、容器改动、CI 行为改变或文档结论。 |
-| 范围 | 根/前后端 `package.json` 与锁文件、`docker-compose.yml`、`client/nginx.conf`、`client/vite.config.ts`、`client/index.html`、`.gitignore`、`client/.gitignore`、`.github/workflows/{ci,quality}.yml`、`.vscode/{settings,extensions,launch,tasks}.json`、`README.md`、`design-qa.md`、`docs/**`、`scripts/**` 与 `client/scripts/**`。`.env.example` 只能审阅变量名、注释和是否存在占位符，绝不读取或复制任何实际 `.env` 值。`AGENTS.md` 属安全规则文件，必须从本批拆出并由用户人工确认后才可纳入任何提交。 |
+| 范围 | 根/前后端 `package.json` 与锁文件、`docker-compose.yml`、`client/nginx.conf`、`client/vite.config.ts`、`client/index.html`、`.gitignore`、`client/.gitignore`、`.github/workflows/{ci,quality}.yml`、`.vscode/{settings,extensions,launch,tasks}.json`、`README.md`、`docs/design-qa.md`、`docs/**`、`scripts/**` 与 `client/scripts/**`。`.env.example` 只能审阅变量名、注释和是否存在占位符，绝不读取或复制任何实际 `.env` 值。`AGENTS.md` 属安全规则文件，必须从本批拆出并由用户人工确认后才可纳入任何提交。 |
 | 依赖与风险 | `package-lock.json` 变化必须与 manifest 精确一致；安装、升级或删除依赖均需审批。Docker/CI 变化会改变构建、测试和部署行为；不要在自动化中暴露环境变量、令牌或数据库连接信息。`docker-compose.override.yml` 见第 4 节，默认不在本批。 |
 | 验证命令 | 不安装依赖前，仅审阅 manifest/lock 一致性、CI 命令与根脚本是否存在、文档链接是否有效。依赖已就绪且用户批准后，执行 `npm run lint`、`npm run typecheck`、`npm test`、`npm run build`，以及相应领域脚本；检查 CI YAML 与 Docker/NGINX 配置的语法和引用时不得输出或读取密钥。 |
 | 合并/提交前置条件 | 依赖清单获得用户批准；CI 不引入未经授权的部署、外部写入或真实数据库操作；文档日期、结论和路径与当前代码相符；安全规则文件获得单独确认。 |

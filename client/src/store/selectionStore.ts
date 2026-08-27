@@ -3,24 +3,35 @@ import { persist, createJSONStorage } from "zustand/middleware";
 
 interface SelectionState {
   selectedIds: Set<number>;
-  toggle: (id: number) => void;
+  toggle: (id: number) => "added" | "removed" | "limit";
   removeMany: (ids: number[]) => void;
   isSelected: (id: number) => boolean;
   count: () => number;
   clear: () => void;
 }
 
+export const MAX_SELECTION_ITEMS = 20;
+
 export const useSelectionStore = create<SelectionState>()(
   persist(
     (set, get) => ({
       selectedIds: new Set<number>(),
       toggle: (id: number) => {
+        let result: "added" | "removed" | "limit" = "removed";
         set((state) => {
           const next = new Set(state.selectedIds);
-          if (next.has(id)) next.delete(id);
-          else next.add(id);
+          if (next.has(id)) {
+            next.delete(id);
+          } else if (next.size >= MAX_SELECTION_ITEMS) {
+            result = "limit";
+            return state;
+          } else {
+            next.add(id);
+            result = "added";
+          }
           return { selectedIds: next };
         });
+        return result;
       },
       removeMany: (ids: number[]) => {
         if (!ids.length) return;
@@ -45,7 +56,7 @@ export const useSelectionStore = create<SelectionState>()(
         const ids = Array.isArray(p?.selectedIds)
           ? (p.selectedIds as number[])
           : [];
-        return { ...currentState, selectedIds: new Set(ids) };
+        return { ...currentState, selectedIds: new Set(ids.slice(0, MAX_SELECTION_ITEMS)) };
       },
     },
   ),

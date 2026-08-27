@@ -24,7 +24,7 @@ export interface CertificatePuckProps {
 
 export const certificatePuckConfig = {
   render: (props: CertificatePuckProps) => (
-    <CertificateBlock module={convertPuckProps("资质证书", props as any) as any} />
+    <CertificateBlock module={convertPuckProps("资质证书", props)!} />
   ),
   defaultProps: {
     title: "证书信息待确认",
@@ -37,7 +37,7 @@ export const certificatePuckConfig = {
     bgColor: "#FFFFFF",
     locked: false,
   } satisfies CertificatePuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: CertificatePuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

@@ -17,6 +17,31 @@ export type PagePublishEvent = {
   changedAt?: string;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizePublishEvent(value: unknown): PagePublishEvent {
+  if (!isRecord(value)) return { type: "unknown" };
+  const source = isRecord(value.data) ? value.data : value;
+  const knownTypes: PagePublishEvent["type"][] = [
+    "page-document-published",
+    "ready",
+    "heartbeat",
+    "unknown",
+  ];
+  const type = typeof source.type === "string"
+    && knownTypes.includes(source.type as PagePublishEvent["type"])
+    ? source.type as PagePublishEvent["type"]
+    : "unknown";
+  return {
+    type,
+    pageKey: typeof source.pageKey === "string" ? source.pageKey : undefined,
+    version: typeof source.version === "number" ? source.version : undefined,
+    changedAt: typeof source.changedAt === "string" ? source.changedAt : undefined,
+  };
+}
+
 // 与 useReconnectingEventSource 保持一致的重连参数：
 // 浏览器原生 EventSource 在网络抖动/服务重启后可能进入 CLOSED 不自愈，
 // 导致后台发布后前台收不到通知、装修内容陈旧（需整页刷新）。
@@ -68,22 +93,15 @@ export function usePagePublishStream(
       }, POLLING_FALLBACK_MS);
     };
 
-    const handleMessage = (event: MessageEvent) => {
+    const handleMessage = (event: MessageEvent<string>) => {
       let payload: PagePublishEvent;
 
       try {
-        const parsed = JSON.parse(event.data) as any;
+        const parsed: unknown = JSON.parse(event.data);
         // 服务端全局 TransformInterceptor 曾把 SSE 事件包成 { code, data, message, timestamp }，
         // 导致 SseStream 输出的 data 又嵌套一层；此处兼容双层 { data: {...} } 与单层 {...} 两种格式，
         // 保证 type/pageKey 过滤正确生效（否则心跳/其它页面发布都会误触发刷新）。
-        const inner =
-          parsed &&
-          typeof parsed === "object" &&
-          parsed.data &&
-          typeof parsed.data === "object"
-            ? parsed.data
-            : parsed;
-        payload = inner as PagePublishEvent;
+        payload = normalizePublishEvent(parsed);
       } catch {
         payload = { type: "unknown" };
       }

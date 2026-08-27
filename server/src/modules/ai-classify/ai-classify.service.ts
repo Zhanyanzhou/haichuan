@@ -1,6 +1,36 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { KimiService } from "../../common/kimi/kimi.service";
+
+type CategoryCandidate = { id: number; name: string; level: number };
+
+type ClassifyPrediction = {
+  categoryId: number;
+  name: string;
+  confidence: number;
+};
+
+type ClassifyResult = {
+  predictedCategoryId: number | null;
+  predictedCategoryName: string;
+  confidence: number;
+  allPredictions: ClassifyPrediction[];
+};
+
+type BatchClassifyResult = ClassifyResult & { imageUrl: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function finiteNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
 
 @Injectable()
 export class AiClassifyService {
@@ -26,12 +56,7 @@ export class AiClassifyService {
   /**
    * AI 图片分类 - 优先使用 Kimi Vision API，不可用时回退到 mock
    */
-  async classifyImage(imageUrl: string): Promise<{
-    predictedCategoryId: number | null;
-    predictedCategoryName: string;
-    confidence: number;
-    allPredictions: { categoryId: number; name: string; confidence: number }[];
-  }> {
+  async classifyImage(imageUrl: string): Promise<ClassifyResult> {
     this.logger.log(`开始分类图片: ${imageUrl}`);
 
     // 获取所有启用的分类作为候选
@@ -46,8 +71,10 @@ export class AiClassifyService {
     if (this.kimiService.isAvailable()) {
       try {
         return await this.realClassify(imageUrl, categories, categoryNames);
-      } catch (error: any) {
-        this.logger.warn(`Kimi API 调用失败: ${error.message}`);
+      } catch (error: unknown) {
+        this.logger.warn(
+          `Kimi API 调用失败: ${error instanceof Error ? error.message : String(error)}`,
+        );
         throw error;
       }
     }
@@ -62,14 +89,9 @@ export class AiClassifyService {
    */
   private async realClassify(
     imageUrl: string,
-    categories: { id: number; name: string; level: number }[],
+    categories: CategoryCandidate[],
     categoryNames: string,
-  ): Promise<{
-    predictedCategoryId: number | null;
-    predictedCategoryName: string;
-    confidence: number;
-    allPredictions: { categoryId: number; name: string; confidence: number }[];
-  }> {
+  ): Promise<ClassifyResult> {
     const prompt = `你是一个专业的珠宝首饰分类专家。请仔细观察这张珠宝图片，从以下候选分类中选择最匹配的分类：
 
 可选的分类有：${categoryNames}
@@ -120,13 +142,8 @@ ${this.classifyOutputSchema}`;
    */
   private parseClassifyResult(
     rawContent: string,
-    categories: { id: number; name: string; level: number }[],
-  ): {
-    predictedCategoryId: number | null;
-    predictedCategoryName: string;
-    confidence: number;
-    allPredictions: { categoryId: number; name: string; confidence: number }[];
-  } {
+    categories: CategoryCandidate[],
+  ): ClassifyResult {
     try {
       // 清理可能的 markdown 代码块包装
       let jsonStr = rawContent.trim();
@@ -134,7 +151,8 @@ ${this.classifyOutputSchema}`;
       else if (jsonStr.startsWith("```")) jsonStr = jsonStr.slice(3);
       if (jsonStr.endsWith("```")) jsonStr = jsonStr.slice(0, -3);
 
-      const parsed = JSON.parse(jsonStr.trim());
+      const parsed: unknown = JSON.parse(jsonStr.trim());
+      if (!isRecord(parsed)) throw new Error("分类结果不是 JSON 对象");
 
       // 匹配分类名称到数据库分类
       const matchCategory = (name: string) => {
@@ -145,29 +163,36 @@ ${this.classifyOutputSchema}`;
         return found ? { categoryId: found.id, name: found.name } : null;
       };
 
-      const top = matchCategory(parsed.predictedCategoryName);
-      const allPredictions = (parsed.allPredictions || []).map((p: any) => {
-        const matched = matchCategory(p.name);
+      const predictedCategoryName = stringValue(parsed.predictedCategoryName);
+      const top = matchCategory(predictedCategoryName);
+      const rawPredictions = Array.isArray(parsed.allPredictions)
+        ? parsed.allPredictions
+        : [];
+      const allPredictions = rawPredictions
+        .filter(isRecord)
+        .map((prediction): ClassifyPrediction => {
+        const predictionName = stringValue(prediction.name);
+        const matched = matchCategory(predictionName);
         return {
           categoryId: matched?.categoryId || 0,
-          name: matched?.name || p.name || "未知",
-          confidence: p.confidence || 0,
+          name: matched?.name || predictionName || "未知",
+          confidence: finiteNumber(prediction.confidence),
         };
       });
 
       return {
         predictedCategoryId: top?.categoryId || null,
         predictedCategoryName:
-          top?.name || parsed.predictedCategoryName || "未知",
-        confidence: parsed.confidence || 0,
+          top?.name || predictedCategoryName || "未知",
+        confidence: finiteNumber(parsed.confidence),
         allPredictions:
           allPredictions.length > 0
             ? allPredictions
             : [
                 {
                   categoryId: top?.categoryId || 0,
-                  name: top?.name || parsed.predictedCategoryName || "未知",
-                  confidence: parsed.confidence || 0,
+                  name: top?.name || predictedCategoryName || "未知",
+                  confidence: finiteNumber(parsed.confidence),
                 },
               ],
       };
@@ -188,8 +213,8 @@ ${this.classifyOutputSchema}`;
   /**
    * Batch classify multiple images
    */
-  async batchClassify(imageUrls: string[]): Promise<any[]> {
-    const results: any[] = [];
+  async batchClassify(imageUrls: string[]): Promise<BatchClassifyResult[]> {
+    const results: BatchClassifyResult[] = [];
     for (const url of imageUrls) {
       const result = await this.classifyImage(url);
       results.push({ imageUrl: url, ...result });
@@ -206,7 +231,7 @@ ${this.classifyOutputSchema}`;
     status?: string;
   }) {
     const { page = 1, pageSize = 20, status } = params;
-    const where: any = {};
+    const where: Prisma.AIClassifyRecordWhereInput = {};
     if (status && status !== "all") where.status = status;
 
     const [list, total] = await Promise.all([

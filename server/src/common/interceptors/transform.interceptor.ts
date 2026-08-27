@@ -7,6 +7,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
+import type { Response } from 'express';
 
 export interface ApiResponse<T> {
   code: number;
@@ -25,7 +26,10 @@ export class TransformInterceptor<T>
 {
   constructor(private readonly reflector: Reflector) {}
 
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+  intercept(
+    context: ExecutionContext,
+    next: CallHandler<T>,
+  ): Observable<ApiResponse<T>> {
     // SSE 流式端点不能被 JSON 包装：@Sse handler 返回的每个 MessageEvent 会被
     // SseStream 直接序列化，若包成 { code, data, ... } 会让 data 再嵌套一层，
     // 客户端解析不到 type/pageKey（ready/heartbeat 过滤失效、pageKey 过滤失效）。
@@ -34,16 +38,16 @@ export class TransformInterceptor<T>
       context.getHandler(),
     );
     if (isSse) {
-      return next.handle();
+      return next.handle() as unknown as Observable<ApiResponse<T>>;
     }
 
     return next.handle().pipe(
       map((data) => {
         // 二进制响应（受控媒体端点直接返回 Buffer）：跳过 JSON 包装，保持字节流原样返回
-        if (Buffer.isBuffer(data)) return data as any;
+        if (Buffer.isBuffer(data)) return data;
         // handler 已用 @Res() 手动结束响应（如受控媒体文件流）：跳过包装，避免 write-after-end
         const http = context.switchToHttp();
-        const response = http.getResponse();
+        const response = http.getResponse<Response>();
         if (response?.writableEnded) return data;
         const request = http.getRequest<{ id?: unknown }>();
         const requestId =
@@ -56,6 +60,6 @@ export class TransformInterceptor<T>
           ...(requestId ? { requestId } : {}),
         };
       }),
-    );
+    ) as Observable<ApiResponse<T>>;
   }
 }

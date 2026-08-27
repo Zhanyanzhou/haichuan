@@ -27,6 +27,7 @@ import InspectorPrimaryTabs, {
 } from "./InspectorPrimaryTabs";
 import { useVisualEditorSession } from "../visual-editor/visualEditorSession";
 import { useInspectorModuleEditor } from "./useInspectorModuleEditor";
+import type { PuckProps } from "../types";
 import {
   getContentTemplateContract,
   getContentTemplateEditableFieldKeys,
@@ -44,7 +45,7 @@ interface SchemaInspectorPanelProps {
   hasUnsavedChanges: boolean;
   saving: boolean;
   onSaveDraft: () => void;
-  onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
+  onSaveAsTemplate: (type: string, props: PuckProps) => void;
   publishIssues: Array<{
     blockId?: string;
     message: string;
@@ -399,7 +400,7 @@ export default function SchemaInspectorPanel({
 
   const content = appData.content as Array<{
     type: string;
-    props: Record<string, any>;
+    props: PuckProps;
   }>;
 
   const visibleFields = schema.sections

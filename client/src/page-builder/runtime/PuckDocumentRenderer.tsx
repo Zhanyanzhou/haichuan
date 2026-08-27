@@ -43,16 +43,9 @@ import {
   normalizeLegacyRenderColors,
   useHasMissingAssets,
 } from "@/page-builder/runtime/renderParity";
+import type { PuckBlock, PuckDocument, PuckProps } from "@/page-builder/types";
 
-export type PuckBlock = {
-  type?: string;
-  props?: Record<string, any>;
-};
-
-export type PuckDocument = {
-  content?: PuckBlock[];
-  zones?: Record<string, PuckBlock[]>;
-};
+export type { PuckBlock, PuckDocument } from "@/page-builder/types";
 
 function UnsupportedContentTemplateState({
   type,
@@ -173,7 +166,7 @@ function PublicMediaFallback({
   headingLevel,
 }: {
   type?: string;
-  props: Record<string, any>;
+  props: PuckProps;
   headingLevel: 1 | 2;
 }) {
   const eyebrow = [props.number, props.label, props.eyebrow]
@@ -188,10 +181,10 @@ function PublicMediaFallback({
     props.actionText || props.buttonText || props.primaryText,
   );
   const targetUrl = resolveLinkTargetUrl({
-    targetType: props.targetType,
-    productCode: props.productCode,
-    productId: props.productId,
-    linkUrl: props.linkUrl,
+    targetType: typeof props.targetType === "string" ? props.targetType : undefined,
+    productCode: typeof props.productCode === "string" ? props.productCode : undefined,
+    productId: typeof props.productId === "string" || typeof props.productId === "number" ? props.productId : undefined,
+    linkUrl: typeof props.linkUrl === "string" ? props.linkUrl : undefined,
   });
   const Heading = headingLevel === 1 ? "h1" : "h2";
   const isHero = type === "首屏主视觉";
@@ -258,7 +251,7 @@ function hasRequiredPublicMedia(block: PuckBlock) {
   }
 }
 
-function suppressHomeSecondaryActions(props: Record<string, any>): Record<string, any> {
+function suppressHomeSecondaryActions(props: PuckProps): PuckProps {
   return {
     ...props,
     actionText: "",
@@ -330,7 +323,7 @@ function ResolvedProductRowBlock({
   props,
   codeOnly = false,
 }: {
-  props: Record<string, any>;
+  props: PuckProps;
   codeOnly?: boolean;
 }) {
   const productIds = useMemo(
@@ -375,8 +368,8 @@ function ResolvedProductRowBlock({
           pageSize: productCodes.length || productIds.length,
           sortBy: "sortOrder",
         }, controller.signal);
-        const data = unwrapResponse<any>(response);
-        const list: Product[] = data?.list || data || [];
+        const data = unwrapResponse<{ list?: Product[] } | Product[]>(response);
+        const list = Array.isArray(data) ? data : data.list ?? [];
         const byReference = new Map(list.map((product) => [productCodes.length ? product.code : product.id, product]));
         const ordered = (productCodes.length ? productCodes : productIds)
           .map((reference) => byReference.get(reference))
@@ -399,9 +392,9 @@ function ResolvedProductRowBlock({
   if (loading) {
     return (
       <ProductRowState
-        title={props.title}
-        subtitle={props.subtitle}
-        bgColor={props.bgColor}
+        title={textValue(props.title)}
+        subtitle={textValue(props.subtitle)}
+        bgColor={textValue(props.bgColor)}
         message="正在加载精选商品"
       />
     );
@@ -409,9 +402,9 @@ function ResolvedProductRowBlock({
   if (error) {
     return (
       <ProductRowState
-        title={props.title}
-        subtitle={props.subtitle}
-        bgColor={props.bgColor}
+        title={textValue(props.title)}
+        subtitle={textValue(props.subtitle)}
+        bgColor={textValue(props.bgColor)}
         message="精选商品暂时加载失败"
       />
     );
@@ -419,9 +412,9 @@ function ResolvedProductRowBlock({
   if (products.length === 0) {
     return (
       <ProductRowState
-        title={props.title}
-        subtitle={props.subtitle}
-        bgColor={props.bgColor}
+        title={textValue(props.title)}
+        subtitle={textValue(props.subtitle)}
+        bgColor={textValue(props.bgColor)}
         message="所选商品暂不可展示"
       />
     );
@@ -429,14 +422,14 @@ function ResolvedProductRowBlock({
 
   const module = convertPuckProps("产品展示行", props);
   if (!module) return null;
-  (module as any).content.products = products.map(toProductRowItem);
+  module.content.products = products.map(toProductRowItem);
   if (codeOnly) {
-    (module as any).content.displayMode = "album";
-    (module as any).content.showPrice = false;
-    (module as any).content.showButton = false;
-    (module as any).content.actionStyle = "none";
-    (module as any).content.mobileColumns = 1;
-    (module as any).content.layout = products.length === 2 ? "grid-2" : "grid-3";
+    module.content.displayMode = "album";
+    module.content.showPrice = false;
+    module.content.showButton = false;
+    module.content.actionStyle = "none";
+    module.content.mobileColumns = 1;
+    module.content.layout = products.length === 2 ? "grid-2" : "grid-3";
   }
 
   const productRow = <ProductRowBlock module={module} />;
@@ -455,7 +448,7 @@ function ResolvedFeaturedProductBlock({
   editMode = false,
   codeOnly = false,
 }: {
-  props: Record<string, any>;
+  props: PuckProps;
   editMode?: boolean;
   codeOnly?: boolean;
 }) {
@@ -479,8 +472,8 @@ function ResolvedFeaturedProductBlock({
     setError(false);
     void productApi.getPublicList(productCode ? { codes: productCode, pageSize: 1 } : { ids: String(productId), pageSize: 1 }, controller.signal)
       .then((response) => {
-        const result = unwrapResponse<any>(response);
-        const list: Product[] = result?.list || result || [];
+        const result = unwrapResponse<{ list?: Product[] } | Product[]>(response);
+        const list = Array.isArray(result) ? result : result.list ?? [];
         if (!cancelled) {
           const resolved = list.find((item) => productCode ? item.code === productCode : item.id === productId);
           setProduct(resolved && getListingImage(resolved) ? resolved : null);
@@ -500,17 +493,17 @@ function ResolvedFeaturedProductBlock({
     const module = convertPuckProps("单品焦点推荐", props);
     return module ? <FeaturedProductBlock module={module} editMode /> : null;
   }
-  if (loading) return <ProductRowState title={props.title} bgColor={props.bgColor} message="正在加载主推商品" />;
-  if (error) return <ProductRowState title={props.title} bgColor={props.bgColor} message="主推商品加载失败，请稍后重试" />;
-  if (!product) return <ProductRowState title={props.title} bgColor={props.bgColor} message="所选主推商品已下架或暂不可展示" />;
+  if (loading) return <ProductRowState title={textValue(props.title)} bgColor={textValue(props.bgColor)} message="正在加载主推商品" />;
+  if (error) return <ProductRowState title={textValue(props.title)} bgColor={textValue(props.bgColor)} message="主推商品加载失败，请稍后重试" />;
+  if (!product) return <ProductRowState title={textValue(props.title)} bgColor={textValue(props.bgColor)} message="所选主推商品已下架或暂不可展示" />;
   const module = convertPuckProps("单品焦点推荐", props);
   if (!module) return null;
-  (module as any).content.product = toProductRowItem(product);
-  if (codeOnly) (module as any).content.showPrice = false;
+  module.content.product = toProductRowItem(product);
+  if (codeOnly) module.content.showPrice = false;
   return <FeaturedProductBlock module={module} editMode={editMode} />;
 }
 
-function ResolvedLookbookBlock({ props }: { props: Record<string, any> }) {
+function ResolvedLookbookBlock({ props }: { props: PuckProps }) {
   const productIds = useMemo(
     () => Array.isArray(props.productIds)
       ? props.productIds.map((id: unknown) => Number(id)).filter((id: number) => Number.isInteger(id) && id > 0)
@@ -542,8 +535,8 @@ function ResolvedLookbookBlock({ props }: { props: Record<string, any> }) {
       ? { codes: codesKey, pageSize: productCodes.length, sortBy: "sortOrder" }
       : { ids: idsKey, pageSize: productIds.length, sortBy: "sortOrder" }, controller.signal)
       .then((response) => {
-        const result = unwrapResponse<any>(response);
-        const list: Product[] = result?.list || result || [];
+        const result = unwrapResponse<{ list?: Product[] } | Product[]>(response);
+        const list = Array.isArray(result) ? result : result.list ?? [];
         const byReference = new Map(list.map((item) => [productCodes.length ? item.code : item.id, item]));
         const references = productCodes.length ? productCodes : productIds;
         if (!cancelled) setProducts(references.map((reference) => byReference.get(reference)).filter((item): item is Product => Boolean(item && getListingImage(item))));
@@ -557,11 +550,11 @@ function ResolvedLookbookBlock({ props }: { props: Record<string, any> }) {
     return () => { cancelled = true; controller.abort(); };
   }, [codesKey, idsKey, productCodes, productIds, revision]);
 
-  if (loading) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="正在加载关联商品" />;
-  if (error) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="关联商品暂时加载失败" />;
+  if (loading) return <ProductRowState title={textValue(props.title)} subtitle={textValue(props.subtitle)} bgColor={textValue(props.bgColor)} message="正在加载关联商品" />;
+  if (error) return <ProductRowState title={textValue(props.title)} subtitle={textValue(props.subtitle)} bgColor={textValue(props.bgColor)} message="关联商品暂时加载失败" />;
   const module = convertPuckProps("佩戴灵感", props);
   if (!module) return null;
-  (module as any).content.products = products.map(toProductRowItem);
+  module.content.products = products.map(toProductRowItem);
   return <LookbookBlock module={module} />;
 }
 
@@ -577,7 +570,7 @@ function flattenCategoryNodes(nodes: PublicCategoryNode[]): PublicCategoryNode[]
   return nodes.flatMap((node) => [node, ...flattenCategoryNodes(node.children ?? [])]);
 }
 
-function ResolvedCategoryCardsBlock({ props }: { props: Record<string, any> }) {
+function ResolvedCategoryCardsBlock({ props }: { props: PuckProps }) {
   const slugs = useMemo(
     () => Array.isArray(props.categorySlugs) ? props.categorySlugs.map(String).filter(Boolean) : [],
     [props.categorySlugs],
@@ -605,9 +598,9 @@ function ResolvedCategoryCardsBlock({ props }: { props: Record<string, any> }) {
     return () => controller.abort();
   }, [slugs]);
 
-  if (loading) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="正在加载分类导航" />;
-  if (error) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="分类导航暂时加载失败" />;
-  if (categories.length === 0) return <ProductRowState title={props.title} subtitle={props.subtitle} bgColor={props.bgColor} message="所选分类当前不可展示" />;
+  if (loading) return <ProductRowState title={textValue(props.title)} subtitle={textValue(props.subtitle)} bgColor={textValue(props.bgColor)} message="正在加载分类导航" />;
+  if (error) return <ProductRowState title={textValue(props.title)} subtitle={textValue(props.subtitle)} bgColor={textValue(props.bgColor)} message="分类导航暂时加载失败" />;
+  if (categories.length === 0) return <ProductRowState title={textValue(props.title)} subtitle={textValue(props.subtitle)} bgColor={textValue(props.bgColor)} message="所选分类当前不可展示" />;
   const module = convertPuckProps("分类卡片", { ...props, categories });
   return module ? <CategoryCardsBlock module={module} /> : null;
 }
@@ -622,11 +615,14 @@ function renderBlock(
   homeSurface: boolean,
   allowHomePrimaryAction: boolean,
 ) {
-  const contractProps = normalizeLegacyRenderColors(block.props || {}) as Record<string, any>;
+  const normalized = normalizeLegacyRenderColors(block.props || {});
+  const contractProps: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
+    ? normalized as PuckProps
+    : {};
   const props = homeSurface && !allowHomePrimaryAction
     ? suppressHomeSecondaryActions(contractProps)
     : contractProps;
-  const key = props.id || `${block.type || "block"}-${index}`;
+  const key = textValue(props.id) || `${block.type || "block"}-${index}`;
   const preview = mode === "preview";
   const wrap = (node: ReactNode) => (
     <ContentTemplateContractFrame
@@ -786,7 +782,10 @@ function GuardedBlock({
   const hasMissingAsset = useHasMissingAssets(block.props || {});
 
   if (hasMissingAsset && mode === "public") {
-    const normalizedProps = normalizeLegacyRenderColors(block.props || {}) as Record<string, any>;
+    const normalized = normalizeLegacyRenderColors(block.props || {});
+    const normalizedProps: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
+      ? normalized as PuckProps
+      : {};
     const fallbackProps = homeSurface && !allowHomePrimaryAction
       ? suppressHomeSecondaryActions(normalizedProps)
       : normalizedProps;

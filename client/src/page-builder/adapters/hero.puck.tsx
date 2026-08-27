@@ -39,7 +39,7 @@ export interface HeroPuckProps {
 
 export const heroPuckConfig = {
   render: (props: HeroPuckProps) => (
-    <HeroSection module={convertPuckProps("首屏主视觉", props as any)!} editMode />
+    <HeroSection module={convertPuckProps("首屏主视觉", props)!} editMode />
   ),
 
   defaultProps: {
@@ -64,7 +64,7 @@ export const heroPuckConfig = {
   } satisfies HeroPuckProps,
 
   /** 模板锁定：locked 属性为 true 时禁止删除/拖动 */
-  resolvePermissions: (data: any, _params: any) => {
+  resolvePermissions: (data: { props?: HeroPuckProps }) => {
     if (data.props?.locked) {
       return { delete: false, drag: false, duplicate: false };
     }

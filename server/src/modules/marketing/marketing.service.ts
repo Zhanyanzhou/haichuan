@@ -11,6 +11,11 @@ import {
   type CreateCouponDto,
   type UpdateCouponDto,
 } from './dto/coupon.dto';
+import type {
+  CreatePromotionDto,
+  UpdatePromotionDto,
+} from './dto/promotion.dto';
+import { Prisma } from '@prisma/client';
 
 const COUPON_ECONOMIC_FIELDS = [
   'name',
@@ -31,6 +36,12 @@ type NormalizedUpdateCouponInput = Omit<UpdateCouponDto, 'startTime' | 'endTime'
   startTime?: Date;
   endTime?: Date;
 };
+
+function toPrismaJsonObject(
+  value: Record<string, unknown>,
+): Prisma.InputJsonObject {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
+}
 
 @Injectable()
 export class MarketingService {
@@ -124,8 +135,21 @@ export class MarketingService {
 
   // Promotions
   async getPromotions() { return this.prisma.promotion.findMany({ where: { isActive: true }, orderBy: { startTime: 'desc' } }); }
-  async createPromotion(data: any) { return this.prisma.promotion.create({ data }); }
-  async updatePromotion(id: number, data: any) { return this.prisma.promotion.update({ where: { id }, data }); }
+  async createPromotion(data: CreatePromotionDto) {
+    return this.prisma.promotion.create({
+      data: { ...data, rule: toPrismaJsonObject(data.rule) },
+    });
+  }
+  async updatePromotion(id: number, data: UpdatePromotionDto) {
+    const { rule, ...fields } = data;
+    return this.prisma.promotion.update({
+      where: { id },
+      data: {
+        ...fields,
+        ...(rule ? { rule: toPrismaJsonObject(rule) } : {}),
+      },
+    });
+  }
   async deletePromotion(id: number) { return this.prisma.promotion.update({ where: { id }, data: { isActive: false } }); }
 
   // Coupons

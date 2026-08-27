@@ -25,8 +25,13 @@ docker compose up -d mysql
 # 3. 本地开发数据库迁移（仅限已确认的本地目标，并获批准后）
 cd server && npx prisma migrate dev
 
-# 4. (可选) 填充种子数据
+# 4. (可选) 仅向明确的本地开发库填充 Demo 数据
+# 必须在当前进程显式提供 ALLOW_DEMO_SEED=true 和 DEMO_ADMIN_PASSWORD；
+# NODE_ENV=production 时脚本无条件拒绝。
+$env:ALLOW_DEMO_SEED = "true"
+$env:DEMO_ADMIN_PASSWORD = "仅本地使用的字母数字密码"
 npx prisma db seed
+Remove-Item Env:ALLOW_DEMO_SEED, Env:DEMO_ADMIN_PASSWORD
 
 # 5. 启动真实联调环境（先构建服务端，再启动单一前端与后端）
 npm run dev
@@ -53,7 +58,7 @@ npm run dev
 | `npm run dev:mock`       | 仅启动 5174 Mock 前端  |
 | `npm run build`          | 生产构建               |
 | `npx prisma migrate dev` | 本地开发数据库迁移（需批准） |
-| `npx prisma db seed`     | 种子数据               |
+| `npx prisma db seed`     | 显式本地 Demo 数据；生产环境硬拒绝 |
 | `npx prisma studio`      | 数据库管理界面         |
 | `npx prisma generate`    | 重新生成 Prisma Client |
 | `npx tsc --noEmit`       | 类型检查               |
@@ -67,6 +72,7 @@ npm run dev
 2. **修改 schema.prisma 后**：先获批准，再运行 `prisma migrate dev` → `prisma generate`；仅生成或验证不等于可迁移目标数据库
 3. **修改 HTTP 传输层**：检查所有领域服务、拦截器、解包与错误路径；不依赖固定消费者数量
 4. **Feature Flags**：从当前代码和 `docs/CURRENT_STATE.md` 复核入口，不凭旧路径推断
+5. **Demo Seed 不是生产初始化**：它会写入固定演示管理员、仓库、分类和 5 条演示商品；候选/生产首管理员必须使用 `docs/DEPLOYMENT.md` 中的一次性 CLI，正式 PageDocument 与 SiteSettings 必须通过后台维护和发布。
 
 ## Mock 模式
 

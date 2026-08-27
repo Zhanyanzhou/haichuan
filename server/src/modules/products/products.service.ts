@@ -13,11 +13,17 @@ import {
   ResolveProductReferencesDto,
   UpdateProductDto,
   AddProductImageDto,
+  CreateCertificateDto,
+  UpdateCertificateDto,
+  CreateSkuDto,
+  UpdateSkuDto,
 } from "./dto";
 import {
   InventoryPolicy,
+  ImageType,
   MaterialType,
   Prisma,
+  type ProductImage,
   ProductStatus,
   ProductVisibility,
   SalesMode,
@@ -29,7 +35,15 @@ import { ProductMediaService } from "./product-media.service";
 import { ProductAccessService } from "./product-access.service";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { createHash } from "node:crypto";
-import { resolveCustomerProductVisibilities } from "./product-eligibility";
+import {
+  resolveCustomerProductVisibilities,
+  type CustomerProductAccess,
+} from "./product-eligibility";
+import type { Response } from "express";
+import type {
+  CustomerOrStaffRequest,
+  CustomerPrincipal,
+} from "../../common/security/authenticated-principal";
 
 const PRODUCT_QUALITY_GATE_VERSION = "p0-product-quality-v1";
 const FORBIDDEN_PUBLIC_CONTENT =
@@ -55,32 +69,6 @@ function hasMeaningfulDetailContent(value: unknown): boolean {
   const serialized = JSON.stringify(value);
   if (!serialized || serialized === "{}" || serialized === "[]") return false;
   return !FORBIDDEN_PUBLIC_CONTENT.test(serialized) && !MOJIBAKE_OR_REPLACEMENT.test(serialized);
-}
-
-function publicationQualityHash(product: any): string {
-  const snapshot = {
-    version: PRODUCT_QUALITY_GATE_VERSION,
-    code: product.code,
-    name: product.name,
-    shortDescription: product.shortDescription,
-    description: product.description,
-    detailContent: product.detailContent,
-    materialType: product.materialType,
-    goldWeight: product.goldWeight == null ? null : String(product.goldWeight),
-    weight: product.weight == null ? null : String(product.weight),
-    salesMode: product.salesMode,
-    inventoryPolicy: product.inventoryPolicy,
-    primaryImageId: product.primaryImage?.id ?? null,
-    listingImageId: product.listingImage?.id ?? null,
-    imageIds: (product.images || []).map((image: any) => image.id).sort((a: number, b: number) => a - b),
-    skus: (product.skus || []).map((sku: any) => ({
-      id: sku.id,
-      price: String(sku.price),
-      goldWeight: sku.goldWeight == null ? null : String(sku.goldWeight),
-      inventoryRecords: sku.inventories?.length ?? 0,
-    })),
-  };
-  return createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
 }
 
 const CUSTOMER_FACING_IMAGE_SELECT = {
@@ -229,6 +217,75 @@ type PublicationQualitySnapshot = Prisma.ProductGetPayload<{
   select: typeof PUBLICATION_QUALITY_SELECT;
 }>;
 
+type CustomerFacingImage = Prisma.ProductImageGetPayload<{
+  select: typeof CUSTOMER_FACING_IMAGE_SELECT;
+}>;
+type CustomerFacingListProduct = Prisma.ProductGetPayload<{
+  select: typeof CUSTOMER_FACING_LIST_SELECT;
+}>;
+type CustomerFacingPublicDetailProduct = Prisma.ProductGetPayload<{
+  select: typeof CUSTOMER_FACING_PUBLIC_DETAIL_SELECT;
+}>;
+type CustomerFacingDetailProduct = Prisma.ProductGetPayload<{
+  select: typeof CUSTOMER_FACING_DETAIL_SELECT;
+}>;
+type CustomerFacingProduct =
+  | CustomerFacingListProduct
+  | CustomerFacingPublicDetailProduct
+  | CustomerFacingDetailProduct;
+
+type CompletenessProduct = {
+  name?: string | null;
+  code?: string | null;
+  categoryId?: number | null;
+  images?: readonly unknown[];
+  salesMode?: string | null;
+  materialType?: string | null;
+  visibility?: string | null;
+  detailContent?: unknown;
+  price?: unknown;
+  deliveryMethods?: unknown;
+  inventoryPolicy?: string | null;
+  skus?: readonly {
+    isActive?: boolean | null;
+    price?: unknown;
+    inventories?: readonly { quantity: number }[];
+  }[];
+};
+
+function hasNonEmptyLength(value: unknown): boolean {
+  if (typeof value === "string" || Array.isArray(value)) return value.length > 0;
+  return false;
+}
+
+function publicationQualityHash(product: PublicationQualitySnapshot): string {
+  const snapshot = {
+    version: PRODUCT_QUALITY_GATE_VERSION,
+    code: product.code,
+    name: product.name,
+    shortDescription: product.shortDescription,
+    description: product.description,
+    detailContent: product.detailContent,
+    materialType: product.materialType,
+    goldWeight: product.goldWeight == null ? null : String(product.goldWeight),
+    weight: product.weight == null ? null : String(product.weight),
+    salesMode: product.salesMode,
+    inventoryPolicy: product.inventoryPolicy,
+    primaryImageId: product.primaryImage?.id ?? null,
+    listingImageId: product.listingImage?.id ?? null,
+    imageIds: product.images
+      .map((image) => image.id)
+      .sort((left, right) => left - right),
+    skus: product.skus.map((sku) => ({
+      id: sku.id,
+      price: String(sku.price),
+      goldWeight: sku.goldWeight == null ? null : String(sku.goldWeight),
+      inventoryRecords: sku.inventories.length,
+    })),
+  };
+  return createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+}
+
 const CUSTOMER_MATERIAL_TYPES = new Set([
   "GOLD_999",
   "GOLD_9999",
@@ -273,7 +330,8 @@ function csvValues(value: string | undefined): string[] {
 function csvPositiveIds(value: string | undefined): number[] {
   return csvValues(value)
     .map(Number)
-    .filter((id) => Number.isInteger(id) && id > 0);
+    .filter((id) => Number.isInteger(id) && id > 0)
+    .slice(0, 100);
 }
 
 function weightRanges(
@@ -347,7 +405,9 @@ function mapCreateDto(dto: CreateProductDto): Prisma.ProductCreateInput {
     size: size ?? null,
     gemInfo: gemInfo ?? undefined,
     craftTechnique: craftTechnique ?? undefined,
-    detailContent: (detailContent ?? undefined) as any,
+    detailContent: (detailContent ?? undefined) as unknown as
+      | Prisma.InputJsonValue
+      | undefined,
     status: status ?? "DRAFT",
     visibility: visibility ?? "MEMBER",
     salesMode: salesMode ?? "DISPLAY_ONLY",
@@ -400,7 +460,9 @@ function mapUpdateDto(dto: UpdateProductDto): Prisma.ProductUpdateInput {
   if (dto.gemInfo !== undefined) data.gemInfo = dto.gemInfo;
   if (dto.craftTechnique !== undefined)
     data.craftTechnique = dto.craftTechnique;
-  if (dto.detailContent !== undefined) data.detailContent = dto.detailContent as any;
+  if (dto.detailContent !== undefined) {
+    data.detailContent = dto.detailContent as unknown as Prisma.InputJsonValue;
+  }
   if (dto.visibility !== undefined) data.visibility = dto.visibility;
   if (dto.salesMode !== undefined) data.salesMode = dto.salesMode;
   if (dto.inventoryPolicy !== undefined)
@@ -507,7 +569,7 @@ export class ProductsService {
       codes,
       visibility,
     } = params;
-    const where: any = { deletedAt: null };
+    const where: Prisma.ProductWhereInput = { deletedAt: null };
     if (ids) {
       const idList = String(ids)
         .split(",")
@@ -526,16 +588,16 @@ export class ProductsService {
     if (categoryId) where.categoryId = +categoryId;
     // 后台默认工作列表不包含回收站；回收站通过显式 ARCHIVED 状态单独查询。
     // 这里在服务端收敛口径，避免前端对单页数组过滤导致 total/分页与列表不一致。
-    where.status = status || { not: "ARCHIVED" };
-    if (materialType) where.materialType = materialType;
-    if (salesMode) where.salesMode = salesMode;
+    where.status = status ? (status as ProductStatus) : { not: "ARCHIVED" };
+    if (materialType) where.materialType = materialType as MaterialType;
+    if (salesMode) where.salesMode = salesMode as SalesMode;
     if (isHot !== undefined) where.isHot = isHot === "true";
     if (isRecommended !== undefined)
       where.isRecommended = isRecommended === "true";
     // 受控目录可见范围过滤（catalog 传入数组；admin 列表不传则显示全部）
     if (visibility) {
       where.visibility = {
-        in: Array.isArray(visibility) ? visibility : [visibility],
+        in: [visibility as ProductVisibility],
       };
     }
     if (keyword) {
@@ -547,7 +609,7 @@ export class ProductsService {
 
     const _page = +page,
       _pageSize = +pageSize;
-    const orderBy: any =
+    const orderBy: Prisma.ProductOrderByWithRelationInput =
       sortBy === "sortOrder"
         ? { sortOrder: "asc" }
         : sortBy === "code_asc"
@@ -605,33 +667,33 @@ export class ProductsService {
         this.prisma.product.count({ where }),
       ]);
 
-      const enrichedList = list.map((p: any) => ({
-        ...p,
+      const enrichedList = list.map((product) => ({
+        ...product,
         // 后台媒体也统一走受控媒体端点（迁移后旧 /uploads 文件删除，url 不再可用）
-        images: (p.images || []).map((img: any) => ({
-          ...img,
-          mediaUrl: `/products/catalog/${p.id}/media/${img.id}`,
+        images: product.images.map((image) => ({
+          ...image,
+          mediaUrl: `/products/catalog/${product.id}/media/${image.id}`,
         })),
-        completeness: this.calcCompleteness(p),
-        hasPrimaryImage: p.images?.length > 0,
-        imageCount: p.images?.length ?? 0,
+        completeness: this.calcCompleteness(product),
+        hasPrimaryImage: product.images.length > 0,
+        imageCount: product.images.length,
         totalStock:
-          p.skus?.reduce(
-            (sum: number, sku: any) =>
+          product.skus.reduce(
+            (sum, sku) =>
               sum +
-              (sku.inventories?.reduce(
-                (s: number, inv: any) => s + (inv.quantity || 0),
+              sku.inventories.reduce(
+                (skuTotal, inventory) => skuTotal + inventory.quantity,
                 0,
-              ) ?? 0),
+              ),
             0,
-          ) ?? 0,
+          ),
       }));
 
       return { list: enrichedList, total, page: _page, pageSize: _pageSize };
-    } catch (error: any) {
+    } catch (error: unknown) {
       // 记录完整查询上下文，便于定位 Prisma 校验异常
       console.error("[findAll] Prisma 查询失败", {
-        message: error?.message,
+        message: error instanceof Error ? error.message : String(error),
         where: JSON.stringify(where),
         skip: (_page - 1) * _pageSize,
         take: _pageSize,
@@ -639,6 +701,51 @@ export class ProductsService {
       });
       throw error;
     }
+  }
+
+  async listMedia(params: { page?: number; pageSize?: number; keyword?: string }) {
+    const page = this.toBoundedPositiveInt(params.page, 1, 10_000);
+    const pageSize = this.toBoundedPositiveInt(params.pageSize, 20, 100);
+    const keyword = params.keyword?.trim();
+    const where: Prisma.ProductImageWhereInput = {
+      product: {
+        deletedAt: null,
+        ...(keyword
+          ? { OR: [{ name: { contains: keyword } }, { code: { contains: keyword } }] }
+          : {}),
+      },
+    };
+    const [rows, total] = await Promise.all([
+      this.prisma.productImage.findMany({
+        where,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        select: {
+          id: true,
+          type: true,
+          sortOrder: true,
+          createdAt: true,
+          product: { select: { id: true, name: true, code: true } },
+        },
+      }),
+      this.prisma.productImage.count({ where }),
+    ]);
+    return {
+      list: rows.map((row) => ({
+        id: row.id,
+        type: row.type,
+        sortOrder: row.sortOrder,
+        createdAt: row.createdAt,
+        productId: row.product.id,
+        productName: row.product.name,
+        productCode: row.product.code,
+        mediaUrl: `/products/catalog/${row.product.id}/media/${row.id}?width=480`,
+      })),
+      total,
+      page,
+      pageSize,
+    };
   }
 
   async resolveReferences(input: ResolveProductReferencesDto) {
@@ -744,12 +851,12 @@ export class ProductsService {
    * SUSPENDED / REJECTED / NEEDS_SUPPLEMENT / PENDING / NONE 一律降级为 MEMBER 可见范围，
    * 因此审核暂停即便旧 JWT 未过期，也会在下一次请求立即生效。
    */
-  resolveVisibleVisibilities(customer: any): ProductVisibility[] {
+  resolveVisibleVisibilities(customer: CustomerProductAccess): ProductVisibility[] {
     return resolveCustomerProductVisibilities(customer);
   }
 
   /** 会员目录：按客户可见范围过滤，并使用与游客一致的安全字段白名单。 */
-  async findCatalog(params: PublicProductQueryDto, customer: any) {
+  async findCatalog(params: PublicProductQueryDto, customer: CustomerPrincipal) {
     const visibilities = this.resolveVisibleVisibilities(customer);
     return this.findCustomerFacingList(params, visibilities, "catalog");
   }
@@ -762,8 +869,8 @@ export class ProductsService {
     visibilities: ProductVisibility[],
     mediaScope: "public" | "catalog",
   ) {
-    const page = this.toBoundedPositiveInt(params.page, 1, 1_000_000);
-    const pageSize = this.toBoundedPositiveInt(params.pageSize, 20, 2_000);
+    const page = this.toBoundedPositiveInt(params.page, 1, 10_000);
+    const pageSize = this.toBoundedPositiveInt(params.pageSize, 20, 100);
     const baseWhere: Prisma.ProductWhereInput = {
       deletedAt: null,
       status: "PUBLISHED",
@@ -885,7 +992,19 @@ export class ProductsService {
       });
     }
 
-    // 价格区间过滤（元，含边界；非法输入静默忽略）。基准为 Product.price（min 活跃 SKU 价）
+    // 公开价格只属于 DIRECT_PURCHASE。只要请求使用价格过滤或价格排序，
+    // 就把结果限定到直购商品，避免用不公开的内部价格筛选/排列询价商品。
+    const usesPublicPrice =
+      params.minPrice !== undefined ||
+      params.maxPrice !== undefined ||
+      params.sortBy === "price_asc" ||
+      params.sortBy === "price_desc";
+    if (usesPublicPrice) {
+      andFilters.push({ salesMode: "DIRECT_PURCHASE" });
+    }
+
+    // 价格区间过滤（元，含边界；非法输入静默忽略）。
+    // DIRECT_PURCHASE 的 Product.price 由有效 SKU 最低成交价派生。
     const priceFilter: { gte?: number; lte?: number } = {};
     const minPrice = Number(params.minPrice);
     if (Number.isFinite(minPrice) && minPrice >= 0) priceFilter.gte = minPrice;
@@ -964,32 +1083,32 @@ export class ProductsService {
    * 前台商品序列化器。显式逐字段组装，禁止 storageKey、库存、统计和运营字段进入响应。
    */
   private toCustomerFacingProduct(
-    product: any,
+    product: CustomerFacingProduct,
     mediaScope: "public" | "catalog",
     includePublicCraftTechnique = false,
   ): Record<string, unknown> {
     const productId = product.id;
-    const mapImage = (img: any) => {
-      if (!img || !this.productMedia.isProductMediaReadable(img)) return null;
+    const mapImage = (image: CustomerFacingImage | null) => {
+      if (!image || !this.productMedia.isProductMediaReadable(image)) return null;
       return {
-        id: img.id,
-        type: img.type,
-        sortOrder: img.sortOrder,
-        isVideo: img.isVideo,
-        width: img.width ?? null,
-        height: img.height ?? null,
-        mediaUrl: `/products/${mediaScope}/${productId}/media/${img.id}`,
+        id: image.id,
+        type: image.type,
+        sortOrder: image.sortOrder,
+        isVideo: image.isVideo,
+        width: image.width ?? null,
+        height: image.height ?? null,
+        mediaUrl: `/products/${mediaScope}/${productId}/media/${image.id}`,
       };
     };
-    const mapImageList = (imgs: any[]) =>
-      (imgs || []).map(mapImage).filter((x) => x !== null);
+    const mapImageList = (images: CustomerFacingImage[]) =>
+      images.map(mapImage).filter((image) => image !== null);
 
     const canShowPrice = product.salesMode === "DIRECT_PURCHASE";
-    const availableStock = (product.skus || []).reduce(
-      (total: number, sku: any) =>
+    const availableStock = (product.skus ?? []).reduce(
+      (total, sku) =>
         total +
-        (sku.inventories || []).reduce(
-          (skuTotal: number, inventory: any) =>
+        sku.inventories.reduce(
+          (skuTotal, inventory) =>
             skuTotal + Math.max(0, Number(inventory.quantity) || 0),
           0,
         ),
@@ -1015,16 +1134,16 @@ export class ProductsService {
       isLimited: product.isLimited,
       isCustom: product.isCustom,
       category: product.category,
-      attributes: (product.productAttributes || [])
-        .map((pa: any) => pa.attributeValue)
-        .filter((v: any) => v?.id)
-        .map((v: any) => ({
-          id: v.id,
-          value: v.value,
-          attributeKey: v.attribute?.key,
-          attributeName: v.attribute?.name,
+      attributes: (product.productAttributes ?? [])
+        .map(({ attributeValue }) => attributeValue)
+        .filter((value) => Boolean(value.id))
+        .map((value) => ({
+          id: value.id,
+          value: value.value,
+          attributeKey: value.attribute.key,
+          attributeName: value.attribute.name,
         })),
-      images: mapImageList(product.images),
+      images: mapImageList(product.images ?? []),
       primaryImage: product.primaryImage
         ? mapImage(product.primaryImage)
         : null,
@@ -1033,11 +1152,11 @@ export class ProductsService {
         : null,
     };
 
-    if (includePublicCraftTechnique) {
+    if (includePublicCraftTechnique && "craftTechnique" in product) {
       response.craftTechnique = product.craftTechnique;
     }
 
-    if (Object.prototype.hasOwnProperty.call(product, "description")) {
+    if ("description" in product) {
       response.description = product.description;
       response.detailContent = product.detailContent;
       response.gemInfo = product.gemInfo;
@@ -1050,7 +1169,7 @@ export class ProductsService {
       response.includesCertificate = product.includesCertificate;
       response.packageType = product.packageType;
       response.customLeadTime = product.customLeadTime;
-      response.skus = (product.skus || []).map((sku: any) => ({
+      response.skus = (product.skus ?? []).map((sku) => ({
         id: sku.id,
         material: sku.material,
         size: sku.size,
@@ -1097,7 +1216,7 @@ export class ProductsService {
   async servePublicMedia(
     productId: number,
     imageId: number,
-    response: any,
+    response: Response,
     width?: string,
   ): Promise<void> {
     if (
@@ -1141,8 +1260,8 @@ export class ProductsService {
   async serveCatalogMedia(
     productId: number,
     imageId: number,
-    request: any,
-    response: any,
+    request: CustomerOrStaffRequest,
+    response: Response,
     width?: string,
   ): Promise<void> {
     const image = await this.prisma.productImage.findFirst({
@@ -1158,7 +1277,7 @@ export class ProductsService {
     }
     const product = image.product;
 
-    let needsWatermark = false;
+    let watermarkLabel: string | null = null;
     if (request.authKind !== "staff") {
       const visibilities = this.resolveVisibleVisibilities(request.customer);
       if (
@@ -1170,7 +1289,7 @@ export class ProductsService {
         throw new NotFoundException("媒体不存在");
       }
       // 所有登录客户（非员工）访问受控媒体一律加水印，防止款式资料外泄
-      needsWatermark = true;
+      watermarkLabel = this.productMedia.maskPhone(request.customer.phone);
       // 记录媒体浏览审计（customerId 从令牌派生，不接受客户端提交）
       await this.productAccess.recordEvent(
         request.customer.id,
@@ -1186,11 +1305,10 @@ export class ProductsService {
 
     let outBuffer: Buffer = buffer;
     let outMime = mimeType;
-    if (needsWatermark && !isVideo) {
-      const label = this.productMedia.maskPhone(request.customer.phone);
+    if (watermarkLabel !== null && !isVideo) {
       const watermarked = await this.productMedia.applyPartnerWatermark(
         buffer,
-        label,
+        watermarkLabel,
       );
       outBuffer = watermarked.buffer;
       outMime = watermarked.mimeType;
@@ -1268,7 +1386,7 @@ export class ProductsService {
   }
 
   /** 会员目录详情：查询本身完成越权过滤，不再调用返回后台字段的 findById。 */
-  async findCatalogById(reference: string | number, customer: any) {
+  async findCatalogById(reference: string | number, customer: CustomerPrincipal) {
     const value = String(reference).trim();
     if (!value) return null;
     const visibilities = this.resolveVisibleVisibilities(customer);
@@ -1316,7 +1434,7 @@ export class ProductsService {
    */
   async filterVisibleProductIds(
     productIds: number[],
-    customer?: any,
+    customer?: CustomerProductAccess,
   ): Promise<Set<number>> {
     // 委托给 resolveVisibleProductSnapshots，避免可见性查询逻辑重复；
     // 仅取 ID 集合时此方法仍可用，且与快照解析走同一条判定路径。
@@ -1341,7 +1459,7 @@ export class ProductsService {
    */
   async resolveVisibleProductSnapshots(
     productIds: number[],
-    customer?: any,
+    customer?: CustomerProductAccess,
   ): Promise<Map<number, { name: string; mediaUrl: string | null }>> {
     const ids = (productIds || []).filter(
       (id) => Number.isInteger(id) && (id as number) > 0,
@@ -1397,35 +1515,37 @@ export class ProductsService {
     );
   }
 
-  calcCompleteness(product: any): {
+  calcCompleteness(product: CompletenessProduct): {
     isComplete: boolean;
     missingFields: string[];
     score: number;
   } {
     const requirements: Array<[string, boolean]> = [
-      ["name", Boolean(product.name?.trim?.() || product.name)],
-      ["code", Boolean(product.code?.trim?.() || product.code)],
+      ["name", Boolean(product.name?.trim())],
+      ["code", Boolean(product.code?.trim())],
       ["categoryId", Boolean(product.categoryId)],
       ["primaryImage", Boolean(product.images?.length)],
       ["salesMode", Boolean(product.salesMode)],
       ["materialType", Boolean(product.materialType)],
       ["visibility", Boolean(product.visibility)],
-      ["detailContent", Boolean(product.detailContent?.length)],
+      ["detailContent", hasNonEmptyLength(product.detailContent)],
     ];
     if (product.salesMode === "DIRECT_PURCHASE") {
-      const activeSkus = (product.skus || []).filter((sku: any) => sku.isActive !== false);
+      const activeSkus = (product.skus ?? []).filter(
+        (sku) => sku.isActive !== false,
+      );
       requirements.push(
         ["derivedPrice", Number(product.price) > 0],
-        ["activeSku", activeSkus.length > 0 && activeSkus.every((sku: any) => Number(sku.price) > 0)],
-        ["inventoryRecord", activeSkus.length > 0 && activeSkus.every((sku: any) => sku.inventories?.length > 0)],
-        ["deliveryMethods", Boolean(product.deliveryMethods?.length)],
+        ["activeSku", activeSkus.length > 0 && activeSkus.every((sku) => Number(sku.price) > 0)],
+        ["inventoryRecord", activeSkus.length > 0 && activeSkus.every((sku) => (sku.inventories?.length ?? 0) > 0)],
+        ["deliveryMethods", hasNonEmptyLength(product.deliveryMethods)],
       );
       if (product.inventoryPolicy === "SINGLE_UNIT") {
         const totalStock = activeSkus.reduce(
-          (sum: number, sku: any) =>
+          (sum, sku) =>
             sum +
-            (sku.inventories || []).reduce(
-              (skuSum: number, inventory: any) =>
+            (sku.inventories ?? []).reduce(
+              (skuSum, inventory) =>
                 skuSum + Math.max(0, Number(inventory.quantity) || 0),
               0,
             ),
@@ -1462,24 +1582,21 @@ export class ProductsService {
     });
     if (!product) return null;
     // 后台/详情媒体统一走受控媒体端点（迁移后旧 /uploads 文件删除，url 不再可用）
-    const withMedia = (img: any) =>
-      img
-        ? {
-            ...img,
-            mediaUrl: `/products/catalog/${product.id}/media/${img.id}`,
-          }
-        : img;
+    const withMedia = (image: ProductImage) => ({
+      ...image,
+      mediaUrl: `/products/catalog/${product.id}/media/${image.id}`,
+    });
     return {
       ...product,
-      tags: (product.tags || []).map((t: any) => ({
-        id: t.id,
-        productId: t.productId,
-        tagId: t.tagId,
-        tagName: t.tag?.name || "",
+      tags: product.tags.map((tag) => ({
+        id: tag.id,
+        productId: tag.productId,
+        tagId: tag.tagId,
+        tagName: tag.tag.name,
       })),
-      images: (product.images || []).map(withMedia),
-      primaryImage: withMedia(product.primaryImage),
-      listingImage: withMedia(product.listingImage),
+      images: product.images.map(withMedia),
+      primaryImage: product.primaryImage ? withMedia(product.primaryImage) : null,
+      listingImage: product.listingImage ? withMedia(product.listingImage) : null,
     };
   }
 
@@ -1527,7 +1644,7 @@ export class ProductsService {
               data: {
                 productId: created.id,
                 skuCode: sku.skuCode,
-                material: (sku.material ?? "GOLD_999") as any,
+                material: sku.material ?? "GOLD_999",
                 size: sku.size ?? null,
                 goldWeight: sku.goldWeight ?? 0,
                 price: sku.price,
@@ -1544,7 +1661,7 @@ export class ProductsService {
             data: {
               productId: created.id,
               skuCode: `${created.code}-DEFAULT`,
-              material: (dto.materialType ?? "GOLD_999") as any,
+              material: dto.materialType ?? "GOLD_999",
               size: dto.size ?? null,
               goldWeight: dto.goldWeight ?? 0,
               price: dto.price ?? 0,
@@ -1585,7 +1702,9 @@ export class ProductsService {
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === "P2002") {
-          const target = (error.meta as any)?.target;
+          const target = (
+            error.meta as { target?: unknown } | undefined
+          )?.target;
           if (Array.isArray(target) && target.includes("sku_code")) {
             throw new ConflictException("该 SKU 编码已存在，请更换编码");
           }
@@ -2066,17 +2185,19 @@ export class ProductsService {
   /* ═══ 图片管理 ═══ */
   // ImageType 枚举（schema 定义：FRONT/SIDE/TOP/DETAIL/WEARING，无 BACK）。
   // 注：是否新增 BACK 属【待产品决策】（PRODUCT_DATA_CONTRACT 13.5），未确认前不扩展。
-  private readonly IMAGE_TYPES = new Set([
+  private readonly IMAGE_TYPES = new Set<ImageType>([
     "FRONT",
     "SIDE",
     "TOP",
     "DETAIL",
     "WEARING",
   ]);
-  private normalizeImageType(type: string | undefined): string {
+  private normalizeImageType(type: string | undefined): ImageType {
     if (!type) return "FRONT"; // 默认与 schema 一致（旧代码默认 SIDE 与 schema 冲突，已统一为 FRONT）
     const upper = String(type).toUpperCase();
-    return this.IMAGE_TYPES.has(upper) ? upper : "FRONT"; // 非法值兜底 FRONT，不写入任意字符串
+    return this.IMAGE_TYPES.has(upper as ImageType)
+      ? (upper as ImageType)
+      : "FRONT"; // 非法值兜底 FRONT，不写入任意字符串
   }
 
   async addImage(
@@ -2103,7 +2224,7 @@ export class ProductsService {
           productId,
           url: initialUrl,
           storageKey: storageKey ?? null,
-          type: this.normalizeImageType(data.type) as any,
+          type: this.normalizeImageType(data.type),
           sortOrder: data.sortOrder ?? 0,
           isVideo: data.isVideo ?? false,
           sourceImageId: data.sourceImageId ?? null,
@@ -2141,9 +2262,9 @@ export class ProductsService {
       where: { id: imageId, productId },
     });
     if (!img) throw new BadRequestException("图片不属于该商品");
-    const updateData: any = {};
+    const updateData: Prisma.ProductImageUpdateInput = {};
     if (data.type !== undefined)
-      updateData.type = this.normalizeImageType(data.type) as any;
+      updateData.type = this.normalizeImageType(data.type);
     if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
     const image = await this.prisma.productImage.update({
       where: { id: imageId },
@@ -2283,17 +2404,12 @@ export class ProductsService {
   /* ═══ 证书管理 ═══ */
   async addCertificate(
     productId: number,
-    dto: {
-      certType: string;
-      certNumber?: string;
-      certImage?: string;
-      expireDate?: string;
-    },
+    dto: CreateCertificateDto,
   ) {
     const cert = await this.prisma.certificate.create({
       data: {
         productId,
-        certType: dto.certType as any,
+        certType: dto.certType,
         certNumber: dto.certNumber ?? "",
         certImage: dto.certImage ?? null,
         expireDate: dto.expireDate ? new Date(dto.expireDate) : null,
@@ -2306,19 +2422,14 @@ export class ProductsService {
   async updateCertificate(
     productId: number,
     certId: number,
-    dto: {
-      certType?: string;
-      certNumber?: string;
-      certImage?: string;
-      expireDate?: string;
-    },
+    dto: UpdateCertificateDto,
   ) {
     // P1-22：校验证书归属于 URL 声明的商品，避免跨商品越权改删
     const existing = await this.prisma.certificate.findFirst({
       where: { id: certId, productId },
     });
     if (!existing) throw new NotFoundException("证书不存在或不属于该商品");
-    const data: any = {};
+    const data: Prisma.CertificateUpdateInput = {};
     if (dto.certType !== undefined) data.certType = dto.certType;
     if (dto.certNumber !== undefined) data.certNumber = dto.certNumber;
     if (dto.certImage !== undefined) data.certImage = dto.certImage;
@@ -2352,14 +2463,7 @@ export class ProductsService {
 
   async createSku(
     productId: number,
-    dto: {
-      skuCode: string;
-      material?: string;
-      size?: string;
-      goldWeight?: number;
-      price: number;
-      isActive?: boolean;
-    },
+    dto: CreateSkuDto,
   ) {
     try {
       const sku = await this.prisma.$transaction(async (tx) => {
@@ -2368,7 +2472,7 @@ export class ProductsService {
           data: {
             productId,
             skuCode: dto.skuCode,
-            material: (dto.material || "GOLD_999") as any,
+            material: dto.material ?? "GOLD_999",
             size: dto.size ?? null,
             goldWeight: dto.goldWeight ?? 0,
             price: dto.price,
@@ -2398,16 +2502,9 @@ export class ProductsService {
   async updateSku(
     productId: number,
     skuId: number,
-    dto: {
-      skuCode?: string;
-      material?: string;
-      size?: string;
-      goldWeight?: number;
-      price?: number;
-      isActive?: boolean;
-    },
+    dto: UpdateSkuDto,
   ) {
-    const data: any = {};
+    const data: Prisma.ProductSKUUpdateInput = {};
     if (dto.skuCode !== undefined) data.skuCode = dto.skuCode;
     if (dto.material !== undefined) data.material = dto.material;
     if (dto.size !== undefined) data.size = dto.size;
@@ -2554,7 +2651,7 @@ export class ProductsService {
   ) {
     const tag = await this.prisma.tag.findUnique({ where: { id } });
     if (!tag) throw new NotFoundException("标签不存在");
-    const updateData: any = {};
+    const updateData: Prisma.TagUpdateInput = {};
     if (data.name !== undefined) {
       const name = String(data.name).trim();
       if (!name) throw new BadRequestException("标签名称不能为空");

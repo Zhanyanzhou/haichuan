@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, Matches } from 'class-validator';
+import { IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength, Matches, ValidateIf } from 'class-validator';
 
 export const RefundStatusValues = ['PENDING', 'APPROVED', 'PROCESSING', 'COMPLETED', 'REJECTED', 'FAILED'] as const;
 
@@ -40,24 +40,26 @@ export class ExecuteRefundDto {
   @IsEnum(['COMPLETED', 'FAILED'])
   action!: string;
 
-  @IsOptional() @IsString() @MaxLength(100)
+  @ValidateIf((dto: ExecuteRefundDto) => dto.action === 'COMPLETED')
+  @IsString() @MinLength(1) @MaxLength(100)
   gatewayRefundNo?: string;
 
-  @IsOptional() @IsString() @MaxLength(500)
+  @ValidateIf((dto: ExecuteRefundDto) => dto.action === 'FAILED')
+  @IsString() @MinLength(1) @MaxLength(500)
   reviewNote?: string;
 }
 
 /** 退款列表查询 DTO */
 export class RefundQueryDto {
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
-  page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10_000)
+  page = 1;
 
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
-  pageSize?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100)
+  pageSize = 20;
 
   @IsOptional() @IsEnum(RefundStatusValues)
   status?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional() @IsString() @MaxLength(100)
   keyword?: string;
 }

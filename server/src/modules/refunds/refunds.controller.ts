@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 import { RefundsService } from './refunds.service';
 import { CreateRefundDto, ExecuteRefundDto, RefundQueryDto, ReviewRefundDto } from './dto/refund.dto';
 
@@ -26,38 +27,39 @@ export class RefundsController {
 
   @ApiBearerAuth()
   @Get(':id')
-  findById(@Param('id') id: string) {
-    return this.refundsService.findById(+id);
+  findById(@Param('id', ParseIntPipe) id: number) {
+    return this.refundsService.findById(id);
   }
 
   @ApiBearerAuth()
   @Roles('SUPER_ADMIN', 'ADMIN')
   @Post()
-  create(@Body() dto: CreateRefundDto, @CurrentUser() user: any) {
-    return this.refundsService.create({ ...dto, operator: { type: 'ADMIN', id: user?.id, name: user?.realName || user?.username } });
+  create(@Body() dto: CreateRefundDto, @CurrentUser() user: StaffPrincipal) {
+    return this.refundsService.create({ ...dto, operator: { type: 'ADMIN', id: user.id, name: user.realName || user.username } });
   }
 
   @ApiBearerAuth()
   @Roles('SUPER_ADMIN', 'ADMIN')
   @Put(':id/review')
-  review(@Param('id') id: string, @Body() dto: ReviewRefundDto, @CurrentUser() user: any) {
+  review(@Param('id', ParseIntPipe) id: number, @Body() dto: ReviewRefundDto, @CurrentUser() user: StaffPrincipal) {
     return this.refundsService.review(
-      +id,
+      id,
       dto.action as 'APPROVED' | 'REJECTED',
       dto.reviewNote,
-      { type: 'ADMIN', id: user?.id, name: user?.realName || user?.username },
+      { type: 'ADMIN', id: user.id, name: user.realName || user.username },
     );
   }
 
   @ApiBearerAuth()
   @Roles('SUPER_ADMIN', 'ADMIN')
   @Put(':id/execute')
-  execute(@Param('id') id: string, @Body() dto: ExecuteRefundDto, @CurrentUser() user: any) {
+  execute(@Param('id', ParseIntPipe) id: number, @Body() dto: ExecuteRefundDto, @CurrentUser() user: StaffPrincipal) {
     return this.refundsService.execute(
-      +id,
+      id,
       dto.action as 'COMPLETED' | 'FAILED',
       dto.gatewayRefundNo,
-      { type: 'ADMIN', id: user?.id, name: user?.realName || user?.username },
+      { type: 'ADMIN', id: user.id, name: user.realName || user.username },
+      dto.reviewNote,
     );
   }
 
@@ -65,11 +67,11 @@ export class RefundsController {
   @ApiBearerAuth()
   @Roles('SUPER_ADMIN', 'ADMIN')
   @Put(':id/channel')
-  startChannel(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.refundsService.startOnlineRefund(+id, {
+  startChannel(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: StaffPrincipal) {
+    return this.refundsService.startOnlineRefund(id, {
       type: 'ADMIN',
-      id: user?.id,
-      name: user?.realName || user?.username,
+      id: user.id,
+      name: user.realName || user.username,
     });
   }
 
@@ -77,7 +79,7 @@ export class RefundsController {
   @ApiBearerAuth()
   @Roles('SUPER_ADMIN', 'ADMIN')
   @Get(':id/channel')
-  queryChannel(@Param('id') id: string) {
-    return this.refundsService.queryOnlineRefund(+id);
+  queryChannel(@Param('id', ParseIntPipe) id: number) {
+    return this.refundsService.queryOnlineRefund(id);
   }
 }

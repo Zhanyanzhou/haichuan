@@ -15,6 +15,7 @@ import {
 import { registerOverlayPortal } from "@puckeditor/core";
 import { ROOT_ZONE, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
+import type { PuckProps } from "@/page-builder/types";
 
 export default function CanvasSelectionDock({
   readOnly = false,
@@ -35,7 +36,7 @@ export default function CanvasSelectionDock({
   const componentId = String(selectedItem?.props?.id ?? "");
   const content = appData.content as Array<{
     type: string;
-    props: Record<string, any>;
+    props: PuckProps;
   }>;
   const selectedIndex = content.findIndex(
     (item) => item.props?.id === componentId,

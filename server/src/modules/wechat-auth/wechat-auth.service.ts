@@ -9,8 +9,9 @@ import {
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcrypt";
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { resolveCorsOrigins } from "../../common/config/cors-origins";
 
 const WECHAT_QR_CONNECT = "https://open.weixin.qq.com/connect/qrconnect";
 const WECHAT_ACCESS_TOKEN_API =
@@ -18,29 +19,81 @@ const WECHAT_ACCESS_TOKEN_API =
 const STATE_TTL_MS = 5 * 60 * 1000; // 二维码 state 5 分钟有效
 const BIND_TTL_MS = 10 * 60 * 1000; // 绑定令牌 10 分钟有效
 
-/** 回调父页来源必须是完整 http(s) origin（无路径/查询/尾斜杠），否则降级为 null 不投递 */
-function normalizeParentOrigin(origin: unknown): string | null {
+/** 回调父页来源必须是 CORS 白名单内的完整 http(s) origin。 */
+function normalizeParentOrigin(origin: unknown, allowedOrigins: string[]): string | null {
   if (typeof origin !== "string" || !origin.trim()) return null;
   const value = origin.trim();
+  let url: URL;
   try {
-    const url = new URL(value);
-    if (!["http:", "https:"].includes(url.protocol)) return null;
-    if (url.origin !== value) return null;
-    return url.origin;
+    url = new URL(value);
   } catch {
-    return null;
+    throw new BadRequestException("回调页面来源格式无效");
   }
+  if (!["http:", "https:"].includes(url.protocol) || url.origin !== value) {
+    throw new BadRequestException("回调页面来源格式无效");
+  }
+  if (!allowedOrigins.includes(url.origin)) {
+    throw new BadRequestException("回调页面来源不在允许列表中");
+  }
+  return url.origin;
 }
 
-interface WechatStateRecord {
-  createdAt: number;
-  parentOrigin: string | null;
+type WechatBindClaims = {
+  type: "customer";
+  tokenUse: "wechat-bind";
+  openid: string;
+  unionid: string | null;
+};
+
+function stateSigningKey(): string {
+  const key = process.env.JWT_SECRET?.trim();
+  if (!key) throw new ServiceUnavailableException("登录签名配置不可用");
+  return key;
+}
+
+function stateSignature(value: string): Buffer {
+  return createHmac("sha256", stateSigningKey())
+    .update(value)
+    .digest()
+    .subarray(0, 16);
+}
+
+function buildSignedState(parentOrigin: string | null, allowedOrigins: string[]): string {
+  const originIndex = parentOrigin ? allowedOrigins.indexOf(parentOrigin) : -1;
+  const body = [
+    "v1",
+    Date.now().toString(36),
+    String(originIndex),
+    randomBytes(12).toString("base64url"),
+  ].join(".");
+  return `${body}.${stateSignature(body).toString("base64url")}`;
+}
+
+function verifySignedState(state: string, allowedOrigins: string[]): string | null {
+  const parts = state.split(".");
+  if (parts.length !== 5 || parts[0] !== "v1") {
+    throw new BadRequestException("登录状态已失效，请重新扫码");
+  }
+  const body = parts.slice(0, 4).join(".");
+  const supplied = Buffer.from(parts[4], "base64url");
+  const expected = stateSignature(body);
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+    throw new BadRequestException("登录状态已失效，请重新扫码");
+  }
+  const issuedAt = Number.parseInt(parts[1], 36);
+  if (!Number.isFinite(issuedAt) || Date.now() - issuedAt > STATE_TTL_MS || issuedAt > Date.now() + 30_000) {
+    throw new BadRequestException("登录状态已失效，请重新扫码");
+  }
+  const originIndex = Number(parts[2]);
+  if (!Number.isInteger(originIndex) || originIndex < -1 || originIndex >= allowedOrigins.length) {
+    throw new BadRequestException("登录状态已失效，请重新扫码");
+  }
+  return originIndex === -1 ? null : allowedOrigins[originIndex];
 }
 
 export type WechatCallbackResult =
   | {
       kind: "success";
-      accessToken: string;
       customer: {
         id: number;
         phone: string;
@@ -54,18 +107,11 @@ export type WechatCallbackResult =
 export type WechatCallbackOutcome = {
   result: WechatCallbackResult;
   parentOrigin: string | null;
+  session?: { accessToken: string; customerId: number };
 };
 
 @Injectable()
 export class WechatAuthService {
-  // 内存态：state → 签发时间戳；bindToken → openid 绑定上下文。
-  // 单实例部署足够；若未来横向扩容，需迁移到 Redis/DB 存储。
-  private readonly states = new Map<string, WechatStateRecord>();
-  private readonly binds = new Map<
-    string,
-    { openid: string; unionid: string | null; expiresAt: number }
-  >();
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
@@ -81,8 +127,8 @@ export class WechatAuthService {
 
   private issueAccessToken(customerId: number) {
     return this.jwtService.sign(
-      { sub: customerId, type: "customer" },
-      { expiresIn: "24h" },
+      { sub: customerId, type: "customer", tokenUse: "access" },
+      { expiresIn: "15m" },
     );
   }
 
@@ -103,27 +149,17 @@ export class WechatAuthService {
     };
   }
 
-  private prune() {
-    const now = Date.now();
-    for (const [state, record] of this.states) {
-      if (now - record.createdAt > STATE_TTL_MS) this.states.delete(state);
-    }
-    for (const [token, record] of this.binds) {
-      if (now > record.expiresAt) this.binds.delete(token);
-    }
-  }
-
   /** 生成微信扫码登录的二维码地址（WeChat 官方 qrconnect 页面，iframe 内嵌自带二维码渲染） */
   buildQrConnectUrl(parentOrigin?: unknown): { url: string; state: string } {
     if (!this.isConfigured()) {
       throw new ServiceUnavailableException("微信扫码登录未配置");
     }
-    this.prune();
-    const state = randomBytes(16).toString("hex");
-    this.states.set(state, {
-      createdAt: Date.now(),
-      parentOrigin: normalizeParentOrigin(parentOrigin),
-    });
+    const allowedOrigins = resolveCorsOrigins(
+      process.env.NODE_ENV,
+      process.env.CORS_ORIGIN,
+    );
+    const normalizedOrigin = normalizeParentOrigin(parentOrigin, allowedOrigins);
+    const state = buildSignedState(normalizedOrigin, allowedOrigins);
     const url = new URL(WECHAT_QR_CONNECT);
     url.searchParams.set("appid", process.env.WECHAT_APP_ID!.trim());
     url.searchParams.set(
@@ -171,15 +207,18 @@ export class WechatAuthService {
         parentOrigin: null,
       };
     }
-    const record = state ? this.states.get(state) : undefined;
-    if (!record) {
+    let parentOrigin: string | null;
+    try {
+      parentOrigin = verifySignedState(
+        state,
+        resolveCorsOrigins(process.env.NODE_ENV, process.env.CORS_ORIGIN),
+      );
+    } catch {
       return {
         result: { kind: "error", message: "登录状态已失效，请重新扫码" },
         parentOrigin: null,
       };
     }
-    this.states.delete(state);
-    const { parentOrigin } = record;
     try {
       const { openid, unionid } = await this.exchangeCode(code);
       const existing = await this.prisma.customer.findUnique({
@@ -192,17 +231,17 @@ export class WechatAuthService {
             parentOrigin,
           };
         }
+        const account = this.accountResponse(existing);
         return {
-          result: { kind: "success", ...this.accountResponse(existing) },
+          result: { kind: "success", customer: account.customer },
           parentOrigin,
+          session: { accessToken: account.accessToken, customerId: existing.id },
         };
       }
-      const bindToken = randomBytes(24).toString("hex");
-      this.binds.set(bindToken, {
-        openid,
-        unionid,
-        expiresAt: Date.now() + BIND_TTL_MS,
-      });
+      const bindToken = this.jwtService.sign(
+        { type: "customer", tokenUse: "wechat-bind", openid, unionid },
+        { expiresIn: Math.floor(BIND_TTL_MS / 1000) },
+      );
       return { result: { kind: "need-bind", bindToken }, parentOrigin };
     } catch (error) {
       const message =
@@ -218,8 +257,13 @@ export class WechatAuthService {
     password: string;
     name?: string;
   }) {
-    const record = this.binds.get(data.bindToken);
-    if (!record || Date.now() > record.expiresAt) {
+    let record: WechatBindClaims;
+    try {
+      record = await this.jwtService.verifyAsync<WechatBindClaims>(data.bindToken);
+    } catch {
+      throw new BadRequestException("微信登录已过期，请重新扫码");
+    }
+    if (record.type !== "customer" || record.tokenUse !== "wechat-bind" || !record.openid) {
       throw new BadRequestException("微信登录已过期，请重新扫码");
     }
     const phone = data.phone?.trim();
@@ -243,6 +287,9 @@ export class WechatAuthService {
       email: string | null;
     };
     if (existing) {
+      if (existing.status === "DISABLED") {
+        throw new UnauthorizedException("该账户已被停用");
+      }
       if (
         !existing.passwordHash ||
         !(await bcrypt.compare(password, existing.passwordHash))
@@ -271,7 +318,6 @@ export class WechatAuthService {
         },
       });
     }
-    this.binds.delete(data.bindToken);
     return this.accountResponse(customer);
   }
 }

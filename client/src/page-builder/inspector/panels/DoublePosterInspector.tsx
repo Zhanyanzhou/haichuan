@@ -29,6 +29,7 @@ import {
   ADVANCED_BG_COLOR_FIELD,
 } from "../schema/shared";
 import type { FieldDef, InspectorContext } from "../schema/types";
+import type { PuckProps } from "../../types";
 import { useVisualEditorSession } from "../../visual-editor/visualEditorSession";
 import {
   resolveVisualNode,
@@ -59,7 +60,7 @@ interface DoublePosterInspectorProps {
   hasUnsavedChanges: boolean;
   saving: boolean;
   onSaveDraft: () => void;
-  onSaveAsTemplate: (type: string, props: Record<string, any>) => void;
+  onSaveAsTemplate: (type: string, props: PuckProps) => void;
   publishIssues: Array<{
     blockId?: string;
     message: string;
@@ -308,7 +309,7 @@ export default function DoublePosterInspector({
       ? frameOverrides.compositionPreset
       : "balanced";
 
-  const designDefaults: Record<string, any> = {
+  const designDefaults: PuckProps = {
     ...(doublePosterSchema.defaults ?? {}),
     mainImageRatio: slashToColon(
       getContractRoleRatio("doublePoster", "mainImage", "desktop"),
@@ -425,7 +426,7 @@ export default function DoublePosterInspector({
   const removeModule = () => {
     const content = appData.content as Array<{
       type: string;
-      props: Record<string, any>;
+      props: PuckProps;
     }>;
     const index = content.findIndex((item) => item.props?.id === props.id);
     if (index < 0) return;

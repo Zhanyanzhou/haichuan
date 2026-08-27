@@ -40,9 +40,9 @@ export default function AnomalyOrders() {
       const data = unwrapResponse<{ list: AnomalyOrder[]; total: number }>(res);
       setList(data?.list || []);
       setTotal(data?.total || 0);
-    } catch (e: any) {
+    } catch (error: unknown) {
       setLoadError(true);
-      message.error(getSafeAdminErrorMessage(e, "异常订单加载失败，请稍后重新加载。"));
+      message.error(getSafeAdminErrorMessage(error, "异常订单加载失败，请稍后重新加载。"));
     } finally {
       setLoading(false);
     }

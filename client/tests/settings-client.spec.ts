@@ -1,25 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 async function authenticateAuditAdmin(page: Page) {
-  await page.addInitScript(() => {
-    const token = "settings-client-test-token";
-    localStorage.setItem("token", token);
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token,
-          user: {
-            id: 1,
-            username: "settings-auditor",
-            role: "SUPER_ADMIN",
-            realName: "设置审计员",
-          },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "settings-auditor",
+    realName: "设置审计员",
   });
 }
 
@@ -36,6 +21,7 @@ test("操作日志沿用员工鉴权和现有分页筛选参数", async ({ page 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/auth/profile") return route.fallback();
     let data: unknown = {};
 
     if (url.pathname === "/api/settings/logs") {
@@ -114,10 +100,6 @@ test("操作日志沿用员工鉴权和现有分页筛选参数", async ({ page 
       ),
     )
     .toBe(true);
-  expect(
-    logRequests.every(
-      (request) =>
-        request.authorization === "Bearer settings-client-test-token",
-    ),
-  ).toBe(true);
+  expect(logRequests.every((request) => request.authorization === undefined))
+    .toBe(true);
 });

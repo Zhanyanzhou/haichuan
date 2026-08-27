@@ -9,7 +9,7 @@ import {
   Select,
   Modal,
   InputNumber,
-  message,
+  App as AntdApp,
 } from "antd";
 import { ExportOutlined } from "@ant-design/icons";
 import { inventoryApi, warehouseApi } from "@/services/api";
@@ -51,6 +51,7 @@ type InventoryRow = {
 };
 
 export default function Inventory() {
+  const { message } = AntdApp.useApp();
   const [items, setItems] = useState<InventoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +62,7 @@ export default function Inventory() {
   const [warehouseError, setWarehouseError] = useState(false);
   const [adjustModal, setAdjustModal] = useState<{
     open: boolean;
-    record: any;
+    record: InventoryRow | null;
   }>({ open: false, record: null });
   const [adjustQty, setAdjustQty] = useState<number | null>(0);
   const [page, setPage] = useState(1);
@@ -155,8 +156,8 @@ export default function Inventory() {
       message.success("库存已调整");
       setAdjustModal({ open: false, record: null });
       void load();
-    } catch (e: any) {
-      message.error(getSafeAdminErrorMessage(e, "库存调整失败，请重新加载库存后核对数量。"));
+    } catch (error: unknown) {
+      message.error(getSafeAdminErrorMessage(error, "库存调整失败，请重新加载库存后核对数量。"));
     }
   };
 
@@ -293,10 +294,10 @@ export default function Inventory() {
             {
               title: "库存",
               dataIndex: "quantity",
-              render: (v: number, r: any) => (
+              render: (v: number, row: InventoryRow) => (
                 <span
                   className="font-sans font-bold"
-                  style={{ color: r.status === "out" ? "var(--adm-error)" : r.status === "low" ? "var(--adm-warning)" : "var(--adm-ink)" }}
+                  style={{ color: row.status === "out" ? "var(--adm-error)" : row.status === "low" ? "var(--adm-warning)" : "var(--adm-ink)" }}
                 >
                   {v}
                 </span>

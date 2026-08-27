@@ -9,6 +9,10 @@ import {
   IsEnum,
 } from 'class-validator';
 import { Role, Status } from '@prisma/client';
+import {
+  STAFF_PASSWORD_MESSAGE,
+  STAFF_PASSWORD_PATTERN,
+} from '../staff-password-policy';
 
 export class CreateUserDto {
   @IsString()
@@ -17,8 +21,9 @@ export class CreateUserDto {
   username!: string;
 
   @IsString()
-  @MinLength(8, { message: '密码至少8位' })
+  @MinLength(12, { message: STAFF_PASSWORD_MESSAGE })
   @MaxLength(128)
+  @Matches(STAFF_PASSWORD_PATTERN, { message: STAFF_PASSWORD_MESSAGE })
   password!: string;
 
   @IsOptional()
@@ -65,7 +70,8 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsString()
-  @MinLength(8, { message: '密码至少8位' })
+  @MinLength(12, { message: STAFF_PASSWORD_MESSAGE })
   @MaxLength(128)
+  @Matches(STAFF_PASSWORD_PATTERN, { message: STAFF_PASSWORD_MESSAGE })
   password?: string;
 }

@@ -346,6 +346,38 @@ test('关联售后退款必须属于同订单、类型正确且累计不超过�
   assert.equal(state.refunds.length, 2);
 });
 
+test('关联售后在退款审核前失效时拒绝继续推进', async () => {
+  const refund: FakeRefund = {
+    id: 1,
+    orderId: 1,
+    paymentId: 1,
+    refundNo: 'RFD-AS-CANCELLED',
+    amount: new Prisma.Decimal(30),
+    reason: '售后退款',
+    status: 'PENDING',
+    idempotencyKey: 'refund-as-cancelled',
+    gatewayRefundNo: null,
+    afterSalesCaseId: 9,
+  };
+  const { service, state } = createHarness(
+    [{ id: 1, amount: new Prisma.Decimal(100), method: 'bank_transfer', status: 'PAID' }],
+    [refund],
+    [{
+      id: 9,
+      orderId: 1,
+      type: 'REFUND',
+      status: 'CANCELLED',
+      approvedRefundAmount: new Prisma.Decimal(30),
+    }],
+  );
+
+  await assert.rejects(
+    () => service.review(1, 'APPROVED', '同意', admin),
+    BadRequestException,
+  );
+  assert.equal(state.refunds[0].status, 'PENDING');
+});
+
 test('在线支付退款不能由后台人工标记完成', async () => {
   const refund: FakeRefund = {
     id: 1,
@@ -407,6 +439,31 @@ test('线下退款按原 Payment 更新部分/全退状态，重复完成不会�
   await service.execute(2, 'COMPLETED', 'BANK-NEW', admin);
   assert.equal(state.refundUpdates, updateCount);
   assert.equal(Number(state.order.refundedAmount), 100);
+});
+
+test('线下退款执行失败必须填写失败原因，且原因进入交易时间线而非冒充流水号', async () => {
+  const refund: FakeRefund = {
+    id: 1,
+    orderId: 1,
+    paymentId: 1,
+    refundNo: 'RFD-FAILED',
+    amount: new Prisma.Decimal(20),
+    reason: '退款测试',
+    status: 'APPROVED',
+    idempotencyKey: 'refund-failed',
+    gatewayRefundNo: null,
+  };
+  const { service, state } = createHarness([
+    { id: 1, amount: new Prisma.Decimal(100), method: 'bank_transfer', status: 'PAID' },
+  ], [refund]);
+
+  await assert.rejects(
+    () => service.execute(1, 'FAILED', undefined, admin),
+    BadRequestException,
+  );
+  await service.execute(1, 'FAILED', undefined, admin, '银行退回请求超时');
+  assert.equal(state.refunds[0].status, 'APPROVED');
+  assert.equal(state.events.at(-1)?.reason, '银行退回请求超时');
 });
 
 test('关联退款达到审核额度后在同一事务闭合退款类售后工单', async () => {

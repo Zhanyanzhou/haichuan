@@ -5,6 +5,8 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
+import { Prisma } from "@prisma/client";
+import { CreateWarehouseDto, UpdateWarehouseDto } from "./dto/warehouse.dto";
 
 @Injectable()
 export class InventoryService {
@@ -20,7 +22,7 @@ export class InventoryService {
     status?: string;
   }) {
     const { page = 1, pageSize = 20, warehouseId, status } = params;
-    const where: any = {};
+    const where: Prisma.InventoryWhereInput = {};
     if (warehouseId) where.warehouseId = warehouseId;
 
     const [list, total] = await Promise.all([
@@ -58,6 +60,7 @@ export class InventoryService {
   async updateStock(
     id: number,
     data: { type: "in" | "out" | "adjust"; quantity: number; remark?: string },
+    operator?: { id?: number; name?: string },
   ) {
     if (!Number.isInteger(data.quantity) || data.quantity < 0) {
       throw new BadRequestException("数量必须为非负整数");
@@ -67,7 +70,7 @@ export class InventoryService {
     const updated = await this.prisma.$transaction(async (tx) => {
       const inv = await tx.inventory.findUnique({
         where: { id },
-        select: { id: true, sku: { select: { productId: true } } },
+        select: { id: true, quantity: true, sku: { select: { productId: true } } },
       });
       if (!inv) throw new NotFoundException("库存记录不存在");
       const productId = inv.sku.productId;
@@ -94,7 +97,25 @@ export class InventoryService {
       }
 
       await this.productsService.reconcileTradeRulesInTransaction(productId, tx);
-      return tx.inventory.findUniqueOrThrow({ where: { id } });
+      const result = await tx.inventory.findUniqueOrThrow({ where: { id } });
+      if (operator?.id) {
+        await tx.operationLog.create({
+          data: {
+            userId: operator.id,
+            action: "stock_update",
+            module: "inventory",
+            targetId: id,
+            detail: JSON.stringify({
+              type: data.type,
+              quantity: data.quantity,
+              before: inv.quantity,
+              after: result.quantity,
+              remark: data.remark?.trim() || null,
+            }),
+          },
+        });
+      }
+      return result;
     });
     if (changedProductId !== null) {
       this.productsService.notifyTradeProductChanged(changedProductId);
@@ -119,19 +140,13 @@ export class InventoryService {
     });
   }
 
-  async createWarehouse(data: {
-    name: string;
-    type?: string;
-    address?: string;
-    contact?: string;
-    phone?: string;
-  }) {
+  async createWarehouse(data: CreateWarehouseDto) {
     const name = String(data.name || "").trim();
     if (!name) throw new BadRequestException("仓库名称不能为空");
     return this.prisma.warehouse.create({
       data: {
         name,
-        type: (data.type as any) || "SHOWROOM",
+        type: data.type || "SHOWROOM",
         address: data.address?.trim() || null,
         contact: data.contact?.trim() || null,
         phone: data.phone?.trim() || null,
@@ -141,18 +156,11 @@ export class InventoryService {
 
   async updateWarehouse(
     id: number,
-    data: {
-      name?: string;
-      type?: string;
-      address?: string;
-      contact?: string;
-      phone?: string;
-      isActive?: boolean;
-    },
+    data: UpdateWarehouseDto,
   ) {
     const warehouse = await this.prisma.warehouse.findUnique({ where: { id } });
     if (!warehouse) throw new NotFoundException("仓库不存在");
-    const updateData: any = {};
+    const updateData: Prisma.WarehouseUpdateInput = {};
     if (data.name !== undefined) updateData.name = String(data.name).trim();
     if (data.type !== undefined) updateData.type = data.type;
     if (data.address !== undefined) updateData.address = data.address?.trim() || null;

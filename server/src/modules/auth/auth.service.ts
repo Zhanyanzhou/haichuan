@@ -1,7 +1,11 @@
-import { Injectable, UnauthorizedException, BadRequestException, HttpException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, HttpException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { UsersService } from '../users/users.service';
+import type { User } from '@prisma/client';
+
+type SafeStaff = Omit<User, 'password'>;
 
 /**
  * 登录失败锁定（A07 防爆破第二道防线，配合既有 5/min 限流）：
@@ -25,6 +29,7 @@ export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private usersService: UsersService,
   ) {}
 
   private assertNotLocked(username: string): void {
@@ -67,20 +72,7 @@ export class AuthService {
     }
   }
 
-  /** 密码复杂度校验：最小8位，必须包含字母和数字 */
-  private validatePassword(password: string): void {
-    if (!password || password.length < 8) {
-      throw new BadRequestException('密码长度不能少于8位');
-    }
-    if (!/[a-zA-Z]/.test(password)) {
-      throw new BadRequestException('密码必须包含至少一个字母');
-    }
-    if (!/[0-9]/.test(password)) {
-      throw new BadRequestException('密码必须包含至少一个数字');
-    }
-  }
-
-  async validateUser(username: string, password: string): Promise<any> {
+  async validateUser(username: string, password: string): Promise<SafeStaff> {
     this.assertNotLocked(username);
 
     const user = await this.prisma.user.findUnique({ where: { username } });
@@ -105,8 +97,8 @@ export class AuthService {
     return result;
   }
 
-  async login(user: any) {
-    const payload = { sub: user.id, username: user.username, role: user.role };
+  async login(user: SafeStaff) {
+    const accessToken = this.issueAccessToken(user);
 
     // 更新最后登录信息
     await this.prisma.user.update({
@@ -115,7 +107,7 @@ export class AuthService {
     });
 
     return {
-      accessToken: this.jwtService.sign(payload),
+      accessToken,
       user: {
         id: user.id,
         username: user.username,
@@ -126,27 +118,40 @@ export class AuthService {
     };
   }
 
-  async register(data: { username: string; password: string; realName?: string; phone?: string }) {
-    // 密码复杂度校验
-    this.validatePassword(data.password);
-
-    const existingUser = await this.prisma.user.findUnique({
-      where: { username: data.username },
-    });
-    if (existingUser) throw new UnauthorizedException('用户名已存在');
-
-    const hashedPassword = await bcrypt.hash(data.password, 10);
-    const user = await this.prisma.user.create({
-      data: {
-        username: data.username,
-        password: hashedPassword,
-        realName: data.realName,
-        phone: data.phone,
-        role: 'EDITOR',
+  async resume(userId: number) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.status === 'DISABLED') {
+      throw new UnauthorizedException('账号无效或已被禁用');
+    }
+    const { password: _, ...safeUser } = user;
+    return {
+      accessToken: this.issueAccessToken(safeUser),
+      user: {
+        id: safeUser.id,
+        username: safeUser.username,
+        realName: safeUser.realName,
+        role: safeUser.role,
+        avatar: safeUser.avatar,
       },
-    });
+    };
+  }
 
-    const { password: _, ...result } = user;
-    return result;
+  private issueAccessToken(
+    user: Pick<SafeStaff, 'id' | 'username' | 'role'>,
+  ) {
+    return this.jwtService.sign(
+      {
+        sub: user.id,
+        type: 'admin',
+        tokenUse: 'access',
+        username: user.username,
+        role: user.role,
+      },
+      { expiresIn: '15m' },
+    );
+  }
+
+  async register(data: { username: string; password: string; realName?: string; phone?: string }) {
+    return this.usersService.create({ ...data, role: 'EDITOR' });
   }
 }

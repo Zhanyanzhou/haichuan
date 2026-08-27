@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
+import { PaymentStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
@@ -54,8 +54,8 @@ export class PaymentsService {
   async findAll(params: { page?: number; pageSize?: number; status?: string; type?: string; method?: string; keyword?: string; startDate?: string; endDate?: string }) {
     const page = Math.max(Number(params.page) || 1, 1);
     const pageSize = Math.min(Math.max(Number(params.pageSize) || 20, 1), 100);
-    const where: any = {};
-    if (params.status && params.status !== 'all') where.status = params.status;
+    const where: Prisma.PaymentWhereInput = {};
+    if (params.status && params.status !== 'all') where.status = params.status as PaymentStatus;
     if (params.type && params.type !== 'all') where.type = params.type;
     if (params.method && params.method !== 'all') where.method = params.method;
     if (params.keyword) where.OR = [
@@ -66,12 +66,23 @@ export class PaymentsService {
       { order: { customerPhone: { contains: params.keyword } } },
     ];
     if (params.startDate || params.endDate) {
+      const start = params.startDate ? new Date(params.startDate) : null;
+      const end = params.endDate ? new Date(params.endDate) : null;
+      if (
+        (start && Number.isNaN(start.getTime())) ||
+        (end && Number.isNaN(end.getTime()))
+      ) {
+        throw new BadRequestException('付款时间范围无效');
+      }
+      if (start && end && start.getTime() > end.getTime()) {
+        throw new BadRequestException('付款开始时间不能晚于结束时间');
+      }
       where.paidAt = {};
-      if (params.startDate) where.paidAt.gte = new Date(params.startDate);
-      if (params.endDate) {
-        const end = new Date(params.endDate);
-        end.setDate(end.getDate() + 1);
-        where.paidAt.lt = end;
+      if (start) where.paidAt.gte = start;
+      if (end) {
+        const exclusiveEnd = new Date(end);
+        exclusiveEnd.setDate(exclusiveEnd.getDate() + 1);
+        where.paidAt.lt = exclusiveEnd;
       }
     }
     const [list, total] = await Promise.all([

@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "exceptions": [
+    {
+      "migrationName": "20260824115000_add_product_publication_quality",
+      "repositorySha256": "8d8c49582be821a458404abeabb2c1f9bd0039149d82d34154a228c9f17f5c3a",
+      "appliedLedgerSha256": "7afed2a64fb53d0064cf60c3bf8415f82bbe9261e4f98a2201804d1cd21d21de",
+      "appliedAt": "2026-08-24T14:27:47.290Z",
+      "reasonCode": "PRE_COMMIT_MIGRATION_BYTES_UNRECOVERABLE",
+      "evidence": {
+        "backupManifest": "jewelry_db_20260826_124443.sha256",
+        "verifiedAt": "2026-08-27"
+      },
+      "schemaContract": {
+        "table": "products",
+        "columns": [
+          {
+            "name": "publication_quality_status",
+            "columnType": "enum('quarantined','ready')",
+            "nullable": false,
+            "default": "QUARANTINED"
+          },
+          {
+            "name": "publication_quality_hash",
+            "columnType": "char(64)",
+            "nullable": true,
+            "default": null
+          },
+          {
+            "name": "publication_quality_checked_at",
+            "columnType": "datetime(3)",
+            "nullable": true,
+            "default": null
+          }
+        ],
+        "index": {
+          "name": "products_publication_quality_idx",
+          "columns": [
+            "status",
+            "visibility",
+            "publication_quality_status"
+          ]
+        }
+      }
+    }
+  ]
+}

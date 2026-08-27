@@ -8,6 +8,7 @@
 import { createUsePuck } from "@puckeditor/core";
 import { puckConfig } from "@/page-builder/config/puckConfig";
 import { create } from "zustand";
+import type { PuckDocument } from "@/page-builder/types";
 
 export const useHomepagePuck = createUsePuck<typeof puckConfig>();
 
@@ -137,7 +138,7 @@ export type PageDocumentRevision = {
   id: number;
   version: number;
   puckData: unknown;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   status?: string;
   publishedAt?: string | null;
   publishedBy?: number | null;
@@ -148,13 +149,13 @@ export type PageDocumentRevision = {
 export type PageDraftSnapshot = {
   pageKey: string;
   puckData: unknown;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   updatedAt?: string | null;
 };
 
 export type PageSessionCache = {
-  data: any;
-  metadata: Record<string, any>;
+  data: PuckDocument;
+  metadata: Record<string, unknown>;
   lastSaved: string | null;
   updatedAt: string | null;
 };

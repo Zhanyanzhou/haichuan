@@ -4,6 +4,14 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
 import { GoldPriceService } from "./gold-price.service";
 
+type GoldPriceServiceInternals = {
+  fetchAndUpdateGoldPrice(source: string): Promise<void>;
+  extractPrice(data: unknown): number | null;
+};
+
+const accessInternals = (service: GoldPriceService) =>
+  service as unknown as GoldPriceServiceInternals;
+
 test("手动金价写入只创建金价记录且不读取或改写商品价格", async () => {
   let goldPriceWrites = 0;
   let productPriceCalls = 0;
@@ -66,7 +74,7 @@ test("自动金价采集只写金价事实且不改写 SKU 或 Product 价格", 
     }) as Response;
 
   try {
-    await (service as any).fetchAndUpdateGoldPrice("TEST");
+    await accessInternals(service).fetchAndUpdateGoldPrice("TEST");
   } finally {
     globalThis.fetch = originalFetch;
     delete process.env.GOLD_PRICE_API_URL;
@@ -74,4 +82,17 @@ test("自动金价采集只写金价事实且不改写 SKU 或 Product 价格", 
 
   assert.equal(goldPriceWrites, 1);
   assert.equal(productPriceCalls, 0);
+});
+
+test("行情响应只从受支持的直接、嵌套或数组价格字段提取正数", () => {
+  const service = new GoldPriceService(
+    {} as PrismaService,
+    {} as ProductsService,
+  );
+  const internals = accessInternals(service);
+
+  assert.equal(internals.extractPrice({ data: { latestPrice: "886.50" } }), 886.5);
+  assert.equal(internals.extractPrice([{ ignored: 1 }, { Au9999: 887 }]), 887);
+  assert.equal(internals.extractPrice({ data: { price: "invalid" } }), null);
+  assert.equal(internals.extractPrice(null), null);
 });

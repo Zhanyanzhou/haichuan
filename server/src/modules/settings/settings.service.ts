@@ -9,10 +9,10 @@ const SETTINGS_KEY = 'site';
 
 const DEFAULT_SETTINGS = {
   siteName: '海川珠宝',
-  siteDescription: '高端珠宝产品管理平台',
+  siteDescription: '珠宝作品与顾问服务',
   logo: '',
-  seoTitle: '海川珠宝 - 高端珠宝臻品平台',
-  seoDescription: '4000+款高端珠宝臻品，融合传统工艺与现代科技',
+  seoTitle: '海川珠宝',
+  seoDescription: '浏览珠宝作品，了解定制与顾问服务。',
   seoKeywords: '珠宝,首饰,黄金,钻石,手镯,吊坠,戒指,耳饰',
   contactPhone: '',
   contactEmail: '',
@@ -37,6 +37,10 @@ type BackupSet = {
   privateMedia: BackupArtifact;
   manifest: BackupArtifact;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 export function summarizeBackupArtifacts(
   files: BackupArtifact[],
@@ -86,10 +90,11 @@ export function summarizeBackupArtifacts(
   };
 }
 
-function normalizeSettings(settings: any) {
-  const logo = typeof settings?.logo === 'string' ? settings.logo.trim() : '';
+function normalizeSettings(settings: unknown): Record<string, unknown> {
+  const source = isRecord(settings) ? settings : {};
+  const logo = typeof source.logo === 'string' ? source.logo.trim() : '';
   return {
-    ...settings,
+    ...source,
     logo: LEGACY_PLACEHOLDER_LOGOS.has(logo.toLowerCase()) ? '' : logo,
   };
 }
@@ -201,8 +206,9 @@ export class SettingsService {
           ? `最近完整备份批次：${summary.latest.timestamp}，共 ${summary.completeSets.length} 组。`
           : `最近完整备份批次 ${summary.latest.timestamp} 已超过两个计划周期；请检查 backup 容器并创建新鲜恢复点。`,
       };
-    } catch (error: any) {
-      if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') {
+    } catch (error: unknown) {
+      const code = isRecord(error) && typeof error.code === 'string' ? error.code : null;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
         return {
           lastBackup: null,
           autoBackup: false,
@@ -218,7 +224,7 @@ export class SettingsService {
 
   async getLogs(params: { page?: number; pageSize?: number; keyword?: string; module?: string }) {
     const { page = 1, pageSize = 50, keyword, module } = params;
-    const where: any = {};
+    const where: Prisma.OperationLogWhereInput = {};
     if (module) where.module = module;
     if (keyword) {
       where.OR = [

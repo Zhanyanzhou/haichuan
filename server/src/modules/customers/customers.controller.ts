@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
-import type { Response } from 'express';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -23,9 +23,13 @@ import {
 import {
   buildClearSessionCookieHeaders,
   buildSessionCookieHeaders,
+  extractRefreshCookieToken,
+  requestSessionMetadata,
 } from '../../common/security/session-security';
+import { RefreshSessionService } from '../../common/security/refresh-session.service';
 import { CustomerNotificationsService } from './customer-notifications.service';
 import { CustomerNotificationQueryDto } from './dto/customer-notification-query.dto';
+import type { CustomerRequest } from '../../common/security/authenticated-principal';
 
 // 交易域认证说明（P0 修复）：
 // JwtAuthGuard 已被注册为全局守卫（见 app.module.ts APP_GUARD），
@@ -40,6 +44,7 @@ export class CustomersController {
     private readonly customersService: CustomersService,
     private readonly ordersService: OrdersService,
     private readonly customerNotifications: CustomerNotificationsService,
+    private readonly refreshSessions: RefreshSessionService,
   ) {}
 
   // 游客下单已关闭（DECISIONS D.7）：checkout 必须先 login/register，不再签发 access token
@@ -47,17 +52,30 @@ export class CustomersController {
   @UseGuards(CustomerAuthGuard, CustomerCommerceGuard)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('checkout')
-  checkout(@Req() request: any, @Body() dto: CheckoutDto) {
+  checkout(@Req() request: CustomerRequest, @Body() dto: CheckoutDto) {
     return this.customersService.checkout(request.customer.id, dto);
   }
 
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('register')
-  async register(@Req() request: any, @Res({ passthrough: true }) response: Response, @Body() dto: CustomerRegisterDto) {
-    const result = await this.customersService.register(dto);
-    if (request.headers?.['x-session-mode'] === 'cookie') {
-      response.setHeader('Set-Cookie', buildSessionCookieHeaders('customer', result.accessToken, 24 * 60 * 60).headers);
+  async register(@Req() request: Request, @Res({ passthrough: true }) response: Response, @Body() dto: CustomerRegisterDto) {
+    const cookieMode = request.headers?.['x-session-mode'] === 'cookie';
+    const result = await this.customersService.register(
+      dto,
+      cookieMode ? requestSessionMetadata(request) : undefined,
+    );
+    if (cookieMode) {
+      if (!result.refreshSession) throw new UnauthorizedException('客户会话未建立');
+      response.setHeader(
+        'Set-Cookie',
+        buildSessionCookieHeaders(
+          'customer',
+          result.accessToken,
+          result.refreshSession.refreshToken,
+        ).headers,
+      );
+      return { customer: result.customer };
     }
     return result;
   }
@@ -65,18 +83,48 @@ export class CustomersController {
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login')
-  async login(@Req() request: any, @Res({ passthrough: true }) response: Response, @Body() dto: CustomerLoginDto) {
+  async login(@Req() request: Request, @Res({ passthrough: true }) response: Response, @Body() dto: CustomerLoginDto) {
     const result = await this.customersService.login(dto);
     if (request.headers?.['x-session-mode'] === 'cookie') {
-      response.setHeader('Set-Cookie', buildSessionCookieHeaders('customer', result.accessToken, 24 * 60 * 60).headers);
+      const session = await this.refreshSessions.issueCustomer(
+        result.customer.id,
+        requestSessionMetadata(request),
+      );
+      response.setHeader(
+        'Set-Cookie',
+        buildSessionCookieHeaders('customer', result.accessToken, session.refreshToken).headers,
+      );
+      return { customer: result.customer };
     }
     return result;
   }
 
   @Public()
-  @UseGuards(CustomerAuthGuard)
-  @Post('logout')
-  logout(@Res({ passthrough: true }) response: Response) {
+  @Post('session/refresh')
+  async refresh(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const refreshToken = extractRefreshCookieToken(request.headers?.cookie, 'customer');
+    if (!refreshToken) throw new UnauthorizedException('刷新会话不存在');
+    const rotated = await this.refreshSessions.rotateCustomer(
+      refreshToken,
+      requestSessionMetadata(request),
+    );
+    const result = await this.customersService.resume(rotated.customerId);
+    response.setHeader(
+      'Set-Cookie',
+      buildSessionCookieHeaders('customer', result.accessToken, rotated.refreshToken).headers,
+    );
+    return { customer: result.customer };
+  }
+
+  @Public()
+  @Post(['logout', 'session/logout'])
+  async logout(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    await this.refreshSessions.revokeCustomer(
+      extractRefreshCookieToken(request.headers?.cookie, 'customer'),
+    );
     response.setHeader('Set-Cookie', buildClearSessionCookieHeaders('customer'));
     return { success: true };
   }
@@ -116,21 +164,21 @@ export class CustomersController {
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me')
-  getProfile(@Req() request: any) {
+  getProfile(@Req() request: CustomerRequest) {
     return this.customersService.getProfile(request.customer.id);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Put('me')
-  updateProfile(@Req() request: any, @Body() dto: UpdateCustomerProfileDto) {
+  updateProfile(@Req() request: CustomerRequest, @Body() dto: UpdateCustomerProfileDto) {
     return this.customersService.updateProfile(request.customer.id, dto);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/orders')
-  getOrders(@Req() request: any) {
+  getOrders(@Req() request: CustomerRequest) {
     return this.ordersService.findForCustomer(request.customer.id);
   }
 
@@ -138,7 +186,7 @@ export class CustomersController {
   @UseGuards(CustomerAuthGuard)
   @Get('me/notifications')
   getNotifications(
-    @Req() request: any,
+    @Req() request: CustomerRequest,
     @Query() query: CustomerNotificationQueryDto,
   ) {
     return this.customerNotifications.list(request.customer.id, query);
@@ -147,14 +195,14 @@ export class CustomersController {
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Put('me/notifications/read-all')
-  markAllNotificationsRead(@Req() request: any) {
+  markAllNotificationsRead(@Req() request: CustomerRequest) {
     return this.customerNotifications.markAllRead(request.customer.id);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Put('me/notifications/:id/read')
-  markNotificationRead(@Req() request: any, @Param('id', ParseIntPipe) id: number) {
+  markNotificationRead(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number) {
     return this.customerNotifications.markRead(request.customer.id, id);
   }
 
@@ -162,29 +210,29 @@ export class CustomersController {
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/orders/:id/tracking')
-  getOrderTracking(@Req() request: any, @Param('id') id: string) {
-    return this.ordersService.trackForCustomer(request.customer.id, +id);
+  getOrderTracking(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number) {
+    return this.ordersService.trackForCustomer(request.customer.id, id);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/selection-inquiries')
-  getSelectionInquiries(@Req() request: any) {
+  getSelectionInquiries(@Req() request: CustomerRequest) {
     return this.customersService.getSelectionInquiries(request.customer.id);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/inquiries')
-  getInquiries(@Req() request: any) {
+  getInquiries(@Req() request: CustomerRequest) {
     return this.customersService.getInquiries(request.customer.id);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard, CustomerCommerceGuard)
   @Post('me/orders/:id/payment-proof')
-  submitPaymentProof(@Req() request: any, @Param('id') id: string, @Body() dto: SubmitPaymentProofDto) {
-    return this.ordersService.submitOfflinePaymentProof(request.customer.id, +id, dto.proofKey, {
+  submitPaymentProof(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number, @Body() dto: SubmitPaymentProofDto) {
+    return this.ordersService.submitOfflinePaymentProof(request.customer.id, id, dto.proofKey, {
       type: 'CUSTOMER' as const,
       id: request.customer.id,
     });
@@ -193,28 +241,28 @@ export class CustomersController {
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/addresses')
-  listAddresses(@Req() request: any) {
+  listAddresses(@Req() request: CustomerRequest) {
     return this.customersService.listAddresses(request.customer.id);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Post('me/addresses')
-  createAddress(@Req() request: any, @Body() dto: CustomerAddressDto) {
+  createAddress(@Req() request: CustomerRequest, @Body() dto: CustomerAddressDto) {
     return this.customersService.createAddress(request.customer.id, dto);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Put('me/addresses/:id')
-  updateAddress(@Req() request: any, @Param('id') id: string, @Body() dto: CustomerAddressDto) {
-    return this.customersService.updateAddress(request.customer.id, +id, dto);
+  updateAddress(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number, @Body() dto: CustomerAddressDto) {
+    return this.customersService.updateAddress(request.customer.id, id, dto);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/favorites')
-  listFavorites(@Req() request: any) {
+  listFavorites(@Req() request: CustomerRequest) {
     return this.customersService.listFavorites(request.customer.id);
   }
 
@@ -222,15 +270,15 @@ export class CustomersController {
   @UseGuards(CustomerAuthGuard)
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   @Post('me/favorites/:productId/toggle')
-  toggleFavorite(@Req() request: any, @Param('productId') productId: string) {
-    return this.customersService.toggleFavorite(request.customer.id, +productId);
+  toggleFavorite(@Req() request: CustomerRequest, @Param('productId', ParseIntPipe) productId: number) {
+    return this.customersService.toggleFavorite(request.customer.id, productId);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Delete('me/addresses/:id')
-  deleteAddress(@Req() request: any, @Param('id') id: string) {
-    return this.customersService.deleteAddress(request.customer.id, +id);
+  deleteAddress(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number) {
+    return this.customersService.deleteAddress(request.customer.id, id);
   }
 
   // ===== 合规（个保法：可携带权 + 注销权）=====
@@ -239,7 +287,7 @@ export class CustomersController {
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/data-export')
-  exportMyData(@Req() request: any) {
+  exportMyData(@Req() request: CustomerRequest) {
     return this.customersService.exportMyData(request.customer.id);
   }
 
@@ -248,8 +296,14 @@ export class CustomersController {
   @UseGuards(CustomerAuthGuard)
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post('me/close')
-  closeAccount(@Req() request: any, @Body() dto: CloseCustomerAccountDto) {
-    return this.customersService.closeAccount(request.customer.id, dto.password);
+  async closeAccount(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Body() dto: CloseCustomerAccountDto,
+  ) {
+    const result = await this.customersService.closeAccount(request.customer.id, dto.password);
+    response.setHeader('Set-Cookie', buildClearSessionCookieHeaders('customer'));
+    return result;
   }
 
   // ===== 后台客户档案（只读运营视图）=====
@@ -268,7 +322,7 @@ export class CustomersController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE')
   @Get('admin/:id')
-  adminDetail(@Param('id') id: string) {
-    return this.customersService.adminGetCustomer(+id);
+  adminDetail(@Param('id', ParseIntPipe) id: number) {
+    return this.customersService.adminGetCustomer(id);
   }
 }

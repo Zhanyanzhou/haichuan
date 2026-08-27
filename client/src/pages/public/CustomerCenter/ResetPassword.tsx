@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { message } from 'antd';
 import { customerApi } from '@/services/api';
+import { getRequestErrorMessage } from '@/services/httpClient';
 
 /**
  * 重置密码（第二步）：从邮件链接进入（/customer/reset?token=...），设置新密码。
@@ -30,8 +31,8 @@ export default function ResetPassword() {
       await customerApi.resetPassword({ token, password });
       message.success('密码已重置，请使用新密码登录');
       navigate('/customer', { replace: true });
-    } catch (e: any) {
-      message.error(e?.response?.data?.message || e?.message || '重置失败，请重试');
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, '重置失败，请重试'));
     } finally {
       setSubmitting(false);
     }

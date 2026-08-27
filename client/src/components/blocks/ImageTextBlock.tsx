@@ -4,9 +4,10 @@ import { IMAGE_TEXT_CONTRACT, RESPONSIVE_CANVAS } from "@/page-builder/config/bl
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { SecureImage } from "@/components/common/SecureImage";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
+import type { RenderablePageModule } from "@/types/pageModule";
 
 interface ImageTextBlockProps {
-  module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 
@@ -22,7 +23,7 @@ function ImageTextAction({ editMode, text, targetUrl }: { editMode?: boolean; te
  * 图文混排模块 — 支持左文右图 / 左图右文 / 纯文字 / 图片背景
  */
 export default function ImageTextBlock({ module, editMode }: ImageTextBlockProps) {
-  const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
+  const { content, layoutConfig, styleConfig } = module;
   const {
     label, title, body, image, imageAlt, buttonText, linkUrl,
   } = content;

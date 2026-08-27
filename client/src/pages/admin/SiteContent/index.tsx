@@ -111,7 +111,7 @@ export default function SiteContent() {
   const handleLogoUpload = async (file: File) => {
     try {
       const res = await uploadApi.uploadImage(file);
-      const data = unwrapResponse<{ url: string }>(res as any);
+      const data = unwrapResponse<{ url: string }>(res);
       if (data?.url) {
         form.setFieldsValue({ logo: data.url });
         message.success("Logo 已上传，保存后生效");
@@ -258,7 +258,7 @@ export default function SiteContent() {
           }}
         >
           <Form.Item name="seoTitle" label="默认页面标题">
-            <Input placeholder="海川珠宝 - 高端珠宝臻品平台" />
+            <Input placeholder="海川珠宝" />
           </Form.Item>
           <Form.Item name="seoDescription" label="默认页面描述">
             <Input.TextArea rows={3} placeholder="描述文字" />

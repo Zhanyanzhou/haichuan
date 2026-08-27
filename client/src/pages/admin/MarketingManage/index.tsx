@@ -21,10 +21,57 @@ import {
   EditOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
-import { marketingApi } from "@/services/api";
+import {
+  marketingApi,
+  type CouponType,
+  type CreateCouponInput,
+  type CreatePromotionInput,
+  type PromotionType,
+} from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import dayjs from "dayjs";
+import type { Dayjs } from "dayjs";
+
+interface PromotionRecord extends CreatePromotionInput {
+  id: number;
+}
+
+interface PromotionFormValues {
+  name: string;
+  type: PromotionType;
+  rule: string;
+  range: [Dayjs, Dayjs];
+  description?: string;
+  isActive?: boolean;
+}
+
+interface CouponRecord extends Omit<CreateCouponInput, "startTime" | "endTime"> {
+  id: number;
+  startTime: string;
+  endTime: string;
+  usedCount: number;
+}
+
+interface CouponFormValues
+  extends Omit<CreateCouponInput, "startTime" | "endTime"> {
+  startTime: Dayjs;
+  endTime: Dayjs;
+}
+
+interface CouponStats {
+  total?: number;
+  active?: number;
+  totalUsed?: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasFormErrorFields(error: unknown): boolean {
+  return isRecord(error) && Array.isArray(error.errorFields);
+}
 
 const PROMO_TYPE: Record<string, string> = {
   FULL_REDUCTION: "满减",
@@ -86,18 +133,18 @@ export default function MarketingManage() {
 }
 
 function PromotionsTab() {
-  const [list, setList] = useState<any[]>([]);
+  const [list, setList] = useState<PromotionRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<any>(null);
+  const [editing, setEditing] = useState<PromotionRecord | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<PromotionFormValues>();
 
   const load = async () => {
     setLoading(true);
     try {
       const res = await marketingApi.getPromotions();
-      setList(unwrapResponse<any[]>(res) || []);
+      setList(unwrapResponse<PromotionRecord[]>(res) || []);
     } catch {
       setList([]);
     } finally {
@@ -122,13 +169,19 @@ function PromotionsTab() {
           return;
         }
       }
-      const data = {
-        ...values,
+      if (!isRecord(parsedRule)) {
+        message.error("规则(JSON) 必须是对象");
+        return;
+      }
+      const data: CreatePromotionInput = {
+        name: values.name,
+        type: values.type,
         rule: parsedRule,
         startTime: values.range[0].toISOString(),
         endTime: values.range[1].toISOString(),
+        description: values.description,
+        isActive: values.isActive,
       };
-      delete data.range;
       if (editing) await marketingApi.updatePromotion(editing.id, data);
       else await marketingApi.createPromotion(data);
       message.success(editing ? "营销活动已更新" : "营销活动已创建");
@@ -136,9 +189,9 @@ function PromotionsTab() {
       setEditing(null);
       form.resetFields();
       load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       // P1-37：校验失败（errorFields）由 antd 字段内提示，不重复弹；其余失败给反馈，避免 Modal 卡 loading
-      if (e?.errorFields) return;
+      if (hasFormErrorFields(e)) return;
       message.error(getSafeAdminErrorMessage(e, "营销活动保存失败，请检查填写内容后重试。"));
     } finally {
       setSaving(false);
@@ -151,14 +204,14 @@ function PromotionsTab() {
       await marketingApi.deletePromotion(id);
       message.success("营销活动已删除");
       load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "营销活动删除失败，请重新加载后重试。"));
     } finally {
       setSaving(false);
     }
   };
 
-  const openEdit = (record: any) => {
+  const openEdit = (record: PromotionRecord) => {
     setEditing(record);
     form.setFieldsValue({
       ...record,
@@ -222,7 +275,7 @@ function PromotionsTab() {
           },
           {
             title: "操作",
-            render: (_: any, r: any) => (
+            render: (_: unknown, r: PromotionRecord) => (
               <Space>
                 <Button
                   size="small"
@@ -298,14 +351,14 @@ function PromotionsTab() {
 }
 
 function CouponsTab() {
-  const [list, setList] = useState<any[]>([]);
+  const [list, setList] = useState<CouponRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<any>(null);
-  const [form] = Form.useForm();
+  const [editing, setEditing] = useState<CouponRecord | null>(null);
+  const [form] = Form.useForm<CouponFormValues>();
   const [saving, setSaving] = useState(false);
-  const [stats, setStats] = useState<any>({});
-  const couponType = Form.useWatch("type", form) || "fixed";
+  const [stats, setStats] = useState<CouponStats>({});
+  const couponType: CouponType = Form.useWatch("type", form) || "fixed";
   const economicFieldsLocked = Number(editing?.usedCount || 0) > 0;
 
   const load = async () => {
@@ -315,8 +368,8 @@ function CouponsTab() {
         marketingApi.getCoupons(),
         marketingApi.getCouponStats(),
       ]);
-      setList(unwrapResponse<any[]>(cRes) || []);
-      setStats(unwrapResponse<any>(sRes) || {});
+      setList(unwrapResponse<CouponRecord[]>(cRes) || []);
+      setStats(unwrapResponse<CouponStats>(sRes) || {});
     } catch {
       setList([]);
     } finally {
@@ -331,22 +384,27 @@ function CouponsTab() {
     setSaving(true);
     try {
       const values = await form.validateFields();
+      const payload: CreateCouponInput = {
+        ...values,
+        startTime: values.startTime.toISOString(),
+        endTime: values.endTime.toISOString(),
+      };
       if (editing) {
         await marketingApi.updateCoupon(
           editing.id,
-          economicFieldsLocked ? { isActive: values.isActive } : values,
+          economicFieldsLocked ? { isActive: values.isActive } : payload,
         );
       } else {
-        await marketingApi.createCoupon(values);
+        await marketingApi.createCoupon(payload);
       }
       message.success(editing ? "优惠券已更新" : "优惠券已创建");
       setModalOpen(false);
       setEditing(null);
       form.resetFields();
       load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       // P1-37：校验失败由 antd 字段提示；其余失败给反馈，避免 Modal 卡 loading
-      if (e?.errorFields) return;
+      if (hasFormErrorFields(e)) return;
       message.error(getSafeAdminErrorMessage(e, "优惠券保存失败，请检查填写内容后重试。"));
     } finally {
       setSaving(false);
@@ -440,7 +498,7 @@ function CouponsTab() {
           {
             title: "面值",
             dataIndex: "value",
-            render: (v: number, r: any) =>
+            render: (v: number, r: CouponRecord) =>
               r.type === "percent" ? `${v}%` : `¥${v}`,
           },
           {
@@ -450,11 +508,11 @@ function CouponsTab() {
           },
           {
             title: "已用/总量",
-            render: (_: any, r: any) => `${r.usedCount}/${r.totalCount}`,
+            render: (_: unknown, r: CouponRecord) => `${r.usedCount}/${r.totalCount}`,
           },
           {
             title: "有效期",
-            render: (_: any, r: any) =>
+            render: (_: unknown, r: CouponRecord) =>
               `${new Date(r.startTime).toLocaleDateString("zh-CN")} ~ ${new Date(r.endTime).toLocaleDateString("zh-CN")}`,
           },
           {
@@ -466,7 +524,7 @@ function CouponsTab() {
           },
           {
             title: "操作",
-            render: (_: any, r: any) => (
+            render: (_: unknown, r: CouponRecord) => (
               <Button
                 size="small"
                 icon={<EditOutlined />}

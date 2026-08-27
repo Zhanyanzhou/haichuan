@@ -5,6 +5,9 @@ export type MockProductFilterParams = {
   categoryIds?: string;
   materialType?: string;
   materialTypes?: string;
+  salesMode?: string;
+  minPrice?: number;
+  maxPrice?: number;
   craftTechniques?: string;
   sizes?: string;
   weightRanges?: string;
@@ -14,6 +17,8 @@ export type MockProductFilterParams = {
   isRecommended?: string;
   sortBy?: string;
   sortOrder?: string;
+  /** 公开目录专用：价格条件只能消费 DIRECT_PURCHASE 的公开成交价。 */
+  publicPriceOnly?: boolean;
 };
 
 type FilterableMockProduct = {
@@ -28,6 +33,7 @@ type FilterableMockProduct = {
   goldWeight?: number | null;
   weight?: number | null;
   price?: number | null;
+  salesMode?: string;
   status: string;
   isHot?: boolean;
   isNew?: boolean;
@@ -91,6 +97,9 @@ export function filterProducts<T extends FilterableMockProduct>(
   if (materialTypes.size) {
     result = result.filter((product) => materialTypes.has(product.materialType));
   }
+  if (params.salesMode) {
+    result = result.filter((product) => product.salesMode === params.salesMode);
+  }
   const crafts = csv(params.craftTechniques);
   if (crafts.length) {
     result = result.filter((product) => {
@@ -140,6 +149,20 @@ export function filterProducts<T extends FilterableMockProduct>(
   }
   if (params.isRecommended === "true") {
     result = result.filter((product) => product.isRecommended);
+  }
+  const usesPrice =
+    params.minPrice !== undefined ||
+    params.maxPrice !== undefined ||
+    params.sortBy === "price_asc" ||
+    params.sortBy === "price_desc";
+  if (params.publicPriceOnly && usesPrice) {
+    result = result.filter((product) => product.salesMode === "DIRECT_PURCHASE");
+  }
+  if (params.minPrice !== undefined) {
+    result = result.filter((product) => Number(product.price) >= params.minPrice!);
+  }
+  if (params.maxPrice !== undefined) {
+    result = result.filter((product) => Number(product.price) <= params.maxPrice!);
   }
   if (params.sortBy === "sortOrder") {
     result.sort((left, right) => left.id - right.id);

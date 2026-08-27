@@ -3,6 +3,7 @@
  * 点击预设一次写入一组 props 键值（patch）；不直接暴露专业参数。
  */
 import type { InspectorContext } from "../schema/types";
+import type { PuckProps } from "../../types";
 
 interface PresetFieldProps {
   label: string;
@@ -11,11 +12,11 @@ interface PresetFieldProps {
   options: ReadonlyArray<{
     label: string;
     value: string;
-    patch: Record<string, any>;
+    patch: PuckProps;
     isActive?: (ctx: InspectorContext) => boolean;
   }>;
   ctx: InspectorContext;
-  onApply: (patch: Record<string, any>, value: string) => void;
+  onApply: (patch: PuckProps, value: string) => void;
 }
 
 export default function PresetField({

@@ -27,7 +27,14 @@ import {
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
-import { orderApi, userApi, productApi, marketingApi } from "@/services/api";
+import {
+  orderApi,
+  userApi,
+  productApi,
+  marketingApi,
+  type CreateOrderInput,
+  type OrderListQuery,
+} from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { ADMIN_COPY, getAdminEmptyText } from "@/constants/adminCopy";
 import { useAuthStore } from "@/store/authStore";
@@ -40,6 +47,10 @@ import type {
   User,
   Product,
   ProductSKU,
+  DeliveryStatus,
+  OrderType,
+  PaymentStatus,
+  CustomStage,
 } from "@/types";
 
 const { RangePicker } = DatePicker;
@@ -54,7 +65,7 @@ const STATUS_META: Record<OrderStatus, { c: string; t: string }> = {
   CANCELLED: { c: "red", t: "已取消" },
 };
 
-const STATUS_TABS: Array<{ k: string; l: string }> = [
+const STATUS_TABS: Array<{ k: "all" | OrderStatus; l: string }> = [
   { k: "all", l: "全部" },
   { k: "PENDING_PAYMENT", l: "待付款" },
   { k: "PENDING_SHIP", l: "待发货" },
@@ -62,6 +73,30 @@ const STATUS_TABS: Array<{ k: string; l: string }> = [
   { k: "COMPLETED", l: "已完成" },
   { k: "CANCELLED", l: "已取消" },
 ];
+
+function isOrderStatusFilter(value: string): value is "all" | OrderStatus {
+  return value === "all" || Object.prototype.hasOwnProperty.call(STATUS_META, value);
+}
+
+type OrderOperationType =
+  | "amount"
+  | "address"
+  | "note"
+  | "consultant"
+  | "custom-stage";
+
+interface OrderOperationValues {
+  discountAmount?: number;
+  adjustmentAmount?: number;
+  finalAmount?: number;
+  depositAmount?: number;
+  balanceAmount?: number;
+  reason?: string;
+  address?: string;
+  internalNote?: string;
+  salesConsultantId?: number;
+  stage?: CustomStage;
+}
 
 // 交易事件类型中文映射（时间线展示）
 const EVENT_LABEL: Record<string, string> = {
@@ -239,7 +274,7 @@ export default function OrderManage() {
 
   // 筛选状态
   const requestedStatus = searchParams.get("status") || "all";
-  const statusFilter = STATUS_TABS.some((t) => t.k === requestedStatus)
+  const statusFilter: "all" | OrderStatus = isOrderStatusFilter(requestedStatus)
     ? requestedStatus
     : "all";
   const [keyword, setKeyword] = useState("");
@@ -253,24 +288,47 @@ export default function OrderManage() {
     max?: number;
   }>({});
   // 交易中心多维筛选
-  const [orderTypeFilter, setOrderTypeFilter] = useState<string>("all");
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all");
+  const [orderTypeFilter, setOrderTypeFilter] = useState<"all" | OrderType>("all");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<"all" | PaymentStatus>("all");
   const [deliveryStatusFilter, setDeliveryStatusFilter] =
-    useState<string>("all");
+    useState<"all" | DeliveryStatus>("all");
 
   const [detail, setDetail] = useState<OrderDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [shippingOrder, setShippingOrder] = useState<Order | null>(null);
+  const detailHasBlockingPayment =
+    detail?.payments?.some((payment) => payment.status !== "FAILED") ?? false;
+  const canEditDetailAmount = Boolean(
+    capabilities.canEditAmount &&
+      detail?.status === "PENDING_PAYMENT" &&
+      !detailHasBlockingPayment,
+  );
+  const canEditDetailAddress = Boolean(
+    capabilities.canEditAddress &&
+      detail &&
+      ["PENDING_PAYMENT", "PENDING_SHIP"].includes(detail.status),
+  );
+  const canReceiveDetail = Boolean(
+    capabilities.canReceive &&
+      detail?.status === "SHIPPED" &&
+      ["SHIPPED", "ABNORMAL"].includes(detail.deliveryStatus || "") &&
+      detail.fulfillments?.some((fulfillment) =>
+        ["SHIPPED", "ABNORMAL"].includes(fulfillment.status),
+      ),
+  );
   const [shipping, setShipping] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [opModal, setOpModal] = useState<{ type: string; open: boolean }>({
-    type: "",
+  const [opModal, setOpModal] = useState<{
+    type: OrderOperationType | null;
+    open: boolean;
+  }>({
+    type: null,
     open: false,
   });
   const [consultants, setConsultants] = useState<User[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [createSaving, setCreateSaving] = useState(false);
-  const [createForm] = Form.useForm();
+  const [createForm] = Form.useForm<Omit<CreateOrderInput, "items">>();
   const [itemRows, setItemRows] = useState<
     Array<{ key: number; productId?: number; skuId?: number; quantity: number }>
   >([{ key: 1, quantity: 1 }]);
@@ -298,7 +356,7 @@ export default function OrderManage() {
     setLoading(true);
     setLoadError(false);
     try {
-      const params: Record<string, unknown> = {
+      const params: OrderListQuery = {
         page,
         pageSize,
         status: statusFilter !== "all" ? statusFilter : undefined,
@@ -348,7 +406,7 @@ export default function OrderManage() {
     try {
       const res = await orderApi.getById(orderId);
       setDetail(unwrapResponse<OrderDetail>(res));
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "订单详情加载失败，请稍后重新加载。"));
     } finally {
       setDetailLoading(false);
@@ -371,7 +429,7 @@ export default function OrderManage() {
       setShippingOrder(null);
       void load();
       if (detail?.id === id) void openDetail(id);
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "发货登记失败，请核对物流信息后重试。"));
     } finally {
       setShipping(false);
@@ -390,7 +448,7 @@ export default function OrderManage() {
           await orderApi.updateStatus(record.id, { status: "COMPLETED" });
           message.success("订单已完成");
           void load();
-        } catch (e: any) {
+        } catch (e: unknown) {
           message.error(getSafeAdminErrorMessage(e, "订单完成状态更新失败，请重新加载后重试。"));
         }
       },
@@ -422,7 +480,7 @@ export default function OrderManage() {
           });
           message.success("订单已取消");
           void load();
-        } catch (e: any) {
+        } catch (e: unknown) {
           message.error(getSafeAdminErrorMessage(e, "订单取消失败，请重新加载后确认当前状态。"));
         }
       },
@@ -475,7 +533,7 @@ export default function OrderManage() {
       a.click();
       URL.revokeObjectURL(url);
       message.success(`已导出 ${rows.length} 条订单（与当前筛选一致）`);
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "订单导出失败，请检查筛选条件后重试。"));
     } finally {
       setExporting(false);
@@ -484,25 +542,30 @@ export default function OrderManage() {
 
   const loadConsultants = async () => {
     try {
-      const res = await userApi.getList({ pageSize: 200 });
-      const users = unwrapResponse<PaginatedResult<User>>(res)?.list || [];
+      const res = await userApi.getAssignable();
+      const users = unwrapResponse<Array<{ id: number; name: string; role: User['role'] }>>(res) || [];
       setConsultants(
         users.filter(
           (u) =>
             u.role === "SALES_CONSULTANT" ||
             u.role === "ADMIN" ||
             u.role === "SUPER_ADMIN",
-        ),
+        ).map((user) => ({
+          id: user.id,
+          username: user.name,
+          realName: user.name,
+          role: user.role,
+        } as User)),
       );
     } catch {
       setConsultants([]);
     }
   };
 
-  const openOp = (type: string) => {
+  const openOp = (type: OrderOperationType) => {
     const allowed =
-      (type === "amount" && capabilities.canEditAmount) ||
-      (type === "address" && capabilities.canEditAddress) ||
+      (type === "amount" && canEditDetailAmount) ||
+      (type === "address" && canEditDetailAddress) ||
       (type === "note" && capabilities.canEditNote) ||
       (type === "consultant" && capabilities.canEditConsultant) ||
       (type === "custom-stage" && capabilities.canAdvanceCustomStage);
@@ -512,20 +575,30 @@ export default function OrderManage() {
     setOpModal({ type, open: true });
   };
 
-  const submitOp = async (values: any) => {
+  const submitOp = async (values: OrderOperationValues) => {
     if (!detail) return;
     const allowed =
-      (opModal.type === "amount" && capabilities.canEditAmount) ||
-      (opModal.type === "address" && capabilities.canEditAddress) ||
+      (opModal.type === "amount" && canEditDetailAmount) ||
+      (opModal.type === "address" && canEditDetailAddress) ||
       (opModal.type === "note" && capabilities.canEditNote) ||
       (opModal.type === "consultant" && capabilities.canEditConsultant) ||
       (opModal.type === "custom-stage" && capabilities.canAdvanceCustomStage);
     if (!allowed) return;
     try {
-      if (opModal.type === "amount")
-        await orderApi.updateAmount(detail.id, values);
-      else if (opModal.type === "address")
+      if (opModal.type === "amount") {
+        if (!values.reason?.trim()) return;
+        await orderApi.updateAmount(detail.id, {
+          discountAmount: values.discountAmount,
+          adjustmentAmount: values.adjustmentAmount,
+          finalAmount: values.finalAmount,
+          depositAmount: values.depositAmount,
+          balanceAmount: values.balanceAmount,
+          reason: values.reason,
+        });
+      } else if (opModal.type === "address") {
+        if (!values.address?.trim()) return;
         await orderApi.updateAddress(detail.id, values.address);
+      }
       else if (opModal.type === "note")
         await orderApi.updateNote(detail.id, values.internalNote);
       else if (opModal.type === "consultant")
@@ -533,10 +606,10 @@ export default function OrderManage() {
           detail.id,
           values.salesConsultantId ?? null,
         );
-      else if (opModal.type === "custom-stage")
+      else if (opModal.type === "custom-stage" && values.stage)
         await orderApi.advanceCustomStage(detail.id, values.stage);
       message.success("订单信息已更新");
-      setOpModal({ type: "", open: false });
+      setOpModal({ type: null, open: false });
       void openDetail(detail.id);
       void load();
     } catch (e: unknown) {
@@ -545,7 +618,7 @@ export default function OrderManage() {
   };
 
   const handleReceive = () => {
-    if (!detail || !capabilities.canReceive) return;
+    if (!detail || !canReceiveDetail) return;
     modal.confirm({
       title: "确认签收？",
       content: "确认后，订单的发货状态将更新为“已签收”。",
@@ -644,11 +717,11 @@ export default function OrderManage() {
     };
   }, [createOpen, createTotalCents]);
 
-  const submitCreate = async (values: any) => {
+  const submitCreate = async (values: Omit<CreateOrderInput, "items">) => {
     if (!capabilities.canCreate) return;
-    const items = itemRows
-      .filter((r) => r.skuId)
-      .map((r) => ({ skuId: r.skuId, quantity: r.quantity }));
+    const items: CreateOrderInput["items"] = itemRows.flatMap((row) =>
+      row.skuId ? [{ skuId: row.skuId, quantity: row.quantity }] : [],
+    );
     if (items.length === 0) {
       message.error("请至少选择一个商品 SKU");
       return;
@@ -963,7 +1036,9 @@ export default function OrderManage() {
                         发货
                       </Button>
                     )}
-                    {capabilities.canComplete && r.status === "SHIPPED" && (
+                    {capabilities.canComplete &&
+                      r.status === "SHIPPED" &&
+                      r.deliveryStatus === "RECEIVED" && (
                       <Button
                         size="small"
                         type="primary"
@@ -972,9 +1047,7 @@ export default function OrderManage() {
                         完成
                       </Button>
                     )}
-                    {capabilities.canCancel &&
-                      (r.status === "PENDING_PAYMENT" ||
-                        r.status === "PENDING_SHIP") && (
+                    {capabilities.canCancel && r.status === "PENDING_PAYMENT" && (
                         <Button
                           size="small"
                           danger
@@ -1356,21 +1429,21 @@ export default function OrderManage() {
             </div>
 
             {/* 操作权限与订单状态分别判断；服务端 @Roles 仍是最终边界。 */}
-            {(capabilities.canEditAmount ||
-              capabilities.canEditAddress ||
+            {(canEditDetailAmount ||
+              canEditDetailAddress ||
               capabilities.canEditNote ||
               capabilities.canEditConsultant ||
               (capabilities.canAdvanceCustomStage && detail.orderType === "CUSTOM") ||
-              (capabilities.canReceive && detail.status === "SHIPPED")) && (
+              canReceiveDetail) && (
               <div>
                 <h3 className="font-semibold mb-2">订单操作</h3>
                 <Space wrap>
-                  {capabilities.canEditAmount && (
+                  {canEditDetailAmount && (
                     <Button size="small" onClick={() => openOp("amount")}>
                       修改金额
                     </Button>
                   )}
-                  {capabilities.canEditAddress && (
+                  {canEditDetailAddress && (
                     <Button size="small" onClick={() => openOp("address")}>
                       修改地址
                     </Button>
@@ -1390,7 +1463,7 @@ export default function OrderManage() {
                       推进定制阶段
                     </Button>
                   )}
-                  {capabilities.canReceive && detail.status === "SHIPPED" && (
+                  {canReceiveDetail && (
                     <Button size="small" type="primary" onClick={handleReceive}>
                       确认签收
                     </Button>
@@ -1518,7 +1591,7 @@ export default function OrderManage() {
                   : "推进定制阶段"
         }
         open={opModal.open}
-        onCancel={() => setOpModal({ type: "", open: false })}
+        onCancel={() => setOpModal({ type: null, open: false })}
         footer={null}
         destroyOnHidden
       >
@@ -1534,7 +1607,11 @@ export default function OrderManage() {
               <Form.Item name="finalAmount" label="应收金额">
                 <InputNumber className="w-full" min={0} />
               </Form.Item>
-              <Form.Item name="reason" label="调整原因">
+              <Form.Item
+                name="reason"
+                label="调整原因"
+                rules={[{ required: true, whitespace: true, message: "请填写调整原因" }]}
+              >
                 <Input.TextArea rows={2} />
               </Form.Item>
             </>
@@ -1580,7 +1657,7 @@ export default function OrderManage() {
             </Form.Item>
           )}
           <div className="flex justify-end gap-2">
-            <Button onClick={() => setOpModal({ type: "", open: false })}>
+            <Button onClick={() => setOpModal({ type: null, open: false })}>
               {ADMIN_COPY.actions.cancel}
             </Button>
             <Button type="primary" htmlType="submit">

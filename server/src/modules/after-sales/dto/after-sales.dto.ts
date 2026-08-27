@@ -73,11 +73,11 @@ export class UpdateAfterSalesStatusDto {
 
 /** 售后列表查询 DTO */
 export class AfterSalesQueryDto {
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
-  page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10_000)
+  page = 1;
 
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
-  pageSize?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100)
+  pageSize = 20;
 
   @IsOptional() @IsEnum(AfterSalesStatusValues)
   status?: string;
@@ -85,6 +85,6 @@ export class AfterSalesQueryDto {
   @IsOptional() @IsEnum(AfterSalesTypeValues)
   type?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional() @IsString() @MaxLength(100)
   keyword?: string;
 }

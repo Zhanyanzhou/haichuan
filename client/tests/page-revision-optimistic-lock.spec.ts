@@ -1,28 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 const useMock = process.env.VITE_USE_MOCK === "true";
 const CURRENT_UPDATED_AT = "2026-08-23T08:00:00.000Z";
 
 async function authenticateAdmin(page: Page) {
-  await page.addInitScript(() => {
-    const token = "page-revision-lock-token";
-    localStorage.setItem("token", token);
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token,
-          user: {
-            id: 1,
-            username: "page-revision-lock-admin",
-            realName: "历史恢复测试管理员",
-            role: "SUPER_ADMIN",
-          },
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "page-revision-lock-admin",
+    realName: "历史恢复测试管理员",
   });
 }
 
@@ -81,6 +66,7 @@ test.describe("页面历史版本恢复乐观锁", () => {
     await page.route("**/api/**", async (route) => {
       const request = route.request();
       const path = new URL(request.url()).pathname;
+      if (path === "/api/auth/profile") return route.fallback();
       if (
         path === "/api/page-modules/document/revisions/1/restore" &&
         request.method() === "PUT"
@@ -167,9 +153,12 @@ test.describe("页面历史版本恢复乐观锁", () => {
     });
     await expect(
       page.getByText(
-        "该页面已被其他编辑者更新，请重新加载版本记录后再恢复",
+        "数据已被其他操作更新，请重新加载后再试。",
       ),
     ).toBeVisible();
+    await expect(page.getByText(
+      "该页面已被其他编辑者更新，请重新加载版本记录后再恢复",
+    )).toHaveCount(0);
     await expect(drawer).toBeVisible();
 
     expect(consoleErrors).toEqual([

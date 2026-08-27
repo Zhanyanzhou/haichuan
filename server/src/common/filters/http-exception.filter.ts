@@ -20,7 +20,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const request = ctx.getRequest<Request>();
     const requestId = (request as Request & { id?: unknown }).id;
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
-    let message: string = '服务器内部错误';
+    let message: string | string[] = '服务器内部错误';
     let errorCode = 'INTERNAL_ERROR';
     let details: ApiErrorDetails | undefined;
 
@@ -33,10 +33,22 @@ export class HttpExceptionFilter implements ExceptionFilter {
     else if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
-      message =
-        typeof exceptionResponse === 'string'
-          ? exceptionResponse
-          : (exceptionResponse as any).message || exception.message;
+      if (typeof exceptionResponse === 'string') {
+        message = exceptionResponse;
+      } else if (
+        typeof exceptionResponse === 'object' &&
+        exceptionResponse !== null &&
+        'message' in exceptionResponse
+      ) {
+        const responseMessage = exceptionResponse.message;
+        message =
+          typeof responseMessage === 'string' ||
+          (Array.isArray(responseMessage) && responseMessage.every((item) => typeof item === 'string'))
+            ? responseMessage
+            : exception.message;
+      } else {
+        message = exception.message;
+      }
       errorCode = status === HttpStatus.BAD_REQUEST
         ? 'VALIDATION_ERROR'
         : `HTTP_${status}`;

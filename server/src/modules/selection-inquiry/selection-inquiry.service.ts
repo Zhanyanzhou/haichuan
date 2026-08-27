@@ -4,6 +4,12 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
 import { PRIVACY_CONSENT_VERSION } from "../../common/privacy/privacy-consent";
 import { CreateSelectionInquiryDto } from "./dto/create-selection-inquiry.dto";
+import type { CustomerPrincipal } from "../../common/security/authenticated-principal";
+import {
+  assertMatchingSubmission,
+  isUniqueConstraintError,
+  prepareLeadIdempotency,
+} from "../leads/lead-submission";
 
 @Injectable()
 export class SelectionInquiryService {
@@ -36,7 +42,7 @@ export class SelectionInquiryService {
     pageSize?: number;
   }) {
     const { status, keyword, page = 1, pageSize = 20 } = params;
-    const where: any = {};
+    const where: Prisma.SelectionInquiryWhereInput = {};
     if (status) where.status = status;
     if (keyword) {
       where.OR = [
@@ -66,7 +72,8 @@ export class SelectionInquiryService {
 
   async create(
     data: CreateSelectionInquiryDto & {
-      customer?: { id: number; name: string | null; phone: string; email: string | null };
+      customer?: CustomerPrincipal;
+      idempotencyKey?: string;
     },
   ) {
     // 终线守卫：controller 以外的调用也必须提交真正的 boolean true。
@@ -134,20 +141,63 @@ export class SelectionInquiryService {
     });
     const privacyConsentedAt = new Date();
     const recentSince = new Date(privacyConsentedAt.getTime() - 10 * 60 * 1000);
+    const email = data.customer?.email || data.email?.trim() || null;
+    const wechat = data.wechat?.trim() || null;
+    const message = data.message?.trim() || null;
+    const idempotency = prepareLeadIdempotency(data.idempotencyKey, {
+      sourceType: "SELECTION_INQUIRY",
+      customerId: data.customer?.id || null,
+      customerName,
+      phone,
+      email,
+      wechat,
+      message,
+      productIds: distinctIds,
+      productSkuSnapshots: createItems.map((item) => ({
+        productId: item.productId,
+        productSkuSnapshot: item.productSkuSnapshot,
+      })),
+      privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+    });
 
     // 同一手机号与同一商品集合在短时间内的重复请求复用原记录。
-    // Serializable 事务覆盖同一数据库中的并发重试；不引入 Schema 或迁移变更。
-    return this.prisma.$transaction(
+    // 显式幂等键跨接口全局唯一；旧客户端仍保留十分钟同集合兼容去重。
+    const create = async () => this.prisma.$transaction(
       async (transaction) => {
-        const recentInquiries = await transaction.selectionInquiry.findMany({
-          where: { phone, createdAt: { gte: recentSince } },
-          include: { items: true },
-          orderBy: { createdAt: "desc" },
-        });
-        const existingInquiry = recentInquiries.find((inquiry) =>
-          this.hasSameProductSet(inquiry.items, distinctIds),
-        );
-        if (existingInquiry) return existingInquiry;
+        if (idempotency.idempotencyKeyHash) {
+          const existing = await transaction.lead.findUnique({
+            where: { idempotencyKeyHash: idempotency.idempotencyKeyHash },
+            select: {
+              sourceType: true,
+              submissionFingerprint: true,
+              selectionInquiryId: true,
+            },
+          });
+          if (existing) {
+            assertMatchingSubmission(
+              existing,
+              "SELECTION_INQUIRY",
+              idempotency.submissionFingerprint,
+            );
+            if (!existing.selectionInquiryId) {
+              throw new BadRequestException("幂等提交记录不完整");
+            }
+            return transaction.selectionInquiry.findUniqueOrThrow({
+              where: { id: existing.selectionInquiryId },
+              include: { items: true },
+            });
+          }
+        } else {
+          const recentInquiries = await transaction.selectionInquiry.findMany({
+            where: { phone, createdAt: { gte: recentSince } },
+            include: { items: true },
+            orderBy: { createdAt: "desc" },
+          });
+          const existingInquiry = recentInquiries.find((inquiry) =>
+            this.hasSameProductSet(inquiry.items, distinctIds),
+          );
+          if (existingInquiry) return existingInquiry;
+        }
 
         // 写入时以服务端规范名称与受控媒体地址覆盖客户端快照；
         // productSkuSnapshot 为展示性描述文本，保留客户端值（已 trim），不作为可见性或安全依据。
@@ -156,24 +206,71 @@ export class SelectionInquiryService {
             customerName,
             phone,
             customerId: data.customer?.id || null,
-            email: data.customer?.email || data.email?.trim() || null,
-            wechat: data.wechat?.trim() || null,
-            message: data.message?.trim() || null,
+            email,
+            wechat,
+            message,
             privacyConsent: true,
             privacyConsentVersion: PRIVACY_CONSENT_VERSION,
             privacyConsentedAt,
             status: "PENDING",
             items: { create: createItems },
+            lead: {
+              create: {
+                sourceType: "SELECTION_INQUIRY",
+                customerId: data.customer?.id || null,
+                customerName,
+                phone,
+                email,
+                wechat,
+                idempotencyKeyHash: idempotency.idempotencyKeyHash,
+                submissionFingerprint: idempotency.submissionFingerprint,
+                activities: {
+                  create: {
+                    type: "CREATED",
+                    content: "选款咨询已提交",
+                    currentStatus: "PENDING",
+                    metadata: { selectedProductCount: createItems.length },
+                  },
+                },
+              },
+            },
           },
           include: { items: true },
         });
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+
+    try {
+      return await create();
+    } catch (error) {
+      if (!idempotency.idempotencyKeyHash || !isUniqueConstraintError(error)) {
+        throw error;
+      }
+      const existing = await this.prisma.lead.findUnique({
+        where: { idempotencyKeyHash: idempotency.idempotencyKeyHash },
+        select: {
+          sourceType: true,
+          submissionFingerprint: true,
+          selectionInquiryId: true,
+        },
+      });
+      if (!existing) throw error;
+      assertMatchingSubmission(
+        existing,
+        "SELECTION_INQUIRY",
+        idempotency.submissionFingerprint,
+      );
+      if (!existing.selectionInquiryId) throw error;
+      return this.prisma.selectionInquiry.findUniqueOrThrow({
+        where: { id: existing.selectionInquiryId },
+        include: { items: true },
+      });
+    }
   }
 
   async update(id: number, data: { status?: string; handlerId?: number }) {
-    const updateData: any = {};
+    const updateData: Prisma.SelectionInquiryUncheckedUpdateInput = {};
     if (data.status) updateData.status = data.status;
     if (data.handlerId !== undefined) {
       updateData.handledBy = data.handlerId;

@@ -9,7 +9,7 @@ import {
   Form,
   Input,
   Select,
-  message,
+  App as AntdApp,
   Popconfirm,
 } from "antd";
 import {
@@ -40,6 +40,7 @@ const rm: Record<string, { c: string; t: string }> = {
 };
 
 export default function UserManage() {
+  const { message } = AntdApp.useApp();
   const role = useAuthStore((state) => state.user?.role);
   const isSuperAdmin = role === "SUPER_ADMIN";
   const [users, setUsers] = useState<User[]>([]);
@@ -130,7 +131,7 @@ export default function UserManage() {
       message.success(editing ? "后台员工信息已更新" : "后台员工已创建");
       setModalOpen(false);
       void load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "后台员工信息保存失败，请检查填写内容后重试。"));
     }
   };
@@ -141,7 +142,7 @@ export default function UserManage() {
       await userApi.delete(id);
       message.success("后台员工已禁用");
       void load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "后台员工禁用失败，请重新加载后确认当前状态。"));
     }
   };
@@ -155,7 +156,7 @@ export default function UserManage() {
       setResetPwdOpen(false);
       setResetPwdUser(null);
       resetPwdForm.resetFields();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "密码重置失败，请确认权限后重试。"));
     }
   };
@@ -250,7 +251,7 @@ export default function UserManage() {
             },
             {
               title: "操作",
-              render: (_: any, r: User) => (
+              render: (_: unknown, r: User) => (
                 <Space>
                   <Button
                     size="small"
@@ -304,6 +305,7 @@ export default function UserManage() {
       )}
 
       <Modal
+        forceRender
         title={editing ? "编辑后台员工" : "新建后台员工"}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
@@ -357,7 +359,8 @@ export default function UserManage() {
               label="密码"
               rules={[
                 { required: true, message: "请输入登录密码" },
-                { min: 8, message: "密码至少 8 位" },
+                { min: 12, max: 128, message: "密码需为 12–128 位" },
+                { pattern: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{12,128}$/, message: "密码需包含大小写字母、数字和符号" },
               ]}
             >
               <Input.Password placeholder="登录密码" />
@@ -366,6 +369,7 @@ export default function UserManage() {
         </Form>
       </Modal>
       <Modal
+        forceRender
         title={`重置密码 — ${resetPwdUser?.realName || ""}`}
         open={resetPwdOpen}
         onOk={handleResetPwd}
@@ -381,7 +385,8 @@ export default function UserManage() {
             label="新密码"
             rules={[
               { required: true, message: "请输入新密码" },
-              { min: 8, message: "密码至少 8 位" },
+              { min: 12, max: 128, message: "密码需为 12–128 位" },
+              { pattern: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{12,128}$/, message: "密码需包含大小写字母、数字和符号" },
             ]}
           >
             <Input.Password placeholder="输入新密码" />

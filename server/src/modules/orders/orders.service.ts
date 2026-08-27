@@ -763,29 +763,49 @@ export class OrdersService implements OnModuleInit {
 
     // 时间范围
     if (params.startDate || params.endDate) {
+      const start = params.startDate ? new Date(params.startDate) : null;
+      const end = params.endDate ? new Date(params.endDate) : null;
+      if (
+        (start && Number.isNaN(start.getTime())) ||
+        (end && Number.isNaN(end.getTime()))
+      ) {
+        throw new BadRequestException("订单时间范围无效");
+      }
+      if (start && end && start.getTime() > end.getTime()) {
+        throw new BadRequestException("订单开始时间不能晚于结束时间");
+      }
       where.createdAt = {};
-      if (params.startDate) where.createdAt.gte = new Date(params.startDate);
-      if (params.endDate) {
+      if (start) where.createdAt.gte = start;
+      if (end) {
         // endDate 含当天：加一天作为上界，实现闭区间
-        const end = new Date(params.endDate);
-        end.setDate(end.getDate() + 1);
-        where.createdAt.lt = end;
+        const exclusiveEnd = new Date(end);
+        exclusiveEnd.setDate(exclusiveEnd.getDate() + 1);
+        where.createdAt.lt = exclusiveEnd;
       }
     }
 
     // 金额范围（按 finalAmount）
     if (params.minAmount !== undefined || params.maxAmount !== undefined) {
+      const min =
+        params.minAmount !== undefined && params.minAmount !== ""
+          ? Number(params.minAmount)
+          : null;
+      const max =
+        params.maxAmount !== undefined && params.maxAmount !== ""
+          ? Number(params.maxAmount)
+          : null;
+      if (
+        (min !== null && (!Number.isFinite(min) || min < 0)) ||
+        (max !== null && (!Number.isFinite(max) || max < 0))
+      ) {
+        throw new BadRequestException("订单金额范围无效");
+      }
+      if (min !== null && max !== null && min > max) {
+        throw new BadRequestException("订单最小金额不能大于最大金额");
+      }
       where.finalAmount = {};
-      if (params.minAmount !== undefined && params.minAmount !== "") {
-        where.finalAmount.gte = new Prisma.Decimal(
-          params.minAmount as number | string,
-        );
-      }
-      if (params.maxAmount !== undefined && params.maxAmount !== "") {
-        where.finalAmount.lte = new Prisma.Decimal(
-          params.maxAmount as number | string,
-        );
-      }
+      if (min !== null) where.finalAmount.gte = new Prisma.Decimal(min);
+      if (max !== null) where.finalAmount.lte = new Prisma.Decimal(max);
     }
 
     // 商品名/货号筛选：通过 items 关联
@@ -865,22 +885,56 @@ export class OrdersService implements OnModuleInit {
     return { list, total, page, pageSize };
   }
 
-  /** 订单导出：返回与当前筛选条件一致的记录（权限由 Controller 控制，导出动作记审计事件） */
-  async findAllForExport(params: OrderListParams, limit = 1000) {
+  /** 订单导出：数据读取与操作日志同成同败，避免客户信息被无痕导出。 */
+  async findAllForExport(
+    params: OrderListParams,
+    operator: OperatorContext,
+    limit = 1000,
+  ) {
+    const operatorId = operator.id;
+    if (!operatorId) {
+      throw new BadRequestException("订单导出缺少可审计的操作人");
+    }
     const where = this.buildListWhere(params);
-    return this.prisma.order.findMany({
-      where,
-      take: Math.min(Math.max(limit, 1), 1000),
-      select: {
-        orderNo: true,
-        customerName: true,
-        customerPhone: true,
-        finalAmount: true,
-        status: true,
-        createdAt: true,
-        paymentConfirmedAt: true,
-      },
-      orderBy: { createdAt: "desc" },
+    const boundedLimit = Math.min(Math.max(limit, 1), 1000);
+    return this.prisma.$transaction(async (tx) => {
+      const rows = await tx.order.findMany({
+        where,
+        take: boundedLimit,
+        select: {
+          orderNo: true,
+          customerName: true,
+          customerPhone: true,
+          finalAmount: true,
+          status: true,
+          createdAt: true,
+          paymentConfirmedAt: true,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      await tx.operationLog.create({
+        data: {
+          userId: operatorId,
+          action: "export",
+          module: "orders",
+          detail: JSON.stringify({
+            exportedCount: rows.length,
+            limit: boundedLimit,
+            filters: {
+              status: params.status ?? null,
+              orderType: params.orderType ?? null,
+              deliveryStatus: params.deliveryStatus ?? null,
+              paymentStatus: params.paymentStatus ?? null,
+              startDate: params.startDate ?? null,
+              endDate: params.endDate ?? null,
+              hasKeyword: Boolean(params.keyword || params.productKeyword),
+              salesConsultantId: params.salesConsultantId ?? null,
+              source: params.source ?? null,
+            },
+          }),
+        },
+      });
+      return rows;
     });
   }
 
@@ -2148,30 +2202,47 @@ export class OrdersService implements OnModuleInit {
       return cancelled;
     }
 
-    const order = await this.prisma.order.findUnique({ where: { id } });
-    if (!order) throw new NotFoundException("订单不存在");
-    const currentStatus = order.status as OrderStatus;
-
-    // 状态机校验：检查是否是合法的状态转换
-    const allowedNext = VALID_TRANSITIONS[currentStatus];
-    if (!allowedNext || !allowedNext.includes(newStatus)) {
-      throw new BadRequestException(
-        `订单状态不能从 ${currentStatus} 变更为 ${newStatus}。允许的变更为: ${allowedNext?.join(", ") || "无"}`,
-      );
-    }
-
-    const updateData: Prisma.OrderUpdateInput = { status: newStatus };
-    if (data.internalNote) updateData.internalNote = data.internalNote;
-
-    this.logger.log(`订单 #${id} 状态变更: ${currentStatus} → ${newStatus}`);
-
-    if (newStatus === "COMPLETED") {
-      updateData.completedAt = new Date();
-      const updated = await this.prisma.order.update({
-        where: { id },
-        data: updateData,
+    const completed = await this.prisma.$transaction(async (tx) => {
+      await this.lockOrderForTrade(tx, id);
+      const order = await tx.order.findUnique({ where: { id } });
+      if (!order) throw new NotFoundException("订单不存在");
+      const currentStatus = order.status as OrderStatus;
+      const allowedNext = VALID_TRANSITIONS[currentStatus];
+      if (!allowedNext || !allowedNext.includes(newStatus)) {
+        throw new BadRequestException(
+          `订单状态不能从 ${currentStatus} 变更为 ${newStatus}。允许的变更为: ${allowedNext?.join(", ") || "无"}`,
+        );
+      }
+      if (newStatus !== "COMPLETED") {
+        throw new BadRequestException("该订单状态必须通过对应的付款、发货或取消流程推进");
+      }
+      if (order.deliveryStatus !== "RECEIVED" || !order.receivedAt) {
+        throw new BadRequestException("订单尚未确认签收，不能完成");
+      }
+      const fulfillments = await tx.fulfillment.findMany({
+        where: { orderId: id },
+        select: { id: true, status: true },
       });
-      await this.tradeEvents.record(this.prisma, {
+      if (
+        fulfillments.length === 0 ||
+        fulfillments.some((fulfillment) => fulfillment.status !== "DELIVERED")
+      ) {
+        throw new ConflictException("订单履约事实尚未全部送达，不能完成");
+      }
+
+      const now = new Date();
+      const updated = await tx.order.updateMany({
+        where: { id, status: currentStatus, deliveryStatus: "RECEIVED" },
+        data: {
+          status: newStatus,
+          completedAt: now,
+          internalNote: data.internalNote?.trim() || undefined,
+        },
+      });
+      if (updated.count === 0) {
+        throw new ConflictException("订单状态已变化，请刷新后重试");
+      }
+      await this.tradeEvents.record(tx, {
         orderId: id,
         entityType: TRADE_ENTITY_TYPE.ORDER,
         entityId: id,
@@ -2180,10 +2251,12 @@ export class OrdersService implements OnModuleInit {
         toStatus: newStatus,
         operator,
       });
-      this.notifyCustomerOrderStatus(updated, "已完成");
-      return updated;
-    }
-    return this.prisma.order.update({ where: { id }, data: updateData });
+      return tx.order.findUnique({ where: { id } });
+    });
+    if (!completed) throw new NotFoundException("订单不存在");
+    this.logger.log(`订单 #${id} 状态变更为 ${newStatus}`);
+    this.notifyCustomerOrderStatus(completed, "已完成");
+    return completed;
   }
 
   @Cron(CronExpression.EVERY_10_MINUTES)
@@ -2226,7 +2299,7 @@ export class OrdersService implements OnModuleInit {
 
   /**
    * 修改订单金额（优惠 / 订单调整 / 应收 / 定金 / 尾款）。
-   * 已完成或已取消的订单不可修改。
+   * 仅允许尚未产生待处理或已确认付款事实的待付款订单修改。
    */
   async updateAmount(
     id: number,
@@ -2241,57 +2314,141 @@ export class OrdersService implements OnModuleInit {
     operator?: OperatorContext,
   ) {
     const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN };
-    const order = await this.prisma.order.findUnique({ where: { id } });
-    if (!order) throw new NotFoundException("订单不存在");
-    if (order.status === "COMPLETED" || order.status === "CANCELLED") {
-      throw new BadRequestException("已完成或已取消的订单不能修改金额");
-    }
-
-    const updateData: Prisma.OrderUpdateInput = {};
-    const before: Record<string, string> = {};
-    const after: Record<string, string> = {};
-    const fields: Array<{
-      key: string;
-      src: keyof typeof data;
-      label: string;
-    }> = [
-      { key: "discountAmount", src: "discountAmount", label: "优惠金额" },
-      { key: "adjustmentAmount", src: "adjustmentAmount", label: "订单调整" },
-      { key: "finalAmount", src: "finalAmount", label: "应收金额" },
-      { key: "depositAmount", src: "depositAmount", label: "应付定金" },
-      { key: "balanceAmount", src: "balanceAmount", label: "应付尾款" },
-    ];
-    for (const f of fields) {
-      const v = data[f.src];
-      if (v === undefined || v === null || v === "") continue;
-      const cents = Math.round(Number(v) * 100);
-      if (!Number.isFinite(cents))
-        throw new BadRequestException(`${f.label} 必须为有效数字`);
-      const decimal = new Prisma.Decimal(cents).div(100);
-      before[f.label] = String(
-        (order as unknown as Record<string, unknown>)[f.key] ?? "",
-      );
-      after[f.label] = decimal.toString();
-      (updateData as Record<string, unknown>)[f.key] = decimal;
-    }
-    if (Object.keys(updateData).length === 0) {
+    const reason = data.reason?.trim();
+    if (!reason) throw new BadRequestException("修改订单金额必须填写调整原因");
+    const hasAmountInput = [
+      data.discountAmount,
+      data.adjustmentAmount,
+      data.finalAmount,
+      data.depositAmount,
+      data.balanceAmount,
+    ].some((value) => value !== undefined && value !== null && value !== "");
+    if (!hasAmountInput) {
       throw new BadRequestException("未提供需要修改的金额字段");
     }
 
-    const updated = await this.prisma.order.update({
-      where: { id },
-      data: updateData,
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockOrderForTrade(tx, id);
+      const order = await tx.order.findUnique({ where: { id } });
+      if (!order) throw new NotFoundException("订单不存在");
+      if (order.status !== "PENDING_PAYMENT") {
+        throw new BadRequestException("只有待付款订单可以修改金额");
+      }
+      const blockingPayment = await tx.payment.findFirst({
+        where: { orderId: id, status: { not: "FAILED" } },
+        select: { paymentNo: true, status: true },
+      });
+      if (blockingPayment) {
+        throw new ConflictException(
+          `订单已有${blockingPayment.status === "PENDING" ? "待处理" : "已确认"}付款 ${blockingPayment.paymentNo}，请先完成支付对账，不能直接改写应收金额`,
+        );
+      }
+
+      const totalCents = this.moneyToCents(order.totalAmount, "订单商品总额");
+      const currentDiscountCents = this.moneyToCents(order.discountAmount, "优惠金额");
+      const currentAdjustmentCents = this.moneyToCents(order.adjustmentAmount, "订单调整");
+      const discountCents =
+        data.discountAmount === undefined
+          ? currentDiscountCents
+          : this.moneyToCents(data.discountAmount, "优惠金额");
+      if (discountCents < 0 || discountCents > totalCents) {
+        throw new BadRequestException("优惠金额必须在 0 与商品总额之间");
+      }
+
+      const explicitFinalCents =
+        data.finalAmount === undefined
+          ? null
+          : this.moneyToCents(data.finalAmount, "应收金额");
+      let adjustmentCents =
+        data.adjustmentAmount === undefined
+          ? currentAdjustmentCents
+          : this.moneyToCents(data.adjustmentAmount, "订单调整");
+      if (explicitFinalCents !== null && data.adjustmentAmount === undefined) {
+        adjustmentCents = explicitFinalCents - totalCents + discountCents;
+      }
+      const calculatedFinalCents = totalCents - discountCents + adjustmentCents;
+      if (
+        explicitFinalCents !== null &&
+        explicitFinalCents !== calculatedFinalCents
+      ) {
+        throw new BadRequestException(
+          "应收金额必须等于商品总额减优惠金额再加订单调整",
+        );
+      }
+      const finalCents = explicitFinalCents ?? calculatedFinalCents;
+      if (finalCents <= 0) {
+        throw new BadRequestException("订单应收金额必须大于 0");
+      }
+
+      const hasInstallmentFacts =
+        Number(order.depositAmount) > 0 ||
+        Number(order.balanceAmount) > 0 ||
+        data.depositAmount !== undefined ||
+        data.balanceAmount !== undefined;
+      let depositCents = this.moneyToCents(order.depositAmount, "应付定金");
+      let balanceCents = this.moneyToCents(order.balanceAmount, "应付尾款");
+      if (hasInstallmentFacts) {
+        if (data.depositAmount !== undefined) {
+          depositCents = this.moneyToCents(data.depositAmount, "应付定金");
+        }
+        if (data.balanceAmount !== undefined) {
+          balanceCents = this.moneyToCents(data.balanceAmount, "应付尾款");
+        } else {
+          balanceCents = finalCents - depositCents;
+        }
+        if (depositCents < 0 || balanceCents < 0 || depositCents + balanceCents !== finalCents) {
+          throw new BadRequestException("应付定金与应付尾款之和必须等于订单应收金额");
+        }
+      }
+
+      const toDecimal = (cents: number) => new Prisma.Decimal(cents).div(100);
+      const updateData: Prisma.OrderUpdateInput = {
+        discountAmount: toDecimal(discountCents),
+        adjustmentAmount: toDecimal(adjustmentCents),
+        finalAmount: toDecimal(finalCents),
+        ...(hasInstallmentFacts
+          ? {
+              depositAmount: toDecimal(depositCents),
+              balanceAmount: toDecimal(balanceCents),
+            }
+          : {}),
+      };
+      const before = {
+        discountAmount: order.discountAmount.toString(),
+        adjustmentAmount: order.adjustmentAmount.toString(),
+        finalAmount: order.finalAmount.toString(),
+        depositAmount: order.depositAmount.toString(),
+        balanceAmount: order.balanceAmount.toString(),
+      };
+      const after = {
+        discountAmount: toDecimal(discountCents).toString(),
+        adjustmentAmount: toDecimal(adjustmentCents).toString(),
+        finalAmount: toDecimal(finalCents).toString(),
+        depositAmount: hasInstallmentFacts
+          ? toDecimal(depositCents).toString()
+          : order.depositAmount.toString(),
+        balanceAmount: hasInstallmentFacts
+          ? toDecimal(balanceCents).toString()
+          : order.balanceAmount.toString(),
+      };
+      const updated = await tx.order.updateMany({
+        where: { id, status: "PENDING_PAYMENT", updatedAt: order.updatedAt },
+        data: updateData,
+      });
+      if (updated.count === 0) {
+        throw new ConflictException("订单金额已被其他操作修改，请刷新后重试");
+      }
+      await this.tradeEvents.record(tx, {
+        orderId: id,
+        entityType: TRADE_ENTITY_TYPE.ORDER,
+        entityId: id,
+        eventType: TRADE_EVENT_TYPE.ORDER_AMOUNT_EDITED,
+        operator: actor,
+        reason,
+        metadata: { before, after },
+      });
+      return tx.order.findUnique({ where: { id } });
     });
-    await this.tradeEvents.record(this.prisma, {
-      orderId: id,
-      entityType: TRADE_ENTITY_TYPE.ORDER,
-      entityId: id,
-      eventType: TRADE_EVENT_TYPE.ORDER_AMOUNT_EDITED,
-      operator: actor,
-      reason: data.reason?.trim() || null,
-      metadata: { before, after },
-    });
-    return updated;
   }
 
   /** 修改收货地址（已发货/已完成不可改） */
@@ -2300,25 +2457,30 @@ export class OrdersService implements OnModuleInit {
     const trimmed = address?.trim();
     if (!trimmed || trimmed.length > 500)
       throw new BadRequestException("请提供有效的收货地址");
-    const order = await this.prisma.order.findUnique({ where: { id } });
-    if (!order) throw new NotFoundException("订单不存在");
-    if (order.status === "SHIPPED" || order.status === "COMPLETED") {
-      throw new BadRequestException("已发货订单不能修改地址");
-    }
-    const before = order.address;
-    const updated = await this.prisma.order.update({
-      where: { id },
-      data: { address: trimmed },
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockOrderForTrade(tx, id);
+      const order = await tx.order.findUnique({ where: { id } });
+      if (!order) throw new NotFoundException("订单不存在");
+      if (!["PENDING_PAYMENT", "PENDING_SHIP"].includes(order.status)) {
+        throw new BadRequestException("已发货、已完成或已取消订单不能修改地址");
+      }
+      const updated = await tx.order.updateMany({
+        where: { id, status: order.status },
+        data: { address: trimmed },
+      });
+      if (updated.count === 0) {
+        throw new ConflictException("订单状态已变化，请刷新后重试");
+      }
+      await this.tradeEvents.record(tx, {
+        orderId: id,
+        entityType: TRADE_ENTITY_TYPE.ORDER,
+        entityId: id,
+        eventType: TRADE_EVENT_TYPE.ORDER_ADDRESS_EDITED,
+        operator: actor,
+        metadata: { before: order.address, after: trimmed },
+      });
+      return tx.order.findUnique({ where: { id } });
     });
-    await this.tradeEvents.record(this.prisma, {
-      orderId: id,
-      entityType: TRADE_ENTITY_TYPE.ORDER,
-      entityId: id,
-      eventType: TRADE_EVENT_TYPE.ORDER_ADDRESS_EDITED,
-      operator: actor,
-      metadata: { before, after: trimmed },
-    });
-    return updated;
   }
 
   /** 修改内部备注（后台备注，不展示给客户） */
@@ -2328,47 +2490,104 @@ export class OrdersService implements OnModuleInit {
     operator?: OperatorContext,
   ) {
     const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN };
-    const order = await this.prisma.order.findUnique({ where: { id } });
-    if (!order) throw new NotFoundException("订单不存在");
-    const before = order.internalNote;
-    const updated = await this.prisma.order.update({
-      where: { id },
-      data: { internalNote: internalNote?.trim() || null },
+    const normalizedNote = internalNote?.trim() || null;
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockOrderForTrade(tx, id);
+      const order = await tx.order.findUnique({ where: { id } });
+      if (!order) throw new NotFoundException("订单不存在");
+      await tx.order.update({
+        where: { id },
+        data: { internalNote: normalizedNote },
+      });
+      await this.tradeEvents.record(tx, {
+        orderId: id,
+        entityType: TRADE_ENTITY_TYPE.ORDER,
+        entityId: id,
+        eventType: TRADE_EVENT_TYPE.ORDER_NOTE_EDITED,
+        operator: actor,
+        metadata: { before: order.internalNote, after: normalizedNote },
+      });
+      return tx.order.findUnique({ where: { id } });
     });
-    await this.tradeEvents.record(this.prisma, {
-      orderId: id,
-      entityType: TRADE_ENTITY_TYPE.ORDER,
-      entityId: id,
-      eventType: TRADE_EVENT_TYPE.ORDER_NOTE_EDITED,
-      operator: actor,
-      metadata: { before, after: internalNote?.trim() || null },
-    });
-    return updated;
   }
 
-  /** 确认签收（发货维度 SHIPPED→RECEIVED） */
+  /** 确认签收：同步 Order.deliveryStatus 与对应 Fulfillment.status。 */
   async confirmReceive(id: number, operator?: OperatorContext) {
     const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN };
-    const order = await this.prisma.order.findUnique({ where: { id } });
-    if (!order) throw new NotFoundException("订单不存在");
-    if (order.deliveryStatus !== "SHIPPED") {
-      throw new BadRequestException("只有已发货的订单可以确认签收");
-    }
-    const now = new Date();
-    const updated = await this.prisma.order.update({
-      where: { id },
-      data: { deliveryStatus: "RECEIVED", receivedAt: now },
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockOrderForTrade(tx, id);
+      const order = await tx.order.findUnique({ where: { id } });
+      if (!order) throw new NotFoundException("订单不存在");
+      if (order.status !== "SHIPPED") {
+        throw new BadRequestException("只有已发货订单可以确认签收");
+      }
+      const fulfillment = await tx.fulfillment.findFirst({
+        where: { orderId: id },
+        orderBy: { id: "asc" },
+      });
+      if (!fulfillment) {
+        throw new ConflictException("订单缺少履约单，不能确认签收");
+      }
+
+      if (
+        order.deliveryStatus === "RECEIVED" &&
+        fulfillment.status === "DELIVERED"
+      ) {
+        return order;
+      }
+      if (
+        !["SHIPPED", "ABNORMAL"].includes(order.deliveryStatus) ||
+        !["SHIPPED", "ABNORMAL"].includes(fulfillment.status)
+      ) {
+        throw new BadRequestException("当前订单或履约状态不能确认签收");
+      }
+
+      const now = new Date();
+      const fulfillmentUpdated = await tx.fulfillment.updateMany({
+        where: {
+          id: fulfillment.id,
+          status: { in: ["SHIPPED", "ABNORMAL"] },
+        },
+        data: {
+          status: "DELIVERED",
+          deliveredAt: now,
+          abnormalReason: null,
+        },
+      });
+      if (fulfillmentUpdated.count === 0) {
+        throw new ConflictException("履约状态已变化，请刷新后重试");
+      }
+      const orderUpdated = await tx.order.updateMany({
+        where: {
+          id,
+          status: "SHIPPED",
+          deliveryStatus: { in: ["SHIPPED", "ABNORMAL"] },
+        },
+        data: { deliveryStatus: "RECEIVED", receivedAt: now },
+      });
+      if (orderUpdated.count === 0) {
+        throw new ConflictException("订单状态已变化，请刷新后重试");
+      }
+      await this.tradeEvents.record(tx, {
+        orderId: id,
+        entityType: TRADE_ENTITY_TYPE.FULFILLMENT,
+        entityId: fulfillment.id,
+        eventType: TRADE_EVENT_TYPE.FULFMENT_DELIVERED,
+        fromStatus: fulfillment.status,
+        toStatus: "DELIVERED",
+        operator: actor,
+      });
+      await this.tradeEvents.record(tx, {
+        orderId: id,
+        entityType: TRADE_ENTITY_TYPE.ORDER,
+        entityId: id,
+        eventType: TRADE_EVENT_TYPE.ORDER_RECEIVED,
+        fromStatus: order.deliveryStatus,
+        toStatus: "RECEIVED",
+        operator: actor,
+      });
+      return tx.order.findUnique({ where: { id } });
     });
-    await this.tradeEvents.record(this.prisma, {
-      orderId: id,
-      entityType: TRADE_ENTITY_TYPE.ORDER,
-      entityId: id,
-      eventType: TRADE_EVENT_TYPE.ORDER_RECEIVED,
-      fromStatus: "SHIPPED",
-      toStatus: "RECEIVED",
-      operator: actor,
-    });
-    return updated;
   }
 
   /** 修改销售顾问 */
@@ -2378,22 +2597,24 @@ export class OrdersService implements OnModuleInit {
     operator?: OperatorContext,
   ) {
     const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN };
-    const order = await this.prisma.order.findUnique({ where: { id } });
-    if (!order) throw new NotFoundException("订单不存在");
-    const before = order.salesConsultantId;
-    const updated = await this.prisma.order.update({
-      where: { id },
-      data: { salesConsultantId: salesConsultantId ?? null },
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockOrderForTrade(tx, id);
+      const order = await tx.order.findUnique({ where: { id } });
+      if (!order) throw new NotFoundException("订单不存在");
+      await tx.order.update({
+        where: { id },
+        data: { salesConsultantId: salesConsultantId ?? null },
+      });
+      await this.tradeEvents.record(tx, {
+        orderId: id,
+        entityType: TRADE_ENTITY_TYPE.ORDER,
+        entityId: id,
+        eventType: TRADE_EVENT_TYPE.ORDER_CONSULTANT_CHANGED,
+        operator: actor,
+        metadata: { before: order.salesConsultantId, after: salesConsultantId },
+      });
+      return tx.order.findUnique({ where: { id } });
     });
-    await this.tradeEvents.record(this.prisma, {
-      orderId: id,
-      entityType: TRADE_ENTITY_TYPE.ORDER,
-      entityId: id,
-      eventType: TRADE_EVENT_TYPE.ORDER_CONSULTANT_CHANGED,
-      operator: actor,
-      metadata: { before, after: salesConsultantId },
-    });
-    return updated;
   }
 
   /**
@@ -2406,26 +2627,28 @@ export class OrdersService implements OnModuleInit {
     operator?: OperatorContext,
   ) {
     const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN };
-    const order = await this.prisma.order.findUnique({ where: { id } });
-    if (!order) throw new NotFoundException("订单不存在");
-    if (order.orderType !== "CUSTOM") {
-      throw new BadRequestException("只有定制订单可以推进定制阶段");
-    }
-    const before = order.customStage;
-    const updated = await this.prisma.order.update({
-      where: { id },
-      data: { customStage: stage },
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockOrderForTrade(tx, id);
+      const order = await tx.order.findUnique({ where: { id } });
+      if (!order) throw new NotFoundException("订单不存在");
+      if (order.orderType !== "CUSTOM") {
+        throw new BadRequestException("只有定制订单可以推进定制阶段");
+      }
+      await tx.order.update({
+        where: { id },
+        data: { customStage: stage },
+      });
+      await this.tradeEvents.record(tx, {
+        orderId: id,
+        entityType: TRADE_ENTITY_TYPE.ORDER,
+        entityId: id,
+        eventType: TRADE_EVENT_TYPE.ORDER_CUSTOM_STAGE_CHANGED,
+        fromStatus: order.customStage ?? null,
+        toStatus: stage,
+        operator: actor,
+      });
+      return tx.order.findUnique({ where: { id } });
     });
-    await this.tradeEvents.record(this.prisma, {
-      orderId: id,
-      entityType: TRADE_ENTITY_TYPE.ORDER,
-      entityId: id,
-      eventType: TRADE_EVENT_TYPE.ORDER_CUSTOM_STAGE_CHANGED,
-      fromStatus: before ?? null,
-      toStatus: stage,
-      operator: actor,
-    });
-    return updated;
   }
 
   // ════════ 第五阶段：异常订单聚合 + 交易数据统计（只读） ════════

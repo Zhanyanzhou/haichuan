@@ -76,7 +76,7 @@ function CategoryCardsPreview({
     ...props,
     categories: slugs.length ? resolved : props.categories,
   });
-  return module ? <CategoryCardsBlock module={module as any} editMode /> : null;
+  return module ? <CategoryCardsBlock module={module} editMode /> : null;
 }
 
 export function renderCategoryCardsPuck(
@@ -101,7 +101,7 @@ export const categoryCardsPuckConfig = {
     bgColor: "#FFFFFF",
     locked: false,
   } satisfies CategoryCardsPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: CategoryCardsPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

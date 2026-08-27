@@ -14,14 +14,14 @@ export interface StoreInfoPuckProps {
 
 export const storeInfoPuckConfig = {
   render: (props: StoreInfoPuckProps) => (
-    <StoreInfoBlock module={convertPuckProps("门店信息", props as any) as any} editMode />
+    <StoreInfoBlock module={convertPuckProps("门店信息", props)!} editMode />
   ),
   defaultProps: {
     image: "",
     bgColor: "#FFFFFF",
     locked: false,
   } satisfies StoreInfoPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: StoreInfoPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

@@ -5,6 +5,8 @@ import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { BoundedListQueryDto } from '../../common/dto/bounded-list-query.dto';
+import type { StaffRequest } from '../../common/security/authenticated-principal';
 
 @ApiTags('用户管理')
 @ApiBearerAuth()
@@ -16,7 +18,7 @@ export class UsersController {
   @Get()
   @Roles('SUPER_ADMIN', 'ADMIN')
   @ApiOperation({ summary: '获取用户列表' })
-  findAll(@Query() query: any) {
+  findAll(@Query() query: BoundedListQueryDto) {
     return this.usersService.findAll(query);
   }
 
@@ -43,14 +45,14 @@ export class UsersController {
 
   @Put(':id')
   @Roles('SUPER_ADMIN', 'ADMIN')
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto, @Request() req: any) {
+  update(@Param('id') id: string, @Body() dto: UpdateUserDto, @Request() req: StaffRequest) {
     return this.usersService.update(+id, dto, req.user);
   }
 
   @Delete(':id')
   @Roles('SUPER_ADMIN')
   @ApiOperation({ summary: '禁用员工账号（兼容原 DELETE 路由）' })
-  delete(@Param('id') id: string, @Request() req: any) {
+  delete(@Param('id') id: string, @Request() req: StaffRequest) {
     return this.usersService.delete(+id, req.user);
   }
 }

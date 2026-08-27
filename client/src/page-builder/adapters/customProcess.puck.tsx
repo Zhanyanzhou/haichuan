@@ -23,7 +23,7 @@ export interface CustomProcessPuckProps {
 
 export const customProcessPuckConfig = {
   render: (props: CustomProcessPuckProps) => (
-    <CustomProcessBlock module={convertPuckProps("定制流程", props as any) as any} editMode />
+    <CustomProcessBlock module={convertPuckProps("定制流程", props)!} editMode />
   ),
   defaultProps: {
     title: "定制旅程",
@@ -38,7 +38,7 @@ export const customProcessPuckConfig = {
     bgColor: "#FFFFFF",
     locked: false,
   } satisfies CustomProcessPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: CustomProcessPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

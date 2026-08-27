@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" role="img" aria-labelledby="title description">
+  <title id="title">商品图片待补充</title>
+  <desc id="description">中性图片占位符，不代表实际商品外观</desc>
+  <rect width="800" height="1000" fill="#F4F5F5"/>
+  <rect x="198" y="282" width="404" height="326" rx="8" fill="none" stroke="#A7ACAE" stroke-width="8"/>
+  <circle cx="310" cy="390" r="38" fill="none" stroke="#A7ACAE" stroke-width="8"/>
+  <path d="M224 564 348 450l82 76 62-58 84 96" fill="none" stroke="#A7ACAE" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M292 684h216" fill="none" stroke="#7B8285" stroke-width="8" stroke-linecap="round"/>
+  <path d="M340 724h120" fill="none" stroke="#B8BCBE" stroke-width="6" stroke-linecap="round"/>
+</svg>

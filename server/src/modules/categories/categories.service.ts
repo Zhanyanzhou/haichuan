@@ -1,6 +1,18 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import type { Category } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
+
+type ManageCategoryNode = Category & {
+  products: Array<{ id: number }>;
+  children?: ManageCategoryNode[];
+  _count?: { children: number; products: number };
+};
+
+type AnnotatedManageCategoryNode = Omit<ManageCategoryNode, 'products' | 'children'> & {
+  children: AnnotatedManageCategoryNode[];
+  hasPublicProduct: boolean;
+};
 
 @Injectable()
 export class CategoriesService {
@@ -122,11 +134,11 @@ export class CategoriesService {
         },
       },
     });
-    const annotate = (node: any): any => {
+    const annotate = (node: ManageCategoryNode): AnnotatedManageCategoryNode => {
       const children = (node.children ?? []).map(annotate);
       const hasPublicProduct =
         (node.products?.length ?? 0) > 0 ||
-        children.some((child: any) => child.hasPublicProduct);
+        children.some((child) => child.hasPublicProduct);
       const { products: _products, ...rest } = node;
       return { ...rest, children, hasPublicProduct };
     };

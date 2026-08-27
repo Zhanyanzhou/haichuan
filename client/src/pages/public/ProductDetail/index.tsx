@@ -30,7 +30,7 @@ import {
   trackAddToCart,
   trackAddToSelection,
   trackPageView,
-  trackProductView,
+  trackViewItem,
   trackRemoveFromSelection,
 } from "@/hooks/useAnalytics";
 import {
@@ -40,20 +40,34 @@ import {
 import { useReconnectingEventSource } from "@/hooks/useReconnectingEventSource";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { useSelectionStore } from "@/store/selectionStore";
+import { useCustomerAuthStore } from "@/store/customerAuthStore";
 import {
   publicProductInquiryPath,
   publicProductPath,
 } from "@/utils/publicProductPath";
+import { buildPublicUrl, normalizePublicSiteOrigin } from "@/utils/publicSiteUrl";
+import { useStructuredData } from "@/hooks/useStructuredData";
+import { getRequestErrorMessage } from "@/services/httpClient";
+
+const productSchemaOrigin = normalizePublicSiteOrigin(
+  import.meta.env.VITE_PUBLIC_SITE_ORIGIN,
+  { allowHttp: import.meta.env.DEV },
+);
 
 /** 相似作品推荐（同分类/材质+热度加权；recommendations 模块首次接线启用） */
+type SimilarProduct = Pick<
+  Product,
+  "id" | "code" | "name" | "price" | "images" | "primaryImage" | "listingImage"
+>;
+
 function SimilarProducts({ productId }: { productId: number }) {
-  const [list, setList] = useState<Array<{ id: number; code?: string | null; name: string; price?: number | string | null }>>([]);
+  const [list, setList] = useState<SimilarProduct[]>([]);
 
   useEffect(() => {
     recommendationApi
       .getSimilar(productId, 8)
       .then((res: unknown) => {
-        setList(unwrapResponse<any[]>(res) || []);
+        setList(unwrapResponse<SimilarProduct[]>(res) || []);
       })
       .catch(() => setList([]));
   }, [productId]);
@@ -69,7 +83,7 @@ function SimilarProducts({ productId }: { productId: number }) {
           <Link key={item.id} to={publicProductPath(item)} className="group">
             <div className="aspect-square bg-brand-bg overflow-hidden">
               <SecureImage
-                src={getListingImage(item as any)}
+                src={getListingImage(item)}
                 alt={item.name}
                 className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
               />
@@ -276,9 +290,7 @@ export default function ProductDetail() {
     useCommerceCapabilities();
   const commerceEnabled = commerceFlags?.commerceEnabled ?? false;
   const cartEnabled = commerceFlags?.cartEnabled ?? false;
-  const isSignedIn = Boolean(
-    typeof window !== "undefined" && localStorage.getItem("customerToken"),
-  );
+  const isSignedIn = useCustomerAuthStore((state) => state.isLoggedIn);
   // 心愿单仅对登录客户启用；游客仍可浏览公开安全字段。
   const [favorited, setFavorited] = useState(false);
   const [favBusy, setFavBusy] = useState(false);
@@ -311,9 +323,9 @@ export default function ProductDetail() {
       const result = unwrapResponse<{ favorited: boolean }>(res);
       setFavorited(Boolean(result?.favorited));
       message.success(result?.favorited ? "已加入心愿单" : "已移出心愿单");
-    } catch (e: any) {
+    } catch (error: unknown) {
       setFavorited(!next);
-      message.error(e?.response?.data?.message || e?.message || "操作失败，请稍后重试");
+      message.error(getRequestErrorMessage(error, "操作失败，请稍后重试"));
     } finally {
       setFavBusy(false);
     }
@@ -371,11 +383,87 @@ export default function ProductDetail() {
         title: `${product.name} | 海川珠宝`,
         description: product.shortDescription || undefined,
         // og:image / twitter:image：分享到微信/微博/小红书时展示作品主图
-        image: getPrimaryImage(product as any) || undefined,
+        image: getPrimaryImage(product) || undefined,
+        canonicalPath: publicProductPath(product),
+      });
+    } else if (!loading) {
+      setPageMeta({
+        title: "作品暂不可浏览 | 海川珠宝",
+        description: "该作品可能已下架，或公开信息暂时无法取得。",
+        noIndex: true,
+        canonicalPath: null,
       });
     }
     return () => clearPageMeta();
-  }, [product, setPageMeta, clearPageMeta]);
+  }, [loading, product, setPageMeta, clearPageMeta]);
+
+  const productCanonicalUrl = product
+    ? buildPublicUrl(productSchemaOrigin, publicProductPath(product))
+    : null;
+  const productImage = product ? getPrimaryImage(product) : "";
+  const absoluteProductImage = productImage
+    ? /^https:\/\//i.test(productImage)
+      ? productImage
+      : buildPublicUrl(productSchemaOrigin, productImage)
+    : null;
+  const schemaPrice = Number(product?.price || 0);
+  const includeOffer = Boolean(
+    product?.salesMode === "DIRECT_PURCHASE"
+    && Number.isFinite(schemaPrice)
+    && schemaPrice > 0
+    && typeof product.isAvailableForPurchase === "boolean",
+  );
+  useStructuredData("product", product ? {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    sku: product.code,
+    ...(product.shortDescription?.trim()
+      ? { description: product.shortDescription.trim() }
+      : {}),
+    ...(product.category?.name ? { category: product.category.name } : {}),
+    ...(absoluteProductImage ? { image: [absoluteProductImage] } : {}),
+    ...(productCanonicalUrl ? { url: productCanonicalUrl } : {}),
+    ...(includeOffer ? {
+      offers: {
+        "@type": "Offer",
+        priceCurrency: "CNY",
+        price: schemaPrice.toFixed(2),
+        availability: product.isAvailableForPurchase
+          ? "https://schema.org/InStock"
+          : "https://schema.org/OutOfStock",
+        ...(productCanonicalUrl ? { url: productCanonicalUrl } : {}),
+      },
+    } : {}),
+  } : null);
+  useStructuredData("product-breadcrumb", product ? {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: "首页",
+        ...(buildPublicUrl(productSchemaOrigin, "/")
+          ? { item: buildPublicUrl(productSchemaOrigin, "/") }
+          : {}),
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: "选款中心",
+        ...(buildPublicUrl(productSchemaOrigin, "/catalog")
+          ? { item: buildPublicUrl(productSchemaOrigin, "/catalog") }
+          : {}),
+      },
+      {
+        "@type": "ListItem",
+        position: 3,
+        name: product.name,
+        ...(productCanonicalUrl ? { item: productCanonicalUrl } : {}),
+      },
+    ],
+  } : null);
 
   // P1-35：带自动重连的 SSE（断线指数退避重连，避免实时刷新静默失效）
   useReconnectingEventSource(USE_MOCK ? null : publicProductStreamUrl(), () =>
@@ -390,7 +478,7 @@ export default function ProductDetail() {
     }
     goldPriceApi
       .getLatest()
-      .then((res) => setGoldPrice(unwrapResponse<any>(res)))
+      .then((res) => setGoldPrice(unwrapResponse<{ price?: number | string }>(res)))
       .catch(() => setGoldPrice(null));
   }, [product?.salesMode, commerceEnabled]);
 
@@ -399,7 +487,7 @@ export default function ProductDetail() {
   }, [id]);
 
   useEffect(() => {
-    if (product?.id) trackProductView(product.id);
+    if (product?.id) trackViewItem(product.id);
   }, [product?.id]);
 
   if (loading)
@@ -429,9 +517,9 @@ export default function ProductDetail() {
   // （原主图恒渲染 getPrimaryImage，点击缩略图只改高亮、主图不变）
   const thumbnails = getThumbnailList(product.images, product.primaryImage);
   const mainImageUrl =
-    (thumbnails[mainImage] as any)?.mediaUrl ||
+    thumbnails[mainImage]?.mediaUrl ||
     thumbnails[mainImage]?.url ||
-    (thumbnails.length > 0 ? getPrimaryImage(product as any) : "");
+    (thumbnails.length > 0 ? getPrimaryImage(product) : "");
   const startingPrice = Number(product.price) || 0;
   const displayPrice = selectedSku ? Number(selectedSku.price) : startingPrice;
   const isDirectPurchase = product.salesMode === "DIRECT_PURCHASE";
@@ -507,8 +595,8 @@ export default function ProductDetail() {
       });
       trackAddToCart(product.id, isSingleUnit ? 1 : qty);
       message.success("已加入购物车");
-    } catch (error: any) {
-      const reason = error?.message || "加入购物车失败，请稍后重试";
+    } catch (error: unknown) {
+      const reason = getRequestErrorMessage(error, "加入购物车失败，请稍后重试");
       setPurchaseError(reason);
       message.error(reason);
     } finally {
@@ -546,7 +634,7 @@ export default function ProductDetail() {
           >
             <div
               data-product-main-media-id={
-                (thumbnails[mainImage] as any)?.id ?? ""
+                thumbnails[mainImage]?.id ?? ""
               }
               onClick={() => mainImageUrl && setLightboxOpen(true)}
               role={mainImageUrl ? "button" : undefined}
@@ -580,9 +668,9 @@ export default function ProductDetail() {
                   aria-pressed={i === mainImage}
                   className={`product-detail-page__thumbnail ${i === mainImage ? "is-active" : ""}`}
                 >
-                  {(img as any).mediaUrl || img.url ? (
+                  {img.mediaUrl || img.url ? (
                     <SecureImage
-                      src={(img as any).mediaUrl || img.url}
+                      src={img.mediaUrl || img.url}
                       alt=""
                       className="w-full h-full object-cover"
                     />
@@ -597,7 +685,7 @@ export default function ProductDetail() {
               close={() => setLightboxOpen(false)}
               index={mainImage}
               slides={thumbnails.map((img) => ({
-                src: (img as any).mediaUrl || img.url,
+                src: img.mediaUrl || img.url,
                 alt: product.name,
               }))}
             /> : null}
@@ -712,7 +800,11 @@ export default function ProductDetail() {
                 isSignedIn={isSignedIn}
                 isSelected={isSelected}
                 onToggleSelection={() => {
-                  toggleSelection(product.id);
+                  const result = toggleSelection(product.id);
+                  if (result === "limit") {
+                    message.warning("每次最多选择 20 款作品");
+                    return;
+                  }
                   if (isSelected) trackRemoveFromSelection(product.id);
                   else trackAddToSelection(product.id);
                 }}
@@ -821,7 +913,7 @@ export default function ProductDetail() {
                   </p>
                 ) : null;
               }
-              const image = product.images?.find((item) => item.id === block.imageId) as any;
+              const image = product.images?.find((item) => item.id === block.imageId);
               const src = image?.mediaUrl || image?.url;
               return src ? (
                 <img key={`detail-image-${index}`} src={src} alt={block.alt || `${product.name} 详情图 ${index + 1}`} className="mx-auto block h-auto w-full" loading="lazy" />

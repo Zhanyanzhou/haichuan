@@ -3,6 +3,20 @@ import { PassportStrategy } from "@nestjs/passport";
 import { ExtractJwt, Strategy } from "passport-jwt";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { extractSessionCookieToken } from "../../common/security/session-security";
+import type { AdminAccessTokenPayload } from "../../common/security/authenticated-principal";
+
+function isAdminAccessTokenPayload(
+  payload: unknown,
+): payload is AdminAccessTokenPayload {
+  if (!payload || typeof payload !== "object") return false;
+  const candidate = payload as Partial<AdminAccessTokenPayload>;
+  return (
+    candidate.type === "admin" &&
+    candidate.tokenUse === "access" &&
+    Number.isInteger(candidate.sub) &&
+    Number(candidate.sub) > 0
+  );
+}
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -22,10 +36,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: any) {
-    // 拒绝客户令牌：客户与管理员共用 JWT_SECRET，必须按 type 区分，
-    // 否则 Customer.id 与 User.id 主键重叠时会被当成员工身份接受（垂直越权）
-    if (payload.type === 'customer') {
+  async validate(payload: unknown) {
+    // 两个身份域共用签名密钥时必须正向匹配类型与用途；未知/缺失类型一律拒绝。
+    if (!isAdminAccessTokenPayload(payload)) {
       throw new UnauthorizedException('令牌类型无效');
     }
     const user = await this.prisma.user.findUnique({

@@ -3,9 +3,12 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 export type SessionDomain = "admin" | "customer";
 
 const COOKIE_NAMES = {
-  admin: { access: "hc_admin_access", csrf: "hc_admin_csrf" },
-  customer: { access: "hc_customer_access", csrf: "hc_customer_csrf" },
+  admin: { access: "hc_admin_access", refresh: "hc_admin_refresh" },
+  customer: { access: "hc_customer_access", refresh: "hc_customer_refresh" },
 } as const;
+const CSRF_COOKIE_NAME = "hc_csrf";
+const ACCESS_COOKIE_MAX_AGE_SECONDS = 15 * 60;
+const REFRESH_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
 export function parseCookies(cookieHeader: unknown): Record<string, string> {
   if (typeof cookieHeader !== "string" || !cookieHeader.trim()) return {};
@@ -36,6 +39,13 @@ export function extractSessionCookieToken(
   return parseCookies(cookieHeader)[COOKIE_NAMES[domain].access] || null;
 }
 
+export function extractRefreshCookieToken(
+  cookieHeader: unknown,
+  domain: SessionDomain,
+): string | null {
+  return parseCookies(cookieHeader)[COOKIE_NAMES[domain].refresh] || null;
+}
+
 export function extractAccessToken(
   request: { headers?: Record<string, unknown> },
   domain: SessionDomain,
@@ -50,14 +60,17 @@ export function hasSessionCookie(
   cookieHeader: unknown,
   domain: SessionDomain,
 ): boolean {
-  return Boolean(extractSessionCookieToken(cookieHeader, domain));
+  return Boolean(
+    extractSessionCookieToken(cookieHeader, domain) ||
+      extractRefreshCookieToken(cookieHeader, domain),
+  );
 }
 
 export function csrfCookieValue(
   cookieHeader: unknown,
-  domain: SessionDomain,
+  _domain?: SessionDomain,
 ): string | null {
-  return parseCookies(cookieHeader)[COOKIE_NAMES[domain].csrf] || null;
+  return parseCookies(cookieHeader)[CSRF_COOKIE_NAME] || null;
 }
 
 export function safeTokenEqual(left: string, right: string): boolean {
@@ -74,17 +87,34 @@ export function createCsrfToken(): string {
 }
 
 export function sessionCookieNames(domain: SessionDomain) {
-  return COOKIE_NAMES[domain];
+  return { ...COOKIE_NAMES[domain], csrf: CSRF_COOKIE_NAME };
+}
+
+export function requestSessionMetadata(request: {
+  ip?: string;
+  socket?: { remoteAddress?: string };
+  headers?: Record<string, unknown>;
+}) {
+  const userAgent = request.headers?.["user-agent"];
+  return {
+    userAgent: typeof userAgent === "string" ? userAgent : null,
+    ip: request.ip || request.socket?.remoteAddress || null,
+  };
 }
 
 function serializeCookie(
   name: string,
   value: string,
-  options: { httpOnly: boolean; maxAgeSeconds: number; production: boolean },
+  options: {
+    httpOnly: boolean;
+    maxAgeSeconds: number;
+    production: boolean;
+    path: string;
+  },
 ): string {
   const attributes = [
     `${name}=${encodeURIComponent(value)}`,
-    "Path=/api",
+    `Path=${options.path}`,
     `Max-Age=${Math.max(0, Math.floor(options.maxAgeSeconds))}`,
     "SameSite=Lax",
   ];
@@ -96,7 +126,7 @@ function serializeCookie(
 export function buildSessionCookieHeaders(
   domain: SessionDomain,
   accessToken: string,
-  maxAgeSeconds: number,
+  refreshToken: string,
   production = process.env.NODE_ENV === "production",
 ) {
   const names = COOKIE_NAMES[domain];
@@ -106,13 +136,21 @@ export function buildSessionCookieHeaders(
     headers: [
       serializeCookie(names.access, accessToken, {
         httpOnly: true,
-        maxAgeSeconds,
+        maxAgeSeconds: ACCESS_COOKIE_MAX_AGE_SECONDS,
         production,
+        path: "/api",
       }),
-      serializeCookie(names.csrf, csrfToken, {
-        httpOnly: false,
-        maxAgeSeconds,
+      serializeCookie(names.refresh, refreshToken, {
+        httpOnly: true,
+        maxAgeSeconds: REFRESH_COOKIE_MAX_AGE_SECONDS,
         production,
+        path: refreshCookiePath(domain),
+      }),
+      serializeCookie(CSRF_COOKIE_NAME, csrfToken, {
+        httpOnly: false,
+        maxAgeSeconds: REFRESH_COOKIE_MAX_AGE_SECONDS,
+        production,
+        path: "/",
       }),
     ],
   };
@@ -128,11 +166,17 @@ export function buildClearSessionCookieHeaders(
       httpOnly: true,
       maxAgeSeconds: 0,
       production,
+      path: "/api",
     }),
-    serializeCookie(names.csrf, "", {
-      httpOnly: false,
+    serializeCookie(names.refresh, "", {
+      httpOnly: true,
       maxAgeSeconds: 0,
       production,
+      path: refreshCookiePath(domain),
     }),
   ];
+}
+
+function refreshCookiePath(domain: SessionDomain): string {
+  return domain === "admin" ? "/api/auth/session" : "/api/customers/session";
 }

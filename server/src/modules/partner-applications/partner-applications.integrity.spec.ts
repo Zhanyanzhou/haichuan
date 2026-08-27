@@ -260,7 +260,7 @@ test('暂停同步后同一旧 JWT 会读取实时状态并立即失去 PARTNER 
 
   const request: any = { headers: { authorization: 'Bearer unchanged-token' } };
   const guard = new CustomerAuthGuard(
-    { verifyAsync: async () => ({ sub: 9, type: 'customer' }) } as any,
+    { verifyAsync: async () => ({ sub: 9, type: 'customer', tokenUse: 'access' }) } as any,
     {
       customer: {
         findUnique: async () => ({

@@ -12,13 +12,10 @@ import {
   templateLayoutVars,
 } from "@/page-builder/layout/contentTemplateLayouts";
 import { hasRenderableImageDimensions } from "@/utils/imageLoad";
+import type { RenderablePageModule } from "@/types/pageModule";
 
 interface FullBleedBlockProps {
-  module: {
-    content: Record<string, any>;
-    layoutConfig?: Record<string, any>;
-    styleConfig?: Record<string, any>;
-  };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 

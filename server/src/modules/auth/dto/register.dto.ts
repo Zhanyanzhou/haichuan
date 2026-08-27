@@ -1,4 +1,8 @@
 import { IsString, IsNotEmpty, IsOptional, MinLength, MaxLength, Matches } from 'class-validator';
+import {
+  STAFF_PASSWORD_MESSAGE,
+  STAFF_PASSWORD_PATTERN,
+} from '../../users/staff-password-policy';
 
 /**
  * 注册 DTO:不包含 role/status,避免调用方提权
@@ -12,8 +16,11 @@ export class RegisterDto {
   username!: string;
 
   @IsString()
-  @MinLength(8, { message: '密码至少 8 位' })
+  @MinLength(12, { message: STAFF_PASSWORD_MESSAGE })
   @MaxLength(128)
+  @Matches(STAFF_PASSWORD_PATTERN, {
+    message: STAFF_PASSWORD_MESSAGE,
+  })
   password!: string;
 
   @IsOptional()

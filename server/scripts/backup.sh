@@ -75,11 +75,10 @@ trap 'exit 143' TERM
 # ---------- 1. 数据库 ----------
 echo "📦 开始备份数据库: ${DB_NAME} ..."
 
-mysqldump \
+MYSQL_PWD="$DB_PASS" mysqldump \
   -h "$DB_HOST" \
   -P "$DB_PORT" \
   -u "$DB_USER" \
-  -p"$DB_PASS" \
   --single-transaction \
   --no-tablespaces \
   --routines \

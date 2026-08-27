@@ -69,9 +69,9 @@ export type PuckProps =
 /** 基础模块骨架 */
 function baseModule(
   moduleType: string,
-  content: Record<string, any>,
-  layoutConfig: Record<string, any> = {},
-  styleConfig: Record<string, any> = {},
+  content: Record<string, unknown>,
+  layoutConfig: Record<string, unknown> = {},
+  styleConfig: Record<string, unknown> = {},
 ): PageModule {
   return {
     id: 0,
@@ -89,10 +89,11 @@ function baseModule(
 }
 
 /** 根据区块类型和 props 转换为 PageModule */
-export function convertPuckProps(
+export function convertPuckProps<T extends object>(
   type: string,
-  props: Record<string, any>,
+  input: T,
 ): PageModule | null {
+  const props = input as Record<string, unknown>;
   switch (type) {
     case "首屏主视觉":
       return baseModule(
@@ -462,7 +463,12 @@ export function convertPuckProps(
           body: props.body,
           buttonText: props.buttonText,
           // 三件套统一解析为最终跳转地址；旧草稿仅在指向已登记页面时按 linkUrl 推断。
-          linkUrl: resolveLinkTargetUrl(props),
+          linkUrl: resolveLinkTargetUrl({
+            targetType: typeof props.targetType === "string" ? props.targetType : undefined,
+            productCode: typeof props.productCode === "string" ? props.productCode : undefined,
+            productId: typeof props.productId === "string" || typeof props.productId === "number" ? props.productId : undefined,
+            linkUrl: typeof props.linkUrl === "string" ? props.linkUrl : undefined,
+          }),
         },
         {
           template: props.template || "imageLeft",

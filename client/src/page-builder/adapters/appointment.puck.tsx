@@ -23,7 +23,7 @@ export interface AppointmentPuckProps {
 
 export const appointmentPuckConfig = {
   render: (props: AppointmentPuckProps) => (
-    <AppointmentBlock module={convertPuckProps("预约入口", props as any) as any} editMode />
+    <AppointmentBlock module={convertPuckProps("预约入口", props)!} editMode />
   ),
   defaultProps: {
     backgroundImage: "",
@@ -40,7 +40,7 @@ export const appointmentPuckConfig = {
     bgColor: "#FFFFFF",
     locked: false,
   } satisfies AppointmentPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: AppointmentPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

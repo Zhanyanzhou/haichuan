@@ -11,15 +11,16 @@ import {
   type VisualViewport,
 } from "../runtime/visualLayout";
 import InspectorDisclosure from "./InspectorDisclosure";
+import type { PuckProps } from "../types";
 
 type OverrideRecord = Record<string, unknown>;
 
 interface InstanceOverridesPanelProps {
   moduleType: string;
-  props: Record<string, any>;
-  update: (patch: Record<string, any>) => void;
+  props: PuckProps;
+  update: (patch: PuckProps) => void;
   updateHistoryTransaction: (
-    patch: Record<string, any> | ((props: Record<string, any>) => Record<string, any>),
+    patch: PuckProps | ((props: PuckProps) => PuckProps),
   ) => void;
   historyTransactionPending: boolean;
   scopes?: ReadonlyArray<"layout" | "slots" | "text" | "surface" | "appearance">;
@@ -486,7 +487,7 @@ export default function InstanceOverridesPanel({
         isRecord((nodes[selectedNodeId] as OverrideRecord).appearance)) ||
       (resetAllDesign && (overrides?.frame || Object.keys(nodes).length > 0)),
   );
-  const createResetPatch = (currentProps: Record<string, any>) => {
+  const createResetPatch = (currentProps: PuckProps) => {
     let next: unknown = currentProps.__instanceOverrides;
     if (showLayout || resetAllDesign) next = setVisualOverridePath(next, ["frame"], undefined);
     if (showSlots || resetAllDesign) {

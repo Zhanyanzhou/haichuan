@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Input, Modal, Rate, Select, Upload, message } from "antd";
+import { App as AntdApp, Input, Modal, Rate, Select, Upload } from "antd";
 import type { UploadProps } from "antd";
 import { reviewApi, uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -16,6 +16,7 @@ export default function CustomerReviewDialog({
   onClose,
   onSubmitted,
 }: CustomerReviewDialogProps) {
+  const { message } = AntdApp.useApp();
   const [rating, setRating] = useState(5);
   const [productId, setProductId] = useState<number | null>(null);
   const [content, setContent] = useState("");
@@ -93,7 +94,7 @@ export default function CustomerReviewDialog({
       confirmLoading={submitting}
       okText="提交评价"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       <p style={{ color: "#5f6568", fontSize: 13, marginBottom: 16 }}>
         评价提交后经审核将在作品页展示，感谢您分享佩戴体验。

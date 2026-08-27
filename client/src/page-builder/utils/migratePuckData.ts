@@ -14,13 +14,7 @@
  * - 礼赠指南   → 按场景选购(分类数据原样保留)
  */
 import { isSafeInternalPath } from "./linkTarget";
-
-type PuckBlock = { type?: string; props?: Record<string, any> };
-type PuckDocument = {
-  content?: PuckBlock[];
-  zones?: Record<string, PuckBlock[]>;
-  [key: string]: any;
-};
+import type { PuckBlock, PuckDocument, PuckProps } from "../types";
 
 function clampText(value: unknown, max: number): string {
   const text = typeof value === "string" ? value.trim() : "";
@@ -31,7 +25,7 @@ function safeLink(value: unknown): string {
   return isSafeInternalPath(value) ? (value as string) : "";
 }
 
-function focusFallback(props: Record<string, any>) {
+function focusFallback(props: PuckProps) {
   const x = Number(props.focusX ?? 50);
   const y = Number(props.focusY ?? 50);
   return {
@@ -89,9 +83,9 @@ function removeLegacyBusinessFacts(block: PuckBlock): PuckBlock {
   return touched ? { ...block, props: nextProps } : block;
 }
 
-function normalizeItemLinkTarget(item: Record<string, any>) {
+function normalizeItemLinkTarget(item: PuckProps) {
   if (item?.targetType != null || item?.productCode != null || item?.productId != null) return item;
-  const link = isSafeInternalPath(item?.link) ? item.link : "";
+  const link = isSafeInternalPath(item.link) ? item.link : "";
   if (!link) return item;
   const productMatch = /^\/products\/([^/?#]+)$/.exec(link);
   let productReference = "";
@@ -127,7 +121,9 @@ function normalizeItemLinks(block: PuckBlock): PuckBlock {
     const list = nextProps[key];
     if (!Array.isArray(list)) continue;
     const nextList = list.map((item) =>
-      item && typeof item === "object" ? normalizeItemLinkTarget(item) : item,
+      item && typeof item === "object" && !Array.isArray(item)
+        ? normalizeItemLinkTarget(item as PuckProps)
+        : item,
     );
     if (nextList.some((item, i) => item !== list[i])) {
       nextProps[key] = nextList;
@@ -237,7 +233,7 @@ export function migratePuckData<T extends PuckDocument>(data: T): T {
   if (!data || typeof data !== "object") return data;
   const next: PuckDocument = { ...data };
   // 存量清洗(2026-08-16 用户决策:全部模块可删):历史草稿中仅业务功能区允许保持锁定。
-  const unlock = (block: any) => {
+  const unlock = (block: PuckBlock): PuckBlock => {
     if (block?.type === "业务功能区") return block;
     if (block?.props?.locked) {
       return { ...block, props: { ...block.props, locked: false } };

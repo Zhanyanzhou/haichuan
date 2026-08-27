@@ -12,13 +12,20 @@ function createHarness(caseInput: {
   const caseRecord: any = {
     id: 1,
     orderId: 9,
+    orderItemId: 3,
     status: 'REQUESTED',
     approvedRefundAmount: null,
     adminNote: null,
+    order: {
+      paidAmount: new Prisma.Decimal(100),
+      refundedAmount: new Prisma.Decimal(0),
+      items: [{ id: 3, subtotal: new Prisma.Decimal(100) }],
+    },
     ...caseInput,
   };
   const events: Array<Record<string, unknown>> = [];
   const tx: any = {
+    $queryRaw: async () => [{ id: caseRecord.orderId }],
     afterSalesCase: {
       findUnique: async () => caseRecord,
       updateMany: async ({ where, data }: any) => {
@@ -30,6 +37,9 @@ function createHarness(caseInput: {
   };
   const service = new AfterSalesService(
     {
+      afterSalesCase: {
+        findUnique: async () => ({ orderId: caseRecord.orderId }),
+      },
       $transaction: async (callback: (client: typeof tx) => Promise<unknown>) =>
         callback(tx),
     } as unknown as PrismaService,
@@ -96,6 +106,21 @@ test('换货或维修工单不能直接审批退款金额', async () => {
 
   await assert.rejects(
     () => service.review(1, 'APPROVED', undefined, 10, admin),
+    BadRequestException,
+  );
+  assert.equal(caseRecord.status, 'REQUESTED');
+});
+
+test('退款类售后审核金额不能超过商品或订单当前可退额度', async () => {
+  const { service, caseRecord } = createHarness({
+    type: 'REFUND',
+    requestedRefundAmount: new Prisma.Decimal(90),
+  });
+  caseRecord.order.paidAmount = new Prisma.Decimal(80);
+  caseRecord.order.refundedAmount = new Prisma.Decimal(20);
+
+  await assert.rejects(
+    () => service.review(1, 'APPROVED', undefined, 61, admin),
     BadRequestException,
   );
   assert.equal(caseRecord.status, 'REQUESTED');

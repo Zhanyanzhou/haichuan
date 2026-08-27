@@ -19,8 +19,8 @@ export class OptionalCustomerAuthGuard implements CanActivate {
     if (!token) return true;
 
     try {
-      const payload = await this.jwtService.verifyAsync<{ sub: number; type?: string }>(token);
-      if (payload.type !== 'customer' || !Number.isInteger(payload.sub)) {
+      const payload = await this.jwtService.verifyAsync<{ sub: number; type?: string; tokenUse?: string }>(token);
+      if (payload.type !== 'customer' || payload.tokenUse !== 'access' || !Number.isInteger(payload.sub)) {
         throw new UnauthorizedException('客户登录状态无效');
       }
       const customer = await this.prisma.customer.findUnique({ where: { id: payload.sub } });

@@ -98,7 +98,8 @@
 - **防复发**：`scripts/verify-public-assets.mjs` 守卫（200MB 警告/500MB 红线）挂入主 `test` 链；`.dockerignore` 收编 playwright-report/test-results；素材正确入口=商品图走 `/uploads` 媒体管道、设计素材走 design-library/。
 - **引用判定纪律**：判孤儿前必须全维扫描（client/src + contracts + server 脚本 + DB `product_images` + `page_documents.puckData`）；PowerShell 5.1 读 UTF-8 无 BOM 源码会产出编码双胞胎字符串，**含中文文件名的判定必须用 ripgrep/字节比对**，当日已实际踩中（Test-Path 假阴性）。
 - **2026-08-26 收敛（C-2 已关闭）**：公开首页只接受已发布 PageDocument；未发布、无效或读取失败时仅显示中性安全短页。`Home/index.tsx` 已移除 `FallbackHome`、`productFocus` 和硬编码品牌长页，编辑器种子只服务新建草稿/预览，不得进入公开兜底。历史 43 张商品图的媒体治理继续按本节既有边界处理，不因本次源码清理获得内容或授权结论。
-- **2026-08-19 追记三（迁移源治理修复，B 方案）**：A.13 执行隔离时未同步 `docs/IMAGE_MIGRATION.md` 第 31 条（"原图目录保持不变"），迁移源治理线断裂。修复：836 张完整原图（793 孤儿 + 43 活图原图，自 `.image-archive/`）经 SHA-256 基线 → 复制 → 逐文件复验（836/836 文件名+大小+SHA-256 全匹配）→ 删源，迁入 `server/migration-source/product-images/`（gitignore 收编）；`generate-product-image-manifest.js`、`product-media.service.ts`、`migrate-product-media.ts` 三处 legacy 指向更新；三方互证（基线 CSV、迁移后目录、新 manifest）SHA-256 集合一致。备份缺口如实记录：backup 容器不覆盖该目录，冷快照在 `backups/migration-source-snapshot-20260819/`，正式备份收编待拍板（详见 IMAGE_MIGRATION.md）。教训固化：**动任何治理文档管辖的资产前先读该文档；变更落地后必须同步更新对应治理文档**。
+- **2026-08-19 追记三（迁移源治理修复，B 方案）**：A.13 执行隔离时未同步 `docs/IMAGE_MIGRATION.md` 第 31 条（"原图目录保持不变"），迁移源治理线断裂。修复：836 张完整原图（793 孤儿 + 43 活图原图，自 `.image-archive/`）经 SHA-256 基线 → 复制 → 逐文件复验（836/836 文件名+大小+SHA-256 全匹配）→ 删源，迁入 `server/migration-source/product-images/`（gitignore 收编）；`generate-product-image-manifest.js`、`product-media.service.ts`、`migrate-product-media.ts` 三处 legacy 指向更新；三方互证（基线 CSV、迁移后目录、新 manifest）SHA-256 集合一致。备份缺口如实记录：backup 容器不覆盖该目录；冷快照已于 2026-08-26 移至项目外的 `G:\网站搭建2-外部资料\quarantine-2026-08-26\backups\migration-source-snapshot-20260819\`，但仍与项目同盘，不属于异地备份，正式备份收编待拍板（详见 IMAGE_MIGRATION.md）。教训固化：**动任何治理文档管辖的资产前先读该文档；变更落地后必须同步更新对应治理文档**。
+- **2026-08-26 追记四（原图退出部署项目）**：当前 13 条商品图片记录均已具备 `storageKey`，10 个唯一私有媒体文件已逐文件校验并同步到 Compose 私有媒体卷，生产运行时不再需要 legacy 原图回退。`server/migration-source/` 的 836 张原图以同盘可逆移动迁至 `G:\网站搭建2-外部资料文件夹\server-migration-source-20260826\product-images\`，随后按 `migration-baseline-20260819.csv` 复验 836/836 文件名、大小和 SHA-256 全匹配；生产服务与 Compose 删除 legacy 读取入口，离线迁移脚本保留但必须在独立维护副本恢复归档后使用。该归档仍与项目同盘，不等于异地备份。
 
 ### A.14 ✅ AI 治理单一授权源与分层收敛（2026-08-20）
 
@@ -294,6 +295,15 @@
 - **结果裁决**：前端跳转、支付控件回调或管理员填写均不能证明到账。支付成功、取消、失败和超时恢复必须通过服务端回调/查单裁决；待支付交易重试复用原商户单号，关单前先查单，结果不确定时不得生成第二个可支付单号。
 - **退款方向**：在线付款审核通过后原路退回，并以渠道受理、查询或回调事实推进；人工不得把微信或支付宝退款直接标记成功。线下异常退款可以人工执行，但必须具备流水、操作者和审计时间线。
 - **上线边界**：代码、SDK、Mock 和构建均不等于真实资金可用。商户资质、凭据、正式域名、回调、查单、关单、退款、对账和隔离目标环境真实验收完成并再次批准前，`CUSTOMER_COMMERCE_ENABLED` 与 `PAYMENT_GATEWAY_TRANSACTIONS_ENABLED` 继续安全默认关闭。
+
+### D.24 ✅ Migration 历史签认与不可变发布制品（2026-08-27）
+
+- **遗留事实与唯一例外**：`20260824115000_add_product_publication_quality` 在首次纳入 Git 前已应用，备份 ledger 的 SHA-256 与当前仓库文件不同，原始字节无法从 Git、现存镜像或本地对象恢复。不得改写 migration 文件或 `_prisma_migrations`。只在 migration 名称、当前仓库 SHA-256、ledger SHA-256，以及 `products` 三列和 `products_publication_quality_idx` 的结构合同全部精确匹配时，接受 `server/prisma/migration-integrity-exceptions.json` 中这一项签认；任一值偏离即阻断。
+- **后续历史不可变**：所有新 migration 只能追加。CI 比较基准与目标 commit，禁止对既有 `migration.sql` 修改、删除或重命名；静态校验同时核对例外清单引用的当前文件哈希。例外清单不是跳过 Prisma 校验的通用机制，增加或修改例外必须重新形成可审计决定。
+- **发布前数据库门禁**：`release-preflight` 把仓库 migration、目标库 `_prisma_migrations`、未完成/重复/缺失记录、未知 checksum 漂移和已签认结构共同验证。只有精确匹配的一个遗留例外可被计为接受；待执行 migration、未知漂移或结构不符均保持阻断。
+- **不可变制品**：server/client Docker 基础镜像及 Compose 第三方镜像固定到 digest。手动 `Release Images` 工作流从精确 commit 构建并推送 GHCR，生成 SBOM、provenance、签名证明和 `release-manifest.json`；镜像 OCI 标签记录源码 revision、来源、组件和 migration bundle SHA-256。生产只接受清单内 `image@sha256:...`，必须先拉取并验证摘要与标签，启动使用 `--no-build`，禁止在生产主机源码构建或依赖浮动 tag。
+- **维护与权限边界**：基础镜像 digest 更新属于显式供应链维护，必须核对上游版本、安全公告并重新构建验证。该决定与本次实现不授权修改当前数据库、执行生产 migration、写入真实 `.env`、Git 提交/推送、注册表推送或生产部署；首次真实制品仍需单独批准并手动触发。
+- **联系页面顺序**：联系页面正式发布门禁排在 migration 历史完整性和首个可验证不可变制品之后。在这两项形成当前目标环境证据前，不以页面存在、草稿或本地构建宣称联系流程已完成。
 
 ### D.10 🟡 金价与按重动态价政策
 - **已定边界**：标准零售固定价不得被金价采集或定时任务自动改写。

@@ -22,6 +22,7 @@ import {
 import StaleDocumentNotice from "@/page-builder/runtime/StaleDocumentNotice";
 import { PublicPageFallback } from "@/page-builder/runtime/PublishedPageDecoration";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
+import type { PuckDocument } from "@/page-builder/runtime/PuckDocumentRenderer";
 
 // 首页基础内容与装修渲染器分离，只有取得已发布的 Puck 数据时才加载编辑器运行时。
 const PuckDocumentRenderer = lazy(
@@ -143,7 +144,7 @@ export default function Home() {
       {!hasVisibleHeroTitle ? <h1 className="sr-only">海川珠宝</h1> : null}
       <Suspense fallback={<PuckDocumentLoading />}>
         <PuckDocumentRenderer
-          data={readiness.data as any}
+          data={readiness.data as PuckDocument}
           surface="home"
           heroHeadingLevel={hasVisibleHeroTitle ? 1 : 2}
         />
@@ -157,7 +158,9 @@ export default function Home() {
 }
 
 function useDraftPageDocument(pageKey = "home") {
-  const [pageDocument, setPageDocument] = useState<any>(null);
+  const [pageDocument, setPageDocument] = useState<{
+    puckData?: PuckDocument;
+  } | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const mountedRef = useRef(true);
 
@@ -174,7 +177,7 @@ function useDraftPageDocument(pageKey = "home") {
       try {
         const response = await pageDocumentApi.getAdmin(pageKey);
         if (mountedRef.current) {
-          setPageDocument(unwrapResponse<any>(response));
+          setPageDocument(unwrapResponse<{ puckData?: PuckDocument } | null>(response));
           setStatus("ready");
         }
       } catch {
@@ -226,7 +229,7 @@ export function PagePreview({ pageKey: pageKeyProp }: { pageKey?: string }) {
             width: "min(100%, 520px)",
             padding: "32px 28px",
             background: "#FFFFFF",
-            border: "1px solid #D9DDDE",
+            border: "1px solid #DDE1E2",
             textAlign: "center",
           }}
         >

@@ -79,9 +79,18 @@ export class FulfillmentService {
     const trackingNo = dto.trackingNo?.trim();
     if (!carrier || !trackingNo) throw new BadRequestException('发货必须填写承运商和运单号');
 
+    const fulfillmentRef = await this.prisma.fulfillment.findUnique({
+      where: { id: fulfillmentId },
+      select: { orderId: true },
+    });
+    if (!fulfillmentRef) throw new NotFoundException('履约单不存在');
+
     return this.prisma.$transaction(async (tx) => {
+      await this.lockOrder(tx, fulfillmentRef.orderId);
       const fulfillment = await tx.fulfillment.findUnique({ where: { id: fulfillmentId }, include: { order: true } });
-      if (!fulfillment) throw new NotFoundException('履约单不存在');
+      if (!fulfillment || fulfillment.orderId !== fulfillmentRef.orderId) {
+        throw new NotFoundException('履约单不存在');
+      }
       if (!['PENDING_PICK', 'PENDING_CHECK', 'PENDING_SHIP'].includes(fulfillment.status)) {
         throw new BadRequestException('当前履约单状态不可发货');
       }
@@ -97,8 +106,8 @@ export class FulfillmentService {
       });
       if (updated.count === 0) throw new BadRequestException('履约单状态已变化，请刷新后重试');
 
-      await tx.order.update({
-        where: { id: fulfillment.orderId },
+      const orderUpdated = await tx.order.updateMany({
+        where: { id: fulfillment.orderId, status: 'PENDING_SHIP' },
         data: {
           status: 'SHIPPED',
           deliveryStatus: 'SHIPPED',
@@ -107,6 +116,9 @@ export class FulfillmentService {
           shippedAt: now,
         },
       });
+      if (orderUpdated.count === 0) {
+        throw new ConflictException('订单状态已变化，不能发货');
+      }
 
       await this.tradeEvents.record(tx, {
         orderId: fulfillment.orderId, entityType: TRADE_ENTITY_TYPE.FULFILLMENT, entityId: fulfillmentId,
@@ -156,21 +168,25 @@ export class FulfillmentService {
           });
           return tx.fulfillment.findUnique({ where: { id: fulfillmentId } });
         }
-        if (fulfillment.status !== 'SHIPPED') {
-          throw new BadRequestException('只有已发货的履约单可标记送达');
+        if (!['SHIPPED', 'ABNORMAL'].includes(fulfillment.status)) {
+          throw new BadRequestException('只有已发货或物流异常的履约单可标记送达');
         }
         if (fulfillment.order.status !== 'SHIPPED') {
           throw new ConflictException('订单状态已变化，不能标记送达');
         }
         const delivered = await tx.fulfillment.updateMany({
-          where: { id: fulfillmentId, status: 'SHIPPED' },
-          data: { status: 'DELIVERED', deliveredAt: now },
+          where: { id: fulfillmentId, status: { in: ['SHIPPED', 'ABNORMAL'] } },
+          data: { status: 'DELIVERED', deliveredAt: now, abnormalReason: null },
         });
         if (delivered.count === 0) {
           throw new ConflictException('履约单状态已变化，请刷新后重试');
         }
         const orderSynced = await tx.order.updateMany({
-          where: { id: fulfillment.orderId, status: 'SHIPPED' },
+          where: {
+            id: fulfillment.orderId,
+            status: 'SHIPPED',
+            deliveryStatus: { in: ['SHIPPED', 'ABNORMAL'] },
+          },
           data: { deliveryStatus: 'RECEIVED', receivedAt: now },
         });
         if (orderSynced.count === 0) {
@@ -182,16 +198,32 @@ export class FulfillmentService {
         });
       } else if (newStatus === 'ABNORMAL') {
         if (!dto.abnormalReason?.trim()) throw new BadRequestException('物流异常必须填写异常原因');
-        await tx.fulfillment.update({
-          where: { id: fulfillmentId },
+        if (fulfillment.status === 'ABNORMAL') {
+          return tx.fulfillment.findUnique({ where: { id: fulfillmentId } });
+        }
+        if (fulfillment.status !== 'SHIPPED' || fulfillment.order.status !== 'SHIPPED') {
+          throw new BadRequestException('只有已发货且未送达的履约单可以标记物流异常');
+        }
+        const abnormal = await tx.fulfillment.updateMany({
+          where: { id: fulfillmentId, status: 'SHIPPED' },
           data: { status: 'ABNORMAL', abnormalReason: dto.abnormalReason.trim(), internalNote: dto.internalNote?.trim() || fulfillment.internalNote },
         });
+        if (abnormal.count === 0) {
+          throw new ConflictException('履约单状态已变化，请刷新后重试');
+        }
         // 同步订单发货维度为异常：异常订单聚合 findAnomalies 依据 order.deliveryStatus 筛选，
         // 缺此回写则仓储标记的物流异常永远进不了异常订单页。
-        await tx.order.update({
-          where: { id: fulfillment.orderId },
+        const orderSynced = await tx.order.updateMany({
+          where: {
+            id: fulfillment.orderId,
+            status: 'SHIPPED',
+            deliveryStatus: 'SHIPPED',
+          },
           data: { deliveryStatus: 'ABNORMAL' },
         });
+        if (orderSynced.count === 0) {
+          throw new ConflictException('订单发货状态已变化，请刷新后重试');
+        }
         await this.tradeEvents.record(tx, {
           orderId: fulfillment.orderId, entityType: TRADE_ENTITY_TYPE.FULFILLMENT, entityId: fulfillmentId,
           eventType: TRADE_EVENT_TYPE.FULFILLMENT_ABNORMAL, fromStatus: fulfillment.status, toStatus: 'ABNORMAL',

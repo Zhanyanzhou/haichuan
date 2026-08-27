@@ -13,8 +13,8 @@ import {
  * 关键约束：
  * - 事件一旦写入不可修改/删除；
  * - 交易写操作必须在同一 Prisma 事务内追加事件（保证状态与事件原子一致）；
- * - 本服务不抛阻断异常——若事件记录失败仅记录日志，不回滚业务事务（事件丢失可容忍，
- *   业务数据正确性优先）。调用方仍可检查返回值。
+ * - 交易事实与审计事件必须同成同败；调用方应传入当前交易事务的 tx。
+ * - 只有不伴随业务状态变化的告警型事件才可使用 recordBestEffort。
  */
 @Injectable()
 export class TradeEventsService {
@@ -23,7 +23,7 @@ export class TradeEventsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * 在事务内或事务外记录一条交易事件。
+   * 记录一条必须成功的交易事件。失败会向上传播，让同一事务回滚。
    *
    * @param tx Prisma 事务客户端或主 PrismaService（事务内传 tx，事务外传 this.prisma）
    * @param params 事件参数
@@ -42,24 +42,31 @@ export class TradeEventsService {
       metadata?: Prisma.InputJsonValue | null;
     },
   ): Promise<void> {
+    await tx.tradeEvent.create({
+      data: {
+        orderId: params.orderId,
+        entityType: params.entityType,
+        entityId: params.entityId,
+        eventType: params.eventType,
+        fromStatus: params.fromStatus ?? null,
+        toStatus: params.toStatus ?? null,
+        operatorType: params.operator.type,
+        operatorId: params.operator.id ?? null,
+        operatorName: params.operator.name ?? null,
+        reason: params.reason ?? null,
+        metadata: params.metadata ?? undefined,
+      },
+    });
+  }
+
+  /** 仅用于不改变业务事实的辅助告警；失败只写服务日志。 */
+  async recordBestEffort(
+    tx: Prisma.TransactionClient | PrismaService,
+    params: Parameters<TradeEventsService['record']>[1],
+  ): Promise<void> {
     try {
-      await tx.tradeEvent.create({
-        data: {
-          orderId: params.orderId,
-          entityType: params.entityType,
-          entityId: params.entityId,
-          eventType: params.eventType,
-          fromStatus: params.fromStatus ?? null,
-          toStatus: params.toStatus ?? null,
-          operatorType: params.operator.type,
-          operatorId: params.operator.id ?? null,
-          operatorName: params.operator.name ?? null,
-          reason: params.reason ?? null,
-          metadata: params.metadata ?? undefined,
-        },
-      });
+      await this.record(tx, params);
     } catch (error) {
-      // 事件记录失败不阻断业务事务：记录日志，由后续对账补偿。
       this.logger.error(
         `交易事件记录失败 orderId=${params.orderId} type=${params.eventType}`,
         error instanceof Error ? error.stack : String(error),

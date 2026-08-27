@@ -39,6 +39,7 @@ function createService(visibleIds: number[]) {
     | { productIds: number[]; customer: Record<string, unknown> | undefined }
     | undefined;
   const prisma = {
+    $transaction: async (callback: (transaction: unknown) => unknown) => callback(prisma),
     inquiry: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
         createdData = data;
@@ -82,6 +83,22 @@ test('咨询服务按已认证客户可见范围复核并关联现有 Inquiry.pr
   assert.deepEqual(harness.visibilityInput(), { productIds: [42], customer });
   assert.equal(harness.createdData()?.productId, 42);
   assert.equal(harness.createdData()?.customerId, 7);
+  const lead = harness.createdData()?.lead as {
+    create: Record<string, unknown> & { submissionFingerprint: string };
+  };
+  assert.equal(lead.create.sourceType, 'INQUIRY');
+  assert.equal(lead.create.customerId, 7);
+  assert.equal(lead.create.customerName, '会员访客');
+  assert.equal(lead.create.phone, '13800000001');
+  assert.equal(lead.create.idempotencyKeyHash, null);
+  assert.match(lead.create.submissionFingerprint, /^[a-f0-9]{64}$/);
+  assert.deepEqual(lead.create.activities, {
+    create: {
+      type: 'CREATED',
+      content: '公开咨询已提交',
+      currentStatus: 'PENDING',
+    },
+  });
 });
 
 test('咨询服务统一拒绝不存在、下架或越权作品且不写入', async () => {

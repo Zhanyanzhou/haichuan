@@ -14,6 +14,7 @@ import {
 } from "@ant-design/icons";
 import { ROOT_ZONE, focusCanvasBlock, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
+import type { PuckProps } from "@/page-builder/types";
 
 export default function LayerRail({
   navigationPreviewOpen,
@@ -39,7 +40,7 @@ export default function LayerRail({
   const selectedId = selectedItem?.props?.id;
   const content = appData.content as Array<{
     type: string;
-    props: Record<string, any>;
+    props: PuckProps;
   }>;
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -90,7 +91,7 @@ export default function LayerRail({
         ui: { itemSelector: { index, zone: ROOT_ZONE } },
       });
     }
-    focusCanvasBlock(targetId);
+    focusCanvasBlock(typeof targetId === "string" ? targetId : undefined);
   };
 
   // 发布检查清单的逃生门：素材未到位时隐藏模块而非删除。
@@ -226,7 +227,7 @@ export default function LayerRail({
       type: "setUi",
       ui: { itemSelector: { index: to, zone: ROOT_ZONE } },
     });
-    focusCanvasBlock(movedBlockId);
+    focusCanvasBlock(typeof movedBlockId === "string" ? movedBlockId : undefined);
   };
 
   const toggleLayerVisibility = (index: number) => {
@@ -369,7 +370,9 @@ export default function LayerRail({
           const visible = item.props?.isVisible !== false;
           return (
             <div
-              key={item.props?.id ?? `${item.type}-${index}`}
+              key={typeof item.props?.id === "string" || typeof item.props?.id === "number"
+                ? item.props.id
+                : `${item.type}-${index}`}
               data-layer-index={index}
               className={`homepage-editor__layer-item${active ? " is-active" : ""}${inView ? " is-in-view" : ""}${multiSelected ? " is-multi-selected" : ""}${visible ? "" : " is-hidden"}${draggingIndex === index ? " is-dragging" : ""}${dropIndex === index ? " is-drop-target" : ""}`}
               data-layer-visible={visible ? "true" : "false"}

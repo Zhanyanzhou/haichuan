@@ -50,7 +50,7 @@ export const inquiriesApi = {
     }
     return api.put(`/inquiries/${id}/reply`, data);
   },
-  submit: async (data: InquirySubmitInput) => {
+  submit: async (data: InquirySubmitInput, idempotencyKey?: string) => {
     if (USE_MOCK) {
       await mockDelay(500);
       return mockResponse({
@@ -68,7 +68,12 @@ export const inquiriesApi = {
         customerPhone: data.phone,
         customerEmail: data.email,
       },
-      { headers: customerAuthHeaders() },
+      {
+        headers: {
+          ...customerAuthHeaders(),
+          ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+        },
+      },
     );
   },
 };

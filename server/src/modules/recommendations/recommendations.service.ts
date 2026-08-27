@@ -3,6 +3,42 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ProductAccessService } from '../products/product-access.service';
 import { customerFacingProductWhere } from '../products/product-eligibility';
+import type { CustomerPrincipal } from '../../common/security/authenticated-principal';
+
+const RECOMMENDATION_PRODUCT_SELECT = {
+  id: true,
+  code: true,
+  name: true,
+  categoryId: true,
+  shortDescription: true,
+  materialType: true,
+  goldWeight: true,
+  craftFee: true,
+  price: true,
+  weight: true,
+  size: true,
+  status: true,
+  salesMode: true,
+  sortOrder: true,
+  isHot: true,
+  isNew: true,
+  isRecommended: true,
+  isLimited: true,
+  isCustom: true,
+  multiDiscount: true,
+  visibility: true,
+  viewCount: true,
+  salesCount: true,
+  category: { select: { id: true, name: true } },
+  images: { orderBy: { sortOrder: 'asc' as const }, take: 3 },
+  primaryImage: true,
+  listingImage: true,
+} satisfies Prisma.ProductSelect;
+
+type RecommendationProduct = Prisma.ProductGetPayload<{
+  select: typeof RECOMMENDATION_PRODUCT_SELECT;
+}>;
+type RecommendationImage = NonNullable<RecommendationProduct['primaryImage']>;
 
 /**
  * 规则推荐系统（可解释、可调权重）
@@ -29,7 +65,7 @@ export class RecommendationsService {
   ) {}
 
   /** 热门商品 */
-  async getHot(customer: any, limit = this.defaultLimit) {
+  async getHot(customer: CustomerPrincipal, limit = this.defaultLimit) {
     const candidates = await this.prisma.product.findMany({
       where: {
         ...customerFacingProductWhere(customer),
@@ -54,7 +90,7 @@ export class RecommendationsService {
   }
 
   /** 猜你喜欢：基于客户近期浏览分类推荐 */
-  async getForYou(customer: any, limit = this.defaultLimit) {
+  async getForYou(customer: CustomerPrincipal, limit = this.defaultLimit) {
     const recentLogs = await this.prisma.productAccessLog.findMany({
       where: {
         customerId: customer.id,
@@ -101,7 +137,7 @@ export class RecommendationsService {
   }
 
   /** 相似商品：同分类 / 同材质 */
-  async getSimilar(productId: number, customer: any, limit = this.defaultLimit) {
+  async getSimilar(productId: number, customer: CustomerPrincipal, limit = this.defaultLimit) {
     const base = await this.prisma.product.findFirst({
       where: {
         id: productId,
@@ -142,16 +178,18 @@ export class RecommendationsService {
   /** 按排序顺序加载商品并序列化为受控目录响应 */
   private async loadAndSerialize(
     orderedIds: number[],
-    customer: any,
+    customer: CustomerPrincipal,
     source: string,
   ) {
     if (orderedIds.length === 0) return [];
     const products = await this.prisma.product.findMany({
       where: { id: { in: orderedIds }, ...customerFacingProductWhere(customer) },
-      select: this.catalogSelect(),
+      select: RECOMMENDATION_PRODUCT_SELECT,
     });
-    const map = new Map(products.map((p: any) => [p.id, p]));
-    const ordered = orderedIds.map((id) => map.get(id)).filter(Boolean) as any[];
+    const map = new Map(products.map((product) => [product.id, product]));
+    const ordered = orderedIds
+      .map((id) => map.get(id))
+      .filter((product): product is RecommendationProduct => Boolean(product));
     // 记录推荐曝光审计（异步，不阻塞主流程；customerId 从令牌派生）
     for (const p of ordered) {
       this.productAccess
@@ -163,42 +201,10 @@ export class RecommendationsService {
     return ordered.map((p) => this.toCatalogProduct(p));
   }
 
-  private catalogSelect(): Prisma.ProductSelect {
-    return {
-      id: true,
-      code: true,
-      name: true,
-      categoryId: true,
-      shortDescription: true,
-      materialType: true,
-      goldWeight: true,
-      craftFee: true,
-      price: true,
-      weight: true,
-      size: true,
-      status: true,
-      salesMode: true,
-      sortOrder: true,
-      isHot: true,
-      isNew: true,
-      isRecommended: true,
-      isLimited: true,
-      isCustom: true,
-      multiDiscount: true,
-      visibility: true,
-      viewCount: true,
-      salesCount: true,
-      category: { select: { id: true, name: true } },
-      images: { orderBy: { sortOrder: 'asc' }, take: 3 },
-      primaryImage: true,
-      listingImage: true,
-    };
-  }
-
   /** 受控目录序列化：图片只返回 mediaUrl，不返回 url/storageKey */
-  private toCatalogProduct(product: any): any {
+  private toCatalogProduct(product: RecommendationProduct) {
     const productId = product.id;
-    const mapImage = (img: any) =>
+    const mapImage = (img: RecommendationImage | null) =>
       img
         ? {
             id: img.id,

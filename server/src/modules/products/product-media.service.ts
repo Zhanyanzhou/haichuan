@@ -32,10 +32,6 @@ export class ProductMediaService {
   private readonly privateRoot = resolve(
     process.env.PRODUCT_MEDIA_ROOT || join(process.cwd(), 'private-media', 'products'),
   );
-  // 迁移源根目录：836 张原始字节（DECISIONS A.13，2026-08-19 起由 public 迁入 server/migration-source）
-  private readonly legacyProductImageRoot = resolve(
-    process.env.PRODUCT_MEDIA_ROOT_LEGACY || join(process.cwd(), 'migration-source', 'product-images'),
-  );
   private readonly uploadsRoot = resolve(process.cwd(), 'uploads');
 
   isAvailable(url?: string | null): boolean {
@@ -59,7 +55,7 @@ export class ProductMediaService {
 
   /**
    * 读取一张产品图片的字节。
-   * 优先按 storageKey 从私有目录读取；无 storageKey 时回退旧公开路径（迁移兼容）。
+   * 优先按 storageKey 从私有目录读取；无 storageKey 时仅回退历史 uploads 路径。
    * 防止 ../ 路径穿越。
    */
   readProductImage(image: {
@@ -178,9 +174,6 @@ export class ProductMediaService {
   }
 
   private resolveLocalPath(url: string): string | null {
-    if (url.startsWith('/images/products/')) {
-      return this.resolveWithin(this.legacyProductImageRoot, url.slice('/images/products/'.length));
-    }
     if (url.startsWith('/uploads/')) {
       return this.resolveWithin(this.uploadsRoot, url.slice('/uploads/'.length));
     }

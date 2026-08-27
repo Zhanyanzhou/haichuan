@@ -12,6 +12,31 @@ import {
 
 export type OnlinePayProvider = 'alipay' | 'wechat';
 
+type AlipayPrecreateResponse = {
+  code?: string;
+  qr_code?: string;
+  sub_msg?: string;
+  msg?: string;
+};
+
+type AlipaySdkClient = {
+  exec: (
+    method: string,
+    params: Record<string, unknown>,
+  ) => Promise<AlipayPrecreateResponse>;
+  checkNotifySign: (
+    postData: Record<string, string>,
+    raw?: boolean,
+  ) => boolean | Promise<boolean>;
+};
+
+type AlipaySdkConstructor = new (config: {
+  appId: string;
+  privateKey: string;
+  alipayPublicKey: string;
+  gateway: string;
+}) => AlipaySdkClient;
+
 export interface CreatePayParams {
   /** 商户单号（Payment.paymentNo） */
   paymentNo: string;
@@ -199,7 +224,9 @@ export class PaymentGatewayService {
     }
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { AlipaySdk } = require('alipay-sdk');
+      const { AlipaySdk } = require('alipay-sdk') as {
+        AlipaySdk: AlipaySdkConstructor;
+      };
       const sdk = new AlipaySdk({
         appId,
         privateKey,
@@ -210,7 +237,7 @@ export class PaymentGatewayService {
         isAvailable: () => true,
         // 当面付预下单（扫码）：适配"顾问生成二维码发给客户"的顾问转化模式
         createPayment: async (params) => {
-          const result: any = await sdk.exec('alipay.trade.precreate', {
+          const result = await sdk.exec('alipay.trade.precreate', {
             notify_url: params.notifyUrl,
             bizContent: {
               out_trade_no: params.paymentNo,
@@ -231,7 +258,7 @@ export class PaymentGatewayService {
             return { verified: false };
           }
           // 官方 SDK 异步通知验签（RSA2）
-          const pass = await (sdk as any).checkNotifySign(parsed, false);
+          const pass = await sdk.checkNotifySign(parsed, false);
           if (!pass) return { verified: false };
           return {
             verified: true,

@@ -136,6 +136,33 @@ test.beforeEach(async ({ page }) => {
   await mockCatalogApi(page);
 });
 
+test("Catalog 在公开商品响应畸形时过滤无效记录而不污染目录", async ({ page }) => {
+  await page.route("**/api/products/public**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        wrapped({
+          list: [
+            products[0],
+            { id: 0, categoryId: 2, name: "非法商品 ID" },
+            { id: 2, categoryId: "not-a-category", name: "非法分类 ID" },
+            null,
+          ],
+          total: 1,
+          facets: { sizes: ["标准", 42, null] },
+        }),
+      ),
+    }),
+  );
+
+  await page.goto("/catalog");
+  await expect(page.getByRole("heading", { name: "作品 01" })).toBeVisible();
+  await expect(page.getByText("非法商品 ID")).toHaveCount(0);
+  await expect(page.getByText("非法分类 ID")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /暂时无法加载/ })).toHaveCount(0);
+});
+
 test("Catalog 使用服务端分页并保持 URL、快速预览与跨页选款盘", async ({ page }) => {
   const firstRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());

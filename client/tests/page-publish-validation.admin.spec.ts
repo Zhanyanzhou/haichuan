@@ -1,4 +1,5 @@
 import { expect, test, type Download, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 /**
  * 店铺装修 —— 发布前校验与边界约束（D3）回归测试
@@ -23,27 +24,11 @@ async function authenticateAdmin(
   page: Page,
   role: "SUPER_ADMIN" | "ADMIN" | "EDITOR" = "SUPER_ADMIN",
 ) {
-  await page.goto("/admin/login");
-  await page.evaluate((currentRole) => {
-    const user = {
-      id: 1,
-      username: "publish-validation-test-admin",
-      realName: "发布校验管理员",
-      role: currentRole,
-    };
-    localStorage.setItem("token", "publish-validation-test-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: {
-          token: "publish-validation-test-token",
-          user,
-          isLoggedIn: true,
-        },
-        version: 0,
-      }),
-    );
-  }, role);
+  await installAdminSession(page, {
+    username: "publish-validation-test-admin",
+    realName: "发布校验管理员",
+    role,
+  });
 }
 
 /** 一个结构合法的草稿（单个首屏主视觉），保证编辑器可正常加载 */
@@ -113,6 +98,7 @@ async function mockEditorApis(
   await page.route(`${API_PREFIX}*`, async (route) => {
     const url = route.request().url();
     const method = route.request().method();
+    if (url.includes("/auth/profile")) return route.fallback();
 
     if (url.includes("/validate")) {
       validateCalls += 1;

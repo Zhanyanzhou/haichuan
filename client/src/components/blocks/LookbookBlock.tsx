@@ -6,9 +6,10 @@ import { getContractRoleRatio, resolveContractAspectRatio } from "@/page-builder
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
+import type { RenderablePageModule } from "@/types/pageModule";
 
 interface LookbookBlockProps {
-  module: { content: Record<string, any>; styleConfig?: Record<string, any> };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 
@@ -113,7 +114,7 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
         )}
         {!pureAtmosphere && (
           <div data-content-role="relatedProducts" className="hc-lookbook__products">
-          {hasProducts ? products.map((product: any, index: number) => (
+          {hasProducts ? products.map((product, index) => (
             <Link
               key={`${product.id || product.name}-${index}`}
               to={product.link || "/products"}

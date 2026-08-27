@@ -34,7 +34,7 @@ export interface SinglePosterPuckProps {
 
 export const singlePosterPuckConfig = {
   render: (props: SinglePosterPuckProps) => (
-    <SinglePosterSection module={convertPuckProps("单图海报", props as any)!} editMode />
+    <SinglePosterSection module={convertPuckProps("单图海报", props)!} editMode />
   ),
   defaultProps: {
     number: "",
@@ -56,7 +56,7 @@ export const singlePosterPuckConfig = {
     __contentTemplate: createContentTemplateMarker("单图海报"),
     locked: false,
   } satisfies SinglePosterPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: SinglePosterPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

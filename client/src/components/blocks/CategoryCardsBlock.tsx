@@ -9,11 +9,34 @@ import { FONT_DISPLAY } from "@/page-builder/designSystem/tokens";
 
 interface CategoryCardsBlockProps {
   module: {
-    content: Record<string, any>;
-    layoutConfig?: Record<string, any>;
-    styleConfig?: Record<string, any>;
+    content: {
+      title?: string;
+      subtitle?: string;
+      categories?: CategoryCardItem[];
+      layout?: string;
+      templateType?: string;
+      imageRatio?: string;
+    };
+    layoutConfig?: { template?: string };
+    styleConfig?: { bgColor?: string };
   };
   editMode?: boolean;
+}
+
+interface CategoryCardItem {
+  id?: string | number;
+  name?: string;
+  image?: string;
+  altText?: string;
+  description?: string;
+  count?: string | number;
+  focusX?: number;
+  focusY?: number;
+  link?: unknown;
+  targetType?: string;
+  productCode?: string;
+  productId?: string | number;
+  linkUrl?: string;
 }
 
 /**
@@ -38,10 +61,10 @@ export default function CategoryCardsBlock({
     ? resolveContractAspectRatio("sceneShopping", "scenes", content.imageRatio, "mobile")
     : resolveContractAspectRatio("categoryCards", "categories", content.imageRatio, "mobile");
   const normalizedCategories = Array.isArray(categories) ? categories.slice(0, CATEGORY_CARDS_CONTRACT.content.maxItems) : [];
-  const getCardLinkUrl = (item: any) => normalizeCatalogIntentUrl(resolveItemLinkUrl(item));
+  const getCardLinkUrl = (item: CategoryCardItem) => normalizeCatalogIntentUrl(resolveItemLinkUrl(item));
   const visibleCategories = editMode
     ? normalizedCategories
-    : normalizedCategories.filter((item: any) => item?.name && item?.image && getCardLinkUrl(item));
+    : normalizedCategories.filter((item) => item.name && item.image && getCardLinkUrl(item));
 
   if (!visibleCategories.length) {
     if (!editMode) return null;
@@ -79,7 +102,7 @@ export default function CategoryCardsBlock({
         } as CSSProperties}
         className="homepage-category-cards__grid"
       >
-          {visibleCategories.map((c: any, i: number) => {
+          {visibleCategories.map((c, i) => {
             const card = (
               <div
                 data-editor-field={`categories.${i}`}

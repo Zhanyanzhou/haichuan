@@ -12,7 +12,7 @@ import {
   IsPositive,
 } from 'class-validator';
 
-/** 公开咨询提交：在 service 之前拦截非法/超长输入（原 body:any 零校验） */
+/** 公开咨询提交：在 service 之前拦截非法或超长输入，避免正文绕过字段校验。 */
 export class CreateInquiryDto {
   @IsString()
   @IsNotEmpty({ message: '请填写称呼' })

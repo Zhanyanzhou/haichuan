@@ -1,28 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 const appMode = process.env.PLAYWRIGHT_APP_MODE === "mock" ? "mock" : "development";
 
 async function authenticateAdmin(page: Page) {
-  await page.addInitScript(() => {
-    const user = {
-      id: 1,
-      username: "toolbar-audit-admin",
-      realName: "测试管理员",
-      role: "SUPER_ADMIN",
-    };
-    localStorage.setItem("token", "toolbar-audit-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: { token: "toolbar-audit-token", user, isLoggedIn: true },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "toolbar-audit-admin",
+    realName: "测试管理员",
   });
 }
 
 async function openDashboard(page: Page, width: number) {
-  await authenticateAdmin(page);
   await page.route("**/api/**", (route) =>
     route.fulfill({
       status: 503,
@@ -30,6 +18,7 @@ async function openDashboard(page: Page, width: number) {
       body: JSON.stringify({ success: false, message: "工具栏确定性测试状态" }),
     }),
   );
+  await authenticateAdmin(page);
   await page.setViewportSize({ width, height: 844 });
   await page.goto("/admin/dashboard");
   await expect(page).not.toHaveURL(/\/admin\/login/);

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { customerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { getRequestErrorMessage } from "@/services/httpClient";
+import type { CustomerAccount } from "@/store/customerAuthStore";
 import "./AccountExperience.css";
 
 type AccountExperienceProps = {
@@ -14,12 +16,12 @@ type AccountExperienceProps = {
     email?: string;
     smsCode?: string;
   }) => void;
-  onWechatAuth: (result: { accessToken: string; customer: unknown }) => void;
+  onWechatAuth: (result: { customer: CustomerAccount }) => void;
 };
 function WechatLoginPanel({
   onAuthenticated,
 }: {
-  onAuthenticated: (result: { accessToken: string; customer: unknown }) => void;
+  onAuthenticated: (result: { customer: CustomerAccount }) => void;
 }) {
   const [qrConnectUrl, setQrConnectUrl] = useState<string | null>(null);
   const [notConfigured, setNotConfigured] = useState(false);
@@ -58,19 +60,15 @@ function WechatLoginPanel({
         type?: string;
         payload?: {
           kind?: "success" | "need-bind" | "error";
-          accessToken?: string;
-          customer?: unknown;
+          customer?: CustomerAccount;
           bindToken?: string;
           message?: string;
         };
       };
       if (data?.type !== "wechat-login-result" || !data.payload) return;
       const payload = data.payload;
-      if (payload.kind === "success" && payload.accessToken && payload.customer) {
-        onAuthenticated({
-          accessToken: payload.accessToken,
-          customer: payload.customer,
-        });
+      if (payload.kind === "success" && payload.customer) {
+        onAuthenticated({ customer: payload.customer });
       } else if (payload.kind === "need-bind" && payload.bindToken) {
         setBindToken(payload.bindToken);
       } else if (payload.kind === "error") {
@@ -97,10 +95,11 @@ function WechatLoginPanel({
         phone,
         password,
       });
-      const result = unwrapResponse<{ accessToken: string; customer: unknown }>(res);
+      const result = unwrapResponse<{ customer: CustomerAccount }>(res);
+      if (!result?.customer) throw new Error("绑定成功但会话未建立");
       onAuthenticated(result);
-    } catch (error: any) {
-      alert(error?.response?.data?.message || error?.message || "绑定失败，请重试");
+    } catch (error: unknown) {
+      alert(getRequestErrorMessage(error, "绑定失败，请重试"));
     } finally {
       setBinding(false);
     }
@@ -221,8 +220,8 @@ function MemberAccess({
     try {
       await customerApi.requestSmsCode({ phone });
       setSmsCooldown(60);
-    } catch (e: any) {
-      alert(e?.response?.data?.message || e?.message || "验证码发送失败");
+    } catch (error: unknown) {
+      alert(getRequestErrorMessage(error, "验证码发送失败"));
     } finally {
       setSendingSms(false);
     }
@@ -368,7 +367,7 @@ export default function AccountExperience({
   onWechatAuth,
 }: AccountExperienceProps) {
   return (
-    <main className="account-page account-page--guest">
+    <div className="account-page account-page--guest">
       <section className="account-hero">
         <p className="account-kicker">HAICHUAN PRIVATE CLIENT</p>
         <h1>
@@ -434,6 +433,6 @@ export default function AccountExperience({
           />
         </div>
       </section>
-    </main>
+    </div>
   );
 }

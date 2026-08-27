@@ -2,6 +2,7 @@
  * templates.ts — 预置页面模板定义
  * Phase 5: 模板系统
  */
+import type { PuckBlock, PuckDocument } from "@/page-builder/types";
 
 
 /** 模板定义 */
@@ -15,7 +16,7 @@ export interface TemplateDefinition {
   scenario?: string;
   tags?: string[];
   /** 模板默认 Puck 数据 */
-  puckData: any;
+  puckData: PuckDocument;
   /** 允许拖入的 Block 类型 */
   allowedBlockTypes: string[];
   version: number;
@@ -773,7 +774,7 @@ const rawPageTemplates: TemplateDefinition[] = [
  * 模板库卡片继续消费下方的空白结构版本；编辑器首次进入消费这份推荐起点。
  * 公开运行时只接受已发布 PageDocument，不能把编辑器种子当成品牌内容兜底。
  */
-export function createPageDocumentSeed(id: string): any | null {
+export function createPageDocumentSeed(id: string): PuckDocument | null {
   const template = rawPageTemplates.find((item) => item.id === id);
   return template?.puckData
     ? JSON.parse(JSON.stringify(template.puckData))
@@ -785,7 +786,7 @@ export function createPageDocumentSeed(id: string): any | null {
  * 占位图片写入草稿/发布数据。编辑器卡片使用独立的 skeleton 示例。
  */
 function asBlankStructuralTemplate(template: TemplateDefinition): TemplateDefinition {
-  const blankBlock = (block: { type?: string; props?: Record<string, any> }) => {
+  const blankBlock = (block: PuckBlock): PuckBlock => {
     const props = { ...(block.props || {}) };
     for (const [key, value] of Object.entries(props)) {
       if (key === "id" || key === "locked" || key === "template" || key === "layout" || key === "spacing" || key === "bgColor" || key === "textColor" || key === "tone") continue;

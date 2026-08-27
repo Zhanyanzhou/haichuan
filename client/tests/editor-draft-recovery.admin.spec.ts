@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 /**
  * 店铺装修 —— 草稿恢复与继续编辑回归测试
@@ -18,22 +19,9 @@ const useMock = process.env.VITE_USE_MOCK === "true";
 const API_PREFIX = "**/api/**";
 
 async function authenticateAdmin(page: Page) {
-  await page.goto("/admin/login");
-  await page.evaluate(() => {
-    const user = {
-      id: 1,
-      username: "editor-draft-test-admin",
-      realName: "草稿回归管理员",
-      role: "SUPER_ADMIN",
-    };
-    localStorage.setItem("token", "editor-draft-test-token");
-    localStorage.setItem(
-      "jewelry-auth",
-      JSON.stringify({
-        state: { token: "editor-draft-test-token", user, isLoggedIn: true },
-        version: 0,
-      }),
-    );
+  await installAdminSession(page, {
+    username: "editor-draft-test-admin",
+    realName: "草稿回归管理员",
   });
 }
 
@@ -108,6 +96,7 @@ async function mockEditorApis(
   await page.route(`${API_PREFIX}*`, async (route) => {
     const url = route.request().url();
     const method = route.request().method();
+    if (url.includes("/auth/profile")) return route.fallback();
 
     if (url.includes("/validate")) {
       return route.fulfill(json({ valid: true, errors: [] }));
@@ -1049,9 +1038,13 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
       }
       return route.fulfill(json([]));
     });
+    await authenticateAdmin(page);
 
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    // 工具栏先于 650ms 防抖发布校验出现。先等初始 home 校验真正完成，
+    // 避免把它在高并发下的延迟到达误记为 SPA 切页后发出的旧页请求。
+    await expect(page.locator(".homepage-editor__toolbar-publish")).toBeEnabled();
     validations.length = 0;
 
     await page.evaluate(() => {

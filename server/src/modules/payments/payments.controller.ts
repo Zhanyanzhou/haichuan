@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { Throttle } from '@nestjs/throttler';
@@ -9,7 +9,19 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PaymentsService } from './payments.service';
 import { UploadService } from '../upload/upload.service';
 import type { OnlinePayProvider } from '../../common/payment-gateway/payment-gateway.service';
-import { CreateManualReceiptDto } from './dto/payment.dto';
+import { CreateChannelPaymentDto, CreateManualReceiptDto, PaymentQueryDto, ReviewPaymentDto } from './dto/payment.dto';
+import type { RawBodyRequest, StaffPrincipal } from '../../common/security/authenticated-principal';
+
+function normalizedRequestHeaders(
+  headers: Request['headers'],
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).flatMap(([name, value]) => {
+      if (value === undefined) return [];
+      return [[name, Array.isArray(value) ? value.join(',') : String(value)]];
+    }),
+  );
+}
 
 // 付款审核角色边界（P0 修复，对应任务优先问题 #5）：
 // - 查看（列表/详情）：SUPER_ADMIN、ADMIN、CUSTOMER_SERVICE（客服需跟进客户付款状态）；
@@ -25,7 +37,7 @@ export class PaymentsController {
   ) {}
 
   @Get()
-  findAll(@Query() query: any) {
+  findAll(@Query() query: PaymentQueryDto) {
     return this.paymentsService.findAll(query);
   }
 
@@ -48,7 +60,7 @@ export class PaymentsController {
   @Post('notify/:provider')
   async notify(
     @Param('provider') provider: string,
-    @Req() request: Request,
+    @Req() request: RawBodyRequest,
     @Res() response: Response,
   ) {
     if (provider !== 'alipay' && provider !== 'wechat') {
@@ -57,8 +69,8 @@ export class PaymentsController {
     }
     // 微信 APIv3 验签必须用原始报文（main.ts 已启用 rawBody）
     let rawBody: string;
-    if (Buffer.isBuffer((request as any).rawBody)) {
-      rawBody = (request as any).rawBody.toString('utf8');
+    if (Buffer.isBuffer(request.rawBody)) {
+      rawBody = request.rawBody.toString('utf8');
     } else if (typeof request.body === 'string') {
       rawBody = request.body;
     } else {
@@ -66,7 +78,7 @@ export class PaymentsController {
     }
     const result = await this.paymentsService.settleFromGateway(
       provider as OnlinePayProvider,
-      (request.headers as Record<string, string>) ?? {},
+      normalizedRequestHeaders(request.headers),
       rawBody,
     );
     if (provider === 'alipay') {
@@ -84,14 +96,11 @@ export class PaymentsController {
   @Post(':orderId/channel')
   @Roles('SUPER_ADMIN', 'ADMIN')
   createChannel(
-    @Param('orderId') orderId: string,
-    @Body('method') method: OnlinePayProvider,
-    @CurrentUser() user: any,
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() dto: CreateChannelPaymentDto,
+    @CurrentUser() user: StaffPrincipal,
   ) {
-    if (method !== 'alipay' && method !== 'wechat') {
-      throw new BadRequestException('method 仅支持 alipay / wechat');
-    }
-    return this.paymentsService.createChannelPayment(+orderId, method, {
+    return this.paymentsService.createChannelPayment(orderId, dto.method, {
       type: 'ADMIN' as const,
       id: user?.id,
       name: user?.realName || user?.username,
@@ -99,8 +108,8 @@ export class PaymentsController {
   }
 
   @Get(':id/proof')
-  async getProof(@Param('id') id: string, @Res() response: Response) {
-    const proof = await this.uploadService.getPaymentProofForStaff(+id);
+  async getProof(@Param('id', ParseIntPipe) id: number, @Res() response: Response) {
+    const proof = await this.uploadService.getPaymentProofForStaff(id);
     response.setHeader('Cache-Control', 'private, no-store');
     response.setHeader('Content-Disposition', 'inline');
     response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -108,14 +117,14 @@ export class PaymentsController {
   }
 
   @Get(':id')
-  findById(@Param('id') id: string) {
-    return this.paymentsService.findById(+id);
+  findById(@Param('id', ParseIntPipe) id: number) {
+    return this.paymentsService.findById(id);
   }
 
   @Put(':id/approve')
   @Roles('SUPER_ADMIN', 'ADMIN')
-  approve(@Param('id') id: string, @Body('reviewNote') reviewNote: string, @CurrentUser() user: any) {
-    return this.paymentsService.approve(+id, user.id, reviewNote, {
+  approve(@Param('id', ParseIntPipe) id: number, @Body() dto: ReviewPaymentDto, @CurrentUser() user: StaffPrincipal) {
+    return this.paymentsService.approve(id, user.id, dto.reviewNote, {
       type: 'ADMIN' as const,
       id: user?.id,
       name: user?.realName || user?.username,
@@ -124,8 +133,8 @@ export class PaymentsController {
 
   @Put(':id/reject')
   @Roles('SUPER_ADMIN', 'ADMIN')
-  reject(@Param('id') id: string, @Body('reviewNote') reviewNote: string, @CurrentUser() user: any) {
-    return this.paymentsService.reject(+id, user.id, reviewNote, {
+  reject(@Param('id', ParseIntPipe) id: number, @Body() dto: ReviewPaymentDto, @CurrentUser() user: StaffPrincipal) {
+    return this.paymentsService.reject(id, user.id, dto.reviewNote, {
       type: 'ADMIN' as const,
       id: user?.id,
       name: user?.realName || user?.username,
@@ -135,7 +144,7 @@ export class PaymentsController {
   // 异常线下实收登记；不得用此入口伪造微信/支付宝网关到账。
   @Post('receipt')
   @Roles('SUPER_ADMIN', 'ADMIN', 'FINANCE')
-  createReceipt(@Body() body: CreateManualReceiptDto, @CurrentUser() user: any) {
+  createReceipt(@Body() body: CreateManualReceiptDto, @CurrentUser() user: StaffPrincipal) {
     return this.paymentsService.createReceipt(body, {
       type: 'ADMIN' as const,
       id: user?.id,

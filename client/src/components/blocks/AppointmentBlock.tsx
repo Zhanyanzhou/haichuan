@@ -4,9 +4,10 @@ import { resolveLinkTargetUrl } from '@/page-builder/utils/linkTarget';
 import { DesignSystemStyles } from '@/page-builder/designSystem/sectionShell';
 import { FONT_DISPLAY, FONT_SANS } from '@/page-builder/designSystem/tokens';
 import { usePublicSiteSettings } from '@/hooks/usePublicSiteSettings';
+import type { RenderablePageModule } from '@/types/pageModule';
 
 interface AppointmentBlockProps {
-  module: { content: Record<string, any>; layoutConfig?: Record<string, any>; styleConfig?: Record<string, any> };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 

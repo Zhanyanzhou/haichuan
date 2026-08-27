@@ -6,13 +6,10 @@ import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS, type WidthToken } from "@/page-builder/designSystem/tokens";
 import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
+import type { RenderablePageModule } from "@/types/pageModule";
 
 interface VideoBlockProps {
-  module: {
-    content: Record<string, any>;
-    layoutConfig?: Record<string, any>;
-    styleConfig?: Record<string, any>;
-  };
+  module: RenderablePageModule;
   editMode?: boolean;
 }
 
@@ -36,7 +33,7 @@ const RATIO_MAP: Record<string, string> = {
 const LEGACY_RATIOS = new Set(["16 / 7", "3 / 4", "21 / 9", "4 / 3"]);
 
 export default function VideoBlock({ module, editMode }: VideoBlockProps) {
-  const { content = {}, layoutConfig = {}, styleConfig = {} } = module;
+  const { content, layoutConfig, styleConfig } = module;
   const {
     videoUrl,
     posterUrl,
@@ -57,7 +54,7 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
   const maxHeight = layoutConfig.maxHeight || 760;
   const videoWidth = (layoutConfig.videoWidth || "standard") as WidthToken;
   const bgColor = styleConfig.bgColor || "#FFFFFF";
-  const requestedRatio = RATIO_MAP[aspectRatio] ?? "";
+  const requestedRatio = aspectRatio ? RATIO_MAP[aspectRatio] ?? "" : "";
   // 历史比例原样渲染;规范比例经契约白名单校验,越界值回退契约默认
   const desktopRatio = LEGACY_RATIOS.has(requestedRatio)
     ? requestedRatio

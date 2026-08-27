@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { Upload, Button, Input, Modal, message } from "antd";
+import { App as AntdApp, Upload, Button, Input, type InputRef } from "antd";
 import {
   InboxOutlined,
   LinkOutlined,
@@ -74,6 +74,7 @@ export default function MediaPickerField({
   previewZoom,
   onReplaceOpenChange,
 }: MediaPickerFieldProps) {
+  const { message, modal } = AntdApp.useApp();
   /** 更换面板：在预览下方内嵌展开，预览保持可见 */
   const [replaceOpen, setReplaceOpen] = useState(false);
   /** 上传区比例后缀：一律由规格派生,schema 的 placeholder 只写人话不写比例 */
@@ -91,7 +92,7 @@ export default function MediaPickerField({
   const hasQualityWarning = Boolean(
     imgSize.loaded && (resolutionTooSmall || matchStatus === "watch" || matchStatus === "risk"),
   );
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<InputRef>(null);
 
   const hasValue = Boolean(value && value.trim().length > 0);
   const isEmpty = !hasValue;
@@ -126,7 +127,7 @@ export default function MediaPickerField({
     try {
       const result = await uploadApi.uploadImage(file);
       const data = unwrapResponse<{ url: string }>(result);
-      const finalUrl = data?.url || (result as any)?.data?.url;
+      const finalUrl = data?.url;
       if (finalUrl) {
         sessionUploadedMedia.add(finalUrl);
         window.dispatchEvent(new CustomEvent(SESSION_MEDIA_UPLOADED_EVENT));
@@ -157,7 +158,7 @@ export default function MediaPickerField({
   const handleClear = () => {
     const doClear = () => onChange?.("");
     if (required) {
-      Modal.confirm({
+      modal.confirm({
         title: "删除这张图片？",
         content: "该图片为必填项，删除后请重新上传或填写链接。",
         okText: "删除",
@@ -290,7 +291,7 @@ export default function MediaPickerField({
       {urlMode && !readOnly && (
         <div style={{ display: "grid", gap: 8, marginTop: hasValue ? 8 : 0 }}>
           <Input
-            ref={inputRef as any}
+            ref={inputRef}
             value={urlInput}
             onChange={(e: ChangeEvent<HTMLInputElement>) =>
               setUrlInput(e.target.value)

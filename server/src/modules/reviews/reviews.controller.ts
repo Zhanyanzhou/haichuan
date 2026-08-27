@@ -8,6 +8,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CustomerAuthGuard } from '../customers/customer-auth.guard';
 import { ReviewsService } from './reviews.service';
 import { CreateReviewDto, ModerateReviewDto } from './dto/review.dto';
+import type { CustomerRequest } from '../../common/security/authenticated-principal';
+import { BoundedListQueryDto } from '../../common/dto/bounded-list-query.dto';
 
 @ApiTags('商品评价')
 @Controller('reviews')
@@ -23,7 +25,7 @@ export class ReviewsController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post()
   @ApiOperation({ summary: '提交评价（订单完成后，先审后展）' })
-  submit(@Req() request: any, @Body() dto: CreateReviewDto) {
+  submit(@Req() request: CustomerRequest, @Body() dto: CreateReviewDto) {
     return this.reviewsService.submit(request.customer.id, dto);
   }
 
@@ -31,7 +33,7 @@ export class ReviewsController {
   @UseGuards(CustomerAuthGuard)
   @Get('me')
   @ApiOperation({ summary: '我的评价（含审核状态）' })
-  mine(@Req() request: any) {
+  mine(@Req() request: CustomerRequest) {
     return this.reviewsService.listMine(request.customer.id);
   }
 
@@ -57,7 +59,7 @@ export class ReviewsController {
   @Roles('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiOperation({ summary: '评价管理列表（按状态筛选）' })
-  listAll(@Query() query: any) {
+  listAll(@Query() query: BoundedListQueryDto) {
     return this.reviewsService.listAll(query);
   }
 

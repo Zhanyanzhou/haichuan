@@ -6,7 +6,18 @@ import { unwrapResponse } from "@/utils/unwrap";
 import AccountExperience from "./AccountExperience";
 import MyAccountDashboard from "./MyAccountDashboard";
 import PartnerApplication from "@/pages/public/PartnerApplication";
-import type { CustomerNotificationPage, CustomerOrder } from "./types";
+import type {
+  CustomerAddress,
+  CustomerInquiry,
+  CustomerNotificationPage,
+  CustomerOrder,
+  CustomerPartnerState,
+  CustomerProfile,
+  CustomerSelectionInquiry,
+} from "./types";
+import { useCustomerAuthStore } from "@/store/customerAuthStore";
+import type { CustomerAccount } from "@/store/customerAuthStore";
+import { getRequestErrorMessage } from "@/services/httpClient";
 
 const EMPTY_NOTIFICATIONS: CustomerNotificationPage = {
   list: [],
@@ -27,11 +38,11 @@ function getRequestStatus(error: unknown): number | undefined {
 
 export default function CustomerCenter() {
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
-  const [selectionInquiries, setSelectionInquiries] = useState<any[]>([]);
-  const [inquiries, setInquiries] = useState<any[]>([]);
-  const [addresses, setAddresses] = useState<any[]>([]);
-  const [profile, setProfile] = useState<any>(null);
-  const [partner, setPartner] = useState<any>(null);
+  const [selectionInquiries, setSelectionInquiries] = useState<CustomerSelectionInquiry[]>([]);
+  const [inquiries, setInquiries] = useState<CustomerInquiry[]>([]);
+  const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
+  const [profile, setProfile] = useState<CustomerProfile | null>(null);
+  const [partner, setPartner] = useState<CustomerPartnerState>(null);
   const [notifications, setNotifications] = useState<CustomerNotificationPage>(EMPTY_NOTIFICATIONS);
   const [notificationError, setNotificationError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,12 +51,18 @@ export default function CustomerCenter() {
 
   const location = useLocation();
   const navigate = useNavigate();
+  const authStatus = useCustomerAuthStore((state) => state.status);
+  const setCustomerAuth = useCustomerAuthStore((state) => state.setAuth);
+  const markCustomerAnonymous = useCustomerAuthStore((state) => state.markAnonymous);
 
   // 安全恢复来源路径：仅允许内部路径（/开头且非 //），防开放重定向
   const consumeReturnTo = (): string | null => {
-    const raw =
-      (location.state as any)?.returnTo ||
-      new URLSearchParams(location.search).get("returnTo");
+    const locationState =
+      typeof location.state === "object" && location.state !== null
+        ? (location.state as Record<string, unknown>)
+        : null;
+    const raw = locationState?.returnTo
+      ?? new URLSearchParams(location.search).get("returnTo");
     if (
       typeof raw === "string" &&
       raw.startsWith("/") &&
@@ -57,8 +74,7 @@ export default function CustomerCenter() {
   };
 
   const clearSession = useCallback(() => {
-    localStorage.removeItem("customerToken");
-    localStorage.removeItem("customer");
+    markCustomerAnonymous();
     setOrders([]);
     setSelectionInquiries([]);
     setInquiries([]);
@@ -67,7 +83,7 @@ export default function CustomerCenter() {
     setPartner(null);
     setNotifications(EMPTY_NOTIFICATIONS);
     setNotificationError(null);
-  }, []);
+  }, [markCustomerAnonymous]);
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -83,31 +99,33 @@ export default function CustomerCenter() {
   }, []);
 
   const load = useCallback(async () => {
-    if (!localStorage.getItem("customerToken")) {
+    if (useCustomerAuthStore.getState().status === 'anonymous') {
       setLoadError(null);
       setLoading(false);
       return;
     }
     setLoadError(null);
     try {
-      const [ordersRes, addressesRes, profileRes, selectionsRes, inquiriesRes] =
+      const profileRes = await customerApi.getProfile();
+      const nextProfile = unwrapResponse<CustomerProfile>(profileRes);
+      setCustomerAuth(nextProfile);
+      setProfile(nextProfile);
+      const [ordersRes, addressesRes, selectionsRes, inquiriesRes] =
         await Promise.all([
           customerApi.getOrders(),
           customerApi.getAddresses(),
-          customerApi.getProfile(),
           customerApi.getSelectionInquiries(),
           customerApi.getInquiries(),
         ]);
       setOrders(unwrapResponse<CustomerOrder[]>(ordersRes) || []);
-      setAddresses(unwrapResponse<any[]>(addressesRes) || []);
-      setProfile(unwrapResponse<any>(profileRes));
-      setSelectionInquiries(unwrapResponse<any[]>(selectionsRes) || []);
-      setInquiries(unwrapResponse<any[]>(inquiriesRes) || []);
+      setAddresses(unwrapResponse<CustomerAddress[]>(addressesRes) || []);
+      setSelectionInquiries(unwrapResponse<CustomerSelectionInquiry[]>(selectionsRes) || []);
+      setInquiries(unwrapResponse<CustomerInquiry[]>(inquiriesRes) || []);
       void loadNotifications();
       // 合作商家状态独立容错：接口不可用（如后端未部署）时不影响账号页整体加载
       try {
         const partnerRes = await partnerApi.getMine();
-        setPartner(unwrapResponse<any>(partnerRes) || null);
+        setPartner(unwrapResponse<CustomerPartnerState>(partnerRes) || null);
       } catch {
         setPartner(null);
       }
@@ -120,25 +138,24 @@ export default function CustomerCenter() {
     } finally {
       setLoading(false);
     }
-  }, [clearSession, loadNotifications]);
+  }, [clearSession, loadNotifications, setCustomerAuth]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   const signOut = () => {
-    clearSession();
+    void customerApi.logout().finally(clearSession);
   };
 
   const completeAuth = async (request: Promise<unknown>) => {
     setAuthLoading(true);
     try {
-      const result = unwrapResponse<{ accessToken: string; customer: unknown }>(
+      const result = unwrapResponse<{ customer: CustomerAccount }>(
         await request,
       );
-      if (!result?.accessToken) throw new Error("账户认证失败");
-      localStorage.setItem("customerToken", result.accessToken);
-      localStorage.setItem("customer", JSON.stringify(result.customer));
+      if (!result?.customer) throw new Error("账户认证失败");
+      setCustomerAuth(result.customer);
       setLoading(true);
       await load();
       message.success("已登录您的会员账户");
@@ -148,20 +165,16 @@ export default function CustomerCenter() {
         navigate(returnTo, { replace: true });
         return;
       }
-    } catch (error: any) {
-      message.error(error?.message || "账户认证失败，请稍后重试");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "账户认证失败，请稍后重试"));
     } finally {
       setAuthLoading(false);
     }
   };
 
-  // 微信扫码登录：postMessage 回传的结果已是业务数据（无需 unwrap），直接落本地并刷新
-  const applyWechatAuth = (result: {
-    accessToken: string;
-    customer: unknown;
-  }) => {
-    localStorage.setItem("customerToken", result.accessToken);
-    localStorage.setItem("customer", JSON.stringify(result.customer));
+  // 微信回调只回传非敏感账户摘要；真实会话已由回调响应写入 HttpOnly Cookie。
+  const applyWechatAuth = (result: { customer: CustomerAccount }) => {
+    setCustomerAuth(result.customer);
     setLoading(true);
     void load();
     message.success("已通过微信登录您的会员账户");
@@ -176,7 +189,7 @@ export default function CustomerCenter() {
       </div>
     );
 
-  const isSignedIn = Boolean(localStorage.getItem("customerToken"));
+  const isSignedIn = authStatus === 'authenticated';
   const accountSection = new URLSearchParams(location.search).get("section");
 
   if (isSignedIn) {

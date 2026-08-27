@@ -1,5 +1,6 @@
 // 微信扫码登录控制器：二维码配置 + 授权回调（HTML postMessage 回传）+ 手机号绑定。
-import { Body, Controller, Get, Post, Query, Res } from "@nestjs/common";
+import { Body, Controller, Get, Post, Query, Req, Res } from "@nestjs/common";
+import type { Request, Response } from "express";
 import { Throttle } from "@nestjs/throttler";
 import { Public } from "../../common/decorators/public.decorator";
 import {
@@ -8,10 +9,18 @@ import {
   type WechatCallbackResult,
 } from "./wechat-auth.service";
 import { BindWechatDto } from "./dto/bind-wechat.dto";
+import { RefreshSessionService } from "../../common/security/refresh-session.service";
+import {
+  buildSessionCookieHeaders,
+  requestSessionMetadata,
+} from "../../common/security/session-security";
 
 @Controller("customers/wechat")
 export class WechatAuthController {
-  constructor(private readonly wechatAuth: WechatAuthService) {}
+  constructor(
+    private readonly wechatAuth: WechatAuthService,
+    private readonly refreshSessions: RefreshSessionService,
+  ) {}
 
   /** 前端据此决定是否渲染扫码入口，并获取二维码地址 */
   @Public()
@@ -31,7 +40,8 @@ export class WechatAuthController {
   async callback(
     @Query("code") code: string,
     @Query("state") state: string,
-    @Res() res: any,
+    @Req() request: Request,
+    @Res() res: Response,
   ) {
     const outcome: WechatCallbackOutcome = code
       ? await this.wechatAuth.handleCallback(code, state)
@@ -39,6 +49,20 @@ export class WechatAuthController {
           result: { kind: "error", message: "缺少授权码" },
           parentOrigin: null,
         };
+    if (outcome.session) {
+      const refresh = await this.refreshSessions.issueCustomer(
+        outcome.session.customerId,
+        requestSessionMetadata(request),
+      );
+      res.setHeader(
+        "Set-Cookie",
+        buildSessionCookieHeaders(
+          "customer",
+          outcome.session.accessToken,
+          refresh.refreshToken,
+        ).headers,
+      );
+    }
     res
       .type("html")
       .send(renderCallbackPage(outcome.result, outcome.parentOrigin));
@@ -48,10 +72,28 @@ export class WechatAuthController {
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post("bind")
-  bind(
+  async bind(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
     @Body() body: BindWechatDto,
   ) {
-    return this.wechatAuth.bindWechat(body);
+    const result = await this.wechatAuth.bindWechat(body);
+    if (request.headers?.["x-session-mode"] === "cookie") {
+      const session = await this.refreshSessions.issueCustomer(
+        result.customer.id,
+        requestSessionMetadata(request),
+      );
+      response.setHeader(
+        "Set-Cookie",
+        buildSessionCookieHeaders(
+          "customer",
+          result.accessToken,
+          session.refreshToken,
+        ).headers,
+      );
+      return { customer: result.customer };
+    }
+    return result;
   }
 }
 

@@ -1,0 +1,126 @@
+name: Release Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      public_site_origin:
+        description: "正式公开站点 Origin（HTTPS，不含路径）"
+        required: true
+        type: string
+      api_base_url:
+        description: "前端 API 基础路径"
+        required: true
+        default: "/api"
+        type: string
+      analytics_enabled:
+        description: "是否把分析能力编入前端制品"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: 检出精确提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: 配置 Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: 登录 GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 计算发布事实
+        id: release
+        shell: bash
+        run: |
+          echo "migration_sha=$(node scripts/verify-migration-integrity.mjs --print-bundle-sha)" >> "$GITHUB_OUTPUT"
+          echo "server_image=ghcr.io/${GITHUB_REPOSITORY,,}-server" >> "$GITHUB_OUTPUT"
+          echo "client_image=ghcr.io/${GITHUB_REPOSITORY,,}-client" >> "$GITHUB_OUTPUT"
+
+      - name: 构建并推送服务端镜像
+        id: server
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: server
+          file: server/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.release.outputs.server_image }}:sha-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            BUILD_REVISION=${{ github.sha }}
+            BUILD_SOURCE=${{ github.server_url }}/${{ github.repository }}
+            MIGRATION_BUNDLE_SHA256=${{ steps.release.outputs.migration_sha }}
+
+      - name: 构建并推送客户端镜像
+        id: client
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: client
+          file: client/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.release.outputs.client_image }}:sha-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            BUILD_REVISION=${{ github.sha }}
+            BUILD_SOURCE=${{ github.server_url }}/${{ github.repository }}
+            MIGRATION_BUNDLE_SHA256=${{ steps.release.outputs.migration_sha }}
+            VITE_API_BASE_URL=${{ inputs.api_base_url }}
+            VITE_PUBLIC_SITE_ORIGIN=${{ inputs.public_site_origin }}
+            VITE_ANALYTICS_ENABLED=${{ inputs.analytics_enabled }}
+
+      - name: 为服务端制品生成签名证明
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-name: ${{ steps.release.outputs.server_image }}
+          subject-digest: ${{ steps.server.outputs.digest }}
+          push-to-registry: true
+
+      - name: 为客户端制品生成签名证明
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-name: ${{ steps.release.outputs.client_image }}
+          subject-digest: ${{ steps.client.outputs.digest }}
+          push-to-registry: true
+
+      - name: 生成不可变发布清单
+        shell: bash
+        env:
+          SERVER_IMAGE_NAME: ${{ steps.release.outputs.server_image }}
+          SERVER_IMAGE_DIGEST: ${{ steps.server.outputs.digest }}
+          CLIENT_IMAGE_NAME: ${{ steps.release.outputs.client_image }}
+          CLIENT_IMAGE_DIGEST: ${{ steps.client.outputs.digest }}
+          MIGRATION_SHA: ${{ steps.release.outputs.migration_sha }}
+        run: |
+          mkdir -p release-output
+          node -e 'const fs=require("node:fs"); const manifest={schemaVersion:1,gitSha:process.env.GITHUB_SHA,migrationBundleSha256:process.env.MIGRATION_SHA,source:`${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`,server:{image:process.env.SERVER_IMAGE_NAME,digest:process.env.SERVER_IMAGE_DIGEST,reference:`${process.env.SERVER_IMAGE_NAME}@${process.env.SERVER_IMAGE_DIGEST}`},client:{image:process.env.CLIENT_IMAGE_NAME,digest:process.env.CLIENT_IMAGE_DIGEST,reference:`${process.env.CLIENT_IMAGE_NAME}@${process.env.CLIENT_IMAGE_DIGEST}`}}; fs.writeFileSync("release-output/release-manifest.json",`${JSON.stringify(manifest,null,2)}\n`);'
+          node scripts/verify-release-images.mjs --manifest release-output/release-manifest.json
+
+      - name: 上传发布清单
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-manifest-${{ github.sha }}
+          path: release-output/release-manifest.json
+          if-no-files-found: error
+          retention-days: 90

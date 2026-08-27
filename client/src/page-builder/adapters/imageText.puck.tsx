@@ -26,7 +26,7 @@ export interface ImageTextPuckProps {
 
 export const imageTextPuckConfig = {
   render: (props: ImageTextPuckProps) => (
-    <ImageTextBlock module={convertPuckProps("图文混排", props as any) as any} editMode />
+    <ImageTextBlock module={convertPuckProps("图文混排", props)!} editMode />
   ),
   defaultProps: {
     label: "",
@@ -44,7 +44,7 @@ export const imageTextPuckConfig = {
     focusY: 50,
     locked: false,
   } satisfies ImageTextPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: ImageTextPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

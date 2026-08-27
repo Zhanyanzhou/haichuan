@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { message } from "antd";
+import { App as AntdApp } from "antd";
 import { customerApi } from "@/services/api";
 import type { CustomerPaymentOrder } from "@/components/commerce/CustomerPaymentDialog";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -10,6 +10,7 @@ import type {
   CustomerOrder,
   CustomerReviewOrder,
 } from "./types";
+import { trackRefund } from "@/hooks/useAnalytics";
 
 const orderStatus: Record<string, string> = {
   PENDING_PAYMENT: "待付款",
@@ -117,7 +118,18 @@ export default function CustomerOrdersPanel({
   onOpenProof,
   onOpenPayment,
 }: CustomerOrdersPanelProps) {
+  const { message } = AntdApp.useApp();
   const [trackingOrderId, setTrackingOrderId] = useState<number | null>(null);
+
+  useEffect(() => {
+    for (const order of orders) {
+      for (const refund of order.refunds ?? []) {
+        if (refund.status === "COMPLETED") {
+          trackRefund(refund.id, order.id, Number(refund.amount));
+        }
+      }
+    }
+  }, [orders]);
   const [trackingData, setTrackingData] = useState<TrackingData | null>(null);
   const [trackingLoading, setTrackingLoading] = useState(false);
 

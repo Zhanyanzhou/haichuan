@@ -24,6 +24,7 @@
 import type { ReactNode } from "react";
 import type { MediaSpec } from "../../fields/MediaPickerField";
 import type { ModuleContractStatus } from "../../config/blockContracts";
+import type { PuckProps } from "../../types";
 
 export type InspectorLayer =
   | "content"
@@ -38,7 +39,7 @@ export type InspectorDevice = "desktop" | "mobile";
 
 /** 传给 visibleWhen / isActive / custom render 的编辑上下文 */
 export interface InspectorContext {
-  props: Record<string, any>;
+  props: PuckProps;
   device: InspectorDevice;
   viewportWidth: number | "100%";
 }
@@ -162,7 +163,7 @@ export interface PresetFieldDef extends FieldBase {
     label: string;
     value: string;
     /** 点击预设时写入 props 的键值组 */
-    patch: Record<string, any>;
+    patch: PuckProps;
     /** 判断当前 props 是否命中该预设（高亮） */
     isActive?: (ctx: InspectorContext) => boolean;
   }>;
@@ -173,7 +174,7 @@ export interface CustomFieldDef extends FieldBase {
   control: "custom";
   render: (
     ctx: InspectorContext & {
-      update: (patch: Record<string, any>) => void;
+      update: (patch: PuckProps) => void;
     },
   ) => ReactNode;
 }
@@ -184,14 +185,14 @@ export interface ArrayFieldDef extends FieldBase {
   /** 条目业务名，如 "卡片" */
   itemLabel: string;
   /** 新增条目的初始值 */
-  defaultItem?: Record<string, any>;
+  defaultItem?: PuckProps;
   /** 合同允许的最少条目数；删除按钮与发布提示共同遵守 */
   minItems?: number;
   maxItems?: number;
   /** 条目字段（复用 FieldDef；条目内不可再嵌套 array） */
   itemFields: FieldDef[];
   /** 条目导航摘要（如卡片标题） */
-  itemSummary?: (item: Record<string, any>) => string;
+  itemSummary?: (item: PuckProps) => string;
 }
 
 export type FieldDef =
@@ -233,9 +234,9 @@ export interface ModuleInspectorSchema {
   /** 系统区块（网站全局设置/业务功能区）：面板隐藏删除/隐藏/恢复默认等动作 */
   systemBlock?: boolean;
   /** 完成度横幅；无契约的模块可省略 */
-  evaluate?: (props: Record<string, any>) => ModuleContractStatus;
+  evaluate?: (props: PuckProps) => ModuleContractStatus;
   /** 「恢复默认」使用；缺省时取 adapter defaultProps */
-  defaults?: Record<string, any>;
+  defaults?: PuckProps;
   /** 分组标题覆盖（如商品模板把「图片素材」改为「选择商品」），未覆盖时用默认标题 */
   groupTitles?: Partial<
     Record<

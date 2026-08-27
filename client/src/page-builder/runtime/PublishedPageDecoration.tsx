@@ -15,6 +15,7 @@ import {
   type PublishedPageDocumentResource,
   type PublishedPageDocumentStatus,
 } from "./usePublishedPageDocument";
+import type { PuckBlock } from "./PuckDocumentRenderer";
 
 // 页面装修器及其编辑器依赖仅在确有已发布内容时加载，避免进入纯展示页首屏。
 const PuckDocumentRenderer = lazy(() => import("./PuckDocumentRenderer"));
@@ -284,7 +285,7 @@ export default function PublishedPageDecoration({
     );
   }
 
-  const renderDecoration = (sectionContent: any[], position: "before" | "after") => {
+  const renderDecoration = (sectionContent: PuckBlock[], position: "before" | "after") => {
     if (!sectionContent.length || !effectiveData) return null;
     const data = { ...effectiveData, content: sectionContent };
     return (

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 async function expectNoHorizontalOverflow(page: import("@playwright/test").Page) {
   await expect
@@ -7,11 +8,15 @@ async function expectNoHorizontalOverflow(page: import("@playwright/test").Page)
 }
 
 test.describe("后台紧凑导航", () => {
+  test.beforeEach(async ({ page }) => {
+    await installAdminSession(page);
+  });
+
   test("1024px 切换为可键盘关闭的抽屉导航", async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 900 });
     await page.goto("/admin/dashboard");
 
-    const trigger = page.getByRole("button", { name: "打开后台导航" });
+    const trigger = page.locator(".admin-header__menu-btn");
     const navigation = page.getByRole("navigation", { name: "后台导航" });
 
     await expect(trigger).toBeVisible();
@@ -21,6 +26,7 @@ test.describe("后台紧凑导航", () => {
     await trigger.click();
     await expect(navigation).toBeVisible();
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(trigger).toHaveAccessibleName("关闭后台导航");
 
     await page.keyboard.press("Escape");
     await expect(navigation).toBeHidden();

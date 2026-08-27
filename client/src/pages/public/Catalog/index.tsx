@@ -1,7 +1,7 @@
 ﻿import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { usePageMetaStore } from "@/store/pageMetaStore";
-import { message } from "antd";
+import { App as AntdApp } from "antd";
 import { useSelectionStore } from "@/store/selectionStore";
 import type { CatalogProduct } from "@/data/catalogData";
 import {
@@ -16,6 +16,7 @@ import { getMaterialCode } from "@/utils/material";
 import {
   trackPageView,
   trackFilter,
+  trackViewItemList,
 } from "@/hooks/useAnalytics";
 import { usePageDecorationState } from "@/page-builder/runtime/PublishedPageDecoration";
 import {
@@ -213,6 +214,7 @@ export default function Catalog({
   mode = "public",
   hasLeadingDecoration: leadingDecorationOverride,
 }: CatalogProps = {}) {
+  const { message } = AntdApp.useApp();
   const location = useLocation();
   const { flags: commerceFlags, loading: commerceFlagsLoading } =
     useCommerceCapabilities();
@@ -381,6 +383,7 @@ export default function Catalog({
     });
   }, [
     removeInvalidSelections,
+    message,
     selectedDataQueryKey,
     selectedIds,
     selectedProducts,
@@ -462,6 +465,11 @@ export default function Catalog({
     if (editorPreview) return;
     trackPageView();
   }, [editorPreview]);
+
+  useEffect(() => {
+    if (editorPreview || apiLoading || apiError) return;
+    trackViewItemList(mergedProducts.length, "catalog");
+  }, [apiError, apiLoading, editorPreview, mergedProducts]);
 
   return (
     <div

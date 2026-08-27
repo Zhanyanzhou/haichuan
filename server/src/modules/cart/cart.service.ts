@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { ProductsService } from '../products/products.service';
 import {
   directPurchaseProductWhere,
+  resolveCustomerProductVisibilities,
   type CustomerProductAccess,
 } from '../products/product-eligibility';
 
@@ -114,13 +115,100 @@ export class CartService {
 
   async getCart(owner: Owner) {
     const where = await this.prepareOwner(owner);
-    return this.prisma.cart.findMany({
+    const items = await this.prisma.cart.findMany({
       where,
       include: {
-        product: { select: { id: true, name: true, code: true, materialType: true, goldWeight: true, price: true, images: { take: 1 } } },
-        sku: { select: { id: true, skuCode: true, material: true, size: true, price: true, goldWeight: true } },
+        product: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            materialType: true,
+            goldWeight: true,
+            price: true,
+            inventoryPolicy: true,
+            status: true,
+            visibility: true,
+            salesMode: true,
+            deletedAt: true,
+            images: { take: 1 },
+          },
+        },
+        sku: {
+          select: {
+            id: true,
+            productId: true,
+            skuCode: true,
+            material: true,
+            size: true,
+            price: true,
+            goldWeight: true,
+            isActive: true,
+            inventories: { select: { quantity: true } },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
+    });
+
+    const visibleVisibilities = resolveCustomerProductVisibilities(owner.customer);
+    return items.map((item) => {
+      const productUnavailable =
+        item.product.deletedAt !== null ||
+        item.product.status !== 'PUBLISHED' ||
+        !visibleVisibilities.includes(item.product.visibility) ||
+        item.product.salesMode !== 'DIRECT_PURCHASE';
+      const skuUnavailable =
+        !item.sku.isActive || item.sku.productId !== item.productId;
+      const availableStock = (item.sku.inventories ?? []).reduce(
+        (sum, inventory) => sum + Math.max(0, inventory.quantity),
+        0,
+      );
+      const quantityInvalid =
+        item.quantity < 1 ||
+        item.quantity > 99 ||
+        (item.product.inventoryPolicy === 'SINGLE_UNIT' && item.quantity !== 1);
+
+      const availability = productUnavailable
+        ? {
+            available: false,
+            status: 'PRODUCT_UNAVAILABLE' as const,
+            message: '商品已下架或不再支持直接购买，请移除后重新选购',
+          }
+        : skuUnavailable
+          ? {
+              available: false,
+              status: 'SKU_UNAVAILABLE' as const,
+              message: '所选规格已停用，请移除后重新选择规格',
+            }
+          : quantityInvalid
+            ? {
+                available: false,
+                status: 'QUANTITY_INVALID' as const,
+                message: '商品数量不符合当前购买规则，请调整后重试',
+              }
+            : availableStock <= 0
+              ? {
+                  available: false,
+                  status: 'OUT_OF_STOCK' as const,
+                  message: '所选规格暂时无库存，请移除或稍后重试',
+                }
+              : availableStock < item.quantity
+                ? {
+                    available: false,
+                    status: 'INSUFFICIENT_STOCK' as const,
+                    message: '库存已发生变化，请减少数量后重试',
+                  }
+                : {
+                    available: true,
+                    status: 'AVAILABLE' as const,
+                    message: null,
+                  };
+
+      return {
+        ...item,
+        availability,
+      };
     });
   }
 

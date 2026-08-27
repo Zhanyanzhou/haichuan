@@ -152,6 +152,8 @@ export interface ProductImage {
   id: number;
   productId: number;
   url: string;
+  /** 公开商品接口使用受控媒体端点，避免暴露存储键和原始路径。 */
+  mediaUrl?: string;
   storageKey?: string | null;
   type: "FRONT" | "SIDE" | "TOP" | "DETAIL" | "WEARING";
   sortOrder: number;

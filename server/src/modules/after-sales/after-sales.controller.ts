@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 import { AfterSalesService } from './after-sales.service';
 import { AfterSalesQueryDto, CreateAfterSalesDto, ReviewAfterSalesDto, UpdateAfterSalesStatusDto } from './dto/after-sales.dto';
 
@@ -25,36 +26,36 @@ export class AfterSalesController {
 
   @ApiBearerAuth()
   @Get(':id')
-  findById(@Param('id') id: string) {
-    return this.afterSalesService.findById(+id);
+  findById(@Param('id', ParseIntPipe) id: number) {
+    return this.afterSalesService.findById(id);
   }
 
   @ApiBearerAuth()
   @Post()
-  create(@Body() dto: CreateAfterSalesDto, @CurrentUser() user: any) {
+  create(@Body() dto: CreateAfterSalesDto, @CurrentUser() user: StaffPrincipal) {
     return this.afterSalesService.create({
       ...dto,
-      operator: { type: 'ADMIN', id: user?.id, name: user?.realName || user?.username },
+      operator: { type: 'ADMIN', id: user.id, name: user.realName || user.username },
     });
   }
 
   @ApiBearerAuth()
   @Put(':id/review')
-  review(@Param('id') id: string, @Body() dto: ReviewAfterSalesDto, @CurrentUser() user: any) {
+  review(@Param('id', ParseIntPipe) id: number, @Body() dto: ReviewAfterSalesDto, @CurrentUser() user: StaffPrincipal) {
     return this.afterSalesService.review(
-      +id,
+      id,
       dto.action as 'APPROVED' | 'REJECTED',
       dto.adminNote,
       dto.approvedRefundAmount,
-      { type: 'ADMIN', id: user?.id, name: user?.realName || user?.username },
+      { type: 'ADMIN', id: user.id, name: user.realName || user.username },
     );
   }
 
   @ApiBearerAuth()
   @Put(':id/status')
-  updateStatus(@Param('id') id: string, @Body() dto: UpdateAfterSalesStatusDto, @CurrentUser() user: any) {
-    return this.afterSalesService.updateStatus(+id, dto.status, dto.adminNote, {
-      type: 'ADMIN', id: user?.id, name: user?.realName || user?.username,
+  updateStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateAfterSalesStatusDto, @CurrentUser() user: StaffPrincipal) {
+    return this.afterSalesService.updateStatus(id, dto.status, dto.adminNote, {
+      type: 'ADMIN', id: user.id, name: user.realName || user.username,
     });
   }
 }

@@ -89,6 +89,20 @@ test.describe("商品 Mock 查询模型", () => {
     expect(products.map((product) => product.id)).toEqual(originalIds);
   });
 
+  test("公开价格排序不消费非直购商品的内部价格", () => {
+    const pricedProducts = products.map((product, index) => ({
+      ...product,
+      salesMode: index === 1 ? "DISPLAY_ONLY" : "DIRECT_PURCHASE",
+    }));
+
+    expect(
+      filterProducts(pricedProducts, {
+        sortBy: "price_asc",
+        publicPriceOnly: true,
+      }).map((product) => product.id),
+    ).toEqual([3, 2]);
+  });
+
   test("显式 Mock 模式下商品目录继续消费精确货号查询", async ({ page }) => {
     test.skip(appMode !== "mock", "该回归仅验证显式 Vite mock 模式");
 
@@ -100,5 +114,40 @@ test.describe("商品 Mock 查询模型", () => {
     await expect(
       page.getByRole("heading", { name: "星云系列 · 足金平安扣吊坠", exact: true }),
     ).toHaveCount(0);
+  });
+
+  test("显式 Mock 模式丢弃本地缓存中的畸形商品记录", async ({ page }) => {
+    test.skip(appMode !== "mock", "该回归仅验证显式 Vite mock 模式");
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        "haichuan.mock-products",
+        JSON.stringify([
+          {
+            id: 901,
+            code: "HC-CACHE-VALID",
+            name: "本地缓存有效作品",
+            categoryId: 10,
+            category: { id: 10, name: "吊坠" },
+            materialType: "GOLD_999",
+            status: "PUBLISHED",
+            visibility: "PUBLIC",
+            salesMode: "DISPLAY_ONLY",
+            images: [],
+            skus: [],
+            certificates: null,
+            tags: [],
+          },
+          { id: "invalid", code: "HC-CACHE-BROKEN" },
+          null,
+        ]),
+      );
+    });
+
+    await page.goto("/catalog?query=HC-CACHE-VALID");
+
+    await expect(
+      page.getByRole("heading", { name: "本地缓存有效作品", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("HC-CACHE-BROKEN")).toHaveCount(0);
   });
 });

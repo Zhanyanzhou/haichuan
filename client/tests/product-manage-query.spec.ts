@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
 
 const useMock = process.env.VITE_USE_MOCK === "true";
 
@@ -8,28 +9,11 @@ test.describe("商品管理列表查询契约", () => {
   test("默认、切换和重置排序均发送后端允许的 sortBy", async ({ page }) => {
     const productQueries: string[] = [];
 
-    await page.addInitScript(() => {
-      localStorage.setItem("token", "mock-jwt-token");
-      localStorage.setItem(
-        "jewelry-auth",
-        JSON.stringify({
-          state: {
-            token: "mock-jwt-token",
-            user: {
-              id: 1,
-              username: "mock-admin",
-              role: "SUPER_ADMIN",
-              name: "Mock Admin",
-            },
-            isLoggedIn: true,
-          },
-          version: 0,
-        }),
-      );
-    });
+    await installAdminSession(page, { username: "mock-admin", realName: "Mock Admin" });
 
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
+      if (url.pathname === "/api/auth/profile") return route.fallback();
       let data: unknown = {};
 
       if (url.pathname === "/api/products") {
@@ -80,23 +64,11 @@ test.describe("商品管理列表查询契约", () => {
   });
 
   test("商品列表失败时不展示服务端原始异常正文", async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem("token", "safe-error-test-token");
-      localStorage.setItem(
-        "jewelry-auth",
-        JSON.stringify({
-          state: {
-            token: "safe-error-test-token",
-            user: { id: 1, username: "safe-error-admin", role: "SUPER_ADMIN" },
-            isLoggedIn: true,
-          },
-          version: 0,
-        }),
-      );
-    });
+    await installAdminSession(page, { username: "safe-error-admin" });
     const rawServerMessage = "SQLSTATE internal_product_table leaked detail";
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
+      if (path === "/api/auth/profile") return route.fallback();
       if (path === "/api/products") {
         return route.fulfill({
           status: 503,

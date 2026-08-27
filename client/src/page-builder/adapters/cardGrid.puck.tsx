@@ -28,8 +28,8 @@ export function renderCardGridPuck(
     <CardGridBlock
       module={convertPuckProps(
         contentTemplateKey === "servicePromises" ? "服务承诺" : "卡片网格",
-        props as any,
-      ) as any}
+        props,
+      )!}
       contentTemplateKey={contentTemplateKey}
     />
   );
@@ -49,7 +49,7 @@ export const cardGridPuckConfig = {
     bgColor: "#FFFFFF",
     locked: false,
   } satisfies CardGridPuckProps,
-  resolvePermissions: (data: any) => {
+  resolvePermissions: (data: { props?: CardGridPuckProps }) => {
     if (data.props?.locked) return { delete: false, drag: false };
     return {};
   },

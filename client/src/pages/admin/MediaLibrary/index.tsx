@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Tabs, Table, Image, Button, Tag, message, Popconfirm, Empty, Space, Upload, Input, Select, Modal } from 'antd';
+import type { TableColumnsType, UploadProps } from 'antd';
 import { PictureOutlined, FileImageOutlined, DeleteOutlined, LinkOutlined, UploadOutlined } from '@ant-design/icons';
 import { productApi, uploadApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
@@ -8,16 +9,43 @@ import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
 import AdminPageHeader from '@/components/common/AdminPageHeader';
 import { AdminLoadingState, AdminEmptyState, AdminErrorState } from '@/components/common/AdminDataStates';
 import type { PaginatedResult } from '@/types';
+import { SecureImage } from '@/components/common/SecureImage';
+
+type PageMediaItem = {
+  url: string;
+  type: 'image' | 'video';
+  name: string;
+  createdAt: string;
+};
+
+type ProductMediaRow = {
+  id: number;
+  productId: number;
+  mediaUrl?: string | null;
+  productName?: string | null;
+  productCode?: string | null;
+  type?: string | null;
+  sortOrder?: number | null;
+};
+
+function isPageMediaItem(value: unknown): value is PageMediaItem {
+  if (typeof value !== 'object' || value === null) return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.url === 'string'
+    && (item.type === 'image' || item.type === 'video')
+    && typeof item.name === 'string'
+    && typeof item.createdAt === 'string';
+}
 
 export default function MediaLibrary() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [images, setImages] = useState<any[]>([]);
+  const [images, setImages] = useState<ProductMediaRow[]>([]);
+  const [productMediaPage, setProductMediaPage] = useState(1);
+  const [productMediaTotal, setProductMediaTotal] = useState(0);
   const [tab, setTab] = useState('pages');
-  const [pageMedia, setPageMedia] = useState<
-    { url: string; type: 'image' | 'video'; name: string; createdAt: string }[]
-  >([]);
+  const [pageMedia, setPageMedia] = useState<PageMediaItem[]>([]);
   const [mediaKeyword, setMediaKeyword] = useState('');
   const [mediaType, setMediaType] = useState<'all' | 'image' | 'video'>('all');
   const [preview, setPreview] = useState<{ url: string; type: 'image' | 'video'; name: string } | null>(null);
@@ -34,7 +62,10 @@ export default function MediaLibrary() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(PAGE_MEDIA_KEY);
-      if (raw) setPageMedia(JSON.parse(raw));
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw);
+        if (Array.isArray(parsed)) setPageMedia(parsed.filter(isPageMediaItem));
+      }
     } catch { /* ignore */ }
   }, []);
 
@@ -43,7 +74,10 @@ export default function MediaLibrary() {
     try { localStorage.setItem(PAGE_MEDIA_KEY, JSON.stringify(list)); } catch { /* ignore */ }
   };
 
-  const handleUpload = async (options: any, type: 'image' | 'video') => {
+  const handleUpload = async (
+    options: Parameters<NonNullable<UploadProps['customRequest']>>[0],
+    type: 'image' | 'video',
+  ) => {
     const { file, onSuccess, onError } = options;
     try {
       const res = type === 'image'
@@ -57,9 +91,9 @@ export default function MediaLibrary() {
       ]);
       message.success('素材已上传');
       onSuccess?.(url);
-    } catch (e: any) {
-      message.error(getSafeAdminErrorMessage(e, '素材上传失败，请检查文件格式和网络后重试。'));
-      onError?.(e);
+    } catch (error: unknown) {
+      message.error(getSafeAdminErrorMessage(error, '素材上传失败，请检查文件格式和网络后重试。'));
+      onError?.(error instanceof Error ? error : new Error('素材上传失败'));
     }
   };
 
@@ -76,41 +110,37 @@ export default function MediaLibrary() {
     persistMedia(pageMedia.filter((m) => m.url !== url));
   };
 
-  const load = async () => {
+  const load = useCallback(async (page = 1) => {
     setLoading(true); setError('');
     try {
-      const res = await productApi.getList({ page: 1, pageSize: 200 });
-      const data = unwrapResponse<PaginatedResult<any>>(res);
-      const allImages: any[] = [];
-      (data?.list || []).forEach((p: any) => {
-        (p.images || []).forEach((img: any) => {
-          allImages.push({ ...img, productName: p.name, productId: p.id, productCode: p.code });
-        });
-      });
-      setImages(allImages);
-    } catch (e: any) { setError(getSafeAdminErrorMessage(e, '商品图片加载失败，请稍后重新加载。')); }
+      const res = await productApi.getMediaList({ page, pageSize: 50 });
+      const data = unwrapResponse<PaginatedResult<ProductMediaRow>>(res);
+      setImages(data?.list || []);
+      setProductMediaTotal(data?.total || 0);
+      setProductMediaPage(page);
+    } catch (error: unknown) { setError(getSafeAdminErrorMessage(error, '商品图片加载失败，请稍后重新加载。')); }
     finally { setLoading(false); }
-  };
+  }, []);
 
   useEffect(() => {
     if (tab === 'products') load();
-  }, [tab]);
+  }, [tab, load]);
 
-  const handleDelete = async (img: any) => {
+  const handleDelete = async (img: ProductMediaRow) => {
     try {
       await productApi.deleteImage(img.productId, img.id);
       message.success('商品图片已删除');
-      load();
+      load(productMediaPage);
     } catch (error) { message.error(getSafeAdminErrorMessage(error, '素材删除失败，请重新加载后重试。')); }
   };
 
-  const columns = [
-    { title: '缩略图', dataIndex: 'url', width: 80, render: (v: string) => v ? <Image src={v} width={48} height={48} style={{ objectFit: 'cover', borderRadius: 4 }} /> : <FileImageOutlined style={{ fontSize: 24, color: 'var(--adm-subtle)' }} /> },
-    { title: '所属产品', render: (_: any, r: any) => <div><a href={`/admin/products`} style={{ color: 'var(--adm-action)' }}>{r.productName || '—'}</a><p style={{ fontSize: 13, lineHeight: '20px', color: 'var(--adm-text)', fontVariantNumeric: 'tabular-nums' }}>{r.productCode}</p></div> },
+  const columns: TableColumnsType<ProductMediaRow> = [
+    { title: '缩略图', dataIndex: 'mediaUrl', width: 80, render: (v: string) => v ? <SecureImage src={v} tokenKind="staff" alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }} /> : <FileImageOutlined style={{ fontSize: 24, color: 'var(--adm-subtle)' }} /> },
+    { title: '所属产品', render: (_, row) => <div><a href={`/admin/products`} style={{ color: 'var(--adm-action)' }}>{row.productName || '—'}</a><p style={{ fontSize: 13, lineHeight: '20px', color: 'var(--adm-text)', fontVariantNumeric: 'tabular-nums' }}>{row.productCode}</p></div> },
     { title: '类型', dataIndex: 'type', render: (v: string) => <Tag>{v || 'FRONT'}</Tag> },
     { title: '排序', dataIndex: 'sortOrder', width: 60 },
-    { title: '操作', width: 100, render: (_: any, r: any) => (
-      <Popconfirm title="删除这张商品图片？" description="删除后需要重新上传才能恢复。" okText="删除图片" cancelText="取消" onConfirm={() => handleDelete(r)}>
+    { title: '操作', width: 100, render: (_, row) => (
+      <Popconfirm title="删除这张商品图片？" description="删除后需要重新上传才能恢复。" okText="删除图片" cancelText="取消" onConfirm={() => handleDelete(row)}>
         <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除图片</Button>
       </Popconfirm>
     )},
@@ -184,7 +214,7 @@ export default function MediaLibrary() {
               error ? <AdminErrorState message={error} onRetry={load} /> :
                 images.length === 0 ? <AdminEmptyState message="暂无商品图片" /> :
                   <Table dataSource={images} rowKey="id" columns={columns} size="middle"
-                    pagination={{ pageSize: 20, showTotal: t => `共 ${t} 张` }} />,
+                    pagination={{ current: productMediaPage, pageSize: 50, total: productMediaTotal, showSizeChanger: false, onChange: (page) => void load(page), showTotal: t => `共 ${t} 张` }} />,
           },
         ]} />
       </Card>

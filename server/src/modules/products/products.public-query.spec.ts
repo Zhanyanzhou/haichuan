@@ -59,6 +59,23 @@ test("公开目录：商品 ids 与分类 categoryIds 分别进入正确字段�
   assert.equal(result.pageSize, 32);
 });
 
+test("公开目录：价格筛选和排序只作用于公开价格的直购商品", async () => {
+  for (const query of [
+    { minPrice: 1_000, maxPrice: 20_000 },
+    { sortBy: "price_asc" as const },
+    { sortBy: "price_desc" as const, salesMode: "DISPLAY_ONLY" },
+  ]) {
+    const { service, findManyCalls } = createService();
+    await service.findPublic(query);
+
+    const where = findManyCalls[0].where;
+    assert.match(JSON.stringify(where.AND), /"salesMode":"DIRECT_PURCHASE"/);
+    if (query.salesMode) {
+      assert.equal(where.salesMode, "DISPLAY_ONLY");
+    }
+  }
+});
+
 test("公开目录：工艺兼容 JSON 数组/字符串，尺寸与多段重量均在服务端过滤", async () => {
   const { service, findManyCalls } = createService();
   await service.findPublic({

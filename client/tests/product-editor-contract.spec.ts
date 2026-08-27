@@ -1,18 +1,12 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { installAdminSession as installMockAdminSession } from "./fixtures/session-auth";
 
 const useMock = process.env.VITE_USE_MOCK === "true";
 
 function installAdminSession(page: Page) {
-  return page.addInitScript(() => {
-    localStorage.setItem("token", "isolated-admin-token");
-    localStorage.setItem("jewelry-auth", JSON.stringify({
-      state: {
-        token: "isolated-admin-token",
-        user: { id: 1, username: "isolated-admin", role: "SUPER_ADMIN", name: "Isolated Admin" },
-        isLoggedIn: true,
-      },
-      version: 0,
-    }));
+  return installMockAdminSession(page, {
+    username: "isolated-admin",
+    realName: "Isolated Admin",
   });
 }
 
@@ -40,6 +34,7 @@ test.describe("商品编辑器现有接口契约", () => {
 
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
+      if (url.pathname === "/api/auth/profile") return route.fallback();
       if (url.pathname === "/api/categories/admin/tree") {
         categoryAttempts += 1;
         if (categoryAttempts === 1) {
@@ -138,6 +133,7 @@ test.describe("商品编辑器现有接口契约", () => {
 
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
+      if (url.pathname === "/api/auth/profile") return route.fallback();
       if (url.pathname === "/api/categories/admin/tree") {
         await fulfill(route, [{ id: 1, name: "戒指", children: [] }]);
         return;
@@ -221,6 +217,7 @@ test.describe("商品编辑器现有接口契约", () => {
 
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
+      if (url.pathname === "/api/auth/profile") return route.fallback();
       if (url.pathname === "/api/products" && route.request().method() === "GET") {
         await fulfill(route, {
           list: [{
@@ -323,6 +320,7 @@ test.describe("商品编辑器现有接口契约", () => {
 
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
+      if (url.pathname === "/api/auth/profile") return route.fallback();
       if (url.pathname === "/api/categories/admin/tree") return fulfill(route, [{ id: 1, name: "戒指", children: [] }]);
       if (url.pathname === "/api/shipping-templates") return fulfill(route, []);
       if (url.pathname === "/api/settings/flags") return fulfill(route, { commerceEnabled: true, cartEnabled: true, paymentEnabled: false });
