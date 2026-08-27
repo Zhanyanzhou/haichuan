@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { KimiService } from "../../common/kimi/kimi.service";
@@ -281,6 +281,10 @@ ${this.classifyOutputSchema}`;
           select: { predictedCategoryId: true },
         })
       )?.predictedCategoryId;
+
+    if (!confirmedCategoryId) {
+      throw new BadRequestException("无法确认：请先选择有效分类");
+    }
 
     const record = await this.prisma.aIClassifyRecord.update({
       where: { id },

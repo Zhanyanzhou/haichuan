@@ -8,6 +8,7 @@ import {
   Body,
   UseGuards,
   ServiceUnavailableException,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -17,7 +18,6 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { BoundedListQueryDto } from '../../common/dto/bounded-list-query.dto';
 import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 import type OpenAI from 'openai';
 import {
@@ -26,6 +26,7 @@ import {
   ChatDto,
   GenerateDescriptionDto,
   ConfirmClassifyDto,
+  AiClassifyListQueryDto,
 } from './dto/ai-classify.dto';
 
 @ApiTags('AI智能分类')
@@ -68,17 +69,17 @@ export class AiClassifyController {
 
   @Get('records')
   @ApiOperation({ summary: '获取分类记录' })
-  async getRecords(@Query() query: BoundedListQueryDto) {
+  async getRecords(@Query() query: AiClassifyListQueryDto) {
     return this.aiClassifyService.getRecords(query);
   }
 
   @Put('confirm/:id')
   async confirm(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() dto: ConfirmClassifyDto,
     @CurrentUser() user: StaffPrincipal,
   ) {
-    return this.aiClassifyService.confirmClassification(+id, {
+    return this.aiClassifyService.confirmClassification(id, {
       status: dto.status,
       confirmedCategoryId: dto.confirmedCategoryId,
       operatorId: user.id,

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Public } from '../../common/decorators/public.decorator';
@@ -7,7 +7,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CustomerAuthGuard } from '../customers/customer-auth.guard';
 import { ReviewsService } from './reviews.service';
-import { CreateReviewDto, ModerateReviewDto } from './dto/review.dto';
+import { CreateReviewDto, ModerateReviewDto, ReviewListQueryDto } from './dto/review.dto';
 import type { CustomerRequest } from '../../common/security/authenticated-principal';
 import { BoundedListQueryDto } from '../../common/dto/bounded-list-query.dto';
 
@@ -43,12 +43,12 @@ export class ReviewsController {
   @Get('product/:productId')
   @ApiOperation({ summary: '作品评价（公开，仅审核通过）' })
   listForProduct(
-    @Param('productId') productId: string,
-    @Query() query: { page?: string; pageSize?: string },
+    @Param('productId', ParseIntPipe) productId: number,
+    @Query() query: BoundedListQueryDto,
   ) {
-    return this.reviewsService.listForProduct(+productId, {
-      page: Number(query.page) || 1,
-      pageSize: Number(query.pageSize) || 10,
+    return this.reviewsService.listForProduct(productId, {
+      page: query.page,
+      pageSize: query.pageSize,
     });
   }
 
@@ -59,7 +59,7 @@ export class ReviewsController {
   @Roles('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiOperation({ summary: '评价管理列表（按状态筛选）' })
-  listAll(@Query() query: BoundedListQueryDto) {
+  listAll(@Query() query: ReviewListQueryDto) {
     return this.reviewsService.listAll(query);
   }
 
@@ -69,9 +69,9 @@ export class ReviewsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiOperation({ summary: '审核评价（通过/驳回）+ 商家回复' })
   moderate(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() dto: ModerateReviewDto,
   ) {
-    return this.reviewsService.moderate(+id, dto);
+    return this.reviewsService.moderate(id, dto);
   }
 }

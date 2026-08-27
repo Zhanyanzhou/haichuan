@@ -1,5 +1,12 @@
 import { IsInt, IsString, Max, Min, MinLength, MaxLength, IsOptional, IsIn, IsArray, ArrayMaxSize } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { BoundedListQueryDto } from '../../../common/dto/bounded-list-query.dto';
+
+export class ReviewListQueryDto extends BoundedListQueryDto {
+  @IsOptional()
+  @IsIn(['all', 'PENDING', 'APPROVED', 'REJECTED'])
+  declare status?: 'all' | 'PENDING' | 'APPROVED' | 'REJECTED';
+}
 
 export class CreateReviewDto {
   @ApiProperty({ description: '来源订单 ID（必须为当前客户已完成的订单且包含该商品）' })

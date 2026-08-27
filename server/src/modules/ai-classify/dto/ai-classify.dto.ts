@@ -7,8 +7,29 @@ import {
   ArrayMaxSize,
   IsIn,
   IsInt,
+  Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { BoundedListQueryDto } from '../../../common/dto/bounded-list-query.dto';
+
+export class AiClassifyListQueryDto extends BoundedListQueryDto {
+  @IsOptional()
+  @IsIn([
+    'all',
+    'auto_confirmed',
+    'pending_confirm',
+    'pending_review',
+    'confirmed',
+    'rejected',
+  ])
+  declare status?:
+    | 'all'
+    | 'auto_confirmed'
+    | 'pending_confirm'
+    | 'pending_review'
+    | 'confirmed'
+    | 'rejected';
+}
 
 export class ClassifyImageDto {
   @ApiProperty({ description: '待分类图片 URL' })
@@ -62,5 +83,6 @@ export class ConfirmClassifyDto {
   })
   @IsOptional()
   @IsInt()
+  @Min(1)
   confirmedCategoryId?: number;
 }
