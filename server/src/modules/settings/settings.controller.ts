@@ -9,6 +9,10 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { requirePublishedPublicContentLocale } from "../../common/content-locale";
 import { BoundedListQueryDto } from "../../common/dto/bounded-list-query.dto";
+import {
+  isCustomerCommerceEnabled,
+  isPartnerApplicationsWriteEnabled,
+} from "../../common/release/release-profile";
 
 @ApiTags("系统设置")
 @ApiBearerAuth()
@@ -70,10 +74,9 @@ export class SettingsController {
   @ApiOperation({ summary: "获取功能开关" })
   @Get("flags")
   getFlags() {
-    // 单一来源：与 CustomerCommerceGuard 读取同一环境变量。
-    // 缺失或写错一律按关闭处理；前端据此隐藏交易 CTA，服务端守卫负责最终拦截。
-    const commerceEnabled =
-      process.env.CUSTOMER_COMMERCE_ENABLED?.trim().toLowerCase() === "true";
+    // 单一来源：与 CustomerCommerceGuard 共用发布档位和交易开关判定。
+    // 缺失、写错或 lead-generation 档位一律关闭；服务端守卫负责最终拦截。
+    const commerceEnabled = isCustomerCommerceEnabled();
     // 行为分析后台：默认开启；显式设置 ANALYTICS_DASHBOARD_ENABLED=false 才关闭。
     const analyticsDashboardEnabled =
       process.env.ANALYTICS_DASHBOARD_ENABLED?.trim().toLowerCase() !== "false";
@@ -81,6 +84,7 @@ export class SettingsController {
       commerceEnabled,
       cartEnabled: commerceEnabled,
       paymentEnabled: commerceEnabled,
+      partnerApplicationsWriteEnabled: isPartnerApplicationsWriteEnabled(),
       analyticsDashboardEnabled,
     };
   }

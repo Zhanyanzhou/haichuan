@@ -25,6 +25,112 @@ async function mockEmptyAdminApis(page: Page) {
   );
 }
 
+async function mockAdminLogin(page: Page) {
+  await page.route("**/api/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/auth/login") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: 200,
+          data: {
+            user: {
+              id: 1,
+              username: "return-path-admin",
+              realName: "回跳测试管理员",
+              role: "ADMIN",
+              status: "ACTIVE",
+            },
+          },
+          message: "ok",
+        }),
+      });
+    }
+
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: 200,
+        data: { list: [], total: 0 },
+        message: "ok",
+      }),
+    });
+  });
+}
+
+async function submitAdminLogin(page: Page) {
+  await page.getByPlaceholder("输入用户名").fill("returnpathadmin");
+  await page.getByPlaceholder("输入密码").fill("TestPassword123!");
+  await page.getByRole("button", { name: "登录" }).click();
+}
+
+test.describe("后台登录安全恢复原页面", () => {
+  test("后台会话失效时把当前路径和查询参数带到登录页", async ({ page }) => {
+    await page.route("**/api/**", (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/api/auth/profile") {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: 200,
+            data: {
+              id: 1,
+              username: "expired-admin",
+              realName: "会话失效管理员",
+              role: "ADMIN",
+              status: "ACTIVE",
+            },
+            message: "ok",
+          }),
+        });
+      }
+      if (path === "/api/payments" || path === "/api/auth/session/refresh") {
+        return route.fulfill({
+          status: 401,
+          contentType: "application/json",
+          body: JSON.stringify({ code: 401, message: "会话已失效" }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data: { list: [], total: 0 }, message: "ok" }),
+      });
+    });
+
+    await page.goto("/admin/trade/payments?status=PENDING");
+
+    await expect(page).toHaveURL(
+      /\/admin\/login\?returnTo=%2Fadmin%2Ftrade%2Fpayments%3Fstatus%3DPENDING$/,
+    );
+  });
+
+  test("登录后恢复受控的后台路径、查询参数和锚点", async ({ page }) => {
+    await mockAdminLogin(page);
+    const returnTo = "/admin/trade/payments?status=PENDING#review";
+
+    await page.goto(`/admin/login?returnTo=${encodeURIComponent(returnTo)}`);
+    await submitAdminLogin(page);
+
+    await expect(page).toHaveURL(
+      /\/admin\/trade\/payments\?status=PENDING#review$/,
+    );
+  });
+
+  test("拒绝站外与登录页回跳并降级到后台首页", async ({ page }) => {
+    await mockAdminLogin(page);
+
+    for (const returnTo of ["https://evil.example/steal", "/admin/login"]) {
+      await page.goto(`/admin/login?returnTo=${encodeURIComponent(returnTo)}`);
+      await submitAdminLogin(page);
+      await expect(page).toHaveURL(/\/admin\/dashboard$/);
+    }
+  });
+});
+
 test.describe("后台页面统一从 authStore 读取角色", () => {
   test("ADMIN 在桌面端保留原有写操作入口", async ({ page }) => {
     await mockEmptyAdminApis(page);

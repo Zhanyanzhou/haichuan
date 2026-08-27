@@ -83,6 +83,7 @@ export class CustomerPaymentsController {
   }
 
   @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseGuards(CustomerCommerceGuard)
   @Post('orders/:orderId/payment/close')
   close(@Req() request: CustomerRequest, @Param('orderId') orderId: string) {
     return this.paymentsService.closeCustomerPayment(

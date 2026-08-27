@@ -7,6 +7,13 @@ import {
   hasCurrentContentTemplatePublicationAttestation,
 } from "../modules/page-modules/content-template-contract";
 import { PageModulesService } from "../modules/page-modules/page-modules.service";
+import {
+  isPartnerApplicationsWriteEnabled,
+  parseReleaseProfile,
+  type ReleaseProfile,
+} from "../common/release/release-profile";
+
+export { parseReleaseProfile, type ReleaseProfile } from "../common/release/release-profile";
 
 export const RELEASE_PAGE_KEYS = [
   "home",
@@ -353,8 +360,24 @@ export async function runReleasePreflight(
     metadata: Prisma.JsonValue,
   ) => Promise<PageValidationResult>,
   migrationIntegrityCheck: () => Promise<ReleasePreflightCheck>,
+  releaseProfile: ReleaseProfile = "lead-generation",
+  options: { partnerApplicationsWriteEnabled?: boolean } = {},
 ) {
   const checks: ReleasePreflightCheck[] = [];
+  const partnerApplicationsWriteEnabled =
+    options.partnerApplicationsWriteEnabled ??
+    isPartnerApplicationsWriteEnabled();
+  checks.push({
+    code: "partner-applications-write-disabled-until-b4",
+    ok: !partnerApplicationsWriteEnabled,
+    summary: partnerApplicationsWriteEnabled
+      ? "合作申请写能力已开启，但协议、资质与审计闭环尚未完成"
+      : "合作申请写能力保持安全关闭",
+    facts: {
+      capability: "partner-applications-write",
+      requiredClosure: "B4",
+    },
+  });
   try {
     checks.push(await migrationIntegrityCheck());
   } catch {
@@ -430,14 +453,23 @@ export async function runReleasePreflight(
       salesMode: "DIRECT_PURCHASE",
     },
   });
-  checks.push({
-    code: "direct-purchase-assortment-present",
-    ok: directPurchaseProductCount > 0,
-    summary: directPurchaseProductCount > 0
-      ? "至少存在一件通过发布质量门禁的直购商品"
-      : "没有可用于真实成交闭环的正式直购商品",
-    facts: { count: directPurchaseProductCount },
-  });
+  checks.push(releaseProfile === "commerce"
+    ? {
+        code: "direct-purchase-assortment-present",
+        ok: directPurchaseProductCount > 0,
+        summary: directPurchaseProductCount > 0
+          ? "至少存在一件通过发布质量门禁的直购商品"
+          : "交易型发布没有可用于真实成交闭环的正式直购商品",
+        facts: { count: directPurchaseProductCount },
+      }
+    : {
+        code: "lead-generation-assortment-commerce-free",
+        ok: directPurchaseProductCount === 0,
+        summary: directPurchaseProductCount === 0
+          ? "线索型发布没有公开直购商品"
+          : "线索型发布仍包含公开直购商品",
+        facts: { count: directPurchaseProductCount },
+      });
 
   const storedSettings = await database.siteSetting.findUnique({
     where: { key: "site" },
@@ -534,13 +566,16 @@ export async function runReleasePreflight(
   }
 
   return {
+    releaseProfile,
     technicalReady: checks.every((check) => check.ok),
     checks,
     manualChecksRequired: [
       "公开联系方式与营业信息真实性签认",
       "品牌文案、法务文案与运营主体签认",
       "公开媒体商用权利与最终视觉签认",
-      "首发商品组合、SKU、库存、价格、配送范围与媒体权利签认",
+      releaseProfile === "commerce"
+        ? "首发商品组合、SKU、库存、价格、配送范围与媒体权利签认"
+        : "首发作品组合、展示模式、作品事实与媒体权利签认",
       "正式域名、TLS、监控、异地备份与目标环境证据",
     ],
   };
@@ -556,6 +591,7 @@ async function main() {
       (pageKey, puckData, metadata) =>
         pageModules.validatePageDocument(pageKey, puckData, metadata),
       () => checkMigrationIntegrity(prisma as unknown as MigrationIntegrityDatabase),
+      parseReleaseProfile(process.env.RELEASE_PROFILE),
     );
     console.log(JSON.stringify(result, null, 2));
     if (!result.technicalReady) process.exitCode = 1;

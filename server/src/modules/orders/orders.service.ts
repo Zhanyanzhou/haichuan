@@ -50,6 +50,7 @@ const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 const OFFLINE_PAYMENT_RESERVATION_MS = 24 * 60 * 60 * 1000;
 const CONFIRMED_PAYMENT_STATUSES = ["PAID", "PARTIAL_REFUND", "REFUNDED"] as const;
 const MANUAL_RECEIPT_METHODS = ["bank_transfer", "store"] as const;
+const ONLINE_PAYMENT_METHODS = ["alipay", "wechat"] as const;
 const CUSTOMER_VISIBLE_EVENT_TYPES: ReadonlySet<string> = new Set([
   TRADE_EVENT_TYPE.ORDER_CREATED,
   TRADE_EVENT_TYPE.ORDER_CANCELLED,
@@ -165,23 +166,25 @@ export class OrdersService implements OnModuleInit {
 
   /**
    * 生成订单号：ORD + 日期 + 4 位日内流水（如 ORD202608130001）。
-   * 事务内查当日最大序号 +1；并发冲突由 orderNo @unique 约束 + create 外层重试兜底。
+   * 事务内按数值后缀取当日最大序号 +1；并发冲突由 orderNo @unique 约束 + create 外层重试兜底。
    * 重试有明确上限，且每次失败的完整事务必须先回滚。
    */
   private async generateOrderNo(tx: Prisma.TransactionClient): Promise<string> {
     const date = businessDateKey();
     const prefix = `ORD${date}`;
-    const latest = await tx.order.findFirst({
-      where: { orderNo: { startsWith: prefix } },
-      orderBy: { orderNo: "desc" },
-      select: { orderNo: true },
-    });
-    let seq = 1;
-    if (latest && latest.orderNo.length > prefix.length) {
-      const parsed = Number.parseInt(latest.orderNo.slice(prefix.length), 10);
-      if (!Number.isNaN(parsed) && parsed >= 0) seq = parsed + 1;
-    }
-    return `${prefix}${String(seq).padStart(4, "0")}`;
+    const suffixStart = prefix.length + 1;
+    const [latest] = await tx.$queryRaw<
+      Array<{ max_sequence: bigint | number | string | null }>
+    >(
+      Prisma.sql`
+        SELECT MAX(CAST(SUBSTRING(order_no, ${suffixStart}) AS UNSIGNED)) AS max_sequence
+        FROM orders
+        WHERE order_no LIKE ${`${prefix}%`}
+          AND SUBSTRING(order_no, ${suffixStart}) REGEXP '^[0-9]+$'
+      `,
+    );
+    const seq = BigInt(String(latest?.max_sequence ?? 0)) + 1n;
+    return `${prefix}${seq.toString().padStart(4, "0")}`;
   }
 
   private createPaymentNo(): string {
@@ -684,11 +687,16 @@ export class OrdersService implements OnModuleInit {
     const order = await tx.order.findFirst({
       where: { id: orderId, status: "PENDING_PAYMENT" },
       include: {
-        payments: { select: { status: true, proofUrl: true } },
+        payments: { select: { status: true, proofUrl: true, method: true } },
       },
     });
     const hasPendingProof = order?.payments.some(
       (payment) => payment.status === 'PENDING' && payment.proofUrl !== null,
+    );
+    const hasPendingOnlinePayment = order?.payments.some(
+      (payment) =>
+        payment.status === "PENDING"
+        && (ONLINE_PAYMENT_METHODS as readonly string[]).includes(payment.method),
     );
     const hasConfirmedPayment = order?.payments.some((payment) =>
       (CONFIRMED_PAYMENT_STATUSES as readonly string[]).includes(payment.status),
@@ -696,6 +704,7 @@ export class OrdersService implements OnModuleInit {
     if (
       !order?.reservedAt ||
       hasPendingProof ||
+      hasPendingOnlinePayment ||
       hasConfirmedPayment ||
       Number(order.paidAmount) !== 0
     ) {
@@ -2267,7 +2276,15 @@ export class OrdersService implements OnModuleInit {
       where: {
         status: "PENDING_PAYMENT",
         reservedAt: { lte: cutoff },
-        payments: { none: { status: "PENDING", proofUrl: { not: null } } },
+        payments: {
+          none: {
+            status: "PENDING",
+            OR: [
+              { proofUrl: { not: null } },
+              { method: { in: [...ONLINE_PAYMENT_METHODS] } },
+            ],
+          },
+        },
       },
       select: { id: true },
     });

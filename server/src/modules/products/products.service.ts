@@ -7,6 +7,10 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import {
+  customerFacingReleaseWhere,
+  isCommerceReleaseProfile,
+} from "../../common/release/release-profile";
+import {
   CreateProductDto,
   AdminProductQueryDto,
   PublicProductQueryDto,
@@ -36,6 +40,7 @@ import { ProductAccessService } from "./product-access.service";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { createHash } from "node:crypto";
 import {
+  customerFacingProductWhereForVisibilities,
   resolveCustomerProductVisibilities,
   type CustomerProductAccess,
 } from "./product-eligibility";
@@ -768,6 +773,7 @@ export class ProductsService {
         price: true,
         status: true,
         publicationQualityStatus: true,
+        salesMode: true,
         visibility: true,
         deletedAt: true,
         category: { select: { id: true, name: true } },
@@ -811,9 +817,13 @@ export class ProductsService {
               ? "ARCHIVED"
               : product.visibility !== "PUBLIC"
                 ? "NON_PUBLIC"
-                : !imageId
-                  ? "MISSING_IMAGE"
-                  : "AVAILABLE";
+                : product.publicationQualityStatus !== "READY"
+                  ? "NOT_READY"
+                  : !isCommerceReleaseProfile() && product.salesMode === "DIRECT_PURCHASE"
+                    ? "RELEASE_HIDDEN"
+                    : !imageId
+                      ? "MISSING_IMAGE"
+                      : "AVAILABLE";
       return {
         ...reference,
         id: product.id,
@@ -871,11 +881,8 @@ export class ProductsService {
   ) {
     const page = this.toBoundedPositiveInt(params.page, 1, 10_000);
     const pageSize = this.toBoundedPositiveInt(params.pageSize, 20, 100);
-    const baseWhere: Prisma.ProductWhereInput = {
-      deletedAt: null,
-      status: "PUBLISHED",
-      visibility: { in: visibilities },
-    };
+    const baseWhere: Prisma.ProductWhereInput =
+      customerFacingProductWhereForVisibilities(visibilities);
     const where: Prisma.ProductWhereInput = { ...baseWhere };
     const andFilters: Prisma.ProductWhereInput[] = [];
 
@@ -1234,7 +1241,9 @@ export class ProductsService {
         product: {
           deletedAt: null,
           status: "PUBLISHED",
+          publicationQualityStatus: "READY",
           visibility: "PUBLIC",
+          ...customerFacingReleaseWhere(),
         },
       },
     });
@@ -1268,7 +1277,14 @@ export class ProductsService {
       where: { id: imageId, productId },
       include: {
         product: {
-          select: { id: true, status: true, visibility: true, deletedAt: true },
+          select: {
+            id: true,
+            status: true,
+            visibility: true,
+            salesMode: true,
+            publicationQualityStatus: true,
+            deletedAt: true,
+          },
         },
       },
     });
@@ -1283,6 +1299,8 @@ export class ProductsService {
       if (
         product.deletedAt ||
         product.status !== "PUBLISHED" ||
+        product.publicationQualityStatus !== "READY" ||
+        (!isCommerceReleaseProfile() && product.salesMode === "DIRECT_PURCHASE") ||
         !visibilities.includes(product.visibility)
       ) {
         // 不可见：统一 404，不泄露商品存在性
@@ -1362,9 +1380,7 @@ export class ProductsService {
     // 游客详情在公开列表白名单上仅追加已获准的工艺字段；
     // description/gemInfo/SKU 与履约细节仍只在登录目录详情返回。
     const publicWhere = {
-      deletedAt: null,
-      status: "PUBLISHED" as const,
-      visibility: "PUBLIC" as const,
+      ...customerFacingProductWhereForVisibilities(["PUBLIC"]),
     };
     let product = await this.prisma.product.findFirst({
       where: {
@@ -1391,9 +1407,7 @@ export class ProductsService {
     if (!value) return null;
     const visibilities = this.resolveVisibleVisibilities(customer);
     const catalogWhere = {
-      deletedAt: null,
-      status: "PUBLISHED" as const,
-      visibility: { in: visibilities },
+      ...customerFacingProductWhereForVisibilities(visibilities),
     };
     let product = await this.prisma.product.findFirst({
       where: {
@@ -1472,9 +1486,7 @@ export class ProductsService {
     const rows = await this.prisma.product.findMany({
       where: {
         id: { in: ids },
-        deletedAt: null,
-        status: "PUBLISHED",
-        visibility: { in: visibilities },
+        ...customerFacingProductWhereForVisibilities(visibilities),
       },
       select: {
         id: true,
@@ -1983,6 +1995,17 @@ export class ProductsService {
   ) {
     await this.syncProductStartingPrice(productId, tx);
     await this.assertInventoryPolicy(productId, tx);
+    await this.revalidatePublishedQualityAfterMutation(productId, tx);
+  }
+
+  /**
+   * 任何会改变公开质量事实的写入，都必须在同一商品行锁与事务内重新计算 READY。
+   * 校验失败时回滚本次写入，避免“数据库仍标 READY、公开事实已失效”的窗口。
+   */
+  private async revalidatePublishedQualityAfterMutation(
+    productId: number,
+    tx: Prisma.TransactionClient,
+  ) {
     const product = await tx.product.findUnique({
       where: { id: productId },
       select: { status: true },
@@ -2219,6 +2242,7 @@ export class ProductsService {
       throw new BadRequestException("媒体文件不可读取，请重新上传");
     }
     const image = await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(productId, tx);
       const created = await tx.productImage.create({
         data: {
           productId,
@@ -2239,15 +2263,19 @@ export class ProductsService {
         },
       });
       const mediaUrl = `/products/catalog/${productId}/media/${created.id}`;
+      let result: ProductImage | (ProductImage & { url: string });
       if (storageKey) {
-        return tx.productImage.update({
+        result = await tx.productImage.update({
           where: { id: created.id },
           data: { url: mediaUrl },
         });
+      } else {
+        // legacy /uploads 与 /images/products 路径是这类记录唯一的底层读取事实，
+        // 数据库必须保留；仅返回值改写为受控端点，公开序列化也不会泄漏底层路径。
+        result = { ...created, url: mediaUrl };
       }
-      // legacy /uploads 与 /images/products 路径是这类记录唯一的底层读取事实，
-      // 数据库必须保留；仅返回值改写为受控端点，公开序列化也不会泄漏底层路径。
-      return { ...created, url: mediaUrl };
+      await this.revalidatePublishedQualityAfterMutation(productId, tx);
+      return result;
     });
     this.notifyPublicChange(productId);
     return image;
@@ -2258,17 +2286,22 @@ export class ProductsService {
     imageId: number,
     data: { type?: string; sortOrder?: number },
   ) {
-    const img = await this.prisma.productImage.findFirst({
-      where: { id: imageId, productId },
-    });
-    if (!img) throw new BadRequestException("图片不属于该商品");
     const updateData: Prisma.ProductImageUpdateInput = {};
     if (data.type !== undefined)
       updateData.type = this.normalizeImageType(data.type);
     if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
-    const image = await this.prisma.productImage.update({
-      where: { id: imageId },
-      data: updateData,
+    const image = await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(productId, tx);
+      const img = await tx.productImage.findFirst({
+        where: { id: imageId, productId },
+      });
+      if (!img) throw new BadRequestException("图片不属于该商品");
+      const updated = await tx.productImage.update({
+        where: { id: imageId },
+        data: updateData,
+      });
+      await this.revalidatePublishedQualityAfterMutation(productId, tx);
+      return updated;
     });
     this.notifyPublicChange(image.productId);
     return image;
@@ -2283,22 +2316,7 @@ export class ProductsService {
       if (!existing)
         throw new NotFoundException("商品图片不存在或不属于该商品");
       const deleted = await tx.productImage.delete({ where: { id: imageId } });
-      const product = await tx.product.findUnique({
-        where: { id: productId },
-        select: { status: true },
-      });
-      if (product?.status === "PUBLISHED") {
-        try {
-          await this.canPublish(productId, tx);
-        } catch (error) {
-          if (error instanceof BadRequestException) {
-            throw new ConflictException(
-              `已发布商品更新后不满足发布条件：${error.message}`,
-            );
-          }
-          throw error;
-        }
-      }
+      await this.revalidatePublishedQualityAfterMutation(productId, tx);
       return deleted;
     });
     this.notifyPublicChange(image.productId);
@@ -2307,18 +2325,17 @@ export class ProductsService {
 
   /** 设置详情主图 */
   async setPrimaryImage(productId: number, imageId: number) {
-    // 验证图片属于该商品
-    const img = await this.prisma.productImage.findFirst({
-      where: { id: imageId, productId },
-    });
-    if (!img) throw new BadRequestException("图片不属于该商品");
-    if (img.isVideo || !this.productMedia.isProductMediaReadable(img)) {
-      throw new BadRequestException("主图必须是可读取的非视频图片");
-    }
-
     // 主图通过 primaryImageId 指针 + sortOrder 表达，不改写图片 type（保留原始视角语义 FRONT/SIDE/...）。
     // 旧实现把所有 FRONT 改 SIDE、目标改 FRONT，会破坏原始拍摄视角。
     const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(productId, tx);
+      const img = await tx.productImage.findFirst({
+        where: { id: imageId, productId },
+      });
+      if (!img) throw new BadRequestException("图片不属于该商品");
+      if (img.isVideo || !this.productMedia.isProductMediaReadable(img)) {
+        throw new BadRequestException("主图必须是可读取的非视频图片");
+      }
       await tx.productImage.update({
         where: { id: imageId },
         data: { sortOrder: 0 },
@@ -2348,6 +2365,7 @@ export class ProductsService {
           data: { listingImageId: imageId },
         });
       }
+      await this.revalidatePublishedQualityAfterMutation(productId, tx);
       return {
         primaryImageId: imageId,
         listingImageId: product.listingImageId || imageId,
@@ -2360,17 +2378,20 @@ export class ProductsService {
 
   /** 直接设置列表图（不裁切） */
   async setListingImage(productId: number, imageId: number) {
-    const img = await this.prisma.productImage.findFirst({
-      where: { id: imageId, productId },
-    });
-    if (!img) throw new BadRequestException("图片不属于该商品");
-    if (img.isVideo || !this.productMedia.isProductMediaReadable(img)) {
-      throw new BadRequestException("列表图必须是可读取的非视频图片");
-    }
-
-    await this.prisma.product.update({
-      where: { id: productId },
-      data: { listingImageId: imageId },
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(productId, tx);
+      const img = await tx.productImage.findFirst({
+        where: { id: imageId, productId },
+      });
+      if (!img) throw new BadRequestException("图片不属于该商品");
+      if (img.isVideo || !this.productMedia.isProductMediaReadable(img)) {
+        throw new BadRequestException("列表图必须是可读取的非视频图片");
+      }
+      await tx.product.update({
+        where: { id: productId },
+        data: { listingImageId: imageId },
+      });
+      await this.revalidatePublishedQualityAfterMutation(productId, tx);
     });
 
     this.notifyPublicChange(productId);
@@ -2379,26 +2400,30 @@ export class ProductsService {
 
   /** 恢复列表图为详情主图 */
   async resetListingToPrimary(productId: number) {
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-      select: { primaryImageId: true, primaryImage: true },
-    });
-    if (!product) throw new NotFoundException("商品不存在");
-    if (
-      !product.primaryImage ||
-      product.primaryImage.isVideo ||
-      !this.productMedia.isProductMediaReadable(product.primaryImage)
-    ) {
-      throw new BadRequestException("当前主图不可读取，无法恢复为列表图");
-    }
-
-    await this.prisma.product.update({
-      where: { id: productId },
-      data: { listingImageId: product.primaryImageId },
+    const listingImageId = await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(productId, tx);
+      const product = await tx.product.findUnique({
+        where: { id: productId },
+        select: { primaryImageId: true, primaryImage: true },
+      });
+      if (!product) throw new NotFoundException("商品不存在");
+      if (
+        !product.primaryImage ||
+        product.primaryImage.isVideo ||
+        !this.productMedia.isProductMediaReadable(product.primaryImage)
+      ) {
+        throw new BadRequestException("当前主图不可读取，无法恢复为列表图");
+      }
+      await tx.product.update({
+        where: { id: productId },
+        data: { listingImageId: product.primaryImageId },
+      });
+      await this.revalidatePublishedQualityAfterMutation(productId, tx);
+      return product.primaryImageId;
     });
 
     this.notifyPublicChange(productId);
-    return { listingImageId: product.primaryImageId };
+    return { listingImageId };
   }
 
   /* ═══ 证书管理 ═══ */

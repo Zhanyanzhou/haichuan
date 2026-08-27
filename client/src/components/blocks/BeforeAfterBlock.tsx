@@ -227,11 +227,11 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
       {actionText && targetUrl ? (
         <div style={{ marginTop: 20, textAlign: "center" }}>
           {editMode ? (
-            <span data-editor-field="actionText linkUrl productId" style={{ color: INK, fontSize: 13, letterSpacing: "0.04em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+            <span data-content-role="action" data-editor-field="actionText linkUrl productId" style={{ color: INK, fontSize: 13, letterSpacing: "0.04em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
               {actionText} <span>→</span>
             </span>
           ) : (
-            <Link to={targetUrl} data-editor-field="actionText linkUrl productId" style={{ color: INK, textDecoration: "none", fontSize: 13, letterSpacing: "0.04em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
+            <Link to={targetUrl} data-content-role="action" data-editor-field="actionText linkUrl productId" style={{ color: INK, textDecoration: "none", fontSize: 13, letterSpacing: "0.04em", fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>
               {actionText} <span>→</span>
             </Link>
           )}

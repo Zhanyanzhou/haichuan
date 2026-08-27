@@ -14,6 +14,7 @@ import {
   getBrowserPublicContentLocale,
   type PublicContentLocale,
 } from "@/i18n/publicLocale";
+import { buildAdminLoginPath } from "@/utils/adminReturnPath";
 
 declare module "axios" {
   interface AxiosRequestConfig {
@@ -31,7 +32,10 @@ declare module "axios" {
   }
 }
 
-export type NormalizedRequestError = Error & { status?: number };
+export type NormalizedRequestError = Error & {
+  status?: number;
+  errorCode?: string;
+};
 
 // Vite 浏览器构建会注入 env；Playwright 的 Node 侧静态合同可能直接加载本模块，
 // 该环境没有注入对象，因此必须保持类型边界并安全降级到同源 /api。
@@ -85,6 +89,10 @@ export function customerAuthHeaders() {
 
 export function requestStatus(error: unknown): number | undefined {
   return (error as NormalizedRequestError | undefined)?.status;
+}
+
+export function requestErrorCode(error: unknown): string | undefined {
+  return (error as NormalizedRequestError | undefined)?.errorCode;
 }
 
 const apiBaseUrl = (clientEnv?.VITE_API_BASE_URL || "/api").replace(
@@ -216,7 +224,7 @@ api.interceptors.response.use(
   },
   async (caught: unknown) => {
     if (!axios.isAxiosError(caught)) return Promise.reject(caught);
-    const error = caught as AxiosError<{ message?: string }>;
+    const error = caught as AxiosError<{ message?: string; errorCode?: string }>;
     const suppressGlobalError = Boolean(error.config?.suppressGlobalError);
     const requestUrl = String(error.config?.url || "");
     if (
@@ -240,7 +248,9 @@ api.interceptors.response.use(
           window.location.pathname.startsWith("/admin") &&
           !window.location.pathname.includes("/admin/login")
         ) {
-          window.location.href = "/admin/login";
+          const returnTo =
+            window.location.pathname + window.location.search + window.location.hash;
+          window.location.replace(buildAdminLoginPath(returnTo));
         } else if (
           domain === "customer" &&
           typeof window !== "undefined" &&
@@ -269,6 +279,7 @@ api.interceptors.response.use(
       error.response?.data?.message || error.message || "网络错误";
     const normalized = new Error(message) as NormalizedRequestError;
     normalized.status = error.response?.status;
+    normalized.errorCode = error.response?.data?.errorCode;
     return Promise.reject(normalized);
   },
 );

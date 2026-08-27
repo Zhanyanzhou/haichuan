@@ -1,6 +1,6 @@
 import { useCallback, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Tabs, Table, Image, Button, Tag, message, Popconfirm, Empty, Space, Upload, Input, Select, Modal } from 'antd';
+import { App as AntdApp, Card, Tabs, Table, Image, Button, Tag, Popconfirm, Empty, Space, Upload, Input, Select, Modal } from 'antd';
 import type { TableColumnsType, UploadProps } from 'antd';
 import { PictureOutlined, FileImageOutlined, DeleteOutlined, LinkOutlined, UploadOutlined } from '@ant-design/icons';
 import { productApi, uploadApi } from '@/services/api';
@@ -38,6 +38,7 @@ function isPageMediaItem(value: unknown): value is PageMediaItem {
 }
 
 export default function MediaLibrary() {
+  const { message } = AntdApp.useApp();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

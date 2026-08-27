@@ -29,6 +29,7 @@ import {
 import { RefreshSessionService } from '../../common/security/refresh-session.service';
 import { CustomerNotificationsService } from './customer-notifications.service';
 import { CustomerNotificationQueryDto } from './dto/customer-notification-query.dto';
+import { CustomerInquiryQueryDto } from './dto/customer-inquiry-query.dto';
 import type { CustomerRequest } from '../../common/security/authenticated-principal';
 
 // 交易域认证说明（P0 修复）：
@@ -224,8 +225,8 @@ export class CustomersController {
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/inquiries')
-  getInquiries(@Req() request: CustomerRequest) {
-    return this.customersService.getInquiries(request.customer.id);
+  getInquiries(@Req() request: CustomerRequest, @Query() query: CustomerInquiryQueryDto) {
+    return this.customersService.getInquiries(request.customer.id, query);
   }
 
   @Public()

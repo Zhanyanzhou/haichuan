@@ -20,14 +20,14 @@ import { OrderListQueryDto } from "./dto/order-query.dto";
 import type { StaffPrincipal } from "../../common/security/authenticated-principal";
 
 // 交易域角色边界（P0 修复，对应任务优先问题 #5）：
-// - 订单查看（列表/详情）：SUPER_ADMIN、ADMIN、CUSTOMER_SERVICE、WAREHOUSE 均可，
-//   客服需跟进订单、仓储需发货，都必须能看订单。
+// - 订单查看（列表/详情）：SUPER_ADMIN、ADMIN、CUSTOMER_SERVICE。
+//   仓储仅通过 /fulfillments 获取履约所需最小投影，不能读取通用订单财务与客户资料。
 // - 交易写操作（人工建单、改状态、强制取消）：仅 SUPER_ADMIN、ADMIN。
-// - 发货登记：SUPER_ADMIN、ADMIN、WAREHOUSE。
+// - 发货登记：仓储统一走 /fulfillments/:id/dispatch；订单兼容入口仅限管理员。
 // - EDITOR 不再拥有任何交易写权限，也不再默认能看交易订单。
 @ApiTags("订单管理")
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles("SUPER_ADMIN", "ADMIN", "CUSTOMER_SERVICE", "WAREHOUSE")
+@Roles("SUPER_ADMIN", "ADMIN", "CUSTOMER_SERVICE")
 @Controller("orders")
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
@@ -89,7 +89,7 @@ export class OrdersController {
   }
 
   @ApiBearerAuth()
-  @Roles("SUPER_ADMIN", "ADMIN", "WAREHOUSE")
+  @Roles("SUPER_ADMIN", "ADMIN")
   @Put(":id/ship")
   @ApiOperation({ summary: "发货并登记物流（由履约流程调用；未付款订单不可发货）" })
   ship(@Param("id", ParseIntPipe) id: number, @Body() dto: ShipOrderDto, @CurrentUser() user: StaffPrincipal) {
@@ -112,7 +112,8 @@ export class OrdersController {
   }
 
   // ════════ 交易中心：订单管理中心操作（金额/地址/备注/签收/顾问/定制阶段） ════════
-  // 金额、地址、顾问、定制阶段为高敏操作，限 SUPER_ADMIN/ADMIN；备注开放客服；签收开放仓储。
+  // 金额、地址、顾问、定制阶段为高敏操作，限 SUPER_ADMIN/ADMIN；备注开放客服。
+  // 仓储送达确认统一走履约接口，避免获得通用订单详情权限。
 
   @ApiBearerAuth()
   @Roles("SUPER_ADMIN", "ADMIN")
@@ -145,7 +146,7 @@ export class OrdersController {
   }
 
   @ApiBearerAuth()
-  @Roles("SUPER_ADMIN", "ADMIN", "WAREHOUSE")
+  @Roles("SUPER_ADMIN", "ADMIN")
   @Put(":id/receive")
   @ApiOperation({ summary: "确认签收（发货维度 SHIPPED→RECEIVED）" })
   confirmReceive(@Param("id", ParseIntPipe) id: number, @CurrentUser() user: StaffPrincipal) {

@@ -19,8 +19,8 @@ function createHarness(conflicts: number, target = 'quotations_quote_no_key') {
   let createAttempts = 0;
   let committed = 0;
   const tx = {
+    $queryRaw: async () => [{ max_sequence: 0n }],
     quotation: {
-      findFirst: async () => null,
       create: async ({ data }: any) => {
         createAttempts += 1;
         if (createAttempts <= conflicts) throw p2002(target);
@@ -64,3 +64,23 @@ test('报价创建不吞掉其他唯一键冲突', async () => {
     committed: 0,
   });
 });
+
+for (const [maximum, expectedSuffix] of [
+  [null, '0001'],
+  [9998, '9999'],
+  [9999n, '10000'],
+  [10000n, '10001'],
+] as const) {
+  test(`报价单日序号最大值 ${maximum ?? '空'} 后生成 ${expectedSuffix}`, async () => {
+    const service = new QuotationsService({} as PrismaService);
+    const tx = {
+      $queryRaw: async () => [{ max_sequence: maximum }],
+    };
+
+    const quoteNo = await (service as unknown as {
+      generateQuoteNo: (transaction: typeof tx) => Promise<string>;
+    }).generateQuoteNo(tx);
+
+    assert.match(quoteNo, new RegExp(`^QT\\d{8}${expectedSuffix}$`));
+  });
+}

@@ -7,6 +7,7 @@ const ProgressBar: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [width, setWidth] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     setLoading(true);
@@ -27,7 +28,7 @@ const ProgressBar: React.FC = () => {
     const timeout = setTimeout(() => {
       clearInterval(timerRef.current);
       setWidth(100);
-      setTimeout(() => {
+      hideTimerRef.current = setTimeout(() => {
         setLoading(false);
         setWidth(0);
       }, 300);
@@ -36,13 +37,18 @@ const ProgressBar: React.FC = () => {
     return () => {
       clearInterval(timerRef.current);
       clearTimeout(timeout);
+      clearTimeout(hideTimerRef.current);
     };
   }, [location.pathname]);
 
   if (!loading) return null;
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-[9999] h-[3px]">
+    <div
+      className="fixed top-0 left-0 right-0 z-[9999] h-[3px]"
+      data-testid="route-progress"
+      aria-hidden="true"
+    >
       <div
         className="h-full bg-brand-gold transition-all duration-300 ease-out"
         style={{

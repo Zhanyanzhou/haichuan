@@ -316,6 +316,29 @@ test("ProductDetail 金重与总重相同时省略重复事实，不同时继续
   await expectWriteContract(writes);
 });
 
+test("ProductDetail 快速切换作品时不会被较早请求的迟到响应覆盖", async ({ page }) => {
+  const first = publicProduct(23, "DISPLAY_ONLY");
+  const second = publicProduct(24, "DISPLAY_ONLY");
+  const firstBarrier = createRouteBarrier();
+  const writes = await mockCatalogDetail(page, {
+    products: [first, second],
+    detailBarriers: { [String(first.id)]: firstBarrier },
+  });
+
+  await page.goto(`/products/${first.id}`);
+  await firstBarrier.reached;
+  await page.evaluate((path) => {
+    window.history.pushState({}, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, `/products/${second.id}`);
+  await expect(page.getByRole("heading", { name: second.name })).toBeVisible();
+
+  firstBarrier.release();
+  await expect(page.getByRole("heading", { name: second.name })).toBeVisible();
+  await expect(page.getByRole("heading", { name: first.name })).toHaveCount(0);
+  await expectWriteContract(writes);
+});
+
 test("Catalog loading、error、empty 与 no-results 状态完整", async ({ page }) => {
   const barrier = createRouteBarrier();
   const writes = await mockCatalogDetail(page, { products: fiveModes, productsBarrier: barrier });
@@ -447,7 +470,10 @@ test("Contact 提交时作品失效会保留可恢复选择，移除后作为普
         await route.fulfill({
           status: 400,
           contentType: "application/json",
-          body: JSON.stringify({ message: "internal product visibility query leaked" }),
+          body: JSON.stringify({
+            errorCode: "INQUIRY_PRODUCT_NOT_AVAILABLE",
+            message: "internal product visibility query leaked",
+          }),
         });
         return;
       }
@@ -474,6 +500,36 @@ test("Contact 提交时作品失效会保留可恢复选择，移除后作为普
   expect(payloads[0]).toMatchObject({ productId: product.id });
   expect(payloads[1]).not.toHaveProperty("productId");
   await expectWriteContract(writes, 0, 0, 2);
+});
+
+test("Contact 普通表单校验失败不会被误判为作品失效", async ({ page }) => {
+  const product = publicProduct(34, "DISPLAY_ONLY");
+  const writes = await mockCatalogDetail(page, {
+    products: [product],
+    onInquiry: async (route) => {
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          errorCode: "VALIDATION_ERROR",
+          message: "internal validation detail",
+        }),
+      });
+    },
+  });
+
+  await page.goto(`/contact?type=product&productRef=${product.code}`);
+  await expect(page.locator(".contact-product-context").getByText(product.name, { exact: true }))
+    .toBeVisible();
+  await fillContactForm(page);
+  await page.getByRole("button", { name: "提交需求" }).click();
+
+  await expect(page.getByText("提交信息未通过校验，请检查后重试。", { exact: true }))
+    .toBeVisible();
+  await expect(page.locator(".contact-product-context").getByText(product.name, { exact: true }))
+    .toBeVisible();
+  await expect(page.getByText("internal validation detail")).toHaveCount(0);
+  await expectWriteContract(writes, 0, 0, 1);
 });
 
 test("Contact 非法作品引用不会发起解析或静默提交，可移除恢复普通咨询", async ({ page }) => {

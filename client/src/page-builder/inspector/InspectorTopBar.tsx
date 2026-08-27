@@ -43,9 +43,12 @@ export default function InspectorTopBar({
       </div>
       <span
         className="homepage-editor__inspector-device"
+        data-dirty={dirty ? "true" : "false"}
         title={dirty ? "本模块有未保存修改" : undefined}
       >
-        {dirty ? "已修改 · " : ""}
+        {dirty ? (
+          <span className="homepage-editor__sr-only">已修改，</span>
+        ) : null}
         {deviceLabel}
       </span>
       <Dropdown

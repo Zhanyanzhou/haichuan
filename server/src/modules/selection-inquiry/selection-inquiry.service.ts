@@ -10,12 +10,15 @@ import {
   isUniqueConstraintError,
   prepareLeadIdempotency,
 } from "../leads/lead-submission";
+import { LeadsService } from "../leads/leads.service";
+import { UpdateSelectionInquiryDto } from "./dto/update-selection-inquiry.dto";
 
 @Injectable()
 export class SelectionInquiryService {
   constructor(
     private prisma: PrismaService,
     private productsService: ProductsService,
+    private leadsService: LeadsService,
   ) {}
 
   private hasSameProductSet(
@@ -201,7 +204,7 @@ export class SelectionInquiryService {
 
         // 写入时以服务端规范名称与受控媒体地址覆盖客户端快照；
         // productSkuSnapshot 为展示性描述文本，保留客户端值（已 trim），不作为可见性或安全依据。
-        return transaction.selectionInquiry.create({
+        const inquiry = await transaction.selectionInquiry.create({
           data: {
             customerName,
             phone,
@@ -237,6 +240,18 @@ export class SelectionInquiryService {
           },
           include: { items: true },
         });
+        await transaction.consentRecord.create({
+          data: {
+            customerId: data.customer?.id || null,
+            purpose: "SERVICE_PRIVACY",
+            decision: "GRANTED",
+            policyVersion: PRIVACY_CONSENT_VERSION,
+            locale: "ZH_CN",
+            source: `selection-inquiry:${inquiry.id}`,
+            decidedAt: privacyConsentedAt,
+          },
+        });
+        return inquiry;
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -269,16 +284,22 @@ export class SelectionInquiryService {
     }
   }
 
-  async update(id: number, data: { status?: string; handlerId?: number }) {
-    const updateData: Prisma.SelectionInquiryUncheckedUpdateInput = {};
-    if (data.status) updateData.status = data.status;
-    if (data.handlerId !== undefined) {
-      updateData.handledBy = data.handlerId;
-      updateData.handledAt = new Date();
-    }
-    return this.prisma.selectionInquiry.update({
-      where: { id },
-      data: updateData,
-    });
+  async update(
+    id: number,
+    data: UpdateSelectionInquiryDto,
+    createdBy?: number,
+  ) {
+    return this.leadsService.updateBySource(
+      "selection",
+      id,
+      {
+        status: data.status,
+        assignedTo: data.handlerId,
+        nextFollowUpAt: data.nextFollowUpAt,
+        closureReason: data.closureReason,
+        reopenReason: data.reopenReason,
+      },
+      createdBy,
+    );
   }
 }

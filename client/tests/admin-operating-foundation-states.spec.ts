@@ -24,6 +24,83 @@ async function fulfillJson(route: Route, data: unknown, status = 200) {
 }
 
 test.describe("后台经营底座第一批状态", () => {
+  test("合作申请加载失败可重试，审核写请求保持可恢复且移动端不产生页面级横向滚动", async ({
+    page,
+  }) => {
+    await authenticateAdmin(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(() => {
+      document.cookie = "hc_csrf=partner-review-csrf; Path=/";
+    });
+    let mode: "fail" | "success" = "fail";
+    const reviewBodies: unknown[] = [];
+
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path.endsWith("/api/auth/profile")) return route.fallback();
+      if (path.endsWith("/api/settings/flags")) {
+        await fulfillJson(route, {
+          commerceEnabled: false,
+          cartEnabled: false,
+          paymentEnabled: false,
+          partnerApplicationsWriteEnabled: true,
+        });
+        return;
+      }
+      if (path.endsWith("/api/partner-applications") && request.method() === "GET") {
+        if (mode === "fail") {
+          await fulfillJson(route, null, 503);
+          return;
+        }
+        await fulfillJson(route, {
+          list: [{
+            id: 7,
+            customerId: 17,
+            applicantName: "合作申请测试客户",
+            applicantPhone: "13800001234",
+            companyName: "测试珠宝工作室",
+            channelType: "线下工作室",
+            status: "PENDING",
+            submittedAt: "2026-08-27T08:00:00.000Z",
+            createdAt: "2026-08-27T08:00:00.000Z",
+          }],
+          total: 1,
+        });
+        return;
+      }
+      if (
+        path.endsWith("/api/partner-applications/7/review")
+        && request.method() === "PUT"
+      ) {
+        reviewBodies.push(request.postDataJSON());
+        await fulfillJson(route, { id: 7, status: "APPROVED" });
+        return;
+      }
+      await fulfillJson(route, {});
+    });
+
+    await page.goto("/admin/partner-applications");
+    await expect(
+      page.getByText("合作申请列表加载失败，请稍后重新加载。"),
+    ).toBeVisible();
+
+    mode = "success";
+    await page.getByRole("button", { name: "重新加载" }).click();
+    await expect(page.getByText("合作申请测试客户")).toBeVisible();
+    await expect(page.getByText("138****1234")).toBeVisible();
+
+    await page.locator(".ant-table-content").evaluate((element) => {
+      element.scrollLeft = element.scrollWidth;
+    });
+    await page.getByRole("button", { name: /审\s*核/ }).click();
+    await page.getByRole("button", { name: "提交审核" }).click();
+    await expect(page.getByText("审核已提交")).toBeVisible();
+    await expect.poll(() => reviewBodies.length).toBe(1);
+    expect(reviewBodies[0]).toEqual({ action: "APPROVED" });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+
   test("Inventory 失败不显示零值，重试后标清全量与当前页并按当前页导出", async ({
     page,
   }) => {

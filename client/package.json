@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "珠宝管理平台 - React 前端",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",

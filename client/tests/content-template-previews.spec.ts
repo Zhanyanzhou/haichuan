@@ -160,7 +160,8 @@ for (const viewport of ["desktop", "mobile"] as const) {
 
     const textBanner = page.locator('[data-content-template-preview="textBanner"]');
     await expect(textBanner.locator('[data-content-role="copy"]')).toHaveCount(1);
-    await expect(textBanner.locator("[data-content-role]")).toHaveCount(1);
+    await expect(textBanner.locator('[data-content-role="bgImage"]')).toHaveCount(1);
+    await expect(textBanner.locator("[data-content-role]")).toHaveCount(2);
     const sceneShopping = page.locator('[data-content-template-preview="sceneShopping"]');
     await expect(sceneShopping.locator('[data-content-role="scenes"]')).toHaveCount(1);
     await expect(sceneShopping.locator('[data-content-role="categories"]')).toHaveCount(0);

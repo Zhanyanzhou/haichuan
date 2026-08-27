@@ -85,16 +85,7 @@ function validateDefaultGeometry(template) {
       invariant(rect && [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite), `${template.key}.defaultGeometryByViewport.${device}.${zone.nodeId}.rect 缺失`);
       invariant(rect.x >= 0 && rect.y >= 0 && rect.width > 0 && rect.height > 0 && rect.x + rect.width <= 1.000001 && rect.y + rect.height <= 1.000001, `${template.key}.defaultGeometryByViewport.${device}.${zone.nodeId}.rect 越界`);
     }
-    if (template.copyPlacementByViewport?.[device] === "stacked") {
-      const overlaidFlowRoles = geometry.zones.filter((zone) => {
-        const role = rolesById.get(zone.roleId);
-        return zone.overlay === true && (role?.kind === "text" || role?.kind === "action");
-      });
-      invariant(
-        overlaidFlowRoles.length === 0,
-        `${template.key}.defaultGeometryByViewport.${device} 堆叠文字与行动不得声明 overlay`,
-      );
-    }
+    // Schema v6 的模板编辑器允许固定语义对象互相叠放；这里只校验对象仍在模块画框内。
   }
 }
 
@@ -352,6 +343,85 @@ function validateUnifiedRoot(template) {
   }
 }
 
+/**
+ * schema v6 的页面级自由编辑策略由合同顶层统一声明，再在生成前展开到
+ * 24 个模板的每个固定语义节点。源 JSON 仍是唯一事实来源，生成物不维护
+ * 第二份手写能力清单。
+ */
+function applyPageSharedFreeEditorPolicy(contractSource) {
+  const policy = contractSource.editorPolicy;
+  if (!policy || policy.version !== 1) return;
+  for (const template of contractSource.templates) {
+    const layoutOverrides = template.editorCapabilities.layoutOverrides ?? {};
+    layoutOverrides.frameRatioRange = { min: 0.25, max: 4, step: 0.01 };
+    layoutOverrides.frameRatioPresets = [
+      ...new Set([
+        ...(layoutOverrides.frameRatioPresets ?? []),
+        "16/9", "4/3", "1/1", "3/4", "9/16",
+      ]),
+    ];
+    const slots = [...(layoutOverrides.slots ?? [])];
+    const textRoles = [...(layoutOverrides.textRoles ?? [])];
+    for (const object of template.editorCapabilities.editableObjects) {
+      object.capabilities = [...new Set([
+        ...object.capabilities,
+        "layout",
+        "layer",
+        ...(object.kind === "text" || object.kind === "action"
+          ? ["visibility", "typography"]
+          : []),
+      ])];
+      object.responsive = {
+        ...object.responsive,
+        layout: "viewport-specific",
+        layer: "viewport-specific",
+        ...(object.kind === "text" || object.kind === "action"
+          ? { visibility: "shared", typography: "shared" }
+          : {}),
+      };
+      if (object.capabilityViewports) {
+        delete object.capabilityViewports.layout;
+        delete object.capabilityViewports.layer;
+        if (Object.keys(object.capabilityViewports).length === 0) {
+          delete object.capabilityViewports;
+        }
+      }
+      object.constraints = {
+        ...object.constraints,
+        movementAxes: ["x", "y"],
+        allowedResize: [...resizeDirections],
+        safeAreaRequired: false,
+      };
+      for (const nodeId of object.nodeIds ?? [object.roleId]) {
+        if (object.kind === "text" || object.kind === "action") {
+          const existingTextRole = textRoles.find((role) => role.roleId === nodeId);
+          if (existingTextRole) {
+            existingTextRole.requiresSafeBand = false;
+          } else {
+            textRoles.push({
+              roleId: nodeId,
+              placementPresets: [],
+              widthPresets: [],
+              align: ["left", "center", "right"],
+              colorTokens: ["ink", "mineral", "ivory"],
+              requiresSafeBand: false,
+              maxLines: 6,
+            });
+          }
+        } else if (!slots.some((slot) => slot.roleId === nodeId)) {
+          slots.push({ roleId: nodeId });
+        }
+      }
+    }
+    template.editorCapabilities.layoutOverrides = {
+      ...layoutOverrides,
+      slots,
+      textRoles,
+    };
+  }
+}
+
+applyPageSharedFreeEditorPolicy(source);
 validateAssetPolicy(source.assetPolicy);
 for (const template of source.templates) {
   validateDefaultGeometry(template);
@@ -454,6 +524,18 @@ function invariant(condition, message) {
 
 invariant(Number.isInteger(source.contractSchemaVersion) && source.contractSchemaVersion > 0, "contractSchemaVersion 必须是正整数");
 invariant(Number.isInteger(source.registryVersion) && source.registryVersion > 0, "registryVersion 必须是正整数");
+invariant(
+  source.editorPolicy?.version === 1
+    && source.editorPolicy.designScope === "page-module-type"
+    && source.editorPolicy.designSurface === "main-canvas"
+    && source.editorPolicy.fixedObjects === true
+    && source.editorPolicy.bounds === "module-frame"
+    && source.editorPolicy.allowSemanticOverlap === true
+    && source.editorPolicy.internalLayerPanel === "select-only"
+    && source.editorPolicy.contentFieldsRemainInstanceScoped === true
+    && source.editorPolicy.viewportGeometry === "independent",
+  "editorPolicy 必须声明页面同类型共享、主画布自由布局与固定对象边界",
+);
 invariant(
   Number.isInteger(source.publicationGateVersion) && source.publicationGateVersion > 0,
   "publicationGateVersion 必须是正整数",
@@ -688,8 +770,10 @@ for (const template of source.templates) {
       invariant(
         object.kind === "action" &&
           object.contentFieldKeys.length > 0 &&
-          object.capabilities.every((capability) => ["content", "link"].includes(capability)),
-        `${template.key}.editableObjects.${object.roleId} 未声明为角色时只能作为 content/link 行动字段组`,
+          object.capabilities.every((capability) => [
+            "content", "link", "layout", "layer", "visibility", "typography",
+          ].includes(capability)),
+        `${template.key}.editableObjects.${object.roleId} 未声明为角色时只能作为固定行动对象`,
       );
     }
     invariant(object.responsive && typeof object.responsive === "object" && !Array.isArray(object.responsive), `${template.key}.editableObjects.${object.roleId}.responsive 缺失`);
@@ -738,7 +822,7 @@ for (const template of source.templates) {
     }
   }
   for (const slot of layoutOverrides.slots ?? []) {
-    invariant(template.roles.some((role) => role.id === slot.roleId), `${template.key}.layoutOverrides.slots 引用了未知角色 ${slot.roleId}`);
+    invariant(editableNodeIds.has(slot.roleId), `${template.key}.layoutOverrides.slots 引用了未知节点 ${slot.roleId}`);
     invariant(!slot.fieldKey || /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(slot.fieldKey), `${template.key}.${slot.roleId}.fieldKey 不合法`);
     invariant(!slot.zoom || (Number.isFinite(slot.zoom.min) && Number.isFinite(slot.zoom.max) && slot.zoom.min >= 1 && slot.zoom.max >= slot.zoom.min), `${template.key}.${slot.roleId}.zoom 范围不合法`);
     const editableObject = editableObjects.find((object) => (object.nodeIds ?? [object.roleId]).includes(slot.roleId));
@@ -756,7 +840,7 @@ for (const template of source.templates) {
     invariant(requiredCapabilities.every((capability) => editableObject.capabilities.includes(capability)), `${template.key}.${slot.roleId} editableObjects 能力未覆盖布局槽位`);
   }
   for (const textRole of layoutOverrides.textRoles ?? []) {
-    const knownTextRole =
+    const knownTextRole = editableNodeIds.has(textRole.roleId) ||
       template.roles.some((role) =>
         role.id === textRole.roleId || role.previewRoles?.includes(textRole.roleId),
       ) ||
@@ -824,6 +908,7 @@ export const CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION = ${source.contractSchemaV
 export const CONTENT_TEMPLATE_CONTRACT_VERSION = ${contractVersion};
 export const CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION = ${source.publicationGateVersion};
 export const CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY = "_contentPublication";
+export const CONTENT_TEMPLATE_EDITOR_POLICY = ${JSON.stringify(source.editorPolicy, sortReplacer, 2)} as const;
 
 export type ContentTemplatePublicationAttestation = {
   gateVersion: number;
@@ -1250,6 +1335,7 @@ export type ContentTemplateIssue = {
     | "content-template-marker-invalid"
     | "content-template-key-mismatch"
     | "content-template-version-unsupported"
+    | "content-template-shared-design-mismatch"
     | "page-validation"
     | \`page-validation-\${string}\`;
   severity: ContentTemplateIssueSeverity;
@@ -2306,6 +2392,76 @@ function getInstanceOverrideIssues(input: {
             path + ".typography.safeBand",
             nodeId,
             "error",
+          ));
+        }
+      }
+    }
+    for (const editableObject of input.contract.editorCapabilities.editableObjects) {
+      const role = input.contract.roles.find((candidate) => candidate.id === editableObject.roleId);
+      if (!role?.required) continue;
+      for (const nodeId of editableObject.nodeIds ?? [editableObject.roleId]) {
+        const rawNode = nodes[nodeId];
+        if (isRecord(rawNode) && rawNode.enabled === false) {
+          issues.push(issue(
+            "必需对象不能隐藏。",
+            basePath + ".nodes." + nodeId + ".enabled",
+            nodeId,
+            "error",
+          ));
+        }
+      }
+    }
+    for (const viewport of ["desktop", "mobile"] as const) {
+      const explicitRects = Object.entries(nodes).flatMap(([nodeId, rawNode]) => {
+        if (!isRecord(rawNode) || rawNode.enabled === false || !isRecord(rawNode.rectByViewport)) return [];
+        const rawRect = rawNode.rectByViewport[viewport];
+        if (!isRecord(rawRect)) return [];
+        const rect = {
+          x: Number(rawRect.x),
+          y: Number(rawRect.y),
+          width: Number(rawRect.width),
+          height: Number(rawRect.height),
+        };
+        if (!Object.values(rect).every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) return [];
+        const editableObject = findContentTemplateEditableObject(input.contract, nodeId);
+        if (!editableObject) return [];
+        const zByViewport = isRecord(rawNode.zIndexByViewport) ? rawNode.zIndexByViewport : {};
+        return [{
+          nodeId,
+          rect,
+          zIndex: Number.isInteger(Number(zByViewport[viewport])) ? Number(zByViewport[viewport]) : 2,
+          editableObject,
+        }];
+      });
+      for (let index = 0; index < explicitRects.length; index += 1) {
+        for (let otherIndex = index + 1; otherIndex < explicitRects.length; otherIndex += 1) {
+          const left = explicitRects[index];
+          const right = explicitRects[otherIndex];
+          if (left.editableObject === right.editableObject) continue;
+          const intersectionWidth = Math.min(left.rect.x + left.rect.width, right.rect.x + right.rect.width) - Math.max(left.rect.x, right.rect.x);
+          const intersectionHeight = Math.min(left.rect.y + left.rect.height, right.rect.y + right.rect.height) - Math.max(left.rect.y, right.rect.y);
+          if (intersectionWidth <= 0 || intersectionHeight <= 0) continue;
+          const action = left.editableObject.kind === "action"
+            ? left
+            : right.editableObject.kind === "action"
+              ? right
+              : undefined;
+          const cover = action === left ? right : left;
+          const actionHasContent = action?.editableObject.contentFieldKeys.some((fieldKey) => {
+            const value = input.props[fieldKey];
+            return typeof value === "string" && value.trim().length > 0;
+          });
+          const fullyCovered = Boolean(action && actionHasContent && cover.zIndex > action.zIndex &&
+            cover.rect.x <= action.rect.x && cover.rect.y <= action.rect.y &&
+            cover.rect.x + cover.rect.width >= action.rect.x + action.rect.width &&
+            cover.rect.y + cover.rect.height >= action.rect.y + action.rect.height);
+          issues.push(issue(
+            fullyCovered
+              ? "行动对象被更高层对象完全遮挡，无法形成有效交互区域。"
+              : "对象存在自定义重叠；请在真实画布检查裁切、文字拥挤与可读性。",
+            basePath + ".nodes." + (action?.nodeId ?? left.nodeId) + ".rectByViewport." + viewport,
+            action?.nodeId ?? left.nodeId,
+            fullyCovered ? "error" : "warning",
           ));
         }
       }

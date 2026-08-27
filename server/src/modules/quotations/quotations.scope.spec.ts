@@ -103,6 +103,7 @@ test('销售创建与更新报价时负责人由服务端强制为本人', async
   let updateData: any;
   let updateWhere: any;
   const tx = {
+    $queryRaw: async () => [{ max_sequence: 0n }],
     quotation: {
       findFirst: async () => null,
       create: async ({ data }: any) => {

@@ -1,14 +1,25 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：5ed6616593c3e10ae89d9ea4ee6b732e3fb8cb20222202c9cf58fce7ea0ba3e5
+ * SHA-256：d52de5523dfb216844ffac8fed878ac49f9d241cae97084605a41cb4f8be857c
  */
 
-export const CONTENT_TEMPLATE_REGISTRY_VERSION = 14;
-export const CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION = 5;
-export const CONTENT_TEMPLATE_CONTRACT_VERSION = 5;
-export const CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION = 2;
+export const CONTENT_TEMPLATE_REGISTRY_VERSION = 15;
+export const CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION = 6;
+export const CONTENT_TEMPLATE_CONTRACT_VERSION = 6;
+export const CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION = 3;
 export const CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY = "_contentPublication";
+export const CONTENT_TEMPLATE_EDITOR_POLICY = {
+  "allowSemanticOverlap": true,
+  "bounds": "module-frame",
+  "contentFieldsRemainInstanceScoped": true,
+  "designScope": "page-module-type",
+  "designSurface": "main-canvas",
+  "fixedObjects": true,
+  "internalLayerPanel": "select-only",
+  "version": 1,
+  "viewportGeometry": "independent"
+} as const;
 
 export type ContentTemplatePublicationAttestation = {
   gateVersion: number;
@@ -654,6 +665,7 @@ export type ContentTemplateIssue = {
     | "content-template-marker-invalid"
     | "content-template-key-mismatch"
     | "content-template-version-unsupported"
+    | "content-template-shared-design-mismatch"
     | "page-validation"
     | `page-validation-${string}`;
   severity: ContentTemplateIssueSeverity;
@@ -1119,7 +1131,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content",
             "visibility",
-            "typography"
+            "typography",
+            "layout",
+            "layer"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -1127,7 +1141,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": true,
             "allowTypography": true,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -1140,8 +1163,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -1155,6 +1181,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "responsive": {
             "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
             "typography": "shared",
             "visibility": "shared"
           },
@@ -1165,7 +1193,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "content",
             "link",
             "visibility",
-            "typography"
+            "typography",
+            "layout",
+            "layer"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -1173,7 +1203,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": true,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -1186,8 +1225,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.04,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "buttonText",
@@ -1203,6 +1245,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "responsive": {
             "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
             "link": "shared",
             "typography": "shared",
             "visibility": "shared"
@@ -1220,12 +1264,17 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "21 / 6",
           "16 / 9",
           "3 / 2",
-          "4 / 5"
+          "4 / 5",
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
         ],
         "frameRatioRange": {
-          "max": 3.5,
-          "min": 0.8,
-          "step": 0.05
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
         },
         "slots": [
           {
@@ -1254,7 +1303,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "ivory"
             ],
             "maxLines": 2,
-            "requiresSafeBand": true,
+            "requiresSafeBand": false,
             "roleId": "title",
             "sizePresets": [
               "small",
@@ -1272,7 +1321,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "ivory"
             ],
             "maxLines": 3,
-            "requiresSafeBand": true,
+            "requiresSafeBand": false,
             "roleId": "subtitle",
             "sizePresets": [
               "small",
@@ -1289,12 +1338,46 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "ivory"
             ],
             "maxLines": 1,
-            "requiresSafeBand": true,
+            "requiresSafeBand": false,
             "roleId": "buttonText",
             "sizePresets": [
               "small",
               "standard"
             ]
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "primaryAction",
+            "widthPresets": []
           }
         ]
       },
@@ -1456,7 +1539,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 5,
+    "version": 6,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "standard"
@@ -1595,7 +1678,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "items"
+            "items",
+            "layout",
+            "layer"
           ],
           "collectionFieldKeys": [
             "cards"
@@ -1606,7 +1691,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -1619,7 +1713,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.1,
               "width": 0.12
             },
-            "movementAxes": [],
+            "movementAxes": [
+              "x",
+              "y"
+            ],
             "safeAreaRequired": false
           },
           "contentFieldKeys": [
@@ -1628,13 +1725,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "kind": "collection",
           "responsive": {
             "content": "shared",
-            "items": "shared"
+            "items": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific"
           },
           "roleId": "points"
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -1642,7 +1745,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -1655,8 +1767,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -1664,7 +1779,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "text",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "copy"
         }
@@ -1679,6 +1798,42 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "compact",
           "standard",
           "spacious"
+        ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
+        "slots": [
+          {
+            "roleId": "points"
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
+          }
         ]
       },
       "primaryTask": "structured"
@@ -1814,7 +1969,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "standard"
@@ -2027,6 +2182,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "standard",
           "wide"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "images",
@@ -2046,7 +2213,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "step": 0.05
             }
           }
-        ]
+        ],
+        "textRoles": []
       },
       "primaryTask": "media"
     },
@@ -2198,7 +2366,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -2410,7 +2578,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -2418,7 +2590,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -2431,8 +2612,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -2440,7 +2624,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "text",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "copy"
         }
@@ -2451,6 +2639,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "grid-3",
           "grid-4"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "categories",
@@ -2462,6 +2662,25 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "4 / 5"
             ],
             "roleId": "categories"
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
           }
         ]
       },
@@ -2620,7 +2839,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "full"
@@ -2828,7 +3047,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -2836,7 +3059,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -2849,8 +3081,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -2858,7 +3093,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "text",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "copy"
         }
@@ -2868,6 +3107,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "grid-2",
           "grid-3"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "certificates",
@@ -2880,6 +3131,25 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "4 / 5"
             ],
             "roleId": "certificates"
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
           }
         ]
       },
@@ -3033,7 +3303,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
@@ -3043,7 +3313,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     "commercialPurpose": "信任建立",
     "contentBudget": {
       "limits": {},
-      "maxCtas": 0,
+      "maxCtas": 1,
       "requiredText": []
     },
     "copyPlacementByViewport": {
@@ -3107,6 +3377,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             },
             "role": "marker",
             "roleId": "comparisonHandle"
+          },
+          {
+            "nodeId": "action",
+            "overlay": true,
+            "rect": {
+              "height": 0.08,
+              "width": 0.24,
+              "x": 0.38,
+              "y": 0.86
+            },
+            "role": "action",
+            "roleId": "action"
           }
         ]
       },
@@ -3166,6 +3448,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             },
             "role": "marker",
             "roleId": "comparisonHandle"
+          },
+          {
+            "nodeId": "action",
+            "overlay": true,
+            "rect": {
+              "height": 0.08,
+              "width": 0.6,
+              "x": 0.2,
+              "y": 0.88
+            },
+            "role": "action",
+            "roleId": "action"
           }
         ]
       }
@@ -3303,7 +3597,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -3311,7 +3609,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -3324,8 +3631,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -3333,14 +3643,22 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "text",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "copy"
         },
         {
           "capabilities": [
             "content",
-            "link"
+            "link",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -3348,7 +3666,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -3361,8 +3688,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.04,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "actionText",
@@ -3378,12 +3708,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "responsive": {
             "content": "shared",
-            "link": "shared"
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "link": "shared",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "action"
         }
       ],
       "layoutOverrides": {
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "beforeImage",
@@ -3417,6 +3763,59 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "step": 0.05
             }
           }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "action",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "actionText",
+            "widthPresets": []
+          }
         ]
       },
       "primaryTask": "media"
@@ -3448,13 +3847,15 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "copy",
         "before",
         "after",
-        "comparisonHandle"
+        "comparisonHandle",
+        "action"
       ],
       "mobile": [
         "copy",
         "before",
         "after",
-        "comparisonHandle"
+        "comparisonHandle",
+        "action"
       ]
     },
     "presets": [],
@@ -3464,7 +3865,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "copy",
           "before",
           "after",
-          "comparisonHandle"
+          "comparisonHandle",
+          "action"
         ],
         "tone": "light",
         "zones": [
@@ -3501,6 +3903,15 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "row": 4,
             "rowSpan": 2,
             "span": 2.000004
+          },
+          {
+            "column": 5.56,
+            "overlay": true,
+            "role": "action",
+            "roleId": "action",
+            "row": 7.88,
+            "rowSpan": 0.64,
+            "span": 2.88
           }
         ]
       },
@@ -3509,7 +3920,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "copy",
           "before",
           "after",
-          "comparisonHandle"
+          "comparisonHandle",
+          "action"
         ],
         "tone": "light",
         "zones": [
@@ -3546,6 +3958,15 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "row": 4,
             "rowSpan": 2,
             "span": 2.000004
+          },
+          {
+            "column": 3.4,
+            "overlay": true,
+            "role": "action",
+            "roleId": "action",
+            "row": 8.04,
+            "rowSpan": 0.64,
+            "span": 7.2
           }
         ]
       },
@@ -3607,13 +4028,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "required": false,
         "role": "marker",
         "semantic": "comparison-handle"
+      },
+      {
+        "id": "action",
+        "kind": "action",
+        "required": false,
+        "role": "action"
       }
     ],
     "spacingPolicy": [
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 5,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
@@ -3867,7 +4294,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "x",
               "y"
             ],
-            "safeAreaRequired": true
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "eyebrow",
@@ -4027,6 +4454,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "compositionPresets": [
           "lead-detail"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fit": [
@@ -4120,6 +4559,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "left",
               "center"
             ],
+            "requiresSafeBand": false,
             "roleId": "copy",
             "sizePresets": [
               "small",
@@ -4353,7 +4793,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": false,
-    "version": 1,
+    "version": 2,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
@@ -4639,7 +5079,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content",
             "visibility",
-            "typography"
+            "typography",
+            "layout",
+            "layer"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -4647,7 +5089,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": true,
             "allowTypography": true,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -4660,8 +5111,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -4672,6 +5126,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "kind": "text",
           "responsive": {
             "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
             "typography": "shared",
             "visibility": "shared"
           },
@@ -4680,7 +5136,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "link"
+            "link",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -4688,7 +5148,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -4701,8 +5170,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.04,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "actionText",
@@ -4718,7 +5190,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "responsive": {
             "content": "shared",
-            "link": "shared"
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "link": "shared",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "action"
         }
@@ -4729,6 +5205,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "main-led",
           "detail-led"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fit": [
@@ -4795,12 +5283,47 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "ivory"
             ],
             "maxLines": 6,
+            "requiresSafeBand": false,
             "roleId": "copy",
             "sizePresets": [
               "small",
               "standard",
               "large"
             ]
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "action",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "actionText",
+            "widthPresets": []
           }
         ]
       },
@@ -4993,7 +5516,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 4,
+    "version": 5,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
@@ -5191,7 +5714,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -5199,7 +5726,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -5212,8 +5748,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "eyebrow",
@@ -5222,14 +5761,22 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "text",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "copy"
         },
         {
           "capabilities": [
             "content",
-            "link"
+            "link",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -5237,7 +5784,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -5250,8 +5806,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.04,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "primaryText",
@@ -5269,13 +5828,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "responsive": {
             "content": "shared",
-            "link": "shared"
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "link": "shared",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "action"
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -5283,7 +5848,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -5296,7 +5870,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.1,
               "width": 0.12
             },
-            "movementAxes": [],
+            "movementAxes": [
+              "x",
+              "y"
+            ],
             "safeAreaRequired": false
           },
           "contentFieldKeys": [
@@ -5304,7 +5881,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "collection",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific"
           },
           "roleId": "list"
         }
@@ -5314,6 +5893,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "image-left",
           "image-right"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "productCode",
@@ -5330,6 +5921,79 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "standard",
               "large"
             ]
+          },
+          {
+            "roleId": "list"
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "action",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "primaryText",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "secondaryText",
+            "widthPresets": []
           }
         ]
       },
@@ -5510,7 +6174,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
@@ -5772,7 +6436,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content",
             "visibility",
-            "typography"
+            "typography",
+            "layout",
+            "layer"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -5780,7 +6446,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": true,
             "allowTypography": true,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -5793,8 +6468,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "eyebrow",
@@ -5804,6 +6482,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "kind": "text",
           "responsive": {
             "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
             "typography": "shared",
             "visibility": "shared"
           },
@@ -5812,7 +6492,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "link"
+            "link",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -5820,7 +6504,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -5833,8 +6526,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.04,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "buttonText",
@@ -5850,7 +6546,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "responsive": {
             "content": "shared",
-            "link": "shared"
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "link": "shared",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "action"
         }
@@ -5860,6 +6560,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "standard",
           "immersive"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fit": [
@@ -5907,13 +6619,47 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "ivory"
             ],
             "maxLines": 4,
-            "requiresSafeBand": true,
+            "requiresSafeBand": false,
             "roleId": "copy",
             "sizePresets": [
               "small",
               "standard",
               "large"
             ]
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "action",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "buttonText",
+            "widthPresets": []
           }
         ]
       },
@@ -6079,7 +6825,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 4,
+    "version": 5,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "full"
@@ -6319,7 +7065,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -6327,7 +7077,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -6340,8 +7099,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -6349,7 +7111,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "text",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "copy"
         }
@@ -6359,6 +7125,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "editorial",
           "balanced"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "items",
@@ -6376,6 +7154,25 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "min": 1,
               "step": 0.05
             }
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
           }
         ]
       },
@@ -6551,7 +7348,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -6869,14 +7666,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
-          "capabilityViewports": {
-            "layer": [
-              "desktop"
-            ],
-            "layout": [
-              "desktop"
-            ]
-          },
           "constraints": {
             "allowAspectRatio": false,
             "allowFocus": false,
@@ -6909,7 +7698,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "x",
               "y"
             ],
-            "safeAreaRequired": true
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "eyebrow",
@@ -6941,14 +7730,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
-          "capabilityViewports": {
-            "layer": [
-              "desktop"
-            ],
-            "layout": [
-              "desktop"
-            ]
-          },
           "constraints": {
             "allowAspectRatio": false,
             "allowFocus": false,
@@ -6981,7 +7762,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "x",
               "y"
             ],
-            "safeAreaRequired": true
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "actionText",
@@ -7016,12 +7797,17 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "21 / 9",
           "16 / 9",
           "3 / 2",
-          "4 / 5"
+          "4 / 5",
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
         ],
         "frameRatioRange": {
-          "max": 2.4,
-          "min": 0.8,
-          "step": 0.05
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
         },
         "slots": [
           {
@@ -7076,7 +7862,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "center",
               "right"
             ],
-            "requiresSafeBand": true,
+            "requiresSafeBand": false,
             "roleId": "eyebrow",
             "sizePresets": [
               "small",
@@ -7103,7 +7889,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "center",
               "right"
             ],
-            "requiresSafeBand": true,
+            "requiresSafeBand": false,
             "roleId": "title",
             "sizePresets": [
               "small",
@@ -7132,7 +7918,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "center",
               "right"
             ],
-            "requiresSafeBand": true,
+            "requiresSafeBand": false,
             "roleId": "subtitle",
             "sizePresets": [
               "small",
@@ -7161,7 +7947,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "center",
               "right"
             ],
-            "requiresSafeBand": true,
+            "requiresSafeBand": false,
             "roleId": "actionText",
             "sizePresets": [
               "small",
@@ -7171,6 +7957,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "narrow",
               "standard"
             ]
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "action",
+            "widthPresets": []
           }
         ]
       },
@@ -7626,7 +8446,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content",
             "items",
-            "link"
+            "link",
+            "layout",
+            "layer"
           ],
           "collectionFieldKeys": [
             "hotspots",
@@ -7648,7 +8470,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -7661,7 +8492,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.1,
               "width": 0.12
             },
-            "movementAxes": [],
+            "movementAxes": [
+              "x",
+              "y"
+            ],
             "safeAreaRequired": false
           },
           "contentFieldKeys": [
@@ -7676,12 +8510,26 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "responsive": {
             "content": "shared",
             "items": "viewport-specific",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
             "link": "shared"
           },
           "roleId": "hotspots"
         }
       ],
       "layoutOverrides": {
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "image",
@@ -7701,8 +8549,12 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "min": 1,
               "step": 0.05
             }
+          },
+          {
+            "roleId": "hotspots"
           }
-        ]
+        ],
+        "textRoles": []
       },
       "primaryTask": "media"
     },
@@ -7909,7 +8761,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -8006,7 +8858,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "items"
+            "items",
+            "layout",
+            "layer"
           ],
           "collectionFieldKeys": [
             "steps"
@@ -8027,7 +8881,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -8040,7 +8903,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.1,
               "width": 0.12
             },
-            "movementAxes": [],
+            "movementAxes": [
+              "x",
+              "y"
+            ],
             "safeAreaRequired": false
           },
           "contentFieldKeys": [
@@ -8049,13 +8915,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "kind": "collection",
           "responsive": {
             "content": "shared",
-            "items": "shared"
+            "items": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific"
           },
           "roleId": "steps"
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -8063,7 +8935,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -8076,8 +8957,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -8085,7 +8969,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "text",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "copy"
         }
@@ -8094,6 +8982,42 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "framePresets": [
           "standard",
           "spacious"
+        ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
+        "slots": [
+          {
+            "roleId": "steps"
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
+          }
         ]
       },
       "primaryTask": "structured"
@@ -8210,7 +9134,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
@@ -8415,7 +9339,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "items"
+            "items",
+            "layout",
+            "layer"
           ],
           "collectionFieldKeys": [
             "benefits"
@@ -8426,7 +9352,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -8439,7 +9374,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.1,
               "width": 0.12
             },
-            "movementAxes": [],
+            "movementAxes": [
+              "x",
+              "y"
+            ],
             "safeAreaRequired": false
           },
           "contentFieldKeys": [
@@ -8449,7 +9387,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "kind": "collection",
           "responsive": {
             "content": "shared",
-            "items": "shared"
+            "items": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific"
           },
           "roleId": "time"
         },
@@ -8461,14 +9401,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
-          "capabilityViewports": {
-            "layer": [
-              "desktop"
-            ],
-            "layout": [
-              "desktop"
-            ]
-          },
           "constraints": {
             "allowAspectRatio": false,
             "allowFocus": false,
@@ -8501,7 +9433,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "x",
               "y"
             ],
-            "safeAreaRequired": true
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "eyebrow",
@@ -8521,7 +9453,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "link"
+            "link",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -8529,7 +9465,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -8542,8 +9487,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.04,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "buttonText",
@@ -8559,7 +9507,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "responsive": {
             "content": "shared",
-            "link": "shared"
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "link": "shared",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "action"
         }
@@ -8569,6 +9521,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "standard",
           "immersive"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "eventImage",
@@ -8587,6 +9551,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "min": 1,
               "step": 0.05
             }
+          },
+          {
+            "roleId": "time"
           }
         ],
         "textRoles": [
@@ -8604,7 +9571,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "overlay",
               "below"
             ],
-            "requiresSafeBand": true,
+            "requiresSafeBand": false,
             "roleId": "copy",
             "sizePresets": [
               "small",
@@ -8615,6 +9582,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "narrow",
               "standard"
             ]
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "action",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "buttonText",
+            "widthPresets": []
           }
         ]
       },
@@ -8791,7 +9792,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 4,
+    "version": 5,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -8987,7 +9988,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -8995,7 +10000,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -9008,8 +10022,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -9017,7 +10034,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "text",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "copy"
         }
@@ -9028,6 +10049,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "grid-3",
           "grid-4"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "productCodes",
@@ -9041,6 +10074,25 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "3 / 4"
             ],
             "roleId": "productCards"
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
           }
         ]
       },
@@ -9222,7 +10274,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -9460,7 +10512,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -9468,7 +10524,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -9481,8 +10546,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -9490,7 +10558,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "text",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "copy"
         }
@@ -9501,6 +10573,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "grid-3",
           "grid-4"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "categories",
@@ -9512,6 +10596,25 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "1 / 1"
             ],
             "roleId": "scenes"
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
           }
         ]
       },
@@ -9677,7 +10780,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
@@ -9838,7 +10941,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "items"
+            "items",
+            "layout",
+            "layer"
           ],
           "collectionFieldKeys": [
             "cards"
@@ -9849,7 +10954,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -9862,7 +10976,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.1,
               "width": 0.12
             },
-            "movementAxes": [],
+            "movementAxes": [
+              "x",
+              "y"
+            ],
             "safeAreaRequired": false
           },
           "contentFieldKeys": [
@@ -9871,13 +10988,19 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "kind": "collection",
           "responsive": {
             "content": "shared",
-            "items": "shared"
+            "items": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific"
           },
           "roleId": "promises"
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -9885,7 +11008,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -9898,8 +11030,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -9907,7 +11042,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "text",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "copy"
         }
@@ -9920,6 +11059,42 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "framePresets": [
           "compact",
           "standard"
+        ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
+        "slots": [
+          {
+            "roleId": "promises"
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
+          }
         ]
       },
       "primaryTask": "structured"
@@ -10071,7 +11246,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "full"
@@ -10362,14 +11537,6 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "visibility",
             "typography"
           ],
-          "capabilityViewports": {
-            "layer": [
-              "desktop"
-            ],
-            "layout": [
-              "desktop"
-            ]
-          },
           "constraints": {
             "allowAspectRatio": false,
             "allowFocus": false,
@@ -10402,7 +11569,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "x",
               "y"
             ],
-            "safeAreaRequired": true
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -10423,7 +11590,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "link"
+            "link",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -10431,7 +11602,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -10444,8 +11624,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.04,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "actionText",
@@ -10461,7 +11644,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "responsive": {
             "content": "shared",
-            "link": "shared"
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "link": "shared",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "action"
         }
@@ -10472,6 +11659,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "standard",
           "tall"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fit": [
@@ -10526,7 +11725,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "center",
               "right"
             ],
-            "requiresSafeBand": true,
+            "requiresSafeBand": false,
             "roleId": "copy",
             "sizePresets": [
               "small",
@@ -10537,6 +11736,40 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "narrow",
               "standard"
             ]
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "action",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "actionText",
+            "widthPresets": []
           }
         ]
       },
@@ -10728,7 +11961,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 4,
+    "version": 5,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "standard"
@@ -10931,6 +12164,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "image-left",
           "image-right"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "image",
@@ -10949,7 +12194,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "step": 0.05
             }
           }
-        ]
+        ],
+        "textRoles": []
       },
       "primaryTask": "media"
     },
@@ -11121,7 +12367,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 4,
+    "version": 5,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -11318,6 +12564,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "editorial",
           "balanced"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "testimonials",
@@ -11334,8 +12592,15 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "min": 1,
               "step": 0.05
             }
+          },
+          {
+            "roleId": "mainQuote"
+          },
+          {
+            "roleId": "attribution"
           }
-        ]
+        ],
+        "textRoles": []
       },
       "primaryTask": "structured"
     },
@@ -11496,7 +12761,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "wide"
@@ -11621,7 +12886,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "altPolicy": "decorative",
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -11629,7 +12896,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -11642,7 +12918,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.1,
               "width": 0.12
             },
-            "movementAxes": [],
+            "movementAxes": [
+              "x",
+              "y"
+            ],
             "safeAreaRequired": false
           },
           "contentFieldKeys": [
@@ -11653,7 +12932,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "bgImage"
           ],
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific"
           },
           "roleId": "bgImage"
         },
@@ -11661,7 +12942,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "capabilities": [
             "content",
             "visibility",
-            "typography"
+            "typography",
+            "layout",
+            "layer"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -11669,7 +12952,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": true,
             "allowTypography": true,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -11682,8 +12974,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "eyebrow",
@@ -11693,6 +12988,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "kind": "text",
           "responsive": {
             "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
             "typography": "shared",
             "visibility": "shared"
           },
@@ -11701,7 +12998,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "link"
+            "link",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -11709,7 +13010,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -11722,8 +13032,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.04,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "buttonText",
@@ -11739,7 +13052,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "responsive": {
             "content": "shared",
-            "link": "shared"
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "link": "shared",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "action"
         }
@@ -11749,6 +13066,23 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "compact",
           "standard",
           "spacious"
+        ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
+        "slots": [
+          {
+            "roleId": "bgImage"
+          }
         ],
         "textRoles": [
           {
@@ -11762,12 +13096,47 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "ivory"
             ],
             "maxLines": 6,
+            "requiresSafeBand": false,
             "roleId": "copy",
             "sizePresets": [
               "small",
               "standard",
               "large"
             ]
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "action",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "buttonText",
+            "widthPresets": []
           }
         ]
       },
@@ -11913,7 +13282,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "grand"
     ],
     "supportsLinkTarget": true,
-    "version": 4,
+    "version": 5,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "editorial"
@@ -12131,7 +13500,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -12139,7 +13512,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -12152,8 +13534,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -12161,14 +13546,22 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "text",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "copy"
         },
         {
           "capabilities": [
             "content",
-            "link"
+            "link",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -12176,7 +13569,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -12189,8 +13591,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.04,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "actionText",
@@ -12206,7 +13611,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "responsive": {
             "content": "shared",
-            "link": "shared"
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "link": "shared",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "action"
         }
@@ -12216,6 +13625,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "standard",
           "wide"
         ],
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "posterUrl",
@@ -12234,6 +13655,59 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "min": 1,
               "step": 0.05
             }
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "action",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "actionText",
+            "widthPresets": []
           }
         ]
       },
@@ -12416,7 +13890,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 5,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -12619,7 +14093,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         {
           "capabilities": [
-            "content"
+            "content",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -12627,7 +14105,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -12640,8 +14127,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.03,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "title",
@@ -12649,14 +14139,20 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "kind": "text",
           "responsive": {
-            "content": "shared"
+            "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "copy"
         },
         {
           "capabilities": [
             "content",
-            "reference"
+            "reference",
+            "layout",
+            "layer"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -12664,7 +14160,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -12677,7 +14182,10 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.1,
               "width": 0.12
             },
-            "movementAxes": [],
+            "movementAxes": [
+              "x",
+              "y"
+            ],
             "safeAreaRequired": false
           },
           "contentFieldKeys": [
@@ -12687,6 +14195,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "referenceFieldKey": "productCodes",
           "responsive": {
             "content": "shared",
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
             "reference": "shared"
           },
           "roleId": "relatedProducts"
@@ -12694,7 +14204,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         {
           "capabilities": [
             "content",
-            "link"
+            "link",
+            "layout",
+            "layer",
+            "visibility",
+            "typography"
           ],
           "constraints": {
             "allowAspectRatio": false,
@@ -12702,7 +14216,16 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "allowHide": false,
             "allowTypography": false,
             "allowZoom": false,
-            "allowedResize": [],
+            "allowedResize": [
+              "n",
+              "ne",
+              "e",
+              "se",
+              "s",
+              "sw",
+              "w",
+              "nw"
+            ],
             "layerRange": {
               "max": 0,
               "min": 0
@@ -12715,8 +14238,11 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "height": 0.04,
               "width": 0.08
             },
-            "movementAxes": [],
-            "safeAreaRequired": true
+            "movementAxes": [
+              "x",
+              "y"
+            ],
+            "safeAreaRequired": false
           },
           "contentFieldKeys": [
             "actionText",
@@ -12732,12 +14258,28 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           ],
           "responsive": {
             "content": "shared",
-            "link": "shared"
+            "layer": "viewport-specific",
+            "layout": "viewport-specific",
+            "link": "shared",
+            "typography": "shared",
+            "visibility": "shared"
           },
           "roleId": "action"
         }
       ],
       "layoutOverrides": {
+        "frameRatioPresets": [
+          "16/9",
+          "4/3",
+          "1/1",
+          "3/4",
+          "9/16"
+        ],
+        "frameRatioRange": {
+          "max": 4,
+          "min": 0.25,
+          "step": 0.01
+        },
         "slots": [
           {
             "fieldKey": "image",
@@ -12756,6 +14298,62 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "min": 1,
               "step": 0.05
             }
+          },
+          {
+            "roleId": "relatedProducts"
+          }
+        ],
+        "textRoles": [
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "copy",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "action",
+            "widthPresets": []
+          },
+          {
+            "align": [
+              "left",
+              "center",
+              "right"
+            ],
+            "colorTokens": [
+              "ink",
+              "mineral",
+              "ivory"
+            ],
+            "maxLines": 6,
+            "placementPresets": [],
+            "requiresSafeBand": false,
+            "roleId": "actionText",
+            "widthPresets": []
           }
         ]
       },
@@ -12939,7 +14537,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 3,
+    "version": 4,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
@@ -13308,13 +14906,15 @@ export const CONTENT_TEMPLATE_SKELETONS = {
         "copy",
         "mainMedia",
         "detailMedia",
-        "marker"
+        "marker",
+        "action"
       ],
       "mobile": [
         "copy",
         "mainMedia",
         "detailMedia",
-        "marker"
+        "marker",
+        "action"
       ]
     },
     "preview": {
@@ -13348,6 +14948,14 @@ export const CONTENT_TEMPLATE_SKELETONS = {
           "row": 4,
           "rowSpan": 2,
           "span": 2.000004
+        },
+        {
+          "column": 5.56,
+          "overlay": true,
+          "role": "action",
+          "row": 7.88,
+          "rowSpan": 0.64,
+          "span": 2.88
         }
       ],
       "tone": "light"
@@ -13372,6 +14980,10 @@ export const CONTENT_TEMPLATE_SKELETONS = {
       {
         "key": "comparisonHandle",
         "role": "marker"
+      },
+      {
+        "key": "action",
+        "role": "action"
       }
     ],
     "visualRole": "feature-stage",
@@ -15172,7 +16784,8 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
         "copy",
         "mainMedia",
         "detailMedia",
-        "marker"
+        "marker",
+        "action"
       ],
       "tone": "light",
       "zones": [
@@ -15205,6 +16818,14 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "row": 4,
           "rowSpan": 2,
           "span": 2.000004
+        },
+        {
+          "column": 5.56,
+          "overlay": true,
+          "role": "action",
+          "row": 7.88,
+          "rowSpan": 0.64,
+          "span": 2.88
         }
       ]
     },
@@ -15215,7 +16836,8 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
         "copy",
         "mainMedia",
         "detailMedia",
-        "marker"
+        "marker",
+        "action"
       ],
       "tone": "light",
       "zones": [
@@ -15248,6 +16870,14 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
           "row": 4,
           "rowSpan": 2,
           "span": 2.000004
+        },
+        {
+          "column": 3.4,
+          "overlay": true,
+          "role": "action",
+          "row": 8.04,
+          "rowSpan": 0.64,
+          "span": 7.2
         }
       ]
     },
@@ -17766,6 +19396,76 @@ function getInstanceOverrideIssues(input: {
             path + ".typography.safeBand",
             nodeId,
             "error",
+          ));
+        }
+      }
+    }
+    for (const editableObject of input.contract.editorCapabilities.editableObjects) {
+      const role = input.contract.roles.find((candidate) => candidate.id === editableObject.roleId);
+      if (!role?.required) continue;
+      for (const nodeId of editableObject.nodeIds ?? [editableObject.roleId]) {
+        const rawNode = nodes[nodeId];
+        if (isRecord(rawNode) && rawNode.enabled === false) {
+          issues.push(issue(
+            "必需对象不能隐藏。",
+            basePath + ".nodes." + nodeId + ".enabled",
+            nodeId,
+            "error",
+          ));
+        }
+      }
+    }
+    for (const viewport of ["desktop", "mobile"] as const) {
+      const explicitRects = Object.entries(nodes).flatMap(([nodeId, rawNode]) => {
+        if (!isRecord(rawNode) || rawNode.enabled === false || !isRecord(rawNode.rectByViewport)) return [];
+        const rawRect = rawNode.rectByViewport[viewport];
+        if (!isRecord(rawRect)) return [];
+        const rect = {
+          x: Number(rawRect.x),
+          y: Number(rawRect.y),
+          width: Number(rawRect.width),
+          height: Number(rawRect.height),
+        };
+        if (!Object.values(rect).every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) return [];
+        const editableObject = findContentTemplateEditableObject(input.contract, nodeId);
+        if (!editableObject) return [];
+        const zByViewport = isRecord(rawNode.zIndexByViewport) ? rawNode.zIndexByViewport : {};
+        return [{
+          nodeId,
+          rect,
+          zIndex: Number.isInteger(Number(zByViewport[viewport])) ? Number(zByViewport[viewport]) : 2,
+          editableObject,
+        }];
+      });
+      for (let index = 0; index < explicitRects.length; index += 1) {
+        for (let otherIndex = index + 1; otherIndex < explicitRects.length; otherIndex += 1) {
+          const left = explicitRects[index];
+          const right = explicitRects[otherIndex];
+          if (left.editableObject === right.editableObject) continue;
+          const intersectionWidth = Math.min(left.rect.x + left.rect.width, right.rect.x + right.rect.width) - Math.max(left.rect.x, right.rect.x);
+          const intersectionHeight = Math.min(left.rect.y + left.rect.height, right.rect.y + right.rect.height) - Math.max(left.rect.y, right.rect.y);
+          if (intersectionWidth <= 0 || intersectionHeight <= 0) continue;
+          const action = left.editableObject.kind === "action"
+            ? left
+            : right.editableObject.kind === "action"
+              ? right
+              : undefined;
+          const cover = action === left ? right : left;
+          const actionHasContent = action?.editableObject.contentFieldKeys.some((fieldKey) => {
+            const value = input.props[fieldKey];
+            return typeof value === "string" && value.trim().length > 0;
+          });
+          const fullyCovered = Boolean(action && actionHasContent && cover.zIndex > action.zIndex &&
+            cover.rect.x <= action.rect.x && cover.rect.y <= action.rect.y &&
+            cover.rect.x + cover.rect.width >= action.rect.x + action.rect.width &&
+            cover.rect.y + cover.rect.height >= action.rect.y + action.rect.height);
+          issues.push(issue(
+            fullyCovered
+              ? "行动对象被更高层对象完全遮挡，无法形成有效交互区域。"
+              : "对象存在自定义重叠；请在真实画布检查裁切、文字拥挤与可读性。",
+            basePath + ".nodes." + (action?.nodeId ?? left.nodeId) + ".rectByViewport." + viewport,
+            action?.nodeId ?? left.nodeId,
+            fullyCovered ? "error" : "warning",
           ));
         }
       }

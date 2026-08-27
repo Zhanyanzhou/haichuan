@@ -33,8 +33,9 @@ test.describe("商品编辑器关键回归", () => {
     await page.getByRole("button", { name: "Close" }).click();
 
     await page.getByRole("button", { name: "物流服务" }).click();
-    await page.waitForTimeout(400);
-    await page.getByRole("checkbox", { name: "物流配送" }).uncheck();
+    const expressDelivery = page.getByRole("checkbox", { name: "物流配送" });
+    await expect(expressDelivery).toBeVisible();
+    await expressDelivery.uncheck();
     await page.getByText("到店自提", { exact: true }).click();
     await expect(page.getByRole("checkbox", { name: "到店自提" })).toBeChecked();
     await expect(page.getByText("当前未选择物流配送，无需设置运费模板。" )).toBeVisible();
@@ -46,8 +47,9 @@ test.describe("商品编辑器关键回归", () => {
     await expect(page.getByText("保存失败，请检查后重试")).toHaveCount(0);
 
     await page.getByRole("button", { name: "基础信息" }).click();
-    await page.waitForTimeout(400);
-    await page.getByRole("textbox", { name: "货号" }).fill(`DRAFT-${Date.now()}`);
+    const productCode = page.getByRole("textbox", { name: "货号" });
+    await expect(productCode).toBeVisible();
+    await productCode.fill(`DRAFT-${Date.now()}`);
     await page.getByRole("combobox", { name: "当前类目" }).click();
     const firstCategory = page.locator(".ant-select-item-option").first();
     await expect(firstCategory).toBeVisible();

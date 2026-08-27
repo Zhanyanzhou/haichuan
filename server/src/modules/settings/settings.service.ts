@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS = {
 const LEGACY_PLACEHOLDER_LOGOS = new Set(['/favicon.svg', '/images/brand-logo.svg']);
 const MIN_DATABASE_BACKUP_BYTES = 1024;
 const DEFAULT_BACKUP_INTERVAL_SECONDS = 86400;
+const DEFAULT_BACKUP_HEALTH_GRACE_SECONDS = 3600;
 
 type BackupArtifact = { name: string; size: number; mtime: Date };
 
@@ -38,8 +39,100 @@ type BackupSet = {
   manifest: BackupArtifact;
 };
 
+export type BackupExecutionStatus = {
+  markerPresent: boolean;
+  markerValid: boolean;
+  executionStatus: 'SUCCESS' | 'WARNING' | 'FAILED' | 'UNKNOWN' | 'INVALID';
+  lastAttemptStartedAt: string | null;
+  lastAttemptFinishedAt: string | null;
+  lastSuccessAt: string | null;
+  lastExitCode: number | null;
+  errorCode: string | null;
+  warningCode: string | null;
+  latestManifest: string | null;
+  isFresh: boolean;
+  isHealthy: boolean;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isIsoTimestamp(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)
+    && Number.isFinite(Date.parse(value));
+}
+
+export function evaluateBackupExecutionMarker(
+  source: string | null,
+  intervalSeconds: number,
+  graceSeconds: number,
+  now = new Date(),
+): BackupExecutionStatus {
+  const empty: BackupExecutionStatus = {
+    markerPresent: false,
+    markerValid: false,
+    executionStatus: 'UNKNOWN',
+    lastAttemptStartedAt: null,
+    lastAttemptFinishedAt: null,
+    lastSuccessAt: null,
+    lastExitCode: null,
+    errorCode: null,
+    warningCode: null,
+    latestManifest: null,
+    isFresh: false,
+    isHealthy: false,
+  };
+  if (source === null) return empty;
+
+  const values = new Map<string, string>();
+  for (const line of source.split(/\r?\n/)) {
+    if (!line) continue;
+    const separator = line.indexOf('=');
+    if (separator <= 0) continue;
+    values.set(line.slice(0, separator), line.slice(separator + 1));
+  }
+  const result = values.get('RESULT') ?? '';
+  const startedAt = values.get('LAST_ATTEMPT_STARTED_AT') ?? '';
+  const finishedAt = values.get('LAST_ATTEMPT_FINISHED_AT') ?? '';
+  const lastSuccessAt = values.get('LAST_SUCCESS_AT') ?? '';
+  const exitCodeText = values.get('LAST_EXIT_CODE') ?? '';
+  const latestManifest = values.get('LATEST_MANIFEST') ?? '';
+  const exitCode = /^\d+$/.test(exitCodeText) ? Number(exitCodeText) : null;
+  const valid = values.get('SCHEMA_VERSION') === '1'
+    && ['SUCCESS', 'WARNING', 'FAILED'].includes(result)
+    && isIsoTimestamp(startedAt)
+    && isIsoTimestamp(finishedAt)
+    && (lastSuccessAt === '' || isIsoTimestamp(lastSuccessAt))
+    && exitCode !== null
+    && (latestManifest === '' || /^jewelry_db_\d{8}_\d{6}\.sha256$/.test(latestManifest));
+  if (!valid) {
+    return { ...empty, markerPresent: true, executionStatus: 'INVALID' };
+  }
+
+  const normalizedInterval = Number.isFinite(intervalSeconds) && intervalSeconds > 0
+    ? intervalSeconds
+    : DEFAULT_BACKUP_INTERVAL_SECONDS;
+  const normalizedGrace = Number.isFinite(graceSeconds) && graceSeconds >= 0
+    ? graceSeconds
+    : DEFAULT_BACKUP_HEALTH_GRACE_SECONDS;
+  const ageMs = lastSuccessAt ? now.getTime() - Date.parse(lastSuccessAt) : Number.POSITIVE_INFINITY;
+  const isFresh = ageMs >= 0 && ageMs <= (normalizedInterval + normalizedGrace) * 1000;
+  const executionStatus = result as BackupExecutionStatus['executionStatus'];
+  return {
+    markerPresent: true,
+    markerValid: true,
+    executionStatus,
+    lastAttemptStartedAt: startedAt,
+    lastAttemptFinishedAt: finishedAt,
+    lastSuccessAt: lastSuccessAt || null,
+    lastExitCode: exitCode,
+    errorCode: values.get('ERROR_CODE') || null,
+    warningCode: values.get('WARNING_CODE') || null,
+    latestManifest: latestManifest || null,
+    isFresh,
+    isHealthy: executionStatus === 'SUCCESS' && exitCode === 0 && isFresh,
+  };
 }
 
 export function summarizeBackupArtifacts(
@@ -153,6 +246,31 @@ export class SettingsService {
     const dir = process.env.BACKUP_DIR || '/backups';
     try {
       const entries = await fs.promises.readdir(dir);
+      const configuredInterval = Number(process.env.BACKUP_INTERVAL_SECONDS || DEFAULT_BACKUP_INTERVAL_SECONDS);
+      const intervalSeconds = Number.isFinite(configuredInterval) && configuredInterval > 0
+        ? configuredInterval
+        : DEFAULT_BACKUP_INTERVAL_SECONDS;
+      const configuredGrace = Number(
+        process.env.BACKUP_HEALTH_GRACE_SECONDS || DEFAULT_BACKUP_HEALTH_GRACE_SECONDS,
+      );
+      const graceSeconds = Number.isFinite(configuredGrace) && configuredGrace >= 0
+        ? configuredGrace
+        : DEFAULT_BACKUP_HEALTH_GRACE_SECONDS;
+      let markerSource: string | null = null;
+      try {
+        markerSource = await fs.promises.readFile(
+          path.join(dir, '.health', 'backup-status.env'),
+          'utf8',
+        );
+      } catch (error: unknown) {
+        const code = isRecord(error) && typeof error.code === 'string' ? error.code : null;
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+      }
+      const execution = evaluateBackupExecutionMarker(
+        markerSource,
+        intervalSeconds,
+        graceSeconds,
+      );
       const files: BackupArtifact[] = [];
       for (const name of entries) {
         // 只识别 backup.sh 的数据库、媒体与批次 SHA-256 完成清单。
@@ -160,10 +278,6 @@ export class SettingsService {
         const stat = await fs.promises.stat(path.join(dir, name));
         if (stat.isFile()) files.push({ name, size: stat.size, mtime: stat.mtime });
       }
-      const configuredInterval = Number(process.env.BACKUP_INTERVAL_SECONDS || DEFAULT_BACKUP_INTERVAL_SECONDS);
-      const intervalSeconds = Number.isFinite(configuredInterval) && configuredInterval > 0
-        ? configuredInterval
-        : DEFAULT_BACKUP_INTERVAL_SECONDS;
       const intervalHours = Math.max(1, Math.round(intervalSeconds / 3600));
       const schedule = `backup 容器目标每 ${intervalHours} 小时一轮（保留 7 天）`;
       const summary = summarizeBackupArtifacts(files, intervalSeconds);
@@ -174,7 +288,10 @@ export class SettingsService {
           storageMounted: true,
           backupSchedule: schedule,
           totalBackups: 0,
-          message: `备份目录已挂载（${dir}），但暂无备份产物；请确认 backup 容器已启动，详见 docker logs jewelry-backup。`,
+          ...execution,
+          message: execution.executionStatus === 'FAILED'
+            ? `最近一次备份失败（${execution.errorCode || 'UNKNOWN'}），且暂无完整备份产物。`
+            : `备份目录已挂载（${dir}），但暂无备份产物；请确认 backup 容器已启动，详见 docker logs jewelry-backup。`,
         };
       }
       if (!summary.latest) {
@@ -185,6 +302,7 @@ export class SettingsService {
           backupSchedule: schedule,
           totalBackups: 0,
           incompleteArtifactCount: summary.incompleteArtifactCount,
+          ...execution,
           message: `备份目录中有 ${files.length} 个产物，但没有数据库、uploads 与 private-media 同批且有效的完整备份组。`,
         };
       }
@@ -194,17 +312,35 @@ export class SettingsService {
         summary.latest.privateMedia,
         summary.latest.manifest,
       ];
+      const markerMatchesLatest = execution.latestManifest === summary.latest.manifest.name;
+      const autoBackup = summary.isFresh && execution.isHealthy && markerMatchesLatest;
+      let message: string;
+      if (!execution.markerPresent) {
+        message = `最近完整备份批次 ${summary.latest.timestamp} 存在，但缺少执行状态标记，无法证明定时任务最近一次成功。`;
+      } else if (!execution.markerValid) {
+        message = `最近完整备份批次 ${summary.latest.timestamp} 存在，但执行状态标记无效。`;
+      } else if (execution.executionStatus !== 'SUCCESS' || execution.lastExitCode !== 0) {
+        message = `最近一次备份执行状态为 ${execution.executionStatus}（${execution.errorCode || 'UNKNOWN'}），请检查 backup 容器日志。`;
+      } else if (!execution.isFresh) {
+        message = `最近一次成功备份已超过计划周期与宽限时间，请检查 backup 容器。`;
+      } else if (!markerMatchesLatest) {
+        message = `状态标记与最近完整备份清单不一致，请核对备份目录完整性。`;
+      } else if (!summary.isFresh) {
+        message = `最近完整备份批次 ${summary.latest.timestamp} 已超过产物新鲜度窗口。`;
+      } else {
+        message = `最近完整备份批次：${summary.latest.timestamp}，共 ${summary.completeSets.length} 组；执行状态与产物一致。`;
+      }
       return {
         lastBackup: new Date(Math.max(...latestFiles.map((file) => file.mtime.getTime()))).toISOString(),
-        autoBackup: summary.isFresh,
+        autoBackup,
         storageMounted: true,
         backupSchedule: schedule,
         totalBackups: summary.completeSets.length,
         incompleteArtifactCount: summary.incompleteArtifactCount,
         latestFiles: latestFiles.map((file) => ({ name: file.name, size: file.size })),
-        message: summary.isFresh
-          ? `最近完整备份批次：${summary.latest.timestamp}，共 ${summary.completeSets.length} 组。`
-          : `最近完整备份批次 ${summary.latest.timestamp} 已超过两个计划周期；请检查 backup 容器并创建新鲜恢复点。`,
+        ...execution,
+        markerMatchesLatest,
+        message,
       };
     } catch (error: unknown) {
       const code = isRecord(error) && typeof error.code === 'string' ? error.code : null;
@@ -215,6 +351,7 @@ export class SettingsService {
           storageMounted: false,
           backupSchedule: null,
           totalBackups: 0,
+          ...evaluateBackupExecutionMarker(null, DEFAULT_BACKUP_INTERVAL_SECONDS, DEFAULT_BACKUP_HEALTH_GRACE_SECONDS),
           message: '备份目录未挂载到 server 容器（本地开发环境属正常）；生产部署请确认 ./backups 已只读挂载。',
         };
       }

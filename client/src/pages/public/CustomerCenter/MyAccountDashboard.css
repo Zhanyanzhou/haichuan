@@ -1,4 +1,5 @@
 .my-account{--ink:#181a1b!important;--soft:#5f6568!important;--line:#dde1e2!important;--gold:#181a1b!important}
+.my-account__records-state{margin:34px 0 0;color:var(--soft);font-size:13px;line-height:1.8}.my-account__pagination{display:flex;justify-content:flex-end;margin-top:20px}.my-account__pagination .ant-pagination{max-width:100%;margin:0}.my-account__pagination .ant-pagination-item,.my-account__pagination .ant-pagination-prev,.my-account__pagination .ant-pagination-next{min-width:32px;min-height:32px}@media(max-width:720px){.my-account__pagination{justify-content:flex-start;overflow-x:auto;padding-bottom:2px}}
 .my-account__summary-action{background:#f4f5f5!important}
 .my-account__panel--collection{background:#111315!important;border-color:#111315!important}
 .my-account__button{color:#181a1b!important}

@@ -8,13 +8,11 @@ type AuditRequest = {
   originalUrl?: string;
   path?: string;
   params?: Record<string, string>;
-  body?: unknown;
   ip?: string;
   user?: { id?: number };
 };
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-const SENSITIVE_KEY = /(password|token|secret|authorization|cookie|file|buffer)/i;
 
 @Injectable()
 export class AuditLogInterceptor implements NestInterceptor {
@@ -43,9 +41,9 @@ export class AuditLogInterceptor implements NestInterceptor {
     const idCandidate = request.params?.id;
     const targetId = idCandidate && /^\d+$/.test(idCandidate) ? Number(idCandidate) : undefined;
     const detail = JSON.stringify({
+      schemaVersion: 1,
       method: request.method,
       path: pathname,
-      payload: this.sanitize(request.body),
     }).slice(0, 4000);
 
     try {
@@ -67,16 +65,5 @@ export class AuditLogInterceptor implements NestInterceptor {
 
   private actionFor(method: string): string {
     return ({ POST: 'create', PUT: 'update', PATCH: 'update', DELETE: 'delete' } as Record<string, string>)[method] || method.toLowerCase();
-  }
-
-  private sanitize(value: unknown): unknown {
-    if (Array.isArray(value)) return value.slice(0, 50).map((item) => this.sanitize(item));
-    if (!value || typeof value !== 'object') return value;
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
-        key,
-        SENSITIVE_KEY.test(key) ? '[REDACTED]' : this.sanitize(item),
-      ]),
-    );
   }
 }

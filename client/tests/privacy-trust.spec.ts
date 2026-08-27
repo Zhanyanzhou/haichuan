@@ -157,7 +157,9 @@ test.describe("隐私页面", () => {
       }),
     );
     await page.goto("/privacy");
-    await expect(page.getByRole("link", { name: "通过咨询表单提交" })).toBeVisible();
+    const privacyRequest = page.getByRole("link", { name: "提交隐私与个人信息请求" });
+    await expect(privacyRequest).toBeVisible();
+    await expect(privacyRequest).toHaveAttribute("href", "/contact?type=privacy");
   });
 });
 

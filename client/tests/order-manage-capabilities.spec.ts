@@ -246,38 +246,24 @@ test.describe("订单管理前端 capability 矩阵", () => {
     expect(antdConsoleProblems).toEqual([]);
   });
 
-  test("WAREHOUSE 仅可见发货与确认签收", async ({ page }) => {
+  test("WAREHOUSE 不能进入订单中心或读取通用订单投影", async ({ page }) => {
     await authenticate(page, "WAREHOUSE");
     const prohibitedRequests = await mockOrderApis(page);
+    const orderReadRequests: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (request.method() === "GET" && /\/api\/orders(?:\/|$)/.test(path)) {
+        orderReadRequests.push(path);
+      }
+    });
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto("/admin/orders");
 
+    await expect(page.getByText("抱歉，您没有访问此页面的权限")).toBeVisible();
     await expect(page.getByRole("button", { name: "导出" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "人工建单" })).toHaveCount(0);
-    await expect(
-      rowFor(page, "HC-PENDING-SHIP").getByRole("button", { name: "发货" }),
-    ).toBeVisible();
-    await expect(
-      rowFor(page, "HC-PENDING-SHIP").getByRole("button", { name: /取\s*消/ }),
-    ).toHaveCount(0);
-    await expect(
-      rowFor(page, "HC-SHIPPED").getByRole("button", { name: /完\s*成/ }),
-    ).toHaveCount(0);
-
-    const shippedDialog = await openDetail(page, "HC-SHIPPED");
-    await expect(
-      shippedDialog.getByRole("button", { name: "确认签收" }),
-    ).toBeVisible();
-    for (const action of ["修改金额", "修改地址", "修改备注", "修改顾问"]) {
-      await expect(shippedDialog.getByRole("button", { name: action })).toHaveCount(0);
-    }
-    await closeDetail(page);
-
-    const customDialog = await openDetail(page, "HC-CUSTOM");
-    await expect(customDialog.getByText("订单操作")).toHaveCount(0);
-    await expect(
-      customDialog.getByRole("button", { name: "推进定制阶段" }),
-    ).toHaveCount(0);
+    await expect(page.getByText("HC-PENDING-SHIP")).toHaveCount(0);
+    expect(orderReadRequests).toEqual([]);
     expect(prohibitedRequests).toEqual([]);
   });
 

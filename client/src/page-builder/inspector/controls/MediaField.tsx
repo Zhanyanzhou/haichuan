@@ -73,16 +73,23 @@ export default function MediaField({
     },
     [pageData, sessionMediaRevision],
   );
-  const recentPageMedia = useMemo(
-    () => [value, ...currentPageMedia.filter((url) => url !== value)]
-      .filter(Boolean)
-      .slice(0, 5),
+  const availablePageMedia = useMemo(
+    () => [value, ...currentPageMedia.filter((url) => url !== value)].filter(Boolean),
     [currentPageMedia, value],
   );
+  const recentPageMedia = useMemo(
+    () => availablePageMedia.slice(0, 5),
+    [availablePageMedia],
+  );
   const [replaceOpen, setReplaceOpen] = useState(false);
+  const [pageMediaOpen, setPageMediaOpen] = useState(false);
   const showOverrideBadge = Boolean(def.inheritFrom && device === "mobile");
   const overridden = showOverrideBadge && Boolean(value && value.trim());
   const canAdjustComposition = Boolean(onAdjustComposition && value && value.trim());
+  const selectMedia = (nextValue: string) => {
+    setPageMediaOpen(false);
+    onChange(nextValue);
+  };
   return (
     <div className="homepage-editor__inspector-field">
       <label>
@@ -112,7 +119,7 @@ export default function MediaField({
           fieldKey={def.key}
           device={device}
           value={value}
-          onChange={onChange}
+          onChange={selectMedia}
           spec={def.spec}
           required={def.required}
           placeholder={def.placeholder}
@@ -123,17 +130,21 @@ export default function MediaField({
           previewFit={previewFit}
           previewZoom={previewZoom}
           onReplaceOpenChange={setReplaceOpen}
+          onOpenPageMedia={availablePageMedia.length > 1
+            ? () => setPageMediaOpen((open) => !open)
+            : undefined}
+          pageMediaOpen={pageMediaOpen}
         />
       ) : null}
       {!showOverrideBadge || overridden ? (
-        replaceOpen && currentPageMedia.length > 1 ? (
+        (replaceOpen || pageMediaOpen) && availablePageMedia.length > 1 ? (
           <div
             className="homepage-editor__current-page-media"
             aria-label="最近使用的图片"
           >
             <div className="homepage-editor__current-page-media-heading">
               <strong>最近使用</strong>
-              <span>{currentPageMedia.length} 张</span>
+              <span>{availablePageMedia.length} 张</span>
             </div>
             <div>
               {recentPageMedia.map((url) => (
@@ -141,15 +152,15 @@ export default function MediaField({
                   key={url}
                   type="button"
                   className={url === value ? "is-current" : ""}
-                  onClick={() => onChange(url)}
+                  onClick={() => selectMedia(url)}
                   aria-label={url === value ? "当前使用的素材" : "使用本页素材"}
                 >
                   <img src={url} alt="" loading="lazy" />
                 </button>
               ))}
-              {currentPageMedia.length > recentPageMedia.length ? (
+              {availablePageMedia.length > recentPageMedia.length ? (
                 <span className="homepage-editor__current-page-media-more">
-                  +{currentPageMedia.length - recentPageMedia.length}
+                  +{availablePageMedia.length - recentPageMedia.length}
                 </span>
               ) : null}
             </div>

@@ -94,6 +94,7 @@ function FixtureControls() {
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const dataRef = useRef(appData);
+  const visualEditStartRef = useRef<typeof appData>();
   const panelMode = useVisualEditorSession((state) => state.panelMode);
   const selection = useVisualEditorSession((state) => state.selection);
   const setPanelMode = useVisualEditorSession((state) => state.setPanelMode);
@@ -107,11 +108,21 @@ function FixtureControls() {
     const onVisualEdit = (event: MessageEvent<CanvasVisualEditMessage>) => {
       if (event.origin !== window.location.origin) return;
       if (event.data?.type !== CANVAS_VISUAL_EDIT_MESSAGE) return;
+      if (event.data.cancelled === true) {
+        const start = visualEditStartRef.current;
+        visualEditStartRef.current = undefined;
+        if (start) dispatch({ type: "setData", data: start, recordHistory: false });
+        return;
+      }
       const current = dataRef.current;
       const index = current.content.findIndex(
         (block) => String(block.props?.id ?? "") === event.data.blockId,
       );
       if (index < 0) return;
+      if (event.data.transient === true && !visualEditStartRef.current) {
+        visualEditStartRef.current = structuredClone(current);
+      }
+      if (event.data.transient !== true) visualEditStartRef.current = undefined;
       const block = current.content[index];
       dispatch({
         type: "replace",

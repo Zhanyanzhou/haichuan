@@ -1,4 +1,4 @@
-FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS build
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS build
 
 WORKDIR /app
 
@@ -24,7 +24,10 @@ LABEL org.opencontainers.image.source="${BUILD_SOURCE}" \
       io.haichuan.component="client" \
       io.haichuan.migration-bundle-sha256="${MIGRATION_BUNDLE_SHA256}"
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY --chown=nginx:nginx nginx-main.conf /etc/nginx/nginx.conf
+COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build --chown=nginx:nginx /app/dist /usr/share/nginx/html
 
-EXPOSE 80
+USER nginx
+
+EXPOSE 8080

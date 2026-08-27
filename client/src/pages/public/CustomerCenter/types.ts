@@ -125,6 +125,13 @@ export type CustomerInquiry = {
   product?: { name?: string | null } | null;
 };
 
+export type CustomerInquiryPage = {
+  list: CustomerInquiry[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
 export type CustomerPartnerState = {
   customer?: {
     accountType?: string;

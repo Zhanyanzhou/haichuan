@@ -47,9 +47,14 @@ function assertLegacyHeroWasNormalized(puckData: any) {
   const props = puckData.content[0].props;
   const nodes = props.__instanceOverrides.nodes;
   assert.deepEqual(props.__contentTemplate, { key: "hero", version: 2 });
-  assert.equal(nodes.title.rectByViewport.mobile, undefined);
+  assert.deepEqual(nodes.title.rectByViewport.mobile, {
+    x: 0.2,
+    y: 0.62,
+    width: 0.6,
+    height: 0.12,
+  });
   assert.deepEqual(nodes.title.rectByViewport.desktop, {
-    x: 0.035,
+    x: 0,
     y: 0.5,
     width: 0.92,
     height: 0.1,
@@ -66,7 +71,7 @@ function assertLegacyHeroWasNormalized(puckData: any) {
   });
 }
 
-test("保存旧 version=2 PageDocument 时移除非法移动标题覆盖并保留合法双端覆盖", async () => {
+test("保存旧 version=2 PageDocument 时将越界几何收敛到画框并保留合法双端覆盖", async () => {
   const writes: any[] = [];
   const existing = {
     id: 9,

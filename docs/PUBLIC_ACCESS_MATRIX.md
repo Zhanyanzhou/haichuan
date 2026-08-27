@@ -63,7 +63,7 @@
 | 创建购物车、结算、支付                     | 不允许                 | 当前默认不允许；获批开放后只支付本人订单 | 当前默认不允许；获批开放后只支付本人订单 | 不得绕过资金门禁；可按角色查看/处理历史业务 |
 | 查看成本、供应商、真实库存、仓库、内部备注 | 不允许                 | 不允许                 | 不允许             | 按后台角色允许     |
 
-本矩阵重点管理客户前台访问。后台员工不是单一权限主体；`SUPER_ADMIN / ADMIN / EDITOR / CUSTOMER_SERVICE / WAREHOUSE / SALES_CONSULTANT / FINANCE` 的具体接口权限以当前服务端 `@Roles` 白名单为代码事实。本文只固化下列高风险不变量，不复制所有 Controller 形成第二套 RBAC：`WAREHOUSE` 不查看或审核付款，`CUSTOMER_SERVICE` 不因售后职责获得付款审核权，员工禁用仅 `SUPER_ADMIN` 可执行；任何角色范围变化仍按 `AGENTS.md` 单独审批。
+本矩阵重点管理客户前台访问。后台员工不是单一权限主体；`SUPER_ADMIN / ADMIN / EDITOR / CUSTOMER_SERVICE / WAREHOUSE / SALES_CONSULTANT / FINANCE` 的具体接口权限以当前服务端 `@Roles` 白名单为代码事实。本文只固化下列高风险不变量，不复制所有 Controller 形成第二套 RBAC：`WAREHOUSE` 不进入通用订单、付款或退款数据面，只通过库存与履约最小投影完成拣货、发货和物流状态操作；`CUSTOMER_SERVICE` 不因售后职责获得付款审核权；员工禁用仅 `SUPER_ADMIN` 可执行。任何角色范围变化仍按 `AGENTS.md` 单独审批。
 
 内容发布另有稳定职责边界：`EDITOR` 只能保存草稿、预览和提交审核；`ADMIN`、`SUPER_ADMIN` 可以复核并发布。任何前端按钮隐藏都不能代替服务端拒绝越权发布。
 
@@ -74,7 +74,7 @@
 - 合作商家：`accountType=PARTNER` 且 `partnerStatus=APPROVED`；
 - 合作状态为 `PENDING`、`NEEDS_SUPPLEMENT`、`REJECTED`、`SUSPENDED` 或 `NONE` 时，一律按注册会员处理；
 - 页面隐藏不能代替服务端鉴权，所有权限必须由服务端再次校验。
-- `WAREHOUSE` 不得进入付款审核；可按授权进入库存和履约范围。
+- `WAREHOUSE` 不得进入通用订单与付款审核；只可按授权进入库存和履约最小数据范围。
 - `CUSTOMER_SERVICE` 保留售后查看、登记、审核与推进权限，但不因此获得付款审核权限。
 - 后台员工“删除”实际为禁用账号，只有 `SUPER_ADMIN` 可执行；不得物理删除员工记录。
 
@@ -113,6 +113,8 @@
 - `status=PUBLISHED`；
 - `visibility=PUBLIC`；
 - `deletedAt IS NULL`。
+- `publicationQualityStatus=READY`；
+- 满足当前 `RELEASE_PROFILE`：`lead-generation` 档位不返回 `DIRECT_PURCHASE`，`commerce` 档位仍需独立交易开关才能创建购物车、结算或支付。
 
 ### 3.1 列表允许返回
 
@@ -173,8 +175,8 @@
 
 | 接口                                                  | 身份               | 返回或行为                                                 |
 | ----------------------------------------------------- | ------------------ | ---------------------------------------------------------- |
-| `GET /api/products/public`                            | 游客可访问         | 仅 `PUBLIC + PUBLISHED` 的安全商品列表                     |
-| `GET /api/products/public/:id`                        | 游客可访问         | 仅 `PUBLIC + PUBLISHED` 的安全商品详情；不可见统一返回 404 |
+| `GET /api/products/public`                            | 游客可访问         | 仅满足 `PUBLIC + PUBLISHED + READY + RELEASE_PROFILE` 的安全商品列表 |
+| `GET /api/products/public/:id`                        | 游客可访问         | 仅满足同一公开资格的安全商品详情；不可见统一返回 404       |
 | `GET /api/products/public/:productId/media/:imageId`  | 游客可访问         | 仅公开商品媒体；校验商品和图片归属；不可见统一返回 404     |
 | `GET /api/products/catalog`                           | 注册会员           | `PUBLIC + MEMBER` 的安全列表                               |
 | `GET /api/products/catalog/:id`                       | 注册会员           | `PUBLIC + MEMBER` 的安全详情                               |

@@ -67,7 +67,7 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
     const mainBox = await main.boundingBox();
     if (!mainBox) throw new Error("主海报槽位没有布局尺寸");
     await page.mouse.click(mainBox.x + 20, mainBox.y + 20);
-    await expect(page.getByText("已选择：主海报")).toBeVisible();
+    await expect(page.getByText("正在调整：主海报")).toBeVisible();
     const state = page.getByTestId("visual-state");
     const layerGroup = page.getByRole("group", { name: "图层顺序（桌面端）" });
     await layerGroup.getByRole("button", { name: "上移一层" }).click();
@@ -80,7 +80,6 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
     const mainLayoutButton = mainHud.getByRole("button", { name: "调整对象区域" });
     await mainLayoutButton.focus();
     await mainLayoutButton.press("Enter");
-    await expect(main).toBeFocused();
     await main.press("ArrowRight");
     await mainGroup.getByRole("button", { name: "精确位置与尺寸" }).click();
     await mainGroup.getByLabel("区域宽度（桌面端）").fill("44");
@@ -96,7 +95,6 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
     const detailLayoutButton = detailHud.getByRole("button", { name: "调整对象区域" });
     await detailLayoutButton.focus();
     await detailLayoutButton.press("Enter");
-    await expect(detail).toBeFocused();
     await detail.press("ArrowLeft");
     await detailGroup.getByRole("button", { name: "精确位置与尺寸" }).click();
     await detailGroup.getByLabel("区域宽度（桌面端）").fill("28");

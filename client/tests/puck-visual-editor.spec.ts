@@ -110,7 +110,7 @@ test("缩放后的真实 Puck iframe 可同时选中模块和视觉槽位并写�
   await page.getByRole("tab", { name: "模板编辑" }).click();
   await expect(page.getByRole("button", { name: "调整布局" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "选择对象" })).toHaveCount(0);
-  await expect(page.getByText("已选择：标题")).toBeVisible();
+  await expect(page.getByText("正在调整：标题")).toBeVisible();
   await page.getByRole("button", { name: "调整区域" }).click();
   await expect(page.getByText("正在调整：标题")).toBeVisible();
   await expect(page.getByTestId("selected-visual-state"))
@@ -154,6 +154,8 @@ test("缩放后的真实 Puck iframe 可同时选中模块和视觉槽位并写�
   });
   await expect(page.getByTestId("selected-block-state"))
     .toHaveText("已选择模块：puck-hero-visual-test");
+  await expect(page.getByText("正在调整：桌面主图")).toBeVisible();
+  await media.press("Escape");
   await expect(page.getByText("已选择：桌面主图")).toBeVisible();
 
   const productCards = canvas.locator('[data-content-role="productCards"]').first();

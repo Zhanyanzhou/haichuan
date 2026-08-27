@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   Button,
+  Pagination,
 } from "antd";
 import { customerApi } from "@/services/api";
 import { getRequestErrorMessage } from "@/services/httpClient";
@@ -31,7 +32,7 @@ import type {
   CustomerOrder,
   CustomerReviewOrder,
   CustomerAddress,
-  CustomerInquiry,
+  CustomerInquiryPage,
   CustomerPartnerState,
   CustomerProfile,
   CustomerSelectionInquiry,
@@ -43,7 +44,10 @@ type AccountDashboardProps = {
   orders: CustomerOrder[];
   addresses: CustomerAddress[];
   selectionInquiries: CustomerSelectionInquiry[];
-  inquiries: CustomerInquiry[];
+  inquiryPage: CustomerInquiryPage;
+  inquiryLoading: boolean;
+  inquiryError: string | null;
+  onInquiryPageChange: (page: number) => Promise<void>;
   partner: CustomerPartnerState;
   notifications: CustomerNotificationPage;
   notificationError: string | null;
@@ -58,7 +62,11 @@ type AccountAddress = AccountDashboardProps["addresses"][number];
 const inquiryStatus: Record<string, string> = {
   PENDING: "待顾问联系",
   PROCESSING: "顾问跟进中",
+  CONTACTED: "已联系",
+  FOLLOWING: "持续跟进中",
   REPLIED: "已回复",
+  COMPLETED: "已完成",
+  INVALID: "已关闭",
   CLOSED: "已结束",
 };
 
@@ -91,7 +99,10 @@ export default function MyAccountDashboard({
   orders,
   addresses,
   selectionInquiries,
-  inquiries,
+  inquiryPage,
+  inquiryLoading,
+  inquiryError,
+  onInquiryPageChange,
   notifications,
   notificationError,
   onReadNotification,
@@ -102,6 +113,7 @@ export default function MyAccountDashboard({
   const { message, modal } = AntdApp.useApp();
   const name = profile?.name || "海川贵宾";
   const commerceEnabled = useCommerceEnabled();
+  const inquiries = inquiryPage.list;
   const partnerStatus = partner?.customer?.partnerStatus || "NONE";
   const partnerApprovedAt = partner?.customer?.partnerApprovedAt || null;
 
@@ -201,8 +213,13 @@ export default function MyAccountDashboard({
     }
     setClosing(true);
     try {
-      await customerApi.closeAccount({ password: closePassword });
-      message.success("账户已注销");
+      const response = await customerApi.closeAccount({ password: closePassword });
+      const result = unwrapResponse<{ retainedUnderLegalHold?: number }>(response);
+      if ((result.retainedUnderLegalHold ?? 0) > 0) {
+        message.warning("账户已注销；依法需要保留的咨询记录将在保留依据结束后继续处理");
+      } else {
+        message.success("账户已注销，关联咨询个人信息已匿名化");
+      }
       onSignOut();
     } catch (error: unknown) {
       message.error(getRequestErrorMessage(error, "注销失败"));
@@ -378,7 +395,7 @@ export default function MyAccountDashboard({
             <span>选款咨询</span>
           </div>
           <div>
-            <strong>{String(inquiries.length).padStart(2, "0")}</strong>
+            <strong>{String(inquiryPage.total).padStart(2, "0")}</strong>
             <span>预约咨询</span>
           </div>
           <div>
@@ -436,24 +453,46 @@ export default function MyAccountDashboard({
               </div>
               <Link to="/contact">预约咨询 →</Link>
             </div>
-            {inquiries.length ? (
-              <div className="my-account__records">
-                {inquiries.slice(0, 3).map((record) => (
-                  <article key={record.id}>
-                    <div>
-                      <small>
-                        {new Date(record.createdAt).toLocaleDateString("zh-CN")}
-                      </small>
-                      <h3>
-                        {record.product?.name ||
-                          record.consultationType ||
-                          "预约咨询"}
-                      </h3>
-                    </div>
-                    <em>{inquiryStatus[record.status] || record.status}</em>
-                  </article>
-                ))}
-              </div>
+            {inquiryError && (
+              <p className="my-account__records-state" role="alert">
+                {inquiryError}
+              </p>
+            )}
+            {inquiryLoading && inquiries.length === 0 ? (
+              <p className="my-account__records-state" role="status">
+                正在加载预约记录…
+              </p>
+            ) : inquiries.length ? (
+              <>
+                <div className="my-account__records" aria-busy={inquiryLoading}>
+                  {inquiries.map((record) => (
+                    <article key={record.id}>
+                      <div>
+                        <small>
+                          {new Date(record.createdAt).toLocaleDateString("zh-CN")}
+                        </small>
+                        <h3>
+                          {record.product?.name ||
+                            record.consultationType ||
+                            "预约咨询"}
+                        </h3>
+                      </div>
+                      <em>{inquiryStatus[record.status] || record.status}</em>
+                    </article>
+                  ))}
+                </div>
+                <nav className="my-account__pagination" aria-label="预约咨询分页">
+                  <Pagination
+                    current={inquiryPage.page}
+                    pageSize={inquiryPage.pageSize}
+                    total={inquiryPage.total}
+                    showSizeChanger={false}
+                    hideOnSinglePage
+                    disabled={inquiryLoading}
+                    onChange={(page) => void onInquiryPageChange(page)}
+                  />
+                </nav>
+              </>
             ) : (
               <Empty>
                 还没有预约记录。<Link to="/contact">预约专属顾问 →</Link>

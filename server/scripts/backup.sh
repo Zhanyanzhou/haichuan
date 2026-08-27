@@ -46,14 +46,69 @@ PARTIAL_PATH="${FINAL_PATH}.partial"
 MANIFEST_FILENAME="${DB_NAME}_${TIMESTAMP}.sha256"
 MANIFEST_FINAL_PATH="${BACKUP_DIR}/${MANIFEST_FILENAME}"
 MANIFEST_PARTIAL_PATH="${MANIFEST_FINAL_PATH}.partial"
+STATUS_DIR="${BACKUP_DIR}/.health"
+STATUS_PATH="${STATUS_DIR}/backup-status.env"
+STATUS_PARTIAL_PATH="${STATUS_PATH}.partial"
+ATTEMPT_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+BACKUP_PHASE="INITIALIZING"
+WARNING_CODE="NONE"
 
 # 创建备份目录
 mkdir -p "$BACKUP_DIR"
+mkdir -p "$STATUS_DIR"
 
 MEDIA_FINAL_PATHS=()
 MEDIA_PARTIAL_PATHS=()
 PUBLISHED_PATHS=()
 PUBLISH_COMPLETE=false
+
+read_previous_status() {
+  local key="$1"
+  if [ ! -f "$STATUS_PATH" ]; then
+    return 0
+  fi
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$STATUS_PATH"
+}
+
+PREVIOUS_LAST_SUCCESS_AT=$(read_previous_status "LAST_SUCCESS_AT")
+PREVIOUS_LATEST_MANIFEST=$(read_previous_status "LATEST_MANIFEST")
+
+failure_code_for_phase() {
+  case "$BACKUP_PHASE" in
+    DATABASE_DUMP) echo "DB_DUMP_FAILED" ;;
+    MEDIA_ARCHIVE) echo "MEDIA_ARCHIVE_FAILED" ;;
+    MANIFEST_BUILD) echo "MANIFEST_FAILED" ;;
+    MANIFEST_VERIFY) echo "VERIFY_FAILED" ;;
+    RETENTION) echo "RETENTION_FAILED" ;;
+    DISK_CHECK) echo "DISK_CHECK_FAILED" ;;
+    *) echo "UNKNOWN" ;;
+  esac
+}
+
+write_status_marker() {
+  local exit_code="$1"
+  local result="$2"
+  local error_code="$3"
+  local finished_at="$4"
+  local last_success_at="$PREVIOUS_LAST_SUCCESS_AT"
+  local latest_manifest="$PREVIOUS_LATEST_MANIFEST"
+  if [ "$PUBLISH_COMPLETE" = "true" ]; then
+    last_success_at="$finished_at"
+    latest_manifest="$MANIFEST_FILENAME"
+  fi
+  {
+    printf 'SCHEMA_VERSION=1\n'
+    printf 'LAST_ATTEMPT_STARTED_AT=%s\n' "$ATTEMPT_STARTED_AT"
+    printf 'LAST_ATTEMPT_FINISHED_AT=%s\n' "$finished_at"
+    printf 'LAST_SUCCESS_AT=%s\n' "$last_success_at"
+    printf 'LAST_EXIT_CODE=%s\n' "$exit_code"
+    printf 'RESULT=%s\n' "$result"
+    printf 'ERROR_CODE=%s\n' "$error_code"
+    printf 'WARNING_CODE=%s\n' "$WARNING_CODE"
+    printf 'LATEST_MANIFEST=%s\n' "$latest_manifest"
+  } > "$STATUS_PARTIAL_PATH"
+  mv -f -- "$STATUS_PARTIAL_PATH" "$STATUS_PATH"
+}
 
 cleanup_incomplete_backup() {
   rm -f -- "$PARTIAL_PATH" "$MANIFEST_PARTIAL_PATH"
@@ -67,12 +122,37 @@ cleanup_incomplete_backup() {
   fi
 }
 
+on_exit() {
+  local exit_code=$?
+  local finished_at
+  local result="FAILED"
+  local error_code
+  trap - EXIT
+  set +e
+  cleanup_incomplete_backup
+  finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if [ "$exit_code" -eq 0 ] && [ "$PUBLISH_COMPLETE" = "true" ]; then
+    if [ "$WARNING_CODE" = "NONE" ]; then
+      result="SUCCESS"
+      error_code="NONE"
+    else
+      result="WARNING"
+      error_code="$WARNING_CODE"
+    fi
+  else
+    error_code=$(failure_code_for_phase)
+  fi
+  write_status_marker "$exit_code" "$result" "$error_code" "$finished_at"
+  exit "$exit_code"
+}
+
 # 重定向会在命令失败前创建空文件；清单发布前的任何退出都清理本批产物。
-trap cleanup_incomplete_backup EXIT
+trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # ---------- 1. 数据库 ----------
+BACKUP_PHASE="DATABASE_DUMP"
 echo "📦 开始备份数据库: ${DB_NAME} ..."
 
 MYSQL_PWD="$DB_PASS" mysqldump \
@@ -92,6 +172,7 @@ echo "✅ 数据库备份暂存并校验完成: $PARTIAL_PATH"
 
 # ---------- 2. 媒体卷（uploads / private-media，含付款凭证） ----------
 if [ -n "$MEDIA_DIRS" ]; then
+  BACKUP_PHASE="MEDIA_ARCHIVE"
   echo "📦 开始备份媒体卷: $MEDIA_DIRS ..."
   IFS=':' read -ra DIRS <<< "$MEDIA_DIRS"
   for dir in "${DIRS[@]}"; do
@@ -130,6 +211,7 @@ else
 fi
 
 # ---------- 3. 批次提交（清单最后发布，作为完整备份组的提交标记） ----------
+BACKUP_PHASE="MANIFEST_BUILD"
 : > "$MANIFEST_PARTIAL_PATH"
 db_checksum=$(sha256sum "$PARTIAL_PATH" | awk '{print $1}')
 printf '%s  %s\n' "$db_checksum" "$(basename "$FINAL_PATH")" >> "$MANIFEST_PARTIAL_PATH"
@@ -148,20 +230,24 @@ done
 mv -f -- "$MANIFEST_PARTIAL_PATH" "$MANIFEST_FINAL_PATH"
 PUBLISHED_PATHS+=("$MANIFEST_FINAL_PATH")
 
+BACKUP_PHASE="MANIFEST_VERIFY"
 (cd "$BACKUP_DIR" && sha256sum -c "$MANIFEST_FILENAME")
 PUBLISH_COMPLETE=true
 echo "✅ 完整备份批次已发布并复验: $MANIFEST_FINAL_PATH"
 
 # ---------- 4. 清理过期备份 ----------
+BACKUP_PHASE="RETENTION"
 echo "🧹 清理 ${RETENTION_DAYS} 天前的备份 ..."
 find "$BACKUP_DIR" -name "${DB_NAME}_*.sql.gz" -mtime +"$RETENTION_DAYS" -delete
 find "$BACKUP_DIR" -name "${DB_NAME}_*.sha256" -mtime +"$RETENTION_DAYS" -delete
 find "$BACKUP_DIR" -name "${MEDIA_PREFIX}_*.tar.gz" -mtime +"$RETENTION_DAYS" -delete
 
 # ---------- 5. 磁盘水位检查（超阈值输出告警日志，供日志采集/人工巡检发现） ----------
+BACKUP_PHASE="DISK_CHECK"
 disk_use=$(df -P "$BACKUP_DIR" | awk 'NR==2 {gsub("%",""); print $5}')
 if [ -n "$disk_use" ] && [ "$disk_use" -ge "$DISK_WARN_PCT" ]; then
   echo "🚨 WARN: 备份目标磁盘使用率 ${disk_use}% ≥ 阈值 ${DISK_WARN_PCT}%，请清理或扩容！"
+  WARNING_CODE="DISK_HIGH"
 fi
 
 # ---------- 6. 清单 ----------

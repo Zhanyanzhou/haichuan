@@ -22,13 +22,55 @@ on:
           - "true"
 
 permissions:
+  actions: read
   contents: read
   packages: write
   attestations: write
   id-token: write
 
 jobs:
+  quality-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run_id: ${{ steps.quality.outputs.run_id }}
+      run_url: ${{ steps.quality.outputs.run_url }}
+      head_sha: ${{ steps.quality.outputs.head_sha }}
+    steps:
+      - name: 查找同一 SHA 的成功质量门禁
+        id: quality
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate --slurp \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${GITHUB_REPOSITORY}/actions/workflows/quality.yml/runs?head_sha=${GITHUB_SHA}&status=completed&per_page=100" \
+            > "${RUNNER_TEMP}/quality-runs.json"
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const payload = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/quality-runs.json`, "utf8"));
+          const runs = Array.isArray(payload) ? payload.flatMap((page) => page.workflow_runs ?? []) : payload.workflow_runs ?? [];
+          const candidates = runs
+            .filter((run) =>
+              run.head_sha === process.env.GITHUB_SHA &&
+              run.event === "push" &&
+              run.status === "completed" &&
+              run.conclusion === "success" &&
+              run.head_repository?.full_name === process.env.GITHUB_REPOSITORY)
+            .sort((left, right) => Number(right.id) - Number(left.id));
+          const run = candidates[0];
+          if (!run) throw new Error("QUALITY_GATE_SAME_SHA_SUCCESS_NOT_FOUND");
+          const output = [
+            `run_id=${run.id}`,
+            `run_url=${run.html_url}`,
+            `head_sha=${run.head_sha}`,
+          ].join("\n");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `${output}\n`);
+          NODE
+
   publish:
+    needs: quality-proof
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -112,9 +154,12 @@ jobs:
           CLIENT_IMAGE_NAME: ${{ steps.release.outputs.client_image }}
           CLIENT_IMAGE_DIGEST: ${{ steps.client.outputs.digest }}
           MIGRATION_SHA: ${{ steps.release.outputs.migration_sha }}
+          QUALITY_RUN_ID: ${{ needs.quality-proof.outputs.run_id }}
+          QUALITY_RUN_URL: ${{ needs.quality-proof.outputs.run_url }}
+          QUALITY_HEAD_SHA: ${{ needs.quality-proof.outputs.head_sha }}
         run: |
           mkdir -p release-output
-          node -e 'const fs=require("node:fs"); const manifest={schemaVersion:1,gitSha:process.env.GITHUB_SHA,migrationBundleSha256:process.env.MIGRATION_SHA,source:`${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`,server:{image:process.env.SERVER_IMAGE_NAME,digest:process.env.SERVER_IMAGE_DIGEST,reference:`${process.env.SERVER_IMAGE_NAME}@${process.env.SERVER_IMAGE_DIGEST}`},client:{image:process.env.CLIENT_IMAGE_NAME,digest:process.env.CLIENT_IMAGE_DIGEST,reference:`${process.env.CLIENT_IMAGE_NAME}@${process.env.CLIENT_IMAGE_DIGEST}`}}; fs.writeFileSync("release-output/release-manifest.json",`${JSON.stringify(manifest,null,2)}\n`);'
+          node -e 'const fs=require("node:fs"); const manifest={schemaVersion:2,gitSha:process.env.GITHUB_SHA,migrationBundleSha256:process.env.MIGRATION_SHA,source:`${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`,qualityGate:{workflow:"quality.yml",runId:Number(process.env.QUALITY_RUN_ID),runUrl:process.env.QUALITY_RUN_URL,headSha:process.env.QUALITY_HEAD_SHA,event:"push",conclusion:"success"},server:{image:process.env.SERVER_IMAGE_NAME,digest:process.env.SERVER_IMAGE_DIGEST,reference:`${process.env.SERVER_IMAGE_NAME}@${process.env.SERVER_IMAGE_DIGEST}`},client:{image:process.env.CLIENT_IMAGE_NAME,digest:process.env.CLIENT_IMAGE_DIGEST,reference:`${process.env.CLIENT_IMAGE_NAME}@${process.env.CLIENT_IMAGE_DIGEST}`}}; fs.writeFileSync("release-output/release-manifest.json",`${JSON.stringify(manifest,null,2)}\n`);'
           node scripts/verify-release-images.mjs --manifest release-output/release-manifest.json
 
       - name: 上传发布清单

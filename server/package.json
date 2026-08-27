@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "珠宝管理平台 - NestJS 后端服务",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "test": "node --test -r ts-node/register \"src/**/*.spec.ts\"",
     "build": "nest build",
@@ -12,7 +15,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "prisma:seed": "ts-node prisma/seed.ts"
+    "prisma:seed": "ts-node prisma/seed.ts",
+    "privacy:lead-retention": "npm run build && node dist/cli/lead-retention-disposition.js"
   },
   "dependencies": {
     "@alicloud/dysmsapi20170525": "^3.0.0",

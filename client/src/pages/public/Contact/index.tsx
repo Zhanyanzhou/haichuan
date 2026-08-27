@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { inquiriesApi, productApi } from "@/services/api";
-import { requestStatus } from "@/services/httpClient";
+import { requestErrorCode, requestStatus } from "@/services/httpClient";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackPageView, trackSubmitInquiry } from "@/hooks/useAnalytics";
 import { usePageMetaStore } from "@/store/pageMetaStore";
@@ -54,6 +54,7 @@ const SOURCE_TYPE_TO_CONSULTATION: Record<string, string> = {
   product: "选款建议",
   "purchase-support": "选款建议",
   custom: "高级定制",
+  privacy: "其他",
 };
 
 type InquirySourceProduct = {
@@ -168,6 +169,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const sourceType = searchParams.get("type") || "";
   const preselectedConsultationType = SOURCE_TYPE_TO_CONSULTATION[sourceType] || "";
+  const isPrivacyRequest = sourceType === "privacy";
   const rawProductRef = editorPreview ? null : searchParams.get("productRef");
   const hasProductReference = rawProductRef !== null;
   const productRef = normalizePublicProductReference(rawProductRef);
@@ -215,7 +217,9 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     preferredContact: "电话",
     preferredTime: "",
     budgetRange: "",
-    message: "",
+    message: isPrivacyRequest
+      ? "我希望行使以下个人信息权利（查询、更正、删除或撤回同意，请说明具体需求）："
+      : "",
     privacyConsent: false,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -360,7 +364,10 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
       setSubmitted(true);
     } catch (error) {
       const status = requestStatus(error);
-      if (sourceProduct && (status === 400 || status === 404 || status === 422)) {
+      if (
+        sourceProduct
+        && requestErrorCode(error) === "INQUIRY_PRODUCT_NOT_AVAILABLE"
+      ) {
         setProductContextStatus("unavailable");
         setSubmitError("作品当前不可咨询，请移除作品后提交普通咨询。");
       } else if (status === 429) {
@@ -673,6 +680,27 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
 
           {/* 右侧：表单 */}
           <div>
+            {isPrivacyRequest && (
+              <section
+                aria-labelledby="privacy-request-title"
+                style={{
+                  border: `1px solid ${T.line}`,
+                  background: T.warmBg,
+                  padding: "16px 18px",
+                  marginBottom: 16,
+                }}
+              >
+                <strong
+                  id="privacy-request-title"
+                  style={{ display: "block", color: T.txt, fontSize: 15, fontWeight: 500 }}
+                >
+                  隐私与个人信息请求
+                </strong>
+                <p style={{ margin: "6px 0 0", color: T.sec, fontSize: 13, lineHeight: 1.7 }}>
+                  请说明您希望查询、更正、删除的信息，或需要撤回的同意范围。提交后会生成可分配、跟进和审计的服务记录。
+                </p>
+              </section>
+            )}
             {hasProductReference && (
               <section
                 className="contact-product-context"

@@ -18,6 +18,8 @@ import {
   getInspectorDevice,
 } from "../../pages/admin/HomepageConfig/editor-utils";
 import type { PuckProps } from "../types";
+import { useVisualEditorSession } from "../visual-editor/visualEditorSession";
+import { applySharedTemplateDesignPatch } from "../visual-editor/sharedTemplateDesign";
 
 export interface InspectorModuleEditor {
   moduleType: string;
@@ -27,6 +29,8 @@ export interface InspectorModuleEditor {
   dirty: boolean;
   /** 写入 props 补丁（即时同步画布） */
   update: (patch: PuckProps) => void;
+  /** 基于最新模块状态生成补丁，避免连续控件用旧闭包覆盖前一项设计。 */
+  updateFromCurrent: (factory: (props: PuckProps) => PuckProps) => void;
   /** 将一次恢复操作写成明确的 before/after 历史事务。 */
   updateHistoryTransaction: (
     patch: PuckProps | ((props: PuckProps) => PuckProps),
@@ -50,6 +54,7 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
   const historyTransactionPending = useEditorHistoryTransaction(
     (state) => state.pending,
   );
+  const panelMode = useVisualEditorSession((state) => state.panelMode);
   const setHistoryTransactionPending = useEditorHistoryTransaction(
     (state) => state.setPending,
   );
@@ -86,6 +91,16 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
 
   const update = (patch: PuckProps) => {
     if (index < 0 || historyTransactionPending) return;
+    if (panelMode === "design") {
+      dispatch({
+        type: "setData",
+        data: {
+          ...appData,
+          content: applySharedTemplateDesignPatch(content, moduleType, patch),
+        },
+      });
+      return;
+    }
     const nextItem = {
       ...content[index],
       props: { ...content[index].props, ...patch },
@@ -95,6 +110,35 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
       destinationIndex: index,
       destinationZone: ROOT_ZONE,
       data: nextItem,
+    });
+  };
+
+  const updateFromCurrent: InspectorModuleEditor["updateFromCurrent"] = (factory) => {
+    if (historyTransactionPending) return;
+    const latest = getPuck();
+    const latestData = latest.appState.data;
+    const latestContent = latestData.content as typeof content;
+    const latestIndex = latestContent.findIndex((item) => item.props?.id === props.id);
+    if (latestIndex < 0) return;
+    const patch = factory(latestContent[latestIndex].props);
+    if (panelMode === "design") {
+      dispatch({
+        type: "setData",
+        data: {
+          ...latestData,
+          content: applySharedTemplateDesignPatch(latestContent, moduleType, patch),
+        },
+      });
+      return;
+    }
+    dispatch({
+      type: "replace",
+      destinationIndex: latestIndex,
+      destinationZone: ROOT_ZONE,
+      data: {
+        ...latestContent[latestIndex],
+        props: { ...latestContent[latestIndex].props, ...patch },
+      },
     });
   };
 
@@ -112,11 +156,19 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
     const patch = typeof patchOrFactory === "function"
       ? patchOrFactory(beforeItem.props)
       : patchOrFactory;
-    const afterContent = [...beforeData.content];
-    afterContent[beforeIndex] = {
-      ...beforeItem,
-      props: { ...beforeItem.props, ...patch },
-    };
+    const afterContent = panelMode === "design"
+      ? applySharedTemplateDesignPatch(
+          beforeData.content as typeof content,
+          moduleType,
+          patch,
+        )
+      : [...beforeData.content];
+    if (panelMode !== "design") {
+      afterContent[beforeIndex] = {
+        ...beforeItem,
+        props: { ...beforeItem.props, ...patch },
+      };
+    }
     const afterState = {
       ...before.appState,
       data: { ...beforeData, content: afterContent },
@@ -126,19 +178,11 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
     setHistoryTransactionPending(true);
 
     // 覆盖 Puck 尚未触发的 250ms 防抖记录：先让当前完整状态成为 before。
-    dispatch({
-      type: "replace",
-      destinationIndex: beforeIndex,
-      destinationZone: ROOT_ZONE,
-      data: beforeItem,
-      recordHistory: true,
-    });
+    dispatch({ type: "setData", data: beforeData, recordHistory: true });
     // reset 立即反映到画布；after 由下方 setHistories 原子追加。
     dispatch({
-      type: "replace",
-      destinationIndex: beforeIndex,
-      destinationZone: ROOT_ZONE,
-      data: afterContent[beforeIndex],
+      type: "setData",
+      data: { ...beforeData, content: afterContent },
       recordHistory: false,
     });
 
@@ -195,6 +239,7 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
     device: getInspectorDevice(currentViewport),
     dirty,
     update,
+    updateFromCurrent,
     updateHistoryTransaction,
     historyTransactionPending,
     revert,

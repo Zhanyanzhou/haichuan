@@ -88,7 +88,7 @@ test.describe("Booking 黄金模板（独立属性面板与画布）", () => {
     await expect(canvas.locator("form")).toHaveCount(0);
   });
 
-  test("比例、安全文字带与键盘画面调整保存为稀疏实例覆盖", async ({ page }) => {
+  test("比例、文字样式与键盘画面调整保存为稀疏实例覆盖", async ({ page }) => {
     const canvas = page.getByRole("region", { name: "Booking 中央画布测试区" });
     await page.getByRole("group", { name: "画面比例" }).getByRole("button", { name: "21 / 6" }).click();
     await expect(page.getByTestId("booking-state")).toContainText('"aspectRatioByViewport":{"desktop":3.5}');
@@ -96,8 +96,10 @@ test.describe("Booking 黄金模板（独立属性面板与画布）", () => {
     const titleGroup = page.locator("fieldset").filter({ has: page.locator("legend", { hasText: "主标题" }) });
     await titleGroup.getByRole("checkbox").check();
     await titleGroup.getByRole("button", { name: "高级设置" }).click();
-    await titleGroup.getByRole("group", { name: "安全文字带" }).getByRole("button", { name: "深色文字带" }).click();
-    await expect(page.getByTestId("booking-state")).toContainText('"safeBand":"dark"');
+    await expect(titleGroup.getByRole("group", { name: "安全文字带" })).toHaveCount(0);
+    await titleGroup.getByRole("button", { name: "居中对齐", exact: true }).click();
+    await expect(page.getByTestId("booking-state")).toContainText('"align":"center"');
+    await expect(page.getByTestId("booking-state")).not.toContainText('"safeBand"');
 
     const media = canvas.locator('[data-hc-keyboard-node="bgImage"]');
     await media.click({ position: { x: 80, y: 80 } });

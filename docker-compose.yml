@@ -57,10 +57,11 @@ services:
       HOST: "0.0.0.0"
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-      JWT_EXPIRES_IN: "${JWT_EXPIRES_IN:-7d}"
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
       # 线上交易总开关（默认关闭；获 D.2 批准后才显式设为 true）
       CUSTOMER_COMMERCE_ENABLED: "${CUSTOMER_COMMERCE_ENABLED:-false}"
+      PARTNER_APPLICATIONS_WRITE_ENABLED: "${PARTNER_APPLICATIONS_WRITE_ENABLED:-false}"
+      RELEASE_PROFILE: "${RELEASE_PROFILE:-lead-generation}"
       # 可选能力一律显式注入；缺失时由服务端按各自合同关闭或诚实降级。
       WECHAT_APP_ID: "${WECHAT_APP_ID:-}"
       WECHAT_APP_SECRET: "${WECHAT_APP_SECRET:-}"
@@ -104,6 +105,7 @@ services:
       PRODUCT_MEDIA_ROOT: /app/private-media/products
       BACKUP_DIR: /backups
       BACKUP_INTERVAL_SECONDS: "${BACKUP_INTERVAL_SECONDS:-86400}"
+      BACKUP_HEALTH_GRACE_SECONDS: "${BACKUP_HEALTH_GRACE_SECONDS:-3600}"
     # P0-3：不对宿主机暴露 3000（仅 nginx 反代 /api 与 /uploads → server:3000，见 nginx.conf）
     expose:
       - "3000"
@@ -147,9 +149,9 @@ services:
       server:
         condition: service_healthy
     ports:
-      - "80:80"
+      - "80:8080"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -179,8 +181,10 @@ services:
       DISK_WARN_PCT: ${DISK_WARN_PCT:-85}
       RETENTION_DAYS: "7"
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_HEALTH_GRACE_SECONDS: ${BACKUP_HEALTH_GRACE_SECONDS:-3600}
     volumes:
       - ./server/scripts/backup.sh:/usr/local/bin/backup.sh:ro
+      - ./server/scripts/check-backup-health.sh:/usr/local/bin/check-backup-health.sh:ro
       - uploads_data:/media/uploads:ro
       - private_media_data:/media/private-media:ro
       - ./backups:/backups
@@ -192,6 +196,12 @@ services:
           /bin/bash /usr/local/bin/backup.sh || echo "🚨 ERROR: 备份执行失败，将在下个周期重试"
           sleep "$${BACKUP_INTERVAL_SECONDS}"
         done
+    healthcheck:
+      test: ["CMD-SHELL", "/bin/bash /usr/local/bin/check-backup-health.sh"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
     networks:
       - jewelry-network
 
@@ -200,7 +210,7 @@ services:
   # 首次部署后在 UI 中手动添加监控项：
   #   http://server:3000/api/health  （后端进程存活，不检查数据库）
   #   http://server:3000/api/ready   （后端与数据库就绪）
-  #   http://client:80/              （前台可达）
+  #   http://client:8080/            （前台可达）
   # 通知渠道在 UI 配置（邮件/企业微信/webhook 均可）。
   # 备份容器与磁盘水位无 HTTP 端点，由 backup.sh 输出告警日志（docker logs jewelry-backup 巡检）。
   uptime-kuma:

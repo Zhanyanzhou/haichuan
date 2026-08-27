@@ -9,6 +9,13 @@ import {
   UnorderedListOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
+import type { CSSProperties } from "react";
+import {
+  getContentTemplateContract,
+  getContentTemplateDefaultRect,
+  getContentTemplateEditableObject,
+} from "../generated/contentTemplates.generated";
+import { useVisualEditorSession } from "../visual-editor/visualEditorSession";
 
 export type InspectorObjectKind =
   | "module"
@@ -96,11 +103,14 @@ interface InspectorObjectContextProps {
   desktopState?: InspectorResponsiveState;
   mobileState?: InspectorResponsiveState;
   sharedDesignLabel?: string;
+  blockId?: string;
+  moduleType?: string;
+  mode?: "content" | "design";
 }
 
 /**
  * 属性面板的单一编辑范围入口。
- * 原生 select 保留紧凑键盘切换；可视对象卡承担直接鼠标选择，模板内部对象不进入图层面板。
+ * 原生 select 保留紧凑键盘切换；可视对象卡承担只读导航，模板模式的图层面板同步提供内部对象选择。
  */
 export default function InspectorObjectContext({
   moduleLabel,
@@ -113,7 +123,16 @@ export default function InspectorObjectContext({
   desktopState = "base",
   mobileState = "base",
   sharedDesignLabel = "共享样式会同步到双端",
+  blockId,
+  moduleType,
+  mode = "content",
 }: InspectorObjectContextProps) {
+  const measuredGeometry = useVisualEditorSession((state) =>
+    blockId ? state.canvasGeometryByBlock[blockId]?.[activeDevice] : undefined,
+  );
+  const contract = moduleType ? getContentTemplateContract(moduleType) : undefined;
+  const frameAspectRatio = measuredGeometry?.frameAspectRatio ??
+    contract?.defaultGeometryByViewport[activeDevice].frameAspectRatio ?? 1;
   const scope = selectedObjectId ? "object" : "module";
   const stateLabel: Record<InspectorResponsiveState, string> = {
     base: "基准",
@@ -132,19 +151,6 @@ export default function InspectorObjectContext({
     collection: "Collection · 集合对象",
     structured: "Object · 内容对象",
   }[objectKind];
-  const KindIcon = objectKind === "media"
-    ? FileImageOutlined
-    : objectKind === "video"
-      ? VideoCameraOutlined
-    : objectKind === "text"
-      ? FontSizeOutlined
-      : objectKind === "action"
-        ? LinkOutlined
-        : objectKind === "product"
-          ? ShoppingOutlined
-          : objectKind === "collection"
-            ? UnorderedListOutlined
-            : AppstoreOutlined;
   const iconForKind = (kind: InspectorObjectKind = "structured") => kind === "media"
     ? FileImageOutlined
     : kind === "video"
@@ -158,6 +164,10 @@ export default function InspectorObjectContext({
             : kind === "collection"
               ? UnorderedListOutlined
               : AppstoreOutlined;
+  const selectedObject = selectedObjectId
+    ? objects.find((object) => object.id === selectedObjectId)
+    : undefined;
+  const SelectedIcon = selectedObject ? iconForKind(selectedObject.kind) : AppstoreOutlined;
 
   return (
     <section
@@ -169,76 +179,14 @@ export default function InspectorObjectContext({
       data-desktop-state={desktopState}
       data-mobile-state={mobileState}
       data-shared-design="true"
+      data-panel-mode={mode}
       aria-label="当前编辑对象"
     >
-      <div className="homepage-editor__object-thumbnail" aria-hidden="true">
-        <KindIcon />
-        {thumbnailUrl ? (
-          <img
-            src={thumbnailUrl}
-            alt=""
-            onError={(event) => {
-              event.currentTarget.hidden = true;
-            }}
-          />
-        ) : null}
-      </div>
-      <div className="homepage-editor__object-summary">
-        <label>
-          <span>编辑对象</span>
-          <select
-            aria-label="选择编辑对象"
-            value={selectedObjectId ?? ""}
-            onChange={(event) => onSelect(event.target.value || null)}
-          >
-            <option value="">{moduleLabel}（模块级）</option>
-            {objects.map((object) => (
-              <option key={object.id} value={object.id}>
-                {object.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <small>{kindLabel}</small>
-        <div
-          className="homepage-editor__responsive-state"
-          role="status"
-          aria-label={`响应式状态：桌面端${stateLabel[desktopState]}，移动端${stateLabel[mobileState]}`}
-        >
-          <span
-            data-device="desktop"
-            data-state={desktopState}
-            data-active={activeDevice === "desktop" ? "true" : "false"}
-          >
-            <DesktopOutlined aria-hidden="true" />
-            桌面端 · {stateLabel[desktopState]}
-          </span>
-          <LinkOutlined aria-hidden="true" />
-          <span
-            data-device="mobile"
-            data-state={mobileState}
-            data-active={activeDevice === "mobile" ? "true" : "false"}
-          >
-            <MobileOutlined aria-hidden="true" />
-            移动端 · {stateLabel[mobileState]}
-          </span>
-        </div>
-        <small className="homepage-editor__responsive-shared-note">
-          {sharedDesignLabel}
-        </small>
-      </div>
-      <span className="homepage-editor__edit-scope-badge">
-        {scope === "object" ? "对象级" : "模块级"}
-      </span>
       {objects.length > 0 ? (
         <div
           className="homepage-editor__object-picker"
           data-inspector-object-picker="visual"
         >
-          <div className="homepage-editor__object-picker-heading">
-            <strong>模板对象</strong>
-            <span>点击对象后，画布与属性同步定位</span>
-          </div>
           <div
             className="homepage-editor__object-picker-grid"
             role="listbox"
@@ -255,10 +203,7 @@ export default function InspectorObjectContext({
               <span className="homepage-editor__object-picker-thumb" aria-hidden="true">
                 <AppstoreOutlined />
               </span>
-              <span>
-                <strong>整个模板</strong>
-                <small>画布比例与整体布局</small>
-              </span>
+              <strong>整体</strong>
             </button>
             {objects.map((object) => {
               const ObjectIcon = iconForKind(object.kind);
@@ -284,13 +229,111 @@ export default function InspectorObjectContext({
                       />
                     ) : null}
                   </span>
-                  <span>
-                    <strong>{object.label}</strong>
-                    <small>{object.kind === "media" || object.kind === "video" ? "画面与槽位" : "位置与样式"}</small>
-                  </span>
+                  <strong>{object.label}</strong>
                 </button>
               );
             })}
+          </div>
+        </div>
+      ) : null}
+      <label className="homepage-editor__object-native-select">
+        <span>编辑对象</span>
+        <select
+          aria-label="选择编辑对象"
+          value={selectedObjectId ?? ""}
+          onChange={(event) => onSelect(event.target.value || null)}
+        >
+          <option value="">{moduleLabel}（模块级）</option>
+          {objects.map((object) => (
+            <option key={object.id} value={object.id}>{object.label}</option>
+          ))}
+        </select>
+      </label>
+      <div className="homepage-editor__object-context-line">
+        <span className="homepage-editor__object-context-icon" aria-hidden="true">
+          <SelectedIcon />
+          {thumbnailUrl ? (
+            <img
+              src={thumbnailUrl}
+              alt=""
+              onError={(event) => {
+                event.currentTarget.hidden = true;
+              }}
+            />
+          ) : null}
+        </span>
+        <span>
+          <strong>{selectedObject?.label ?? moduleLabel}</strong>
+          <small>{mode === "content" ? kindLabel : sharedDesignLabel}</small>
+        </span>
+        <span className="homepage-editor__edit-scope-badge">
+          {mode === "content"
+            ? scope === "object" ? "内容" : "全部内容"
+            : activeDevice === "mobile" ? "移动端" : "桌面端"}
+        </span>
+      </div>
+      {contract && moduleType && objects.length > 0 ? (
+        <div className="homepage-editor__template-navigator" data-mode={mode}>
+          <div className="homepage-editor__object-picker-heading">
+            <strong>{mode === "content" ? "在模板中的位置" : "模板画面"}</strong>
+            <span>{mode === "content" ? "只用于定位" : "选择对象后在主画布调整"}</span>
+          </div>
+          <div
+            className="homepage-editor__template-mini-frame"
+            data-geometry-source={measuredGeometry ? "renderer" : "contract"}
+            style={{ aspectRatio: frameAspectRatio } as CSSProperties}
+            role="listbox"
+            aria-label={`${moduleLabel}模板对象缩略导航`}
+          >
+            {objects.map((object) => {
+              const editableObject = getContentTemplateEditableObject(moduleType, object.id);
+              const fallbackNodeId = editableObject?.roleId ?? object.id;
+              const rect = measuredGeometry?.nodes[object.id] ??
+                measuredGeometry?.nodes[fallbackNodeId] ??
+                getContentTemplateDefaultRect(moduleType, fallbackNodeId, activeDevice);
+              if (!rect) return null;
+              return (
+                <button
+                  key={object.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selectedObjectId === object.id}
+                  className={selectedObjectId === object.id ? "is-active" : undefined}
+                  onClick={() => onSelect(object.id)}
+                  style={{
+                    left: `${rect.x * 100}%`,
+                    top: `${rect.y * 100}%`,
+                    width: `${rect.width * 100}%`,
+                    height: `${rect.height * 100}%`,
+                  }}
+                  title={object.label}
+                >
+                  {object.thumbnailUrl ? (
+                    <img
+                      src={object.thumbnailUrl}
+                      alt=""
+                      onError={(event) => {
+                        event.currentTarget.hidden = true;
+                      }}
+                    />
+                  ) : null}
+                  <span>{object.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div
+            className="homepage-editor__responsive-state"
+            role="status"
+            aria-label={`响应式状态：桌面端${stateLabel[desktopState]}，移动端${stateLabel[mobileState]}`}
+          >
+            <span data-device="desktop" data-state={desktopState} data-active={activeDevice === "desktop" ? "true" : "false"}>
+              <DesktopOutlined aria-hidden="true" />桌面端 · {stateLabel[desktopState]}
+            </span>
+            <LinkOutlined aria-hidden="true" />
+            <span data-device="mobile" data-state={mobileState} data-active={activeDevice === "mobile" ? "true" : "false"}>
+              <MobileOutlined aria-hidden="true" />移动端 · {stateLabel[mobileState]}
+            </span>
           </div>
         </div>
       ) : null}

@@ -19,7 +19,24 @@ const categories = ["视觉展示", "图文内容", "商品展示", "导航入�
 const commercialPurposes = ["品牌展示", "商品销售", "活动转化", "内容传播", "信任建立"];
 const devices = ["desktop", "mobile"];
 
-assert.equal(contract.contractSchemaVersion, 5, "必须使用含商业目的的归一化双端几何合同 schema v5");
+assert.equal(contract.contractSchemaVersion, 6, "必须使用页面同类共享自由编辑合同 schema v6");
+assert.deepEqual(
+  contract.editorPolicy,
+  {
+    version: 1,
+    designScope: "page-module-type",
+    designSurface: "main-canvas",
+    fixedObjects: true,
+    bounds: "module-frame",
+    allowSemanticOverlap: true,
+    internalLayerPanel: "select-only",
+    contentFieldsRemainInstanceScoped: true,
+    viewportGeometry: "independent",
+  },
+  "编辑策略必须固定页面同类共享、主画布操作、框内固定对象与只读内部图层",
+);
+assert.match(client, /CONTENT_TEMPLATE_EDITOR_POLICY/, "客户端生成物必须携带编辑策略");
+assert.match(server, /CONTENT_TEMPLATE_EDITOR_POLICY/, "服务端生成物必须携带编辑策略");
 assert.equal(
   contract.templates.length,
   contract.expectedTemplateCount,

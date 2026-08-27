@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import {
+  Alert,
+  App as AntdApp,
   Table,
   Card,
   Input,
@@ -10,7 +12,6 @@ import {
   Descriptions,
   Form,
   Modal,
-  message,
   Space,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -18,6 +19,12 @@ import type { TagProps } from "antd";
 import { partnerApi, type PartnerApplicationStatus } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
+import {
+  AdminEmptyState,
+  AdminErrorState,
+  AdminLoadingState,
+} from "@/components/common/AdminDataStates";
+import { useCommerceCapabilities } from "@/store/featureFlags";
 
 const STATUS_OPTIONS = [
   { value: "PENDING", label: "待审核", color: "processing" },
@@ -58,9 +65,13 @@ interface ApplicationRow {
 }
 
 export default function PartnerApplications() {
+  const { message } = AntdApp.useApp();
+  const { flags, loading: flagsLoading } = useCommerceCapabilities();
+  const writeEnabled = flags?.partnerApplicationsWriteEnabled === true;
   const [data, setData] = useState<ApplicationRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [statusFilter, setStatusFilter] = useState<PartnerApplicationStatus | undefined>(undefined);
@@ -73,6 +84,7 @@ export default function PartnerApplications() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
       const res = unwrapResponse<{ list?: ApplicationRow[]; total?: number }>(
         await partnerApi.adminGetList({
@@ -85,7 +97,9 @@ export default function PartnerApplications() {
       setData(res?.list || []);
       setTotal(res?.total || 0);
     } catch (e: unknown) {
-      message.error(getSafeAdminErrorMessage(e, "合作申请列表加载失败，请稍后重新加载。"));
+      setData([]);
+      setTotal(0);
+      setError(getSafeAdminErrorMessage(e, "合作申请列表加载失败，请稍后重新加载。"));
     } finally {
       setLoading(false);
     }
@@ -94,6 +108,13 @@ export default function PartnerApplications() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!writeEnabled) {
+      setReviewing(null);
+      reviewForm.resetFields();
+    }
+  }, [reviewForm, writeEnabled]);
 
   const openDetail = async (row: ApplicationRow) => {
     try {
@@ -107,6 +128,10 @@ export default function PartnerApplications() {
 
   const submitReview = async () => {
     if (!reviewing) return;
+    if (!writeEnabled) {
+      message.info("合作申请写能力当前关闭，仅可查看历史申请");
+      return;
+    }
     const values = await reviewForm.validateFields();
     setSubmitting(true);
     try {
@@ -160,7 +185,7 @@ export default function PartnerApplications() {
           <Button
             size="small"
             type="primary"
-            disabled={r.status === "APPROVED" || r.status === "REJECTED"}
+            disabled={!writeEnabled || r.status === "APPROVED" || r.status === "REJECTED"}
             onClick={() => {
               setReviewing(r);
               reviewForm.resetFields();
@@ -176,6 +201,15 @@ export default function PartnerApplications() {
   return (
     <div className="p-6">
       <Card>
+        {!flagsLoading && !writeEnabled && (
+          <Alert
+            type="info"
+            showIcon
+            className="mb-4"
+            message="合作申请当前为只读模式"
+            description="新申请、补充资料与审核写入均已关闭。历史记录仍可查看；请在协议、责任人、SLA 与通知补偿完成验收后再启用。"
+          />
+        )}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <h1 className="font-semibold mr-4">合作申请</h1>
           <Select
@@ -200,22 +234,34 @@ export default function PartnerApplications() {
           />
         </div>
 
-        <Table
-          rowKey="id"
-          loading={loading}
-          dataSource={data}
-          columns={columns}
-          pagination={{
-            current: page,
-            pageSize,
-            total,
-            showSizeChanger: true,
-            onChange: (p, ps) => {
-              setPage(p);
-              setPageSize(ps);
-            },
-          }}
-        />
+        {loading ? (
+          <AdminLoadingState subject="合作申请" />
+        ) : error ? (
+          <AdminErrorState message={error} onRetry={load} />
+        ) : data.length === 0 ? (
+          <AdminEmptyState
+            message={statusFilter || keyword
+              ? "没有符合当前筛选条件的合作申请"
+              : "暂无合作申请"}
+          />
+        ) : (
+          <Table
+            rowKey="id"
+            dataSource={data}
+            columns={columns}
+            scroll={{ x: 1040 }}
+            pagination={{
+              current: page,
+              pageSize,
+              total,
+              showSizeChanger: true,
+              onChange: (p, ps) => {
+                setPage(p);
+                setPageSize(ps);
+              },
+            }}
+          />
+        )}
       </Card>
 
       <Drawer

@@ -1,4 +1,5 @@
 import { Prisma, ProductVisibility } from "@prisma/client";
+import { customerFacingReleaseWhere } from "../../common/release/release-profile";
 
 export type CustomerProductAccess = {
   accountType?: string | null;
@@ -22,16 +23,26 @@ export function resolveCustomerProductVisibilities(
 }
 
 /**
- * 客户侧可展示商品的共享门禁，供目录与推荐复用。
- * 第一阶段仅记录发布质量状态，不用它隐藏迁移前已发布商品。
+ * 客户侧可展示商品的共享门禁。公开列表、详情、推荐、收藏、页面引用与交易入口
+ * 必须复用同一条件，避免 READY 隔离只在部分路径生效。
  */
 export function customerFacingProductWhere(
   customer?: CustomerProductAccess,
 ): Prisma.ProductWhereInput {
+  return customerFacingProductWhereForVisibilities(
+    resolveCustomerProductVisibilities(customer),
+  );
+}
+
+export function customerFacingProductWhereForVisibilities(
+  visibilities: ProductVisibility[],
+): Prisma.ProductWhereInput {
   return {
     deletedAt: null,
     status: "PUBLISHED",
-    visibility: { in: resolveCustomerProductVisibilities(customer) },
+    publicationQualityStatus: "READY",
+    visibility: { in: visibilities },
+    ...customerFacingReleaseWhere(),
   };
 }
 
@@ -40,7 +51,9 @@ export function directPurchaseProductBaseWhere(): Prisma.ProductWhereInput {
   return {
     deletedAt: null,
     status: "PUBLISHED",
+    publicationQualityStatus: "READY",
     salesMode: "DIRECT_PURCHASE",
+    ...customerFacingReleaseWhere(),
   };
 }
 

@@ -78,10 +78,18 @@ test.describe("分类引用黄金闭环（确定性 UI）", () => {
 
   test("过期已选解析响应不会把已移除分类写回", async ({ page }) => {
     await page.getByRole("button", { name: "重试加载" }).click();
+    const slowRequestStarted = page.waitForRequest((request) =>
+      request.url().includes("/api/categories/admin/resolve-references")
+      && Boolean(request.postData()?.includes('"slow-ref"')),
+    );
     await page.getByRole("button", { name: "选择分类 慢速分类" }).click();
     await expect(page.getByTestId("category-reference-state")).toContainText("slow-ref");
+    const slowRequest = await slowRequestStarted;
+    const slowRequestCancelled = page.waitForEvent("requestfailed", (request) =>
+      request === slowRequest,
+    );
     await page.getByRole("button", { name: "移除分类 慢速分类" }).click();
-    await page.waitForTimeout(450);
+    await slowRequestCancelled;
     await expect(page.getByTestId("category-reference-state")).not.toContainText("slow-ref");
     await expect(page.locator(".homepage-editor__product-picker-selected-row").filter({ hasText: "慢速分类" })).toHaveCount(0);
   });

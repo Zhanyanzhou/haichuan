@@ -11,7 +11,7 @@ VPS (Ubuntu 22.04)
 ├── Docker Compose（五服务，docker-compose.yml 为唯一事实来源）
 │   ├── mysql:8.0@sha256 (仅容器网络，不对宿主机暴露；管理走 SSH 隧道/ exec)
 │   ├── server@sha256    (NestJS，仅容器网络，nginx 反代 /api 与 /uploads)
-│   ├── client@sha256    (Nginx，80 端口对外，静态资源 + 反代 + CSP/安全响应头)
+│   ├── client@sha256    (Nginx 非 root 监听容器内 8080，宿主 80 映射，静态资源 + 反代 + CSP/安全响应头)
 │   ├── backup           (固定 digest 的 mysql:8.0 镜像复用，每日 DB+媒体卷备份至 ./backups)
 │   └── uptime-kuma      (固定 digest；127.0.0.1:3001，远程经 SSH 隧道访问)
 └── 数据卷
@@ -129,7 +129,9 @@ mkdir -p client/public/images/products
 
 ## 备份恢复门禁
 
-`server/scripts/backup.sh` 会为同一批次发布一个 `.sql.gz`、零个或多个媒体 `.tar.gz`，最后发布 `.sha256` 清单。只有清单存在且 `sha256sum -c` 全部通过的批次才可进入恢复候选。
+`server/scripts/backup.sh` 会为同一批次发布一个 `.sql.gz`、零个或多个媒体 `.tar.gz`，最后发布 `.sha256` 清单。只有清单存在且 `sha256sum -c` 全部通过的批次才可进入恢复候选。每次尝试还会原子更新 `./backups/.health/backup-status.env`，只记录时间、结果、退出码、受控错误代码和最新清单名，不记录连接信息或密钥。
+
+`backup` 容器健康检查会读取该状态标记（不执行 `source`），并要求最近一次结果为 `SUCCESS`、退出码为 0，且 `LAST_SUCCESS_AT` 未超过 `BACKUP_INTERVAL_SECONDS + BACKUP_HEALTH_GRACE_SECONDS`。`WARNING`（包括 `DISK_HIGH`）、`FAILED`、标记缺失/损坏或超期都会让容器变为 unhealthy。后台“系统设置”会把该执行状态与实际完整产物交叉核对；容器 healthy 和后台“最近成功”仍不等于恢复演练通过。
 
 `server/scripts/restore.sh` 是人工、一次性的恢复入口，不挂载到任何长期运行服务，也不会由 Compose 自动触发。它采用以下安全默认值：
 
@@ -164,12 +166,12 @@ bash /usr/local/bin/restore.sh
 
 ## 第六步：启动服务
 
-生产操作必须显式指定基础 Compose 文件，避免 Docker Compose 自动合并仅供本地开发的 `docker-compose.override.yml`。`Release Images` 工作流只能手动触发：它从精确 Git commit 构建 server/client，附加 OCI revision 与 migration bundle 标签，生成 SBOM、provenance 和签名证明，并输出含两个完整 digest 引用的 `release-manifest.json`。工作流存在不等于制品已经发布；仍须由获批人员对指定 commit 和正式前端构建参数手动执行。
+生产操作必须显式指定基础 Compose 文件，避免 Docker Compose 自动合并仅供本地开发的 `docker-compose.override.yml`。`Release Images` 工作流只能手动触发：在任何镜像推送前，它必须从 GitHub Actions 找到同一 `github.sha`、事件为 `push`、结论为 `success` 的完整 `Quality Gate` 运行；随后才从该精确 commit 构建 server/client，附加 OCI revision 与 migration bundle 标签，生成 SBOM、provenance 和签名证明，并输出 Manifest v2。清单除两个完整 digest 引用外，还必须保存质量门禁的 workflow、run ID、run URL、head SHA、事件和结论。工作流存在或本地静态合同通过，都不等于远端制品已经发布。
 
 生产主机禁止从工作区源码构建，也禁止以浮动 tag 部署。获得精确环境的部署与 migration 批准后，必须按以下顺序执行：
 
 1. 记录待发布版本和当前运行版本；为数据库、`uploads_data`、`private_media_data` 建立同一发布批次的部署前备份，核对备份产物可读，并记录可恢复的回滚点。只有备份文件、保留位置和恢复步骤，不等于恢复演练已经通过。
-2. 下载本次工作流产出的 `release-manifest.json`，独立核对 commit、构建参数、证明和负责人；随后运行 `node scripts/verify-release-images.mjs --manifest <清单路径>`。把清单中的完整 `server.reference`、`client.reference`、`gitSha` 与 `migrationBundleSha256` 分别写入受控部署环境的 `SERVER_IMAGE`、`CLIENT_IMAGE`、`RELEASE_GIT_SHA`、`MIGRATION_BUNDLE_SHA256`，并设置 `RELEASE_SOURCE`。两个镜像变量必须形如 `ghcr.io/...@sha256:<64位摘要>`。
+2. 下载本次工作流产出的 `release-manifest.json`，独立核对 commit、构建参数、证明和负责人；确认 `qualityGate.headSha == gitSha`、`qualityGate.event == push`、`qualityGate.conclusion == success`，并打开 `qualityGate.runUrl` 复核完整工作流，而非只看单个 job。随后运行 `node scripts/verify-release-images.mjs --manifest <清单路径>`。把清单中的完整 `server.reference`、`client.reference`、`gitSha` 与 `migrationBundleSha256` 分别写入受控部署环境的 `SERVER_IMAGE`、`CLIENT_IMAGE`、`RELEASE_GIT_SHA`、`MIGRATION_BUNDLE_SHA256`，并设置 `RELEASE_SOURCE`。两个镜像变量必须形如 `ghcr.io/...@sha256:<64位摘要>`。
 3. 拉取并在启动前验证本地镜像摘要及 OCI 标签；任一不匹配都停止：
 
 ```bash
@@ -217,7 +219,7 @@ docker compose -f docker-compose.yml exec -T server \
   node dist/cli/release-preflight.js
 ```
 
-只有 `technicalReady=true` 且命令退出 0 才能进入人工 Go/No-Go；它不代替联系方式真实性、运营主体、法务文案、媒体商用权利、正式域名、TLS、监控、异地备份或目标环境验收。
+只有 `technicalReady=true` 且命令退出 0 才能进入人工 Go/No-Go；在 B4 的合作协议、资质与审计闭环完成前，`PARTNER_APPLICATIONS_WRITE_ENABLED=true` 会由预检直接阻断。预检不代替联系方式真实性、运营主体、法务文案、媒体商用权利、正式域名、TLS、监控、异地备份或目标环境验收。
 
 10. 依次验证 `/api/health`（进程存活）、`/api/ready`（数据库就绪）、前台首页、后台登录及本次批准开放的业务路径；任一失败都停止放量，并按记录的版本、数据库和媒体回滚点执行已批准的回退方案。回退应用版本不能自动逆转数据库 migration。
 

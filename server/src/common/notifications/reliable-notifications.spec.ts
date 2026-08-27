@@ -206,6 +206,7 @@ test("可靠通知：账号关闭后的 CANCELLED 投递不能被 worker 重新�
   await (worker as any).processClaimed({
     id: 41,
     attempts: 1,
+    eventType: "notification.delivery.requested",
     payload: { notificationId: 21, orderId: 11 },
   });
 
@@ -285,6 +286,7 @@ test("可靠通知：发送期间注销不会把 CANCELLED 覆盖为 SENT 或重
   await (worker as any).processClaimed({
     id: 42,
     attempts: 1,
+    eventType: "notification.delivery.requested",
     payload: { notificationId: 22, orderId: 12 },
   });
 
@@ -346,6 +348,7 @@ test("可靠通知：租约恢复遇到 SENDING 时停止自动重发并标记�
   await (worker as any).processClaimed({
     id: 43,
     attempts: 2,
+    eventType: "notification.delivery.requested",
     payload: { notificationId: 23, orderId: 13 },
   });
 
@@ -353,6 +356,222 @@ test("可靠通知：租约恢复遇到 SENDING 时停止自动重发并标记�
   assert.equal(deliveryStatus, "FAILED");
   assert.equal(outboxStatus, "FAILED");
   assert.equal(lastErrorCode, "DELIVERY_RESULT_UNKNOWN");
+});
+
+test("线索回复通知：从活动和咨询实时解析收件人且转义自由文本", async () => {
+  const outboxUpdates: any[] = [];
+  let sent: any = null;
+  const prisma = {
+    leadActivity: {
+      findUnique: async () => ({
+        id: 51,
+        leadId: 41,
+        type: "REPLY",
+        content: "请勿执行 <script>alert(1)</script>",
+        lead: {
+          sourceType: "INQUIRY",
+          inquiry: {
+            id: 17,
+            customerId: null,
+            customerName: "客户 <甲>",
+            customerEmail: " Customer@Example.com ",
+          },
+        },
+      }),
+    },
+    outboxEvent: {
+      updateMany: async ({ data }: any) => {
+        outboxUpdates.push(data);
+        return { count: 1 };
+      },
+    },
+  };
+  const worker = new ReliableNotificationDeliveryWorker(
+    prisma as never,
+    { get: () => "true" } as never,
+    {
+      renderShell: (html: string) => html,
+      getSiteBaseUrl: () => "https://example.com",
+      send: async (message: any) => {
+        sent = message;
+        return { delivered: true };
+      },
+    } as never,
+  );
+
+  await (worker as any).processClaimed({
+    id: 61,
+    attempts: 1,
+    eventType: "lead.reply.notification.requested",
+    payload: { leadId: 41, activityId: 51 },
+  });
+
+  assert.equal(sent.to, "customer@example.com");
+  assert.match(sent.html, /客户 &lt;甲&gt;/);
+  assert.match(sent.html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(sent.html, /<script>/);
+  assert.equal(outboxUpdates[0].lastErrorCode, "SEND_STARTED");
+  assert.equal(outboxUpdates[1].status, "PROCESSED");
+});
+
+test("线索回复通知：SMTP 失败保留错误码并进入有界重试", async () => {
+  let finalUpdate: any = null;
+  const tx = {
+    outboxEvent: {
+      updateMany: async ({ data }: any) => {
+        if (data.status) finalUpdate = data;
+        return { count: 1 };
+      },
+    },
+  };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    leadActivity: {
+      findUnique: async () => ({
+        id: 52,
+        leadId: 42,
+        type: "REPLY",
+        content: "顾问回复",
+        lead: {
+          sourceType: "INQUIRY",
+          inquiry: {
+            id: 18,
+            customerId: 8,
+            customerName: "客户乙",
+            customerEmail: "customer@example.com",
+          },
+        },
+      }),
+    },
+    outboxEvent: { updateMany: async () => ({ count: 1 }) },
+  };
+  const worker = new ReliableNotificationDeliveryWorker(
+    prisma as never,
+    { get: () => "true" } as never,
+    {
+      renderShell: (html: string) => html,
+      getSiteBaseUrl: () => "https://example.com",
+      send: async () => ({ delivered: false, reason: "send_failed" }),
+    } as never,
+  );
+
+  await (worker as any).processClaimed({
+    id: 62,
+    attempts: 1,
+    eventType: "lead.reply.notification.requested",
+    payload: { leadId: 42, activityId: 52 },
+  });
+
+  assert.equal(finalUpdate.status, "PENDING");
+  assert.equal(finalUpdate.lastErrorCode, "SMTP_SEND_FAILED");
+  assert.ok(finalUpdate.availableAt instanceof Date);
+});
+
+test("线索回复通知：领取后发生匿名化时在 SMTP 调用前终止", async () => {
+  let reads = 0;
+  let mailCalls = 0;
+  let terminalUpdate: any = null;
+  const baseActivity = {
+    id: 53,
+    leadId: 43,
+    type: "REPLY",
+    content: "顾问回复",
+    lead: {
+      sourceType: "INQUIRY",
+      privacyDisposedAt: null,
+      inquiry: {
+        id: 19,
+        customerId: 9,
+        customerName: "客户丙",
+        customerEmail: "customer@example.com",
+      },
+    },
+  };
+  const tx = {
+    outboxEvent: {
+      updateMany: async ({ data }: any) => {
+        if (data.status === "FAILED") terminalUpdate = data;
+        return { count: 1 };
+      },
+    },
+  };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    leadActivity: {
+      findUnique: async () => {
+        reads += 1;
+        if (reads === 1) return baseActivity;
+        return {
+          ...baseActivity,
+          content: null,
+          lead: {
+            ...baseActivity.lead,
+            privacyDisposedAt: new Date("2026-08-27T00:00:00Z"),
+            inquiry: {
+              ...baseActivity.lead.inquiry,
+              customerEmail: null,
+            },
+          },
+        };
+      },
+    },
+    outboxEvent: { updateMany: async () => ({ count: 1 }) },
+  };
+  const worker = new ReliableNotificationDeliveryWorker(
+    prisma as never,
+    { get: () => "true" } as never,
+    {
+      renderShell: (html: string) => html,
+      getSiteBaseUrl: () => "https://example.com",
+      send: async () => {
+        mailCalls += 1;
+        return { delivered: true };
+      },
+    } as never,
+  );
+
+  await (worker as any).processClaimed({
+    id: 64,
+    attempts: 1,
+    eventType: "lead.reply.notification.requested",
+    payload: { leadId: 43, activityId: 53 },
+  });
+
+  assert.equal(reads, 2);
+  assert.equal(mailCalls, 0);
+  assert.equal(terminalUpdate.status, "FAILED");
+  assert.equal(terminalUpdate.lastErrorCode, "LEAD_PRIVACY_ANONYMIZED");
+});
+
+test("线索回复通知：发送开始后租约过期会标记结果未知而不重复发送", async () => {
+  let terminalUpdate: any = null;
+  const tx = {
+    $queryRaw: async () => [{
+      id: 63,
+      eventType: "lead.reply.notification.requested",
+      status: "PROCESSING",
+      lastErrorCode: "SEND_STARTED",
+    }],
+    outboxEvent: {
+      updateMany: async ({ data }: any) => {
+        terminalUpdate = data;
+        return { count: 1 };
+      },
+    },
+  };
+  const worker = new ReliableNotificationDeliveryWorker(
+    {
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    } as never,
+    { get: () => "true" } as never,
+    {} as never,
+  );
+
+  const claimed = await (worker as any).claimNext();
+
+  assert.equal(claimed, null);
+  assert.equal(terminalUpdate.status, "FAILED");
+  assert.equal(terminalUpdate.lastErrorCode, "DELIVERY_RESULT_UNKNOWN");
 });
 
 function emailHashForTest(value: string) {

@@ -1,11 +1,12 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { CreateInquiryDto } from './dto/create-inquiry.dto';
 import { InquiriesService } from './inquiries.service';
+import { ApiError } from '../../common/errors/api-error';
 
 const validInquiry = {
   customerName: '测试访客',
@@ -35,6 +36,7 @@ test('公开咨询 DTO 只接受正整数作品 ID', async () => {
 
 function createService(visibleIds: number[]) {
   let createdData: Record<string, unknown> | undefined;
+  let consentData: Record<string, unknown> | undefined;
   let visibilityInput:
     | { productIds: number[]; customer: Record<string, unknown> | undefined }
     | undefined;
@@ -44,6 +46,12 @@ function createService(visibleIds: number[]) {
       create: async ({ data }: { data: Record<string, unknown> }) => {
         createdData = data;
         return { id: 1, ...data };
+      },
+    },
+    consentRecord: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        consentData = data;
+        return { id: 1 };
       },
     },
   };
@@ -58,13 +66,14 @@ function createService(visibleIds: number[]) {
   };
   const service = new InquiriesService(
     prisma as never,
-    {} as never,
     productsService as never,
+    {} as never,
   );
   return {
     service,
     createdData: () => createdData,
     visibilityInput: () => visibilityInput,
+    consentData: () => consentData,
   };
 }
 
@@ -99,6 +108,15 @@ test('咨询服务按已认证客户可见范围复核并关联现有 Inquiry.pr
       currentStatus: 'PENDING',
     },
   });
+  assert.deepEqual(harness.consentData(), {
+    customerId: 7,
+    purpose: 'SERVICE_PRIVACY',
+    decision: 'GRANTED',
+    policyVersion: 'privacy-v2',
+    locale: 'ZH_CN',
+    source: 'inquiry:1',
+    decidedAt: harness.createdData()?.privacyConsentedAt,
+  });
 });
 
 test('咨询服务统一拒绝不存在、下架或越权作品且不写入', async () => {
@@ -107,7 +125,8 @@ test('咨询服务统一拒绝不存在、下架或越权作品且不写入', as
   await assert.rejects(
     () => harness.service.create({ ...validInquiry, productId: 42 }),
     (error: unknown) =>
-      error instanceof BadRequestException
+      error instanceof ApiError
+      && error.errorCode === 'INQUIRY_PRODUCT_NOT_AVAILABLE'
       && error.message === '作品当前不可咨询，请移除作品后提交普通咨询',
   );
   assert.equal(harness.createdData(), undefined);
@@ -133,4 +152,90 @@ test('服务终线拒绝绕过 DTO 传入的非法作品 ID', async () => {
   );
   assert.equal(harness.visibilityInput(), undefined);
   assert.equal(harness.createdData(), undefined);
+});
+
+test('相同幂等键与相同提交只创建一次来源记录和 Lead', async () => {
+  let existingLead: {
+    sourceType: string;
+    submissionFingerprint: string;
+    inquiryId: number;
+  } | null = null;
+  let createCount = 0;
+  const source = { id: 77, status: 'PENDING' };
+  const prisma = {
+    $transaction: async (callback: (transaction: unknown) => unknown) => callback(prisma),
+    lead: {
+      findUnique: async () => existingLead,
+    },
+    inquiry: {
+      create: async ({ data }: { data: Record<string, any> }) => {
+        createCount += 1;
+        existingLead = {
+          sourceType: data.lead.create.sourceType,
+          submissionFingerprint: data.lead.create.submissionFingerprint,
+          inquiryId: source.id,
+        };
+        return source;
+      },
+      findUniqueOrThrow: async () => source,
+    },
+    consentRecord: { create: async () => ({ id: 1 }) },
+  };
+  const service = new InquiriesService(
+    prisma as never,
+    { filterVisibleProductIds: async () => new Set<number>() } as never,
+    {} as never,
+  );
+
+  const first = await service.create({
+    ...validInquiry,
+    idempotencyKey: 'same-intent-0001',
+  });
+  const retry = await service.create({
+    ...validInquiry,
+    idempotencyKey: 'same-intent-0001',
+  });
+
+  assert.deepEqual(first, source);
+  assert.deepEqual(retry, source);
+  assert.equal(createCount, 1);
+});
+
+test('同一幂等键不能跨用到内容不同的提交', async () => {
+  let existingLead: {
+    sourceType: string;
+    submissionFingerprint: string;
+    inquiryId: number;
+  } | null = null;
+  const prisma = {
+    $transaction: async (callback: (transaction: unknown) => unknown) => callback(prisma),
+    lead: { findUnique: async () => existingLead },
+    inquiry: {
+      create: async ({ data }: { data: Record<string, any> }) => {
+        existingLead = {
+          sourceType: data.lead.create.sourceType,
+          submissionFingerprint: data.lead.create.submissionFingerprint,
+          inquiryId: 78,
+        };
+        return { id: 78 };
+      },
+      findUniqueOrThrow: async () => ({ id: 78 }),
+    },
+    consentRecord: { create: async () => ({ id: 1 }) },
+  };
+  const service = new InquiriesService(
+    prisma as never,
+    { filterVisibleProductIds: async () => new Set<number>() } as never,
+    {} as never,
+  );
+  await service.create({ ...validInquiry, idempotencyKey: 'same-intent-0002' });
+
+  await assert.rejects(
+    service.create({
+      ...validInquiry,
+      message: '这是另一笔不同的咨询需求',
+      idempotencyKey: 'same-intent-0002',
+    }),
+    ConflictException,
+  );
 });

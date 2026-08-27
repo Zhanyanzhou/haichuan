@@ -347,7 +347,7 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     }
   });
 
-  test("图层面板保持模块级，模板内部对象在属性面板可视切换", async ({ page }) => {
+  test("模板模式图层栏临时显示固定内部对象且只允许选择", async ({ page }) => {
     const maximumDepthErrors: string[] = [];
     page.on("console", (message) => {
       if (message.type() === "error" && message.text().includes("Maximum update depth exceeded")) {
@@ -356,11 +356,23 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     });
     const inspector = await openHeroInspector(page, { width: 1440, height: 900 });
 
-    await expect(page.locator(".homepage-editor__layer-children")).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "模板内部对象" })).toHaveCount(0);
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    const internalLayers = page.getByRole("region", { name: "模板内部对象" });
+    await expect(internalLayers).toBeVisible();
+    await expect(internalLayers).toContainText("此处仅用于选择固定对象");
+    await internalLayers.getByRole("button", { name: "桌面主图" }).click();
     const objectPicker = inspector.getByRole("listbox", {
       name: "属性面板对象列表",
     });
     await expect(objectPicker).toBeVisible();
+    await expect(objectPicker.getByRole("option")).toHaveCount(8);
+    await expect(
+      inspector.getByRole("region", { name: "当前编辑对象" }),
+    ).toHaveAttribute("data-panel-mode", "design");
+    await expect(
+      inspector.getByRole("listbox", { name: /模板对象缩略导航/ }),
+    ).toBeVisible();
 
     const desktopImage = objectPicker.getByRole("option", {
       name: "选择桌面主图",
@@ -370,6 +382,8 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await expect(
       inspector.getByRole("region", { name: "当前编辑对象" }),
     ).toHaveAttribute("data-selected-node-id", "desktopImage");
+    await expect(internalLayers.getByRole("button", { name: "桌面主图" })).toHaveAttribute("aria-pressed", "true");
+    await expect(internalLayers.getByRole("button", { name: /删除|隐藏|锁定|排序/ })).toHaveCount(0);
     await page.waitForTimeout(250);
     expect(
       maximumDepthErrors,
@@ -393,10 +407,14 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
       maximumDepthErrors,
       "对象选择不得触发 React 更新循环",
     ).toEqual([]);
+    await inspector.getByRole("tab", { name: "内容编辑" }).click();
+    await expect(page.getByRole("region", { name: "模板内部对象" })).toHaveCount(0);
+    await expect(page.locator(".homepage-editor__layer-item")).not.toHaveCount(0);
   });
 
-  test("Desktop 标题保留独立覆盖，Mobile 固定阅读顺序不暴露自由几何", async ({ page }) => {
+  test("标题桌面与移动端分别暴露自由几何并保持独立覆盖", async ({ page }) => {
     const inspector = await openHeroInspector(page);
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     await selectObject(inspector, "title", "标题");
     await inspector.getByRole("tab", { name: "模板编辑" }).click();
     await inspector.getByRole("button", { name: "精确位置与尺寸" }).click();
@@ -414,16 +432,24 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await expect(desktopLayer).toContainText("当前层级 5");
 
     await page.getByRole("button", { name: /移动端布局/ }).click();
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
     const mobileGeometry = inspector.locator(
       '[data-visual-geometry-node="title"][data-visual-geometry-viewport="mobile"]',
     );
-    await expect(mobileGeometry).toHaveCount(0);
-    await expect(inspector.locator('[data-device-state="mobile-default"]')).toBeVisible();
-    await expect(inspector.getByText("位置由移动端堆叠模板控制")).toBeVisible();
-    await expect(inspector.getByRole("slider", { name: "横向位置（移动端）" })).toHaveCount(0);
+    await expect(mobileGeometry).toBeVisible();
+    await expect(inspector.getByText("位置由移动端堆叠模板控制")).toHaveCount(0);
+    const mobileX = inspector.getByRole("slider", { name: "横向位置（移动端）" });
+    await expect(mobileX).toBeVisible();
+    await setRangeValue(mobileX, 30);
+    await expect(mobileX).toHaveValue("30");
 
     await page.getByRole("button", { name: /桌面端布局/ }).click();
-    await inspector.getByRole("button", { name: "精确位置与尺寸" }).click();
+    await canvas.getByRole("button", { name: /选择“.*首屏.*”模块/ }).first().dispatchEvent("click");
+    await selectObject(inspector, "title", "标题");
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    if ((await desktopX.count()) === 0) {
+      await inspector.getByRole("button", { name: "精确位置与尺寸" }).click();
+    }
     await expect(desktopX).toHaveValue("22");
     await expect(desktopLayer).toContainText("当前层级 5");
 
@@ -431,6 +457,30 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await expect(desktopX).toHaveValue("25");
     await inspector.getByRole("button", { name: "恢复主标题设计默认" }).click();
     await expect(desktopLayer).toContainText("当前层级 2");
+  });
+
+  test("画框自定义比例校验 0.25–4.00 并可恢复系统默认", async ({ page }) => {
+    const inspector = await openHeroInspector(page);
+    await inspector.getByRole("tab", { name: "模板编辑" }).click();
+    await inspector.getByRole("button", { name: "高级设置" }).click();
+
+    const ratio = inspector.getByRole("spinbutton", { name: /自定义比例/ });
+    const apply = inspector.getByRole("button", { name: "应用比例" });
+    const reset = inspector.getByRole("button", { name: "恢复系统默认" });
+    const defaultValue = await ratio.inputValue();
+
+    await ratio.fill("4.01");
+    await expect(ratio).toHaveAttribute("aria-invalid", "true");
+    await expect(inspector.getByRole("alert")).toContainText("0.25 到 4.00");
+    await expect(apply).toBeDisabled();
+
+    await ratio.fill("1.33");
+    await expect(ratio).toHaveAttribute("aria-invalid", "false");
+    await apply.click();
+    await expect(ratio).toHaveValue("1.33");
+    await expect(reset).toBeEnabled();
+    await reset.click();
+    await expect(ratio).toHaveValue(defaultValue);
   });
 
   test("键盘可切换内容/设计并进入对象选择，焦点可见", async ({ page }) => {

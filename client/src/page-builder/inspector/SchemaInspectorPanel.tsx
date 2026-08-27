@@ -29,10 +29,15 @@ import { useVisualEditorSession } from "../visual-editor/visualEditorSession";
 import { useInspectorModuleEditor } from "./useInspectorModuleEditor";
 import type { PuckProps } from "../types";
 import {
+  extractContentTemplateLayoutData,
   getContentTemplateContract,
   getContentTemplateEditableFieldKeys,
   getContentTemplateEditableObject,
 } from "../generated/contentTemplates.generated";
+import {
+  applySharedTemplateDesignPatch,
+  getSharedTemplateDesignSignatures,
+} from "../visual-editor/sharedTemplateDesign";
 import {
   type FieldDef,
   type InspectorContext,
@@ -308,6 +313,7 @@ export default function SchemaInspectorPanel({
   const appData = useHomepagePuck((state) => state.appState.data);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
   const visualSelection = useVisualEditorSession((state) => state.selection);
+  const contentActionRequest = useVisualEditorSession((state) => state.contentActionRequest);
   const selectVisualNode = useVisualEditorSession((state) => state.selectNode);
   const clearVisualNode = useVisualEditorSession((state) => state.clearNode);
   const setVisualPanelMode = useVisualEditorSession((state) => state.setPanelMode);
@@ -331,8 +337,15 @@ export default function SchemaInspectorPanel({
   useLayoutEffect(() => {
     const pending = pendingPanelScrollRef.current;
     if (!pending || pending.mode !== activePanelMode) return;
-    inspectorScrollRef.current?.scrollTo({ top: pending.top, behavior: "auto" });
+    const restoreScroll = () => {
+      inspectorScrollRef.current?.scrollTo({ top: pending.top, behavior: "auto" });
+    };
+    restoreScroll();
     pendingPanelScrollRef.current = null;
+    // 对象导航与小画布会在页签提交后的下一帧完成尺寸同步；届时再复核一次，
+    // 避免首次 scrollTo 被尚未稳定的可滚动高度夹回顶部。
+    const frameId = window.requestAnimationFrame(restoreScroll);
+    return () => window.cancelAnimationFrame(frameId);
   }, [activePanelMode]);
 
   useEffect(() => {
@@ -369,11 +382,35 @@ export default function SchemaInspectorPanel({
         ))
         .find(Boolean);
       target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      if (visualSelection.kind === "text" || visualSelection.kind === "action") {
+        target?.querySelector<HTMLElement>("input, textarea, select, button, [tabindex]")?.focus();
+      }
     });
     return () => {
       window.cancelAnimationFrame(renderFrame);
     };
   }, [activePanelMode, editor?.moduleType, editorBlockId, visualSelection]);
+
+  useEffect(() => {
+    if (!editorBlockId || !contentActionRequest ||
+      contentActionRequest.blockId !== editorBlockId || activePanelMode !== "content") return;
+    const fieldKeys = getInspectorContentFieldKeys(
+      editor?.moduleType ?? "",
+      contentActionRequest.nodeId,
+    );
+    const renderFrame = window.requestAnimationFrame(() => {
+      const target = fieldKeys
+        .map((fieldKey) => document.querySelector<HTMLElement>(
+          `[data-inspector-field="${CSS.escape(fieldKey)}"]`,
+        ))
+        .find(Boolean);
+      target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      if (contentActionRequest.kind === "media") {
+        target?.querySelector<HTMLButtonElement>("[data-media-field] button")?.click();
+      }
+    });
+    return () => window.cancelAnimationFrame(renderFrame);
+  }, [activePanelMode, contentActionRequest, editor?.moduleType, editorBlockId]);
 
   useEffect(() => {
     if (activePanelMode !== "design" || !editorBlockId || !visualSelection ||
@@ -610,7 +647,7 @@ export default function SchemaInspectorPanel({
       issue.severity !== "info" && issue.blockId === editor.props.id,
   );
 
-  const activatePanelMode = (panelMode: InspectorPrimaryMode) => {
+  const commitPanelMode = (panelMode: InspectorPrimaryMode) => {
     const targetScrollTop = panelScrollPositionsRef.current[panelMode];
     if (panelMode !== activePanelMode && inspectorScrollRef.current) {
       panelScrollPositionsRef.current[activePanelMode] =
@@ -621,6 +658,42 @@ export default function SchemaInspectorPanel({
     }
     setActivePanelMode(panelMode);
     setVisualPanelMode(panelMode);
+  };
+
+  const activatePanelMode = (panelMode: InspectorPrimaryMode) => {
+    if (panelMode !== "design" || activePanelMode === "design") {
+      commitPanelMode(panelMode);
+      return;
+    }
+    const signatures = getSharedTemplateDesignSignatures(content, editor.moduleType);
+    if (signatures.size <= 1) {
+      commitPanelMode("design");
+      return;
+    }
+    modal.confirm({
+      title: "统一本页同类模板设计？",
+      content: `本页的“${getModuleDisplayName(editor.moduleType, editor.props)}”存在不同设计。进入模板编辑会以当前选中模块为基准，统一全部同类模块；各自图片、文字、链接和业务内容保持不变。`,
+      okText: "统一并进入",
+      cancelText: "取消",
+      onOk: () => {
+        const selectedDesign = extractContentTemplateLayoutData(
+          editor.moduleType,
+          editor.props,
+        );
+        dispatch({
+          type: "setData",
+          data: {
+            ...appData,
+            content: applySharedTemplateDesignPatch(content, editor.moduleType, {
+              __instanceOverrides: selectedDesign,
+            }),
+          },
+          recordHistory: true,
+        });
+        commitPanelMode("design");
+      },
+      onCancel: () => commitPanelMode("content"),
+    });
   };
 
   const removeModule = () => {
@@ -802,7 +875,7 @@ export default function SchemaInspectorPanel({
             ? editor.props.moduleName
             : ""
         }
-        deviceLabel={editor.device === "mobile" ? "移动端画布" : "桌面端画布"}
+        deviceLabel={editor.device === "mobile" ? "移动端" : "桌面端"}
         dirty={hasUnsavedChanges}
         onClose={editor.close}
         actions={[
@@ -837,8 +910,17 @@ export default function SchemaInspectorPanel({
         ]}
       />
 
+      <InspectorPrimaryTabs
+        activeMode={activePanelMode}
+        designDisabled={!currentObjectCanEditDesign}
+        onChange={activatePanelMode}
+      />
+
       <InspectorObjectContext
           moduleLabel={schema.displayName}
+          blockId={String(editor.props.id ?? "")}
+          moduleType={editor.moduleType}
+          mode={activePanelMode}
           selectedObjectId={selectedVisualObject?.nodeId ?? null}
           objects={visualObjects.map((item) => ({
             id: item.nodeId,
@@ -871,12 +953,6 @@ export default function SchemaInspectorPanel({
               activatePanelMode("content");
             }
           }}
-      />
-
-      <InspectorPrimaryTabs
-        activeMode={activePanelMode}
-        designDisabled={!currentObjectCanEditDesign}
-        onChange={activatePanelMode}
       />
 
       <div

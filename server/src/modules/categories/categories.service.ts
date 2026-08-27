@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import type { Category } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
+import { customerFacingProductWhereForVisibilities } from '../products/product-eligibility';
 
 type ManageCategoryNode = Category & {
   products: Array<{ id: number }>;
@@ -35,9 +36,7 @@ export class CategoriesService {
   private async findPublicProductCategoryIds(): Promise<Set<number>> {
     const categories = await this.prisma.product.findMany({
       where: {
-        status: 'PUBLISHED',
-        visibility: 'PUBLIC',
-        deletedAt: null,
+        ...customerFacingProductWhereForVisibilities(['PUBLIC']),
         category: { isActive: true, deletedAt: null },
       },
       select: { categoryId: true },
@@ -109,7 +108,7 @@ export class CategoriesService {
   /** 管理端分类树：保留已停用的二、三级类目，便于重新启用。 */
   async findManageTree() {
     const publicProducts = {
-      where: { deletedAt: null, status: 'PUBLISHED' as const, visibility: 'PUBLIC' as const },
+      where: customerFacingProductWhereForVisibilities(['PUBLIC']),
       take: 1,
       select: { id: true },
     };
@@ -164,9 +163,7 @@ export class CategoriesService {
         deletedAt: true,
         products: {
           where: {
-            deletedAt: null,
-            status: 'PUBLISHED',
-            visibility: 'PUBLIC',
+            ...customerFacingProductWhereForVisibilities(['PUBLIC']),
           },
           take: 1,
           select: { id: true },

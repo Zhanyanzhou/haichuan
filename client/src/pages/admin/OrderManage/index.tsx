@@ -242,13 +242,12 @@ type OrderCapabilities = Readonly<{
 /** 与 orders.controller.ts 当前 @Roles 严格对齐；服务端仍是最终权限边界。 */
 function getOrderCapabilities(role: User["role"] | undefined): OrderCapabilities {
   const isAdmin = role === "SUPER_ADMIN" || role === "ADMIN";
-  const isWarehouse = role === "WAREHOUSE";
   const isCustomerService = role === "CUSTOMER_SERVICE";
 
   return {
     canExport: isAdmin,
     canCreate: isAdmin,
-    canShip: isAdmin || isWarehouse,
+    canShip: isAdmin,
     canComplete: isAdmin,
     canCancel: isAdmin,
     canEditAmount: isAdmin,
@@ -256,7 +255,7 @@ function getOrderCapabilities(role: User["role"] | undefined): OrderCapabilities
     canEditNote: isAdmin || isCustomerService,
     canEditConsultant: isAdmin,
     canAdvanceCustomStage: isAdmin,
-    canReceive: isAdmin || isWarehouse,
+    canReceive: isAdmin,
   };
 }
 

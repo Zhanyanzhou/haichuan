@@ -4,11 +4,13 @@ import {
   ConflictException,
   ForbiddenException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { PartnerStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreatePartnerApplicationDto } from './dto/create-partner-application.dto';
 import { PartnerApplicationQueryDto } from './dto/partner-application-query.dto';
+import { isPartnerApplicationsWriteEnabled } from '../../common/release/release-profile';
 
 const SUBMITTABLE_PARTNER_STATUSES: PartnerStatus[] = [
   'NONE',
@@ -41,6 +43,15 @@ export class PartnerApplicationsService {
   };
 
   constructor(private readonly prisma: PrismaService) {}
+
+  private assertWriteEnabled() {
+    if (!isPartnerApplicationsWriteEnabled()) {
+      throw new ServiceUnavailableException({
+        code: 'PARTNER_APPLICATIONS_WRITE_DISABLED',
+        message: '合作申请服务正在准备中，当前仅可查看已有申请状态',
+      });
+    }
+  }
 
   /**
    * MySQL Serializable 事务在竞争时可能返回 P2034。有限重试后统一转为可操作的 409，
@@ -84,6 +95,7 @@ export class PartnerApplicationsService {
 
   /** 客户：提交/重新提交申请（新增历史记录，保留旧版本） */
   async submit(customerId: number, dto: CreatePartnerApplicationDto) {
+    this.assertWriteEnabled();
     if (!dto.agreementAccepted) {
       throw new BadRequestException('请先阅读并同意合作协议');
     }
@@ -197,6 +209,7 @@ export class PartnerApplicationsService {
     reviewNote: string | undefined,
     reviewer: { id: number; role: string },
   ) {
+    this.assertWriteEnabled();
     return this.runSerializable(async (tx) => {
       // 审核和客户当前资格必须在同一事务内重读，不能信任事务外快照。
       const app = await tx.partnerApplication.findUnique({

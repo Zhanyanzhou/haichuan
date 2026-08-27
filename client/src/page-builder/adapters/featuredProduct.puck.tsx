@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import FeaturedProductBlock from "@/components/blocks/FeaturedProductBlock";
 import { resolveProductReferences, type ProductRow } from "../data-sources/productSource";
 import { convertPuckProps } from "../utils/puckPropsToModule";
+import type { LinkTargetType } from "../utils/linkTarget";
 
 export interface FeaturedProductPuckProps {
   eyebrow: string;
@@ -12,6 +13,10 @@ export interface FeaturedProductPuckProps {
   primaryText: string;
   secondaryText: string;
   secondaryLink: string;
+  secondaryTargetType: LinkTargetType;
+  secondaryProductCode: string;
+  secondaryProductId: number;
+  secondaryLinkUrl: string;
   layout: "imageLeft" | "imageRight";
   showPrice: boolean;
   bgColor: string;
@@ -94,6 +99,10 @@ export const featuredProductPuckConfig = {
     primaryText: "查看作品",
     secondaryText: "预约鉴赏",
     secondaryLink: "/contact",
+    secondaryTargetType: "page",
+    secondaryProductCode: "",
+    secondaryProductId: 0,
+    secondaryLinkUrl: "/contact",
     layout: "imageLeft",
     showPrice: false,
     bgColor: "#FFFFFF",

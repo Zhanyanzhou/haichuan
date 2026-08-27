@@ -171,6 +171,7 @@ export function StorefrontMenuDrawer({
       : null;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (!open) return;
         event.preventDefault();
         onOpenChange(false);
         restoreTriggerFocus();

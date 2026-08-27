@@ -44,7 +44,7 @@
 - `产品展示行`、`单品焦点推荐`与`佩戴灵感`只在 PageDocument 保存商品引用，公开渲染时实时读取游客商品 API；三类模块共享一条商品变更流并在事件后重新核对公开资格，失效商品不会继续从旧组件状态展示。
 - 公开壳层与编辑器画布壳层分别只持有一份 `PublicSiteSettingsResource`；导航、页脚、门店信息、预约区块和联系页固定业务区共享同一快照。PageDocument 不复制电话、地址等业务资料，脱离壳层的独立预览仍只读查询同一个 SiteSettings API。
 - 模板库艺术指导内容只存在于预览层，当前 24 模板真实 Renderer 预览在桌面与移动浏览器只加载 WebP 派生图；PNG 母版没有进入组件默认值、PageDocument 或公开业务数据。它们仍没有可用于正式发布的来源和授权记录，不能视为正式媒体。
-- 合作申请的唯一实际表单位于登录后的“我的账户”合作区块；旧 `/partner` 只做登录保护后的兼容跳转到 `/customer?section=partner`，不再维护第二份表单或状态来源。
+- 合作申请的唯一实际表单位于登录后的“我的账户”合作区块；旧 `/partner` 只做登录保护后的兼容跳转到 `/customer?section=partner`，不再维护第二份表单或状态来源。写能力由 `PARTNER_APPLICATIONS_WRITE_ENABLED` 独立控制并默认关闭；关闭时前后台保留历史只读，服务端在事务前拒绝新提交、补充和审核。
 - `/search` 当前在 `App.tsx` 中只做查询参数兼容并重定向到 `/catalog`。
 
 ### 静态实现差距复核（2026-08-26）
@@ -53,9 +53,10 @@
 - `PublicLayout` 已按共享路由策略对账户、密码重置、购物车、结算、合作入口、受控预览和开发台架输出 `noindex, nofollow` 并移除 canonical；生产 Nginx 对后台、上述非公开旅程和预览提供 `X-Robots-Tag` 二次保护。
 - `/products` 等纯品牌页已区分未发布、无效和读取失败：不会把编辑器默认 seed 或硬编码品牌长页作为公开回退；只有真实读取失败提供重试。
 - 五种 `SalesMode` 的详情页主行动已按模式分流；需要顾问承接的路径携带稳定 `type/productRef`，Contact 经公开商品接口解析并由服务端按当前客户可见范围复核后关联现有 `Inquiry.productId`。真实表单提交与后台登录态联调仍未执行。
-- 购物车加购、购物车读取和订单创建链路尚未形成统一的客户商品可见性复核；交易开关当前默认关闭，但这不能替代未来开放前的权限修复与边界测试。
-- 非直购商品的响应价格会被隐藏，但当前价格筛选和排序仍可能使用其 SKU 价格，存在结果语义矛盾和价格区间推断风险。
-- 公开商品序列化器当前返回的部分字段超出现行访问矩阵白名单，尚未逐项完成公开必要性确认或收窄。
+- 公开列表/详情/媒体、客户目录、推荐、分类、装修引用、咨询快照、收藏、购物车和订单创建已复用 `PUBLISHED + READY + visibility + RELEASE_PROFILE` 资格规则；影响质量的商品与媒体写入在同一事务内复核 READY。交易开关仍默认关闭，目标数据库存量 READY 事实和真实客户身份边界仍须单独验证。
+- `WAREHOUSE` 已从通用订单接口与页面移除，只通过库存和履约最小投影工作；履约数据不包含金额、支付、退款、邮箱或订单内部备注，送达终态隐藏地址并脱敏手机号。该结论是当前源码候选，运行角色实测仍待隔离账号。
+- 非直购商品不返回公开成交价，公开目录的价格筛选和排序也只作用于直购商品，避免通过结果集合推断咨询类作品的 SKU 价格。
+- 公开商品序列化器已按访问矩阵收窄并由字段白名单合同覆盖；后续新增字段仍须先确认公开必要性并同步合同。
 - 当前 24 个活跃模板已由浏览器自动遍历桌面、紧凑桌面、平板和手机视口，验证真实 Renderer 角色顺序、比例、高度、可编辑 DOM 落点与横向溢出；该证据不替代逐模板人工艺术方向和真实正式内容验收。
 - Puck 保存、刷新回显、发布与公开 Renderer 已在隔离账号、隔离页面、隔离临时 MySQL/Nest 和完整后台壳中完成真实持久化验收，保存值与数据库/公开 Renderer 哈希一致；该证据没有触碰现有用户草稿，也不证明目标数据库或正式内容可发布。Hero 移动端鼠标复核进一步确认：真正无覆盖的可见媒体像素可从 `title` 切换选中 `mobileImage`，白色正文覆盖区保持文字优先；原“所有图片像素都无法直接选择”结论属于测试点位混淆，当前只补强防假绿测试，未加入错误的点击穿透。
 - 公开目录的吸顶筛选观察器已改为渐进增强：浏览器缺少 `IntersectionObserver` 或构造器异常时只停用吸顶状态，不再把整个目录升级为全局错误页。桌面、390×844 移动与 reduced-motion 组合均已用浏览器夹具验证核心搜索、商品矩阵、无横向溢出且不产生写请求。
@@ -148,7 +149,7 @@ products, categories, auth, users, orders, inventory, inquiries, selection-inqui
 
 - **Playwright E2E**（`client/tests/`）：`public-access.spec.ts`（公开访问 + 交易关闭降级 + 字段白名单）、`responsive-public.spec.ts`（4 视口横向溢出）、`responsive-admin.admin.spec.ts`、`core-template-homepage.spec.ts`、`privacy-trust.spec.ts`。交易关闭测试证明降级路径存在，不证明当前部署一定关闭。
 - **契约测试**（`scripts/`）：page-builder / trade 状态机 / trade 并发 / trade 契约。
-- CI（`.github/workflows/`）：ci.yml 包含 client/server lint+build；quality.yml 包含 lint、typecheck、contract、trade、build，并定义 `e2e-public` 安装 Chromium 后运行 `public-chromium`。CI 配置存在不等于本轮 CI 已实际执行或通过。
+- CI（`.github/workflows/`）：ci.yml 包含 client/server lint+build；quality.yml 包含 lint、typecheck、contract、trade、build，并定义 `e2e-deterministic` 安装 Chromium 后运行 public/customer/admin 三个 project。CI 配置存在不等于本轮 CI 已实际执行或通过。
 
 2026-08-23 新鲜代码级验证包括：服务端构建；库存释放、资金门禁、报价暂停、金价事实和版本恢复 16 项目标测试；SiteContent 权限与版本恢复 10 项浏览器测试；客户端生产构建与目标 lint。以上结果仍不是生产、真实支付或真实数据库联调证据。
 
@@ -183,7 +184,7 @@ products, categories, auth, users, orders, inventory, inquiries, selection-inqui
 11. **报价确认与转单安全暂停** — 当前后台员工不能代客户确认，转单在客户本人确认状态机、不可变报价快照和所需 Schema 获批实现前返回安全拒绝；这不是完整经营闭环。
 12. **客户通知只有第一批本地候选，不能外推为真实送达闭环** — 认证客户的订单创建和每笔支付确认已在业务事务内原子写 Notification/NotificationDelivery/OutboxEvent，客户 API 绑定本人，Worker 具备抢占、租约、有限重试和保守的未知结果处理；外部投递默认关闭。目标库 migration、真实 MySQL 抢占、授权测试收件人、SMTP 配置、送达/退信，以及发货、退款、售后、咨询等后续事件仍未闭合；旧直接邮件路径尚未统一迁移。
 13. **英文站只有 EN-A 安全轨道，正式英文内容尚未实现** — `/en` 及其子路由当前由外层门禁返回不可用页面，不请求中文业务事实；公开 API 与 SSE 显式携带 locale，服务端 `en` 在访问事实源前返回 unavailable，Nginx 候选配置为初始响应添加 `noindex, nofollow`。虽然候选 Schema 已有 PageDocumentLocalization/ProductTranslation/CategoryTranslation/SeoSnapshot，但 PageDocumentRevision 没有 locale/contentHash，publishedRevisionId 无法可靠证明同语言不可变修订；该设计必须在目标库状态明确后、migration 执行前处理。不能用机器翻译、自动回退或空页伪装完成。
-14. **发布基础已有安全入口，但尚未完成目标环境闭环** — 仓库已具备受控 `restore.sh` 与一次性首管理员 CLI，2026-08-27 的 Bash 语法检查通过；但尚未在目标环境的独立空库和空媒体卷执行恢复演练。备份仍默认同宿主机、明文、7 天保留且媒体归档非原子。微信支付证书路径已进入变量合同，但 Compose 尚无证书目录只读挂载；TLS/443 也未实施。这些问题不影响当前本地构建，却阻断隔离候选环境和正式发布。
+14. **发布基础已有安全入口，但尚未完成目标环境闭环** — 仓库已具备受控 `restore.sh`、一次性首管理员 CLI、备份状态标记/容器健康检查，以及发布前同 SHA Quality Gate 证明和 Manifest v2 合同；当前仅完成 Bash 语法与静态/单元合同验证。尚未在 GitHub 远端生成制品，也未在目标环境的独立空库和空媒体卷执行恢复演练。备份仍默认同宿主机、明文、7 天保留且媒体归档非原子；微信支付证书只读挂载和 TLS/443 仍未实施。
 
 ### 已过时的历史结论（以代码事实为准）
 

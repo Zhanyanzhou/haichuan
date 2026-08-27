@@ -1353,8 +1353,11 @@ export const customerApi = {
     api.get("/customers/me/selection-inquiries", {
       headers: customerAuthHeaders(),
     }),
-  getInquiries: () =>
-    api.get("/customers/me/inquiries", { headers: customerAuthHeaders() }),
+  getInquiries: (params?: { page?: number; pageSize?: number }) =>
+    api.get("/customers/me/inquiries", {
+      params,
+      headers: customerAuthHeaders(),
+    }),
   getAddresses: () =>
     api.get("/customers/me/addresses", { headers: customerAuthHeaders() }),
   createAddress: (data: CustomerAddressInput) =>

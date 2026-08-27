@@ -11,6 +11,8 @@ import {
   Space,
   Card,
   Timeline,
+  Alert,
+  Popconfirm,
   App as AntdApp,
 } from "antd";
 import type { TableColumnsType } from "antd";
@@ -19,6 +21,7 @@ import {
   EyeOutlined,
   PhoneOutlined,
   MailOutlined,
+  SafetyCertificateOutlined,
 } from "@ant-design/icons";
 import api from "@/services/api";
 import { useAuthStore } from "@/store/authStore";
@@ -46,6 +49,10 @@ interface LeadListRow {
   status: string;
   assigneeName?: string | null;
   nextFollowUpAt?: string | null;
+  retentionUntil?: string | null;
+  legalHoldAt?: string | null;
+  privacyDisposition?: "ANONYMIZED" | null;
+  privacyDisposedAt?: string | null;
   createdAt: string;
 }
 
@@ -58,7 +65,8 @@ interface LeadItem {
 
 interface LeadFollowUp {
   id: number;
-  content: string;
+  type?: string;
+  content?: string | null;
   createdAt: string;
   creator?: { realName?: string | null } | null;
 }
@@ -77,6 +85,7 @@ interface LeadDetail extends Partial<LeadListRow> {
   message?: string | null;
   reply?: string | null;
   internalNote?: string | null;
+  closureReason?: string | null;
   items?: LeadItem[];
   followUps?: LeadFollowUp[];
 }
@@ -85,6 +94,26 @@ interface AssignableStaff {
   id: number;
   name: string;
 }
+
+interface LeadNotificationFailure {
+  id: number;
+  leadId?: number | null;
+  leadType?: LeadType | null;
+  customerName?: string | null;
+  attempts: number;
+  lastErrorCode?: string | null;
+  retryable: boolean;
+  updatedAt: string;
+}
+
+const NOTIFICATION_ERROR_LABELS: Record<string, string> = {
+  SMTP_NOT_CONFIGURED: "邮件服务未配置",
+  NOTIFICATION_DELIVERY_DISABLED: "外部投递门禁关闭",
+  SMTP_SEND_FAILED: "邮件服务发送失败",
+  DELIVERY_RESULT_UNKNOWN: "发送结果未知",
+  DESTINATION_UNAVAILABLE: "收件信息不可用",
+  INVALID_EVENT_PAYLOAD: "通知关联数据异常",
+};
 
 const STATUS_MAP: Record<string, { color: string; label: string }> = {
   PENDING: { color: "warning", label: "待处理" },
@@ -98,9 +127,23 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
   PENDING: ["CONTACTED", "INVALID"],
   CONTACTED: ["FOLLOWING", "COMPLETED", "INVALID"],
   FOLLOWING: ["COMPLETED", "INVALID"],
-  COMPLETED: [],
-  INVALID: [],
+  COMPLETED: ["PENDING"],
+  INVALID: ["PENDING"],
 };
+
+const LEGAL_HOLD_REASONS = [
+  { value: "LEGAL_REQUIREMENT", label: "法律或监管要求" },
+  { value: "DISPUTE_OR_CLAIM", label: "争议或权利主张处理中" },
+  { value: "RIGHTS_REQUEST_REVIEW", label: "隐私权利请求复核中" },
+  { value: "OTHER_REVIEW", label: "其他合规复核" },
+] as const;
+
+const LEGAL_HOLD_RELEASE_REASONS = [
+  { value: "REQUIREMENT_ENDED", label: "法律或监管要求已结束" },
+  { value: "DISPUTE_RESOLVED", label: "争议已经解决" },
+  { value: "REVIEW_COMPLETED", label: "合规复核已经完成" },
+  { value: "ENTERED_IN_ERROR", label: "原保留设置有误" },
+] as const;
 
 export default function LeadManage() {
   const { message } = AntdApp.useApp();
@@ -120,15 +163,30 @@ export default function LeadManage() {
   const [detailError, setDetailError] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [statusReason, setStatusReason] = useState("");
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
   const [staffLoading, setStaffLoading] = useState(false);
   const [assignTo, setAssignTo] = useState<number | undefined>(undefined);
   const [assigning, setAssigning] = useState(false);
+  const [notificationFailures, setNotificationFailures] = useState<
+    LeadNotificationFailure[]
+  >([]);
+  const [notificationFailureTotal, setNotificationFailureTotal] = useState(0);
+  const [notificationFailureError, setNotificationFailureError] =
+    useState(false);
+  const [retryingNotificationId, setRetryingNotificationId] = useState<
+    number | null
+  >(null);
+  const [legalHoldReason, setLegalHoldReason] = useState<string>();
+  const [privacyUpdating, setPrivacyUpdating] = useState(false);
   const role = useAuthStore((s) => s.user?.role);
+  const isSuperAdmin = role === "SUPER_ADMIN";
   const canAssign =
     role === "SUPER_ADMIN" || role === "ADMIN" || role === "CUSTOMER_SERVICE";
   const requestedStatus = searchParams.get("status") || "";
   const requestedType = searchParams.get("type") || "";
+  const requestedNotification = searchParams.get("notification") || "";
+  const requestedRetentionDue = searchParams.get("retention") === "due";
 
   useEffect(() => {
     setStatus(
@@ -161,6 +219,7 @@ export default function LeadManage() {
           status: status || undefined,
           type: leadType || undefined,
           keyword: keyword || undefined,
+          retentionDue: requestedRetentionDue ? true : undefined,
         },
       });
       const data = unwrapResponse<PaginatedResult<LeadListRow>>(res);
@@ -171,16 +230,36 @@ export default function LeadManage() {
     } finally {
       setLoading(false);
     }
-  }, [keyword, leadType, page, pageSize, status]);
+  }, [keyword, leadType, page, pageSize, requestedRetentionDue, status]);
 
   useEffect(() => {
     void fetchList();
   }, [fetchList]);
 
+  const fetchNotificationFailures = useCallback(async () => {
+    setNotificationFailureError(false);
+    try {
+      const res = await api.get("/leads/notification-failures", {
+        params: { page: 1, pageSize: 20 },
+      });
+      const data = unwrapResponse<PaginatedResult<LeadNotificationFailure>>(res);
+      setNotificationFailures(data.list ?? []);
+      setNotificationFailureTotal(data.total ?? 0);
+    } catch {
+      setNotificationFailureError(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchNotificationFailures();
+  }, [fetchNotificationFailures]);
+
   const openDetail = async (type: LeadType, id: number) => {
     setDetailId({ type, id });
     setDetailError(false);
     setDetail(null);
+    setStatusReason("");
+    setLegalHoldReason(undefined);
     try {
       const res = await api.get(`/leads/${type}/${id}`);
       setDetail(unwrapResponse<LeadDetail>(res));
@@ -190,14 +269,83 @@ export default function LeadManage() {
     }
   };
 
+  const retryNotification = async (event: LeadNotificationFailure) => {
+    setRetryingNotificationId(event.id);
+    try {
+      await api.post(`/leads/notification-failures/${event.id}/retry`);
+      message.success("已加入重新投递队列，处理结果会继续记录在系统中");
+      await fetchNotificationFailures();
+      if (
+        detailId
+        && event.leadId === detailId.id
+        && event.leadType === detailId.type
+      ) {
+        await openDetail(detailId.type, detailId.id);
+      }
+    } catch (error) {
+      message.error(
+        getSafeAdminErrorMessage(
+          error,
+          "通知重投失败，请刷新状态并确认邮件服务配置。",
+        ),
+      );
+    } finally {
+      setRetryingNotificationId(null);
+    }
+  };
+
+  const updateLegalHold = async (release: boolean) => {
+    if (!detailId || !legalHoldReason) return;
+    setPrivacyUpdating(true);
+    try {
+      const payload = { reason: legalHoldReason };
+      if (release) {
+        await api.post(
+          `/leads/${detailId.type}/${detailId.id}/legal-hold/release`,
+          payload,
+        );
+      } else {
+        await api.post(
+          `/leads/${detailId.type}/${detailId.id}/legal-hold`,
+          payload,
+        );
+      }
+      message.success(release ? "法律保留已解除" : "法律保留已设置");
+      setLegalHoldReason(undefined);
+      await openDetail(detailId.type, detailId.id);
+      await fetchList();
+    } catch (error) {
+      message.error(
+        getSafeAdminErrorMessage(
+          error,
+          release ? "解除法律保留失败，请刷新后重试。" : "设置法律保留失败，请刷新后重试。",
+        ),
+      );
+    } finally {
+      setPrivacyUpdating(false);
+    }
+  };
+
   const updateStatus = async (newStatus: string) => {
     if (!detailId) return;
+    const needsClosureReason = newStatus === "COMPLETED" || newStatus === "INVALID";
+    const needsReopenReason =
+      (detail?.status === "COMPLETED" || detail?.status === "INVALID") &&
+      newStatus === "PENDING";
+    const reason = statusReason.trim();
+    if ((needsClosureReason || needsReopenReason) && !reason) {
+      message.warning(needsReopenReason ? "请填写重新打开原因" : "请填写完成或无效原因");
+      return;
+    }
     setSaving(true);
     try {
       await api.put(`/leads/${detailId.type}/${detailId.id}`, {
         status: newStatus,
+        ...(needsClosureReason ? { closureReason: reason } : {}),
+        ...(needsReopenReason ? { reopenReason: reason } : {}),
       });
       message.success("状态已更新");
+      setStatusReason("");
       openDetail(detailId.type, detailId.id);
       fetchList();
     } catch (error) {
@@ -327,6 +475,22 @@ export default function LeadManage() {
         v ? new Date(v).toLocaleDateString("zh-CN") : "-",
     },
     {
+      title: "留存复核",
+      width: 110,
+      render: (_, row) => {
+        if (row.privacyDisposedAt) return <Tag>已匿名化</Tag>;
+        if (row.legalHoldAt) return <Tag color="processing">法律保留</Tag>;
+        const v = row.retentionUntil;
+        if (!v) return "-";
+        const due = new Date(v).getTime() <= Date.now();
+        return (
+          <Tag color={due ? "error" : "default"}>
+            {due ? "已到期" : new Date(v).toLocaleDateString("zh-CN")}
+          </Tag>
+        );
+      },
+    },
+    {
       title: "提交时间",
       dataIndex: "createdAt",
       width: 150,
@@ -354,6 +518,101 @@ export default function LeadManage() {
         title="客户线索"
         subtitle="统一管理预约咨询、选款咨询与定制咨询"
       />
+      {requestedRetentionDue && (
+        <Alert
+          style={{ marginBottom: 16 }}
+          type="warning"
+          showIcon
+          message="正在查看留存期已到期的线索"
+          description="本页用于授权人员复核。匿名化 CLI 默认只预览；真实执行必须显式开启一次性门禁、提供超级管理员身份和固定确认词。法律保留中的线索不会进入处置批次。"
+        />
+      )}
+      {(notificationFailureError
+        || notificationFailureTotal > 0
+        || requestedNotification === "failed") && (
+        <Alert
+          style={{ marginBottom: 16 }}
+          type={
+            notificationFailureError
+              ? "warning"
+              : notificationFailureTotal > 0
+                ? "error"
+                : "success"
+          }
+          showIcon
+          message={
+            notificationFailureError
+              ? "通知投递异常状态读取失败"
+              : notificationFailureTotal > 0
+                ? `${notificationFailureTotal} 条咨询回复通知需要处理`
+                : "当前没有失败的咨询回复通知"
+          }
+          description={
+            notificationFailureError ? (
+              <Button size="small" onClick={fetchNotificationFailures}>
+                重新读取
+              </Button>
+            ) : notificationFailureTotal > 0 ? (
+              <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                {notificationFailures.map((event) => (
+                  <Space key={event.id} wrap>
+                    <span>
+                      事件 #{event.id}
+                      {event.customerName ? ` · ${event.customerName}` : ""}
+                      {event.leadId ? ` · 线索 #${event.leadId}` : ""}
+                    </span>
+                    <Tag color={event.retryable ? "warning" : "error"}>
+                      {event.lastErrorCode
+                        ? NOTIFICATION_ERROR_LABELS[event.lastErrorCode]
+                          || event.lastErrorCode
+                        : "未知失败"}
+                    </Tag>
+                    <span>
+                      已尝试 {event.attempts} 次 ·{" "}
+                      {new Date(event.updatedAt).toLocaleString("zh-CN")}
+                    </span>
+                    {event.leadId && event.leadType && (
+                      <Button
+                        type="link"
+                        size="small"
+                        onClick={() =>
+                          void openDetail(event.leadType as LeadType, event.leadId as number)
+                        }
+                      >
+                        查看线索
+                      </Button>
+                    )}
+                    {event.retryable ? (
+                      <Popconfirm
+                        title="确认重新投递这条回复通知？"
+                        description="系统会在投递服务可用时再次向客户邮箱发送原回复。"
+                        okText="确认重投"
+                        cancelText="取消"
+                        onConfirm={() => retryNotification(event)}
+                      >
+                        <Button
+                          size="small"
+                          type="primary"
+                          loading={retryingNotificationId === event.id}
+                        >
+                          重新投递
+                        </Button>
+                      </Popconfirm>
+                    ) : (
+                      <span>需人工核对，系统禁止重投</span>
+                    )}
+                  </Space>
+                ))}
+                {notificationFailureTotal > notificationFailures.length && (
+                  <span>
+                    当前显示最近 {notificationFailures.length} 条，请处理后刷新查看其余记录。
+                  </span>
+                )}
+              </Space>
+            ) : undefined
+          }
+        />
+      )}
       <Card
         style={{
           borderRadius: 10,
@@ -468,6 +727,15 @@ export default function LeadManage() {
                   {STATUS_MAP[detail.status]?.label || detail.status}
                 </Tag>
               </Descriptions.Item>
+              <Descriptions.Item label="隐私处置">
+                {detail.privacyDisposedAt ? (
+                  <Tag>已匿名化</Tag>
+                ) : detail.legalHoldAt ? (
+                  <Tag color="processing">法律保留中</Tag>
+                ) : (
+                  <Tag color="default">按留存规则复核</Tag>
+                )}
+              </Descriptions.Item>
               <Descriptions.Item label="负责人">
                 {detail.assignee?.realName || detail.handler?.realName || "-"}
               </Descriptions.Item>
@@ -480,12 +748,83 @@ export default function LeadManage() {
               <Descriptions.Item label="内部备注">
                 {detail.internalNote || "-"}
               </Descriptions.Item>
+              {(detail.status === "COMPLETED" || detail.status === "INVALID") && (
+                <Descriptions.Item label="关闭原因">
+                  {detail.closureReason || "历史记录未保留原因"}
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label="提交时间">
                 {detail.createdAt
                   ? new Date(detail.createdAt).toLocaleString("zh-CN")
                   : "-"}
               </Descriptions.Item>
             </Descriptions>
+
+            {detail.privacyDisposedAt && (
+              <Alert
+                style={{ marginTop: 16 }}
+                type="info"
+                showIcon
+                message="该线索已完成匿名化"
+                description={`处置时间：${new Date(detail.privacyDisposedAt).toLocaleString("zh-CN")}。业务骨架与结构化审计保留，个人信息和自由文本不可恢复；本页禁止继续分配、回复或跟进。`}
+              />
+            )}
+
+            {isSuperAdmin && !detail.privacyDisposedAt && detailId && (
+              <Card
+                size="small"
+                title={
+                  <Space>
+                    <SafetyCertificateOutlined />
+                    法律保留
+                  </Space>
+                }
+                style={{ marginTop: 16 }}
+              >
+                <Alert
+                  type={detail.legalHoldAt ? "warning" : "info"}
+                  showIcon
+                  message={
+                    detail.legalHoldAt
+                      ? "该线索不会进入到期匿名化批次"
+                      : "仅在确有法律、争议或权利请求复核依据时设置"
+                  }
+                  style={{ marginBottom: 12 }}
+                />
+                <Space wrap>
+                  <Select<string>
+                    style={{ minWidth: 240 }}
+                    placeholder={detail.legalHoldAt ? "选择解除原因" : "选择保留原因"}
+                    value={legalHoldReason}
+                    onChange={setLegalHoldReason}
+                    options={
+                      detail.legalHoldAt
+                        ? [...LEGAL_HOLD_RELEASE_REASONS]
+                        : [...LEGAL_HOLD_REASONS]
+                    }
+                  />
+                  <Popconfirm
+                    title={detail.legalHoldAt ? "确认解除法律保留？" : "确认设置法律保留？"}
+                    description={
+                      detail.legalHoldAt
+                        ? "解除后，到期线索可再次进入匿名化预览。"
+                        : "设置后，该线索会从到期匿名化候选中排除。"
+                    }
+                    okText="确认"
+                    cancelText="取消"
+                    onConfirm={() => updateLegalHold(Boolean(detail.legalHoldAt))}
+                  >
+                    <Button
+                      type="primary"
+                      loading={privacyUpdating}
+                      disabled={!legalHoldReason}
+                    >
+                      {detail.legalHoldAt ? "解除法律保留" : "设置法律保留"}
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              </Card>
+            )}
 
             {detail.items && detail.items.length > 0 && (
               <>
@@ -526,7 +865,7 @@ export default function LeadManage() {
                 items={(detail.followUps ?? []).map((followUp) => ({
                   children: (
                     <div>
-                      <div>{followUp.content}</div>
+                      <div>{followUp.content || "系统记录"}</div>
                       <small style={{ color: "var(--adm-muted)" }}>
                         {followUp.creator?.realName || "系统"} ·{" "}
                         {new Date(followUp.createdAt).toLocaleString("zh-CN")}
@@ -539,6 +878,8 @@ export default function LeadManage() {
               <AdminEmptyState description="暂无跟进记录" />
             )}
 
+            {!detail.privacyDisposedAt && (
+              <>
             <div style={{ marginTop: 16 }}>
               <Input.TextArea
                 rows={3}
@@ -591,6 +932,19 @@ export default function LeadManage() {
             )}
 
             <div style={{ marginTop: 16 }}>
+              <Input.TextArea
+                rows={2}
+                value={statusReason}
+                onChange={(event) => setStatusReason(event.target.value)}
+                maxLength={1000}
+                showCount
+                placeholder={
+                  detail.status === "COMPLETED" || detail.status === "INVALID"
+                    ? "重新打开原因（必填）"
+                    : "完成或标记无效的原因（执行对应状态时必填）"
+                }
+                aria-label="状态变更原因"
+              />
               <Space>
                 <span>状态流转：</span>
                 {(STATUS_TRANSITIONS[detail.status] ?? []).map((nextStatus) => (
@@ -603,11 +957,15 @@ export default function LeadManage() {
                   >
                     {nextStatus === "INVALID"
                       ? "标记无效"
-                      : STATUS_MAP[nextStatus].label}
+                      : nextStatus === "PENDING"
+                        ? "重新打开"
+                        : STATUS_MAP[nextStatus].label}
                   </Button>
                 ))}
               </Space>
             </div>
+              </>
+            )}
           </>
         ) : detailError ? (
           <AdminErrorState

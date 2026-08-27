@@ -39,7 +39,12 @@ const mediaByType: Record<string, Record<string, unknown>> = {
   },
   定制流程: { steps: [1, 2, 3].map((id) => ({ number: `0${id}`, name: `步骤 ${id}`, desc: "安全测试说明", image: image("journey") })) },
   改款对比: { beforeImage: image("before-after"), afterImage: image("before-after"), beforeAltText: "改款前替代文字哨兵", afterAltText: "改款后替代文字哨兵" },
-  单品焦点推荐: { productCode: "SAFE-1" },
+  单品焦点推荐: {
+    productCode: "SAFE-1",
+    secondaryText: "查看说明",
+    secondaryTargetType: "page",
+    secondaryLinkUrl: "/about",
+  },
   产品展示行: { productCodes: ["SAFE-1", "SAFE-2", "SAFE-3"], layout: "grid-3", mobileColumns: 2 },
   作品画廊: { items: [1, 2, 3, 4].map((id) => ({ image: image("asymmetric-gallery"), altText: `画廊测试图 ${id}`, caption: `FIG. 0${id}`, link: "" })) },
   佩戴灵感: { image: image("lookbook"), altText: "佩戴灵感替代文字哨兵", productCodes: ["SAFE-1", "SAFE-2"] },
@@ -231,7 +236,7 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
     await page.emulateMedia({ reducedMotion: "reduce" });
   });
 
-  test("原始发布门禁保留失效覆盖错误，公开净化器只保留合同允许设备", () => {
+  test("原始发布门禁拒绝未知设备，公开净化器保留双端并剔除未知设备", () => {
     const rawTextBannerOverrides = {
       version: 2 as const,
       nodes: {
@@ -239,8 +244,9 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
           rectByViewport: {
             desktop: { x: 0.08, y: 0.56, width: 0.48, height: 0.18 },
             mobile: { x: 0.06, y: 0.38, width: 0.88, height: 0.2 },
+            tablet: { x: 0.1, y: 0.1, width: 0.8, height: 0.2 },
           },
-          zIndexByViewport: { desktop: 3, mobile: 4 },
+          zIndexByViewport: { desktop: 3, mobile: 4, tablet: 5 },
         },
       },
     };
@@ -254,8 +260,10 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
     expect(rawIssues.some((issue) =>
       issue.severity === "error" && issue.path.includes("rectByViewport"),
     )).toBe(true);
-    expect(sanitizeContentTemplateLayoutData("文字横幅", rawTextBannerOverrides)?.nodes)
-      .toBeUndefined();
+    const sanitizedTextBanner = sanitizeContentTemplateLayoutData("文字横幅", rawTextBannerOverrides);
+    expect(sanitizedTextBanner?.nodes?.copy?.rectByViewport?.desktop).toBeDefined();
+    expect(sanitizedTextBanner?.nodes?.copy?.rectByViewport?.mobile).toBeDefined();
+    expect((sanitizedTextBanner?.nodes?.copy?.rectByViewport as Record<string, unknown>)?.tablet).toBeUndefined();
 
     const heroOverrides = {
       version: 2 as const,
@@ -268,9 +276,9 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
     };
     const sanitizedHero = sanitizeContentTemplateLayoutData("首屏主视觉", heroOverrides);
     expect(sanitizedHero?.nodes?.title?.rectByViewport?.desktop).toBeDefined();
-    expect(sanitizedHero?.nodes?.title?.rectByViewport?.mobile).toBeUndefined();
+    expect(sanitizedHero?.nodes?.title?.rectByViewport?.mobile).toBeDefined();
     expect(sanitizedHero?.nodes?.title?.zIndexByViewport?.desktop).toBe(3);
-    expect(sanitizedHero?.nodes?.title?.zIndexByViewport?.mobile).toBeUndefined();
+    expect(sanitizedHero?.nodes?.title?.zIndexByViewport?.mobile).toBe(4);
   });
 
   test("浏览器缺少观察器 API 时双图海报仍显示核心媒体", async ({ page }) => {
@@ -730,7 +738,7 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
     await expect(page.locator('[data-content-template-contract="booking"] [data-content-role="primaryAction"]')).toBeVisible();
   });
 
-  test("公开 Renderer 只在合同允许的设备消费旧位置与层级覆盖", async ({ page }) => {
+  test("公开 Renderer 在全部合同对象的桌面和移动端消费位置与层级覆盖", async ({ page }) => {
     const overriddenBlocks = createBlocks().filter((block) =>
       ["首屏主视觉", "文字横幅", "预约入口"].includes(block.type),
     );
@@ -779,17 +787,17 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
     const desktop = await positions();
     expect(desktop.heroTitle).toBe("absolute");
     expect(desktop.heroAction).toBe("absolute");
-    expect(desktop.textCopy).not.toBe("absolute");
-    expect(desktop.bookingTitle).not.toBe("absolute");
-    expect(desktop.bookingAction).not.toBe("absolute");
+    expect(desktop.textCopy).toBe("absolute");
+    expect(desktop.bookingTitle).toBe("absolute");
+    expect(desktop.bookingAction).toBe("absolute");
 
     await page.setViewportSize({ width: 390, height: 844 });
     const mobile = await positions();
-    expect(mobile.heroTitle).not.toBe("absolute");
-    expect(mobile.heroAction).not.toBe("absolute");
-    expect(mobile.textCopy).not.toBe("absolute");
-    expect(mobile.bookingTitle).not.toBe("absolute");
-    expect(mobile.bookingAction).not.toBe("absolute");
+    expect(mobile.heroTitle).toBe("absolute");
+    expect(mobile.heroAction).toBe("absolute");
+    expect(mobile.textCopy).toBe("absolute");
+    expect(mobile.bookingTitle).toBe("absolute");
+    expect(mobile.bookingAction).toBe("absolute");
   });
 
   test("全部模板保留桌面、中间宽度与手机截图证据", async ({ page }) => {

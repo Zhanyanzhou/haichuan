@@ -3,16 +3,17 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { isCustomerCommerceEnabled } from '../release/release-profile';
 
 /**
  * 客户线上交易总开关。
- * 仅当部署环境显式设置 CUSTOMER_COMMERCE_ENABLED=true 时开放；缺失或写错都按关闭处理。
+ * 仅当发布档位为 commerce 且显式设置 CUSTOMER_COMMERCE_ENABLED=true 时开放；
+ * 缺失、写错或 lead-generation 档位都按关闭处理。
  */
 @Injectable()
 export class CustomerCommerceGuard implements CanActivate {
   canActivate(): boolean {
-    const enabled =
-      process.env.CUSTOMER_COMMERCE_ENABLED?.trim().toLowerCase() === 'true';
+    const enabled = isCustomerCommerceEnabled();
 
     if (!enabled) {
       throw new ServiceUnavailableException(

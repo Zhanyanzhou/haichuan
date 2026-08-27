@@ -45,6 +45,7 @@ npm run dev
 | 5173 | Vite 开发前端（`strictPort`） |
 | 5174 | 显式 Mock 前端（仅 `npm run dev:mock`） |
 | 3000 | 宿主机 NestJS 后端（开发唯一归属） |
+| 3001 | Uptime Kuma 本机监控面板（Docker，仅绑定 `127.0.0.1`） |
 | 3002 | 容器后端映射（仅验收直连） |
 | 3306 | MySQL (Docker) |
 
@@ -64,7 +65,7 @@ npm run dev
 | `npx tsc --noEmit`       | 类型检查               |
 | `npm run lint`           | 客户端 ESLint 检查     |
 | `npm run typecheck`      | 前后端 TypeScript 类型检查 |
-| `npm test`               | 页面构建器跨层契约检查 |
+| `npm test`               | 合同、内容模板、服务端行为、公开资源与运行时所有权检查 |
 
 ## 注意事项
 
@@ -73,6 +74,7 @@ npm run dev
 3. **修改 HTTP 传输层**：检查所有领域服务、拦截器、解包与错误路径；不依赖固定消费者数量
 4. **Feature Flags**：从当前代码和 `docs/CURRENT_STATE.md` 复核入口，不凭旧路径推断
 5. **Demo Seed 不是生产初始化**：它会写入固定演示管理员、仓库、分类和 5 条演示商品；候选/生产首管理员必须使用 `docs/DEPLOYMENT.md` 中的一次性 CLI，正式 PageDocument 与 SiteSettings 必须通过后台维护和发布。
+6. **备份容器没有 HTTP 端口**：`backup` 在 Docker 内按计划写入宿主机 `./backups`，并通过本地状态标记健康检查暴露最近一次执行结果；容器健康、后台状态、完整产物与隔离恢复演练是四层不同证据，不得用任一层替代恢复验收。
 
 ## Mock 模式
 

@@ -9,6 +9,8 @@ import { MailerService } from '../../common/mailer/mailer.service';
 import { SmsService } from '../../common/sms/sms.service';
 import { OrdersService } from '../orders/orders.service';
 import { RefreshSessionService, type SessionMetadata } from '../../common/security/refresh-session.service';
+import { anonymizeCustomerConsultations } from '../leads/lead-privacy-disposition';
+import { customerFacingProductWhere } from '../products/product-eligibility';
 
 type AddressInput = {
   recipientName: string;
@@ -160,14 +162,12 @@ export class CustomersService {
         await this.consumeSmsCode(tx, phone, data.smsCode!, now);
       }
       const existing = await tx.customer.findUnique({ where: { phone } });
-      if (existing?.passwordHash) throw new ConflictException('该手机号已注册，请直接登录');
-      const customer = existing
-        ? tx.customer.update({
-            where: { id: existing.id },
-            data: { name, email: email || existing.email, passwordHash, status: 'ACTIVE' },
-          })
-        : tx.customer.create({ data: { phone, name, email: email || null, passwordHash } });
-      const resolvedCustomer = await customer;
+      if (existing) {
+        throw new ConflictException('无法完成注册，请直接登录或通过账户恢复流程处理');
+      }
+      const resolvedCustomer = await tx.customer.create({
+        data: { phone, name, email: email || null, passwordHash },
+      });
       const refreshSession = sessionMetadata
         ? await this.refreshSessions.issueCustomerInTransaction(
             tx,
@@ -377,12 +377,29 @@ export class CustomersService {
     });
   }
 
-  async getInquiries(customerId: number) {
-    return this.prisma.inquiry.findMany({
-      where: { customerId },
-      include: { product: { select: { name: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
+  async getInquiries(
+    customerId: number,
+    params: { page?: number; pageSize?: number } = {},
+  ) {
+    const page = Number.isInteger(params.page) && Number(params.page) > 0
+      ? Number(params.page)
+      : 1;
+    const pageSize = Number.isInteger(params.pageSize) && Number(params.pageSize) > 0
+      ? Math.min(Number(params.pageSize), 50)
+      : 10;
+    const where = { customerId };
+    const [list, total] = await Promise.all([
+      this.prisma.inquiry.findMany({
+        where,
+        include: { product: { select: { name: true } } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.inquiry.count({ where }),
+    ]);
+
+    return { list, total, page, pageSize };
   }
 
   // ===== 收藏（心愿单）=====
@@ -392,8 +409,13 @@ export class CustomersService {
     if (!Number.isInteger(productId) || productId <= 0) {
       throw new BadRequestException('无效的商品');
     }
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { accountType: true, partnerStatus: true },
+    });
+    if (!customer) throw new NotFoundException('客户不存在');
     const product = await this.prisma.product.findFirst({
-      where: { id: productId, deletedAt: null, status: 'PUBLISHED' },
+      where: { id: productId, ...customerFacingProductWhere(customer) },
       select: { id: true },
     });
     if (!product) throw new NotFoundException('作品不存在或不可收藏');
@@ -421,10 +443,15 @@ export class CustomersService {
     return { favorited: true };
   }
 
-  /** 我的心愿单（仅公开可见作品，按收藏时间倒序） */
+  /** 我的心愿单（仅返回当前客户仍有资格查看的 READY 作品） */
   async listFavorites(customerId: number) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { accountType: true, partnerStatus: true },
+    });
+    if (!customer) throw new NotFoundException('客户不存在');
     const favorites = await this.prisma.customerFavorite.findMany({
-      where: { customerId },
+      where: { customerId, product: customerFacingProductWhere(customer) },
       include: {
         product: {
           select: {
@@ -442,10 +469,8 @@ export class CustomersService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    // 商品后续下架/删除/转为会员可见时，从心愿单展示中过滤（记录保留，重新上架自动恢复）
-    return favorites
-      .filter((f) => f.product && f.product.deletedAt === null && f.product.status === 'PUBLISHED' && f.product.visibility === 'PUBLIC')
-      .map((f) => ({
+    // 资格过滤在数据库查询完成，分页与返回集合不会因 Node 侧过滤发生漂移。
+    return favorites.map((f) => ({
         id: f.id,
         productId: f.product.id,
         name: f.product.name,
@@ -459,8 +484,13 @@ export class CustomersService {
 
   /** 登录客户对一批作品的收藏态（商品详情页批量查询用） */
   async getFavoriteProductIds(customerId: number) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { accountType: true, partnerStatus: true },
+    });
+    if (!customer) throw new NotFoundException('客户不存在');
     const rows = await this.prisma.customerFavorite.findMany({
-      where: { customerId },
+      where: { customerId, product: customerFacingProductWhere(customer) },
       select: { productId: true },
     });
     return rows.map((r) => r.productId);
@@ -545,7 +575,8 @@ export class CustomersService {
    * 注销账户：密码二次确认后匿名化处理。
    * 保留（交易/财务记录法定保存 + 公开展示内容）：
    *   订单与收款记录、已通过的评价（昵称本就脱敏展示）。
-   * 清除/失效：姓名、邮箱、密码哈希（置随机值使其永久无法登录）、地址簿、收藏、状态置 DISABLED。
+   * 清除/失效：姓名、手机号、邮箱、微信身份、密码哈希（置随机值使其永久无法登录）、
+   * 地址簿、收藏、关联咨询 PII，状态置 DISABLED。法律保留中的咨询事实除外。
    */
   async closeAccount(customerId: number, password: string) {
     const customer = await this.prisma.customer.findUnique({
@@ -554,16 +585,28 @@ export class CustomersService {
     if (!customer?.passwordHash || !(await bcrypt.compare(password || '', customer.passwordHash))) {
       throw new UnauthorizedException('密码不正确，无法注销');
     }
-    // 作废全部未使用的密码重置令牌，防止注销后经邮件链接复活
-    await this.prisma.customerPasswordResetToken.updateMany({
-      where: { customerId, usedAt: null },
-      data: { usedAt: new Date() },
-    });
+    const now = new Date();
+    const closedIdentity = `closed-${customerId}`;
     const randomPasswordHash = await bcrypt.hash(randomBytes(24).toString('hex'), 12);
-    await this.prisma.$transaction([
-      this.prisma.customerAddress.deleteMany({ where: { customerId } }),
-      this.prisma.customerFavorite.deleteMany({ where: { customerId } }),
-      this.prisma.notificationDelivery.updateMany({
+    const consultationDisposition = await this.prisma.$transaction(async (transaction) => {
+      const disposition = await anonymizeCustomerConsultations(
+        transaction,
+        customerId,
+        now,
+      );
+      // 作废全部未使用的密码重置令牌，防止注销后经邮件链接复活。
+      await transaction.customerPasswordResetToken.updateMany({
+        where: { customerId, usedAt: null },
+        data: { usedAt: now },
+      });
+      // 短信验证码没有 customerId，必须按注销前手机号清除可识别值并立即失效。
+      await transaction.customerSmsCode.updateMany({
+        where: { phone: customer.phone },
+        data: { phone: closedIdentity, usedAt: now },
+      });
+      await transaction.customerAddress.deleteMany({ where: { customerId } });
+      await transaction.customerFavorite.deleteMany({ where: { customerId } });
+      await transaction.notificationDelivery.updateMany({
         where: {
           notification: { customerId },
           status: { in: ['PENDING', 'SENDING', 'FAILED'] },
@@ -573,26 +616,37 @@ export class CustomersService {
           nextAttemptAt: null,
           lastErrorCode: 'CUSTOMER_ACCOUNT_CLOSED',
         },
-      }),
-      this.prisma.notification.updateMany({
+      });
+      await transaction.notification.updateMany({
         where: { customerId, status: { not: 'ARCHIVED' } },
         data: { status: 'ARCHIVED' },
-      }),
-      this.prisma.customerRefreshSession.updateMany({
+      });
+      await transaction.customerRefreshSession.updateMany({
         where: { customerId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      }),
-      this.prisma.customer.update({
+        data: { revokedAt: now, userAgentHash: null, ipHash: null },
+      });
+      await transaction.consentRecord.updateMany({
+        where: { customerId },
+        data: { customerId: null, anonymousIdHash: null },
+      });
+      await transaction.customer.update({
         where: { id: customerId },
         data: {
+          phone: closedIdentity,
           name: '已注销会员',
           email: null,
+          wechatOpenId: null,
+          wechatUnionId: null,
           passwordHash: randomPasswordHash,
           status: 'DISABLED',
         },
-      }),
-    ]);
-    return { message: '账户已注销，感谢您曾经的信任与陪伴' };
+      });
+      return disposition;
+    });
+    return {
+      message: '账户已注销，感谢您曾经的信任与陪伴',
+      retainedUnderLegalHold: consultationDisposition.retainedUnderLegalHold,
+    };
   }
 
   async updateProfile(customerId: number, data: { name?: string; email?: string }) {

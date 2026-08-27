@@ -11,6 +11,7 @@ test("客户订单在 Serializable 事务内复核并清空同一购物车", asy
   let isolationLevel: unknown;
   let notificationOrderId: number | null = null;
   const tx = {
+    $queryRaw: async () => [{ max_sequence: 0n }],
     cart: {
       findMany: async () => [{ skuId: 10, quantity: 1 }],
       deleteMany: async () => {
@@ -91,7 +92,7 @@ test("客户订单在 Serializable 事务内复核并清空同一购物车", asy
     },
   });
 
-  assert.equal("publicationQualityStatus" in (productWhere || {}), false);
+  assert.equal(productWhere?.publicationQualityStatus, "READY");
   assert.deepEqual(productWhere?.visibility, { in: ["PUBLIC", "MEMBER"] });
   assert.equal(isolationLevel, Prisma.TransactionIsolationLevel.Serializable);
   assert.equal(customerUpdated, true);

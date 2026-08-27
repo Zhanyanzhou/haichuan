@@ -15,6 +15,7 @@ import {
 import { partnerApi } from "@/services/api";
 import type { PartnerApplicationInput, PartnerApplicationStatus } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { useCommerceCapabilities } from "@/store/featureFlags";
 
 // 合作商家入驻协议（草案，待法务终审；页面内可读，供申请人勾选同意）
 const AGREEMENT_TEXT = `合作商家入驻协议（草案 v0.1）
@@ -67,6 +68,7 @@ type PartnerState = {
 
 export default function PartnerApplication() {
   const navigate = useNavigate();
+  const { flags, loading: flagsLoading } = useCommerceCapabilities();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -110,6 +112,10 @@ export default function PartnerApplication() {
   }, [load]);
 
   const onSubmit = async (values: PartnerApplicationInput) => {
+    if (flags?.partnerApplicationsWriteEnabled !== true) {
+      message.info("合作申请暂未开放，请通过联系页面咨询");
+      return;
+    }
     setSubmitting(true);
     try {
       const payload = { ...values, agreementAccepted: true };
@@ -130,7 +136,7 @@ export default function PartnerApplication() {
     }
   };
 
-  if (loading) {
+  if (loading || flagsLoading || !flags) {
     return (
       <div className="min-h-[50vh] flex items-center justify-center">
         <Spin size="large" />
@@ -199,6 +205,31 @@ export default function PartnerApplication() {
               onClick={() => navigate("/contact")}
             >
               联系专属顾问
+            </Button>,
+          ]}
+        />
+      </div>
+    );
+  }
+
+  if (!flags.partnerApplicationsWriteEnabled) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-8">
+        <Result
+          status="info"
+          title="合作申请暂未开放"
+          subTitle="我们正在完善合作协议与服务流程。当前可通过联系页面提交合作意向，已提交申请仍可在此查看状态。"
+          extra={[
+            <Button
+              key="contact"
+              type="primary"
+              size="large"
+              onClick={() => navigate("/contact")}
+            >
+              联系合作顾问
+            </Button>,
+            <Button key="home" size="large" onClick={() => navigate("/")}>
+              返回首页
             </Button>,
           ]}
         />

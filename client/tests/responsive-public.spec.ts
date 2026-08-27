@@ -562,6 +562,58 @@ test.describe("公开菜单键盘交互", () => {
     await expect(openTrigger).toBeFocused();
   });
 
+  test("第三档：菜单关闭时 Esc 不劫持当前输入焦点", async ({ page }) => {
+    await page.goto("/catalog");
+    const searchInput = page.getByRole("search").getByRole("combobox", {
+      name: "关键词或货号",
+    });
+
+    await searchInput.focus();
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+
+    await expect(searchInput).toBeFocused();
+  });
+
+  test("第三档：损坏的搜索历史会安全恢复为可写字符串列表", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("hc_search_history", JSON.stringify({ invalid: true }));
+    });
+    await page.goto("/catalog");
+
+    const searchInput = page.getByRole("search").getByRole("combobox", {
+      name: "关键词或货号",
+    });
+    await searchInput.fill("戒指");
+    await page.getByRole("search").getByRole("button", { name: "搜索" }).click();
+
+    await expect.poll(() => page.evaluate(() =>
+      JSON.parse(localStorage.getItem("hc_search_history") || "[]"),
+    )).toEqual(["戒指"]);
+  });
+
+  test("第三档：连续路由切换不会被上一轮清理定时器提前隐藏进度条", async ({ page }) => {
+    await page.goto("/privacy");
+    const progress = page.getByTestId("route-progress");
+    await expect(progress).toHaveCount(0);
+    await page.clock.install();
+
+    const navigate = (path: string) => page.evaluate((nextPath) => {
+      window.history.pushState({}, "", nextPath);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, path);
+
+    await navigate("/contact");
+    await expect(progress).toBeVisible();
+    await page.clock.fastForward(650);
+    await navigate("/privacy");
+    await page.clock.fastForward(350);
+
+    await expect(progress).toBeVisible();
+  });
+
   test("跳至主内容链接获得焦点后进入视口", async ({ page }) => {
     await page.goto("/");
     const skipLink = page.getByRole("link", { name: "跳至主内容" });

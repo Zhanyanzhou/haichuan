@@ -15,6 +15,7 @@ import {
   LinkOutlined,
   DeleteOutlined,
   ExclamationCircleOutlined,
+  PictureOutlined,
   SwapOutlined,
 } from "@ant-design/icons";
 import { uploadApi } from "@/services/api";
@@ -57,6 +58,9 @@ interface MediaPickerFieldProps {
   previewZoom?: number;
   /** 更换区开合状态，用于让上层只在换图任务中显示可复用素材。 */
   onReplaceOpenChange?: (open: boolean) => void;
+  /** 打开当前页面已使用素材；只有存在可选素材时由上层传入。 */
+  onOpenPageMedia?: () => void;
+  pageMediaOpen?: boolean;
 }
 
 export default function MediaPickerField({
@@ -73,6 +77,8 @@ export default function MediaPickerField({
   previewFit,
   previewZoom,
   onReplaceOpenChange,
+  onOpenPageMedia,
+  pageMediaOpen = false,
 }: MediaPickerFieldProps) {
   const { message, modal } = AntdApp.useApp();
   /** 更换面板：在预览下方内嵌展开，预览保持可见 */
@@ -92,6 +98,16 @@ export default function MediaPickerField({
   const hasQualityWarning = Boolean(
     imgSize.loaded && (resolutionTooSmall || matchStatus === "watch" || matchStatus === "risk"),
   );
+  const naturalRatio = imgSize.loaded && imgSize.height > 0
+    ? imgSize.width / imgSize.height
+    : null;
+  const qualityLabel = imgSize.error
+    ? "不可用"
+    : !imgSize.loaded
+      ? "检测中"
+      : hasQualityWarning
+        ? "需检查"
+        : "适合";
   const inputRef = useRef<InputRef>(null);
 
   const hasValue = Boolean(value && value.trim().length > 0);
@@ -214,7 +230,10 @@ export default function MediaPickerField({
             ) : null}
           </div>
           {!readOnly && (
-            <div className="homepage-editor__media-preview-actions">
+            <div
+              className="homepage-editor__media-preview-actions"
+              data-has-page-media={onOpenPageMedia ? "true" : "false"}
+            >
               <Button
                 size="small"
                 icon={<SwapOutlined />}
@@ -223,6 +242,17 @@ export default function MediaPickerField({
               >
                 替换图片
               </Button>
+              {onOpenPageMedia ? (
+                <Button
+                  size="small"
+                  icon={<PictureOutlined />}
+                  className={pageMediaOpen ? "is-active" : undefined}
+                  aria-pressed={pageMediaOpen}
+                  onClick={onOpenPageMedia}
+                >
+                  本页素材
+                </Button>
+              ) : null}
               <Button
                 size="small"
                 icon={<LinkOutlined />}
@@ -249,6 +279,25 @@ export default function MediaPickerField({
               </details>
             </div>
           )}
+          <dl
+            className="homepage-editor__media-facts"
+            data-media-quality={imgSize.error ? "error" : hasQualityWarning ? "warning" : imgSize.loaded ? "good" : "loading"}
+            aria-label="图片信息"
+            role="status"
+          >
+            <div>
+              <dt>比例</dt>
+              <dd>{naturalRatio === null ? "—" : naturalRatio.toFixed(2)}</dd>
+            </div>
+            <div>
+              <dt>分辨率</dt>
+              <dd>{imgSize.loaded ? `${imgSize.width} × ${imgSize.height}` : "—"}</dd>
+            </div>
+            <div>
+              <dt>状态</dt>
+              <dd><i aria-hidden="true" />{qualityLabel}</dd>
+            </div>
+          </dl>
         </div>
       )}
 

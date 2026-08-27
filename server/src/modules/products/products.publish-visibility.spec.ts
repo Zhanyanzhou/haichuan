@@ -700,7 +700,7 @@ test("已发布商品 SKU 更新破坏门禁时返回 409，并由事务回滚�
   assert.equal(records[0].price, 100);
 });
 
-test("第一阶段公开列表不因存量质量状态隐藏已发布商品", async () => {
+test("公开列表只返回当前标记为 READY 的已发布商品", async () => {
   const { service } = createService([
     product({ id: 1, status: "PUBLISHED", visibility: "PUBLIC" }),
     product({ id: 2, status: "OFFLINE", visibility: "PUBLIC" }),
@@ -724,8 +724,8 @@ test("第一阶段公开列表不因存量质量状态隐藏已发布商品", as
   ]);
   const result = await service.findPublic({});
   const ids = result.list.map((p) => Number(p.id)).sort((a, b) => a - b);
-  assert.deepEqual(ids, [1, 9]);
-  assert.equal(result.total, 2);
+  assert.deepEqual(ids, [1]);
+  assert.equal(result.total, 1);
 });
 
 test("已发布商品改为 OFFLINE 或 ARCHIVED 后公开查询不再返回", async () => {

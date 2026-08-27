@@ -7,6 +7,7 @@ import {
 } from "../modules/page-modules/content-template-contract";
 import {
   evaluateMigrationIntegrity,
+  parseReleaseProfile,
   RELEASE_PAGE_KEYS,
   runReleasePreflight,
   type ReleasePreflightDatabase,
@@ -63,7 +64,7 @@ function createFakeDatabase(options: FakeOptions = {}): ReleasePreflightDatabase
       async count(args: any) {
         if (args.where?.code?.in) return options.demoProductCount ?? 0;
         if (args.where?.salesMode === "DIRECT_PURCHASE") {
-          return options.directPurchaseProductCount ?? 1;
+          return options.directPurchaseProductCount ?? 0;
         }
         return options.governedPublicProductCount ?? 1;
       },
@@ -92,7 +93,7 @@ function createFakeDatabase(options: FakeOptions = {}): ReleasePreflightDatabase
   };
 }
 
-test("发布前门禁在超管、店铺资料、六页和 Demo 清理全部满足时通过", async () => {
+test("线索型发布门禁在超管、店铺资料、页面、作品和非交易边界全部满足时通过", async () => {
   const result = await runReleasePreflight(
     createFakeDatabase(),
     async () => ({ valid: true, errors: [], issues: [] }),
@@ -100,6 +101,7 @@ test("发布前门禁在超管、店铺资料、六页和 Demo 清理全部满�
   );
 
   assert.equal(result.technicalReady, true);
+  assert.equal(result.releaseProfile, "lead-generation");
   assert.equal(result.checks.filter((check) => !check.ok).length, 0);
   assert.equal(
     result.checks.filter((check) => check.code.startsWith("page-")).length,
@@ -114,7 +116,7 @@ test("发布前门禁同时报告缺失资料、正式商品、Demo 商品与失
       activeSuperAdminCount: 0,
       demoProductCount: 2,
       governedPublicProductCount: 0,
-      directPurchaseProductCount: 0,
+      directPurchaseProductCount: 1,
       settings: { siteName: "海川珠宝" },
       stalePageKey: "home",
       missingPageKey: "custom",
@@ -130,10 +132,64 @@ test("发布前门禁同时报告缺失资料、正式商品、Demo 商品与失
   assert.ok(failedCodes.includes("active-super-admin-present"));
   assert.ok(failedCodes.includes("demo-products-absent"));
   assert.ok(failedCodes.includes("governed-public-catalog-present"));
-  assert.ok(failedCodes.includes("direct-purchase-assortment-present"));
+  assert.ok(failedCodes.includes("lead-generation-assortment-commerce-free"));
   assert.ok(failedCodes.includes("site-settings-required-fields"));
   assert.ok(failedCodes.includes("page-home-published-current"));
   assert.ok(failedCodes.includes("page-custom-published-current"));
+});
+
+test("交易型发布档位继续要求正式直购商品，不被线索型规则削弱", async () => {
+  const blocked = await runReleasePreflight(
+    createFakeDatabase({ directPurchaseProductCount: 0 }),
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+    "commerce",
+  );
+  const ready = await runReleasePreflight(
+    createFakeDatabase({ directPurchaseProductCount: 1 }),
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+    "commerce",
+  );
+
+  assert.equal(blocked.technicalReady, false);
+  assert.ok(blocked.checks.some(
+    (check) => check.code === "direct-purchase-assortment-present" && !check.ok,
+  ));
+  assert.equal(ready.technicalReady, true);
+  assert.equal(ready.releaseProfile, "commerce");
+});
+
+test("发布档位默认安全选择线索型并拒绝未知值", () => {
+  assert.equal(parseReleaseProfile(), "lead-generation");
+  assert.equal(parseReleaseProfile("commerce"), "commerce");
+  assert.throws(() => parseReleaseProfile("hybrid"), /unsupported release profile/);
+});
+
+test("B4 闭环完成前开启合作申请写能力会阻断发布", async () => {
+  const result = await runReleasePreflight(
+    createFakeDatabase(),
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+    "lead-generation",
+    { partnerApplicationsWriteEnabled: true },
+  );
+
+  assert.equal(result.technicalReady, false);
+  assert.deepEqual(
+    result.checks.find(
+      (check) => check.code === "partner-applications-write-disabled-until-b4",
+    ),
+    {
+      code: "partner-applications-write-disabled-until-b4",
+      ok: false,
+      summary: "合作申请写能力已开启，但协议、资质与审计闭环尚未完成",
+      facts: {
+        capability: "partner-applications-write",
+        requiredClosure: "B4",
+      },
+    },
+  );
 });
 
 test("发布前门禁把当前服务端重新验证失败视为阻断", async () => {

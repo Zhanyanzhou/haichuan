@@ -4,9 +4,10 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const [clientSource, serverSource, rendererSource, blockMetaSource, homepageConfigSource, schemaInspectorSource] = await Promise.all([
+const [clientSource, serverSource, productEligibilitySource, rendererSource, blockMetaSource, homepageConfigSource, schemaInspectorSource] = await Promise.all([
   readFile(path.join(root, "client/src/page-builder/config/puckConfig.tsx"), "utf8"),
   readFile(path.join(root, "server/src/modules/page-modules/page-modules.service.ts"), "utf8"),
+  readFile(path.join(root, "server/src/modules/products/product-eligibility.ts"), "utf8"),
   readFile(path.join(root, "client/src/page-builder/runtime/PuckDocumentRenderer.tsx"), "utf8"),
   readFile(path.join(root, "client/src/page-builder/config/blockMeta.ts"), "utf8"),
   readFile(path.join(root, "client/src/pages/admin/HomepageConfig/index.tsx"), "utf8"),
@@ -76,31 +77,53 @@ assert.ok(publishProductCheck, "未找到页面发布时的关联商品校验");
 const publishProductSource = publishProductCheck[1];
 assert.match(
   publishProductSource,
+  /customerFacingProductWhereForVisibilities\(\["PUBLIC"\]\)/,
+  "页面发布必须复用客户侧公开商品资格单一事实源",
+);
+assert.match(
+  serverSource,
+  /import \{ customerFacingProductWhereForVisibilities \} from "\.\.\/products\/product-eligibility";/,
+  "页面发布必须从商品资格模块导入共享门禁",
+);
+assert.match(
+  productEligibilitySource,
   /deletedAt:\s*null/,
-  "页面发布必须拒绝引用已删除商品",
+  "共享商品资格必须拒绝已删除商品",
 );
 assert.match(
-  publishProductSource,
+  productEligibilitySource,
   /status:\s*["']PUBLISHED["']/,
-  "页面发布必须拒绝引用未上架商品",
+  "共享商品资格必须拒绝未上架商品",
 );
 assert.match(
-  publishProductSource,
-  /visibility:\s*["']PUBLIC["']/,
-  "页面发布必须拒绝引用内部或非公开商品",
+  productEligibilitySource,
+  /publicationQualityStatus:\s*["']READY["']/,
+  "共享商品资格必须拒绝未通过发布质量门禁的商品",
+);
+assert.match(
+  productEligibilitySource,
+  /visibility:\s*\{\s*in:\s*visibilities\s*\}/,
+  "共享商品资格必须按调用方允许的可见范围过滤",
+);
+assert.match(
+  productEligibilitySource,
+  /\.\.\.customerFacingReleaseWhere\(\)/,
+  "共享商品资格必须遵循当前发布画像",
 );
 
 const productVisibilityCases = [
-  { name: "public", status: "PUBLISHED", visibility: "PUBLIC", deletedAt: null, allowed: true },
-  { name: "draft", status: "DRAFT", visibility: "PUBLIC", deletedAt: null, allowed: false },
-  { name: "member", status: "PUBLISHED", visibility: "MEMBER", deletedAt: null, allowed: false },
-  { name: "internal", status: "PUBLISHED", visibility: "INTERNAL", deletedAt: null, allowed: false },
-  { name: "deleted", status: "PUBLISHED", visibility: "PUBLIC", deletedAt: new Date(), allowed: false },
+  { name: "public-ready", status: "PUBLISHED", quality: "READY", visibility: "PUBLIC", deletedAt: null, allowed: true },
+  { name: "quarantined", status: "PUBLISHED", quality: "QUARANTINED", visibility: "PUBLIC", deletedAt: null, allowed: false },
+  { name: "draft", status: "DRAFT", quality: "READY", visibility: "PUBLIC", deletedAt: null, allowed: false },
+  { name: "member", status: "PUBLISHED", quality: "READY", visibility: "MEMBER", deletedAt: null, allowed: false },
+  { name: "internal", status: "PUBLISHED", quality: "READY", visibility: "INTERNAL", deletedAt: null, allowed: false },
+  { name: "deleted", status: "PUBLISHED", quality: "READY", visibility: "PUBLIC", deletedAt: new Date(), allowed: false },
 ];
 
 for (const product of productVisibilityCases) {
   const isPubliclyVisible =
     product.status === "PUBLISHED" &&
+    product.quality === "READY" &&
     product.visibility === "PUBLIC" &&
     product.deletedAt === null;
   assert.equal(

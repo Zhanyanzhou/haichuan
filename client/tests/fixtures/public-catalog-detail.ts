@@ -169,6 +169,7 @@ export async function mockCatalogDetail(
     flagsBarrier?: RouteBarrier;
     productsStatus?: number;
     productsBarrier?: RouteBarrier;
+    detailBarriers?: Record<string, RouteBarrier>;
     reviewsByProduct?: Record<number, { list: unknown[]; total: number; averageRating: number | null }>;
     allowCartWrite?: boolean;
     allowFavoriteWrite?: boolean;
@@ -275,11 +276,15 @@ export async function mockCatalogDetail(
     }
     const detailMatch = path.match(/\/products\/(?:catalog|public)\/([^/]+)$/);
     if (detailMatch) {
+      const reference = decodeURIComponent(detailMatch[1]);
       if (options.productsBarrier) await options.productsBarrier.waitUntilReleased();
+      if (options.detailBarriers?.[reference]) {
+        await options.detailBarriers[reference].waitUntilReleased();
+      }
       if (options.productsStatus && options.productsStatus !== 200) {
         return fulfill(route, { statusCode: options.productsStatus, message: "detail unavailable" }, options.productsStatus);
       }
-      return fulfill(route, findProduct(decodeURIComponent(detailMatch[1])) ?? null);
+      return fulfill(route, findProduct(reference) ?? null);
     }
     return fulfill(route, null);
   });

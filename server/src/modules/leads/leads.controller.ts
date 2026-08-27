@@ -5,8 +5,17 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { CreateLeadFollowUpDto, UpdateLeadDto } from './dto/lead.dto';
-import type { LeadListQuery } from './leads.service';
+import {
+  CreateLeadFollowUpDto,
+  ReleaseLeadLegalHoldDto,
+  SetLeadLegalHoldDto,
+  UpdateLeadDto,
+} from './dto/lead.dto';
+import type {
+  LeadListQuery,
+  LeadNotificationFailureQuery,
+  LeadRetentionDispositionQuery,
+} from './leads.service';
 
 @ApiTags('统一线索管理')
 @Controller('leads')
@@ -20,6 +29,28 @@ export class LeadsController {
   @ApiOperation({ summary: '获取统一线索列表' })
   findAll(@Query() q: LeadListQuery) {
     return this.service.findAll(q);
+  }
+
+  @Get('notification-failures')
+  @ApiOperation({ summary: '获取咨询回复通知失败列表' })
+  getNotificationFailures(@Query() q: LeadNotificationFailureQuery) {
+    return this.service.getNotificationFailures(q);
+  }
+
+  @Post('notification-failures/:eventId/retry')
+  @ApiOperation({ summary: '人工重试可安全重投的咨询回复通知' })
+  retryNotificationFailure(
+    @Param('eventId', ParseIntPipe) eventId: number,
+    @CurrentUser() user: { id?: number },
+  ) {
+    return this.service.retryNotificationFailure(eventId, user?.id);
+  }
+
+  @Get('retention-disposition/preview')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: '预览到期且未受法律保留的线索（零写入）' })
+  previewRetentionDisposition(@Query() q: LeadRetentionDispositionQuery) {
+    return this.service.previewRetentionDisposition(q);
   }
 
   @Get(':type/:id')
@@ -37,6 +68,30 @@ export class LeadsController {
     @CurrentUser() user: { id?: number },
   ) {
     return this.service.updateLead(type, id, body, user?.id);
+  }
+
+  @Post(':type/:id/legal-hold')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: '为线索设置法律保留' })
+  setLegalHold(
+    @Param('type') type: string,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: SetLeadLegalHoldDto,
+    @CurrentUser() user: { id?: number },
+  ) {
+    return this.service.setLegalHold(type, id, body.reason, user?.id);
+  }
+
+  @Post(':type/:id/legal-hold/release')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: '解除线索法律保留' })
+  releaseLegalHold(
+    @Param('type') type: string,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: ReleaseLeadLegalHoldDto,
+    @CurrentUser() user: { id?: number },
+  ) {
+    return this.service.releaseLegalHold(type, id, body.reason, user?.id);
   }
 
   @Post(':type/:id/follow-up')

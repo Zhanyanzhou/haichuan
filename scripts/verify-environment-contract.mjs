@@ -113,6 +113,7 @@ const serverComposeKeys = mappingKeys(serverComposeBlock, "environment");
 const serverVolumesBlock = sectionBody(serverComposeBlock, "volumes");
 const serverVolumeEntries = sequenceEntries(serverComposeBlock, "volumes");
 const clientComposeBlock = serviceBlock(compose, "client");
+const backupComposeBlock = serviceBlock(compose, "backup");
 const clientComposeKeys = collectMatches(clientComposeBlock, [
   /^\s+(VITE_[A-Z][A-Z0-9_]*):/gm,
 ]);
@@ -134,6 +135,7 @@ const operationalKeys = new Set([
   "MYSQL_ROOT_PASSWORD",
   "MYSQL_PASSWORD",
   "BACKUP_INTERVAL_SECONDS",
+  "BACKUP_HEALTH_GRACE_SECONDS",
   "DISK_WARN_PCT",
 ]);
 const secretKeys = new Set([
@@ -154,6 +156,7 @@ const secretKeys = new Set([
 ]);
 const releaseFoundationKeys = new Set([
   "NOTIFICATION_DELIVERY_ENABLED",
+  "PARTNER_APPLICATIONS_WRITE_ENABLED",
   "PAYMENT_GATEWAY_REFUNDS_ENABLED",
   "WECHAT_MCH_CERT_SERIAL_NO",
 ]);
@@ -221,6 +224,12 @@ const releaseFoundationComposeContracts = [
     message: "通知外部投递消费者必须显式注入并安全默认 false",
   },
   {
+    key: "PARTNER_APPLICATIONS_WRITE_ENABLED",
+    pattern:
+      /^\s{6}PARTNER_APPLICATIONS_WRITE_ENABLED:\s*"\$\{PARTNER_APPLICATIONS_WRITE_ENABLED:-false\}"\s*$/m,
+    message: "合作申请写能力必须显式注入并安全默认 false",
+  },
+  {
     key: "PAYMENT_GATEWAY_REFUNDS_ENABLED",
     pattern:
       /^\s{6}PAYMENT_GATEWAY_REFUNDS_ENABLED:\s*"\$\{PAYMENT_GATEWAY_REFUNDS_ENABLED:-false\}"\s*$/m,
@@ -237,6 +246,21 @@ for (const contract of releaseFoundationComposeContracts) {
   if (!contract.pattern.test(serverComposeBlock)) {
     errors.push(`${contract.message}: ${contract.key}`);
   }
+}
+
+const backupScript = read("server/scripts/backup.sh");
+const backupHealthScript = read("server/scripts/check-backup-health.sh");
+const settingsService = read("server/src/modules/settings/settings.service.ts");
+for (const [label, condition] of [
+  ["备份脚本必须原子发布状态标记", backupScript.includes('mv -f -- "$STATUS_PARTIAL_PATH" "$STATUS_PATH"')],
+  ["备份脚本必须记录最近退出码", backupScript.includes("LAST_EXIT_CODE")],
+  ["备份健康检查不得 source 状态文件", !/(?:^|\s)(?:source|\.)\s+["']?\$?STATUS_PATH/m.test(backupHealthScript)],
+  ["备份健康检查必须要求 SUCCESS", backupHealthScript.includes('result" != "SUCCESS')],
+  ["backup service 必须挂载健康检查脚本只读", backupComposeBlock.includes("./server/scripts/check-backup-health.sh:/usr/local/bin/check-backup-health.sh:ro")],
+  ["backup service 必须声明健康检查", backupComposeBlock.includes("/bin/bash /usr/local/bin/check-backup-health.sh")],
+  ["后台备份状态必须读取执行标记", settingsService.includes("backup-status.env")],
+]) {
+  if (!condition) errors.push(label);
 }
 
 const wechatCertificateMounts = serverVolumeEntries.filter((entry) =>
@@ -303,7 +327,7 @@ if (staleExampleKeys.length) {
 
 const nonRuntimeKeys = new Set([
   ...[...seedKeys].filter((key) => !serverRuntimeKeys.has(key)),
-  ...oneShotCliKeys,
+  ...[...oneShotCliKeys].filter((key) => !serverRuntimeKeys.has(key)),
 ]);
 for (const key of nonRuntimeKeys) {
   if (serverComposeKeys.has(key)) {

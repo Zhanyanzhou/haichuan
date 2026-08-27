@@ -110,25 +110,23 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     }).toBeCloseTo(21 / 9, 1);
 
     await canvas.getByText("点击添加主标题").click();
-    await expect(page.getByText("已选择：标题")).toBeVisible();
+    await expect(page.getByText("正在调整：标题")).toBeVisible();
 
     const titleGroup = page.locator("fieldset").filter({ has: page.locator("legend", { hasText: "主标题" }) });
     await titleGroup.getByRole("checkbox").check();
     await titleGroup.getByRole("button", { name: "居中对齐", exact: true }).click();
     await titleGroup.getByRole("button", { name: "象牙白" }).click();
-    await titleGroup.getByRole("button", { name: "高级设置" }).click();
-    await titleGroup.getByRole("group", { name: "安全文字带" }).getByRole("button", { name: "深色文字带" }).click();
 
     await expect(page.getByTestId("visual-state")).toContainText('"version":2');
     await expect(page.getByTestId("visual-state")).toContainText('"title"');
-    await expect(page.getByTestId("visual-state")).toContainText('"safeBand":"dark"');
+    await expect(page.getByTestId("visual-state")).not.toContainText('"safeBand"');
     const titleSlot = canvas.getByText("点击添加主标题");
     await expect(titleSlot).toHaveCSS("background-color", "rgb(244, 245, 245)");
     await expect.poll(() => titleSlot.evaluate((element) =>
       getComputedStyle(element, "::after").content,
     )).toContain("文字槽位");
     await page.getByRole("tab", { name: "内容编辑" }).click();
-    await expect(titleSlot).toHaveCSS("background-color", "rgb(24, 26, 27)");
+    await expect(titleSlot).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
     await mkdir(screenshotDir, { recursive: true });
     await page.screenshot({
@@ -143,7 +141,7 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     await title.click();
     await page.getByRole("tab", { name: "模板编辑" }).click();
     await expect(page.getByRole("button", { name: "调整布局" })).toHaveCount(0);
-    await expect(page.getByText("已选择：标题")).toBeVisible();
+    await expect(page.getByText("正在调整：标题")).toBeVisible();
     await page.getByRole("button", { name: "调整区域" }).click();
     await expect(page.getByText("正在调整：标题")).toBeVisible();
     const titleBox = await title.boundingBox();
@@ -156,7 +154,7 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
 
     const media = canvas.locator('[data-content-role-desktop="desktopImage"]');
     await media.click({ position: { x: 100, y: 100 } });
-    await expect(page.getByText("已选择：桌面主图")).toBeVisible();
+    await expect(page.getByText("正在调整：桌面主图")).toBeVisible();
     await expect(media.locator("img")).toHaveCSS("opacity", "0");
     const mediaHud = canvas.getByRole("toolbar", {
       name: "调整画布对象 desktopImage",
@@ -179,8 +177,6 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     await title.focus();
     await title.press("Enter");
     await page.getByRole("tab", { name: "模板编辑" }).click();
-    await expect(page.getByText("已选择：标题")).toBeVisible();
-    await title.press("Enter");
     await expect(page.getByText("正在调整：标题")).toBeVisible();
     await expect(liveStatus).toContainText("已进入对象位置调整，");
     await title.press("ArrowRight");

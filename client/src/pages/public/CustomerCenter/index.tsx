@@ -8,7 +8,7 @@ import MyAccountDashboard from "./MyAccountDashboard";
 import PartnerApplication from "@/pages/public/PartnerApplication";
 import type {
   CustomerAddress,
-  CustomerInquiry,
+  CustomerInquiryPage,
   CustomerNotificationPage,
   CustomerOrder,
   CustomerPartnerState,
@@ -27,6 +27,37 @@ const EMPTY_NOTIFICATIONS: CustomerNotificationPage = {
   pageSize: 20,
 };
 
+const INQUIRY_PAGE_SIZE = 3;
+const EMPTY_INQUIRIES: CustomerInquiryPage = {
+  list: [],
+  total: 0,
+  page: 1,
+  pageSize: INQUIRY_PAGE_SIZE,
+};
+
+function normalizeInquiryPage(
+  value: unknown,
+  requestedPage: number,
+): CustomerInquiryPage {
+  // 兼容前后端滚动发布期间的旧数组响应；新接口始终返回分页对象。
+  if (Array.isArray(value)) {
+    return {
+      list: value,
+      total: value.length,
+      page: requestedPage,
+      pageSize: INQUIRY_PAGE_SIZE,
+    } as CustomerInquiryPage;
+  }
+  const page = value as Partial<CustomerInquiryPage> | null;
+  return {
+    list: Array.isArray(page?.list) ? page.list : [],
+    total: typeof page?.total === "number" ? page.total : 0,
+    page: typeof page?.page === "number" ? page.page : requestedPage,
+    pageSize:
+      typeof page?.pageSize === "number" ? page.pageSize : INQUIRY_PAGE_SIZE,
+  };
+}
+
 function getRequestStatus(error: unknown): number | undefined {
   const candidate = error as {
     response?: { status?: unknown };
@@ -39,7 +70,9 @@ function getRequestStatus(error: unknown): number | undefined {
 export default function CustomerCenter() {
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [selectionInquiries, setSelectionInquiries] = useState<CustomerSelectionInquiry[]>([]);
-  const [inquiries, setInquiries] = useState<CustomerInquiry[]>([]);
+  const [inquiries, setInquiries] = useState<CustomerInquiryPage>(EMPTY_INQUIRIES);
+  const [inquiryLoading, setInquiryLoading] = useState(false);
+  const [inquiryError, setInquiryError] = useState<string | null>(null);
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [partner, setPartner] = useState<CustomerPartnerState>(null);
@@ -77,7 +110,9 @@ export default function CustomerCenter() {
     markCustomerAnonymous();
     setOrders([]);
     setSelectionInquiries([]);
-    setInquiries([]);
+    setInquiries(EMPTY_INQUIRIES);
+    setInquiryLoading(false);
+    setInquiryError(null);
     setAddresses([]);
     setProfile(null);
     setPartner(null);
@@ -98,6 +133,22 @@ export default function CustomerCenter() {
     }
   }, []);
 
+  const loadInquiryPage = useCallback(async (page: number) => {
+    setInquiryLoading(true);
+    try {
+      const response = await customerApi.getInquiries({
+        page,
+        pageSize: INQUIRY_PAGE_SIZE,
+      });
+      setInquiries(normalizeInquiryPage(unwrapResponse<unknown>(response), page));
+      setInquiryError(null);
+    } catch {
+      setInquiryError("预约记录暂时无法加载，请稍后重试。");
+    } finally {
+      setInquiryLoading(false);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     if (useCustomerAuthStore.getState().status === 'anonymous') {
       setLoadError(null);
@@ -110,17 +161,16 @@ export default function CustomerCenter() {
       const nextProfile = unwrapResponse<CustomerProfile>(profileRes);
       setCustomerAuth(nextProfile);
       setProfile(nextProfile);
-      const [ordersRes, addressesRes, selectionsRes, inquiriesRes] =
+      const [ordersRes, addressesRes, selectionsRes] =
         await Promise.all([
           customerApi.getOrders(),
           customerApi.getAddresses(),
           customerApi.getSelectionInquiries(),
-          customerApi.getInquiries(),
         ]);
       setOrders(unwrapResponse<CustomerOrder[]>(ordersRes) || []);
       setAddresses(unwrapResponse<CustomerAddress[]>(addressesRes) || []);
       setSelectionInquiries(unwrapResponse<CustomerSelectionInquiry[]>(selectionsRes) || []);
-      setInquiries(unwrapResponse<CustomerInquiry[]>(inquiriesRes) || []);
+      await loadInquiryPage(1);
       void loadNotifications();
       // 合作商家状态独立容错：接口不可用（如后端未部署）时不影响账号页整体加载
       try {
@@ -138,7 +188,7 @@ export default function CustomerCenter() {
     } finally {
       setLoading(false);
     }
-  }, [clearSession, loadNotifications, setCustomerAuth]);
+  }, [clearSession, loadInquiryPage, loadNotifications, setCustomerAuth]);
 
   useEffect(() => {
     void load();
@@ -218,7 +268,10 @@ export default function CustomerCenter() {
           orders={orders}
           addresses={addresses}
           selectionInquiries={selectionInquiries}
-          inquiries={inquiries}
+          inquiryPage={inquiries}
+          inquiryLoading={inquiryLoading}
+          inquiryError={inquiryError}
+          onInquiryPageChange={loadInquiryPage}
           notifications={notifications}
           notificationError={notificationError}
           onReadNotification={async (id) => {

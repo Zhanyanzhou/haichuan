@@ -4,6 +4,59 @@ import { TradeEventsService } from '../trade-events/trade-events.service';
 import { TRADE_ENTITY_TYPE, TRADE_EVENT_TYPE, type OperatorContext } from '../trade-events/trade-events.constants';
 import { Prisma, type FulfillmentStatus } from '@prisma/client';
 
+const fulfillmentListSelect = {
+  id: true,
+  fulfillmentNo: true,
+  orderId: true,
+  status: true,
+  carrier: true,
+  trackingNo: true,
+  shippedAt: true,
+  deliveredAt: true,
+  abnormalReason: true,
+  createdAt: true,
+  updatedAt: true,
+  order: {
+    select: {
+      id: true,
+      orderNo: true,
+      status: true,
+      deliveryStatus: true,
+      customerName: true,
+      customerPhone: true,
+    },
+  },
+} satisfies Prisma.FulfillmentSelect;
+
+const fulfillmentDetailSelect = {
+  ...fulfillmentListSelect,
+  internalNote: true,
+  order: {
+    select: {
+      ...fulfillmentListSelect.order.select,
+      address: true,
+      items: {
+        select: {
+          id: true,
+          quantity: true,
+          productNameSnapshot: true,
+          productImageSnapshot: true,
+          productCodeSnapshot: true,
+          skuSnapshot: true,
+          actualWeight: true,
+          certNumber: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.FulfillmentSelect;
+
+function maskPhone(phone: string): string {
+  const normalized = phone.trim();
+  if (normalized.length < 7) return '***';
+  return `${normalized.slice(0, 3)}****${normalized.slice(-4)}`;
+}
+
 /**
  * 履约服务：管理拣货→复核→发货→送达生命周期。
  *
@@ -44,29 +97,43 @@ export class FulfillmentService {
         where,
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: {
-          order: {
-            select: { id: true, orderNo: true, customerName: true, customerPhone: true, finalAmount: true, status: true },
-          },
-          creator: { select: { id: true, realName: true, username: true } },
-        },
+        select: fulfillmentListSelect,
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.fulfillment.count({ where }),
     ]);
-    return { list, total, page, pageSize };
+    return {
+      list: list.map((fulfillment) => ({
+        ...fulfillment,
+        order: {
+          ...fulfillment.order,
+          customerPhone: maskPhone(fulfillment.order.customerPhone),
+        },
+      })),
+      total,
+      page,
+      pageSize,
+    };
   }
 
   async findById(id: number) {
     const fulfillment = await this.prisma.fulfillment.findUnique({
       where: { id },
-      include: {
-        order: { include: { items: true } },
-        creator: { select: { id: true, realName: true, username: true } },
-      },
+      select: fulfillmentDetailSelect,
     });
     if (!fulfillment) throw new NotFoundException('履约单不存在');
-    return fulfillment;
+
+    const terminal = fulfillment.status === 'DELIVERED';
+    const { internalNote, order, ...safeFulfillment } = fulfillment;
+    return {
+      ...safeFulfillment,
+      warehouseNote: internalNote,
+      order: {
+        ...order,
+        customerPhone: terminal ? maskPhone(order.customerPhone) : order.customerPhone,
+        address: terminal ? null : order.address,
+      },
+    };
   }
 
   /**

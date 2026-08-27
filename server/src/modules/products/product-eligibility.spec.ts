@@ -6,7 +6,7 @@ import {
   resolveCustomerProductVisibilities,
 } from "./product-eligibility";
 
-test("第一阶段客户商品门禁保留实时可见范围且不强制质量状态", () => {
+test("客户商品门禁统一要求 READY、实时可见范围与发布档位", () => {
   assert.deepEqual(resolveCustomerProductVisibilities(undefined), ["PUBLIC"]);
   assert.deepEqual(resolveCustomerProductVisibilities({ accountType: "MEMBER" }), [
     "PUBLIC",
@@ -27,10 +27,19 @@ test("第一阶段客户商品门禁保留实时可见范围且不强制质量�
     {
       deletedAt: null,
       status: "PUBLISHED",
+      publicationQualityStatus: "READY",
       visibility: { in: ["PUBLIC", "MEMBER"] },
+      NOT: { salesMode: "DIRECT_PURCHASE" },
     },
   );
-  const directPurchaseWhere = directPurchaseProductWhere(undefined);
-  assert.equal(directPurchaseWhere.salesMode, "DIRECT_PURCHASE");
-  assert.equal("publicationQualityStatus" in directPurchaseWhere, false);
+  const previousProfile = process.env.RELEASE_PROFILE;
+  try {
+    process.env.RELEASE_PROFILE = "commerce";
+    const directPurchaseWhere = directPurchaseProductWhere(undefined);
+    assert.equal(directPurchaseWhere.salesMode, "DIRECT_PURCHASE");
+    assert.equal(directPurchaseWhere.publicationQualityStatus, "READY");
+  } finally {
+    if (previousProfile === undefined) delete process.env.RELEASE_PROFILE;
+    else process.env.RELEASE_PROFILE = previousProfile;
+  }
 });

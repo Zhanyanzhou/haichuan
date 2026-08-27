@@ -331,6 +331,10 @@ export function convertPuckProps<T extends object>(
           primaryText: props.primaryText || "查看作品",
           secondaryText: props.secondaryText,
           secondaryLink: props.secondaryLink,
+          secondaryTargetType: props.secondaryTargetType,
+          secondaryProductCode: props.secondaryProductCode,
+          secondaryProductId: Number(props.secondaryProductId) || 0,
+          secondaryLinkUrl: props.secondaryLinkUrl,
           // 价格默认隐藏,仅电商场景显式开启(品牌保护)
           showPrice: props.showPrice === true,
           // 槽位比例选项:契约预设白名单,渲染端校验回退
@@ -394,6 +398,10 @@ export function convertPuckProps<T extends object>(
           afterLabel: props.afterLabel || "改款后",
           beforeAltText: props.beforeAltText,
           afterAltText: props.afterAltText,
+          actionText: props.actionText,
+          linkUrl: props.linkUrl,
+          targetType: props.targetType,
+          productId: Number(props.productId) || 0,
           // 槽位比例选项:前后两图同步,渲染端校验回退
           aspectRatio: props.aspectRatio || "4:5",
         },

@@ -81,6 +81,10 @@ const selectionController = stripComments(await readSrc("server/src/modules/sele
 const selectionModule = stripComments(await readSrc("server/src/modules/selection-inquiry/selection-inquiry.module.ts"));
 
 const snapshotMethod = methodBody(productsService, "resolveVisibleProductSnapshots");
+const visibleProductWhereHelper = methodBody(
+  productEligibility,
+  "customerFacingProductWhereForVisibilities",
+);
 
 // ── 复用既有可见性规则（不另造判断）──
 check("ProductsService：提供服务端规范快照解析 resolveVisibleProductSnapshots", () => {
@@ -97,11 +101,22 @@ check("可见性规则：游客（customer 为空）降级为仅 PUBLIC", () => 
   assert.ok(/\[\s*"PUBLIC"\s*\]/.test(snapshotMethod[0]), "游客分支必须显式降级为 ['PUBLIC']");
 });
 
-check("可见性规则：同时校验 PUBLISHED + deletedAt IS NULL + visibility 命中范围", () => {
+check("可见性规则：规范快照复用共享商品门禁（PUBLISHED + READY + 未删除 + 可见范围 + 发布档位）", () => {
   assert.ok(snapshotMethod, "未定位 resolveVisibleProductSnapshots 方法体");
-  assert.ok(/status:\s*"PUBLISHED"/.test(snapshotMethod[0]), "必须校验 status=PUBLISHED");
-  assert.ok(/deletedAt:\s*null/.test(snapshotMethod[0]), "必须过滤软删除 deletedAt:null");
-  assert.ok(/visibility:\s*\{\s*in:\s*visibilities\s*\}/.test(snapshotMethod[0]), "必须按可见范围 visibility:in 过滤");
+  assert.ok(visibleProductWhereHelper, "未定位共享 customerFacingProductWhereForVisibilities 方法体");
+  assert.ok(
+    /import\s*\{[^}]*\bcustomerFacingProductWhereForVisibilities\b[^}]*\}\s*from\s*["']\.\/product-eligibility["']/.test(productsService),
+    "ProductsService 必须从 product-eligibility 导入共享商品门禁",
+  );
+  assert.ok(
+    /customerFacingProductWhereForVisibilities\(visibilities\)/.test(snapshotMethod[0]),
+    "规范快照查询必须复用共享商品门禁，不可复制可见性条件",
+  );
+  assert.ok(/status:\s*"PUBLISHED"/.test(visibleProductWhereHelper[0]), "共享门禁必须校验 status=PUBLISHED");
+  assert.ok(/publicationQualityStatus:\s*"READY"/.test(visibleProductWhereHelper[0]), "共享门禁必须校验 publicationQualityStatus=READY");
+  assert.ok(/deletedAt:\s*null/.test(visibleProductWhereHelper[0]), "共享门禁必须过滤软删除 deletedAt:null");
+  assert.ok(/visibility:\s*\{\s*in:\s*visibilities\s*\}/.test(visibleProductWhereHelper[0]), "共享门禁必须按 visibility:in 过滤");
+  assert.ok(/customerFacingReleaseWhere\(\)/.test(visibleProductWhereHelper[0]), "共享门禁必须应用当前发布档位约束");
 });
 
 check("不泄露内部信息：仅 select 展示所需字段，不含价格/库存/存储键/销量等内部字段", () => {
@@ -234,9 +249,15 @@ check("草稿、内部、已删除商品不能用客户端快照绕过", () => {
   assert.ok(snapshotMethod, "未定位 resolveVisibleProductSnapshots 方法体");
   const query = snapshotMethod[0].match(/this\.prisma\.product\.findMany\(\{([\s\S]*?)\}\)/);
   assert.ok(query, "未定位实际商品可见性查询");
-  assert.ok(/status:\s*"PUBLISHED"/.test(query[1]), "草稿商品不得进入服务端规范快照");
-  assert.ok(/deletedAt:\s*null/.test(query[1]), "软删除商品不得进入服务端规范快照");
-  assert.ok(/visibility:\s*\{\s*in:\s*visibilities\s*\}/.test(query[1]), "内部商品不得绕过可见性范围");
+  assert.ok(
+    /customerFacingProductWhereForVisibilities\(visibilities\)/.test(query[1]),
+    "规范快照查询必须调用共享商品门禁，防止草稿、未就绪、内部或已删除商品绕过",
+  );
+  assert.ok(visibleProductWhereHelper, "未定位共享 customerFacingProductWhereForVisibilities 方法体");
+  assert.ok(/status:\s*"PUBLISHED"/.test(visibleProductWhereHelper[0]), "草稿商品不得进入服务端规范快照");
+  assert.ok(/publicationQualityStatus:\s*"READY"/.test(visibleProductWhereHelper[0]), "未就绪商品不得进入服务端规范快照");
+  assert.ok(/deletedAt:\s*null/.test(visibleProductWhereHelper[0]), "软删除商品不得进入服务端规范快照");
+  assert.ok(/visibility:\s*\{\s*in:\s*visibilities\s*\}/.test(visibleProductWhereHelper[0]), "内部商品不得绕过可见性范围");
 
   const createMethod = methodBody(selectionService, "create");
   assert.ok(createMethod, "未定位 SelectionInquiryService.create 方法体");

@@ -156,3 +156,68 @@ test("AI 分类记录、报告与人工确认保持现有请求合同", async ({
     confirmedCategoryId: 2,
   });
 });
+
+test("AI 分类加载失败不会伪装成零指标，并可分别重试恢复", async ({ page }) => {
+  await authenticateProductEditor(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  let mode: "fail" | "success" = "fail";
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/auth/profile") return route.fallback();
+    if (path === "/api/ai-classify/records" || path === "/api/ai-classify/report") {
+      if (mode === "fail") {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ code: 503, data: null, message: "test failure" }),
+        });
+        return;
+      }
+      await fulfillApi(
+        route,
+        path.endsWith("/records")
+          ? {
+              list: [{
+                id: 9,
+                predictedCategoryId: 3,
+                predictedCategoryName: "戒指",
+                confidence: 88,
+                status: "pending_confirm",
+                createdAt: "2026-08-27 10:00",
+              }],
+              total: 26,
+            }
+          : { accuracy: "95.0", autoConfirmRate: "42.3", todayCount: 4 },
+      );
+      return;
+    }
+    await fulfillApi(
+      route,
+      path === "/api/settings/flags"
+        ? { commerceEnabled: false, cartEnabled: false, paymentEnabled: false }
+        : {},
+    );
+  });
+
+  await page.goto("/admin/ai-classify");
+  await expect(
+    page.getByText("识别记录加载失败，请稍后重新加载。"),
+  ).toBeVisible();
+  await expect(
+    page.getByText("识别指标加载失败，请稍后重新加载。"),
+  ).toBeVisible();
+  await expect(page.getByText("0", { exact: true })).toHaveCount(0);
+
+  mode = "success";
+  const retryButtons = page.getByRole("button", { name: "重新加载" });
+  await retryButtons.first().click();
+  await retryButtons.last().click();
+
+  await expect(page.getByText("戒指", { exact: true })).toBeVisible();
+  await expect(page.getByText("26", { exact: true })).toBeVisible();
+  await expect(page.getByText("42.3%", { exact: true })).toBeVisible();
+  await expect(page.getByText("95.0%", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});

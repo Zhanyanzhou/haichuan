@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "珠宝产品管理平台 - 高级科幻风格全栈网站",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "npm run build:server && concurrently \"npm run dev:server:run\" \"npm run dev:client\"",
     "dev:server": "npm run build:server && npm run dev:server:run",
@@ -18,8 +21,8 @@
     "typecheck:client": "cd client && npx tsc --noEmit -p tsconfig.json",
     "contracts:generate": "node scripts/generate-content-template-contract.mjs",
     "contracts:check": "node scripts/generate-content-template-contract.mjs --check",
-    "test": "npm run test:contracts && npm run test:server && npm run test:public-assets && npm run test:runtime-ownership",
-    "test:contracts": "node scripts/verify-page-builder-contract.mjs && node scripts/verify-wechat-callback-origin.mjs",
+    "test": "npm run test:contracts && npm run test:content-templates && npm run test:server && npm run test:public-assets && npm run test:runtime-ownership",
+    "test:contracts": "node scripts/verify-page-builder-contract.mjs && node scripts/verify-wechat-callback-origin.mjs && node scripts/verify-inquiry-privacy-consent.mjs",
     "test:server": "cd server && npm test",
     "test:content-templates": "npm run contracts:check && node scripts/verify-content-template-contract.mjs && node scripts/verify-content-template-skeletons.mjs && node scripts/verify-content-template-image-specs.mjs && node scripts/verify-inspector-schema.mjs",
     "test:page-builder-publish": "node scripts/verify-page-builder-publish.mjs",

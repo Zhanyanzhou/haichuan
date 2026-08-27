@@ -1,9 +1,20 @@
 {
-  "contractSchemaVersion": 5,
-  "registryVersion": 14,
+  "contractSchemaVersion": 6,
+  "registryVersion": 15,
   "expectedTemplateCount": 24,
   "activeTemplateCount": 24,
-  "publicationGateVersion": 2,
+  "publicationGateVersion": 3,
+  "editorPolicy": {
+    "version": 1,
+    "designScope": "page-module-type",
+    "designSurface": "main-canvas",
+    "fixedObjects": true,
+    "bounds": "module-frame",
+    "allowSemanticOverlap": true,
+    "internalLayerPanel": "select-only",
+    "contentFieldsRemainInstanceScoped": true,
+    "viewportGeometry": "independent"
+  },
   "pageRules": [
     {
       "pageKey": "home",
@@ -1219,7 +1230,7 @@
       "category": "视觉展示",
       "commercialPurpose": "品牌展示",
       "implementationStatus": "active",
-      "version": 4,
+      "version": 5,
       "master": "immersive-image",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -1599,7 +1610,7 @@
     "category": "视觉展示",
     "commercialPurpose": "品牌展示",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 5,
       "master": "cinematic-video",
       "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
@@ -1940,7 +1951,7 @@
       "category": "视觉展示",
       "commercialPurpose": "品牌展示",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "sequence-stage",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -2448,7 +2459,7 @@
       "category": "图文内容",
       "commercialPurpose": "内容传播",
       "implementationStatus": "active",
-      "version": 4,
+      "version": 5,
       "master": "editorial-split",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -2988,7 +2999,7 @@
       "category": "图文内容",
       "commercialPurpose": "内容传播",
       "implementationStatus": "active",
-      "version": 4,
+      "version": 5,
       "master": "editorial-story",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -3373,7 +3384,7 @@
       "category": "图文内容",
       "commercialPurpose": "内容传播",
       "implementationStatus": "active",
-      "version": 4,
+      "version": 5,
       "master": "editorial-text",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -3659,7 +3670,7 @@
       "category": "图文内容",
       "commercialPurpose": "内容传播",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "editorial-journey",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -4056,7 +4067,7 @@
       "category": "图文内容",
       "commercialPurpose": "信任建立",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 5,
       "master": "comparison-stage",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -4128,6 +4139,12 @@
           "kind": "marker",
           "required": false,
           "semantic": "comparison-handle"
+        },
+        {
+          "id": "action",
+          "role": "action",
+          "kind": "action",
+          "required": false
         }
       ],
       "order": {
@@ -4135,20 +4152,22 @@
           "copy",
           "before",
           "after",
-          "comparisonHandle"
+          "comparisonHandle",
+          "action"
         ],
         "mobile": [
           "copy",
           "before",
           "after",
-          "comparisonHandle"
+          "comparisonHandle",
+          "action"
         ]
       },
       "presets": [],
       "contentBudget": {
         "limits": {},
         "requiredText": [],
-        "maxCtas": 0
+        "maxCtas": 1
       },
       "allowedControls": [],
       "supportsLinkTarget": true,
@@ -4213,6 +4232,18 @@
               },
               "overlay": true,
               "kind": "handle"
+            },
+            {
+              "nodeId": "action",
+              "roleId": "action",
+              "role": "action",
+              "rect": {
+                "x": 0.38,
+                "y": 0.86,
+                "width": 0.24,
+                "height": 0.08
+              },
+              "overlay": true
             }
           ]
         },
@@ -4272,6 +4303,18 @@
               },
               "overlay": true,
               "kind": "handle"
+            },
+            {
+              "nodeId": "action",
+              "roleId": "action",
+              "role": "action",
+              "rect": {
+                "x": 0.2,
+                "y": 0.88,
+                "width": 0.6,
+                "height": 0.08
+              },
+              "overlay": true
             }
           ]
         }
@@ -4501,7 +4544,7 @@
       "category": "商品展示",
       "commercialPurpose": "商品销售",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "product-focus",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -4839,7 +4882,7 @@
       "category": "商品展示",
       "commercialPurpose": "商品销售",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "product-grid",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -5205,7 +5248,7 @@
       "category": "商品展示",
       "commercialPurpose": "商品销售",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "asymmetric-gallery",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -5649,7 +5692,7 @@
       "category": "商品展示",
       "commercialPurpose": "商品销售",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "wearing-story",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -6003,7 +6046,7 @@
       "category": "导航入口",
       "commercialPurpose": "商品销售",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "category-navigation",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -6339,7 +6382,7 @@
       "category": "导航入口",
       "commercialPurpose": "商品销售",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "scene-navigation",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -6712,7 +6755,7 @@
       "category": "导航入口",
       "commercialPurpose": "商品销售",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "hotspot-stage",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -7060,7 +7103,7 @@
       "category": "服务信息",
       "commercialPurpose": "信任建立",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "brand-points",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -7335,7 +7378,7 @@
       "category": "服务信息",
       "commercialPurpose": "信任建立",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "service-policy",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -7672,7 +7715,7 @@
       "category": "服务信息",
       "commercialPurpose": "信任建立",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "trust-gallery",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -7961,7 +8004,7 @@
       "category": "服务信息",
       "commercialPurpose": "信任建立",
       "implementationStatus": "active",
-      "version": 4,
+      "version": 5,
       "master": "store-visit",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -8277,7 +8320,7 @@
       "category": "服务信息",
       "commercialPurpose": "信任建立",
       "implementationStatus": "active",
-      "version": 3,
+      "version": 4,
       "master": "testimonial-proof",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -8719,7 +8762,7 @@
       "category": "服务信息",
       "commercialPurpose": "活动转化",
       "implementationStatus": "active",
-      "version": 5,
+      "version": 6,
       "master": "booking-epilogue",
       "visualRole": "support-stage",
       "visualWeight": "support-stage",
@@ -9189,7 +9232,7 @@
       "category": "活动内容",
       "commercialPurpose": "活动转化",
       "implementationStatus": "active",
-      "version": 4,
+      "version": 5,
       "master": "event-stage",
       "visualRole": "feature-stage",
       "visualWeight": "feature-stage",
@@ -9772,7 +9815,7 @@
     "category": "图文内容",
     "commercialPurpose": "信任建立",
       "implementationStatus": "active",
-      "version": 1,
+      "version": 2,
       "master": "editorial-story",
     "visualRole": "support-stage",
     "visualWeight": "support-stage",

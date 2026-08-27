@@ -844,7 +844,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     );
     await expect(heroPlaceholder).toHaveAttribute(
       "data-asset-safe-zone-desktop",
-      "desktopImage:required|mobileImage:none",
+      "desktopImage:none|mobileImage:none",
     );
     await expect(heroPlaceholder).toContainText("等待最终素材 · 内部占位");
     await expect(
@@ -2424,7 +2424,12 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
         contextContained: withinInspector(".homepage-editor__object-context > *"),
         actionContained: withinInspector(".homepage-editor__visual-toolbar button"),
         selectOverflow: Boolean(select && select.scrollWidth > select.clientWidth),
-        scrollHasRoom: Boolean(scroll && scroll.clientHeight > 200),
+        scrollContained: Boolean(scroll && (() => {
+          const rect = scroll.getBoundingClientRect();
+          return rect.height > 0
+            && rect.top >= inspectorRect.top - 0.5
+            && rect.bottom <= inspectorRect.bottom + 0.5;
+        })()),
         footerHeight: footer ? Math.round(footer.getBoundingClientRect().height) : 0,
         footerVisible: Boolean(footer && footer.getBoundingClientRect().bottom <= window.innerHeight + 0.5),
       };
@@ -2442,7 +2447,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
         contextContained: true,
         actionContained: true,
         selectOverflow: false,
-        scrollHasRoom: true,
+        scrollContained: true,
         footerHeight: 0,
         footerVisible: false,
       });

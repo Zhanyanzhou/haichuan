@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   createContentTemplateMarker,
   getContentTemplateContract,
@@ -143,6 +144,65 @@ function supportsLayoutOnViewport(
   if (!object?.capabilities.includes("layout")) return false;
   const allowedViewports = object.capabilityViewports?.layout;
   return !allowedViewports || allowedViewports.includes(viewport);
+}
+
+function CustomFrameRatioInput({
+  value,
+  min,
+  max,
+  step,
+  hasOverride,
+  pending,
+  onApply,
+  onReset,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  hasOverride: boolean;
+  pending: boolean;
+  onApply: (value: number) => void;
+  onReset: () => void;
+}) {
+  const [draft, setDraft] = useState(value.toFixed(2));
+  useEffect(() => setDraft(value.toFixed(2)), [value]);
+  const numeric = Number(draft);
+  const invalid = !Number.isFinite(numeric) || numeric < min || numeric > max;
+  return (
+    <div className="homepage-editor__instance-field" data-inspector-control="custom-ratio">
+      <label>
+        <span>自定义比例（{min.toFixed(2)}–{max.toFixed(2)}）</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          min={min}
+          max={max}
+          step={step}
+          value={draft}
+          aria-invalid={invalid}
+          aria-describedby={invalid ? "frame-ratio-error" : undefined}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !invalid) onApply(numeric);
+          }}
+        />
+      </label>
+      {invalid ? (
+        <span id="frame-ratio-error" role="alert">
+          请输入 {min.toFixed(2)} 到 {max.toFixed(2)} 之间的比例。
+        </span>
+      ) : null}
+      <div>
+        <button type="button" disabled={invalid || pending} onClick={() => onApply(numeric)}>
+          应用比例
+        </button>
+        <button type="button" disabled={!hasOverride || pending} onClick={onReset}>
+          恢复系统默认
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function InstanceOverridesPanel({
@@ -627,17 +687,25 @@ export default function InstanceOverridesPanel({
             <InspectorDisclosure label="高级设置">
               <div className="homepage-editor__advanced-settings-grid">
                 {capabilities.frameRatioRange ? (
-                  <label className="homepage-editor__instance-field">
-                    <span>自定义比例 · {Number.isFinite(activeFrameRatio) ? activeFrameRatio.toFixed(2) : "默认"}</span>
-                    <input
-                      type="range"
-                      min={capabilities.frameRatioRange.min}
-                      max={capabilities.frameRatioRange.max}
-                      step={capabilities.frameRatioRange.step}
-                      value={Number.isFinite(activeFrameRatio) ? activeFrameRatio : 16 / 9}
-                      onChange={(event) => apply(["frame", "aspectRatioByViewport", viewport], Number(event.target.value))}
-                    />
-                  </label>
+                  <CustomFrameRatioInput
+                    value={Number.isFinite(activeFrameRatio) ? activeFrameRatio : 16 / 9}
+                    min={capabilities.frameRatioRange.min}
+                    max={capabilities.frameRatioRange.max}
+                    step={capabilities.frameRatioRange.step}
+                    hasOverride={hasActiveFrameRatioOverride}
+                    pending={historyTransactionPending}
+                    onApply={(ratio) => applyHistoryTransaction(
+                      ["frame", "aspectRatioByViewport", viewport],
+                      Math.min(capabilities.frameRatioRange!.max, Math.max(
+                        capabilities.frameRatioRange!.min,
+                        Number(ratio.toFixed(2)),
+                      )),
+                    )}
+                    onReset={() => applyHistoryTransaction(
+                      ["frame", "aspectRatioByViewport", viewport],
+                      undefined,
+                    )}
+                  />
                 ) : null}
                 {viewport === "mobile" && frameAspectRatios.mobile !== undefined ? (
                   <button

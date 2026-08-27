@@ -1,6 +1,9 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { summarizeBackupArtifacts } from "./settings.service";
+import {
+  evaluateBackupExecutionMarker,
+  summarizeBackupArtifacts,
+} from "./settings.service";
 
 const NOW = new Date("2026-08-26T12:00:00.000Z");
 
@@ -70,4 +73,73 @@ test("没有 SHA-256 完成清单的三份产物仍视为未提交批次", () =>
 
   assert.equal(result.completeSets.length, 0);
   assert.equal(result.incompleteArtifactCount, 3);
+});
+
+test("备份状态标记只在最近结果成功、退出码为零且未超宽限时健康", () => {
+  const marker = [
+    "SCHEMA_VERSION=1",
+    "LAST_ATTEMPT_STARTED_AT=2026-08-26T10:59:00Z",
+    "LAST_ATTEMPT_FINISHED_AT=2026-08-26T11:00:03Z",
+    "LAST_SUCCESS_AT=2026-08-26T11:00:03Z",
+    "LAST_EXIT_CODE=0",
+    "RESULT=SUCCESS",
+    "ERROR_CODE=NONE",
+    "WARNING_CODE=NONE",
+    "LATEST_MANIFEST=jewelry_db_20260826_110000.sha256",
+    "",
+  ].join("\n");
+  const result = evaluateBackupExecutionMarker(marker, 86400, 3600, NOW);
+  assert.equal(result.markerValid, true);
+  assert.equal(result.isFresh, true);
+  assert.equal(result.isHealthy, true);
+  assert.equal(result.latestManifest, "jewelry_db_20260826_110000.sha256");
+});
+
+test("最近一次失败或磁盘告警不会被较早成功产物伪装为健康", () => {
+  const base = [
+    "SCHEMA_VERSION=1",
+    "LAST_ATTEMPT_STARTED_AT=2026-08-26T11:55:00Z",
+    "LAST_ATTEMPT_FINISHED_AT=2026-08-26T11:56:00Z",
+    "LAST_SUCCESS_AT=2026-08-26T11:00:03Z",
+    "LATEST_MANIFEST=jewelry_db_20260826_110000.sha256",
+  ];
+  const failed = evaluateBackupExecutionMarker([
+    ...base,
+    "LAST_EXIT_CODE=1",
+    "RESULT=FAILED",
+    "ERROR_CODE=MEDIA_ARCHIVE_FAILED",
+    "WARNING_CODE=NONE",
+  ].join("\n"), 86400, 3600, NOW);
+  assert.equal(failed.isFresh, true);
+  assert.equal(failed.isHealthy, false);
+  assert.equal(failed.errorCode, "MEDIA_ARCHIVE_FAILED");
+
+  const warning = evaluateBackupExecutionMarker([
+    ...base,
+    "LAST_EXIT_CODE=0",
+    "RESULT=WARNING",
+    "ERROR_CODE=DISK_HIGH",
+    "WARNING_CODE=DISK_HIGH",
+  ].join("\n"), 86400, 3600, NOW);
+  assert.equal(warning.isHealthy, false);
+});
+
+test("格式异常或超期的备份状态标记安全失败", () => {
+  const invalid = evaluateBackupExecutionMarker("RESULT=SUCCESS\n", 86400, 3600, NOW);
+  assert.equal(invalid.executionStatus, "INVALID");
+  assert.equal(invalid.isHealthy, false);
+
+  const stale = evaluateBackupExecutionMarker([
+    "SCHEMA_VERSION=1",
+    "LAST_ATTEMPT_STARTED_AT=2026-08-24T10:00:00Z",
+    "LAST_ATTEMPT_FINISHED_AT=2026-08-24T10:01:00Z",
+    "LAST_SUCCESS_AT=2026-08-24T10:01:00Z",
+    "LAST_EXIT_CODE=0",
+    "RESULT=SUCCESS",
+    "ERROR_CODE=NONE",
+    "WARNING_CODE=NONE",
+    "LATEST_MANIFEST=jewelry_db_20260824_100000.sha256",
+  ].join("\n"), 86400, 3600, NOW);
+  assert.equal(stale.isFresh, false);
+  assert.equal(stale.isHealthy, false);
 });

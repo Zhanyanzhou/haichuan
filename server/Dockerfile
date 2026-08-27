@@ -34,6 +34,11 @@ COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/dist ./dist
 COPY prisma ./prisma
 
+RUN mkdir -p /app/uploads /app/private-media/products \
+    && chown -R node:node /app/uploads /app/private-media
+
+USER node
+
 EXPOSE 3000
 
 CMD ["node", "dist/main.js"]

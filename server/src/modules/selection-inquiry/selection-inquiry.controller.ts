@@ -20,6 +20,8 @@ import { Throttle } from "@nestjs/throttler";
 import { CreateSelectionInquiryDto } from "./dto/create-selection-inquiry.dto";
 import { BoundedListQueryDto } from "../../common/dto/bounded-list-query.dto";
 import type { OptionalCustomerRequest } from "../../common/security/authenticated-principal";
+import { CurrentUser } from "../../common/decorators/current-user.decorator";
+import { UpdateSelectionInquiryDto } from "./dto/update-selection-inquiry.dto";
 
 @Controller("selection-inquiries")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -62,8 +64,9 @@ export class SelectionInquiryController {
   @Put(":id")
   update(
     @Param("id") id: number,
-    @Body() body: { status?: string; handlerId?: number },
+    @Body() body: UpdateSelectionInquiryDto,
+    @CurrentUser() user: { id?: number },
   ) {
-    return this.service.update(+id, body);
+    return this.service.update(+id, body, user?.id);
   }
 }

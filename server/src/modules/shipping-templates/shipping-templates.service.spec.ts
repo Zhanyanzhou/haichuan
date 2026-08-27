@@ -1,10 +1,10 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { NotFoundException } from "@nestjs/common";
+import { ConflictException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ShippingTemplatesService } from "./shipping-templates.service";
 
-function createService(existing: { id: number } | null = { id: 7 }) {
+function createService(existing: { id: number; isActive?: boolean } | null = { id: 7, isActive: true }, productCount = 0) {
   const calls: Array<{ operation: string; args: unknown }> = [];
   const shippingTemplate = {
     findMany: async (args: unknown) => {
@@ -30,8 +30,8 @@ function createService(existing: { id: number } | null = { id: 7 }) {
   };
   const prisma = {
     shippingTemplate,
-    $transaction: async <T>(callback: (tx: { shippingTemplate: typeof shippingTemplate }) => Promise<T>) =>
-      callback({ shippingTemplate }),
+    $transaction: async <T>(callback: (tx: { shippingTemplate: typeof shippingTemplate; product: { count: () => Promise<number> } }) => Promise<T>) =>
+      callback({ shippingTemplate, product: { count: async () => productCount } }),
   };
 
   return {
@@ -85,4 +85,13 @@ test("更新默认模板时只取消其他模板的默认状态", async () => {
   assert.deepEqual(updateCall.args.where, { id: 7 });
   assert.equal(updateCall.args.data.carrier, "SF");
   assert.equal(updateCall.args.data.isDefault, true);
+});
+
+test("仍被 READY 直购商品使用的配送模板不可停用", async () => {
+  const { service, calls } = createService({ id: 7, isActive: true }, 2);
+  await assert.rejects(
+    () => service.update(7, { isActive: false }),
+    ConflictException,
+  );
+  assert.equal(calls.some((call) => call.operation === "update"), false);
 });

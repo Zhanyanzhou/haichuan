@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
+import { SecureImage } from "@/components/common/SecureImage";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
@@ -15,7 +16,7 @@ interface TextBannerBlockProps {
   editMode?: boolean;
 }
 
-/** 纯文字 — 无图片槽，只允许对齐和上下留白两个受控布局预设。 */
+/** 纯文字 — 固定语义对象可在模板编辑模式中自由布局，内容仍按实例维护。 */
 export default function TextBannerBlock({
   module,
   editMode,
@@ -85,17 +86,31 @@ export default function TextBannerBlock({
       )}
       style={{
         color: textColor,
-        ...(bgImage
-          ? {
-              backgroundImage: `url(${bgImage})`,
-              backgroundSize: "cover",
-              backgroundPosition: "center",
-            }
-          : {}),
+        position: "relative",
+        overflow: "hidden",
         ...templateLayoutVars(CONTENT_TEMPLATE_LAYOUTS.textBanner),
       }}
     >
       <ContentTemplateLayoutStyles />
+      <div
+        data-content-role="bgImage"
+        data-editor-field="bgImage"
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          overflow: "hidden",
+          pointerEvents: bgImage || editMode ? undefined : "none",
+        }}
+      >
+        {bgImage ? (
+          <SecureImage
+            src={bgImage}
+            alt=""
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          />
+        ) : null}
+      </div>
       <div
         className="hc-content-template__copy hc-phase1-text"
         data-content-role="copy"

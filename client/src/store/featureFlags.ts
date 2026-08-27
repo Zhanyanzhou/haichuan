@@ -17,12 +17,14 @@ export interface CommerceFlags {
   commerceEnabled: boolean;
   cartEnabled: boolean;
   paymentEnabled: boolean;
+  partnerApplicationsWriteEnabled: boolean;
 }
 
 const SAFE_FLAGS: CommerceFlags = {
   commerceEnabled: false,
   cartEnabled: false,
   paymentEnabled: false,
+  partnerApplicationsWriteEnabled: false,
 };
 
 interface CommerceFlagsState {
@@ -45,6 +47,7 @@ export const useCommerceFlags = create<CommerceFlagsState>((set, get) => ({
           commerceEnabled: Boolean(data.commerceEnabled),
           cartEnabled: Boolean(data.cartEnabled),
           paymentEnabled: Boolean(data.paymentEnabled),
+          partnerApplicationsWriteEnabled: Boolean(data.partnerApplicationsWriteEnabled),
         },
       });
     } catch {

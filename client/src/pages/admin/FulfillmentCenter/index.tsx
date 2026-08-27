@@ -4,7 +4,7 @@ import { ExportOutlined, EyeOutlined, TruckOutlined } from '@ant-design/icons';
 import { fulfillmentApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
-import type { Fulfillment, FulfillmentStatus, PaginatedResult } from '@/types';
+import type { FulfillmentStatus, PaginatedResult } from '@/types';
 
 // 履约状态映射（含颜色与中文标签）
 const STATUS_META: Record<FulfillmentStatus, { color: string; label: string }> = {
@@ -26,8 +26,39 @@ const STATUS_TABS: Array<{ key: string; label: string }> = [
   { key: 'ABNORMAL', label: '物流异常' },
 ];
 
-type FulfillmentListItem = Fulfillment & {
-  order: { orderNo: string; customerName: string; customerPhone: string; finalAmount: number | string; status: string };
+type FulfillmentItemSnapshot = {
+  id: number;
+  quantity: number;
+  productNameSnapshot?: string | null;
+  productCodeSnapshot?: string | null;
+  skuSnapshot?: string | null;
+  actualWeight?: number | string | null;
+  certNumber?: string | null;
+};
+
+type FulfillmentListItem = {
+  id: number;
+  fulfillmentNo: string;
+  orderId: number;
+  status: FulfillmentStatus;
+  carrier?: string | null;
+  trackingNo?: string | null;
+  shippedAt?: string | null;
+  deliveredAt?: string | null;
+  abnormalReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  warehouseNote?: string | null;
+  order: {
+    id: number;
+    orderNo: string;
+    status: string;
+    deliveryStatus: string;
+    customerName: string;
+    customerPhone: string;
+    address?: string | null;
+    items?: FulfillmentItemSnapshot[];
+  };
 };
 
 export default function FulfillmentCenter() {
@@ -256,13 +287,26 @@ export default function FulfillmentCenter() {
             <div className="flex justify-between"><span className="text-brand-muted">状态</span><Tag color={STATUS_META[detail.status]?.color}>{STATUS_META[detail.status]?.label}</Tag></div>
             <div className="flex justify-between"><span className="text-brand-muted">订单号</span><span>{detail.order?.orderNo}</span></div>
             <div className="flex justify-between"><span className="text-brand-muted">客户</span><span>{detail.order?.customerName} · {detail.order?.customerPhone}</span></div>
+            {detail.order?.address && <div><p className="text-brand-muted mb-1">收货地址</p><p className="bg-brand-bg p-3 rounded">{detail.order.address}</p></div>}
             <div className="flex justify-between"><span className="text-brand-muted">承运商</span><span>{detail.carrier || '—'}</span></div>
             <div className="flex justify-between"><span className="text-brand-muted">运单号</span><span>{detail.trackingNo || '—'}</span></div>
             <div className="flex justify-between"><span className="text-brand-muted">发货时间</span><span>{detail.shippedAt || '—'}</span></div>
             <div className="flex justify-between"><span className="text-brand-muted">送达时间</span><span>{detail.deliveredAt || '—'}</span></div>
             {detail.abnormalReason && <div className="flex justify-between"><span className="text-brand-muted">异常原因</span><span style={{ color: "var(--adm-error)" }}>{detail.abnormalReason}</span></div>}
-            <div><p className="text-brand-muted mb-1">内部备注</p><p className="bg-brand-bg p-3 rounded">{detail.internalNote || '无'}</p></div>
-            {detail.creator && <div className="flex justify-between"><span className="text-brand-muted">创建人</span><span>{detail.creator.realName || detail.creator.username}</span></div>}
+            {detail.order?.items && detail.order.items.length > 0 && (
+              <div>
+                <p className="text-brand-muted mb-1">拣货明细</p>
+                <div className="space-y-2 bg-brand-bg p-3 rounded">
+                  {detail.order.items.map((item) => (
+                    <div key={item.id} className="flex justify-between gap-4">
+                      <span>{item.productNameSnapshot || item.productCodeSnapshot || '商品快照'} · {item.skuSnapshot || '默认规格'}</span>
+                      <span>× {item.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div><p className="text-brand-muted mb-1">仓储备注</p><p className="bg-brand-bg p-3 rounded">{detail.warehouseNote || '无'}</p></div>
           </div>
         )}
       </Drawer>

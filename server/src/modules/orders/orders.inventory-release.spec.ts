@@ -190,3 +190,50 @@ test("超时取消调用统一原子释放入口", async () => {
   assert.equal(releaseCalls, 1);
   assert.equal(updatedStatus, "CANCELLED");
 });
+
+test("存在待确认在线支付时超时任务不得取消订单或释放库存", async () => {
+  let releaseCalls = 0;
+  let updateCalls = 0;
+  const tx = {
+    order: {
+      findFirst: async () => ({
+        id: 1,
+        reservedAt: new Date("2026-08-20T00:00:00Z"),
+        paidAmount: 0,
+        couponId: null,
+        status: "PENDING_PAYMENT",
+        payments: [
+          {
+            status: "PENDING",
+            proofUrl: null,
+            method: "wechat",
+          },
+        ],
+      }),
+      updateMany: async () => {
+        updateCalls += 1;
+        return { count: 1 };
+      },
+    },
+  };
+  const service = new OrdersService(
+    {} as PrismaService,
+    { record: async () => undefined } as never,
+    {} as never,
+    {} as never,
+  );
+  (service as any).releaseStockReservations = async () => {
+    releaseCalls += 1;
+    return 1;
+  };
+
+  const expired = await (service as any).expireReservationIfNeeded(
+    tx,
+    1,
+    new Date("2026-08-23T00:00:00Z"),
+  );
+
+  assert.equal(expired, false);
+  assert.equal(releaseCalls, 0);
+  assert.equal(updateCalls, 0);
+});

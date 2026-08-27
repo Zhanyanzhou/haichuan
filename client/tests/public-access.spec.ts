@@ -106,11 +106,22 @@ test.describe("游客公开浏览", () => {
     await page.goto("/partner");
     await expect.poll(() => new URL(page.url()).pathname).toBe("/customer");
 
-    await page.route("**/api/**", (route) => route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ code: 200, data: null, message: "success" }),
-    }));
+    await page.route("**/api/**", (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const data = path.endsWith("/api/settings/flags")
+        ? {
+            commerceEnabled: false,
+            cartEnabled: false,
+            paymentEnabled: false,
+            partnerApplicationsWriteEnabled: true,
+          }
+        : null;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data, message: "success" }),
+      });
+    });
     await installCustomerSession(page, { id: 7, name: "合作申请测试客户" });
     await page.goto("/partner");
     await expect(page).toHaveURL(/\/customer\?section=partner$/);

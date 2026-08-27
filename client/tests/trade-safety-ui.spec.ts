@@ -1,5 +1,81 @@
 import { expect, test, type Page } from '@playwright/test';
 
+test.describe('客户咨询完整分页', () => {
+  test('显示服务端总数并可读取第二页，移动端不产生横向溢出', async ({ page }) => {
+    const inquiryRequests: Array<{ page: string | null; pageSize: string | null }> = [];
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.route('**/api/**', (route) => {
+      const url = new URL(route.request().url());
+      const path = url.pathname;
+      const respond = (data: unknown) => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 200, data, message: 'ok' }),
+      });
+
+      if (path === '/api/customers/me') {
+        return respond({ id: 7, phone: '13800000007', name: '分页测试会员', email: null });
+      }
+      if (path === '/api/customers/me/inquiries') {
+        const requestedPage = url.searchParams.get('page');
+        inquiryRequests.push({
+          page: requestedPage,
+          pageSize: url.searchParams.get('pageSize'),
+        });
+        const pageNumber = Number(requestedPage || 1);
+        const list = pageNumber === 2
+          ? [{
+              id: 4,
+              status: 'COMPLETED',
+              createdAt: '2026-08-20T00:00:00.000Z',
+              product: { name: '第二页祖母绿预约' },
+            }]
+          : [1, 2, 3].map((id) => ({
+              id,
+              status: 'PENDING',
+              createdAt: `2026-08-2${id}T00:00:00.000Z`,
+              product: { name: `第一页预约 ${id}` },
+            }));
+        return respond({ list, total: 4, page: pageNumber, pageSize: 3 });
+      }
+      if (
+        path === '/api/customers/me/orders' ||
+        path === '/api/customers/me/addresses' ||
+        path === '/api/customers/me/selection-inquiries' ||
+        path === '/api/customers/me/favorites'
+      ) {
+        return respond([]);
+      }
+      if (path === '/api/customers/me/notifications') {
+        return respond({ list: [], total: 0, unreadCount: 0, page: 1, pageSize: 20 });
+      }
+      if (path === '/api/partners/me') return respond(null);
+      if (path === '/api/recommendations/for-you') return respond([]);
+      if (path.endsWith('/settings/flags')) {
+        return respond({ commerceEnabled: true, cartEnabled: true, paymentEnabled: true });
+      }
+      if (path.endsWith('/settings/public')) return respond({ siteName: '海川珠宝' });
+      return respond({ list: [], total: 0 });
+    });
+
+    await page.goto('/customer');
+    const summary = page.getByLabel('服务概览');
+    await expect(summary.getByText('04', { exact: true })).toBeVisible();
+    await expect(page.getByText('第一页预约 1')).toBeVisible();
+    await page.getByLabel('预约咨询分页').locator('.ant-pagination-item-2').click();
+    await expect(page.getByText('第二页祖母绿预约')).toBeVisible();
+    await expect(page.getByText('第一页预约 1')).toHaveCount(0);
+    expect(inquiryRequests).toEqual([
+      { page: '1', pageSize: '3' },
+      { page: '2', pageSize: '3' },
+    ]);
+    const hasHorizontalOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(hasHorizontalOverflow).toBe(false);
+  });
+});
+
 async function authenticateAdmin(page: Page) {
   await page.route('**/api/auth/profile', (route) =>
     route.fulfill({

@@ -96,6 +96,7 @@ import {
   CANVAS_VISUAL_EDIT_MESSAGE,
   type CanvasVisualEditMessage,
 } from "@/page-builder/visual-editor/visualEditorSession";
+import { applySharedTemplateDesignPatch } from "@/page-builder/visual-editor/sharedTemplateDesign";
 import "./editor.css";
 import EditorToolbar, { VIEWPORT_PRESETS } from "./components/EditorToolbar";
 import UnsavedChangesGuard from "./components/UnsavedChangesGuard";
@@ -1981,6 +1982,12 @@ function TemplateLibrary({
       return;
     }
     const block = createBlockContent(template.moduleType);
+    const existingSameType = appData.content.find(
+      (item: { type: string; props?: PuckProps }) => item.type === template.moduleType,
+    );
+    const inheritedPageDesign = existingSameType
+      ? extractContentTemplateLayoutData(template.moduleType, existingSameType.props)
+      : undefined;
     const contentDefaults = sanitizeContentTemplateDefaultContent(
       template.moduleType,
       template.contentDefaults,
@@ -1988,7 +1995,9 @@ function TemplateLibrary({
     block.props = {
       ...block.props,
       ...(contentDefaults ?? {}),
-      __instanceOverrides: layoutData,
+      __instanceOverrides: inheritedPageDesign
+        ? structuredClone(inheritedPageDesign)
+        : layoutData,
     };
     insertPreparedBlock(dispatch, block, appData.content?.length ?? 0);
     message.success(
@@ -2764,16 +2773,22 @@ function EditorBody({
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const previewFrameRef = useRef<HTMLDivElement>(null);
-  const visualEditStartRef = useRef(
-    new Map<string, { index: number; item: EditorPuckBlock }>(),
-  );
+  const visualEditStartRef = useRef(new Map<string, Data>());
+  const visualEditFrameRef = useRef(new Map<string, number>());
+  const visualEditPendingRef = useRef(new Map<string, CanvasVisualEditMessage>());
   useEffect(() => {
     appDataRef.current = appData;
   }, [appData]);
   useEffect(() => {
     visualEditStartRef.current.clear();
+    visualEditPendingRef.current.clear();
+    visualEditFrameRef.current.forEach((frame) => window.cancelAnimationFrame(frame));
+    visualEditFrameRef.current.clear();
   }, [pageKey]);
   useEffect(() => {
+    const visualEditFrames = visualEditFrameRef.current;
+    const visualEditPending = visualEditPendingRef.current;
+    const visualEditStarts = visualEditStartRef.current;
     const handleVisualEdit = (event: MessageEvent<CanvasVisualEditMessage>) => {
       if (viewingPublished) return;
       const detail = event.data;
@@ -2795,50 +2810,82 @@ function EditorBody({
           item.type === detail.moduleType && item.props?.id === detail.blockId,
       );
       if (contentIndex < 0) return;
-      const current = currentAppData.content[contentIndex] as {
-        type: string;
-        props: PuckProps & { id: string };
-      };
-      const nextItem = {
-        ...current,
-        props: {
-          ...current.props,
-          __instanceOverrides: detail.overrides,
-          ...(current.props?.__contentTemplate
-            ? {}
-            : { __contentTemplate: createContentTemplateMarker(detail.moduleType) }),
-        },
+      const applyDetail = (
+        baseData: Data,
+        edit: CanvasVisualEditMessage,
+        recordHistory: boolean,
+      ) => {
+        const marker = createContentTemplateMarker(edit.moduleType);
+        const designPatch: PuckProps = {
+          __instanceOverrides: edit.overrides,
+          ...(marker ? { __contentTemplate: marker } : {}),
+        };
+        const nextContent = applySharedTemplateDesignPatch(
+          baseData.content as Array<{
+            type: string;
+            props: PuckProps & { id: string };
+          }>,
+          edit.moduleType,
+          designPatch,
+        );
+        dispatch({
+          type: "setData",
+          data: { ...baseData, content: nextContent },
+          recordHistory,
+        });
       };
       const transient = detail.transient === true;
-      if (transient && !visualEditStartRef.current.has(detail.blockId)) {
-        visualEditStartRef.current.set(detail.blockId, {
-          index: contentIndex,
-          item: current,
-        });
+      if (detail.cancelled === true) {
+        const pendingFrame = visualEditFrameRef.current.get(detail.moduleType);
+        if (pendingFrame !== undefined) window.cancelAnimationFrame(pendingFrame);
+        visualEditFrameRef.current.delete(detail.moduleType);
+        visualEditPendingRef.current.delete(detail.moduleType);
+        const editStart = visualEditStartRef.current.get(detail.moduleType);
+        visualEditStartRef.current.delete(detail.moduleType);
+        if (editStart) {
+          dispatch({ type: "setData", data: editStart, recordHistory: false });
+        }
+        return;
       }
-      const editStart = visualEditStartRef.current.get(detail.blockId);
-      if (!transient && editStart) {
-        // transient 已把 store 更新到最终值；先无历史恢复拖前快照，再记录
-        // pointerup 的最终值，让整次手势只产生一个且可用的撤销步骤。
-        dispatch({
-          type: "replace",
-          destinationIndex: editStart.index,
-          destinationZone: ROOT_ZONE,
-          data: editStart.item,
-          recordHistory: false,
-        });
-        visualEditStartRef.current.delete(detail.blockId);
+      if (transient) {
+        if (!visualEditStartRef.current.has(detail.moduleType)) {
+          visualEditStartRef.current.set(detail.moduleType, structuredClone(currentAppData));
+        }
+        visualEditPendingRef.current.set(detail.moduleType, detail);
+        if (!visualEditFrameRef.current.has(detail.moduleType)) {
+          const frame = window.requestAnimationFrame(() => {
+            visualEditFrameRef.current.delete(detail.moduleType);
+            const pending = visualEditPendingRef.current.get(detail.moduleType);
+            if (!pending) return;
+            visualEditPendingRef.current.delete(detail.moduleType);
+            applyDetail(appDataRef.current, pending, false);
+          });
+          visualEditFrameRef.current.set(detail.moduleType, frame);
+        }
+        return;
       }
-      dispatch({
-        type: "replace",
-        destinationIndex: contentIndex,
-        destinationZone: ROOT_ZONE,
-        data: nextItem,
-        recordHistory: !transient,
-      });
+      const pendingFrame = visualEditFrameRef.current.get(detail.moduleType);
+      if (pendingFrame !== undefined) window.cancelAnimationFrame(pendingFrame);
+      visualEditFrameRef.current.delete(detail.moduleType);
+      visualEditPendingRef.current.delete(detail.moduleType);
+      const editStart = visualEditStartRef.current.get(detail.moduleType);
+      if (editStart) {
+        // 先恢复手势开始时的完整页面，再将最终同类设计记作唯一历史步骤。
+        dispatch({ type: "setData", data: editStart, recordHistory: false });
+        visualEditStartRef.current.delete(detail.moduleType);
+        applyDetail(editStart, detail, true);
+        return;
+      }
+      applyDetail(currentAppData, detail, true);
     };
     window.addEventListener("message", handleVisualEdit);
-    return () => window.removeEventListener("message", handleVisualEdit);
+    return () => {
+      window.removeEventListener("message", handleVisualEdit);
+      visualEditFrames.forEach((frame) => window.cancelAnimationFrame(frame));
+      visualEditFrames.clear();
+      visualEditPending.clear();
+      visualEditStarts.clear();
+    };
   }, [dispatch, viewingPublished]);
   const viewportWidth =
     currentViewport.width === "100%"
@@ -3058,7 +3105,15 @@ function EditorBody({
         return;
       }
 
-      insertPreparedBlock(dispatch, createBlockContent(templateName), insertionIndex);
+      const block = createBlockContent(templateName);
+      const existingSameType = appData.content.find(
+        (item: { type: string; props?: PuckProps }) => item.type === templateName,
+      );
+      const inheritedDesign = existingSameType
+        ? extractContentTemplateLayoutData(templateName, existingSameType.props)
+        : undefined;
+      if (inheritedDesign) block.props.__instanceOverrides = structuredClone(inheritedDesign);
+      insertPreparedBlock(dispatch, block, insertionIndex);
       dispatch({
         type: "setUi",
         ui: { itemSelector: { index: insertionIndex, zone: ROOT_ZONE } },

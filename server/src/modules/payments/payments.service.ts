@@ -377,6 +377,17 @@ export class PaymentsService {
     return { order, payment };
   }
 
+  /** 仅填充空备注，保留预下单不确定等更早形成的对账事实。 */
+  private async setAttentionReviewNoteIfEmpty(paymentId: number, reviewNote: string) {
+    await this.prisma.payment.updateMany({
+      where: {
+        id: paymentId,
+        OR: [{ reviewNote: null }, { reviewNote: '' }],
+      },
+      data: { reviewNote },
+    }).catch(() => undefined);
+  }
+
   private async settleVerifiedPayment(
     provider: OnlinePayProvider,
     fact: {
@@ -396,10 +407,10 @@ export class PaymentsService {
     }
     if (payment.method !== provider) {
       this.logger.error(`${provider} ${source} 与本地付款方式 ${payment.method} 不一致：${payment.paymentNo}`);
-      await this.prisma.payment.update({
-        where: { id: payment.id },
-        data: { reviewNote: `渠道不符告警：${provider} 事实不能核销 ${payment.method} 付款` },
-      }).catch(() => undefined);
+      await this.setAttentionReviewNoteIfEmpty(
+        payment.id,
+        `渠道不符告警：${provider} 事实不能核销 ${payment.method} 付款`,
+      );
       return 'ATTENTION';
     }
     if (['PAID', 'PARTIAL_REFUND', 'REFUNDED'].includes(payment.status)) {
@@ -412,17 +423,20 @@ export class PaymentsService {
       this.logger.error(
         `${provider} ${source} 金额不符：商户单 ${payment.paymentNo} 本地 ${payment.amount} 元 / 渠道 ${fact.amountYuan ?? '缺失'} 元，已拒绝自动核销`,
       );
-      await this.prisma.payment.update({
-        where: { id: payment.id },
-        data: { reviewNote: `金额不符告警：渠道 ${fact.amountYuan ?? '缺失'} 元 ≠ 本地 ${payment.amount} 元，请人工对账` },
-      }).catch(() => undefined);
+      await this.setAttentionReviewNoteIfEmpty(
+        payment.id,
+        `金额不符告警：渠道 ${fact.amountYuan ?? '缺失'} 元 ≠ 本地 ${payment.amount} 元，请人工对账`,
+      );
       return 'ATTENTION';
     }
     if (!fact.gatewayTradeNo) {
-      await this.prisma.payment.update({
-        where: { id: payment.id },
-        data: { reviewNote: '渠道已返回支付成功但缺少渠道交易号，请人工对账' },
-      }).catch(() => undefined);
+      this.logger.error(
+        `${provider} ${source} 已返回支付成功但缺少渠道交易号：${payment.paymentNo}`,
+      );
+      await this.setAttentionReviewNoteIfEmpty(
+        payment.id,
+        '渠道已返回支付成功但缺少渠道交易号，请人工对账',
+      );
       return 'ATTENTION';
     }
 

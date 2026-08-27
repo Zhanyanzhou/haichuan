@@ -17,6 +17,7 @@ import {
   CONTENT_TEMPLATE_PAGE_METADATA,
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
   createContentTemplatePublicationAttestation,
+  extractContentTemplateLayoutData,
   getContentTemplatePageRule,
   getContentTemplateIssues,
   getContentTemplateCompletion,
@@ -32,6 +33,7 @@ import {
   type ContentTemplateDefaultContentValue,
   type ContentTemplateIssue,
 } from "./content-template-contract";
+import { customerFacingProductWhereForVisibilities } from "../products/product-eligibility";
 
 /**
  * 页面构建器区块类型契约 — 与前端 puckConfig MyComponents 严格一致,
@@ -897,6 +899,41 @@ export class PageModulesService {
       document.content.forEach((block, index) =>
         collectBlock(block, `content[${index}]`),
       );
+      const designByModuleType = new Map<string, {
+        signature: string;
+        blockId?: string;
+        index: number;
+      }>();
+      document.content.forEach((block, index) => {
+        if (!block || typeof block !== "object" || Array.isArray(block)) return;
+        const value = block as { type?: unknown; props?: unknown };
+        if (typeof value.type !== "string" || !CONTENT_TEMPLATE_BY_MODULE_TYPE[value.type]) return;
+        const props = value.props && typeof value.props === "object" && !Array.isArray(value.props)
+          ? value.props as Record<string, unknown>
+          : {};
+        const signature = JSON.stringify(
+          extractContentTemplateLayoutData(value.type, props) ?? null,
+        );
+        const baseline = designByModuleType.get(value.type);
+        if (!baseline) {
+          designByModuleType.set(value.type, {
+            signature,
+            blockId: typeof props.id === "string" ? props.id : undefined,
+            index,
+          });
+          return;
+        }
+        if (baseline.signature === signature) return;
+        issues.push({
+          code: "content-template-shared-design-mismatch",
+          severity: "error",
+          layer: "contract",
+          moduleType: value.type,
+          ...(typeof props.id === "string" ? { blockId: props.id } : {}),
+          path: `content[${index}].props.__instanceOverrides`,
+          message: `同页“${value.type}”必须共享同一模板设计；请选中此模块进入模板编辑并统一同类实例。`,
+        });
+      });
     }
     const pageRule = getContentTemplatePageRule(pageKey);
     if (
@@ -1893,10 +1930,8 @@ export class PageModulesService {
       // 发布文档对游客公开，关联商品必须与游客公开目录保持一致。
       const products = await db.product.findMany({
         where: {
-            id: { in: [...productIds] },
-            deletedAt: null,
-            status: "PUBLISHED",
-            visibility: "PUBLIC",
+          id: { in: [...productIds] },
+          ...customerFacingProductWhereForVisibilities(["PUBLIC"]),
         },
         select: {
           id: true,
@@ -1916,7 +1951,7 @@ export class PageModulesService {
           if (references?.length) {
             for (const reference of references) {
               const errorIndex = errors.push(
-                `${reference.label}：商品 ID ${id} 未满足公开发布条件（需已发布、公开可见且未删除）`,
+                `${reference.label}：商品 ID ${id} 未满足公开发布条件（需已发布、质量就绪、符合发布画像、公开可见且未删除）`,
               ) - 1;
               errorContexts[errorIndex] = {
                 blockId: reference.blockId,
@@ -1927,7 +1962,7 @@ export class PageModulesService {
             }
           } else {
             errors.push(
-              `页面引用的商品 ID ${id} 未满足公开发布条件（需已发布、公开可见且未删除）`,
+              `页面引用的商品 ID ${id} 未满足公开发布条件（需已发布、质量就绪、符合发布画像、公开可见且未删除）`,
             );
           }
         }
@@ -1937,10 +1972,8 @@ export class PageModulesService {
     if (productCodes.size > 0) {
       const products = await db.product.findMany({
         where: {
-            code: { in: [...productCodes] },
-            deletedAt: null,
-            status: "PUBLISHED",
-            visibility: "PUBLIC",
+          code: { in: [...productCodes] },
+          ...customerFacingProductWhereForVisibilities(["PUBLIC"]),
         },
         select: {
           code: true,
@@ -1958,7 +1991,7 @@ export class PageModulesService {
         if (publicProductCodes.has(code)) continue;
         for (const reference of productCodeReferences.get(code) ?? []) {
           const errorIndex = errors.push(
-            `${reference.label}：商品 ${code} 未满足公开发布条件（需已发布、公开可见、未删除且有展示图）`,
+            `${reference.label}：商品 ${code} 未满足公开发布条件（需已发布、质量就绪、符合发布画像、公开可见、未删除且有展示图）`,
           ) - 1;
           errorContexts[errorIndex] = {
             blockId: reference.blockId,
@@ -1979,11 +2012,7 @@ export class PageModulesService {
           slug: true,
           coverImage: true,
           products: {
-            where: {
-              deletedAt: null,
-              status: "PUBLISHED",
-              visibility: "PUBLIC",
-            },
+            where: customerFacingProductWhereForVisibilities(["PUBLIC"]),
             take: 1,
             select: { id: true },
           },

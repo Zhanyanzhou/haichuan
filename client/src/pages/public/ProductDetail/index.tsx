@@ -332,24 +332,29 @@ export default function ProductDetail() {
   };
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
       if (!id) return;
       setLoading(true);
       try {
         const res = await productApi.getPublicById(id || "");
         const data = unwrapResponse<Product>(res);
+        if (cancelled) return;
         setProduct(data);
         setMainImage(0);
         setSelectedSku(data?.skus?.find((s) => s.isActive) ?? null);
         setQty(1);
         setPurchaseError("");
       } catch {
-        setProduct(null);
+        if (!cancelled) setProduct(null);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     load();
+    return () => {
+      cancelled = true;
+    };
   }, [id, revision]);
 
   useEffect(() => {

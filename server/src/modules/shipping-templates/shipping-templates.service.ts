@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { CreateShippingTemplateDto, UpdateShippingTemplateDto } from "./dto/shipping-template.dto";
@@ -57,6 +57,22 @@ export class ShippingTemplatesService {
     const existing = await this.prisma.shippingTemplate.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("运费模板不存在");
     return this.prisma.$transaction(async (tx) => {
+      if (dto.isActive === false && existing.isActive !== false) {
+        const activePublishedProducts = await tx.product.count({
+          where: {
+            shippingTemplateId: id,
+            deletedAt: null,
+            status: "PUBLISHED",
+            publicationQualityStatus: "READY",
+            salesMode: "DIRECT_PURCHASE",
+          },
+        });
+        if (activePublishedProducts > 0) {
+          throw new ConflictException(
+            `该模板仍被 ${activePublishedProducts} 个可交易上架商品使用，请先更换商品配送模板`,
+          );
+        }
+      }
       if (dto.isDefault) {
         await tx.shippingTemplate.updateMany({ where: { id: { not: id } }, data: { isDefault: false } });
       }

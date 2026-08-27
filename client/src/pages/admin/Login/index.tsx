@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Form, Input, Checkbox } from 'antd';
 import type { InputRef } from 'antd';
 import { UserOutlined, LockOutlined, EyeInvisibleOutlined, EyeOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
@@ -8,6 +8,7 @@ import { authApi } from '@/services/api';
 import { USE_MOCK } from '@/services/mockData';
 import { unwrapResponse } from '@/utils/unwrap';
 import { ADMIN_COLORS } from '@/styles/antdTheme';
+import { resolveAdminReturnPath } from '@/utils/adminReturnPath';
 import type { User } from '@/types';
 
 /* ═══════ 局部视觉令牌 — 仅作用于登录页 ═══════ */
@@ -40,6 +41,7 @@ export default function Login() {
   const usernameInputRef = useRef<InputRef>(null);
   const passwordInputRef = useRef<InputRef>(null);
   const navigate = useNavigate();
+  const location = useLocation();
   const setAuth = useAuthStore((s) => s.setAuth);
 
   // 页面加载时恢复记住的账号；密码和会话令牌不写入 Web Storage。
@@ -68,7 +70,8 @@ export default function Login() {
         localStorage.removeItem(REMEMBER_KEY);
       }
 
-      navigate('/admin/dashboard');
+      const stateFrom = (location.state as { from?: unknown } | null)?.from;
+      navigate(resolveAdminReturnPath(location.search, stateFrom), { replace: true });
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : '';
       if (errorMessage.includes('Network') || errorMessage.includes('网络')) {

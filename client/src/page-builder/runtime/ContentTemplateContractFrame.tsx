@@ -1249,11 +1249,14 @@ export default function ContentTemplateContractFrame({
   const selectNode = useVisualEditorSession((state) => state.selectNode);
   const setEditorMode = useVisualEditorSession((state) => state.setMode);
   const setVisualPanelMode = useVisualEditorSession((state) => state.setPanelMode);
+  const requestContentAction = useVisualEditorSession((state) => state.requestContentAction);
+  const reportCanvasGeometry = useVisualEditorSession((state) => state.reportCanvasGeometry);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const propsRef = useRef(props);
   const dragRef = useRef<MediaDragState | null>(null);
   const layoutDragRef = useRef<LayoutDragState | null>(null);
   const suppressClickRef = useRef(false);
+  const hudFocusRequestRef = useRef(false);
   const gesturePreviewRef = useRef<GesturePreviewState | null>(null);
   const handledLayerCommandRef = useRef(0);
   const [liveMessage, setLiveMessage] = useState("");
@@ -1314,6 +1317,15 @@ export default function ContentTemplateContractFrame({
     const layoutDrag = layoutDragRef.current;
     if (mediaDrag?.frameId) mediaDrag.sourceWindow.cancelAnimationFrame(mediaDrag.frameId);
     if (layoutDrag?.frameId) layoutDrag.sourceWindow.cancelAnimationFrame(layoutDrag.frameId);
+    const sourceWindow = layoutDrag?.sourceWindow ?? mediaDrag?.sourceWindow;
+    if (updateUi && sourceWindow && (mediaDrag || layoutDrag)) {
+      sendCanvasVisualEdit({
+        blockId,
+        moduleType,
+        overrides: undefined,
+        cancelled: true,
+      }, sourceWindow);
+    }
     const pointerId = layoutDrag?.pointerId ?? mediaDrag?.pointerId;
     dragRef.current = null;
     layoutDragRef.current = null;
@@ -1329,7 +1341,7 @@ export default function ContentTemplateContractFrame({
       setLiveMessage("已取消本次调整，恢复调整前状态");
     }
     return Boolean(mediaDrag || layoutDrag);
-  }, []);
+  }, [blockId, moduleType]);
 
   useEffect(() => {
     if (gesturePreview?.phase !== "commit") return;
@@ -1583,6 +1595,12 @@ export default function ContentTemplateContractFrame({
     }
     const ownerWindow = root.ownerDocument.defaultView;
     if (!ownerWindow) return;
+    const frameElement = ownerWindow.frameElement;
+    const canvasOwnsFocus = frameElement
+      ? frameElement.ownerDocument.activeElement === frameElement
+      : root.contains(root.ownerDocument.activeElement);
+    const hudRequestedFocus = hudFocusRequestRef.current;
+    hudFocusRequestRef.current = false;
     setLiveMessage(
       editorMode === "adjust-media"
         ? canDragMediaFocus
@@ -1590,6 +1608,9 @@ export default function ContentTemplateContractFrame({
           : "已进入图片显示调整，可使用画布工具调整显示方式和缩放，按 Escape 退出"
         : "已进入对象位置调整，使用方向键移动，按 Alt 加方向键调整大小，按 Escape 退出",
     );
+    // 页签、属性面板等画布外控件切换设计模式时保留其键盘焦点；画布内 HUD
+    // 是显式操作入口，即使 pointerdown 被拦截，也要把键盘焦点交回当前对象。
+    if (!canvasOwnsFocus && !hudRequestedFocus) return;
     const frameId = ownerWindow.requestAnimationFrame(() => {
       const target = Array.from(
         root.querySelectorAll<HTMLElement>("[data-hc-keyboard-node]"),
@@ -1649,6 +1670,7 @@ export default function ContentTemplateContractFrame({
     if (!root || !contract || !layout) return;
     const ownerWindow = root.ownerDocument.defaultView;
     const appliedVariables = new Set<string>();
+    let geometryFrame = 0;
     const visualProps = gesturePreview
       ? { ...props, __instanceOverrides: gesturePreview.overrides }
       : props;
@@ -1661,6 +1683,60 @@ export default function ContentTemplateContractFrame({
     const clearVariables = () => {
       appliedVariables.forEach((name) => root.style.removeProperty(name));
       appliedVariables.clear();
+    };
+    const reportMeasuredGeometry = () => {
+      if (mode !== "editor" || !blockId) return;
+      const viewport = (ownerWindow?.innerWidth ?? 1024) <= 767
+        ? "mobile" as const
+        : "desktop" as const;
+      const candidates = Array.from(root.querySelectorAll<HTMLElement>(
+        "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
+      ));
+      const nodes: Record<string, { x: number; y: number; width: number; height: number }> = {};
+      let sharedFrame: HTMLElement | null = null;
+      const round = (value: number) => Math.round(value * 100_000) / 100_000;
+      nodeIds.forEach((nodeId) => {
+        const target = candidates.find((element) => {
+          if (element.getClientRects().length === 0) return false;
+          const ids = [
+            viewport === "mobile"
+              ? element.dataset.contentRoleMobile
+              : element.dataset.contentRoleDesktop,
+            element.dataset.contentRole,
+            ...(element.dataset.editorField?.split(/\s+/) ?? []),
+          ];
+          return ids.includes(nodeId);
+        });
+        if (!target) return;
+        const frameElement = findModuleFrameElement(target, root);
+        if (!sharedFrame) sharedFrame = frameElement;
+        if (frameElement !== sharedFrame) return;
+        const frameBounds = frameElement.getBoundingClientRect();
+        const nodeBounds = target.getBoundingClientRect();
+        if (frameBounds.width <= 0 || frameBounds.height <= 0 || nodeBounds.width <= 0 || nodeBounds.height <= 0) return;
+        nodes[nodeId] = {
+          x: round((nodeBounds.left - frameBounds.left) / frameBounds.width),
+          y: round((nodeBounds.top - frameBounds.top) / frameBounds.height),
+          width: round(nodeBounds.width / frameBounds.width),
+          height: round(nodeBounds.height / frameBounds.height),
+        };
+      });
+      const measuredFrame = sharedFrame as HTMLElement | null;
+      if (!measuredFrame || Object.keys(nodes).length === 0) return;
+      const frameBounds = measuredFrame.getBoundingClientRect();
+      if (frameBounds.width <= 0 || frameBounds.height <= 0) return;
+      reportCanvasGeometry({
+        blockId,
+        moduleType,
+        viewport,
+        frameAspectRatio: round(frameBounds.width / frameBounds.height),
+        nodes,
+      });
+    };
+    const scheduleGeometryReport = () => {
+      if (!ownerWindow || mode !== "editor") return;
+      ownerWindow.cancelAnimationFrame(geometryFrame);
+      geometryFrame = ownerWindow.requestAnimationFrame(reportMeasuredGeometry);
     };
     const syncLayoutVariables = () => {
       clearVariables();
@@ -1732,6 +1808,7 @@ export default function ContentTemplateContractFrame({
           },
         );
       });
+      scheduleGeometryReport();
     };
 
     syncLayoutVariables();
@@ -1744,9 +1821,10 @@ export default function ContentTemplateContractFrame({
     return () => {
       observer?.disconnect();
       ownerWindow?.removeEventListener("resize", syncLayoutVariables);
+      ownerWindow?.cancelAnimationFrame(geometryFrame);
       clearVariables();
     };
-  }, [contract, gesturePreview, layout, props]);
+  }, [blockId, contract, gesturePreview, layout, mode, moduleType, props, reportCanvasGeometry]);
 
   if (!contract || !layout) return <>{children}</>;
   const scopeId = `hc-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
@@ -1898,6 +1976,10 @@ export default function ContentTemplateContractFrame({
     );
     if (phase === "update") {
       previewGesture(next);
+      sendCanvasVisualEdit(
+        { blockId, moduleType, overrides: next, transient: true },
+        drag.sourceWindow,
+      );
       return;
     }
     sendCanvasVisualEdit({ blockId, moduleType, overrides: next }, drag.sourceWindow);
@@ -1952,6 +2034,10 @@ export default function ContentTemplateContractFrame({
     }
     if (phase === "update") {
       previewGesture(next);
+      sendCanvasVisualEdit(
+        { blockId, moduleType, overrides: next, transient: true },
+        drag.sourceWindow,
+      );
       return;
     }
     sendCanvasVisualEdit({ blockId, moduleType, overrides: next }, drag.sourceWindow);
@@ -1971,6 +2057,7 @@ export default function ContentTemplateContractFrame({
 
   const handleHudMode = (nextMode: "adjust-layout" | "adjust-media") => {
     cancelActiveGesture(false);
+    hudFocusRequestRef.current = true;
     if (nextMode === "adjust-layout" && panelMode !== "design") {
       setVisualPanelMode("design");
     }
@@ -2033,7 +2120,15 @@ export default function ContentTemplateContractFrame({
         }
       : findVisualNode(event.target, activeViewport);
     if (!node) return;
+    const previousSelection = useVisualEditorSession.getState().selection;
     selectNode({ blockId, moduleType, nodeId: node.nodeId, kind: node.kind });
+    if (previousSelection && previousSelection.blockId !== blockId) {
+      // 跨模块第一击必须先让外层画布边界同步 Puck 模块选择；若立即进入
+      // 拖动并停止冒泡，会出现“对象已换、属性面板仍属于旧模块”的分裂状态。
+      setEditorMode("select");
+      event.preventDefault();
+      return;
+    }
     const activeMode = useVisualEditorSession.getState().mode;
     const visualCapabilities = contract.editorCapabilities.layoutOverrides;
     const editableObject = findContentTemplateEditableObject(contract, node.nodeId);
@@ -2181,6 +2276,18 @@ export default function ContentTemplateContractFrame({
     // Puck 会在外层组件的 pointerdown 阶段处理 itemSelector；select 模式下
     // 再用 click 落实一次视觉节点选择，避免同一轮重挂把 pointerdown 选择吞掉。
     selectNode({ blockId, moduleType, nodeId: node.nodeId, kind: node.kind });
+    if (panelModeHere === "content" && (
+      node.kind === "media" ||
+      node.kind === "product" ||
+      node.kind === "structured"
+    )) {
+      requestContentAction({
+        blockId,
+        moduleType,
+        nodeId: node.nodeId,
+        kind: node.kind,
+      });
+    }
   };
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {

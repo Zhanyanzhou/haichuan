@@ -27,12 +27,11 @@ const PAYMENT_REVIEW: readonly AdminRole[] = [
   "CUSTOMER_SERVICE",
 ];
 const WAREHOUSE: readonly AdminRole[] = ["SUPER_ADMIN", "ADMIN", "WAREHOUSE"];
-// 交易域订单查看：客服跟进订单、仓储发货都需要看订单；EDITOR 不含交易权限。
+// 交易域订单查看：客服跟进订单；仓储仅进入履约中心，不读取通用订单与财务信息。
 const TRADE_VIEW: readonly AdminRole[] = [
   "SUPER_ADMIN",
   "ADMIN",
   "CUSTOMER_SERVICE",
-  "WAREHOUSE",
 ];
 // 销售顾问：报价管理（与服务端 quotations.controller @Roles 同口径）
 const SALES_CONSULTANT: readonly AdminRole[] = [
@@ -68,7 +67,7 @@ const ROUTE_RULES: RouteRule[] = [
   { prefix: "/admin/finance", roles: ADMIN_ONLY },
   { prefix: "/admin/inventory", roles: WAREHOUSE },
   { prefix: "/admin/warehouses", roles: WAREHOUSE },
-  // 交易域：订单中心对所有交易角色可见（查看）；EDITOR 无权限
+  // 交易域：订单中心对管理员与客服可见；仓储使用履约中心的最小数据投影
   { prefix: "/admin/orders", roles: TRADE_VIEW },
   // 交易域子页面（放于 orders 之后，避免前缀误匹配——它们以 /admin/trade/ 开头，互不冲突）
   { prefix: "/admin/trade/payments", roles: PAYMENT_REVIEW },

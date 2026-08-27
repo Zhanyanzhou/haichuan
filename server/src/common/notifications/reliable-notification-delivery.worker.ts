@@ -5,14 +5,20 @@ import { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { MailerService } from "../mailer/mailer.service";
+import {
+  LEAD_PRIVACY_DISPOSITION_ERROR_CODE,
+  LEAD_REPLY_NOTIFICATION_EVENT_TYPE,
+} from "./notification-delivery.constants";
 
-const EVENT_TYPE = "notification.delivery.requested";
+const ORDER_EVENT_TYPE = "notification.delivery.requested";
+const SEND_STARTED = "SEND_STARTED";
 const MAX_ATTEMPTS = 5;
 const CLAIM_TIMEOUT_MS = 5 * 60 * 1000;
 
 type ClaimedEvent = {
   id: number;
   attempts: number;
+  eventType: string;
   payload: Prisma.JsonValue;
 };
 
@@ -81,10 +87,19 @@ export class ReliableNotificationDeliveryWorker {
     const now = new Date();
     const staleBefore = new Date(now.getTime() - CLAIM_TIMEOUT_MS);
     return this.prisma.$transaction(async (tx) => {
-      const rows = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
-        SELECT id
+      const rows = await tx.$queryRaw<Array<{
+        id: number;
+        eventType: string;
+        status: string;
+        lastErrorCode: string | null;
+      }>>(Prisma.sql`
+        SELECT
+          id,
+          event_type AS eventType,
+          status,
+          last_error_code AS lastErrorCode
         FROM outbox_events
-        WHERE event_type = ${EVENT_TYPE}
+        WHERE event_type IN (${ORDER_EVENT_TYPE}, ${LEAD_REPLY_NOTIFICATION_EVENT_TYPE})
           AND available_at <= ${now}
           AND (
             status = 'PENDING'
@@ -94,10 +109,34 @@ export class ReliableNotificationDeliveryWorker {
         LIMIT 1
         FOR UPDATE SKIP LOCKED
       `);
-      const id = rows[0]?.id;
-      if (!id) return null;
+      const candidate = rows[0];
+      if (!candidate) return null;
+      if (
+        candidate.eventType === LEAD_REPLY_NOTIFICATION_EVENT_TYPE
+        && candidate.status === "PROCESSING"
+        && candidate.lastErrorCode === SEND_STARTED
+      ) {
+        await tx.outboxEvent.updateMany({
+          where: {
+            id: candidate.id,
+            status: "PROCESSING",
+            lockedAt: { lt: staleBefore },
+            lastErrorCode: SEND_STARTED,
+          },
+          data: {
+            status: "FAILED",
+            lockedAt: null,
+            lockedBy: null,
+            lastErrorCode: "DELIVERY_RESULT_UNKNOWN",
+          },
+        });
+        this.logger.warn(
+          `通知投递事件 ${candidate.id} 发送结果未知，已停止自动重发`,
+        );
+        return null;
+      }
       const event = await tx.outboxEvent.update({
-        where: { id },
+        where: { id: candidate.id },
         data: {
           status: "PROCESSING",
           lockedAt: now,
@@ -105,13 +144,21 @@ export class ReliableNotificationDeliveryWorker {
           attempts: { increment: 1 },
           lastErrorCode: null,
         },
-        select: { id: true, attempts: true, payload: true },
+        select: { id: true, attempts: true, eventType: true, payload: true },
       });
       return event;
     });
   }
 
   private async processClaimed(event: ClaimedEvent) {
+    if (event.eventType === LEAD_REPLY_NOTIFICATION_EVENT_TYPE) {
+      await this.processLeadReply(event);
+      return;
+    }
+    if (event.eventType !== ORDER_EVENT_TYPE) {
+      await this.fail(event, "UNSUPPORTED_EVENT_TYPE", true);
+      return;
+    }
     const payload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
       ? event.payload as Record<string, unknown>
       : {};
@@ -208,6 +255,101 @@ export class ReliableNotificationDeliveryWorker {
         ? "NOTIFICATION_DELIVERY_DISABLED"
         : "SMTP_SEND_FAILED";
     await this.fail(event, reason, false, emailDelivery.id);
+  }
+
+  private async processLeadReply(event: ClaimedEvent) {
+    const payload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+      ? event.payload as Record<string, unknown>
+      : {};
+    const leadId = asPositiveInteger(payload.leadId);
+    const activityId = asPositiveInteger(payload.activityId);
+    if (!leadId || !activityId) {
+      await this.fail(event, "INVALID_EVENT_PAYLOAD", true);
+      return;
+    }
+
+    const activity = await this.prisma.leadActivity.findUnique({
+      where: { id: activityId },
+      include: { lead: { include: { inquiry: true } } },
+    });
+    const inquiry = activity?.lead.inquiry;
+    const destination = inquiry?.customerEmail?.trim().toLowerCase() || null;
+    if (
+      !activity
+      || activity.leadId !== leadId
+      || activity.type !== "REPLY"
+      || activity.lead.sourceType !== "INQUIRY"
+      || activity.lead.privacyDisposedAt
+      || !activity.content
+      || !inquiry
+      || !destination
+    ) {
+      await this.fail(event, "DESTINATION_UNAVAILABLE", true);
+      return;
+    }
+
+    const sendStarted = await this.prisma.outboxEvent.updateMany({
+      where: { id: event.id, status: "PROCESSING", lockedBy: this.workerId },
+      data: { lockedAt: new Date(), lastErrorCode: SEND_STARTED },
+    });
+    if (sendStarted.count !== 1) return;
+
+    // 匿名化/注销可能发生在领取事件之后；SMTP 调用前重新读取处置状态和正文。
+    // 外部发送无法撤回，因此匿名化事务也会以 CAS 终止该 Outbox，缩小竞态窗口。
+    const stillSendable = await this.prisma.leadActivity.findUnique({
+      where: { id: activityId },
+      include: { lead: { include: { inquiry: true } } },
+    });
+    if (
+      !stillSendable
+      || stillSendable.leadId !== leadId
+      || stillSendable.type !== "REPLY"
+      || stillSendable.lead.privacyDisposedAt
+      || !stillSendable.content
+      || !stillSendable.lead.inquiry?.customerEmail
+    ) {
+      await this.fail(
+        event,
+        stillSendable?.lead.privacyDisposedAt
+          ? LEAD_PRIVACY_DISPOSITION_ERROR_CODE
+          : "DESTINATION_UNAVAILABLE",
+        true,
+      );
+      return;
+    }
+
+    let result: Awaited<ReturnType<MailerService["send"]>>;
+    try {
+      const accountHint = inquiry.customerId
+        ? `<p>如需继续沟通，可<a href="${escapeHtml(this.mailer.getSiteBaseUrl())}/customer">登录客户中心</a>查看详情。</p>`
+        : "<p>如需继续沟通，请使用您提交咨询时填写的常用联系方式。</p>";
+      result = await this.mailer.send(
+        {
+          to: destination,
+          subject: "您的咨询已回复 - 海川珠宝",
+          html: this.mailer.renderShell(`
+            <p>您好，${escapeHtml(inquiry.customerName)}：</p>
+            <p>您的咨询已有顾问回复：</p>
+            <div style="background:#f9f7f4;padding:16px;border-radius:6px;margin:16px 0;white-space:pre-wrap;">${escapeHtml(activity.content)}</div>
+            ${accountHint}
+          `),
+        },
+        { requireNotificationDeliveryEnabled: true },
+      );
+    } catch {
+      await this.fail(event, "SMTP_SEND_FAILED", false);
+      return;
+    }
+    if (result.delivered) {
+      await this.complete(event.id);
+      return;
+    }
+    const reason = result.reason === "not_configured"
+      ? "SMTP_NOT_CONFIGURED"
+      : result.reason === "delivery_disabled"
+        ? "NOTIFICATION_DELIVERY_DISABLED"
+        : "SMTP_SEND_FAILED";
+    await this.fail(event, reason, false);
   }
 
   private async claimDeliveryForSend(eventId: number, deliveryId: number) {

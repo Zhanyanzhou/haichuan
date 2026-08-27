@@ -42,6 +42,9 @@ const serviceSrc = await readSrc(
 const productsSrc = await readSrc(
   "server/src/modules/products/products.service.ts",
 );
+const productEligibilitySrc = await readSrc(
+  "server/src/modules/products/product-eligibility.ts",
+);
 const moduleSrc = await readSrc(
   "server/src/modules/selection-inquiry/selection-inquiry.module.ts",
 );
@@ -72,19 +75,32 @@ check("ProductsService 暴露 resolveVisibleProductSnapshots", () => {
   );
 });
 
-check("快照查询同时满足 id / 已发布 / 未删除 / 可见范围 四条件", () => {
+check("快照查询同时满足 id + 共享商品门禁（已发布 / READY / 未删除 / 可见范围 / 发布档位）", () => {
   // 不可见（越权）与不存在都表现为查询不命中，二者走同一条拒绝路径。
   const block = productsSrc.match(
     /批量解析提交商品[\s\S]*?(?=\n\s*publicChangeStream)/,
   );
   assert.ok(block, "未找到 resolveVisibleProductSnapshots 实现");
   assert.ok(/id:\s*\{\s*in:\s*ids\s*\}/.test(block[0]), "缺少 id in ids 过滤");
-  assert.ok(/deletedAt:\s*null/.test(block[0]), "缺少 deletedAt:null 过滤");
-  assert.ok(/status:\s*"PUBLISHED"/.test(block[0]), "缺少 status:PUBLISHED 过滤");
   assert.ok(
-    /visibility:\s*\{\s*in:\s*visibilities\s*\}/.test(block[0]),
-    "缺少 visibility in visibilities 过滤",
+    /customerFacingProductWhereForVisibilities\(visibilities\)/.test(block[0]),
+    "快照查询未复用共享商品门禁",
   );
+  const helper = productEligibilitySrc.match(
+    /export\s+function\s+customerFacingProductWhereForVisibilities\s*\([\s\S]*?\n\}/,
+  );
+  assert.ok(helper, "未找到 customerFacingProductWhereForVisibilities 共享门禁");
+  assert.ok(/deletedAt:\s*null/.test(helper[0]), "共享门禁缺少 deletedAt:null 过滤");
+  assert.ok(/status:\s*"PUBLISHED"/.test(helper[0]), "共享门禁缺少 status:PUBLISHED 过滤");
+  assert.ok(
+    /publicationQualityStatus:\s*"READY"/.test(helper[0]),
+    "共享门禁缺少 publicationQualityStatus:READY 过滤",
+  );
+  assert.ok(
+    /visibility:\s*\{\s*in:\s*visibilities\s*\}/.test(helper[0]),
+    "共享门禁缺少 visibility in visibilities 过滤",
+  );
+  assert.ok(/customerFacingReleaseWhere\(\)/.test(helper[0]), "共享门禁缺少发布档位过滤");
 });
 
 check("游客（customer 为空）仅解析为 PUBLIC 可见范围", () => {

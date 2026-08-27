@@ -32,6 +32,8 @@ model User {
   leadFollowUps             LeadFollowUp[]                 @relation("Creator")
   assignedLeads             Lead[]                         @relation("LeadAssignee")
   leadActivities            LeadActivity[]                 @relation("LeadActivityCreator")
+  leadLegalHolds            Lead[]                         @relation("LeadLegalHoldActor")
+  leadPrivacyDispositions   Lead[]                         @relation("LeadPrivacyDispositionActor")
   // 交易域审核/执行人关联（命名关系，避免与既有 User 关系冲突）
   paymentReviews            Payment[]                      @relation("PaymentReviewer")
   refundRequests            Refund[]                       @relation("RefundRequester")
@@ -1332,38 +1334,52 @@ enum LeadActivityType {
   CREATED
   ASSIGNED
   STATUS_CHANGED
+  REOPENED
   FOLLOW_UP
   REPLY
   NOTE
 }
 
+enum LeadPrivacyDisposition {
+  ANONYMIZED
+}
+
 // 统一线索运营事实。原 Inquiry / SelectionInquiry 继续保存原始提交内容，
 // 本表只维护跨来源一致的分配、联系、跟进、完结和留存状态。
 model Lead {
-  id                    Int            @id @default(autoincrement())
-  sourceType            LeadSourceType @map("source_type")
-  inquiryId             Int?           @unique @map("inquiry_id")
-  selectionInquiryId    Int?           @unique @map("selection_inquiry_id")
-  customerId            Int?           @map("customer_id")
-  customerName          String         @map("customer_name") @db.VarChar(50)
-  phone                 String?        @db.VarChar(20)
-  email                 String?        @db.VarChar(100)
-  wechat                String?        @db.VarChar(50)
-  status                LeadStatus     @default(PENDING)
-  assignedTo            Int?           @map("assigned_to")
-  internalNote          String?        @map("internal_note") @db.Text
-  nextFollowUpAt        DateTime?      @map("next_follow_up_at")
-  closedAt              DateTime?      @map("closed_at")
-  retentionUntil        DateTime?      @map("retention_until")
-  idempotencyKeyHash    String?        @unique @map("idempotency_key_hash") @db.Char(64)
-  submissionFingerprint String?        @map("submission_fingerprint") @db.Char(64)
-  createdAt             DateTime       @default(now()) @map("created_at")
-  updatedAt             DateTime       @updatedAt @map("updated_at")
+  id                    Int                     @id @default(autoincrement())
+  sourceType            LeadSourceType          @map("source_type")
+  inquiryId             Int?                    @unique @map("inquiry_id")
+  selectionInquiryId    Int?                    @unique @map("selection_inquiry_id")
+  customerId            Int?                    @map("customer_id")
+  customerName          String                  @map("customer_name") @db.VarChar(50)
+  phone                 String?                 @db.VarChar(20)
+  email                 String?                 @db.VarChar(100)
+  wechat                String?                 @db.VarChar(50)
+  status                LeadStatus              @default(PENDING)
+  assignedTo            Int?                    @map("assigned_to")
+  internalNote          String?                 @map("internal_note") @db.Text
+  closureReason         String?                 @map("closure_reason") @db.Text
+  nextFollowUpAt        DateTime?               @map("next_follow_up_at")
+  closedAt              DateTime?               @map("closed_at")
+  retentionUntil        DateTime?               @map("retention_until")
+  legalHoldAt           DateTime?               @map("legal_hold_at")
+  legalHoldReason       String?                 @map("legal_hold_reason") @db.VarChar(50)
+  legalHoldBy           Int?                    @map("legal_hold_by")
+  privacyDisposition    LeadPrivacyDisposition? @map("privacy_disposition")
+  privacyDisposedAt     DateTime?               @map("privacy_disposed_at")
+  privacyDisposedBy     Int?                    @map("privacy_disposed_by")
+  idempotencyKeyHash    String?                 @unique @map("idempotency_key_hash") @db.Char(64)
+  submissionFingerprint String?                 @map("submission_fingerprint") @db.Char(64)
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
 
   inquiry          Inquiry?          @relation(fields: [inquiryId], references: [id], onDelete: Restrict)
   selectionInquiry SelectionInquiry? @relation(fields: [selectionInquiryId], references: [id], onDelete: Restrict)
   customer         Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
   assignee         User?             @relation("LeadAssignee", fields: [assignedTo], references: [id], onDelete: SetNull)
+  legalHoldActor   User?             @relation("LeadLegalHoldActor", fields: [legalHoldBy], references: [id], onDelete: SetNull)
+  dispositionActor User?             @relation("LeadPrivacyDispositionActor", fields: [privacyDisposedBy], references: [id], onDelete: SetNull)
   activities       LeadActivity[]
 
   @@index([sourceType, createdAt])
@@ -1371,6 +1387,9 @@ model Lead {
   @@index([assignedTo, status, nextFollowUpAt])
   @@index([customerId, createdAt])
   @@index([retentionUntil])
+  @@index([retentionUntil, legalHoldAt, privacyDisposedAt])
+  @@index([legalHoldBy, legalHoldAt])
+  @@index([privacyDisposedBy, privacyDisposedAt])
   @@map("leads")
 }
 
@@ -1579,7 +1598,7 @@ model QuotationItem {
   @@map("quotation_items")
 }
 
-// ========== P0 成熟网站共享数据合同（2026-08-24，仅加法式；migration 未执行）==========
+// ========== P0 成熟网站共享数据合同（2026-08-24，仅加法式；应用状态以 migrations 与目标数据库核验为准）==========
 
 enum ContentLocale {
   ZH_CN @map("zh-CN")

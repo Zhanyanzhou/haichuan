@@ -39,7 +39,8 @@ export const TRADE_EVENT_TYPE = {
   REFUND_COMPLETED: 'REFUND_COMPLETED',
   REFUND_EXECUTE_FAILED: 'REFUND_EXECUTE_FAILED', // 执行失败（保持 APPROVED 可重试，仅记时间线）
   // 报价
-  QUOTATION_CONVERTED: 'QUOTATION_CONVERTED', // 报价单转订单
+  // 安全暂停：当前报价转单入口明确拒绝；恢复写入需先完成客户确认状态机与交易审批。
+  QUOTATION_CONVERTED: 'QUOTATION_CONVERTED',
   // 订单管理操作（交易中心：金额/地址/备注/签收/顾问/定制阶段）
   ORDER_AMOUNT_EDITED: 'ORDER_AMOUNT_EDITED', // 修改订单金额
   ORDER_ADDRESS_EDITED: 'ORDER_ADDRESS_EDITED', // 修改收货地址

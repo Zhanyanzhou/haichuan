@@ -51,6 +51,7 @@ test("公开目录：商品 ids 与分类 categoryIds 分别进入正确字段�
   const listCall = findManyCalls[0];
   assert.deepEqual(listCall.where.id, { in: [101, 102] });
   assert.deepEqual(listCall.where.categoryId, { in: [7, 8, 9] });
+  assert.deepEqual(listCall.where.NOT, { salesMode: "DIRECT_PURCHASE" });
   assert.equal(listCall.skip, 64);
   assert.equal(listCall.take, 32);
   assert.deepEqual(listCall.orderBy, [{ code: "asc" }, { id: "asc" }]);
@@ -59,7 +60,13 @@ test("公开目录：商品 ids 与分类 categoryIds 分别进入正确字段�
   assert.equal(result.pageSize, 32);
 });
 
-test("公开目录：价格筛选和排序只作用于公开价格的直购商品", async () => {
+test("commerce 档位的价格筛选和排序只作用于公开价格的直购商品", async (t) => {
+  const previousProfile = process.env.RELEASE_PROFILE;
+  process.env.RELEASE_PROFILE = "commerce";
+  t.after(() => {
+    if (previousProfile === undefined) delete process.env.RELEASE_PROFILE;
+    else process.env.RELEASE_PROFILE = previousProfile;
+  });
   for (const query of [
     { minPrice: 1_000, maxPrice: 20_000 },
     { sortBy: "price_asc" as const },
@@ -113,6 +120,7 @@ test("公开目录：Facet 只继承公开性与分类边界，不被当前材�
   assert.equal(facetCall.where.materialType, undefined);
   assert.deepEqual(facetCall.where.visibility, { in: ["PUBLIC"] });
   assert.equal(facetCall.where.status, "PUBLISHED");
+  assert.deepEqual(facetCall.where.NOT, { salesMode: "DIRECT_PURCHASE" });
 });
 
 test("公开目录：工艺只用于服务端筛选，不进入匿名列表响应", async () => {
@@ -192,7 +200,13 @@ test("公开目录查询 DTO：非法分页、ID 列表、材质与重量区间�
   );
 });
 
-test("游客统一详情返回真实展示价、规格、库存状态与公开媒体且不泄露内部字段", async () => {
+test("commerce 档位的游客详情返回真实展示价、规格、库存状态与公开媒体", async (t) => {
+  const previousProfile = process.env.RELEASE_PROFILE;
+  process.env.RELEASE_PROFILE = "commerce";
+  t.after(() => {
+    if (previousProfile === undefined) delete process.env.RELEASE_PROFILE;
+    else process.env.RELEASE_PROFILE = previousProfile;
+  });
   let findFirstArgs: any;
   const prisma = {
     product: {
@@ -251,7 +265,8 @@ test("游客统一详情返回真实展示价、规格、库存状态与公开�
   assert.deepEqual(findFirstArgs.where, {
     deletedAt: null,
     status: "PUBLISHED",
-    visibility: "PUBLIC",
+    publicationQualityStatus: "READY",
+    visibility: { in: ["PUBLIC"] },
     code: "HC-REAL-088",
   });
   assert.equal(findFirstArgs.select.price, true);
@@ -271,6 +286,32 @@ test("游客统一详情返回真实展示价、规格、库存状态与公开�
   const serialized = JSON.stringify(result);
   assert.doesNotMatch(serialized, /storageKey|internal-product|viewCount|publicationQualityStatus/);
   assert.equal(Object.prototype.hasOwnProperty.call(result, "skus"), false);
+});
+
+test("线索型档位默认从公开详情排除 DIRECT_PURCHASE", async (t) => {
+  const previousProfile = process.env.RELEASE_PROFILE;
+  delete process.env.RELEASE_PROFILE;
+  t.after(() => {
+    if (previousProfile === undefined) delete process.env.RELEASE_PROFILE;
+    else process.env.RELEASE_PROFILE = previousProfile;
+  });
+  let where: any;
+  const prisma = {
+    product: {
+      findFirst: async (args: any) => {
+        where = args.where;
+        return null;
+      },
+    },
+  };
+  const service = new ProductsService(
+    prisma as unknown as PrismaService,
+    {} as never,
+    {} as never,
+  );
+
+  assert.equal(await service.findPublicById("HC-DIRECT-1"), null);
+  assert.deepEqual(where.NOT, { salesMode: "DIRECT_PURCHASE" });
 });
 
 test("装修商品引用解析：保持输入顺序并区分删除、下架、缺图和不存在", async () => {

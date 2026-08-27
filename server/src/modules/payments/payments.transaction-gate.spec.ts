@@ -35,6 +35,32 @@ test("资金交易总开关默认关闭并在网关调用前拒绝新交易", as
   assert.equal(adapterCreateCalls, 0);
 });
 
+test("资金交易与退款开关不能绕过 lead-generation 发布档位", () => {
+  const leadGenerationGateway = new PaymentGatewayService({
+    get: (key: string) =>
+      key === "RELEASE_PROFILE"
+        ? "lead-generation"
+        : key === "PAYMENT_GATEWAY_TRANSACTIONS_ENABLED" ||
+            key === "PAYMENT_GATEWAY_REFUNDS_ENABLED"
+          ? "true"
+          : undefined,
+  } as unknown as ConfigService);
+  assert.equal(leadGenerationGateway.isTransactionCreationEnabled(), false);
+  assert.equal(leadGenerationGateway.isRefundCreationEnabled(), false);
+
+  const commerceGateway = new PaymentGatewayService({
+    get: (key: string) =>
+      key === "RELEASE_PROFILE"
+        ? "commerce"
+        : key === "PAYMENT_GATEWAY_TRANSACTIONS_ENABLED" ||
+            key === "PAYMENT_GATEWAY_REFUNDS_ENABLED"
+          ? "true"
+          : undefined,
+  } as unknown as ConfigService);
+  assert.equal(commerceGateway.isTransactionCreationEnabled(), true);
+  assert.equal(commerceGateway.isRefundCreationEnabled(), true);
+});
+
 test("服务层门禁在创建本地 Payment 前生效", async () => {
   let databaseCalls = 0;
   const prisma = new Proxy(

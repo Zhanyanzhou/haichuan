@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import test, { after, before } from 'node:test';
+import { ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CustomerAuthGuard } from '../customers/customer-auth.guard';
@@ -12,6 +12,44 @@ const application = {
   applicantPhone: '13800138000',
   agreementAccepted: true,
 };
+
+const originalWriteFlag = process.env.PARTNER_APPLICATIONS_WRITE_ENABLED;
+before(() => {
+  process.env.PARTNER_APPLICATIONS_WRITE_ENABLED = 'true';
+});
+after(() => {
+  if (originalWriteFlag === undefined) delete process.env.PARTNER_APPLICATIONS_WRITE_ENABLED;
+  else process.env.PARTNER_APPLICATIONS_WRITE_ENABLED = originalWriteFlag;
+});
+
+test('合作申请写能力缺失或关闭时在任何数据库写入前失败', async () => {
+  delete process.env.PARTNER_APPLICATIONS_WRITE_ENABLED;
+  let transactionTouched = false;
+  const service = new PartnerApplicationsService({
+    $transaction: async () => {
+      transactionTouched = true;
+    },
+  } as unknown as PrismaService);
+
+  try {
+    await assert.rejects(
+      service.submit(9, application),
+      (error: unknown) => {
+        assert.ok(error instanceof ServiceUnavailableException);
+        const response = error.getResponse() as { code?: string };
+        assert.equal(response.code, 'PARTNER_APPLICATIONS_WRITE_DISABLED');
+        return true;
+      },
+    );
+    await assert.rejects(
+      service.review(41, 'APPROVED', undefined, { id: 1, role: 'ADMIN' }),
+      ServiceUnavailableException,
+    );
+    assert.equal(transactionTouched, false);
+  } finally {
+    process.env.PARTNER_APPLICATIONS_WRITE_ENABLED = 'true';
+  }
+});
 
 test('初次申请在 Serializable 事务内原子同步客户与申请 PENDING 状态', async () => {
   let partnerStatus = 'NONE';

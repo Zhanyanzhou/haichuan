@@ -13,6 +13,8 @@ export interface DashboardStats {
   pendingShip: number;
   pendingAppointmentInquiries: number;
   pendingSelectionInquiries: number;
+  failedLeadReplyNotifications?: number;
+  retentionDueLeads?: number;
   lowStock: number;
   pendingReview: number;
 }

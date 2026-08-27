@@ -507,6 +507,124 @@ assert.ok(
   "历史区块必须明确标记为 legacy-0，而不是静默升级",
 );
 
+const sharedDesignData = validData("同类共享设计");
+const firstSharedDesignBlock = {
+  type: "文字横幅",
+  props: {
+    id: "same-type-first",
+    title: "第一个实例内容",
+    body: "内容保持独立",
+    __instanceOverrides: {
+      version: 2,
+      frame: { aspectRatioByViewport: { desktop: 1.5 } },
+    },
+  },
+};
+const secondSharedDesignBlock = clone(firstSharedDesignBlock);
+secondSharedDesignBlock.props.id = "same-type-second";
+secondSharedDesignBlock.props.title = "独立内容";
+secondSharedDesignBlock.props.__instanceOverrides = clone(
+  firstSharedDesignBlock.props.__instanceOverrides,
+);
+sharedDesignData.content.push(firstSharedDesignBlock, secondSharedDesignBlock);
+const sharedDesignResult = await service.validatePageDocument(
+  "home",
+  sharedDesignData,
+  validMetadata("同类共享设计"),
+);
+assert.equal(
+  sharedDesignResult.valid,
+  true,
+  `同页同类实例设计相同且内容独立时必须允许发布：${JSON.stringify(sharedDesignResult.issues)}`,
+);
+
+secondSharedDesignBlock.props.__instanceOverrides.frame.aspectRatioByViewport.desktop = 1.25;
+const divergentSharedDesignResult = await service.validatePageDocument(
+  "home",
+  sharedDesignData,
+  validMetadata("同类设计不一致"),
+);
+assert.equal(divergentSharedDesignResult.valid, false, "同页同类实例设计不一致必须阻断发布");
+assert.deepEqual(
+  divergentSharedDesignResult.issues.find(
+    (issue) => issue.code === "content-template-shared-design-mismatch",
+  ) && {
+    blockId: divergentSharedDesignResult.issues.find(
+      (issue) => issue.code === "content-template-shared-design-mismatch",
+    ).blockId,
+    moduleType: divergentSharedDesignResult.issues.find(
+      (issue) => issue.code === "content-template-shared-design-mismatch",
+    ).moduleType,
+    path: divergentSharedDesignResult.issues.find(
+      (issue) => issue.code === "content-template-shared-design-mismatch",
+    ).path,
+  },
+  {
+    blockId: "same-type-second",
+    moduleType: "文字横幅",
+    path: "content[2].props.__instanceOverrides",
+  },
+  "同类设计不一致必须定位到模块、模板类型和覆盖路径",
+);
+
+const coveredActionData = validData("行动遮挡校验");
+coveredActionData.content.push({
+  type: "文字横幅",
+  props: {
+    id: "covered-action-banner",
+    title: "查看系列",
+    buttonText: "进入作品页",
+    targetType: "page",
+    linkUrl: "/products",
+    __instanceOverrides: {
+      version: 2,
+      nodes: {
+        action: {
+          rectByViewport: { desktop: { x: 0.35, y: 0.4, width: 0.3, height: 0.12 } },
+          zIndexByViewport: { desktop: 2 },
+        },
+        bgImage: {
+          rectByViewport: { desktop: { x: 0.2, y: 0.2, width: 0.6, height: 0.6 } },
+          zIndexByViewport: { desktop: 4 },
+        },
+      },
+    },
+  },
+});
+const coveredActionResult = await service.validatePageDocument(
+  "home",
+  coveredActionData,
+  validMetadata("行动遮挡校验"),
+);
+assert.equal(coveredActionResult.valid, false, "可确定被完全遮挡的行动对象必须阻断发布");
+assert.ok(
+  coveredActionResult.issues.some((issue) =>
+    issue.blockId === "covered-action-banner" &&
+    issue.severity === "error" &&
+    issue.message.includes("完全遮挡")),
+  "行动遮挡问题必须定位到具体模块并返回结构化错误",
+);
+
+coveredActionData.content[1].props.__instanceOverrides.nodes.bgImage.rectByViewport.desktop = {
+  x: 0.58, y: 0.2, width: 0.22, height: 0.6,
+};
+const overlappingActionResult = await service.validatePageDocument(
+  "home",
+  coveredActionData,
+  validMetadata("普通重叠校验"),
+);
+assert.equal(
+  overlappingActionResult.valid,
+  true,
+  `普通对象重叠只能警告，不得阻断发布：${JSON.stringify(overlappingActionResult.issues)}`,
+);
+assert.ok(
+  overlappingActionResult.issues.some((issue) =>
+    issue.blockId === "covered-action-banner" && issue.severity === "warning" &&
+    issue.message.includes("自定义重叠")),
+  "普通重叠必须返回可定位 warning",
+);
+
 const mismatchedData = validData("错误印记", { key: "textBanner", version: 1 });
 const mismatchResult = await service.validatePageDocument("home", mismatchedData);
 assert.equal(mismatchResult.valid, false);
@@ -523,14 +641,14 @@ assert.ok(
   "未知内容模板版本不得猜测为当前版本",
 );
 
-const unsafeHeroData = validData("", { key: "hero", version: 2 });
+const unsafeHeroData = validData("真实标题", { key: "hero", version: 2 });
 unsafeHeroData.content[0].props.__instanceOverrides = {
   version: 1,
   textRoles: { copy: { enabled: true, placementPreset: "overlay" } },
 };
 const unsafeHeroResult = await service.validatePageDocument("home", unsafeHeroData);
-assert.equal(unsafeHeroResult.valid, false, "启用图片叠字而未选择安全文字带时必须阻止发布");
-assert.ok(unsafeHeroResult.issues.some((issue) => issue.path.includes("__instanceOverrides.textRoles.copy.safeBand")), "安全文字带问题必须定位到精确覆盖路径");
+assert.equal(unsafeHeroResult.valid, true, "自由构图中的文字叠图不应仅因缺少安全文字带阻止发布");
+assert.equal(unsafeHeroResult.issues.some((issue) => issue.path.includes("__instanceOverrides.textRoles.copy.safeBand")), false, "安全文字带不得继续作为结构性发布阻断");
 
 const unsafeHeroV2Data = validData("真实标题", { key: "hero", version: 2 });
 unsafeHeroV2Data.content[0].props.__instanceOverrides = {
@@ -538,12 +656,13 @@ unsafeHeroV2Data.content[0].props.__instanceOverrides = {
   nodes: { title: { enabled: true, typography: { align: "center" } } },
 };
 const unsafeHeroV2Result = await service.validatePageDocument("home", unsafeHeroV2Data);
-assert.equal(unsafeHeroV2Result.valid, false, "v2 图片叠字未选择安全文字带时必须阻止发布");
-assert.ok(
+assert.equal(unsafeHeroV2Result.valid, true, "v2 文字叠图缺少安全文字带只属于构图风险，不应阻止发布");
+assert.equal(
   unsafeHeroV2Result.issues.some((issue) =>
     issue.path.includes("__instanceOverrides.nodes.title.typography.safeBand"),
   ),
-  "v2 安全文字带问题必须定位到具体语义文字节点",
+  false,
+  "v2 安全文字带不得继续作为结构性发布阻断",
 );
 
 const emptyHeroRoleData = validData("", { key: "hero", version: 2 });
@@ -561,7 +680,7 @@ assert.ok(
 const unsafeHeroFrameData = validData("真实标题", { key: "hero", version: 2 });
 unsafeHeroFrameData.content[0].props.__instanceOverrides = {
   version: 2,
-  frame: { aspectRatioByViewport: { desktop: 3.2 } },
+  frame: { aspectRatioByViewport: { desktop: 4.2 } },
 };
 const unsafeHeroFrameResult = await service.validatePageDocument("home", unsafeHeroFrameData);
 assert.equal(unsafeHeroFrameResult.valid, false, "超出模板边界的整体比例必须阻止发布");

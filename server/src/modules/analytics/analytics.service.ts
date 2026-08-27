@@ -3,6 +3,7 @@ import { Cron } from "@nestjs/schedule";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { PUBLIC_ANALYTICS_CONSENT_VERSION } from "./dto/track-event.dto";
+import { getConfiguredAnalyticsDataset } from "./analytics-dataset";
 
 const MAX_METADATA_BYTES = 2048;
 const METADATA_FIELDS_BY_EVENT: Record<string, string[]> = {
@@ -37,19 +38,6 @@ function sanitizeMetadata(
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
-function configuredDataset(): "PRODUCTION" | "TEST" | null {
-  const configured =
-    process.env.ANALYTICS_DATASET?.trim().toLowerCase() || "test";
-  const dataset =
-    configured === "production"
-      ? "PRODUCTION"
-      : configured === "test"
-        ? "TEST"
-        : null;
-  if (process.env.NODE_ENV === "production" && dataset !== "PRODUCTION") return null;
-  return dataset;
-}
-
 function retentionDays(): number {
   const parsed = Number(process.env.ANALYTICS_RETENTION_DAYS || 90);
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 365 ? parsed : 90;
@@ -79,7 +67,7 @@ export class AnalyticsService {
     ) {
       return false;
     }
-    const dataset = configuredDataset();
+    const dataset = getConfiguredAnalyticsDataset();
     if (!dataset) return false;
     const safeMeta = sanitizeMetadata(event.eventName, event.metadata);
     if (safeMeta && Buffer.byteLength(JSON.stringify(safeMeta)) > MAX_METADATA_BYTES) {
@@ -120,7 +108,7 @@ export class AnalyticsService {
     const _p = +page,
       _ps = +pageSize;
     const where: Prisma.AnalyticsEventWhereInput = {};
-    const dataset = configuredDataset();
+    const dataset = getConfiguredAnalyticsDataset();
     if (!dataset) return { list: [], total: 0, page: _p, pageSize: _ps };
     where.dataset = dataset;
     if (eventName) where.eventName = eventName;
@@ -144,7 +132,7 @@ export class AnalyticsService {
   @Cron("0 0 3 * * *")
   async purgeExpiredEvents(): Promise<number> {
     if (process.env.ANALYTICS_RETENTION_ENABLED !== "true") return 0;
-    const dataset = configuredDataset();
+    const dataset = getConfiguredAnalyticsDataset();
     if (!dataset) return 0;
     const result = await this.prisma.analyticsEvent.deleteMany({
       where: {

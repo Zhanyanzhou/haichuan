@@ -15,6 +15,23 @@ import {
 import { ROOT_ZONE, focusCanvasBlock, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
 import type { PuckProps } from "@/page-builder/types";
+import { getContentTemplateContract } from "@/page-builder/generated/contentTemplates.generated";
+import { resolveVisualNode } from "@/page-builder/runtime/visualLayout";
+import { useVisualEditorSession } from "@/page-builder/visual-editor/visualEditorSession";
+
+const INTERNAL_OBJECT_LABELS: Record<string, string> = {
+  desktopImage: "桌面主图",
+  mobileImage: "移动端主图",
+  image: "主图",
+  mainImage: "主海报",
+  detailImage: "细节海报",
+  copy: "文案",
+  title: "标题",
+  action: "行动入口",
+  video: "视频",
+  product: "商品作品",
+  collection: "内容集合",
+};
 
 export default function LayerRail({
   navigationPreviewOpen,
@@ -38,6 +55,10 @@ export default function LayerRail({
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const selectedId = selectedItem?.props?.id;
+  const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
+  const panelMode = useVisualEditorSession((state) => state.panelMode);
+  const visualSelection = useVisualEditorSession((state) => state.selection);
+  const selectVisualNode = useVisualEditorSession((state) => state.selectNode);
   const content = appData.content as Array<{
     type: string;
     props: PuckProps;
@@ -63,6 +84,30 @@ export default function LayerRail({
   }, [content]);
 
   const layerScrollRef = useRef<HTMLDivElement>(null);
+  const pageLayerScrollTopRef = useRef(0);
+  const wasShowingInternalLayersRef = useRef(false);
+  const selectedContract = selectedItem?.type
+    ? getContentTemplateContract(selectedItem.type)
+    : undefined;
+  const showInternalLayers = panelMode === "design" && Boolean(
+    selectedContract && selectedId,
+  );
+  const inspectorViewport = typeof currentViewport.width === "number" && currentViewport.width <= 767
+    ? "mobile" as const
+    : "desktop" as const;
+
+  useEffect(() => {
+    if (showInternalLayers && !wasShowingInternalLayersRef.current) {
+      pageLayerScrollTopRef.current = layerScrollRef.current?.scrollTop ?? 0;
+    } else if (!showInternalLayers && wasShowingInternalLayersRef.current) {
+      window.requestAnimationFrame(() => {
+        if (layerScrollRef.current) {
+          layerScrollRef.current.scrollTop = pageLayerScrollTopRef.current;
+        }
+      });
+    }
+    wasShowingInternalLayersRef.current = showInternalLayers;
+  }, [showInternalLayers]);
 
   // 画布滚动时，让图层列表自动滚动到当前可见模块（仅滚动，不改选中态）。
   useEffect(() => {
@@ -275,6 +320,66 @@ export default function LayerRail({
       },
     });
   };
+
+  if (showInternalLayers && selectedContract && selectedItem && selectedId) {
+    return (
+      <section className="homepage-editor__layer-rail" aria-label="模板内部对象">
+        <div className="homepage-editor__layer-scroll" ref={layerScrollRef}>
+          <div className="homepage-editor__layer-frame homepage-editor__layer-global">
+            <span>模板内部对象</span>
+            <LockOutlined title="固定对象，仅可选择" aria-label="固定对象，仅可选择" />
+          </div>
+          {selectedContract.editorCapabilities.editableObjects.map((object) => {
+            const nodeIds = object.nodeIds?.length ? object.nodeIds : [object.roleId];
+            const selectedNodeId = visualSelection?.blockId === selectedId &&
+              nodeIds.includes(visualSelection.nodeId)
+              ? visualSelection.nodeId
+              : nodeIds[0];
+            const enabled = resolveVisualNode(
+              selectedItem.props as PuckProps,
+              selectedNodeId,
+              inspectorViewport,
+            ).enabled !== false;
+            const active = visualSelection?.blockId === selectedId &&
+              nodeIds.includes(visualSelection.nodeId);
+            const kind = object.kind === "video"
+              ? "media" as const
+              : object.kind === "collection"
+                ? "structured" as const
+                : object.kind;
+            return (
+              <div
+                key={object.roleId}
+                className={`homepage-editor__layer-item${active ? " is-active" : ""}${enabled ? "" : " is-hidden"}`}
+                data-template-object={object.roleId}
+                data-layer-visible={enabled ? "true" : "false"}
+              >
+                <button
+                  type="button"
+                  className="homepage-editor__layer-select"
+                  aria-pressed={active}
+                  onClick={() => selectVisualNode({
+                    blockId: String(selectedId),
+                    moduleType: selectedItem.type,
+                    nodeId: selectedNodeId,
+                    kind,
+                  })}
+                >
+                  <span className="homepage-editor__layer-name">
+                    {INTERNAL_OBJECT_LABELS[object.roleId] ?? object.roleId}
+                  </span>
+                  {!enabled ? <EyeInvisibleOutlined aria-label="当前隐藏" /> : null}
+                </button>
+              </div>
+            );
+          })}
+          <p className="homepage-editor__layer-empty">
+            此处仅用于选择固定对象；移动、缩放和层级调整请在主画布或属性面板完成。
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="homepage-editor__layer-rail">

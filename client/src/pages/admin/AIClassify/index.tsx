@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
-import { App as AntdApp, Card, Upload, Table, Tag, Button, Space, Row, Col, Input } from 'antd';
+import { Alert, App as AntdApp, Card, Upload, Table, Tag, Button, Space, Row, Col, Input } from 'antd';
 import { InboxOutlined, RobotOutlined, CheckCircleOutlined, ThunderboltOutlined, SendOutlined } from '@ant-design/icons';
 import { aiClassifyApi, uploadApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
 import type { RcFile } from 'antd/es/upload';
 import type { UploadProps } from 'antd';
+import {
+  AdminEmptyState,
+  AdminErrorState,
+  AdminLoadingState,
+} from '@/components/common/AdminDataStates';
 
 const { Dragger } = Upload;
 
@@ -32,15 +37,24 @@ interface AIClassificationRecord {
 
 interface AIClassificationReport {
   accuracy?: number | string;
+  autoConfirmRate?: number | string;
   todayCount?: number;
+}
+
+function formatPercent(value: number | string | undefined): string {
+  if (value === undefined || value === '') return '—';
+  const text = String(value);
+  return text.endsWith('%') ? text : `${text}%`;
 }
 
 export default function AIClassify() {
   const { message } = AntdApp.useApp();
   const [records, setRecords] = useState<AIClassificationRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [recordsError, setRecordsError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [report, setReport] = useState<AIClassificationReport | null>(null);
+  const [reportError, setReportError] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
@@ -51,23 +65,32 @@ export default function AIClassify() {
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
+    setRecordsError('');
     try {
       const res = await aiClassifyApi.getRecords({ page, pageSize });
       const data = unwrapResponse<{ list?: AIClassificationRecord[]; total?: number }>(res);
       setRecords(data?.list || []);
       setTotal(data?.total || 0);
-    } catch { setRecords([]); }
+    } catch (error: unknown) {
+      setRecords([]);
+      setTotal(0);
+      setRecordsError(getSafeAdminErrorMessage(error, '识别记录加载失败，请稍后重新加载。'));
+    }
     finally { setLoading(false); }
   }, [page, pageSize]);
 
-  const loadReport = async () => {
+  const loadReport = useCallback(async () => {
+    setReportError('');
     try {
       const res = await aiClassifyApi.getReport();
       setReport(unwrapResponse<AIClassificationReport>(res));
-    } catch { /* 报告拉取失败不影响页面 */ }
-  };
+    } catch (error: unknown) {
+      setReport(null);
+      setReportError(getSafeAdminErrorMessage(error, '识别指标加载失败，请稍后重新加载。'));
+    }
+  }, []);
 
-  useEffect(() => { void loadRecords(); void loadReport(); }, [loadRecords]);
+  useEffect(() => { void loadRecords(); void loadReport(); }, [loadRecords, loadReport]);
 
   const customUpload: NonNullable<UploadProps['customRequest']> = async (options) => {
     setUploading(true);
@@ -79,7 +102,8 @@ export default function AIClassify() {
       if (!url) throw new Error('图片上传失败：未获取到图片地址');
       await aiClassifyApi.classify({ imageUrl: url });
       message.success('识别完成');
-      loadRecords();
+      void loadRecords();
+      void loadReport();
     } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, '图片上传或识别失败，请检查文件格式和网络后重试。'));
     } finally {
@@ -94,7 +118,8 @@ export default function AIClassify() {
         confirmedCategoryId: record.predictedCategoryId,
       });
       message.success('识别结果已确认');
-      loadRecords();
+      void loadRecords();
+      void loadReport();
     } catch (e: unknown) { message.error(getSafeAdminErrorMessage(e, '识别结果确认失败，请重新加载后重试。')); }
   };
 
@@ -102,7 +127,8 @@ export default function AIClassify() {
     try {
       await aiClassifyApi.confirm(id, { status: 'rejected' });
       message.success('识别结果已驳回');
-      loadRecords();
+      void loadRecords();
+      void loadReport();
     } catch (e: unknown) { message.error(getSafeAdminErrorMessage(e, '识别结果驳回失败，请重新加载后重试。')); }
   };
 
@@ -130,10 +156,10 @@ export default function AIClassify() {
   };
 
   const stats = [
-    { t: '识别记录', v: records.length, i: <RobotOutlined /> },
-    { t: '自动确认率', v: records.length ? Math.round(records.filter(r => r.status === 'auto_confirmed').length / records.length * 100) + '%' : '0%', i: <CheckCircleOutlined /> },
-    { t: '模型准确率', v: report?.accuracy ?? 'N/A', i: <CheckCircleOutlined /> },
-    { t: '今日识别', v: report?.todayCount ?? 0, i: <ThunderboltOutlined /> },
+    { t: '识别记录', v: recordsError ? '—' : total, i: <RobotOutlined /> },
+    { t: '自动确认率', v: reportError ? '—' : formatPercent(report?.autoConfirmRate), i: <CheckCircleOutlined /> },
+    { t: '模型准确率', v: reportError ? '—' : formatPercent(report?.accuracy), i: <CheckCircleOutlined /> },
+    { t: '今日识别', v: reportError ? '—' : (report?.todayCount ?? '—'), i: <ThunderboltOutlined /> },
   ];
 
   return (
@@ -144,6 +170,15 @@ export default function AIClassify() {
           <Col xs={12} sm={6} key={s.t}><div className="bg-white border border-brand-line p-4"><div className="flex justify-between"><div><p className="text-xs text-brand-muted">{s.t}</p><p className="text-xl font-sans font-bold text-brand-text mt-1">{s.v}</p></div><span className="text-xl text-brand-gold">{s.i}</span></div></div></Col>
         ))}
       </Row>
+      {reportError && (
+        <Alert
+          type="error"
+          showIcon
+          message="识别指标加载失败"
+          description={reportError}
+          action={<Button onClick={() => void loadReport()}>重新加载</Button>}
+        />
+      )}
       <Card className="!bg-white !border-brand-line">
         <Dragger customRequest={customUpload} showUploadList={false} accept="image/*" multiple className="!bg-transparent !border-dashed !border-brand-line hover:!border-brand-gold"
           disabled={uploading}>
@@ -183,7 +218,10 @@ export default function AIClassify() {
         <p className="text-xs text-brand-muted mt-2">由 Kimi 驱动；未配置 KIMI_API_KEY 时该功能不可用。</p>
       </Card>
       <Card className="!bg-white !border-brand-line" title={<span className="font-semibold text-brand-text">识别记录</span>}>
-        <Table dataSource={records} rowKey="id" loading={loading} size="middle"
+        {loading ? <AdminLoadingState subject="识别记录" compact />
+          : recordsError ? <AdminErrorState message={recordsError} onRetry={loadRecords} />
+          : records.length === 0 ? <AdminEmptyState message="暂无识别记录" />
+          : <Table dataSource={records} rowKey="id" size="middle" scroll={{ x: 760 }}
           pagination={{ current: page, pageSize, total, showSizeChanger: true, showTotal: (t) => `共 ${t} 条`, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }}
           columns={[
             { title: 'ID', dataIndex: 'id', width: 60 },
@@ -192,7 +230,7 @@ export default function AIClassify() {
             { title: '状态', dataIndex: 'status', width: 120, render: (v: string) => { const s = sm[v]; return <Tag color={s?.c}>{s?.t}</Tag>; } },
             { title: '时间', dataIndex: 'createdAt', width: 150 },
             { title: '操作', width: 168, render: (_: unknown, r: AIClassificationRecord) => r.status === 'pending_confirm' ? <Space><Button size="small" type="primary" onClick={() => handleConfirm(r)}>确认结果</Button><Button size="small" onClick={() => handleReject(r.id)}>驳回结果</Button></Space> : null },
-          ]} />
+          ]} />}
       </Card>
     </div>
   );

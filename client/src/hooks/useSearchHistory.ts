@@ -3,13 +3,24 @@ import { useState, useCallback, useEffect } from 'react';
 const STORAGE_KEY = 'hc_search_history';
 const MAX_ITEMS = 10;
 
+function readSearchHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is string => typeof item === 'string')
+      .map(item => item.trim())
+      .filter(Boolean)
+      .slice(0, MAX_ITEMS);
+  } catch {
+    return [];
+  }
+}
+
 export function useSearchHistory() {
-  const [history, setHistory] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
-  });
+  const [history, setHistory] = useState<string[]>(readSearchHistory);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(history));

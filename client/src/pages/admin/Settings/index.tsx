@@ -14,6 +14,14 @@ interface BackupStatus {
   totalBackups: number;
   incompleteArtifactCount?: number;
   latestFiles?: Array<{ name: string; size: number }>;
+  markerPresent?: boolean;
+  markerValid?: boolean;
+  markerMatchesLatest?: boolean;
+  executionStatus?: "SUCCESS" | "WARNING" | "FAILED" | "UNKNOWN" | "INVALID";
+  lastAttemptFinishedAt?: string | null;
+  lastExitCode?: number | null;
+  errorCode?: string | null;
+  warningCode?: string | null;
   message: string;
 }
 
@@ -110,6 +118,33 @@ export default function Settings() {
                 {status?.autoBackup ? "最近成功" : status?.storageMounted ? "需检查" : "未挂载"}
               </Tag>
             </div>
+
+            {status && (
+              <div className="p-4 bg-brand-bg text-xs space-y-1">
+                <div className="flex justify-between gap-4">
+                  <span className="text-brand-muted">最近执行结果</span>
+                  <span className="text-brand-text">
+                    {status.executionStatus || "UNKNOWN"}
+                    {status.lastExitCode !== null && status.lastExitCode !== undefined
+                      ? ` · exit ${status.lastExitCode}`
+                      : ""}
+                  </span>
+                </div>
+                {status.lastAttemptFinishedAt && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-brand-muted">最近尝试完成</span>
+                    <span className="text-brand-text">{formatTime(status.lastAttemptFinishedAt)}</span>
+                  </div>
+                )}
+                {(status.errorCode && status.errorCode !== "NONE") && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-brand-muted">错误代码</span>
+                    <code className="text-brand-text">{status.errorCode}</code>
+                  </div>
+                )}
+                <p className="text-brand-muted pt-1">{status.message}</p>
+              </div>
+            )}
 
             {status?.latestFiles && status.latestFiles.length > 0 && (
               <div className="p-4 bg-brand-bg">

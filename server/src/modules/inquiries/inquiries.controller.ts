@@ -10,6 +10,8 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Throttle } from '@nestjs/throttler';
 import { BoundedListQueryDto } from '../../common/dto/bounded-list-query.dto';
 import type { OptionalCustomerRequest } from '../../common/security/authenticated-principal';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AssignInquiryDto, ReplyInquiryDto } from './dto/update-inquiry.dto';
 
 @ApiTags('咨询管理')
 @Controller('inquiries')
@@ -39,9 +41,21 @@ export class InquiriesController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: '分配咨询处理人' })
-  @Put(':id/assign') assign(@Param('id') id: string, @Body('assignedTo') uid: number) { return this.inquiriesService.assign(+id, uid); }
+  @Put(':id/assign') assign(
+    @Param('id') id: string,
+    @Body() body: AssignInquiryDto,
+    @CurrentUser() user: { id?: number },
+  ) {
+    return this.inquiriesService.assign(+id, body.assignedTo, user?.id);
+  }
 
   @ApiBearerAuth()
   @ApiOperation({ summary: '回复咨询' })
-  @Put(':id/reply') reply(@Param('id') id: string, @Body('reply') r: string) { return this.inquiriesService.reply(+id, r); }
+  @Put(':id/reply') reply(
+    @Param('id') id: string,
+    @Body() body: ReplyInquiryDto,
+    @CurrentUser() user: { id?: number },
+  ) {
+    return this.inquiriesService.reply(+id, body.reply, user?.id);
+  }
 }

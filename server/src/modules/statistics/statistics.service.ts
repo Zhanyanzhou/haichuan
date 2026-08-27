@@ -1,6 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { OrderStatus } from "@prisma/client";
+import {
+  LEAD_PRIVACY_DISPOSITION_ERROR_CODE,
+  LEAD_REPLY_NOTIFICATION_EVENT_TYPE,
+} from "../../common/notifications/notification-delivery.constants";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { getConfiguredAnalyticsDataset } from "../analytics/analytics-dataset";
 
 // 经营趋势支持的指标：订单数 / 成交额 / 咨询数 / 页面浏览量
 // 访客(UV)因缺少独立访客埋点(仅有 sessionId)暂不纳入
@@ -40,8 +45,10 @@ export class StatisticsService {
       selectionInquiriesToday,
       inquiriesYesterday,
       selectionInquiriesYesterday,
-      pendingInquiries,
-      pendingSelectionInquiries,
+      pendingAppointmentLeads,
+      pendingSelectionLeads,
+      failedLeadReplyNotifications,
+      retentionDueLeads,
     ] = await Promise.all([
       this.prisma.product.count(),
       this.prisma.product.count({ where: { status: "PUBLISHED" } }),
@@ -90,8 +97,26 @@ export class StatisticsService {
       this.prisma.selectionInquiry.count({
         where: { createdAt: yesterdayRange },
       }),
-      this.prisma.inquiry.count({ where: { status: "PENDING" } }),
-      this.prisma.selectionInquiry.count({ where: { status: "PENDING" } }),
+      this.prisma.lead.count({
+        where: { sourceType: "INQUIRY", status: "PENDING" },
+      }),
+      this.prisma.lead.count({
+        where: { sourceType: "SELECTION_INQUIRY", status: "PENDING" },
+      }),
+      this.prisma.outboxEvent.count({
+        where: {
+          eventType: LEAD_REPLY_NOTIFICATION_EVENT_TYPE,
+          status: "FAILED",
+          lastErrorCode: { not: LEAD_PRIVACY_DISPOSITION_ERROR_CODE },
+        },
+      }),
+      this.prisma.lead.count({
+        where: {
+          status: { in: ["COMPLETED", "INVALID"] },
+          retentionUntil: { lte: now },
+          privacyDisposedAt: null,
+        },
+      }),
     ]);
 
     return {
@@ -110,9 +135,11 @@ export class StatisticsService {
       pageViewsYesterday,
       inquiriesToday: inquiriesToday + selectionInquiriesToday,
       inquiriesYesterday: inquiriesYesterday + selectionInquiriesYesterday,
-      pendingInquiries: pendingInquiries + pendingSelectionInquiries,
-      pendingAppointmentInquiries: pendingInquiries,
-      pendingSelectionInquiries,
+      pendingInquiries: pendingAppointmentLeads + pendingSelectionLeads,
+      pendingAppointmentInquiries: pendingAppointmentLeads,
+      pendingSelectionInquiries: pendingSelectionLeads,
+      failedLeadReplyNotifications,
+      retentionDueLeads,
     };
   }
 
@@ -142,16 +169,19 @@ export class StatisticsService {
       `;
       for (const r of rows) map.set(r.date, Number(r.total));
     } else if (metric === "pageViews") {
-      // 注意：analytics_events 的事件名列在 schema 中无 @map，DB 列名即 eventName
-      const rows = await this.prisma.$queryRaw<
-        { date: string; count: bigint }[]
-      >`
-        SELECT DATE_FORMAT(CONVERT_TZ(occurred_at,'+00:00','+08:00'), '%Y-%m-%d') AS date, COUNT(*) AS count
-        FROM analytics_events
-        WHERE occurred_at >= ${start} AND occurred_at < UTC_TIMESTAMP() AND eventName = 'page_view'
-        GROUP BY DATE_FORMAT(CONVERT_TZ(occurred_at,'+00:00','+08:00'), '%Y-%m-%d')
-      `;
-      for (const r of rows) map.set(r.date, Number(r.count));
+      const dataset = getConfiguredAnalyticsDataset();
+      if (dataset) {
+        // 注意：analytics_events 的事件名列在 schema 中无 @map，DB 列名即 eventName
+        const rows = await this.prisma.$queryRaw<
+          { date: string; count: bigint }[]
+        >`
+          SELECT DATE_FORMAT(CONVERT_TZ(occurred_at,'+00:00','+08:00'), '%Y-%m-%d') AS date, COUNT(*) AS count
+          FROM analytics_events
+          WHERE occurred_at >= ${start} AND occurred_at < UTC_TIMESTAMP() AND dataset = ${dataset} AND eventName = 'page_view'
+          GROUP BY DATE_FORMAT(CONVERT_TZ(occurred_at,'+00:00','+08:00'), '%Y-%m-%d')
+        `;
+        for (const r of rows) map.set(r.date, Number(r.count));
+      }
     } else if (metric === "inquiries") {
       // 咨询跨两表：分别按日聚合后合并同日
       const [appointmentRows, selectionRows] = await Promise.all([

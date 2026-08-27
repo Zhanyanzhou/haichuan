@@ -1,5 +1,6 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isCommerceFeatureEnabled } from '../release/release-profile';
 import { X509Certificate } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
@@ -24,9 +25,8 @@ type AlipaySdkClient = {
     method: string,
     params: Record<string, unknown>,
   ) => Promise<AlipayPrecreateResponse>;
-  checkNotifySign: (
+  checkNotifySignV2: (
     postData: Record<string, string>,
-    raw?: boolean,
   ) => boolean | Promise<boolean>;
 };
 
@@ -196,21 +196,17 @@ export class PaymentGatewayService {
    * 回调验签不读取该门禁，确保关闭期间仍能安全处理关闭前已创建的有效交易。
    */
   isTransactionCreationEnabled(): boolean {
-    return (
-      this.configService
-        .get<string>('PAYMENT_GATEWAY_TRANSACTIONS_ENABLED')
-        ?.trim()
-        .toLowerCase() === 'true'
+    return isCommerceFeatureEnabled(
+      this.configService.get<string>('RELEASE_PROFILE'),
+      this.configService.get<string>('PAYMENT_GATEWAY_TRANSACTIONS_ENABLED'),
     );
   }
 
   /** 真实退款独立门禁：关闭新退款不影响已发起退款的查询和通知处理。 */
   isRefundCreationEnabled(): boolean {
-    return (
-      this.configService
-        .get<string>('PAYMENT_GATEWAY_REFUNDS_ENABLED')
-        ?.trim()
-        .toLowerCase() === 'true'
+    return isCommerceFeatureEnabled(
+      this.configService.get<string>('RELEASE_PROFILE'),
+      this.configService.get<string>('PAYMENT_GATEWAY_REFUNDS_ENABLED'),
     );
   }
 
@@ -251,14 +247,10 @@ export class PaymentGatewayService {
           return { provider: 'alipay', scene: 'native', qrCode: String(result.qr_code) };
         },
         verifyNotification: async (_headers, rawBody) => {
-          let parsed: Record<string, string>;
-          try {
-            parsed = JSON.parse(rawBody);
-          } catch {
-            return { verified: false };
-          }
-          // 官方 SDK 异步通知验签（RSA2）
-          const pass = await sdk.checkNotifySign(parsed, false);
+          const parsed = Object.fromEntries(new URLSearchParams(rawBody));
+          // 支付宝异步通知是 urlencoded 表单；URLSearchParams 已完成一次解码，
+          // V2 验签保持字段值原样，避免再次 decodeURIComponent 破坏 % 等合法内容。
+          const pass = await sdk.checkNotifySignV2(parsed);
           if (!pass) return { verified: false };
           return {
             verified: true,

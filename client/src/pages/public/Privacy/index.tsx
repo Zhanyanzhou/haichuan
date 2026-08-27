@@ -262,16 +262,19 @@ export default function Privacy() {
               </div>
             ) : (
               <p style={{ fontSize: 13, color: T.sec, lineHeight: 1.7, margin: 0 }}>
-                公开联系方式正在完善。如需行使上述权利或有任何隐私疑问，可
-                <Link
-                  to="/contact"
-                  style={{ color: T.gold, textDecoration: "underline", marginInline: 2 }}
-                >
-                  通过咨询表单提交
-                </Link>
-                您的需求，我们会由专人跟进处理。
+                公开联系方式正在完善。
               </p>
             )}
+            <p style={{ fontSize: 13, color: T.sec, lineHeight: 1.7, margin: "12px 0 0" }}>
+              如需行使查询、更正、删除或撤回同意等权利，可
+              <Link
+                to="/contact?type=privacy"
+                style={{ color: T.gold, textDecoration: "underline", marginInline: 2 }}
+              >
+                提交隐私与个人信息请求
+              </Link>
+              ，系统会生成服务记录，由专人跟进处理。
+            </p>
           </div>
 
           <p

@@ -364,7 +364,7 @@ check("后台建单：POST /orders 限 SUPER_ADMIN/ADMIN（不含 EDITOR）", ()
 // ── 角色权限一致性（验收项 #14）──
 check("订单/付款控制器：EDITOR 无交易写权限", () => {
   // 类级 @Roles 含 EDITOR 吗？查看是否有方法级覆盖
-  // OrdersController 类级应含 CUSTOMER_SERVICE/WAREHOUSE，不含 EDITOR
+  // OrdersController 类级应含 CUSTOMER_SERVICE，不含 EDITOR/WAREHOUSE
   const classRoles = ordersController.match(
     /@Roles\(([^)]+)\)[\s\S]*?@Controller\(['"]orders['"]\)/,
   );
@@ -399,7 +399,7 @@ check("付款控制器：查看含 CUSTOMER_SERVICE，审核限 ADMIN，不含 E
 });
 
 const routeAccess = await readSrc("client/src/config/adminRouteAccess.ts");
-check("前端路由：/admin/orders 含 CS/WAREHOUSE，不含 EDITOR", () => {
+check("前端路由：/admin/orders 含 CS，不含 WAREHOUSE/EDITOR", () => {
   const orderRule = routeAccess.match(
     /prefix:\s*["']\/admin\/orders["'],\s*roles:\s*(\w+)/,
   );
@@ -412,11 +412,23 @@ check("前端路由：/admin/orders 含 CS/WAREHOUSE，不含 EDITOR", () => {
     roleSource[1].includes("CUSTOMER_SERVICE"),
     "/admin/orders 应含 CUSTOMER_SERVICE",
   );
-  assert.ok(
-    roleSource[1].includes("WAREHOUSE"),
-    "/admin/orders 应含 WAREHOUSE",
-  );
+  assert.ok(!roleSource[1].includes("WAREHOUSE"), "/admin/orders 不可含 WAREHOUSE");
   assert.ok(!roleSource[1].includes("EDITOR"), "/admin/orders 不可含 EDITOR");
+});
+
+check("订单控制器：WAREHOUSE 仅通过履约接口操作", () => {
+  const classRoles = ordersController.match(
+    /@Roles\(([^)]+)\)[\s\S]*?@Controller\(['"]orders['"]\)/,
+  );
+  assert.ok(classRoles, "未找到 OrdersController 类级 @Roles");
+  assert.ok(!classRoles[1].includes("WAREHOUSE"), "通用订单接口不可授予 WAREHOUSE");
+  for (const route of [":id/ship", ":id/receive"]) {
+    const block = ordersController.match(
+      new RegExp(`@Roles\\(([^)]*)\\)[\\s\\S]{0,200}@Put\\(["']${route.replace("/", "\\/")}["']\\)`),
+    );
+    assert.ok(block, `未找到订单兼容入口 ${route}`);
+    assert.ok(!block[1].includes("WAREHOUSE"), `${route} 不可授予 WAREHOUSE`);
+  }
 });
 
 check("前端路由：交易域子页面路由已定义", () => {

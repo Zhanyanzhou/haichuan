@@ -60,7 +60,56 @@ function assertPinnedDockerfile(path, component) {
   if (!source.includes(`io.haichuan.component=\"${component}\"`)) {
     fail(`DOCKERFILE_COMPONENT_LABEL_INVALID:${path}`);
   }
+  const runtimeStage = source.slice(source.toUpperCase().lastIndexOf("FROM "));
+  const runtimeUser = /^USER\s+(\S+)\s*$/gim.exec(runtimeStage)?.[1];
+  if (!runtimeUser || /^(?:root|0(?::0)?)$/i.test(runtimeUser)) {
+    fail(`DOCKERFILE_RUNTIME_USER_NOT_NON_ROOT:${path}`);
+  }
   return fromImages;
+}
+
+function assertNodeAndClientRuntimeBaseline() {
+  for (const path of ["package.json", "client/package.json", "server/package.json"]) {
+    const manifest = JSON.parse(readProjectFile(path));
+    if (manifest?.engines?.node !== "22.x") {
+      fail(`NODE_ENGINE_BASELINE_INVALID:${path}`);
+    }
+  }
+  for (const path of [".github/workflows/ci.yml", ".github/workflows/quality.yml"]) {
+    const source = readProjectFile(path);
+    const versions = [...source.matchAll(/^\s+node-version:\s*["']?(\d+)["']?\s*$/gm)]
+      .map((match) => Number(match[1]));
+    if (versions.length === 0 || versions.some((version) => version !== 22)) {
+      fail(`WORKFLOW_NODE_BASELINE_INVALID:${path}`);
+    }
+  }
+  for (const path of ["server/Dockerfile", "client/Dockerfile"]) {
+    const source = readProjectFile(path);
+    const nodeBases = [...source.matchAll(/^FROM\s+(node:[^\s]+)(?:\s+AS\s+\S+)?\s*$/gim)]
+      .map((match) => match[1]);
+    if (nodeBases.length === 0 || nodeBases.some((image) => !/^node:22-alpine@sha256:/.test(image))) {
+      fail(`DOCKERFILE_NODE_BASELINE_INVALID:${path}`);
+    }
+  }
+
+  const compose = readProjectFile("docker-compose.yml");
+  const clientNginx = readProjectFile("client/nginx.conf");
+  const clientMainNginx = readProjectFile("client/nginx-main.conf");
+  if (!compose.includes('- "80:8080"') ||
+      !compose.includes("http://127.0.0.1:8080/") ||
+      !/^\s*listen\s+8080;\s*$/m.test(clientNginx)) {
+    fail("CLIENT_NON_ROOT_PORT_CONTRACT_INVALID");
+  }
+  for (const required of [
+    "pid /tmp/nginx.pid;",
+    "client_body_temp_path /tmp/client_temp;",
+    "proxy_temp_path /tmp/proxy_temp;",
+  ]) {
+    if (!clientMainNginx.includes(required)) {
+      fail(`CLIENT_NON_ROOT_NGINX_PATH_MISSING:${required}`);
+    }
+  }
+  return { packageCount: 3, workflowCount: 2, dockerfileCount: 2 };
 }
 
 function assertComposeImages() {
@@ -121,7 +170,48 @@ function assertReleaseWorkflow() {
   if (!source.includes(":sha-${{ github.sha }}")) {
     fail("RELEASE_WORKFLOW_COMMIT_TAG_MISSING");
   }
+  if (!/^\s{2}actions:\s*read\s*$/m.test(source)) {
+    fail("RELEASE_WORKFLOW_ACTIONS_READ_PERMISSION_MISSING");
+  }
+  if (!/^\s{2}quality-proof:\s*$/m.test(source) ||
+      !/^\s{4}needs:\s*quality-proof\s*$/m.test(source)) {
+    fail("RELEASE_WORKFLOW_QUALITY_PROOF_DEPENDENCY_MISSING");
+  }
+  for (const required of [
+    "actions/workflows/quality.yml/runs?head_sha=${GITHUB_SHA}",
+    'run.head_sha === process.env.GITHUB_SHA',
+    'run.event === "push"',
+    'run.conclusion === "success"',
+    "QUALITY_GATE_SAME_SHA_SUCCESS_NOT_FOUND",
+    "schemaVersion:2",
+    "qualityGate:",
+  ]) {
+    if (!source.includes(required)) {
+      fail(`RELEASE_WORKFLOW_QUALITY_PROOF_CONTRACT_MISSING:${required}`);
+    }
+  }
   return path;
+}
+
+function assertWorkflowActionsPinned() {
+  const workflowPaths = [
+    ".github/workflows/ci.yml",
+    ".github/workflows/quality.yml",
+    ".github/workflows/release-images.yml",
+  ];
+  let actionCount = 0;
+  for (const path of workflowPaths) {
+    const source = readProjectFile(path);
+    for (const match of source.matchAll(/^\s+(?:-\s+)?uses:\s+([^\s]+)\s*$/gm)) {
+      actionCount += 1;
+      const reference = match[1];
+      if (!/@[a-f0-9]{40}$/.test(reference)) {
+        fail(`WORKFLOW_ACTION_NOT_PINNED:${path}:${reference}`);
+      }
+    }
+  }
+  if (actionCount === 0) fail("WORKFLOW_ACTION_REFERENCE_MISSING");
+  return { workflowCount: workflowPaths.length, actionCount };
 }
 
 function assertSafeRuntimeInspection() {
@@ -146,15 +236,20 @@ function assertSafeRuntimeInspection() {
 function verifyStaticContract() {
   const serverBases = assertPinnedDockerfile("server/Dockerfile", "server");
   const clientBases = assertPinnedDockerfile("client/Dockerfile", "client");
+  const runtimeBaseline = assertNodeAndClientRuntimeBaseline();
   const composeImages = assertComposeImages();
   const workflow = assertReleaseWorkflow();
+  const workflowActions = assertWorkflowActionsPinned();
   const runtimeInspectionFieldCount = assertSafeRuntimeInspection();
   return {
     ok: true,
     mode: "static",
     dockerfileBaseCount: serverBases.length + clientBases.length,
+    runtimeBaseline,
     composeImageCount: composeImages.length,
     workflow,
+    workflowCount: workflowActions.workflowCount,
+    workflowActionCount: workflowActions.actionCount,
     runtimeInspectionFieldCount,
   };
 }
@@ -181,7 +276,7 @@ function readAndValidateManifest(path) {
   }
   if (!existsSync(absolutePath)) fail(`RELEASE_MANIFEST_MISSING:${path}`);
   const manifest = JSON.parse(readFileSync(absolutePath, "utf8"));
-  if (manifest?.schemaVersion !== 1) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
+  if (manifest?.schemaVersion !== 2) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
   if (!gitShaPattern.test(manifest.gitSha ?? "")) fail("RELEASE_MANIFEST_GIT_SHA_INVALID");
   if (manifest.gitSha !== currentGitSha()) fail("RELEASE_MANIFEST_GIT_SHA_MISMATCH");
   if (!/^[a-f0-9]{64}$/.test(manifest.migrationBundleSha256 ?? "")) {
@@ -192,6 +287,19 @@ function readAndValidateManifest(path) {
   }
   if (typeof manifest.source !== "string" || !/^https:\/\/[^\s]+$/.test(manifest.source)) {
     fail("RELEASE_MANIFEST_SOURCE_INVALID");
+  }
+  const quality = manifest.qualityGate;
+  if (!quality || typeof quality !== "object") fail("RELEASE_MANIFEST_QUALITY_GATE_MISSING");
+  if (quality.workflow !== "quality.yml") fail("RELEASE_MANIFEST_QUALITY_WORKFLOW_INVALID");
+  if (!Number.isSafeInteger(quality.runId) || quality.runId <= 0) {
+    fail("RELEASE_MANIFEST_QUALITY_RUN_ID_INVALID");
+  }
+  if (quality.headSha !== manifest.gitSha) fail("RELEASE_MANIFEST_QUALITY_SHA_MISMATCH");
+  if (quality.event !== "push" || quality.conclusion !== "success") {
+    fail("RELEASE_MANIFEST_QUALITY_RESULT_INVALID");
+  }
+  if (quality.runUrl !== `${manifest.source}/actions/runs/${quality.runId}`) {
+    fail("RELEASE_MANIFEST_QUALITY_RUN_URL_INVALID");
   }
   validateImageEntry("server", manifest.server);
   validateImageEntry("client", manifest.client);

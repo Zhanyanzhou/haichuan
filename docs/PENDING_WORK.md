@@ -10,7 +10,7 @@
 > - 当前正式 migration 已与 Schema/共享合同测试对齐，但目标数据库与 `_prisma_migrations` 状态仍未确认；不得以临时库或旧“无 drift”结果执行现有/目标数据库迁移或回填。
 > - A 组验证命令 → 已由 `docs/VERIFICATION_RUNBOOK.md` 取代并**全部实跑通过**（2026-08-15：静态门禁/迁移无 drift/五容器+恢复演练/Playwright 59 过/admin 后台回归）
 > - C-5 CORS 默认域名 → 已解决：生产强制 `CORS_ORIGIN` 环境变量，缺失即拒绝启动
-> - E-1 Playwright 入 CI → 已完成（quality.yml 新增 e2e-public job）
+> - E-1 Playwright 入 CI → 已完成（quality.yml 的 `e2e-deterministic` job 运行 public/customer/admin 三个 project）
 > - G-5 Feature Flags → 已完成服务端单一来源化（DECISIONS D.3 已修订）
 > - git rm 死资产 → 已执行（2026-08-15：homepage.ts/根 nginx.conf/homeCampaign.ts/splitPanel.ts/save-slot.dto.ts）
 > - B 组经营资料、域名、ICP、外部凭据 → **仍然有效**，见 `docs/OPERATIONS_READINESS.md` §8
@@ -31,7 +31,7 @@
 | A-2 | `cd client && npm run lint`                                  | 客户端 ESLint                        | 0 error（warning 可接受） |
 | A-3 | `cd server && npm run build`                                 | 服务端构建（nest build）             | 0 error                   |
 | A-4 | `npm run typecheck`（根目录）                                | 前后端类型检查                       | 0 error                   |
-| A-5 | `npm test`（根目录）                                         | page-builder 契约测试                | 通过                      |
+| A-5 | `npm test`（根目录）                                         | 合同、内容模板、服务端、公开资源与运行时所有权检查 | 通过                      |
 | A-6 | `npm run test:trade`（根目录）                               | 交易域状态机/并发/契约测试           | 通过                      |
 | A-7 | `cd client && npx playwright test --project=public-chromium` | 公开页面 E2E（含新增 privacy-trust） | 全部通过                  |
 | A-8 | `git diff --check`                                           | 行尾/空白冲突检查                    | 无冲突                    |
@@ -130,7 +130,6 @@
 | G-2 | 行为分析                     | 当前开关与真实数据链路须按运行环境复核，不沿用旧“默认 true”结论                    |
 | G-3 | 正式域名上线后补 SEO         | canonical URL、sitemap 绝对地址、JSON-LD url、og:url                                |
 | G-4 | 多仓库存管理启用             | DECISIONS D.1/D.9 待决策（库存架构迁移、默认仓库）                                  |
-| G-5 | Feature Flags 正式接线或删除 | DECISIONS D.3 待决策                                                                |
 | G-6 | 金价自动采集                 | ✅ **已接入（2026-08-16）**：`GOLD_PRICE_API_URL` 未配置则跳过；配置后自动拉取+调价 |
 
 ---

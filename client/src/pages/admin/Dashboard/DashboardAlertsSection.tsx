@@ -22,6 +22,18 @@ function buildAlerts(stats: DashboardStats | null): DashboardAlert[] {
       route: "/admin/leads?status=PENDING",
     },
     {
+      key: "leadReplyNotification",
+      label: "咨询回复通知失败",
+      count: stats.failedLeadReplyNotifications || 0,
+      route: "/admin/leads?notification=failed",
+    },
+    {
+      key: "retentionDue",
+      label: "线索留存期已到期",
+      count: stats.retentionDueLeads || 0,
+      route: "/admin/leads?retention=due",
+    },
+    {
       key: "lowStock",
       label: "库存预警商品",
       count: stats.lowStock || 0,

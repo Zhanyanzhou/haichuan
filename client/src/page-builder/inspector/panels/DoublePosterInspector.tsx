@@ -14,10 +14,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { App as AntdApp } from "antd";
 import InspectorTopBar from "../InspectorTopBar";
-import InspectorObjectContext, {
-  getInspectorResponsiveStates,
-} from "../InspectorObjectContext";
 import InspectorDisclosure from "../InspectorDisclosure";
+import InstanceOverridesPanel from "../InstanceOverridesPanel";
 import InspectorPrimaryTabs, {
   type InspectorPrimaryMode,
 } from "../InspectorPrimaryTabs";
@@ -35,14 +33,20 @@ import {
   resolveVisualNode,
   setVisualOverridePath,
   isVisualRecord,
+  type VisualRect,
   type VisualViewport,
 } from "../../runtime/visualLayout";
 import {
   createContentTemplateMarker,
+  extractContentTemplateLayoutData,
   getContentTemplateContract,
   getContentTemplateEditableFieldKeys,
   getContentTemplateEditableObject,
 } from "../../generated/contentTemplates.generated";
+import {
+  applySharedTemplateDesignPatch,
+  getSharedTemplateDesignSignatures,
+} from "../../visual-editor/sharedTemplateDesign";
 import {
   getContractRoleRatio,
   getContractRoleRatioPresets,
@@ -52,9 +56,12 @@ import {
   useHomepagePuck,
 } from "../../../pages/admin/HomepageConfig/editor-store";
 import { getModuleDisplayName } from "../../../pages/admin/HomepageConfig/editor-utils";
+import DoublePosterMiniCanvas, {
+  type DoublePosterObjectId,
+} from "./DoublePosterMiniCanvas";
 
 type PanelMode = InspectorPrimaryMode;
-type ObjectId = "mainImage" | "detailImage" | "copy" | "action";
+type ObjectId = DoublePosterObjectId;
 
 interface DoublePosterInspectorProps {
   hasUnsavedChanges: boolean;
@@ -80,6 +87,28 @@ const OBJECT_LABELS: Record<ObjectId, string> = {
 
 const isObjectId = (value: string): value is ObjectId =>
   Object.prototype.hasOwnProperty.call(OBJECT_LABELS, value);
+
+const ISSUE_FIELD_TO_OBJECT: Record<string, ObjectId> = {
+  mainImage: "mainImage",
+  mainAltText: "mainImage",
+  detailImage: "detailImage",
+  detailAltText: "detailImage",
+  number: "copy",
+  label: "copy",
+  title: "copy",
+  description: "copy",
+  actionText: "action",
+  targetType: "action",
+  linkUrl: "action",
+  productId: "action",
+};
+
+function getIssueObjectId(issue: DoublePosterInspectorProps["publishIssues"][number]) {
+  const source = `${issue.path ?? ""} ${issue.message}`;
+  return Object.entries(ISSUE_FIELD_TO_OBJECT).find(([field]) =>
+    new RegExp(`(^|[^a-zA-Z])${field}([^a-zA-Z]|$)`, "i").test(source),
+  )?.[1];
+}
 
 function supportsCapabilityOnViewport(
   object: ReturnType<typeof getContentTemplateEditableObject>,
@@ -115,12 +144,6 @@ const RATIO_SHAPE_LABELS: Record<string, string> = {
   "9:16": "竖屏",
   "3:4": "竖版",
 };
-
-const COMPOSITION_OPTIONS = [
-  { value: "balanced", label: "均衡" },
-  { value: "main-led", label: "主图优先" },
-  { value: "detail-led", label: "细节图优先" },
-] as const;
 
 const FIT_OPTIONS = [
   { value: "cover", label: "填满裁切" },
@@ -171,6 +194,8 @@ export default function DoublePosterInspector({
   const editor = useInspectorModuleEditor();
   const [activePanelMode, setActivePanelMode] = useState<PanelMode>("content");
   const inspectorScrollRef = useRef<HTMLDivElement>(null);
+  const pendingContentActionRef = useRef<ObjectId | null | undefined>(undefined);
+  const [contentActionRevision, setContentActionRevision] = useState(0);
   const panelScrollPositionsRef = useRef<Record<PanelMode, number>>({
     content: 0,
     design: 0,
@@ -180,11 +205,15 @@ export default function DoublePosterInspector({
   const appData = useHomepagePuck((state) => state.appState.data);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
   const visualSelection = useVisualEditorSession((state) => state.selection);
+  const contentActionRequest = useVisualEditorSession((state) => state.contentActionRequest);
   const selectVisualNode = useVisualEditorSession((state) => state.selectNode);
   const clearVisualNode = useVisualEditorSession((state) => state.clearNode);
   const setVisualPanelMode = useVisualEditorSession((state) => state.setPanelMode);
   const visualPanelMode = useVisualEditorSession((state) => state.panelMode);
   const editorBlockId = editor?.props.id;
+  const activeCanvasGeometry = useVisualEditorSession((state) =>
+    state.canvasGeometryByBlock[String(editorBlockId ?? "")]?.[editor?.device ?? "desktop"],
+  );
 
   // 切换模块时重置 tab 与滚动位置（与 SchemaInspectorPanel 同模式）
   useEffect(() => {
@@ -206,6 +235,51 @@ export default function DoublePosterInspector({
     inspectorScrollRef.current?.scrollTo({ top: pending.top, behavior: "auto" });
     pendingPanelScrollRef.current = null;
   }, [activePanelMode]);
+
+  useLayoutEffect(() => {
+    if (!editor || pendingContentActionRef.current === undefined) return;
+    const objectId = pendingContentActionRef.current;
+    pendingContentActionRef.current = undefined;
+    const fieldKey = objectId === "mainImage" || objectId === "detailImage"
+      ? objectId
+      : objectId === "action"
+        ? "actionText"
+        : "title";
+    const focusField = () => {
+      const field = inspectorScrollRef.current?.querySelector<HTMLElement>(
+        `[data-inspector-field="${fieldKey}"]`,
+      );
+      if (!field) return;
+      field.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      if (objectId === "mainImage" || objectId === "detailImage") {
+        const replaceButton = Array.from(field.querySelectorAll<HTMLButtonElement>("button"))
+          .find((button) => button.textContent?.includes("替换图片"));
+        replaceButton?.click();
+        window.requestAnimationFrame(() => {
+          field.querySelector<HTMLElement>("[data-media-field], .ant-upload")?.focus();
+        });
+        return;
+      }
+      field.querySelector<HTMLElement>("input, textarea, button, [tabindex]")?.focus();
+    };
+    const frame = window.requestAnimationFrame(() => window.requestAnimationFrame(focusField));
+    return () => window.cancelAnimationFrame(frame);
+  }, [contentActionRevision, editor]);
+
+  useEffect(() => {
+    if (!contentActionRequest || contentActionRequest.blockId !== editorBlockId ||
+      !isObjectId(contentActionRequest.nodeId) || activePanelMode !== "content") return;
+    pendingContentActionRef.current = contentActionRequest.nodeId;
+    setContentActionRevision((revision) => revision + 1);
+  }, [activePanelMode, contentActionRequest, editorBlockId]);
+
+  useEffect(() => {
+    if (!visualSelection || visualSelection.blockId !== editorBlockId ||
+      !isObjectId(visualSelection.nodeId) || activePanelMode !== "content" ||
+      (visualSelection.kind !== "text" && visualSelection.kind !== "action")) return;
+    pendingContentActionRef.current = visualSelection.nodeId;
+    setContentActionRevision((revision) => revision + 1);
+  }, [activePanelMode, editorBlockId, visualSelection]);
 
   useEffect(() => {
     if (activePanelMode !== "design" || !editorBlockId || !visualSelection ||
@@ -252,14 +326,11 @@ export default function DoublePosterInspector({
   const currentSelection = currentEditableObject && isObjectId(currentEditableObject.roleId)
     ? currentEditableObject.roleId
     : null;
-  const responsiveStates = getInspectorResponsiveStates({
-    instanceOverrides: props.__instanceOverrides,
-    selectedNodeId: currentSelection,
-    supportsFocus: currentSelection === "mainImage" || currentSelection === "detailImage",
-  });
-
   const currentPublishIssues = publishIssues.filter(
     (issue) => issue.severity !== "info" && issue.blockId === props.id,
+  );
+  const issueObjectIds = new Set(
+    currentPublishIssues.map(getIssueObjectId).filter((objectId): objectId is ObjectId => Boolean(objectId)),
   );
 
   const fieldByKey = (key: string): FieldDef | undefined =>
@@ -288,26 +359,17 @@ export default function DoublePosterInspector({
 
   /** 视觉覆盖稀疏写入：undefined/"" 删键（D.17），写回即时同步画布 */
   const applyVisual = (path: string[], value: unknown) => {
-    editor.update({
+    editor.updateFromCurrent((currentProps) => ({
       __instanceOverrides: setVisualOverridePath(
-        props.__instanceOverrides,
+        currentProps.__instanceOverrides,
         path,
         value,
       ),
-      ...(props.__contentTemplate
+      ...(currentProps.__contentTemplate
         ? {}
         : { __contentTemplate: createContentTemplateMarker(editor.moduleType) }),
-    });
+    }));
   };
-
-  const frameOverrides = isVisualRecord(props.__instanceOverrides) &&
-    isVisualRecord(props.__instanceOverrides.frame)
-      ? props.__instanceOverrides.frame
-      : {};
-  const compositionPreset =
-    typeof frameOverrides.compositionPreset === "string"
-      ? frameOverrides.compositionPreset
-      : "balanced";
 
   const designDefaults: PuckProps = {
     ...(doublePosterSchema.defaults ?? {}),
@@ -343,7 +405,7 @@ export default function DoublePosterInspector({
     });
   };
 
-  const activatePanelMode = (panelMode: PanelMode) => {
+  const commitPanelMode = (panelMode: PanelMode) => {
     const targetScrollTop = panelScrollPositionsRef.current[panelMode];
     if (panelMode !== activePanelMode && inspectorScrollRef.current) {
       panelScrollPositionsRef.current[activePanelMode] =
@@ -352,6 +414,44 @@ export default function DoublePosterInspector({
     }
     setActivePanelMode(panelMode);
     setVisualPanelMode(panelMode);
+  };
+
+  const activatePanelMode = (panelMode: PanelMode) => {
+    if (panelMode !== "design" || activePanelMode === "design") {
+      commitPanelMode(panelMode);
+      return;
+    }
+    const content = appData.content as Array<{
+      type: string;
+      props: PuckProps & { id: string };
+    }>;
+    if (getSharedTemplateDesignSignatures(content, editor.moduleType).size <= 1) {
+      commitPanelMode("design");
+      return;
+    }
+    modal.confirm({
+      title: "统一本页同类模板设计？",
+      content: "本页双图海报存在不同设计。进入模板编辑会以当前选中模块为基准统一全部双图海报，各自内容保持不变。",
+      okText: "统一并进入",
+      cancelText: "取消",
+      onOk: () => {
+        dispatch({
+          type: "setData",
+          data: {
+            ...appData,
+            content: applySharedTemplateDesignPatch(content, editor.moduleType, {
+              __instanceOverrides: extractContentTemplateLayoutData(
+                editor.moduleType,
+                editor.props,
+              ),
+            }),
+          },
+          recordHistory: true,
+        });
+        commitPanelMode("design");
+      },
+      onCancel: () => commitPanelMode("content"),
+    });
   };
 
   const selectObject = (objectId: ObjectId | null) => {
@@ -375,6 +475,45 @@ export default function DoublePosterInspector({
     if (activePanelMode === "design" && objectId === "action") {
       activatePanelMode("content");
     }
+  };
+
+  const updateImageRatio = (
+    objectId: "mainImage" | "detailImage",
+    colonValue: string,
+    sourceRect = activeCanvasGeometry?.nodes[objectId],
+    frameAspectRatio = activeCanvasGeometry?.frameAspectRatio,
+  ) => {
+    const ratio = Number(colonValue.split(":")[0]) / Number(colonValue.split(":")[1]);
+    const ratioPropKey = objectId === "mainImage" ? "mainImageRatio" : "detailImageRatio";
+    const editableObject = getContentTemplateEditableObject(editor.moduleType, objectId);
+    const nextHeight = sourceRect && frameAspectRatio && Number.isFinite(ratio) && ratio > 0
+      ? Math.min(
+          1 - sourceRect.y,
+          Math.max(
+            editableObject?.constraints.minSize.height ?? 0.08,
+            Math.min(
+              editableObject?.constraints.maxSize.height ?? 1,
+              sourceRect.width * frameAspectRatio / ratio,
+            ),
+          ),
+        )
+      : undefined;
+    editor.updateFromCurrent((currentProps) => {
+      const nextOverrides = nextHeight === undefined || !sourceRect
+        ? currentProps.__instanceOverrides
+        : setVisualOverridePath(
+            currentProps.__instanceOverrides,
+            ["nodes", objectId, "rectByViewport", viewport],
+            { ...sourceRect, height: nextHeight },
+          );
+      return {
+        [ratioPropKey]: colonValue,
+        __instanceOverrides: nextOverrides,
+        ...(currentProps.__contentTemplate
+          ? {}
+          : { __contentTemplate: createContentTemplateMarker(editor.moduleType) }),
+      };
+    });
   };
 
   const renderLayerOrder = (roleId: ObjectId) => {
@@ -420,6 +559,100 @@ export default function DoublePosterInspector({
           </button>
         </div>
       </div>
+    );
+  };
+
+  const renderObjectGeometry = (roleId: ObjectId) => {
+    const editableObject = getContentTemplateEditableObject(editor.moduleType, roleId);
+    if (!supportsCapabilityOnViewport(editableObject, "layout", viewport)) return null;
+    const contractRect = contract?.defaultGeometryByViewport[viewport].zones.find(
+      (zone) => zone.roleId === roleId,
+    )?.rect;
+    const rect = resolveVisualNode(props, roleId, viewport).rect ??
+      activeCanvasGeometry?.nodes[roleId] ?? contractRect;
+    if (!rect) return null;
+    const minSize = editableObject?.constraints.minSize ?? { width: 0.08, height: 0.08 };
+    const maxSize = editableObject?.constraints.maxSize ?? { width: 1, height: 1 };
+    const applyRect = (next: VisualRect) => applyVisual(
+      ["nodes", roleId, "rectByViewport", viewport],
+      {
+        x: Math.max(0, Math.min(1 - next.width, next.x)),
+        y: Math.max(0, Math.min(1 - next.height, next.y)),
+        width: Math.max(minSize.width, Math.min(maxSize.width, 1 - next.x, next.width)),
+        height: Math.max(minSize.height, Math.min(maxSize.height, 1 - next.y, next.height)),
+      },
+    );
+    const updateRect = (key: keyof VisualRect, percent: number) => {
+      const value = percent / 100;
+      if (key === "x") applyRect({ ...rect, x: Math.min(1 - rect.width, value) });
+      else if (key === "y") applyRect({ ...rect, y: Math.min(1 - rect.height, value) });
+      else if (key === "width") applyRect({ ...rect, width: value });
+      else applyRect({ ...rect, height: value });
+    };
+    const moveTo = (x: number, y: number) => {
+      const nextX = x === 0 ? 0 : x === 100 ? 1 - rect.width : (1 - rect.width) / 2;
+      const nextY = y === 0 ? 0 : y === 100 ? 1 - rect.height : (1 - rect.height) / 2;
+      applyRect({ ...rect, x: nextX, y: nextY });
+    };
+    return (
+      <>
+        <div
+          className="homepage-editor__visual-preset-group"
+          role="group"
+          aria-label={`${OBJECT_LABELS[roleId]}快速定位（${viewport === "mobile" ? "移动端" : "桌面端"}）`}
+          data-inspector-control="position"
+        >
+          <span>位置与尺寸</span>
+          <div className="homepage-editor__geometry-visual-row">
+            <div className="homepage-editor__nine-point-grid" aria-label="快速定位">
+              {[0, 50, 100].flatMap((y) => [0, 50, 100].map((x) => {
+                const targetX = x === 0 ? 0 : x === 100 ? 1 - rect.width : (1 - rect.width) / 2;
+                const targetY = y === 0 ? 0 : y === 100 ? 1 - rect.height : (1 - rect.height) / 2;
+                const active = Math.abs(rect.x - targetX) < 0.02 && Math.abs(rect.y - targetY) < 0.02;
+                return (
+                  <button
+                    key={`${x}-${y}`}
+                    type="button"
+                    aria-label={`位置：${y === 0 ? x === 0 ? "左上" : x === 50 ? "顶部居中" : "右上" : y === 50 ? x === 0 ? "左侧居中" : x === 50 ? "居中" : "右侧居中" : x === 0 ? "左下" : x === 50 ? "底部居中" : "右下"}`}
+                    aria-pressed={active}
+                    className={active ? "is-active" : undefined}
+                    onClick={() => moveTo(x, y)}
+                  />
+                );
+              }))}
+            </div>
+            <dl className="homepage-editor__geometry-readout" aria-label="当前位置与尺寸">
+              <div><dt>X</dt><dd>{Math.round(rect.x * 100)}%</dd></div>
+              <div><dt>Y</dt><dd>{Math.round(rect.y * 100)}%</dd></div>
+              <div><dt>W</dt><dd>{Math.round(rect.width * 100)}%</dd></div>
+              <div><dt>H</dt><dd>{Math.round(rect.height * 100)}%</dd></div>
+            </dl>
+          </div>
+        </div>
+        <InspectorDisclosure label="精确位置与尺寸">
+          <div className="homepage-editor__geometry-fields">
+            {([
+              ["x", "横向位置", 0, 1 - rect.width],
+              ["y", "纵向位置", 0, 1 - rect.height],
+              ["width", "宽度", minSize.width, Math.min(maxSize.width, 1 - rect.x)],
+              ["height", "高度", minSize.height, Math.min(maxSize.height, 1 - rect.y)],
+            ] as const).map(([key, label, min, max]) => (
+              <label key={key} className="homepage-editor__instance-field">
+                <span>{label} · {Math.round(rect[key] * 100)}%</span>
+                <input
+                  type="range"
+                  aria-label={`${label}（${viewport === "mobile" ? "移动端" : "桌面端"}）`}
+                  min={Math.round(min * 100)}
+                  max={Math.round(max * 100)}
+                  step={1}
+                  value={Math.round(rect[key] * 100)}
+                  onChange={(event) => updateRect(key, Number(event.target.value))}
+                />
+              </label>
+            ))}
+          </div>
+        </InspectorDisclosure>
+      </>
     );
   };
 
@@ -505,7 +738,7 @@ export default function DoublePosterInspector({
                   type="button"
                   className={currentRatio === colonValue ? "is-active" : ""}
                   aria-pressed={currentRatio === colonValue}
-                  onClick={() => editor.update({ [ratioPropKey]: colonValue })}
+                  onClick={() => updateImageRatio(roleId, colonValue)}
                 >
                   <i style={{ aspectRatio: preset }} aria-hidden="true" />
                   <em>
@@ -584,6 +817,7 @@ export default function DoublePosterInspector({
           />
         </label>
 
+        {renderObjectGeometry(roleId)}
         {renderLayerOrder(roleId)}
         <InspectorDisclosure label="高级设置">
           <div className="homepage-editor__advanced-settings-grid">
@@ -821,28 +1055,16 @@ export default function DoublePosterInspector({
 
   const renderModuleDesign = () => (
     <>
-      <div className="homepage-editor__visual-preset-group" role="group" aria-label="双图构图">
-        <span>双图构图</span>
-        <div className="homepage-editor__choice-cards is-composition">
-          {COMPOSITION_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={compositionPreset === option.value ? "is-active" : ""}
-              aria-pressed={compositionPreset === option.value}
-              onClick={() =>
-                applyVisual(
-                  ["frame", "compositionPreset"],
-                  option.value === "balanced" ? undefined : option.value,
-                )
-              }
-            >
-              <i data-choice={option.value} aria-hidden="true"><b /></i>
-              <em>{option.label}</em>
-            </button>
-          ))}
-        </div>
-      </div>
+      <InstanceOverridesPanel
+        moduleType={editor.moduleType}
+        props={props}
+        update={editor.update}
+        updateHistoryTransaction={editor.updateHistoryTransaction}
+        historyTransactionPending={editor.historyTransactionPending}
+        scopes={["layout"]}
+        embedded
+        viewport={viewport}
+      />
 
       <FieldRenderer
         def={bgColorPresetField()}
@@ -937,7 +1159,7 @@ export default function DoublePosterInspector({
         moduleName={
           typeof props.moduleName === "string" ? props.moduleName : ""
         }
-        deviceLabel={editor.device === "mobile" ? "移动端画布" : "桌面端画布"}
+        deviceLabel={editor.device === "mobile" ? "移动端" : "桌面端"}
         dirty={hasUnsavedChanges}
         onClose={editor.close}
         actions={[
@@ -953,34 +1175,20 @@ export default function DoublePosterInspector({
         ]}
       />
 
-      <InspectorObjectContext
-        moduleLabel="双图文"
-        selectedObjectId={currentSelection}
-        objects={inspectorObjects.map((object) => ({
-          id: object.roleId,
-          label: OBJECT_LABELS[object.roleId as ObjectId],
-        }))}
-        objectKind={currentEditableObject?.kind ?? "module"}
-        thumbnailUrl={currentSelection && currentSelection !== "copy" && typeof props[currentSelection] === "string"
-          ? props[currentSelection]
-          : undefined}
-        activeDevice={editor.device}
-        desktopState={responsiveStates.desktop}
-        mobileState={responsiveStates.mobile}
-        sharedDesignLabel={currentSelection === "copy"
-          ? "字号、对齐、颜色与字距双端共用"
-          : currentSelection === "action"
-            ? "行动文案与去向双端共用"
-          : currentSelection
-            ? "比例、填充与缩放双端共用"
-            : "构图与背景双端共用"}
-        onSelect={(objectId) => selectObject(objectId as ObjectId | null)}
-      />
-
       <InspectorPrimaryTabs
         activeMode={activePanelMode}
         designDisabled={!currentObjectCanEditDesign}
         onChange={activatePanelMode}
+      />
+
+      <DoublePosterMiniCanvas
+        props={props}
+        mode={activePanelMode}
+        selectedObjectId={currentSelection}
+        availableObjectIds={inspectorObjects.map((object) => object.roleId as ObjectId)}
+        issueObjectIds={issueObjectIds}
+        activeDevice={editor.device}
+        onSelect={selectObject}
       />
 
       <div ref={inspectorScrollRef} className="homepage-editor__inspector-scroll" data-inspector-scroll="main">
@@ -1016,21 +1224,14 @@ export default function DoublePosterInspector({
           aria-labelledby={`inspector-panel-tab-${activePanelMode}`}
         >
           <>
-            {activePanelMode === "content" && currentEditableObject ? (
-              <div
-                className="homepage-editor__design-scope-note"
-                data-content-scope="shared"
-                role="note"
-              >
-                <strong>内容字段双端共用</strong>
-              </div>
-            ) : null}
             <section className="homepage-editor__task-group">
-            {!currentSelection ? <header className="homepage-editor__task-panel-header">
+            <header className="homepage-editor__task-panel-header">
               <h3>
-                {activePanelMode === "design" ? "模块布局" : "模块内容"}
+                {currentSelection
+                  ? `${OBJECT_LABELS[currentSelection]}${activePanelMode === "design" ? "设计" : "内容"}`
+                  : activePanelMode === "design" ? "模块布局" : "模块内容"}
               </h3>
-            </header> : null}
+            </header>
             <div className="homepage-editor__task-panel-body">
               {activePanelMode === "content"
                 ? renderContentFields()

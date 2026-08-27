@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpStatus, Injectable } from '@nestjs/common';
+import { ApiError } from '../../common/errors/api-error';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { MailerService } from '../../common/mailer/mailer.service';
 import { PRIVACY_CONSENT_VERSION } from '../../common/privacy/privacy-consent';
 import { ProductsService } from '../products/products.service';
 import { Prisma } from '@prisma/client';
@@ -11,13 +11,14 @@ import {
   isUniqueConstraintError,
   prepareLeadIdempotency,
 } from '../leads/lead-submission';
+import { LeadsService } from '../leads/leads.service';
 
 @Injectable()
 export class InquiriesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly mailer: MailerService,
     private readonly productsService: ProductsService,
+    private readonly leadsService: LeadsService,
   ) {}
 
   async findAll(params: {
@@ -69,7 +70,9 @@ export class InquiriesService {
         customer,
       );
       if (!visibleProductIds.has(productId)) {
-        throw new BadRequestException(
+        throw new ApiError(
+          HttpStatus.BAD_REQUEST,
+          'INQUIRY_PRODUCT_NOT_AVAILABLE',
           '作品当前不可咨询，请移除作品后提交普通咨询',
         );
       }
@@ -89,6 +92,7 @@ export class InquiriesService {
       message: data.message,
       privacyConsentVersion: PRIVACY_CONSENT_VERSION,
     });
+    const privacyConsentedAt = new Date();
 
     const create = async () => this.prisma.$transaction(async (transaction) => {
       if (idempotency.idempotencyKeyHash) {
@@ -115,7 +119,7 @@ export class InquiriesService {
         }
       }
 
-      return transaction.inquiry.create({
+      const inquiry = await transaction.inquiry.create({
         data: {
           productId: productId ?? null,
           customerId: customer?.id || null,
@@ -129,7 +133,7 @@ export class InquiriesService {
           message: data.message,
           privacyConsent: true,
           privacyConsentVersion: PRIVACY_CONSENT_VERSION,
-          privacyConsentedAt: new Date(),
+          privacyConsentedAt,
           status: 'PENDING',
           lead: {
             create: {
@@ -151,6 +155,18 @@ export class InquiriesService {
           },
         },
       });
+      await transaction.consentRecord.create({
+        data: {
+          customerId: customer?.id || null,
+          purpose: 'SERVICE_PRIVACY',
+          decision: 'GRANTED',
+          policyVersion: PRIVACY_CONSENT_VERSION,
+          locale: 'ZH_CN',
+          source: `inquiry:${inquiry.id}`,
+          decidedAt: privacyConsentedAt,
+        },
+      });
+      return inquiry;
     });
 
     try {
@@ -180,34 +196,17 @@ export class InquiriesService {
     }
   }
 
-  async assign(id: number, assignedTo: number) {
-    return this.prisma.inquiry.update({ where: { id }, data: { assignedTo, status: 'PROCESSING' } });
+  async assign(id: number, assignedTo: number, createdBy?: number) {
+    return this.leadsService.updateBySource(
+      'inquiry',
+      id,
+      { assignedTo },
+      createdBy,
+    );
   }
 
-  async reply(id: number, reply: string) {
-    const updated = await this.prisma.inquiry.update({ where: { id }, data: { reply, status: 'REPLIED', repliedAt: new Date() } });
-
-    // 触达（OR-2）：回复后邮件告知客户。fire-and-forget，失败不影响回复主流程；
-    // 顾问回复为自由文本，插值前转义防注入邮件 HTML。
-    if (updated.customerEmail) {
-      const escapeHtml = (value: string) =>
-        String(value).replace(
-          /[&<>"']/g,
-          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c,
-        );
-      void this.mailer
-        .send({
-          to: updated.customerEmail,
-          subject: '您的咨询已回复 - 海川珠宝',
-          html: this.mailer.renderShell(`
-            <p>您好，${escapeHtml(updated.customerName)}：</p>
-            <p>您的咨询已有顾问回复：</p>
-            <div style="background:#f9f7f4;padding:16px;border-radius:6px;margin:16px 0;white-space:pre-wrap;">${escapeHtml(reply)}</div>
-            <p>如需继续沟通，欢迎<a href="${this.mailer.getSiteBaseUrl()}/customer">登录客户中心</a>查看详情，或直接回复本封邮件外的常用联系方式。</p>
-          `),
-        }, { requireNotificationDeliveryEnabled: true })
-        .catch(() => undefined);
-    }
-    return updated;
+  async reply(id: number, reply: string, createdBy?: number) {
+    // 回复是审计活动，不自动宣称已经完成首次联系；状态由客服显式流转。
+    return this.leadsService.recordInquiryReply(id, reply, createdBy);
   }
 }

@@ -70,17 +70,19 @@ export class QuotationsService {
   private async generateQuoteNo(tx: Prisma.TransactionClient): Promise<string> {
     const date = businessDateKey();
     const prefix = `QT${date}`;
-    const latest = await tx.quotation.findFirst({
-      where: { quoteNo: { startsWith: prefix } },
-      orderBy: { quoteNo: 'desc' },
-      select: { quoteNo: true },
-    });
-    let seq = 1;
-    if (latest && latest.quoteNo.length > prefix.length) {
-      const parsed = Number.parseInt(latest.quoteNo.slice(prefix.length), 10);
-      if (!Number.isNaN(parsed) && parsed >= 0) seq = parsed + 1;
-    }
-    return `${prefix}${String(seq).padStart(4, '0')}`;
+    const suffixStart = prefix.length + 1;
+    const [latest] = await tx.$queryRaw<
+      Array<{ max_sequence: bigint | number | string | null }>
+    >(
+      Prisma.sql`
+        SELECT MAX(CAST(SUBSTRING(quote_no, ${suffixStart}) AS UNSIGNED)) AS max_sequence
+        FROM quotations
+        WHERE quote_no LIKE ${`${prefix}%`}
+          AND SUBSTRING(quote_no, ${suffixStart}) REGEXP '^[0-9]+$'
+      `,
+    );
+    const seq = BigInt(String(latest?.max_sequence ?? 0)) + 1n;
+    return `${prefix}${seq.toString().padStart(4, '0')}`;
   }
 
   /** 由商品行计算报价金额（原价合计 / 折扣 / 成交价合计，整数分） */
