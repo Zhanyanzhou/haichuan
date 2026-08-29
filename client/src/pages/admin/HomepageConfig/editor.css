@@ -6633,7 +6633,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 }
 
 .homepage-editor__dp-mini-object.is-action:has(.anticon-link) {
-  border: 1px dashed #8e9497;
+  border: 1px dashed var(--adm-neutral-border);
   background: repeating-linear-gradient(135deg, #fff, #fff 6px, #f4f5f5 6px, #f4f5f5 12px);
 }
 
@@ -6647,7 +6647,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   height: 18px;
   border-radius: 50%;
   color: #fff;
-  background: #b54708;
+  background: var(--adm-warning);
   font-size: 10px;
   box-shadow: 0 0 0 2px #fff;
 }
