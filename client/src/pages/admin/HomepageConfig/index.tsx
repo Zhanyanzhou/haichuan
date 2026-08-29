@@ -32,7 +32,7 @@ import { Puck, type Data, type PuckAction, type UiState } from "@puckeditor/core
 import { useNavigate } from "react-router-dom";
 import { canAccessAdminRoute } from "@/config/adminRouteAccess";
 import { useAuthStore } from "@/store/authStore";
-import "@puckeditor/core/puck.css";
+import "@puckeditor/core/no-external.css";
 import { puckConfig } from "@/page-builder/config/puckConfig";
 import { BusinessRegionCanvasProvider } from "@/page-builder/adapters/businessRegion.puck";
 import {

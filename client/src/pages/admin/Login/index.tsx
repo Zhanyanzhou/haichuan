@@ -5,6 +5,7 @@ import type { InputRef } from 'antd';
 import { UserOutlined, LockOutlined, EyeInvisibleOutlined, EyeOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
 import { authApi } from '@/services/api';
+import { requestErrorCode, requestStatus } from '@/services/httpClient';
 import { USE_MOCK } from '@/services/mockData';
 import { unwrapResponse } from '@/utils/unwrap';
 import { ADMIN_COLORS } from '@/styles/antdTheme';
@@ -31,6 +32,22 @@ const TOKENS = {
 } as const;
 
 const REMEMBER_KEY = 'haichuan_remembered_user';
+
+function loginErrorMessage(error: unknown): string {
+  const status = requestStatus(error);
+  const errorCode = requestErrorCode(error);
+  const message = error instanceof Error ? error.message : '';
+
+  if (errorCode === 'ADMIN_LOGIN_TEMPORARILY_LOCKED') {
+    return message || '登录失败次数过多，账号已临时锁定，请稍后重试';
+  }
+  if (status === 429) return '登录尝试过于频繁，请稍后再试';
+  if (!status && (message.includes('Network') || message.includes('网络'))) {
+    return '暂时无法连接服务器，请稍后重试';
+  }
+  if (status && status >= 500) return '服务器暂时无法完成登录，请稍后重试';
+  return '账号或密码不正确，请检查后重试';
+}
 
 export default function Login() {
   const [form] = Form.useForm();
@@ -73,12 +90,7 @@ export default function Login() {
       const stateFrom = (location.state as { from?: unknown } | null)?.from;
       navigate(resolveAdminReturnPath(location.search, stateFrom), { replace: true });
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : '';
-      if (errorMessage.includes('Network') || errorMessage.includes('网络')) {
-        setError('暂时无法连接服务器，请稍后重试');
-      } else {
-        setError('账号或密码不正确，请检查后重试');
-      }
+      setError(loginErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -142,8 +154,8 @@ export default function Login() {
           <Form.Item
             name="username"
             rules={[
-              { required: true, message: '请输入用户名' },
-              { pattern: /^[a-zA-Z0-9]+$/, message: '用户名仅支持英文和数字' },
+              { required: true, whitespace: true, message: '请输入用户名' },
+              { max: 50, message: '用户名不能超过 50 个字符' },
             ]}
             label={<span style={{ fontSize: 14, fontWeight: 500, color: TOKENS.text }}>用户名</span>}
             style={{ marginBottom: 20 }}
@@ -155,11 +167,9 @@ export default function Login() {
               prefix={<UserOutlined style={{ color: TOKENS.placeholder }} />}
               placeholder="输入用户名"
               autoFocus
+              maxLength={50}
               onChange={(e) => {
-                // 实时过滤：只保留英文和数字
-                const username = e.target.value.replace(/[^a-zA-Z0-9]/g, '');
-                e.target.value = username;
-                setCredentials((current) => ({ ...current, username }));
+                setCredentials((current) => ({ ...current, username: e.target.value }));
               }}
               style={{
                 height: 56,
@@ -222,6 +232,7 @@ export default function Login() {
           {/* 错误提示 */}
           {error && (
             <div
+              role="alert"
               className="text-center mb-5 -mt-2"
               style={{ color: TOKENS.error, fontSize: 14 }}
             >
@@ -236,9 +247,9 @@ export default function Login() {
             onClick={() => {
               const usernameElement = document.getElementById('admin-login-username') as HTMLInputElement | null;
               const passwordElement = document.getElementById('admin-login-password') as HTMLInputElement | null;
-              const username = usernameElement?.value.trim() || credentials.username;
+              const username = usernameElement?.value ?? credentials.username;
               const password = passwordElement?.value || credentials.password;
-              if (!username || !password) {
+              if (!username.trim() || !password) {
                 setError('请输入用户名和密码');
                 return;
               }

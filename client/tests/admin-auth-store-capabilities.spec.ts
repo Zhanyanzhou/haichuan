@@ -67,6 +67,92 @@ async function submitAdminLogin(page: Page) {
 }
 
 test.describe("后台登录安全恢复原页面", () => {
+  test("登录页原样提交服务端已支持的标点用户名", async ({ page }) => {
+    let submittedUsername = "";
+    await page.route("**/api/**", (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path === "/api/auth/login") {
+        submittedUsername = request.postDataJSON().username;
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: 200,
+            data: {
+              user: {
+                id: 1,
+                username: submittedUsername,
+                realName: "标点用户名测试管理员",
+                role: "ADMIN",
+                status: "ACTIVE",
+              },
+            },
+            message: "ok",
+          }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data: {}, message: "ok" }),
+      });
+    });
+
+    await page.goto("/admin/login");
+    await page.getByPlaceholder("输入用户名").fill("owner.main_test-1");
+    await page.getByPlaceholder("输入密码").fill("TestPassword123!");
+    await page.getByRole("button", { name: "登录" }).click();
+
+    await expect.poll(() => submittedUsername).toBe("owner.main_test-1");
+    await expect(page).toHaveURL(/\/admin\/dashboard$/);
+  });
+
+  for (const scenario of [
+    {
+      name: "账号或密码错误保持统一提示",
+      status: 401,
+      errorCode: "HTTP_401",
+      apiMessage: "用户名或密码错误",
+      uiMessage: "账号或密码不正确，请检查后重试",
+    },
+    {
+      name: "账号临时锁定显示安全的等待提示",
+      status: 403,
+      errorCode: "ADMIN_LOGIN_TEMPORARILY_LOCKED",
+      apiMessage: "密码连续错误次数过多，账号已临时锁定，请约 15 分钟后重试",
+      uiMessage: "密码连续错误次数过多，账号已临时锁定，请约 15 分钟后重试",
+    },
+    {
+      name: "登录限流提示稍后重试",
+      status: 429,
+      errorCode: "HTTP_429",
+      apiMessage: "Too Many Requests",
+      uiMessage: "登录尝试过于频繁，请稍后再试",
+    },
+  ] as const) {
+    test(scenario.name, async ({ page }) => {
+      await page.route("**/api/auth/login", (route) => route.fulfill({
+        status: scenario.status,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: scenario.status,
+          data: null,
+          message: scenario.apiMessage,
+          errorCode: scenario.errorCode,
+        }),
+      }));
+
+      await page.goto("/admin/login");
+      await page.getByPlaceholder("输入用户名").fill("loginprobe");
+      await page.getByPlaceholder("输入密码").fill("invalid-password");
+      await page.getByRole("button", { name: "登录" }).click();
+
+      await expect(page.getByRole("alert")).toContainText(scenario.uiMessage);
+      await expect(page).toHaveURL(/\/admin\/login$/);
+    });
+  }
+
   test("后台会话失效时把当前路径和查询参数带到登录页", async ({ page }) => {
     await page.route("**/api/**", (route) => {
       const path = new URL(route.request().url()).pathname;

@@ -332,6 +332,7 @@ export const authApi = {
     }
     return api.post("/auth/login", data, {
       headers: { "X-Session-Mode": "cookie" },
+      suppressGlobalError: true,
     });
   },
   register: (data: StaffRegisterInput) => api.post("/auth/register", data),
