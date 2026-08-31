@@ -1,4 +1,12 @@
-import { useState, useEffect, useCallback, type CSSProperties } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
@@ -58,6 +66,11 @@ export default function CarouselBlock({
   );
 
   const [current, setCurrent] = useState(0);
+  const [manuallyPaused, setManuallyPaused] = useState(false);
+  const [hoverPaused, setHoverPaused] = useState(false);
+  const [focusPaused, setFocusPaused] = useState(false);
+  const swipeStartXRef = useRef<number | null>(null);
+  const suppressClickRef = useRef(false);
   const validImages = (Array.isArray(images) ? images : []).filter(
     (img) => Boolean(img.url),
   );
@@ -72,12 +85,56 @@ export default function CarouselBlock({
     setCurrent((c) => (c - 1 + validImages.length) % validImages.length);
   }, [validImages.length]);
 
+  const paused = manuallyPaused || hoverPaused || focusPaused;
+
   useEffect(() => {
     // 编辑预览中不自动轮播：避免周期性切换大图拖慢画布滚动，也避免干扰编辑定位。
-    if (editMode || !autoPlay || validImages.length <= 1) return;
+    if (editMode || !autoPlay || paused || validImages.length <= 1) return;
     const timer = setInterval(next, interval);
     return () => clearInterval(timer);
-  }, [editMode, autoPlay, interval, next, validImages.length]);
+  }, [editMode, autoPlay, interval, next, paused, validImages.length]);
+
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      prev();
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      next();
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setCurrent(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setCurrent(Math.max(0, validImages.length - 1));
+    }
+  };
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    if ((event.target as Element).closest("button")) return;
+    swipeStartXRef.current = event.clientX;
+    suppressClickRef.current = false;
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // 合成测试事件或旧浏览器可能不提供真实 pointer capture，手势仍可在组件内完成。
+    }
+  };
+
+  const finishPointerGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    const startX = swipeStartXRef.current;
+    swipeStartXRef.current = null;
+    if (startX === null) return;
+    const distance = event.clientX - startX;
+    if (Math.abs(distance) >= 40) {
+      suppressClickRef.current = true;
+      distance < 0 ? next() : prev();
+    }
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    }
+  };
 
   // 删除当前轮播项后及时收敛索引，避免访问已不存在的图片导致画布崩溃。
   useEffect(() => {
@@ -126,6 +183,26 @@ export default function CarouselBlock({
     <section
       className="homepage-carousel"
       data-content-role="frames"
+      role="region"
+      aria-roledescription="轮播图"
+      aria-label="图片轮播"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      onMouseEnter={() => setHoverPaused(true)}
+      onMouseLeave={() => setHoverPaused(false)}
+      onFocusCapture={() => setFocusPaused(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusPaused(false);
+      }}
+      onPointerDown={onPointerDown}
+      onPointerUp={finishPointerGesture}
+      onPointerCancel={() => { swipeStartXRef.current = null; }}
+      onClickCapture={(event) => {
+        if (!suppressClickRef.current) return;
+        suppressClickRef.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
       style={
         {
           position: "relative",
@@ -133,6 +210,7 @@ export default function CarouselBlock({
           "--homepage-carousel-mobile-ratio": mobileRatio,
           overflow: "hidden",
           background: "#DDE1E2",
+          touchAction: "pan-y",
         } as CSSProperties
       }
     >
@@ -142,7 +220,15 @@ export default function CarouselBlock({
           .homepage-carousel { aspect-ratio: var(--homepage-carousel-mobile-ratio); }
         }
         .homepage-carousel picture { display: block; width: 100%; height: 100%; }
+        .homepage-carousel:focus-visible { outline: 3px solid #181A1B; outline-offset: 3px; }
       `}</style>
+      <span
+        aria-live="polite"
+        aria-atomic="true"
+        style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0, 0, 0, 0)", whiteSpace: "nowrap", border: 0 }}
+      >
+        第 {current + 1} 张，共 {validImages.length} 张
+      </span>
       {(() => {
         const itemUrl = resolveItemLinkUrl(img);
         return itemUrl ? <Link to={itemUrl}>{imageContent}</Link> : imageContent;
@@ -158,8 +244,8 @@ export default function CarouselBlock({
               left: 16,
               top: "50%",
               transform: "translateY(-50%)",
-              width: 40,
-              height: 40,
+              width: 44,
+              height: 44,
               borderRadius: "50%",
               border: "none",
               background: "rgba(0,0,0,0.3)",
@@ -182,8 +268,8 @@ export default function CarouselBlock({
               right: 16,
               top: "50%",
               transform: "translateY(-50%)",
-              width: 40,
-              height: 40,
+              width: 44,
+              height: 44,
               borderRadius: "50%",
               border: "none",
               background: "rgba(0,0,0,0.3)",
@@ -200,8 +286,9 @@ export default function CarouselBlock({
         </>
       )}
       {showDots && validImages.length > 1 && (
-        <div
+        <nav
           data-content-role="pagination"
+          aria-label="轮播图片"
           style={{
             position: "absolute",
             bottom: 16,
@@ -219,18 +306,46 @@ export default function CarouselBlock({
               aria-label={`切换到第 ${i + 1} 张轮播图`}
               aria-current={i === current ? "true" : undefined}
               style={{
-                width: i === current ? 20 : 8,
-                height: 8,
-                borderRadius: 4,
+                width: 32,
+                height: 32,
                 border: "none",
                 cursor: "pointer",
-                background: i === current ? "#181A1B" : "rgba(255,255,255,0.5)",
-                transition: "all 0.3s",
+                background: "transparent",
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
               }}
-            />
+            >
+              <span aria-hidden style={{ width: i === current ? 20 : 8, height: 8, borderRadius: 4, background: i === current ? "#181A1B" : "rgba(255,255,255,0.7)", transition: "all 0.3s" }} />
+            </button>
           ))}
-        </div>
+        </nav>
       )}
+      {autoPlay && validImages.length > 1 ? (
+        <button
+          type="button"
+          aria-label={manuallyPaused ? "继续自动轮播" : "暂停自动轮播"}
+          aria-pressed={manuallyPaused}
+          onClick={() => setManuallyPaused((value) => !value)}
+          style={{
+            position: "absolute",
+            right: 16,
+            bottom: 14,
+            width: 44,
+            height: 44,
+            borderRadius: "50%",
+            border: "none",
+            background: "rgba(0,0,0,0.38)",
+            color: "#fff",
+            cursor: "pointer",
+            display: "grid",
+            placeItems: "center",
+            fontSize: 13,
+          }}
+        >
+          <span aria-hidden>{manuallyPaused ? "▶" : "Ⅱ"}</span>
+        </button>
+      ) : null}
     </section>
   );
 }

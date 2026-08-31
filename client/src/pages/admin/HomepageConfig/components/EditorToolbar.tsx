@@ -3,12 +3,11 @@
  * 设备切换器 + 保存/发布主操作；版本与页面设置收纳到更多菜单。
  * （自 index.tsx 平移，逻辑零变更）
  */
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useGetPuck } from "@puckeditor/core";
-import { App as AntdApp, Button, Dropdown } from "antd";
+import { App as AntdApp } from "antd";
 import {
-  CopyOutlined,
   DeleteOutlined,
   DesktopOutlined,
   DownloadOutlined,
@@ -17,13 +16,7 @@ import {
   HistoryOutlined,
   LayoutOutlined,
   MobileOutlined,
-  MoreOutlined,
-  RedoOutlined,
-  ReloadOutlined,
-  SaveOutlined,
-  SendOutlined,
   SettingOutlined,
-  UndoOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import type { EditorPageKey } from "@/page-builder/config/editorPages";
@@ -37,16 +30,17 @@ import { BLOCK_META } from "@/page-builder/config/blockMeta";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import { USE_MOCK } from "@/services/mockData";
 import {
-  ROOT_ZONE,
   useEditorHistoryTransaction,
   useHomepagePuck,
 } from "../editor-store";
+import { formatViewportSize, type ViewportPreset } from "../editor-utils";
+import WorkspaceContextControls from "@/page-builder/template-editor/WorkspaceContextControls";
+import useWorkspaceHistoryShortcuts from "@/page-builder/template-editor/useWorkspaceHistoryShortcuts";
 import {
-  formatViewportSize,
-  getModuleDisplayName,
-  type ViewportPreset,
-} from "../editor-utils";
-import type { PuckProps } from "@/page-builder/types";
+  WorkspaceDeviceSwitcher,
+  WorkspaceStatusBadge,
+  WorkspaceToolbarActions,
+} from "@/page-builder/template-editor/WorkspaceToolbarPrimitives";
 
 export const VIEWPORT_PRESETS: ViewportPreset[] = [
   // 平板档已移除（2026-08-16 用户决策）：平板继承桌面布局无独立编辑价值，
@@ -54,78 +48,6 @@ export const VIEWPORT_PRESETS: ViewportPreset[] = [
   { label: "桌面端", icon: <DesktopOutlined />, ...RESPONSIVE_CANVAS.desktop },
   { label: "移动端", icon: <MobileOutlined />, ...RESPONSIVE_CANVAS.mobile },
 ];
-
-type DraftStatusMode = "saving" | "dirty" | "pending" | "clean" | "published";
-
-function getDraftStatusMode(options: {
-  saving: boolean;
-  viewingPublished: boolean;
-  hasUnsavedChanges: boolean;
-  hasPendingDraft: boolean;
-}): DraftStatusMode {
-  if (options.saving) return "saving";
-  if (options.hasUnsavedChanges) return "dirty";
-  if (options.viewingPublished) return "published";
-  if (options.hasPendingDraft) return "pending";
-  return "clean";
-}
-
-function DraftStatusBadge({
-  mode,
-  draftSavedAtLabel,
-}: {
-  mode: DraftStatusMode;
-  draftSavedAtLabel: string | null;
-}) {
-  if (mode === "published") return null;
-
-  let content: ReactNode;
-  if (mode === "saving") {
-    content = <>正在保存草稿</>;
-  } else if (mode === "dirty") {
-    content = (
-      <>
-        <i className="homepage-editor__draft-status-dot" aria-hidden="true" />
-        有未保存修改
-      </>
-    );
-  } else if (mode === "pending") {
-    content = (
-      <>
-        草稿有未发布修改
-        {draftSavedAtLabel ? <small>最后保存 {draftSavedAtLabel}</small> : null}
-      </>
-    );
-  } else {
-    content = (
-      <>
-        与线上版本一致
-        {draftSavedAtLabel ? <small>最后保存 {draftSavedAtLabel}</small> : null}
-      </>
-    );
-  }
-
-  const accessibleLabel =
-    mode === "saving"
-      ? "草稿状态：正在保存草稿"
-      : mode === "dirty"
-        ? "草稿状态：有未保存修改"
-        : mode === "pending"
-          ? `草稿状态：草稿有未发布修改${draftSavedAtLabel ? `，最后保存 ${draftSavedAtLabel}` : ""}`
-          : `草稿状态：与线上版本一致${draftSavedAtLabel ? `，最后保存 ${draftSavedAtLabel}` : ""}`;
-
-  return (
-    <div
-      className="homepage-editor__draft-status"
-      data-mode={mode}
-      role="status"
-      aria-label={accessibleLabel}
-      title={accessibleLabel}
-    >
-      {content}
-    </div>
-  );
-}
 
 export default function EditorToolbar({
   pageKey,
@@ -137,9 +59,7 @@ export default function EditorToolbar({
   previewMode,
   hasUnsavedChanges,
   canPublish,
-  publishValidationState,
-  publishErrorCount,
-  publishSettingsErrorCount,
+  canManageTemplates,
   draftSavedAtLabel,
   onPublish,
   onSaveDraft,
@@ -149,10 +69,11 @@ export default function EditorToolbar({
   onDiscardDraft,
   onOpenRevisions,
   onOpenPageSettings,
-  onRetryPublishValidation,
   onPreviewModeChange,
   onDataChange,
   onCanvasDataSync,
+  onEnterTemplateMode,
+  restoreViewport,
 }: {
   pageKey: EditorPageKey;
   publishing: boolean;
@@ -163,11 +84,9 @@ export default function EditorToolbar({
   previewMode: boolean;
   hasUnsavedChanges: boolean;
   canPublish: boolean;
-  publishValidationState: "checking" | "current" | "stale" | "error";
-  publishErrorCount: number;
-  publishSettingsErrorCount: number;
+  canManageTemplates: boolean;
   draftSavedAtLabel: string | null;
-  onPublish: (data: unknown, locateBlock: (blockIndex: number) => void) => void;
+  onPublish: (data: unknown) => void;
   onSaveDraft: (data: unknown) => void;
   onExitViewing: () => void;
   onEditPendingDraft: () => void;
@@ -175,11 +94,12 @@ export default function EditorToolbar({
   onDiscardDraft: () => void;
   onOpenRevisions: () => void;
   onOpenPageSettings: () => void;
-  onRetryPublishValidation: () => void;
   onPreviewModeChange: (previewing: boolean) => void;
   onDataChange: (data: unknown) => void;
   /** 整页替换或历史导航后同步父层 data prop，不推进已保存草稿基线。 */
   onCanvasDataSync: (data: unknown) => void;
+  onEnterTemplateMode: (viewport: { width: number; height: number }) => void;
+  restoreViewport?: { width: number; height: number } | null;
 }) {
   const { message, modal } = AntdApp.useApp();
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
@@ -187,37 +107,40 @@ export default function EditorToolbar({
   const appData = useHomepagePuck((state) => state.appState.data);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
   const dispatch = useHomepagePuck((state) => state.dispatch);
-  const selectedItem = useHomepagePuck((state) => state.selectedItem);
-  const history = useHomepagePuck((state) => state.history);
-  const historyTransactionPending = useEditorHistoryTransaction(
-    (state) => state.pending,
-  );
+  const canUndo = useHomepagePuck((state) => state.history.hasPast);
+  const canRedo = useHomepagePuck((state) => state.history.hasFuture);
+  const historyPending = useEditorHistoryTransaction((state) => state.pending);
   const currentViewport = viewports.current;
-  const content = appData.content as Array<{
-    type: string;
-    props: PuckProps;
-  }>;
-  const selectedIndex = content.findIndex(
-    (item) => item.props?.id === selectedItem?.props?.id,
-  );
-  const selectedModule = selectedIndex >= 0 ? content[selectedIndex] : null;
-  const selectedLocked = Boolean(selectedModule?.props?.locked);
-  const selectedLabel = selectedModule
-    ? getModuleDisplayName(selectedModule.type, selectedModule.props)
-    : null;
   const publishUnavailableReason = !canPublish
     ? "当前账号只能编辑草稿，需由管理员发布"
     : viewingPublished
-    ? "正在查看线上版本，无需重复发布"
-    : publishValidationState === "checking"
-      ? "正在核对发布资格"
-      : publishValidationState === "stale"
-        ? "内容已变化，等待重新核对发布资格"
-        : publishValidationState === "error"
-          ? "发布资格暂时无法核对，请稍后重试"
-          : publishErrorCount > 0
-            ? `还有 ${publishErrorCount} 项发布问题需要处理`
-            : null;
+      ? "正在查看线上版本，无需重复发布"
+      : null;
+  const publishActionLabel = publishUnavailableReason
+    ? `发布到前台网站（${publishUnavailableReason}）`
+    : "发布到前台网站";
+  const draftStatusMode = saving
+    ? "saving"
+    : hasUnsavedChanges
+      ? "dirty"
+      : viewingPublished
+        ? "readonly"
+        : hasPendingDraft
+          ? "pending"
+          : "clean";
+  const draftStatusLabel = draftStatusMode === "saving"
+    ? "正在保存草稿"
+    : draftStatusMode === "dirty"
+      ? "有未保存修改"
+      : draftStatusMode === "pending"
+        ? "草稿有未发布修改"
+        : draftStatusMode === "readonly"
+          ? "线上版本只读"
+          : "与线上版本一致";
+  const draftStatusDetail = draftStatusMode === "pending" || draftStatusMode === "clean"
+    ? draftSavedAtLabel ? `最后保存 ${draftSavedAtLabel}` : null
+    : null;
+  const draftStatusAriaLabel = `草稿状态：${draftStatusLabel}${draftStatusDetail ? `，${draftStatusDetail}` : ""}`;
 
   useEffect(() => {
     onDataChange(appData);
@@ -228,7 +151,7 @@ export default function EditorToolbar({
   }, []);
 
   const setViewport = useCallback(
-    (preset: ViewportPreset) => {
+    (preset: Pick<ViewportPreset, "width" | "height">) => {
       dispatch({
         type: "setUi",
         ui: {
@@ -242,21 +165,21 @@ export default function EditorToolbar({
     [dispatch, viewports],
   );
 
+  const restoredViewportRef = useRef(false);
+  useEffect(() => {
+    if (restoredViewportRef.current || !restoreViewport) return;
+    restoredViewportRef.current = true;
+    setViewport(restoreViewport);
+  }, [restoreViewport, setViewport]);
+
   const navigateHistory = useCallback(
     (direction: "back" | "forward") => {
-      if (previewMode || useEditorHistoryTransaction.getState().pending) {
-        return;
-      }
-
+      if (previewMode || useEditorHistoryTransaction.getState().pending) return false;
       const before = getPuck();
-      const canNavigate =
-        direction === "back"
-          ? before.history.hasPast
-          : before.history.hasFuture;
-      if (!canNavigate) return;
-
-      // Puck 历史快照包含 ui.viewports.current；内容撤销不应切换用户
-      // 正在编辑的设备。历史导航后只恢复 current，且不再写入历史。
+      const canNavigate = direction === "back"
+        ? before.history.hasPast
+        : before.history.hasFuture;
+      if (!canNavigate) return false;
       const activeViewport = { ...before.appState.ui.viewports.current };
       before.history[direction]();
       const after = getPuck();
@@ -271,68 +194,26 @@ export default function EditorToolbar({
         },
         recordHistory: false,
       });
+      return true;
     },
     [getPuck, onCanvasDataSync, previewMode],
   );
 
+  useWorkspaceHistoryShortcuts({
+    disabled: viewingPublished || previewMode,
+    onNavigate: navigateHistory,
+  });
+
   const publishCurrentPage = useCallback(() => {
-    onPublish(appData, (blockIndex) => {
-      dispatch({
-        type: "setUi",
-        ui: { itemSelector: { index: blockIndex, zone: ROOT_ZONE } },
-      });
-    });
-  }, [appData, dispatch, onPublish]);
-
-  const duplicateSelected = useCallback(() => {
-    if (!selectedModule || selectedLocked || previewMode) return;
-    dispatch({
-      type: "duplicate",
-      sourceIndex: selectedIndex,
-      sourceZone: ROOT_ZONE,
-    });
-    message.success(`已复制“${selectedLabel}”模块`);
-  }, [
-    dispatch,
-    message,
-    previewMode,
-    selectedIndex,
-    selectedLabel,
-    selectedLocked,
-    selectedModule,
-  ]);
-
-  const deleteSelected = useCallback(() => {
-    if (!selectedModule || selectedLocked || previewMode) return;
-    modal.confirm({
-      title: `删除“${selectedLabel}”？`,
-      content: "删除后可使用“撤销”恢复；发布前不会影响线上页面。",
-      okText: "删除模块",
-      okButtonProps: { danger: true },
-      cancelText: "取消",
-      onOk: () => {
-        dispatch({
-          type: "remove",
-          index: selectedIndex,
-          zone: ROOT_ZONE,
-        });
-        message.success(`已删除“${selectedLabel}”模块`);
-      },
-    });
-  }, [
-    dispatch,
-    message,
-    modal,
-    previewMode,
-    selectedIndex,
-    selectedLabel,
-    selectedLocked,
-    selectedModule,
-  ]);
+    onPublish(getPuck().appState.data);
+  }, [getPuck, onPublish]);
 
   const togglePreviewMode = useCallback(() => {
     const nextPreviewMode = !previewMode;
     if (nextPreviewMode) {
+      // 进入预览会切换画布分支；切换前先把 Puck 的即时内存状态同步给父层，
+      // 避免 onChange 尚未提交时由旧受控 data 重新挂载而丢失刚输入的字段。
+      onCanvasDataSync(getPuck().appState.data);
       dispatch({
         type: "setUi",
         ui: { itemSelector: null },
@@ -340,7 +221,7 @@ export default function EditorToolbar({
       });
     }
     onPreviewModeChange(nextPreviewMode);
-  }, [dispatch, onPreviewModeChange, previewMode]);
+  }, [dispatch, getPuck, onCanvasDataSync, onPreviewModeChange, previewMode]);
 
   useEffect(() => {
     if (!previewMode) return undefined;
@@ -537,30 +418,6 @@ export default function EditorToolbar({
       : [];
 
   const compactActionItems = [
-    ...(publishValidationState === "error" && !viewingPublished
-      ? [{
-          key: "retry-publish-validation",
-          icon: <ReloadOutlined />,
-          label: "重新检查发布资格",
-          onClick: onRetryPublishValidation,
-        }]
-      : []),
-    ...(publishValidationState === "current"
-      && publishSettingsErrorCount > 0
-      && !viewingPublished
-      ? [{
-          key: "complete-publish-settings",
-          icon: <SettingOutlined />,
-          label: `完善发布资料（${publishSettingsErrorCount}）`,
-          danger: true,
-          onClick: onOpenPageSettings,
-        }]
-      : []),
-    ...((publishValidationState === "error"
-      || (publishValidationState === "current" && publishSettingsErrorCount > 0))
-      && !viewingPublished
-      ? [{ type: "divider" as const }]
-      : []),
     ...(publishedNeedsRevalidation
       ? [{
           key: "publication-revalidation",
@@ -647,269 +504,128 @@ export default function EditorToolbar({
           if (file) void importPageDecoration(file);
         }}
       />
-      <div
-        className="homepage-editor__viewport-switcher"
-        aria-label="编辑设备：桌面端与移动端布局可分别调整"
+      <WorkspaceDeviceSwitcher
+        ariaLabel="编辑设备：桌面端与移动端布局可分别调整"
         title="切换桌面端或移动端布局；移动端调整不会覆盖桌面端"
-      >
-        {VIEWPORT_PRESETS.map((preset) => (
-          <button
-            key={preset.label}
-            type="button"
-            className={
-              currentViewport.width === preset.width ||
-              (preset.width === RESPONSIVE_CANVAS.desktop.width &&
-                currentViewport.width === "100%")
-                ? "is-active"
-                : ""
-            }
-            onClick={() => setViewport(preset)}
-            aria-pressed={
-              currentViewport.width === preset.width ||
-              (preset.width === RESPONSIVE_CANVAS.desktop.width &&
-                currentViewport.width === "100%")
-            }
-            title={`${preset.label}预览（${formatViewportSize(preset)}）`}
-            aria-label={`${preset.label}布局（${formatViewportSize(preset)}）`}
-          >
-            {preset.icon}
-            <span>
-              {preset.label}
-              <small>{formatViewportSize(preset)}</small>
-            </span>
-          </button>
-        ))}
-      </div>
+        value={currentViewport.width === RESPONSIVE_CANVAS.mobile.width ? "mobile" : "desktop"}
+        options={VIEWPORT_PRESETS.map((preset) => ({
+          value: preset.width === RESPONSIVE_CANVAS.mobile.width ? "mobile" : "desktop",
+          label: preset.label,
+          detail: formatViewportSize(preset),
+          icon: preset.icon,
+          title: `${preset.label}预览（${formatViewportSize(preset)}）`,
+          ariaLabel: `${preset.label}布局（${formatViewportSize(preset)}）`,
+        }))}
+        onChange={(value) => {
+          const preset = VIEWPORT_PRESETS.find((candidate) => (
+            value === "mobile"
+              ? candidate.width === RESPONSIVE_CANVAS.mobile.width
+              : candidate.width === RESPONSIVE_CANVAS.desktop.width
+          ));
+          if (preset) setViewport(preset);
+        }}
+      />
 
-      <div className="homepage-editor__toolbar-left-context">
-        {!viewingPublished && publishValidationState === "error" ? (
-          <Button
-            type="text"
-            danger
-            size="small"
-            icon={<ReloadOutlined />}
-            onClick={onRetryPublishValidation}
-            aria-label="发布资格检查失败，重新检查"
-            title="当前草稿已保留；重新调用服务端发布预检"
-          >
-            重新检查发布资格
-          </Button>
-        ) : null}
-        {!viewingPublished
-        && publishValidationState === "current"
-        && publishSettingsErrorCount > 0 ? (
-          <Button
-            type="text"
-            danger
-            size="small"
-            icon={<SettingOutlined />}
-            onClick={onOpenPageSettings}
-            aria-label={`有 ${publishSettingsErrorCount} 项页面发布资料问题，打开发布设置`}
-            title="补齐内容责任、SEO 与当前公开素材授权"
-          >
-            发布资料待完善 {publishSettingsErrorCount}
-          </Button>
-        ) : null}
-        {publishedNeedsRevalidation ? (
-          <Button
-            type="text"
-            danger
-            size="small"
-            icon={<SettingOutlined />}
-            onClick={onOpenPageSettings}
-            aria-label="线上版本未通过当前正式内容门禁，打开发布设置"
-            title="旧线上快照缺少当前发布验收记录；补齐发布设置并重新发布前，公开端使用安全短页"
-          >
-            线上版本需重新审核
-          </Button>
-        ) : null}
-        <DraftStatusBadge
-          mode={getDraftStatusMode({
-            saving,
-            viewingPublished,
-            hasUnsavedChanges,
-            hasPendingDraft,
-          })}
-          draftSavedAtLabel={draftSavedAtLabel}
-        />
+      <div
+        id="homepage-editor-mode-slot"
+        className="homepage-editor__mode-slot"
+        aria-label="编辑工作模式入口"
+      />
 
-        <div className="homepage-editor__edit-context">
-          <span
-            className="homepage-editor__selected-module"
-            data-selected={selectedModule ? "true" : "false"}
-            role="status"
-            aria-label={
-              selectedLabel
-                ? `当前选中模块：${selectedLabel}`
-                : "当前未选中模块"
-            }
-            title={
-              selectedLabel
-                ? `当前选中：${selectedLabel}`
-                : "请在画布或图层面板选择模块"
-            }
-          >
-            {selectedLabel ? `已选：${selectedLabel}` : "未选模块"}
-          </span>
-          <div
-            className="homepage-editor__history-actions"
-            role="toolbar"
-            aria-label="画布编辑操作"
-          >
-            <Button
-              type="text"
-              size="small"
-              icon={<UndoOutlined />}
-              disabled={
-                viewingPublished ||
-                !history.hasPast ||
-                previewMode ||
-                historyTransactionPending
-              }
-              onClick={() => navigateHistory("back")}
-              aria-label="撤销"
-              title="撤销"
-            />
-            <Button
-              type="text"
-              size="small"
-              icon={<RedoOutlined />}
-              disabled={
-                viewingPublished ||
-                !history.hasFuture ||
-                previewMode ||
-                historyTransactionPending
-              }
-              onClick={() => navigateHistory("forward")}
-              aria-label="重做"
-              title="重做"
-            />
-            <Button
-              type="text"
-              size="small"
-              icon={<CopyOutlined />}
-              disabled={
-                viewingPublished ||
-                !selectedModule ||
-                selectedLocked ||
-                previewMode
-              }
-              onClick={duplicateSelected}
-              aria-label="复制当前模块"
-              title={selectedLocked ? "固定模块不能复制" : "复制当前模块"}
-            />
-            <Button
-              type="text"
-              danger
-              size="small"
-              icon={<DeleteOutlined />}
-              disabled={
-                viewingPublished ||
-                !selectedModule ||
-                selectedLocked ||
-                previewMode
-              }
-              onClick={deleteSelected}
-              aria-label="删除当前模块"
-              title={selectedLocked ? "固定模块不能删除" : "删除当前模块"}
-            />
-          </div>
-        </div>
-      </div>
+      <WorkspaceContextControls
+        activeMode="page"
+        canEnterTemplate={canManageTemplates && !viewingPublished}
+        templateDisabledReason={!canManageTemplates
+          ? "只有超级管理员可以设计模板"
+          : viewingPublished
+            ? "返回草稿后才能设计模板"
+            : undefined}
+        onSelectTemplate={() => onEnterTemplateMode({
+          width: typeof currentViewport.width === "number"
+            ? currentViewport.width
+            : RESPONSIVE_CANVAS.desktop.width,
+          height: typeof currentViewport.height === "number"
+            ? currentViewport.height
+            : RESPONSIVE_CANVAS.desktop.height,
+        })}
+      />
 
-      <div className="homepage-editor__toolbar-actions">
-        {USE_MOCK ? (
-          <span
-            className="homepage-editor__mock-mode-badge"
-            data-testid="homepage-editor-mock-mode"
-            role="status"
-            aria-label="当前为 Mock 模式，数据仅保存在本机，不连接真实接口"
-            title="当前为 Mock 模式，数据仅保存在本机，不连接真实接口"
-          >
-            Mock <span>模式</span>
-          </span>
-        ) : null}
-        <Button
-          className="homepage-editor__toolbar-preview"
-          size="small"
-          type={previewMode ? "primary" : "default"}
-          icon={<EyeOutlined />}
-          onClick={togglePreviewMode}
-          aria-pressed={previewMode}
-          aria-label={previewMode ? "退出当前画布预览" : "预览当前画布"}
-          title={
+      <WorkspaceToolbarActions
+        history={{
+          canUndo: !viewingPublished && !previewMode && !historyPending && canUndo,
+          canRedo: !viewingPublished && !previewMode && !historyPending && canRedo,
+          onUndo: () => { navigateHistory("back"); },
+          onRedo: () => { navigateHistory("forward"); },
+        }}
+        leading={(
+          <>
+            {!viewingPublished ? (
+              <WorkspaceStatusBadge
+                mode={draftStatusMode}
+                label={draftStatusLabel}
+                detail={draftStatusDetail}
+                ariaLabel={draftStatusAriaLabel}
+                className="homepage-editor__draft-status"
+              />
+            ) : null}
+            {USE_MOCK ? (
+              <span
+                className="homepage-editor__mock-mode-badge"
+                data-testid="homepage-editor-mock-mode"
+                role="status"
+                aria-label="当前为 Mock 模式，数据仅保存在本机，不连接真实接口"
+                title="当前为 Mock 模式，数据仅保存在本机，不连接真实接口"
+              >
+                Mock <span>模式</span>
+              </span>
+            ) : null}
+          </>
+        )}
+        preview={{
+          active: previewMode,
+          label: previewMode ? "退出预览" : "预览",
+          onClick: togglePreviewMode,
+          ariaLabel: previewMode ? "退出当前画布预览" : "预览当前画布",
+          title:
             previewMode
               ? "退出当前画布预览（Esc）"
-              : "预览当前内存中的画布，不会保存或发布"
-          }
-        >
-          {previewMode ? "退出预览" : "预览"}
-        </Button>
-        <div className="homepage-editor__toolbar-secondary-actions">
-          {viewingPublished ? (
-            <Button
-              size="small"
-              icon={<EditOutlined />}
-              onClick={onExitViewing}
-              title="返回编辑模式"
-            >
-              返回编辑
-            </Button>
-          ) : (
-            <Button
-              size="small"
-              icon={<SaveOutlined />}
-              loading={saving}
-              onClick={() => onSaveDraft(appData)}
-              aria-label={saving ? "正在保存当前装修草稿" : "保存当前装修草稿"}
-              title={saving ? "正在保存当前装修草稿" : "保存当前装修草稿"}
-            >
-              保存草稿
-            </Button>
-          )}
-        </div>
-        <Dropdown
-          trigger={["click"]}
-          placement="bottomRight"
-          menu={{ items: menuItems, onClick: handleMenuClick }}
-        >
-        <Button
-          className="homepage-editor__toolbar-more"
-          size="small"
-          danger={publishedNeedsRevalidation}
-          icon={<MoreOutlined />}
-          aria-label={
+              : "预览当前内存中的画布，不会保存或发布",
+        }}
+        save={viewingPublished ? {
+          label: "返回编辑",
+          icon: <EditOutlined />,
+          onClick: onExitViewing,
+          ariaLabel: "返回编辑",
+          title: "返回编辑模式",
+        } : {
+          label: "保存草稿",
+          loading: saving,
+          onClick: () => onSaveDraft(getPuck().appState.data),
+          ariaLabel: saving ? "正在保存当前装修草稿" : "保存当前装修草稿",
+          title: saving ? "正在保存当前装修草稿" : "保存当前装修草稿",
+        }}
+        more={{
+          items: menuItems,
+          onClick: handleMenuClick,
+          danger: publishedNeedsRevalidation,
+          ariaLabel:
             publishedNeedsRevalidation
               ? "更多编辑操作，线上版本需重新审核"
-              : "更多编辑操作"
-          }
-          title={
+              : "更多编辑操作",
+          title:
             publishedNeedsRevalidation
               ? "线上版本需重新审核；打开菜单处理发布设置"
-              : "更多编辑操作"
-          }
-        >
-            更多
-          </Button>
-        </Dropdown>
-        <Button
-          className="homepage-editor__toolbar-publish"
-          size="small"
-          type="primary"
-          icon={<SendOutlined />}
-          aria-label={
-            publishUnavailableReason
-              ? `发布到前台网站（${publishUnavailableReason}）`
-              : "发布到前台网站"
-          }
-          loading={publishing}
-          disabled={Boolean(publishUnavailableReason)}
-          onClick={publishCurrentPage}
-          title={publishUnavailableReason ?? "发布到前台网站"}
-        >
-          发布
-        </Button>
-      </div>
+              : "更多编辑操作",
+        }}
+        publish={{
+          label: "发布",
+          loading: publishing,
+          disabled: Boolean(publishUnavailableReason),
+          onClick: publishCurrentPage,
+          ariaLabel: publishActionLabel,
+          title: publishUnavailableReason ?? publishActionLabel,
+        }}
+      />
     </header>
   );
 

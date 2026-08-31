@@ -4,11 +4,13 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const [clientSource, serverSource, productEligibilitySource, rendererSource, blockMetaSource, homepageConfigSource, schemaInspectorSource] = await Promise.all([
+const [clientSource, serverSource, productEligibilitySource, rendererSource, matureRegistrySource, matureRendererSource, blockMetaSource, homepageConfigSource, schemaInspectorSource] = await Promise.all([
   readFile(path.join(root, "client/src/page-builder/config/puckConfig.tsx"), "utf8"),
   readFile(path.join(root, "server/src/modules/page-modules/page-modules.service.ts"), "utf8"),
   readFile(path.join(root, "server/src/modules/products/product-eligibility.ts"), "utf8"),
   readFile(path.join(root, "client/src/page-builder/runtime/PuckDocumentRenderer.tsx"), "utf8"),
+  readFile(path.join(root, "client/src/page-builder/template-definition/validateTemplateDefinition.ts"), "utf8"),
+  readFile(path.join(root, "client/src/page-builder/template-definition/MatureContentTemplateRenderer.tsx"), "utf8"),
   readFile(path.join(root, "client/src/page-builder/config/blockMeta.ts"), "utf8"),
   readFile(path.join(root, "client/src/pages/admin/HomepageConfig/index.tsx"), "utf8"),
   readFile(path.join(root, "client/src/page-builder/inspector/SchemaInspectorPanel.tsx"), "utf8"),
@@ -26,6 +28,14 @@ function serverBlockTypes(source) {
   return [...labelsBlock[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
 }
 
+function objectStringValues(source, constName) {
+  const objectBlock = source.match(
+    new RegExp(`const ${constName} = \\{([\\s\\S]*?)\\n\\} as const`),
+  );
+  assert.ok(objectBlock, `未找到 ${constName} 映射`);
+  return [...objectBlock[1].matchAll(/:\s*"([^"]+)"/g)].map((match) => match[1]);
+}
+
 const clientTypes = clientBlockTypes(clientSource);
 const serverTypes = serverBlockTypes(serverSource);
 const missingOnServer = clientTypes.filter((type) => !serverTypes.includes(type));
@@ -35,10 +45,32 @@ assert.deepEqual(missingOnServer, [], `服务端缺少前端区块类型：${mis
 assert.deepEqual(staleOnServer, [], `服务端存在前端未注册区块类型：${staleOnServer.join("、")}`);
 
 const editorOnlyTypes = ["网站全局设置", "业务功能区"];
-const rendererDirectTypes = ["产品展示行", "单品焦点推荐", "佩戴灵感"];
+const rendererDirectTypes = ["动态模板实例", "产品展示行", "单品焦点推荐", "佩戴灵感"];
 const rendererTypes = [...rendererSource.matchAll(/case "([^"]+)":/g)].map((match) => match[1]);
+const matureTypes = objectStringValues(
+  matureRegistrySource,
+  "MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE",
+);
+const matureRendererTypes = [...matureRendererSource.matchAll(/case "([^"]+)":/g)]
+  .map((match) => match[1]);
+const missingOnMatureRenderer = matureTypes.filter(
+  (type) => !matureRendererTypes.includes(type),
+);
+assert.deepEqual(
+  missingOnMatureRenderer,
+  [],
+  `成熟模板渲染器缺少区块类型：${missingOnMatureRenderer.join("、")}`,
+);
+assert.match(
+  rendererSource,
+  /getMatureContentTemplateSlotType\(block\.type \|\| ""\)[\s\S]*<MatureContentTemplateRenderer/,
+  "前台渲染器必须把成熟模板映射接入统一渲染器",
+);
 const missingOnRenderer = clientTypes.filter(
-  (type) => !editorOnlyTypes.includes(type) && !rendererDirectTypes.includes(type) && !rendererTypes.includes(type),
+  (type) => !editorOnlyTypes.includes(type)
+    && !rendererDirectTypes.includes(type)
+    && !matureTypes.includes(type)
+    && !rendererTypes.includes(type),
 );
 assert.deepEqual(missingOnRenderer, [], `前台渲染器缺少区块类型：${missingOnRenderer.join("、")}`);
 
@@ -51,8 +83,8 @@ assert.match(
 );
 assert.match(
   homepageConfigSource,
-  /isContentTemplateInsertable\(name\)/,
-  "模板库必须按合同实施状态限制新增入口",
+  /isSystemTemplateAllowed=\{\(moduleType\) => \([\s\S]*isContentTemplateInsertable\(moduleType\)[\s\S]*isContentTemplateAllowedForPage\(pageKey, moduleType\)/,
+  "页面模板目录必须同时按合同实施状态与页面范围限制新增入口",
 );
 assert.match(
   homepageConfigSource,

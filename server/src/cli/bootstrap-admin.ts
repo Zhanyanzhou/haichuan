@@ -1,6 +1,10 @@
 import { Prisma, Role, Status } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import { PrismaService } from "../common/prisma/prisma.service";
+import {
+  STAFF_PASSWORD_MAX_LENGTH,
+  STAFF_PASSWORD_MIN_LENGTH,
+} from "../modules/users/staff-password-policy";
 
 const PASSWORD_HASH_ROUNDS = 12;
 
@@ -59,21 +63,13 @@ export function validateFirstAdminInput(input: FirstAdminInput) {
   }
 
   const password = input.password ?? "";
-  const passwordLower = password.toLowerCase();
   if (
-    password.length < 12
-    || password.length > 128
-    || /\s/.test(password)
-    || !/[a-z]/.test(password)
-    || !/[A-Z]/.test(password)
-    || !/[0-9]/.test(password)
-    || !/[^A-Za-z0-9]/.test(password)
-    || passwordLower.includes(username.toLowerCase())
-    || /(admin123|password|changeme|请设置)/i.test(password)
+    password.length < STAFF_PASSWORD_MIN_LENGTH
+    || password.length > STAFF_PASSWORD_MAX_LENGTH
   ) {
     throw new FirstAdminBootstrapError(
       "bootstrap-password-invalid",
-      "管理员密码必须为 12-128 位，无空白，并包含大小写字母、数字和符号；不得包含用户名或常见占位密码",
+      `管理员密码长度必须为 ${STAFF_PASSWORD_MIN_LENGTH}-${STAFF_PASSWORD_MAX_LENGTH} 位`,
     );
   }
 

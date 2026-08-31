@@ -124,18 +124,23 @@ test.describe("商品引用黄金闭环（确定性 UI）", () => {
     await expect(page.getByText(/已下架，可更换为公开商品/)).toBeVisible();
     await expect(page.getByText(/缺少展示图，请先补图/)).toBeVisible();
 
-    await page.getByRole("button", { name: "下一页" }).click();
-    await expect(page.getByText("分页商品 13")).toBeVisible();
-    await expect(page.getByText(/第 2 页 · 共 13 件/)).toBeVisible();
+    await page.getByRole("button", { name: "重新选择商品" }).click();
+    const dialog = page.getByRole("dialog", { name: "选择商品" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "下一页" }).click();
+    await expect(dialog.getByText("分页商品 13")).toBeVisible();
+    await expect(dialog.getByText(/第 2 页 · 共 13 件商品/)).toBeVisible();
 
-    const search = page.getByRole("textbox", { name: "搜索商品名称或货号" });
+    const search = dialog.getByRole("textbox", { name: "搜索商品名称或货号" });
     const slowRequest = page.waitForRequest((request) => request.url().includes("keyword=slow"));
     await search.fill("slow");
     await slowRequest;
     await search.fill("fast");
-    await expect(page.getByText("快速结果 1")).toBeVisible();
+    await expect(dialog.getByText("快速结果 1")).toBeVisible();
     await page.waitForTimeout(400); // 明确等待被取消的慢请求原本会返回的窗口，验证旧响应不会回写。
-    await expect(page.getByText("过期结果 1")).toHaveCount(0);
+    await expect(dialog.getByText("过期结果 1")).toHaveCount(0);
+    await page.getByRole("button", { name: /取\s*消/ }).click();
+    await expect(dialog).not.toBeVisible();
 
     const selectedRows = page.locator(".homepage-editor__product-picker-selected-row");
     await selectedRows.nth(1).getByRole("button", { name: "上移" }).click();
@@ -146,18 +151,77 @@ test.describe("商品引用黄金闭环（确定性 UI）", () => {
 
   test("已选解析失败保留稳定 ID 和上次成功结果", async ({ page }) => {
     await expect(page.getByText("可公开戒指")).toBeVisible();
-    const search = page.getByRole("textbox", { name: "搜索商品名称或货号" });
+    await page.getByRole("button", { name: "重新选择商品" }).click();
+    const dialog = page.getByRole("dialog", { name: "选择商品" });
+    const search = dialog.getByRole("textbox", { name: "搜索商品名称或货号" });
     await search.fill("fail-new");
-    await page.getByRole("button", { name: /触发解析失败商品/ }).click();
+    await dialog.getByRole("button", { name: /触发解析失败商品/ }).click();
+    await expect(page.getByTestId("product-reference-state")).not.toContainText("FAIL-NEW");
+    await dialog.getByRole("button", { name: /确认选择（4）/ }).click();
+    await expect(dialog).not.toBeVisible();
     await expect(page.getByTestId("product-reference-state")).toContainText("FAIL-NEW");
     await expect(page.getByText(/解析失败.*已保留上次成功解析结果和原始引用/)).toBeVisible();
-    await expect(page.getByText("可公开戒指")).toBeVisible();
-    await expect(page.getByText("已下架项链")).toBeVisible();
+    const committedSelection = page.locator(".homepage-editor__product-picker-selected");
+    await expect(committedSelection.getByText("可公开戒指")).toBeVisible();
+    await expect(committedSelection.getByText("已下架项链")).toBeVisible();
     const failedReference = page.locator(".homepage-editor__product-picker-selected-row").filter({ hasText: "FAIL-NEW" });
     await expect(failedReference).toContainText("商品解析失败");
     await expect(page.getByRole("button", { name: "重试解析" })).toBeVisible();
     await failedReference.getByRole("button", { name: /移除/ }).click();
     await expect(page.getByTestId("product-reference-state")).not.toContainText("FAIL-NEW");
+  });
+
+  test("弹窗取消不回写，确认后一次更新页面引用", async ({ page }) => {
+    const initialState = await page.getByTestId("product-reference-state").textContent();
+    await page.getByRole("button", { name: "重新选择商品" }).click();
+    let dialog = page.getByRole("dialog", { name: "选择商品" });
+    await dialog.getByRole("button", { name: /^分页商品 1 / }).click();
+    await expect(dialog.getByText("本次已选")).toBeVisible();
+    await page.getByRole("button", { name: /取\s*消/ }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByTestId("product-reference-state")).toHaveText(initialState ?? "");
+
+    await page.getByRole("button", { name: "重新选择商品" }).click();
+    dialog = page.getByRole("dialog", { name: "选择商品" });
+    await dialog.getByRole("button", { name: /^分页商品 1 / }).click();
+    await dialog.getByRole("button", { name: /确认选择（4）/ }).click();
+    await expect(page.getByTestId("product-reference-state")).toContainText("PAGE-1");
+  });
+
+  test("单选模板直接选择新商品会替换原商品", async ({ page }) => {
+    await page.goto("/__product-references?single=1");
+    await expect(page.getByTestId("product-reference-state")).toContainText('["SKU-OK"]');
+    await page.getByRole("button", { name: "重新选择商品" }).click();
+    const dialog = page.getByRole("dialog", { name: "选择商品" });
+    await dialog.getByRole("button", { name: /^分页商品 1 / }).click();
+    await expect(dialog.getByText("本次已选").locator("..")).toContainText("1/1 件");
+    await dialog.getByRole("button", { name: /确认选择（1）/ }).click();
+    await expect(page.getByTestId("product-reference-state")).toContainText('["PAGE-1"]');
+    await expect(page.getByTestId("product-reference-state")).not.toContainText("SKU-OK");
+  });
+
+  test("390px 窄屏使用全屏选择器且筛选和商品卡不横向溢出", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "重新选择商品" }).click();
+    const dialog = page.getByRole("dialog", { name: "选择商品" });
+    await expect(dialog).toBeVisible();
+    const dialogBox = await dialog.boundingBox();
+    if (!dialogBox) throw new Error("商品选择弹窗没有布局尺寸");
+    expect(dialogBox.x).toBeGreaterThanOrEqual(0);
+    expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(391);
+
+    for (const locator of [
+      dialog.locator(".homepage-editor__product-picker-toolbar"),
+      dialog.locator(".homepage-editor__product-picker-dialog-results"),
+    ]) {
+      const size = await locator.evaluate((element) => ({
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+      }));
+      expect(size.scrollWidth).toBeLessThanOrEqual(size.clientWidth + 1);
+    }
+    await expect(dialog.getByRole("button", { name: /^分页商品 1 / })).toBeVisible();
+    await expect(page.getByRole("button", { name: /取\s*消/ })).toBeVisible();
   });
 
   test("旧 numeric id 普通加载不迁移，显式编辑后改存稳定 code", async ({ page }) => {

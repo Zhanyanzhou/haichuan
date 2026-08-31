@@ -3,8 +3,9 @@
  * 用于 editMode 下图片/数据未配置时，向运营明确"这里需要填充"，
  * 避免误把老兜底数据当成默认成品。
  *
- * 视觉语言(2026-08-18 对齐 UI_GUIDE/契约表面)：纯白、石墨、石灰、
- * 低饱和灰线与单一香槟金识别符；无渐变、无蓝灰科技色。
+ * 视觉语言(2026-08-31 对齐 UI_GUIDE/契约表面)：统一浅中性底、石墨、石灰、
+ * 低饱和灰线；无渐变、无蓝灰科技色。占位插画跟随素材槽扩展，
+ * 不再在大画框中缩成固定的小图标。
  * ratio 传入时空态即契约比例框(空素材结构不坍塌),与画布/前台渲染同源。
  */
 interface Props {
@@ -38,12 +39,13 @@ const SURFACE = {
     accent: "#181A1B",
   },
   dark: {
-    canvas: "#181A1B",
-    line: "#5F6568",
-    ink: "#DDE1E2",
+    // 历史调用方可以继续传 dark，但空素材状态统一使用浅中性表面。
+    canvas: "#F7F8F8",
+    line: "#DDE1E2",
+    ink: "#5F6568",
     muted: "#6E7477",
-    sketch: "#181A1B",
-    accent: "#F7F8F8",
+    sketch: "#DDE1E2",
+    accent: "#181A1B",
   },
 } as const;
 
@@ -96,11 +98,11 @@ export default function BlockEmptyPlaceholder({
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 14,
+        gap: 12,
         height: height ?? undefined,
         minHeight: height ?? (ratio ? undefined : 320),
         aspectRatio: !height && (ratio || contractRatio) ? (ratio || contractRatio) : undefined,
-        padding: "clamp(30px, 6vw, 48px) 24px",
+        padding: "clamp(16px, 3vw, 32px) clamp(12px, 2vw, 24px)",
         background: bg ?? color.canvas,
         border: `1px solid ${color.line}`,
         color: color.ink,
@@ -123,10 +125,18 @@ export default function BlockEmptyPlaceholder({
         </span>
       ) : null}
       <svg
+        data-asset-placeholder-illustration="slot-fill"
         viewBox="0 0 118 84"
+        preserveAspectRatio="xMidYMid slice"
         fill="none"
         aria-hidden="true"
-        style={{ width: "clamp(160px, 28%, 240px)", height: "auto", maxWidth: "78%" }}
+        style={{
+          flex: "1 1 0",
+          width: "100%",
+          height: 0,
+          minHeight: 0,
+          maxWidth: "100%",
+        }}
       >
         <path d="M16 28.5c0-4.6 3.7-8.3 8.3-8.3 3.6 0 6.7 2.3 7.8 5.6a7.7 7.7 0 0 1 11.3 6.8c0 4.3-3.5 7.8-7.8 7.8H17.8A8.2 8.2 0 0 1 16 28.5Z" stroke={color.sketch} strokeWidth="1.5" />
         <path d="M82 49.6c0-3.9 3.1-7 7-7 3.1 0 5.8 2 6.7 4.8a6.6 6.6 0 0 1 9.7 5.8c0 3.7-3 6.7-6.7 6.7H83.6A7 7 0 0 1 82 49.6Z" stroke={color.sketch} strokeWidth="1.5" />

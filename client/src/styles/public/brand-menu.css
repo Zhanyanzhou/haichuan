@@ -184,10 +184,10 @@
 .brand-menu__inner {
   display: flex;
   flex-direction: column;
-  width: clamp(500px, 31vw, 560px);
+  width: clamp(380px, 28vw, 420px);
   height: 100svh;
   max-height: 100svh;
-  padding: 0 60px 32px;
+  padding: 0 36px 28px;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
@@ -211,9 +211,9 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 34px;
-  min-height: 108px;
-  border-bottom: 1px solid rgba(24, 26, 27, 0.08);
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 88px;
 }
 
 .brand-menu__top-action {
@@ -228,7 +228,7 @@
   font-family: "Inter", system-ui, sans-serif;
   font-size: 13px;
   font-weight: 400;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   text-decoration: none;
   cursor: pointer;
   transition: color 220ms ease;
@@ -246,12 +246,12 @@
 }
 
 .brand-menu__top-action:focus-visible {
-  outline: 2px solid #181a1b;
-  outline-offset: 4px;
+  outline: 0;
+  box-shadow: inset 0 -2px 0 currentColor;
 }
 
 .brand-menu__eyebrow {
-  margin: 30px 0 10px;
+  margin: 26px 0 12px;
   color: var(--hc-text-muted);
   font-family: "Inter", system-ui, sans-serif;
   font-size: 10px;
@@ -267,13 +267,12 @@
 
 .brand-menu__primary a {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) 22px;
+  grid-template-columns: minmax(0, 1fr) 20px;
   align-items: center;
-  gap: 14px;
-  min-height: 82px;
+  gap: 16px;
+  min-height: 64px;
   padding: 0;
   color: #181a1b;
-  border-bottom: 1px solid rgba(24, 26, 27, 0.1);
   text-decoration: none;
   transition: color 220ms ease;
 }
@@ -283,158 +282,90 @@
   outline-offset: 4px;
 }
 
-.brand-menu__index {
-  color: var(--hc-text-muted);
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.16em;
-  transition: color 220ms ease;
-}
-
-.brand-menu__copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 4px;
-  transition: transform 260ms ease;
-}
-
 .brand-menu__label {
   font-family: "Noto Serif SC", "Source Han Serif CN", serif;
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 400;
   line-height: 1.35;
-  letter-spacing: 0.06em;
-}
-
-.brand-menu__description {
-  color: var(--hc-text-secondary);
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.5;
-  letter-spacing: 0.03em;
+  letter-spacing: 0;
+  transition: transform 260ms ease;
 }
 
 .brand-menu__arrow {
   display: inline-flex;
   color: #5f6568;
-  opacity: 0;
-  transform: translateX(-7px);
+  opacity: 0.42;
+  transform: translateX(0);
   transition:
     opacity 220ms ease,
     transform 260ms ease;
 }
 
-.brand-menu__primary a:hover .brand-menu__copy,
-.brand-menu__primary a:focus-visible .brand-menu__copy {
-  transform: translateX(5px);
+.brand-menu__primary a:hover .brand-menu__label,
+.brand-menu__primary a:focus-visible .brand-menu__label {
+  transform: translateX(3px);
 }
 
 .brand-menu__primary a:hover .brand-menu__arrow,
 .brand-menu__primary a:focus-visible .brand-menu__arrow,
 .brand-menu__primary a.is-active .brand-menu__arrow {
   opacity: 1;
-  transform: translateX(0);
+  transform: translateX(3px);
 }
 
-.brand-menu__primary a.is-active .brand-menu__index {
-  color: #181a1b;
-}
-
-.brand-menu__service {
-  margin-top: 30px;
-}
-
-.brand-menu__service > p {
-  margin: 0 0 10px;
-  color: var(--hc-text-muted);
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 10px;
+.brand-menu__primary a.is-active .brand-menu__label {
   font-weight: 500;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-}
-
-.brand-menu__service > a {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 76px;
-  padding: 0 2px;
-  color: #181a1b;
-  border-top: 1px solid rgba(24, 26, 27, 0.14);
-  border-bottom: 1px solid rgba(24, 26, 27, 0.14);
-  text-decoration: none;
-}
-
-.brand-menu__service > a > span {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.brand-menu__service strong {
-  font-family: "Noto Serif SC", "Source Han Serif CN", serif;
-  font-size: 17px;
-  font-weight: 400;
-  letter-spacing: 0.05em;
-}
-
-.brand-menu__service small {
-  color: var(--hc-text-secondary);
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 12px;
-  letter-spacing: 0.03em;
-}
-
-.brand-menu__service > a > svg {
-  color: #5f6568;
-  transition: transform 260ms ease;
-}
-
-.brand-menu__service > a:hover > svg,
-.brand-menu__service > a:focus-visible > svg {
-  transform: translateX(5px);
-}
-
-.brand-menu__service > a:focus-visible {
-  outline: 2px solid #181a1b;
-  outline-offset: 4px;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 8px;
 }
 
 .brand-menu__footer {
+  flex: 0 0 auto;
   margin-top: auto;
-  padding-top: 24px;
-  border-top: 1px solid rgba(24, 26, 27, 0.11);
+  padding-top: 32px;
 }
 
-.brand-menu__utility {
+.brand-menu__service-links {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px 22px;
+  flex-direction: column;
 }
 
-.brand-menu__utility a {
-  display: inline-flex;
+.brand-menu__service-links a {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px;
   align-items: center;
-  min-height: 44px;
+  gap: 14px;
+  min-height: 48px;
   color: #5f6568;
   font-family: "Inter", system-ui, sans-serif;
   font-size: 12px;
-  letter-spacing: 0.05em;
+  font-weight: 400;
+  letter-spacing: 0;
   text-decoration: none;
+  transition: color 220ms ease;
 }
 
-.brand-menu__utility a:hover,
-.brand-menu__utility a:focus-visible {
+.brand-menu__service-links a:hover,
+.brand-menu__service-links a:focus-visible,
+.brand-menu__service-links a.is-active {
   color: #181a1b;
 }
 
-.brand-menu__utility a:focus-visible {
+.brand-menu__service-links a:focus-visible {
   outline: 2px solid #181a1b;
   outline-offset: 3px;
+}
+
+.brand-menu__service-links .brand-menu__arrow {
+  opacity: 0.52;
+}
+
+.brand-menu__service-links a:hover .brand-menu__arrow,
+.brand-menu__service-links a:focus-visible .brand-menu__arrow,
+.brand-menu__service-links a.is-active .brand-menu__arrow {
+  opacity: 1;
+  transform: translateX(3px);
 }
 
 .brand-menu__categories {
@@ -448,36 +379,4 @@
   display: flex;
   flex-direction: column;
   gap: 18px;
-}
-
-.brand-menu__contact {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.brand-menu__contact a,
-.brand-menu__contact span {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  color: #5f6568;
-  font-size: 13px;
-  letter-spacing: 0.04em;
-  text-decoration: none;
-  line-height: 1.5;
-}
-
-.brand-menu__contact a {
-  min-height: 44px;
-}
-
-.brand-menu__contact a:hover {
-  opacity: 0.65;
-}
-
-.brand-menu__contact svg {
-  flex-shrink: 0;
-  color: var(--hc-text-secondary);
 }

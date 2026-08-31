@@ -41,6 +41,15 @@ function VisualEditorHeroFixture() {
   }, []);
 
   const update = (patch: Record<string, any>) => setProps((current) => ({ ...current, ...patch }));
+  const updateFromCurrent = (
+    factory: (current: Record<string, any>) => Record<string, any>,
+  ) => setProps((current) => ({ ...current, ...factory(current) }));
+  const updateHistoryTransaction = (
+    patchOrFactory: Record<string, any> | ((current: Record<string, any>) => Record<string, any>),
+  ) => setProps((current) => ({
+    ...current,
+    ...(typeof patchOrFactory === "function" ? patchOrFactory(current) : patchOrFactory),
+  }));
   const panelMode = useVisualEditorSession((state) => state.panelMode);
   const selection = useVisualEditorSession((state) => state.selection);
   const setPanelMode = useVisualEditorSession((state) => state.setPanelMode);
@@ -92,7 +101,9 @@ function VisualEditorHeroFixture() {
           <InstanceOverridesPanel
             moduleType={moduleType}
             props={props}
-            update={update}
+            updateFromCurrent={updateFromCurrent}
+            updateHistoryTransaction={updateHistoryTransaction}
+            historyTransactionPending={false}
             scopes={currentSelection?.kind === "media" ? ["slots"] : currentSelection?.kind === "text" ? ["text"] : ["layout"]}
             selectedNodeId={currentSelection?.nodeId}
             resetAllDesign={!currentSelection}

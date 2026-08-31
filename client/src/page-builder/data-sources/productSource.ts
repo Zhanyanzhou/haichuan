@@ -42,7 +42,7 @@ function trimCache<T>(cache: Map<string, T>, max: number) {
 function toProductRow(product: Product): ProductRow {
   const listingImage = getListingImage(product);
   const hasListingImage = Boolean(
-    listingImage && listingImage !== "/images/products/placeholder.svg",
+    listingImage && listingImage !== "/images/system/product-placeholder.svg",
   );
   return {
     id: product.id,

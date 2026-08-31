@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
@@ -214,6 +214,23 @@ function assertWorkflowActionsPinned() {
   return { workflowCount: workflowPaths.length, actionCount };
 }
 
+function assertReleaseSupplyChainTests() {
+  const manifest = JSON.parse(readProjectFile("package.json"));
+  const rootTest = manifest?.scripts?.test;
+  const releaseTest = manifest?.scripts?.["test:release-supply-chain"];
+  if (typeof rootTest !== "string" ||
+      !rootTest.includes("npm run test:release-supply-chain")) {
+    fail("RELEASE_SUPPLY_CHAIN_TEST_NOT_IN_QUALITY_SUITE");
+  }
+  if (releaseTest !== "node --test scripts/verify-release-images.spec.mjs") {
+    fail("RELEASE_SUPPLY_CHAIN_TEST_COMMAND_INVALID");
+  }
+  return {
+    command: releaseTest,
+    includedInRootTest: true,
+  };
+}
+
 function assertSafeRuntimeInspection() {
   const source = readProjectFile("scripts/verify-release-images.mjs");
   const forbiddenFullImageFormat = "{{json " + ".}}";
@@ -240,6 +257,7 @@ function verifyStaticContract() {
   const composeImages = assertComposeImages();
   const workflow = assertReleaseWorkflow();
   const workflowActions = assertWorkflowActionsPinned();
+  const supplyChainTests = assertReleaseSupplyChainTests();
   const runtimeInspectionFieldCount = assertSafeRuntimeInspection();
   return {
     ok: true,
@@ -250,6 +268,7 @@ function verifyStaticContract() {
     workflow,
     workflowCount: workflowActions.workflowCount,
     workflowActionCount: workflowActions.actionCount,
+    supplyChainTests,
     runtimeInspectionFieldCount,
   };
 }
@@ -268,21 +287,14 @@ function validateImageEntry(name, entry) {
   }
 }
 
-function readAndValidateManifest(path) {
-  const absolutePath = resolve(projectRoot, path);
-  const relativePath = relative(projectRoot, absolutePath);
-  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
-    fail("RELEASE_MANIFEST_OUTSIDE_PROJECT");
-  }
-  if (!existsSync(absolutePath)) fail(`RELEASE_MANIFEST_MISSING:${path}`);
-  const manifest = JSON.parse(readFileSync(absolutePath, "utf8"));
+export function validateReleaseManifest(manifest, expected) {
   if (manifest?.schemaVersion !== 2) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
   if (!gitShaPattern.test(manifest.gitSha ?? "")) fail("RELEASE_MANIFEST_GIT_SHA_INVALID");
-  if (manifest.gitSha !== currentGitSha()) fail("RELEASE_MANIFEST_GIT_SHA_MISMATCH");
+  if (manifest.gitSha !== expected.gitSha) fail("RELEASE_MANIFEST_GIT_SHA_MISMATCH");
   if (!/^[a-f0-9]{64}$/.test(manifest.migrationBundleSha256 ?? "")) {
     fail("RELEASE_MANIFEST_MIGRATION_BUNDLE_INVALID");
   }
-  if (manifest.migrationBundleSha256 !== repositoryMigrationBundleSha256()) {
+  if (manifest.migrationBundleSha256 !== expected.migrationBundleSha256) {
     fail("RELEASE_MANIFEST_MIGRATION_BUNDLE_MISMATCH");
   }
   if (typeof manifest.source !== "string" || !/^https:\/\/[^\s]+$/.test(manifest.source)) {
@@ -304,6 +316,20 @@ function readAndValidateManifest(path) {
   validateImageEntry("server", manifest.server);
   validateImageEntry("client", manifest.client);
   return manifest;
+}
+
+function readAndValidateManifest(path) {
+  const absolutePath = resolve(projectRoot, path);
+  const relativePath = relative(projectRoot, absolutePath);
+  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
+    fail("RELEASE_MANIFEST_OUTSIDE_PROJECT");
+  }
+  if (!existsSync(absolutePath)) fail(`RELEASE_MANIFEST_MISSING:${path}`);
+  const manifest = JSON.parse(readFileSync(absolutePath, "utf8"));
+  return validateReleaseManifest(manifest, {
+    gitSha: currentGitSha(),
+    migrationBundleSha256: repositoryMigrationBundleSha256(),
+  });
 }
 
 function inspectImageField(reference, format) {
@@ -395,12 +421,17 @@ function main() {
   fail("VERIFY_RELEASE_IMAGES_MODE_REQUIRED");
 }
 
-try {
-  console.log(JSON.stringify(main(), null, 2));
-} catch (error) {
-  console.error(JSON.stringify({
-    ok: false,
-    code: error instanceof Error ? error.message : "RELEASE_IMAGE_VERIFICATION_FAILED",
-  }));
-  process.exitCode = 1;
+const isDirectExecution = process.argv[1] &&
+  pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
+
+if (isDirectExecution) {
+  try {
+    console.log(JSON.stringify(main(), null, 2));
+  } catch (error) {
+    console.error(JSON.stringify({
+      ok: false,
+      code: error instanceof Error ? error.message : "RELEASE_IMAGE_VERIFICATION_FAILED",
+    }));
+    process.exitCode = 1;
+  }
 }

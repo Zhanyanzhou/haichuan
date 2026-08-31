@@ -4,6 +4,11 @@ import { customerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getRequestErrorMessage } from "@/services/httpClient";
 import type { CustomerAccount } from "@/store/customerAuthStore";
+import {
+  ACCOUNT_PASSWORD_HINT,
+  ACCOUNT_PASSWORD_MAX_LENGTH,
+  ACCOUNT_PASSWORD_MIN_LENGTH,
+} from "@/config/accountPasswordPolicy";
 import "./AccountExperience.css";
 
 type AccountExperienceProps = {
@@ -84,8 +89,8 @@ function WechatLoginPanel({
       alert("请填写有效的手机号");
       return;
     }
-    if (password.length < 8) {
-      alert("密码至少 8 位");
+    if (!password) {
+      alert("请输入登录密码");
       return;
     }
     setBinding(true);
@@ -130,12 +135,12 @@ function WechatLoginPanel({
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             type="password"
-            minLength={8}
+            maxLength={128}
             style={{ marginTop: 6 }}
           />
         </label>
         <p className="text-xs" style={{ marginTop: 6 }}>
-          已注册手机号请填原密码绑定；未注册将创建新会员账户。
+          已注册手机号请填原密码；未注册将创建新会员账户，新密码需为 6–18 位。
         </p>
         <button
           type="button"
@@ -328,11 +333,12 @@ function MemberAccess({
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           type="password"
-          minLength={8}
+          minLength={mode === "register" ? ACCOUNT_PASSWORD_MIN_LENGTH : undefined}
+          maxLength={mode === "register" ? ACCOUNT_PASSWORD_MAX_LENGTH : 128}
           required
         />
       </label>
-      <small>密码至少 8 位，需包含字母和数字。</small>
+      <small>{mode === "register" ? ACCOUNT_PASSWORD_HINT : "请输入账户当前密码。"}</small>
       {mode === "login" && (
         <div className="text-right">
           <Link

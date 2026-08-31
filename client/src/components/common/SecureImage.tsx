@@ -11,6 +11,8 @@ interface SecureImageProps {
   fallback?: string;
   /** 是否用员工令牌而非客户令牌（后台场景） */
   tokenKind?: "auto" | "customer" | "staff";
+  /** 进入或接近可视区后才请求受控媒体，适合长列表缩略图 */
+  deferUntilVisible?: boolean;
 }
 
 // Vite 会在构建和测试时注入类型化 env；未配置时安全降级到同源 /api。
@@ -40,6 +42,7 @@ export function SecureImage({
   style,
   fallback,
   tokenKind = "auto",
+  deferUntilVisible = false,
 }: SecureImageProps) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "error" | "ready">(
@@ -47,6 +50,40 @@ export function SecureImage({
   );
   const [fallbackFailed, setFallbackFailed] = useState(false);
   const revokeRef = useRef<string | null>(null);
+  const placeholderRef = useRef<HTMLDivElement | null>(null);
+  const [shouldLoad, setShouldLoad] = useState(!deferUntilVisible);
+
+  useEffect(() => {
+    if (!deferUntilVisible) {
+      setShouldLoad(true);
+      return;
+    }
+
+    setShouldLoad(false);
+    setStatus("loading");
+    let observer: IntersectionObserver | null = null;
+    const frame = window.requestAnimationFrame(() => {
+      const target = placeholderRef.current;
+      if (!target || typeof IntersectionObserver === "undefined") {
+        setShouldLoad(true);
+        return;
+      }
+      observer = new IntersectionObserver(
+        (entries) => {
+          if (!entries.some((entry) => entry.isIntersecting)) return;
+          setShouldLoad(true);
+          observer?.disconnect();
+        },
+        { rootMargin: "200px 0px" },
+      );
+      observer.observe(target);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [deferUntilVisible, src]);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,6 +99,7 @@ export function SecureImage({
       (isPublicProductMedia ||
         (src.startsWith("/products/catalog/") && src.includes("/media/")) ||
         /^\/(payments|upload\/payment-proofs)\/\d+(\/proof)?$/.test(src));
+    if (isControlledMedia && !shouldLoad) return;
     if (!isControlledMedia) {
       setBlobUrl(src || null);
       setStatus(src ? "ready" : "error");
@@ -98,7 +136,7 @@ export function SecureImage({
         revokeRef.current = null;
       }
     };
-  }, [fallback, src, tokenKind]);
+  }, [fallback, shouldLoad, src, tokenKind]);
 
   const placeholderStyle: CSSProperties = {
     background: "#F4F5F5",
@@ -114,7 +152,7 @@ export function SecureImage({
 
   if (status === "loading") {
     return (
-      <div className={className} style={{ ...placeholderStyle }}>
+      <div ref={placeholderRef} className={className} style={{ ...placeholderStyle }}>
         正在加载图片…
       </div>
     );

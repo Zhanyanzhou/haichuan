@@ -268,7 +268,7 @@ export default function Catalog({
   const categoryIds = useMemo(
     () =>
       categoryTarget
-        ? expandCategoryIds(categories, Number(categoryTarget)) || categoryTarget
+        ? expandCategoryIds(categories, categoryTarget) || categoryTarget
         : "",
     [categories, categoryTarget],
   );

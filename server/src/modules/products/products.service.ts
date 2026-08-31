@@ -506,6 +506,17 @@ function mapUpdateDto(dto: UpdateProductDto): Prisma.ProductUpdateInput {
 @Injectable()
 export class ProductsService {
   private readonly publicEvents = new EventEmitter();
+  private readonly resizedMediaCache = new Map<
+    string,
+    {
+      value: { buffer: Buffer; mimeType: string } | null;
+      expiresAt: number;
+    }
+  >();
+  private readonly resizedMediaInFlight = new Map<
+    string,
+    Promise<{ buffer: Buffer; mimeType: string } | null>
+  >();
 
   constructor(
     private prisma: PrismaService,
@@ -1192,6 +1203,8 @@ export class ProductsService {
   /** 公开媒体：必须同时满足商品、图片归属以及 PUBLIC + PUBLISHED 条件。 */
   /** 动态缩放宽白名单：列表 480 / 卡片 800 / 详情 1200（防任意参数滥用与超清抓取） */
   private static readonly RESIZE_WIDTHS = new Set([480, 800, 1200]);
+  private static readonly RESIZE_CACHE_TTL_MS = 5 * 60_000;
+  private static readonly RESIZE_CACHE_MAX_ENTRIES = 128;
 
   /**
    * 按宽白名单生成 WebP 缩放版（动态 resize，旧图零回填即刻受益）。
@@ -1200,23 +1213,62 @@ export class ProductsService {
   private async resizeMediaBuffer(
     buffer: Buffer,
     width: string | number,
+    cacheKey?: string,
   ): Promise<{ buffer: Buffer; mimeType: string } | null> {
-    const allowed = ProductsService.RESIZE_WIDTHS.has(Number(width));
+    const normalizedWidth = Number(width);
+    const allowed = ProductsService.RESIZE_WIDTHS.has(normalizedWidth);
     if (!allowed) return null;
+    const variantKey = cacheKey ? `${cacheKey}:w${normalizedWidth}` : null;
+
+    if (variantKey) {
+      const cached = this.resizedMediaCache.get(variantKey);
+      if (cached && cached.expiresAt > Date.now()) return cached.value;
+      if (cached) this.resizedMediaCache.delete(variantKey);
+
+      const pending = this.resizedMediaInFlight.get(variantKey);
+      if (pending) return pending;
+    }
+
+    const resize = async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const sharp = require("sharp");
+        const out = await sharp(buffer)
+          .rotate()
+          .resize({ width: normalizedWidth, withoutEnlargement: true })
+          .webp({ quality: 82 })
+          .toBuffer();
+        // 缩放产物明显更小才使用（极端小图可能反而更大）
+        return out.length < buffer.length
+          ? { buffer: out, mimeType: "image/webp" }
+          : null;
+      } catch {
+        return null;
+      }
+    };
+
+    if (!variantKey) return resize();
+
+    const pending = resize();
+    this.resizedMediaInFlight.set(variantKey, pending);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const sharp = require("sharp");
-      const out = await sharp(buffer)
-        .rotate()
-        .resize({ width: Number(width), withoutEnlargement: true })
-        .webp({ quality: 82 })
-        .toBuffer();
-      // 缩放产物明显更小才使用（极端小图可能反而更大）
-      return out.length < buffer.length
-        ? { buffer: out, mimeType: "image/webp" }
-        : null;
-    } catch {
-      return null;
+      const value = await pending;
+      if (
+        this.resizedMediaCache.size >=
+        ProductsService.RESIZE_CACHE_MAX_ENTRIES
+      ) {
+        const oldestKey = this.resizedMediaCache.keys().next().value;
+        if (oldestKey) this.resizedMediaCache.delete(oldestKey);
+      }
+      this.resizedMediaCache.set(variantKey, {
+        value,
+        expiresAt: Date.now() + ProductsService.RESIZE_CACHE_TTL_MS,
+      });
+      return value;
+    } finally {
+      if (this.resizedMediaInFlight.get(variantKey) === pending) {
+        this.resizedMediaInFlight.delete(variantKey);
+      }
     }
   }
 
@@ -1249,8 +1301,12 @@ export class ProductsService {
     });
     if (!image) throw new NotFoundException("媒体不存在");
 
-    const { buffer, mimeType } = this.productMedia.readProductImage(image);
-    const resized = await this.resizeMediaBuffer(buffer, width || "");
+    const { buffer, mimeType } = await this.productMedia.readProductImage(image);
+    const resized = await this.resizeMediaBuffer(
+      buffer,
+      width || "",
+      `public:${image.id}:${image.storageKey || image.url || "unknown"}`,
+    );
     response.setHeader("Content-Type", resized?.mimeType ?? mimeType);
     // 宽度在 URL query 上，不同宽度的变体按完整 URL 独立缓存
     response.setHeader(
@@ -1319,7 +1375,7 @@ export class ProductsService {
 
     // 读取字节（优先私有 storageKey，回退旧公开路径）
     const { buffer, mimeType, isVideo } =
-      this.productMedia.readProductImage(image);
+      await this.productMedia.readProductImage(image);
 
     let outBuffer: Buffer = buffer;
     let outMime = mimeType;
@@ -1333,7 +1389,13 @@ export class ProductsService {
     }
     // 动态缩放（水印之后，水印随图等比保留）：带宽优先于 CPU，移动端列表收益显著
     if (!isVideo && width) {
-      const resized = await this.resizeMediaBuffer(outBuffer, width);
+      const resized = await this.resizeMediaBuffer(
+        outBuffer,
+        width,
+        watermarkLabel === null
+          ? `staff:${image.id}:${image.storageKey || image.url || "unknown"}`
+          : undefined,
+      );
       if (resized) {
         outBuffer = resized.buffer;
         outMime = resized.mimeType;

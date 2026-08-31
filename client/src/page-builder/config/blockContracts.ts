@@ -90,6 +90,21 @@ export function resolveContractAspectRatio(
 }
 
 /**
+ * 模板根画框比例来自 defaultGeometryByViewport，不能用单个素材槽位比例替代。
+ * 例如改款对比的两张素材默认都是 4:5，但桌面合成画框是 8:5。
+ */
+export function getContractFrameAspectRatio(
+  key: ContractKey,
+  viewport: ContractViewport,
+): number {
+  const ratio = CONTENT_TEMPLATE_CONTRACTS[key].defaultGeometryByViewport[viewport].frameAspectRatio;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    throw new Error(`内容模板 ${String(key)}.${viewport} 缺少合法画框比例`);
+  }
+  return ratio;
+}
+
+/**
  * 内容合同只有 desktop / mobile 两端。768–1023px 仍可做纯 CSS 几何适配，
  * 但素材、比例与阅读顺序继续继承 desktop，不能形成第三个合同设备源。
  */
@@ -193,7 +208,9 @@ export interface FeaturedProductContractProps {
   secondaryLink?: string;
   /** 次行动跳转三件套(secondary 前缀,2026-08-18 P1-3) */
   secondaryTargetType?: string;
+  secondaryProductCode?: string;
   secondaryProductId?: number | string;
+  secondaryCategorySlug?: string;
   secondaryLinkUrl?: string;
 }
 
@@ -204,7 +221,9 @@ export interface CategoryCardContractItem {
   link?: string;
   /** 跳转三件套(2026-08-18 P1-3) */
   targetType?: string;
+  productCode?: string;
   productId?: number | string;
+  categorySlug?: string;
   linkUrl?: string;
   description?: string;
 }
@@ -223,7 +242,9 @@ export interface AppointmentContractProps {
   linkUrl?: string;
   /** 跳转三件套(2026-08-18 P1-3) */
   targetType?: string;
+  productCode?: string;
   productId?: number | string;
+  categorySlug?: string;
   backgroundImage?: string;
   altText?: string;
 }
@@ -351,8 +372,8 @@ export const GALLERY_CONTRACT = {
     secondaryMediaAspectRatios: [getContractRoleRatio("gallery", "works", "desktop")],
   },
   content: {
-    minItems: 3,
-    maxItems: 6,
+    minItems: getContractRoleQuantity("gallery", "works").min,
+    maxItems: getContractRoleQuantity("gallery", "works").max,
     limits: { title: 24, subtitle: 60, caption: 24, altText: 80 },
   },
   defaults: {},
@@ -546,6 +567,16 @@ function evaluateLinkTarget(value: LinkTargetValue): {
       ? { ready: true }
       : { ready: false, error: "请选择跳转商品" };
   }
+  if (targetType === "category") {
+    return resolveLinkTargetUrl(value)
+      ? { ready: true }
+      : { ready: false, error: "请选择跳转分类" };
+  }
+  if (targetType === "external") {
+    return resolveLinkTargetUrl(value)
+      ? { ready: true }
+      : { ready: false, error: "请输入完整的 HTTPS 外部链接" };
+  }
   return resolveLinkTargetUrl(value)
     ? { ready: true }
     : { ready: false, error: "请选择已登记的公开页面" };
@@ -726,7 +757,9 @@ export function evaluateAppointmentContract(
   // 旧 linkUrl 仅在指向已登记公开页面时由统一解析器兼容。
   const targetUrl = resolveLinkTargetUrl({
     targetType: props.targetType,
+    productCode: props.productCode,
     productId: props.productId,
+    categorySlug: props.categorySlug,
     linkUrl: props.linkUrl,
   });
   const checks = [hasText(props.title), hasText(props.buttonText), Boolean(targetUrl)];

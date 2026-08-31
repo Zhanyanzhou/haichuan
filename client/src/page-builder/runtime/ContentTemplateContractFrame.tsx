@@ -22,8 +22,11 @@ import {
 } from "../layout/contentTemplateLayouts";
 import { resolveVisualNode, setVisualOverridePath, toVisualOverridesV2 } from "./visualLayout";
 import {
+  CANVAS_SHARED_VISUAL_PREVIEW_MESSAGE,
+  sendCanvasTemplateHistory,
   sendCanvasVisualEdit,
   useVisualEditorSession,
+  type CanvasSharedVisualPreviewMessage,
   type VisualNodeKind,
 } from "../visual-editor/visualEditorSession";
 
@@ -184,8 +187,14 @@ const EDITOR_SURFACE_CSS = `
   position: absolute;
   border: 1px solid #335F7D;
   box-shadow: 0 0 0 1px rgba(255,255,255,.82);
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: move;
+  background: transparent;
   z-index: 2;
+}
+.hc-contract-frame--editor[data-visual-editor-mode="select"] [data-hc-selection-box] {
+  pointer-events: none;
+  cursor: pointer;
 }
 .hc-contract-frame--editor [data-hc-template-slot-box] {
   position: absolute;
@@ -870,7 +879,7 @@ function createInstanceCss(
         const width = Number(rawRect.width);
         const height = Number(rawRect.height);
         if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.0001 || y + height > 1.0001) return "";
-        return `position:absolute!important;box-sizing:border-box!important;left:var(${visualNodeLayoutVar(nodeId, viewport, "left")},${x * 100}%)!important;top:var(${visualNodeLayoutVar(nodeId, viewport, "top")},${y * 100}%)!important;width:var(${visualNodeLayoutVar(nodeId, viewport, "width")},${width * 100}%)!important;height:var(${visualNodeLayoutVar(nodeId, viewport, "height")},${height * 100}%)!important;margin:0!important;max-width:none!important;max-height:none!important;z-index:${zIndex ?? 2}`;
+        return `position:absolute!important;box-sizing:border-box!important;left:var(${visualNodeLayoutVar(nodeId, viewport, "left")},${x * 100}%)!important;top:var(${visualNodeLayoutVar(nodeId, viewport, "top")},${y * 100}%)!important;width:var(${visualNodeLayoutVar(nodeId, viewport, "width")},${width * 100}%)!important;height:var(${visualNodeLayoutVar(nodeId, viewport, "height")},${height * 100}%)!important;margin:0!important;max-width:none!important;max-height:none!important;z-index:${zIndex ?? 2}!important`;
       };
       const desktopRect = hasCapabilityOnViewport("layout", "desktop")
         ? rectRule(rectByViewport.desktop, desktopZIndex, "desktop")
@@ -1264,9 +1273,20 @@ export default function ContentTemplateContractFrame({
   const [selectionOverlay, setSelectionOverlay] = useState<SelectionOverlayBox | null>(null);
   const [templateSlotOverlays, setTemplateSlotOverlays] = useState<TemplateSlotOverlayBox[]>([]);
   const [gesturePreview, setGesturePreview] = useState<GesturePreviewState | null>(null);
+  const [sharedDesignPreview, setSharedDesignPreview] = useState<InstanceValue | undefined>();
   const [gesturePhase, setGesturePhase] = useState<GesturePhase>("idle");
   const [activeViewport, setActiveViewport] = useState<"desktop" | "mobile">("desktop");
   const blockId = typeof props?.id === "string" ? props.id : "";
+  const forcedEditorViewport = props?.__editorViewport === "mobile"
+    ? "mobile" as const
+    : props?.__editorViewport === "desktop"
+      ? "desktop" as const
+      : undefined;
+  const resolveEditorViewport = useCallback(
+    (ownerWindow: Window | null | undefined) =>
+      forcedEditorViewport ?? (ownerWindow && ownerWindow.innerWidth <= 767 ? "mobile" : "desktop"),
+    [forcedEditorViewport],
+  );
   const selectedHere = mode === "editor" && selection?.blockId === blockId
     ? selection
     : null;
@@ -1296,6 +1316,27 @@ export default function ContentTemplateContractFrame({
   const canDragMediaFocus = selectedSlot?.focusByViewport === true &&
     contentTemplateObjectHasCapability(selectedEditableObject, "focus");
   propsRef.current = props;
+
+  useEffect(() => {
+    if (mode !== "editor") return;
+    const ownerWindow = rootRef.current?.ownerDocument.defaultView;
+    if (!ownerWindow) return;
+    const handleSharedPreview = (event: MessageEvent<CanvasSharedVisualPreviewMessage>) => {
+      if (
+        event.origin !== ownerWindow.location.origin ||
+        event.data?.type !== CANVAS_SHARED_VISUAL_PREVIEW_MESSAGE ||
+        event.data.moduleType !== moduleType
+      ) {
+        return;
+      }
+      const next = event.data.overrides;
+      setSharedDesignPreview(
+        isRecord(next) && next.version === 2 ? next as InstanceValue : undefined,
+      );
+    };
+    ownerWindow.addEventListener("message", handleSharedPreview);
+    return () => ownerWindow.removeEventListener("message", handleSharedPreview);
+  }, [mode, moduleType]);
 
   const previewGesture = useCallback((overrides: InstanceValue | undefined) => {
     const next: GesturePreviewState = { overrides, phase: "update" };
@@ -1367,7 +1408,7 @@ export default function ContentTemplateContractFrame({
     handledLayerCommandRef.current = layerCommand.revision;
     const editableObject = findContentTemplateEditableObject(contract, layerCommand.nodeId);
     const sourceWindow = rootRef.current?.ownerDocument.defaultView ?? window;
-    const viewport = sourceWindow.innerWidth <= 767 ? "mobile" : "desktop";
+    const viewport = resolveEditorViewport(sourceWindow);
     const allowedNode = supportsCapabilityOnViewport(editableObject, "layer", viewport);
     if (!allowedNode) return;
     const currentZIndex = resolveContractVisualNode(
@@ -1388,7 +1429,7 @@ export default function ContentTemplateContractFrame({
     );
     sendCanvasVisualEdit({ blockId, moduleType, overrides: next }, sourceWindow);
     setLiveMessage(`对象层级已调整为 ${nextZIndex}`);
-  }, [blockId, contract, layerCommand, mode, moduleType]);
+  }, [blockId, contract, layerCommand, mode, moduleType, resolveEditorViewport]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -1421,33 +1462,42 @@ export default function ContentTemplateContractFrame({
       const rootBounds = root.getBoundingClientRect();
       const targetBounds = target.getBoundingClientRect();
       const frameBounds = findModuleFrameElement(target, root).getBoundingClientRect();
-      const left = targetBounds.left - rootBounds.left;
-      const top = targetBounds.top - rootBounds.top;
-      const width = targetBounds.width;
-      const height = targetBounds.height;
+      // 独立模板画布通过 transform 缩放真实 Renderer。DOMRect 是缩放后的
+      // 屏幕坐标，而选框仍位于 Renderer 内部坐标系；不还原比例会造成选框
+      // 二次缩放、控制点错位，表现为“能选中但无法直接拖拽/缩放”。
+      const scaleX = root.offsetWidth > 0 ? rootBounds.width / root.offsetWidth : 1;
+      const scaleY = root.offsetHeight > 0 ? rootBounds.height / root.offsetHeight : scaleX;
+      const safeScaleX = Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1;
+      const safeScaleY = Number.isFinite(scaleY) && scaleY > 0 ? scaleY : safeScaleX;
+      const rootWidth = root.offsetWidth || rootBounds.width / safeScaleX;
+      const rootHeight = root.offsetHeight || rootBounds.height / safeScaleY;
+      const left = (targetBounds.left - rootBounds.left) / safeScaleX;
+      const top = (targetBounds.top - rootBounds.top) / safeScaleY;
+      const width = targetBounds.width / safeScaleX;
+      const height = targetBounds.height / safeScaleY;
       const belowTop = top + height + 8;
       const hudPlacement = top >= HUD_ESTIMATED_HEIGHT + 8
         ? "above" as const
-        : belowTop + HUD_ESTIMATED_HEIGHT <= rootBounds.height
+        : belowTop + HUD_ESTIMATED_HEIGHT <= rootHeight
           ? "below" as const
           : "inside" as const;
       const hudTop = hudPlacement === "above"
         ? top - 8
         : hudPlacement === "below"
           ? belowTop
-          : Math.max(4, Math.min(top + 8, rootBounds.height - HUD_ESTIMATED_HEIGHT - 4));
+          : Math.max(4, Math.min(top + 8, rootHeight - HUD_ESTIMATED_HEIGHT - 4));
       setSelectionOverlay({
         left,
         top,
         width,
         height,
-        frameLeft: frameBounds.left - rootBounds.left,
-        frameTop: frameBounds.top - rootBounds.top,
-        frameWidth: frameBounds.width,
-        frameHeight: frameBounds.height,
+        frameLeft: (frameBounds.left - rootBounds.left) / safeScaleX,
+        frameTop: (frameBounds.top - rootBounds.top) / safeScaleY,
+        frameWidth: frameBounds.width / safeScaleX,
+        frameHeight: frameBounds.height / safeScaleY,
         hudLeft: Math.max(
           4,
-          Math.min(left, Math.max(4, rootBounds.width - HUD_ESTIMATED_WIDTH - 4)),
+          Math.min(left, Math.max(4, rootWidth - HUD_ESTIMATED_WIDTH - 4)),
         ),
         hudTop,
         hudPlacement,
@@ -1541,6 +1591,10 @@ export default function ContentTemplateContractFrame({
     const nodes = Array.from(root.querySelectorAll<HTMLElement>("[data-hc-template-slot-kind]"));
     const updateOverlays = () => {
       const rootBounds = root.getBoundingClientRect();
+      const scaleX = root.offsetWidth > 0 ? rootBounds.width / root.offsetWidth : 1;
+      const scaleY = root.offsetHeight > 0 ? rootBounds.height / root.offsetHeight : scaleX;
+      const safeScaleX = Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1;
+      const safeScaleY = Number.isFinite(scaleY) && scaleY > 0 ? scaleY : safeScaleX;
       const next = nodes.flatMap((element): TemplateSlotOverlayBox[] => {
         const nodeId = element.dataset.hcKeyboardNode ||
           element.dataset.contentRole ||
@@ -1555,10 +1609,10 @@ export default function ContentTemplateContractFrame({
           nodeId,
           kind,
           label: element.dataset.hcTemplateSlotLabel || getTemplateSlotLabel(kind),
-          left: bounds.left - rootBounds.left,
-          top: bounds.top - rootBounds.top,
-          width: bounds.width,
-          height: bounds.height,
+          left: (bounds.left - rootBounds.left) / safeScaleX,
+          top: (bounds.top - rootBounds.top) / safeScaleY,
+          width: bounds.width / safeScaleX,
+          height: bounds.height / safeScaleY,
         }];
       });
       setTemplateSlotOverlays((current) =>
@@ -1629,14 +1683,12 @@ export default function ContentTemplateContractFrame({
     const root = rootRef.current;
     const ownerDocument = root?.ownerDocument;
     const ownerWindow = root?.ownerDocument.defaultView;
-    let viewportWidth = ownerWindow?.innerWidth;
+    let viewport = resolveEditorViewport(ownerWindow);
     const cancelOnViewportWidthChange = () => {
-      const nextWidth = ownerWindow?.innerWidth;
-      if (nextWidth !== undefined) {
-        setActiveViewport(nextWidth <= 767 ? "mobile" : "desktop");
-      }
-      if (nextWidth === viewportWidth) return;
-      viewportWidth = nextWidth;
+      const nextViewport = resolveEditorViewport(ownerWindow);
+      setActiveViewport(nextViewport);
+      if (nextViewport === viewport) return;
+      viewport = nextViewport;
       cancelActiveGesture(true);
     };
     const cancelOnBlur = () => cancelActiveGesture(true);
@@ -1663,7 +1715,7 @@ export default function ContentTemplateContractFrame({
         }
       }, 120);
     };
-  }, [blockId, cancelActiveGesture]);
+  }, [blockId, cancelActiveGesture, resolveEditorViewport]);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -1671,8 +1723,9 @@ export default function ContentTemplateContractFrame({
     const ownerWindow = root.ownerDocument.defaultView;
     const appliedVariables = new Set<string>();
     let geometryFrame = 0;
-    const visualProps = gesturePreview
-      ? { ...props, __instanceOverrides: gesturePreview.overrides }
+    const previewOverrides = gesturePreview?.overrides ?? sharedDesignPreview;
+    const visualProps = previewOverrides
+      ? { ...props, __instanceOverrides: previewOverrides }
       : props;
     const nodeIds = new Set(
       contract.editorCapabilities.editableObjects.flatMap((object) =>
@@ -1686,9 +1739,7 @@ export default function ContentTemplateContractFrame({
     };
     const reportMeasuredGeometry = () => {
       if (mode !== "editor" || !blockId) return;
-      const viewport = (ownerWindow?.innerWidth ?? 1024) <= 767
-        ? "mobile" as const
-        : "desktop" as const;
+      const viewport = resolveEditorViewport(ownerWindow);
       const candidates = Array.from(root.querySelectorAll<HTMLElement>(
         "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
       ));
@@ -1740,9 +1791,7 @@ export default function ContentTemplateContractFrame({
     };
     const syncLayoutVariables = () => {
       clearVariables();
-      const viewport = (ownerWindow?.innerWidth ?? 1024) <= 767
-        ? "mobile" as const
-        : "desktop" as const;
+      const viewport = resolveEditorViewport(ownerWindow);
       root.style.setProperty(
         "--hc-layout-grid-rows",
         String(contract.defaultGeometryByViewport[viewport].rows),
@@ -1824,12 +1873,13 @@ export default function ContentTemplateContractFrame({
       ownerWindow?.cancelAnimationFrame(geometryFrame);
       clearVariables();
     };
-  }, [blockId, contract, gesturePreview, layout, mode, moduleType, props, reportCanvasGeometry]);
+  }, [blockId, contract, gesturePreview, layout, mode, moduleType, props, reportCanvasGeometry, resolveEditorViewport, sharedDesignPreview]);
 
   if (!contract || !layout) return <>{children}</>;
   const scopeId = `hc-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
-  const previewProps = gesturePreview
-    ? { ...props, __instanceOverrides: gesturePreview.overrides }
+  const previewOverrides = gesturePreview?.overrides ?? sharedDesignPreview;
+  const previewProps = previewOverrides
+    ? { ...props, __instanceOverrides: previewOverrides }
     : props;
   const instanceOverrides = resolveInstanceOverrides(contract, previewProps);
   const instanceCss = createInstanceCss(contract, instanceOverrides, scopeId, mode);
@@ -1983,7 +2033,13 @@ export default function ContentTemplateContractFrame({
       return;
     }
     sendCanvasVisualEdit({ blockId, moduleType, overrides: next }, drag.sourceWindow);
-    retainCommittedPreview(next);
+    if (drag.pointerId >= 0) {
+      retainCommittedPreview(next);
+    } else {
+      gesturePreviewRef.current = null;
+      setGesturePreview(null);
+      setGesturePhase("idle");
+    }
   };
 
   const applyRect = (
@@ -2041,7 +2097,13 @@ export default function ContentTemplateContractFrame({
       return;
     }
     sendCanvasVisualEdit({ blockId, moduleType, overrides: next }, drag.sourceWindow);
-    retainCommittedPreview(next);
+    if (drag.pointerId >= 0) {
+      retainCommittedPreview(next);
+    } else {
+      gesturePreviewRef.current = null;
+      setGesturePreview(null);
+      setGesturePhase("idle");
+    }
   };
 
   const commitVisualPath = (path: string[], value: unknown, message: string) => {
@@ -2073,6 +2135,7 @@ export default function ContentTemplateContractFrame({
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (mode !== "editor" || !blockId || !isHtmlElement(event.target)) return;
+    if (event.currentTarget.closest('[data-editor-node-selection="module"]')) return;
     const requestedHudMode = event.target
       .closest<HTMLElement>("[data-hc-hud-mode]")
       ?.dataset.hcHudMode;
@@ -2092,10 +2155,11 @@ export default function ContentTemplateContractFrame({
     }
     if (event.target.closest("[data-hc-node-hud]")) return;
     const sourceWindow = event.currentTarget.ownerDocument.defaultView ?? window;
-    const activeViewport = sourceWindow.innerWidth <= 767 ? "mobile" : "desktop";
+    const activeViewport = resolveEditorViewport(sourceWindow);
     const resizeHandleElement = event.target.closest<HTMLElement>("[data-hc-resize-handle]");
+    const selectionBoxElement = event.target.closest<HTMLElement>("[data-hc-selection-box]");
     const resizeDirection = resizeHandleElement?.dataset.resizeDirection as ResizeDirection | undefined;
-    const forcedNodeId = resizeHandleElement?.dataset.nodeId;
+    const forcedNodeId = resizeHandleElement?.dataset.nodeId ?? selectionBoxElement?.dataset.nodeId;
     const forcedNodeElement = forcedNodeId
       ? Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
           "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
@@ -2220,6 +2284,10 @@ export default function ContentTemplateContractFrame({
       suppressClickRef.current = true;
       setGesturePreview(null);
       setGesturePhase("begin");
+      // pointerdown 会被画布接管并阻止浏览器默认聚焦；若不显式聚焦，
+      // 随后的 Esc/方向键会落到 iframe 宿主而无法取消或微调当前对象。
+      // preventScroll 保留画布当前位置，避免缩放 iframe 因聚焦而跳动。
+      node.element.focus({ preventScroll: true });
       event.currentTarget.setPointerCapture(event.pointerId);
       event.preventDefault();
       event.stopPropagation();
@@ -2251,6 +2319,7 @@ export default function ContentTemplateContractFrame({
     suppressClickRef.current = true;
     setGesturePreview(null);
     setGesturePhase("begin");
+    node.element.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
     event.preventDefault();
     event.stopPropagation();
@@ -2258,6 +2327,7 @@ export default function ContentTemplateContractFrame({
 
   const handleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (mode !== "editor" || !blockId || !isHtmlElement(event.target)) return;
+    if (event.currentTarget.closest('[data-editor-node-selection="module"]')) return;
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
       event.preventDefault();
@@ -2270,7 +2340,7 @@ export default function ContentTemplateContractFrame({
       event.stopPropagation();
     }
     const sourceWindow = event.currentTarget.ownerDocument.defaultView ?? window;
-    const activeViewport = sourceWindow.innerWidth <= 767 ? "mobile" : "desktop";
+    const activeViewport = resolveEditorViewport(sourceWindow);
     const node = findVisualNode(event.target, activeViewport);
     if (!node) return;
     // Puck 会在外层组件的 pointerdown 阶段处理 itemSelector；select 模式下
@@ -2292,6 +2362,20 @@ export default function ContentTemplateContractFrame({
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (mode !== "editor" || !blockId || !isHtmlElement(event.target)) return;
+    if (
+      blockId.startsWith("template-editor:")
+      && (event.ctrlKey || event.metaKey)
+      && !event.altKey
+      && ["z", "y"].includes(event.key.toLowerCase())
+    ) {
+      sendCanvasTemplateHistory({
+        blockId,
+        direction: event.key.toLowerCase() === "y" || event.shiftKey ? "forward" : "back",
+      }, event.currentTarget.ownerDocument.defaultView ?? window);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (event.key === "Escape") {
       cancelActiveGesture(true);
       setEditorMode("select");
@@ -2300,8 +2384,7 @@ export default function ContentTemplateContractFrame({
       return;
     }
     if (event.target.closest("[data-hc-node-hud]")) return;
-    const activeViewport = event.currentTarget.ownerDocument.defaultView?.innerWidth &&
-      event.currentTarget.ownerDocument.defaultView.innerWidth <= 767 ? "mobile" : "desktop";
+    const activeViewport = resolveEditorViewport(event.currentTarget.ownerDocument.defaultView);
     const node = findVisualNode(event.target, activeViewport);
     if (!node || node.kind === "action") return;
     selectNode({ blockId, moduleType, nodeId: node.nodeId, kind: node.kind });
@@ -2714,6 +2797,7 @@ export default function ContentTemplateContractFrame({
           : undefined}
       data-visual-editor-mode={mode === "editor" ? editorModeHere : undefined}
       data-visual-panel-mode={mode === "editor" ? panelModeHere : undefined}
+      data-visual-editor-viewport={mode === "editor" ? activeViewport : undefined}
       data-visual-selected-node={selectedHere?.nodeId}
       data-hc-snap-active={activeGuides.x || activeGuides.y ? "true" : undefined}
       data-hc-gesture-phase={mode === "editor" && gesturePhase !== "idle" ? gesturePhase : undefined}
@@ -2826,24 +2910,25 @@ export default function ContentTemplateContractFrame({
                   <b>{geometryHint.width} × {geometryHint.height}</b>
                 </output>
               ) : null}
-              <div
-                role="toolbar"
-                aria-label={`调整画布对象 ${selectedHere.nodeId}`}
-                data-hc-node-hud
-                data-node-id={selectedHere.nodeId}
-                data-node-kind={selectedHere.kind}
-                data-placement={selectionOverlay.hudPlacement}
-                data-can-adjust-layout={canAdjustLayout ? "true" : "false"}
-                data-can-adjust-focus={canDragMediaFocus ? "true" : "false"}
-                data-can-adjust-fit={canAdjustFit ? "true" : "false"}
-                data-can-adjust-zoom={canAdjustZoom ? "true" : "false"}
-                style={{
-                  left: selectionOverlay.hudLeft,
-                  top: selectionOverlay.hudTop,
-                }}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => event.stopPropagation()}
-              >
+              {panelModeHere === "design" ? (
+                <div
+                  role="toolbar"
+                  aria-label={`调整画布对象 ${selectedHere.nodeId}`}
+                  data-hc-node-hud
+                  data-node-id={selectedHere.nodeId}
+                  data-node-kind={selectedHere.kind}
+                  data-placement={selectionOverlay.hudPlacement}
+                  data-can-adjust-layout={canAdjustLayout ? "true" : "false"}
+                  data-can-adjust-focus={canDragMediaFocus ? "true" : "false"}
+                  data-can-adjust-fit={canAdjustFit ? "true" : "false"}
+                  data-can-adjust-zoom={canAdjustZoom ? "true" : "false"}
+                  style={{
+                    left: selectionOverlay.hudLeft,
+                    top: selectionOverlay.hudTop,
+                  }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                >
                 {canAdjustLayout ? (
                   <button
                     type="button"
@@ -2907,18 +2992,19 @@ export default function ContentTemplateContractFrame({
                     </button>
                   </>
                 ) : null}
-                {editorMode !== "select" ? (
-                  <button
-                    type="button"
-                    aria-label="完成画布调整"
-                    data-hc-hud-mode="select"
-                    onClick={() => setEditorMode("select")}
-                  >
-                    <CheckOutlined aria-hidden="true" />
-                    完成
-                  </button>
-                ) : null}
-              </div>
+                  {editorMode !== "select" ? (
+                    <button
+                      type="button"
+                      aria-label="完成画布调整"
+                      data-hc-hud-mode="select"
+                      onClick={() => setEditorMode("select")}
+                    >
+                      <CheckOutlined aria-hidden="true" />
+                      完成
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               {editorMode === "adjust-layout" && canAdjustLayout
                 ? RESIZE_HANDLES
                     .filter((handle) => selectedEditableObject?.constraints.allowedResize.includes(handle.direction))

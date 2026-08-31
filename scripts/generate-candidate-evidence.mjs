@@ -23,6 +23,10 @@ function normalizePath(path) {
   return path.split(sep).join("/");
 }
 
+function compareStable(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function projectRelative(path) {
   const value = normalizePath(relative(projectRoot, resolve(projectRoot, path)));
   if (!value || value === "." || value.startsWith("../")) {
@@ -81,7 +85,8 @@ function hashTree(path) {
 
   visit(root);
   entries.sort((left, right) =>
-    normalizePath(relative(root, left)).localeCompare(
+    compareStable(
+      normalizePath(relative(root, left)),
       normalizePath(relative(root, right)),
     ),
   );
@@ -162,7 +167,8 @@ function hashClientBuildGraph() {
   }
 
   const entries = [indexPath, ...reachableAssets].sort((left, right) =>
-    normalizePath(relative(root, left)).localeCompare(
+    compareStable(
+      normalizePath(relative(root, left)),
       normalizePath(relative(root, right)),
     ),
   );
@@ -235,21 +241,27 @@ function inventoryTree(path) {
     assetsOverOneMiB,
     byExtension: Object.fromEntries(
       [...byExtension.entries()].sort(([left], [right]) =>
-        left.localeCompare(right),
+        compareStable(left, right),
       ),
     ),
     largest: rows
-      .sort((left, right) => right.bytes - left.bytes)
+      .sort((left, right) =>
+        right.bytes - left.bytes || compareStable(left.path, right.path),
+      )
       .slice(0, 15),
   };
 }
 
 function collectWorktree(outputPath) {
-  const head = run("git", ["rev-parse", "HEAD"]);
-  const branch = run("git", ["branch", "--show-current"]);
+  // 固定 clean filter 语义，避免同一挂载工作树在 Windows 与 Linux 中
+  // 因全局 core.autocrlf 不同而得到不同的修改集合和候选指纹。
+  const gitPrefix = ["-c", "core.autocrlf=true"];
+  const head = run("git", [...gitPrefix, "rev-parse", "HEAD"]);
+  const branch = run("git", [...gitPrefix, "branch", "--show-current"]);
   const excludedOutput = projectRelative(outputPath);
   const tracked = new Set(
     runNullSeparated("git", [
+      ...gitPrefix,
       "diff",
       "--name-only",
       "--no-renames",
@@ -260,13 +272,14 @@ function collectWorktree(outputPath) {
   );
   const untracked = new Set(
     runNullSeparated("git", [
+      ...gitPrefix,
       "ls-files",
       "--others",
       "--exclude-standard",
       "-z",
     ]).filter((path) => path !== excludedOutput),
   );
-  const paths = [...new Set([...tracked, ...untracked])].sort();
+  const paths = [...new Set([...tracked, ...untracked])].sort(compareStable);
   const fingerprint = createHash("sha256");
   fingerprint.update(`HEAD:${head}\0`);
   let deleted = 0;
@@ -307,13 +320,20 @@ function collectWorktree(outputPath) {
 }
 
 function collectReleaseContract() {
+  run(process.execPath, ["--test", "scripts/verify-release-images.spec.mjs"]);
   const result = JSON.parse(
     run(process.execPath, ["scripts/verify-release-images.mjs", "--static"]),
   );
   if (result?.ok !== true || result?.mode !== "static") {
     fail("STATIC_RELEASE_CONTRACT_FAILED");
   }
-  return result;
+  return {
+    ...result,
+    manifestRegressionTests: {
+      passed: true,
+      path: "scripts/verify-release-images.spec.mjs",
+    },
+  };
 }
 
 function collectRuntime(source, migrationBundleSha256) {
@@ -393,7 +413,7 @@ function collectRuntime(source, migrationBundleSha256) {
           migrationBundleLabel,
         };
       })
-      .sort((left, right) => left.service.localeCompare(right.service));
+      .sort((left, right) => compareStable(left.service, right.service));
 
     const candidateServices = services.filter((entry) =>
       entry.service === "server" || entry.service === "client",

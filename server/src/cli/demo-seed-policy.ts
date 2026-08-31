@@ -1,3 +1,9 @@
+import {
+  ACCOUNT_PASSWORD_MAX_LENGTH,
+  ACCOUNT_PASSWORD_MESSAGE,
+  ACCOUNT_PASSWORD_MIN_LENGTH,
+} from "../modules/users/staff-password-policy";
+
 export type DemoSeedEnvironment = {
   NODE_ENV?: string;
   ALLOW_DEMO_SEED?: string;
@@ -32,14 +38,12 @@ export function resolveDemoSeedConfig(environment: DemoSeedEnvironment) {
 
   const adminPassword = environment.DEMO_ADMIN_PASSWORD ?? "";
   if (
-    adminPassword.length < 8
-    || adminPassword.length > 128
-    || !/[A-Za-z]/.test(adminPassword)
-    || !/[0-9]/.test(adminPassword)
+    adminPassword.length < ACCOUNT_PASSWORD_MIN_LENGTH
+    || adminPassword.length > ACCOUNT_PASSWORD_MAX_LENGTH
   ) {
     throw new DemoSeedPolicyError(
       "demo-seed-password-invalid",
-      "DEMO_ADMIN_PASSWORD 必须为 8-128 位并同时包含字母和数字",
+      `DEMO_ADMIN_PASSWORD ${ACCOUNT_PASSWORD_MESSAGE}`,
     );
   }
 

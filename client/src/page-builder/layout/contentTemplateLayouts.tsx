@@ -67,8 +67,8 @@ const getPrimaryRatio = (
   ?? skeleton.slots.find((slot) => Boolean(slot[`${device}Ratio`]))?.[`${device}Ratio`];
 
 /**
- * 全部活跃模板均拥有真实 adapter / Renderer。这里仅把 schema v5
- * 生成产物转换为渲染布局元数据，不能据 implementationStatus 降级为骨架。
+ * 全部活跃模板均拥有真实 adapter / Renderer。这里仅把当前机器合同
+ * 的生成产物转换为渲染布局元数据，不能据 implementationStatus 降级为骨架。
  */
 const DERIVED_TEMPLATE_LAYOUTS = Object.fromEntries(
   Object.values(CONTENT_TEMPLATE_SKELETONS).map((skeleton) => {

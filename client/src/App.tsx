@@ -1,18 +1,11 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { Suspense, lazy, useEffect } from "react";
-import PublicLayout from "@/components/layout/PublicLayout";
+import { Suspense, lazy } from "react";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { RequestErrorNotice } from "@/components/common/RequestErrorNotice";
-import { CustomerProtectedRoute } from "@/components/common/CustomerProtectedRoute";
 import ProgressBar from "@/components/common/ProgressBar";
-import {
-  rolesForAdminRoute,
-  canAccessAdminRoute,
-} from "@/config/adminRouteAccess";
-import { useAuthStore } from "@/store/authStore";
-import { useCommerceFlags } from "@/store/featureFlags";
+import RouteLoading from "@/components/common/RouteLoading";
+import { rolesForAdminRoute } from "@/config/adminRouteAccess";
 import { CONTENT_TEMPLATE_PAGE_PATHS } from "@/page-builder/generated/contentTemplates.generated";
-import EnglishPublicRouteGate from "@/components/common/EnglishPublicRouteGate";
 import {
   type PublicContentLocale,
   withPublicLocalePath,
@@ -22,6 +15,19 @@ import {
 const AdminLayout = lazy(() => import("@/components/layout/AdminLayout"));
 const ProtectedRoute = lazy(() => import("@/components/common/ProtectedRoute"));
 const AntdProvider = lazy(() => import("@/components/common/AntdProvider"));
+const PublicLayout = lazy(() => import("@/components/layout/PublicLayout"));
+const EnglishPublicRouteGate = lazy(
+  () => import("@/components/common/EnglishPublicRouteGate"),
+);
+const CustomerProtectedRoute = lazy(() =>
+  import("@/components/common/CustomerProtectedRoute").then((module) => ({
+    default: module.CustomerProtectedRoute,
+  })),
+);
+const CommerceRoute = lazy(() => import("@/components/common/CommerceRoute"));
+const AdminIndexRedirect = lazy(
+  () => import("@/pages/admin/AdminIndexRedirect"),
+);
 // Lazy load pages
 const Home = lazy(() => import("@/pages/public/Home"));
 const HomePreview = lazy(() =>
@@ -85,51 +91,6 @@ const PartnerApplications = lazy(
 const ReviewManage = lazy(() => import("@/pages/admin/ReviewManage"));
 const CustomerManage = lazy(() => import("@/pages/admin/CustomerManage"));
 
-const Loading = () => (
-  <div
-    className="flex min-h-screen items-center justify-center bg-brand-bg"
-    role="status"
-    aria-live="polite"
-  >
-    <span
-      className="h-10 w-10 animate-spin rounded-full border-4 border-brand-line border-t-brand-text"
-      aria-hidden="true"
-    />
-    <span className="sr-only">页面加载中</span>
-  </div>
-);
-
-/**
- * 交易开关关闭或读取失败时，直接访问旧链接也不能进入购物车/结算页面。
- * 服务端 CustomerCommerceGuard 仍是写操作的最终保护；本组件只负责访客路径降级。
- */
-const CommerceRoute = ({
-  children,
-  capability,
-  locale,
-}: {
-  children: React.ReactNode;
-  capability: "cart" | "checkout";
-  locale: PublicContentLocale;
-}) => {
-  const flags = useCommerceFlags((state) => state.flags);
-  const loading = useCommerceFlags((state) => state.loading);
-  const load = useCommerceFlags((state) => state.load);
-
-  useEffect(() => {
-    if (!flags && !loading) void load();
-  }, [flags, loading, load]);
-
-  if (!flags) return <Loading />;
-  const allowed = capability === "cart"
-    ? flags.commerceEnabled && flags.cartEnabled
-    : flags.commerceEnabled && flags.cartEnabled && flags.paymentEnabled;
-  if (!allowed) {
-    return <Navigate to={withPublicLocalePath("/contact", locale)} replace />;
-  }
-  return <>{children}</>;
-};
-
 const AdminPage = ({
   children,
   route,
@@ -145,17 +106,6 @@ const AdminPage = ({
 const AntdRoute = ({ children }: { children: React.ReactNode }) => (
   <AntdProvider>{children}</AntdProvider>
 );
-
-// 各角色后台落地页（仅声明首屏偏好，权限仍由 ROUTE_RULES 最终校验）
-const ADMIN_LANDING: Readonly<Record<string, string>> = {
-  SUPER_ADMIN: "/admin/dashboard",
-  ADMIN: "/admin/dashboard",
-  EDITOR: "/admin/products",
-  WAREHOUSE: "/admin/inventory",
-  CUSTOMER_SERVICE: "/admin/leads",
-  SALES_CONSULTANT: "/admin/trade/quotations",
-  FINANCE: "/admin/trade/overview",
-};
 
 /** 旧搜索链接只做参数兼容；真实查询、建议、历史与埋点统一由选款中心执行。 */
 function LegacySearchRedirect({ locale }: { locale: PublicContentLocale }) {
@@ -175,16 +125,6 @@ function LegacySearchRedirect({ locale }: { locale: PublicContentLocale }) {
   const suffix = canonical.toString();
   const catalogPath = withPublicLocalePath("/catalog", locale);
   return <Navigate replace to={`${catalogPath}${suffix ? `?${suffix}` : ""}`} />;
-}
-
-function AdminIndexRedirect() {
-  const role = useAuthStore((s) => s.user?.role);
-  const preferred = role ? ADMIN_LANDING[role] : undefined;
-  const target =
-    preferred && canAccessAdminRoute(role, preferred)
-      ? preferred
-      : "/admin/dashboard";
-  return <Navigate to={target} replace />;
 }
 
 function contentPageRoute(pageKey: keyof typeof CONTENT_TEMPLATE_PAGE_PATHS) {
@@ -291,7 +231,7 @@ function App() {
     <ErrorBoundary>
       <ProgressBar />
       <RequestErrorNotice />
-      <Suspense fallback={<Loading />}>
+      <Suspense fallback={<RouteLoading />}>
         <Routes>
           {/* Public Routes — 首页和其他页面统一使用 PublicLayout */}
           <Route element={<PublicLayout />}>

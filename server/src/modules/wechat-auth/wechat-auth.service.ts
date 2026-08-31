@@ -12,6 +12,7 @@ import * as bcrypt from "bcrypt";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { resolveCorsOrigins } from "../../common/config/cors-origins";
+import { assertAccountPassword } from "../users/staff-password-policy";
 
 const WECHAT_QR_CONNECT = "https://open.weixin.qq.com/connect/qrconnect";
 const WECHAT_ACCESS_TOKEN_API =
@@ -271,13 +272,6 @@ export class WechatAuthService {
       throw new BadRequestException("请提供有效的手机号码");
     }
     const password = data.password ?? "";
-    if (
-      password.length < 8 ||
-      !/[A-Za-z]/.test(password) ||
-      !/\d/.test(password)
-    ) {
-      throw new BadRequestException("密码至少需要 8 位，并包含字母和数字");
-    }
 
     const existing = await this.prisma.customer.findUnique({ where: { phone } });
     let customer: {
@@ -307,6 +301,7 @@ export class WechatAuthService {
         },
       });
     } else {
+      assertAccountPassword(password);
       const passwordHash = await bcrypt.hash(password, 12);
       customer = await this.prisma.customer.create({
         data: {

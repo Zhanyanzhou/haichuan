@@ -1,6 +1,7 @@
 /**
  * schema/modules/beforeAfter.ts — 「改款对比(前后对比)」编辑区 Schema。
- * Editorial Story 母版(改款叙事变体):同比例双图滑动对比(默认 4:5,可选项),两图独立焦点。
+ * Editorial Story 母版(改款叙事变体):同比例双图滑动对比,默认使用模板画框比例,
+ * 页面实例可显式选择图片裁切比例,两图各自独立焦点。
  */
 import {
   BEFORE_AFTER_CONTRACT,
@@ -11,10 +12,10 @@ import { beforeAfterPuckConfig } from "../../../adapters/beforeAfter.puck";
 import { ADVANCED_BG_COLOR_FIELD, bgColorPresetField, linkTargetField, moduleNameField, ratioField } from "../shared";
 import type { ModuleInspectorSchema } from "../types";
 
-/** 槽位比例选项(契约派生):改款前后两图同步应用 */
+/** 槽位裁切比例选项(契约派生):改款前后两图同步应用 */
 const beforeAfterRatioControl = ratioField("comparison", "before", {
-  label: "对比图比例",
-  hint: "改款前后两图同步应用，建议同机位素材",
+  label: "图片裁切比例",
+  hint: "显式选择后覆盖模板默认画框；改款前后两图同步应用",
 });
 
 export const beforeAfterSchema: ModuleInspectorSchema = {

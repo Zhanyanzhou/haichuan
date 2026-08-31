@@ -2,6 +2,7 @@ import {
   ensureEditorPageStructure,
   getEditorPage,
   isContentTemplateBlockPublicReady,
+  isContentTemplateBlockPublicRenderable,
   isEditorPageKey,
   type EditorPageKey,
 } from "@/page-builder/config/editorPages";
@@ -55,7 +56,9 @@ export function getPublishedPageReadiness(
   const visibleBlocks = Array.isArray(data.content)
     ? data.content.filter((block) => block?.props?.isVisible !== false)
     : [];
-  const brandBlocks = visibleBlocks.filter(isRenderablePublishedBrandBlock);
+  const brandBlocks = visibleBlocks
+    .filter(isRenderablePublishedBrandBlock)
+    .filter((block) => isContentTemplateBlockPublicRenderable(block));
   const invalidBlocks = visibleBlocks
     .filter((block) => block?.type !== "业务功能区")
     .filter((block) => !isContentTemplateBlockPublicReady(block));

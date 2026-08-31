@@ -1,10 +1,11 @@
 /**
  * UnsavedChangesGuard.tsx — SPA 路由级未保存拦截（2026-08-16 批次 D）。
  * 依赖数据路由（createBrowserRouter，见 main.tsx），声明式 BrowserRouter 下 useBlocker 不可用。
- * 三选项：保存并离开（主）/ 直接离开（放弃修改）/ 继续编辑。
+ * 两个直接选项：保存并离开（主）/ 继续编辑。
  * 仅拦截 pathname 变化（编辑器状态按路径隔离，search 变化无需拦截）。
  */
-import { Button, Modal, message } from "antd";
+import { Modal, message } from "antd";
+import { useState } from "react";
 import { useBlocker } from "react-router-dom";
 
 interface UnsavedChangesGuardProps {
@@ -28,6 +29,7 @@ export default function UnsavedChangesGuard({
   rootClassName,
 }: UnsavedChangesGuardProps) {
   const [messageApi, messageContext] = message.useMessage();
+  const [saving, setSaving] = useState(false);
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
       hasUnsavedChanges &&
@@ -38,6 +40,8 @@ export default function UnsavedChangesGuard({
   if (blocker.state !== "blocked") return messageContext;
 
   const handleSaveAndLeave = async () => {
+    if (saving) return;
+    setSaving(true);
     const ok = await onSaveAndLeave();
     if (ok) {
       blocker.proceed();
@@ -45,6 +49,7 @@ export default function UnsavedChangesGuard({
       messageApi.error("修改未保存，已留在当前页面");
       blocker.reset();
     }
+    setSaving(false);
   };
 
   return (
@@ -53,17 +58,16 @@ export default function UnsavedChangesGuard({
       <Modal
         open
         rootClassName={rootClassName}
-        title="有未保存的修改"
+        title="保存后离开？"
+        okText="保存并离开"
+        cancelText="继续编辑"
+        confirmLoading={saving}
+        closable={false}
+        maskClosable={false}
+        onOk={() => void handleSaveAndLeave()}
         onCancel={blocker.reset}
-        footer={[
-          <Button key="discard" type="text" danger className="unsaved-guard__discard" onClick={blocker.proceed} style={{ marginRight: "auto" }}>
-            直接离开（放弃修改）
-          </Button>,
-          <Button key="cancel" onClick={blocker.reset}>继续编辑</Button>,
-          <Button key="save" type="primary" onClick={() => void handleSaveAndLeave()}>保存并离开</Button>,
-        ]}
       >
-        离开前是否保存{subject}的修改？直接离开将丢失未保存的修改。
+        {subject}有未保存修改。保存成功后将直接离开；保存失败会留在当前页面。
       </Modal>
     </>
   );

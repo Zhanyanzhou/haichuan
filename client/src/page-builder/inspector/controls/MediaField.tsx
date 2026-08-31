@@ -14,6 +14,10 @@ import {
   SESSION_MEDIA_UPLOADED_EVENT,
   sessionUploadedMedia,
 } from "../../fields/MediaPickerField";
+import {
+  PAGE_MEDIA_LIBRARY_CHANGED_EVENT,
+  readPageMediaLibrary,
+} from "../../fields/pageMediaLibrary";
 
 interface MediaFieldProps {
   def: MediaFieldDef;
@@ -24,8 +28,9 @@ interface MediaFieldProps {
   onAdjustComposition?: () => void;
   /** 继承来源键的当前值（inheritFrom 配置时由 FieldRenderer 传入） */
   inheritBaseValue?: string;
-  previewFit?: "cover" | "contain";
+  previewFit?: "cover" | "contain" | "fill";
   previewZoom?: number;
+  taskPresentation?: "media";
 }
 
 const MEDIA_KEY = /(image|media|poster|cover|avatar|logo|thumbnail)/i;
@@ -57,31 +62,38 @@ export default function MediaField({
   inheritBaseValue,
   previewFit,
   previewZoom,
+  taskPresentation,
 }: MediaFieldProps) {
   const pageData = useHomepagePuck((state) => state.appState.data);
-  const [sessionMediaRevision, setSessionMediaRevision] = useState(0);
+  const [mediaRevision, setMediaRevision] = useState(0);
   useEffect(() => {
-    const refresh = () => setSessionMediaRevision((revision) => revision + 1);
+    const refresh = () => setMediaRevision((revision) => revision + 1);
     window.addEventListener(SESSION_MEDIA_UPLOADED_EVENT, refresh);
-    return () => window.removeEventListener(SESSION_MEDIA_UPLOADED_EVENT, refresh);
+    window.addEventListener(PAGE_MEDIA_LIBRARY_CHANGED_EVENT, refresh);
+    return () => {
+      window.removeEventListener(SESSION_MEDIA_UPLOADED_EVENT, refresh);
+      window.removeEventListener(PAGE_MEDIA_LIBRARY_CHANGED_EVENT, refresh);
+    };
   }, []);
   const currentPageMedia = useMemo(
     () => {
       // 会话上传集合本身可变，revision 仅用于通知此处重新计算。
-      void sessionMediaRevision;
+      void mediaRevision;
       return [...new Set([...collectPageMedia(pageData), ...sessionUploadedMedia])];
     },
-    [pageData, sessionMediaRevision],
+    [mediaRevision, pageData],
   );
-  const availablePageMedia = useMemo(
-    () => [value, ...currentPageMedia.filter((url) => url !== value)].filter(Boolean),
-    [currentPageMedia, value],
-  );
-  const recentPageMedia = useMemo(
-    () => availablePageMedia.slice(0, 5),
-    [availablePageMedia],
-  );
-  const [replaceOpen, setReplaceOpen] = useState(false);
+  const availablePageMedia = useMemo(() => {
+    void mediaRevision;
+    const libraryItems = readPageMediaLibrary().filter((item) => item.type === "image");
+    const items = new Map<string, { url: string; name: string }>();
+    if (value) items.set(value, { url: value, name: "当前图片" });
+    libraryItems.forEach((item) => items.set(item.url, { url: item.url, name: item.name }));
+    currentPageMedia.forEach((url, index) => {
+      if (!items.has(url)) items.set(url, { url, name: `当前页面图片 ${index + 1}` });
+    });
+    return [...items.values()];
+  }, [currentPageMedia, mediaRevision, value]);
   const [pageMediaOpen, setPageMediaOpen] = useState(false);
   const showOverrideBadge = Boolean(def.inheritFrom && device === "mobile");
   const overridden = showOverrideBadge && Boolean(value && value.trim());
@@ -90,10 +102,16 @@ export default function MediaField({
     setPageMediaOpen(false);
     onChange(nextValue);
   };
+  const taskLabel = taskPresentation === "media"
+    ? def.label.replace(/^(桌面端|移动端)/, "")
+    : def.label;
   return (
-    <div className="homepage-editor__inspector-field">
+    <div
+      className="homepage-editor__inspector-field"
+      data-task-presentation={taskPresentation}
+    >
       <label>
-        {def.label}
+        {taskLabel}
         {def.required ? <em>必填</em> : null}
         {def.hint ? (
           <span className="homepage-editor__inspector-hint">{def.hint}</span>
@@ -129,41 +147,41 @@ export default function MediaField({
           previewFocus={focus}
           previewFit={previewFit}
           previewZoom={previewZoom}
-          onReplaceOpenChange={setReplaceOpen}
-          onOpenPageMedia={availablePageMedia.length > 1
-            ? () => setPageMediaOpen((open) => !open)
-            : undefined}
+          onOpenPageMedia={() => setPageMediaOpen((open) => !open)}
           pageMediaOpen={pageMediaOpen}
+          taskPresentation={taskPresentation === "media"}
         />
       ) : null}
       {!showOverrideBadge || overridden ? (
-        (replaceOpen || pageMediaOpen) && availablePageMedia.length > 1 ? (
+        pageMediaOpen ? (
           <div
             className="homepage-editor__current-page-media"
-            aria-label="最近使用的图片"
+            aria-label="选择素材库图片"
+            role="region"
           >
             <div className="homepage-editor__current-page-media-heading">
-              <strong>最近使用</strong>
+              <strong>素材库图片</strong>
               <span>{availablePageMedia.length} 张</span>
             </div>
-            <div>
-              {recentPageMedia.map((url) => (
-                <button
-                  key={url}
-                  type="button"
-                  className={url === value ? "is-current" : ""}
-                  onClick={() => selectMedia(url)}
-                  aria-label={url === value ? "当前使用的素材" : "使用本页素材"}
-                >
-                  <img src={url} alt="" loading="lazy" />
-                </button>
-              ))}
-              {availablePageMedia.length > recentPageMedia.length ? (
-                <span className="homepage-editor__current-page-media-more">
-                  +{availablePageMedia.length - recentPageMedia.length}
-                </span>
-              ) : null}
-            </div>
+            {availablePageMedia.length > 0 ? (
+              <div className="homepage-editor__current-page-media-items">
+                {availablePageMedia.map((item) => (
+                  <button
+                    key={item.url}
+                    type="button"
+                    className={item.url === value ? "is-current" : ""}
+                    onClick={() => selectMedia(item.url)}
+                    aria-label={item.url === value ? `当前素材：${item.name}` : `使用素材：${item.name}`}
+                  >
+                    <img src={item.url} alt="" loading="lazy" />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="homepage-editor__current-page-media-empty">
+                素材库暂无图片，可使用“更换图片”上传。
+              </p>
+            )}
           </div>
         ) : null
       ) : null}

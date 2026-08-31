@@ -2,11 +2,11 @@ import { expect, test, type Download, type Page } from "@playwright/test";
 import { installAdminSession } from "./fixtures/session-auth";
 
 /**
- * 店铺装修 —— 发布前校验与边界约束（D3）回归测试
+ * 店铺装修 —— 直接发布与安全边界回归测试
  *
- * 覆盖：发布预检（前端调用后端 /document/validate，单一校验源）的边界反馈。
- *   - 超长文本 / 过多组件 / 必填缺失 → 后台校验完成后直接禁用发布入口
- *   - 合法数据 → 预检通过并完成发布
+ * 覆盖：客户端内容检查只提供编辑反馈，不再成为发布前置流程。
+ *   - 点击发布 → 保存当前草稿后直接调用发布接口，不重复预检、不弹确认框
+ *   - 权限、版本冲突和危险内容等硬门禁仍由服务端发布接口负责
  *
  * 运行方式（需已登录 admin 会话快照，非 mock 模式）：
  *   $env:PLAYWRIGHT_ADMIN_STORAGE_STATE="tests/.auth/admin.json"
@@ -72,6 +72,19 @@ function validDraft() {
   };
 }
 
+function multiHeroDraft() {
+  const draft = validDraft();
+  draft.puckData.content.push({
+    type: "首屏主视觉",
+    props: {
+      ...draft.puckData.content[0].props,
+      id: "d3-hero-second-stage",
+      title: "海川工艺篇章",
+    },
+  });
+  return draft;
+}
+
 async function mockEditorApis(
   page: Page,
   opts: {
@@ -87,6 +100,7 @@ async function mockEditorApis(
     }>;
     publishedDocument?: Record<string, unknown> | null;
     saveFailure?: boolean;
+    publishFailure?: boolean;
     saveDelayMs?: number;
     validateFailuresBeforeSuccess?: number;
     draftDocument?: Record<string, unknown>;
@@ -127,6 +141,16 @@ async function mockEditorApis(
     if (url.includes("/publish")) {
       // 发布接口（PUT）：返回已发布快照
       persistentWriteCalls += 1;
+      if (opts.publishFailure) {
+        return route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: 409,
+            message: "该页面已被其他编辑者更新，请重新加载后再发布",
+          }),
+        });
+      }
       return route.fulfill(
         json({ ...draft, status: "PUBLISHED", version: 1, updatedAt: "2026-08-14T00:00:02.000Z" }),
       );
@@ -183,15 +207,15 @@ async function expectNoHorizontalOverflow(page: Page) {
   )).toBe(true);
 }
 
-test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () => {
+test.describe("店铺装修 —— 直接发布与安全边界", () => {
   test.skip(useMock, "发布预检闭环依赖 HTTP 拦截夹具，mock 模式下由手动验收覆盖");
 
   test.beforeEach(async ({ page }) => {
     await authenticateAdmin(page);
   });
 
-  test("超长文本 / 过多组件 / SEO 超限时，最新服务端门禁直接禁用发布入口", async ({ page }) => {
-    await mockEditorApis(page, {
+  test("内容检查存在问题时点击发布仍直接保存并调用发布接口", async ({ page }) => {
+    const requests = await mockEditorApis(page, {
       valid: false,
       errors: [
         "第 1 个区块「首屏展示」：title 文本过长（150/100 字）",
@@ -209,26 +233,28 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
 
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
-    // checking / stale 期间也必须先保持禁用，不能短暂闪现为可发布。
-    await expect(publishButton).toBeDisabled();
+    await expect.poll(requests.validateCalls).toBe(1);
+    await expect(publishButton).toBeEnabled();
     await expect(publishButton).toHaveAttribute(
       "aria-label",
-      /发布到前台网站（(?:.+发布资格.+|还有 3 项发布问题需要处理)）/,
+      "发布到前台网站",
     );
-    // 服务端返回三个阻断问题后，按钮继续禁用并说明真实原因。
     await expect(publishButton).toHaveAttribute(
       "title",
-      "还有 3 项发布问题需要处理",
+      "发布到前台网站",
     );
-    await expect(publishButton).toBeDisabled();
-    await expect(page.getByRole("dialog").filter({ hasText: "发布前需修复" })).toHaveCount(0);
+    await publishButton.click();
+    await expect(page.getByRole("dialog").filter({ hasText: "确认发布首页" })).toHaveCount(0);
+    await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+    expect(requests.validateCalls()).toBe(1);
+    expect(requests.persistentWriteCalls()).toBe(2);
   });
 
   for (const viewport of [
     { name: "桌面", width: 1440, height: 900 },
     { name: "移动窄屏", width: 390, height: 844 },
   ]) {
-    test(`${viewport.name}发布资格读取失败后可原位安全重试`, async ({ page }) => {
+    test(`${viewport.name}内容检查失败不影响直接发布`, async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       const requests = await mockEditorApis(page, {
         valid: true,
@@ -239,22 +265,21 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
       const publishButton = page.locator(".homepage-editor__toolbar-publish");
       await expect(publishButton).toHaveAttribute(
         "title",
-        "发布资格暂时无法核对，请稍后重试",
+        "发布到前台网站",
       );
-      await expect(publishButton).toBeDisabled();
+      await expect(publishButton).toBeEnabled();
       await expect(page.getByText("internal validation service path must never reach the browser"))
         .toHaveCount(0);
+      await expect.poll(requests.validateCalls).toBe(1);
 
-      if (viewport.width <= 390) {
-        await page.getByRole("button", { name: "更多编辑操作" }).click();
-        await page.getByRole("menuitem", { name: "重新检查发布资格" }).click();
-      } else {
-        await page.getByRole("button", { name: "发布资格检查失败，重新检查" }).click();
-      }
+      await page.getByRole("button", { name: "更多编辑操作" }).click();
+      await expect(page.getByRole("menuitem", { name: "重新检查发布资格" })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await publishButton.click();
 
-      await expect(publishButton).toBeEnabled();
-      expect(requests.validateCalls()).toBe(2);
-      expect(requests.persistentWriteCalls()).toBe(0);
+      await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+      expect(requests.validateCalls()).toBe(1);
+      expect(requests.persistentWriteCalls()).toBe(2);
       await expectNoHorizontalOverflow(page);
     });
   }
@@ -263,13 +288,13 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
     { name: "桌面", width: 1440, height: 900 },
     { name: "移动窄屏", width: 390, height: 844 },
   ]) {
-    test(`${viewport.name}页面级发布问题可从当前状态直达发布设置`, async ({ page }) => {
+    test(`${viewport.name}页面级检查问题不再生成发布限制入口`, async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       const requests = await mockEditorApis(page, {
         valid: false,
-        errors: ["页面设置：页面标题不能为空"],
+        errors: ["页面设置：seoTitle 过长（200/60 字）"],
         issues: [{
-          message: "页面设置：页面标题不能为空",
+          message: "页面设置：seoTitle 过长（200/60 字）",
           severity: "error",
           path: "metadata.seoTitle",
           field: "seoTitle",
@@ -277,19 +302,15 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
       });
 
       await page.goto("/admin/editor/home");
-      await expect(page.locator(".homepage-editor__toolbar-publish")).toBeDisabled();
-      if (viewport.width <= 390) {
-        await page.getByRole("button", { name: "更多编辑操作" }).click();
-        await page.getByRole("menuitem", { name: "完善发布资料（1）" }).click();
-      } else {
-        await page.getByRole("button", { name: "有 1 项页面发布资料问题，打开发布设置" }).click();
-      }
-
-      const drawer = page.getByRole("dialog", { name: "页面发布设置" });
-      await expect(drawer).toBeVisible();
-      await expect(drawer.getByRole("status", { name: "当前页面正式发布资料完成度" }))
-        .toContainText("必填资料 0/4");
-      expect(requests.persistentWriteCalls()).toBe(0);
+      const publishButton = page.locator(".homepage-editor__toolbar-publish");
+      await expect(publishButton).toBeEnabled();
+      await expect.poll(requests.validateCalls).toBe(1);
+      await page.getByRole("button", { name: "更多编辑操作" }).click();
+      await expect(page.getByRole("menuitem", { name: "完善发布资料（1）" })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await publishButton.click();
+      await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+      expect(requests.persistentWriteCalls()).toBe(2);
       await expectNoHorizontalOverflow(page);
     });
   }
@@ -298,18 +319,18 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
     { name: "桌面", width: 1440, height: 900 },
     { name: "移动窄屏", width: 390, height: 844 },
   ]) {
-    test(viewport.name + "可在当前模块属性面板看到精确行动目标问题", async ({ page }) => {
+    test(viewport.name + "属性面板底栏不再显示发布阻断", async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      const issueMessage = "第 1 个区块「首屏主视觉」：已填写行动文案，必须设置有效去向";
-      await mockEditorApis(page, {
+      const issueMessage = "第 1 个区块「首屏主视觉」：外部链接只允许完整的 HTTPS 地址";
+      const requests = await mockEditorApis(page, {
         valid: false,
         errors: [issueMessage],
         issues: [{
           message: issueMessage,
           severity: "error",
           blockId: "d3-hero",
-          path: "content[0].props.targetType",
-          field: "targetType",
+          path: "content[0].props.linkUrl",
+          field: "linkUrl",
         }],
       });
 
@@ -322,10 +343,16 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
         await layerSelect.click();
       }
 
-      const issuePanel = page.getByRole("alert", { name: "当前模块发布检查问题" });
-      await expect(issuePanel).toBeVisible();
-      await expect(issuePanel).toContainText(issueMessage);
-      await expect(page.locator(".homepage-editor__toolbar-publish")).toBeDisabled();
+      await expect(page.getByRole("alert", { name: "当前模块发布检查问题" })).toHaveCount(0);
+      await expect(page.getByText("当前任务：修复发布阻断", { exact: true })).toHaveCount(0);
+      await expect(page.getByRole("status", { name: /尚有 1 项发布阻断/ })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "查看阻断项" })).toHaveCount(0);
+      await expect(page.getByRole("status", { name: /已保存到本地草稿/ })).toBeVisible();
+      const publishButton = page.locator(".homepage-editor__toolbar-publish");
+      await expect(publishButton).toBeEnabled();
+      await publishButton.click();
+      await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+      expect(requests.persistentWriteCalls()).toBe(2);
     });
   }
 
@@ -338,9 +365,9 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
       const draft = validDraft();
       await mockEditorApis(page, {
         valid: false,
-        errors: ["页面设置：页面标题不能为空"],
+        errors: ["页面设置：seoTitle 过长（200/60 字）"],
         issues: [{
-          message: "页面设置：页面标题不能为空",
+          message: "页面设置：seoTitle 过长（200/60 字）",
           severity: "error",
           path: "metadata.seoTitle",
           field: "seoTitle",
@@ -354,16 +381,10 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
       });
 
       await page.goto("/admin/editor/home");
-      if (viewport.width <= 390) {
-        const more = page.getByRole("button", { name: /更多编辑操作，线上版本需重新审核/ });
-        await expect(more).toBeVisible();
-        await more.click();
-        await page.getByRole("menuitem", { name: "线上版本需重新审核" }).click();
-      } else {
-        const revalidation = page.getByRole("button", { name: /线上版本未通过当前正式内容门禁/ });
-        await expect(revalidation).toBeVisible();
-        await revalidation.click();
-      }
+      const more = page.getByRole("button", { name: /更多编辑操作，线上版本需重新审核/ });
+      await expect(more).toBeVisible();
+      await more.click();
+      await page.getByRole("menuitem", { name: "线上版本需重新审核" }).click();
 
       const drawer = page.getByRole("dialog", { name: "页面发布设置" });
       await expect(drawer).toBeVisible();
@@ -374,26 +395,78 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
     });
   }
 
-  test("合法数据通过预检并完成发布", async ({ page }) => {
-    await mockEditorApis(page, { valid: true });
+  test("合法数据点击一次即完成发布", async ({ page }) => {
+    const requests = await mockEditorApis(page, { valid: true });
 
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
 
-    // 发布 → 预检通过 → 弹「确认发布」→ 确认
     await page.locator(".homepage-editor__toolbar-publish").click();
-    const confirmDialog = page.getByRole("dialog").filter({ hasText: "确认发布首页" });
-    await expect(confirmDialog).toBeVisible();
-    await confirmDialog.getByRole("button", { name: "确认发布" }).click();
+    await expect(page.getByRole("dialog").filter({ hasText: "确认发布首页" })).toHaveCount(0);
+    await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+    expect(requests.persistentWriteCalls()).toBe(2);
+  });
 
-    // 发布成功提示
+  test("发布接口拒绝时保留明确错误且不误报成功", async ({ page }) => {
+    const requests = await mockEditorApis(page, {
+      valid: true,
+      publishFailure: true,
+    });
+
+    await page.goto("/admin/editor/home");
+    await page.locator(".homepage-editor__toolbar-publish").click();
+
+    await expect(page.getByText("数据已被其他操作更新，请重新加载后再试。"))
+      .toBeVisible({ timeout: 8000 });
+    await expect(page.getByText("店铺首页已发布")).toHaveCount(0);
+    expect(requests.persistentWriteCalls()).toBe(2);
+  });
+
+  test("多个首屏通过预检后发布按钮可用并完成发布", async ({ page }) => {
+    await mockEditorApis(page, {
+      valid: true,
+      draftDocument: multiHeroDraft(),
+    });
+
+    await page.goto("/admin/editor/home");
+    await expect(
+      page.locator(".homepage-editor__template-card", { hasText: "已添加" }),
+    ).toHaveCount(0);
+    const publishButton = page.locator(".homepage-editor__toolbar-publish");
+    await expect(publishButton).toBeEnabled({ timeout: 10000 });
+    await publishButton.click();
+    await expect(page.getByRole("dialog").filter({ hasText: "确认发布首页" })).toHaveCount(0);
     await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
   });
 
-  test("正式资料 warning 保留到确认对话框且不阻断发布", async ({ page }) => {
+  test("内容提示不弹确认框并直接发布到前台", async ({ page }) => {
+    const warning = "第 2 个区块「首屏主视觉」：mobileImage 图片不能为空";
+    await mockEditorApis(page, {
+      valid: true,
+      errors: [],
+      issues: [{
+        message: warning,
+        severity: "warning",
+        blockId: "d3-hero-second-stage",
+        path: "content[1].props.mobileImage",
+        field: "mobileImage",
+      }],
+      draftDocument: multiHeroDraft(),
+    });
+
+    await page.goto("/admin/editor/home");
+    const publishButton = page.locator(".homepage-editor__toolbar-publish");
+    await expect(publishButton).toBeEnabled({ timeout: 10000 });
+    await publishButton.click();
+    await expect(page.getByRole("dialog").filter({ hasText: "确认发布首页" })).toHaveCount(0);
+    await expect(page.getByText(warning)).toHaveCount(0);
+    await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+  });
+
+  test("正式资料提示不再插入确认或跳转步骤", async ({ page }) => {
     const warning =
       "统一联系资料尚未配置；公开联系页仍可提交咨询，但不会显示服务热线、邮箱、地址或服务时间。请先到「店铺资料」维护。";
-    await mockEditorApis(page, {
+    const requests = await mockEditorApis(page, {
       valid: true,
       issues: [{
         message: warning,
@@ -407,69 +480,11 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
     await expect(publishButton).toBeEnabled({ timeout: 10000 });
     await publishButton.click();
-
-    const confirmDialog = page.getByRole("dialog").filter({ hasText: "确认发布首页" });
-    await expect(confirmDialog).toBeVisible();
-    await expect(confirmDialog.getByRole("region", { name: "发布提示" })).toContainText(
-      warning,
-    );
-    await expect(confirmDialog).toContainText("以下 1 项提示不会阻断发布");
-    await confirmDialog.getByRole("button", { name: "确认发布" }).click();
+    await expect(page.getByRole("dialog").filter({ hasText: "确认发布首页" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "前往店铺资料" })).toHaveCount(0);
+    await expect(page.getByText(warning)).toHaveCount(0);
     await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
-  });
-
-  test("正式资料 warning 可直达唯一店铺资料来源", async ({ page }) => {
-    const warning =
-      "统一联系资料尚未配置；公开联系页仍可提交咨询，但不会显示服务热线、邮箱、地址或服务时间。请先到「店铺资料」维护。";
-    const requests = await mockEditorApis(page, {
-      valid: true,
-      issues: [{
-        message: warning,
-        severity: "warning",
-        path: "siteSettings.contact",
-      }],
-    });
-
-    await page.goto("/admin/editor/home");
-    await page.locator(".homepage-editor__toolbar-publish").click();
-    const confirmDialog = page.getByRole("dialog").filter({ hasText: "确认发布首页" });
-    await expect(confirmDialog.getByRole("button", { name: "前往店铺资料" })).toBeVisible();
-    await confirmDialog.getByRole("button", { name: "前往店铺资料" }).click();
-
-    await expect(page).toHaveURL(/\/admin\/site-content$/);
-    await expect(page.getByRole("heading", { name: "店铺资料与品牌设置" })).toBeVisible();
-    expect(requests.persistentWriteCalls()).toBe(0);
-  });
-
-  test("移动端从 warning 前往店铺资料仍保护未保存草稿", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    const warning = "统一联系电话尚未配置；请先到「店铺资料」维护联系电话。";
-    const requests = await mockEditorApis(page, {
-      valid: true,
-      issues: [{
-        message: warning,
-        severity: "warning",
-        path: "siteSettings.contactPhone",
-      }],
-    });
-
-    await page.goto("/admin/editor/home");
-    const heroTitleInput = page.locator(
-      '.homepage-editor__inspector input[placeholder="如 珠宝作品"]',
-    );
-    await heroTitleInput.fill("未保存的正式资料联动标题");
-    await expect(page.locator(".homepage-editor__toolbar-publish")).toBeEnabled();
-    await page.locator(".homepage-editor__toolbar-publish").click();
-    const confirmDialog = page.getByRole("dialog").filter({ hasText: "确认发布首页" });
-    await confirmDialog.getByRole("button", { name: "前往店铺资料" }).click();
-
-    const guard = page.getByRole("dialog", { name: "有未保存的修改" });
-    await expect(guard).toBeVisible();
-    await expect(page).toHaveURL(/\/admin\/editor\/home$/);
-    await guard.getByRole("button", { name: "继续编辑" }).click();
-    await expect(heroTitleInput).toHaveValue("未保存的正式资料联动标题");
-    expect(requests.persistentWriteCalls()).toBe(0);
-    await expectNoHorizontalOverflow(page);
+    expect(requests.persistentWriteCalls()).toBe(2);
   });
 
   test("EDITOR 只能编辑草稿，前端发布入口与服务端权限一致", async ({ page }) => {
@@ -546,7 +561,7 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
         buffer: Buffer.from(JSON.stringify(importedDocument)),
       });
       const confirmDialog = page.getByRole("dialog", { name: "导入装修方案？" });
-      await expect(confirmDialog).toContainText("将移除 3 个不适用于店铺首页的系统或模板区块");
+      await expect(confirmDialog).toContainText("将移除 2 个不适用于店铺首页的系统或模板区块");
       await confirmDialog.getByRole("button", { name: "导入并替换画布" }).click();
       await expect(confirmDialog).toBeHidden();
 
@@ -554,8 +569,8 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
         await page.getByRole("button", { name: "收起属性面板" }).click();
         await page.getByRole("button", { name: "展开图层面板" }).click();
       }
-      await expect(page.locator("[data-layer-index]")).toHaveCount(1);
-      await expect(page.locator('[data-layer-index="0"]')).toContainText("首屏");
+      await expect(page.locator("[data-layer-index]")).toHaveCount(2);
+      await expect(page.locator("[data-layer-index]", { hasText: "首屏" })).toHaveCount(1);
       await expect(page.getByRole("button", { name: "编辑店铺资料" })).toHaveCount(0);
       await expect(
         page.frameLocator("iframe").getByText("导入后的海川典藏", { exact: true }),
@@ -680,6 +695,9 @@ test.describe("店铺装修 —— 发布前校验与边界约束（D3）", () =
       );
       await confirmDialog.getByRole("button", { name: "导入并替换画布" }).click();
       await expect(confirmDialog).toBeHidden();
+      await expect(page.locator(".ant-message-notice-content")).toHaveCount(0, {
+        timeout: 10_000,
+      });
 
       const downloadPromise = page.waitForEvent("download");
       await page.getByRole("button", { name: "更多编辑操作" }).click();

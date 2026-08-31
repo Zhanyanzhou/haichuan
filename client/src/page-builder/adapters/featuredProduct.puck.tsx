@@ -16,6 +16,7 @@ export interface FeaturedProductPuckProps {
   secondaryTargetType: LinkTargetType;
   secondaryProductCode: string;
   secondaryProductId: number;
+  secondaryCategorySlug: string;
   secondaryLinkUrl: string;
   layout: "imageLeft" | "imageRight";
   showPrice: boolean;
@@ -30,7 +31,10 @@ function toProduct(product?: ProductRow) {
   return { id: product.id, name: product.name, image: product.image, price: product.priceLabel, link: `/products/${encodeURIComponent(product.code || String(product.id))}` };
 }
 
-function FeaturedProductPreview(props: FeaturedProductPuckProps) {
+export function FeaturedProductPreview({
+  editMode = true,
+  ...props
+}: FeaturedProductPuckProps & { editMode?: boolean }) {
   const productId = Number(props.productId) || 0;
   const productCode = String(props.productCode || "").trim();
   const [product, setProduct] = useState<ProductRow | undefined>();
@@ -83,13 +87,13 @@ function FeaturedProductPreview(props: FeaturedProductPuckProps) {
           主推商品加载失败，当前构图仍可调整
         </p>
       ) : null}
-      <FeaturedProductBlock module={module} editMode />
+      <FeaturedProductBlock module={module} editMode={editMode} />
     </>
   );
 }
 
 export const featuredProductPuckConfig = {
-  render: (props: FeaturedProductPuckProps) => <FeaturedProductPreview {...props} />,
+  render: (props: FeaturedProductPuckProps) => <FeaturedProductPreview {...props} editMode />,
   defaultProps: {
     eyebrow: "SIGNATURE PIECE",
     title: "代表作品",
@@ -102,6 +106,7 @@ export const featuredProductPuckConfig = {
     secondaryTargetType: "page",
     secondaryProductCode: "",
     secondaryProductId: 0,
+    secondaryCategorySlug: "",
     secondaryLinkUrl: "/contact",
     layout: "imageLeft",
     showPrice: false,

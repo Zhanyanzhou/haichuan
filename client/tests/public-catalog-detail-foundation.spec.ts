@@ -658,7 +658,7 @@ test("ProductDetail 请求等待与失败分别显示 loading 和不可浏览", 
   await expectWriteContract(writes);
 });
 
-test("ProductDetail 请求失败与缺媒体都使用安全公开降级", async ({ page }) => {
+test("ProductDetail 缺媒体、不存在与请求失败使用可区分的安全降级", async ({ page }) => {
   const writes = await mockCatalogDetail(page, {
     products: [publicProduct(25, "DISPLAY_ONLY", { image: null })],
   });
@@ -670,12 +670,33 @@ test("ProductDetail 请求失败与缺媒体都使用安全公开降级", async 
     products: [publicProduct(26, "DISPLAY_ONLY")],
     productsStatus: 500,
   });
+  await failedPage.setViewportSize({ width: 390, height: 844 });
   await failedPage.goto("/products/26");
-  await expect(failedPage.getByRole("heading", { name: "作品暂不可浏览" })).toBeVisible();
-  await expect(failedPage.getByRole("link", { name: "进入选款中心" }))
-    .toHaveAttribute("href", "/catalog");
+  await expect(failedPage.getByRole("heading", { name: "作品暂时无法加载" })).toBeVisible();
+  await expect(failedPage.locator(".ant-message-notice")).toHaveCount(0);
+  const retryResponse = failedPage.waitForResponse((response) =>
+    /\/products\/(?:catalog|public)\/26$/.test(new URL(response.url()).pathname),
+  );
+  await failedPage.getByRole("button", { name: "重新尝试" }).click();
+  await retryResponse;
+  await expect(failedPage.getByRole("heading", { name: "作品暂时无法加载" })).toBeVisible();
+  const catalogLink = failedPage.getByRole("link", { name: "进入选款中心" });
+  await expect(catalogLink).toHaveAttribute("href", "/catalog");
+  await expect(catalogLink).toBeVisible();
+  const catalogLinkBox = await catalogLink.boundingBox();
+  expect(catalogLinkBox).not.toBeNull();
+  expect(catalogLinkBox!.height).toBeGreaterThanOrEqual(44);
+  await expectNoHorizontalOverflow(failedPage);
+
+  const missingPage = await page.context().newPage();
+  const missingWrites = await mockCatalogDetail(missingPage, { products: [] });
+  await missingPage.goto("/products/27");
+  await expect(missingPage.getByRole("heading", { name: "作品暂不可浏览" })).toBeVisible();
+  await expect(missingPage.getByRole("button", { name: "重新尝试" })).toHaveCount(0);
   await expectWriteContract(writes);
   await expectWriteContract(failedWrites);
+  await expectWriteContract(missingWrites);
+  await missingPage.close();
   await failedPage.close();
 });
 

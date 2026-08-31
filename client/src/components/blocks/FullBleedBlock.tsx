@@ -41,7 +41,7 @@ export default function FullBleedBlock({
   const desktopFocusY = Math.min(100, Math.max(0, Number(styleConfig.desktopFocusY ?? 50)));
   const mobileFocusX = Math.min(100, Math.max(0, Number(styleConfig.mobileFocusX ?? desktopFocusX)));
   const mobileFocusY = Math.min(100, Math.max(0, Number(styleConfig.mobileFocusY ?? desktopFocusY)));
-  const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, linkUrl });
+  const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, categorySlug: content.categorySlug, linkUrl });
   const [imageFailed, setImageFailed] = useState(false);
 
   const desktopImg = image || mobileImage;

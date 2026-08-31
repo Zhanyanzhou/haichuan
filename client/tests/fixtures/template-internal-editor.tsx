@@ -73,6 +73,7 @@ function SelectableBlock({
       blockType={blockType}
       blockLabel={blockType}
       focused={String(selectedItem?.props?.id ?? "") === blockId}
+      allowNodeSelection
       onSelect={() => {
         if (index < 0) return;
         dispatch({
@@ -109,21 +110,25 @@ function FixtureControls() {
       if (event.origin !== window.location.origin) return;
       if (event.data?.type !== CANVAS_VISUAL_EDIT_MESSAGE) return;
       if (event.data.cancelled === true) {
-        const start = visualEditStartRef.current;
         visualEditStartRef.current = undefined;
-        if (start) dispatch({ type: "setData", data: start, recordHistory: false });
         return;
       }
       const current = dataRef.current;
-      const index = current.content.findIndex(
+      if (event.data.transient === true) {
+        if (!visualEditStartRef.current) {
+          visualEditStartRef.current = structuredClone(current);
+        }
+        // 与真实页面画布一致：iframe 自己呈现手势预览，Puck store 只在
+        // 手势结束时写一次，确保撤销快照仍是手势开始前的完整状态。
+        return;
+      }
+      const historyBaseline = visualEditStartRef.current ?? current;
+      visualEditStartRef.current = undefined;
+      const index = historyBaseline.content.findIndex(
         (block) => String(block.props?.id ?? "") === event.data.blockId,
       );
       if (index < 0) return;
-      if (event.data.transient === true && !visualEditStartRef.current) {
-        visualEditStartRef.current = structuredClone(current);
-      }
-      if (event.data.transient !== true) visualEditStartRef.current = undefined;
-      const block = current.content[index];
+      const block = historyBaseline.content[index];
       dispatch({
         type: "replace",
         destinationIndex: index,
@@ -135,7 +140,7 @@ function FixtureControls() {
             __instanceOverrides: event.data.overrides,
           },
         },
-        recordHistory: event.data.transient !== true,
+        recordHistory: true,
       });
     };
     window.addEventListener("message", onVisualEdit);
@@ -149,11 +154,15 @@ function FixtureControls() {
         publishing={false}
         saving={false}
         hasPendingDraft={false}
+        publishedNeedsRevalidation={false}
         viewingPublished={false}
         previewMode={previewMode}
         hasUnsavedChanges={false}
+        canPublish={true}
+        canManageTemplates={false}
         publishValidationState="current"
         publishErrorCount={0}
+        publishSettingsErrorCount={0}
         draftSavedAtLabel={null}
         onPublish={() => undefined}
         onSaveDraft={() => undefined}
@@ -163,8 +172,12 @@ function FixtureControls() {
         onDiscardDraft={() => undefined}
         onOpenRevisions={() => undefined}
         onOpenPageSettings={() => undefined}
+        onRetryPublishValidation={() => undefined}
         onPreviewModeChange={setPreviewMode}
         onDataChange={() => undefined}
+        onCanvasDataSync={() => undefined}
+        onEnterTemplateMode={() => undefined}
+        restoreViewport={null}
       />
       <section className="template-internal-fixture__inspector" aria-label="视觉对象属性测试区">
         <p role="note">
@@ -185,7 +198,7 @@ function FixtureControls() {
             aria-selected={panelMode === "design"}
             onClick={() => setPanelMode("design")}
           >
-            模板编辑
+            构图调整
           </button>
         </div>
         <VisualEditorToolbar

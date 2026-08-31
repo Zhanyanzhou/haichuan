@@ -1,25 +1,5309 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：d52de5523dfb216844ffac8fed878ac49f9d241cae97084605a41cb4f8be857c
+ * SHA-256：4782c93333316782be1d2843a007cde66eb69908b048694e93390840017324a7
  */
 
-export const CONTENT_TEMPLATE_REGISTRY_VERSION = 15;
-export const CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION = 6;
-export const CONTENT_TEMPLATE_CONTRACT_VERSION = 6;
+export const CONTENT_TEMPLATE_REGISTRY_VERSION = 18;
+export const CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION = 8;
+export const CONTENT_TEMPLATE_CONTRACT_VERSION = 7;
 export const CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION = 3;
 export const CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY = "_contentPublication";
 export const CONTENT_TEMPLATE_EDITOR_POLICY = {
   "allowSemanticOverlap": true,
   "bounds": "module-frame",
   "contentFieldsRemainInstanceScoped": true,
-  "designScope": "page-module-type",
-  "designSurface": "main-canvas",
+  "designScope": "template-definition",
+  "designSurface": "template-workspace",
+  "externalLinkProtocol": "https-only",
   "fixedObjects": true,
-  "internalLayerPanel": "select-only",
-  "version": 1,
+  "linkTargetTypes": [
+    "none",
+    "product",
+    "category",
+    "page",
+    "external"
+  ],
+  "pageInstanceScope": "page-instance",
+  "pageLayerPanel": "module-only",
+  "templateStructurePanel": "select-only",
+  "version": 2,
   "viewportGeometry": "independent"
 } as const;
+export const CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX = [
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "首屏主视觉",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "desktopImage",
+          "altText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "desktopImage"
+        ],
+        "roleId": "desktopImage",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 1.777778
+          },
+          "mobile": {
+            "applicable": false,
+            "defaultRect": null,
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "mobileImage",
+          "altText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "mobileImage"
+        ],
+        "roleId": "mobileImage",
+        "viewports": {
+          "desktop": {
+            "applicable": false,
+            "defaultRect": null,
+            "frameAspectRatio": 1.777778
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": true,
+          "allowTypography": true,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "eyebrow",
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy",
+          "eyebrow",
+          "title",
+          "subtitle"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.0875,
+              "width": 0.333333,
+              "x": 0.333333,
+              "y": 0.4
+            },
+            "frameAspectRatio": 1.777778
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.055,
+              "width": 0.48,
+              "x": 0.12,
+              "y": 0.54
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "link",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": true,
+          "allowTypography": true,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.28,
+            "width": 0.72
+          },
+          "minSize": {
+            "height": 0.04,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "actionText",
+          "targetType",
+          "productCode",
+          "productId",
+          "linkUrl",
+          "categorySlug"
+        ],
+        "kind": "action",
+        "nodeIds": [
+          "action",
+          "actionText"
+        ],
+        "roleId": "action",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.0875,
+              "width": 0.25,
+              "x": 0.333333,
+              "y": 0.8
+            },
+            "frameAspectRatio": 1.777778
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.07,
+              "width": 0.36,
+              "x": 0.12,
+              "y": 0.865
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      }
+    ],
+    "templateKey": "hero",
+    "version": 6
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "全屏出血图",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "image",
+          "altText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "image"
+        ],
+        "roleId": "image",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 1.75
+          },
+          "mobile": {
+            "applicable": false,
+            "defaultRect": null,
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "mobileImage",
+          "altText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "mobileImage"
+        ],
+        "roleId": "mobileImage",
+        "viewports": {
+          "desktop": {
+            "applicable": false,
+            "defaultRect": null,
+            "frameAspectRatio": 1.75
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "visibility",
+          "typography",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": true,
+          "allowTypography": true,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "eyebrow",
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 0.666667,
+              "x": 0.04,
+              "y": 0.5
+            },
+            "frameAspectRatio": 1.75
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.5
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "link",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.28,
+            "width": 0.72
+          },
+          "minSize": {
+            "height": 0.04,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "buttonText",
+          "targetType",
+          "productCode",
+          "productId",
+          "linkUrl",
+          "categorySlug"
+        ],
+        "kind": "action",
+        "nodeIds": [
+          "action",
+          "buttonText"
+        ],
+        "roleId": "action",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.71,
+              "y": 0.75
+            },
+            "frameAspectRatio": 1.75
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.75
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      }
+    ],
+    "templateKey": "fullBleed",
+    "version": 6
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "视频区块",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "playback",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "videoUrl",
+          "posterUrl",
+          "videoDescription",
+          "videoWidth",
+          "autoPlay",
+          "loop",
+          "muted",
+          "showControls"
+        ],
+        "kind": "video",
+        "nodeIds": [
+          "coverImage"
+        ],
+        "roleId": "coverImage",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.875,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 1.555556
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.083333,
+              "y": 0.5
+            },
+            "frameAspectRatio": 1.555556
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.5
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "link",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.28,
+            "width": 0.72
+          },
+          "minSize": {
+            "height": 0.04,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "actionText",
+          "targetType",
+          "productCode",
+          "productId",
+          "linkUrl",
+          "categorySlug"
+        ],
+        "kind": "action",
+        "nodeIds": [
+          "action",
+          "actionText"
+        ],
+        "roleId": "action",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.083333,
+              "y": 0.75
+            },
+            "frameAspectRatio": 1.555556
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.75
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      }
+    ],
+    "templateKey": "video",
+    "version": 6
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "轮播图",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "items",
+          "link",
+          "playback",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": true,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "images",
+          "autoPlay",
+          "showDots",
+          "showArrows",
+          "interval"
+        ],
+        "kind": "collection",
+        "nodeIds": [
+          "frames"
+        ],
+        "roleId": "frames",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.75,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 2.625
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      }
+    ],
+    "templateKey": "carousel",
+    "version": 4
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "单图海报",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "desktopImage",
+          "altText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "desktopImage"
+        ],
+        "roleId": "desktopImage",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 1,
+              "width": 0.75,
+              "x": 0.25,
+              "y": 0
+            },
+            "frameAspectRatio": 1.066667
+          },
+          "mobile": {
+            "applicable": false,
+            "defaultRect": null,
+            "frameAspectRatio": 0.5
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "mobileImage",
+          "altText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "mobileImage"
+        ],
+        "roleId": "mobileImage",
+        "viewports": {
+          "desktop": {
+            "applicable": false,
+            "defaultRect": null,
+            "frameAspectRatio": 1.066667
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.625,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.5
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": true,
+          "allowTypography": true,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle",
+          "number",
+          "label"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.0875,
+              "width": 0.208333,
+              "x": 0.04,
+              "y": 0.475
+            },
+            "frameAspectRatio": 1.066667
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 0.833333,
+              "x": 0.083333,
+              "y": 0.625
+            },
+            "frameAspectRatio": 0.5
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "link",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.28,
+            "width": 0.72
+          },
+          "minSize": {
+            "height": 0.04,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "actionText",
+          "targetType",
+          "productCode",
+          "productId",
+          "linkUrl",
+          "categorySlug"
+        ],
+        "kind": "action",
+        "nodeIds": [
+          "action",
+          "actionText"
+        ],
+        "roleId": "action",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.075,
+              "width": 0.166667,
+              "x": 0.04,
+              "y": 0.85
+            },
+            "frameAspectRatio": 1.066667
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.25,
+              "y": 0.875
+            },
+            "frameAspectRatio": 0.5
+          }
+        }
+      }
+    ],
+    "templateKey": "singlePoster",
+    "version": 6
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "双图海报",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "size",
+          "position",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "mainImage",
+          "mainAltText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "mainImage"
+        ],
+        "roleId": "mainImage",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.666667,
+              "width": 0.666667,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 1.5
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.4,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.6
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "size",
+          "position",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "detailImage",
+          "detailAltText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "detailImage"
+        ],
+        "roleId": "detailImage",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.625,
+              "width": 0.333333,
+              "x": 0.666667,
+              "y": 0.125
+            },
+            "frameAspectRatio": 1.5
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.5,
+              "width": 0.666667,
+              "x": 0.333333,
+              "y": 0.4
+            },
+            "frameAspectRatio": 0.6
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "visibility",
+          "typography",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": true,
+          "allowTypography": true,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "description",
+          "number",
+          "label"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 0.333333,
+              "x": 0.626667,
+              "y": 0.5
+            },
+            "frameAspectRatio": 1.5
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.375
+            },
+            "frameAspectRatio": 0.6
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "link",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.28,
+            "width": 0.72
+          },
+          "minSize": {
+            "height": 0.04,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "actionText",
+          "targetType",
+          "productCode",
+          "productId",
+          "linkUrl",
+          "categorySlug"
+        ],
+        "kind": "action",
+        "nodeIds": [
+          "action",
+          "actionText"
+        ],
+        "roleId": "action",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.666667,
+              "y": 0.825
+            },
+            "frameAspectRatio": 1.5
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.835
+            },
+            "frameAspectRatio": 0.6
+          }
+        }
+      }
+    ],
+    "templateKey": "doublePoster",
+    "version": 6
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "文字横幅",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "bgImage"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "bgImage"
+        ],
+        "roleId": "bgImage",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 2.285714
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "visibility",
+          "typography",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": true,
+          "allowTypography": true,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "eyebrow",
+          "title",
+          "body"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.0875,
+              "width": 0.333333,
+              "x": 0.333333,
+              "y": 0.325
+            },
+            "frameAspectRatio": 2.285714
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.375,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.125
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "link",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.28,
+            "width": 0.72
+          },
+          "minSize": {
+            "height": 0.04,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "buttonText",
+          "targetType",
+          "productCode",
+          "productId",
+          "linkUrl",
+          "categorySlug"
+        ],
+        "kind": "action",
+        "nodeIds": [
+          "action",
+          "buttonText"
+        ],
+        "roleId": "action",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.0875,
+              "width": 0.333333,
+              "x": 0.333333,
+              "y": 0.8
+            },
+            "frameAspectRatio": 2.285714
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.625
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      }
+    ],
+    "templateKey": "textBanner",
+    "version": 6
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "定制流程",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "items",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": true,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "steps"
+        ],
+        "kind": "collection",
+        "nodeIds": [
+          "steps"
+        ],
+        "roleId": "steps",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.375,
+              "width": 1,
+              "x": 0,
+              "y": 0.375
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.625,
+              "width": 1,
+              "x": 0,
+              "y": 0.25
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 0.416667,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      }
+    ],
+    "templateKey": "journey",
+    "version": 4
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "改款对比",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "beforeImage",
+          "beforeLabel",
+          "beforeAltText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "before"
+        ],
+        "roleId": "before",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 1,
+              "width": 0.5,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "afterImage",
+          "afterLabel",
+          "afterAltText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "after"
+        ],
+        "roleId": "after",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 1,
+              "width": 0.5,
+              "x": 0.5,
+              "y": 0
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.92,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "link",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.28,
+            "width": 0.72
+          },
+          "minSize": {
+            "height": 0.04,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "actionText",
+          "targetType",
+          "productCode",
+          "productId",
+          "linkUrl",
+          "categorySlug"
+        ],
+        "kind": "action",
+        "nodeIds": [
+          "action",
+          "actionText"
+        ],
+        "roleId": "action",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.08,
+              "width": 0.24,
+              "x": 0.38,
+              "y": 0.86
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.08,
+              "width": 0.6,
+              "x": 0.2,
+              "y": 0.88
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      }
+    ],
+    "templateKey": "comparison",
+    "version": 6
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "单品焦点推荐",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "reference",
+          "layout",
+          "layer",
+          "ratio",
+          "size",
+          "fit"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "productCode"
+        ],
+        "kind": "product",
+        "nodeIds": [
+          "product"
+        ],
+        "roleId": "product",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.625,
+              "width": 0.666667,
+              "x": 0.166667,
+              "y": 0
+            },
+            "frameAspectRatio": 0.75
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "eyebrow",
+          "title",
+          "summary"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.666667,
+              "x": 0.166667,
+              "y": 0.625
+            },
+            "frameAspectRatio": 0.75
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.5
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "link",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.28,
+            "width": 0.72
+          },
+          "minSize": {
+            "height": 0.04,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "primaryText",
+          "secondaryText",
+          "secondaryTargetType",
+          "secondaryProductCode",
+          "secondaryProductId",
+          "secondaryLinkUrl",
+          "secondaryCategorySlug"
+        ],
+        "kind": "action",
+        "nodeIds": [
+          "action",
+          "primaryText",
+          "secondaryText"
+        ],
+        "roleId": "action",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.5,
+              "x": 0.25,
+              "y": 0.825
+            },
+            "frameAspectRatio": 0.75
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.75
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": true,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "showPrice"
+        ],
+        "kind": "collection",
+        "nodeIds": [
+          "list"
+        ],
+        "roleId": "list",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.5,
+              "x": 0.25,
+              "y": 0.75
+            },
+            "frameAspectRatio": 0.75
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.625
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      }
+    ],
+    "templateKey": "featuredProduct",
+    "version": 5
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "产品展示行",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "reference",
+          "layout",
+          "layer",
+          "ratio",
+          "fit"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "productCodes"
+        ],
+        "kind": "product",
+        "nodeIds": [
+          "productCards"
+        ],
+        "roleId": "productCards",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.5,
+              "width": 0.333333,
+              "x": 0,
+              "y": 0.25
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.125
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      }
+    ],
+    "templateKey": "productRow",
+    "version": 4
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "作品画廊",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "items",
+          "link",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom"
+        ],
+        "collectionWholeObjectOnly": true,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "items"
+        ],
+        "kind": "collection",
+        "nodeIds": [
+          "works"
+        ],
+        "roleId": "works",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.4,
+              "width": 0.583333,
+              "x": 0,
+              "y": 0.2
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.3,
+              "width": 1,
+              "x": 0,
+              "y": 0.1
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.1,
+              "width": 0.416667,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.1,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      }
+    ],
+    "templateKey": "gallery",
+    "version": 4
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "佩戴灵感",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "image",
+          "altText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "wearingImage"
+        ],
+        "roleId": "wearingImage",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.8,
+              "width": 0.583333,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 1.097143
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.2,
+              "width": 0.416667,
+              "x": 0.543333,
+              "y": 0.05
+            },
+            "frameAspectRatio": 1.097143
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.5
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "reference",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "productCodes"
+        ],
+        "kind": "product",
+        "nodeIds": [
+          "relatedProducts"
+        ],
+        "roleId": "relatedProducts",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.6,
+              "width": 0.416667,
+              "x": 0.583333,
+              "y": 0.2
+            },
+            "frameAspectRatio": 1.097143
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 0.666667,
+              "x": 0.333333,
+              "y": 0.625
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "link",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.28,
+            "width": 0.72
+          },
+          "minSize": {
+            "height": 0.04,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "actionText",
+          "targetType",
+          "productCode",
+          "productId",
+          "linkUrl",
+          "categorySlug"
+        ],
+        "kind": "action",
+        "nodeIds": [
+          "action",
+          "actionText"
+        ],
+        "roleId": "action",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.1,
+              "width": 0.25,
+              "x": 0.583333,
+              "y": 0.85
+            },
+            "frameAspectRatio": 1.097143
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.835
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      }
+    ],
+    "templateKey": "wearingInspiration",
+    "version": 5
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "分类卡片",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "items",
+          "reference",
+          "layout",
+          "layer",
+          "ratio",
+          "fit"
+        ],
+        "collectionWholeObjectOnly": true,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "categorySlugs",
+          "categories"
+        ],
+        "kind": "collection",
+        "nodeIds": [
+          "categories"
+        ],
+        "roleId": "categories",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.5,
+              "width": 0.333333,
+              "x": 0,
+              "y": 0.25
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.125
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.333333,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      }
+    ],
+    "templateKey": "categoryCards",
+    "version": 4
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "按场景选购",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "items",
+          "link",
+          "layout",
+          "layer",
+          "ratio",
+          "fit"
+        ],
+        "collectionWholeObjectOnly": true,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "categories"
+        ],
+        "kind": "collection",
+        "nodeIds": [
+          "scenes"
+        ],
+        "roleId": "scenes",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.375,
+              "width": 0.25,
+              "x": 0,
+              "y": 0.25
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.125
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.92,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      }
+    ],
+    "templateKey": "sceneShopping",
+    "version": 4
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "热区图",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "image",
+          "mobileImage",
+          "altText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "sceneImage"
+        ],
+        "roleId": "sceneImage",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.75,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 1.333333
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.75,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.6
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "items",
+          "link",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": true,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "hotspots",
+          "mobileHotspots"
+        ],
+        "kind": "collection",
+        "nodeIds": [
+          "hotspots"
+        ],
+        "roleId": "hotspots",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.083333,
+              "x": 0.166667,
+              "y": 0.25
+            },
+            "frameAspectRatio": 1.333333
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.083333,
+              "x": 0.166667,
+              "y": 0.125
+            },
+            "frameAspectRatio": 0.6
+          }
+        }
+      }
+    ],
+    "templateKey": "hotspot",
+    "version": 4
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "卡片网格",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "items",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": true,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "cards"
+        ],
+        "kind": "collection",
+        "nodeIds": [
+          "points"
+        ],
+        "roleId": "points",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.375,
+              "width": 0.333333,
+              "x": 0,
+              "y": 0.25
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.125
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.666667,
+              "x": 0.166667,
+              "y": 0.05
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      }
+    ],
+    "templateKey": "brandPoints",
+    "version": 4
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "服务承诺",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "items",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": true,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "cards"
+        ],
+        "kind": "collection",
+        "nodeIds": [
+          "promises"
+        ],
+        "roleId": "promises",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.375,
+              "width": 0.25,
+              "x": 0,
+              "y": 0.25
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 1,
+              "x": 0,
+              "y": 0.125
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      }
+    ],
+    "templateKey": "servicePromises",
+    "version": 4
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "资质证书",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "items",
+          "layout",
+          "layer",
+          "ratio",
+          "fit"
+        ],
+        "collectionWholeObjectOnly": true,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "certificates"
+        ],
+        "kind": "collection",
+        "nodeIds": [
+          "certificates"
+        ],
+        "roleId": "certificates",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.375,
+              "width": 0.333333,
+              "x": 0,
+              "y": 0.25
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 1,
+              "x": 0,
+              "y": 0.125
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.333333,
+              "x": 0.04,
+              "y": 0.05
+            },
+            "frameAspectRatio": 1.6
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      }
+    ],
+    "templateKey": "certificates",
+    "version": 4
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "门店信息",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "image"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "store"
+        ],
+        "roleId": "store",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.75,
+              "width": 0.583333,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 1.928573
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.75
+          }
+        }
+      }
+    ],
+    "templateKey": "storeInfo",
+    "version": 5
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "真实评价与实拍",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "items",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom"
+        ],
+        "collectionWholeObjectOnly": true,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "testimonials"
+        ],
+        "kind": "collection",
+        "nodeIds": [
+          "authorizedPhoto",
+          "mainQuote",
+          "attribution"
+        ],
+        "roleId": "authorizedPhoto",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.75,
+              "width": 0.416667,
+              "x": 0,
+              "y": 0.125
+            },
+            "frameAspectRatio": 1.44
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      }
+    ],
+    "templateKey": "testimonials",
+    "version": 4
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "预约入口",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "backgroundImage",
+          "altText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "bgImage"
+        ],
+        "roleId": "bgImage",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 2.285714
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "visibility",
+          "typography",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": true,
+          "allowTypography": true,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "title",
+          "subtitle"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy",
+          "title",
+          "subtitle"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.375,
+              "width": 0.5,
+              "x": 0.083333,
+              "y": 0.125
+            },
+            "frameAspectRatio": 2.285714
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.375,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.04
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "link",
+          "visibility",
+          "typography",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": true,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.28,
+            "width": 0.72
+          },
+          "minSize": {
+            "height": 0.04,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "buttonText",
+          "targetType",
+          "productCode",
+          "productId",
+          "linkUrl",
+          "categorySlug"
+        ],
+        "kind": "action",
+        "nodeIds": [
+          "primaryAction",
+          "buttonText"
+        ],
+        "roleId": "primaryAction",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.666667,
+              "y": 0.25
+            },
+            "frameAspectRatio": 2.285714
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.666667,
+              "x": 0.05,
+              "y": 0.5
+            },
+            "frameAspectRatio": 0.8
+          }
+        }
+      }
+    ],
+    "templateKey": "booking",
+    "version": 7
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "限时活动",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "fit",
+          "zoom"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "eventImage"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "event"
+        ],
+        "roleId": "event",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.875,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 1.555556
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.5,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "items",
+          "layout",
+          "layer"
+        ],
+        "collectionWholeObjectOnly": true,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "targetDate",
+          "benefits"
+        ],
+        "kind": "collection",
+        "nodeIds": [
+          "time"
+        ],
+        "roleId": "time",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.083333,
+              "y": 0.125
+            },
+            "frameAspectRatio": 1.555556
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.333333,
+              "x": 0,
+              "y": 0.5
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": true,
+          "allowTypography": true,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "eyebrow",
+          "title",
+          "body"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.25,
+              "width": 0.5,
+              "x": 0.083333,
+              "y": 0.375
+            },
+            "frameAspectRatio": 1.555556
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.625
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "link",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.28,
+            "width": 0.72
+          },
+          "minSize": {
+            "height": 0.04,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "buttonText",
+          "targetType",
+          "productCode",
+          "productId",
+          "linkUrl",
+          "categorySlug"
+        ],
+        "kind": "action",
+        "nodeIds": [
+          "action",
+          "buttonText"
+        ],
+        "roleId": "action",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.25,
+              "x": 0.083333,
+              "y": 0.75
+            },
+            "frameAspectRatio": 1.555556
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.125,
+              "width": 0.416667,
+              "x": 0.05,
+              "y": 0.835
+            },
+            "frameAspectRatio": 0.4
+          }
+        }
+      }
+    ],
+    "templateKey": "limitedEvent",
+    "version": 6
+  },
+  {
+    "designScope": "template-definition",
+    "fixedObjects": true,
+    "moduleType": "工艺细节",
+    "objects": [
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "size",
+          "position",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "leadImage",
+          "leadAltText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "leadImage"
+        ],
+        "roleId": "leadImage",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.522222,
+              "width": 0.626667,
+              "x": 0.333333,
+              "y": 0.04
+            },
+            "frameAspectRatio": 1.25
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.55,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "frameAspectRatio": 0.44
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "visibility",
+          "typography"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": false,
+          "allowFocus": false,
+          "allowHide": true,
+          "allowTypography": true,
+          "allowZoom": false,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 0.7,
+            "width": 0.92
+          },
+          "minSize": {
+            "height": 0.03,
+            "width": 0.08
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "eyebrow",
+          "title",
+          "body"
+        ],
+        "kind": "text",
+        "nodeIds": [
+          "copy"
+        ],
+        "roleId": "copy",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.28,
+              "width": 0.25,
+              "x": 0.04,
+              "y": 0.12
+            },
+            "frameAspectRatio": 1.25
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.18,
+              "width": 0.9,
+              "x": 0.05,
+              "y": 0.58
+            },
+            "frameAspectRatio": 0.44
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "size",
+          "position",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "detailImageOne",
+          "detailOneAltText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "detailImageOne"
+        ],
+        "roleId": "detailImageOne",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.366667,
+              "width": 0.293333,
+              "x": 0.333333,
+              "y": 0.61
+            },
+            "frameAspectRatio": 1.25
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.187,
+              "width": 0.425,
+              "x": 0.05,
+              "y": 0.78
+            },
+            "frameAspectRatio": 0.44
+          }
+        }
+      },
+      {
+        "capabilities": [
+          "content",
+          "layout",
+          "layer",
+          "ratio",
+          "size",
+          "position",
+          "fit",
+          "zoom",
+          "focus"
+        ],
+        "collectionWholeObjectOnly": false,
+        "constraints": {
+          "allowAspectRatio": true,
+          "allowFocus": true,
+          "allowHide": false,
+          "allowTypography": false,
+          "allowZoom": true,
+          "allowedResize": [
+            "n",
+            "ne",
+            "e",
+            "se",
+            "s",
+            "sw",
+            "w",
+            "nw"
+          ],
+          "layerRange": {
+            "max": 20,
+            "min": 0
+          },
+          "maxSize": {
+            "height": 1,
+            "width": 1
+          },
+          "minSize": {
+            "height": 0.1,
+            "width": 0.12
+          },
+          "movementAxes": [
+            "x",
+            "y"
+          ],
+          "safeAreaRequired": false
+        },
+        "contentFieldKeys": [
+          "detailImageTwo",
+          "detailTwoAltText"
+        ],
+        "kind": "media",
+        "nodeIds": [
+          "detailImageTwo"
+        ],
+        "roleId": "detailImageTwo",
+        "viewports": {
+          "desktop": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.366667,
+              "width": 0.293333,
+              "x": 0.666667,
+              "y": 0.61
+            },
+            "frameAspectRatio": 1.25
+          },
+          "mobile": {
+            "applicable": true,
+            "defaultRect": {
+              "height": 0.187,
+              "width": 0.425,
+              "x": 0.525,
+              "y": 0.78
+            },
+            "frameAspectRatio": 0.44
+          }
+        }
+      }
+    ],
+    "templateKey": "craftDetails",
+    "version": 2
+  }
+] as const;
 
 export type ContentTemplatePublicationAttestation = {
   gateVersion: number;
@@ -164,16 +5448,27 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "hero",
       "fullBleed",
       "video",
+      "carousel",
       "singlePoster",
       "doublePoster",
-      "craftDetails",
       "textBanner",
       "journey",
+      "comparison",
+      "featuredProduct",
+      "productRow",
+      "gallery",
+      "wearingInspiration",
+      "categoryCards",
+      "sceneShopping",
+      "hotspot",
       "brandPoints",
       "servicePromises",
       "certificates",
       "storeInfo",
-      "booking"
+      "testimonials",
+      "booking",
+      "limitedEvent",
+      "craftDetails"
     ],
     "businessRegionCount": 0,
     "contentPlacement": "root-only",
@@ -188,10 +5483,30 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
   },
   "catalog": {
     "allowedTemplateKeys": [
+      "hero",
       "fullBleed",
+      "video",
+      "carousel",
       "singlePoster",
+      "doublePoster",
       "textBanner",
-      "booking"
+      "journey",
+      "comparison",
+      "featuredProduct",
+      "productRow",
+      "gallery",
+      "wearingInspiration",
+      "categoryCards",
+      "sceneShopping",
+      "hotspot",
+      "brandPoints",
+      "servicePromises",
+      "certificates",
+      "storeInfo",
+      "testimonials",
+      "booking",
+      "limitedEvent",
+      "craftDetails"
     ],
     "businessRegionCount": 1,
     "businessRegionPosition": "after-first-brand-block",
@@ -208,9 +5523,28 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
     "allowedTemplateKeys": [
       "hero",
       "fullBleed",
+      "video",
+      "carousel",
       "singlePoster",
+      "doublePoster",
       "textBanner",
-      "storeInfo"
+      "journey",
+      "comparison",
+      "featuredProduct",
+      "productRow",
+      "gallery",
+      "wearingInspiration",
+      "categoryCards",
+      "sceneShopping",
+      "hotspot",
+      "brandPoints",
+      "servicePromises",
+      "certificates",
+      "storeInfo",
+      "testimonials",
+      "booking",
+      "limitedEvent",
+      "craftDetails"
     ],
     "businessRegionCount": 1,
     "businessRegionPosition": "after-first-brand-block",
@@ -229,19 +5563,27 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "hero",
       "fullBleed",
       "video",
+      "carousel",
       "singlePoster",
       "doublePoster",
-      "craftDetails",
       "textBanner",
       "journey",
       "comparison",
+      "featuredProduct",
+      "productRow",
       "gallery",
+      "wearingInspiration",
+      "categoryCards",
+      "sceneShopping",
       "hotspot",
       "brandPoints",
       "servicePromises",
-      "testimonials",
       "certificates",
-      "booking"
+      "storeInfo",
+      "testimonials",
+      "booking",
+      "limitedEvent",
+      "craftDetails"
     ],
     "businessRegionCount": 0,
     "contentPlacement": "root-only",
@@ -262,18 +5604,24 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "carousel",
       "singlePoster",
       "doublePoster",
-      "craftDetails",
       "textBanner",
       "journey",
+      "comparison",
       "featuredProduct",
       "productRow",
       "gallery",
       "wearingInspiration",
       "categoryCards",
       "sceneShopping",
+      "hotspot",
       "brandPoints",
+      "servicePromises",
+      "certificates",
+      "storeInfo",
+      "testimonials",
       "booking",
-      "limitedEvent"
+      "limitedEvent",
+      "craftDetails"
     ],
     "businessRegionCount": 0,
     "contentPlacement": "root-only",
@@ -294,8 +5642,9 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "carousel",
       "singlePoster",
       "doublePoster",
-      "craftDetails",
       "textBanner",
+      "journey",
+      "comparison",
       "featuredProduct",
       "productRow",
       "gallery",
@@ -303,8 +5652,14 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
       "categoryCards",
       "sceneShopping",
       "hotspot",
+      "brandPoints",
+      "servicePromises",
+      "certificates",
+      "storeInfo",
+      "testimonials",
       "booking",
-      "limitedEvent"
+      "limitedEvent",
+      "craftDetails"
     ],
     "businessRegionCount": 0,
     "contentPlacement": "root-only",
@@ -665,7 +6020,6 @@ export type ContentTemplateIssue = {
     | "content-template-marker-invalid"
     | "content-template-key-mismatch"
     | "content-template-version-unsupported"
-    | "content-template-shared-design-mismatch"
     | "page-validation"
     | `page-validation-${string}`;
   severity: ContentTemplateIssueSeverity;
@@ -736,12 +6090,14 @@ export type ContentTemplateLinkTargetReference = {
   targetTypeFieldKey: string;
   productCodeFieldKey: string;
   productIdFieldKey: string;
+  categorySlugFieldKey: string;
   linkUrlFieldKey: string;
   legacyLinkFieldKey?: string;
   actionTextFieldKey?: string;
   targetType: unknown;
   productCode: unknown;
   productId: unknown;
+  categorySlug: unknown;
   linkUrl: unknown;
   legacyLink?: unknown;
   actionText?: unknown;
@@ -980,6 +6336,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
+            "nodeId": "bgImage",
+            "overlay": true,
+            "rect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "bgImage"
+          },
+          {
             "nodeId": "copy",
             "rect": {
               "height": 0.375,
@@ -1025,6 +6393,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         },
         "tone": "light",
         "zones": [
+          {
+            "nodeId": "bgImage",
+            "overlay": true,
+            "rect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "bgImage"
+          },
           {
             "nodeId": "copy",
             "rect": {
@@ -1152,7 +6532,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -1214,7 +6594,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -1236,7 +6616,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "targetType",
             "productCode",
             "productId",
-            "linkUrl"
+            "linkUrl",
+            "categorySlug"
           ],
           "kind": "action",
           "nodeIds": [
@@ -1426,6 +6807,15 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
+            "column": 1,
+            "overlay": true,
+            "role": "media",
+            "roleId": "bgImage",
+            "row": 1,
+            "rowSpan": 8,
+            "span": 12
+          },
+          {
             "column": 1.999996,
             "role": "copy",
             "roleId": "copy",
@@ -1459,6 +6849,15 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "tone": "light",
         "zones": [
+          {
+            "column": 1,
+            "overlay": true,
+            "role": "media",
+            "roleId": "bgImage",
+            "row": 1,
+            "rowSpan": 8,
+            "span": 12
+          },
           {
             "column": 1.6,
             "role": "copy",
@@ -1539,7 +6938,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 6,
+    "version": 7,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "standard"
@@ -1702,7 +7101,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -1756,7 +7155,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -2601,7 +8000,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -3070,7 +8469,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -3620,7 +9019,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -3677,7 +9076,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -3699,7 +9098,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "targetType",
             "productCode",
             "productId",
-            "linkUrl"
+            "linkUrl",
+            "categorySlug"
           ],
           "kind": "action",
           "nodeIds": [
@@ -4040,7 +9440,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 5,
+    "version": 6,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
@@ -5100,7 +10500,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -5159,7 +10559,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -5181,7 +10581,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "targetType",
             "productCode",
             "productId",
-            "linkUrl"
+            "linkUrl",
+            "categorySlug"
           ],
           "kind": "action",
           "nodeIds": [
@@ -5516,7 +10917,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 5,
+    "version": 6,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
@@ -5737,7 +11138,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -5795,7 +11196,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -5818,7 +11219,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "secondaryTargetType",
             "secondaryProductCode",
             "secondaryProductId",
-            "secondaryLinkUrl"
+            "secondaryLinkUrl",
+            "secondaryCategorySlug"
           ],
           "kind": "action",
           "nodeIds": [
@@ -5859,7 +11261,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -6174,7 +11576,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 4,
+    "version": 5,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
@@ -6457,7 +11859,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -6515,7 +11917,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -6537,7 +11939,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "targetType",
             "productCode",
             "productId",
-            "linkUrl"
+            "linkUrl",
+            "categorySlug"
           ],
           "kind": "action",
           "nodeIds": [
@@ -6825,7 +12228,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 5,
+    "version": 6,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "full"
@@ -7088,7 +12491,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -7769,7 +13172,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "targetType",
             "productCode",
             "productId",
-            "linkUrl"
+            "linkUrl",
+            "categorySlug"
           ],
           "kind": "action",
           "nodeIds": [
@@ -8198,7 +13602,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 5,
+    "version": 6,
     "visualRole": "primary-stage",
     "visualWeight": "primary-stage",
     "width": "full"
@@ -8481,7 +13885,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -8892,7 +14296,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -8946,7 +14350,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -9363,7 +14767,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -9476,7 +14880,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -9498,7 +14902,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "targetType",
             "productCode",
             "productId",
-            "linkUrl"
+            "linkUrl",
+            "categorySlug"
           ],
           "kind": "action",
           "nodeIds": [
@@ -9792,7 +15197,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 5,
+    "version": 6,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -10011,7 +15416,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -10535,7 +15940,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -10965,7 +16370,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -11019,7 +16424,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -11613,7 +17018,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -11635,7 +17040,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "targetType",
             "productCode",
             "productId",
-            "linkUrl"
+            "linkUrl",
+            "categorySlug"
           ],
           "kind": "action",
           "nodeIds": [
@@ -11961,7 +17367,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 5,
+    "version": 6,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "standard"
@@ -12799,6 +18205,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
+            "nodeId": "bgImage",
+            "overlay": true,
+            "rect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "bgImage"
+          },
+          {
             "nodeId": "copy",
             "rect": {
               "height": 0.0875,
@@ -12856,6 +18274,18 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
+            "nodeId": "bgImage",
+            "overlay": true,
+            "rect": {
+              "height": 1,
+              "width": 1,
+              "x": 0,
+              "y": 0
+            },
+            "role": "media",
+            "roleId": "bgImage"
+          },
+          {
             "nodeId": "copy",
             "rect": {
               "height": 0.375,
@@ -12907,7 +18337,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -12963,7 +18393,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -13021,7 +18451,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -13043,7 +18473,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "targetType",
             "productCode",
             "productId",
-            "linkUrl"
+            "linkUrl",
+            "categorySlug"
           ],
           "kind": "action",
           "nodeIds": [
@@ -13179,6 +18610,15 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "tone": "light",
         "zones": [
           {
+            "column": 1,
+            "overlay": true,
+            "role": "media",
+            "roleId": "bgImage",
+            "row": 1,
+            "rowSpan": 8,
+            "span": 12
+          },
+          {
             "column": 4.999996,
             "role": "eyebrow",
             "roleId": "copy",
@@ -13219,6 +18659,15 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         ],
         "tone": "light",
         "zones": [
+          {
+            "column": 1,
+            "overlay": true,
+            "role": "media",
+            "roleId": "bgImage",
+            "row": 1,
+            "rowSpan": 8,
+            "span": 12
+          },
           {
             "column": 1.6,
             "role": "copy",
@@ -13282,7 +18731,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "grand"
     ],
     "supportsLinkTarget": true,
-    "version": 5,
+    "version": 6,
     "visualRole": "support-stage",
     "visualWeight": "support-stage",
     "width": "editorial"
@@ -13293,7 +18742,9 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
     ],
     "commercialPurpose": "品牌展示",
     "contentBudget": {
-      "limits": {},
+      "limits": {
+        "videoDescription": 120
+      },
       "maxCtas": 1,
       "requiredText": []
     },
@@ -13475,6 +18926,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
           "contentFieldKeys": [
             "videoUrl",
             "posterUrl",
+            "videoDescription",
             "videoWidth",
             "autoPlay",
             "loop",
@@ -13523,7 +18975,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -13580,7 +19032,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -13602,7 +19054,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "targetType",
             "productCode",
             "productId",
-            "linkUrl"
+            "linkUrl",
+            "categorySlug"
           ],
           "kind": "action",
           "nodeIds": [
@@ -13890,7 +19343,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 5,
+    "version": 6,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "full"
@@ -14116,7 +19569,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -14171,7 +19624,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -14227,7 +19680,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
               "nw"
             ],
             "layerRange": {
-              "max": 0,
+              "max": 20,
               "min": 0
             },
             "maxSize": {
@@ -14249,7 +19702,8 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
             "targetType",
             "productCode",
             "productId",
-            "linkUrl"
+            "linkUrl",
+            "categorySlug"
           ],
           "kind": "action",
           "nodeIds": [
@@ -14537,7 +19991,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       "normal"
     ],
     "supportsLinkTarget": true,
-    "version": 4,
+    "version": 5,
     "visualRole": "feature-stage",
     "visualWeight": "feature-stage",
     "width": "wide"
@@ -14572,6 +20026,14 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     },
     "preview": {
       "desktopZones": [
+        {
+          "column": 1,
+          "overlay": true,
+          "role": "media",
+          "row": 1,
+          "rowSpan": 8,
+          "span": 12
+        },
         {
           "column": 1.999996,
           "role": "copy",
@@ -16171,6 +21633,14 @@ export const CONTENT_TEMPLATE_SKELETONS = {
     "preview": {
       "desktopZones": [
         {
+          "column": 1,
+          "overlay": true,
+          "role": "media",
+          "row": 1,
+          "rowSpan": 8,
+          "span": 12
+        },
+        {
           "column": 4.999996,
           "role": "eyebrow",
           "row": 3.6,
@@ -16398,6 +21868,14 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
+          "column": 1,
+          "overlay": true,
+          "role": "media",
+          "row": 1,
+          "rowSpan": 8,
+          "span": 12
+        },
+        {
           "column": 1.999996,
           "role": "copy",
           "row": 2,
@@ -16430,6 +21908,14 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       ],
       "tone": "light",
       "zones": [
+        {
+          "column": 1,
+          "overlay": true,
+          "role": "media",
+          "row": 1,
+          "rowSpan": 8,
+          "span": 12
+        },
         {
           "column": 1.6,
           "role": "copy",
@@ -18196,6 +23682,14 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       "tone": "light",
       "zones": [
         {
+          "column": 1,
+          "overlay": true,
+          "role": "media",
+          "row": 1,
+          "rowSpan": 8,
+          "span": 12
+        },
+        {
           "column": 4.999996,
           "role": "eyebrow",
           "row": 3.6,
@@ -18234,6 +23728,14 @@ export const CONTENT_TEMPLATE_PREVIEWS = {
       ],
       "tone": "light",
       "zones": [
+        {
+          "column": 1,
+          "overlay": true,
+          "role": "media",
+          "row": 1,
+          "rowSpan": 8,
+          "span": 12
+        },
         {
           "column": 1.6,
           "role": "copy",
@@ -18475,11 +23977,21 @@ export function getContentTemplateDefaultRect(
   const contract = getContentTemplateContract(moduleType);
   const editableObject = findContentTemplateEditableObject(contract, nodeId);
   const directMatches = geometry?.zones.filter((zone) => zone.nodeId === nodeId) ?? [];
-  if (directMatches.length === 1) return directMatches[0].rect;
   const roleMatches = geometry?.zones.filter(
     (zone) => zone.roleId === editableObject?.roleId,
   ) ?? [];
-  return roleMatches.length === 1 ? roleMatches[0].rect : undefined;
+  const matches = directMatches.length > 0 ? directMatches : roleMatches;
+  if (matches.length === 0) return undefined;
+  const left = Math.min(...matches.map((zone) => zone.rect.x));
+  const top = Math.min(...matches.map((zone) => zone.rect.y));
+  const right = Math.max(...matches.map((zone) => zone.rect.x + zone.rect.width));
+  const bottom = Math.max(...matches.map((zone) => zone.rect.y + zone.rect.height));
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+  };
 }
 
 const PERSONAL_TEMPLATE_COLOR_TOKENS = new Set([
@@ -18990,6 +24502,7 @@ export function getContentTemplateLinkTargetReferences(
     const targetTypeFieldKey = prefix ? prefix + "TargetType" : "targetType";
     const productCodeFieldKey = prefix ? prefix + "ProductCode" : "productCode";
     const productIdFieldKey = prefix ? prefix + "ProductId" : "productId";
+    const categorySlugFieldKey = prefix ? prefix + "CategorySlug" : "categorySlug";
     const linkUrlFieldKey = prefix ? prefix + "LinkUrl" : "linkUrl";
     references.push({
       path,
@@ -18998,12 +24511,14 @@ export function getContentTemplateLinkTargetReferences(
       targetTypeFieldKey,
       productCodeFieldKey,
       productIdFieldKey,
+      categorySlugFieldKey,
       linkUrlFieldKey,
       ...(legacyLinkFieldKey ? { legacyLinkFieldKey } : {}),
       ...(actionTextFieldKey ? { actionTextFieldKey } : {}),
       targetType: values[targetTypeFieldKey],
       productCode: values[productCodeFieldKey],
       productId: values[productIdFieldKey],
+      categorySlug: values[categorySlugFieldKey],
       linkUrl: values[linkUrlFieldKey],
       ...(legacyLinkFieldKey ? { legacyLink: values[legacyLinkFieldKey] } : {}),
       ...(actionTextFieldKey ? { actionText: values[actionTextFieldKey] } : {}),
@@ -19647,7 +25162,7 @@ export function getContentTemplateIssues(input: {
         ...base,
         code: "content-template-legacy",
         severity: "info",
-        message: "历史模板已自动采用新版默认构图；合法实例覆盖继续保留，不合法部分使用安全回退。",
+        message: "历史模板已自动采用当前默认构图；合法实例覆盖继续保留，不合法部分使用安全回退。",
       }, ...overrideIssues];
     }
     return [{

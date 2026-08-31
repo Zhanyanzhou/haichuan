@@ -71,6 +71,19 @@ export {
   type TrendMetric,
 } from "./clients/statisticsClient";
 export { settingsApi } from "./clients/settingsClient";
+export {
+  dynamicTemplateApi,
+  type DynamicTemplateDraftResource,
+  type DynamicTemplateResource,
+  type DynamicTemplateVersionResource,
+  type PublishedDynamicTemplateResource,
+  type TemplateCatalogItemResource,
+  type TemplateCatalogPersonalCompatibilityResource,
+  type TemplateCatalogResource,
+} from "./clients/dynamicTemplateClient";
+export {
+  type SystemContentTemplateCurrent,
+} from "./clients/systemContentTemplateClient";
 export { recommendationApi } from "./clients/recommendationClient";
 export {
   customerAdminApi,
@@ -332,6 +345,7 @@ export const authApi = {
     }
     return api.post("/auth/login", data, {
       headers: { "X-Session-Mode": "cookie" },
+      suppressGlobalError: true,
     });
   },
   register: (data: StaffRegisterInput) => api.post("/auth/register", data),
@@ -637,7 +651,7 @@ export const productApi = {
       const product = getMockProducts().find(
         (item) => (item.code === String(id) || item.id === Number(id)) && item.status === "PUBLISHED",
       );
-      if (!product) throw new Error("商品当前不可浏览");
+      if (!product) throw mockRequestError("商品当前不可浏览", 404);
       return mockRes(product);
     }
     const reference = encodeURIComponent(String(id));
@@ -1733,6 +1747,8 @@ export type PageDocumentResource = {
   editorVersion?: string;
   status: "DRAFT" | "PUBLISHED";
   version: number;
+  publishedRevisionId?: number | null;
+  isPublished?: boolean;
   publishedAt?: string | null;
   publishedBy?: number | null;
   createdAt: string;
@@ -1830,6 +1846,7 @@ export type PersonalContentTemplate = {
   contractKey: string;
   contractVersion: number;
   layoutData: Record<string, unknown>;
+  revision: number;
   contentDefaults: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
@@ -1865,87 +1882,6 @@ function getMockPublicPageDocument(
     updatedAt: document.updatedAt,
   };
 }
-
-const _mockPersonalContentTemplates: PersonalContentTemplate[] = [];
-
-export const personalContentTemplateApi = {
-  list: async () => {
-    if (USE_MOCK) {
-      await mockDelay(80);
-      return mockRes(cloneMockDocument(_mockPersonalContentTemplates));
-    }
-    return api.get("/page-modules/personal-content-templates", {
-      suppressGlobalError: true,
-    });
-  },
-  create: async (data: {
-    name: string;
-    moduleType: string;
-    layoutData: Record<string, unknown>;
-    contentDefaults?: Record<string, unknown> | null;
-  }) => {
-    if (USE_MOCK) {
-      await mockDelay(100);
-      const now = new Date().toISOString();
-      const record: PersonalContentTemplate = {
-        id: Math.max(0, ..._mockPersonalContentTemplates.map((item) => item.id)) + 1,
-        name: data.name.trim(),
-        moduleType: data.moduleType,
-        contractKey: data.moduleType,
-        contractVersion: 3,
-        layoutData: cloneMockDocument(data.layoutData),
-        contentDefaults: data.contentDefaults
-          ? cloneMockDocument(data.contentDefaults)
-          : null,
-        createdAt: now,
-        updatedAt: now,
-      };
-      _mockPersonalContentTemplates.unshift(record);
-      return mockRes(cloneMockDocument(record));
-    }
-    return api.post("/page-modules/personal-content-templates", data, {
-      suppressGlobalError: true,
-    });
-  },
-  update: async (
-    id: number,
-    data: {
-      name?: string;
-      layoutData?: Record<string, unknown>;
-      contentDefaults?: Record<string, unknown> | null;
-    },
-  ) => {
-    if (USE_MOCK) {
-      await mockDelay(100);
-      const record = _mockPersonalContentTemplates.find((item) => item.id === id);
-      if (!record) throw new Error("模板不存在");
-      if (data.name !== undefined) record.name = data.name.trim();
-      if (data.layoutData !== undefined) record.layoutData = cloneMockDocument(data.layoutData);
-      if (data.contentDefaults !== undefined) {
-        record.contentDefaults = data.contentDefaults
-          ? cloneMockDocument(data.contentDefaults)
-          : null;
-      }
-      record.updatedAt = new Date().toISOString();
-      return mockRes(cloneMockDocument(record));
-    }
-    return api.patch(`/page-modules/personal-content-templates/${id}`, data, {
-      suppressGlobalError: true,
-    });
-  },
-  remove: async (id: number) => {
-    if (USE_MOCK) {
-      await mockDelay(80);
-      const index = _mockPersonalContentTemplates.findIndex((item) => item.id === id);
-      if (index < 0) throw new Error("模板不存在");
-      _mockPersonalContentTemplates.splice(index, 1);
-      return mockRes({ id, deleted: true });
-    }
-    return api.delete(`/page-modules/personal-content-templates/${id}`, {
-      suppressGlobalError: true,
-    });
-  },
-};
 
 export const pageDocumentApi = {
   getPublished: async (
@@ -1985,10 +1921,17 @@ export const pageDocumentApi = {
       suppressGlobalError: true,
     });
   },
-  discardDraft: async (pageKey = "home", expectedUpdatedAt?: string) => {
+  discardDraft: async (pageKey: string, expectedUpdatedAt: string) => {
     if (USE_MOCK) {
       await mockDelay(160);
       const store = loadMockPageDocuments();
+      const current = store.drafts[pageKey] || store.published[pageKey];
+      if (!expectedUpdatedAt || Number.isNaN(Date.parse(expectedUpdatedAt))) {
+        throw mockRequestError("放弃草稿时缺少页面版本标识", 400);
+      }
+      if (!current || current.updatedAt !== expectedUpdatedAt) {
+        throw mockRequestError("草稿已被其他编辑保存，请刷新页面后重试", 409);
+      }
       delete store.drafts[pageKey];
       persistMockPageDocuments();
       return mockRes({ discarded: true });
@@ -2010,6 +1953,12 @@ export const pageDocumentApi = {
       const store = loadMockPageDocuments();
       const previous =
         store.drafts[data.pageKey] || store.published[data.pageKey];
+      if (previous && (!data.expectedUpdatedAt || Number.isNaN(Date.parse(data.expectedUpdatedAt)))) {
+        throw mockRequestError("保存已有页面时缺少页面版本标识", 400);
+      }
+      if (previous && previous.updatedAt !== data.expectedUpdatedAt) {
+        throw mockRequestError("该页面已被其他编辑者更新，请重新加载后再保存", 409);
+      }
       const now = new Date().toISOString();
       const document: PageDocumentResource = {
         ...(previous || createMockPageDocument(data)),
@@ -2030,15 +1979,21 @@ export const pageDocumentApi = {
     });
   },
   publish: async (
-    pageKey = "home",
-    userId?: number,
-    expectedUpdatedAt?: string,
+    pageKey: string,
+    userId: number | undefined,
+    expectedUpdatedAt: string,
   ) => {
     if (USE_MOCK) {
       await mockDelay(180);
       const store = loadMockPageDocuments();
       const draft = store.drafts[pageKey];
       if (!draft) throw new Error("请先保存页面草稿");
+      if (!expectedUpdatedAt || Number.isNaN(Date.parse(expectedUpdatedAt))) {
+        throw mockRequestError("发布页面时缺少页面版本标识", 400);
+      }
+      if (draft.updatedAt !== expectedUpdatedAt) {
+        throw mockRequestError("该页面已被其他编辑者更新，请重新加载后再发布", 409);
+      }
       const now = new Date().toISOString();
       const published: PageDocumentResource = {
         ...cloneMockDocument(draft),
@@ -2048,10 +2003,19 @@ export const pageDocumentApi = {
         publishedBy: userId ?? 1,
         updatedAt: now,
       };
+      const revision = {
+        ...cloneMockDocument(published),
+        id: Date.now(),
+        isPublished: true,
+      };
+      published.publishedRevisionId = revision.id;
       store.published[pageKey] = published;
       store.revisions[pageKey] = [
-        published,
-        ...(store.revisions[pageKey] || []),
+        revision,
+        ...(store.revisions[pageKey] || []).map((item) => ({
+          ...item,
+          isPublished: false,
+        })),
       ].slice(0, 20);
       persistMockPageDocuments();
       return mockRes(cloneMockDocument(published));
@@ -2084,7 +2048,11 @@ export const pageDocumentApi = {
     if (USE_MOCK) {
       await mockDelay(120);
       const store = loadMockPageDocuments();
-      return mockRes(cloneMockDocument(store.revisions[pageKey] || []));
+      const pointer = store.published[pageKey]?.publishedRevisionId;
+      return mockRes(cloneMockDocument((store.revisions[pageKey] || []).map((revision) => ({
+        ...revision,
+        isPublished: revision.id === pointer,
+      }))));
     }
     return api.get("/page-modules/document/revisions", {
       params: { pageKey },
@@ -2132,6 +2100,46 @@ export const pageDocumentApi = {
     }, {
       suppressGlobalError: true,
     });
+  },
+  rollbackPublication: async (
+    pageKey: string,
+    revisionId: number,
+    expectedPublishedRevisionId: number,
+  ) => {
+    if (USE_MOCK) {
+      await mockDelay(160);
+      const store = loadMockPageDocuments();
+      const published = store.published[pageKey];
+      if (!published || published.publishedRevisionId !== expectedPublishedRevisionId) {
+        throw mockRequestError("线上版本已变化，请重新加载版本记录后再回滚", 409);
+      }
+      const revision = (store.revisions[pageKey] || []).find((item) => item.id === revisionId);
+      if (!revision) throw mockRequestError("指定发布版本不属于当前页面", 400);
+      published.publishedRevisionId = revisionId;
+      published.puckData = cloneMockDocument(revision.puckData);
+      published.metadata = cloneMockDocument(revision.metadata);
+      published.version = revision.version;
+      published.publishedAt = revision.publishedAt;
+      published.publishedBy = revision.publishedBy;
+      const updatedAt = new Date().toISOString();
+      published.updatedAt = updatedAt;
+      const draft = store.drafts[pageKey];
+      if (draft) {
+        draft.publishedRevisionId = revisionId;
+        draft.updatedAt = updatedAt;
+      }
+      store.revisions[pageKey] = (store.revisions[pageKey] || []).map((item) => ({
+        ...item,
+        isPublished: item.id === revisionId,
+      }));
+      persistMockPageDocuments();
+      return mockRes(cloneMockDocument(draft || published));
+    }
+    return api.put(
+      `/page-modules/document/revisions/${revisionId}/rollback-publication`,
+      { pageKey, expectedPublishedRevisionId },
+      { suppressGlobalError: true },
+    );
   },
 };
 

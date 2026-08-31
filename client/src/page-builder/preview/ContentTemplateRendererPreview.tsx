@@ -183,7 +183,7 @@ function ContentTemplateRealRendererPreview({
       aria-label={`${profile.displayName}的${viewport === "desktop" ? "桌面" : "手机"}真实构图预览：${profile.purpose}`}
       data-content-template-preview={contract.key}
       data-preview-only="true"
-      data-preview-art-direction="quiet-light-court-v1"
+      data-preview-art-direction="neutral-template-preview-v1"
       data-preview-viewport={viewport}
       data-desktop-order={contract.order.desktop.join(",")}
       data-mobile-order={contract.order.mobile.join(",")}

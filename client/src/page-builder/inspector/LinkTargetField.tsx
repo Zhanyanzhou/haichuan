@@ -1,8 +1,10 @@
 import { useEffect, useRef } from "react";
 import ProductReferencesField from "@/page-builder/fields/ProductReferencesField";
+import CategoryReferencesField from "@/page-builder/fields/CategoryReferencesField";
 import { editorPages } from "@/page-builder/config/editorPages";
 import { isContentTemplatePageTarget } from "@/page-builder/generated/contentTemplates.generated";
 import {
+  normalizeHttpsExternalTarget,
   normalizeLinkTargetType,
   type LinkTargetType,
   type LinkTargetValue,
@@ -34,6 +36,7 @@ export default function LinkTargetField({
   targetType,
   productCode,
   productId,
+  categorySlug,
   linkUrl,
   onChange,
   label = "点击后跳转",
@@ -41,9 +44,10 @@ export default function LinkTargetField({
   compact = false,
   keyPrefix = "",
 }: LinkTargetFieldProps) {
-  const normalizedTargetType = normalizeLinkTargetType({ targetType, productCode, productId, linkUrl });
+  const normalizedTargetType = normalizeLinkTargetType({ targetType, productCode, productId, categorySlug, linkUrl });
   const normalizedProductCode = typeof productCode === "string" ? productCode.trim() : "";
   const normalizedProductId = Number(productId) || 0;
+  const normalizedCategorySlug = typeof categorySlug === "string" ? categorySlug.trim() : "";
   const detailRef = useRef<HTMLDivElement | null>(null);
   const previousTargetTypeRef = useRef(normalizedTargetType);
 
@@ -82,7 +86,7 @@ export default function LinkTargetField({
   // 前缀键遵循 camelCase:targetType / secondaryTargetType。
   // 无前缀时仅首字母小写(TargetType→targetType),不能整词 toLowerCase——
   // 否则写入 targettype 键,渲染端/发布校验读驼峰键会静默失联(2026-08-18 实测抓出)。
-  const key = (suffix: "TargetType" | "ProductCode" | "ProductId" | "LinkUrl") =>
+  const key = (suffix: "TargetType" | "ProductCode" | "ProductId" | "CategorySlug" | "LinkUrl") =>
     keyPrefix
       ? `${keyPrefix}${suffix}`
       : suffix.charAt(0).toLowerCase() + suffix.slice(1);
@@ -96,12 +100,19 @@ export default function LinkTargetField({
     if (nextTargetType === "none") {
       patch[key("ProductCode")] = "";
       patch[key("ProductId")] = 0;
+      patch[key("CategorySlug")] = "";
       patch[key("LinkUrl")] = "";
     } else if (nextTargetType === "product") {
+      patch[key("CategorySlug")] = "";
+      patch[key("LinkUrl")] = "";
+    } else if (nextTargetType === "category") {
+      patch[key("ProductCode")] = "";
+      patch[key("ProductId")] = 0;
       patch[key("LinkUrl")] = "";
     } else {
       patch[key("ProductCode")] = "";
       patch[key("ProductId")] = 0;
+      patch[key("CategorySlug")] = "";
     }
     onChange(patch);
   };
@@ -109,6 +120,9 @@ export default function LinkTargetField({
   const pathInvalid =
     normalizedTargetType === "page" &&
     !isContentTemplatePageTarget(linkUrl);
+  const externalInvalid =
+    normalizedTargetType === "external" &&
+    !normalizeHttpsExternalTarget(linkUrl);
 
   return (
     <>
@@ -124,7 +138,11 @@ export default function LinkTargetField({
         ], [
           "product", "商品",
         ], [
+          "category", "分类",
+        ], [
           "page", "页面",
+        ], [
+          "external", "外链",
         ]] as const).map(([value, text]) => (
           <button
             key={value}
@@ -157,6 +175,21 @@ export default function LinkTargetField({
         </div>
       ) : null}
 
+      {normalizedTargetType === "category" ? (
+        <div
+          ref={detailRef}
+          className="homepage-editor__inspector-field homepage-editor__link-target-detail"
+        >
+          <label>关联分类 <em>必填</em></label>
+          <CategoryReferencesField
+            value={normalizedCategorySlug ? [normalizedCategorySlug] : []}
+            onChange={(slugs) => onChange({ [key("CategorySlug")]: slugs[0] || "" })}
+            minItems={1}
+            maxItems={1}
+          />
+        </div>
+      ) : null}
+
       {normalizedTargetType === "page" ? (
         <div
           ref={detailRef}
@@ -184,6 +217,31 @@ export default function LinkTargetField({
               {linkUrl
                 ? "该路径不是可发布的公开页面；商品详情请使用「商品」目标。"
                 : "请选择机器合同登记的公开页面。"}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {normalizedTargetType === "external" ? (
+        <div
+          ref={detailRef}
+          className="homepage-editor__inspector-field homepage-editor__link-target-detail"
+        >
+          <label htmlFor={`link-target-external-${id}`}>
+            HTTPS 外部链接 <em>必填</em>
+          </label>
+          <input
+            id={`link-target-external-${id}`}
+            type="url"
+            inputMode="url"
+            value={linkUrl || ""}
+            onChange={(event) => onChange({ [key("LinkUrl")]: event.target.value })}
+            placeholder="https://example.com/page"
+            autoComplete="url"
+            aria-invalid={externalInvalid}
+          />
+          {externalInvalid ? (
+            <span className="homepage-editor__inspector-hint" role="alert">
+              {linkUrl ? "外部链接必须是完整的 HTTPS 地址。" : "请输入完整的 HTTPS 地址。"}
             </span>
           ) : null}
         </div>

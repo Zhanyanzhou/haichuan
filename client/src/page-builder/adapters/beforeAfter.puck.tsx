@@ -18,6 +18,7 @@ export interface BeforeAfterPuckProps {
   beforeFocusY: number;
   afterFocusX: number;
   afterFocusY: number;
+  aspectRatio?: string;
   actionText: string;
   linkUrl: string;
   targetType: LinkTargetType;

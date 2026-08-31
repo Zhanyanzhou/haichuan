@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Modal } from "antd";
 import { categoryApi } from "@/services/api";
 import { SecureImage } from "@/components/common/SecureImage";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -7,6 +8,7 @@ import {
   resolveProductReferences,
   type ProductRow,
 } from "../data-sources/productSource";
+import "./ProductReferencesField.css";
 
 interface CategoryOption {
   id: number;
@@ -67,6 +69,10 @@ export default function ProductReferencesField({
   const oldIds = useMemo(() => uniqueIds(legacyIds), [legacyIds]);
   const [selectedRows, setSelectedRows] = useState<ProductRow[]>([]);
   const [results, setResults] = useState<ProductRow[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [draftCodes, setDraftCodes] = useState<string[]>([]);
+  const [draftLegacyIds, setDraftLegacyIds] = useState<number[]>([]);
+  const [candidateRows, setCandidateRows] = useState<Record<string, ProductRow>>({});
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -83,9 +89,11 @@ export default function ProductReferencesField({
   const [selectedRevision, setSelectedRevision] = useState(0);
   const [listRevision, setListRevision] = useState(0);
   const requestVersion = useRef(0);
+  const pickerTriggerRef = useRef<HTMLButtonElement>(null);
   const pageSize = 12;
 
   useEffect(() => {
+    if (!pickerOpen) return;
     const controller = new AbortController();
     setCategoryError(false);
     void categoryApi.getManageTree()
@@ -100,7 +108,7 @@ export default function ProductReferencesField({
         }
       });
     return () => controller.abort();
-  }, [categoryRevision]);
+  }, [categoryRevision, pickerOpen]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -126,6 +134,7 @@ export default function ProductReferencesField({
   }, [codes, oldIds, selectedRevision]);
 
   useEffect(() => {
+    if (!pickerOpen) return;
     const version = ++requestVersion.current;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
@@ -144,6 +153,10 @@ export default function ProductReferencesField({
           if (version !== requestVersion.current || controller.signal.aborted) return;
           setResults(result.rows);
           setTotal(result.total);
+          setCandidateRows((current) => ({
+            ...current,
+            ...Object.fromEntries(result.rows.map((row) => [row.code, row])),
+          }));
         })
         .catch((requestError: unknown) => {
           if (version !== requestVersion.current || controller.signal.aborted) return;
@@ -158,7 +171,7 @@ export default function ProductReferencesField({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [categoryId, listRevision, page, query, status, visibility]);
+  }, [categoryId, listRevision, page, pickerOpen, query, status, visibility]);
 
   const selectedByCode = new Map(
     selectedRows.filter((row) => row.code).map((row) => [row.code, row]),
@@ -208,6 +221,131 @@ export default function ProductReferencesField({
   ];
   const selectedCount = codes.length + oldIds.length;
 
+  const draftSelectedByCode = new Map(
+    [...selectedRows, ...Object.values(candidateRows)]
+      .filter((row) => row.code)
+      .map((row) => [row.code, row]),
+  );
+  const draftResolvedLegacyCodes = draftLegacyIds.map(
+    (id) => selectedByLegacyId.get(id)?.code ?? "",
+  );
+  const allDraftLegacyResolved = draftResolvedLegacyCodes.every(Boolean);
+  const draftActiveCodes = [...new Set([
+    ...draftCodes,
+    ...(allDraftLegacyResolved ? draftResolvedLegacyCodes : []),
+  ])];
+  const draftDisplayRows: DisplayProductRow[] = [
+    ...draftCodes.map((code) => draftSelectedByCode.get(code) ?? {
+      id: 0,
+      code,
+      name: "引用状态待确认",
+      price: 0,
+      priceLabel: "",
+      image: "",
+      category: "",
+      status: "",
+      visibility: "",
+      eligible: false,
+      reason: "RESOLVE_FAILED" as const,
+      resolutionPending: true,
+    }),
+    ...draftLegacyIds.map((legacyId) => selectedByLegacyId.get(legacyId) ?? {
+      id: legacyId,
+      legacyId,
+      code: "",
+      name: `旧商品引用 #${legacyId}`,
+      price: 0,
+      priceLabel: "",
+      image: "",
+      category: "",
+      status: "",
+      visibility: "",
+      eligible: false,
+      reason: "RESOLVE_FAILED" as const,
+      resolutionPending: selectedLoading && !selectedError,
+    }),
+  ];
+  const draftSelectedCount = draftCodes.length + draftLegacyIds.length;
+
+  const openPicker = () => {
+    setDraftCodes(codes);
+    setDraftLegacyIds(oldIds);
+    setCandidateRows(Object.fromEntries(
+      selectedRows.filter((row) => row.code).map((row) => [row.code, row]),
+    ));
+    setPickerOpen(true);
+  };
+
+  const closePicker = () => {
+    setPickerOpen(false);
+  };
+
+  const resetFilters = () => {
+    setQuery("");
+    setCategoryId(undefined);
+    setStatus("");
+    setVisibility("");
+    setPage(1);
+  };
+
+  const getDraftLegacyIdForCode = (code: string) => draftLegacyIds.find(
+    (legacyId) => selectedByLegacyId.get(legacyId)?.code === code,
+  );
+
+  const toggleDraftProduct = (product: ProductRow) => {
+    if (readOnly) return;
+    const legacyId = getDraftLegacyIdForCode(product.code);
+    const selectedAsCode = draftCodes.includes(product.code);
+    if (selectedAsCode || legacyId) {
+      setDraftCodes((current) => current.filter((code) => code !== product.code));
+      if (legacyId) {
+        setDraftLegacyIds((current) => current.filter((id) => id !== legacyId));
+      }
+      return;
+    }
+    if (!allDraftLegacyResolved) return;
+    if (maxProducts === 1) {
+      setDraftCodes([product.code]);
+      setDraftLegacyIds([]);
+      return;
+    }
+    if (draftSelectedCount >= maxProducts) return;
+    setDraftCodes((current) => [...new Set([...current, product.code])]);
+  };
+
+  const removeDraftRow = (product: ProductRow) => {
+    if (readOnly) return;
+    const legacyId = product.legacyId && draftLegacyIds.includes(product.legacyId)
+      ? product.legacyId
+      : getDraftLegacyIdForCode(product.code);
+    if (legacyId) {
+      setDraftLegacyIds((current) => current.filter((id) => id !== legacyId));
+      return;
+    }
+    setDraftCodes((current) => current.filter((code) => code !== product.code));
+  };
+
+  const moveDraftRow = (index: number, direction: -1 | 1) => {
+    if (readOnly || !allDraftLegacyResolved) return;
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= draftDisplayRows.length) return;
+    const ordered = draftDisplayRows.map((row) => row.code).filter(Boolean);
+    [ordered[index], ordered[nextIndex]] = [ordered[nextIndex], ordered[index]];
+    setDraftCodes(ordered);
+    setDraftLegacyIds([]);
+  };
+
+  const confirmDraftSelection = () => {
+    if (
+      readOnly ||
+      !allDraftLegacyResolved ||
+      draftSelectedCount < minProducts ||
+      draftSelectedCount > maxProducts
+    ) return;
+    onChange(draftActiveCodes, []);
+    setPickerOpen(false);
+  };
+
   const commitCodes = (nextCodes: string[]) => {
     if (readOnly || !allLegacyResolved) return;
     onChange([...new Set(nextCodes)], []);
@@ -248,56 +386,29 @@ export default function ProductReferencesField({
           <small>页面只保存商品 code；名称、价格、图片和状态始终从商品系统读取。</small>
         </div>
       </div>
-      <div className="homepage-editor__product-picker-search">
-        <input
-          value={query}
-          disabled={readOnly}
-          aria-label="搜索商品名称或货号"
-          placeholder="搜索商品名称或货号"
-          onChange={(event) => { setQuery(event.target.value); setPage(1); }}
-        />
-      </div>
-      <div className="homepage-editor__product-picker-filters" aria-label="商品筛选">
-        <select aria-label="商品分类" value={categoryId ?? ""} onChange={(event) => { setCategoryId(event.target.value ? Number(event.target.value) : undefined); setPage(1); }}>
-          <option value="">全部分类</option>
-          {categories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}
-        </select>
-        <select aria-label="商品状态" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
-          <option value="">全部状态</option><option value="PUBLISHED">已发布</option><option value="DRAFT">草稿</option><option value="OFFLINE">已下架</option><option value="ARCHIVED">已归档</option>
-        </select>
-        <select aria-label="公开资格" value={visibility} onChange={(event) => { setVisibility(event.target.value); setPage(1); }}>
-          <option value="">全部可见范围</option><option value="PUBLIC">公开</option><option value="MEMBER">会员</option><option value="PARTNER">合作商家</option><option value="INTERNAL">内部</option>
-        </select>
-      </div>
-      {categoryError ? (
-        <div className="homepage-editor__product-picker-note is-error" role="status">
-          分类筛选加载失败，仍可使用关键词、状态和公开资格继续选择商品
-          <button type="button" onClick={() => setCategoryRevision((value) => value + 1)}>重新加载分类</button>
+      <div className="homepage-editor__product-picker-entry">
+        <div>
+          <strong>{selectedCount > 0 ? `已选择 ${selectedCount} 件商品` : "尚未选择商品"}</strong>
+          <small>
+            {maxProducts === 1
+              ? "打开商品库后单击商品，再确认选择。"
+              : `可选择 ${minProducts}–${maxProducts} 件，公开展示顺序可在下方调整。`}
+          </small>
         </div>
-      ) : null}
-
-      <div className="homepage-editor__product-picker-results" aria-live="polite" aria-busy={loading}>
-        {loading ? <div className="homepage-editor__product-picker-note">正在加载商品</div>
-            : error ? <div className="homepage-editor__product-picker-note is-error">{error === "FORBIDDEN" ? "当前账号无权浏览商品，请联系管理员" : "商品加载失败，原有选择未改变"}<button type="button" onClick={() => setListRevision((value) => value + 1)}>重试加载</button></div>
-            : results.length ? results.map((product) => {
-                const selected = codes.includes(product.code) || selectedRows.some((row) => row.code === product.code);
-                return <button key={product.code} type="button" disabled={readOnly || selected || selectedCount >= maxProducts || !allLegacyResolved} className="homepage-editor__product-picker-row" onClick={() => commitCodes([...activeCodes, product.code])}>
-                  {product.image ? <SecureImage src={product.image} alt="" tokenKind="staff" className="homepage-editor__product-picker-thumb" /> : <span aria-hidden="true" />}
-                  <span><strong>{product.name}</strong><small>{product.code} · {product.category || "未分类"} · {REASON_LABEL[product.reason]}</small></span>
-                  <em>{selected ? "已选" : selectedCount >= maxProducts ? "已达上限" : product.priceLabel}</em>
-                </button>;
-              })
-              : <div className="homepage-editor__product-picker-note">没有符合条件的商品</div>}
-      </div>
-      <div className="homepage-editor__product-picker-pagination" aria-label="商品分页">
-        <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button>
-        <span>第 {page} 页 · 共 {total} 件</span>
-        <button type="button" disabled={page * pageSize >= total || loading} onClick={() => setPage((value) => value + 1)}>下一页</button>
+        <button
+          ref={pickerTriggerRef}
+          type="button"
+          className="homepage-editor__product-picker-trigger"
+          disabled={readOnly}
+          onClick={openPicker}
+        >
+          {selectedCount > 0 ? "重新选择商品" : "选择商品"}
+        </button>
       </div>
 
       <div className="homepage-editor__product-picker-selected">
         <div className="homepage-editor__product-picker-title">已选商品 · 顺序即公开顺序<span>{selectedCount}/{maxProducts} 件</span></div>
-        {selectedLoading ? <div className="homepage-editor__product-picker-note">正在刷新已选商品状态，当前结果暂时保留</div> : null}
+        {selectedLoading ? <div className="homepage-editor__product-picker-note">正在刷新已选商品状态…当前结果暂时保留</div> : null}
         {selectedError ? <div className="homepage-editor__product-picker-note is-error">{REASON_LABEL[selectedError]}；已保留上次成功解析结果和原始引用<button type="button" onClick={() => setSelectedRevision((value) => value + 1)}>重试解析</button></div> : null}
         {displaySelectedRows.map((product, index) => <div key={product.code || `legacy-${product.legacyId}-${index}`} className="homepage-editor__product-picker-selected-row">
           {product.image ? <SecureImage src={product.image} alt="" tokenKind="staff" className="homepage-editor__product-picker-thumb" /> : <span aria-hidden="true" />}
@@ -312,6 +423,150 @@ export default function ProductReferencesField({
         {selectedCount > 0 && selectedCount < minProducts ? <div className="homepage-editor__product-picker-note is-error">至少选择 {minProducts} 件商品后才能发布</div> : null}
         {!allLegacyResolved ? <div className="homepage-editor__product-picker-note is-error">旧引用中有无法解析的商品；请先移除失效项，再添加或排序。</div> : null}
       </div>
+
+      <Modal
+        title="选择商品"
+        open={pickerOpen}
+        width={1120}
+        centered
+        keyboard
+        maskClosable={false}
+        wrapClassName="homepage-editor__product-picker-modal"
+        okText={`确认选择（${draftSelectedCount}）`}
+        cancelText="取消"
+        okButtonProps={{
+          disabled:
+            readOnly ||
+            !allDraftLegacyResolved ||
+            draftSelectedCount < minProducts ||
+            draftSelectedCount > maxProducts,
+          size: "large",
+        }}
+        cancelButtonProps={{ size: "large" }}
+        onOk={confirmDraftSelection}
+        onCancel={closePicker}
+        afterClose={() => pickerTriggerRef.current?.focus()}
+      >
+        <div className="homepage-editor__product-picker-dialog">
+          <div className="homepage-editor__product-picker-dialog-heading">
+            <div>
+              <strong>从商品库关联</strong>
+              <span>名称、价格、图片和公开状态始终从商品系统读取。</span>
+            </div>
+            <span>已选 {draftSelectedCount}/{maxProducts} 件</span>
+          </div>
+
+          <div className="homepage-editor__product-picker-toolbar" aria-label="商品搜索与筛选">
+            <label>
+              <span>搜索商品</span>
+              <input
+                value={query}
+                disabled={readOnly}
+                aria-label="搜索商品名称或货号"
+                placeholder="搜索商品名称或货号"
+                onChange={(event) => { setQuery(event.target.value); setPage(1); }}
+              />
+            </label>
+            <label>
+              <span>商品分类</span>
+              <select aria-label="商品分类" value={categoryId ?? ""} onChange={(event) => { setCategoryId(event.target.value ? Number(event.target.value) : undefined); setPage(1); }}>
+                <option value="">全部分类</option>
+                {categories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>商品状态</span>
+              <select aria-label="商品状态" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
+                <option value="">全部状态</option><option value="PUBLISHED">已发布</option><option value="DRAFT">草稿</option><option value="OFFLINE">已下架</option><option value="ARCHIVED">已归档</option>
+              </select>
+            </label>
+            <label>
+              <span>公开资格</span>
+              <select aria-label="公开资格" value={visibility} onChange={(event) => { setVisibility(event.target.value); setPage(1); }}>
+                <option value="">全部可见范围</option><option value="PUBLIC">公开</option><option value="MEMBER">会员</option><option value="PARTNER">合作商家</option><option value="INTERNAL">内部</option>
+              </select>
+            </label>
+            <button type="button" className="homepage-editor__product-picker-reset" onClick={resetFilters}>重置</button>
+          </div>
+
+          {categoryError ? (
+            <div className="homepage-editor__product-picker-note is-error" role="status">
+              分类筛选加载失败，仍可使用关键词、状态和公开资格继续选择商品
+              <button type="button" onClick={() => setCategoryRevision((value) => value + 1)}>重新加载分类</button>
+            </div>
+          ) : null}
+
+          <div className="homepage-editor__product-picker-dialog-results" aria-live="polite" aria-busy={loading}>
+            {loading ? <div className="homepage-editor__product-picker-dialog-state">正在加载商品…</div>
+              : error ? <div className="homepage-editor__product-picker-dialog-state is-error">{error === "FORBIDDEN" ? "当前账号无权浏览商品，请联系管理员。" : "商品加载失败，原有选择未改变。"}<button type="button" onClick={() => setListRevision((value) => value + 1)}>重新加载</button></div>
+              : results.length ? results.map((product) => {
+                  const selected = draftActiveCodes.includes(product.code);
+                  const addBlocked = !selected && (
+                    readOnly ||
+                    !allDraftLegacyResolved ||
+                    (maxProducts !== 1 && draftSelectedCount >= maxProducts)
+                  );
+                  return (
+                    <button
+                      key={product.code}
+                      type="button"
+                      className="homepage-editor__product-picker-card"
+                      data-selected={selected}
+                      aria-pressed={selected}
+                      disabled={addBlocked}
+                      onClick={() => toggleDraftProduct(product)}
+                    >
+                      <span className="homepage-editor__product-picker-card-check" aria-hidden="true">{selected ? "✓" : ""}</span>
+                      {product.image ? (
+                        <SecureImage src={product.image} alt="" tokenKind="staff" className="homepage-editor__product-picker-card-image" />
+                      ) : (
+                        <span className="homepage-editor__product-picker-card-image is-empty" aria-hidden="true">暂无图片</span>
+                      )}
+                      <span className="homepage-editor__product-picker-card-copy">
+                        <strong>{product.name}</strong>
+                        <small>{product.code} · {product.category || "未分类"}</small>
+                        <em data-eligible={product.eligible}>{REASON_LABEL[product.reason]}</em>
+                        <b>{product.priceLabel}</b>
+                      </span>
+                    </button>
+                  );
+                })
+                : <div className="homepage-editor__product-picker-dialog-state">没有符合当前筛选条件的商品</div>}
+          </div>
+
+          <div className="homepage-editor__product-picker-dialog-pagination" aria-label="商品分页">
+            <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button>
+            <span>第 {page} 页 · 共 {total} 件商品</span>
+            <button type="button" disabled={page * pageSize >= total || loading} onClick={() => setPage((value) => value + 1)}>下一页</button>
+          </div>
+
+          <section className="homepage-editor__product-picker-draft" aria-label="本次已选商品">
+            <header>
+              <strong>本次已选</strong>
+              <span>{draftSelectedCount}/{maxProducts} 件 · 确认后才会更新页面</span>
+            </header>
+            {draftDisplayRows.length > 0 ? (
+              <div>
+                {draftDisplayRows.map((product, index) => (
+                  <article key={product.code || `draft-legacy-${product.legacyId}-${index}`}>
+                    {product.image ? <SecureImage src={product.image} alt="" tokenKind="staff" /> : <span aria-hidden="true" />}
+                    <span><strong>{product.name}</strong><small>{product.code || `旧引用 #${product.legacyId}`}</small></span>
+                    <div>
+                      <button type="button" aria-label={`上移本次选择 ${product.name}`} disabled={readOnly || !allDraftLegacyResolved || index === 0} onClick={() => moveDraftRow(index, -1)}>上移</button>
+                      <button type="button" aria-label={`下移本次选择 ${product.name}`} disabled={readOnly || !allDraftLegacyResolved || index === draftDisplayRows.length - 1} onClick={() => moveDraftRow(index, 1)}>下移</button>
+                      <button type="button" aria-label={`移除本次选择 ${product.name}`} disabled={readOnly} onClick={() => removeDraftRow(product)}>移除</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p>尚未选择商品。</p>
+            )}
+            {draftSelectedCount < minProducts ? <p role="alert">至少选择 {minProducts} 件商品后才能确认。</p> : null}
+            {!allDraftLegacyResolved ? <p role="alert">旧引用中有无法解析的商品，请先移除失效项。</p> : null}
+          </section>
+        </div>
+      </Modal>
     </div>
   );
 }

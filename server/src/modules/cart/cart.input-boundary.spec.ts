@@ -51,11 +51,11 @@ test("购物车改量只允许 0 到 99 的整数", async () => {
   );
 });
 
-test("微信绑定 DTO 限制一次性 token、手机号和强密码", async () => {
+test("微信绑定 DTO 限制一次性 token、手机号和凭据输入上限", async () => {
   const result = await validateBody(BindWechatDto, {
     bindToken: "a".repeat(48),
     phone: "13800138000",
-    password: "Password123",
+    password: "123456",
     name: "测试客户",
     role: "SUPER_ADMIN",
   });
@@ -63,9 +63,9 @@ test("微信绑定 DTO 限制一次性 token、手机号和强密码", async () 
 
   await assert.rejects(
     validateBody(BindWechatDto, {
-      bindToken: "not-a-token",
-      phone: "123",
-      password: "weak",
+      bindToken: "a".repeat(48),
+      phone: "13800138000",
+      password: "x".repeat(129),
     }),
     BadRequestException,
   );

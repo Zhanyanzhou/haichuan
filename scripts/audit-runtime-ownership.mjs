@@ -38,6 +38,10 @@ function normalizePath(path) {
   return path.split(sep).join("/");
 }
 
+function compareStable(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function projectRelative(path) {
   const value = normalizePath(relative(projectRoot, resolve(projectRoot, path)));
   if (!value || value === "." || value.startsWith("../")) {
@@ -55,7 +59,9 @@ function walk(path) {
   const stat = lstatSync(path);
   if (!stat.isDirectory()) return [path];
   const files = [];
-  for (const entry of readdirSync(path, { withFileTypes: true })) {
+  const directoryEntries = readdirSync(path, { withFileTypes: true })
+    .sort((left, right) => compareStable(left.name, right.name));
+  for (const entry of directoryEntries) {
     const absolutePath = resolve(path, entry.name);
     if (entry.isDirectory()) files.push(...walk(absolutePath));
     else files.push(absolutePath);
@@ -146,7 +152,7 @@ function buildGraph(paths, scope) {
         unresolved.push({ importer: projectRelative(path), specifier });
       }
     }
-    graph.set(path, [...new Set(dependencies)].sort());
+    graph.set(path, [...new Set(dependencies)].sort(compareStable));
   }
   return { parsed, graph, unresolved };
 }
@@ -171,7 +177,7 @@ function reverseImporters(graph, target, reachable) {
       reachable.has(importer) && dependencies.includes(target),
     )
     .map(([importer]) => projectRelative(importer))
-    .sort();
+    .sort(compareStable);
 }
 
 function extractClientCalls(parsed, reachable) {
@@ -245,7 +251,8 @@ function extractClientCalls(parsed, reachable) {
     visit(source.ast);
   }
   return calls.sort((left, right) =>
-    `${left.path}:${left.method}:${left.source}:${left.line}`.localeCompare(
+    compareStable(
+      `${left.path}:${left.method}:${left.source}:${left.line}`,
       `${right.path}:${right.method}:${right.source}:${right.line}`,
     ),
   );
@@ -281,7 +288,8 @@ function extractServerRoutes(controllerFiles) {
     }
   }
   return routes.sort((left, right) =>
-    `${left.path}:${left.method}:${left.source}:${left.line}`.localeCompare(
+    compareStable(
+      `${left.path}:${left.method}:${left.source}:${left.line}`,
       `${right.path}:${right.method}:${right.source}:${right.line}`,
     ),
   );
@@ -380,7 +388,7 @@ function extractPrismaModels(serverFiles, reachable) {
               : "NO_DIRECT_DELEGATE_OR_SCHEMA_RELATION_REVIEW_REQUIRED",
       };
     })
-    .sort((left, right) => left.model.localeCompare(right.model));
+    .sort((left, right) => compareStable(left.model, right.model));
 }
 
 function collectAudit() {
@@ -415,7 +423,7 @@ function collectAudit() {
             : "SOURCE_UNREACHABLE_REVIEW_REQUIRED",
       };
     })
-    .sort((left, right) => left.path.localeCompare(right.path));
+    .sort((left, right) => compareStable(left.path, right.path));
   const unreachableClientSourceFiles = clientSourceFiles
     .filter((path) => !clientRuntimeReachable.has(path))
     .map((path) => ({
@@ -426,7 +434,7 @@ function collectAudit() {
           ? "TEST_ONLY_REACHABLE"
           : "SOURCE_UNREACHABLE_REVIEW_REQUIRED",
     }))
-    .sort((left, right) => left.path.localeCompare(right.path));
+    .sort((left, right) => compareStable(left.path, right.path));
 
   const serverFiles = walk(resolve(projectRoot, "server/src")).filter(isCodeFile);
   const serverGraph = buildGraph(serverFiles, "server");

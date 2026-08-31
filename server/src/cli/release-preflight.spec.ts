@@ -6,10 +6,12 @@ import {
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
 } from "../modules/page-modules/content-template-contract";
 import {
+  createReleasePreflightTargetConfig,
   evaluateMigrationIntegrity,
   parseReleaseProfile,
   RELEASE_PAGE_KEYS,
   runReleasePreflight,
+  runReleasePreflightTargetAudit,
   type ReleasePreflightDatabase,
 } from "./release-preflight";
 
@@ -28,6 +30,8 @@ type FakeOptions = {
   directPurchaseProductCount?: number;
   settings?: Record<string, unknown> | null;
   missingPageKey?: string;
+  missingPointerPageKey?: string;
+  danglingPointerPageKey?: string;
   stalePageKey?: string;
 };
 
@@ -41,7 +45,13 @@ function currentMetadata(): Prisma.JsonObject {
 function createFakeDatabase(options: FakeOptions = {}): ReleasePreflightDatabase {
   const pages = RELEASE_PAGE_KEYS
     .filter((pageKey) => pageKey !== options.missingPageKey)
-    .map((pageKey, index) => ({ id: index + 1, pageKey }));
+    .map((pageKey, index) => ({
+      id: index + 1,
+      pageKey,
+      publishedRevisionId: pageKey === options.missingPointerPageKey
+        ? null
+        : 101 + index,
+    }));
   const settings = options.settings === undefined
     ? {
         siteName: "海川珠宝",
@@ -81,9 +91,13 @@ function createFakeDatabase(options: FakeOptions = {}): ReleasePreflightDatabase
     },
     pageDocumentRevision: {
       async findFirst(args: any) {
-        const page = pages.find((candidate) => candidate.id === args.where.documentId);
-        if (!page) return null;
+        const page = pages.find(
+          (candidate) => candidate.id === args.where.documentId &&
+            candidate.publishedRevisionId === args.where.id,
+        );
+        if (!page || page.pageKey === options.danglingPointerPageKey) return null;
         return {
+          id: page.publishedRevisionId,
           version: 3,
           puckData: { content: [{ type: "测试区块", props: {} }] },
           metadata: page.pageKey === options.stalePageKey ? {} : currentMetadata(),
@@ -166,6 +180,117 @@ test("发布档位默认安全选择线索型并拒绝未知值", () => {
   assert.throws(() => parseReleaseProfile("hybrid"), /unsupported release profile/);
 });
 
+test("正式预检在连接前要求只读授权、环境身份、数据库名和审批引用", () => {
+  const baseEnvironment = {
+    DATABASE_URL: "mysql://readonly:secret@db:3306/jewelry_staging",
+    RELEASE_PREFLIGHT_ENVIRONMENT_ID: "staging-cn",
+    RELEASE_PREFLIGHT_EXPECTED_DATABASE: "jewelry_staging",
+    RELEASE_PREFLIGHT_APPROVAL_REFERENCE: "approval-20260831",
+  };
+  assert.throws(
+    () => createReleasePreflightTargetConfig(baseEnvironment),
+    /RELEASE_PREFLIGHT_READ_ONLY_AUTHORIZATION_REQUIRED/,
+  );
+  assert.throws(
+    () => createReleasePreflightTargetConfig({
+      ...baseEnvironment,
+      RELEASE_PREFLIGHT_READ_ONLY_AUTHORIZED: "1",
+      DATABASE_URL: "mysql://readonly:secret@db:3306/wrong_database",
+    }),
+    /RELEASE_PREFLIGHT_DATABASE_NAME_MISMATCH/,
+  );
+
+  const config = createReleasePreflightTargetConfig({
+    ...baseEnvironment,
+    RELEASE_PREFLIGHT_READ_ONLY_AUTHORIZED: "1",
+  });
+  assert.equal(config.environmentId, "staging-cn");
+  assert.equal(config.expectedDatabase, "jewelry_staging");
+  assert.equal(config.approvalReferenceHash.length, 64);
+  assert.doesNotMatch(JSON.stringify(config), /approval-20260831/);
+});
+
+test("正式预检先验证只读账号和数据库范围，再执行内容门禁", async () => {
+  const database = createFakeDatabase() as ReleasePreflightDatabase & {
+    $queryRawUnsafe<T>(query: string): Promise<T>;
+  };
+  const rawQueries: string[] = [];
+  database.$queryRawUnsafe = async <T>(query: string) => {
+    rawQueries.push(query);
+    if (query.includes("SELECT DATABASE()")) {
+      return [{ databaseName: "jewelry_staging" }] as T;
+    }
+    if (query.includes("SHOW GRANTS")) {
+      return [{ grant: "GRANT USAGE ON *.* TO `readonly`@`%`" }, {
+        grant: "GRANT SELECT, SHOW VIEW ON `jewelry_staging`.* TO `readonly`@`%`",
+      }] as T;
+    }
+    throw new Error(`unexpected raw query: ${query}`);
+  };
+
+  const result = await runReleasePreflightTargetAudit(
+    database,
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+    {
+      environmentId: "staging-cn",
+      expectedDatabase: "jewelry_staging",
+      approvalReferenceHash: "a".repeat(64),
+    },
+  );
+
+  assert.equal(result.technicalReady, true);
+  assert.equal(result.environmentId, "staging-cn");
+  assert.equal(result.databaseName, "jewelry_staging");
+  assert.deepEqual(result.access, {
+    mode: "READ_ONLY",
+    grantsVerifiedReadOnly: true,
+    grantsVerifiedLeastPrivilege: true,
+    databaseScopeVerified: true,
+  });
+  assert.deepEqual(rawQueries, [
+    "SELECT DATABASE() AS databaseName",
+    "SHOW GRANTS FOR CURRENT_USER()",
+  ]);
+});
+
+test("正式预检拒绝跨数据库只读授权且不进入业务查询", async () => {
+  const database = createFakeDatabase() as ReleasePreflightDatabase & {
+    $queryRawUnsafe<T>(query: string): Promise<T>;
+  };
+  let businessReadCount = 0;
+  database.user.count = async () => {
+    businessReadCount += 1;
+    return 1;
+  };
+  database.$queryRawUnsafe = async <T>(query: string) => {
+    if (query.includes("SELECT DATABASE()")) {
+      return [{ databaseName: "jewelry_staging" }] as T;
+    }
+    if (query.includes("SHOW GRANTS")) {
+      return [{
+        grant: "GRANT SELECT ON `another_database`.* TO `readonly`@`%`",
+      }] as T;
+    }
+    throw new Error(`unexpected raw query: ${query}`);
+  };
+
+  await assert.rejects(
+    () => runReleasePreflightTargetAudit(
+      database,
+      async () => ({ valid: true, errors: [], issues: [] }),
+      passingMigrationIntegrityCheck,
+      {
+        environmentId: "staging-cn",
+        expectedDatabase: "jewelry_staging",
+        approvalReferenceHash: "a".repeat(64),
+      },
+    ),
+    /RELEASE_PREFLIGHT_DATABASE_ACCOUNT_NOT_READ_ONLY:CROSS_DATABASE_SCOPE/,
+  );
+  assert.equal(businessReadCount, 0);
+});
+
 test("B4 闭环完成前开启合作申请写能力会阻断发布", async () => {
   const result = await runReleasePreflight(
     createFakeDatabase(),
@@ -211,11 +336,75 @@ test("发布前门禁把当前服务端重新验证失败视为阻断", async ()
   );
   assert.equal(productsCheck?.ok, false);
   assert.deepEqual(productsCheck?.facts, {
+    revisionId: 103,
     version: 3,
     errorCount: 1,
     issueCodes: ["page-validation-test"],
   });
   assert.doesNotMatch(JSON.stringify(result), /测试错误，不应出现在门禁输出/);
+});
+
+test("发布前门禁与 Public 一致，只验证 publishedRevisionId 指向的同页面快照", async () => {
+  const database = createFakeDatabase();
+  const originalFindFirst = database.pageDocumentRevision.findFirst;
+  const revisionQueries: unknown[] = [];
+  database.pageDocumentRevision.findFirst = async (args: unknown) => {
+    revisionQueries.push(structuredClone(args));
+    return originalFindFirst(args);
+  };
+
+  const result = await runReleasePreflight(
+    database,
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+  );
+
+  assert.equal(result.technicalReady, true);
+  assert.equal(revisionQueries.length, RELEASE_PAGE_KEYS.length);
+  assert.deepEqual(revisionQueries[0], {
+    where: { id: 101, documentId: 1 },
+    select: { id: true, version: true, puckData: true, metadata: true },
+  });
+  assert.equal(
+    revisionQueries.some((query: any) => query.orderBy || query.where.status),
+    false,
+  );
+  assert.deepEqual(
+    result.checks.find((check) => check.code === "page-home-published-current")?.facts,
+    { revisionId: 101, version: 3, errorCount: 0, issueCodes: [] },
+  );
+});
+
+test("发布前门禁失败关闭空指针与跨页面或悬空指针", async () => {
+  const validatedPageKeys: string[] = [];
+  const result = await runReleasePreflight(
+    createFakeDatabase({
+      missingPointerPageKey: "home",
+      danglingPointerPageKey: "about",
+    }),
+    async (pageKey) => {
+      validatedPageKeys.push(pageKey);
+      return { valid: true, errors: [], issues: [] };
+    },
+    passingMigrationIntegrityCheck,
+  );
+
+  assert.equal(result.technicalReady, false);
+  assert.equal(
+    result.checks.find((check) => check.code === "page-home-published-current")?.summary,
+    "home 缺少线上版本指针",
+  );
+  assert.deepEqual(
+    result.checks.find((check) => check.code === "page-about-published-current"),
+    {
+      code: "page-about-published-current",
+      ok: false,
+      summary: "about 线上版本指针无效",
+      facts: { publishedRevisionId: 102 },
+    },
+  );
+  assert.equal(validatedPageKeys.includes("home"), false);
+  assert.equal(validatedPageKeys.includes("about"), false);
 });
 
 const legacyMigrationName = "20260824115000_add_product_publication_quality";

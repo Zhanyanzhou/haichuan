@@ -6,6 +6,7 @@ import type { LinkTargetType } from "../utils/linkTarget";
 export interface VideoPuckProps {
   videoUrl: string;
   posterUrl: string;
+  videoDescription: string;
   title: string;
   subtitle: string;
   actionText: string;
@@ -33,6 +34,7 @@ export const videoPuckConfig = {
   defaultProps: {
     videoUrl: "",
     posterUrl: "",
+    videoDescription: "",
     title: "",
     subtitle: "",
     actionText: "",

@@ -42,7 +42,10 @@ function toCards(products: ProductRow[]) {
   }));
 }
 
-function ProductRowPreview(props: ProductRowPuckProps) {
+export function ProductRowPreview({
+  editMode = true,
+  ...props
+}: ProductRowPuckProps & { editMode?: boolean }) {
   const productIds = useMemo(() => normalizeIds(props.productIds), [props.productIds]);
   const productCodes = useMemo(
     () => Array.isArray(props.productCodes) ? props.productCodes.map(String).filter(Boolean) : [],
@@ -112,13 +115,13 @@ function ProductRowPreview(props: ProductRowPuckProps) {
           商品预览刷新失败，已保留上次成功结果
         </p>
       ) : null}
-      <ProductRowBlock module={merged} editMode />
+      <ProductRowBlock module={merged} editMode={editMode} />
     </>
   );
 }
 
 export const productRowPuckConfig = {
-  render: (props: ProductRowPuckProps) => <ProductRowPreview {...props} />,
+  render: (props: ProductRowPuckProps) => <ProductRowPreview {...props} editMode />,
   defaultProps: {
     title: "精选商品",
     subtitle: "",

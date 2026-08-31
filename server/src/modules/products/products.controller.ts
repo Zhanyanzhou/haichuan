@@ -382,7 +382,7 @@ export class ProductsController {
     // 裁切：归一化坐标 → 实际像素 → sharp 处理
     // 读取原图字节与尺寸：优先私有存储，回退旧公开路径（迁移兼容）
     const { buffer: sourceBuffer } =
-      this.productMedia.readProductImage(sourceImg);
+      await this.productMedia.readProductImage(sourceImg);
     const metadata = await sharp(sourceBuffer).metadata();
     const imgW = metadata.width || 1;
     const imgH = metadata.height || 1;

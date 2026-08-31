@@ -12,6 +12,12 @@ import {
   parseReleaseProfile,
   type ReleaseProfile,
 } from "../common/release/release-profile";
+import {
+  parseTargetDatabaseIdentity,
+  verifyTargetDatabaseAccess,
+  type TargetDatabaseAuditDatabase,
+  type TargetDatabaseIdentity,
+} from "./target-database-audit";
 
 export { parseReleaseProfile, type ReleaseProfile } from "../common/release/release-profile";
 
@@ -40,8 +46,13 @@ const REQUIRED_SITE_SETTING_FIELDS = [
   "businessHours",
 ] as const;
 
-type PageDocumentRow = { id: number; pageKey: string };
+type PageDocumentRow = {
+  id: number;
+  pageKey: string;
+  publishedRevisionId: number | null;
+};
 type PublishedRevisionRow = {
+  id: number;
   version: number;
   puckData: Prisma.JsonValue;
   metadata: Prisma.JsonValue;
@@ -77,6 +88,23 @@ export type ReleasePreflightCheck = {
   summary: string;
   facts?: Record<string, unknown>;
 };
+
+export interface ReleasePreflightTargetConfig extends TargetDatabaseIdentity {}
+
+export function createReleasePreflightTargetConfig(
+  environment: NodeJS.ProcessEnv,
+): ReleasePreflightTargetConfig {
+  if (environment.RELEASE_PREFLIGHT_READ_ONLY_AUTHORIZED !== "1") {
+    throw new Error("RELEASE_PREFLIGHT_READ_ONLY_AUTHORIZATION_REQUIRED");
+  }
+  return parseTargetDatabaseIdentity({
+    environmentId: environment.RELEASE_PREFLIGHT_ENVIRONMENT_ID,
+    expectedDatabase: environment.RELEASE_PREFLIGHT_EXPECTED_DATABASE,
+    approvalReference: environment.RELEASE_PREFLIGHT_APPROVAL_REFERENCE,
+    databaseUrl: environment.DATABASE_URL,
+    errorPrefix: "RELEASE_PREFLIGHT",
+  });
+}
 
 type MigrationLedgerRow = {
   migrationName: string;
@@ -498,7 +526,7 @@ export async function runReleasePreflight(
 
   const documents = await database.pageDocument.findMany({
     where: { pageKey: { in: [...RELEASE_PAGE_KEYS] } },
-    select: { id: true, pageKey: true },
+    select: { id: true, pageKey: true, publishedRevisionId: true },
   });
   const documentsByKey = new Map(documents.map((document) => [document.pageKey, document]));
 
@@ -513,16 +541,28 @@ export async function runReleasePreflight(
       continue;
     }
 
+    if (!document.publishedRevisionId) {
+      checks.push({
+        code: `page-${pageKey}-published-current`,
+        ok: false,
+        summary: `${pageKey} 缺少线上版本指针`,
+      });
+      continue;
+    }
+
     const revision = await database.pageDocumentRevision.findFirst({
-      where: { documentId: document.id, status: "published" },
-      orderBy: { version: "desc" },
-      select: { version: true, puckData: true, metadata: true },
+      where: {
+        id: document.publishedRevisionId,
+        documentId: document.id,
+      },
+      select: { id: true, version: true, puckData: true, metadata: true },
     });
     if (!revision) {
       checks.push({
         code: `page-${pageKey}-published-current`,
         ok: false,
-        summary: `${pageKey} 缺少已发布 revision`,
+        summary: `${pageKey} 线上版本指针无效`,
+        facts: { publishedRevisionId: document.publishedRevisionId },
       });
       continue;
     }
@@ -531,8 +571,8 @@ export async function runReleasePreflight(
       checks.push({
         code: `page-${pageKey}-published-current`,
         ok: false,
-        summary: `${pageKey} 最新发布 revision 未通过当前合同签认`,
-        facts: { version: revision.version },
+        summary: `${pageKey} 指针 revision 未通过当前合同签认`,
+        facts: { revisionId: revision.id, version: revision.version },
       });
       continue;
     }
@@ -547,9 +587,10 @@ export async function runReleasePreflight(
         code: `page-${pageKey}-published-current`,
         ok: validation.valid,
         summary: validation.valid
-          ? `${pageKey} 最新发布 revision 通过当前服务端验证`
-          : `${pageKey} 最新发布 revision 重新验证失败`,
+          ? `${pageKey} 指针 revision 通过当前服务端验证`
+          : `${pageKey} 指针 revision 重新验证失败`,
         facts: {
+          revisionId: revision.id,
           version: revision.version,
           errorCount: validation.errors?.length ?? 0,
           issueCodes: uniqueIssueCodes(validation),
@@ -559,8 +600,8 @@ export async function runReleasePreflight(
       checks.push({
         code: `page-${pageKey}-published-current`,
         ok: false,
-        summary: `${pageKey} 最新发布 revision 无法完成重新验证`,
-        facts: { version: revision.version },
+        summary: `${pageKey} 指针 revision 无法完成重新验证`,
+        facts: { revisionId: revision.id, version: revision.version },
       });
     }
   }
@@ -581,16 +622,63 @@ export async function runReleasePreflight(
   };
 }
 
+export async function runReleasePreflightTargetAudit(
+  database: ReleasePreflightDatabase & TargetDatabaseAuditDatabase,
+  validatePage: (
+    pageKey: string,
+    puckData: Prisma.JsonValue,
+    metadata: Prisma.JsonValue,
+  ) => Promise<PageValidationResult>,
+  migrationIntegrityCheck: () => Promise<ReleasePreflightCheck>,
+  config: ReleasePreflightTargetConfig,
+  releaseProfile: ReleaseProfile = "lead-generation",
+  options: { partnerApplicationsWriteEnabled?: boolean } = {},
+) {
+  const access = await verifyTargetDatabaseAccess(
+    database,
+    config,
+    "read-only",
+    "RELEASE_PREFLIGHT",
+  );
+  const preflight = await runReleasePreflight(
+    database,
+    validatePage,
+    migrationIntegrityCheck,
+    releaseProfile,
+    options,
+  );
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    environmentId: config.environmentId,
+    databaseName: config.expectedDatabase,
+    approvalReferenceHash: config.approvalReferenceHash,
+    access,
+    ...preflight,
+    evidenceBoundary:
+      "只读账号的目标身份、migration、正式内容与 publishedRevisionId 快照预检；不执行 migration、回填、部署、页面发布或流量切换",
+  };
+}
+
+function safeReleasePreflightErrorCode(error: unknown): string {
+  if (!(error instanceof Error)) return "RELEASE_PREFLIGHT_EXECUTION_FAILED";
+  return /^RELEASE_PREFLIGHT_[A-Z0-9_]+(?::[A-Z0-9_,.-]+)?$/.test(error.message)
+    ? error.message
+    : "RELEASE_PREFLIGHT_EXECUTION_FAILED";
+}
+
 async function main() {
+  const config = createReleasePreflightTargetConfig(process.env);
   const prisma = new PrismaService();
   await prisma.$connect();
   try {
     const pageModules = new PageModulesService(prisma);
-    const result = await runReleasePreflight(
-      prisma as unknown as ReleasePreflightDatabase,
+    const result = await runReleasePreflightTargetAudit(
+      prisma as unknown as ReleasePreflightDatabase & TargetDatabaseAuditDatabase,
       (pageKey, puckData, metadata) =>
         pageModules.validatePageDocument(pageKey, puckData, metadata),
       () => checkMigrationIntegrity(prisma as unknown as MigrationIntegrityDatabase),
+      config,
       parseReleaseProfile(process.env.RELEASE_PROFILE),
     );
     console.log(JSON.stringify(result, null, 2));
@@ -601,10 +689,10 @@ async function main() {
 }
 
 if (require.main === module) {
-  void main().catch(() => {
+  void main().catch((error: unknown) => {
     console.error(JSON.stringify({
       technicalReady: false,
-      code: "release-preflight-execution-failed",
+      code: safeReleasePreflightErrorCode(error),
       message: "发布前检查执行失败；未输出底层异常、连接信息或业务数据",
     }));
     process.exitCode = 2;

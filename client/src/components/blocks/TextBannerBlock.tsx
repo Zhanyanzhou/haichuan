@@ -27,6 +27,7 @@ export default function TextBannerBlock({
     targetType: content.targetType,
     productCode: content.productCode,
     productId: content.productId,
+    categorySlug: content.categorySlug,
     linkUrl: content.linkUrl,
   });
   const template = layoutConfig.template || "center";

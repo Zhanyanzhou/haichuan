@@ -17,6 +17,10 @@ const editorPagesSource = readFileSync(
   "src/page-builder/config/editorPages.ts",
   "utf8",
 );
+const publicLayoutSource = readFileSync(
+  "src/components/layout/PublicLayout.tsx",
+  "utf8",
+);
 
 test("生产构建关闭开发画廊、mock mode 与静态首页 fallback", () => {
   expect(appSource).toContain("const TemplateGallery = import.meta.env.DEV");
@@ -25,6 +29,9 @@ test("生产构建关闭开发画廊、mock mode 与静态首页 fallback", () =
   expect(publishedPageSource).toContain(
     'data-production-fallback={content ? "safe-status" : "disabled"}',
   );
+  expect(publicLayoutSource).toContain("{USE_MOCK && (");
+  expect(publicLayoutSource).toContain('aria-label="演示数据说明"');
+  expect(publicLayoutSource).toContain("不代表真实库存、价格或服务承诺");
 });
 
 test("分析必须显式配置并获得访客同意", () => {

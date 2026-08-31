@@ -70,6 +70,45 @@ function makeHeroDraft() {
   };
 }
 
+function makeVideoDraft() {
+  const draft = makeHeroDraft();
+  return {
+    ...draft,
+    id: 9704,
+    puckData: {
+      content: [
+        {
+          type: "视频区块",
+          props: {
+            id: "inspector-context-video",
+            videoUrl: "",
+            posterUrl: "",
+            videoDescription: "工匠在工作台前手工錾刻金饰",
+            title: "视频工艺故事",
+            subtitle: "确定性封面与播放设置",
+            actionText: "",
+            targetType: "none",
+            linkUrl: "",
+            productId: 0,
+            autoPlay: false,
+            loop: true,
+            muted: true,
+            showControls: true,
+            aspectRatio: "16:9",
+            maxHeight: 720,
+            videoWidth: "standard",
+            bgColor: "#FFFFFF",
+            focusX: 50,
+            focusY: 50,
+          },
+        },
+      ],
+      zones: {},
+      root: { props: {} },
+    },
+  };
+}
+
 function makeFeaturedProductDraft() {
   return {
     ...makeHeroDraft(),
@@ -97,10 +136,38 @@ function makeFeaturedProductDraft() {
   };
 }
 
+function makeScrollableLayerDraft() {
+  const draft = makeHeroDraft();
+  const hero = draft.puckData.content[0];
+  return {
+    ...draft,
+    id: 9703,
+    puckData: {
+      ...draft.puckData,
+      content: [
+        { ...hero, props: { ...hero.props, id: "inspector-layer-hero" } },
+        ...Array.from({ length: 14 }, (_, index) => ({
+          type: "文字横幅",
+          props: {
+            id: `inspector-layer-banner-${index}`,
+            title: `图层恢复测试 ${index + 1}`,
+            buttonText: "",
+            targetType: "none",
+          },
+        })),
+      ],
+    },
+  };
+}
+
 async function mockEditorApis(page: Page, draft = makeHeroDraft()) {
   await page.route("**/api/**", async (route) => {
     const url = route.request().url();
+    const pathname = new URL(url).pathname;
     if (url.includes("/auth/profile")) return route.fallback();
+    if (pathname === "/api/upload/image" && route.request().method() === "POST") {
+      return route.fulfill(json({ url: "/svg/inspector-context-uploaded.svg" }));
+    }
     if (url.includes("/page-modules/document/validate")) {
       return route.fulfill(json({ valid: true, errors: [] }));
     }
@@ -146,9 +213,10 @@ async function authenticateAdmin(page: Page) {
 async function openHeroInspector(
   page: Page,
   viewport: { width: number; height: number } = { width: 1600, height: 1000 },
+  draft = makeHeroDraft(),
 ) {
   await page.setViewportSize(viewport);
-  await mockEditorApis(page);
+  await mockEditorApis(page, draft);
   await authenticateAdmin(page);
   await page.goto("/admin/editor/home");
   await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
@@ -161,7 +229,10 @@ async function openHeroInspector(
       .click();
   }
   await expect(inspector).toBeVisible();
-  await expect(inspector).toHaveAttribute("data-module-type", "首屏主视觉");
+  await expect(inspector).toHaveAttribute(
+    "data-module-type",
+    String(draft.puckData.content[0]?.type ?? ""),
+  );
   return inspector;
 }
 
@@ -172,11 +243,19 @@ async function selectObject(inspector: Locator, value: string, label: string) {
 }
 
 async function setRangeValue(range: Locator, value: number) {
-  const current = Number(await range.inputValue());
-  const key = value >= current ? "ArrowRight" : "ArrowLeft";
-  await range.focus();
-  for (let step = 0; step < Math.abs(value - current); step += 1) {
+  if (await range.getAttribute("type") === "number") {
+    await range.fill(String(value));
+    await expect(range).toHaveValue(String(value));
+    return;
+  }
+  let current = Number(await range.inputValue());
+  const direction = value >= current ? 1 : -1;
+  const key = direction > 0 ? "ArrowRight" : "ArrowLeft";
+  while (current !== value) {
+    const next = current + direction;
     await range.press(key);
+    await expect(range).toHaveValue(String(next));
+    current = next;
   }
   await expect(range).toHaveValue(String(value));
 }
@@ -191,30 +270,62 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     "该层在 development 模式拦截自有 API；不用于证明真实保存或发布",
   );
 
-  test("属性面板删除确认使用当前 AntD context，不产生静态 API 警告", async ({
+  test("模块级操作只保留在全局工具栏和图层栏，不在属性面板重复", async ({
     page,
   }) => {
-    const antdContextWarnings: string[] = [];
-    page.on("console", (message) => {
-      if (message.text().includes("Static function can not consume context")) {
-        antdContextWarnings.push(message.text());
-      }
-    });
     const inspector = await openHeroInspector(page);
 
-    await inspector.getByRole("button", { name: "更多模块操作" }).click();
-    await page.getByRole("menuitem", { name: "删除模块" }).click();
-    const dialog = page.getByRole("dialog").filter({ hasText: "删除“" });
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole("button", { name: "删除模块" }).click();
-    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(0);
-    expect(antdContextWarnings).toEqual([]);
+    await expect(
+      inspector.getByRole("button", { name: "更多模块操作" }),
+    ).toHaveCount(0);
+    const canvasDock = page.getByRole("toolbar", {
+      name: "调整“首屏”模块",
+    });
+    await expect(canvasDock).toBeVisible();
+    await expect(
+      canvasDock.getByRole("button", { name: "删除当前模块" }),
+    ).toBeVisible();
+    await expect(
+      page
+        .locator(".homepage-editor__layer-item")
+        .first()
+        .getByRole("button", { name: "删除首屏" }),
+    ).toBeVisible();
   });
 
   test("图层栏直接显示隐藏并删除模块，仍保持轻量页面导航", async ({ page }) => {
-    await openHeroInspector(page);
+    const inspector = await openHeroInspector(page);
+    const pageNavigation = page.getByRole("button", { name: "预览页面导航" });
+    const navigationLock = pageNavigation.getByLabel("固定区域");
+    const [navigationBox, lockBox] = await Promise.all([
+      pageNavigation.boundingBox(),
+      navigationLock.boundingBox(),
+    ]);
+    if (!navigationBox || !lockBox) throw new Error("页面导航或固定区域图标未渲染");
+    const lockRightInset = navigationBox.x + navigationBox.width - (lockBox.x + lockBox.width);
+    expect(lockBox.x).toBeGreaterThan(navigationBox.x + navigationBox.width / 2);
+    expect(lockRightInset).toBeGreaterThanOrEqual(8);
+    expect(lockRightInset).toBeLessThanOrEqual(14);
+
     const layer = page.locator(".homepage-editor__layer-item").first();
     await expect(layer).toHaveAttribute("data-layer-visible", "true");
+    const layerActions = layer.getByRole("group", { name: "首屏图层操作" });
+    const [navigationBackground, layerBackground, actionBackground] = await Promise.all([
+      pageNavigation.evaluate((element) => getComputedStyle(element).backgroundColor),
+      layer.evaluate((element) => getComputedStyle(element).backgroundColor),
+      layerActions.evaluate((element) => getComputedStyle(element).backgroundColor),
+    ]);
+    expect(navigationBackground).toBe(layerBackground);
+    expect(actionBackground).toBe(layerBackground);
+    await expect(layer.getByRole("button", { name: "复制首屏" })).toHaveCount(0);
+    await expect(layerActions.getByRole("button"))
+      .toHaveCount(2);
+
+    await expect(
+      inspector.getByRole("combobox", { name: "选择编辑对象" }),
+    ).toHaveCount(0);
+    await expect(page.frameLocator(".homepage-editor__canvas-scale iframe").locator("[data-hc-node-hud]"))
+      .toHaveCount(0);
 
     await layer.getByRole("button", { name: "隐藏首屏" }).click();
     await expect(layer).toHaveAttribute("data-layer-visible", "false");
@@ -228,43 +339,221 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(0);
   });
 
-  test("media / text / action 内容字段严格过滤，返回模块级恢复完整内容", async ({
+  test("页面画布点击只选中模板并保持完整属性面板稳定", async ({
     page,
   }) => {
     const inspector = await openHeroInspector(page);
+    const allContentFields = [
+      "desktopImage",
+      "altText",
+      "title",
+      "subtitle",
+      "eyebrow",
+      "actionText",
+      "targetType",
+    ] as const;
+    await expect(
+      inspector.getByRole("combobox", { name: "选择编辑对象" }),
+    ).toHaveCount(0);
+    await expect(inspector.getByRole("region", { name: "当前编辑对象" }))
+      .toContainText("全部内容");
+    await expect(inspector.locator("[data-task-group]")).toHaveCount(3);
+    expect(await inspector.locator("[data-task-group]").evaluateAll((groups) =>
+      groups.map((group) => group.getAttribute("data-task-group")),
+    )).toEqual(["media", "content", "link"]);
+    for (const key of allContentFields) {
+      await expect(field(inspector, key), `顶层字段 ${key} 应同时可见`).toHaveCount(1);
+    }
+    await expect(inspector.locator(".is-visual-selected")).toHaveCount(0);
 
-    await selectObject(inspector, "desktopImage", "桌面主图");
-    await expect(field(inspector, "desktopImage")).toHaveCount(1);
-    await expect(field(inspector, "altText")).toHaveCount(1);
-    await expect(field(inspector, "title")).toHaveCount(0);
-    await expect(field(inspector, "actionText")).toHaveCount(0);
-    await expect(field(inspector, "targetType")).toHaveCount(0);
-    await expect(inspector.locator('[data-property-level="content"]')).toHaveCount(1);
+    const scroll = inspector.locator('[data-inspector-scroll="main"]');
+    await scroll.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+    const scrollTop = await scroll.evaluate((element) => Math.round(element.scrollTop));
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    await canvas.locator('[data-editor-field~="title"]:visible').first().click();
+    await expect(inspector.locator(".is-visual-selected")).toHaveCount(0);
+    await expect(inspector.getByRole("region", { name: "当前编辑对象" }))
+      .toContainText("全部内容");
+    await expect.poll(() => scroll.evaluate((element) => Math.round(element.scrollTop)))
+      .toBe(scrollTop);
+    for (const key of allContentFields) {
+      await expect(field(inspector, key), `点击标题后仍应保留 ${key}`).toHaveCount(1);
+    }
 
-    await selectObject(inspector, "title", "标题");
-    await expect(field(inspector, "title")).toHaveCount(1);
+    await canvas.locator('[data-content-role-desktop="desktopImage"] img:visible').first().click();
+    await expect(inspector.locator(".is-visual-selected")).toHaveCount(0);
+    await expect(inspector.getByRole("region", { name: "当前编辑对象" }))
+      .toContainText("全部内容");
+    await expect.poll(() => scroll.evaluate((element) => Math.round(element.scrollTop)))
+      .toBe(scrollTop);
+    await expect(canvas.locator("[data-hc-node-hud]")).toHaveCount(0);
+    for (const key of allContentFields) {
+      await expect(field(inspector, key), `点击主图后仍应保留 ${key}`).toHaveCount(1);
+    }
+
+    await page.getByRole("button", { name: /移动端布局/ }).click();
     await expect(field(inspector, "desktopImage")).toHaveCount(0);
-    await expect(field(inspector, "altText")).toHaveCount(0);
-    await expect(field(inspector, "actionText")).toHaveCount(0);
-    await expect(field(inspector, "targetType")).toHaveCount(0);
-    await expect(inspector.locator('[data-property-level="content"]')).toHaveCount(1);
+    await expect(field(inspector, "mobileImage")).toHaveCount(1);
+    for (const key of allContentFields.filter((fieldKey) => fieldKey !== "desktopImage")) {
+      await expect(field(inspector, key), `移动端仍应保留当前适用字段 ${key}`).toHaveCount(1);
+    }
+  });
 
-    await selectObject(inspector, "actionText", "行动文字");
-    await expect(field(inspector, "actionText")).toHaveCount(1);
-    await expect(field(inspector, "targetType")).toHaveCount(1);
-    await expect(field(inspector, "title")).toHaveCount(0);
-    await expect(field(inspector, "desktopImage")).toHaveCount(0);
-    await expect(field(inspector, "altText")).toHaveCount(0);
-    await expect(inspector.locator('[data-property-level="interaction"]')).toHaveCount(1);
+  test("首屏图片预览、更换与素材库选择共用单一等比例任务区", async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem("haichuan.page-media", JSON.stringify([
+        {
+          url: "/svg/inspector-context-library.svg",
+          type: "image",
+          name: "首屏备选图.svg",
+          createdAt: "2026-08-31T00:00:00.000Z",
+        },
+      ]));
+    });
+    await page.route("**/svg/inspector-context-library.svg", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "image/svg+xml",
+        body: fixtureSvg.replace("#d8d6d0", "#bfc7c9"),
+      }),
+    );
+    await page.route("**/svg/inspector-context-uploaded.svg", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "image/svg+xml",
+        body: fixtureSvg.replace("#d8d6d0", "#c9c2ba"),
+      }),
+    );
+    const inspector = await openHeroInspector(page, { width: 1912, height: 955 });
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    await page.evaluate(() => {
+      const probeWindow = window as Window & { __inspectorFileInputClicks?: number };
+      probeWindow.__inspectorFileInputClicks = 0;
+      document.addEventListener("click", (event) => {
+        if (event.target instanceof HTMLInputElement && event.target.type === "file") {
+          probeWindow.__inspectorFileInputClicks = (probeWindow.__inspectorFileInputClicks ?? 0) + 1;
+        }
+      }, true);
+    });
+    await canvas.locator('[data-content-role-desktop="desktopImage"] img:visible').first().click();
 
-    await inspector
-      .getByRole("combobox", { name: "选择编辑对象" })
-      .selectOption("");
-    await expect(field(inspector, "title")).toHaveCount(1);
-    await expect(field(inspector, "actionText")).toHaveCount(1);
-    await expect(field(inspector, "targetType")).toHaveCount(1);
-    await expect(field(inspector, "desktopImage")).toHaveCount(1);
-    await expect(field(inspector, "altText")).toHaveCount(1);
+    const mediaField = field(inspector, "desktopImage");
+    const preview = mediaField.getByRole("button", { name: "点击更换当前图片" });
+    const replace = mediaField.getByRole("button", { name: "更换图片" });
+    const library = mediaField.getByRole("button", { name: "从素材库选择" });
+    await expect(preview).toBeVisible();
+    await expect(replace).toBeEnabled();
+    await expect(library).toBeEnabled();
+    await expect(inspector.locator(".is-visual-selected")).toHaveCount(0);
+    await expect(mediaField.locator("[data-media-field]")).not.toBeFocused();
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+    }));
+    expect(await page.evaluate(() => (
+      window as Window & { __inspectorFileInputClicks?: number }
+    ).__inspectorFileInputClicks ?? 0)).toBe(0);
+
+    const previewBox = await mediaField.locator(".homepage-editor__media-preview-img").boundingBox();
+    if (!previewBox) throw new Error("首屏图片预览没有布局尺寸");
+    expect(previewBox.width / previewBox.height).toBeCloseTo(16 / 9, 1);
+    const [replaceBox, libraryBox] = await Promise.all([
+      replace.boundingBox(),
+      library.boundingBox(),
+    ]);
+    if (!replaceBox || !libraryBox) throw new Error("图片任务按钮没有布局尺寸");
+    expect(Math.abs(replaceBox.width - libraryBox.width)).toBeLessThanOrEqual(1);
+
+    const previewChooser = page.waitForEvent("filechooser");
+    await preview.click();
+    await (await previewChooser).setFiles([]);
+    const replaceChooser = page.waitForEvent("filechooser");
+    await replace.click();
+    await (await replaceChooser).setFiles({
+      name: "首屏上传验证.svg",
+      mimeType: "image/svg+xml",
+      buffer: Buffer.from(fixtureSvg),
+    });
+    await expect(mediaField.getByRole("img", { name: "预览" })).toHaveAttribute(
+      "src",
+      "/svg/inspector-context-uploaded.svg",
+    );
+    await expect(canvas.locator('[data-hc-keyboard-node="desktopImage"] img:visible').first())
+      .toHaveAttribute("src", /inspector-context-uploaded\.svg/);
+    await expect(mediaField.locator(".ant-upload-drag")).toHaveCount(0);
+
+    await library.click();
+    const picker = mediaField.getByRole("region", { name: "选择素材库图片" });
+    await expect(picker).toBeVisible();
+    await picker.getByRole("button", { name: "使用素材：首屏备选图.svg" }).click();
+    await expect(mediaField.getByRole("img", { name: "预览" })).toHaveAttribute(
+      "src",
+      "/svg/inspector-context-library.svg",
+    );
+    await expect(canvas.locator('[data-hc-keyboard-node="desktopImage"] img:visible').first())
+      .toHaveAttribute("src", /inspector-context-library\.svg/);
+
+    const desktopShot = testInfo.outputPath("hero-media-inspector-1912x955.png");
+    await inspector.screenshot({ path: desktopShot, animations: "disabled" });
+    await testInfo.attach("hero-media-inspector-1912x955", {
+      path: desktopShot,
+      contentType: "image/png",
+    });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mediaField.scrollIntoViewIfNeeded();
+    const [narrowPreviewBox, narrowReplaceBox, narrowLibraryBox] = await Promise.all([
+      mediaField.locator(".homepage-editor__media-preview-img").boundingBox(),
+      replace.boundingBox(),
+      library.boundingBox(),
+    ]);
+    if (!narrowPreviewBox || !narrowReplaceBox || !narrowLibraryBox) {
+      throw new Error("窄屏图片任务区没有完整布局尺寸");
+    }
+    expect(narrowPreviewBox.width / narrowPreviewBox.height).toBeCloseTo(16 / 9, 1);
+    expect(Math.abs(narrowReplaceBox.width - narrowLibraryBox.width)).toBeLessThanOrEqual(1);
+    const narrowShot = testInfo.outputPath("hero-media-inspector-390x844.png");
+    await page.screenshot({ path: narrowShot, animations: "disabled" });
+    await testInfo.attach("hero-media-inspector-390x844", {
+      path: narrowShot,
+      contentType: "image/png",
+    });
+  });
+
+  test("视频画布点击只保持模块属性，上传只能从属性面板发起", async ({ page }) => {
+    const inspector = await openHeroInspector(
+      page,
+      { width: 1912, height: 955 },
+      makeVideoDraft(),
+    );
+    await page.evaluate(() => {
+      const probeWindow = window as Window & { __inspectorFileInputClicks?: number };
+      probeWindow.__inspectorFileInputClicks = 0;
+      document.addEventListener("click", (event) => {
+        if (event.target instanceof HTMLInputElement && event.target.type === "file") {
+          probeWindow.__inspectorFileInputClicks = (probeWindow.__inspectorFileInputClicks ?? 0) + 1;
+        }
+      }, true);
+    });
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    await canvas.locator('[data-content-role="coverImage"]:visible').first().click();
+
+    const posterField = field(inspector, "posterUrl");
+    await expect(inspector.locator(".is-visual-selected")).toHaveCount(0);
+    await expect(posterField.locator("[data-media-field]")).not.toBeFocused();
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+    }));
+    expect(await page.evaluate(() => (
+      window as Window & { __inspectorFileInputClicks?: number }
+    ).__inspectorFileInputClicks ?? 0)).toBe(0);
+
+    const chooser = page.waitForEvent("filechooser");
+    await posterField.getByRole("button", { name: "上传图片" }).click();
+    await (await chooser).setFiles([]);
+    expect(await page.evaluate(() => (
+      window as Window & { __inspectorFileInputClicks?: number }
+    ).__inspectorFileInputClicks ?? 0)).toBe(1);
   });
 
   for (const viewport of [
@@ -273,23 +562,28 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
   ]) {
     test(`${viewport.name}页面目标即时拒绝未登记路径并接受页面查询参数`, async ({ page }) => {
       const inspector = await openHeroInspector(page, viewport);
-      await selectObject(inspector, "actionText", "行动文字");
+      await expect(
+        inspector.getByRole("combobox", { name: "选择编辑对象" }),
+      ).toHaveCount(0);
 
       const pageTarget = inspector.locator('input[list^="link-target-pages-"]');
+      const pageTargetError = inspector.getByRole("alert").filter({
+        hasText: "该路径不是可发布的公开页面",
+      });
       await expect(pageTarget).toBeVisible();
       await pageTarget.fill("/not-a-route");
       await expect(pageTarget).toHaveAttribute("aria-invalid", "true");
-      await expect(inspector.getByRole("alert")).toContainText(
+      await expect(pageTargetError).toContainText(
         "该路径不是可发布的公开页面",
       );
 
       await pageTarget.fill("/catalog?category=12");
       await expect(pageTarget).toHaveAttribute("aria-invalid", "false");
-      await expect(inspector.getByRole("alert")).toHaveCount(0);
+      await expect(pageTargetError).toHaveCount(0);
     });
   }
 
-  test("product 对象只显示商品选择字段，不回退模块级内容", async ({ page }) => {
+  test("商品模板画布点击只保持模块级属性面板", async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 1000 });
     await mockEditorApis(page, makeFeaturedProductDraft());
     await authenticateAdmin(page);
@@ -312,209 +606,162 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await productNode.click();
     await expect(
       inspector.getByRole("combobox", { name: "选择编辑对象" }),
-    ).toHaveValue("product");
-    await expect(field(inspector, "productCode")).toHaveCount(1);
-    await expect(field(inspector, "title")).toHaveCount(0);
-    await expect(field(inspector, "primaryText")).toHaveCount(0);
-    await expect(field(inspector, "secondaryText")).toHaveCount(0);
-  });
-
-  test("media / text / action 设计区只显示当前对象的真实控制", async ({ page }) => {
-    const inspector = await openHeroInspector(page);
-    const designTab = inspector.getByRole("tab", { name: "模板编辑" });
-
-    for (const object of [
-      { value: "desktopImage", label: "桌面主图" },
-      { value: "title", label: "标题" },
-      { value: "actionText", label: "行动文字" },
+    ).toHaveCount(0);
+    await expect(inspector.locator(".is-visual-selected")).toHaveCount(0);
+    await expect(inspector.getByRole("region", { name: "当前编辑对象" }))
+      .toContainText("全部内容");
+    for (const key of [
+      "productCode",
+      "eyebrow",
+      "title",
+      "summary",
+      "primaryText",
+      "secondaryText",
+      "secondaryLinkTarget",
+      "showPrice",
     ]) {
-      await inspector.getByRole("tab", { name: "内容编辑" }).click();
-      await selectObject(inspector, object.value, object.label);
-      await designTab.click();
-      const groups = inspector.locator("fieldset.homepage-editor__instance-group");
-      await expect(groups).toHaveCount(object.value === "desktopImage" ? 2 : 1);
-      await expect(groups.locator("[data-visual-geometry-node]")).toHaveAttribute(
-        "data-visual-geometry-node",
-        object.value,
-      );
-      await expect(inspector.locator(`[data-property-level="${object.value === "desktopImage" ? "layout" : "style"}"]`)).toHaveCount(1);
-      if (object.value === "desktopImage") {
-        await expect(inspector.locator('[data-object-appearance="desktopImage"]')).toBeVisible();
-        await expect(inspector.getByRole("group", { name: "对象圆角" })).toBeVisible();
-        await expect(inspector.getByRole("group", { name: "对象阴影" })).toBeVisible();
-        await expect(inspector.locator('[data-property-level="style"]')).toHaveCount(1);
-      }
+      await expect(field(inspector, key), `商品模板顶层字段 ${key} 应同时可见`).toHaveCount(1);
     }
   });
 
-  test("模板模式图层栏临时显示固定内部对象且只允许选择", async ({ page }) => {
+  test("页面属性面板只保留实例内容，不再提供模板结构设计入口", async ({ page }) => {
+    const inspector = await openHeroInspector(page);
+    await expect(
+      page.getByRole("button", { name: "模板设计", exact: true }),
+    ).toBeVisible();
+    await expect(inspector.getByRole("tab", { name: "模板编辑" })).toHaveCount(0);
+    await expect(inspector.getByRole("tab", { name: "内容编辑" })).toHaveCount(0);
+    await expect(inspector.getByRole("button", { name: "另存到模板库" })).toHaveCount(0);
+    await expect(inspector.getByText("布局与比例", { exact: true })).toHaveCount(0);
+    await expect(
+      inspector.getByRole("combobox", { name: "选择编辑对象" }),
+    ).toHaveCount(0);
+    await expect(field(inspector, "desktopImage")).toHaveCount(1);
+    await expect(field(inspector, "altText")).toHaveCount(1);
+    await expect(inspector).toHaveAttribute("data-panel-mode", "content");
+  });
+
+  test("旧页面 Inspector 模板模式已移除，模板设计只从独立工作区进入", async ({ page }) => {
     const maximumDepthErrors: string[] = [];
     page.on("console", (message) => {
       if (message.type() === "error" && message.text().includes("Maximum update depth exceeded")) {
         maximumDepthErrors.push(message.text());
       }
     });
-    const inspector = await openHeroInspector(page, { width: 1440, height: 900 });
+    const inspector = await openHeroInspector(page, { width: 1440, height: 1100 });
 
     await expect(page.getByRole("region", { name: "模板内部对象" })).toHaveCount(0);
-    await inspector.getByRole("tab", { name: "模板编辑" }).click();
-    const internalLayers = page.getByRole("region", { name: "模板内部对象" });
-    await expect(internalLayers).toBeVisible();
-    await expect(internalLayers).toContainText("此处仅用于选择固定对象");
-    await internalLayers.getByRole("button", { name: "桌面主图" }).click();
-    const objectPicker = inspector.getByRole("listbox", {
-      name: "属性面板对象列表",
-    });
-    await expect(objectPicker).toBeVisible();
-    await expect(objectPicker.getByRole("option")).toHaveCount(8);
-    await expect(
-      inspector.getByRole("region", { name: "当前编辑对象" }),
-    ).toHaveAttribute("data-panel-mode", "design");
-    await expect(
-      inspector.getByRole("listbox", { name: /模板对象缩略导航/ }),
-    ).toBeVisible();
+    await expect(page.getByRole("tab", { name: "模板编辑" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "内容编辑" })).toHaveCount(0);
+    await expect(inspector.getByRole("combobox", { name: "选择编辑对象" })).toHaveCount(0);
+    await expect(inspector.locator(".homepage-editor__template-navigator")).toHaveCount(0);
+    await expect(field(inspector, "desktopImage")).toHaveCount(1);
+    await expect(field(inspector, "altText")).toHaveCount(1);
 
-    const desktopImage = objectPicker.getByRole("option", {
-      name: "选择桌面主图",
-    });
-    await desktopImage.click();
-    await expect(desktopImage).toHaveAttribute("aria-selected", "true");
-    await expect(
-      inspector.getByRole("region", { name: "当前编辑对象" }),
-    ).toHaveAttribute("data-selected-node-id", "desktopImage");
-    await expect(internalLayers.getByRole("button", { name: "桌面主图" })).toHaveAttribute("aria-pressed", "true");
-    await expect(internalLayers.getByRole("button", { name: /删除|隐藏|锁定|排序/ })).toHaveCount(0);
-    await page.waitForTimeout(250);
-    expect(
-      maximumDepthErrors,
-      "选择图片对象不得触发 React 更新循环",
-    ).toEqual([]);
-    maximumDepthErrors.length = 0;
-    await inspector.screenshot({
-      path: "test-results/inspector-object-picker.png",
-    });
-
-    const wholeTemplate = objectPicker.getByRole("option", {
-      name: /选择.*整个模板/,
-    });
-    await wholeTemplate.click();
-    await expect(wholeTemplate).toHaveAttribute("aria-selected", "true");
-    await expect(
-      inspector.getByRole("region", { name: "当前编辑对象" }),
-    ).toHaveAttribute("data-selected-node-id", "module");
-    await page.waitForTimeout(250);
-    expect(
-      maximumDepthErrors,
-      "对象选择不得触发 React 更新循环",
-    ).toEqual([]);
-    await inspector.getByRole("tab", { name: "内容编辑" }).click();
-    await expect(page.getByRole("region", { name: "模板内部对象" })).toHaveCount(0);
-    await expect(page.locator(".homepage-editor__layer-item")).not.toHaveCount(0);
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    await expect(page.getByRole("complementary", { name: "模板组件库" })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "模板结构" })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "模板属性工作区" })).toBeVisible();
+    await expect(page.getByRole("region", { name: /模板设计画布/ })).toBeVisible();
+    expect(maximumDepthErrors, "进入独立模板工作区不得触发 React 更新循环").toEqual([]);
   });
 
-  test("标题桌面与移动端分别暴露自由几何并保持独立覆盖", async ({ page }) => {
-    const inspector = await openHeroInspector(page);
-    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
-    await selectObject(inspector, "title", "标题");
-    await inspector.getByRole("tab", { name: "模板编辑" }).click();
-    await inspector.getByRole("button", { name: "精确位置与尺寸" }).click();
-
-    const desktopX = inspector.getByRole("slider", {
-      name: "横向位置（桌面端）",
-    });
-    await expect(desktopX).toHaveValue("18");
-    await setRangeValue(desktopX, 22);
-    const desktopLayer = inspector.getByRole("group", {
-      name: "图层顺序（桌面端）",
-    });
-    await expect(desktopLayer).toContainText("当前层级 4");
-    await desktopLayer.getByRole("button", { name: "上移一层" }).click();
-    await expect(desktopLayer).toContainText("当前层级 5");
-
-    await page.getByRole("button", { name: /移动端布局/ }).click();
-    await inspector.getByRole("tab", { name: "模板编辑" }).click();
-    const mobileGeometry = inspector.locator(
-      '[data-visual-geometry-node="title"][data-visual-geometry-viewport="mobile"]',
+  test("切换独立模板工作区后返回页面装修可恢复图层选择和滚动位置", async ({ page }) => {
+    const inspector = await openHeroInspector(
+      page,
+      { width: 1440, height: 820 },
+      makeScrollableLayerDraft(),
     );
-    await expect(mobileGeometry).toBeVisible();
-    await expect(inspector.getByText("位置由移动端堆叠模板控制")).toHaveCount(0);
-    const mobileX = inspector.getByRole("slider", { name: "横向位置（移动端）" });
-    await expect(mobileX).toBeVisible();
-    await setRangeValue(mobileX, 30);
-    await expect(mobileX).toHaveValue("30");
+    const scroll = page.locator(".homepage-editor__layer-scroll");
+    const layers = page.locator(".homepage-editor__layer-item");
+    await layers.first().locator(".homepage-editor__layer-select").click();
+    await expect(inspector).toHaveAttribute("data-module-type", "首屏主视觉");
+    await scroll.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await layers.nth(12).locator(".homepage-editor__layer-select").click({ modifiers: ["Control"] });
+    await layers.nth(13).locator(".homepage-editor__layer-select").click({ modifiers: ["Control"] });
+    await expect(page.locator(".homepage-editor__layer-item.is-multi-selected")).toHaveCount(2);
+    await expect(layers.first()).toHaveClass(/is-active/);
+    const beforeScroll = await scroll.evaluate((element) => element.scrollTop);
+    expect(beforeScroll).toBeGreaterThan(0);
 
-    await page.getByRole("button", { name: /桌面端布局/ }).click();
-    await canvas.getByRole("button", { name: /选择“.*首屏.*”模块/ }).first().dispatchEvent("click");
-    await selectObject(inspector, "title", "标题");
-    await inspector.getByRole("tab", { name: "模板编辑" }).click();
-    if ((await desktopX.count()) === 0) {
-      await inspector.getByRole("button", { name: "精确位置与尺寸" }).click();
-    }
-    await expect(desktopX).toHaveValue("22");
-    await expect(desktopLayer).toContainText("当前层级 5");
+    await expect(page.getByRole("region", { name: "模板内部对象" })).toHaveCount(0);
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    await expect(page.getByRole("complementary", { name: "模板结构" })).toBeVisible();
+    await page.getByRole("button", { name: "页面装修", exact: true }).click();
+    await expect(page.getByRole("region", { name: "模板内部对象" })).toHaveCount(0);
 
-    await inspector.getByRole("button", { name: "恢复桌面端默认位置" }).click();
-    await expect(desktopX).toHaveValue("25");
-    await inspector.getByRole("button", { name: "恢复主标题设计默认" }).click();
-    await expect(desktopLayer).toContainText("当前层级 2");
+    await expect(page.locator(".homepage-editor__layer-item.is-multi-selected")).toHaveCount(2);
+    await expect(layers.first()).toHaveClass(/is-active/);
+    await expect.poll(async () => scroll.evaluate((element) => element.scrollTop)).toBeCloseTo(beforeScroll, 0);
   });
 
-  test("画框自定义比例校验 0.25–4.00 并可恢复系统默认", async ({ page }) => {
+  test("页面内不再开放母模板几何，独立模板工作区提供双端布局入口", async ({ page }) => {
     const inspector = await openHeroInspector(page);
-    await inspector.getByRole("tab", { name: "模板编辑" }).click();
-    await inspector.getByRole("button", { name: "高级设置" }).click();
+    await expect(inspector.getByRole("combobox", { name: "选择编辑对象" })).toHaveCount(0);
+    await expect(inspector.getByRole("spinbutton", { name: /横向位置/ })).toHaveCount(0);
+    await expect(inspector.getByRole("group", { name: /图层顺序/ })).toHaveCount(0);
+    await expect(field(inspector, "desktopImage")).toHaveCount(1);
 
-    const ratio = inspector.getByRole("spinbutton", { name: /自定义比例/ });
-    const apply = inspector.getByRole("button", { name: "应用比例" });
-    const reset = inspector.getByRole("button", { name: "恢复系统默认" });
-    const defaultValue = await ratio.inputValue();
-
-    await ratio.fill("4.01");
-    await expect(ratio).toHaveAttribute("aria-invalid", "true");
-    await expect(inspector.getByRole("alert")).toContainText("0.25 到 4.00");
-    await expect(apply).toBeDisabled();
-
-    await ratio.fill("1.33");
-    await expect(ratio).toHaveAttribute("aria-invalid", "false");
-    await apply.click();
-    await expect(ratio).toHaveValue("1.33");
-    await expect(reset).toBeEnabled();
-    await reset.click();
-    await expect(ratio).toHaveValue(defaultValue);
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    await expect(page.getByRole("region", { name: /模板设计画布/ })).toBeVisible();
+    const templateInspector = page.getByRole("complementary", { name: "模板属性", exact: true });
+    await templateInspector.getByRole("tab", { name: "布局" }).click();
+    await expect(templateInspector.getByLabel("布局方式")).toBeVisible();
+    await page.getByRole("button", { name: /移动端模板布局/ }).click();
+    await expect(page.getByRole("button", { name: /移动端模板布局/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(templateInspector.getByRole("tab", { name: "布局" })).toHaveAttribute("aria-selected", "true");
   });
 
-  test("键盘可切换内容/设计并进入对象选择，焦点可见", async ({ page }) => {
+  test("页面内不再开放母模板对象控件，独立模板属性按任务分区", async ({ page }) => {
     const inspector = await openHeroInspector(page);
-    const contentTab = inspector.getByRole("tab", { name: "内容编辑" });
-    const designTab = inspector.getByRole("tab", { name: "模板编辑" });
+    await expect(inspector.getByRole("group", { name: "桌面主图比例" })).toHaveCount(0);
+    await expect(inspector.getByRole("button", { name: "高级设置" })).toHaveCount(0);
+    await expect(field(inspector, "desktopImage")).toHaveCount(1);
+    await expect(field(inspector, "altText")).toHaveCount(1);
 
-    await contentTab.focus();
-    await expect(contentTab).toBeFocused();
-    await page.keyboard.press("End");
-    await expect(designTab).toBeFocused();
-    await expect(designTab).toHaveAttribute("aria-selected", "true");
-    await page.keyboard.press("Home");
-    await expect(contentTab).toBeFocused();
-    await expect(contentTab).toHaveAttribute("aria-selected", "true");
-    await page.keyboard.press("ArrowRight");
-    await expect(designTab).toBeFocused();
-    await expect(designTab).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    const templateInspector = page.getByRole("complementary", { name: "模板属性", exact: true });
+    await expect(templateInspector.getByRole("tab", { name: "内容" })).toBeVisible();
+    await expect(templateInspector.getByRole("tab", { name: "布局" })).toBeVisible();
+    await expect(templateInspector.getByRole("tab", { name: "高级" })).toBeVisible();
+    await templateInspector.getByRole("tab", { name: "高级" }).click();
+    await expect(templateInspector.getByRole("tabpanel")).toBeVisible();
+  });
 
-    const objectSelect = inspector.getByRole("combobox", { name: "选择编辑对象" });
-    await objectSelect.focus();
-    await expect(objectSelect).toBeFocused();
-    await expect
-      .poll(() =>
-        objectSelect.evaluate((element) => getComputedStyle(element).outlineWidth),
-      )
-      .toBe("2px");
-    await page.keyboard.press("Home");
-    await page.keyboard.press("ArrowDown");
-    await expect(objectSelect).toHaveValue("desktopImage");
-    await expect(objectSelect.locator("option:checked")).toHaveText("桌面主图");
+  test("页面 Inspector 为单一实例内容面板，键盘从顶部模式按钮进入和退出模板工作区", async ({ page }) => {
+    const inspector = await openHeroInspector(page);
+    await expect(page.getByRole("tab", { name: "内容编辑" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "模板编辑" })).toHaveCount(0);
+    await expect(inspector.getByRole("combobox", { name: "选择编辑对象" })).toHaveCount(0);
+    await expect(field(inspector, "desktopImage")).toHaveCount(1);
+
+    const pageWorkspaceContext = page.getByRole("group", { name: "店铺装修工作模式切换" });
+    await expect(pageWorkspaceContext.getByLabel("当前工作区：页面装修")).toBeVisible();
+    await expect(pageWorkspaceContext).not.toContainText("编辑当前页面");
+    await expect(pageWorkspaceContext.getByRole("button", { name: "页面装修", exact: true })).toHaveCount(0);
+    const enterTemplate = page.getByRole("button", { name: "模板设计", exact: true });
+    await enterTemplate.focus();
+    await expect(enterTemplate).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("complementary", { name: "模板结构" })).toBeVisible();
+
+    const templateWorkspaceContext = page.getByRole("group", { name: "店铺装修工作模式切换" });
+    await expect(templateWorkspaceContext.getByLabel("当前工作区：模板设计")).toBeVisible();
+    await expect(templateWorkspaceContext).not.toContainText("编辑全站母模板");
+    await expect(templateWorkspaceContext.getByRole("button", { name: "模板设计", exact: true })).toHaveCount(0);
+    const returnToPage = page.getByRole("button", { name: "页面装修", exact: true });
+    await returnToPage.focus();
+    await expect(returnToPage).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(inspector).toBeVisible();
+    await expect(field(inspector, "desktopImage")).toHaveCount(1);
+    await expect(page.getByLabel("当前工作区：页面装修")).toBeVisible();
   });
 
   for (const viewport of [
+    { width: 390, height: 844 },
     { width: 1280, height: 720 },
     { width: 1600, height: 1000 },
   ]) {
@@ -533,7 +780,13 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
       await expect(
         inspector.getByRole("button", { name: "保存整页草稿" }),
       ).toHaveCount(0);
-      await expect(inspector.locator(".homepage-editor__properties-actions")).toHaveCount(0);
+      await expect(inspector.locator(".homepage-editor__properties-actions")).toBeVisible();
+      await expect(inspector.locator(".homepage-editor__properties-actions")).not.toContainText("手机端");
+      await expect(inspector.locator(".homepage-editor__properties-actions")).not.toContainText("桌面端");
+      await expect(
+        inspector.getByRole("combobox", { name: "选择编辑对象" }),
+      ).toHaveCount(0);
+      await expect(objectContext).toContainText("全部内容");
 
       const inspectorBox = await inspector.boundingBox();
       const initialContextBox = await objectContext.boundingBox();

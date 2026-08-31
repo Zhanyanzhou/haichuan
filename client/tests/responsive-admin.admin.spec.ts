@@ -9,6 +9,13 @@ async function expectNoHorizontalOverflow(page: import("@playwright/test").Page)
 
 test.describe("后台紧凑导航", () => {
   test.beforeEach(async ({ page }) => {
+    await page.route("**/api/**", (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ success: false, message: "响应式导航确定性测试状态" }),
+      }),
+    );
     await installAdminSession(page);
   });
 

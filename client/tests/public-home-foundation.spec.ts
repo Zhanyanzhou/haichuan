@@ -240,17 +240,19 @@ test("无 Hero 时保留且仅保留一个 sr-only H1", async ({ page }) => {
   await expect(page.locator("main h1")).toHaveText("海川珠宝");
 });
 
-test("Hero 缺少必填标题时不公开渲染旧快照", async ({ page }) => {
+test("Hero 标题为空时安全省略可选文案并保留唯一页面标题", async ({ page }) => {
   await installPublicApiFixture(page, createUntitledHeroHomeFixture());
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
 
-  await expect(page.locator('[data-page-document-state="invalid"]')).toBeVisible();
-  await expect(page.getByRole("heading", { name: "首页正在完善", level: 1 })).toBeVisible();
-  await expect(page.locator("[data-content-template-module]")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "重新载入内容" })).toHaveCount(0);
-  await expect(page.locator('[data-page-header-mode="solid"]')).toBeVisible();
-  await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex, nofollow");
+  await expect(page.locator('[data-page-document-state="published"]')).toBeVisible();
+  await expect(page.locator('[data-content-template-module="首屏主视觉"]')).toBeVisible();
+  await expect(page.locator('[data-content-template-module="首屏主视觉"] h1')).toHaveCount(0);
+  await expect(page.locator("main h1")).toHaveCount(1);
+  await expect(page.locator("main h1")).toHaveClass(/sr-only/);
+  await expect(page.locator("main h1")).toHaveText("海川珠宝");
+  await expect(page.locator('[data-page-header-mode="overlay-light"]')).toBeVisible();
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "index, follow");
   await expectNoHorizontalOverflow(page);
 });
 
@@ -293,13 +295,48 @@ test("移动菜单支持键盘关闭、焦点恢复与路由后主内容焦点",
   expect(drawerMetrics.height).toBe(844);
   expect(drawerMetrics.overflowY).toBe("auto");
   expect(drawerMetrics.smallestTarget).toBeGreaterThanOrEqual(44);
+  const menuVisualMetrics = await page.locator(".brand-menu__inner").evaluate((node) => {
+    const closeButton = node.querySelector<HTMLElement>(".brand-menu__top-action");
+    const labelXs = Array.from(node.querySelectorAll<HTMLElement>(".brand-menu__primary .brand-menu__label"))
+      .map((label) => label.getBoundingClientRect().x);
+    return {
+      closeOutlineWidth: closeButton ? getComputedStyle(closeButton).outlineWidth : null,
+      closeFocusIndicator: closeButton ? getComputedStyle(closeButton).boxShadow : null,
+      primaryLinkCount: node.querySelectorAll(".brand-menu__primary > a").length,
+      serviceLinkCount: node.querySelectorAll(".brand-menu__service-links > a").length,
+      arrowOpacities: Array.from(node.querySelectorAll<HTMLElement>(".brand-menu__primary .brand-menu__arrow"))
+        .map((arrow) => Number(getComputedStyle(arrow).opacity)),
+      labelXs,
+      indexCount: node.querySelectorAll(".brand-menu__index").length,
+      descriptionCount: node.querySelectorAll(".brand-menu__description").length,
+      quickActionCount: node.querySelectorAll(".brand-menu__quick-actions").length,
+      legalLinkCount: node.querySelectorAll('a[href="/privacy"], a[href="/business-info"]').length,
+    };
+  });
+  expect(menuVisualMetrics.closeOutlineWidth).toBe("0px");
+  expect(menuVisualMetrics.closeFocusIndicator).not.toBe("none");
+  expect(menuVisualMetrics.arrowOpacities).toHaveLength(menuVisualMetrics.primaryLinkCount);
+  expect(menuVisualMetrics.arrowOpacities.every((opacity) => opacity >= 0.4)).toBe(true);
+  expect(menuVisualMetrics.primaryLinkCount).toBe(5);
+  expect(menuVisualMetrics.serviceLinkCount).toBe(2);
+  expect(Math.max(...menuVisualMetrics.labelXs) - Math.min(...menuVisualMetrics.labelXs)).toBeLessThan(1);
+  expect(menuVisualMetrics.indexCount).toBe(0);
+  expect(menuVisualMetrics.descriptionCount).toBe(0);
+  expect(menuVisualMetrics.quickActionCount).toBe(0);
+  expect(menuVisualMetrics.legalLinkCount).toBe(0);
   await expect(page.getByRole("dialog", { name: "品牌菜单" })
     .getByRole("link", { name: /珠宝作品/ })).toHaveAttribute("href", "/products");
+  await expect(page.getByRole("dialog", { name: "品牌菜单" })
+    .getByRole("link", { name: /^预约私人珠宝顾问/ })).toHaveAttribute("href", "/contact");
+  await expect(page.getByRole("navigation", { name: "客户服务" })
+    .getByRole("link", { name: "我的账户" })).toHaveAttribute("href", "/customer");
 
   await page.keyboard.press("Escape");
   await expect(menuButton).toBeFocused();
   await menuButton.press("Enter");
-  await page.getByRole("link", { name: /珠宝定制/ }).click();
+  await page.getByRole("dialog", { name: "品牌菜单" })
+    .getByRole("link", { name: /^珠宝定制/ })
+    .click();
   await expect(page).toHaveURL(/\/custom$/);
   await expect(page.locator("main#main-content")).toBeFocused();
 });

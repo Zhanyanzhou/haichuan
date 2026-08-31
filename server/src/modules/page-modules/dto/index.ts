@@ -1,2 +1,2 @@
 export * from "./page-document.dto";
-export * from "./personal-content-template.dto";
+export * from "./dynamic-template.dto";

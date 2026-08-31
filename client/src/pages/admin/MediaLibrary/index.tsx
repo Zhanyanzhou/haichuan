@@ -10,13 +10,11 @@ import AdminPageHeader from '@/components/common/AdminPageHeader';
 import { AdminLoadingState, AdminEmptyState, AdminErrorState } from '@/components/common/AdminDataStates';
 import type { PaginatedResult } from '@/types';
 import { SecureImage } from '@/components/common/SecureImage';
-
-type PageMediaItem = {
-  url: string;
-  type: 'image' | 'video';
-  name: string;
-  createdAt: string;
-};
+import {
+  readPageMediaLibrary,
+  writePageMediaLibrary,
+  type PageMediaItem,
+} from '@/page-builder/fields/pageMediaLibrary';
 
 type ProductMediaRow = {
   id: number;
@@ -27,15 +25,6 @@ type ProductMediaRow = {
   type?: string | null;
   sortOrder?: number | null;
 };
-
-function isPageMediaItem(value: unknown): value is PageMediaItem {
-  if (typeof value !== 'object' || value === null) return false;
-  const item = value as Record<string, unknown>;
-  return typeof item.url === 'string'
-    && (item.type === 'image' || item.type === 'video')
-    && typeof item.name === 'string'
-    && typeof item.createdAt === 'string';
-}
 
 export default function MediaLibrary() {
   const { message } = AntdApp.useApp();
@@ -57,22 +46,14 @@ export default function MediaLibrary() {
     return true;
   });
 
-  const PAGE_MEDIA_KEY = 'haichuan.page-media';
-
   // 读取已上传的页面素材（本地记录，后端无独立素材列表接口）
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(PAGE_MEDIA_KEY);
-      if (raw) {
-        const parsed: unknown = JSON.parse(raw);
-        if (Array.isArray(parsed)) setPageMedia(parsed.filter(isPageMediaItem));
-      }
-    } catch { /* ignore */ }
+    setPageMedia(readPageMediaLibrary());
   }, []);
 
   const persistMedia = (list: typeof pageMedia) => {
     setPageMedia(list);
-    try { localStorage.setItem(PAGE_MEDIA_KEY, JSON.stringify(list)); } catch { /* ignore */ }
+    writePageMediaLibrary(list);
   };
 
   const handleUpload = async (
@@ -136,7 +117,7 @@ export default function MediaLibrary() {
   };
 
   const columns: TableColumnsType<ProductMediaRow> = [
-    { title: '缩略图', dataIndex: 'mediaUrl', width: 80, render: (v: string) => v ? <SecureImage src={v} tokenKind="staff" alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }} /> : <FileImageOutlined style={{ fontSize: 24, color: 'var(--adm-subtle)' }} /> },
+    { title: '缩略图', dataIndex: 'mediaUrl', width: 80, render: (v: string) => v ? <SecureImage src={v} tokenKind="staff" deferUntilVisible alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }} /> : <FileImageOutlined style={{ fontSize: 24, color: 'var(--adm-subtle)' }} /> },
     { title: '所属产品', render: (_, row) => <div><a href={`/admin/products`} style={{ color: 'var(--adm-action)' }}>{row.productName || '—'}</a><p style={{ fontSize: 13, lineHeight: '20px', color: 'var(--adm-text)', fontVariantNumeric: 'tabular-nums' }}>{row.productCode}</p></div> },
     { title: '类型', dataIndex: 'type', render: (v: string) => <Tag>{v || 'FRONT'}</Tag> },
     { title: '排序', dataIndex: 'sortOrder', width: 60 },

@@ -58,6 +58,10 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
 
   const figure = (item: GalleryItem, index: number) => {
     const pattern = index % 4;
+    const sequencePosition = items.length === 7 && index === 6
+      ? " is-sequence-final"
+      : "";
+    const itemClassName = `hc-gallery__item is-p${pattern}${sequencePosition}`;
     const body = (
       <>
         <div className="hc-gallery__frame">
@@ -96,7 +100,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
         key={index}
         to={itemLinkUrl}
         data-editor-field={`items.${index}.image`}
-        className={`hc-gallery__item is-p${pattern}`}
+        className={itemClassName}
       >
         {body}
       </Link>
@@ -104,7 +108,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
       <div
         key={index}
         data-editor-field={`items.${index}.image`}
-        className={`hc-gallery__item is-p${pattern}`}
+        className={itemClassName}
       >
         {body}
       </div>
@@ -137,7 +141,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
           ) : null}
         </header>
       )}
-      <div data-content-role="works" className="hc-gallery">
+      <div data-content-role="works" className={`hc-gallery hc-gallery--count-${items.length}`}>
         <style>{`
           .hc-gallery {
             display: grid;
@@ -161,6 +165,7 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
           .hc-gallery__item.is-p3 .hc-gallery__frame { aspect-ratio: ${galleryRatio}; }
           @media (min-width: 768px) {
             .hc-gallery__item.is-p3 { grid-column: 5 / span 8; }
+            .hc-gallery--count-7 .hc-gallery__item.is-sequence-final { grid-column: 5 / span 8; }
           }
           /* Mobile 重排:大图全宽,成对小图双列 */
           @media (max-width: 767px) {

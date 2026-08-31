@@ -47,7 +47,7 @@ import {
 } from "@/utils/publicProductPath";
 import { buildPublicUrl, normalizePublicSiteOrigin } from "@/utils/publicSiteUrl";
 import { useStructuredData } from "@/hooks/useStructuredData";
-import { getRequestErrorMessage } from "@/services/httpClient";
+import { getRequestErrorMessage, requestStatus } from "@/services/httpClient";
 
 const productSchemaOrigin = normalizePublicSiteOrigin(
   import.meta.env.VITE_PUBLIC_SITE_ORIGIN,
@@ -274,6 +274,7 @@ export default function ProductDetail() {
   const clearPageMeta = usePageMetaStore((s) => s.clear);
   const [loading, setLoading] = useState(true);
   const [product, setProduct] = useState<Product | null>(null);
+  const [loadFailure, setLoadFailure] = useState<"not-found" | "error" | null>(null);
   const [qty, setQty] = useState(1);
   const [selectedSku, setSelectedSku] = useState<ProductSKU | null>(null);
   const [mainImage, setMainImage] = useState(0);
@@ -334,19 +335,29 @@ export default function ProductDetail() {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      if (!id) return;
+      if (!id) {
+        setProduct(null);
+        setLoadFailure("not-found");
+        setLoading(false);
+        return;
+      }
       setLoading(true);
+      setLoadFailure(null);
       try {
-        const res = await productApi.getPublicById(id || "");
+        const res = await productApi.getPublicById(id, { suppressGlobalError: true });
         const data = unwrapResponse<Product>(res);
         if (cancelled) return;
-        setProduct(data);
+        setProduct(data || null);
+        setLoadFailure(data ? null : "not-found");
         setMainImage(0);
         setSelectedSku(data?.skus?.find((s) => s.isActive) ?? null);
         setQty(1);
         setPurchaseError("");
-      } catch {
-        if (!cancelled) setProduct(null);
+      } catch (error) {
+        if (!cancelled) {
+          setProduct(null);
+          setLoadFailure(requestStatus(error) === 404 ? "not-found" : "error");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -393,14 +404,18 @@ export default function ProductDetail() {
       });
     } else if (!loading) {
       setPageMeta({
-        title: "作品暂不可浏览 | 海川珠宝",
-        description: "该作品可能已下架，或公开信息暂时无法取得。",
+        title: loadFailure === "error"
+          ? "作品暂时无法加载 | 海川珠宝"
+          : "作品暂不可浏览 | 海川珠宝",
+        description: loadFailure === "error"
+          ? "作品信息暂时无法取得，请稍后重试。"
+          : "该作品可能已下架，或尚未公开。",
         noIndex: true,
         canonicalPath: null,
       });
     }
     return () => clearPageMeta();
-  }, [loading, product, setPageMeta, clearPageMeta]);
+  }, [loadFailure, loading, product, setPageMeta, clearPageMeta]);
 
   const productCanonicalUrl = product
     ? buildPublicUrl(productSchemaOrigin, publicProductPath(product))
@@ -502,11 +517,37 @@ export default function ProductDetail() {
         <p className="text-xs tracking-[.12em] text-brand-muted">正在加载作品</p>
       </div>
     );
+  if (!product && loadFailure === "error")
+    return (
+      <div
+        className="min-h-[60vh] flex flex-col items-center justify-center gap-4 bg-white px-6 text-center"
+      >
+        <h1 className="font-display text-3xl font-normal tracking-[.04em]">作品暂时无法加载</h1>
+        <p className="max-w-md text-sm leading-7 text-brand-muted" role="alert">
+          当前无法取得作品信息。请检查网络后重新尝试，或先返回选款中心浏览其他作品。
+        </p>
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-4">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setRevision((value) => value + 1)}
+          >
+            重新尝试
+          </button>
+          <Link
+            to="/catalog"
+            className="inline-flex min-h-11 items-center text-sm text-brand-text underline underline-offset-4"
+          >
+            进入选款中心
+          </Link>
+        </div>
+      </div>
+    );
   if (!product)
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 bg-white px-6 text-center">
         <h1 className="font-display text-3xl font-normal tracking-[.04em]">作品暂不可浏览</h1>
-        <p className="text-brand-muted text-sm">该珠宝作品可能已下架，或公开信息暂时无法取得。</p>
+        <p className="text-brand-muted text-sm">该珠宝作品可能已下架，或尚未公开。</p>
         <Link
           to="/catalog"
           className="text-brand-gold hover:underline text-sm"

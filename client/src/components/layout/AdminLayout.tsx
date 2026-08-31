@@ -23,7 +23,6 @@ import {
   MenuOutlined,
   LeftOutlined,
   RightOutlined,
-  GlobalOutlined,
   ExportOutlined,
   DownOutlined,
 } from "@ant-design/icons";
@@ -336,57 +335,46 @@ export default function AdminLayout() {
               <span className="admin-header__site-label">查看网站</span>
             </Link>
           ) : null}
-          {isEditorWorkspace ? (
-            <Link
-              to="/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="admin-header__icon-btn admin-header__editor-preview"
-              title="预览网站"
-              aria-label="预览网站，在新标签页打开"
-            >
-              <GlobalOutlined />
-              <span>预览网站</span>
-            </Link>
-          ) : null}
-          <div className="admin-header__account-group">
-            <Dropdown
-              open={accountMenuOpen}
-              onOpenChange={setAccountMenuOpen}
-              trigger={["click"]}
-              menu={{
-                items: userMenuItems,
-                onClick: ({ key }) => {
-                  setAccountMenuOpen(false);
-                  if (key === "logout") handleLogout();
-                },
-              }}
-            >
-              <button
-                type="button"
-                className="admin-header__account"
-                aria-label={`账户菜单，当前用户${user?.realName || user?.username || "管理员"}`}
-                aria-haspopup="menu"
-                aria-expanded={accountMenuOpen}
+          {!isEditorWorkspace ? (
+            <div className="admin-header__account-group">
+              <Dropdown
+                open={accountMenuOpen}
+                onOpenChange={setAccountMenuOpen}
+                trigger={["click"]}
+                menu={{
+                  items: userMenuItems,
+                  onClick: ({ key }) => {
+                    setAccountMenuOpen(false);
+                    if (key === "logout") handleLogout();
+                  },
+                }}
               >
-                <Avatar
-                  size={28}
-                  icon={<UserOutlined />}
-                  style={{
-                    backgroundColor: "var(--adm-gold-soft)",
-                    color: "var(--adm-action)",
-                  }}
-                />
-                <span className="admin-header__account-name">
-                  {user?.realName || user?.username || "管理员"}
-                </span>
-                <DownOutlined
-                  className="admin-header__account-chevron"
-                  aria-hidden="true"
-                />
-              </button>
-            </Dropdown>
-          </div>
+                <button
+                  type="button"
+                  className="admin-header__account"
+                  aria-label={`账户菜单，当前用户${user?.realName || user?.username || "管理员"}`}
+                  aria-haspopup="menu"
+                  aria-expanded={accountMenuOpen}
+                >
+                  <Avatar
+                    size={28}
+                    icon={<UserOutlined />}
+                    style={{
+                      backgroundColor: "var(--adm-gold-soft)",
+                      color: "var(--adm-action)",
+                    }}
+                  />
+                  <span className="admin-header__account-name">
+                    {user?.realName || user?.username || "管理员"}
+                  </span>
+                  <DownOutlined
+                    className="admin-header__account-chevron"
+                    aria-hidden="true"
+                  />
+                </button>
+              </Dropdown>
+            </div>
+          ) : null}
         </div>
       </header>
 

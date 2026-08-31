@@ -676,7 +676,7 @@ jobs:
   visual-tests:
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/playwright:v1.50.0-noble
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
     steps:
       - uses: actions/checkout@v4
 
@@ -705,7 +705,7 @@ jobs:
 ```bash
 # Generate/update snapshots using the same container as CI
 docker run --rm -v $(pwd):/work -w /work \
-  mcr.microsoft.com/playwright:v1.50.0-noble \
+  mcr.microsoft.com/playwright:v1.62.1-noble \
   npx playwright test --update-snapshots --project=visual
 ```
 
@@ -715,7 +715,7 @@ docker run --rm -v $(pwd):/work -w /work \
 {
   "scripts": {
     "test:visual": "npx playwright test --project=visual",
-    "test:visual:update": "docker run --rm -v $(pwd):/work -w /work mcr.microsoft.com/playwright:v1.50.0-noble npx playwright test --update-snapshots --project=visual"
+    "test:visual:update": "docker run --rm -v $(pwd):/work -w /work mcr.microsoft.com/playwright:v1.62.1-noble npx playwright test --update-snapshots --project=visual"
   }
 }
 ```
@@ -927,7 +927,7 @@ This complements visual snapshots: use it to lock down specific pseudo-element s
 
 ```bash
 docker run --rm -v $(pwd):/work -w /work \
-  mcr.microsoft.com/playwright:v1.50.0-noble \
+  mcr.microsoft.com/playwright:v1.62.1-noble \
   npx playwright test --update-snapshots --project=visual
 ```
 
@@ -957,7 +957,7 @@ If the diff is larger, check the HTML report. Look at the diff image to determin
 ```json
 {
   "devDependencies": {
-    "@playwright/test": "1.50.0"
+    "@playwright/test": "1.62.1"
   }
 }
 ```
@@ -965,7 +965,7 @@ If the diff is larger, check the HTML report. Look at the diff image to determin
 ```yaml
 # CI config
 container:
-  image: mcr.microsoft.com/playwright:v1.50.0-noble  # must match
+  image: mcr.microsoft.com/playwright:v1.62.1-noble  # must match the lockfile-resolved version
 ```
 
 ### Animations cause random diff failures

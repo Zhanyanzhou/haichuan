@@ -1296,7 +1296,7 @@ npx playwright install --with-deps chromium
 
 # If using Docker, use the official Playwright image
 # Dockerfile
-FROM mcr.microsoft.com/playwright:v1.50.0-noble
+FROM mcr.microsoft.com/playwright:v1.62.1-noble
 WORKDIR /app
 COPY . .
 RUN npm ci
@@ -1312,7 +1312,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/playwright:v1.50.0-noble
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
       options: --shm-size=2gb
 
 # Docker run — increase shared memory

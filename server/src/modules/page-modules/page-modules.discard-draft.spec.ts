@@ -20,6 +20,7 @@ function createHarness(options: {
     pageKey: "custom",
     updatedAt: UPDATED_AT,
     status: "DRAFT",
+    publishedRevisionId: options.revision === null ? null : 33,
     puckData: { content: [{ type: "文字横幅", props: { id: "draft" } }] },
     metadata: {},
   };
@@ -44,6 +45,8 @@ function createHarness(options: {
       findFirst: async () =>
         options.revision === undefined
           ? {
+              id: 33,
+              documentId: 17,
               version: 3,
               puckData: { content: [{ type: "文字横幅", props: { id: "live" } }] },
               metadata: { seoTitle: "线上版本" },
@@ -108,6 +111,14 @@ test("从未发布页面的草稿使用原子删除且并发失败返回 409", a
 });
 
 test("放弃草稿拒绝格式不正确或陈旧的页面版本标识", async () => {
+  await assert.rejects(
+    () => createHarness().service.discardPageDocumentDraft(
+      "custom",
+      undefined as unknown as string,
+    ),
+    (error: unknown) =>
+      error instanceof BadRequestException && /缺少页面版本标识/.test(error.message),
+  );
   await assert.rejects(
     () => createHarness().service.discardPageDocumentDraft("custom", "invalid"),
     BadRequestException,

@@ -61,8 +61,15 @@ import type { LimitedOfferPuckProps } from "../adapters/limitedOffer.puck";
 import { testimonialPuckConfig } from "../adapters/testimonial.puck";
 import type { TestimonialPuckProps } from "../adapters/testimonial.puck";
 import ContentTemplateContractFrame from "../runtime/ContentTemplateContractFrame";
+import {
+  DYNAMIC_TEMPLATE_BLOCK_TYPE,
+  DYNAMIC_TEMPLATE_INSTANCE_SCHEMA_VERSION,
+  DynamicTemplateInstanceView,
+  type DynamicTemplateInstanceProps,
+} from "../dynamic-template-instance";
 
 type MyComponents = {
+  动态模板实例: DynamicTemplateInstanceProps;
   首屏主视觉: HeroPuckProps;
   单图海报: SinglePosterPuckProps;
   双图海报: DoublePosterPuckProps;
@@ -95,7 +102,7 @@ type RenderableConfig<Props> = {
   render: (props: Props) => ReactNode;
 } & Record<string, unknown>;
 
-/** 保留 adapter 的真实 render 与 props，只在外层附加 schema v3 根合同。 */
+/** 保留 adapter 的真实 render 与 props，只在外层附加当前机器合同的根包装。 */
 function withContractRenderer<Props>(
   moduleType: string,
   config: RenderableConfig<Props>,
@@ -123,6 +130,25 @@ function withContractRenderer<Props>(
  */
 export const puckConfig: Config<MyComponents> = {
   components: {
+    [DYNAMIC_TEMPLATE_BLOCK_TYPE]: {
+      label: "模板实例",
+      fields: {},
+      defaultProps: {
+        id: "unbound-dynamic-template-instance",
+        instanceSchemaVersion: DYNAMIC_TEMPLATE_INSTANCE_SCHEMA_VERSION,
+        instanceId: "unbound-dynamic-template-instance",
+        templateId: "unbound",
+        templateVersion: 1,
+        moduleName: "模板实例",
+        contentBySlotId: {},
+        layoutOverridesByNodeId: {},
+        hiddenSlotIds: [],
+        isVisible: true,
+      },
+      render: (props: DynamicTemplateInstanceProps) => (
+        <DynamicTemplateInstanceView props={props} mode="editor" />
+      ),
+    },
     首屏主视觉: withContractRenderer("首屏主视觉", heroPuckConfig),
     单图海报: withContractRenderer("单图海报", singlePosterPuckConfig),
     双图海报: withContractRenderer("双图海报", doublePosterPuckConfig),

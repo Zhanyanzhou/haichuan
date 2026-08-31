@@ -29,8 +29,10 @@ import {
 } from "@/i18n/publicLocale";
 import { useCustomerAuthStore, type CustomerAccount } from "@/store/customerAuthStore";
 import { customerApi } from "@/services/api";
+import { USE_MOCK } from "@/services/mockData";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useStructuredData } from "@/hooks/useStructuredData";
+import { LEGAL_ENTITY } from "@/config/legalEntity";
 
 /** 幂等写入/更新 <meta> 标签（按 name 或 property 选择）。 */
 function upsertMeta(attr: "name" | "property", key: string, content: string) {
@@ -236,6 +238,13 @@ export default function PublicLayout() {
     "@context": "https://schema.org",
     "@type": "Organization",
     name: siteSettings?.siteName || "海川珠宝",
+    legalName: LEGAL_ENTITY.name,
+    identifier: {
+      "@type": "PropertyValue",
+      propertyID: "统一社会信用代码",
+      value: LEGAL_ENTITY.unifiedSocialCreditCode,
+    },
+    foundingDate: LEGAL_ENTITY.establishedOnIso,
     ...(publicSiteOrigin ? { url: publicSiteOrigin } : {}),
     ...(organizationLogo ? { logo: organizationLogo } : {}),
     ...(siteSettings?.contactPhone?.trim()
@@ -550,6 +559,18 @@ export default function PublicLayout() {
         style={{ outline: "none" }}
         className={isHome ? "editorial-main" : `site-main${isOverlayHeader ? " site-main--overlay" : ""}`}
       >
+        {USE_MOCK && (
+          <aside
+            aria-label="演示数据说明"
+            className={`border-b border-[#DDE1E2] bg-[#F4F5F5] px-5 py-3 text-center text-[12px] leading-5 tracking-[0.06em] text-[#5F6568]${
+              isOverlayHeader ? " mt-16 md:mt-[72px] xl:mt-[108px]" : ""
+            }`}
+          >
+            <strong className="font-medium text-[#181A1B]">演示数据</strong>
+            <span aria-hidden="true"> · </span>
+            当前商品、订单与账号仅用于本地功能验收，不代表真实库存、价格或服务承诺。
+          </aside>
+        )}
         <PublishedPageDecoration
           pageKey={decorationPage?.key}
           pageLabel={decorationPage?.label}

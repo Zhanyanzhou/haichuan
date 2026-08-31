@@ -81,8 +81,12 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
     await mainLayoutButton.focus();
     await mainLayoutButton.press("Enter");
     await main.press("ArrowRight");
-    await mainGroup.getByRole("button", { name: "精确位置与尺寸" }).click();
+    await page.evaluate(() => new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    ));
     await mainGroup.getByLabel("区域宽度（桌面端）").fill("44");
+    await expect(state).toContainText('"width":0.44');
+    await mainGroup.getByRole("button", { name: "位置与间距" }).click();
     await mainGroup.getByLabel("横向位置（桌面端）").fill("20");
 
     await detail.focus();
@@ -96,8 +100,12 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
     await detailLayoutButton.focus();
     await detailLayoutButton.press("Enter");
     await detail.press("ArrowLeft");
-    await detailGroup.getByRole("button", { name: "精确位置与尺寸" }).click();
+    await page.evaluate(() => new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    ));
     await detailGroup.getByLabel("区域宽度（桌面端）").fill("28");
+    await expect(state).toContainText('"width":0.28');
+    await detailGroup.getByRole("button", { name: "位置与间距" }).click();
     await detailGroup.getByLabel("横向位置（桌面端）").fill("68");
 
     await expect(state).toContainText('"compositionPreset":"detail-led"');
@@ -129,10 +137,10 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
     expect(detailRect.width).toBeCloseTo(0.28, 1);
     await expect(copy).toHaveCSS("grid-column-start", "6");
 
-    await page.getByRole("button", { name: "恢复细节海报设计默认" }).click();
+    await page.getByRole("button", { name: "恢复细节海报桌面端设计默认" }).click();
     await expect(state).toContainText('"mainImage"');
     await page.getByRole("button", { name: "返回模块级" }).click();
-    await page.getByRole("button", { name: "恢复整个模块" }).click();
+    await page.getByRole("button", { name: "恢复整个模块设计默认" }).click();
     await expect(state).toHaveText("null");
     await expect(page.getByTestId("content-state")).toHaveText(
       "/svg/template-double-poster-main.svg|/svg/template-double-poster-detail.svg|双图关系测试",

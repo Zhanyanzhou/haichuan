@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
@@ -16,6 +17,8 @@ type CanvasBlockInteractionBoundaryProps = {
   children: ReactNode;
   focused?: boolean;
   selected?: boolean;
+  /** 仅供独立模板/视觉编辑夹具使用；正式页面装修始终保持模块级选择。 */
+  allowNodeSelection?: boolean;
   scrollMarginTop?: number;
   onSelect: () => void;
 };
@@ -35,6 +38,7 @@ const CanvasBlockInteractionBoundary = forwardRef<
     children,
     focused = false,
     selected = false,
+    allowNodeSelection = false,
     scrollMarginTop = 80,
     onSelect,
   },
@@ -94,6 +98,31 @@ const CanvasBlockInteractionBoundary = forwardRef<
     if (target.closest("a,button,input,select,textarea,[role='button']")) {
       event.preventDefault();
     }
+    if (!allowNodeSelection) {
+      event.stopPropagation();
+    }
+  };
+
+  const handleCanvasPointerDownCapture = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    if (allowNodeSelection) return;
+    // 页面装修只选择整块模板。必须在捕获阶段截断，避免事件继续进入
+    // Renderer 的图片、文字或业务对象选择器并改变右侧属性上下文。
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect();
+  };
+
+  const handleCanvasKeyDownCapture = (
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ) => {
+    if (allowNodeSelection || (event.key !== "Enter" && event.key !== " ")) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || !target.closest("[data-editor-select-handle]")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect();
   };
 
   const handleCanvasPointerDown = (
@@ -110,10 +139,11 @@ const CanvasBlockInteractionBoundary = forwardRef<
       ref={assignBoundaryRef}
       data-editor-block-id={blockId}
       data-editor-block-type={blockType}
-      // 视觉节点在子树 capture 阶段先取得事件并写入节点选择；模块选中放到
-      // 冒泡阶段，避免 Puck 的同步选中更新抢先重渲染、吞掉图片/文字选择。
+      data-editor-node-selection={allowNodeSelection ? "node" : "module"}
+      onPointerDownCapture={handleCanvasPointerDownCapture}
       onPointerDown={handleCanvasPointerDown}
       onClickCapture={handleCanvasClickCapture}
+      onKeyDownCapture={handleCanvasKeyDownCapture}
       onClick={(event) => event.stopPropagation()}
       style={{
         position: "relative",
@@ -131,6 +161,7 @@ const CanvasBlockInteractionBoundary = forwardRef<
         className="homepage-editor__canvas-block-handle"
         data-editor-select-handle={blockType}
         aria-label={`选择“${blockLabel}”模块`}
+        aria-pressed={selected}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();

@@ -2,8 +2,8 @@
  * DoublePosterInspector.tsx — 「双图文」专用对象化属性面板（实验）。
  *
  * 与通用 SchemaInspectorPanel 的差异：
- * - 选中谁就只显示谁的属性：模块级 / 主图 / 细节图 / 文案 四个对象各自成组；
- * - 顶部使用统一的模块级 / 对象级切换器；
+ * - 内容模式连续显示主图、细节图、文案和行动分组，画布选择只负责定位与增强；
+ * - 设计模式继续使用统一的模块级 / 对象级切换器；
  * - 视觉属性（比例/裁切/焦点/缩放/构图/排版）以图形卡片、九宫格、滑杆呈现；
  * - 写回只走 useInspectorModuleEditor.update（模块字段）与
  *   setVisualOverridePath(__instanceOverrides)（视觉覆盖），不新增数据源。
@@ -13,13 +13,16 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { App as AntdApp } from "antd";
-import InspectorTopBar from "../InspectorTopBar";
 import InspectorDisclosure from "../InspectorDisclosure";
+import InspectorFooterBar from "../InspectorFooterBar";
+import InspectorModePortal from "../InspectorModePortal";
+import InspectorObjectContext from "../InspectorObjectContext";
+import InspectorTemplateNavigator from "../InspectorTemplateNavigator";
 import InstanceOverridesPanel from "../InstanceOverridesPanel";
-import InspectorPrimaryTabs, {
+import {
   type InspectorPrimaryMode,
 } from "../InspectorPrimaryTabs";
-import FieldRenderer from "../FieldRenderer";
+import FieldRenderer, { isFieldVisible } from "../FieldRenderer";
 import { useInspectorModuleEditor } from "../useInspectorModuleEditor";
 import { doublePosterSchema } from "../schema/modules/doublePoster";
 import {
@@ -52,13 +55,9 @@ import {
   getContractRoleRatioPresets,
 } from "../../config/blockContracts";
 import {
-  ROOT_ZONE,
   useHomepagePuck,
 } from "../../../pages/admin/HomepageConfig/editor-store";
-import { getModuleDisplayName } from "../../../pages/admin/HomepageConfig/editor-utils";
-import DoublePosterMiniCanvas, {
-  type DoublePosterObjectId,
-} from "./DoublePosterMiniCanvas";
+import type { DoublePosterObjectId } from "./DoublePosterMiniCanvas";
 
 type PanelMode = InspectorPrimaryMode;
 type ObjectId = DoublePosterObjectId;
@@ -67,14 +66,7 @@ interface DoublePosterInspectorProps {
   hasUnsavedChanges: boolean;
   saving: boolean;
   onSaveDraft: () => void;
-  onSaveAsTemplate: (type: string, props: PuckProps) => void;
-  publishIssues: Array<{
-    blockId?: string;
-    message: string;
-    severity: "error" | "warning" | "info";
-    path?: string;
-  }>;
-  validationState: "checking" | "current" | "stale" | "error";
+  templateDesignEnabled?: boolean;
 }
 
 /** 本面板专用对象命名（全局 VISUAL_NODE_LABELS 的「主海报/细节海报」不动） */
@@ -85,30 +77,15 @@ const OBJECT_LABELS: Record<ObjectId, string> = {
   action: "行动入口",
 };
 
-const isObjectId = (value: string): value is ObjectId =>
-  Object.prototype.hasOwnProperty.call(OBJECT_LABELS, value);
-
-const ISSUE_FIELD_TO_OBJECT: Record<string, ObjectId> = {
-  mainImage: "mainImage",
-  mainAltText: "mainImage",
-  detailImage: "detailImage",
-  detailAltText: "detailImage",
-  number: "copy",
-  label: "copy",
-  title: "copy",
-  description: "copy",
-  actionText: "action",
-  targetType: "action",
-  linkUrl: "action",
-  productId: "action",
+const CONTENT_GROUP_LABELS: Record<ObjectId, string> = {
+  mainImage: "主海报",
+  detailImage: "细节海报",
+  copy: "文案",
+  action: "行动与链接",
 };
 
-function getIssueObjectId(issue: DoublePosterInspectorProps["publishIssues"][number]) {
-  const source = `${issue.path ?? ""} ${issue.message}`;
-  return Object.entries(ISSUE_FIELD_TO_OBJECT).find(([field]) =>
-    new RegExp(`(^|[^a-zA-Z])${field}([^a-zA-Z]|$)`, "i").test(source),
-  )?.[1];
-}
+const isObjectId = (value: string): value is ObjectId =>
+  Object.prototype.hasOwnProperty.call(OBJECT_LABELS, value);
 
 function supportsCapabilityOnViewport(
   object: ReturnType<typeof getContentTemplateEditableObject>,
@@ -186,15 +163,14 @@ const slashToColon = (preset: string) =>
 
 export default function DoublePosterInspector({
   hasUnsavedChanges,
-  publishIssues,
-  validationState,
-  onSaveAsTemplate,
+  saving,
+  templateDesignEnabled = true,
 }: DoublePosterInspectorProps) {
-  const { message, modal } = AntdApp.useApp();
+  const { modal } = AntdApp.useApp();
   const editor = useInspectorModuleEditor();
   const [activePanelMode, setActivePanelMode] = useState<PanelMode>("content");
   const inspectorScrollRef = useRef<HTMLDivElement>(null);
-  const pendingContentActionRef = useRef<ObjectId | null | undefined>(undefined);
+  const pendingContentNavigationRef = useRef<ObjectId | undefined>(undefined);
   const [contentActionRevision, setContentActionRevision] = useState(0);
   const panelScrollPositionsRef = useRef<Record<PanelMode, number>>({
     content: 0,
@@ -210,6 +186,7 @@ export default function DoublePosterInspector({
   const clearVisualNode = useVisualEditorSession((state) => state.clearNode);
   const setVisualPanelMode = useVisualEditorSession((state) => state.setPanelMode);
   const visualPanelMode = useVisualEditorSession((state) => state.panelMode);
+  const visualWorkspace = useVisualEditorSession((state) => state.workspace);
   const editorBlockId = editor?.props.id;
   const activeCanvasGeometry = useVisualEditorSession((state) =>
     state.canvasGeometryByBlock[String(editorBlockId ?? "")]?.[editor?.device ?? "desktop"],
@@ -217,17 +194,26 @@ export default function DoublePosterInspector({
 
   // 切换模块时重置 tab 与滚动位置（与 SchemaInspectorPanel 同模式）
   useEffect(() => {
+    if (visualWorkspace !== "page") return;
     panelScrollPositionsRef.current = { content: 0, design: 0 };
     setActivePanelMode("content");
     setVisualPanelMode("content");
     window.requestAnimationFrame(() => {
       inspectorScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
     });
-  }, [editor?.moduleType, editorBlockId, setVisualPanelMode]);
+  }, [editor?.moduleType, editorBlockId, setVisualPanelMode, visualWorkspace]);
 
   useEffect(() => {
+    if (visualWorkspace !== "page") return;
     if (visualPanelMode !== activePanelMode) setActivePanelMode(visualPanelMode);
-  }, [activePanelMode, visualPanelMode]);
+  }, [activePanelMode, visualPanelMode, visualWorkspace]);
+
+  useEffect(() => {
+    if (visualWorkspace !== "page") return;
+    if (templateDesignEnabled) return;
+    if (activePanelMode !== "content") setActivePanelMode("content");
+    if (visualPanelMode !== "content") setVisualPanelMode("content");
+  }, [activePanelMode, setVisualPanelMode, templateDesignEnabled, visualPanelMode, visualWorkspace]);
 
   useLayoutEffect(() => {
     const pending = pendingPanelScrollRef.current;
@@ -237,9 +223,10 @@ export default function DoublePosterInspector({
   }, [activePanelMode]);
 
   useLayoutEffect(() => {
-    if (!editor || pendingContentActionRef.current === undefined) return;
-    const objectId = pendingContentActionRef.current;
-    pendingContentActionRef.current = undefined;
+    if (visualWorkspace !== "page") return;
+    if (!editorBlockId || pendingContentNavigationRef.current === undefined) return;
+    const objectId = pendingContentNavigationRef.current;
+    pendingContentNavigationRef.current = undefined;
     const fieldKey = objectId === "mainImage" || objectId === "detailImage"
       ? objectId
       : objectId === "action"
@@ -252,36 +239,34 @@ export default function DoublePosterInspector({
       if (!field) return;
       field.scrollIntoView({ block: "nearest", behavior: "smooth" });
       if (objectId === "mainImage" || objectId === "detailImage") {
-        const replaceButton = Array.from(field.querySelectorAll<HTMLButtonElement>("button"))
-          .find((button) => button.textContent?.includes("替换图片"));
-        replaceButton?.click();
-        window.requestAnimationFrame(() => {
-          field.querySelector<HTMLElement>("[data-media-field], .ant-upload")?.focus();
-        });
+        const mediaField = field.querySelector<HTMLElement>("[data-media-field]");
+        mediaField?.focus();
         return;
       }
       field.querySelector<HTMLElement>("input, textarea, button, [tabindex]")?.focus();
     };
     const frame = window.requestAnimationFrame(() => window.requestAnimationFrame(focusField));
     return () => window.cancelAnimationFrame(frame);
-  }, [contentActionRevision, editor]);
+  }, [contentActionRevision, editorBlockId, visualWorkspace]);
 
   useEffect(() => {
+    if (visualWorkspace !== "page") return;
     if (!contentActionRequest || contentActionRequest.blockId !== editorBlockId ||
       !isObjectId(contentActionRequest.nodeId) || activePanelMode !== "content") return;
-    pendingContentActionRef.current = contentActionRequest.nodeId;
+    pendingContentNavigationRef.current = contentActionRequest.nodeId;
     setContentActionRevision((revision) => revision + 1);
-  }, [activePanelMode, contentActionRequest, editorBlockId]);
+  }, [activePanelMode, contentActionRequest, editorBlockId, visualWorkspace]);
 
   useEffect(() => {
+    if (visualWorkspace !== "page") return;
     if (!visualSelection || visualSelection.blockId !== editorBlockId ||
-      !isObjectId(visualSelection.nodeId) || activePanelMode !== "content" ||
-      (visualSelection.kind !== "text" && visualSelection.kind !== "action")) return;
-    pendingContentActionRef.current = visualSelection.nodeId;
+      !isObjectId(visualSelection.nodeId) || activePanelMode !== "content") return;
+    pendingContentNavigationRef.current = visualSelection.nodeId;
     setContentActionRevision((revision) => revision + 1);
-  }, [activePanelMode, editorBlockId, visualSelection]);
+  }, [activePanelMode, editorBlockId, visualSelection, visualWorkspace]);
 
   useEffect(() => {
+    if (visualWorkspace !== "page") return;
     if (activePanelMode !== "design" || !editorBlockId || !visualSelection ||
       visualSelection.blockId !== editorBlockId) return;
     const editableObject = getContentTemplateEditableObject(
@@ -294,7 +279,7 @@ export default function DoublePosterInspector({
       setActivePanelMode("content");
       setVisualPanelMode("content");
     }
-  }, [activePanelMode, editor?.moduleType, editorBlockId, setVisualPanelMode, visualSelection]);
+  }, [activePanelMode, editor?.moduleType, editorBlockId, setVisualPanelMode, visualSelection, visualWorkspace]);
 
   if (!editor) return null;
 
@@ -326,33 +311,54 @@ export default function DoublePosterInspector({
   const currentSelection = currentEditableObject && isObjectId(currentEditableObject.roleId)
     ? currentEditableObject.roleId
     : null;
-  const currentPublishIssues = publishIssues.filter(
-    (issue) => issue.severity !== "info" && issue.blockId === props.id,
+  const selectedContentFieldKeys = new Set(
+    currentSelection
+      ? getContentTemplateEditableFieldKeys(editor.moduleType, currentSelection)
+      : [],
   );
-  const issueObjectIds = new Set(
-    currentPublishIssues.map(getIssueObjectId).filter((objectId): objectId is ObjectId => Boolean(objectId)),
-  );
-
   const fieldByKey = (key: string): FieldDef | undefined =>
     doublePosterSchema.sections
       .flatMap((section) => section.fields)
       .find((field) => field.key === key);
 
-  const renderSchemaField = (key: string) => {
+  const renderSchemaField = (key: string, objectId: ObjectId) => {
     const def = fieldByKey(key);
-    if (!def) return null;
+    if (!def || !isFieldVisible(def, ctx) || (
+      def.device && def.device !== "shared" && def.device !== editor.device
+    )) return null;
+    const isSelectedField = selectedContentFieldKeys.has(key);
+    const isMediaField = def.control === "media";
+    const isSelectedMediaField = currentSelection === objectId &&
+      currentEditableObject?.kind === "media" && isSelectedField;
     return (
       <div
         key={key}
-        className="homepage-editor__task-field"
+        className={`homepage-editor__task-field${isSelectedField ? " is-visual-selected" : ""}`}
         data-inspector-field={key}
+        data-selected-media-field={isSelectedMediaField ? "true" : undefined}
       >
         <FieldRenderer
           def={def}
           ctx={ctx}
           update={editor.update}
           moduleType={editor.moduleType}
+          taskPresentation={isMediaField ? "media" : undefined}
+          textRows={isSelectedMediaField && key === currentEditableObject?.altFieldKey ? 3 : undefined}
         />
+        {isMediaField ? (
+          <InstanceOverridesPanel
+            moduleType={editor.moduleType}
+            props={props}
+            updateFromCurrent={editor.updateFromCurrent}
+            updateHistoryTransaction={editor.updateHistoryTransaction}
+            historyTransactionPending={editor.historyTransactionPending}
+            scopes={["slots"]}
+            selectedNodeId={objectId}
+            embedded
+            viewport={viewport}
+            contentMediaOnly
+          />
+        ) : null}
       </div>
     );
   };
@@ -417,6 +423,7 @@ export default function DoublePosterInspector({
   };
 
   const activatePanelMode = (panelMode: PanelMode) => {
+    if (!templateDesignEnabled && panelMode === "design") return;
     if (panelMode !== "design" || activePanelMode === "design") {
       commitPanelMode(panelMode);
       return;
@@ -654,38 +661,6 @@ export default function DoublePosterInspector({
         </InspectorDisclosure>
       </>
     );
-  };
-
-  const removeModule = () => {
-    const content = appData.content as Array<{
-      type: string;
-      props: PuckProps;
-    }>;
-    const index = content.findIndex((item) => item.props?.id === props.id);
-    if (index < 0) return;
-    if (content[index].props?.locked) {
-      message.info("此模块已锁定，不能删除");
-      return;
-    }
-    modal.confirm({
-      title: `删除“${getModuleDisplayName(editor.moduleType, props)}”？`,
-      content: "删除后可通过顶部撤销恢复；保存草稿前不会影响前台页面。",
-      okText: "删除模块",
-      okButtonProps: { danger: true },
-      cancelText: "取消",
-      onOk: () => {
-        dispatch({
-          type: "remove",
-          index,
-          zone: ROOT_ZONE,
-        });
-        dispatch({ type: "setUi", ui: { itemSelector: null } });
-      },
-    });
-  };
-
-  const toggleVisibility = () => {
-    editor.update({ isVisible: props.isVisible === false });
   };
 
   /* ---------------- 图片级设计控件 ---------------- */
@@ -1058,7 +1033,7 @@ export default function DoublePosterInspector({
       <InstanceOverridesPanel
         moduleType={editor.moduleType}
         props={props}
-        update={editor.update}
+        updateFromCurrent={editor.updateFromCurrent}
         updateHistoryTransaction={editor.updateHistoryTransaction}
         historyTransactionPending={editor.historyTransactionPending}
         scopes={["layout"]}
@@ -1096,38 +1071,34 @@ export default function DoublePosterInspector({
 
   /* ---------------- 内容页字段集 ---------------- */
 
-  const renderContentFields = () => {
-    if (currentSelection) {
-      const fieldKeys = getContentTemplateEditableFieldKeys(
-        editor.moduleType,
-        currentSelection,
-      );
-      return (
-        <>
-          {fieldKeys.map(renderSchemaField)}
-          {currentSelection === "mainImage" || currentSelection === "detailImage" ? (
-            <button
-              type="button"
-              className="homepage-editor__task-bridge"
-              onClick={() => activatePanelMode("design")}
-            >
-              继续调整{OBJECT_LABELS[currentSelection]}构图与布局
-            </button>
-          ) : null}
-        </>
-      );
-    }
+  const renderContentGroups = () => inspectorObjects.map((object) => {
+    const objectId = object.roleId as ObjectId;
+    const fields = getContentTemplateEditableFieldKeys(
+      editor.moduleType,
+      objectId,
+    ).map((key) => ({ key, def: fieldByKey(key) })).filter(({ def }) => Boolean(
+      def && isFieldVisible(def, ctx) && (
+        !def.device || def.device === "shared" || def.device === editor.device
+      ),
+    ));
+    if (fields.length === 0) return null;
     return (
-      <>
-        {renderSchemaField("title")}
-        {renderSchemaField("description")}
-        {renderSchemaField("number")}
-        {renderSchemaField("label")}
-        {renderSchemaField("actionText")}
-        {renderSchemaField("targetType")}
-      </>
+      <section
+        key={objectId}
+        id={`inspector-task-section-${objectId}`}
+        className="homepage-editor__task-group"
+        data-task-group={objectId}
+        data-selected-task={currentSelection === objectId ? objectId : undefined}
+      >
+        <header className="homepage-editor__task-panel-header">
+          <h3>{CONTENT_GROUP_LABELS[objectId]}</h3>
+        </header>
+        <div className="homepage-editor__task-panel-body">
+          {fields.map(({ key }) => renderSchemaField(key, objectId))}
+        </div>
+      </section>
     );
-  };
+  });
 
   const renderDesignFields = () => {
     if (currentSelection === "mainImage" || currentSelection === "detailImage") {
@@ -1140,11 +1111,11 @@ export default function DoublePosterInspector({
     return renderModuleDesign();
   };
 
-  const currentObjectCanEditDesign = currentEditableObject
+  const currentObjectCanEditDesign = templateDesignEnabled && (currentEditableObject
     ? currentEditableObject.capabilities.some((capability) =>
         DOUBLE_POSTER_DESIGN_CAPABILITIES.has(capability),
       )
-    : true;
+    : true);
 
   return (
     <section
@@ -1152,104 +1123,80 @@ export default function DoublePosterInspector({
       data-inspector-root="visual-properties"
       data-active-device={editor.device}
       data-module-type={editor.moduleType}
+      data-panel-mode={activePanelMode}
       aria-label="属性面板"
     >
-      <InspectorTopBar
-        displayName="双图文"
-        moduleName={
-          typeof props.moduleName === "string" ? props.moduleName : ""
-        }
-        deviceLabel={editor.device === "mobile" ? "移动端" : "桌面端"}
-        dirty={hasUnsavedChanges}
-        onClose={editor.close}
-        actions={[
-          ...(editor.dirty
-            ? [{ key: "revert", label: "撤销本区修改", onClick: editor.revert }]
-            : []),
-          {
-            key: "visibility",
-            label: props.isVisible === false ? "取消隐藏模块" : "隐藏模块",
-            onClick: toggleVisibility,
-          },
-          { key: "remove", label: "删除模块", danger: true, onClick: removeModule },
-        ]}
-      />
+      {templateDesignEnabled ? (
+        <InspectorModePortal
+          activeMode={activePanelMode}
+          designDisabled={!currentObjectCanEditDesign}
+          onChange={activatePanelMode}
+        />
+      ) : null}
 
-      <InspectorPrimaryTabs
-        activeMode={activePanelMode}
-        designDisabled={!currentObjectCanEditDesign}
-        onChange={activatePanelMode}
-      />
-
-      <DoublePosterMiniCanvas
-        props={props}
+      <InspectorObjectContext
+        moduleLabel="双图文"
+        blockId={String(props.id ?? "")}
+        moduleType={editor.moduleType}
         mode={activePanelMode}
         selectedObjectId={currentSelection}
-        availableObjectIds={inspectorObjects.map((object) => object.roleId as ObjectId)}
-        issueObjectIds={issueObjectIds}
+        objects={inspectorObjects.map((object) => ({
+          id: object.roleId,
+          label: OBJECT_LABELS[object.roleId as ObjectId],
+          kind: object.kind === "video" ? "media" : object.kind === "collection" ? "structured" : object.kind,
+          thumbnailUrl: object.contentFieldKeys
+            .map((fieldKey) => props[fieldKey])
+            .find((value): value is string => typeof value === "string" && value.length > 0),
+        }))}
+        objectKind={currentEditableObject?.kind ?? "module"}
         activeDevice={editor.device}
-        onSelect={selectObject}
+        onSelect={(nodeId) => selectObject(nodeId && isObjectId(nodeId) ? nodeId : null)}
       />
 
       <div ref={inspectorScrollRef} className="homepage-editor__inspector-scroll" data-inspector-scroll="main">
-        {validationState !== "current" ? (
-          <p className="homepage-editor__validation-state" role="status" aria-live="polite">
-            {validationState === "checking"
-              ? "正在按服务端发布规则核对当前页面…"
-              : validationState === "error"
-                ? "发布资格暂时无法核对；本地编辑内容已保留。"
-                : "内容已变化，发布资格等待重新核对。"}
-          </p>
-        ) : null}
-        {currentPublishIssues.length > 0 ? (
-          <section
-            className="homepage-editor__publish-issues homepage-editor__inspector-publish-issues"
-            aria-label="当前模块发布检查问题"
-            role="alert"
-          >
-            <strong>当前模板提示 · {currentPublishIssues.length} 项</strong>
-            <div>
-              {currentPublishIssues.map((issue, index) => (
-                <p key={`${issue.path ?? ""}-${issue.message}-${index}`}>
-                  {issue.message}
-                </p>
-              ))}
-            </div>
-          </section>
+        {activePanelMode === "design" ? (
+          <InspectorTemplateNavigator
+            moduleLabel="双图文"
+            moduleType={editor.moduleType}
+            blockId={String(props.id ?? "")}
+            objects={inspectorObjects.map((object) => ({
+              id: object.roleId,
+              label: OBJECT_LABELS[object.roleId as ObjectId],
+              kind: object.kind === "video" ? "media" : object.kind === "collection" ? "structured" : object.kind,
+              thumbnailUrl: object.contentFieldKeys
+                .map((fieldKey) => props[fieldKey])
+                .find((value): value is string => typeof value === "string" && value.length > 0),
+            }))}
+            selectedObjectId={currentSelection}
+            activeDevice={editor.device}
+            onSelect={(nodeId) => selectObject(isObjectId(nodeId) ? nodeId : null)}
+          />
         ) : null}
         <div
           id={`inspector-panel-${activePanelMode}`}
           className="homepage-editor__panel-mode-content"
           role="tabpanel"
-          aria-labelledby={`inspector-panel-tab-${activePanelMode}`}
+          aria-labelledby={templateDesignEnabled ? `inspector-panel-tab-${activePanelMode}` : undefined}
+          aria-label={templateDesignEnabled ? undefined : "页面实例内容"}
         >
-          <>
+          {activePanelMode === "content" ? (
+            renderContentGroups()
+          ) : (
             <section className="homepage-editor__task-group">
-            <header className="homepage-editor__task-panel-header">
-              <h3>
-                {currentSelection
-                  ? `${OBJECT_LABELS[currentSelection]}${activePanelMode === "design" ? "设计" : "内容"}`
-                  : activePanelMode === "design" ? "模块布局" : "模块内容"}
-              </h3>
-            </header>
-            <div className="homepage-editor__task-panel-body">
-              {activePanelMode === "content"
-                ? renderContentFields()
-                : renderDesignFields()}
-              {activePanelMode === "design" ? (
-                <button
-                  type="button"
-                  className="homepage-editor__task-bridge"
-                  onClick={() => onSaveAsTemplate(editor.moduleType, editor.props)}
-                >
-                  另存到模板库
-                </button>
-              ) : null}
-            </div>
+              <header className="homepage-editor__task-panel-header">
+                <h3>{currentSelection ? `${OBJECT_LABELS[currentSelection]}设计` : "模块布局"}</h3>
+              </header>
+              <div className="homepage-editor__task-panel-body">
+                {renderDesignFields()}
+              </div>
             </section>
-          </>
+          )}
         </div>
       </div>
+      <InspectorFooterBar
+        hasUnsavedChanges={hasUnsavedChanges}
+        saving={saving}
+      />
     </section>
   );
 }

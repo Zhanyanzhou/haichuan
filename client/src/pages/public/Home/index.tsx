@@ -11,7 +11,7 @@ import { pageDocumentApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackPageView } from "@/hooks/useAnalytics";
 import {
-  createEditorPageDefault,
+  ensureEditorPageStructure,
   getEditorPage,
   isEditorPageKey,
 } from "@/page-builder/config/editorPages";
@@ -23,6 +23,7 @@ import StaleDocumentNotice from "@/page-builder/runtime/StaleDocumentNotice";
 import { PublicPageFallback } from "@/page-builder/runtime/PublishedPageDecoration";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import type { PuckDocument } from "@/page-builder/runtime/PuckDocumentRenderer";
+import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 
 // 首页基础内容与装修渲染器分离，只有取得已发布的 Puck 数据时才加载编辑器运行时。
 const PuckDocumentRenderer = lazy(
@@ -205,6 +206,9 @@ export function PagePreview({ pageKey: pageKeyProp }: { pageKey?: string }) {
   const { pageKey: routePageKey } = useParams();
   const pageKey = pageKeyProp || routePageKey || "home";
   const { pageDocument, status, refresh } = useDraftPageDocument(pageKey);
+  const previewData = pageDocument?.puckData && isEditorPageKey(pageKey)
+    ? ensureEditorPageStructure(pageKey, migratePuckData(pageDocument.puckData))
+    : null;
 
   if (status === "loading") {
     return <main aria-busy="true" style={{ background: LG, minHeight: "100vh" }} />;
@@ -258,21 +262,52 @@ export function PagePreview({ pageKey: pageKeyProp }: { pageKey?: string }) {
     );
   }
 
+  if (!previewData) {
+    return (
+      <main
+        data-page-document-state="preview-empty"
+        style={{
+          background: LG,
+          minHeight: "70vh",
+          display: "grid",
+          placeItems: "center",
+          padding: 24,
+        }}
+      >
+        <section
+          role="status"
+          aria-labelledby="draft-preview-empty-title"
+          style={{
+            width: "min(100%, 520px)",
+            padding: "32px 28px",
+            background: "#FFFFFF",
+            border: "1px solid #DDE1E2",
+            textAlign: "center",
+          }}
+        >
+          <h1
+            id="draft-preview-empty-title"
+            style={{ margin: 0, color: "#181A1B", fontSize: 24, fontWeight: 500 }}
+          >
+            尚无已保存草稿
+          </h1>
+          <p style={{ margin: "14px 0 0", color: "#5F6568", lineHeight: 1.7 }}>
+            请先在店铺装修中保存草稿再预览。当前不会展示推荐结构或历史内容。
+          </p>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main style={{ background: LG }}>
-      {pageDocument?.puckData ? (
-        <Suspense fallback={<PuckDocumentLoading />}>
-          <PuckDocumentRenderer data={pageDocument.puckData} mode="preview" />
-        </Suspense>
-      ) : (
-        <Suspense fallback={<PuckDocumentLoading />}>
-          <PuckDocumentRenderer mode="preview" data={
-            isEditorPageKey(pageKey)
-              ? createEditorPageDefault(pageKey)
-              : createEditorPageDefault("home")
-          } />
-        </Suspense>
-      )}
+      <Suspense fallback={<PuckDocumentLoading />}>
+        <PuckDocumentRenderer
+          data={previewData}
+          mode="preview"
+          surface={pageKey === "home" ? "home" : undefined}
+        />
+      </Suspense>
     </main>
   );
 }

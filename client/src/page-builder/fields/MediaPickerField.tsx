@@ -1,8 +1,8 @@
 /**
  * MediaPickerField.tsx — Puck 自定义媒体字段
  *
- * 交互模型（2026-08-16 重写，修复更换/删除死胡同）：
- * 1. 预览为默认态；点"更换"在预览下方内嵌展开上传区（预览不消失），可取消；
+ * 交互模型：
+ * 1. 有图时只保留一个等比例预览；点击预览或“更换图片”共用同一文件选择器；
  * 2. URL 态：清空输入后确认 = 清除图片（不再无动作）；
  * 3. value 外部变化（撤销/预设/载入方案）自动收起所有临时面板；
  * 4. 操作按钮全部带文字：更换 / 链接 / 删除(danger)。
@@ -22,6 +22,7 @@ import { uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { ratioLabelOf } from "@/page-builder/config/imageSpecs";
 import { sizeMatchStatus, useImageNaturalSize } from "./specCheck";
+import { addPageMediaItem } from "./pageMediaLibrary";
 
 export const SESSION_MEDIA_UPLOADED_EVENT = "page-builder:media-uploaded";
 export const sessionUploadedMedia = new Set<string>();
@@ -54,13 +55,13 @@ interface MediaPickerFieldProps {
   previewAspectRatio?: string;
   /** 与画布相同的图片焦点坐标（百分比） */
   previewFocus?: { x: number; y: number };
-  previewFit?: "cover" | "contain";
+  previewFit?: "cover" | "contain" | "fill";
   previewZoom?: number;
-  /** 更换区开合状态，用于让上层只在换图任务中显示可复用素材。 */
-  onReplaceOpenChange?: (open: boolean) => void;
-  /** 打开当前页面已使用素材；只有存在可选素材时由上层传入。 */
+  /** 打开页面素材选择区。 */
   onOpenPageMedia?: () => void;
   pageMediaOpen?: boolean;
+  /** 参考图对应的媒体任务布局：保留真实上传链路，只改变信息层级。 */
+  taskPresentation?: boolean;
 }
 
 export default function MediaPickerField({
@@ -76,13 +77,11 @@ export default function MediaPickerField({
   previewFocus,
   previewFit,
   previewZoom,
-  onReplaceOpenChange,
   onOpenPageMedia,
   pageMediaOpen = false,
+  taskPresentation = false,
 }: MediaPickerFieldProps) {
   const { message, modal } = AntdApp.useApp();
-  /** 更换面板：在预览下方内嵌展开，预览保持可见 */
-  const [replaceOpen, setReplaceOpen] = useState(false);
   /** 上传区比例后缀：一律由规格派生,schema 的 placeholder 只写人话不写比例 */
   const ratioSuffix = spec ? `（${ratioLabelOf(spec)}）` : "";
   /** URL 输入态：可从更换面板或空态进入 */
@@ -109,6 +108,7 @@ export default function MediaPickerField({
         ? "需检查"
         : "适合";
   const inputRef = useRef<InputRef>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const hasValue = Boolean(value && value.trim().length > 0);
   const isEmpty = !hasValue;
@@ -118,14 +118,9 @@ export default function MediaPickerField({
 
   /* value 外部变化（上传成功 / URL 确认 / 撤销 / 预设 / 载入方案）→ 收起全部临时面板 */
   useEffect(() => {
-    setReplaceOpen(false);
     setUrlMode(false);
     setUrlInput(value || "");
   }, [value]);
-
-  useEffect(() => {
-    onReplaceOpenChange?.(replaceOpen);
-  }, [onReplaceOpenChange, replaceOpen]);
 
   /* ── 上传 ── */
   const handleUpload = async (file: File) => {
@@ -145,6 +140,12 @@ export default function MediaPickerField({
       const data = unwrapResponse<{ url: string }>(result);
       const finalUrl = data?.url;
       if (finalUrl) {
+        addPageMediaItem({
+          url: finalUrl,
+          type: "image",
+          name: file.name || "未命名图片",
+          createdAt: new Date().toISOString(),
+        });
         sessionUploadedMedia.add(finalUrl);
         window.dispatchEvent(new CustomEvent(SESSION_MEDIA_UPLOADED_EVENT));
         onChange?.(finalUrl);
@@ -158,6 +159,16 @@ export default function MediaPickerField({
       setUploading(false);
     }
     return false;
+  };
+
+  const openFilePicker = () => {
+    if (!uploading && !readOnly) fileInputRef.current?.click();
+  };
+
+  const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) void handleUpload(file);
   };
 
   /* ── URL 输入：清空 + 确认 = 清除图片 ── */
@@ -189,76 +200,103 @@ export default function MediaPickerField({
 
   return (
     <div
-      className="homepage-editor__media-picker"
+      className={`homepage-editor__media-picker${taskPresentation ? " is-task-presentation" : ""}`}
       data-media-field={fieldKey}
       data-media-device={device}
+      data-workspace-field-control="media-picker"
+      data-workspace-field-shared="true"
       tabIndex={fieldKey ? -1 : undefined}
     >
+      {!readOnly ? (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={handleFileInputChange}
+        />
+      ) : null}
       {/* ═══ 预览（有图时的默认态） ═══ */}
       {hasValue && (
         <div>
-          <div
-            className={`homepage-editor__media-preview-img${hasCropPreview ? " is-crop-preview" : ""}`}
-            style={hasCropPreview ? { aspectRatio: previewAspectRatio } : undefined}
+          <button
+            type="button"
+            className="homepage-editor__media-preview-trigger"
+            aria-label="点击更换当前图片"
+            title="点击更换当前图片"
+            disabled={Boolean(readOnly || uploading)}
+            onClick={openFilePicker}
           >
-            <img
-              src={value}
-              alt="预览"
-              style={{
-                objectFit: hasCropPreview ? "cover" : "contain",
-                ...(previewFit ? { objectFit: previewFit } : {}),
-                objectPosition: `${focusX}% ${focusY}%`,
-                transform: `scale(${Math.min(2, Math.max(1, previewZoom ?? 1))})`,
-                transformOrigin: `${focusX}% ${focusY}%`,
-                width: "100%",
-                height: "100%",
-                background: "#F4F5F5",
-              }}
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
-              }}
-            />
-            {imgSize.error ? (
-              <div
-                className="homepage-editor__media-preview-error"
-                role="alert"
-              >
-                <ExclamationCircleOutlined />
-                <strong>当前图片暂不可用</strong>
-                <span>请替换图片，或检查图片链接是否仍然有效。</span>
-              </div>
-            ) : null}
-          </div>
+            <div
+              className={`homepage-editor__media-preview-img${hasCropPreview ? " is-crop-preview" : ""}`}
+              style={hasCropPreview ? { aspectRatio: previewAspectRatio } : undefined}
+            >
+              <img
+                src={value}
+                alt="预览"
+                style={{
+                  objectFit: hasCropPreview ? "cover" : "contain",
+                  ...(previewFit ? { objectFit: previewFit } : {}),
+                  objectPosition: `${focusX}% ${focusY}%`,
+                  transform: `scale(${Math.min(2, Math.max(1, previewZoom ?? 1))})`,
+                  transformOrigin: `${focusX}% ${focusY}%`,
+                  width: "100%",
+                  height: "100%",
+                  background: "#F4F5F5",
+                }}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                }}
+              />
+              {imgSize.error ? (
+                <div
+                  className="homepage-editor__media-preview-error"
+                  role="alert"
+                >
+                  <ExclamationCircleOutlined />
+                  <strong>当前图片暂不可用</strong>
+                  <span>请替换图片，或检查图片链接是否仍然有效。</span>
+                </div>
+              ) : null}
+            </div>
+          </button>
+          {taskPresentation && spec ? (
+            <p className="homepage-editor__media-recommendation">
+              建议 {spec.width} × {spec.height} · {spec.ratio} · 2K+
+            </p>
+          ) : null}
           {!readOnly && (
             <div
               className="homepage-editor__media-preview-actions"
-              data-has-page-media={onOpenPageMedia ? "true" : "false"}
+              data-has-page-media={!taskPresentation && onOpenPageMedia ? "true" : "false"}
             >
               <Button
                 size="small"
                 icon={<SwapOutlined />}
-                onClick={() => setReplaceOpen((open) => !open)}
-                title="在下方展开上传区，预览保持可见"
+                disabled={uploading}
+                onClick={openFilePicker}
+                title="选择新图片替换当前图片"
               >
-                替换图片
+                {taskPresentation ? "更换图片" : "替换图片"}
               </Button>
-              {onOpenPageMedia ? (
+              {taskPresentation || onOpenPageMedia ? (
                 <Button
                   size="small"
                   icon={<PictureOutlined />}
                   className={pageMediaOpen ? "is-active" : undefined}
                   aria-pressed={pageMediaOpen}
+                  disabled={!onOpenPageMedia}
                   onClick={onOpenPageMedia}
                 >
-                  本页素材
+                  {taskPresentation ? "从素材库选择" : "本页素材"}
                 </Button>
               ) : null}
               <Button
                 size="small"
                 icon={<LinkOutlined />}
+                className={taskPresentation ? "is-secondary-media-action" : undefined}
                 onClick={() => {
                   setUrlMode(true);
-                  setReplaceOpen(false);
                 }}
                 title="输入或清除图片链接"
               >
@@ -298,41 +336,6 @@ export default function MediaPickerField({
               <dd><i aria-hidden="true" />{qualityLabel}</dd>
             </div>
           </dl>
-        </div>
-      )}
-
-      {/* ═══ 更换面板（预览下方内嵌展开） ═══ */}
-      {hasValue && !readOnly && replaceOpen && !urlMode && (
-        <div style={{ marginTop: 8 }}>
-          <Upload.Dragger
-            accept="image/*"
-            showUploadList={false}
-            beforeUpload={(file) => {
-              void handleUpload(file);
-              return false;
-            }}
-            disabled={uploading}
-            style={{
-              minHeight: 96,
-              padding: "12px",
-              border: "1px dashed #B8BEC1",
-              borderRadius: 5,
-              background: "#FFFFFF",
-            }}
-          >
-            <InboxOutlined style={{ color: "var(--adm-action, #5F6568)", fontSize: 20 }} />
-            <div style={{ marginTop: 6, color: "#181A1B", fontSize: 12 }}>
-              {uploading ? "图片上传中…" : "拖入新图或点击上传（替换当前图片）"}
-            </div>
-          </Upload.Dragger>
-          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-            <Button size="small" type="link" onClick={() => setUrlMode(true)}>
-              粘贴链接
-            </Button>
-            <Button size="small" onClick={() => setReplaceOpen(false)}>
-              取消
-            </Button>
-          </div>
         </div>
       )}
 
@@ -379,8 +382,8 @@ export default function MediaPickerField({
             }}
             disabled={uploading}
             style={{
-              minHeight: 116,
-              padding: "16px 12px",
+              minHeight: taskPresentation ? 188 : 116,
+              padding: taskPresentation ? "28px 16px" : "16px 12px",
               border: "1px dashed #B8BEC1",
               borderRadius: 5,
               background: "#FFFFFF",
@@ -390,32 +393,72 @@ export default function MediaPickerField({
             <div style={{ marginTop: 8, color: "#181A1B", fontSize: 13 }}>
               {uploading
                 ? "图片上传中…"
-                : `${placeholder || "拖入图片或点击上传"}${ratioSuffix}`}
+                : taskPresentation
+                  ? "拖入图片，或点击选择文件"
+                  : `${placeholder || "拖入图片或点击上传"}${ratioSuffix}`}
             </div>
             <div style={{ marginTop: 4, color: "#6E7477", fontSize: 11 }}>
-              仅图片，单张 ≤ 10MB
+              {taskPresentation ? `${ratioSuffix || "推荐使用高分辨率图片"} · 单张 ≤ 10MB` : "仅图片，单张 ≤ 10MB"}
             </div>
           </Upload.Dragger>
-          <div
-            className="homepage-editor__media-alt-actions"
-            style={{ marginTop: 6 }}
-          >
-            <button
-              type="button"
-              onClick={() => setUrlMode(true)}
-              style={{
-                border: 0,
-                background: "transparent",
-                color: "#6E7477",
-                cursor: "pointer",
-                fontSize: 11,
-                textDecoration: "underline",
-                padding: 0,
-              }}
+          {taskPresentation && spec ? (
+            <p className="homepage-editor__media-recommendation">
+              建议 {spec.width} × {spec.height} · {spec.ratio} · 2K+
+            </p>
+          ) : null}
+          {taskPresentation ? (
+            <div className="homepage-editor__media-empty-actions">
+              <Upload
+                accept="image/*"
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  void handleUpload(file);
+                  return false;
+                }}
+                disabled={uploading}
+              >
+                <Button size="small" icon={<PictureOutlined />} disabled={uploading}>
+                  上传图片
+                </Button>
+              </Upload>
+              <Button
+                size="small"
+                icon={<PictureOutlined />}
+                disabled={!onOpenPageMedia}
+                onClick={onOpenPageMedia}
+              >
+                从素材库选择
+              </Button>
+              <button
+                type="button"
+                className="homepage-editor__media-link-entry"
+                onClick={() => setUrlMode(true)}
+              >
+                粘贴图片链接
+              </button>
+            </div>
+          ) : (
+            <div
+              className="homepage-editor__media-alt-actions"
+              style={{ marginTop: 6 }}
             >
-              或粘贴图片链接
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setUrlMode(true)}
+                style={{
+                  border: 0,
+                  background: "transparent",
+                  color: "#6E7477",
+                  cursor: "pointer",
+                  fontSize: 11,
+                  textDecoration: "underline",
+                  padding: 0,
+                }}
+              >
+                或粘贴图片链接
+              </button>
+            </div>
+          )}
         </>
       )}
 

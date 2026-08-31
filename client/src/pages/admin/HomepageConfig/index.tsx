@@ -1,6 +1,8 @@
 import {
   cloneElement,
   isValidElement,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -11,51 +13,37 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { App as AntdApp, Button, Input, Spin } from "antd";
+import { App as AntdApp, Button, Spin } from "antd";
 import {
   AppstoreOutlined,
   BlockOutlined,
   CheckCircleOutlined,
   ControlOutlined,
-  CopyOutlined,
-  DeleteOutlined,
-  DragOutlined,
-  EditOutlined,
   EyeOutlined,
   ExclamationCircleOutlined,
-  LeftOutlined,
-  MenuOutlined,
-  RightOutlined,
-  SearchOutlined,
 } from "@ant-design/icons";
 import { Puck, type Data, type PuckAction, type UiState } from "@puckeditor/core";
 import { useNavigate } from "react-router-dom";
-import { canAccessAdminRoute } from "@/config/adminRouteAccess";
 import { useAuthStore } from "@/store/authStore";
-import "@puckeditor/core/puck.css";
+import "@puckeditor/core/no-external.css";
 import { puckConfig } from "@/page-builder/config/puckConfig";
 import { BusinessRegionCanvasProvider } from "@/page-builder/adapters/businessRegion.puck";
 import {
   BLOCK_META,
-  BLOCK_PREVIEW_KIND,
-  BLOCK_CATEGORIES,
-  TEMPLATE_MEDIA_HINT,
   isContentTemplateInsertable,
-  type BlockMeta,
 } from "@/page-builder/config/blockMeta";
 import {
   pageDocumentApi,
-  personalContentTemplateApi,
   type PageDocumentResource,
   type PersonalContentTemplate,
+  type SystemContentTemplateCurrent,
 } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
-import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import {
-  blockTemplateStore,
-  type BlockTemplate,
-} from "@/page-builder/templates/blockTemplateStore";
+  RESPONSIVE_CANVAS,
+  isMobileCanvasWidth,
+} from "@/page-builder/config/blockContracts";
 import StorefrontNavigation from "@/components/layout/StorefrontNavigation";
 import StorefrontFooter from "@/components/layout/StorefrontFooter";
 import {
@@ -75,14 +63,12 @@ import {
   type EditorPageKey,
 } from "@/page-builder/config/editorPages";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
-import ContentTemplateRendererPreview from "@/page-builder/preview/ContentTemplateRendererPreview";
 import {
   createContentTemplateMarker,
-  extractContentTemplateDefaultContent,
   extractContentTemplateLayoutData,
+  getContentTemplateContract,
   getContentTemplatePreview,
   isContentTemplateAllowedForPage,
-  sanitizeContentTemplateDefaultContent,
   sanitizeContentTemplateLayoutData,
   type ContentTemplateMediaRight,
 } from "@/page-builder/generated/contentTemplates.generated";
@@ -93,10 +79,69 @@ import {
   useHasMissingAssets,
 } from "@/page-builder/runtime/renderParity";
 import {
+  CANVAS_DYNAMIC_LAYOUT_EDIT_MESSAGE,
+  CANVAS_SHARED_VISUAL_PREVIEW_MESSAGE,
   CANVAS_VISUAL_EDIT_MESSAGE,
+  type CanvasDynamicLayoutEditMessage,
   type CanvasVisualEditMessage,
+  useVisualEditorSession,
 } from "@/page-builder/visual-editor/visualEditorSession";
-import { applySharedTemplateDesignPatch } from "@/page-builder/visual-editor/sharedTemplateDesign";
+import type { PersistTemplateOptions } from "@/page-builder/template-editor/TemplateWorkspace";
+import { UnifiedTemplateLibrary } from "@/page-builder/template-editor/TemplateEditorLibrary";
+import WorkspaceCanvasControls from "@/page-builder/template-editor/WorkspaceCanvasControls";
+import {
+  createPersonalTemplateDraft,
+  createSystemTemplateDraft,
+} from "@/page-builder/template-editor/templateDraftAdapter";
+import { adaptLegacyTemplateSource } from "@/page-builder/template-editor/legacyTemplateConversion";
+import {
+  hasUnpersistedTemplateDraft,
+  useTemplateEditorSession,
+} from "@/page-builder/template-editor/templateEditorSession";
+import {
+  DYNAMIC_TEMPLATE_LOCAL_DRAFT_CHANGED_EVENT,
+  createNewDynamicTemplateDraft,
+  loadLocalDynamicTemplateDraft,
+  saveLocalDynamicTemplateDraft,
+} from "@/page-builder/template-editor/dynamicTemplateDraftRepository";
+import { USE_MOCK } from "@/services/mockData";
+import {
+  createDynamicTemplateStableId,
+  getEffectiveDynamicTemplateInstanceEditPolicy,
+  type TemplateDefinitionV2,
+} from "@/page-builder/template-definition";
+import {
+  DYNAMIC_TEMPLATE_BLOCK_TYPE,
+  DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
+  DynamicTemplateInstanceView,
+  createDynamicTemplateInstanceProps,
+  dynamicTemplateVersionKey,
+  readResolvedDynamicTemplateDefinitions,
+  registerResolvedDynamicTemplate,
+  replaceResolvedDynamicTemplates,
+  useResolvedDynamicTemplateDefinitions,
+  type DynamicTemplateInstanceProps,
+  type ResolvedDynamicTemplateDefinitionMap,
+} from "@/page-builder/dynamic-template-instance";
+import DynamicTemplateInstanceInspector from "@/page-builder/dynamic-template-instance/DynamicTemplateInstanceInspector";
+import {
+  dynamicTemplateApi,
+  type DynamicTemplatePublishResultResource,
+  type DynamicTemplateResource,
+  type PublishedDynamicTemplateResource,
+  type TemplateCatalogResource,
+} from "@/services/clients/dynamicTemplateClient";
+import type {
+  EditorWorkspaceMode,
+  TemplateEditorDraft,
+} from "@/page-builder/template-editor/types";
+import {
+  countUpgradeableSystemTemplateInstances,
+  upgradePersonalTemplateInstances,
+  upgradeSystemTemplateInstances,
+} from "@/page-builder/templates/templateOrigin";
+import WorkspacePanelHeader from "@/page-builder/workspace/WorkspacePanelHeader";
+import WorkspacePanelCollapseButton from "@/page-builder/workspace/WorkspacePanelCollapseButton";
 import "./editor.css";
 import EditorToolbar, { VIEWPORT_PRESETS } from "./components/EditorToolbar";
 import UnsavedChangesGuard from "./components/UnsavedChangesGuard";
@@ -126,6 +171,12 @@ import {
   type CanvasNavigationStateMessage,
   type CanvasPageNavigationMessage,
 } from "./editor-store";
+
+// 模板编辑器只在运营者主动切换到模板模式后下载；页面编辑首开不承担其结构树、
+// 版本面板和母模板画布成本。
+const TemplateWorkspace = lazy(
+  () => import("@/page-builder/template-editor/TemplateWorkspace"),
+);
 import {
   getModuleDisplayName,
   formatEditorTime,
@@ -170,7 +221,27 @@ const INITIAL_EDITOR_UI: Partial<UiState> = {
 const CANVAS_SCROLL_SPY_TOP_OFFSET = 24;
 
 let blockIdSequence = 0;
-const PERSONAL_TEMPLATE_CHANGED_EVENT = "haichuan:personal-template-changed";
+const DYNAMIC_TEMPLATE_SERVER_CHANGED_EVENT = "haichuan:dynamic-template-server-changed";
+
+function createPersistedDynamicTemplateDraft(
+  template: DynamicTemplateResource,
+): TemplateEditorDraft | null {
+  if (!template.draft) return null;
+  return {
+    format: "dynamic",
+    sourceType: "persisted",
+    localDraftId: template.templateId,
+    versionNote: template.draft.versionNote ?? "",
+    ...(template.sourceReference ? { sourceReference: template.sourceReference } : {}),
+    definition: structuredClone(template.draft.definition),
+    remote: {
+      databaseId: template.id,
+      revision: template.draft.revision,
+      publishedVersion: template.publishedVersion,
+      baseVersion: template.draft.baseVersion,
+    },
+  };
+}
 
 type CanvasComponentConfig = {
   label?: string;
@@ -182,6 +253,32 @@ type EditorPuckBlock = {
   type: string;
   props: PuckProps & { id: string };
 };
+
+function CanvasDynamicTemplateInstance({
+  props,
+  definition,
+  mode,
+}: {
+  props: DynamicTemplateInstanceProps;
+  definition?: TemplateDefinitionV2;
+  mode: "editor" | "preview";
+}) {
+  const currentViewport = useHomepagePuck(
+    (state) => state.appState.ui.viewports.current,
+  );
+  const device = isMobileCanvasWidth(currentViewport.width)
+    ? "mobile"
+    : "desktop";
+
+  return (
+    <DynamicTemplateInstanceView
+      props={props}
+      definition={definition}
+      deviceOverride={device}
+      mode={mode}
+    />
+  );
+}
 
 /**
  * 脏标记比较签名:只取 content 的规范化形态(忽略 block id 与键序、不含 zones/ui)。
@@ -267,9 +364,11 @@ function EditorCanvasFooter() {
 function EditorCanvasShell({
   children,
   pageKey,
+  editable,
 }: {
   children: ReactNode;
   pageKey: EditorPageKey;
+  editable: boolean;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -334,6 +433,7 @@ function EditorCanvasShell({
     <div
       ref={rootRef}
       className="homepage-editor__storefront-frame"
+      data-canvas-editable={editable ? "true" : "false"}
       style={
         {
           "--homepage-editor-preview-height": `${previewViewportHeight}px`,
@@ -544,6 +644,10 @@ function CanvasBlockAnchor({
     const puckBlock = anchor?.closest<HTMLElement>("[data-puck-component]");
     if (!blockId || !frameWindow || !puckBlock) return;
 
+    // 页面装修画布只建立模块上下文；任何旧的图片、文字或业务对象选择
+    // 都必须在显示该模板完整属性面板前清除。
+    useVisualEditorSession.getState().clearNode();
+
     setIsFocused(true);
     if (clearFocusTimer.current)
       frameWindow.clearTimeout(clearFocusTimer.current);
@@ -552,14 +656,15 @@ function CanvasBlockAnchor({
       1800,
     );
 
+    if (selectedBlockId === blockId) return;
+
     const blockIndex = Array.from(
       puckBlock.ownerDocument.querySelectorAll<HTMLElement>(
         "[data-puck-component]",
       ),
     ).indexOf(puckBlock);
-    // Puck 会在当前 pointerdown/click 收尾时同步自身的 itemSelector；
-    // 因此模块选择必须等它完成后再落位。视觉节点选择由独立 store 保留，
-    // 新 Inspector 挂载后会直接读取同一 blockId 的节点上下文。
+    // 模块选择等当前 pointerdown 收尾后落位，避免 Puck 在缩放 iframe 中
+    // 按未缩放坐标重复滚动；内部对象上下文已在上方清除。
     window.setTimeout(() => {
       if (blockIndex < 0) return;
       dispatch({
@@ -640,1794 +745,129 @@ function CanvasPageDataSynchronizer({
  * 模块卡片不使用真实商品素材，而用“布局微缩图”展示该区块插入后的结构。
  * 这让用户先理解版式和内容层级，再决定是否添加。
  */
-const PREVIEW_COLORS = {
-  surface: "#FFFFFF",
-  ink: "#181A1B",
-  muted: "#6E7477",
-  line: "#DDE1E2",
-  media: "#DDE1E2",
-  mediaDeep: "#B8BEC1",
-  accent: "#181A1B",
-  dark: "#111315",
-  light: "#FFFFFF",
-};
-
-function PreviewText({
-  x,
-  y,
-  width,
-  lines = 3,
-  inverse = false,
-}: {
-  x: number;
-  y: number;
-  width: number;
-  lines?: number;
-  inverse?: boolean;
-}) {
-  const color = inverse ? "rgba(255,255,255,.92)" : PREVIEW_COLORS.ink;
-  const soft = inverse ? "rgba(255,255,255,.56)" : PREVIEW_COLORS.muted;
-  return (
-    <g aria-hidden="true">
-      <rect x={x} y={y} width={width} height="9" rx="2" fill={color} />
-      {Array.from(
-        { length: Math.min(2, Math.max(0, lines - 1)) },
-        (_, index) => (
-          <rect
-            key={index}
-            x={x}
-            y={y + 18 + index * 8}
-            width={width * (index === 1 ? 0.62 : 0.84)}
-            height="3"
-            rx="2"
-            fill={soft}
-          />
-        ),
-      )}
-    </g>
-  );
-}
-
-function PreviewMedia({
-  x,
-  y,
-  width,
-  height,
-  dark = false,
-  label = "图片",
-}: {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  dark?: boolean;
-  label?: string;
-}) {
-  const base = dark ? "#5F6568" : PREVIEW_COLORS.media;
-  const detail = dark ? "#6E7477" : PREVIEW_COLORS.mediaDeep;
-  return (
-    <g aria-hidden="true">
-      <rect x={x} y={y} width={width} height={height} rx="4" fill={base} />
-      <rect
-        x={x + 8}
-        y={y + 8}
-        width={Math.max(0, width - 16)}
-        height={Math.max(0, height - 16)}
-        rx="2"
-        fill={detail}
-        opacity=".2"
-      />
-      <path
-        d={`M${x + 10} ${y + height - 10} L${x + width - 10} ${y + 10}`}
-        stroke={dark ? "rgba(255,255,255,.36)" : "rgba(24,26,27,.16)"}
-        strokeWidth="1"
-      />
-    </g>
-  );
-}
-
-function PreviewCard({
-  x,
-  y,
-  width,
-  height,
-  kind = "product",
-}: {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  kind?: "product" | "article" | "service" | "quote";
-}) {
-  const mediaHeight =
-    kind === "article" ? height * 0.42 : kind === "service" ? 0 : height * 0.58;
-  return (
-    <g aria-hidden="true">
-      <rect
-        x={x}
-        y={y}
-        width={width}
-        height={height}
-        rx="4"
-        fill={PREVIEW_COLORS.light}
-        stroke={PREVIEW_COLORS.line}
-      />
-      {kind === "service" ? (
-        <>
-          <circle
-            cx={x + width / 2}
-            cy={y + 19}
-            r="10"
-            fill="#F4F5F5"
-            stroke={PREVIEW_COLORS.accent}
-          />
-          <circle
-            cx={x + width / 2}
-            cy={y + 19}
-            r="3"
-            fill={PREVIEW_COLORS.accent}
-          />
-          <rect
-            x={x + 10}
-            y={y + 39}
-            width={width - 20}
-            height="5"
-            rx="2.5"
-            fill={PREVIEW_COLORS.ink}
-          />
-          <rect
-            x={x + 16}
-            y={y + 50}
-            width={width - 32}
-            height="4"
-            rx="2"
-            fill={PREVIEW_COLORS.muted}
-          />
-        </>
-      ) : kind === "quote" ? (
-        <>
-          <circle cx={x + 19} cy={y + 20} r="9" fill={PREVIEW_COLORS.media} />
-          <rect
-            x={x + 10}
-            y={y + 43}
-            width={width - 20}
-            height="5"
-            rx="2"
-            fill={PREVIEW_COLORS.ink}
-          />
-          <rect
-            x={x + 10}
-            y={y + 54}
-            width={width - 28}
-            height="4"
-            rx="2"
-            fill={PREVIEW_COLORS.muted}
-          />
-          <rect
-            x={x + 10}
-            y={y + height - 14}
-            width={width * 0.36}
-            height="4"
-            rx="2"
-            fill={PREVIEW_COLORS.accent}
-          />
-        </>
-      ) : (
-        <>
-          <PreviewMedia
-            x={x + 5}
-            y={y + 5}
-            width={width - 10}
-            height={mediaHeight - 5}
-            label={kind === "article" ? "内容" : "商品"}
-          />
-          <rect
-            x={x + 8}
-            y={y + mediaHeight + 8}
-            width={width - 16}
-            height="5"
-            rx="2"
-            fill={PREVIEW_COLORS.ink}
-          />
-          <rect
-            x={x + 8}
-            y={y + mediaHeight + 18}
-            width={width * 0.48}
-            height="4"
-            rx="2"
-            fill={PREVIEW_COLORS.accent}
-          />
-        </>
-      )}
-    </g>
-  );
-}
-
-/** 内容模板卡片使用机器合同结构缩略图；非合同模块仍保留旧分类图示。 */
-function BlockTemplateVisual({ name, viewport = "desktop" }: { name: string; viewport?: "desktop" | "mobile" }) {
-  if (getContentTemplatePreview(name)) {
-    return <ContentTemplateRendererPreview moduleType={name} viewport={viewport} variant="structure" />;
-  }
-  const kind = BLOCK_PREVIEW_KIND[name] ?? "hero";
-  let content: ReactNode;
-  let background = PREVIEW_COLORS.surface;
-
-  switch (kind) {
-    case "hero":
-      background = PREVIEW_COLORS.dark;
-      content = (
-        <>
-          <rect
-            x="18"
-            y="20"
-            width="264"
-            height="4"
-            rx="2"
-            fill="rgba(255,255,255,.48)"
-          />
-          <PreviewMedia x={14} y={47} width={272} height={153} dark />
-          <PreviewText x={29} y={144} width={115} lines={3} inverse />
-          <rect
-            x={29}
-            y="183"
-            width="47"
-            height="11"
-            rx="2"
-            fill={PREVIEW_COLORS.accent}
-          />
-          <rect
-            x="111"
-            y="234"
-            width="78"
-            height="139"
-            rx="4"
-            fill="#5f6568"
-            opacity=".58"
-          />
-          <rect
-            x="121"
-            y="244"
-            width="58"
-            height="103"
-            rx="3"
-            fill="#6E7477"
-            opacity=".52"
-          />
-        </>
-      );
-      break;
-    case "single-poster":
-      content = (
-        <>
-          <PreviewText x={21} y={52} width={72} lines={3} />
-          <rect
-            x={21}
-            y="94"
-            width="43"
-            height="11"
-            rx="2"
-            fill="none"
-            stroke={PREVIEW_COLORS.accent}
-          />
-          <PreviewMedia x={110} y={42} width={171} height={114} />
-          <rect x="17" y="192" width="266" height="177" rx="4" fill="#ECEEEF" />
-          <PreviewMedia x={30} y={211} width={140} height={93} />
-          <PreviewText x={190} y={233} width={66} lines={2} />
-        </>
-      );
-      break;
-    case "double-poster":
-      content = (
-        <>
-          <PreviewText x={18} y={27} width={108} lines={2} />
-          <PreviewMedia x={18} y={83} width={160} height={120} />
-          <PreviewMedia x={197} y={105} width={72} height={90} />
-          <PreviewText x={197} y={219} width={72} lines={3} />
-          <rect
-            x={197}
-            y="260"
-            width="45"
-            height="11"
-            rx="2"
-            fill={PREVIEW_COLORS.accent}
-          />
-          <rect
-            x="18"
-            y="306"
-            width="252"
-            height="1"
-            fill={PREVIEW_COLORS.line}
-          />
-          <PreviewMedia x={18} y={327} width={105} height={79} />
-          <PreviewMedia x={139} y={327} width={63} height={79} />
-          <PreviewText x={218} y={347} width={52} lines={2} />
-        </>
-      );
-      break;
-    case "image-text":
-      content = (
-        <>
-          <PreviewMedia x={16} y={72} width={132} height={99} />
-          <PreviewText x={168} y={91} width={98} lines={3} />
-          <rect
-            x={168}
-            y="135"
-            width="48"
-            height="11"
-            rx="2"
-            fill="none"
-            stroke={PREVIEW_COLORS.accent}
-          />
-          <rect
-            x="16"
-            y="216"
-            width="268"
-            height="1"
-            fill={PREVIEW_COLORS.line}
-          />
-          <PreviewText x={28} y={254} width={97} lines={3} />
-          <PreviewMedia x={151} y={239} width={121} height={91} />
-        </>
-      );
-      break;
-    case "full-bleed":
-      background = PREVIEW_COLORS.dark;
-      content = (
-        <>
-          <PreviewMedia x={14} y={54} width={272} height={113} dark />
-          <PreviewText x={34} y={89} width={118} lines={2} inverse />
-          <rect
-            x="34"
-            y="126"
-            width="55"
-            height="2"
-            rx="1"
-            fill="rgba(255,255,255,.72)"
-          />
-          <rect
-            x="187"
-            y="213"
-            width="88"
-            height="106"
-            rx="4"
-            fill="#5f6568"
-            opacity=".72"
-          />
-          <PreviewText x={198} y={246} width={62} lines={2} inverse />
-          <rect
-            x="198"
-            y="282"
-            width="39"
-            height="2"
-            rx="1"
-            fill="rgba(255,255,255,.72)"
-          />
-          <rect
-            x="26"
-            y="363"
-            width="248"
-            height="1"
-            fill="rgba(255,255,255,.18)"
-          />
-        </>
-      );
-      break;
-    case "product-row":
-      content = (
-        <>
-          <PreviewText x={22} y={30} width={114} lines={2} />
-          {[0, 1, 2, 3].map((index) => (
-            <g key={index}>
-              <PreviewMedia
-                x={18 + index * 68}
-                y={108}
-                width={58}
-                height={58}
-              />
-              <rect
-                x={23 + index * 68}
-                y="177"
-                width="47"
-                height="5"
-                rx="2"
-                fill={PREVIEW_COLORS.ink}
-              />
-              <rect
-                x={23 + index * 68}
-                y="188"
-                width="29"
-                height="4"
-                rx="2"
-                fill={PREVIEW_COLORS.accent}
-              />
-            </g>
-          ))}
-          <rect
-            x={106}
-            y="220"
-            width="88"
-            height="11"
-            rx="2"
-            fill="none"
-            stroke={PREVIEW_COLORS.accent}
-          />
-          <rect
-            x="18"
-            y="275"
-            width="264"
-            height="1"
-            fill={PREVIEW_COLORS.line}
-          />
-          <PreviewText x={22} y={308} width={114} lines={2} />
-        </>
-      );
-      break;
-    case "category-cards":
-    case "occasion-guide":
-    case "gift-guide":
-      content = (
-        <>
-          <PreviewText x={74} y={27} width={152} lines={2} />
-          {[
-            [18, 103],
-            [156, 103],
-            [18, 252],
-            [156, 252],
-          ].map(([x, y], index) => (
-            <g key={index}>
-              <PreviewMedia x={x} y={y} width={126} height={126} />
-              <rect
-                x={x + 11}
-                y={y + 98}
-                width="58"
-                height="6"
-                rx="2"
-                fill="rgba(255,255,255,.88)"
-              />
-            </g>
-          ))}
-        </>
-      );
-      break;
-    case "card-grid":
-      content = (
-        <>
-          <PreviewText x={70} y={28} width={160} lines={2} />
-          {[0, 1, 2].map((index) => (
-            <PreviewCard
-              key={index}
-              x={18 + index * 92}
-              y={128}
-              width={80}
-              height={156}
-              kind="service"
-            />
-          ))}
-        </>
-      );
-      break;
-    case "text-banner":
-      background = PREVIEW_COLORS.dark;
-      content = (
-        <>
-          <rect x="16" y="159" width="268" height="56" rx="4" fill="#181A1B" />
-          <PreviewText x={91} y={173} width={118} lines={2} inverse />
-          <rect
-            x="126"
-            y="196"
-            width="48"
-            height="9"
-            rx="2"
-            fill={PREVIEW_COLORS.accent}
-          />
-          <PreviewText x={25} y={263} width={95} lines={2} />
-          <PreviewText x={174} y={263} width={95} lines={2} />
-        </>
-      );
-      break;
-    case "carousel":
-      content = (
-        <>
-          <PreviewMedia x={12} y={105} width={276} height={130} dark />
-          <PreviewText x={28} y={162} width={104} lines={2} inverse />
-          <path
-            d="M23 176l8 -7v14zM277 176l-8 -7v14z"
-            fill="#FFFFFF"
-            opacity=".9"
-          />
-          {[0, 1, 2, 3].map((index) => (
-            <circle
-              key={index}
-              cx={132 + index * 12}
-              cy="220"
-              r="3"
-              fill={index === 0 ? PREVIEW_COLORS.accent : "#FFFFFF"}
-            />
-          ))}
-          <PreviewMedia x={18} y={279} width={74} height={35} />
-          <PreviewMedia x={112} y={279} width={74} height={35} />
-          <PreviewMedia x={206} y={279} width={74} height={35} />
-        </>
-      );
-      break;
-    case "video":
-      background = PREVIEW_COLORS.dark;
-      content = (
-        <>
-          <PreviewMedia x={16} y={105} width={268} height={151} dark />
-          <circle cx="150" cy="180" r="22" fill="rgba(255,255,255,.88)" />
-          <path d="M145 170l17 10-17 10z" fill={PREVIEW_COLORS.dark} />
-          <PreviewText x={65} y={293} width={170} lines={2} />
-        </>
-      );
-      break;
-    case "split-panel":
-      content = (
-        <>
-          <PreviewMedia x={16} y={91} width={120} height={160} />
-          <rect x="151" y="91" width="133" height="160" rx="4" fill="#ECEEEF" />
-          <PreviewText x={168} y={134} width={96} lines={3} />
-          <rect
-            x={168}
-            y="182"
-            width="50"
-            height="11"
-            rx="2"
-            fill={PREVIEW_COLORS.accent}
-          />
-          <PreviewText x={22} y={298} width={102} lines={2} />
-          <PreviewText x={174} y={298} width={102} lines={2} />
-        </>
-      );
-      break;
-    case "hotspot":
-      content = (
-        <>
-          <PreviewMedia x={14} y={99} width={272} height={153} dark />
-          {[
-            [80, 142],
-            [202, 170],
-            [132, 215],
-          ].map(([x, y], index) => (
-            <g key={index}>
-              <circle
-                cx={x}
-                cy={y}
-                r="10"
-                fill={PREVIEW_COLORS.light}
-                stroke={PREVIEW_COLORS.accent}
-                strokeWidth="2"
-              />
-              <circle cx={x} cy={y} r="3" fill={PREVIEW_COLORS.accent} />
-            </g>
-          ))}
-          <PreviewText x={74} y={294} width={152} lines={2} />
-        </>
-      );
-      break;
-    case "appointment":
-      content = (
-        <>
-          <PreviewText x={28} y={52} width={119} lines={2} />
-          <PreviewMedia x={176} y={50} width={94} height={71} />
-          <rect
-            x={28}
-            y="133"
-            width="118"
-            height="11"
-            rx="2"
-            fill="#F4F5F5"
-            stroke={PREVIEW_COLORS.accent}
-          />
-          <rect
-            x={28}
-            y="159"
-            width="244"
-            height="29"
-            rx="3"
-            fill={PREVIEW_COLORS.light}
-            stroke={PREVIEW_COLORS.line}
-          />
-          <rect
-            x={28}
-            y="199"
-            width="244"
-            height="29"
-            rx="3"
-            fill={PREVIEW_COLORS.light}
-            stroke={PREVIEW_COLORS.line}
-          />
-          <rect
-            x={28}
-            y="242"
-            width="92"
-            height="18"
-            rx="2"
-            fill={PREVIEW_COLORS.accent}
-          />
-        </>
-      );
-      break;
-    case "certificate":
-      content = (
-        <>
-          <PreviewText x={72} y={28} width={156} lines={2} />
-          {[0, 1, 2].map((index) => (
-            <g key={index}>
-              <PreviewCard
-                x={22 + index * 88}
-                y={132}
-                width={78}
-                height={146}
-                kind="service"
-              />
-              <circle
-                cx={61 + index * 88}
-                cy="164"
-                r="16"
-                fill="#F4F5F5"
-                stroke={PREVIEW_COLORS.accent}
-              />
-            </g>
-          ))}
-        </>
-      );
-      break;
-    case "custom-process":
-      content = (
-        <>
-          <PreviewText x={72} y={28} width={156} lines={2} />
-          <path d="M48 205H252" stroke={PREVIEW_COLORS.line} strokeWidth="2" />
-          {[0, 1, 2, 3].map((index) => (
-            <g key={index}>
-              <circle
-                cx={48 + index * 68}
-                cy="205"
-                r="16"
-                fill={PREVIEW_COLORS.light}
-                stroke={PREVIEW_COLORS.accent}
-                strokeWidth="2"
-              />
-              <text
-                x={43 + index * 68}
-                y="209"
-                fill={PREVIEW_COLORS.accent}
-                fontSize="10"
-              >
-                0{index + 1}
-              </text>
-              <rect
-                x={21 + index * 68}
-                y="237"
-                width="54"
-                height="5"
-                rx="2"
-                fill={PREVIEW_COLORS.ink}
-              />
-              <rect
-                x={25 + index * 68}
-                y="249"
-                width="46"
-                height="4"
-                rx="2"
-                fill={PREVIEW_COLORS.muted}
-              />
-            </g>
-          ))}
-        </>
-      );
-      break;
-    case "service-promise":
-      content = (
-        <>
-          <PreviewText x={70} y={30} width={160} lines={2} />
-          {[0, 1, 2].map((index) => (
-            <PreviewCard
-              key={index}
-              x={18 + index * 92}
-              y={144}
-              width={80}
-              height={118}
-              kind="service"
-            />
-          ))}
-          <rect
-            x={96}
-            y={296}
-            width="108"
-            height="16"
-            rx="2"
-            fill="none"
-            stroke={PREVIEW_COLORS.accent}
-          />
-        </>
-      );
-      break;
-    case "store-info":
-      content = (
-        <>
-          <PreviewMedia x={16} y={94} width={126} height={95} />
-          <PreviewText x={165} y={107} width={103} lines={2} />
-          {[0, 1, 2].map((index) => (
-            <g key={index}>
-              <circle
-                cx="172"
-                cy={166 + index * 21}
-                r="4"
-                fill={PREVIEW_COLORS.accent}
-              />
-              <rect
-                x="185"
-                y={163 + index * 21}
-                width="74"
-                height="4"
-                rx="2"
-                fill={PREVIEW_COLORS.muted}
-              />
-            </g>
-          ))}
-          <rect
-            x={165}
-            y="231"
-            width="68"
-            height="11"
-            rx="2"
-            fill="none"
-            stroke={PREVIEW_COLORS.accent}
-          />
-          <rect
-            x="16"
-            y="280"
-            width="268"
-            height="1"
-            fill={PREVIEW_COLORS.line}
-          />
-          <PreviewText x={22} y={310} width={114} lines={2} />
-        </>
-      );
-      break;
-    case "featured-product":
-      content = (
-        <>
-          <PreviewMedia x={30} y={91} width={99} height={132} />
-          <PreviewText x={158} y={112} width={104} lines={3} />
-          <rect
-            x={158}
-            y="164"
-            width="63"
-            height="11"
-            rx="2"
-            fill={PREVIEW_COLORS.accent}
-          />
-          <rect
-            x={158}
-            y="185"
-            width="63"
-            height="11"
-            rx="2"
-            fill="none"
-            stroke={PREVIEW_COLORS.accent}
-          />
-          <rect
-            x="18"
-            y="266"
-            width="264"
-            height="1"
-            fill={PREVIEW_COLORS.line}
-          />
-          <PreviewText x={24} y={299} width={116} lines={2} />
-        </>
-      );
-      break;
-    case "lookbook":
-      content = (
-        <>
-          <PreviewText x={20} y={27} width={132} lines={2} />
-          <PreviewMedia x={20} y={97} width={140} height={105} />
-          <PreviewMedia x={178} y={97} width={70} height={93} />
-          <PreviewMedia x={178} y={212} width={70} height={93} />
-          <rect
-            x="178"
-            y="198"
-            width="59"
-            height="4"
-            rx="2"
-            fill={PREVIEW_COLORS.ink}
-          />
-          <rect
-            x="178"
-            y="313"
-            width="59"
-            height="4"
-            rx="2"
-            fill={PREVIEW_COLORS.ink}
-          />
-        </>
-      );
-      break;
-    case "limited-offer":
-      background = PREVIEW_COLORS.dark;
-      content = (
-        <>
-          <PreviewText x={25} y={93} width={118} lines={3} inverse />
-          {[0, 1, 2, 3].map((index) => (
-            <g key={index}>
-              <rect
-                x={160 + index * 29}
-                y="126"
-                width="23"
-                height="31"
-                rx="2"
-                fill="rgba(255,255,255,.14)"
-              />
-              <rect
-                x={164 + index * 29}
-                y="137"
-                width="15"
-                height="5"
-                rx="2"
-                fill="#DDE1E2"
-              />
-            </g>
-          ))}
-          <rect
-            x={25}
-            y={239}
-            width="92"
-            height="17"
-            rx="2"
-            fill={PREVIEW_COLORS.accent}
-          />
-          <rect
-            x={25}
-            y={287}
-            width="188"
-            height="18"
-            rx="2"
-            fill="none"
-            stroke="rgba(221,225,226,.72)"
-          />
-        </>
-      );
-      break;
-    case "testimonial":
-      content = (
-        <>
-          <PreviewText x={72} y={28} width={156} lines={2} />
-          {[0, 1, 2].map((index) => (
-            <g key={index}>
-              <PreviewMedia
-                x={18 + index * 92}
-                y={122}
-                width={80}
-                height={60}
-              />
-              <PreviewCard
-                x={18 + index * 92}
-                y={192}
-                width={80}
-                height={96}
-                kind="quote"
-              />
-            </g>
-          ))}
-        </>
-      );
-      break;
-    case "asymmetric-gallery":
-      // 作品画廊:大图(4:5)→小图错位→方图→宽图(3:2)的非对称节奏
-      content = (
-        <>
-          <PreviewText x={24} y={26} width={150} lines={2} />
-          <PreviewMedia x={18} y={64} width={168} height={132} />
-          <PreviewMedia x={196} y={92} width={86} height={104} />
-          <PreviewMedia x={18} y={216} width={86} height={86} />
-          <PreviewMedia x={114} y={216} width={168} height={112} />
-          <rect
-            x={18}
-            y={344}
-            width={96}
-            height={11}
-            rx={2}
-            fill="none"
-            stroke={PREVIEW_COLORS.accent}
-          />
-        </>
-      );
-      break;
-    case "before-after":
-      // 改款前后:4:5 对比图 + 滑动分割线手柄
-      content = (
-        <>
-          <PreviewText x={70} y={24} width={160} lines={2} />
-          <PreviewMedia x={18} y={66} width={264} height={250} />
-          <rect
-            x={150}
-            y={66}
-            width={132}
-            height={250}
-            fill={PREVIEW_COLORS.surface}
-          />
-          <rect x={149} y={66} width={2} height={250} fill="#FFFFFF" />
-          <circle
-            cx={150}
-            cy={191}
-            r={13}
-            fill={PREVIEW_COLORS.accent}
-            stroke="#FFFFFF"
-            strokeWidth={2}
-          />
-          <rect
-            x={26}
-            y={76}
-            width={34}
-            height={9}
-            rx={2}
-            fill="rgba(17,19,21,.45)"
-          />
-          <rect
-            x={240}
-            y={76}
-            width={34}
-            height={9}
-            rx={2}
-            fill="rgba(17,19,21,.45)"
-          />
-        </>
-      );
-      break;
-    default:
-      content = (
-        <>
-          <PreviewText x={70} y={38} width={160} lines={2} />
-          <PreviewMedia
-            x={18}
-            y={120}
-            width={264}
-            height={170}
-            label="内容区域"
-          />
-          <rect
-            x={104}
-            y={322}
-            width="92"
-            height="16"
-            rx="2"
-            fill="none"
-            stroke={PREVIEW_COLORS.accent}
-          />
-        </>
-      );
-  }
-
-  return (
-    <svg
-      className="homepage-editor__template-preview-img"
-      viewBox="0 0 300 400"
-      role="img"
-      aria-label={`${name}的内容框架预览`}
-      preserveAspectRatio="xMidYMid meet"
-    >
-      <rect width="300" height="400" fill={background} />
-      <rect
-        x="8"
-        y="8"
-        width="284"
-        height="384"
-        rx="5"
-        fill="none"
-        stroke={
-          background === PREVIEW_COLORS.dark
-            ? "rgba(255,255,255,.16)"
-            : "#DDE1E2"
-        }
-      />
-      {content}
-    </svg>
-  );
-}
-
-function TemplateCard({
-  name,
-  meta,
-  viewMode,
-  previewViewport,
-  onActivate,
-  onPointerDragMove,
-  onPointerDragEnd,
-}: {
-  name: string;
-  meta: BlockMeta;
-  viewMode: "single" | "double";
-  previewViewport: "desktop" | "mobile";
-  onActivate: (name: string) => void;
-  onPointerDragMove: (name: string, clientX: number, clientY: number) => void;
-  onPointerDragEnd: (name: string, clientX: number, clientY: number) => boolean;
-}) {
-  const { message } = AntdApp.useApp();
-  const content = useHomepagePuck((state) => state.appState.data.content);
-  const usedCount = content.filter(
-    (item: { type: string }) => item.type === name,
-  ).length;
-  const limit = meta.limit ?? 5;
-  const unavailable = usedCount >= limit;
-  const pointerStart = useRef<{ x: number; y: number } | null>(null);
-  const didPointerDrag = useRef(false);
-  const dragInput = useRef<"pointer" | "mouse" | null>(null);
-
-  const moveTemplate = useCallback(
-    (clientX: number, clientY: number) => {
-      const start = pointerStart.current;
-      if (!start) return;
-      const distance = Math.hypot(clientX - start.x, clientY - start.y);
-      if (distance < 7 && !didPointerDrag.current) return;
-      didPointerDrag.current = true;
-      onPointerDragMove(name, clientX, clientY);
-    },
-    [name, onPointerDragMove],
-  );
-
-  const endTemplateDrag = useCallback(
-    (clientX: number, clientY: number) => {
-      if (!pointerStart.current) return;
-      pointerStart.current = null;
-      if (!didPointerDrag.current) return;
-      onPointerDragEnd(name, clientX, clientY);
-      window.setTimeout(() => {
-        didPointerDrag.current = false;
-      }, 0);
-    },
-    [name, onPointerDragEnd],
-  );
-
-  useEffect(() => {
-    const handleMouseMove = (event: MouseEvent) => {
-      if (dragInput.current) {
-        moveTemplate(event.clientX, event.clientY);
-      }
-    };
-    const handleMouseUp = (event: MouseEvent) => {
-      if (!dragInput.current) return;
-      endTemplateDrag(event.clientX, event.clientY);
-      dragInput.current = null;
-    };
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [endTemplateDrag, moveTemplate]);
-
-  const activateTemplate = () => {
-    if (unavailable) {
-      message.info(`“${meta.name}”最多可添加 ${limit} 个`);
-      return;
-    }
-    onActivate(name);
-  };
-
-  return (
-    <article
-      className={`homepage-editor__template-card${unavailable ? " is-disabled" : ""}${viewMode === "double" ? " is-compact" : ""}`}
-      data-template-name={name}
-      role="button"
-      tabIndex={unavailable ? -1 : 0}
-      aria-disabled={unavailable || undefined}
-      aria-label={`${meta.name}：点击添加到页面末尾，也可拖到画布指定位置`}
-      onClick={() => {
-        if (didPointerDrag.current) {
-          didPointerDrag.current = false;
-          return;
-        }
-        activateTemplate();
-      }}
-      onKeyDown={(event) => {
-        if (
-          !unavailable &&
-          !event.repeat &&
-          (event.key === "Enter" || event.key === " ")
-        ) {
-          event.preventDefault();
-          event.currentTarget.click();
-        }
-      }}
-      onPointerDown={(event) => {
-          if (event.pointerType === "touch" || unavailable) return;
-          dragInput.current = "pointer";
-          pointerStart.current = { x: event.clientX, y: event.clientY };
-          didPointerDrag.current = false;
-          event.currentTarget.setPointerCapture(event.pointerId);
-      }}
-      onPointerMove={(event) => {
-          if (dragInput.current === "pointer") {
-            moveTemplate(event.clientX, event.clientY);
-          }
-      }}
-      onPointerUp={(event) => {
-          if (dragInput.current !== "pointer") return;
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-          }
-          endTemplateDrag(event.clientX, event.clientY);
-          dragInput.current = null;
-          if (!didPointerDrag.current) return;
-          event.preventDefault();
-      }}
-      onPointerCancel={() => {
-          pointerStart.current = null;
-          didPointerDrag.current = false;
-          dragInput.current = null;
-      }}
-      onMouseDown={(event) => {
-          if (unavailable || dragInput.current === "pointer") return;
-          dragInput.current = "mouse";
-          pointerStart.current = { x: event.clientX, y: event.clientY };
-          didPointerDrag.current = false;
-      }}
-      title={
-        unavailable
-          ? `${meta.name}已达可添加上限`
-          : `点击添加${meta.name}到页面末尾，也可拖到画布指定位置`
-      }
-    >
-      <div className="homepage-editor__template-card-main">
-        <span className="homepage-editor__template-preview-wrap">
-          {meta.previewImage ? (
-            <img
-              className="homepage-editor__template-preview-img"
-              src={meta.previewImage}
-              alt={meta.name}
-              loading="lazy"
-              draggable={false}
-            />
-          ) : (
-            <BlockTemplateVisual name={name} viewport={previewViewport} />
-          )}
-          {meta.badge && (
-            <span className="homepage-editor__template-badge">
-              {meta.badge}
-            </span>
-          )}
-          <span className="homepage-editor__template-add">点击添加 · 可拖拽</span>
-        </span>
-        <span className="homepage-editor__template-name">{meta.name}</span>
-        <span className="homepage-editor__template-description">
-          {meta.description}
-        </span>
-      </div>
-      <div className="homepage-editor__template-footer">
-        <span
-          className={`homepage-editor__template-usage${unavailable ? " is-limit" : ""}`}
-        >
-          已添加 {usedCount} / {limit}
-        </span>
-        {viewMode === "single" && (
-          <span className="homepage-editor__template-media-hint">
-            {TEMPLATE_MEDIA_HINT[name] ?? meta.tags[0]}
-          </span>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function TemplateLibrary({
+function PageTemplateLibraryAdapter({
   pageKey,
   onInsertTemplate,
   onTemplatePointerDragMove,
   onTemplatePointerDragEnd,
 }: {
   pageKey: EditorPageKey;
-  onInsertTemplate: (name: string) => void;
+  onInsertTemplate: (name: string, current?: SystemContentTemplateCurrent) => void;
   onTemplatePointerDragMove: (
     name: string,
     clientX: number,
     clientY: number,
+    current?: SystemContentTemplateCurrent,
   ) => void;
   onTemplatePointerDragEnd: (
     name: string,
     clientX: number,
     clientY: number,
+    current?: SystemContentTemplateCurrent,
   ) => boolean;
 }) {
   const { message, modal } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
   const dispatch = useHomepagePuck((state) => state.dispatch);
-  const currentViewport = useHomepagePuck(
-    (state) => state.appState.ui.viewports.current,
-  );
+  const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
   const previewViewport = typeof currentViewport.width === "number" && currentViewport.width <= 480
     ? "mobile"
     : "desktop";
-  const [keyword, setKeyword] = useState("");
-  const [viewMode, setViewMode] = useState<"single" | "double">(() => {
-    try {
-      return window.localStorage.getItem(
-        "homepage-editor-template-view-mode",
-      ) === "single"
-        ? "single"
-        : "double";
-    } catch {
-      return "double";
-    }
-  });
-  const [localTemplates, setLocalTemplates] = useState<BlockTemplate[]>(() =>
-    blockTemplateStore.getAll(),
-  );
-  const [personalTemplates, setPersonalTemplates] = useState<PersonalContentTemplate[]>([]);
-  const [personalTemplatesLoading, setPersonalTemplatesLoading] = useState(true);
-  const [personalTemplatesError, setPersonalTemplatesError] = useState<string | null>(null);
 
-  useEffect(() => {
-    window.localStorage.setItem("homepage-editor-template-view-mode", viewMode);
-  }, [viewMode]);
-
-  const refreshLocalTemplates = useCallback(() => {
-    setLocalTemplates(blockTemplateStore.getAll());
-  }, []);
-
-  const refreshPersonalTemplates = useCallback(async () => {
-    setPersonalTemplatesLoading(true);
-    setPersonalTemplatesError(null);
-    try {
-      const response = await personalContentTemplateApi.list();
-      setPersonalTemplates(unwrapResponse<PersonalContentTemplate[]>(response) ?? []);
-    } catch {
-      const fallbackMessage = "账号模板暂时不可用，内置模板和本机旧方案仍可使用";
-      setPersonalTemplatesError(fallbackMessage);
-    } finally {
-      setPersonalTemplatesLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshPersonalTemplates();
-    const refresh = () => void refreshPersonalTemplates();
-    window.addEventListener(PERSONAL_TEMPLATE_CHANGED_EVENT, refresh);
-    return () => window.removeEventListener(PERSONAL_TEMPLATE_CHANGED_EVENT, refresh);
-  }, [refreshPersonalTemplates]);
-
-  const entries = useMemo(
-    () =>
-      Object.entries(BLOCK_META)
-        .filter(([name, meta]) => {
-          if (!isContentTemplateInsertable(name)) return false;
-          if (!isContentTemplateAllowedForPage(pageKey, name)) return false;
-          const matchKeyword =
-            `${name}${meta.name}${meta.description}${meta.tags.join("")}`.includes(
-              keyword.trim(),
-            );
-          return matchKeyword;
-        })
-        .sort(([, left], [, right]) => {
-          const categoryOrder =
-            BLOCK_CATEGORIES.indexOf(left.category) -
-            BLOCK_CATEGORIES.indexOf(right.category);
-          return categoryOrder || left.order - right.order;
-        }),
-    [keyword, pageKey],
-  );
-  const insertableTemplateCount = useMemo(
-    () =>
-      Object.keys(BLOCK_META).filter((name) =>
-        isContentTemplateInsertable(name)
-          && isContentTemplateAllowedForPage(pageKey, name),
-      ).length,
-    [pageKey],
-  );
-  const groupedEntries = useMemo(
-    () =>
-      BLOCK_CATEGORIES.map((group) => ({
-        group,
-        entries: entries.filter(([, meta]) => meta.category === group),
-      })).filter((section) => section.entries.length > 0),
-    [entries],
-  );
-
-  /* 左栏收缩（2026-08-16 用户需求）：收起为窄条，画布最大化；偏好记入 sessionStorage */
-  const [libraryCollapsed, setLibraryCollapsed] = useState(() => {
-    try {
-      return window.matchMedia("(max-width: 900px)").matches ||
-        sessionStorage.getItem("homepage-editor-library-collapsed") === "1";
-    } catch {
-      return false;
-    }
-  });
-  useEffect(() => {
-    const mobileWorkspace = window.matchMedia("(max-width: 900px)");
-    const collapseForMobile = (event: MediaQueryListEvent) => {
-      if (event.matches) setLibraryCollapsed(true);
-    };
-    mobileWorkspace.addEventListener("change", collapseForMobile);
-    return () => {
-      mobileWorkspace.removeEventListener("change", collapseForMobile);
-    };
-  }, []);
-  const toggleLibrary = () => {
-    setLibraryCollapsed((prev) => {
-      const next = !prev;
-      try {
-        sessionStorage.setItem(
-          "homepage-editor-library-collapsed",
-          next ? "1" : "0",
+  const upgradeSystemTemplateInPage = useCallback((current: SystemContentTemplateCurrent) => {
+    const upgradeableCount = countUpgradeableSystemTemplateInstances(
+      appData as unknown as Record<string, unknown>,
+      current,
+    );
+    if (upgradeableCount === 0) return;
+    modal.confirm({
+      title: `升级“${current.displayName}”页面实例？`,
+      content: `将 ${upgradeableCount} 个页面实例的布局升级到系统版本 ${current.activeVersion}。图片、文字、商品和链接保持不变；只修改当前页面草稿，不会自动发布。`,
+      okText: "升级当前页面草稿",
+      cancelText: "取消",
+      onOk: () => {
+        const result = upgradeSystemTemplateInstances(
+          appData as unknown as Record<string, unknown>,
+          current,
         );
-      } catch {
-        /* 偏好记忆失败不阻断收放 */
-      }
-      return next;
+        if (result.upgradedCount === 0) return;
+        dispatch({
+          type: "setData",
+          data: result.document as unknown as typeof appData,
+          recordHistory: true,
+        });
+        message.success(`已升级 ${result.upgradedCount} 个实例；保存页面草稿后才会持久化`);
+      },
     });
-  };
+  }, [appData, dispatch, message, modal]);
 
-  const insertPersonalTemplate = (template: PersonalContentTemplate) => {
-    if (!isContentTemplateAllowedForPage(pageKey, template.moduleType)) {
-      message.warning("当前页面角色不允许添加此模板");
-      return;
-    }
-    const layoutData = sanitizeContentTemplateLayoutData(
-      template.moduleType,
-      template.layoutData,
-    );
-    if (!layoutData) {
-      message.warning("此模板布局已不符合当前合同，请重新保存");
-      return;
-    }
-    const meta = BLOCK_META[template.moduleType];
-    const limit = meta?.limit ?? 5;
-    const usedCount = (appData.content ?? []).filter(
-      (item: { type: string }) => item.type === template.moduleType,
-    ).length;
-    if (usedCount >= limit) {
-      message.info(`“${getModuleDisplayName(template.moduleType)}”最多可添加 ${limit} 个`);
-      return;
-    }
-    const block = createBlockContent(template.moduleType);
-    const existingSameType = appData.content.find(
-      (item: { type: string; props?: PuckProps }) => item.type === template.moduleType,
-    );
-    const inheritedPageDesign = existingSameType
-      ? extractContentTemplateLayoutData(template.moduleType, existingSameType.props)
-      : undefined;
-    const contentDefaults = sanitizeContentTemplateDefaultContent(
-      template.moduleType,
-      template.contentDefaults,
-    );
-    block.props = {
-      ...block.props,
-      ...(contentDefaults ?? {}),
-      __instanceOverrides: inheritedPageDesign
-        ? structuredClone(inheritedPageDesign)
-        : layoutData,
+  const insertPublishedDynamicTemplate = useCallback((template: PublishedDynamicTemplateResource) => {
+    const resolved = {
+      templateId: template.templateId,
+      version: template.version,
+      schemaVersion: template.schemaVersion,
+      definitionChecksum: template.definitionChecksum,
+      definition: template.definition,
     };
-    insertPreparedBlock(dispatch, block, appData.content?.length ?? 0);
-    message.success(
-      contentDefaults && Object.keys(contentDefaults).length > 0
-        ? `已添加“${template.name}”并恢复已保存的默认内容`
-        : `已添加“${template.name}”，内容使用安全空模板`,
-    );
-  };
-
-  const confirmDeletePersonalTemplate = (template: PersonalContentTemplate) => {
-    modal.confirm({
-      title: `删除“${template.name}”？`,
-      content: "只会删除当前账号的模板及其可选默认内容，不影响已插入页面或历史内容。",
-      okText: "删除模板",
-      okButtonProps: { danger: true },
-      cancelText: "取消",
-      onOk: async () => {
-        try {
-          await personalContentTemplateApi.remove(template.id);
-          await refreshPersonalTemplates();
-          message.success("模板已删除");
-        } catch (error) {
-          message.error(getEditorErrorMessage(error, "模板删除失败，请稍后重试"));
-          throw error;
-        }
-      },
+    registerResolvedDynamicTemplate(resolved);
+    const key = dynamicTemplateVersionKey(template.templateId, template.version);
+    const document = appData as unknown as PuckDocument;
+    const existingResolved = document[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY];
+    const resolvedMap = existingResolved && typeof existingResolved === "object" && !Array.isArray(existingResolved)
+      ? existingResolved as ResolvedDynamicTemplateDefinitionMap
+      : {};
+    const insertionIndex = appData.content?.length ?? 0;
+    dispatch({
+      type: "setData",
+      data: {
+        ...appData,
+        [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: {
+          ...resolvedMap,
+          [key]: resolved,
+        },
+        content: [
+          ...(appData.content ?? []),
+          {
+            type: DYNAMIC_TEMPLATE_BLOCK_TYPE,
+            props: createDynamicTemplateInstanceProps({
+              templateId: template.templateId,
+              version: template.version,
+              name: template.name,
+            }),
+          },
+        ],
+      } as typeof appData,
+      recordHistory: true,
     });
-  };
-
-  const duplicatePersonalTemplate = async (template: PersonalContentTemplate) => {
-    try {
-      await personalContentTemplateApi.create({
-        name: `${template.name} 副本 ${personalTemplates.length + 1}`,
-        moduleType: template.moduleType,
-        layoutData: template.layoutData,
-        contentDefaults: template.contentDefaults,
-      });
-      await refreshPersonalTemplates();
-      message.success("模板副本已创建");
-    } catch (error) {
-      message.error(getEditorErrorMessage(error, "模板复制失败，请稍后重试"));
-    }
-  };
-
-  const renamePersonalTemplate = (template: PersonalContentTemplate) => {
-    const inputId = `personal-template-name-${template.id}`;
-    modal.confirm({
-      title: "重命名模板",
-      content: (
-        <label htmlFor={inputId} style={{ display: "block", marginTop: 8, fontSize: 12 }}>
-          模板名称
-          <input
-            id={inputId}
-            type="text"
-            defaultValue={template.name}
-            style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 10px", border: "1px solid var(--adm-line)", borderRadius: 3 }}
-          />
-        </label>
-      ),
-      okText: "保存名称",
-      cancelText: "取消",
-      onOk: async () => {
-        const name = (document.getElementById(inputId) as HTMLInputElement | null)?.value.trim();
-        if (!name) throw new Error("请输入模板名称");
-        try {
-          await personalContentTemplateApi.update(template.id, { name });
-          await refreshPersonalTemplates();
-          message.success("模板名称已更新");
-        } catch (error) {
-          message.error(
-            getEditorErrorMessage(error, "模板名称更新失败，请稍后重试"),
-          );
-          throw error;
-        }
-      },
+    dispatch({
+      type: "setUi",
+      ui: { itemSelector: { index: insertionIndex, zone: ROOT_ZONE } },
     });
-  };
-
-  const importLocalTemplate = (template: BlockTemplate) => {
-    const migrated = migratePuckData({
-      content: [{ type: template.type, props: template.props }],
-    }).content[0];
-    const layoutData = migrated
-      ? extractContentTemplateLayoutData(migrated.type, migrated.props)
-      : undefined;
-    if (!migrated || !layoutData) {
-      message.warning("此旧方案无法映射到当前模板合同");
-      return;
-    }
-    modal.confirm({
-      title: `导入“${template.name}”？`,
-      content: "只抽取合法布局；旧图片、文案、链接和商品数据不会上传。",
-      okText: "导入到我的模板",
-      cancelText: "取消",
-      onOk: async () => {
-        try {
-          await personalContentTemplateApi.create({
-            name: template.name,
-            moduleType: migrated.type,
-            layoutData,
-          });
-          await refreshPersonalTemplates();
-          message.success("旧方案的合法布局已导入");
-        } catch (error) {
-          message.error(
-            getEditorErrorMessage(error, "旧方案导入失败，请稍后重试"),
-          );
-          throw error;
-        }
-      },
-    });
-  };
-
-  if (libraryCollapsed) {
-    return (
-      <aside
-        className="homepage-editor__library homepage-editor__library--collapsed"
-        aria-label="模板组件库（已收起）"
-      >
-        <button
-          type="button"
-          className="homepage-editor__library-expand-btn admin-panel-collapse-toggle"
-          onClick={toggleLibrary}
-          title="展开模板组件库"
-          aria-label="展开模板组件库"
-        >
-          <RightOutlined />
-        </button>
-      </aside>
-    );
-  }
+    message.success(`已添加“${template.name}”v${template.version}，可在右侧填写页面内容`);
+  }, [appData, dispatch, message]);
 
   return (
-    <aside className="homepage-editor__library" aria-label="模板组件库">
-      <div className="homepage-editor__library-tools">
-        <div className="homepage-editor__panel-header">
-          <span className="homepage-editor__region-title">
-            <AppstoreOutlined />
-            模板组件库
-          </span>
-          <button
-            type="button"
-            className="homepage-editor__library-collapse-btn admin-panel-collapse-toggle"
-            onClick={toggleLibrary}
-            title="收起模板组件库"
-            aria-label="收起模板组件库"
-          >
-            <LeftOutlined />
-          </button>
-        </div>
-        <div className="homepage-editor__library-search-row">
-          <Input
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder="搜索模块"
-            prefix={<SearchOutlined />}
-            aria-label="搜索模块"
-          />
-          <div
-            className="homepage-editor__view-toggle"
-            role="group"
-            aria-label="视图模式"
-          >
-            <button
-              type="button"
-              aria-pressed={viewMode === "single"}
-              className={viewMode === "single" ? "is-active" : ""}
-              onClick={() => setViewMode("single")}
-              title="单列查看"
-              aria-label="单列查看"
-            >
-              <MenuOutlined />
-            </button>
-            <button
-              type="button"
-              aria-pressed={viewMode === "double"}
-              className={viewMode === "double" ? "is-active" : ""}
-              onClick={() => setViewMode("double")}
-              title="双列查看"
-              aria-label="双列查看"
-            >
-              <AppstoreOutlined />
-            </button>
-          </div>
-        </div>
-        <div className="homepage-editor__library-drag-tip">
-          <DragOutlined /> 拖动模块添加至画布
-          <span
-            className="homepage-editor__library-count"
-            title={`显示 ${entries.length} / 已开放 ${insertableTemplateCount} 个；其余模板仍在完成结构验收`}
-          >{`${entries.length} / ${insertableTemplateCount}`}</span>
-        </div>
-      </div>
-
-      <div
-        className={`homepage-editor__template-scroll${viewMode === "double" ? " is-double" : ""}`}
-      >
-        {entries.length > 0 || personalTemplates.length > 0 || localTemplates.length > 0 || personalTemplatesLoading || personalTemplatesError ? (
-          <>
-            {personalTemplatesLoading || personalTemplates.length > 0 || personalTemplatesError ? (
-              <section
-                className="homepage-editor__template-group"
-                aria-labelledby="template-group-personal"
-              >
-                <h3 id="template-group-personal">我的模板</h3>
-                {personalTemplatesLoading ? (
-                  <div className="homepage-editor__library-empty" role="status">
-                    <Spin size="small" />
-                    <p>正在读取账号模板…</p>
-                  </div>
-                ) : (
-                  <>
-                    {personalTemplatesError ? (
-                      <div className="homepage-editor__library-empty is-error" role="alert">
-                        <p>{personalTemplatesError}</p>
-                        <button
-                          type="button"
-                          className="homepage-editor__library-empty-action"
-                          onClick={() => void refreshPersonalTemplates()}
-                        >
-                          重新加载账号模板
-                        </button>
-                      </div>
-                    ) : null}
-                    {personalTemplates.length > 0 ? (
-                      <div className="homepage-editor__template-group-grid">
-                        {personalTemplates.map((template) => (
-                          <article className="homepage-editor__template-card" key={`personal-${template.id}`}>
-                            <div
-                              role="button"
-                              tabIndex={0}
-                              className="homepage-editor__template-card-main"
-                              aria-label={`${template.name}：点击添加`}
-                              onKeyDown={(event) => {
-                                if (!event.repeat && (event.key === "Enter" || event.key === " ")) {
-                                  event.preventDefault();
-                                  insertPersonalTemplate(template);
-                                }
-                              }}
-                              onClick={() => insertPersonalTemplate(template)}
-                            >
-                              <span className="homepage-editor__template-preview-wrap">
-                                <ContentTemplateRendererPreview
-                                  moduleType={template.moduleType}
-                                  viewport={previewViewport}
-                                  layoutData={template.layoutData}
-                                  variant="structure"
-                                />
-                                <span className="homepage-editor__template-badge" style={{ background: "#181A1B" }}>我的</span>
-                                <span className="homepage-editor__template-add">点击添加</span>
-                              </span>
-                              <span className="homepage-editor__template-name">{template.name}</span>
-                              <span className="homepage-editor__template-description">
-                                {getModuleDisplayName(template.moduleType)} · 账号同步
-                                {template.contentDefaults ? " · 含默认内容" : ""}
-                              </span>
-                            </div>
-                            <div className="homepage-editor__template-card-actions" aria-label={`${template.name}模板操作`}>
-                              <button type="button" onClick={() => renamePersonalTemplate(template)} title="重命名此账号模板" aria-label="重命名模板">
-                                <EditOutlined />
-                              </button>
-                              <button type="button" onClick={() => void duplicatePersonalTemplate(template)} title="复制此账号模板" aria-label="复制模板">
-                                <CopyOutlined />
-                              </button>
-                              <button type="button" onClick={() => confirmDeletePersonalTemplate(template)} title="删除此账号模板" aria-label="删除模板">
-                                <DeleteOutlined />
-                              </button>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    ) : null}
-                  </>
-                )}
-              </section>
-            ) : null}
-            {localTemplates.length > 0 ? (
-              <section
-                className="homepage-editor__template-group"
-                aria-labelledby="template-group-local"
-              >
-                <h3 id="template-group-local">本机旧方案</h3>
-                <div className="homepage-editor__template-group-grid">
-                  {localTemplates.map((tpl) => (
-                    <article
-                      className="homepage-editor__template-card"
-                      key={tpl.id}
-                    >
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        className="homepage-editor__template-card-main"
-                        aria-label={`${tpl.name}：点击添加`}
-                        onKeyDown={(event) => {
-                          if (
-                            !event.repeat &&
-                            (event.key === "Enter" || event.key === " ")
-                          ) {
-                            event.preventDefault();
-                            event.currentTarget.click();
-                          }
-                        }}
-                        onClick={() => {
-                          // 个人常用方案可能保存于模板收敛之前(图文混排/分割面板/礼赠指南),
-                          // 插入前经 migratePuckData 转为新类型,避免画布出现未注册坏块
-                          const migratedBlock = migratePuckData({
-                            content: [
-                              {
-                                type: tpl.type,
-                                props: {
-                                  ...JSON.parse(JSON.stringify(tpl.props)),
-                                  id: `homepage-block-${Date.now()}-${blockIdSequence++}`,
-                                  locked: false,
-                                },
-                              },
-                            ],
-                          }).content[0] ?? { type: tpl.type, props: {} };
-                          if (!isContentTemplateAllowedForPage(pageKey, migratedBlock.type)) {
-                            message.warning("当前页面角色不允许添加此模板");
-                            return;
-                          }
-                          const meta = BLOCK_META[migratedBlock.type];
-                          const limit = meta?.limit ?? 5;
-                          const usedCount = (appData.content ?? []).filter(
-                            (item: { type: string }) =>
-                              item.type === migratedBlock.type,
-                          ).length;
-                          if (usedCount >= limit) {
-                            message.info(
-                              `“${getModuleDisplayName(migratedBlock.type)}”最多可添加 ${limit} 个`,
-                            );
-                            return;
-                          }
-                          insertPreparedBlock(
-                            dispatch,
-                            migratedBlock,
-                            appData.content?.length ?? 0,
-                          );
-                          message.success(
-                            migratedBlock.type !== tpl.type
-                              ? `已添加“${tpl.name}”(已升级为「${getModuleDisplayName(migratedBlock.type)}」)`
-                              : `已添加“${tpl.name}”`,
-                          );
-                        }}
-                      >
-                        <span className="homepage-editor__template-preview-wrap">
-                          <BlockTemplateVisual name={tpl.type} viewport={previewViewport} />
-                          <span
-                            className="homepage-editor__template-badge"
-                            style={{ background: "#181A1B" }}
-                          >
-                            我的
-                          </span>
-                          <span className="homepage-editor__template-add">
-                            点击添加
-                          </span>
-                        </span>
-                        <span className="homepage-editor__template-name">
-                          {tpl.name}
-                        </span>
-                        <span className="homepage-editor__template-description">
-                          {getModuleDisplayName(tpl.type)} ·{" "}
-                          {new Date(tpl.createdAt).toLocaleDateString("zh-CN")}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        className="homepage-editor__template-favorite"
-                        style={{ right: 34 }}
-                        onClick={() => importLocalTemplate(tpl)}
-                        title="只导入合法布局到我的模板"
-                      >
-                        导入
-                      </button>
-                      <button
-                        type="button"
-                        className="homepage-editor__template-favorite"
-                        onClick={() => {
-                          blockTemplateStore.remove(tpl.id);
-                          refreshLocalTemplates();
-                        }}
-                        title="删除此本机旧方案"
-                      >
-                        <DeleteOutlined />
-                      </button>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-            {groupedEntries.map(({ group, entries: groupItems }) => (
-              <section
-                className="homepage-editor__template-group"
-                key={group}
-                aria-labelledby={`template-group-${group}`}
-              >
-                <h3 id={`template-group-${group}`}>{group}</h3>
-                <div className="homepage-editor__template-group-grid">
-                  {groupItems.map(([name, meta]) => (
-                    <TemplateCard
-                      key={name}
-                      name={name}
-                      meta={meta}
-                      viewMode={viewMode}
-                      previewViewport={previewViewport}
-                      onActivate={onInsertTemplate}
-                      onPointerDragMove={onTemplatePointerDragMove}
-                      onPointerDragEnd={onTemplatePointerDragEnd}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
-          </>
-        ) : (
-          <div className="homepage-editor__library-empty">
-            <p>暂无匹配模块</p>
-            {keyword ? (
-              <button
-                type="button"
-                className="homepage-editor__library-empty-action"
-                onClick={() => setKeyword("")}
-              >
-                清除搜索
-              </button>
-            ) : null}
-          </div>
-        )}
-      </div>
-    </aside>
+    <UnifiedTemplateLibrary
+      mode="page"
+      device={previewViewport}
+      isSystemTemplateAllowed={(moduleType) => (
+        isContentTemplateInsertable(moduleType)
+        && isContentTemplateAllowedForPage(pageKey, moduleType)
+      )}
+      onInsertSystem={(moduleType, current) => onInsertTemplate(moduleType, current)}
+      onSystemPointerDragMove={(moduleType, clientX, clientY, current) => (
+        onTemplatePointerDragMove(moduleType, clientX, clientY, current)
+      )}
+      onSystemPointerDragEnd={(moduleType, clientX, clientY, current) => (
+        onTemplatePointerDragEnd(moduleType, clientX, clientY, current)
+      )}
+      onInsertPublished={insertPublishedDynamicTemplate}
+      getSystemUpgradeCount={(current) => countUpgradeableSystemTemplateInstances(
+        appData as unknown as Record<string, unknown>,
+        current,
+      )}
+      onUpgradeSystem={upgradeSystemTemplateInPage}
+    />
   );
 }
 
@@ -2446,16 +886,12 @@ function InspectorPanel({
   hasUnsavedChanges,
   saving,
   onSaveDraft,
-  onSaveAsTemplate,
   publishIssues,
-  validationState,
 }: {
   hasUnsavedChanges: boolean;
   saving: boolean;
   onSaveDraft: () => void;
-  onSaveAsTemplate: (type: string, props: PuckProps) => void;
   publishIssues: PublishValidationIssue[];
-  validationState: PublishValidationState;
 }) {
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const content = useHomepagePuck((state) => state.appState.data.content);
@@ -2506,9 +942,16 @@ function InspectorPanel({
         hasUnsavedChanges={hasUnsavedChanges}
         saving={saving}
         onSaveDraft={onSaveDraft}
-        onSaveAsTemplate={onSaveAsTemplate}
-        publishIssues={publishIssues}
-        validationState={validationState}
+        templateDesignEnabled={false}
+      />
+    );
+  }
+  if (selectedItem.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
+    return (
+      <DynamicTemplateInstanceInspector
+        hasUnsavedChanges={hasUnsavedChanges}
+        saving={saving}
+        onSaveDraft={onSaveDraft}
       />
     );
   }
@@ -2520,9 +963,8 @@ function InspectorPanel({
         hasUnsavedChanges={hasUnsavedChanges}
         saving={saving}
         onSaveDraft={onSaveDraft}
-        onSaveAsTemplate={onSaveAsTemplate}
+        templateDesignEnabled={false}
         publishIssues={publishIssues}
-        validationState={validationState}
       />
     );
   }
@@ -2613,8 +1055,6 @@ type PublishValidationIssue = {
   path?: string;
 };
 
-type PublishValidationState = "checking" | "current" | "stale" | "error";
-
 function resolvePublishValidationIssues(result: {
   errors?: string[];
   issues?: PublishValidationIssue[];
@@ -2634,20 +1074,7 @@ function resolvePublishValidationIssues(result: {
   return [...structuredIssues, ...fallbackErrors];
 }
 
-function isPageSettingsPublishIssue(issue: PublishValidationIssue): boolean {
-  return issue.severity === "error" && (
-    issue.path === "metadata"
-    || issue.path?.startsWith("metadata.")
-    || issue.message.startsWith("页面设置：")
-  );
-}
-
-function isSiteSettingsPublishIssue(issue: PublishValidationIssue): boolean {
-  return issue.path === "siteSettings" || issue.path?.startsWith("siteSettings.") === true;
-}
-
 function EditorBody({
-  onSaveAsTemplate,
   pageKey,
   contentReady,
   pageLabel,
@@ -2658,9 +1085,7 @@ function EditorBody({
   viewingPublished,
   onSaveDraft,
   publishIssues,
-  validationState,
 }: {
-  onSaveAsTemplate: (type: string, props: PuckProps) => void;
   pageKey: EditorPageKey;
   contentReady: boolean;
   pageLabel: string;
@@ -2671,7 +1096,6 @@ function EditorBody({
   viewingPublished: boolean;
   onSaveDraft: (data: unknown) => void;
   publishIssues: PublishValidationIssue[];
-  validationState: PublishValidationState;
 }) {
   const { message } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
@@ -2776,12 +1200,14 @@ function EditorBody({
   const visualEditStartRef = useRef(new Map<string, Data>());
   const visualEditFrameRef = useRef(new Map<string, number>());
   const visualEditPendingRef = useRef(new Map<string, CanvasVisualEditMessage>());
+  const visualEditSourceRef = useRef(new Map<string, Window>());
   useEffect(() => {
     appDataRef.current = appData;
   }, [appData]);
   useEffect(() => {
     visualEditStartRef.current.clear();
     visualEditPendingRef.current.clear();
+    visualEditSourceRef.current.clear();
     visualEditFrameRef.current.forEach((frame) => window.cancelAnimationFrame(frame));
     visualEditFrameRef.current.clear();
   }, [pageKey]);
@@ -2789,12 +1215,26 @@ function EditorBody({
     const visualEditFrames = visualEditFrameRef.current;
     const visualEditPending = visualEditPendingRef.current;
     const visualEditStarts = visualEditStartRef.current;
+    const visualEditSources = visualEditSourceRef.current;
+    const sendSharedPreview = (
+      blockId: string,
+      moduleType: string,
+      overrides: Record<string, unknown> | undefined,
+    ) => {
+      const source = visualEditSources.get(blockId);
+      source?.postMessage({
+        type: CANVAS_SHARED_VISUAL_PREVIEW_MESSAGE,
+        moduleType,
+        ...(overrides ? { overrides } : {}),
+      }, window.location.origin);
+    };
     const handleVisualEdit = (event: MessageEvent<CanvasVisualEditMessage>) => {
       if (viewingPublished) return;
       const detail = event.data;
       if (
         event.origin !== window.location.origin ||
         detail?.type !== CANVAS_VISUAL_EDIT_MESSAGE ||
+        detail.workspace !== "page" ||
         typeof detail.blockId !== "string" ||
         typeof detail.moduleType !== "string" ||
         (detail.overrides !== undefined &&
@@ -2810,6 +1250,9 @@ function EditorBody({
           item.type === detail.moduleType && item.props?.id === detail.blockId,
       );
       if (contentIndex < 0) return;
+      if (event.source && "postMessage" in event.source) {
+        visualEditSources.set(detail.blockId, event.source as Window);
+      }
       const applyDetail = (
         baseData: Data,
         edit: CanvasVisualEditMessage,
@@ -2820,14 +1263,14 @@ function EditorBody({
           __instanceOverrides: edit.overrides,
           ...(marker ? { __contentTemplate: marker } : {}),
         };
-        const nextContent = applySharedTemplateDesignPatch(
-          baseData.content as Array<{
+        const nextContent = (baseData.content as Array<{
             type: string;
             props: PuckProps & { id: string };
-          }>,
-          edit.moduleType,
-          designPatch,
-        );
+          }>).map((item) =>
+            item.type === edit.moduleType && item.props.id === edit.blockId
+              ? { ...item, props: { ...item.props, ...designPatch } }
+              : item,
+          );
         dispatch({
           type: "setData",
           data: { ...baseData, content: nextContent },
@@ -2836,43 +1279,41 @@ function EditorBody({
       };
       const transient = detail.transient === true;
       if (detail.cancelled === true) {
-        const pendingFrame = visualEditFrameRef.current.get(detail.moduleType);
+        const pendingFrame = visualEditFrameRef.current.get(detail.blockId);
         if (pendingFrame !== undefined) window.cancelAnimationFrame(pendingFrame);
-        visualEditFrameRef.current.delete(detail.moduleType);
-        visualEditPendingRef.current.delete(detail.moduleType);
-        const editStart = visualEditStartRef.current.get(detail.moduleType);
-        visualEditStartRef.current.delete(detail.moduleType);
-        if (editStart) {
-          dispatch({ type: "setData", data: editStart, recordHistory: false });
-        }
+        visualEditFrameRef.current.delete(detail.blockId);
+        visualEditPendingRef.current.delete(detail.blockId);
+        sendSharedPreview(detail.blockId, detail.moduleType, undefined);
+        visualEditStartRef.current.delete(detail.blockId);
+        visualEditSourceRef.current.delete(detail.blockId);
         return;
       }
       if (transient) {
-        if (!visualEditStartRef.current.has(detail.moduleType)) {
-          visualEditStartRef.current.set(detail.moduleType, structuredClone(currentAppData));
+        if (!visualEditStartRef.current.has(detail.blockId)) {
+          visualEditStartRef.current.set(detail.blockId, structuredClone(currentAppData));
         }
-        visualEditPendingRef.current.set(detail.moduleType, detail);
-        if (!visualEditFrameRef.current.has(detail.moduleType)) {
+        visualEditPendingRef.current.set(detail.blockId, detail);
+        if (!visualEditFrameRef.current.has(detail.blockId)) {
           const frame = window.requestAnimationFrame(() => {
-            visualEditFrameRef.current.delete(detail.moduleType);
-            const pending = visualEditPendingRef.current.get(detail.moduleType);
+            visualEditFrameRef.current.delete(detail.blockId);
+            const pending = visualEditPendingRef.current.get(detail.blockId);
             if (!pending) return;
-            visualEditPendingRef.current.delete(detail.moduleType);
-            applyDetail(appDataRef.current, pending, false);
+            visualEditPendingRef.current.delete(detail.blockId);
+            sendSharedPreview(pending.blockId, pending.moduleType, pending.overrides);
           });
-          visualEditFrameRef.current.set(detail.moduleType, frame);
+          visualEditFrameRef.current.set(detail.blockId, frame);
         }
         return;
       }
-      const pendingFrame = visualEditFrameRef.current.get(detail.moduleType);
+      const pendingFrame = visualEditFrameRef.current.get(detail.blockId);
       if (pendingFrame !== undefined) window.cancelAnimationFrame(pendingFrame);
-      visualEditFrameRef.current.delete(detail.moduleType);
-      visualEditPendingRef.current.delete(detail.moduleType);
-      const editStart = visualEditStartRef.current.get(detail.moduleType);
+      visualEditFrameRef.current.delete(detail.blockId);
+      visualEditPendingRef.current.delete(detail.blockId);
+      sendSharedPreview(detail.blockId, detail.moduleType, undefined);
+      visualEditSourceRef.current.delete(detail.blockId);
+      const editStart = visualEditStartRef.current.get(detail.blockId);
       if (editStart) {
-        // 先恢复手势开始时的完整页面，再将最终同类设计记作唯一历史步骤。
-        dispatch({ type: "setData", data: editStart, recordHistory: false });
-        visualEditStartRef.current.delete(detail.moduleType);
+        visualEditStartRef.current.delete(detail.blockId);
         applyDetail(editStart, detail, true);
         return;
       }
@@ -2885,7 +1326,97 @@ function EditorBody({
       visualEditFrames.clear();
       visualEditPending.clear();
       visualEditStarts.clear();
+      visualEditSources.clear();
     };
+  }, [dispatch, viewingPublished]);
+  useEffect(() => {
+    const handleDynamicLayoutEdit = (event: MessageEvent<CanvasDynamicLayoutEditMessage>) => {
+      const detail = event.data;
+      if (
+        viewingPublished ||
+        event.origin !== window.location.origin ||
+        detail?.type !== CANVAS_DYNAMIC_LAYOUT_EDIT_MESSAGE ||
+        detail.workspace !== "page" ||
+        typeof detail.instanceId !== "string" ||
+        !/^[A-Za-z0-9_-]{1,160}$/.test(detail.instanceId) ||
+        typeof detail.nodeId !== "string" ||
+        !/^[A-Za-z0-9_-]{1,160}$/.test(detail.nodeId) ||
+        (detail.device !== "desktop" && detail.device !== "mobile")
+      ) return;
+      const override = detail.override;
+      const currentAppData = appDataRef.current;
+      const currentContent = currentAppData.content as Array<{
+        type: string;
+        props: PuckProps & { id?: string; instanceId?: string };
+      }>;
+      const target = currentContent.find((item) => (
+        item.type === DYNAMIC_TEMPLATE_BLOCK_TYPE && item.props.instanceId === detail.instanceId
+      ));
+      if (!target) return;
+      const targetProps = target.props as DynamicTemplateInstanceProps;
+      const resolved = readResolvedDynamicTemplateDefinitions(
+        (currentAppData as unknown as Record<string, unknown>)[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY],
+      )[dynamicTemplateVersionKey(targetProps.templateId, Number(targetProps.templateVersion))];
+      const node = resolved?.definition.nodes[detail.nodeId];
+      const slot = node?.slotId ? resolved?.definition.slots[node.slotId] : undefined;
+      const policy = node
+        ? getEffectiveDynamicTemplateInstanceEditPolicy(node, slot)
+        : null;
+      if (!policy || (!policy.position && !policy.size && !policy.zIndex)) return;
+      if (override !== undefined) {
+        if (!override || typeof override !== "object" || Array.isArray(override)) return;
+        const entries = Object.entries(override);
+        if (entries.some(([key, value]) => {
+          if (!["offsetXPercent", "offsetYPercent", "widthPercent", "zIndex"].includes(key)) return true;
+          if (typeof value !== "number" || !Number.isFinite(value)) return true;
+          if (key === "offsetXPercent" || key === "offsetYPercent") {
+            return !policy.position || Math.abs(value) > policy.maxOffsetPercent;
+          }
+          if (key === "widthPercent") {
+            return !policy.size || value < policy.minWidthPercent || value > policy.maxWidthPercent;
+          }
+          return !policy.zIndex || !Number.isInteger(value) || Math.abs(value) > 10;
+        })) return;
+      }
+      const nextContent = currentContent.map((item) => {
+        if (item !== target) return item;
+        const currentOverrides = item.props.layoutOverridesByNodeId
+          && typeof item.props.layoutOverridesByNodeId === "object"
+          && !Array.isArray(item.props.layoutOverridesByNodeId)
+          ? item.props.layoutOverridesByNodeId as Record<string, Record<string, unknown>>
+          : {};
+        const nextOverrides = { ...currentOverrides };
+        const nextNode = { ...(nextOverrides[detail.nodeId] ?? {}) };
+        const currentDevice = nextNode[detail.device]
+          && typeof nextNode[detail.device] === "object"
+          && !Array.isArray(nextNode[detail.device])
+          ? nextNode[detail.device] as Record<string, unknown>
+          : {};
+        const nextDevice = { ...currentDevice };
+        for (const key of ["offsetXPercent", "offsetYPercent", "widthPercent", "zIndex"] as const) {
+          delete nextDevice[key];
+        }
+        if (override) Object.assign(nextDevice, override);
+        if (Object.keys(nextDevice).length) nextNode[detail.device] = nextDevice;
+        else delete nextNode[detail.device];
+        if (Object.keys(nextNode).length) nextOverrides[detail.nodeId] = nextNode;
+        else delete nextOverrides[detail.nodeId];
+        return {
+          ...item,
+          props: {
+            ...item.props,
+            layoutOverridesByNodeId: nextOverrides,
+          },
+        };
+      });
+      dispatch({
+        type: "setData",
+        data: { ...currentAppData, content: nextContent },
+        recordHistory: true,
+      });
+    };
+    window.addEventListener("message", handleDynamicLayoutEdit);
+    return () => window.removeEventListener("message", handleDynamicLayoutEdit);
   }, [dispatch, viewingPublished]);
   const viewportWidth =
     currentViewport.width === "100%"
@@ -3087,7 +1618,11 @@ function EditorBody({
   };
 
   const insertTemplate = useCallback(
-    (templateName: string, insertionIndex: number) => {
+    (
+      templateName: string,
+      insertionIndex: number,
+      current?: SystemContentTemplateCurrent,
+    ) => {
       const meta = BLOCK_META[templateName];
       if (!meta) return;
       if (!isContentTemplateAllowedForPage(pageKey, templateName)) {
@@ -3096,23 +1631,27 @@ function EditorBody({
         return;
       }
       const displayName = meta.name;
-      const usedCount = appData.content.filter(
-        (item: { type: string }) => item.type === templateName,
-      ).length;
-      if (usedCount >= (meta.limit ?? 5)) {
-        message.info(`“${displayName}”已达到可添加上限`);
-        clearDragState();
-        return;
-      }
-
       const block = createBlockContent(templateName);
-      const existingSameType = appData.content.find(
-        (item: { type: string; props?: PuckProps }) => item.type === templateName,
+      const marker = createContentTemplateMarker(templateName);
+      const layoutData = sanitizeContentTemplateLayoutData(
+        templateName,
+        current?.moduleType === templateName ? current.layoutData : { version: 2 },
       );
-      const inheritedDesign = existingSameType
-        ? extractContentTemplateLayoutData(templateName, existingSameType.props)
-        : undefined;
-      if (inheritedDesign) block.props.__instanceOverrides = structuredClone(inheritedDesign);
+      if (marker && layoutData) {
+        block.props = {
+          ...block.props,
+          __instanceOverrides: layoutData,
+          __templateOrigin: {
+            kind: "system",
+            contractKey: current?.moduleType === templateName
+              ? current.contractKey
+              : marker.key,
+            version: current?.moduleType === templateName
+              ? current.activeVersion
+              : 0,
+          },
+        };
+      }
       insertPreparedBlock(dispatch, block, insertionIndex);
       dispatch({
         type: "setUi",
@@ -3121,7 +1660,7 @@ function EditorBody({
       message.success(`已插入“${displayName}”，可在右侧继续编辑`);
       clearDragState();
     },
-    [appData, clearDragState, dispatch, message, pageKey],
+    [clearDragState, dispatch, message, pageKey],
   );
 
   const getCanvasDropIndex = useCallback(
@@ -3142,7 +1681,7 @@ function EditorBody({
   );
 
   const handleTemplatePointerDragMove = useCallback(
-    (name: string, clientX: number, clientY: number) => {
+    (name: string, clientX: number, clientY: number, _current?: SystemContentTemplateCurrent) => {
       const nextDropIndex = getCanvasDropIndex(clientX, clientY);
       if (nextDropIndex === null) {
         clearDragState();
@@ -3155,20 +1694,22 @@ function EditorBody({
   );
 
   const handleTemplatePointerDragEnd = useCallback(
-    (name: string, clientX: number, clientY: number) => {
+    (name: string, clientX: number, clientY: number, current?: SystemContentTemplateCurrent) => {
       const insertionIndex = getCanvasDropIndex(clientX, clientY);
       if (insertionIndex === null) {
         clearDragState();
         return false;
       }
-      insertTemplate(name, insertionIndex);
+      insertTemplate(name, insertionIndex, current);
       return true;
     },
     [clearDragState, getCanvasDropIndex, insertTemplate],
   );
 
   const handleTemplateActivate = useCallback(
-    (name: string) => insertTemplate(name, appData.content.length),
+    (name: string, current?: SystemContentTemplateCurrent) => (
+      insertTemplate(name, appData.content.length, current)
+    ),
     [appData.content.length, insertTemplate],
   );
 
@@ -3193,7 +1734,7 @@ function EditorBody({
           </div>
         </aside>
       ) : (
-        <TemplateLibrary
+        <PageTemplateLibraryAdapter
           pageKey={pageKey}
           onInsertTemplate={handleTemplateActivate}
           onTemplatePointerDragMove={handleTemplatePointerDragMove}
@@ -3206,23 +1747,26 @@ function EditorBody({
         aria-label="图层面板"
       >
         {structureCollapsed ? (
-          <button
-            type="button"
-            className="homepage-editor__structure-expand-btn admin-panel-collapse-toggle"
+          <WorkspacePanelCollapseButton
+            action="expand"
+            panel="structure"
+            panelLabel="图层面板"
             onClick={() => setStructureCollapsed(false)}
-            title="展开图层面板"
-            aria-label="展开图层面板"
-          >
-            <RightOutlined />
-          </button>
+          />
         ) : (
           <>
-            <div className="homepage-editor__panel-header">
-              <span className="homepage-editor__region-title">
-                <BlockOutlined />
-                图层面板
-              </span>
-            </div>
+            <WorkspacePanelHeader
+              icon={<BlockOutlined />}
+              title="图层面板"
+              actions={(
+                <WorkspacePanelCollapseButton
+                  action="collapse"
+                  panel="structure"
+                  panelLabel="图层面板"
+                  onClick={() => setStructureCollapsed(true)}
+                />
+              )}
+            />
             <LayerRail
               navigationPreviewOpen={navigationPreviewOpen}
               onToggleNavigationPreview={toggleNavigationPreview}
@@ -3244,48 +1788,18 @@ function EditorBody({
             <span>包含尚未保存的修改；预览本身不会保存或发布。</span>
           </div>
         ) : null}
-        <div className="homepage-editor__canvas-controls" aria-label="画布缩放">
-          <button
-            type="button"
-            className={isFitView ? "is-active" : ""}
-            onClick={() => setIsFitView(true)}
-          >
-            适应画布
-          </button>
-          <button
-            type="button"
-            className={
-              !isFitView && Math.abs(canvasZoom - 1) < 0.005 ? "is-active" : ""
-            }
-            onClick={() => {
-              setIsFitView(false);
-              setCanvasZoom(1);
-            }}
-          >
-            100%
-          </button>
-          <button
-            type="button"
-            onClick={() => adjustCanvasZoom(-0.1)}
-            aria-label="缩小画布"
-          >
-            −
-          </button>
-          <output
-            className="homepage-editor__canvas-readout"
-            aria-label={`画布尺寸 ${canvasViewportLabel}，缩放 ${Math.round(canvasZoom * 100)}%`}
-          >
-            <span>{canvasViewportLabel}</span>
-            {Math.round(canvasZoom * 100)}%
-          </output>
-          <button
-            type="button"
-            onClick={() => adjustCanvasZoom(0.1)}
-            aria-label="放大画布"
-          >
-            +
-          </button>
-        </div>
+        <WorkspaceCanvasControls
+          isFitView={isFitView}
+          zoom={canvasZoom}
+          viewportLabel={canvasViewportLabel}
+          onFit={() => setIsFitView(true)}
+          onActualSize={() => {
+            setIsFitView(false);
+            setCanvasZoom(1);
+          }}
+          onZoomOut={() => adjustCanvasZoom(-0.1)}
+          onZoomIn={() => adjustCanvasZoom(0.1)}
+        />
         <div ref={stageRef} className="homepage-editor__canvas-scroll">
           <div
             ref={canvasRef}
@@ -3326,32 +1840,29 @@ function EditorBody({
         aria-label="属性面板"
       >
         {inspectorCollapsed ? (
-          <button
-            type="button"
-            className="homepage-editor__inspector-expand-btn admin-panel-collapse-toggle"
+          <WorkspacePanelCollapseButton
+            action="expand"
+            panel="inspector"
+            panelLabel="属性面板"
             onClick={() => setInspectorCollapsed(false)}
-            title="展开属性面板"
-            aria-label="展开属性面板"
+          />
+        ) : null}
+          <div
+            className="homepage-editor__inspector-holder"
+            hidden={inspectorCollapsed}
           >
-            <LeftOutlined />
-          </button>
-        ) : (
-          <div className="homepage-editor__inspector-holder">
-            <div className="homepage-editor__panel-header">
-              <span className="homepage-editor__region-title">
-                <ControlOutlined />
-                属性面板
-              </span>
-              <button
-                type="button"
-                className="homepage-editor__inspector-collapse-btn admin-panel-collapse-toggle"
-                onClick={() => setInspectorCollapsed(true)}
-                title="收起属性面板"
-                aria-label="收起属性面板"
-              >
-                <RightOutlined />
-              </button>
-            </div>
+            <WorkspacePanelHeader
+              icon={<ControlOutlined />}
+              title="属性面板"
+              actions={(
+                <WorkspacePanelCollapseButton
+                  action="collapse"
+                  panel="inspector"
+                  panelLabel="属性面板"
+                  onClick={() => setInspectorCollapsed(true)}
+                />
+              )}
+            />
             {viewingPublished ? (
               <div className="homepage-editor__properties-empty-state homepage-editor__readonly-panel">
                 <EyeOutlined />
@@ -3363,13 +1874,10 @@ function EditorBody({
                 hasUnsavedChanges={hasUnsavedChanges}
                 saving={saving}
                 onSaveDraft={() => onSaveDraft(appData)}
-                onSaveAsTemplate={onSaveAsTemplate}
                 publishIssues={publishIssues}
-                validationState={validationState}
               />
             )}
           </div>
-        )}
       </div>
     </main>
   );
@@ -3384,18 +1892,36 @@ export default function HomepageConfig({
   const navigate = useNavigate();
   const adminRole = useAuthStore((state) => state.user?.role);
   const canPublish = adminRole === "SUPER_ADMIN" || adminRole === "ADMIN";
-  const canEditSiteContent = canAccessAdminRoute(adminRole, "/admin/site-content");
+  // 页面装修可由编辑与管理员完成；母模板设计是全站级结构权限，
+  // 前后端统一只向 SUPER_ADMIN 开放。
+  const canManageTemplates = adminRole === "SUPER_ADMIN";
+  const [workspaceMode, setWorkspaceMode] = useState<EditorWorkspaceMode>("page");
+  const [templatePublishing, setTemplatePublishing] = useState(false);
+  const templatePublishInFlightRef = useRef(false);
+  const pageViewportBeforeTemplateRef = useRef<{ width: number; height: number } | null>(null);
+  const templateDraft = useTemplateEditorSession((state) => state.draft);
+  const templateDirty = useTemplateEditorSession((state) => state.dirty);
   const [data, setData] = useState<PuckDocument>(() => createEditorPageDefault(pageKey));
+  const resolvedDynamicTemplateDefinitions = useResolvedDynamicTemplateDefinitions();
+  const resolvedDefinitionsPayload = data[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY];
+  const waitsForResolvedDynamicTemplates = Boolean(
+    resolvedDefinitionsPayload
+    && typeof resolvedDefinitionsPayload === "object"
+    && !Array.isArray(resolvedDefinitionsPayload)
+    && Object.keys(resolvedDefinitionsPayload).length > 0,
+  );
+  const resolvedDynamicTemplatesReady = !waitsForResolvedDynamicTemplates || (data.content ?? []).every((block) => {
+    if (block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE) return true;
+    const templateId = block.props?.templateId;
+    const templateVersion = block.props?.templateVersion;
+    return typeof templateId === "string"
+      && typeof templateVersion === "number"
+      && Boolean(resolvedDynamicTemplateDefinitions[dynamicTemplateVersionKey(templateId, templateVersion)]);
+  });
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishIssues, setPublishIssues] = useState<PublishValidationIssue[]>(
     [],
-  );
-  const [publishValidationState, setPublishValidationState] =
-    useState<PublishValidationState>("stale");
-  const publishSettingsErrorCount = useMemo(
-    () => publishIssues.filter(isPageSettingsPublishIssue).length,
-    [publishIssues],
   );
   const [validationRevision, setValidationRevision] = useState(0);
   const validationRequestRef = useRef(0);
@@ -3405,9 +1931,11 @@ export default function HomepageConfig({
   const [revisionsLoading, setRevisionsLoading] = useState(false);
   const [revisions, setRevisions] = useState<PageDocumentRevision[]>([]);
   const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
+  const [rollingBackRevisionId, setRollingBackRevisionId] = useState<number | null>(null);
   const [revisionFailure, setRevisionFailure] = useState<{
     message: string;
     revision?: PageDocumentRevision;
+    action?: "restore" | "rollback";
   } | null>(null);
   const [draftDiscardError, setDraftDiscardError] = useState<string | null>(
     null,
@@ -3422,7 +1950,6 @@ export default function HomepageConfig({
   const hasInitializedEditorRef = useRef(false);
   const activePageKeyRef = useRef(pageKey);
   const latestData = useRef<PuckDocument>(data);
-  const preserveSavedBaselineOnDataSyncRef = useRef(false);
   const controlledCanvasStateRef = useRef<{
     hasUnsavedChanges: boolean;
     baselineSignature: string | null;
@@ -3456,6 +1983,41 @@ export default function HomepageConfig({
     hasUnsavedChanges ||
     (viewingPublished &&
       editingDraftSnapshotRef.current?.hasUnsavedChanges === true);
+  const hasProtectedTemplateChanges = Boolean(
+    workspaceMode === "template"
+    && templateDraft
+    && templateDirty,
+  );
+  const hasAnyProtectedChanges =
+    hasProtectedUnsavedChanges || hasProtectedTemplateChanges;
+
+  const openSystemTemplateDraft = useCallback((
+    moduleType: string,
+    current: SystemContentTemplateCurrent | undefined,
+    markAsNew: boolean,
+  ) => {
+    const sourceDraft = createSystemTemplateDraft(moduleType, current);
+    if (!sourceDraft) {
+      message.error("当前母模板缺少可编辑合同，暂时无法打开");
+      return null;
+    }
+    try {
+      const loaded = adaptLegacyTemplateSource(sourceDraft);
+      const visualSession = useVisualEditorSession.getState();
+      visualSession.resetWorkspaceContext("template");
+      visualSession.activateWorkspace("template");
+      const session = useTemplateEditorSession.getState();
+      session.open(loaded.draft, { isNew: markAsNew });
+      session.selectObject(loaded.draft.definition.rootNodeId);
+      if (loaded.skippedItems.length > 0) {
+        message.warning(`母模板已打开；有 ${loaded.skippedItems.length} 项旧引用需在发布前重新确认`);
+      }
+      return useTemplateEditorSession.getState().sessionId;
+    } catch (error) {
+      message.error(getEditorErrorMessage(error, "当前母模板暂时无法在统一编辑器中打开"));
+      return null;
+    }
+  }, [message]);
 
   useEffect(() => {
     activePageKeyRef.current = pageKey;
@@ -3466,106 +2028,353 @@ export default function HomepageConfig({
     viewingPublishedRef.current = viewingPublished;
   }, [viewingPublished]);
 
-  const saveBlockAsTemplate = useCallback(
-    (blockType: string, blockProps: PuckProps) => {
-      const moduleDisplayName = getModuleDisplayName(blockType);
-      const layoutData = extractContentTemplateLayoutData(blockType, blockProps);
-      if (!layoutData) {
-        message.warning("当前模块不是可另存的内容模板，或布局数据需要先升级");
-        return;
+  const openEmptyTemplateWorkspace = useCallback((pageViewport: { width: number; height: number }) => {
+    if (!canManageTemplates) {
+      message.warning("只有超级管理员可以设计模板");
+      return;
+    }
+    if (viewingPublishedRef.current) {
+      message.warning("请先返回页面草稿，再进入模板编辑");
+      return;
+    }
+    const visualSession = useVisualEditorSession.getState();
+    pageViewportBeforeTemplateRef.current = { ...pageViewport };
+    visualSession.resetWorkspaceContext("template");
+    visualSession.activateWorkspace("template");
+    useTemplateEditorSession.getState().close();
+    setWorkspaceMode("template");
+    const defaultModuleType = "首屏主视觉";
+    const openedSessionId = openSystemTemplateDraft(defaultModuleType, undefined, false);
+    const contractKey = getContentTemplateContract(defaultModuleType)?.key;
+    if (!openedSessionId || !contractKey) return;
+
+    void dynamicTemplateApi.listCatalog()
+      .then((response) => {
+        const catalog = unwrapResponse<TemplateCatalogResource>(response);
+        const current = catalog?.items.find((item) => (
+          item.kind === "system-compatibility" && item.template.contractKey === contractKey
+        ));
+        const systemCurrent = current?.kind === "system-compatibility" ? current.template : null;
+        const session = useTemplateEditorSession.getState();
+        if (
+          !systemCurrent
+          || systemCurrent.moduleType !== defaultModuleType
+          || systemCurrent.activeVersion <= 0
+          || session.sessionId !== openedSessionId
+          || session.dirty
+        ) return;
+        openSystemTemplateDraft(defaultModuleType, systemCurrent, false);
+      })
+      .catch(() => {
+        const session = useTemplateEditorSession.getState();
+        if (session.sessionId === openedSessionId && !session.dirty) {
+          message.warning("首屏当前版本暂时无法读取，已打开代码合同基线");
+        }
+      });
+  }, [canManageTemplates, message, openSystemTemplateDraft]);
+
+  const openSystemTemplateWorkspace = useCallback((
+    moduleType: string,
+    current?: SystemContentTemplateCurrent,
+  ) => {
+    if (workspaceMode !== "template") {
+      message.info("请先点击顶部“模板设计”进入模板工作区");
+      return;
+    }
+    if (!canManageTemplates) {
+      message.warning("只有超级管理员可以设计模板");
+      return;
+    }
+    openSystemTemplateDraft(moduleType, current, false);
+  }, [canManageTemplates, message, openSystemTemplateDraft, workspaceMode]);
+
+  const openPersonalTemplateWorkspace = useCallback((template: PersonalContentTemplate) => {
+    if (workspaceMode !== "template") {
+      message.info("请先点击顶部“模板设计”进入模板工作区");
+      return;
+    }
+    if (!canManageTemplates) {
+      message.warning("只有超级管理员可以设计模板");
+      return;
+    }
+    const sourceDraft = createPersonalTemplateDraft(template);
+    if (!sourceDraft) {
+      message.error("此模板与当前合同不兼容，原记录未被修改");
+      return;
+    }
+    try {
+      const loaded = adaptLegacyTemplateSource(sourceDraft);
+      const visualSession = useVisualEditorSession.getState();
+      visualSession.resetWorkspaceContext("template");
+      visualSession.activateWorkspace("template");
+      const session = useTemplateEditorSession.getState();
+      session.open(loaded.draft, { isNew: false });
+      session.selectObject(loaded.draft.definition.rootNodeId);
+      if (loaded.skippedItems.length > 0) {
+        message.warning(`母模板已打开；有 ${loaded.skippedItems.length} 项旧引用需在发布前重新确认`);
       }
-      modal.confirm({
-        title: "另存到模板库",
-        content: (
-          <div style={{ marginTop: 8 }}>
-            <p style={{ margin: "0 0 8px", color: "var(--adm-text)", fontSize: 12 }}>
-              默认仅保存桌面端与移动端布局、焦点和受控视觉属性。
-            </p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 92px", gap: 8, marginBottom: 12 }}>
-              <ContentTemplateRendererPreview
-                moduleType={blockType}
-                viewport="desktop"
-                layoutData={layoutData}
-                variant="renderer"
-              />
-              <ContentTemplateRendererPreview
-                moduleType={blockType}
-                viewport="mobile"
-                layoutData={layoutData}
-                variant="renderer"
-              />
-            </div>
-            <label style={{ fontSize: 12, color: "var(--adm-text-strong)" }}>
-              模板名称
-              <input
-                id="block-template-name-input"
-                type="text"
-                defaultValue={`我的${moduleDisplayName}`}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  marginTop: 4,
-                  padding: "6px 10px",
-                  border: "1px solid var(--adm-line)",
-                  borderRadius: 3,
-                  fontSize: 13,
-                  boxSizing: "border-box",
-                }}
-              />
-            </label>
-            <label
-              htmlFor="block-template-include-content"
-              style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 12, fontSize: 12, color: "var(--adm-text-strong)" }}
-            >
-              <input id="block-template-include-content" type="checkbox" style={{ marginTop: 2 }} />
-              <span>
-                同时保存当前默认内容
-                <small style={{ display: "block", marginTop: 3, color: "var(--adm-text)" }}>
-                  仅保存合同允许的文案、媒体、行动和有效引用；价格、库存、客户、门店资料及其他业务事实不会保存。
-                </small>
-              </span>
-            </label>
-          </div>
-        ),
-        okText: "保存模板",
-        cancelText: "取消",
-        onOk: async () => {
-          const input = document.getElementById(
-            "block-template-name-input",
-          ) as HTMLInputElement | null;
-          const name = input?.value?.trim() || `我的${moduleDisplayName}`;
-          const includeDefaultContent = (
-            document.getElementById("block-template-include-content") as HTMLInputElement | null
-          )?.checked;
-          const extractedDefaults = includeDefaultContent
-            ? extractContentTemplateDefaultContent(blockType, blockProps)
-            : undefined;
-          try {
-            await personalContentTemplateApi.create({
-              name,
-              moduleType: blockType,
-              layoutData,
-              ...(includeDefaultContent
-                ? { contentDefaults: extractedDefaults ?? null }
+    } catch (error) {
+      message.error(getEditorErrorMessage(error, "当前母模板暂时无法在统一编辑器中打开"));
+    }
+  }, [canManageTemplates, message, workspaceMode]);
+
+  const openNewDynamicTemplateWorkspace = useCallback(() => {
+    if (workspaceMode !== "template") {
+      message.info("请先点击顶部“模板设计”进入模板工作区");
+      return;
+    }
+    if (!canManageTemplates) {
+      message.warning("只有超级管理员可以设计模板");
+      return;
+    }
+    const draft = createNewDynamicTemplateDraft("未命名模板");
+    const visualSession = useVisualEditorSession.getState();
+    visualSession.resetWorkspaceContext("template");
+    visualSession.activateWorkspace("template");
+    const session = useTemplateEditorSession.getState();
+    session.open(draft, { isNew: true });
+    session.selectObject(draft.definition.rootNodeId);
+  }, [canManageTemplates, message, workspaceMode]);
+
+  const openDynamicTemplateWorkspace = useCallback((localDraftId: string) => {
+    if (workspaceMode !== "template") {
+      message.info("请先点击顶部“模板设计”进入模板工作区");
+      return;
+    }
+    if (!canManageTemplates) {
+      message.warning("只有超级管理员可以设计模板");
+      return;
+    }
+    const draft = loadLocalDynamicTemplateDraft(localDraftId);
+    if (!draft) {
+      message.error("该本机模板草稿不存在或未通过当前结构校验");
+      return;
+    }
+    const visualSession = useVisualEditorSession.getState();
+    visualSession.resetWorkspaceContext("template");
+    visualSession.activateWorkspace("template");
+    const session = useTemplateEditorSession.getState();
+    session.open(draft);
+    session.selectObject(draft.definition.rootNodeId);
+  }, [canManageTemplates, message, workspaceMode]);
+
+  const openPersistedDynamicTemplateWorkspace = useCallback((template: DynamicTemplateResource) => {
+    if (workspaceMode !== "template") {
+      message.info("请先点击顶部“模板设计”进入模板工作区");
+      return;
+    }
+    if (!canManageTemplates) {
+      message.warning("只有超级管理员可以设计模板");
+      return;
+    }
+    if (template.status === "ARCHIVED") {
+      message.warning("已归档模板需先恢复后才能继续编辑");
+      return;
+    }
+    const draft = createPersistedDynamicTemplateDraft(template);
+    if (!draft) {
+      message.error("服务端模板缺少可编辑草稿");
+      return;
+    }
+    const visualSession = useVisualEditorSession.getState();
+    visualSession.resetWorkspaceContext("template");
+    visualSession.activateWorkspace("template");
+    const session = useTemplateEditorSession.getState();
+    session.open(draft);
+    session.selectObject(draft.definition.rootNodeId);
+  }, [canManageTemplates, message, workspaceMode]);
+
+  const returnToPageWorkspace = useCallback(() => {
+    useTemplateEditorSession.getState().close();
+    useVisualEditorSession.getState().activateWorkspace("page");
+    setWorkspaceMode("page");
+  }, []);
+
+  const persistTemplateDraft = useCallback(async (
+    options: PersistTemplateOptions = {},
+  ): Promise<boolean> => {
+    const session = useTemplateEditorSession.getState();
+    const draft = session.draft;
+    if (!canManageTemplates || !draft) return false;
+    session.setSaveStatus("saving");
+    try {
+      if (USE_MOCK) {
+        const localBase = draft.sourceType === "local"
+          ? draft
+          : (() => {
+              const localDraftId = createDynamicTemplateStableId("tpl");
+              return {
+                format: "dynamic" as const,
+                sourceType: "local" as const,
+                localDraftId,
+                versionNote: draft.versionNote,
+                sourceReference: draft.definition.templateId,
+                definition: {
+                  ...structuredClone(draft.definition),
+                  templateId: localDraftId,
+                },
+              };
+            })();
+        const savedDraft = saveLocalDynamicTemplateDraft(localBase, {
+          asCopy: draft.sourceType === "local" && options.asCopy,
+          name: options.name,
+        });
+        useTemplateEditorSession.getState().markSaved(savedDraft);
+        window.dispatchEvent(new Event(DYNAMIC_TEMPLATE_LOCAL_DRAFT_CHANGED_EVENT));
+        message.success(options.asCopy
+          ? `“${savedDraft.definition.name}”已另存为本机测试草稿`
+          : "已保存为本机测试草稿；未写入服务端模板");
+        return true;
+      }
+      let response: unknown;
+      if (options.asCopy && draft.sourceType === "persisted") {
+        response = await dynamicTemplateApi.saveAs(draft.definition.templateId, {
+          name: (options.name ?? `${draft.definition.name} 副本`).trim(),
+          versionNote: draft.versionNote,
+        });
+      } else {
+        const definition = structuredClone(draft.definition);
+        if (options.name?.trim()) definition.name = options.name.trim();
+        if (options.asCopy) definition.templateId = createDynamicTemplateStableId("tpl");
+        response = draft.sourceType === "persisted" && draft.remote && !options.asCopy
+          ? await dynamicTemplateApi.updateDraft(draft.definition.templateId, {
+              expectedRevision: draft.remote.revision,
+              definition,
+              versionNote: draft.versionNote,
+            })
+            : await dynamicTemplateApi.create({
+              definition,
+              versionNote: draft.versionNote,
+              ...((options.asCopy ? draft.definition.templateId : draft.sourceReference)
+                ? { sourceReference: options.asCopy ? draft.definition.templateId : draft.sourceReference }
                 : {}),
             });
-            window.dispatchEvent(new Event(PERSONAL_TEMPLATE_CHANGED_EVENT));
-            message.success(
-              includeDefaultContent && extractedDefaults && Object.keys(extractedDefaults).length > 0
-                ? `「${name}」已保存布局和默认内容`
-                : `「${name}」已保存到我的模板`,
-            );
-          } catch (error) {
-            message.error(
-              getEditorErrorMessage(error, "模板保存失败，请稍后重试"),
-            );
-            throw error;
-          }
-        },
+      }
+      const saved = unwrapResponse<DynamicTemplateResource>(response);
+      const savedDraft = saved ? createPersistedDynamicTemplateDraft(saved) : null;
+      if (!savedDraft) throw new Error("服务端没有返回可编辑模板草稿");
+      useTemplateEditorSession.getState().markSaved(savedDraft);
+      window.dispatchEvent(new Event(DYNAMIC_TEMPLATE_SERVER_CHANGED_EVENT));
+      message.success(options.asCopy
+        ? `“${savedDraft.definition.name}”副本已保存为新的账号模板`
+        : "模板草稿已保存，可继续设计或发布");
+      return true;
+    } catch (error) {
+      useTemplateEditorSession.getState().setSaveStatus("error");
+      message.error(getEditorErrorMessage(error, "模板保存失败，当前修改仍完整保留"));
+      return false;
+    }
+  }, [canManageTemplates, message]);
+
+  const publishDynamicTemplateDraft = useCallback(async (): Promise<boolean> => {
+    if (USE_MOCK) {
+      message.info("Mock 模式只保存本机测试草稿，不支持服务端发布");
+      return false;
+    }
+    if (!canManageTemplates || templatePublishInFlightRef.current) return false;
+    templatePublishInFlightRef.current = true;
+    setTemplatePublishing(true);
+    const releasePublishing = () => {
+      templatePublishInFlightRef.current = false;
+      setTemplatePublishing(false);
+    };
+    let state = useTemplateEditorSession.getState();
+    if (!state.draft) {
+      releasePublishing();
+      return false;
+    }
+    if (state.dirty || state.draft.sourceType === "local") {
+      const saved = await persistTemplateDraft();
+      if (!saved) {
+        releasePublishing();
+        return false;
+      }
+      state = useTemplateEditorSession.getState();
+    }
+    const draft = state.draft;
+    if (!draft || draft.sourceType !== "persisted" || !draft.remote) {
+      releasePublishing();
+      message.error("模板草稿尚未建立服务端版本，无法发布");
+      return false;
+    }
+    return await new Promise<boolean>((resolve) => {
+        let settled = false;
+        const settle = (result: boolean) => {
+          if (settled) return;
+          settled = true;
+          releasePublishing();
+          resolve(result);
+        };
+        modal.confirm({
+          title: `确认发布模板 v${draft.remote!.publishedVersion + 1}`,
+          width: 560,
+          okText: "确认发布模板",
+          cancelText: "取消",
+          maskClosable: false,
+          content: (
+            <div style={{ display: "grid", gap: 12 }}>
+              <p style={{ margin: 0 }}>
+                本次只创建不可变的模板新版本，不会修改任何页面草稿、线上页面或页面方案。
+              </p>
+              <p style={{ margin: 0 }}>
+                已有页面实例会继续锁定当前模板版本；如需使用新版，必须在页面装修中显式升级草稿并重新发布页面。
+              </p>
+            </div>
+          ),
+          onOk: async () => {
+            try {
+              const publishResponse = await dynamicTemplateApi.publish(
+                draft.definition.templateId,
+                {
+                  expectedRevision: draft.remote!.revision,
+                  ...(draft.versionNote ? { versionNote: draft.versionNote } : {}),
+                },
+              );
+              const published = unwrapResponse<DynamicTemplatePublishResultResource>(
+                publishResponse,
+              );
+              if (
+                !published
+                || published.templateId !== draft.definition.templateId
+                || published.version !== draft.remote!.publishedVersion + 1
+                || !Number.isInteger(published.draft?.revision)
+              ) {
+                throw new Error("服务端返回的模板发布结果与当前草稿不一致");
+              }
+              const current = useTemplateEditorSession.getState();
+              const currentDraft = current.draft;
+              if (
+                currentDraft?.sourceType === "persisted"
+                && currentDraft.remote
+                && currentDraft.definition.templateId === published.templateId
+                && currentDraft.remote.revision === draft.remote!.revision
+              ) {
+                const nextDraft = structuredClone(currentDraft);
+                nextDraft.versionNote = "";
+                nextDraft.remote = {
+                  databaseId: currentDraft.remote.databaseId,
+                  revision: published.draft.revision,
+                  publishedVersion: published.version,
+                  baseVersion: published.version,
+                };
+                current.markSaved(nextDraft);
+              }
+              window.dispatchEvent(new Event(DYNAMIC_TEMPLATE_SERVER_CHANGED_EVENT));
+              message.success(`模板 v${published.version} 已发布；现有页面仍保持原版本`);
+              settle(true);
+            } catch (error) {
+              message.error(getEditorErrorMessage(
+                error,
+                "模板发布失败，当前模板草稿和页面会话仍保留",
+              ));
+              settle(false);
+            }
+          },
+          onCancel: () => settle(false),
+        });
       });
-    },
-    [message, modal],
-  );
+  }, [canManageTemplates, message, modal, persistTemplateDraft]);
+
   const editorConfig = useMemo(
     () =>
       ({
@@ -3575,6 +2384,7 @@ export default function HomepageConfig({
           render: ({ children }: { children: ReactNode }) => (
             <EditorCanvasShell
               pageKey={pageKey}
+              editable={!previewMode}
             >
               {children}
             </EditorCanvasShell>
@@ -3588,6 +2398,7 @@ export default function HomepageConfig({
               label: BLOCK_META[type]?.name ?? component.label ?? type,
               render: (props: PuckProps) => {
                 if (props.isVisible === false) {
+                  if (previewMode) return null;
                   return (
                     <div className="homepage-editor__hidden-block">
                       此模块已隐藏，不会发布到前台
@@ -3601,10 +2412,27 @@ export default function HomepageConfig({
                 const normalizedProps: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
                   ? normalized as PuckProps
                   : {};
-                const rendered = component.render(normalizedProps);
+                const rendered = type === DYNAMIC_TEMPLATE_BLOCK_TYPE
+                  ? (() => {
+                      const instanceProps = normalizedProps as DynamicTemplateInstanceProps;
+                      const resolved = resolvedDynamicTemplateDefinitions[
+                        dynamicTemplateVersionKey(
+                          instanceProps.templateId,
+                          instanceProps.templateVersion,
+                        )
+                      ];
+                      return (
+                        <CanvasDynamicTemplateInstance
+                          props={instanceProps}
+                          definition={resolved?.definition}
+                          mode={previewMode ? "preview" : "editor"}
+                        />
+                      );
+                    })()
+                  : component.render(normalizedProps);
                 // 画布内统一注入 editMode，让 block 区分编辑预览与前台发布
                 const editableBlock = isValidElement<{ editMode?: boolean }>(rendered)
-                  ? cloneElement(rendered, { editMode: true })
+                  ? cloneElement(rendered, { editMode: !previewMode })
                   : rendered;
                 return (
                   <CanvasBlockAnchor blockId={String(props.id ?? "")} blockType={type}>
@@ -3621,11 +2449,32 @@ export default function HomepageConfig({
           ]),
         ),
       }) as unknown as typeof puckConfig,
-    [pageKey],
+    [pageKey, previewMode, resolvedDynamicTemplateDefinitions],
   );
 
   useEffect(() => {
     latestData.current = data;
+  }, [data]);
+
+  useEffect(() => {
+    // 解析结果按页面会话隔离。切换页面时必须先清空，避免另一页面暂存的
+    // 精确模板版本短暂参与当前画布渲染。
+    replaceResolvedDynamicTemplates(undefined);
+  }, [pageKey]);
+
+  useEffect(() => {
+    // resolvedDynamicTemplates 是服务端注入的只读解析缓存，不是页面实例
+    // 的业务数据。Puck 的撤销/重做快照会省略未知顶层字段；此时保留当前
+    // 页面会话已验证的精确版本，不能把“字段缺失”解释为“清空缓存”。
+    const resolvedDefinitions = data[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY];
+    if (
+      resolvedDefinitions
+      && typeof resolvedDefinitions === "object"
+      && !Array.isArray(resolvedDefinitions)
+      && Object.keys(resolvedDefinitions).length > 0
+    ) {
+      replaceResolvedDynamicTemplates(resolvedDefinitions);
+    }
   }, [data]);
 
   useEffect(() => {
@@ -3641,7 +2490,6 @@ export default function HomepageConfig({
       setPublishedNeedsRevalidation(false);
       setViewingPublished(false);
       setPublishIssues([]);
-      setPublishValidationState("stale");
       setRevisions([]);
       setDraftSnapshot(null);
       setRevisionFailure(null);
@@ -3678,11 +2526,12 @@ export default function HomepageConfig({
         setHasUnsavedChanges(false);
       }
       try {
-        // 同时拉取线上已发布版本与后台草稿:存在未发布草稿差异时默认进入草稿继续编辑,
-        // 否则展示线上版本(与下方 displayPuck 判定一致,2026-08-18 P1.5 核对)。
-        const [publishedResponse, adminResponse] = await Promise.all([
+        // 同时拉取线上已发布版本与后台草稿。店铺装修入口始终进入可编辑状态：
+        // 有后台草稿时加载草稿；仅有线上版本时以线上内容作为新草稿的编辑基线。
+        const [publishedResponse, adminResponse, templateCatalogResponse] = await Promise.all([
           pageDocumentApi.getPublishedAdmin(pageKey),
           pageDocumentApi.getAdmin(pageKey),
+          dynamicTemplateApi.listCatalog().catch(() => null),
         ]);
         if (cancelled) return;
         const publishedDoc = unwrapResponse<PageDocumentResource | null>(publishedResponse);
@@ -3705,33 +2554,54 @@ export default function HomepageConfig({
 
         publishedMetadataRef.current = normalizePuckMetadata(publishedDoc?.metadata);
 
-        // 展示基准（2026-08-21 用户决策，取代 2026-08-19 已发布优先）：
-        // 存在与线上不同的未发布草稿时优先展示草稿——画布应始终等于最新编辑内容，
-        // 避免"保存过草稿却看到旧线上版"的错位感；工具栏徽标与「查看线上版本」
-        // 入口可随时对照线上版。从未发布过或草稿与线上一致时展示线上版本。
+        // 编辑基准：后台草稿始终优先；没有草稿时才以线上版本作为新草稿基线。
+        // 「查看线上版本」只由运营主动触发，不再作为进入店铺装修时的默认模式。
         if (publishedPuck || draftPuck) {
-          const viewingPublishedNow =
-            Boolean(publishedPuck) && !nextHasPendingDraft;
-          const displayPuck = nextHasPendingDraft && draftPuck
-            ? draftPuck
-            : publishedPuck ?? draftPuck;
+          const displayPuck = draftPuck ?? publishedPuck;
           if (!displayPuck) return;
-          // 旧模板类型(分割面板/图文混排/礼赠指南)在此迁移为新体系类型;
-          // 公开渲染器仍保留旧类型分支,已发布历史版本不受影响。
+          // 历史模块别名（分割面板/图文混排/礼赠指南）只在编辑器读取时规范化；
+          // 公开 Renderer 继续按原类型重放已发布历史版本。
           serverData = ensureEditorPageStructure(
             pageKey,
             migratePuckData(displayPuck),
           );
-          // 查看线上版本时 metadata 以线上文档为准；草稿文档仅作乐观锁与保存基准。
-          const displayMetadata = viewingPublishedNow
-            ? normalizePuckMetadata(publishedDoc?.metadata)
-            : normalizePuckMetadata(adminDoc?.metadata);
+          const persistedServerData = serverData;
+          const templateCatalog = templateCatalogResponse
+            ? unwrapResponse<TemplateCatalogResource>(templateCatalogResponse)
+            : null;
+          const personalTemplates = Array.isArray(templateCatalog?.items)
+            ? templateCatalog.items.flatMap((item) => (
+                item.kind === "personal-compatibility"
+                  ? [item.template as PersonalContentTemplate]
+                  : []
+              ))
+            : [];
+          const personalUpgrade = upgradePersonalTemplateInstances(
+            serverData as unknown as Record<string, unknown>,
+            Array.isArray(personalTemplates) ? personalTemplates : [],
+          );
+          if (personalUpgrade.upgradedCount > 0) {
+            serverData = personalUpgrade.document as unknown as PuckDocument;
+            controlledCanvasStateRef.current = {
+              hasUnsavedChanges: true,
+              baselineSignature: dataSignature(persistedServerData),
+            };
+          }
+          const displayMetadata = draftPuck
+            ? normalizePuckMetadata(adminDoc?.metadata)
+            : normalizePuckMetadata(publishedDoc?.metadata);
           setData(serverData);
           latestData.current = serverData;
-          dataSignatureRef.current = dataSignature(serverData);
+          dataSignatureRef.current = personalUpgrade.upgradedCount > 0
+            ? dataSignature(persistedServerData)
+            : dataSignature(serverData);
           setMetadata(displayMetadata);
           latestMetadata.current = displayMetadata;
-          setViewingPublished(viewingPublishedNow);
+          setViewingPublished(false);
+          if (personalUpgrade.upgradedCount > 0) {
+            setHasUnsavedChanges(true);
+            message.info(`已将 ${personalUpgrade.upgradedCount} 个历史模板实例布局升级到最新版本；真实内容保持不变，尚未保存或发布`);
+          }
           // 乐观锁与“上次保存时间”仍以草稿文档为准，保证后续保存/发布能正确串行。
           const draftUpdatedAt = adminDoc?.updatedAt || null;
           pageSessionCacheRef.current[pageKey] = {
@@ -3765,7 +2635,7 @@ export default function HomepageConfig({
           : null;
       } catch (error) {
         if (!cancelled) {
-          // 接口失败不能伪装成“没有草稿”，否则一次自动保存就可能覆盖已有装修内容。
+          // 接口失败不能伪装成“没有草稿”，否则后续显式保存可能覆盖已有装修内容。
           setLoadError(
             getEditorErrorMessage(
               error,
@@ -3784,21 +2654,12 @@ export default function HomepageConfig({
     return () => {
       cancelled = true;
     };
-  }, [loadAttempt, pageKey]);
-
-  useEffect(() => {
-    if (preserveSavedBaselineOnDataSyncRef.current) {
-      preserveSavedBaselineOnDataSyncRef.current = false;
-      return;
-    }
-    dataSignatureRef.current = dataSignature(data);
-  }, [data]);
+  }, [loadAttempt, message, pageKey]);
 
   const syncCanvasDataWithoutAdvancingSavedBaseline = useCallback(
     (nextData: unknown) => {
       const nextDocument = getPuckDocument(nextData);
       if (!nextDocument) return;
-      preserveSavedBaselineOnDataSyncRef.current = true;
       setData(nextDocument);
       latestData.current = nextDocument;
       setCanvasDataSyncVersion((version) => version + 1);
@@ -3818,7 +2679,6 @@ export default function HomepageConfig({
       dataSignatureRef.current =
         controlledState.baselineSignature ?? dataSignature(nextDocument);
       setHasUnsavedChanges(controlledState.hasUnsavedChanges);
-      setPublishValidationState("stale");
       setValidationRevision((revision) => revision + 1);
       return;
     }
@@ -3826,7 +2686,6 @@ export default function HomepageConfig({
     // Puck 首帧会 normalize 画布数据,JSON 全等会让每次进入编辑器都误报"有未保存修改"
     const changed = dataSignature(nextDocument) !== dataSignatureRef.current;
     setHasUnsavedChanges(changed);
-    setPublishValidationState("stale");
     setValidationRevision((revision) => revision + 1);
     // 查看线上版本时画布被编辑:自动切回编辑草稿并提示,避免“看着线上却在改草稿”的状态错乱。
     if (changed && viewingPublishedRef.current) {
@@ -3844,7 +2703,6 @@ export default function HomepageConfig({
       latestData.current,
       latestMetadata.current,
     );
-    setPublishValidationState("checking");
     const timer = window.setTimeout(() => {
       void pageDocumentApi
         .validate(
@@ -3868,14 +2726,12 @@ export default function HomepageConfig({
             issues?: PublishValidationIssue[];
           }>(response);
           setPublishIssues(resolvePublishValidationIssues(result));
-          setPublishValidationState("current");
         })
         .catch((error) => {
           if (controller.signal.aborted || requestId !== validationRequestRef.current) return;
           // 失败时不能继续把上一轮问题伪装成当前结论；草稿仍完整保留，
           // 运营可从工具栏原位重试同一个服务端预检。
           setPublishIssues([]);
-          setPublishValidationState("error");
           if (import.meta.env.DEV) console.warn("[PageDocument validate]", error);
         });
     }, 650);
@@ -3904,7 +2760,8 @@ export default function HomepageConfig({
       const save = async (): Promise<boolean> => {
         const editableData = requestedData;
         const isActivePage = () => targetPageKey === activePageKeyRef.current;
-        // 手动保存才点亮按钮 loading 与成功提示；自动保存（silent）完全静默、不打扰。
+        // 顶栏手动保存才点亮按钮 loading 与成功提示；发布前、保存并离开等
+        // 内部显式保存使用 silent，避免重复成功提示。
         if (isActivePage() && !options.silent) {
           setSaving(true);
         }
@@ -4006,20 +2863,15 @@ export default function HomepageConfig({
     [initialLoading, loadError, loadedPageKey, message, modal, pageKey],
   );
 
-  const retryPublishValidation = useCallback(() => {
-    setPublishValidationState("stale");
-    setValidationRevision((revision) => revision + 1);
-  }, []);
-
   // 2026-08-16 批次 D（用户决策）：2 秒自动保存已移除，改为显式保存模型——
-  // 手动"保存草稿" + UnsavedChangesGuard（路由级离开拦截，三选项）+ beforeunload 三层。
+  // 手动"保存草稿" + UnsavedChangesGuard（路由级离开时保存或返回编辑）+ beforeunload 三层。
   // 历史 reason：自动保存曾作为 SPA 跳转的静默兜底，用户判定其无价值且干扰草稿管理。
 
   const switchEditorPage = useCallback(
     async (path: string) => {
       const targetPage = getEditorPageByPath(path);
       if (!targetPage || targetPage.key === pageKey) return;
-      // 未保存修改由 UnsavedChangesGuard 拦截（保存并离开/直接离开/继续编辑），此处纯导航。
+      // 未保存修改由 UnsavedChangesGuard 拦截（保存并离开/继续编辑），此处纯导航。
       navigate(`/admin/editor/${targetPage.key}`);
     },
     [navigate, pageKey],
@@ -4043,17 +2895,17 @@ export default function HomepageConfig({
 
   // 未保存改动时拦截关闭/刷新，避免误丢
   useEffect(() => {
-    if (!hasProtectedUnsavedChanges) return;
+    if (!hasAnyProtectedChanges) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [hasProtectedUnsavedChanges]);
+  }, [hasAnyProtectedChanges]);
 
   // 草稿保护（2026-08-16 起的显式保存模型）：
-  // 1. useBlocker（UnsavedChangesGuard）：SPA 路由跳转弹三选项（保存并离开/直接离开/继续编辑）；
+  // 1. useBlocker（UnsavedChangesGuard）：SPA 路由跳转只提供保存并离开或继续编辑；
   // 2. beforeunload：拦截刷新 / 关闭；
   // 3. 显式动作（发布前保存、页面设置保存）各自先保存再执行。
 
@@ -4072,12 +2924,13 @@ export default function HomepageConfig({
       const adminDoc = unwrapResponse<PageDocumentResource | null>(adminResponse);
       const draftPuck = getPuckDocument(adminDoc?.puckData);
       const hasDraft = Boolean(draftPuck);
-      const latestPublishedPuck = revisionList[0]?.puckData ?? null;
-      const latestPublishedMetadata = revisionList[0]?.metadata ?? null;
-      const hasPublished = latestPublishedPuck != null;
+      const currentPublishedRevision = revisionList.find((revision) => revision.isPublished);
+      const currentPublishedPuck = currentPublishedRevision?.puckData ?? null;
+      const currentPublishedMetadata = currentPublishedRevision?.metadata ?? null;
+      const hasPublished = currentPublishedPuck != null;
       const hasPendingDraft =
         canonicalizePageContent(draftPuck, adminDoc?.metadata) !==
-        canonicalizePageContent(latestPublishedPuck, latestPublishedMetadata);
+        canonicalizePageContent(currentPublishedPuck, currentPublishedMetadata);
       // 草稿条目：只要存在草稿就展示；已发布且草稿与线上一致（刚发布）时不再单独展示。
       const showDraftEntry = hasDraft && (!hasPublished || hasPendingDraft);
       setDraftSnapshot(
@@ -4114,7 +2967,6 @@ export default function HomepageConfig({
         hasUnsavedChanges: false,
         baselineSignature: null,
       };
-      preserveSavedBaselineOnDataSyncRef.current = true;
       setData(structured);
       latestData.current = structured;
       dataSignatureRef.current = dataSignature(structured);
@@ -4170,7 +3022,6 @@ export default function HomepageConfig({
       hasUnsavedChanges: snapshot.hasUnsavedChanges,
       baselineSignature: snapshot.savedSignature,
     };
-    preserveSavedBaselineOnDataSyncRef.current = true;
     setData(snapshot.data);
     latestData.current = snapshot.data;
     setMetadata(snapshot.metadata);
@@ -4248,7 +3099,6 @@ export default function HomepageConfig({
       hasUnsavedChanges: false,
       baselineSignature: null,
     };
-    preserveSavedBaselineOnDataSyncRef.current = true;
     setData(publishedDataRef.current);
     latestData.current = publishedDataRef.current;
     dataSignatureRef.current = dataSignature(publishedDataRef.current);
@@ -4292,6 +3142,10 @@ export default function HomepageConfig({
         // 乐观锁防并发覆盖其他编辑者的修改。
         const expectedUpdatedAt =
           pageSessionCacheRef.current[pageKey]?.updatedAt ?? undefined;
+        if (!expectedUpdatedAt) {
+          setDraftDiscardError("当前页面版本标识缺失，请刷新页面后再放弃草稿");
+          return;
+        }
         try {
           await pageDocumentApi.discardDraft(pageKey, expectedUpdatedAt);
         } catch (error) {
@@ -4304,7 +3158,6 @@ export default function HomepageConfig({
           hasUnsavedChanges: false,
           baselineSignature: null,
         };
-        preserveSavedBaselineOnDataSyncRef.current = true;
         setData(publishedDataRef.current);
         latestData.current = publishedDataRef.current;
         dataSignatureRef.current = dataSignature(publishedDataRef.current);
@@ -4353,7 +3206,6 @@ export default function HomepageConfig({
       // 发布设置已经进入当前内存草稿；即使持久化失败也必须触发离开保护，
       // 不能关闭抽屉后把内容负责人、SEO 或授权编号静默丢失。
       setHasUnsavedChanges(true);
-      setPublishValidationState("stale");
       setValidationRevision((revision) => revision + 1);
       const saved = await saveDraft(latestData.current, { silent: true });
       if (saved) {
@@ -4386,6 +3238,7 @@ export default function HomepageConfig({
             setRevisionFailure({
               message: "当前页面版本标识缺失，请刷新页面后再恢复",
               revision,
+              action: "restore",
             });
             setRestoringVersion(null);
             return;
@@ -4408,7 +3261,6 @@ export default function HomepageConfig({
                 hasUnsavedChanges: false,
                 baselineSignature: null,
               };
-              preserveSavedBaselineOnDataSyncRef.current = true;
               setData(restoredData);
               latestData.current = restoredData;
               // 恢复接口已经把该版本写成服务端草稿；Puck 随后的 setData 回调
@@ -4446,6 +3298,7 @@ export default function HomepageConfig({
                 "版本恢复失败，请稍后重试",
               ),
               revision,
+              action: "restore",
             });
           } finally {
             setRestoringVersion(null);
@@ -4456,9 +3309,88 @@ export default function HomepageConfig({
     [hasProtectedUnsavedChanges, message, modal, pageKey],
   );
 
+  const rollbackPublication = useCallback(
+    (revision: PageDocumentRevision) => {
+      const currentPublished = revisions.find((item) => item.isPublished);
+      if (!currentPublished) {
+        setRevisionFailure({ message: "当前线上版本指针缺失，不能执行回滚" });
+        return;
+      }
+      modal.confirm({
+        title: `回滚线上到版本 ${revision.version}？`,
+        content:
+          "此操作只切换线上发布指针，不会覆盖当前页面草稿，也不会修改或删除任何历史版本。",
+        okText: "确认回滚线上",
+        cancelText: "取消",
+        onOk: async () => {
+          setRollingBackRevisionId(revision.id);
+          setRevisionFailure(null);
+          try {
+            const response = await pageDocumentApi.rollbackPublication(
+              pageKey,
+              revision.id,
+              currentPublished.id,
+            );
+            const updatedDocument = unwrapResponse<PageDocumentResource | null>(response);
+            const cached = pageSessionCacheRef.current[pageKey];
+            if (cached && updatedDocument?.updatedAt) {
+              pageSessionCacheRef.current[pageKey] = {
+                ...cached,
+                updatedAt: updatedDocument.updatedAt,
+              };
+            }
+
+            const publishedResponse = await pageDocumentApi.getPublishedAdmin(pageKey);
+            const publishedDocument = unwrapResponse<PageDocumentResource | null>(publishedResponse);
+            const publishedPuck = getPuckDocument(publishedDocument?.puckData);
+            if (!publishedPuck) throw new Error("回滚后未能读取新的线上版本");
+            const nextPublishedData = ensureEditorPageStructure(
+              pageKey,
+              migratePuckData(publishedPuck),
+            );
+            const nextPublishedMetadata = normalizePuckMetadata(publishedDocument?.metadata);
+            const nextPublishedBaseline = canonicalizePageContent(
+              nextPublishedData,
+              nextPublishedMetadata,
+            );
+            publishedDataRef.current = nextPublishedData;
+            publishedMetadataRef.current = nextPublishedMetadata;
+            publishedBaselineRef.current = nextPublishedBaseline;
+            setHasPendingDraft(
+              canonicalizePageContent(latestData.current, latestMetadata.current)
+                !== nextPublishedBaseline,
+            );
+            if (viewingPublishedRef.current) {
+              setData(nextPublishedData);
+              latestData.current = nextPublishedData;
+              setMetadata(nextPublishedMetadata);
+              latestMetadata.current = nextPublishedMetadata;
+              dataSignatureRef.current = dataSignature(nextPublishedData);
+            }
+            setRevisions((items) => items.map((item) => ({
+              ...item,
+              isPublished: item.id === revision.id,
+            })));
+            message.success(`线上页面已回滚到版本 ${revision.version}；当前草稿保持不变`);
+            await loadRevisions();
+          } catch (error) {
+            setRevisionFailure({
+              message: getEditorErrorMessage(error, "线上回滚失败，请稍后重试"),
+              revision,
+              action: "rollback",
+            });
+            throw error;
+          } finally {
+            setRollingBackRevisionId(null);
+          }
+        },
+      });
+    },
+    [loadRevisions, message, modal, pageKey, revisions],
+  );
+
   const publishHome = async (
     nextData: unknown,
-    locateBlock?: (blockIndex: number) => void,
   ) => {
     if (!canPublish) {
       message.warning("当前账号只能编辑草稿，请通知管理员审核并发布");
@@ -4476,127 +3408,8 @@ export default function HomepageConfig({
     const editableData = nextData ?? latestData.current;
     const pageLabel = getEditorPage(pageKey).label;
 
-    // 发布前预检：单一数据源 = 后端校验器，前端只负责展示问题列表
     setPublishing(true);
-    let validation: {
-      valid: boolean;
-      errors: string[];
-      issues?: PublishValidationIssue[];
-    } | null = null;
     try {
-      const response = await pageDocumentApi.validate(
-        pageKey,
-        editableData,
-        latestMetadata.current,
-      );
-      validation = unwrapResponse<{
-        valid: boolean;
-        errors: string[];
-        issues?: PublishValidationIssue[];
-      }>(
-        response,
-      );
-    } catch (error) {
-      message.error(
-        getEditorErrorMessage(error, "发布前校验失败，请稍后重试"),
-      );
-      setPublishing(false);
-      return;
-    }
-    setPublishing(false);
-
-    const blocks =
-      (
-        editableData as {
-          content?: Array<{ type?: string; props?: Record<string, unknown> }>;
-        }
-      )?.content ?? [];
-    const currentIssues = resolvePublishValidationIssues(validation ?? {});
-    const actionableIssues = currentIssues.filter(
-      (issue) => issue.severity !== "info",
-    );
-
-    if (validation && !validation.valid && validation.errors?.length) {
-      const errorIssues: PublishValidationIssue[] = actionableIssues.filter(
-        (issue) => issue.severity === "error",
-      );
-      setPublishIssues(actionableIssues);
-      const firstIssue = errorIssues.find((issue) => issue.blockId);
-      const firstBlockIndex = firstIssue?.blockId
-        ? blocks.findIndex((block) => block.props?.id === firstIssue.blockId)
-        : -1;
-      if (firstBlockIndex >= 0 && locateBlock) {
-        locateBlock(firstBlockIndex);
-      }
-      message.warning(
-        firstBlockIndex >= 0
-          ? `还有 ${validation.errors.length} 处内容待完善，已定位到第一处；可在右侧「发布检查」清单逐项处理，素材未到位的模块可暂时隐藏`
-          : `还有 ${validation.errors.length} 处内容待完善，请查看右侧「发布检查」清单`,
-      );
-      return;
-    }
-    const warningIssues = actionableIssues.filter(
-      (issue) => issue.severity === "warning",
-    );
-    const hasSiteSettingsWarnings = warningIssues.some(isSiteSettingsPublishIssue);
-    setPublishIssues(warningIssues);
-
-    const usesMobileFallback = blocks.some(
-      (block) =>
-        (block.type === "首屏主视觉" ||
-          block.type === "单图海报" ||
-          block.type === "全屏出血图" ||
-          block.type === "热区图") &&
-        Boolean(block.props?.desktopImage || block.props?.image) &&
-        !block.props?.mobileImage,
-    );
-    const publishImpactCopy = usesMobileFallback
-      ? "部分模块未上传移动端图片，移动端会复用对应桌面图，可能产生裁切。你仍可发布。"
-      : pageKey === "home"
-        ? "发布后，当前店铺首页将立即更新为本次编辑内容。"
-        : `发布后，${pageLabel}将立即更新为本次编辑内容。`;
-    let publishConfirmation: { destroy: () => void } | null = null;
-    const openSiteContent = () => {
-      publishConfirmation?.destroy();
-      navigate("/admin/site-content");
-    };
-    publishConfirmation = modal.confirm({
-      title: pageKey === "home" ? "确认发布首页？" : `确认发布${pageLabel}？`,
-      content: (
-        <div>
-          {warningIssues.length > 0 ? (
-            <section aria-label="发布提示">
-              <p style={{ margin: "0 0 8px", fontWeight: 600 }}>
-                以下 {warningIssues.length} 项提示不会阻断发布，但会影响公开端显示：
-              </p>
-              <ul style={{ margin: "0 0 14px", paddingInlineStart: 20 }}>
-                {warningIssues.map((issue, index) => (
-                  <li key={`${issue.path ?? ""}-${issue.message}-${index}`}>
-                    {issue.message}
-                  </li>
-                ))}
-              </ul>
-              {hasSiteSettingsWarnings ? (
-                canEditSiteContent ? (
-                  <Button size="small" onClick={openSiteContent}>
-                    前往店铺资料
-                  </Button>
-                ) : (
-                  <p style={{ margin: "0 0 14px" }}>
-                    当前账号没有店铺资料维护权限，请联系管理员处理。
-                  </p>
-                )
-              ) : null}
-            </section>
-          ) : null}
-          <p style={{ margin: 0 }}>{publishImpactCopy}</p>
-        </div>
-      ),
-      okText: "确认发布",
-      cancelText: "继续检查",
-      onOk: async () => {
-        setPublishing(true);
-        try {
           const saved = await saveDraft(editableData, { silent: true });
           if (!saved) return;
           const persistedDraft = pageSessionCacheRef.current[pageKey];
@@ -4618,10 +3431,14 @@ export default function HomepageConfig({
             );
             return;
           }
+          if (!persistedDraft?.updatedAt) {
+            message.error("当前页面版本标识缺失，请刷新页面后再发布");
+            return;
+          }
           const publishResponse = await pageDocumentApi.publish(
             pageKey,
             undefined,
-            persistedDraft?.updatedAt || undefined,
+            persistedDraft.updatedAt,
           );
           const publishedDocument = unwrapResponse<PageDocumentResource | null>(publishResponse);
           const publishedData = getPuckDocument(publishedDocument?.puckData) ?? publishData;
@@ -4692,8 +3509,6 @@ export default function HomepageConfig({
         } finally {
           setPublishing(false);
         }
-      },
-    });
   };
 
   return (
@@ -4703,22 +3518,31 @@ export default function HomepageConfig({
         revisions={revisions}
         loading={revisionsLoading}
         restoringVersion={restoringVersion}
+        rollingBackRevisionId={rollingBackRevisionId}
+        canRollback={canPublish}
         draft={draftSnapshot}
         error={revisionFailure?.message ?? null}
         retryLabel={
           revisionFailure?.revision
-            ? `重新恢复版本 ${revisionFailure.revision.version}`
+            ? revisionFailure.action === "rollback"
+              ? `重新回滚到版本 ${revisionFailure.revision.version}`
+              : `重新恢复版本 ${revisionFailure.revision.version}`
             : "重新加载"
         }
         onClose={() => setRevisionsOpen(false)}
         onRetry={() => {
           if (revisionFailure?.revision) {
-            restoreRevision(revisionFailure.revision);
+            if (revisionFailure.action === "rollback") {
+              rollbackPublication(revisionFailure.revision);
+            } else {
+              restoreRevision(revisionFailure.revision);
+            }
             return;
           }
           void loadRevisions();
         }}
         onRestore={restoreRevision}
+        onRollback={rollbackPublication}
         onEditDraft={editDraftFromRevisions}
       />
 
@@ -4767,7 +3591,7 @@ export default function HomepageConfig({
             重新加载
           </Button>
         </div>
-      ) : initialLoading || loadedPageKey !== pageKey ? (
+      ) : initialLoading || loadedPageKey !== pageKey || !resolvedDynamicTemplatesReady ? (
         <div
           style={{
             width: "100%",
@@ -4809,8 +3633,11 @@ export default function HomepageConfig({
             pageKey={pageKey}
             canvasDataSyncVersion={canvasDataSyncVersion}
           />
-          <CanvasSelectionDock readOnly={viewingPublished} />
-          <EditorToolbar
+          {workspaceMode === "page" ? (
+            <CanvasSelectionDock readOnly={viewingPublished} />
+          ) : null}
+          {workspaceMode === "page" ? (
+            <EditorToolbar
             pageKey={pageKey}
             publishing={publishing}
             saving={saving}
@@ -4820,14 +3647,8 @@ export default function HomepageConfig({
             previewMode={previewMode}
             hasUnsavedChanges={hasUnsavedChanges}
             canPublish={canPublish}
-            publishValidationState={publishValidationState}
-            publishErrorCount={
-              publishIssues.filter((issue) => issue.severity === "error").length
-            }
-            publishSettingsErrorCount={publishSettingsErrorCount}
-            draftSavedAtLabel={
-              pageSessionCacheRef.current[pageKey]?.lastSaved ?? null
-            }
+            canManageTemplates={canManageTemplates}
+            draftSavedAtLabel={pageSessionCacheRef.current[pageKey]?.lastSaved ?? null}
             onPublish={publishHome}
             onSaveDraft={(nextData) => {
               void saveDraft(nextData);
@@ -4837,36 +3658,80 @@ export default function HomepageConfig({
             onDiscardDraft={discardDraftToPublished}
             onOpenRevisions={openRevisions}
             onOpenPageSettings={openPageSettingsForEditing}
-            onRetryPublishValidation={retryPublishValidation}
             onPreviewModeChange={setPreviewMode}
             onDataChange={trackEditorData}
             onCanvasDataSync={syncCanvasDataWithoutAdvancingSavedBaseline}
             onExitViewing={returnToEditingDraft}
-          />
-          <EditorBody
-            onSaveAsTemplate={saveBlockAsTemplate}
-            pageKey={pageKey}
-            contentReady={loadedPageKey === pageKey}
-            pageLabel={getEditorPage(pageKey).label}
-            pageMode={getEditorPage(pageKey).mode}
-            hasUnsavedChanges={hasUnsavedChanges}
-            saving={saving}
-            previewMode={previewMode}
-            viewingPublished={viewingPublished}
-            onSaveDraft={(nextData) => {
-              void saveDraft(nextData);
-            }}
-            publishIssues={publishIssues}
-            validationState={publishValidationState}
-          />
+            onEnterTemplateMode={openEmptyTemplateWorkspace}
+            restoreViewport={pageViewportBeforeTemplateRef.current}
+            />
+          ) : null}
+          <div
+            className={`homepage-editor__page-workspace${workspaceMode === "template" ? " is-inactive" : ""}`}
+            aria-hidden={workspaceMode === "template" || undefined}
+          >
+            <EditorBody
+              pageKey={pageKey}
+              contentReady={loadedPageKey === pageKey}
+              pageLabel={getEditorPage(pageKey).label}
+              pageMode={getEditorPage(pageKey).mode}
+              hasUnsavedChanges={hasUnsavedChanges}
+              saving={saving}
+              previewMode={previewMode}
+              viewingPublished={viewingPublished}
+              onSaveDraft={(nextData) => {
+                void saveDraft(nextData);
+              }}
+              publishIssues={publishIssues}
+            />
+          </div>
+          {workspaceMode === "template" ? (
+            <Suspense
+              fallback={
+                <div
+                  className="homepage-editor__loading"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <Spin />
+                  <span>正在加载模板编辑器</span>
+                </div>
+              }
+            >
+              <TemplateWorkspace
+                onPersist={persistTemplateDraft}
+                onPublish={USE_MOCK ? undefined : publishDynamicTemplateDraft}
+                localOnly={USE_MOCK}
+                publishing={templatePublishing}
+                onReturnPage={returnToPageWorkspace}
+                onOpenSystemTemplate={openSystemTemplateWorkspace}
+                onOpenPersonalTemplate={openPersonalTemplateWorkspace}
+                onCreateDynamicTemplate={openNewDynamicTemplateWorkspace}
+                onOpenDynamicTemplate={openDynamicTemplateWorkspace}
+                onOpenPersistedDynamicTemplate={openPersistedDynamicTemplateWorkspace}
+              />
+            </Suspense>
+          ) : null}
         </Puck>
       )}
       <UnsavedChangesGuard
-        hasUnsavedChanges={hasProtectedUnsavedChanges}
+        hasUnsavedChanges={hasAnyProtectedChanges}
         disabled={
           initialLoading || Boolean(loadError) || loadedPageKey !== pageKey
         }
+        subject={
+          hasProtectedTemplateChanges && hasProtectedUnsavedChanges
+            ? "当前模板和页面"
+            : hasProtectedTemplateChanges
+              ? "当前模板"
+              : "当前页面"
+        }
         onSaveAndLeave={async () => {
+          if (hasProtectedTemplateChanges) {
+            const savedTemplate = await persistTemplateDraft();
+            if (!savedTemplate) return false;
+          }
+          if (!hasProtectedUnsavedChanges) return true;
           const protectedDraft = editingDraftSnapshotRef.current;
           if (viewingPublishedRef.current && protectedDraft) {
             const protectedData = protectedDraft.data;

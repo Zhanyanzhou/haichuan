@@ -10,12 +10,29 @@ import { App as AntdApp } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
+  CopyOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
 import { registerOverlayPortal } from "@puckeditor/core";
 import { ROOT_ZONE, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
 import type { PuckProps } from "@/page-builder/types";
+import { duplicatePageModule } from "./pageModuleActions";
+
+function findCanvasBlock(
+  frameDocument: Document | null | undefined,
+  componentId: string,
+): HTMLElement | undefined {
+  if (!frameDocument || !componentId) return undefined;
+  return Array.from(
+    frameDocument.querySelectorAll<HTMLElement>(
+      "[data-editor-block-id], [data-puck-component]",
+    ),
+  ).find((candidate) => (
+    candidate.dataset.editorBlockId === componentId
+    || candidate.dataset.puckComponent === componentId
+  ));
+}
 
 export default function CanvasSelectionDock({
   readOnly = false,
@@ -30,13 +47,14 @@ export default function CanvasSelectionDock({
     top: number;
   } | null>(null);
   const [dockHost, setDockHost] = useState<HTMLElement | null>(null);
+  const [canvasReadyRevision, setCanvasReadyRevision] = useState(0);
   const appData = useHomepagePuck((state) => state.appState.data);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const componentId = String(selectedItem?.props?.id ?? "");
   const content = appData.content as Array<{
     type: string;
-    props: PuckProps;
+    props: PuckProps & { id: string };
   }>;
   const selectedIndex = content.findIndex(
     (item) => item.props?.id === componentId,
@@ -67,9 +85,7 @@ export default function CanvasSelectionDock({
     );
     const frameDocument = frame?.contentDocument;
     const frameWindow = frame?.contentWindow;
-    const selectedBlock = Array.from(
-      frameDocument?.querySelectorAll<HTMLElement>("[data-puck-component]") ?? [],
-    ).find((candidate) => candidate.dataset.puckComponent === componentId);
+    const selectedBlock = findCanvasBlock(frameDocument, componentId);
     const nextDockHost = frame?.closest<HTMLElement>(
       ".homepage-editor__canvas-scroll",
     );
@@ -87,7 +103,65 @@ export default function CanvasSelectionDock({
       lastDockPositionRef.current = null;
       setDockPosition(null);
       setDockHost(null);
-      return undefined;
+
+      if (!componentId) return undefined;
+
+      let disposed = false;
+      const observedFrames = new Set<HTMLIFrameElement>();
+      const readinessObserver = new MutationObserver(() => {
+        observeCurrentFrame();
+        notifyWhenReady();
+      });
+      const observeCurrentFrame = () => {
+        const nextFrame = document.querySelector<HTMLIFrameElement>(
+          ".homepage-editor__canvas-scroll iframe",
+        );
+        if (nextFrame && !observedFrames.has(nextFrame)) {
+          observedFrames.add(nextFrame);
+          nextFrame.addEventListener("load", notifyWhenReady);
+        }
+        const nextRoot = nextFrame?.contentDocument?.documentElement;
+        if (nextRoot) {
+          readinessObserver.observe(nextRoot, {
+            attributes: true,
+            attributeFilter: ["data-editor-block-id", "data-puck-component"],
+            childList: true,
+            subtree: true,
+          });
+        }
+        return nextFrame;
+      };
+      const notifyWhenReady = () => {
+        if (disposed) return;
+        const nextFrame = observeCurrentFrame();
+        const nextHost = nextFrame?.closest<HTMLElement>(
+          ".homepage-editor__canvas-scroll",
+        );
+        if (
+          !nextFrame?.contentWindow ||
+          !nextHost ||
+          !findCanvasBlock(nextFrame.contentDocument, componentId)
+        ) {
+          return;
+        }
+        disposed = true;
+        setCanvasReadyRevision((revision) => revision + 1);
+      };
+
+      readinessObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+      observeCurrentFrame();
+      notifyWhenReady();
+
+      return () => {
+        disposed = true;
+        readinessObserver.disconnect();
+        observedFrames.forEach((observedFrame) => {
+          observedFrame.removeEventListener("load", notifyWhenReady);
+        });
+      };
     }
     if (dockHost !== nextDockHost) setDockHost(nextDockHost);
 
@@ -184,7 +258,7 @@ export default function CanvasSelectionDock({
       overlayObserver.disconnect();
       frameObserver.disconnect();
     };
-  }, [componentId, dockHost, selectedIndex]);
+  }, [canvasReadyRevision, componentId, dockHost, selectedIndex]);
 
   const moveSelected = (direction: -1 | 1) => {
     if (readOnly) return;
@@ -237,6 +311,11 @@ export default function CanvasSelectionDock({
     });
   };
 
+  const duplicateSelected = () => {
+    if (readOnly || !selectedModule || selectedLocked) return;
+    duplicatePageModule(dispatch, selectedModule, selectedIndex);
+  };
+
   return selectedModule && dockHost && !readOnly
     ? createPortal(
         <div
@@ -269,6 +348,15 @@ export default function CanvasSelectionDock({
             title="下移"
           >
             <ArrowDownOutlined aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            disabled={selectedLocked}
+            onClick={duplicateSelected}
+            aria-label={selectedLocked ? "固定模块不能复制" : "复制当前模块"}
+            title={selectedLocked ? "固定模块不能复制" : "复制"}
+          >
+            <CopyOutlined aria-hidden="true" />
           </button>
           <button
             type="button"

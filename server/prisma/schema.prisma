@@ -56,6 +56,10 @@ model User {
   createdQuotationVersions  QuotationVersion[]             @relation("QuotationVersionCreator")
   createdDesignFileVersions CooperationDesignFileVersion[] @relation("DesignFileVersionCreator")
   personalContentTemplates  PersonalContentTemplate[]
+  ownedDynamicTemplates     DynamicTemplate[]              @relation("DynamicTemplateOwner")
+  updatedDynamicDrafts      DynamicTemplateDraft[]         @relation("DynamicTemplateDraftUpdater")
+  publishedDynamicVersions  DynamicTemplateVersion[]       @relation("DynamicTemplateVersionPublisher")
+  activatedDynamicTemplates DynamicTemplateActivation[]    @relation("DynamicTemplateActivationActor")
 
   @@map("users")
 }
@@ -1171,25 +1175,28 @@ model Coupon {
 // ========== 页面文档（Puck 页面级 JSON 存储）==========
 
 model PageDocument {
-  id              Int       @id @default(autoincrement())
-  pageKey         String    @unique @db.VarChar(50)
-  schemaVersion   Int       @default(1) // 我们自己控制的数据版本
-  editorType      String    @default("puck") @db.VarChar(30)
-  editorVersion   String?   @db.VarChar(30) // 生成时的 Puck 版本
-  templateId      String?   @map("template_id") @db.VarChar(50)
-  templateVersion Int?      @map("template_version")
-  puckData        Json // Puck { content, root, zones }
-  metadata        Json      @default("{}") // { title, seoDescription, slug, ... }
-  status          String    @default("DRAFT") @db.VarChar(20) // DRAFT | PUBLISHED
-  publishedAt     DateTime? @map("published_at")
-  publishedBy     Int?      @map("published_by")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  id                  Int       @id @default(autoincrement())
+  pageKey             String    @unique @db.VarChar(50)
+  schemaVersion       Int       @default(1) // 我们自己控制的数据版本
+  editorType          String    @default("puck") @db.VarChar(30)
+  editorVersion       String?   @db.VarChar(30) // 生成时的 Puck 版本
+  templateId          String?   @map("template_id") @db.VarChar(50)
+  templateVersion     Int?      @map("template_version")
+  puckData            Json // Puck { content, root, zones }
+  metadata            Json      @default("{}") // { title, seoDescription, slug, ... }
+  status              String    @default("DRAFT") @db.VarChar(20) // DRAFT | PUBLISHED（兼容字段，线上事实以 publishedRevisionId 为准）
+  publishedRevisionId Int?      @map("published_revision_id")
+  publishedAt         DateTime? @map("published_at")
+  publishedBy         Int?      @map("published_by")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  revisions     PageDocumentRevision[]
-  localizations PageDocumentLocalization[]
+  revisions         PageDocumentRevision[] @relation("PageDocumentRevisions")
+  publishedRevision PageDocumentRevision?  @relation("PagePublishedRevision", fields: [publishedRevisionId], references: [id], onDelete: SetNull)
+  localizations     PageDocumentLocalization[]
 
   @@index([status])
+  @@index([publishedRevisionId])
   @@map("page_documents")
 }
 
@@ -1206,7 +1213,8 @@ model PageDocumentRevision {
   publishedAt DateTime? @map("published_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  document         PageDocument               @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  document         PageDocument               @relation("PageDocumentRevisions", fields: [documentId], references: [id], onDelete: Cascade)
+  publishedByPages PageDocument[]             @relation("PagePublishedRevision")
   publishedLocales PageDocumentLocalization[] @relation("PageLocalePublishedRevision")
 
   @@unique([documentId, version])
@@ -1240,6 +1248,7 @@ model PersonalContentTemplate {
   contractKey     String   @map("contract_key") @db.VarChar(50)
   contractVersion Int      @map("contract_version")
   layoutData      Json     @map("layout_data")
+  revision        Int      @default(1)
   // 运营明确选择后保存的合同白名单默认内容；禁止复制价格、库存、客户及其他业务事实。
   contentDefaults Json?    @map("content_defaults")
   createdAt       DateTime @default(now()) @map("created_at")
@@ -1250,6 +1259,123 @@ model PersonalContentTemplate {
   @@unique([ownerId, name])
   @@index([ownerId, updatedAt])
   @@map("personal_content_templates")
+}
+
+// ========== 动态内容模板（草稿与不可变正式版本）==========
+
+enum DynamicTemplateSourceType {
+  SYSTEM
+  CUSTOM
+}
+
+enum DynamicTemplateVisibility {
+  PRIVATE
+  STAFF
+}
+
+enum DynamicTemplateStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model DynamicTemplate {
+  id                      Int                       @id @default(autoincrement())
+  templateId              String                    @unique @map("template_id") @db.VarChar(128)
+  ownerId                 Int?                      @map("owner_id")
+  sourceType              DynamicTemplateSourceType @default(CUSTOM) @map("source_type")
+  visibility              DynamicTemplateVisibility @default(PRIVATE)
+  status                  DynamicTemplateStatus     @default(ACTIVE)
+  name                    String                    @db.VarChar(100)
+  category                String                    @db.VarChar(50)
+  purpose                 String                    @db.VarChar(100)
+  layoutType              String                    @map("layout_type") @db.VarChar(50)
+  description             String?                   @db.Text
+  slotSummary             String                    @map("slot_summary") @db.VarChar(200)
+  recommendedFor          Json                      @map("recommended_for")
+  tags                    Json
+  definitionSchemaVersion Int                       @map("definition_schema_version")
+  publishedVersion        Int                       @default(0) @map("published_version")
+  sourceReference         String?                   @map("source_reference") @db.VarChar(128)
+  archivedAt              DateTime?                 @map("archived_at")
+  createdAt               DateTime                  @default(now()) @map("created_at")
+  updatedAt               DateTime                  @updatedAt @map("updated_at")
+
+  owner       User?                       @relation("DynamicTemplateOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  draft       DynamicTemplateDraft?
+  versions    DynamicTemplateVersion[]
+  activations DynamicTemplateActivation[]
+
+  @@unique([ownerId, name])
+  @@index([ownerId, status, updatedAt])
+  @@index([visibility, status, updatedAt])
+  @@map("dynamic_templates")
+}
+
+model DynamicTemplateDraft {
+  id                 Int      @id @default(autoincrement())
+  dynamicTemplateId  Int      @unique @map("dynamic_template_id")
+  baseVersion        Int?     @map("base_version")
+  revision           Int      @default(1)
+  definition         Json
+  definitionChecksum String   @map("definition_checksum") @db.Char(64)
+  versionNote        String?  @map("version_note") @db.VarChar(500)
+  updatedById        Int?     @map("updated_by_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  template  DynamicTemplate @relation(fields: [dynamicTemplateId], references: [id], onDelete: Cascade)
+  updatedBy User?           @relation("DynamicTemplateDraftUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([updatedAt])
+  @@map("dynamic_template_drafts")
+}
+
+model DynamicTemplateVersion {
+  id                 Int      @id @default(autoincrement())
+  dynamicTemplateId  Int      @map("dynamic_template_id")
+  version            Int
+  schemaVersion      Int      @map("schema_version")
+  definition         Json
+  definitionChecksum String   @map("definition_checksum") @db.Char(64)
+  versionNote        String?  @map("version_note") @db.VarChar(500)
+  publishedById      Int?     @map("published_by_id")
+  publishedAt        DateTime @default(now()) @map("published_at")
+
+  template    DynamicTemplate @relation(fields: [dynamicTemplateId], references: [id], onDelete: Restrict)
+  publishedBy User?           @relation("DynamicTemplateVersionPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
+
+  @@unique([dynamicTemplateId, version])
+  @@index([dynamicTemplateId, publishedAt])
+  @@index([definitionChecksum])
+  @@map("dynamic_template_versions")
+}
+
+model DynamicTemplateActivation {
+  id                             BigInt   @id @default(autoincrement())
+  dynamicTemplateId              Int      @map("dynamic_template_id")
+  fromVersion                    Int      @map("from_version")
+  toVersion                      Int      @map("to_version")
+  expectedDraftRevision          Int      @map("expected_draft_revision")
+  draftChecksum                  String   @map("draft_checksum") @db.Char(64)
+  impactHash                     String   @map("impact_hash") @db.Char(64)
+  idempotencyKeyHash             String   @unique @map("idempotency_key_hash") @db.Char(64)
+  requestHash                    String   @map("request_hash") @db.Char(64)
+  affectedDocumentCount          Int      @map("affected_document_count")
+  affectedDraftInstanceCount     Int      @map("affected_draft_instance_count")
+  affectedPublishedInstanceCount Int      @map("affected_published_instance_count")
+  affectedSchemeCount            Int      @map("affected_scheme_count")
+  affectedSchemeInstanceCount    Int      @map("affected_scheme_instance_count")
+  createdPageRevisionCount       Int      @map("created_page_revision_count")
+  resultSummary                  Json     @map("result_summary")
+  activatedById                  Int?     @map("activated_by_id")
+  activatedAt                    DateTime @default(now()) @map("activated_at")
+
+  template    DynamicTemplate @relation(fields: [dynamicTemplateId], references: [id], onDelete: Restrict)
+  activatedBy User?           @relation("DynamicTemplateActivationActor", fields: [activatedById], references: [id], onDelete: SetNull)
+
+  @@unique([dynamicTemplateId, toVersion])
+  @@index([dynamicTemplateId, activatedAt], map: "dynamic_template_activations_template_activated_idx")
+  @@map("dynamic_template_activations")
 }
 
 // ========== 选款咨询 ==========

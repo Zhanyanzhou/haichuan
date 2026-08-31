@@ -2,6 +2,7 @@
  * TextField.tsx — 文本 / 多行文本控件（薄封装 antd Input）。
  * 复用 homepage-editor__inspector-field 样式体系，与专属面板观感一致。
  */
+import { useId } from "react";
 import { Input } from "antd";
 
 interface TextFieldProps {
@@ -33,10 +34,11 @@ export default function TextField({
   error,
   readOnly,
 }: TextFieldProps) {
+  const inputId = useId();
   const countVisible = showCount ?? Boolean(maxLength);
   return (
     <div className="homepage-editor__inspector-field">
-      <label>
+      <label htmlFor={inputId}>
         {label}
         {required ? <em>必填</em> : null}
         {countVisible && maxLength ? (
@@ -49,15 +51,24 @@ export default function TextField({
       </label>
       {rows ? (
         <Input.TextArea
+          id={inputId}
+          aria-label={label}
+          aria-required={required || undefined}
+          aria-invalid={error || undefined}
           value={value || ""}
           readOnly={readOnly}
           onChange={(e) => onChange(e.target.value)}
           maxLength={maxLength}
           placeholder={placeholder}
           rows={rows}
+          status={error ? "error" : undefined}
         />
       ) : (
         <Input
+          id={inputId}
+          aria-label={label}
+          aria-required={required || undefined}
+          aria-invalid={error || undefined}
           value={value || ""}
           readOnly={readOnly}
           onChange={(e) => onChange(e.target.value)}

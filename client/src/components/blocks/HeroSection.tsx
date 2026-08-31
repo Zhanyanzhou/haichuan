@@ -55,6 +55,7 @@ export default function HeroSection({
     targetType: c?.targetType,
     productCode: c?.productCode,
     productId: c?.productId,
+    categorySlug: c?.categorySlug,
     linkUrl,
   });
   const legacyFocusX = s?.focusX ?? 50;
@@ -67,9 +68,11 @@ export default function HeroSection({
   // 链路修复:编辑器字段为 alignment(旧数据为 template),统一兼容读取
   const rawAlign = l?.alignment || l?.template || "center";
   const alignment = rawAlign === "left" ? "left" : "center";
-  const textTone = "light";
+  const hasConfiguredImage = Boolean(desktopImg || mobileImg);
+  const useNeutralMediaFallback = Boolean(editMode && (!hasConfiguredImage || imageFailed));
+  const textTone = useNeutralMediaFallback ? "dark" : "light";
   const heroStyle = {
-    background: "#181A1B",
+    background: "#F7F8F8",
     outline: editMode ? "2px solid rgba(24,26,27,0.48)" : undefined,
     outlineOffset: -2,
     position: "relative",
@@ -99,23 +102,6 @@ export default function HeroSection({
     >
       <DesignSystemStyles />
       <ContentTemplateLayoutStyles />
-      {editMode && (
-        <div
-          style={{
-            position: "absolute",
-            top: 8,
-            right: 12,
-            zIndex: 10,
-            background: "#181A1B",
-            color: "#fff",
-            fontSize: 10,
-            padding: "2px 8px",
-            letterSpacing: "0.04em",
-          }}
-        >
-          可编辑 · 首屏
-        </div>
-      )}
       <div
         className="hc-content-template__media hc-phase1-hero__media"
         data-content-role-desktop="desktopImage"
@@ -147,7 +133,7 @@ export default function HeroSection({
               }}
             />
           </picture>
-        ) : !desktopImg ? (
+        ) : !desktopImg || (imageFailed && editMode) ? (
           <BlockEmptyPlaceholder
             assetSlots={[
               { templateKey: "hero", roleId: "desktopImage" },
@@ -155,11 +141,11 @@ export default function HeroSection({
             ]}
             hint={CONTENT_TEMPLATE_LAYOUTS.hero.displayName}
             spec={IMAGE_SPECS.hero.desktop.label}
-            tone="dark"
+            tone="neutral"
             height="100%"
           />
         ) : null}
-        {imageFailed ? (
+        {imageFailed && !editMode ? (
           <div
             className="absolute inset-0 grid place-items-center text-xs tracking-[.08em]"
             role="img"
@@ -171,7 +157,7 @@ export default function HeroSection({
         ) : null}
       </div>
 
-      {title || subtitle || (actionText && targetUrl) || editMode ? (
+      {!useNeutralMediaFallback && (title || subtitle || (actionText && targetUrl) || editMode) ? (
         <div
           aria-hidden="true"
           className="hc-phase1-hero__copy-shade"
@@ -300,6 +286,24 @@ export default function HeroSection({
         }
         .hc-phase1-hero__copy-shade[data-align="center"] {
           background: linear-gradient(0deg, rgba(16, 18, 19, 0.54) 0%, rgba(16, 18, 19, 0.12) 38%, rgba(16, 18, 19, 0) 68%);
+        }
+        .hc-phase1-hero__copy[data-tone="dark"] {
+          color: #181A1B;
+          text-shadow: none;
+        }
+        .hc-phase1-hero__copy[data-tone="dark"] .hc-content-template__title,
+        .hc-phase1-hero__copy[data-tone="dark"] .hc-content-template__action {
+          color: #181A1B;
+        }
+        .hc-phase1-hero__copy[data-tone="dark"] .hc-content-template__body,
+        .hc-phase1-hero__copy[data-tone="dark"] .hc-content-template__eyebrow {
+          color: #5F6568;
+        }
+        .hc-phase1-hero__copy[data-tone="dark"] .hc-content-template__action {
+          border-color: #181A1B;
+        }
+        .hc-phase1-hero__copy[data-tone="dark"] .hc-content-template__action:focus-visible {
+          outline-color: #181A1B;
         }
         .hc-phase1-hero--edit .hc-phase1-hero__copy-band {
           pointer-events: auto;

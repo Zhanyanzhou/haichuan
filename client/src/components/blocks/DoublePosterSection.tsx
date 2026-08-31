@@ -106,16 +106,13 @@ export default function DoublePosterSection({ module, editMode }: Props) {
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const syncViewport = () => {
-      setIsMobileContractViewport(
-        element.getBoundingClientRect().width <= RESPONSIVE_CANVAS.mobileMaxWidth,
-      );
-    };
+    const ownerWindow = element.ownerDocument.defaultView;
+    if (!ownerWindow) return;
+    const mediaQuery = ownerWindow.matchMedia(RESPONSIVE_CANVAS.mobileMediaQuery);
+    const syncViewport = () => setIsMobileContractViewport(mediaQuery.matches);
     syncViewport();
-    if (typeof ResizeObserver !== "function") return;
-    const observer = new ResizeObserver(syncViewport);
-    observer.observe(element);
-    return () => observer.disconnect();
+    mediaQuery.addEventListener("change", syncViewport);
+    return () => mediaQuery.removeEventListener("change", syncViewport);
   }, []);
 
   const defaults = { number: "", label: "", title: "", description: "", href: "" };
@@ -144,7 +141,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
   const description = c?.description ?? defaults.description;
   const actionText = typeof c?.actionText === "string" ? c.actionText : "";
   const linkUrl = c?.linkUrl ?? defaults.href;
-  const targetUrl = resolveLinkTargetUrl({ targetType: c?.targetType, productCode: c?.productCode, productId: c?.productId, linkUrl });
+  const targetUrl = resolveLinkTargetUrl({ targetType: c?.targetType, productCode: c?.productCode, productId: c?.productId, categorySlug: c?.categorySlug, linkUrl });
   const detailSlot = detailImg || editMode ? (
     <div
       data-content-role="detailImage"
@@ -198,11 +195,6 @@ export default function DoublePosterSection({ module, editMode }: Props) {
     >
       <DesignSystemStyles />
       <ContentTemplateLayoutStyles />
-      {editMode && (
-        <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 10, background: '#181A1B', color: '#fff', fontSize: 10, padding: '2px 8px', letterSpacing: '0.04em' }}>
-          可编辑 · 双图文
-        </div>
-      )}
       <div className="hc-content-template__container hc-phase1-double">
         <div data-content-role="mainImage" data-editor-field="mainImage" className="hc-content-template__media hc-phase1-double__main" style={{
             background: '#F4F5F5',

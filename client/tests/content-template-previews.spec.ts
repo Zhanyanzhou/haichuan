@@ -118,11 +118,19 @@ for (const viewport of ["desktop", "mobile"] as const) {
     const previewImageSources = await previews.locator("img[src]").evaluateAll((nodes) =>
       nodes.map((node) => (node as HTMLImageElement).currentSrc || (node as HTMLImageElement).src),
     );
-    expect(previewImageSources.length, "真实 Renderer 预览应加载艺术指导图片").toBeGreaterThan(0);
+    expect(previewImageSources.length, "真实 Renderer 预览应加载中性占位图").toBeGreaterThan(0);
+    const unexpectedPreviewImageSources = previewImageSources.filter((source) => {
+        if (source.startsWith("data:image/svg+xml")) return false;
+        const pathname = new URL(source).pathname;
+        return !(
+          pathname.includes("/neutral-template-preview-v1/template-preview-")
+          || pathname.endsWith("/images/system/product-placeholder.svg")
+        ) || !pathname.endsWith(".svg");
+      });
     expect(
-      previewImageSources.every((source) => new URL(source).pathname.endsWith(".webp")),
-      "模板预览运行时只允许加载 WebP 派生图，不得把 PNG 母版带入浏览器",
-    ).toBe(true);
+      unexpectedPreviewImageSources,
+      "模板预览运行时只允许加载模板或商品中性 SVG 占位图，不得加载真实摄影图片",
+    ).toEqual([]);
     await expect.poll(() => page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     )).toBe(true);
@@ -132,7 +140,7 @@ for (const viewport of ["desktop", "mobile"] as const) {
       const preview = page.locator(`[data-content-template-preview="${entry.key}"]`);
       await expect(preview).toHaveAttribute("data-preview-viewport", viewport);
       await expect(preview).toHaveAttribute("data-preview-only", "true");
-      await expect(preview).toHaveAttribute("data-preview-art-direction", "quiet-light-court-v1");
+      await expect(preview).toHaveAttribute("data-preview-art-direction", "neutral-template-preview-v1");
       await expect(preview).toHaveAttribute("data-desktop-order", /.+/);
       await expect(preview).toHaveAttribute("data-mobile-order", /.+/);
       await expect(preview.locator('[data-content-template-renderer="real"]')).toHaveCount(1);

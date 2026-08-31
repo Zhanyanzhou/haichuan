@@ -11,6 +11,7 @@ export const LEGAL_ENTITY = {
   enterpriseType: "有限责任公司（自然人独资）",
   registeredCapital: "人民币 5 万元",
   establishedOn: "2022 年 9 月 22 日",
+  establishedOnIso: "2022-09-22",
   registrationStatus: "开业（存续）",
   registeredAddress:
     "深圳市龙岗区横岗街道横岗社区富康路 88 号 A 栋 206",

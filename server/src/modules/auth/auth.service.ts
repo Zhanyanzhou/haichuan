@@ -1,9 +1,10 @@
-import { Injectable, UnauthorizedException, HttpException } from '@nestjs/common';
+import { HttpStatus, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import type { User } from '@prisma/client';
+import { ApiError } from '../../common/errors/api-error';
 
 type SafeStaff = Omit<User, 'password'>;
 
@@ -38,9 +39,11 @@ export class AuthService {
     const now = Date.now();
     if (record.lockedUntil > now) {
       const minutes = Math.ceil((record.lockedUntil - now) / 60000);
-      throw new HttpException(
+      throw new ApiError(
+        HttpStatus.FORBIDDEN,
+        'ADMIN_LOGIN_TEMPORARILY_LOCKED',
         `密码连续错误次数过多，账号已临时锁定，请约 ${minutes} 分钟后重试`,
-        403,
+        { retryAfterMinutes: minutes },
       );
     }
     // 仅在「曾锁定且锁定期已满」时清空（新一轮从零开始）；

@@ -57,7 +57,7 @@
 
 | 模块              | 路由                     | 核心功能                                                                                                             |
 | ----------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| **page-modules**  | `/api/page-modules`      | Puck PageDocument 草稿、预检、发布、版本快照与 SSE 通知；模板数量、角色、比例和能力从机器合同派生，`pageRules` 是页面角色与固定业务区的唯一门禁，模板并非全页面通用 |
+| **page-modules**  | `/api/page-modules`      | Puck PageDocument 草稿、预检、发布、版本快照与 SSE 通知；全部 active 母模板跨六个装修页面通用，`pageRules` 继续门禁固定业务区、内容位置和导航模式，`recommendedFor` 仅作推荐 |
 | **content-slots** | ~~`/api/content-slots`~~ | 已删除（2026-08-15 死资产清退：写侧零入口、HERO 插槽永远空，内容统一由 PageDocument 承载）                           |
 | **settings**      | `/api/settings`          | 系统设置（`site_settings` 数据表持久化；旧 JSON 仅首次导入）                                                         |
 | **marketing**     | `/api/marketing`         | 促销+优惠券管理                                                                                                      |

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" role="img" aria-labelledby="title description">
+  <title id="title">竖向模板预览图</title>
+  <desc id="description">中性图片占位符，不代表实际人物、商品或场景</desc>
+  <rect width="800" height="1000" fill="#F7F8F8"/>
+  <rect x="48" y="48" width="704" height="904" rx="12" fill="none" stroke="#D5D9DA" stroke-width="8"/>
+  <circle cx="232" cy="286" r="60" fill="none" stroke="#AEB4B6" stroke-width="8"/>
+  <path d="M104 890 296 604l150 204 116-164 134 246" fill="none" stroke="#AEB4B6" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

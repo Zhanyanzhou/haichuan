@@ -31,7 +31,7 @@ export default function ImageTextBlock({ module, editMode }: ImageTextBlockProps
   const spacing = styleConfig.spacing || 'normal';
   const focusX = Math.min(100, Math.max(0, Number(styleConfig.focusX ?? 50)));
   const focusY = Math.min(100, Math.max(0, Number(styleConfig.focusY ?? 50)));
-  const targetUrl = resolveLinkTargetUrl({ targetType: content.targetType, productCode: content.productCode, productId: content.productId, linkUrl });
+  const targetUrl = resolveLinkTargetUrl({ targetType: content.targetType, productCode: content.productCode, productId: content.productId, categorySlug: content.categorySlug, linkUrl });
 
   const paddingMap: Record<string, string> = { compact: '40px 0', normal: '72px 0', spacious: '100px 0' };
 

@@ -70,6 +70,15 @@ function BookingEditorFixture() {
 
   const update = (patch: Record<string, any>) =>
     setProps((current) => ({ ...current, ...patch }));
+  const updateFromCurrent = (
+    factory: (current: Record<string, any>) => Record<string, any>,
+  ) => setProps((current) => ({ ...current, ...factory(current) }));
+  const updateHistoryTransaction = (
+    patchOrFactory: Record<string, any> | ((current: Record<string, any>) => Record<string, any>),
+  ) => setProps((current) => ({
+    ...current,
+    ...(typeof patchOrFactory === "function" ? patchOrFactory(current) : patchOrFactory),
+  }));
   const ctx = { props, device: "desktop" as const, viewportWidth: 1920 };
   const firstFields = appointmentSchema.sections
     .filter((section) => section.layer === "content" || section.layer === "interaction")
@@ -98,7 +107,9 @@ function BookingEditorFixture() {
         <InstanceOverridesPanel
           moduleType={moduleType}
           props={props}
-          update={update}
+          updateFromCurrent={updateFromCurrent}
+          updateHistoryTransaction={updateHistoryTransaction}
+          historyTransactionPending={false}
           viewport="desktop"
         />
         <pre data-testid="booking-state">{JSON.stringify(props)}</pre>

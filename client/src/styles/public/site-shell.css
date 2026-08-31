@@ -69,7 +69,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 50px;
+  gap: 28px;
   justify-self: end;
 }
 
@@ -83,9 +83,10 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  justify-content: center;
+  min-width: 44px;
   min-height: 44px;
-  padding: 0 0 5px;
+  padding: 0;
   border: 0;
   background: transparent;
   color: rgba(24, 26, 27, 0.72);
@@ -109,14 +110,14 @@
 .site-header__nav-item::after {
   content: "";
   position: absolute;
-  left: 39px;
-  right: 0;
+  left: 50%;
+  width: 18px;
   bottom: 1px;
   height: 1px;
   background: currentColor;
   opacity: 0;
-  transform: scaleX(0.44);
-  transform-origin: left center;
+  transform: translateX(-50%) scaleX(0.44);
+  transform-origin: center;
   transition:
     opacity 280ms ease,
     transform 280ms ease;
@@ -125,7 +126,7 @@
 .site-header__nav-item:hover::after,
 .site-header__nav-item:focus-visible::after {
   opacity: 0.85;
-  transform: scaleX(1);
+  transform: translateX(-50%) scaleX(1);
 }
 
 .site-header__nav-item:hover,
@@ -141,22 +142,13 @@
 }
 
 .site-header__nav-item svg {
-  width: 30px;
-  height: 30px;
-  stroke-width: 1.4;
+  width: 24px;
+  height: 24px;
+  stroke-width: 1.25;
 }
 
-.site-header__nav-label {
-  transform: translateY(1px);
-}
-
-.site-header__nav-label {
-  display: none;
-}
-@media (min-width: 640px) {
-  .site-header__nav-label {
-    display: inline;
-  }
+.site-header__right .site-header__nav-label {
+  display: none !important;
 }
 
 /* 品牌 */
@@ -822,7 +814,7 @@
   }
   .brand-menu__top {
     min-height: 64px;
-    gap: 28px;
+    gap: 20px;
   }
   .brand-menu__top-action {
     font-size: 12px;
@@ -835,28 +827,16 @@
     margin-top: 24px;
   }
   .brand-menu__primary a {
-    grid-template-columns: 27px minmax(0, 1fr) 20px;
-    gap: 10px;
-    min-height: 76px;
+    grid-template-columns: minmax(0, 1fr) 20px;
+    gap: 14px;
+    min-height: 64px;
   }
   .brand-menu__label {
     font-size: 19px;
   }
-  .brand-menu__description {
-    font-size: 11px;
-  }
-  .brand-menu__service {
-    margin-top: 24px;
-  }
-  .brand-menu__service > a {
-    min-height: 70px;
-  }
-  .brand-menu__service strong {
-    font-size: 16px;
-  }
   .brand-menu__footer {
     margin-top: auto;
-    padding-top: 16px;
+    padding-top: 24px;
   }
 
   .site-header {
@@ -864,13 +844,13 @@
   }
   .site-header__inner {
     width: calc(100% - 36px);
-    grid-template-columns: 40px minmax(0, 1fr) 56px;
+    grid-template-columns: 40px minmax(0, 1fr) 88px;
   }
   .site-header__left {
     gap: 0;
   }
   .site-header__right {
-    gap: 12px;
+    gap: 0;
   }
   .site-header__spacer {
     width: 44px;
@@ -884,6 +864,12 @@
   .site-header__nav-item svg {
     width: 22px;
     height: 22px;
+  }
+  .site-header__nav-item--catalog {
+    display: none;
+  }
+  .site-header__right > .site-header__nav-item:first-child {
+    display: none;
   }
   .site-header__logo {
     width: 23px;
@@ -1068,9 +1054,8 @@
   .site-menu-toggle::after,
   .brand-menu,
   .brand-menu__inner,
-  .brand-menu__copy,
+  .brand-menu__label,
   .brand-menu__arrow,
-  .brand-menu__service > a > svg,
   .site-footer__service-link,
   .site-footer__service-link span:last-child,
   .site-footer__links a {

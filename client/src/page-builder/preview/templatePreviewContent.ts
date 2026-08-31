@@ -1,19 +1,26 @@
 import type { RegisteredContentTemplateKey } from "../generated/contentTemplates.generated";
 
-import heroWide from "../preview-assets/quiet-light-court-v1/hero-wide-v1.webp";
-import wearingPortrait from "../preview-assets/quiet-light-court-v1/wearing-portrait-v1.webp";
-import productRingSquare from "../preview-assets/quiet-light-court-v1/product-ring-square-v1.webp";
-import detailEarringsPortrait from "../preview-assets/quiet-light-court-v1/detail-earrings-portrait-v1.webp";
-import craftVideoWide from "../preview-assets/quiet-light-court-v1/craft-video-wide-v1.webp";
-import salonWide from "../preview-assets/quiet-light-court-v1/salon-wide-v1.webp";
-import fullBleedNecklaceWide from "../preview-assets/quiet-light-court-v1/fullbleed-necklace-wide-v1.webp";
-import doublePosterMainWide from "../preview-assets/quiet-light-court-v1/doubleposter-main-wide-v1.webp";
-import carouselBraceletWide from "../preview-assets/quiet-light-court-v1/carousel-bracelet-wide-v1.webp";
-import comparisonBeforeSquare from "../preview-assets/quiet-light-court-v1/comparison-before-square-v1.webp";
-import comparisonAfterSquare from "../preview-assets/quiet-light-court-v1/comparison-after-square-v1.webp";
-import hotspotWide from "../preview-assets/quiet-light-court-v1/hotspot-three-products-wide-v1.webp";
-import limitedEventWide from "../preview-assets/quiet-light-court-v1/limited-event-wide-v1.webp";
-import categoryBraceletSquare from "../preview-assets/quiet-light-court-v1/category-bracelet-square-v1.webp";
+import previewWide from "../preview-assets/neutral-template-preview-v1/template-preview-wide.svg";
+import previewSquare from "../preview-assets/neutral-template-preview-v1/template-preview-square.svg";
+import previewPortrait from "../preview-assets/neutral-template-preview-v1/template-preview-portrait.svg";
+
+const heroWide = previewWide;
+const wearingPortrait = previewPortrait;
+const productRingSquare = previewSquare;
+const detailEarringsPortrait = previewPortrait;
+const craftVideoWide = previewWide;
+const salonWide = previewWide;
+const fullBleedNecklaceWide = previewWide;
+const doublePosterMainWide = previewWide;
+const carouselBraceletWide = previewWide;
+const comparisonBeforeSquare = previewSquare;
+const comparisonAfterSquare = previewSquare;
+const hotspotWide = previewWide;
+const limitedEventWide = previewWide;
+const categoryBraceletSquare = previewSquare;
+const previewWideAlt = "横向模板预览占位图，不代表实际素材";
+const previewSquareAlt = "方形模板预览占位图，不代表实际素材";
+const previewPortraitAlt = "竖向模板预览占位图，不代表实际素材";
 
 type PreviewProps = Record<string, unknown>;
 
@@ -55,7 +62,7 @@ const braceletProduct = previewProduct({
 });
 
 /**
- * 只用于模板组件库缩略图的艺术指导内容。
+ * 只用于模板目录、设计画布和预览样例的中性占位内容。
  * 这些值不会成为组件 defaultProps，也不会进入拖入后的 PageDocument。
  */
 export const TEMPLATE_PREVIEW_CONTENT: Record<RegisteredContentTemplateKey, PreviewProps> = {
@@ -88,9 +95,9 @@ export const TEMPLATE_PREVIEW_CONTENT: Record<RegisteredContentTemplateKey, Prev
     mobileFocusY: 48,
   },
   video: {
-    // 预览只需要让真实 VideoBlock 进入封面渲染分支；无网络请求、不会播放。
-    videoUrl: "data:video/mp4;base64,AAAA",
-    posterUrl: craftVideoWide,
+    // 模板目录展示真实空素材状态，避免无效示例视频触发深色错误遮罩。
+    videoUrl: "",
+    posterUrl: "",
     title: "一根金属线的旅程",
     subtitle: "从手势、力度到最终弧度。",
     actionText: "观看工艺影像",
@@ -101,9 +108,9 @@ export const TEMPLATE_PREVIEW_CONTENT: Record<RegisteredContentTemplateKey, Prev
   },
   carousel: {
     images: [
-      { url: carouselBraceletWide, alt: "横向手镯静物概念图", link: "" },
-      { url: fullBleedNecklaceWide, alt: "横向项链静物概念图", link: "" },
-      { url: salonWide, alt: "静谧珠宝空间概念图", link: "" },
+      { url: carouselBraceletWide, alt: previewWideAlt, link: "" },
+      { url: fullBleedNecklaceWide, alt: previewWideAlt, link: "" },
+      { url: salonWide, alt: previewWideAlt, link: "" },
     ],
     autoPlay: false,
     showDots: true,
@@ -141,11 +148,11 @@ export const TEMPLATE_PREVIEW_CONTENT: Record<RegisteredContentTemplateKey, Prev
     title: "结构与光",
     body: "主图建立制作语境，两张细节图只补充必要的材质观察。",
     leadImage: craftVideoWide,
-    leadAltText: "珠宝制作过程概念图",
+    leadAltText: previewWideAlt,
     detailImageOne: detailEarringsPortrait,
-    detailOneAltText: "耳饰表面细节概念图",
+    detailOneAltText: previewPortraitAlt,
     detailImageTwo: productRingSquare,
-    detailTwoAltText: "戒指结构细节概念图",
+    detailTwoAltText: previewSquareAlt,
     leadFocusX: 70,
     leadFocusY: 50,
     detailOneFocusX: 50,
@@ -154,7 +161,7 @@ export const TEMPLATE_PREVIEW_CONTENT: Record<RegisteredContentTemplateKey, Prev
     detailTwoFocusY: 50,
   },
   textBanner: {
-    eyebrow: "HAICHUAN EDITORIAL",
+    eyebrow: "HAICHUAN EDIT",
     title: "不追逐喧哗，只让比例与材质说话。",
     body: "一段文字也应当拥有留白、节奏和明确的阅读层级。",
     buttonText: "阅读品牌故事",
@@ -179,8 +186,8 @@ export const TEMPLATE_PREVIEW_CONTENT: Record<RegisteredContentTemplateKey, Prev
     afterImage: comparisonAfterSquare,
     beforeLabel: "改款前",
     afterLabel: "改款后",
-    beforeAltText: "虚构旧戒指概念图",
-    afterAltText: "虚构改款戒指概念图",
+    beforeAltText: previewSquareAlt,
+    afterAltText: previewSquareAlt,
     beforeFocusX: 50,
     beforeFocusY: 50,
     afterFocusX: 50,
@@ -209,17 +216,17 @@ export const TEMPLATE_PREVIEW_CONTENT: Record<RegisteredContentTemplateKey, Prev
     title: "光与材质",
     subtitle: "以大小、横竖与远近变化组织一组编辑式画廊。",
     items: [
-      { image: wearingPortrait, altText: "佩戴肖像概念图", caption: "FIG. 01 · PORTRAIT", link: "" },
-      { image: productRingSquare, altText: "戒指静物概念图", caption: "", link: "" },
-      { image: detailEarringsPortrait, altText: "耳饰静物概念图", caption: "", link: "" },
-      { image: craftVideoWide, altText: "制作细节概念图", caption: "FIG. 02 · CRAFT", link: "" },
+      { image: wearingPortrait, altText: previewPortraitAlt, caption: "FIG. 01 · PORTRAIT", link: "" },
+      { image: productRingSquare, altText: previewSquareAlt, caption: "", link: "" },
+      { image: detailEarringsPortrait, altText: previewPortraitAlt, caption: "", link: "" },
+      { image: craftVideoWide, altText: previewWideAlt, caption: "FIG. 02 · CRAFT", link: "" },
     ],
   },
   wearingInspiration: {
     title: "佩戴灵感",
     subtitle: "主肖像负责情绪，关联作品只作为轻量补充。",
     image: wearingPortrait,
-    altText: "珠宝佩戴概念图",
+    altText: previewPortraitAlt,
     actionText: "查看更多",
     __previewProducts: [earringsProduct, braceletProduct],
   },
@@ -229,9 +236,9 @@ export const TEMPLATE_PREVIEW_CONTENT: Record<RegisteredContentTemplateKey, Prev
     layout: "grid-3",
     categorySlugs: [],
     categories: [
-      { name: "戒指", image: productRingSquare, link: "/catalog", altText: "戒指概念图", focusX: 50, focusY: 50 },
-      { name: "耳饰", image: detailEarringsPortrait, link: "/catalog", altText: "耳饰概念图", focusX: 50, focusY: 48 },
-      { name: "手镯", image: categoryBraceletSquare, link: "/catalog", altText: "手镯概念图", focusX: 50, focusY: 50 },
+      { name: "戒指", image: productRingSquare, link: "/catalog", altText: previewSquareAlt, focusX: 50, focusY: 50 },
+      { name: "耳饰", image: detailEarringsPortrait, link: "/catalog", altText: previewPortraitAlt, focusX: 50, focusY: 48 },
+      { name: "手镯", image: categoryBraceletSquare, link: "/catalog", altText: previewSquareAlt, focusX: 50, focusY: 50 },
     ],
   },
   sceneShopping: {
@@ -240,16 +247,16 @@ export const TEMPLATE_PREVIEW_CONTENT: Record<RegisteredContentTemplateKey, Prev
     layout: "grid-4",
     categorySlugs: [],
     categories: [
-      { name: "重要时刻", description: "克制而明确", image: heroWide, link: "/catalog", altText: "重要时刻概念图", focusX: 72, focusY: 48 },
-      { name: "日常佩戴", description: "轻盈地靠近肌肤", image: wearingPortrait, link: "/catalog", altText: "日常佩戴概念图", focusX: 50, focusY: 42 },
-      { name: "专属定制", description: "从手势开始", image: craftVideoWide, link: "/custom", altText: "珠宝工艺概念图", focusX: 72, focusY: 50 },
-      { name: "到店鉴赏", description: "在真实光线中观察", image: salonWide, link: "/contact", altText: "门店空间概念图", focusX: 50, focusY: 50 },
+      { name: "重要时刻", description: "克制而明确", image: heroWide, link: "/catalog", altText: previewWideAlt, focusX: 72, focusY: 48 },
+      { name: "日常佩戴", description: "轻盈地靠近肌肤", image: wearingPortrait, link: "/catalog", altText: previewPortraitAlt, focusX: 50, focusY: 42 },
+      { name: "专属定制", description: "从手势开始", image: craftVideoWide, link: "/custom", altText: previewWideAlt, focusX: 72, focusY: 50 },
+      { name: "到店鉴赏", description: "在真实光线中观察", image: salonWide, link: "/contact", altText: previewWideAlt, focusX: 50, focusY: 50 },
     ],
   },
   hotspot: {
     image: hotspotWide,
     mobileImage: hotspotWide,
-    altText: "三件珠宝静物热区概念图",
+    altText: previewWideAlt,
     hotspots: [
       { x: 20, y: 57, width: 8, height: 12, link: "/catalog", label: "戒指" },
       { x: 50, y: 43, width: 8, height: 14, link: "/catalog", label: "耳饰" },

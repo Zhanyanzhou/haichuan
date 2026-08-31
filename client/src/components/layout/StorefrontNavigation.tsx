@@ -25,6 +25,7 @@ type StorefrontNavigationProps = {
 type StorefrontMenuDrawerProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 兼容装修预览的旧调用；联系信息已统一由全局页脚承载。 */
   contactPhone?: string;
   contactAddress?: string;
   /** 装修预览中仅演示菜单，不离开当前草稿。 */
@@ -54,18 +55,17 @@ export function resolveSiteLogo(logo?: string | null) {
 }
 
 export const storefrontMenuLinks = [
-  { label: "首页", description: "返回品牌首页", href: "/" },
-  { label: "珠宝作品", description: "浏览主题系列与编辑精选", href: "/products" },
-  { label: "选款中心", description: "按品类与货号快速选款", href: "/catalog" },
-  { label: "珠宝定制", description: "了解专属定制流程", href: "/custom" },
-  { label: "关于海川", description: "认识海川珠宝与东方工艺", href: "/about" },
-];
+  { label: "首页", href: "/" },
+  { label: "珠宝作品", href: "/products" },
+  { label: "选款中心", href: "/catalog" },
+  { label: "珠宝定制", href: "/custom" },
+  { label: "关于海川", href: "/about" },
+] as const;
 
-const storefrontServiceLink = {
-  label: "预约私人珠宝顾问",
-  description: "一对一顾问服务",
-  href: "/contact",
-} as const;
+const storefrontServiceLinks = [
+  { label: "预约私人珠宝顾问", href: "/contact" },
+  { label: "我的账户", href: "/customer" },
+] as const;
 
 const MenuIcon = () => (
   <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
@@ -118,25 +118,10 @@ const MenuArrowIcon = () => (
   </svg>
 );
 
-const PhoneIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M14.5 11.5v2a1.33 1.33 0 01-1.45 1.33A11.8 11.8 0 011.5 3.45 1.33 1.33 0 012.83 2h2a1.33 1.33 0 011.33 1.15c.08.63.23 1.24.43 1.82a1.33 1.33 0 01-.3 1.4L5.13 7.54a10.67 10.67 0 004 4l1.17-1.17a1.33 1.33 0 011.4-.3c.58.2 1.19.35 1.82.43a1.33 1.33 0 011.15 1.33z" />
-  </svg>
-);
-
-const LocationIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M8 1.5a5.5 5.5 0 00-5.5 5.5c0 4.13 5.5 9.5 5.5 9.5s5.5-5.37 5.5-9.5A5.5 5.5 0 008 1.5z" />
-    <circle cx="8" cy="7" r="2" />
-  </svg>
-);
-
 /** 前台与装修画布共用的菜单抽屉，统一关闭、键盘和焦点行为。 */
 export function StorefrontMenuDrawer({
   open,
   onOpenChange,
-  contactPhone,
-  contactAddress,
   preview = false,
   onPreviewNavigate,
   menuId,
@@ -226,14 +211,6 @@ export function StorefrontMenuDrawer({
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`);
 
-  const handlePhoneLink = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (preview) {
-      event.preventDefault();
-      restoreTriggerFocus();
-    }
-    onOpenChange(false);
-  };
-
   return (
     <div
       id={menuId}
@@ -266,9 +243,9 @@ export function StorefrontMenuDrawer({
           </Link>
         </div>
 
-        <p className="brand-menu__eyebrow">Explore · 探索</p>
+        <p className="brand-menu__eyebrow">Explore / 探索</p>
         <nav className="brand-menu__primary" aria-label="品牌菜单">
-          {storefrontMenuLinks.map((item, index) => (
+          {storefrontMenuLinks.map((item) => (
             <Link
               key={item.href}
               to={item.href}
@@ -277,13 +254,7 @@ export function StorefrontMenuDrawer({
               className={isActive(item.href) ? "is-active" : undefined}
               onClick={handleLink}
             >
-              <span className="brand-menu__index" aria-hidden="true">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <span className="brand-menu__copy">
-                <span className="brand-menu__label">{item.label}</span>
-                <span className="brand-menu__description">{item.description}</span>
-              </span>
+              <span className="brand-menu__label">{item.label}</span>
               <span className="brand-menu__arrow" aria-hidden="true">
                 <MenuArrowIcon />
               </span>
@@ -291,37 +262,24 @@ export function StorefrontMenuDrawer({
           ))}
         </nav>
 
-        <div className="brand-menu__service">
-          <p>Private service</p>
-          <Link
-            to={storefrontServiceLink.href}
-            tabIndex={open ? 0 : -1}
-            aria-current={isActive(storefrontServiceLink.href) ? "page" : undefined}
-            onClick={handleLink}
-          >
-            <span>
-              <strong>{storefrontServiceLink.label}</strong>
-              <small>{storefrontServiceLink.description}</small>
-            </span>
-            <MenuArrowIcon />
-          </Link>
-        </div>
-
         <div className="brand-menu__footer">
-          <nav className="brand-menu__utility" aria-label="辅助信息">
-            <Link to="/privacy" tabIndex={open ? 0 : -1} onClick={handleLink}>
-              隐私说明
-            </Link>
-            <Link to="/business-info" tabIndex={open ? 0 : -1} onClick={handleLink}>
-              经营主体信息
-            </Link>
+          <nav className="brand-menu__service-links" aria-label="客户服务">
+            {storefrontServiceLinks.map((item) => (
+              <Link
+                key={item.href}
+                to={item.href}
+                tabIndex={open ? 0 : -1}
+                aria-current={isActive(item.href) ? "page" : undefined}
+                className={isActive(item.href) ? "is-active" : undefined}
+                onClick={handleLink}
+              >
+                <span>{item.label}</span>
+                <span className="brand-menu__arrow" aria-hidden="true">
+                  <MenuArrowIcon />
+                </span>
+              </Link>
+            ))}
           </nav>
-          <div className="brand-menu__contact">
-            {contactPhone && (
-              <a href={`tel:${contactPhone}`} tabIndex={open ? 0 : -1} onClick={handlePhoneLink}><PhoneIcon />{contactPhone}</a>
-            )}
-            {contactAddress && <span><LocationIcon />{contactAddress}</span>}
-          </div>
         </div>
       </div>
     </div>
@@ -347,8 +305,6 @@ export default function StorefrontNavigation({
   const isMenuOpen = isControlled ? menuOpen : uncontrolledMenuOpen;
   const resolvedSettings = siteSettings ?? sharedSettingsResource.settings;
   const siteName = resolvedSettings?.siteName || "海川珠宝";
-  const contactPhone = resolvedSettings?.contactPhone?.trim() || "";
-  const contactAddress = resolvedSettings?.contactAddress?.trim() || "";
   const logoUrl = resolveSiteLogo(resolvedSettings?.logo);
   const isTransparent = headerMode === "overlay-light" && !scrolled && !isMenuOpen;
 
@@ -402,14 +358,14 @@ export default function StorefrontNavigation({
             <span className="site-header__brand-text">{siteName}</span>
           </Link>
           <div className="site-header__right">
-            <Link to="/catalog" aria-label="选款中心" className="site-header__nav-item" onClick={handlePreviewLink}>
-              <DiamondIcon /><span className="site-header__nav-label hidden sm:inline">选款</span>
+            <Link to="/catalog" aria-label="选款中心" className="site-header__nav-item site-header__nav-item--catalog" onClick={handlePreviewLink}>
+              <DiamondIcon />
             </Link>
             <Link to="/contact" aria-label="预约咨询" className="site-header__nav-item" onClick={handlePreviewLink}>
-              <CalendarIcon /><span className="site-header__nav-label hidden sm:inline">预约</span>
+              <CalendarIcon />
             </Link>
             <Link to="/customer" aria-label="我的账户" className="site-header__nav-item" onClick={handlePreviewLink}>
-              <AccountIcon /><span className="site-header__nav-label hidden sm:inline">我的账户</span>
+              <AccountIcon />
             </Link>
           </div>
         </div>
@@ -435,8 +391,6 @@ export default function StorefrontNavigation({
       <StorefrontMenuDrawer
         open={isMenuOpen}
         onOpenChange={setMenuOpen}
-        contactPhone={contactPhone}
-        contactAddress={contactAddress}
         preview={preview}
         onPreviewNavigate={onPreviewNavigate}
         menuId={menuId}

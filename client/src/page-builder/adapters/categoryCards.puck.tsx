@@ -37,10 +37,11 @@ export interface CategoryCardsPuckProps {
 
 type CategoryCardsTemplateKey = "categoryCards" | "sceneShopping";
 
-function CategoryCardsPreview({
+export function CategoryCardsPreview({
   templateKey,
+  editMode = true,
   ...props
-}: CategoryCardsPuckProps & { templateKey: CategoryCardsTemplateKey }) {
+}: CategoryCardsPuckProps & { templateKey: CategoryCardsTemplateKey; editMode?: boolean }) {
   const slugs = useMemo(
     () => Array.isArray(props.categorySlugs) ? props.categorySlugs.map(String).filter(Boolean) : [],
     [props.categorySlugs],
@@ -76,14 +77,14 @@ function CategoryCardsPreview({
     ...props,
     categories: slugs.length ? resolved : props.categories,
   });
-  return module ? <CategoryCardsBlock module={module} editMode /> : null;
+  return module ? <CategoryCardsBlock module={module} editMode={editMode} /> : null;
 }
 
 export function renderCategoryCardsPuck(
   props: CategoryCardsPuckProps,
   templateKey: CategoryCardsTemplateKey = "categoryCards",
 ) {
-  return <CategoryCardsPreview {...props} templateKey={templateKey} />;
+  return <CategoryCardsPreview {...props} templateKey={templateKey} editMode />;
 }
 
 export const categoryCardsPuckConfig = {

@@ -7,16 +7,17 @@
 
 ### 前置条件
 
-- Node.js `^20.19.0` 或 `>=22.12.0`（与当前锁定的 Vite 8.2.1 / `@vitejs/plugin-react` 6.0.5 engine 一致；Node 18 不受支持）
+- Node.js `22.12.0` 或更高的 `22.x` 版本（项目 `engines` 固定为 `22.x`；Node 20 和 Node 25 不受支持）
 - Docker Desktop
 - npm 9+
 
 ### 首次启动
 
 ```bash
-# 1. 首次安装依赖（人工执行，或 AI 获明确批准后执行）
-cd client && npm install
-cd ../server && npm install
+# 1. 首次按三份锁文件分别安装依赖（人工执行，或 AI 获明确批准后执行）
+npm ci
+cd client && npm ci
+cd ../server && npm ci
 cd ..
 
 # 2. 仅启动当前容器拓扑中的本地开发数据库

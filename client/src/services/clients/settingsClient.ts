@@ -97,6 +97,7 @@ export const settingsApi = {
         analyticsDashboardEnabled: true,
       });
     }
-    return api.get("/settings/flags");
+    // 前台能力 Store 已提供 fail-closed 降级；避免与页面就地状态叠加无恢复价值的全局错误浮层。
+    return api.get("/settings/flags", { suppressGlobalError: true });
   },
 };

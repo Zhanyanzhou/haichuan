@@ -14,6 +14,7 @@
 #   MEDIA_DIRS   待备份目录列表，冒号分隔（默认空 = 跳过媒体备份）
 #                例: /media/uploads:/media/private-media
 #   MEDIA_PREFIX 媒体归档文件名前缀（默认 jewelry_media）
+#   BACKUP_DB_READY_TIMEOUT_SECONDS 等待数据库就绪的最长秒数（默认 60）
 #   DISK_WARN_PCT 磁盘使用率告警阈值（默认 85）
 #   RETENTION_DAYS 保留天数（默认 7）
 #
@@ -35,8 +36,20 @@ DB_NAME="${DB_NAME:-jewelry_db}"
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 MEDIA_DIRS="${MEDIA_DIRS:-}"
 MEDIA_PREFIX="${MEDIA_PREFIX:-jewelry_media}"
+BACKUP_DB_READY_TIMEOUT_SECONDS="${BACKUP_DB_READY_TIMEOUT_SECONDS:-60}"
 DISK_WARN_PCT="${DISK_WARN_PCT:-85}"
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
+
+case "$BACKUP_DB_READY_TIMEOUT_SECONDS" in
+  ''|*[!0-9]*)
+    echo "🚨 ERROR: BACKUP_DB_READY_TIMEOUT_SECONDS 必须是正整数"
+    exit 2
+    ;;
+esac
+if [ "$BACKUP_DB_READY_TIMEOUT_SECONDS" -le 0 ]; then
+  echo "🚨 ERROR: BACKUP_DB_READY_TIMEOUT_SECONDS 必须大于 0"
+  exit 2
+fi
 
 # 日期
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -154,6 +167,22 @@ trap 'exit 143' TERM
 # ---------- 1. 数据库 ----------
 BACKUP_PHASE="DATABASE_DUMP"
 echo "📦 开始备份数据库: ${DB_NAME} ..."
+
+db_wait_started_at=$SECONDS
+until MYSQL_PWD="$DB_PASS" mysqladmin ping \
+  --protocol=tcp \
+  -h "$DB_HOST" \
+  -P "$DB_PORT" \
+  -u "$DB_USER" \
+  --silent >/dev/null 2>&1; do
+  db_wait_elapsed=$((SECONDS - db_wait_started_at))
+  if [ "$db_wait_elapsed" -ge "$BACKUP_DB_READY_TIMEOUT_SECONDS" ]; then
+    echo "🚨 ERROR: 数据库在 ${BACKUP_DB_READY_TIMEOUT_SECONDS}s 内未就绪"
+    exit 1
+  fi
+  echo "⏳ 数据库尚未就绪，2 秒后重试（已等待 ${db_wait_elapsed}s）..."
+  sleep 2
+done
 
 MYSQL_PWD="$DB_PASS" mysqldump \
   -h "$DB_HOST" \

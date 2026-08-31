@@ -25,24 +25,30 @@ export default function RevisionDrawer({
   revisions,
   loading,
   restoringVersion,
+  rollingBackRevisionId,
+  canRollback,
   draft,
   error,
   retryLabel,
   onClose,
   onRetry,
   onRestore,
+  onRollback,
   onEditDraft,
 }: {
   open: boolean;
   revisions: PageDocumentRevision[];
   loading: boolean;
   restoringVersion: number | null;
+  rollingBackRevisionId: number | null;
+  canRollback: boolean;
   draft: PageDraftSnapshot | null;
   error: string | null;
   retryLabel: string;
   onClose: () => void;
   onRetry: () => void;
   onRestore: (revision: PageDocumentRevision) => void;
+  onRollback: (revision: PageDocumentRevision) => void;
   onEditDraft: () => void;
 }) {
   const hasDraft = Boolean(draft);
@@ -112,11 +118,11 @@ export default function RevisionDrawer({
 
           {revisions.length > 0 ? (
             <div className="homepage-editor__revision-list">
-              {revisions.map((revision, index) => (
+              {revisions.map((revision) => (
                 <article
                   key={revision.id}
                   className={`homepage-editor__revision-item${
-                    index === 0 ? " is-current" : ""
+                    revision.isPublished ? " is-current" : ""
                   }`}
                 >
                   <div>
@@ -135,7 +141,7 @@ export default function RevisionDrawer({
                       >
                         发布成功
                       </Tag>
-                      {index === 0 ? (
+                      {revision.isPublished ? (
                         <Tag
                           className="homepage-editor__revision-status is-live"
                           bordered={false}
@@ -145,14 +151,27 @@ export default function RevisionDrawer({
                       ) : null}
                     </span>
                   </div>
-                  <Button
-                    size="small"
-                    icon={<RollbackOutlined />}
-                    loading={restoringVersion === revision.version}
-                    onClick={() => onRestore(revision)}
-                  >
-                    恢复到草稿
-                  </Button>
+                  <div className="homepage-editor__revision-actions">
+                    <Button
+                      size="small"
+                      icon={<RollbackOutlined />}
+                      loading={restoringVersion === revision.version}
+                      onClick={() => onRestore(revision)}
+                    >
+                      恢复到草稿
+                    </Button>
+                    {canRollback && !revision.isPublished ? (
+                      <Button
+                        size="small"
+                        type="primary"
+                        ghost
+                        loading={rollingBackRevisionId === revision.id}
+                        onClick={() => onRollback(revision)}
+                      >
+                        回滚线上到此版本
+                      </Button>
+                    ) : null}
+                  </div>
                 </article>
               ))}
             </div>

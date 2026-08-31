@@ -1,6 +1,6 @@
 # 海川珠宝 — 当前状态
 
-> 最后整理：2026-08-26 | 当前实现结论来自工作树源码、配置、机器合同、本轮统一工程门禁，以及明确隔离的临时浏览器/MySQL/Nest 验收；既有运行结果在文中按时间与证据范围单列。本轮未连接现有开发数据库、目标数据库或生产环境。本文件记录易变化事实，不构成操作授权。
+> 最后整理：2026-08-31 | 当前实现结论来自工作树源码、配置、机器合同、本轮统一工程门禁，以及明确隔离的临时浏览器/MySQL/Nest 验收；既有运行结果在文中按时间与证据范围单列。本轮未连接现有开发数据库、目标数据库或生产环境。本文件记录易变化事实，不构成操作授权。
 
 ## 证据分层（必须按此阅读）
 
@@ -30,14 +30,23 @@
 - `Product` 当前使用 `deletedAt` 软删除；`Category` 当前以 `isActive` 停用，`deletedAt` 尚未形成有效语义。终局语义仍是 `docs/DECISIONS.md` D.5 的待决事项。
 - 项目当前没有统一 Prisma 软删除 middleware/extension；涉及删除过滤时必须沿当前查询链逐项核对，不得凭此现状推断未来实现。
 
-### 页面装修与公开路由源码（2026-08-26 核对）
+### 页面装修与公开路由源码（2026-08-31 核对）
 
 - Puck `PageDocument` 是唯一活跃装修体系，贯穿页面模块后端、编辑器、预览、公开 Renderer、区块组件和适配器。
-- 活跃模板数量、角色、比例、控件和发布限制以 `contracts/page-builder/content-templates.contract.json` 及生成产物为准。2026-08-26 新鲜检查为 `contractSchemaVersion=5`、`registryVersion=14`、注册 24、活跃 24、6 条 `pageRules`；客户端与服务端生成物权威 SHA-256 一致。其中 `pageRules` 是模板可用于何种页面角色、是否必须包含固定业务区、内容位置及其顺序的唯一机器门禁，模板并非全页面通用。当前六页均为 `contentPlacement: root-only`，因为活跃组件树没有 Puck `DropZone` 消费者；非空 `zones` 不再能被保存或计入发布资格。
+- 活跃模板数量、角色、比例、控件和发布限制以 `contracts/page-builder/content-templates.contract.json` 及生成产物为准。2026-08-31 当前合同为 `contractSchemaVersion=8`、`registryVersion=18`、`publicationGateVersion=3`、注册 24、活跃 24、6 条 `pageRules`；每条规则的 `allowedTemplateKeys` 均完整包含 24 个 active 模板。兼容来源适配后的母模板与已发布 `TemplateDefinitionV2` 母模板在六个可装修页面通用，`recommendedFor` 仅作推荐。`pageRules` 仍是固定业务区、内容位置及导航模式的唯一机器门禁；六页均为 `contentPlacement: root-only`，因为活跃组件树没有 Puck `DropZone` 消费者，非空 `zones` 不能被保存或计入发布资格。
+- 页面装修与模板设计复用同一顶部动作外壳、四栏框架、模板目录卡片和基础字段控件，但保持 `PageDocument` 与 `TemplateEditorSession`、页面撤销栈与模板撤销栈、页面发布与模板版本链路严格隔离。只有顶部“模板设计”页签能进入母模板工作区；页面模板卡只添加页面实例。
+- 2026-08-30 浏览器回归确认：两种模式的设备切换、模式页签、撤销/重做、预览、保存、更多和发布均由共享控件渲染；1600×1000 同视口逐控件的 `x/y/width/height` 差异不超过 1px，空模板的保存、更多和发布保持独立禁用反馈。图层/模板结构与页面/模板属性的收起和展开由同一 `WorkspacePanelCollapseButton` 渲染；页面和模板分别持有状态，模式往返后各自恢复，1600px 固定栏与 1024px 响应式栏均收敛到 40px。媒体上传/链接、九宫格焦点、数字、开关和恢复默认也由共享字段组件渲染；V2 母模板焦点通过适配器写 `objectPosition`，页面实例仍写当前设备稀疏百分比覆盖，恢复默认分别删除模板节点规则或页面实例覆盖，没有合并业务状态。模式页签可用方向键切换焦点，模板搜索、目录卡片、结构树、隔离画布 iframe 与属性字段均可由键盘聚焦。该层使用本地拦截 API，证明界面调用顺序、阻断、发布重试和会话隔离，不替代真实 HTTP、真实数据库或生产验收；本轮变更后的新鲜结果以最终验证记录为准。
+- 独立模板工作空间的画布拖动覆盖只在 iframe 本地预览，手势提交时才写一次模板 store；对象拖动开始会以 `preventScroll` 聚焦当前可编辑节点，使 Esc、方向键和撤销快捷键留在模板画布会话中。该行为已覆盖八方向缩放、取消恢复、桌面/移动独立构图和 Puck 历史无额外性能警告；页面工作空间不复用这条内部对象直接操作链。
+- 统一 V2 已接入服务端草稿、不可变版本、稳定 `templateId/nodeId/slotId`、精确页面实例、稀疏覆盖与同源校验。模板设计“发布模板”只保存并校验独立草稿、创建不可变 `DynamicTemplateVersion`、推进模板自身 `publishedVersion` 与下一版草稿，并记录 `TEMPLATE_VERSION_PUBLISHED`；它不读取或修改 `PageDocument`、`PageDocumentRevision`、`PageScheme` 和既有页面实例。运行时 `activation-impact` / `activate` 控制器、服务、客户端调用和配置开关已删除；历史 activation migration、Prisma ledger 模型与 Gate B 纯内存规划器仅为数据库兼容审计保留，不是产品或运行能力。当前代码与隔离测试不能证明目标环境数据库或生产配置。
+- 默认语言 `PageDocument` 已在代码与待执行 migration 中增加 nullable `publishedRevisionId`；页面发布创建不可变 `PageDocumentRevision` 后设置该指针，Public 与 `release-preflight` 都只按 `publishedRevisionId + documentId` 读取线上快照，不再以 `status=published + version desc` 作为权威事实；空指针、悬空或跨页面指针在发布前门禁中失败关闭。正式 `release-preflight` 还要求显式只读授权、环境身份、数据库名匹配、审批引用哈希以及仅作用于目标数据库的 `USAGE/SELECT/SHOW VIEW`，高权限或跨库账号在任何内容查询前被拒绝。历史恢复仍只复制到 Draft；独立 Rollback Publication 以当前指针为并发条件，只能切换到同一 PageDocument 的历史 Revision，并记录 `PAGE_PUBLICATION_ROLLED_BACK`。migration 尚未应用到任何已确认目标环境，backfill 只提供默认 dry-run 与双重显式 apply 门禁；在目标库完成 migration 和审核回填前，不得部署为线上权威读取。
+- 母模板内容现分为 `defaultContent` 与 `previewContent`：模板设计画布固定编辑预览样例，只有槽位级“设为新实例默认”或模板根“将全部样例设为默认”的显式操作才写入 `defaultContent`；公开 Renderer 不会自动读取示例。每个 Slot 还可声明 `emptyPolicy=hide|use-default`；页面显式清空后按策略隐藏或回退默认值，模板编辑态仍显示空槽占位，复杂对象按真实嵌套内容而不是空对象外壳判断是否为空。复杂节点的模板布局/样式继续写入节点 `contentTemplateDesignProps`，页面实例内容不会反向覆盖母模板受控设计。页面装修画布仍只选中整个模板，内部对象选择与几何操作仅在母模板定义工作面开放。
+- Gate B 目标环境审计具备独立的失败关闭只读入口：执行前要求环境名、预期库名、审批引用和显式只读标记，连接后拒绝任何非 `USAGE/SELECT/SHOW VIEW` 权限；只输出 migration、规模、实例与 dry-run 聚合，不输出页面正文。它要求 24 个 `legacy_system_*` 来源各有且仅有一个 `ownerId=NULL / SYSTEM / STAFF / ACTIVE` 的 V2 草稿，再在内存中把页面草稿、最新正式快照和 PageScheme 分开转换为精确 V2 实例。个人模板 revision 与历史 activation ledger migration 仍是待审计数据库差异，但后者不再对应任何运行时 Activation 能力。该入口尚未连接任何目标环境，因此不构成真实数据库证据或执行授权。
+- 2026-08-31 产品入口已收敛为一套母模板目录和 `TemplateDefinitionV2` 编辑会话：页面装修与模板设计都只请求服务端统一 `GET /page-modules/dynamic-templates/catalog`，由服务端一次聚合正式版本、超级管理员可编辑草稿及只读兼容来源；前端不再分别请求系统、个人、正式和个人草稿目录。选择既有系统或账号模板时，兼容适配在内存中直接载入统一结构树、画布和属性面板，不再展示“固定/动态”分类或要求用户执行“转换新版”。保存面板只提供“覆盖模板”和“另存为模板”；发布创建不可变版本，页面实例锁定精确版本且不自动升级。旧系统/个人 HTTP 写路由、服务方法和 DTO 已删除，旧记录仅用于兼容读取和历史重放。该代码收敛不代表目标数据库已迁移或生产已切换。
+- 2026-08-31 母模板 DIY 工作面加入向后兼容的设备级 `layoutMode=flow|free` 与归一化 `placement`。只有固定高度的 `Stack` 可使用自由叠放；八向缩放、拖动、父级/中心/兄弟吸附、方向键微调和层级均限制在父画框内，手势移动只更新本地预览，松手才进入一次模板历史，取消不写历史。旧定义缺少新字段时继续按流式规则渲染，未批量重写历史草稿和正式版本。成熟模板合同的 `editableObjects` 已作为虚拟叶图层进入统一结构树，选择仍写回原 V2 节点。模板目录兼容卡改用真实 Renderer；首次读取失败只显示重试与 Mock/local-only 本机草稿，正式模式不再从客户端注册表伪造目录。
 - 历史 `ContentSlot` 与旧装修体系已清退；历史材料仅作证据，不具执行力。
 - 当前 `App.tsx` 的 `/products` 是品牌 PageDocument 容器，路由本身不再加载休眠的 `ProductList`；公开内容由 `PublicLayout` / `PublishedPageDecoration` 统一渲染。
 - 当前公开路由只由 `PublicLayout` 持有一份 `PublishedPageDocumentResource`，首页和非首页装修器消费同一状态；发布事件、可见性刷新和错误重试会同步更新正文、SEO、索引与安全降级状态。HTTP GET 并发去重只是传输优化，不再承担状态一致性职责。
-- 受控草稿预览已区分“服务端明确没有草稿”和“草稿读取失败”：前者可显示对应页面推荐结构，后者只显示可重试错误，不再把代码 seed 伪装成真实草稿。发布失败前已保存的草稿保持为未发布状态，刷新后仍可继续；版本列表、恢复版本和放弃草稿失败均保留持续的安全局部错误与原位重试入口，失败不会替换当前画布或清除草稿，恢复成功后的服务端草稿不会误报为本地未保存。“查看线上版本”现在是只读比较态：进入前保留完整内存草稿、metadata、已保存基线和未保存状态，桌面“返回编辑”与移动“继续编辑草稿”恢复同一快照；首次进入且草稿与线上完全一致时没有独立快照，返回编辑直接复用已经加载的 PageDocument 与乐观锁基线，不再用第二次后台读取把用户困在只读态。查看期间离开仍触发未保存保护，保存并离开只保存原草稿。查看线上版本和恢复历史版本都会先排空在途保存，再建立最新草稿基线或读取最新乐观锁。PageDocument 后台动作不透传内部异常正文。
+- 受控草稿预览已区分“服务端明确没有草稿”和“草稿读取失败”：前者只显示“尚无已保存草稿”的安全空状态且不挂载任何推荐结构或历史内容，后者只显示可重试错误，不把代码 seed 伪装成真实草稿。发布失败前已保存的草稿保持为未发布状态，刷新后仍可继续；版本列表、恢复版本和放弃草稿失败均保留持续的安全局部错误与原位重试入口，失败不会替换当前画布或清除草稿，恢复成功后的服务端草稿不会误报为本地未保存。“查看线上版本”现在是只读比较态：进入前保留完整内存草稿、metadata、已保存基线和未保存状态，桌面“返回编辑”与移动“继续编辑草稿”恢复同一快照；首次进入且草稿与线上完全一致时没有独立快照，返回编辑直接复用已经加载的 PageDocument 与乐观锁基线，不再用第二次后台读取把用户困在只读态。查看期间离开仍触发未保存保护，保存并离开只保存原草稿。查看线上版本和恢复历史版本都会先排空在途保存，再建立最新草稿基线或读取最新乐观锁。PageDocument 后台动作不透传内部异常正文。
 - 发布就绪度继续只来自服务端预检，没有新增前端规则副本。预检暂时失败时会清除上一轮过期问题、保留草稿并在桌面工具栏或移动“更多”菜单提供“重新检查发布资格”；当前页面的 SEO、内容责任和媒体授权问题可从同一状态直达既有发布设置，模块问题仍定位到对应 Inspector。上述查看与重试不保存草稿、不发布内容。
 - `siteSettings.*` 正式业务资料 warning 现在可由有权限的管理员从发布确认直接进入唯一“店铺资料”页面；移动端存在未保存画布时仍先经过保存/放弃/继续编辑三选项。`EDITOR` 继续允许编辑与保存草稿，但发布按钮按服务端权限保持禁用，不再让无发布权限账号走到接口 403。
 - JSON 装修方案导入现在与草稿加载、历史恢复共用页面能力归一化：拒绝声明为其他页面的方案，移除 `网站全局设置`、当前页面不允许的模板、全部 `zones` 区块及多余固定区，并在确认前披露移除数量。`home/about/products/custom` 不保留固定业务区；`catalog/contact` 只在 root 保留一个由当前页面定义重建的固定业务区，错 `pageKey` 和导入文案不能覆盖系统字段。导入只进入当前内存画布；内容确有变化时仍触发未保存离开保护，不会自动保存或发布。旧发布快照的 `zones` 只在公开读取副本中清空，不自动迁入根内容；本次位置门禁升级已提升 `publicationGateVersion`，旧验收印记必须人工复核后重新发布。
@@ -119,8 +128,10 @@ products, categories, auth, users, orders, inventory, inquiries, selection-inqui
 
 ## C. 数据库与运行版本（待目标环境验证）
 
-- 2026-08-27 对当前本机 `jewelry_db` 的只读 `prisma migrate status` 显示：仓库 41 个 migration、已应用 39 个，待应用 `20260825110000_add_personal_content_template_content_defaults` 与 `20260825215500_add_release_foundation_schema`。这只描述本机候选库，不代表目标生产库；目标数据库身份和 ledger 仍未提供，未经批准不执行 migration、不改 checksum、不回填。
-- 全新、无宿主端口、无持久卷的一次性 MySQL 8.0 已从空库顺序应用正式目录 41/41 个 SQL，形成 70 张表；第 41 个 migration 的 21/21 个关键表及目标外键均核验存在，容器随后删除且剩余 0。该演练没有写 `_prisma_migrations`，不能代替目标数据库升级路径。目标数据库和 `_prisma_migrations` 状态仍未确认；在获得精确目标与授权前，不执行 migration、不改 checksum、不连接或回填现有数据库。
+- 2026-08-30 对当前本机 `jewelry_db` 的只读 ledger 差异显示：仓库 49 个 migration、已应用 45 个、没有已应用但仓库缺失的记录；待应用依次为 `20260829120000_add_fixed_template_versioning`、`20260830110000_add_personal_content_template_revision`、`20260830111000_add_dynamic_template_activations`、`20260830130000_add_page_document_published_revision_pointer`，当前库没有 `page_documents.published_revision_id`。这只描述本机开发库，不代表目标生产库；未经针对精确目标的批准，不执行 migration、backfill 或 checksum 变更。
+- P0 指针 migration 已在保留的隔离 MySQL `hc-p0-pointer-mysql-20260830` 中以原始 SQL 单独演练：列、索引、同页面外键和 `SET NULL/CASCADE` 行为存在，5 个同页面历史发布指针完成 apply 后第二次 apply 为 0，revision 与草稿业务哈希不变。该方式没有向 `_prisma_migrations` 写 ledger，只证明 SQL 与恢复基线兼容，不代替目标环境 `migrate deploy`。当前代码连接该隔离库的真实 HTTP 烟测已覆盖 Public 指针读取、`EDITOR` 回滚 403、跨页面 400、过期指针 409、`57→50→57` 回滚、结构化审计、Restore Draft 与过期 `updatedAt` 409；旧历史快照因缺少当前 attestation 均保持 `INVALID / publication-revalidation-required`。
+- P0 backfill CLI 现在同时承担失败关闭的目标审计入口：连接前要求环境 ID、预期数据库名、审批引用哈希和显式只读授权；dry-run 连接后只接受 `USAGE/SELECT/SHOW VIEW`，apply 只接受同时包含 `SELECT/UPDATE` 且无更高权限的账号，并继续要求 `--apply + PAGE_PUBLISHED_REVISION_BACKFILL_APPLY=1`。同一报告复用 `checkMigrationIntegrity()`，只输出 ledger、指针列、悬空/跨页面指针和候选聚合，不读取或输出 `puckData/metadata`；pointer migration 尚未执行时只报告顺序 blocker。完全迁移且已回填的隔离恢复库真实烟测得到只读审计 0 candidate / 5 pointers / 0 cross-document、过权 dry-run 失败、最小写账号 apply 0→0 且指针 5→5，临时账号已清理。该证据仍不代替唯一目标环境审计或写入授权。
+- 本机新鲜备份批次 `jewelry_db_20260830_153624.sha256` 已对数据库、uploads 和 private-media 三个产物复验 SHA-256，状态为 `SUCCESS / exit 0 / error NONE`；正式 `restore.sh` 已把数据库恢复到新的空隔离库 `jewelry_p0_restore_20260830_153624`，得到 76 张表、6 个 PageDocument、56 个 revisions 和 45 条已应用 migration，与备份时本机库聚合一致。媒体产物完成清单与 tar 校验但本轮明确选择 database-only，没有写入恢复媒体目录；该证据仍不是目标环境恢复演练或异地灾备。
 - 当前运行后端可能早于工作树最新构建，因而旧 API 响应不能直接证明当前源码缺少能力；同样，源码和构建通过也不能证明运行数据库已经兼容。
 - 真实游客目录当前只有 3 条不适合品牌验收的测试商品，且均为 `DISPLAY_ONLY`；没有可用于验证直购、售罄、0 库存或 `SINGLE_UNIT` 的代表性公开数据。
 
@@ -142,10 +153,13 @@ products, categories, auth, users, orders, inventory, inquiries, selection-inqui
 - Fulfillment 首次进入 `DELIVERED` 时会在同一事务把 `Order.deliveryStatus` 同步为 `RECEIVED` 并写入 `receivedAt`，但 `Order.status` 保持 `SHIPPED`，由客户确认或自动确认另行推进 `COMPLETED`；临时 MySQL 已验证并发重复送达只形成一次持久化事实和事件。
 - 后台售后创建现在强制校验订单、客户、订单商品三元关联、标准零售类型和订单资格，并对不存在、跨客户和跨订单商品返回相同安全 404；订单锁下的并发重复申请只保留一条记录。管理表单和 API 类型已同步必填 `customerId/orderItemId`，但本轮只完成类型、构建和真实 API/数据库自动验收，尚未人工点击后台表单。
 - 手工和自动金价写入只创建 `GoldPrice` 事实，不再调用商品固定价改写路径；未来按重动态价仍须按 D.10 另行设计和审批。
-- SiteContent 前端路由与导航已收窄到 `SUPER_ADMIN` / `ADMIN`，与服务端设置接口白名单一致；页面历史版本恢复已要求 `expectedUpdatedAt` 并以原子条件更新拒绝陈旧请求。
+- SiteContent 前端路由与导航已收窄到 `SUPER_ADMIN` / `ADMIN`，与服务端设置接口白名单一致；已有 PageDocument 的保存、发布、放弃草稿和历史版本恢复均强制携带 `expectedUpdatedAt` 并以原子条件拒绝陈旧请求，只有首次创建页面不要求旧版本标识。页面装修操作审计只附加白名单 `pageKey` 与可选恢复版本，不复制乐观锁、装修正文或其他请求体。
 - 对外只能表述为“是否提供在线交易以当前站点实际功能和经批准的服务条款为准”，不得宣称完整支付闭环已经上线。
 
 ## A/C. 测试资产与历史运行证据
+
+- 2026-08-30 当前工作树统一代码级验证：根 `lint`、`typecheck`、前后端生产构建与动态模板生成一致性检查均退出 0；服务端全量 530 通过、4 个需要显式真实库配置的场景跳过；Playwright 全量 564 通过、76 个被现行独立工作区取代或需要显式环境的场景跳过。浏览器测试主要使用本地拦截 API；运行期间未启动后端的非目标请求产生 `ECONNREFUSED` 诊断噪声，但没有测试失败。该证据不证明真实 HTTP、真实数据库、未知草稿、目标环境 migration、动态模板正式激活或生产发布。
+- P0 当前本地工作树的精确 Git 基线、工作树指纹、migration bundle、构建哈希和运行态身份只记录在 `artifacts/candidate-evidence/current.json`，避免 tracked 状态文档自引用导致候选指纹永久漂移。候选生成器已固定 Unicode 码元排序和 `core.autocrlf=true` 的 Git clean-filter 语义；同一挂载工作树在 Windows/Node 25 与 Linux/Node 22 中，除生成时间、运行态和输出路径外的证据字段逐字一致。固定 Node 22/Dockerfile 构建的本地 server/client 镜像以工作树指纹前缀标记本地 tag，OCI 标签携带一致的 revision、组件和 migration bundle；一次性 Compose 等价网络烟测已验证 client 200、反向代理 `/api/ready` database ok 和 Public 版本 39 安全 INVALID。由于工作树未冻结，证据明确 `releaseEligible=false`；这些镜像没有远端 digest、SBOM、provenance、签名或同 SHA Quality Gate，不是正式发布制品。
 
 - **Playwright E2E**（`client/tests/`）：`public-access.spec.ts`（公开访问 + 交易关闭降级 + 字段白名单）、`responsive-public.spec.ts`（4 视口横向溢出）、`responsive-admin.admin.spec.ts`、`core-template-homepage.spec.ts`、`privacy-trust.spec.ts`。交易关闭测试证明降级路径存在，不证明当前部署一定关闭。
 - **契约测试**（`scripts/`）：page-builder / trade 状态机 / trade 并发 / trade 契约。
@@ -184,11 +198,4 @@ products, categories, auth, users, orders, inventory, inquiries, selection-inqui
 11. **报价确认与转单安全暂停** — 当前后台员工不能代客户确认，转单在客户本人确认状态机、不可变报价快照和所需 Schema 获批实现前返回安全拒绝；这不是完整经营闭环。
 12. **客户通知只有第一批本地候选，不能外推为真实送达闭环** — 认证客户的订单创建和每笔支付确认已在业务事务内原子写 Notification/NotificationDelivery/OutboxEvent，客户 API 绑定本人，Worker 具备抢占、租约、有限重试和保守的未知结果处理；外部投递默认关闭。目标库 migration、真实 MySQL 抢占、授权测试收件人、SMTP 配置、送达/退信，以及发货、退款、售后、咨询等后续事件仍未闭合；旧直接邮件路径尚未统一迁移。
 13. **英文站只有 EN-A 安全轨道，正式英文内容尚未实现** — `/en` 及其子路由当前由外层门禁返回不可用页面，不请求中文业务事实；公开 API 与 SSE 显式携带 locale，服务端 `en` 在访问事实源前返回 unavailable，Nginx 候选配置为初始响应添加 `noindex, nofollow`。虽然候选 Schema 已有 PageDocumentLocalization/ProductTranslation/CategoryTranslation/SeoSnapshot，但 PageDocumentRevision 没有 locale/contentHash，publishedRevisionId 无法可靠证明同语言不可变修订；该设计必须在目标库状态明确后、migration 执行前处理。不能用机器翻译、自动回退或空页伪装完成。
-14. **发布基础已有安全入口，但尚未完成目标环境闭环** — 仓库已具备受控 `restore.sh`、一次性首管理员 CLI、备份状态标记/容器健康检查，以及发布前同 SHA Quality Gate 证明和 Manifest v2 合同；当前仅完成 Bash 语法与静态/单元合同验证。尚未在 GitHub 远端生成制品，也未在目标环境的独立空库和空媒体卷执行恢复演练。备份仍默认同宿主机、明文、7 天保留且媒体归档非原子；微信支付证书只读挂载和 TLS/443 仍未实施。
-
-### 已过时的历史结论（以代码事实为准）
-
-- ~~"0 个测试"~~：已有多套 Playwright + 契约测试。
-- ~~"两套 blocks 并存"~~：旧 `blockComponents` 已不存在，首页统一走 Puck PageDocument。
-- ~~"5 个 service `(this.prisma as any)`"~~：固定数量结论已失效，修改时以当前搜索与类型检查为准。
-- ~~"Feature Flag 全仓 0 引用"~~：`useCommerceEnabled` 已被 ProductDetail、CustomerCenter 等消费，控制交易 CTA 渲染。
+14. **发布基础已有本机隔离证据，但尚未完成目标环境闭环** — 仓库已具备受控 `restore.sh`、一次性首管理员 CLI、备份状态标记/容器健康检查，以及发布前同 SHA Quality Gate 证明和 Manifest v2 合同。`backup.sh` 已增加自身的 MySQL 就绪等待，隔离竞态演练证明数据库延迟恢复后可继续备份、超时会写 `DB_DUMP_FAILED`；本机新鲜数据库备份已恢复到独立空库。运行中的旧 `jewelry-backup` 容器仍没有挂载当前健康检查脚本，须在明确的本机基础设施变更窗口重建后才能让 Docker health 反映新合同。尚未在 GitHub 远端生成制品，也未在唯一目标环境执行 migration、空媒体恢复、候选切换或浏览器验收；备份仍默认同宿主机、明文、7 天保留且媒体归档非跨数据库原子，微信支付证书只读挂载和 TLS/443 仍未实施。

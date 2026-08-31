@@ -413,7 +413,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
           >
             ✓
           </div>
-          <h2
+          <h1
             ref={successHeadingRef}
             tabIndex={-1}
             style={{
@@ -429,7 +429,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
             }}
           >
             需求已提交
-          </h2>
+          </h1>
           <p
             style={{
               fontSize: 14,
@@ -786,6 +786,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                   </label>
                   <input
                     id="cf-name"
+                    autoComplete="name"
                     aria-required="true"
                     aria-invalid={errors.name ? true : undefined}
                     aria-describedby={errors.name ? ERROR_IDS.name : undefined}
@@ -816,6 +817,8 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                   </label>
                   <input
                     id="cf-phone"
+                    autoComplete="tel-national"
+                    inputMode="numeric"
                     aria-required="true"
                     aria-invalid={errors.phone ? true : undefined}
                     aria-describedby={errors.phone ? ERROR_IDS.phone : undefined}

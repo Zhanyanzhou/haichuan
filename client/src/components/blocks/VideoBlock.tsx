@@ -64,13 +64,17 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
       ? "3 / 4"
       : resolveContractAspectRatio("video", "coverImage", aspectRatio, "mobile");
 
-  const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, linkUrl });
+  const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, categorySlug: content.categorySlug, linkUrl });
   const showCopy = Boolean(title || subtitle || (actionText && targetUrl));
   // 封面图焦点（0-100）：poster 作为 video 属性无法设置 objectPosition，
   // 改为独立封面层渲染，才能让「裁切与焦点」真正作用于封面图。
   const coverFocusX = Math.min(100, Math.max(0, Number(focusX ?? 50)));
   const coverFocusY = Math.min(100, Math.max(0, Number(focusY ?? 50)));
   const [playing, setPlaying] = useState(false);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const videoDescription = typeof content.videoDescription === "string"
+    ? content.videoDescription.trim()
+    : "";
 
   if (!videoUrl) {
     if (!editMode) return null;
@@ -165,6 +169,13 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
             loop={loop}
             muted={muted || autoPlay}
             controls={showControls}
+            aria-label={videoDescription || (typeof title === "string" ? title : "") || "品牌影片"}
+            onLoadStart={() => setVideoFailed(false)}
+            onLoadedMetadata={() => setVideoFailed(false)}
+            onError={() => {
+              setPlaying(false);
+              setVideoFailed(true);
+            }}
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
             onEnded={() => setPlaying(false)}
@@ -191,6 +202,25 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
                 pointerEvents: "none",
               }}
             />
+          ) : null}
+          {videoFailed ? (
+            <div
+              role="status"
+              data-video-state="error"
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 2,
+                display: "grid",
+                placeItems: "center",
+                padding: 24,
+                color: "#FFFFFF",
+                background: posterUrl ? "rgba(24, 26, 27, 0.62)" : "#181A1B",
+                textAlign: "center",
+              }}
+            >
+              {videoDescription || "视频暂时无法播放，请稍后重试。"}
+            </div>
           ) : null}
         </div>
         {showCopy ? (

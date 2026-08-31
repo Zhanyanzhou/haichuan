@@ -61,6 +61,7 @@ services:
       # 线上交易总开关（默认关闭；获 D.2 批准后才显式设为 true）
       CUSTOMER_COMMERCE_ENABLED: "${CUSTOMER_COMMERCE_ENABLED:-false}"
       PARTNER_APPLICATIONS_WRITE_ENABLED: "${PARTNER_APPLICATIONS_WRITE_ENABLED:-false}"
+      # 动态模板只读预检始终可用；原子激活必须在目标环境单独显式开启。
       RELEASE_PROFILE: "${RELEASE_PROFILE:-lead-generation}"
       # 可选能力一律显式注入；缺失时由服务端按各自合同关闭或诚实降级。
       WECHAT_APP_ID: "${WECHAT_APP_ID:-}"
@@ -180,6 +181,7 @@ services:
       MEDIA_DIRS: /media/uploads:/media/private-media
       DISK_WARN_PCT: ${DISK_WARN_PCT:-85}
       RETENTION_DAYS: "7"
+      BACKUP_DB_READY_TIMEOUT_SECONDS: ${BACKUP_DB_READY_TIMEOUT_SECONDS:-60}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
       BACKUP_HEALTH_GRACE_SECONDS: ${BACKUP_HEALTH_GRACE_SECONDS:-3600}
     volumes:

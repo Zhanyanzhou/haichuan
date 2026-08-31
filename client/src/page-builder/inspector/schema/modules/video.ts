@@ -57,6 +57,15 @@ export const videoSchema: ModuleInspectorSchema = {
           placeholder: "上传视频封面（可选）",
           showSpecCheck: true,
         },
+        {
+          key: "videoDescription",
+          label: "视频说明",
+          control: "textarea",
+          maxLength: 120,
+          rows: 3,
+          hint: "供无法观看画面的读者理解视频内容，也用于播放失败时的说明。",
+          placeholder: "如：工匠在工作台前手工錾刻金饰的过程",
+        },
       ],
     },
     {

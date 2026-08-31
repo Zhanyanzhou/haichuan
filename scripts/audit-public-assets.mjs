@@ -58,6 +58,10 @@ function normalizePath(path) {
   return path.split(sep).join("/");
 }
 
+function compareStable(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function projectRelative(path) {
   const value = normalizePath(relative(projectRoot, resolve(projectRoot, path)));
   if (!value || value === "." || value.startsWith("../")) {
@@ -75,7 +79,9 @@ function walk(path) {
   const stat = lstatSync(path);
   if (!stat.isDirectory()) return [path];
   const entries = [];
-  for (const entry of readdirSync(path, { withFileTypes: true })) {
+  const directoryEntries = readdirSync(path, { withFileTypes: true })
+    .sort((left, right) => compareStable(left.name, right.name));
+  for (const entry of directoryEntries) {
     const absolutePath = resolve(path, entry.name);
     if (entry.isDirectory()) entries.push(...walk(absolutePath));
     else entries.push(absolutePath);
@@ -113,7 +119,7 @@ function collectTextSources() {
   ];
   const unique = [...new Set(candidates)]
     .filter((path) => textExtensions.has(extname(path).toLowerCase()))
-    .sort((left, right) => projectRelative(left).localeCompare(projectRelative(right)));
+    .sort((left, right) => compareStable(projectRelative(left), projectRelative(right)));
 
   return unique.map((path) => ({
     path: projectRelative(path),
@@ -160,7 +166,7 @@ function summarizeExtensions(files) {
     extensions.set(key, current);
   }
   return Object.fromEntries(
-    [...extensions.entries()].sort(([left], [right]) => left.localeCompare(right)),
+    [...extensions.entries()].sort(([left], [right]) => compareStable(left, right)),
   );
 }
 
@@ -169,7 +175,8 @@ function collectAudit() {
   const sources = collectTextSources();
   const literalReferences = collectLiteralReferences(sources);
   const files = walk(publicRoot)
-    .sort((left, right) => normalizePath(relative(publicRoot, left)).localeCompare(
+    .sort((left, right) => compareStable(
+      normalizePath(relative(publicRoot, left)),
       normalizePath(relative(publicRoot, right)),
     ))
     .map((path) => {
@@ -217,14 +224,14 @@ function collectAudit() {
   }
   const exactDuplicateGroups = [...byHash.entries()]
     .filter(([, paths]) => paths.length > 1)
-    .map(([hash, paths]) => ({ sha256: hash, files: paths.sort() }))
-    .sort((left, right) => left.files[0].localeCompare(right.files[0]));
+    .map(([hash, paths]) => ({ sha256: hash, files: paths.sort(compareStable) }))
+    .sort((left, right) => compareStable(left.files[0], right.files[0]));
 
   const publicUrls = new Set(files.map((file) => file.publicUrl));
   const unresolvedStaticLiterals = [...literalReferences.entries()]
     .filter(([literal]) => !publicUrls.has(literal))
     .map(([literal, references]) => ({ literal, references }))
-    .sort((left, right) => left.literal.localeCompare(right.literal));
+    .sort((left, right) => compareStable(left.literal, right.literal));
   const knownSentinelLiterals = unresolvedStaticLiterals
     .filter(({ literal }) => knownNonAssetSentinels.has(literal))
     .map((entry) => ({
@@ -270,7 +277,9 @@ function collectAudit() {
     },
     byExtension: summarizeExtensions(files),
     largest: [...files]
-      .sort((left, right) => right.bytes - left.bytes)
+      .sort((left, right) =>
+        right.bytes - left.bytes || compareStable(left.path, right.path),
+      )
       .slice(0, 20)
       .map(({ path, bytes, sha256, staticReferenceClassification }) => ({
         path,

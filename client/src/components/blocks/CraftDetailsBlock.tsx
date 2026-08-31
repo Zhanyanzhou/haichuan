@@ -112,6 +112,9 @@ export default function CraftDetailsBlock({ module, editMode }: CraftDetailsBloc
           .hc-craft-details__copy { grid-column: 1 / span 3; grid-row: 1; align-self: center; max-width: 360px; }
           .hc-craft-details__media.is-detailImageOne { grid-column: 5 / span 4; grid-row: 2; }
           .hc-craft-details__media.is-detailImageTwo { grid-column: 9 / span 4; grid-row: 2; }
+          @media (min-width: 768px) and (max-width: 1023px) {
+            .hc-craft-details__copy { grid-column: 1 / span 4; }
+          }
           @media (max-width: 767px) {
             .hc-craft-details { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; row-gap: 28px; }
             .hc-craft-details__media.is-leadImage { grid-column: 1 / -1; grid-row: 1; aspect-ratio: ${leadMobileRatio} !important; }

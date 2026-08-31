@@ -134,9 +134,23 @@ const internalServerKeys = new Set([
 const operationalKeys = new Set([
   "MYSQL_ROOT_PASSWORD",
   "MYSQL_PASSWORD",
+  "BACKUP_DB_READY_TIMEOUT_SECONDS",
   "BACKUP_INTERVAL_SECONDS",
   "BACKUP_HEALTH_GRACE_SECONDS",
   "DISK_WARN_PCT",
+]);
+const publishedRevisionCliKeys = new Set([
+  "PAGE_PUBLISHED_REVISION_AUDIT_READ_ONLY_AUTHORIZED",
+  "PAGE_PUBLISHED_REVISION_ENVIRONMENT_ID",
+  "PAGE_PUBLISHED_REVISION_EXPECTED_DATABASE",
+  "PAGE_PUBLISHED_REVISION_APPROVAL_REFERENCE",
+  "PAGE_PUBLISHED_REVISION_BACKFILL_APPLY",
+]);
+const releasePreflightCliKeys = new Set([
+  "RELEASE_PREFLIGHT_READ_ONLY_AUTHORIZED",
+  "RELEASE_PREFLIGHT_ENVIRONMENT_ID",
+  "RELEASE_PREFLIGHT_EXPECTED_DATABASE",
+  "RELEASE_PREFLIGHT_APPROVAL_REFERENCE",
 ]);
 const secretKeys = new Set([
   "MYSQL_ROOT_PASSWORD",
@@ -192,6 +206,16 @@ requireSubset(
   envExampleKeys,
 );
 requireSubset("one-shot CLI 环境变量未记录在 .env.example", oneShotCliKeys, envExampleKeys);
+requireSubset(
+  "PageDocument 发布指针 CLI 环境变量未记录在 .env.example",
+  publishedRevisionCliKeys,
+  envExampleKeys,
+);
+requireSubset(
+  "正式发布前审计 CLI 环境变量未记录在 .env.example",
+  releasePreflightCliKeys,
+  envExampleKeys,
+);
 requireSubset("client build 变量未记录在 .env.example", clientBuildKeys, envExampleKeys);
 requireSubset("client build 变量未传入 compose build args", clientBuildKeys, clientComposeKeys);
 requireSubset("client build 变量未声明为 Dockerfile ARG", clientBuildKeys, dockerfileBuildKeys);
@@ -254,6 +278,8 @@ const settingsService = read("server/src/modules/settings/settings.service.ts");
 for (const [label, condition] of [
   ["备份脚本必须原子发布状态标记", backupScript.includes('mv -f -- "$STATUS_PARTIAL_PATH" "$STATUS_PATH"')],
   ["备份脚本必须记录最近退出码", backupScript.includes("LAST_EXIT_CODE")],
+  ["备份脚本必须在 dump 前等待数据库就绪", backupScript.includes("mysqladmin ping") && backupScript.includes("BACKUP_DB_READY_TIMEOUT_SECONDS")],
+  ["backup service 必须注入数据库就绪等待上限", backupComposeBlock.includes("BACKUP_DB_READY_TIMEOUT_SECONDS")],
   ["备份健康检查不得 source 状态文件", !/(?:^|\s)(?:source|\.)\s+["']?\$?STATUS_PATH/m.test(backupHealthScript)],
   ["备份健康检查必须要求 SUCCESS", backupHealthScript.includes('result" != "SUCCESS')],
   ["backup service 必须挂载健康检查脚本只读", backupComposeBlock.includes("./server/scripts/check-backup-health.sh:/usr/local/bin/check-backup-health.sh:ro")],
@@ -316,6 +342,8 @@ const knownExampleKeys = new Set([
   ...oneShotCliKeys,
   ...clientBuildKeys,
   ...operationalKeys,
+  ...publishedRevisionCliKeys,
+  ...releasePreflightCliKeys,
   ...releaseDeploymentKeys,
 ]);
 const staleExampleKeys = sorted(
@@ -328,6 +356,8 @@ if (staleExampleKeys.length) {
 const nonRuntimeKeys = new Set([
   ...[...seedKeys].filter((key) => !serverRuntimeKeys.has(key)),
   ...[...oneShotCliKeys].filter((key) => !serverRuntimeKeys.has(key)),
+  ...publishedRevisionCliKeys,
+  ...releasePreflightCliKeys,
 ]);
 for (const key of nonRuntimeKeys) {
   if (serverComposeKeys.has(key)) {
@@ -350,6 +380,8 @@ const summary = {
   serverComposeKeys: sorted(serverComposeKeys),
   seedKeys: sorted(seedKeys),
   oneShotCliKeys: sorted(oneShotCliKeys),
+  publishedRevisionCliKeys: sorted(publishedRevisionCliKeys),
+  releasePreflightCliKeys: sorted(releasePreflightCliKeys),
   clientBuildKeys: sorted(clientBuildKeys),
   envExampleKeyCount: envExampleKeys.size,
   releaseFoundationKeys: sorted(releaseFoundationKeys),

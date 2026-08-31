@@ -3,7 +3,7 @@
  */
 import { useId } from "react";
 
-interface SelectFieldProps {
+export interface SelectFieldProps {
   label: string;
   value: string;
   options: ReadonlyArray<{ label: string; value: string }>;
@@ -12,6 +12,8 @@ interface SelectFieldProps {
   required?: boolean;
   placeholder?: string;
   disabled?: boolean;
+  allowEmpty?: boolean;
+  emptyLabel?: string;
 }
 
 export default function SelectField({
@@ -23,6 +25,8 @@ export default function SelectField({
   required,
   placeholder,
   disabled,
+  allowEmpty,
+  emptyLabel = "使用默认设置",
 }: SelectFieldProps) {
   const id = useId();
   return (
@@ -40,8 +44,9 @@ export default function SelectField({
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
       >
+        {allowEmpty ? <option value="">{emptyLabel}</option> : null}
         {placeholder ? (
-          <option value="" disabled>
+          <option value="" disabled={!allowEmpty}>
             {placeholder}
           </option>
         ) : null}

@@ -55,6 +55,19 @@ async function expectNoForbiddenFakeValues(page: Page) {
 }
 
 test.describe("联系信息真实性", () => {
+  test("演示数据提示只在 mock 模式出现", async ({ page }) => {
+    await page.goto("/catalog");
+    const notice = page.getByRole("complementary", { name: "演示数据说明" });
+
+    if (useMock) {
+      await expect(notice).toBeVisible();
+      await expect(notice).toContainText("不代表真实库存、价格或服务承诺");
+      return;
+    }
+
+    await expect(notice).toHaveCount(0);
+  });
+
   test("设置接口失败时展示安全错误态且不泄露假数据", async ({ page }) => {
     test.skip(useMock, "模拟数据模式不发送设置网络请求");
     await page.route("**/api/settings/public**", (route) =>

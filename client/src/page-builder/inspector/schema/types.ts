@@ -125,7 +125,7 @@ export interface VideoFieldDef extends FieldBase {
   control: "video";
 }
 
-/** 链接字段（紧凑一行式）：一次写入 { targetType, productId?, linkUrl? } */
+/** 链接字段：一次写入互斥的 targetType/product/category/page/external 目标字段。 */
 export interface LinkTargetFieldDef extends FieldBase {
   control: "linkTarget";
   /** 覆盖默认 label（“点击后跳转”） */

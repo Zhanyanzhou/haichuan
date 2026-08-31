@@ -2,27 +2,28 @@
  * SchemaInspectorPanel.tsx — 由模块 Schema 驱动的统一编辑面板。
  *
  * 结构：TopBar（当前实例）→
- *       当前模块发布问题 → 连续任务分区（按内容/业务对象任务调整顺序，全部直接展示）→
+ *       模板导航 / 校验状态 → 连续任务分区（按内容/业务对象任务调整顺序，全部直接展示）→
  *       FooterBar（手动保存整页草稿）。
  * 与 InspectorPanel 的三级分派配合：仅在 registry 命中时渲染。
  */
 import { App as AntdApp } from "antd";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  ROOT_ZONE,
   useHomepagePuck,
 } from "../../pages/admin/HomepageConfig/editor-store";
 import {
   getModuleDisplayName,
 } from "../../pages/admin/HomepageConfig/editor-utils";
-import InspectorTopBar from "./InspectorTopBar";
 import InspectorObjectContext, {
   getInspectorResponsiveStates,
 } from "./InspectorObjectContext";
 import InspectorDisclosure from "./InspectorDisclosure";
+import InspectorFooterBar from "./InspectorFooterBar";
+import InspectorModePortal from "./InspectorModePortal";
+import InspectorTemplateNavigator from "./InspectorTemplateNavigator";
 import FieldRenderer, { isFieldVisible } from "./FieldRenderer";
 import InstanceOverridesPanel from "./InstanceOverridesPanel";
-import InspectorPrimaryTabs, {
+import {
   type InspectorPrimaryMode,
 } from "./InspectorPrimaryTabs";
 import { useVisualEditorSession } from "../visual-editor/visualEditorSession";
@@ -50,14 +51,13 @@ interface SchemaInspectorPanelProps {
   hasUnsavedChanges: boolean;
   saving: boolean;
   onSaveDraft: () => void;
-  onSaveAsTemplate: (type: string, props: PuckProps) => void;
+  templateDesignEnabled?: boolean;
   publishIssues: Array<{
     blockId?: string;
     message: string;
     severity: "error" | "warning" | "info";
     path?: string;
   }>;
-  validationState: "checking" | "current" | "stale" | "error";
 }
 
 type InspectorTaskGroup =
@@ -101,15 +101,6 @@ const VISUAL_NODE_LABELS: Record<string, string> = {
   video: "视频",
   collection: "内容集合",
 };
-
-const OBJECT_TASK_GROUP_BY_KIND = {
-  media: "media",
-  video: "media",
-  text: "content",
-  action: "link",
-  product: "product",
-  collection: "product",
-} as const satisfies Record<string, InspectorTaskGroup>;
 
 const DESIGN_CAPABILITIES = new Set([
   "fit",
@@ -168,6 +159,7 @@ function getSharedDesignLabel(object: EditableObject | undefined) {
     link: "去向",
     items: "条目",
     playback: "播放",
+    visibility: "显示",
   };
   const summary = sharedCapabilities
     .map((capability) => labels[capability] ?? capability)
@@ -179,12 +171,36 @@ function getSharedDesignLabel(object: EditableObject | undefined) {
 function getInspectorContentFieldKeys(moduleType: string, nodeId: string) {
   const editableObject = getContentTemplateEditableObject(moduleType, nodeId);
   if (
-    editableObject?.kind === "text" &&
+    editableObject &&
+    ["text", "action"].includes(editableObject.kind) &&
     editableObject.contentFieldKeys.includes(nodeId)
   ) {
     return [nodeId] as const;
   }
   return getContentTemplateEditableFieldKeys(moduleType, nodeId);
+}
+
+function findInspectorFieldTarget(
+  container: HTMLElement | null,
+  fieldKeys: readonly string[],
+  device: "desktop" | "mobile",
+  preferMedia: boolean,
+) {
+  if (!container) return undefined;
+  const candidates = fieldKeys.flatMap((fieldKey) => {
+    const field = container.querySelector<HTMLElement>(
+      `[data-inspector-field="${CSS.escape(fieldKey)}"]`,
+    );
+    return field ? [field] : [];
+  });
+  if (!preferMedia) return candidates[0];
+  const mediaCandidates = candidates.filter((field) =>
+    Boolean(field.querySelector("[data-media-field]")),
+  );
+  return mediaCandidates.find((field) => field.dataset.inspectorDevice === device) ??
+    mediaCandidates.find((field) => field.dataset.selectedMediaField === "true") ??
+    mediaCandidates[0] ??
+    candidates[0];
 }
 
 const CONTENT_TASK_GROUP_ORDER: InspectorTaskGroup[] = [
@@ -291,11 +307,11 @@ function getTaskGroup(
 export default function SchemaInspectorPanel({
   schema,
   hasUnsavedChanges,
+  saving,
   publishIssues,
-  validationState,
-  onSaveAsTemplate,
+  templateDesignEnabled = true,
 }: SchemaInspectorPanelProps) {
-  const { message, modal } = AntdApp.useApp();
+  const { modal } = AntdApp.useApp();
   const editor = useInspectorModuleEditor();
   const [activePanelMode, setActivePanelMode] =
     useState<InspectorPrimaryMode>("content");
@@ -318,9 +334,12 @@ export default function SchemaInspectorPanel({
   const clearVisualNode = useVisualEditorSession((state) => state.clearNode);
   const setVisualPanelMode = useVisualEditorSession((state) => state.setPanelMode);
   const visualPanelMode = useVisualEditorSession((state) => state.panelMode);
+  const visualWorkspace = useVisualEditorSession((state) => state.workspace);
   const editorBlockId = editor?.props.id;
 
   useEffect(() => {
+    if (visualWorkspace !== "page") return;
+    clearVisualNode();
     panelScrollPositionsRef.current = { content: 0, design: 0 };
     suppressSelectionAutoScrollRef.current = null;
     setActivePanelMode("content");
@@ -328,11 +347,19 @@ export default function SchemaInspectorPanel({
     window.requestAnimationFrame(() => {
       inspectorScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
     });
-  }, [editor?.moduleType, editorBlockId, setVisualPanelMode]);
+  }, [clearVisualNode, editor?.moduleType, editorBlockId, setVisualPanelMode, visualWorkspace]);
 
   useEffect(() => {
+    if (visualWorkspace !== "page") return;
     if (visualPanelMode !== activePanelMode) setActivePanelMode(visualPanelMode);
-  }, [activePanelMode, visualPanelMode]);
+  }, [activePanelMode, visualPanelMode, visualWorkspace]);
+
+  useEffect(() => {
+    if (visualWorkspace !== "page") return;
+    if (templateDesignEnabled) return;
+    if (activePanelMode !== "content") setActivePanelMode("content");
+    if (visualPanelMode !== "content") setVisualPanelMode("content");
+  }, [activePanelMode, setVisualPanelMode, templateDesignEnabled, visualPanelMode, visualWorkspace]);
 
   useLayoutEffect(() => {
     const pending = pendingPanelScrollRef.current;
@@ -349,6 +376,7 @@ export default function SchemaInspectorPanel({
   }, [activePanelMode]);
 
   useEffect(() => {
+    if (visualWorkspace !== "page") return;
     if (!editorBlockId || !visualSelection || visualSelection.blockId !== editorBlockId) return;
     const editableObject = getContentTemplateEditableObject(
       editor?.moduleType ?? "",
@@ -362,9 +390,10 @@ export default function SchemaInspectorPanel({
     )) {
       clearVisualNode(editorBlockId);
     }
-  }, [clearVisualNode, editor?.device, editor?.moduleType, editorBlockId, visualSelection]);
+  }, [clearVisualNode, editor?.device, editor?.moduleType, editorBlockId, visualSelection, visualWorkspace]);
 
   useEffect(() => {
+    if (visualWorkspace !== "page") return;
     if (!editorBlockId || !visualSelection || visualSelection.blockId !== editorBlockId) return;
     const fieldKeys = getInspectorContentFieldKeys(
       editor?.moduleType ?? "",
@@ -376,11 +405,12 @@ export default function SchemaInspectorPanel({
       return;
     }
     const renderFrame = window.requestAnimationFrame(() => {
-      const target = fieldKeys
-        .map((fieldKey) => document.querySelector<HTMLElement>(
-          `[data-inspector-field="${CSS.escape(fieldKey)}"]`,
-        ))
-        .find(Boolean);
+      const target = findInspectorFieldTarget(
+        inspectorScrollRef.current,
+        fieldKeys,
+        editor.device,
+        visualSelection.kind === "media",
+      );
       target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
       if (visualSelection.kind === "text" || visualSelection.kind === "action") {
         target?.querySelector<HTMLElement>("input, textarea, select, button, [tabindex]")?.focus();
@@ -389,9 +419,10 @@ export default function SchemaInspectorPanel({
     return () => {
       window.cancelAnimationFrame(renderFrame);
     };
-  }, [activePanelMode, editor?.moduleType, editorBlockId, visualSelection]);
+  }, [activePanelMode, editor?.device, editor?.moduleType, editorBlockId, visualSelection, visualWorkspace]);
 
   useEffect(() => {
+    if (visualWorkspace !== "page") return;
     if (!editorBlockId || !contentActionRequest ||
       contentActionRequest.blockId !== editorBlockId || activePanelMode !== "content") return;
     const fieldKeys = getInspectorContentFieldKeys(
@@ -399,20 +430,22 @@ export default function SchemaInspectorPanel({
       contentActionRequest.nodeId,
     );
     const renderFrame = window.requestAnimationFrame(() => {
-      const target = fieldKeys
-        .map((fieldKey) => document.querySelector<HTMLElement>(
-          `[data-inspector-field="${CSS.escape(fieldKey)}"]`,
-        ))
-        .find(Boolean);
+      const target = findInspectorFieldTarget(
+        inspectorScrollRef.current,
+        fieldKeys,
+        editor.device,
+        contentActionRequest.kind === "media",
+      );
       target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
       if (contentActionRequest.kind === "media") {
-        target?.querySelector<HTMLButtonElement>("[data-media-field] button")?.click();
+        target?.querySelector<HTMLElement>("[data-media-field]")?.focus();
       }
     });
     return () => window.cancelAnimationFrame(renderFrame);
-  }, [activePanelMode, contentActionRequest, editor?.moduleType, editorBlockId]);
+  }, [activePanelMode, contentActionRequest, editor?.device, editor?.moduleType, editorBlockId, visualWorkspace]);
 
   useEffect(() => {
+    if (visualWorkspace !== "page") return;
     if (activePanelMode !== "design" || !editorBlockId || !visualSelection ||
       visualSelection.blockId !== editorBlockId) return;
     const editableObject = getContentTemplateEditableObject(
@@ -423,7 +456,7 @@ export default function SchemaInspectorPanel({
       setActivePanelMode("content");
       setVisualPanelMode("content");
     }
-  }, [activePanelMode, editor?.moduleType, editorBlockId, setVisualPanelMode, visualSelection]);
+  }, [activePanelMode, editor?.moduleType, editorBlockId, setVisualPanelMode, visualSelection, visualWorkspace]);
 
   const ctx: InspectorContext | null = editor
     ? {
@@ -549,18 +582,19 @@ export default function SchemaInspectorPanel({
     group,
     entries: entries.filter(({ field }) => !isVisuallyManagedPreset(field)),
   }));
-  const selectedContentEntries = currentEditableObject
-    ? visibleFields
-        .filter(({ field }) => selectedContentFieldKeys.has(field.key))
-        .map<VisibleFieldEntry>(({ layer: _layer, ...entry }) => entry)
-    : [];
   const selectedContentTaskGroups = currentEditableObject
-    ? selectedContentEntries.length > 0
-      ? [{
-          group: OBJECT_TASK_GROUP_BY_KIND[currentEditableObject.kind],
-          entries: selectedContentEntries,
-        }]
-      : []
+    ? taskGroupOrder
+        .map((group) => ({
+          group,
+          entries: visibleFields
+            .filter(({ field, layer }) =>
+              selectedContentFieldKeys.has(field.key) &&
+              getTaskGroup(field, layer) === group &&
+              getPanelMode(group) === "content",
+            )
+            .map<VisibleFieldEntry>(({ layer: _layer, ...entry }) => entry),
+        }))
+        .filter((item) => item.entries.length > 0)
     : contentTaskGroups;
   const selectedDesignGroup = designTaskGroups.find(
     ({ group }) => group === "composition",
@@ -569,6 +603,8 @@ export default function SchemaInspectorPanel({
     currentEditableObject &&
       ["media", "video", "product", "collection"].includes(currentEditableObject.kind),
   );
+  // 页面装修默认展示完整任务组；只有运营人员在属性面板内显式选择对象时
+  // 才提供对象高亮与媒体增强语境。画布点击始终保持模块级上下文。
   const activeTaskGroups = activePanelMode === "design"
     ? currentVisualSelection
       ? selectedTextRole
@@ -580,7 +616,7 @@ export default function SchemaInspectorPanel({
               : []),
           ]
       : designTaskGroups
-    : selectedContentTaskGroups;
+    : contentTaskGroups;
   const layoutTextRoleIds = new Set(
     (contractLayoutOverrides?.textRoles ?? []).map((role) => role.roleId),
   );
@@ -609,9 +645,26 @@ export default function SchemaInspectorPanel({
     ? visualObjects.find((object) => object.nodeId === currentVisualSelection.nodeId) ??
       visualObjects.find((object) => object.object === currentEditableObject)
     : undefined;
-  const currentObjectCanEditDesign = currentEditableObject
+  const actionVisualObject = visualObjects.find((object) => object.object.kind === "action");
+  const mediaTextVisualObject = visualObjects.find((object) => object.object.kind === "text");
+  const selectedMediaFields = selectedContentTaskGroups
+    .flatMap(({ entries }) => entries)
+    .map(({ field }) => field)
+    .filter((field) => field.control === "media");
+  const selectedMediaField = selectedMediaFields.find((field) => field.device === editor.device) ??
+    selectedMediaFields.find((field) => field.key === selectedSlot?.fieldKey) ??
+    selectedMediaFields.find((field) => field.key === currentVisualSelection?.nodeId) ??
+    selectedMediaFields[0];
+  const selectedMediaRatio = selectedMediaField?.control === "media"
+    ? selectedMediaField.spec.ratio
+    : "默认";
+  const selectedMediaHasVisibility = Boolean(
+    currentEditableObject &&
+      (currentEditableObject.kind === "media" || currentEditableObject.kind === "video"),
+  );
+  const currentObjectCanEditDesign = templateDesignEnabled && (currentEditableObject
     ? hasEditableDesign(currentEditableObject) && Boolean(selectedSlot || selectedTextRole)
-    : hasInstanceDesignControls || designTaskGroups.some(({ entries }) => entries.length > 0);
+    : hasInstanceDesignControls || designTaskGroups.some(({ entries }) => entries.length > 0));
   const responsiveStates = getInspectorResponsiveStates({
     instanceOverrides: editor.props.__instanceOverrides,
     selectedNodeId: selectedOverrideNodeId ?? null,
@@ -629,24 +682,10 @@ export default function SchemaInspectorPanel({
   const selectedThumbnailUrl = typeof selectedThumbnailValue === "string"
     ? selectedThumbnailValue
     : undefined;
-  const selectedFieldScopes = currentEditableObject
-    ? [...selectedContentFieldKeys].map(
-        (fieldKey) => currentEditableObject.fieldScopes?.[fieldKey] ?? "shared",
-      )
-    : [];
-  const hasSharedContent = selectedFieldScopes.includes("shared");
-  const hasViewportContent = selectedFieldScopes.includes("viewport-specific");
-  const selectedContentScopeLabel = hasViewportContent
-    ? hasSharedContent
-      ? `部分内容双端共用；其余字段作用于当前${editor.device === "mobile" ? "移动端" : "桌面端"}`
-      : `内容字段作用于当前${editor.device === "mobile" ? "移动端" : "桌面端"}`
-    : "内容字段双端共用";
   const schemaDefaults = schema.defaults ?? {};
   const currentPublishIssues = publishIssues.filter(
-    (issue) =>
-      issue.severity !== "info" && issue.blockId === editor.props.id,
+    (issue) => issue.severity !== "info" && issue.blockId === editor.props.id,
   );
-
   const commitPanelMode = (panelMode: InspectorPrimaryMode) => {
     const targetScrollTop = panelScrollPositionsRef.current[panelMode];
     if (panelMode !== activePanelMode && inspectorScrollRef.current) {
@@ -661,6 +700,7 @@ export default function SchemaInspectorPanel({
   };
 
   const activatePanelMode = (panelMode: InspectorPrimaryMode) => {
+    if (!templateDesignEnabled && panelMode === "design") return;
     if (panelMode !== "design" || activePanelMode === "design") {
       commitPanelMode(panelMode);
       return;
@@ -696,36 +736,6 @@ export default function SchemaInspectorPanel({
     });
   };
 
-  const removeModule = () => {
-    const index = content.findIndex(
-      (item) => item.props?.id === editor.props.id,
-    );
-    if (index < 0) return;
-    if (content[index].props?.locked) {
-      message.info("此模块已锁定，不能删除");
-      return;
-    }
-    modal.confirm({
-      title: `删除“${getModuleDisplayName(editor.moduleType, editor.props)}”？`,
-      content: "删除后可通过顶部撤销恢复；保存草稿前不会影响前台页面。",
-      okText: "删除模块",
-      okButtonProps: { danger: true },
-      cancelText: "取消",
-      onOk: () => {
-        dispatch({
-          type: "remove",
-          index,
-          zone: ROOT_ZONE,
-        });
-        dispatch({ type: "setUi", ui: { itemSelector: null } });
-      },
-    });
-  };
-
-  const toggleVisibility = () => {
-    editor.update({ isVisible: editor.props.isVisible === false });
-  };
-
   const renderTaskGroup = (item: {
     group: InspectorTaskGroup;
     entries: VisibleFieldEntry[];
@@ -744,6 +754,10 @@ export default function SchemaInspectorPanel({
         !currentVisualSelection || selectedTextRole || selectedSupportsAppearance,
       )
     );
+    const isSelectedMediaTask = Boolean(
+      currentVisualSelection && group === "media" &&
+        (currentEditableObject?.kind === "media" || currentEditableObject?.kind === "video"),
+    );
     return (
       <section
         key={group}
@@ -751,8 +765,9 @@ export default function SchemaInspectorPanel({
         className="homepage-editor__task-group"
         data-task-group={group}
         data-property-level={PROPERTY_LEVEL_BY_TASK_GROUP[group]}
+        data-selected-task={activePanelMode === "design" && isSelectedMediaTask ? "media" : undefined}
       >
-        {rendersInstanceOverrides && currentVisualSelection ? null : (
+        {activePanelMode === "design" && rendersInstanceOverrides && currentVisualSelection ? null : (
           <header className="homepage-editor__task-panel-header">
             <h3>{groupTitle}</h3>
           </header>
@@ -763,7 +778,7 @@ export default function SchemaInspectorPanel({
               <InstanceOverridesPanel
                 moduleType={editor.moduleType}
                 props={editor.props}
-                update={editor.update}
+                updateFromCurrent={editor.updateFromCurrent}
                 updateHistoryTransaction={editor.updateHistoryTransaction}
                 historyTransactionPending={editor.historyTransactionPending}
                 scopes={
@@ -825,36 +840,148 @@ export default function SchemaInspectorPanel({
                 </>
               ) : null}
             </>
-          ) : entries.map((entry, fieldIndex) => (
-              <div
-                key={`${entry.sectionId}-${entry.field.key}-${fieldIndex}`}
-                className={`homepage-editor__task-field${selectedContentFieldKeys.has(entry.field.key) ? " is-visual-selected" : ""}`}
-                data-inspector-field={entry.field.key}
-              >
-                <FieldRenderer
-                  def={entry.field}
-                  ctx={ctx}
-                  update={editor.update}
-                  moduleType={editor.moduleType}
-                />
-                {Object.prototype.hasOwnProperty.call(schemaDefaults, entry.field.key) &&
-                JSON.stringify(editor.props[entry.field.key]) !==
-                  JSON.stringify(schemaDefaults[entry.field.key]) ? (
-                  <button
-                    type="button"
-                    className="homepage-editor__field-reset"
-                    aria-label={`恢复${entry.field.label}默认`}
-                    onClick={() =>
-                      editor.update({
-                        [entry.field.key]: structuredClone(schemaDefaults[entry.field.key]),
-                      })
-                    }
+          ) : (
+            <>
+              {entries.map((entry, fieldIndex) => {
+                const isSelectedField = selectedContentFieldKeys.has(entry.field.key);
+                const isMediaControlField = entry.field.control === "media";
+                const isSelectedMediaControlField = Boolean(
+                  isSelectedMediaTask && selectedMediaField?.key === entry.field.key,
+                );
+                const isSelectedMediaAltField = Boolean(
+                  isSelectedMediaTask && currentEditableObject?.altFieldKey === entry.field.key,
+                );
+                const mediaSlotForField = isMediaControlField
+                  ? contractLayoutOverrides?.slots?.find((slot) =>
+                      slot.fieldKey === entry.field.key || slot.roleId === entry.field.key,
+                    )
+                  : undefined;
+                return (
+                  <div
+                    key={`${entry.sectionId}-${entry.field.key}-${fieldIndex}`}
+                    className={`homepage-editor__task-field${isSelectedField ? " is-visual-selected" : ""}`}
+                    data-inspector-field={entry.field.key}
+                    data-inspector-device={entry.field.device ?? "shared"}
+                    data-selected-media-field={isSelectedMediaControlField || isSelectedMediaAltField ? "true" : undefined}
                   >
-                    恢复此项默认
-                  </button>
-                ) : null}
-              </div>
-            ))}
+                    <FieldRenderer
+                      def={entry.field}
+                      ctx={ctx}
+                      update={editor.update}
+                      moduleType={editor.moduleType}
+                      taskPresentation={isMediaControlField ? "media" : undefined}
+                      textRows={isSelectedMediaAltField ? 3 : undefined}
+                    />
+                  {isMediaControlField && mediaSlotForField ? (
+                    <InstanceOverridesPanel
+                      moduleType={editor.moduleType}
+                      props={editor.props}
+                      updateFromCurrent={editor.updateFromCurrent}
+                      updateHistoryTransaction={editor.updateHistoryTransaction}
+                      historyTransactionPending={editor.historyTransactionPending}
+                      scopes={["slots"]}
+                      selectedNodeId={mediaSlotForField.roleId}
+                      embedded
+                      viewport={editor.device}
+                      contentMediaOnly
+                    />
+                  ) : null}
+                  {Object.prototype.hasOwnProperty.call(schemaDefaults, entry.field.key) &&
+                  JSON.stringify(editor.props[entry.field.key]) !==
+                    JSON.stringify(schemaDefaults[entry.field.key]) ? (
+                    <button
+                      type="button"
+                      className="homepage-editor__field-reset"
+                      aria-label={`恢复${entry.field.label}默认`}
+                      onClick={() =>
+                        editor.update({
+                          [entry.field.key]: structuredClone(schemaDefaults[entry.field.key]),
+                        })
+                      }
+                    >
+                      恢复此项默认
+                    </button>
+                  ) : null}
+                  {isSelectedMediaAltField ? (
+                    <>
+                      <div className="homepage-editor__media-click-behavior">
+                        <span>点击行为</span>
+                        {actionVisualObject ? (
+                          <button
+                            type="button"
+                            onClick={() => selectVisualNode({
+                              blockId: String(editor.props.id ?? ""),
+                              moduleType: editor.moduleType,
+                              nodeId: actionVisualObject.nodeId,
+                              kind: actionVisualObject.kind,
+                            })}
+                          >
+                            由行动入口控制
+                            <span aria-hidden="true">›</span>
+                          </button>
+                        ) : (
+                          <span>无</span>
+                        )}
+                      </div>
+                      {selectedMediaHasVisibility && selectedSlot ? (
+                        <InstanceOverridesPanel
+                          moduleType={editor.moduleType}
+                          props={editor.props}
+                          updateFromCurrent={editor.updateFromCurrent}
+                          updateHistoryTransaction={editor.updateHistoryTransaction}
+                          historyTransactionPending={editor.historyTransactionPending}
+                          scopes={["slots"]}
+                          selectedNodeId={selectedOverrideNodeId}
+                          embedded
+                          viewport={editor.device}
+                          contentMediaOnly
+                          contentMediaVisibilityOnly
+                        />
+                      ) : null}
+                      {templateDesignEnabled ? (
+                      <div className="homepage-editor__media-setting-links" aria-label="图片相关设置">
+                        <button type="button" onClick={() => activatePanelMode("design")}>
+                          <span>布局与比例</span>
+                          <small>{selectedMediaRatio} · 100%</small>
+                          <b aria-hidden="true">›</b>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!mediaTextVisualObject}
+                          onClick={() => {
+                            if (!mediaTextVisualObject) return;
+                            selectVisualNode({
+                              blockId: String(editor.props.id ?? ""),
+                              moduleType: editor.moduleType,
+                              nodeId: mediaTextVisualObject.nodeId,
+                              kind: mediaTextVisualObject.kind,
+                            });
+                            activatePanelMode("design");
+                          }}
+                        >
+                          <span>文字与颜色</span>
+                          <small>{mediaTextVisualObject ? "编辑文案对象" : "不适用"}</small>
+                          <b aria-hidden="true">›</b>
+                        </button>
+                        <button type="button" onClick={() => activatePanelMode("design")}>
+                          <span>模板专属设置</span>
+                          <small>默认</small>
+                          <b aria-hidden="true">›</b>
+                        </button>
+                        <button type="button" onClick={() => activatePanelMode("design")}>
+                          <span>高级设置</span>
+                          <small>默认</small>
+                          <b aria-hidden="true">›</b>
+                        </button>
+                      </div>
+                      ) : null}
+                    </>
+                  ) : null}
+                </div>
+                );
+              })}
+            </>
+          )}
         </div>
       </section>
     );
@@ -866,55 +993,16 @@ export default function SchemaInspectorPanel({
       data-inspector-root="visual-properties"
       data-active-device={editor.device}
       data-module-type={editor.moduleType}
+      data-panel-mode={activePanelMode}
       aria-label="属性面板"
     >
-      <InspectorTopBar
-        displayName={schema.displayName}
-        moduleName={
-          typeof editor.props.moduleName === "string"
-            ? editor.props.moduleName
-            : ""
-        }
-        deviceLabel={editor.device === "mobile" ? "移动端" : "桌面端"}
-        dirty={hasUnsavedChanges}
-        onClose={editor.close}
-        actions={[
-          ...(editor.dirty
-            ? [
-                {
-                  key: "revert",
-                  label: "撤销本区修改",
-                  onClick: editor.revert,
-                },
-              ]
-            : []),
-          // 系统区块(全局设置/业务功能区)只读或仅提供管理入口,不给破坏性动作
-          ...(schema.systemBlock
-            ? []
-            : [
-                {
-                  key: "visibility",
-                  label:
-                    editor.props.isVisible === false
-                      ? "取消隐藏模块"
-                      : "隐藏模块",
-                  onClick: toggleVisibility,
-                },
-                {
-                  key: "remove",
-                  label: "删除模块",
-                  danger: true,
-                  onClick: removeModule,
-                },
-              ]),
-        ]}
-      />
-
-      <InspectorPrimaryTabs
-        activeMode={activePanelMode}
-        designDisabled={!currentObjectCanEditDesign}
-        onChange={activatePanelMode}
-      />
+      {templateDesignEnabled ? (
+        <InspectorModePortal
+          activeMode={activePanelMode}
+          designDisabled={!currentObjectCanEditDesign}
+          onChange={activatePanelMode}
+        />
+      ) : null}
 
       <InspectorObjectContext
           moduleLabel={schema.displayName}
@@ -960,87 +1048,55 @@ export default function SchemaInspectorPanel({
         className="homepage-editor__inspector-scroll"
         data-inspector-scroll="main"
       >
-        {validationState !== "current" ? (
-          <p className="homepage-editor__validation-state" role="status" aria-live="polite">
-            {validationState === "checking"
-              ? "正在按服务端发布规则核对当前页面…"
-              : validationState === "error"
-                ? "发布资格暂时无法核对；本地编辑内容已保留。"
-                : "内容已变化，发布资格等待重新核对。"}
-          </p>
-        ) : null}
-        {currentPublishIssues.length > 0 ? (
-          <section
-            className="homepage-editor__publish-issues homepage-editor__inspector-publish-issues"
-            aria-label="当前模块发布检查问题"
-            role="alert"
-          >
-            <strong>当前模板提示 · {currentPublishIssues.length} 项</strong>
-            <div>
-              {currentPublishIssues.map((issue, index) => (
-                <p key={`${issue.path ?? ""}-${issue.message}-${index}`}>
-                  {issue.message}
-                </p>
-              ))}
-            </div>
-          </section>
+        {activePanelMode === "design" && contentTemplateContract ? (
+          <InspectorTemplateNavigator
+            moduleLabel={schema.displayName}
+            moduleType={editor.moduleType}
+            blockId={String(editor.props.id ?? "")}
+            objects={visualObjects.map((item) => ({
+              id: item.nodeId,
+              label: VISUAL_NODE_LABELS[item.nodeId] ?? item.nodeId,
+              kind: item.kind,
+              thumbnailUrl: item.object.contentFieldKeys
+                .map((fieldKey) => editor.props[fieldKey])
+                .find((value): value is string => typeof value === "string" && value.length > 0),
+            }))}
+            selectedObjectId={selectedVisualObject?.nodeId ?? null}
+            activeDevice={editor.device}
+            onSelect={(nodeId) => {
+              const item = visualObjects.find((object) => object.nodeId === nodeId);
+              if (!item) return;
+              selectVisualNode({
+                blockId: String(editor.props.id ?? ""),
+                moduleType: editor.moduleType,
+                nodeId: item.nodeId,
+                kind: item.kind,
+              });
+            }}
+          />
         ) : null}
         <div
           id={`inspector-panel-${activePanelMode}`}
           className="homepage-editor__panel-mode-content"
           role="tabpanel"
-          aria-labelledby={`inspector-panel-tab-${activePanelMode}`}
+          aria-labelledby={templateDesignEnabled ? `inspector-panel-tab-${activePanelMode}` : undefined}
+          aria-label={templateDesignEnabled ? undefined : "页面实例内容"}
         >
           {activeTaskGroups.length > 0 ? (
             <>
-              {activePanelMode === "content" && currentEditableObject ? (
-                <div
-                  className="homepage-editor__design-scope-note"
-                  data-content-scope={hasViewportContent
-                    ? hasSharedContent ? "mixed" : "viewport-specific"
-                    : "shared"}
-                  role="note"
-                >
-                  <strong>{selectedContentScopeLabel}</strong>
-                  {editor.device === "mobile" && hasViewportContent ? (
-                    <span>未单独设置的移动端字段继续继承桌面端。</span>
-                  ) : null}
-                </div>
-              ) : null}
               {activeTaskGroups.map(renderTaskGroup)}
-              {activePanelMode === "content" &&
-              currentEditableObject &&
-              (currentEditableObject.kind === "media" || currentEditableObject.kind === "video") &&
-              currentObjectCanEditDesign ? (
-                <button
-                  type="button"
-                  className="homepage-editor__task-bridge"
-                  onClick={() => activatePanelMode("design")}
-                >
-                  继续调整{currentEditableObject.kind === "video" ? "封面" : "图片"}构图与布局
-                </button>
-              ) : null}
-              {activePanelMode === "design" && contentTemplateContract ? (
-                <button
-                  type="button"
-                  className="homepage-editor__task-bridge"
-                  onClick={() => onSaveAsTemplate(editor.moduleType, editor.props)}
-                >
-                  另存到模板库
-                </button>
-              ) : null}
             </>
           ) : (
             <div className="homepage-editor__object-empty-state" role="status">
-              <strong>当前对象没有可编辑的{activePanelMode === "content" ? "内容" : "设计"}项</strong>
+              <strong>{activePanelMode === "content" ? "当前模块没有可编辑内容" : "当前对象没有可编辑设计项"}</strong>
               <span>
-                {activePanelMode === "content" && currentObjectCanEditDesign
-                  ? "切换到“设计”可调整位置、大小和画面。"
-                  : "请切换其他编辑对象或返回模块级。"}
+                {templateDesignEnabled && activePanelMode === "content" && currentObjectCanEditDesign
+                  ? "请在编辑器顶部切换到“模板编辑”调整位置、大小和画面。"
+                  : activePanelMode === "content"
+                    ? "当前设备或条件下没有适用字段。"
+                    : "请切换其他编辑对象或返回模块级。"}
               </span>
-              {activePanelMode === "content" && currentObjectCanEditDesign ? (
-                <button type="button" onClick={() => activatePanelMode("design")}>切换到设计</button>
-              ) : currentVisualSelection ? (
+              {activePanelMode === "design" && currentVisualSelection ? (
                 <button
                   type="button"
                   onClick={() => clearVisualNode(String(editor.props.id ?? ""))}
@@ -1052,6 +1108,22 @@ export default function SchemaInspectorPanel({
           )}
         </div>
       </div>
+      <InspectorFooterBar
+        hasUnsavedChanges={hasUnsavedChanges}
+        saving={saving}
+        issueCount={currentPublishIssues.length}
+        onReviewIssues={currentPublishIssues.length > 0 ? () => {
+          modal.warning({
+            title: `当前模板提示 · ${currentPublishIssues.length} 项`,
+            content: currentPublishIssues.map((issue, index) => (
+              <p key={`${issue.path ?? ""}-${issue.message}-${index}`}>
+                {issue.message}
+              </p>
+            )),
+            okText: "知道了",
+          });
+        } : undefined}
+      />
     </section>
   );
 }

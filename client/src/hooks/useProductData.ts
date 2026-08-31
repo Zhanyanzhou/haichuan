@@ -446,16 +446,18 @@ export function useProductData(
   };
 }
 
-/** 将分类 ID 展开为“自身 + 全部后代”的 categoryIds 参数。 */
+/** 将分类 ID 或 slug 展开为“自身 + 全部后代”的 categoryIds 参数。 */
 export function expandCategoryIds(
   categories: RealCategory[],
-  targetId: number | null,
+  target: number | string | null,
 ): string {
-  if (!targetId) return "";
+  const normalized = typeof target === "string" ? target.trim() : target;
+  if (!normalized) return "";
+  const numericTarget = Number(normalized);
   const ids: number[] = [];
   const collect = (nodes: RealCategory[]) => {
     for (const n of nodes) {
-      if (n.id === targetId) {
+      if (n.id === numericTarget || n.slug === normalized) {
         const walk = (node: RealCategory) => {
           ids.push(node.id);
           node.children?.forEach(walk);

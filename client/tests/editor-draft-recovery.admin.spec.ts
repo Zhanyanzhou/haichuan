@@ -25,6 +25,16 @@ async function authenticateAdmin(page: Page) {
   });
 }
 
+async function selectHeroTitleInput(page: Page) {
+  const inspector = page.getByRole("region", { name: "属性面板" });
+  const input = inspector.getByRole("textbox", {
+    name: "主标题",
+    exact: true,
+  });
+  await expect(input).toBeVisible();
+  return input;
+}
+
 const heroBlock = {
   type: "首屏主视觉",
   props: {
@@ -245,7 +255,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     );
   });
 
-  test("线上内容与草稿一致时返回编辑不再重复读取后台文档", async ({
+  test("线上内容与草稿一致时默认直接进入编辑模式", async ({
     page,
   }) => {
     const sharedPuckData = {
@@ -278,32 +288,24 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
         puckData: sharedPuckData,
         metadata: { seoTitle: "共同页面资料" },
       },
-      // 旧实现点击“返回编辑”会发出第二次 GET；让它失败以证明该读取不应存在。
+      // 保留第二次读取失败陷阱，证明进入编辑态不依赖额外请求。
       adminFailureOnRequest: 2,
     });
 
     await page.goto("/admin/editor/home");
     await expect(
       page.getByText("线上版本仅供查看", { exact: true }),
-    ).toHaveCount(2);
+    ).toHaveCount(0);
     await expect(
       page.frameLocator("iframe").getByText("线上编辑基线标题", { exact: true }),
     ).toBeVisible();
-
-    await page.getByRole("button", { name: "返回编辑" }).click();
-
-    await expect(
-      page.getByText("线上版本仅供查看", { exact: true }),
-    ).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: "保存当前装修草稿" }),
     ).toBeVisible();
     await expect(
       page.frameLocator("iframe").getByText("线上编辑基线标题", { exact: true }),
     ).toBeVisible();
-    const heroTitleInput = page.locator(
-      '.homepage-editor__inspector input[placeholder="如 珠宝作品"]',
-    );
+    const heroTitleInput = await selectHeroTitleInput(page);
     await expect(heroTitleInput).toHaveValue("线上编辑基线标题");
     await heroTitleInput.fill("从线上基线开始的新草稿标题");
     await expect(
@@ -315,6 +317,48 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
       }),
     ).toHaveCount(0);
     expect(adminReads).toBe(1);
+  });
+
+  test("连续编辑文字后立即预览并退出，保存仍使用完整最新画布", async ({
+    page,
+  }) => {
+    const savePayloads: any[] = [];
+    page.on("request", (request) => {
+      if (
+        request.method() === "PUT" &&
+        new URL(request.url()).pathname.endsWith("/page-modules/document")
+      ) {
+        savePayloads.push(request.postDataJSON());
+      }
+    });
+
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+
+    const inspector = page.getByRole("region", { name: "属性面板" });
+    const titleInput = await selectHeroTitleInput(page);
+    const subtitleInput = inspector.getByRole("textbox", {
+      name: "副标题",
+      exact: true,
+    });
+    await titleInput.fill("立即预览也不能丢失的主标题");
+    await subtitleInput.fill("连续输入后保存的完整副标题");
+
+    await page.getByRole("button", { name: "预览当前画布" }).click();
+    await expect(page.getByText("当前画布预览 · 1920 × 1200")).toBeVisible();
+    await expect(
+      page
+        .frameLocator(".homepage-editor__canvas-scale iframe")
+        .getByText("立即预览也不能丢失的主标题", { exact: true }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "退出当前画布预览" }).click();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect.poll(() => savePayloads.length).toBe(1);
+    expect(savePayloads[0]?.puckData?.content?.[0]?.props).toMatchObject({
+      title: "立即预览也不能丢失的主标题",
+      subtitle: "连续输入后保存的完整副标题",
+    });
   });
 
   test("查看线上版本为只读比较，返回后保留未保存画布", async ({ page }) => {
@@ -346,9 +390,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
     const status = page.locator(".homepage-editor__draft-status");
     await expect(status).toContainText("草稿有未发布修改", { timeout: 10000 });
-    const heroTitleInput = page.locator(
-      '.homepage-editor__inspector input[placeholder="如 珠宝作品"]',
-    );
+    const heroTitleInput = await selectHeroTitleInput(page);
     await expect(heroTitleInput).toHaveValue("草稿标题");
     await heroTitleInput.fill("返回后仍需保留的未保存标题");
     await expect(status).toContainText("有未保存修改");
@@ -366,7 +408,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
       page.frameLocator("iframe").getByText("当前线上标题", { exact: true }),
     ).toBeVisible();
     await expect(heroTitleInput).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "删除当前模块" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "删除当前模块" })).toHaveCount(0);
     await page
       .locator(".homepage-editor__layer-item")
       .filter({ hasText: "首屏" })
@@ -402,9 +444,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
   test("移动窄屏查看线上版本后仍可恢复未保存画布", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/admin/editor/home");
-    const heroTitleInput = page.locator(
-      '.homepage-editor__inspector input[placeholder="如 珠宝作品"]',
-    );
+    const heroTitleInput = await selectHeroTitleInput(page);
     await expect(heroTitleInput).toHaveValue("草稿标题");
     await heroTitleInput.fill("移动端未保存标题");
 
@@ -439,9 +479,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
       }
     });
     await page.goto("/admin/editor/home");
-    const heroTitleInput = page.locator(
-      '.homepage-editor__inspector input[placeholder="如 珠宝作品"]',
-    );
+    const heroTitleInput = await selectHeroTitleInput(page);
     await heroTitleInput.fill("离开前必须保存的草稿标题");
 
     await page.getByRole("button", { name: "更多编辑操作" }).click();
@@ -460,7 +498,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
       .getByRole("button", { name: "首页" })
       .first()
       .click();
-    const guard = page.getByRole("dialog", { name: "有未保存的修改" });
+    const guard = page.getByRole("dialog", { name: "保存后离开？" });
     await expect(guard).toBeVisible();
     await expect(page).toHaveURL(/\/admin\/editor\/home/);
     await guard.getByRole("button", { name: "保存并离开" }).click();
@@ -476,9 +514,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await page.unroute(`${API_PREFIX}*`);
     await mockEditorApis(page, { saveDelayMs: 800 });
     await page.goto("/admin/editor/home");
-    const heroTitleInput = page.locator(
-      '.homepage-editor__inspector input[placeholder="如 珠宝作品"]',
-    );
+    const heroTitleInput = await selectHeroTitleInput(page);
     await heroTitleInput.fill("保存完成后再比较的标题");
     const saveResponse = page.waitForResponse(
       (response) =>
@@ -575,9 +611,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
       restoreFailureCount: 1,
     });
     await page.goto("/admin/editor/home");
-    const heroTitleInput = page.locator(
-      '.homepage-editor__inspector input[placeholder="如 珠宝作品"]',
-    );
+    const heroTitleInput = await selectHeroTitleInput(page);
     await expect(heroTitleInput).toHaveValue("草稿标题");
 
     await page.getByRole("button", { name: "更多编辑操作" }).click();
@@ -647,9 +681,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
       beforeSaveResponse: () => saveResponseGate,
     });
     await page.goto("/admin/editor/home");
-    const heroTitleInput = page.locator(
-      '.homepage-editor__inspector input[placeholder="如 珠宝作品"]',
-    );
+    const heroTitleInput = await selectHeroTitleInput(page);
     await heroTitleInput.fill("保存队列中的新标题");
 
     const saveResponse = page.waitForResponse(
@@ -756,8 +788,6 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
     await expect(publishButton).toBeEnabled({ timeout: 10000 });
     await publishButton.click();
-    const publishDialog = page.getByRole("dialog", { name: "确认发布首页？" });
-    await publishDialog.getByRole("button", { name: "确认发布" }).click();
     await expect(page.getByText("店铺首页已发布")).toBeVisible();
 
     const status = page.locator(".homepage-editor__draft-status");
@@ -865,19 +895,16 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     });
 
     await page.goto("/admin/editor/home");
-    const heroTitleInput = page.locator(
-      '.homepage-editor__inspector input[placeholder="如 珠宝作品"]',
-    );
+    let heroTitleInput = await selectHeroTitleInput(page);
     await expect(heroTitleInput).toHaveValue("草稿标题");
 
     await page.locator(".homepage-editor__toolbar-publish").click();
-    const publishDialog = page.getByRole("dialog", { name: "确认发布首页？" });
-    await publishDialog.getByRole("button", { name: "确认发布" }).click();
     await expect(page.getByText("店铺首页已发布")).toBeVisible();
     await page
       .locator(".homepage-editor__layer-item")
       .filter({ hasText: "首屏" })
       .click();
+    heroTitleInput = await selectHeroTitleInput(page);
     await expect(heroTitleInput).toHaveValue("服务端规范后的标题");
 
     const saveAfterPublish = page.waitForResponse(
@@ -918,14 +945,10 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     });
 
     await page.goto("/admin/editor/home");
-    const heroTitleInput = page.locator(
-      '.homepage-editor__inspector input[placeholder="如 珠宝作品"]',
-    );
+    const heroTitleInput = await selectHeroTitleInput(page);
     await expect(heroTitleInput).toHaveValue("草稿标题");
 
     await page.locator(".homepage-editor__toolbar-publish").click();
-    const publishDialog = page.getByRole("dialog", { name: "确认发布首页？" });
-    await publishDialog.getByRole("button", { name: "确认发布" }).click();
     await heroTitleInput.fill("发布等待期间的新修改");
 
     await expect(
@@ -947,17 +970,13 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await mockEditorApis(page, { publishFailure: true });
 
     await page.goto("/admin/editor/home");
-    const heroTitleInput = page.locator(
-      '.homepage-editor__inspector input[placeholder="如 珠宝作品"]',
-    );
+    let heroTitleInput = await selectHeroTitleInput(page);
     await expect(heroTitleInput).toHaveValue("草稿标题");
     await heroTitleInput.fill("发布失败后保留的草稿标题");
 
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
     await expect(publishButton).toBeEnabled({ timeout: 10000 });
     await publishButton.click();
-    const publishDialog = page.getByRole("dialog", { name: "确认发布首页？" });
-    await publishDialog.getByRole("button", { name: "确认发布" }).click();
 
     await expect(page.getByText("发布失败，请稍后重试", { exact: true })).toHaveCount(1);
     await expect(
@@ -974,6 +993,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await expect(publishButton).toBeEnabled();
 
     await page.reload();
+    heroTitleInput = await selectHeroTitleInput(page);
     await expect(heroTitleInput).toHaveValue("发布失败后保留的草稿标题");
     await expect(
       page.locator('.homepage-editor__draft-status[data-mode="pending"]'),
@@ -990,6 +1010,12 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     });
     const writes: Array<Record<string, unknown>> = [];
     const validations: string[] = [];
+    const routerWarnings: string[] = [];
+    page.on("console", (entry) => {
+      if (entry.type() === "warning" && entry.text().includes("blocker on a POP navigation")) {
+        routerWarnings.push(entry.text());
+      }
+    });
 
     await page.route(`${API_PREFIX}*`, async (route) => {
       const request = route.request();
@@ -1048,8 +1074,13 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     validations.length = 0;
 
     await page.evaluate(() => {
-      window.history.pushState({}, "", "/admin/editor/custom");
-      window.dispatchEvent(new PopStateEvent("popstate"));
+      window.postMessage(
+        {
+          type: "homepage-editor:page-navigation",
+          path: "/custom",
+        },
+        window.location.origin,
+      );
     });
     await expect(page).toHaveURL(/\/admin\/editor\/custom$/);
     await expect(page.locator(".homepage-editor__toolbar")).toHaveCount(0);
@@ -1060,5 +1091,6 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     releaseCustom();
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
     expect(writes).toEqual([]);
+    expect(routerWarnings).toEqual([]);
   });
 });

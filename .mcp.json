@@ -3,12 +3,12 @@
     "playwright": {
       "type": "stdio",
       "command": "cmd",
-      "args": ["/c", "npx", "-y", "@playwright/mcp@latest"]
+      "args": ["/c", "npx", "-y", "@playwright/mcp@0.0.79"]
     },
     "context7": {
       "type": "stdio",
       "command": "cmd",
-      "args": ["/c", "npx", "-y", "@upstash/context7-mcp"]
+      "args": ["/c", "npx", "-y", "@upstash/context7-mcp@4.0.4"]
     }
   }
 }

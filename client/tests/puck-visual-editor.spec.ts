@@ -116,9 +116,12 @@ test("缩放后的真实 Puck iframe 可同时选中模块和视觉槽位并写�
   await expect(page.getByTestId("selected-visual-state"))
     .toHaveText("puck-hero-visual-test:title:adjust-layout");
 
-  const titleBox = await title.boundingBox();
-  if (!titleBox) throw new Error("Puck iframe 标题槽位没有布局尺寸");
-  await title.hover();
+  const titleDragSurface = canvas.locator(
+    '[data-hc-selection-box][data-node-id="title"]',
+  );
+  const titleBox = await titleDragSurface.boundingBox();
+  if (!titleBox) throw new Error("Puck iframe 标题拖动层没有布局尺寸");
+  await titleDragSurface.hover();
   await page.mouse.down();
   await page.mouse.move(titleBox.x + titleBox.width / 2 + 50, titleBox.y + titleBox.height / 2 - 20, { steps: 5 });
   await expect(canvas.locator("[data-dnd-dragging]")).toHaveCount(0);

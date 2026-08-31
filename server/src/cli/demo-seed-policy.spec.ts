@@ -34,12 +34,20 @@ test("Demo Seed 默认关闭，缺少显式开关时拒绝", () => {
   );
 });
 
-test("Demo Seed 拒绝弱密码并接受显式本地配置", () => {
+test("Demo Seed 管理员密码与统一 6-18 位合同一致", () => {
   assertPolicyError(
     {
       NODE_ENV: "development",
       ALLOW_DEMO_SEED: "true",
-      DEMO_ADMIN_PASSWORD: "password",
+      DEMO_ADMIN_PASSWORD: "12345",
+    },
+    "demo-seed-password-invalid",
+  );
+  assertPolicyError(
+    {
+      NODE_ENV: "development",
+      ALLOW_DEMO_SEED: "true",
+      DEMO_ADMIN_PASSWORD: "1234567890123456789",
     },
     "demo-seed-password-invalid",
   );
@@ -48,8 +56,8 @@ test("Demo Seed 拒绝弱密码并接受显式本地配置", () => {
     resolveDemoSeedConfig({
       NODE_ENV: "development",
       ALLOW_DEMO_SEED: "true",
-      DEMO_ADMIN_PASSWORD: "DemoPass123",
+      DEMO_ADMIN_PASSWORD: "123456",
     }),
-    { adminPassword: "DemoPass123" },
+    { adminPassword: "123456" },
   );
 });

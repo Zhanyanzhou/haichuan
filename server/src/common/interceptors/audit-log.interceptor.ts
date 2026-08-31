@@ -8,11 +8,14 @@ type AuditRequest = {
   originalUrl?: string;
   path?: string;
   params?: Record<string, string>;
+  query?: Record<string, unknown>;
+  body?: Record<string, unknown>;
   ip?: string;
   user?: { id?: number };
 };
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const SAFE_PAGE_KEY = /^[a-z][a-z0-9-]{0,49}$/;
 
 @Injectable()
 export class AuditLogInterceptor implements NestInterceptor {
@@ -40,10 +43,14 @@ export class AuditLogInterceptor implements NestInterceptor {
     const module = (segments[0] === 'api' ? segments[1] : segments[0]) || 'system';
     const idCandidate = request.params?.id;
     const targetId = idCandidate && /^\d+$/.test(idCandidate) ? Number(idCandidate) : undefined;
+    const pageDocumentTarget = module === 'page-modules' && pathname.includes('/document')
+      ? this.pageDocumentTarget(request)
+      : undefined;
     const detail = JSON.stringify({
       schemaVersion: 1,
       method: request.method,
       path: pathname,
+      ...(pageDocumentTarget ? { target: pageDocumentTarget } : {}),
     }).slice(0, 4000);
 
     try {
@@ -61,6 +68,14 @@ export class AuditLogInterceptor implements NestInterceptor {
       // 审计失败不能反向破坏已成功提交的业务事务，但必须留下服务端告警。
       this.logger.error(`审计日志写入失败: ${pathname}`, error instanceof Error ? error.stack : undefined);
     }
+  }
+
+  private pageDocumentTarget(request: AuditRequest): { pageKey: string; version?: number } | undefined {
+    const candidate = request.query?.pageKey ?? request.body?.pageKey;
+    if (typeof candidate !== 'string' || !SAFE_PAGE_KEY.test(candidate)) return undefined;
+    const rawVersion = request.params?.version;
+    const version = rawVersion && /^\d+$/.test(rawVersion) ? Number(rawVersion) : undefined;
+    return { pageKey: candidate, ...(version ? { version } : {}) };
   }
 
   private actionFor(method: string): string {

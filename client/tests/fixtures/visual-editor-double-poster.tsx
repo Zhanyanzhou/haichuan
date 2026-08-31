@@ -46,6 +46,9 @@ function VisualEditorDoublePosterFixture() {
   }, []);
 
   const update = (patch: Record<string, any>) => setProps((current) => ({ ...current, ...patch }));
+  const updateFromCurrent = (
+    factory: (current: Record<string, any>) => Record<string, any>,
+  ) => setProps((current) => ({ ...current, ...factory(current) }));
   const updateHistoryTransaction = (
     patchOrFactory: Record<string, any> | ((current: Record<string, any>) => Record<string, any>),
   ) => setProps((current) => ({
@@ -78,7 +81,7 @@ function VisualEditorDoublePosterFixture() {
           <InstanceOverridesPanel
             moduleType={moduleType}
             props={props}
-            update={update}
+            updateFromCurrent={updateFromCurrent}
             updateHistoryTransaction={updateHistoryTransaction}
             historyTransactionPending={false}
             scopes={currentSelection ? ["slots"] : ["layout"]}

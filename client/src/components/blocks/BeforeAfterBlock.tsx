@@ -1,7 +1,15 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { Link } from "react-router-dom";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
-import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
+import {
+  getContractFrameAspectRatio,
+  resolveContractAspectRatio,
+} from "@/page-builder/config/blockContracts";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
@@ -19,7 +27,8 @@ const GOLD = "#6E7477";
 
 /**
  * 改款前后对比 — Editorial Story 母版(改款叙事变体)
- * 拖动分割线对比改款前/后两张同比例图(默认 4:5,可选项);PC 与手机均为滑动交互,
+ * 拖动分割线对比改款前/后两张同比例图;默认采用模板画框比例,实例可选裁切比例;
+ * PC 与手机均为滑动交互,
  * 两图各自独立焦点;编辑态同样可拖,不影响数据。
  */
 export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockProps) {
@@ -39,10 +48,17 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
     productId,
   } = content;
   const bgColor = styleConfig.bgColor || "#FFFFFF";
-  const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, linkUrl });
-  // 对比图比例选项(契约派生):前后两图共用同一比例
-  const trackRatioDesktop = resolveContractAspectRatio("comparison", "before", content.aspectRatio, "desktop");
-  const trackRatioMobile = resolveContractAspectRatio("comparison", "before", content.aspectRatio, "mobile");
+  const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, categorySlug: content.categorySlug, linkUrl });
+  // 合成画框默认跟随模板几何；只有实例显式选择合法比例时才用素材比例覆盖。
+  const requestedAspectRatio = typeof content.aspectRatio === "string" && content.aspectRatio.trim()
+    ? content.aspectRatio
+    : undefined;
+  const trackRatioDesktop = requestedAspectRatio
+    ? resolveContractAspectRatio("comparison", "before", requestedAspectRatio, "desktop")
+    : String(getContractFrameAspectRatio("comparison", "desktop"));
+  const trackRatioMobile = requestedAspectRatio
+    ? resolveContractAspectRatio("comparison", "before", requestedAspectRatio, "mobile")
+    : String(getContractFrameAspectRatio("comparison", "mobile"));
   const beforeFocusX = Math.min(100, Math.max(0, Number(styleConfig.beforeFocusX ?? 50)));
   const beforeFocusY = Math.min(100, Math.max(0, Number(styleConfig.beforeFocusY ?? 50)));
   const afterFocusX = Math.min(100, Math.max(0, Number(styleConfig.afterFocusX ?? 50)));
@@ -67,6 +83,22 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
     if (dragging) updateFromPointer(e.clientX);
   };
   const onUp = () => setDragging(false);
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 10 : 1;
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      event.preventDefault();
+      setPosition((value) => Math.max(0, value - step));
+    } else if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setPosition((value) => Math.min(100, value + step));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setPosition(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setPosition(100);
+    }
+  };
 
   if (!beforeImage && !afterImage) {
     if (!editMode) return null;
@@ -96,6 +128,10 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
           touch-action: none;
           cursor: ${dragging ? "grabbing" : "ew-resize"};
         }
+        .hc-before-after__track:focus-visible {
+          outline: 3px solid #181A1B;
+          outline-offset: 3px;
+        }
         .hc-before-after__img {
           position: absolute;
           inset: 0;
@@ -119,8 +155,8 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
           position: absolute;
           top: 50%;
           left: 50%;
-          width: 40px;
-          height: 40px;
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
           border: 2px solid #FFFFFF;
           background: rgba(24,26,27,.92);
@@ -176,9 +212,19 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
         ref={trackRef}
         className="hc-before-after__track"
         data-editor-field="beforeImage afterImage"
+        role="slider"
+        tabIndex={0}
+        aria-label="改款前后对比分割线"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(position)}
+        aria-valuetext={`改款前显示 ${Math.round(position)}%`}
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
+        onPointerCancel={onUp}
+        onLostPointerCapture={onUp}
+        onKeyDown={onKeyDown}
       >
         {beforeImage ? (
           <img

@@ -1,8 +1,10 @@
+import { useId } from "react";
+
 /**
  * NumberField.tsx — 数值控件(百分比坐标/数值参数)。
  * min/max/step 交给 input 原生校验;值以 number 写回 props。
  */
-interface NumberFieldProps {
+export interface NumberFieldProps {
   label: string;
   hint?: string;
   unit?: string;
@@ -11,6 +13,8 @@ interface NumberFieldProps {
   step?: number;
   value: number | string | undefined;
   onChange: (next: number) => void;
+  onClear?: () => void;
+  disabled?: boolean;
 }
 
 export default function NumberField({
@@ -22,11 +26,18 @@ export default function NumberField({
   step,
   value,
   onChange,
+  onClear,
+  disabled,
 }: NumberFieldProps) {
+  const inputId = useId();
   const numeric = Number(value);
   return (
-    <div className="homepage-editor__inspector-field">
-      <label>
+    <div
+      className="homepage-editor__inspector-field"
+      data-workspace-field-control="number"
+      data-workspace-field-shared="true"
+    >
+      <label htmlFor={inputId}>
         {label}
         {hint ? (
           <span className="homepage-editor__inspector-hint">{hint}</span>
@@ -34,12 +45,18 @@ export default function NumberField({
       </label>
       <div className="homepage-editor__number-input">
         <input
+          id={inputId}
           type="number"
-          value={Number.isFinite(numeric) ? numeric : ""}
+          value={value !== undefined && value !== "" && Number.isFinite(numeric) ? numeric : ""}
           min={min}
           max={max}
           step={step ?? 1}
+          disabled={disabled}
           onChange={(event) => {
+            if (event.target.value === "") {
+              onClear?.();
+              return;
+            }
             const next = Number(event.target.value);
             if (Number.isFinite(next)) onChange(next);
           }}

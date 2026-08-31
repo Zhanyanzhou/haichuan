@@ -36,16 +36,16 @@ export default function VisualEditorToolbar({
   const setMode = useVisualEditorSession((state) => state.setMode);
   const current = selection?.blockId === blockId ? selection : null;
   const capabilities = getContentTemplateContract(moduleType)?.editorCapabilities.layoutOverrides;
-  const canAdjustMedia = Boolean(
+  const canAdjustMedia = Boolean(current?.canAdjustMedia || (
     (current?.kind === "media" || current?.kind === "product") &&
-      capabilities?.slots?.some((slot) => slot.roleId === current.nodeId),
-  );
-  const canAdjustLayout = Boolean(
+      capabilities?.slots?.some((slot) => slot.roleId === current.nodeId)
+  ));
+  const canAdjustLayout = Boolean(current?.canAdjustLayout || (
     current && (
       capabilities?.slots?.some((slot) => slot.roleId === current.nodeId) ||
       capabilities?.textRoles?.some((role) => role.roleId === current.nodeId)
-    ),
-  );
+    )
+  ));
 
   const hasModeAction = Boolean(
     current && (

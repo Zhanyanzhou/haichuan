@@ -2,7 +2,7 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 import { ProductMediaService } from "./product-media.service";
 
-test("媒体可读性与实际读取共享同一安全路径规则", () => {
+test("媒体可读性与实际读取共享同一安全路径规则", async () => {
   const originalRoot = process.env.PRODUCT_MEDIA_ROOT;
   process.env.PRODUCT_MEDIA_ROOT = process.cwd();
   try {
@@ -10,7 +10,7 @@ test("媒体可读性与实际读取共享同一安全路径规则", () => {
     const readable = { storageKey: "package.json" };
 
     assert.equal(service.isProductMediaReadable(readable), true);
-    assert.ok(service.readProductImage(readable).buffer.length > 0);
+    assert.ok((await service.readProductImage(readable)).buffer.length > 0);
     assert.equal(
       service.isProductMediaReadable({ storageKey: "missing-media.jpg" }),
       false,

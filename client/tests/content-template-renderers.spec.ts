@@ -3,6 +3,7 @@ import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
   CONTENT_TEMPLATE_CONTRACTS,
+  CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX,
   CONTENT_TEMPLATE_REGISTRY,
   createContentTemplateMarker,
   getContentTemplateIssues,
@@ -13,7 +14,9 @@ import {
 type FixtureBlock = { type: string; props: Record<string, unknown> };
 
 const image = (name: string) => `/svg/template-${name}.svg`;
-const screenshotDir = path.resolve("test-results/content-template-renderers");
+const screenshotDir = path.resolve(
+  "../artifacts/design-audit/template-v2-acceptance-2026-08-29/screenshots",
+);
 const fixtureSvg = `
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000">
     <rect width="1600" height="1000" fill="#ECEBE7"/>
@@ -84,6 +87,57 @@ const createBlocks = (): FixtureBlock[] => CONTENT_TEMPLATE_REGISTRY.map((entry,
     ...(mediaByType[entry.moduleType] ?? {}),
     id: `contract-renderer-${index + 1}`,
     __contentTemplate: createContentTemplateMarker(entry.moduleType),
+  },
+}));
+const emptyFixtureValue = (value: unknown): unknown => {
+  if (typeof value === "string") return "";
+  if (typeof value === "number") return 0;
+  if (typeof value === "boolean") return false;
+  if (Array.isArray(value)) return [];
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [key, emptyFixtureValue(nested)]),
+    );
+  }
+  return value;
+};
+const createEmptyBlocks = (): FixtureBlock[] => createBlocks().map((block, index) => ({
+  type: block.type,
+  props: {
+    ...Object.fromEntries(
+      Object.entries(block.props)
+        .filter(([key]) => key !== "id" && key !== "__contentTemplate")
+        .map(([key, value]) => [key, emptyFixtureValue(value)]),
+    ),
+    id: `empty-contract-renderer-${index + 1}`,
+    __contentTemplate: block.props.__contentTemplate,
+  },
+}));
+const STRESS_TEXT_KEYS = new Set([
+  "title", "subtitle", "body", "description", "desc", "content", "name", "label", "caption",
+  "beforeLabel", "afterLabel", "actionText", "buttonText", "primaryText", "secondaryText",
+  "storeName", "address",
+]);
+const stressFixtureValue = (value: unknown, key = ""): unknown => {
+  if (typeof value === "string") {
+    if (/^\/(?:svg|media)\//.test(value)) return "/media/contract-missing-asset";
+    if (STRESS_TEXT_KEYS.has(key)) return `异常内容${"仍需稳定换行".repeat(18)}`;
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((item) => stressFixtureValue(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([nestedKey, nested]) => [nestedKey, stressFixtureValue(nested, nestedKey)]),
+    );
+  }
+  return value;
+};
+const createStressBlocks = (): FixtureBlock[] => createBlocks().map((block, index) => ({
+  type: block.type,
+  props: {
+    ...stressFixtureValue(block.props) as Record<string, unknown>,
+    id: `stress-contract-renderer-${index + 1}`,
+    __contentTemplate: block.props.__contentTemplate,
   },
 }));
 const templateCount = CONTENT_TEMPLATE_REGISTRY.length;
@@ -234,6 +288,108 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
   test.beforeEach(async ({ page }) => {
     await seed(page);
     await page.emulateMedia({ reducedMotion: "reduce" });
+  });
+
+  test("全部 24 模板在全空素材与空业务来源下保持双端安全输出", async ({ page }) => {
+    const runtimeErrors: string[] = [];
+    page.on("pageerror", (error) => runtimeErrors.push(error.message));
+    await page.unroute(/\/__content-template-renderers(?:\?.*)?$/);
+    await page.route(/\/__content-template-renderers(?:\?.*)?$/, (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: rendererFixturePage(createEmptyBlocks()),
+    }));
+    await page.unroute("**/api/settings/public**");
+    await page.route("**/api/settings/public**", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ code: 200, data: {} }),
+    }));
+    await page.unroute("**/api/products/public/**");
+    await page.route("**/api/products/public/**", (route) => route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ code: 404, data: null }),
+    }));
+    await page.unroute("**/api/products/public?*");
+    await page.route("**/api/products/public?*", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ code: 200, data: { list: [], total: 0 } }),
+    }));
+    await page.unroute("**/api/categories/tree**");
+    await page.route("**/api/categories/tree**", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ code: 200, data: [] }),
+    }));
+
+    for (const viewport of [
+      { width: 1920, height: 1200 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/__content-template-renderers");
+      await expect(page.locator('[data-content-template-renderer="real"]')).toHaveCount(templateCount);
+      expect(await horizontalOverflowNodes(page), `${viewport.width}px 全空页面不得横向溢出`).toEqual([]);
+      expect(await page.locator('img[src=""], img:not([src])').count(), "全空素材不得生成空图片请求").toBe(0);
+      expect(
+        await page.locator("a").evaluateAll((links) => links
+          .filter((link) => !(link.getAttribute("href") ?? "").trim())
+          .map((link) => link.outerHTML)),
+        "全空行动不得生成空链接",
+      ).toEqual([]);
+      expect(
+        await page.locator("body").innerText(),
+        "公开端不得泄漏编辑器上传或填写提示",
+      ).not.toMatch(/点击上传|拖入图片|请在右侧|待上传|待补充/);
+      for (const entry of CONTENT_TEMPLATE_REGISTRY) {
+        const renderer = page.locator(`[data-content-template-contract="${entry.key}"]`).first();
+        await expect(renderer, `${entry.moduleType} 全空状态仍应保留可识别合同边界`).toBeAttached();
+        expect(
+          await renderer.evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
+          `${entry.moduleType} 全空状态不得横向溢出`,
+        ).toBe(true);
+        expect(await renderer.innerText()).not.toMatch(/\bundefined\b|\bnull\b|\bNaN\b/);
+      }
+    }
+    expect(runtimeErrors).toEqual([]);
+  });
+
+  test("全部 24 模板在坏媒体与超长内容下保持四档稳定边界", async ({ page }) => {
+    const runtimeErrors: string[] = [];
+    page.on("pageerror", (error) => runtimeErrors.push(error.message));
+    await page.unroute(/\/__content-template-renderers(?:\?.*)?$/);
+    await page.route(/\/__content-template-renderers(?:\?.*)?$/, (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: rendererFixturePage(createStressBlocks()),
+    }));
+    await page.route("**/media/contract-missing-asset", (route) => route.fulfill({
+      status: 404,
+      contentType: "text/plain; charset=utf-8",
+      body: "missing",
+    }));
+
+    for (const viewport of [
+      { width: 1920, height: 1200 },
+      { width: 1200, height: 900 },
+      { width: 768, height: 1024 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/__content-template-renderers");
+      await expect(page.locator('[data-content-template-renderer="real"]')).toHaveCount(templateCount);
+      await expect.poll(() => horizontalOverflowNodes(page), {
+        message: `${viewport.width}px 坏媒体与超长内容不得造成页面横向溢出`,
+      }).toEqual([]);
+      for (const entry of CONTENT_TEMPLATE_REGISTRY) {
+        const renderer = page.locator(`[data-content-template-contract="${entry.key}"]`).first();
+        await expect(renderer, `${entry.moduleType} 异常内容下仍应保留合同边界`).toBeAttached();
+        expect(await renderer.innerText()).not.toMatch(/\bundefined\b|\bnull\b|\bNaN\b/);
+      }
+    }
+    expect(runtimeErrors).toEqual([]);
   });
 
   test("原始发布门禁拒绝未知设备，公开净化器保留双端并剔除未知设备", () => {
@@ -412,6 +568,9 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
           // 没有独立比例预设的媒体槽（例如 Booking 的全幅背景）跟随根框架与内容安全高度，
           // 合同中的图片规格比例只用于素材建议，不应误判为真实 DOM 必须始终固定该比例。
           if (slotCapability && (!slotCapability.ratioPresets || slotCapability.ratioPresets.length === 0)) continue;
+          // 前后对比的两张素材以 cover 方式叠满同一个合成画框，素材比例约束用于上传与实例裁切，
+          // 真实 img DOM 必须跟随合成画框，不能分别强制成 4:5。
+          if (contract.key === "comparison" && (role.id === "before" || role.id === "after")) continue;
           const expectedRatio = role.defaultRatioByViewport?.[viewportName];
           if (!expectedRatio) continue;
           const media = renderer.locator(roleSelector(role.id, viewportName)).first();
@@ -429,6 +588,21 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
     });
   }
 
+  test("768px 视口不会因非覆盖式滚动条压缩内容宽度而切换为手机顺序", async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.goto("/__content-template-renderers");
+    const renderer = page.locator('[data-content-template-contract="doublePoster"]').first();
+    await renderer.evaluate((node) => {
+      (node as HTMLElement).style.width = "753px";
+    });
+
+    const contract = CONTENT_TEMPLATE_CONTRACTS.doublePoster;
+    await expect.poll(async () => {
+      const observedRoles = await renderedRoleOrder(renderer, "desktop");
+      return observedRoles.join(",");
+    }).toBe(contract.order.desktop.join(","));
+  });
+
   test("重点合同：视频、商品列数、热点、顾客分享与预约", async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1200 });
     await page.goto("/__content-template-renderers");
@@ -442,10 +616,31 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
     await expect(page.locator('[data-content-template-contract="singlePoster"] img:visible').first()).toHaveAttribute("alt", "单图海报替代文字哨兵");
     await expect(page.locator('[data-content-template-contract="doublePoster"] [data-content-role="mainImage"] img').first()).toHaveAttribute("alt", "双图海报主图替代文字哨兵");
     await expect(page.locator('[data-content-template-contract="doublePoster"] [data-content-role="detailImage"] img').first()).toHaveAttribute("alt", "双图海报细节图替代文字哨兵");
-    await expect(page.locator('[data-content-template-contract="comparison"]').getByRole("img", { name: "改款前替代文字哨兵" })).toBeVisible();
-    await expect(page.locator('[data-content-template-contract="comparison"]').getByRole("img", { name: "改款后替代文字哨兵" })).toBeVisible();
+    const comparison = page.locator('[data-content-template-contract="comparison"]');
+    await expect(comparison.getByRole("img", { name: "改款前替代文字哨兵" })).toBeVisible();
+    await expect(comparison.getByRole("img", { name: "改款后替代文字哨兵" })).toBeVisible();
+    const comparisonTrack = page.locator('[data-content-template-contract="comparison"] .hc-before-after__track');
+    const desktopComparisonBox = await comparisonTrack.boundingBox();
+    expect(
+      (desktopComparisonBox?.width ?? 0) / (desktopComparisonBox?.height ?? 1),
+      "改款对比桌面画框应使用模板合同 8:5，而不是单张素材 4:5",
+    ).toBeCloseTo(1.6, 1);
+    await comparisonTrack.focus();
+    await comparisonTrack.press("ArrowRight");
+    await expect(comparisonTrack).toHaveAttribute("aria-valuenow", "51");
+    await comparisonTrack.press("Shift+ArrowLeft");
+    await expect(comparisonTrack).toHaveAttribute("aria-valuenow", "41");
     await expect(page.locator('[data-content-template-contract="booking"]').getByRole("img", { name: "预约背景替代文字哨兵" })).toBeVisible();
-    await expect(page.locator('[data-content-template-contract="carousel"]').getByRole("img", { name: "轮播测试图 1" })).toBeVisible();
+    const carousel = page.locator('[data-content-template-contract="carousel"] .homepage-carousel');
+    await expect(carousel.getByRole("img", { name: "轮播测试图 1" })).toBeVisible();
+    await carousel.focus();
+    await carousel.press("ArrowRight");
+    await expect(carousel.getByRole("img", { name: "轮播测试图 2" })).toBeVisible();
+    const pauseCarousel = carousel.getByRole("button", { name: "暂停自动轮播" });
+    await pauseCarousel.click();
+    await expect(carousel.getByRole("button", { name: "继续自动轮播" })).toHaveAttribute("aria-pressed", "true");
+    await carousel.getByRole("button", { name: "切换到第 3 张轮播图" }).click();
+    await expect(carousel.getByRole("img", { name: "轮播测试图 3" })).toBeVisible();
     await expect(page.locator('[data-content-template-contract="gallery"]').getByRole("img", { name: "画廊测试图 1" })).toBeVisible();
     await expect(page.locator('[data-content-template-contract="sceneShopping"]').getByRole("img", { name: "场景入口替代文字 1" })).toBeVisible();
     await expect(page.locator('[data-content-template-contract="journey"]').getByRole("img", { name: "步骤 1" })).toBeVisible();
@@ -478,6 +673,28 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/__content-template-renderers");
+    const mobileCarousel = page.locator('[data-content-template-contract="carousel"] .homepage-carousel');
+    const mobileCarouselBox = await mobileCarousel.boundingBox();
+    await mobileCarousel.dispatchEvent("pointerdown", {
+      pointerId: 9,
+      pointerType: "touch",
+      clientX: (mobileCarouselBox?.x ?? 0) + (mobileCarouselBox?.width ?? 0) * 0.8,
+      clientY: (mobileCarouselBox?.y ?? 0) + (mobileCarouselBox?.height ?? 0) * 0.5,
+    });
+    await mobileCarousel.dispatchEvent("pointerup", {
+      pointerId: 9,
+      pointerType: "touch",
+      clientX: (mobileCarouselBox?.x ?? 0) + (mobileCarouselBox?.width ?? 0) * 0.2,
+      clientY: (mobileCarouselBox?.y ?? 0) + (mobileCarouselBox?.height ?? 0) * 0.5,
+    });
+    await expect(mobileCarousel.getByRole("img", { name: "轮播测试图 2" })).toBeVisible();
+    const mobileComparisonBox = await page
+      .locator('[data-content-template-contract="comparison"] .hc-before-after__track')
+      .boundingBox();
+    expect(
+      (mobileComparisonBox?.width ?? 0) / (mobileComparisonBox?.height ?? 1),
+      "改款对比移动画框应使用模板合同 4:5",
+    ).toBeCloseTo(0.8, 1);
     const mobileVideo = page.locator('[data-content-template-contract="video"]');
     const mobileVideoMedia = mobileVideo.locator('.hc-video__media');
     const mobileVideoCopy = mobileVideo.locator('[data-content-role="copy"]');
@@ -739,89 +956,125 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
   });
 
   test("公开 Renderer 在全部合同对象的桌面和移动端消费位置与层级覆盖", async ({ page }) => {
-    const overriddenBlocks = createBlocks().filter((block) =>
-      ["首屏主视觉", "文字横幅", "预约入口"].includes(block.type),
-    );
-    const hero = overriddenBlocks.find((block) => block.type === "首屏主视觉")!;
-    const textBanner = overriddenBlocks.find((block) => block.type === "文字横幅")!;
-    const booking = overriddenBlocks.find((block) => block.type === "预约入口")!;
-    const legacyNode = {
-      rectByViewport: {
-        desktop: { x: 0.08, y: 0.56, width: 0.48, height: 0.18 },
-        mobile: { x: 0.06, y: 0.38, width: 0.88, height: 0.2 },
-      },
-      zIndexByViewport: { desktop: 3, mobile: 4 },
-    };
-    const heroLegacyNode = {
-      ...legacyNode,
-      typography: { safeBand: "dark" },
-    };
-    hero.props.__instanceOverrides = {
-      version: 2,
-      nodes: { title: heroLegacyNode, actionText: heroLegacyNode },
-    };
-    textBanner.props.__instanceOverrides = {
-      version: 2,
-      nodes: { copy: legacyNode },
-    };
-    booking.props.__instanceOverrides = {
-      version: 2,
-      nodes: { title: legacyNode, buttonText: legacyNode },
-    };
+    const overriddenBlocks = createBlocks();
+    for (const block of overriddenBlocks) {
+      const matrix = CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX.find(
+        (entry) => entry.moduleType === block.type,
+      );
+      expect(matrix, `${block.type} 缺少机器验收矩阵`).toBeTruthy();
+      block.props.__instanceOverrides = {
+        version: 2,
+        nodes: Object.fromEntries(matrix!.objects.map((object, objectIndex) => [
+          object.roleId,
+          {
+            rectByViewport: Object.fromEntries(
+              (["desktop", "mobile"] as const)
+                .filter((viewport) => object.viewports[viewport].applicable)
+                .map((viewport) => [viewport, object.viewports[viewport].defaultRect]),
+            ),
+            zIndexByViewport: Object.fromEntries(
+              (["desktop", "mobile"] as const)
+                .filter((viewport) => object.viewports[viewport].applicable)
+                .map((viewport) => [viewport, Math.min(20, objectIndex + 1)]),
+            ),
+          },
+        ])),
+      };
+    }
     await page.route(/\/__content-template-renderers(?:\?.*)?$/, (route) => route.fulfill({
       status: 200,
       contentType: "text/html; charset=utf-8",
       body: rendererFixturePage(overriddenBlocks),
     }));
 
-    const positions = async () => ({
-      heroTitle: await page.locator('[data-content-template-contract="hero"] [data-editor-field~="title"]').evaluate((node) => getComputedStyle(node).position),
-      heroAction: await page.locator('[data-content-template-contract="hero"] [data-editor-field~="actionText"]').evaluate((node) => getComputedStyle(node).position),
-      textCopy: await page.locator('[data-content-template-contract="textBanner"] [data-content-role="copy"]').evaluate((node) => getComputedStyle(node).position),
-      bookingTitle: await page.locator('[data-content-template-contract="booking"] [data-editor-field~="title"]').evaluate((node) => getComputedStyle(node).position),
-      bookingAction: await page.locator('[data-content-template-contract="booking"] [data-editor-field~="buttonText"]').evaluate((node) => getComputedStyle(node).position),
-    });
-
-    await page.setViewportSize({ width: 1024, height: 900 });
-    await page.goto("/__content-template-renderers");
-    const desktop = await positions();
-    expect(desktop.heroTitle).toBe("absolute");
-    expect(desktop.heroAction).toBe("absolute");
-    expect(desktop.textCopy).toBe("absolute");
-    expect(desktop.bookingTitle).toBe("absolute");
-    expect(desktop.bookingAction).toBe("absolute");
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    const mobile = await positions();
-    expect(mobile.heroTitle).toBe("absolute");
-    expect(mobile.heroAction).toBe("absolute");
-    expect(mobile.textCopy).toBe("absolute");
-    expect(mobile.bookingTitle).toBe("absolute");
-    expect(mobile.bookingAction).toBe("absolute");
+    for (const viewport of [
+      { name: "desktop" as const, width: 1024, height: 900 },
+      { name: "mobile" as const, width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.goto("/__content-template-renderers");
+      for (const matrix of CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX) {
+        const renderer = page.locator(`[data-content-template-contract="${matrix.templateKey}"]`).first();
+        await expect(renderer, `${matrix.templateKey} 公开 Renderer 未挂载`).toBeAttached();
+        for (const object of matrix.objects) {
+          if (!object.viewports[viewport.name].applicable) continue;
+          const selectors = [...new Set([object.roleId, ...object.nodeIds])]
+            .flatMap((nodeId) => [
+              `[data-content-role="${nodeId}"]`,
+              `[data-content-role-${viewport.name}="${nodeId}"]`,
+              `[data-editor-field~="${nodeId}"]`,
+            ])
+            .join(", ");
+          const node = renderer.locator(selectors).first();
+          await expect(node, `${matrix.templateKey}.${object.roleId}.${viewport.name} 缺少真实 DOM 落点`).toBeAttached();
+          await expect(node, `${matrix.templateKey}.${object.roleId}.${viewport.name} 未消费位置覆盖`).toHaveCSS("position", "absolute");
+          await expect(node, `${matrix.templateKey}.${object.roleId}.${viewport.name} 未消费层级覆盖`).toHaveCSS(
+            "z-index",
+            String(Math.min(20, matrix.objects.indexOf(object) + 1)),
+          );
+        }
+      }
+    }
   });
 
-  test("全部模板保留桌面、中间宽度与手机截图证据", async ({ page }) => {
+  test("分类与 HTTPS 外链行动目标在公开 Renderer 使用唯一去向", async ({ page }) => {
+    const blocks = createBlocks().filter((block) =>
+      ["文字横幅", "限时活动"].includes(block.type),
+    );
+    const categoryAction = blocks.find((block) => block.type === "文字横幅")!;
+    categoryAction.props.targetType = "category";
+    categoryAction.props.categorySlug = "daily-rings";
+    categoryAction.props.linkUrl = "";
+    const externalAction = blocks.find((block) => block.type === "限时活动")!;
+    externalAction.props.targetType = "external";
+    externalAction.props.linkUrl = "https://partner.example.com/jewelry-story";
+    externalAction.props.categorySlug = "";
+
+    await page.route(/\/__content-template-renderers(?:\?.*)?$/, (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: rendererFixturePage(blocks),
+    }));
+    await page.goto("/__content-template-renderers");
+    await expect(page.locator('[data-content-template-contract="textBanner"] a')).toHaveAttribute(
+      "href",
+      "/catalog?category=daily-rings",
+    );
+    await expect(page.locator('[data-content-template-contract="limitedEvent"] a')).toHaveAttribute(
+      "href",
+      "https://partner.example.com/jewelry-story",
+    );
+  });
+
+  test("全部模板保留 1920、1200、960、768 与 390 五档截图证据", async ({ page }) => {
+    await page.clock.setFixedTime(new Date("2026-08-29T12:00:00.000Z"));
+    const screenshotBlocks = createBlocks();
+    const carousel = screenshotBlocks.find((block) => block.type === "轮播图");
+    if (carousel) carousel.props.autoPlay = false;
+    await page.unroute(/\/__content-template-renderers(?:\?.*)?$/);
+    await page.route(/\/__content-template-renderers(?:\?.*)?$/, (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: rendererFixturePage(screenshotBlocks),
+    }));
     await mkdir(screenshotDir, { recursive: true });
     const keys = CONTENT_TEMPLATE_REGISTRY.map((entry) => entry.key);
     for (const viewport of [
       { width: 1920, height: 1200 },
+      { width: 1200, height: 900 },
       { width: 960, height: 900 },
+      { width: 768, height: 1024 },
       { width: 390, height: 844 },
     ]) {
       await page.setViewportSize(viewport);
       await page.goto("/__content-template-renderers");
       for (const key of keys) {
         const renderer = page.locator(`[data-content-template-contract="${key}"]`).first();
-        const rendererHeight = await renderer.evaluate((root) => root.getBoundingClientRect().height);
-        const captureHeight = Math.max(viewport.height, Math.ceil(rendererHeight) + 2);
-        if (captureHeight !== viewport.height) {
-          await page.setViewportSize({ width: viewport.width, height: captureHeight });
-        }
-        await renderer.evaluate((root) => root.scrollIntoView({ block: "start" }));
-        await renderer.screenshot({ path: path.join(screenshotDir, `${key}-${viewport.width}.png`) });
-        if (captureHeight !== viewport.height) {
-          await page.setViewportSize(viewport);
-        }
+        await expect(renderer, `${key}.${viewport.width} 截图目标未稳定挂载`).toBeVisible();
+        await renderer.screenshot({
+          path: path.join(screenshotDir, `${key}-${viewport.width}.png`),
+          animations: "disabled",
+        });
       }
     }
   });

@@ -46,8 +46,7 @@ jewelry-platform/
 ├── server/          # NestJS 后端
 │   ├── src/
 │   │   ├── modules/     # 业务模块（当前清单见 docs/CURRENT_STATE.md）
-│   │   ├── common/      # 公共 (守卫/拦截器/装饰器)
-│   │   └── queue/       # 消息队列
+│   │   └── common/      # 公共 (守卫/拦截器/装饰器)
 │   └── prisma/          # 数据模型、迁移与开发数据脚本（操作需审批）
 └── docker-compose.yml
 ```

@@ -88,6 +88,7 @@ function PuckVisualEditorFixture() {
                 blockType={componentType}
                 blockLabel={componentType}
                 selected={selectedBlockRef.current === String(props.id ?? "")}
+                allowNodeSelection
                 onSelect={() => {
                   const nextBlockId = String(props.id ?? "");
                   selectedBlockRef.current = nextBlockId;

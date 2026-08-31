@@ -74,24 +74,30 @@ test("未注册页面键不能通过预检或写入草稿", async () => {
   );
 });
 
-test("页面发布设置草稿可留空，但发布预检要求内容责任与三项 SEO 完整", async () => {
+test("页面发布资料可留空并提示，但非法 metadata 结构仍阻断", async () => {
   const service = createService();
+  const incompleteMetadata = {
+    ...makeFormalMetadata(),
+    seoTitle: "",
+    seoDescription: "",
+    ogImage: "",
+    contentOwner: "",
+  };
   const incompleteValidation = await service.validatePageDocument(
     "home",
     makeHomeDocument(),
-    {},
+    incompleteMetadata,
   );
-  assert.equal(incompleteValidation.valid, false);
+  assert.equal(incompleteValidation.valid, true, incompleteValidation.errors.join("\n"));
   assert.deepEqual(
     incompleteValidation.issues
       .filter((issue) => issue.path.startsWith("metadata."))
-      .map((issue) => ({ field: issue.field, path: issue.path })),
+      .map((issue) => ({ field: issue.field, path: issue.path, severity: issue.severity })),
     [
-      { field: "seoTitle", path: "metadata.seoTitle" },
-      { field: "seoDescription", path: "metadata.seoDescription" },
-      { field: "ogImage", path: "metadata.ogImage" },
-      { field: "contentOwner", path: "metadata.contentOwner" },
-      { field: "mediaRights", path: "metadata.mediaRights" },
+      { field: "seoTitle", path: "metadata.seoTitle", severity: "warning" },
+      { field: "seoDescription", path: "metadata.seoDescription", severity: "warning" },
+      { field: "ogImage", path: "metadata.ogImage", severity: "warning" },
+      { field: "contentOwner", path: "metadata.contentOwner", severity: "warning" },
     ],
   );
 
@@ -120,7 +126,7 @@ test("页面发布设置草稿可留空，但发布预检要求内容责任与�
   assert.ok(invalidValidation.errors.some((message) => message.includes("contentOwner 必须是字符串")));
 });
 
-test("发布预检拒绝正在完善、内容建设中和即将上线等发布占位文案", async () => {
+test("发布预检把正在完善、内容建设中和即将上线等占位文案降为提示", async () => {
   const service = createService();
   const document = makeHomeDocument();
   document.content[0].props.title = "品牌内容建设中";
@@ -131,20 +137,26 @@ test("发布预检拒绝正在完善、内容建设中和即将上线等发布�
 
   const result = await service.validatePageDocument("home", document, metadata);
 
-  assert.equal(result.valid, false);
+  assert.equal(result.valid, true, result.errors.join("\n"));
   assert.ok(result.issues.some(
-    (issue) => issue.path === "content[0].props.title" && issue.message.includes("占位内容"),
+    (issue) => issue.path === "content[0].props.title"
+      && issue.message.includes("占位内容")
+      && issue.severity === "warning",
   ));
   assert.ok(result.issues.some(
-    (issue) => issue.path === "metadata.seoDescription" && issue.message.includes("占位内容"),
+    (issue) => issue.path === "metadata.seoDescription"
+      && issue.message.includes("占位内容")
+      && issue.severity === "warning",
   ));
 
   document.content[0].props.title = "珠宝作品";
   metadata.seoDescription = "品牌故事即将上线";
   const launchResult = await service.validatePageDocument("home", document, metadata);
-  assert.equal(launchResult.valid, false);
+  assert.equal(launchResult.valid, true, launchResult.errors.join("\n"));
   assert.ok(launchResult.issues.some(
-    (issue) => issue.path === "metadata.seoDescription" && issue.message.includes("占位内容"),
+    (issue) => issue.path === "metadata.seoDescription"
+      && issue.message.includes("占位内容")
+      && issue.severity === "warning",
   ));
 });
 
@@ -155,10 +167,17 @@ test("公开 PageDocument metadata 只返回 SEO 白名单，不泄漏内部内�
   };
   const service = new PageModulesService({
     pageDocument: {
-      findUnique: async () => ({ id: 7, pageKey: "home", status: "DRAFT" }),
+      findUnique: async () => ({
+        id: 7,
+        pageKey: "home",
+        status: "DRAFT",
+        publishedRevisionId: 31,
+      }),
     },
     pageDocumentRevision: {
       findFirst: async () => ({
+        id: 31,
+        documentId: 7,
         puckData: makeHomeDocument(),
         metadata: {
           ...metadata,
@@ -202,10 +221,17 @@ test("公开 PageDocument metadata 只返回 SEO 白名单，不泄漏内部内�
 test("旧发布快照缺少当前验收印记时公共接口只返回安全失效状态", async () => {
   const service = new PageModulesService({
     pageDocument: {
-      findUnique: async () => ({ id: 8, pageKey: "home", status: "PUBLISHED" }),
+      findUnique: async () => ({
+        id: 8,
+        pageKey: "home",
+        status: "PUBLISHED",
+        publishedRevisionId: 38,
+      }),
     },
     pageDocumentRevision: {
       findFirst: async () => ({
+        id: 38,
+        documentId: 8,
         puckData: makeHomeDocument(),
         metadata: makeFormalMetadata(),
         publishedAt: new Date("2026-08-25T00:00:00.000Z"),
@@ -414,7 +440,7 @@ test("机器合同提取顶层、次级行动和桌面/移动集合目标", () =
   );
 });
 
-test("可见行动文案没有去向时不能通过发布预检", async () => {
+test("可见行动文案没有去向时提示但不阻断可用版本发布", async () => {
   const document: any = makeHomeDocument();
   document.content[0].props.actionText = "探索作品";
   document.content[0].props.targetType = "none";
@@ -424,11 +450,12 @@ test("可见行动文案没有去向时不能通过发布预检", async () => {
     makeFormalMetadata(),
   );
 
-  assert.equal(result.valid, false);
+  assert.equal(result.valid, true, result.errors.join("\n"));
   assert.ok(result.issues.some(
     (issue) =>
       issue.path === "content[0].props.targetType"
-      && issue.message.includes("已填写行动文案"),
+      && issue.message.includes("已填写行动文案")
+      && issue.severity === "warning",
   ));
 });
 
@@ -478,7 +505,7 @@ test("未登记页面去向被服务端发布门禁拒绝，登记页面可携�
   assert.equal(valid.valid, true, valid.errors.join("\n"));
 });
 
-test("按场景选购条目必须具备 Renderer 可解析的公开去向", async () => {
+test("按场景选购条目缺少公开去向时提示但不阻断", async () => {
   const document: any = makeHomeDocument();
   document.content.push({
     type: "按场景选购",
@@ -516,13 +543,14 @@ test("按场景选购条目必须具备 Renderer 可解析的公开去向", asyn
   );
 
   const result = await createService().validatePageDocument("home", document, metadata);
-  assert.equal(result.valid, false);
+  assert.equal(result.valid, true, result.errors.join("\n"));
   assert.ok(result.issues.some(
     (issue) =>
       issue.path === "content[1].props.categories[0].targetType"
       && issue.field === "categories"
       && issue.index === 0
-      && issue.message.includes("必须设置有效去向"),
+      && issue.message.includes("必须设置有效去向")
+      && issue.severity === "warning",
   ));
 
   document.content[1].props.categories[0].targetType = undefined;

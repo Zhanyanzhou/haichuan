@@ -14,10 +14,10 @@ import { fromEvent, interval, map, merge, Observable, startWith } from "rxjs";
 import {
   CONTENT_TEMPLATE_ASSET_POLICY,
   CONTENT_TEMPLATE_BY_MODULE_TYPE,
+  CONTENT_TEMPLATE_REGISTRY,
   CONTENT_TEMPLATE_PAGE_METADATA,
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
   createContentTemplatePublicationAttestation,
-  extractContentTemplateLayoutData,
   getContentTemplatePageRule,
   getContentTemplateIssues,
   getContentTemplateCompletion,
@@ -27,13 +27,25 @@ import {
   hasCurrentContentTemplatePublicationAttestation,
   isContentTemplatePageTarget,
   isContentTemplateAllowedForPage,
-  sanitizeContentTemplateDefaultContent,
   sanitizeContentTemplateLayoutData,
   withoutContentTemplatePublicationAttestation,
-  type ContentTemplateDefaultContentValue,
   type ContentTemplateIssue,
+  type ContentTemplateContract,
 } from "./content-template-contract";
 import { customerFacingProductWhereForVisibilities } from "../products/product-eligibility";
+import {
+  DYNAMIC_TEMPLATE_BLOCK_TYPE,
+  DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
+  collectDynamicTemplateInstanceReferences,
+  dynamicTemplateVersionKey,
+  readDynamicTemplateInstanceReference,
+  validateDynamicTemplateInstance,
+} from "./dynamic-template-instance";
+import {
+  calculateDynamicTemplateDefinitionChecksum,
+  matchesDynamicTemplateDefinitionChecksum,
+} from "./dynamic-template-definition-integrity";
+import { validateDynamicTemplateDefinition } from "./generated/validateTemplateDefinition.generated";
 
 /**
  * 页面构建器区块类型契约 — 与前端 puckConfig MyComponents 严格一致,
@@ -42,6 +54,7 @@ import { customerFacingProductWhereForVisibilities } from "../products/product-e
  * 新保存的草稿不再包含,故不列入本契约。
  */
 const PUCK_COMPONENT_LABELS = [
+  "动态模板实例",
   "首屏主视觉",
   "单图海报",
   "双图海报",
@@ -141,7 +154,7 @@ const PAGE_METADATA_FIELD_LABELS: Readonly<Record<string, string>> = {
 
 /**
  * 发布校验：占位文案关键词。
- * 默认模板与新增模块内置的文案及素材占位状态，运营未替换时不得发布到前台。
+ * 默认模板与新增模块内置的文案及素材占位状态会在发布确认中提示，但不阻断可用版本更新前台。
  */
 const PLACEHOLDER_MARKERS = [
   "待确认",
@@ -184,21 +197,6 @@ const PAGE_DOCUMENT_FACT_SOURCE_LABEL_BY_MODULE: Readonly<Record<string, string>
   预约入口: "统一联系电话",
 };
 
-const PERSONAL_TEMPLATE_FACT_FIELDS_BY_MODULE: Readonly<Record<string, ReadonlySet<string>>> = {
-  定制流程: new Set(["steps"]),
-  分类卡片: new Set(["categories"]),
-  按场景选购: new Set(["categories"]),
-  服务承诺: new Set(["cards"]),
-  资质证书: new Set(["certificates"]),
-  门店信息: STORE_INFO_PAGE_DOCUMENT_FACT_FIELDS,
-  真实评价与实拍: new Set(["testimonials"]),
-  预约入口: APPOINTMENT_PAGE_DOCUMENT_FACT_FIELDS,
-  限时活动: new Set(["targetDate", "benefits"]),
-};
-
-const PERSONAL_TEMPLATE_MEDIA_KEY = /(?:image|poster|videoUrl)$/i;
-const PERSONAL_TEMPLATE_PRODUCT_ID_KEY = /productId$/i;
-
 type PageDocumentRecord = Record<string, unknown> & {
   content?: unknown;
   zones?: unknown;
@@ -206,7 +204,7 @@ type PageDocumentRecord = Record<string, unknown> & {
 
 type PageValidationDb = Pick<
   Prisma.TransactionClient,
-  "siteSetting" | "product" | "category"
+  "siteSetting" | "product" | "category" | "dynamicTemplateVersion"
 >;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -258,293 +256,132 @@ export class PageModulesService {
     return Number(ownerId);
   }
 
-  private normalizePersonalTemplateName(name: string) {
-    const normalized = String(name ?? "").trim();
-    if (!normalized) throw new BadRequestException("模板名称不能为空");
-    if (normalized.length > 100) throw new BadRequestException("模板名称不能超过 100 个字符");
-    return normalized;
+  private normalizeFixedTemplateOrigin(moduleType: string, value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const origin = value as Record<string, unknown>;
+    if (origin.kind === "system") {
+      const contract = CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType];
+      return contract
+        && origin.contractKey === contract.key
+        && Number.isInteger(origin.version)
+        && Number(origin.version) >= 0
+        ? {
+            kind: "system" as const,
+            contractKey: contract.key,
+            version: Number(origin.version),
+          }
+        : undefined;
+    }
+    if (
+      origin.kind === "personal"
+      && Number.isInteger(origin.templateId)
+      && Number(origin.templateId) > 0
+      && Number.isInteger(origin.revision)
+      && Number(origin.revision) > 0
+    ) {
+      return {
+        kind: "personal" as const,
+        templateId: Number(origin.templateId),
+        revision: Number(origin.revision),
+      };
+    }
+    return undefined;
   }
 
-  private sanitizePersonalTemplateLayout(moduleType: string, layoutData: unknown) {
-    const contract = CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType];
-    if (!contract) throw new BadRequestException("该模块不是可保存的内容模板");
-    const sanitized = sanitizeContentTemplateLayoutData(moduleType, layoutData);
-    if (!sanitized) throw new BadRequestException("布局数据版本无效或不符合当前模板合同");
-    return { contract, sanitized };
+  private getSystemContentTemplateContract(contractKey: string): ContentTemplateContract {
+    const registryItem = CONTENT_TEMPLATE_REGISTRY.find((item) => item.key === contractKey);
+    const contract = registryItem
+      ? CONTENT_TEMPLATE_BY_MODULE_TYPE[registryItem.moduleType]
+      : undefined;
+    if (!contract) throw new NotFoundException("系统母模板合同不存在");
+    return contract;
   }
 
-  private isForbiddenPersonalTemplateFactKey(key: string) {
-    const normalized = key.replace(/[-_]/g, "");
-    if (normalized.toLowerCase() === "showprice") return false;
-    return /^(?:price|inventory|stock|customer|client|buyer|order|payment|refund|cost|amount)(?:[A-Z0-9]|$)/i.test(
-      normalized,
-    );
+  private isMissingLegacyPersonalTemplateRevision(error: unknown): boolean {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2022") {
+      return false;
+    }
+    const details = `${error.message} ${JSON.stringify(error.meta ?? {})}`;
+    return /personal_content_templates[^\n]*revision|revision[^\n]*personal_content_templates/i.test(details);
   }
 
-  private containsForbiddenPersonalTemplateFact(value: unknown): boolean {
-    if (Array.isArray(value)) {
-      return value.some((item) => this.containsForbiddenPersonalTemplateFact(item));
-    }
-    if (!value || typeof value !== "object") return false;
-    return Object.entries(value).some(
-      ([key, child]) =>
-        this.isForbiddenPersonalTemplateFactKey(key) ||
-        this.containsForbiddenPersonalTemplateFact(child),
-    );
+  private toSystemContentTemplateCurrent(contract: ContentTemplateContract) {
+    const baseline = sanitizeContentTemplateLayoutData(contract.moduleType, { version: 2 });
+    if (!baseline) throw new ConflictException("系统母模板代码合同基线无效");
+    return {
+      contractKey: contract.key,
+      moduleType: contract.moduleType,
+      displayName: contract.displayName,
+      contractVersion: contract.version,
+      activeVersion: 0,
+      layoutData: baseline,
+      source: "code" as const,
+      changeNote: null,
+      updatedAt: null,
+    };
   }
 
-  private collectPersonalTemplateUploadUrls(
-    value: unknown,
-    fieldKey: string,
-    urls: Set<string>,
-  ): void {
-    if (typeof value === "string") {
-      if (PERSONAL_TEMPLATE_MEDIA_KEY.test(fieldKey) && value.startsWith("/uploads/")) {
-        urls.add(value);
-      }
-      return;
-    }
-    if (Array.isArray(value)) {
-      for (const item of value) this.collectPersonalTemplateUploadUrls(item, fieldKey, urls);
-      return;
-    }
-    if (!value || typeof value !== "object") return;
-    for (const [key, child] of Object.entries(value)) {
-      this.collectPersonalTemplateUploadUrls(child, key, urls);
-    }
+  async getSystemContentTemplates() {
+    return CONTENT_TEMPLATE_REGISTRY.map((item) => {
+      const contract = CONTENT_TEMPLATE_BY_MODULE_TYPE[item.moduleType];
+      if (!contract) throw new ConflictException(`系统模板合同缺失：${item.moduleType}`);
+      return this.toSystemContentTemplateCurrent(contract);
+    });
   }
 
-  private assertPersonalTemplateUploadsExist(content: Record<string, unknown>) {
-    const urls = new Set<string>();
-    for (const [key, value] of Object.entries(content)) {
-      this.collectPersonalTemplateUploadUrls(value, key, urls);
-    }
-    for (const url of urls) {
-      const requestedPath = url.slice("/uploads/".length);
-      const targetPath = resolve(this.uploadsRoot, requestedPath);
-      const relativePath = relative(this.uploadsRoot, targetPath);
-      const isWithinUploads =
-        relativePath !== ".." &&
-        !relativePath.startsWith(`..${sep}`) &&
-        !relativePath.startsWith("../") &&
-        !relativePath.startsWith("..\\");
-      if (!isWithinUploads || !existsSync(targetPath)) {
-        throw new BadRequestException("默认内容包含不存在或越界的本地上传素材");
-      }
-    }
+  async getSystemContentTemplate(contractKey: string) {
+    const contract = this.getSystemContentTemplateContract(contractKey);
+    return this.toSystemContentTemplateCurrent(contract);
   }
 
-  private async validatePersonalTemplateReferences(
-    moduleType: string,
-    content: Record<string, ContentTemplateDefaultContentValue>,
-  ) {
-    const contract = CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType];
-    const productCodes = new Set<string>();
-    const productIds = new Set<number>();
-    const categorySlugs = new Set<string>();
-
-    for (const reference of contract?.editorCapabilities.referenceFields ?? []) {
-      const rawValue = content[reference.key];
-      if (rawValue === undefined || rawValue === null || rawValue === "") continue;
-      const values = Array.isArray(rawValue) ? rawValue : [rawValue];
-      if (!values.length) {
-        delete content[reference.key];
-        continue;
-      }
-      if (!values.every((value) => typeof value === "string" && value.trim().length > 0)) {
-        throw new BadRequestException("默认内容的业务引用格式不正确");
-      }
-      const normalized = values.map((value) => String(value).trim());
-      content[reference.key] = Array.isArray(rawValue) ? normalized : normalized[0];
-      for (const value of normalized) {
-        if (reference.kind === "product") productCodes.add(value);
-        else categorySlugs.add(value);
-      }
-    }
-
-    for (const [fieldKey, rawValue] of Object.entries(content)) {
-      if (!PERSONAL_TEMPLATE_PRODUCT_ID_KEY.test(fieldKey)) continue;
-      if (rawValue === 0 || rawValue === null || rawValue === "") {
-        delete content[fieldKey];
-        continue;
-      }
-      const numericId = Number(rawValue);
-      if (!Number.isInteger(numericId) || numericId <= 0) {
-        throw new BadRequestException("默认内容的商品引用格式不正确");
-      }
-      content[fieldKey] = numericId;
-      productIds.add(numericId);
-    }
-
-    if (productCodes.size || productIds.size) {
-      const products = await this.prisma.product.findMany({
-        where: {
-          deletedAt: null,
-          OR: [
-            ...(productCodes.size ? [{ code: { in: [...productCodes] } }] : []),
-            ...(productIds.size ? [{ id: { in: [...productIds] } }] : []),
-          ],
-        },
-        select: { id: true, code: true },
-      });
-      const availableCodes = new Set(products.map((product) => product.code));
-      const availableIds = new Set(products.map((product) => product.id));
-      if (
-        [...productCodes].some((code) => !availableCodes.has(code)) ||
-        [...productIds].some((id) => !availableIds.has(id))
-      ) {
-        throw new BadRequestException("默认内容包含不存在或已删除的商品引用");
-      }
-    }
-
-    if (categorySlugs.size) {
-      const categories = await this.prisma.category.findMany({
-        where: {
-          slug: { in: [...categorySlugs] },
-          deletedAt: null,
-          isActive: true,
-        },
-        select: { slug: true },
-      });
-      const availableSlugs = new Set(categories.map((category) => category.slug));
-      if ([...categorySlugs].some((slug) => !availableSlugs.has(slug))) {
-        throw new BadRequestException("默认内容包含不存在或已停用的分类引用");
-      }
-    }
-  }
-
-  private async sanitizePersonalTemplateContentDefaults(
-    moduleType: string,
-    rawContent: unknown,
-  ): Promise<Record<string, ContentTemplateDefaultContentValue> | null | undefined> {
-    if (rawContent === undefined) return undefined;
-    if (rawContent === null) return null;
-    const sanitized = sanitizeContentTemplateDefaultContent(moduleType, rawContent);
-    if (!sanitized) throw new BadRequestException("默认内容无效或不符合当前模板合同");
-
-    const blockedFields = PERSONAL_TEMPLATE_FACT_FIELDS_BY_MODULE[moduleType] ?? new Set<string>();
-    const filtered: Record<string, ContentTemplateDefaultContentValue> = {};
-    for (const [fieldKey, value] of Object.entries(sanitized)) {
-      if (
-        blockedFields.has(fieldKey) ||
-        this.isForbiddenPersonalTemplateFactKey(fieldKey) ||
-        this.containsForbiddenPersonalTemplateFact(value)
-      ) {
-        continue;
-      }
-      filtered[fieldKey] = value;
-    }
-    await this.validatePersonalTemplateReferences(moduleType, filtered);
-    this.assertPersonalTemplateUploadsExist(filtered);
-    return Object.keys(filtered).length ? filtered : null;
+  async getSystemContentTemplateHistory(contractKey: string) {
+    const contract = this.getSystemContentTemplateContract(contractKey);
+    const baseline = sanitizeContentTemplateLayoutData(contract.moduleType, { version: 2 });
+    if (!baseline) throw new ConflictException("系统母模板代码合同基线无效");
+    return [
+      {
+        version: 0,
+        contractKey: contract.key,
+        moduleType: contract.moduleType,
+        contractVersion: contract.version,
+        layoutData: baseline,
+        changeNote: "代码机器合同基线",
+        createdById: null,
+        createdAt: null,
+        active: true,
+        source: "code" as const,
+      },
+    ];
   }
 
   async getPersonalContentTemplates(ownerId?: number) {
     const resolvedOwnerId = this.requirePersonalTemplateOwner(ownerId);
-    return this.prisma.personalContentTemplate.findMany({
-      where: { ownerId: resolvedOwnerId },
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-    });
-  }
-
-  async createPersonalContentTemplate(
-    ownerId: number | undefined,
-    input: {
-      name: string;
-      moduleType: string;
-      layoutData: unknown;
-      contentDefaults?: Record<string, unknown> | null;
-    },
-  ) {
-    const resolvedOwnerId = this.requirePersonalTemplateOwner(ownerId);
-    const name = this.normalizePersonalTemplateName(input.name);
-    const { contract, sanitized } = this.sanitizePersonalTemplateLayout(input.moduleType, input.layoutData);
-    const contentDefaults = await this.sanitizePersonalTemplateContentDefaults(
-      contract.moduleType,
-      input.contentDefaults,
-    );
+    const orderBy = [{ updatedAt: "desc" as const }, { id: "desc" as const }];
     try {
-      return await this.prisma.personalContentTemplate.create({
-        data: {
-          ownerId: resolvedOwnerId,
-          name,
-          moduleType: contract.moduleType,
-          contractKey: contract.key,
-          contractVersion: contract.version,
-          layoutData: sanitized as Prisma.InputJsonValue,
-          ...(contentDefaults
-            ? { contentDefaults: contentDefaults as Prisma.InputJsonValue }
-            : {}),
+      return await this.prisma.personalContentTemplate.findMany({
+        where: { ownerId: resolvedOwnerId },
+        orderBy,
+      });
+    } catch (error) {
+      if (!this.isMissingLegacyPersonalTemplateRevision(error)) throw error;
+      const legacyRows = await this.prisma.personalContentTemplate.findMany({
+        where: { ownerId: resolvedOwnerId },
+        orderBy,
+        select: {
+          id: true,
+          ownerId: true,
+          name: true,
+          moduleType: true,
+          contractKey: true,
+          contractVersion: true,
+          layoutData: true,
+          contentDefaults: true,
+          createdAt: true,
+          updatedAt: true,
         },
       });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        throw new ConflictException("当前账号已存在同名模板");
-      }
-      throw error;
+      return legacyRows.map((row) => ({ ...row, revision: 1 }));
     }
-  }
-
-  async updatePersonalContentTemplate(
-    ownerId: number | undefined,
-    id: number,
-    input: {
-      name?: string;
-      layoutData?: unknown;
-      contentDefaults?: Record<string, unknown> | null;
-    },
-  ) {
-    const resolvedOwnerId = this.requirePersonalTemplateOwner(ownerId);
-    if (!Number.isInteger(id) || id <= 0) throw new BadRequestException("模板 ID 无效");
-    const existing = await this.prisma.personalContentTemplate.findFirst({
-      where: { id, ownerId: resolvedOwnerId },
-    });
-    if (!existing) throw new NotFoundException("模板不存在或无权访问");
-    if (
-      input.name === undefined &&
-      input.layoutData === undefined &&
-      input.contentDefaults === undefined
-    ) {
-      throw new BadRequestException("没有可更新的模板字段");
-    }
-    const data: Prisma.PersonalContentTemplateUpdateInput = {};
-    if (input.name !== undefined) data.name = this.normalizePersonalTemplateName(input.name);
-    if (input.layoutData !== undefined) {
-      const { contract, sanitized } = this.sanitizePersonalTemplateLayout(existing.moduleType, input.layoutData);
-      data.contractKey = contract.key;
-      data.contractVersion = contract.version;
-      data.layoutData = sanitized as Prisma.InputJsonValue;
-    }
-    if (input.contentDefaults !== undefined) {
-      const contentDefaults = await this.sanitizePersonalTemplateContentDefaults(
-        existing.moduleType,
-        input.contentDefaults,
-      );
-      data.contentDefaults = contentDefaults
-        ? (contentDefaults as Prisma.InputJsonValue)
-        : Prisma.DbNull;
-    }
-    try {
-      return await this.prisma.personalContentTemplate.update({
-        where: { id },
-        data,
-      });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        throw new ConflictException("当前账号已存在同名模板");
-      }
-      throw error;
-    }
-  }
-
-  async deletePersonalContentTemplate(ownerId: number | undefined, id: number) {
-    const resolvedOwnerId = this.requirePersonalTemplateOwner(ownerId);
-    if (!Number.isInteger(id) || id <= 0) throw new BadRequestException("模板 ID 无效");
-    const deleted = await this.prisma.personalContentTemplate.deleteMany({
-      where: { id, ownerId: resolvedOwnerId },
-    });
-    if (deleted.count !== 1) throw new NotFoundException("模板不存在或无权访问");
-    return { id, deleted: true };
   }
 
   publicChangeStream(): Observable<MessageEvent> {
@@ -565,8 +402,121 @@ export class PageModulesService {
     );
   }
 
+  private async hydrateDynamicTemplateDefinitions(puckData: unknown) {
+    if (!isRecord(puckData)) return puckData;
+    const references = collectDynamicTemplateInstanceReferences(puckData);
+    const persistableDocument = { ...puckData };
+    delete persistableDocument[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY];
+    if (references.length === 0) return persistableDocument;
+    const versions = await this.prisma.dynamicTemplateVersion.findMany({
+      where: {
+        OR: references.map((reference) => ({
+          version: reference.templateVersion,
+          template: {
+            templateId: reference.templateId,
+            visibility: "STAFF",
+          },
+        })),
+      },
+      select: {
+        version: true,
+        schemaVersion: true,
+        definition: true,
+        definitionChecksum: true,
+        template: { select: { templateId: true } },
+      },
+    });
+    const resolved = Object.fromEntries(versions.flatMap((version) => {
+      const validation = validateDynamicTemplateDefinition(version.definition);
+      if (
+        !validation.valid
+        || !validation.definition
+        || validation.definition.templateId !== version.template.templateId
+        || validation.definition.schemaVersion !== version.schemaVersion
+        || !matchesDynamicTemplateDefinitionChecksum(
+          validation.definition,
+          version.definitionChecksum,
+        )
+      ) return [];
+      return [[
+        dynamicTemplateVersionKey(version.template.templateId, version.version),
+        {
+          templateId: version.template.templateId,
+          version: version.version,
+          schemaVersion: version.schemaVersion,
+          definitionChecksum: calculateDynamicTemplateDefinitionChecksum(validation.definition),
+          definition: validation.definition,
+        },
+      ]];
+    }));
+    return {
+      ...persistableDocument,
+      [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: resolved,
+    };
+  }
+
+  /**
+   * 草稿允许内容未填完，但所有实例构图必须在保存前通过页面所绑定精确版本的
+   * instanceEditPolicy。只检查构图路径，完整内容与业务引用仍由发布预检处理。
+   */
+  private async assertDynamicTemplateLayoutOverridesValid(puckData: unknown) {
+    if (!isRecord(puckData)) return;
+    const blocks = [
+      ...(Array.isArray(puckData.content) ? puckData.content : []),
+      ...(isRecord(puckData.zones)
+        ? Object.values(puckData.zones).flatMap((zone) => Array.isArray(zone) ? zone : [])
+        : []),
+    ];
+    const instances: Array<{
+      reference: ReturnType<typeof readDynamicTemplateInstanceReference>;
+      props: Record<string, unknown>;
+    }> = [];
+    for (const block of blocks) {
+      if (!isRecord(block) || block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE || !isRecord(block.props)) continue;
+      instances.push({
+        reference: readDynamicTemplateInstanceReference(block.props),
+        props: block.props,
+      });
+    }
+    if (instances.length === 0) return;
+    const hydrated = await this.hydrateDynamicTemplateDefinitions(puckData);
+    if (!isRecord(hydrated)) return;
+    const resolved = isRecord(hydrated[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY])
+      ? hydrated[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]
+      : {};
+    const issues: string[] = [];
+    for (const { reference, props } of instances) {
+      if (!reference) {
+        if (Object.prototype.hasOwnProperty.call(props, "layoutOverridesByNodeId")) {
+          issues.push("身份无效的模板实例不能保存构图覆盖");
+        }
+        continue;
+      }
+      const versionKey = dynamicTemplateVersionKey(reference.templateId, reference.templateVersion);
+      const resolvedVersion = isRecord(resolved[versionKey]) ? resolved[versionKey] : undefined;
+      const definition = resolvedVersion?.definition;
+      if (!definition) {
+        issues.push(`${reference.instanceId ?? reference.templateId}：精确模板版本不可用或校验和损坏`);
+        continue;
+      }
+      const validation = validateDynamicTemplateInstance(props, definition);
+      for (const issue of validation.issues) {
+        if (issue.pathSuffix.startsWith(".layoutOverridesByNodeId")) {
+          issues.push(`${reference.instanceId ?? reference.templateId}：${issue.message}`);
+        }
+      }
+    }
+    if (issues.length > 0) {
+      throw new BadRequestException(`页面实例构图覆盖无效：${issues.slice(0, 5).join("；")}`);
+    }
+  }
+
   async getPageDocument(pageKey: string) {
-    return this.prisma.pageDocument.findUnique({ where: { pageKey } });
+    const document = await this.prisma.pageDocument.findUnique({ where: { pageKey } });
+    return document ? {
+      ...document,
+      puckData: await this.hydrateDynamicTemplateDefinitions(document.puckData),
+    } : null;
   }
 
   private getPublicPageMetadata(metadata: unknown): Record<string, string> {
@@ -594,9 +544,12 @@ export class PageModulesService {
     });
     if (!document) return null;
 
+    if (!document.publishedRevisionId) return null;
     const revision = await this.prisma.pageDocumentRevision.findFirst({
-      where: { documentId: document.id, status: "published" },
-      orderBy: { version: "desc" },
+      where: {
+        id: document.publishedRevisionId,
+        documentId: document.id,
+      },
     });
     if (!revision) return null;
 
@@ -628,7 +581,7 @@ export class PageModulesService {
     }
     return {
       pageKey: snapshot.pageKey,
-      puckData: snapshot.puckData,
+      puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData),
       // 公开端只需要 SEO 字段；内容责任人与其他后台元数据不得随页面响应泄漏。
       metadata: this.getPublicPageMetadata(snapshot.metadata),
       status: snapshot.status,
@@ -644,6 +597,7 @@ export class PageModulesService {
     if (!snapshot) return null;
     return {
       ...snapshot,
+      puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData),
       metadata: withoutContentTemplatePublicationAttestation(snapshot.metadata),
       publicationAttested:
         hasCurrentContentTemplatePublicationAttestation(snapshot.metadata),
@@ -678,6 +632,7 @@ export class PageModulesService {
       );
     }
     const normalizedPuckData = this.normalizePageDocumentPuckData(puckData);
+    await this.assertDynamicTemplateLayoutOverridesValid(normalizedPuckData);
     // 区块合同版本只存在于 puckData.props.__contentTemplate。页面级摘要仅兼容旧数据读取，
     // 普通保存不得重新写入，更不能借用 schemaVersion/templateVersion 标记区块合同。
     const metadataWithoutPublicationAttestation =
@@ -695,7 +650,10 @@ export class PageModulesService {
     });
     if (existing) {
       const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
-      if (expected && existing.updatedAt.getTime() !== expected.getTime()) {
+      if (!expected) {
+        throw new BadRequestException("保存已有页面时缺少页面版本标识");
+      }
+      if (existing.updatedAt.getTime() !== expected.getTime()) {
         throw new ConflictException(
           "该页面已被其他编辑者更新，请重新加载后再保存",
         );
@@ -731,9 +689,13 @@ export class PageModulesService {
 
   async publishPageDocument(
     pageKey: string,
-    userId?: number,
-    expectedUpdatedAt?: string,
+    userId: number | undefined,
+    expectedUpdatedAt: string,
   ) {
+    const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
+    if (!expected) {
+      throw new BadRequestException("发布页面时缺少页面版本标识");
+    }
     const result = await this.prisma.$transaction(async (tx) => {
       // 锁定当前页面文档，串行化同一页面的版本号分配，避免并发发布生成重复版本。
       await tx.$queryRaw<Array<{ id: number }>>`
@@ -744,8 +706,7 @@ export class PageModulesService {
       });
       if (!doc) throw new Error("Page document not found");
       const normalizedPuckData = this.normalizePageDocumentPuckData(doc.puckData);
-      const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
-      if (expected && doc.updatedAt.getTime() !== expected.getTime()) {
+      if (doc.updatedAt.getTime() !== expected.getTime()) {
         throw new ConflictException(
           "该页面已被其他编辑者更新，请重新加载后再发布",
         );
@@ -782,7 +743,7 @@ export class PageModulesService {
           createContentTemplatePublicationAttestation(),
       };
 
-      await tx.pageDocumentRevision.create({
+      const revision = await tx.pageDocumentRevision.create({
         data: {
           documentId: doc.id,
           version: nextVersion,
@@ -794,23 +755,38 @@ export class PageModulesService {
         },
       });
 
-      // 仅保留最新 50 条发布历史，避免 revisions 表无上限增长
-      const keepVersion = nextVersion - 49;
-      if (keepVersion > 1) {
-        await tx.pageDocumentRevision.deleteMany({
-          where: { documentId: doc.id, version: { lt: keepVersion } },
-        });
-      }
-
       const published = await tx.pageDocument.update({
         where: { id: doc.id },
         data: {
           puckData: toInputJsonValue(normalizedPuckData),
           status: "PUBLISHED",
+          publishedRevisionId: revision.id,
           publishedAt,
           publishedBy: userId,
         },
       });
+      if (userId !== undefined) {
+        await tx.operationLog.create({
+          data: {
+            userId,
+            action: "PAGE_PUBLISHED",
+            module: "page-builder",
+            targetId: doc.id,
+            detail: JSON.stringify({
+              schemaVersion: 1,
+              event: "PAGE_PUBLISHED",
+              actor: userId,
+              timestamp: publishedAt.toISOString(),
+              pageKey,
+              pageDocumentId: doc.id,
+              fromRevision: doc.publishedRevisionId,
+              toRevision: revision.id,
+              toRevisionVersion: revision.version,
+              result: "succeeded",
+            }),
+          },
+        });
+      }
       return { published, nextVersion };
     });
 
@@ -851,6 +827,16 @@ export class PageModulesService {
     return validation;
   }
 
+  /** 模板原子激活在同一事务内复用页面发布的完整校验规则。 */
+  async validatePageDocumentSnapshot(
+    db: PageValidationDb,
+    pageKey: string,
+    puckData: unknown,
+    metadata: unknown,
+  ) {
+    return this.collectPageDocumentValidation(db, puckData, metadata, pageKey);
+  }
+
   private async collectPageDocumentValidation(
     db: PageValidationDb,
     puckData: unknown,
@@ -864,10 +850,69 @@ export class PageModulesService {
       ...this.collectMetadataIssues(metadata),
       ...this.collectMediaRightsIssues(puckData, metadata, pageKey),
     ];
-    const errors = issues
+    const publicationIssues = issues.map((issue) =>
+      this.toUsablePublicationIssue(issue),
+    );
+    const errors = publicationIssues
       .filter((issue) => issue.severity === "error")
       .map((issue) => issue.message);
-    return { valid: errors.length === 0, errors, issues };
+    return { valid: errors.length === 0, errors, issues: publicationIssues };
+  }
+
+  /**
+   * “发布”保存一个立即供前台使用的版本。内容尚未完善时允许发布并在确认框提示；
+   * 结构损坏、危险地址、不可解析引用、权限与版本冲突仍由原校验保持阻断。
+   */
+  private toUsablePublicationIssue(
+    issue: ContentTemplateIssue,
+  ): ContentTemplateIssue {
+    if (issue.severity !== "error" || issue.layer !== "page") return issue;
+
+    const message = issue.message;
+    const metadataCompletionFields = new Set([
+      "seoTitle",
+      "seoDescription",
+      "ogImage",
+      "contentOwner",
+    ]);
+    const isMetadataCompletion =
+      issue.path.startsWith("metadata.")
+      && Boolean(issue.field && metadataCompletionFields.has(issue.field))
+      && (message.includes("不能为空") || message.includes("仍是占位内容"));
+    const isContentCompletion = [
+      " 图片不能为空",
+      " 内容不能为空",
+      "视频地址不能为空",
+      "轮播图片不能为空",
+      "画廊图片不能为空",
+      "替代文字不能为空",
+      "替代文字来源",
+      "必须填写替代文字",
+      "必须填写视频说明",
+      "为必填内容",
+      "图片地址无效",
+      "至少填写眉题、标题或副标题之一",
+      "已启用眉题角色，请填写眉题内容",
+      "已启用标题角色，请填写标题内容",
+      "已启用副标题角色，请填写副标题内容",
+      "已启用行动文字角色，请填写行动文字内容",
+      "仍是占位内容",
+      " 数量应为 ",
+      "请选择 1 件有效的主推商品",
+      "关联商品必须是不重复的 1–4 件商品",
+      "必须填写行动文案",
+      "必须设置有效去向",
+      "必须选择有效商品",
+      "必须选择有效分类",
+      "站内页面跳转必须填写链接",
+      "必须选择商品",
+    ].some((marker) => message.includes(marker));
+    const isDynamicContentBudget =
+      /(?:至少需要|最多允许) \d+ (?:个字符|项)/.test(message);
+
+    return isMetadataCompletion || isContentCompletion || isDynamicContentBudget
+      ? { ...issue, severity: "warning" }
+      : issue;
   }
 
   private collectContentTemplateIssues(
@@ -899,41 +944,6 @@ export class PageModulesService {
       document.content.forEach((block, index) =>
         collectBlock(block, `content[${index}]`),
       );
-      const designByModuleType = new Map<string, {
-        signature: string;
-        blockId?: string;
-        index: number;
-      }>();
-      document.content.forEach((block, index) => {
-        if (!block || typeof block !== "object" || Array.isArray(block)) return;
-        const value = block as { type?: unknown; props?: unknown };
-        if (typeof value.type !== "string" || !CONTENT_TEMPLATE_BY_MODULE_TYPE[value.type]) return;
-        const props = value.props && typeof value.props === "object" && !Array.isArray(value.props)
-          ? value.props as Record<string, unknown>
-          : {};
-        const signature = JSON.stringify(
-          extractContentTemplateLayoutData(value.type, props) ?? null,
-        );
-        const baseline = designByModuleType.get(value.type);
-        if (!baseline) {
-          designByModuleType.set(value.type, {
-            signature,
-            blockId: typeof props.id === "string" ? props.id : undefined,
-            index,
-          });
-          return;
-        }
-        if (baseline.signature === signature) return;
-        issues.push({
-          code: "content-template-shared-design-mismatch",
-          severity: "error",
-          layer: "contract",
-          moduleType: value.type,
-          ...(typeof props.id === "string" ? { blockId: props.id } : {}),
-          path: `content[${index}].props.__instanceOverrides`,
-          message: `同页“${value.type}”必须共享同一模板设计；请选中此模块进入模板编辑并统一同类实例。`,
-        });
-      });
     }
     const pageRule = getContentTemplatePageRule(pageKey);
     if (
@@ -1132,8 +1142,20 @@ export class PageModulesService {
     const categorySlugs = new Set<string>();
     const categoryReferences = new Map<
       string,
-      Array<{ blockId?: string; path: string; label: string; field: string; index: number }>
+      Array<{ blockId?: string; path: string; label: string; field: string; index?: number }>
     >();
+    const dynamicTemplateInstances: Array<{
+      props: Record<string, unknown>;
+      path: string;
+      label: string;
+      blockId?: string;
+      templateId: string;
+      templateVersion: number;
+    }> = [];
+    const dynamicTemplateCompositionByProps = new Map<Record<string, unknown>, {
+      visualRole: "primary-stage" | "feature-stage" | "support-stage";
+      headerCompatibility: ReadonlySet<string>;
+    }>();
     const missingUploadUrls = new Set<string>();
     const pageRule = getContentTemplatePageRule(pageKey);
     if (!/^[a-z0-9-]{1,50}$/i.test(pageKey)) {
@@ -1219,6 +1241,29 @@ export class PageModulesService {
 
       // 编辑器说明区不会进入前台；隐藏区块也不应因未完成内容阻断其他模块发布。
       if (EDITOR_ONLY_COMPONENTS.has(type) || props.isVisible === false) {
+        attachBlockContext(props);
+        return;
+      }
+
+      if (type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
+        const reference = readDynamicTemplateInstanceReference(props);
+        if (!reference) {
+          const errorIndex = errors.push(`${label}：必须绑定有效的正式模板版本`) - 1;
+          errorContexts[errorIndex] = {
+            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+            path: `${path}.props.templateVersion`,
+            field: "templateVersion",
+          };
+        } else {
+          dynamicTemplateInstances.push({
+            props,
+            path,
+            label,
+            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+            templateId: reference.templateId,
+            templateVersion: reference.templateVersion,
+          });
+        }
         attachBlockContext(props);
         return;
       }
@@ -1361,6 +1406,9 @@ export class PageModulesService {
         // 历史 LinkTargetField 用 0 表示“未选择商品”；它不是业务引用。
         // 其他非空值（含负数和非数字）仍作为残留进入后续错误分支。
         const hasProductIdTarget = hasProductIdValue && productId !== 0;
+        const categorySlug = this.isNonEmptyString(reference.categorySlug)
+          ? reference.categorySlug.trim()
+          : "";
         const linkUrl = this.isNonEmptyString(reference.linkUrl)
           ? reference.linkUrl.trim()
           : "";
@@ -1368,21 +1416,25 @@ export class PageModulesService {
           ? reference.legacyLink.trim()
           : "";
         const hasProductTarget = Boolean(productCode || hasProductIdTarget);
-        const hasPageTarget = Boolean(linkUrl || legacyLink);
+        const hasCategoryTarget = Boolean(categorySlug);
+        const hasLinkTarget = Boolean(linkUrl || legacyLink);
         const inferredTargetType = targetType || (
-          hasProductTarget && !hasPageTarget
+          hasProductTarget && !hasCategoryTarget && !hasLinkTarget
             ? "product"
-            : hasPageTarget && !hasProductTarget
+            : hasCategoryTarget && !hasProductTarget && !hasLinkTarget
+              ? "category"
+            : hasLinkTarget && !hasProductTarget && !hasCategoryTarget
               ? "page"
               : "none"
         );
         const hasActionText = this.isNonEmptyString(reference.actionText);
 
-        if (!targetType && hasProductTarget && hasPageTarget) {
-          pushLinkError("旧版行动目标同时包含商品与页面去向，请重新选择唯一去向", reference.targetTypeFieldKey);
+        const targetCount = Number(hasProductTarget) + Number(hasCategoryTarget) + Number(hasLinkTarget);
+        if (!targetType && targetCount > 1) {
+          pushLinkError("旧版行动目标同时包含多个去向，请重新选择唯一去向", reference.targetTypeFieldKey);
           continue;
         }
-        if (!["none", "product", "page"].includes(inferredTargetType)) {
+        if (!["none", "product", "category", "page", "external"].includes(inferredTargetType)) {
           pushLinkError("行动目标类型不合法", reference.targetTypeFieldKey);
           continue;
         }
@@ -1397,15 +1449,15 @@ export class PageModulesService {
         }
 
         if (inferredTargetType === "none") {
-          if (hasProductTarget || hasPageTarget) {
-            pushLinkError("不跳转时不能保留商品或页面去向", reference.targetTypeFieldKey);
+          if (hasProductTarget || hasCategoryTarget || hasLinkTarget) {
+            pushLinkError("不跳转时不能保留商品、分类或链接去向", reference.targetTypeFieldKey);
           }
           continue;
         }
 
         if (inferredTargetType === "product") {
-          if (hasPageTarget) {
-            pushLinkError("商品跳转不能同时保留页面链接", reference.linkUrlFieldKey);
+          if (hasCategoryTarget || hasLinkTarget) {
+            pushLinkError("商品跳转不能同时保留分类或链接去向", reference.linkUrlFieldKey);
             continue;
           }
           if (productCode && hasProductIdTarget) {
@@ -1440,10 +1492,42 @@ export class PageModulesService {
           continue;
         }
 
-        if (hasProductTarget) {
-          pushLinkError("页面跳转不能同时保留商品编号", reference.productCodeFieldKey);
+        if (inferredTargetType === "category") {
+          if (hasProductTarget || hasLinkTarget) {
+            pushLinkError("分类跳转不能同时保留商品或链接去向", reference.categorySlugFieldKey);
+            continue;
+          }
+          if (!categorySlug) {
+            pushLinkError("分类跳转必须选择有效分类", reference.categorySlugFieldKey);
+            continue;
+          }
+          categorySlugs.add(categorySlug);
+          const references = categoryReferences.get(categorySlug) ?? [];
+          references.push({
+            blockId: reference.blockId,
+            path: `${reference.path}.${reference.categorySlugFieldKey}`,
+            label: itemLabel,
+            field: contextField(reference.categorySlugFieldKey),
+            ...(reference.index === undefined ? {} : { index: reference.index }),
+          });
+          categoryReferences.set(categorySlug, references);
           continue;
         }
+
+        if (hasProductTarget || hasCategoryTarget) {
+          pushLinkError("链接跳转不能同时保留商品或分类去向", reference.productCodeFieldKey);
+          continue;
+        }
+
+        if (inferredTargetType === "external") {
+          if (legacyLink || !linkUrl) {
+            pushLinkError("外部链接必须填写完整的 HTTPS 地址", reference.linkUrlFieldKey);
+          } else if (!this.isSafeExternalLink(linkUrl)) {
+            pushLinkError("外部链接只允许完整的 HTTPS 地址", reference.linkUrlFieldKey);
+          }
+          continue;
+        }
+
         if (linkUrl && legacyLink && linkUrl !== legacyLink) {
           pushLinkError("页面跳转存在两个不同链接，请重新选择唯一去向", reference.linkUrlFieldKey);
           continue;
@@ -1871,7 +1955,7 @@ export class PageModulesService {
       const semanticRootContent = rootContent.filter((block) =>
         isBusinessRegionBlock(block) || (
           isVisiblePuckBlock(block) &&
-          Boolean(CONTENT_TEMPLATE_BY_MODULE_TYPE[block.type])
+          (Boolean(CONTENT_TEMPLATE_BY_MODULE_TYPE[block.type]) || block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE)
         ),
       );
       if (
@@ -1880,27 +1964,6 @@ export class PageModulesService {
       ) {
         errors.push("固定业务区必须紧随首个品牌框架模块之后");
       }
-      if (pageRule.headerMode.configured === "overlay-light") {
-        const firstTemplate = CONTENT_TEMPLATE_BY_MODULE_TYPE[
-          orderedVisibleBlocks[0]?.type
-        ];
-        if (firstTemplate?.key !== pageRule.headerMode.overlayRequiresFirstTemplate) {
-          errors.push("覆盖式浅色导航要求首个可见品牌模块为首屏主视觉");
-        }
-      }
-    }
-    const primaryStageIndexes = orderedVisibleBlocks
-      .map((block, index) =>
-        CONTENT_TEMPLATE_BY_MODULE_TYPE[block.type]?.visualRole === "primary-stage"
-          ? index
-          : -1,
-      )
-      .filter((index: number) => index >= 0);
-    if (primaryStageIndexes.length > 1) {
-      errors.push("每页最多只能有 1 个首屏主舞台（primary-stage）");
-    }
-    if (primaryStageIndexes.length === 1 && primaryStageIndexes[0] !== 0) {
-      errors.push("首屏主舞台（primary-stage）必须是首个可见品牌内容区");
     }
 
     if (Array.isArray(puckData.content)) {
@@ -1924,6 +1987,214 @@ export class PageModulesService {
           );
         });
       });
+    }
+
+    if (dynamicTemplateInstances.length > 0) {
+      const seenInstanceIds = new Set<string>();
+      for (const instance of dynamicTemplateInstances) {
+        const instanceId = this.isNonEmptyString(instance.props.instanceId)
+          ? instance.props.instanceId.trim()
+          : "";
+        if (!instanceId || !seenInstanceIds.has(instanceId)) {
+          if (instanceId) seenInstanceIds.add(instanceId);
+          continue;
+        }
+        const errorIndex = errors.push(`${instance.label}：页面模板实例 ID 不能重复`) - 1;
+        errorContexts[errorIndex] = {
+          blockId: instance.blockId,
+          path: `${instance.path}.props.instanceId`,
+          field: "instanceId",
+        };
+      }
+      const exactVersions = await db.dynamicTemplateVersion.findMany({
+        where: {
+          OR: dynamicTemplateInstances.map((instance) => ({
+            version: instance.templateVersion,
+            template: {
+              templateId: instance.templateId,
+              visibility: "STAFF",
+            },
+          })),
+        },
+        select: {
+          version: true,
+          schemaVersion: true,
+          definition: true,
+          definitionChecksum: true,
+          template: { select: { templateId: true } },
+        },
+      });
+      const versionByKey = new Map(exactVersions.map((version) => [
+        dynamicTemplateVersionKey(version.template.templateId, version.version),
+        version,
+      ]));
+      for (const instance of dynamicTemplateInstances) {
+        const version = versionByKey.get(
+          dynamicTemplateVersionKey(instance.templateId, instance.templateVersion),
+        );
+        if (!version) {
+          const errorIndex = errors.push(
+            `${instance.label}：正式模板 ${instance.templateId} v${instance.templateVersion} 不存在或不可用于页面`,
+          ) - 1;
+          errorContexts[errorIndex] = {
+            blockId: instance.blockId,
+            path: `${instance.path}.props.templateVersion`,
+            field: "templateVersion",
+          };
+          continue;
+        }
+        const definitionValidation = validateDynamicTemplateDefinition(version.definition);
+        if (
+          !definitionValidation.valid
+          || !definitionValidation.definition
+          || definitionValidation.definition.templateId !== instance.templateId
+          || definitionValidation.definition.schemaVersion !== version.schemaVersion
+          || !matchesDynamicTemplateDefinitionChecksum(
+            definitionValidation.definition,
+            version.definitionChecksum,
+          )
+        ) {
+          const errorIndex = errors.push(
+            `${instance.label}：正式模板 ${instance.templateId} v${instance.templateVersion} 的结构或校验和已损坏`,
+          ) - 1;
+          errorContexts[errorIndex] = {
+            blockId: instance.blockId,
+            path: `${instance.path}.props.templateVersion`,
+            field: "templateVersion",
+          };
+          continue;
+        }
+        const result = validateDynamicTemplateInstance(
+          instance.props,
+          definitionValidation.definition,
+        );
+        if (result.definition) {
+          dynamicTemplateCompositionByProps.set(instance.props, {
+            visualRole: result.definition.metadata.visualRole ?? "support-stage",
+            headerCompatibility: new Set(
+              result.definition.metadata.headerCompatibility ?? ["solid"],
+            ),
+          });
+        }
+        for (const issue of result.issues) {
+          const errorIndex = errors.push(`${instance.label}：${issue.message}`) - 1;
+          errorContexts[errorIndex] = {
+            blockId: instance.blockId,
+            path: `${instance.path}.props${issue.pathSuffix}`,
+            field: issue.field,
+            index: issue.index,
+          };
+        }
+        for (const asset of result.assets) {
+          const assetLabel = `${instance.label}：${result.definition?.slots[asset.slotId]?.label ?? asset.slotId} 素材`;
+          if (!this.isSafeAssetUrl(asset.url)) {
+            const errorIndex = errors.push(`${assetLabel}地址不合法`) - 1;
+            errorContexts[errorIndex] = {
+              blockId: instance.blockId,
+              path: `${instance.path}.props.contentBySlotId.${asset.slotId}.src`,
+              field: asset.slotId,
+            };
+          } else {
+            const previousErrorCount = errors.length;
+            this.collectMissingUploadError(asset.url, assetLabel, missingUploadUrls, errors);
+            for (let index = previousErrorCount; index < errors.length; index += 1) {
+              errorContexts[index] = {
+                blockId: instance.blockId,
+                path: `${instance.path}.props.contentBySlotId.${asset.slotId}.src`,
+                field: asset.slotId,
+              };
+            }
+          }
+        }
+        const registerProductCode = (slotId: string, code: string, index?: number) => {
+          productCodes.add(code);
+          const references = productCodeReferences.get(code) ?? [];
+          references.push({
+            blockId: instance.blockId,
+            path: `${instance.path}.props.contentBySlotId.${slotId}${index === undefined ? "" : `[${index}]`}`,
+            label: instance.label,
+            field: slotId,
+            ...(index === undefined ? {} : { index }),
+          });
+          productCodeReferences.set(code, references);
+        };
+        const registerCategorySlug = (slotId: string, slug: string, index?: number) => {
+          categorySlugs.add(slug);
+          const references = categoryReferences.get(slug) ?? [];
+          references.push({
+            blockId: instance.blockId,
+            path: `${instance.path}.props.contentBySlotId.${slotId}${index === undefined ? "" : `[${index}]`}`,
+            label: instance.label,
+            field: slotId,
+            ...(index === undefined ? {} : { index }),
+          });
+          categoryReferences.set(slug, references);
+        };
+        result.productCodes.forEach((reference) => {
+          registerProductCode(reference.slotId, reference.value, reference.index);
+        });
+        result.categorySlugs.forEach((reference) => {
+          registerCategorySlug(reference.slotId, reference.value, reference.index);
+        });
+        for (const action of result.actions) {
+          if (action.targetType === "product") {
+            registerProductCode(action.slotId, action.value, action.index);
+          } else if (action.targetType === "category") {
+            registerCategorySlug(action.slotId, action.value, action.index);
+          } else if (
+            action.targetType === "page"
+            && !isContentTemplatePageTarget(action.value)
+          ) {
+            const errorIndex = errors.push(`${instance.label}：站内页面去向未登记`) - 1;
+            errorContexts[errorIndex] = {
+              blockId: instance.blockId,
+              path: `${instance.path}.props.contentBySlotId.${action.slotId}`,
+              field: action.slotId,
+            };
+          } else if (
+            action.targetType === "external"
+            && !this.isSafeExternalLink(action.value)
+          ) {
+            const errorIndex = errors.push(`${instance.label}：外部链接只允许完整 HTTPS 地址`) - 1;
+            errorContexts[errorIndex] = {
+              blockId: instance.blockId,
+              path: `${instance.path}.props.contentBySlotId.${action.slotId}`,
+              field: action.slotId,
+            };
+          }
+        }
+      }
+    }
+
+    const compositionByBlock = orderedVisibleBlocks.map((block) => {
+      const fixed = CONTENT_TEMPLATE_BY_MODULE_TYPE[block.type];
+      if (fixed) {
+        return {
+          visualRole: fixed.visualRole,
+          overlayLightCompatible:
+            fixed.key === pageRule?.headerMode.overlayRequiresFirstTemplate,
+        };
+      }
+      const dynamic = block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE
+        ? dynamicTemplateCompositionByProps.get(block.props)
+        : undefined;
+      return {
+        visualRole: dynamic?.visualRole,
+        overlayLightCompatible:
+          dynamic?.headerCompatibility.has("overlay-light") ?? false,
+      };
+    });
+    if (
+      pageRule?.headerMode.configured === "overlay-light"
+      && !compositionByBlock[0]?.overlayLightCompatible
+    ) {
+      errors.push("覆盖式浅色导航要求首个可见品牌模块明确兼容浅色覆盖导航");
+    }
+    const primaryStageIndexes = compositionByBlock
+      .map((composition, index) => composition.visualRole === "primary-stage" ? index : -1)
+      .filter((index) => index >= 0);
+    if (primaryStageIndexes.length > 0 && primaryStageIndexes[0] !== 0) {
+      errors.push("首屏主舞台（primary-stage）必须是首个可见品牌内容区");
     }
 
     if (productIds.size > 0) {
@@ -2125,6 +2396,8 @@ export class PageModulesService {
     }
 
     const document = withoutBusinessFacts as Record<string, unknown>;
+    const persistableDocument = { ...document };
+    delete persistableDocument[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY];
     const normalizeBlock = (block: unknown): unknown => {
       if (!block || typeof block !== "object" || Array.isArray(block)) return block;
       const value = block as Record<string, unknown>;
@@ -2138,32 +2411,38 @@ export class PageModulesService {
         return block;
       }
       const props = value.props as Record<string, unknown>;
-      if (!Object.prototype.hasOwnProperty.call(props, "__instanceOverrides")) {
-        return block;
-      }
-
-      const normalizedOverrides = sanitizeContentTemplateLayoutData(
-        value.type,
-        props.__instanceOverrides,
-      );
       const nextProps = { ...props };
-      if (normalizedOverrides) {
-        nextProps.__instanceOverrides = normalizedOverrides;
-      } else {
-        delete nextProps.__instanceOverrides;
+      let touched = false;
+      if (Object.prototype.hasOwnProperty.call(props, "__instanceOverrides")) {
+        const normalizedOverrides = sanitizeContentTemplateLayoutData(
+          value.type,
+          props.__instanceOverrides,
+        );
+        if (normalizedOverrides) {
+          nextProps.__instanceOverrides = normalizedOverrides;
+        } else {
+          delete nextProps.__instanceOverrides;
+        }
+        touched = true;
       }
-      return { ...value, props: nextProps };
+      if (Object.prototype.hasOwnProperty.call(props, "__templateOrigin")) {
+        const origin = this.normalizeFixedTemplateOrigin(value.type, props.__templateOrigin);
+        if (origin) nextProps.__templateOrigin = origin;
+        else delete nextProps.__templateOrigin;
+        touched = true;
+      }
+      return touched ? { ...value, props: nextProps } : block;
     };
 
     return {
-      ...document,
-      ...(Array.isArray(document.content)
-        ? { content: document.content.map(normalizeBlock) }
+      ...persistableDocument,
+      ...(Array.isArray(persistableDocument.content)
+        ? { content: persistableDocument.content.map(normalizeBlock) }
         : {}),
-      ...(document.zones && typeof document.zones === "object" && !Array.isArray(document.zones)
+      ...(persistableDocument.zones && typeof persistableDocument.zones === "object" && !Array.isArray(persistableDocument.zones)
         ? {
             zones: Object.fromEntries(
-              Object.entries(document.zones).map(([zoneKey, blocks]) => [
+              Object.entries(persistableDocument.zones).map(([zoneKey, blocks]) => [
                 zoneKey,
                 Array.isArray(blocks) ? blocks.map(normalizeBlock) : blocks,
               ]),
@@ -2396,6 +2675,15 @@ export class PageModulesService {
     return /^https?:\/\//i.test(url);
   }
 
+  private isSafeExternalLink(value: string): boolean {
+    try {
+      const url = new URL(value.trim());
+      return url.protocol === "https:" && Boolean(url.hostname);
+    } catch {
+      return false;
+    }
+  }
+
   private parseExpectedUpdatedAt(value?: string): Date | null {
     if (!value) return null;
     const date = new Date(value);
@@ -2434,11 +2722,15 @@ export class PageModulesService {
       where: { pageKey },
     });
     if (!doc) return [];
-    return this.prisma.pageDocumentRevision.findMany({
+    const revisions = await this.prisma.pageDocumentRevision.findMany({
       where: { documentId: doc.id },
       orderBy: { version: "desc" },
       take: 20,
     });
+    return revisions.map((revision) => ({
+      ...revision,
+      isPublished: revision.id === doc.publishedRevisionId,
+    }));
   }
 
   async restorePageDocumentRevision(
@@ -2490,6 +2782,81 @@ export class PageModulesService {
       );
     }
     return this.prisma.pageDocument.findUnique({ where: { pageKey } });
+  }
+
+  async rollbackPagePublication(
+    pageKey: string,
+    revisionId: number,
+    expectedPublishedRevisionId: number,
+    userId: number,
+  ) {
+    if (!Number.isInteger(revisionId) || revisionId <= 0) {
+      throw new BadRequestException("发布版本标识不正确");
+    }
+    if (!Number.isInteger(expectedPublishedRevisionId) || expectedPublishedRevisionId <= 0) {
+      throw new BadRequestException("当前线上版本标识不正确");
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: number }>>`
+        SELECT id FROM page_documents WHERE pageKey = ${pageKey} FOR UPDATE
+      `;
+      const document = await tx.pageDocument.findUnique({ where: { pageKey } });
+      if (!document) throw new NotFoundException("页面文档不存在");
+      if (document.publishedRevisionId !== expectedPublishedRevisionId) {
+        throw new ConflictException("线上版本已变化，请重新加载版本记录后再回滚");
+      }
+      const revision = await tx.pageDocumentRevision.findFirst({
+        where: {
+          id: revisionId,
+          documentId: document.id,
+          status: "published",
+        },
+      });
+      if (!revision || revision.documentId !== document.id) {
+        throw new BadRequestException("指定发布版本不属于当前页面");
+      }
+      if (revision.id === document.publishedRevisionId) {
+        throw new BadRequestException("该版本已经是当前线上版本");
+      }
+
+      const updated = await tx.pageDocument.updateMany({
+        where: {
+          id: document.id,
+          publishedRevisionId: expectedPublishedRevisionId,
+        },
+        data: { publishedRevisionId: revision.id },
+      });
+      if (updated.count !== 1) {
+        throw new ConflictException("线上版本刚刚发生变化，请重新加载后再回滚");
+      }
+      const rolledBackAt = new Date();
+      await tx.operationLog.create({
+        data: {
+          userId,
+          action: "PAGE_PUBLICATION_ROLLED_BACK",
+          module: "page-builder",
+          targetId: document.id,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            event: "PAGE_PUBLICATION_ROLLED_BACK",
+            actor: userId,
+            timestamp: rolledBackAt.toISOString(),
+            pageKey,
+            pageDocumentId: document.id,
+            fromRevision: expectedPublishedRevisionId,
+            toRevision: revision.id,
+            toRevisionVersion: revision.version,
+            result: "succeeded",
+          }),
+        },
+      });
+      const updatedDocument = await tx.pageDocument.findUnique({ where: { id: document.id } });
+      return { document: updatedDocument, revision };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    this.notifyPublicChange(pageKey, "page-document-published", result.revision.version);
+    return result.document;
   }
 
   private notifyPublicChange(
@@ -2628,27 +2995,34 @@ export class PageModulesService {
    *  expectedUpdatedAt 为乐观锁,防止并发覆盖其他编辑者的修改。 */
   async discardPageDocumentDraft(
     pageKey: string,
-    expectedUpdatedAt?: string,
+    expectedUpdatedAt: string,
   ) {
+    const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
+    if (!expected) {
+      throw new BadRequestException("放弃草稿时缺少页面版本标识");
+    }
     const doc = await this.prisma.pageDocument.findUnique({ where: { pageKey } });
     if (!doc) throw new BadRequestException("该页面没有草稿");
-    const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
-    if (expected && doc.updatedAt.getTime() !== expected.getTime()) {
+    if (doc.updatedAt.getTime() !== expected.getTime()) {
       throw new ConflictException(
         "草稿已被其他编辑保存，请刷新页面后重试",
       );
     }
-    const latestRevision = await this.prisma.pageDocumentRevision.findFirst({
-      where: { documentId: doc.id },
-      orderBy: { version: "desc" },
-    });
-    if (latestRevision) {
+    const publishedRevision = doc.publishedRevisionId
+      ? await this.prisma.pageDocumentRevision.findFirst({
+          where: { id: doc.publishedRevisionId, documentId: doc.id },
+        })
+      : null;
+    if (doc.publishedRevisionId && !publishedRevision) {
+      throw new ConflictException("线上版本指针无效，请先修复发布状态再放弃草稿");
+    }
+    if (publishedRevision) {
       const restored = await this.prisma.pageDocument.updateMany({
         where: { pageKey, updatedAt: doc.updatedAt },
         data: {
-          puckData: toInputJsonValue(latestRevision.puckData),
+          puckData: toInputJsonValue(publishedRevision.puckData),
           metadata: toInputJsonValue(
-            withoutContentTemplatePublicationAttestation(latestRevision.metadata),
+            withoutContentTemplatePublicationAttestation(publishedRevision.metadata),
           ),
           status: "PUBLISHED",
         },

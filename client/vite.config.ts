@@ -35,7 +35,7 @@ export default defineConfig(({ mode, command }) => {
         // 排除构建输出和图片目录，减少中文文件名监视负担
         ignored: ["**/dist/**", "**/dist-*/**", "**/public/images/**"],
       },
-      // Mock 模式下不需要代理，后端启动后取消注释
+      // 统一代理本地 API 与上传路径
       proxy: {
         "/api": {
           target: apiProxyTarget,

@@ -262,6 +262,11 @@ export default function HotspotBlock({
                 color: "#fff",
                 fontSize: 11,
                 letterSpacing: "0.08em",
+                whiteSpace: "nowrap",
+                maxWidth: "100%",
+                boxSizing: "border-box",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
                 opacity: 0.85,
                 pointerEvents: "none",
               }}

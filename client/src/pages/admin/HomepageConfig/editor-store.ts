@@ -143,6 +143,7 @@ export type PageDocumentRevision = {
   publishedAt?: string | null;
   publishedBy?: number | null;
   createdAt?: string;
+  isPublished?: boolean;
 };
 
 /** 后台草稿快照：发布版本抽屉中用于展示与一键编辑的“未发布草稿”。 */

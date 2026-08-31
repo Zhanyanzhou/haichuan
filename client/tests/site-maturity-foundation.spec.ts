@@ -163,6 +163,19 @@ test("联系页输出事实型 Organization 与 FAQ Schema 并标记必填语义
     }));
   expect(schemaTypes).toEqual(expect.arrayContaining(["Organization", "FAQPage"]));
 
+  const organization = await page
+    .locator('script[data-structured-data="organization"]')
+    .evaluate((script) => JSON.parse(script.textContent || "{}"));
+  expect(organization).toMatchObject({
+    "@type": "Organization",
+    legalName: "深圳市海川文化创意设计有限公司",
+    identifier: {
+      propertyID: "统一社会信用代码",
+      value: "91440300MA5HH1J83Y",
+    },
+    foundingDate: "2022-09-22",
+  });
+
   for (const id of [
     "cf-name",
     "cf-phone",
@@ -173,6 +186,18 @@ test("联系页输出事实型 Organization 与 FAQ Schema 并标记必填语义
   ]) {
     await expect(page.locator(`#${id}`)).toHaveAttribute("aria-required", "true");
   }
+});
+
+test("经营主体与隐私页使用同一法定事实并如实说明分析同意边界", async ({ page }) => {
+  await page.goto("/business-info");
+  await expect(page.getByRole("heading", { level: 1, name: "经营主体信息" })).toBeVisible();
+  await expect(page.getByText("深圳市海川文化创意设计有限公司", { exact: true })).toBeVisible();
+  await expect(page.getByText("91440300MA5HH1J83Y", { exact: true })).toBeVisible();
+
+  await page.goto("/privacy");
+  await expect(page.getByText(/行为分析功能默认关闭/)).toBeVisible();
+  await expect(page.getByText(/只有在该功能已启用且您明确同意后/)).toBeVisible();
+  await expect(page.getByText(/随机分析标识仅保存在当前会话存储中/)).toBeVisible();
 });
 
 test("404 在 390px 视口无横向溢出且键盘焦点清晰", async ({ page }) => {

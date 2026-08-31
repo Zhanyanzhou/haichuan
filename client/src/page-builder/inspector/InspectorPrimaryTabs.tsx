@@ -10,10 +10,10 @@ interface InspectorPrimaryTabsProps {
 
 const TABS: ReadonlyArray<{ mode: InspectorPrimaryMode; label: string }> = [
   { mode: "content", label: "内容编辑" },
-  { mode: "design", label: "模板编辑" },
+  { mode: "design", label: "构图调整" },
 ];
 
-/** 固定的 Inspector 一级导航；对象切换时只变化内容，不增删页签。 */
+/** 编辑器全局工作模式；通过 InspectorModePortal 挂载到顶部工具栏。 */
 export default function InspectorPrimaryTabs({
   activeMode,
   designDisabled = false,
@@ -40,8 +40,8 @@ export default function InspectorPrimaryTabs({
   };
 
   return (
-    <nav className="homepage-editor__panel-mode-tabs" aria-label="属性面板一级导航">
-      <div role="tablist" aria-label="属性面板一级导航">
+    <nav className="homepage-editor__panel-mode-tabs" aria-label="编辑工作模式">
+      <div role="tablist" aria-label="编辑工作模式">
         {TABS.map(({ mode, label }) => {
           const disabled = mode === "design" && designDisabled;
           return (

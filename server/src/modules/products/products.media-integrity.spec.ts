@@ -316,3 +316,34 @@ test("装修引用与咨询快照只为可读媒体生成受控地址", async ()
   assert.equal(snapshots.get(6)?.mediaUrl, "/products/catalog/6/media/2");
   assert.deepEqual(snapshotWhere.NOT, { salesMode: "DIRECT_PURCHASE" });
 });
+
+test("同一缩略图变体合并并发缩放并复用短时缓存", async () => {
+  const service = new ProductsService(
+    {} as PrismaService,
+    readableMedia as never,
+    {} as never,
+  );
+  const resize = (
+    service as unknown as {
+      resizeMediaBuffer: (
+        buffer: Buffer,
+        width: number,
+        cacheKey: string,
+      ) => Promise<{ buffer: Buffer; mimeType: string } | null>;
+    }
+  ).resizeMediaBuffer.bind(service);
+  const input = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200"><rect width="1200" height="1200" fill="#8c6b3f"/>${" ".repeat(20_000)}</svg>`,
+  );
+
+  const [first, concurrent] = await Promise.all([
+    resize(input, 480, "staff:fixture"),
+    resize(input, 480, "staff:fixture"),
+  ]);
+  const cached = await resize(input, 480, "staff:fixture");
+
+  assert.ok(first);
+  assert.strictEqual(concurrent, first);
+  assert.strictEqual(cached, first);
+  assert.equal(first.mimeType, "image/webp");
+});

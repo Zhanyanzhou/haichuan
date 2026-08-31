@@ -1,4 +1,5 @@
-import { IsISO8601, IsObject, IsOptional, IsString, MaxLength } from "class-validator";
+import { Type } from "class-transformer";
+import { IsISO8601, IsInt, IsObject, IsOptional, IsString, MaxLength, Min } from "class-validator";
 
 export class SavePageDocumentDto {
   @IsString()
@@ -28,9 +29,8 @@ export class PublishPageDocumentDto {
   @MaxLength(80)
   pageKey?: string;
 
-  @IsOptional()
   @IsISO8601()
-  expectedUpdatedAt?: string;
+  expectedUpdatedAt!: string;
 }
 
 export class ValidatePageDocumentDto {
@@ -56,4 +56,16 @@ export class RestorePageDocumentRevisionDto {
 
   @IsISO8601()
   expectedUpdatedAt!: string;
+}
+
+export class RollbackPagePublicationDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  pageKey?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  expectedPublishedRevisionId!: number;
 }

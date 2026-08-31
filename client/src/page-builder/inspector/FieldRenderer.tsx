@@ -29,9 +29,19 @@ interface FieldRendererProps {
   update: (patch: PuckProps) => void;
   moduleType?: string;
   onRequestVisualEdit?: (nodeId: string) => void;
+  taskPresentation?: "media";
+  textRows?: number;
 }
 
-export default function FieldRenderer({ def, ctx, update, moduleType, onRequestVisualEdit }: FieldRendererProps) {
+export default function FieldRenderer({
+  def,
+  ctx,
+  update,
+  moduleType,
+  onRequestVisualEdit,
+  taskPresentation,
+  textRows,
+}: FieldRendererProps) {
   const value = ctx.props[def.key];
 
   switch (def.control) {
@@ -44,7 +54,7 @@ export default function FieldRenderer({ def, ctx, update, moduleType, onRequestV
           required={def.required}
           maxLength={def.maxLength}
           placeholder={def.placeholder}
-          rows={def.control === "textarea" ? def.rows : undefined}
+          rows={textRows ?? (def.control === "textarea" ? def.rows : undefined)}
           value={typeof value === "string" ? value : ""}
           error={def.required && !(typeof value === "string" && value.trim())}
           onChange={(next) => update({ [def.key]: next })}
@@ -163,6 +173,7 @@ export default function FieldRenderer({ def, ctx, update, moduleType, onRequestV
               : undefined
           }
           inheritBaseValue={inheritBaseValue}
+          taskPresentation={taskPresentation}
         />
       );
     }
@@ -181,13 +192,14 @@ export default function FieldRenderer({ def, ctx, update, moduleType, onRequestV
       // keyPrefix(如 "secondary")把读写切到 secondaryTargetType/secondaryProductId/secondaryLinkUrl;
       // 无前缀时首字母小写驼峰,与持久化键一致
       const prefix = def.keyPrefix ?? "";
-      const readKey = (suffix: "TargetType" | "ProductCode" | "ProductId" | "LinkUrl") =>
+      const readKey = (suffix: "TargetType" | "ProductCode" | "ProductId" | "CategorySlug" | "LinkUrl") =>
         prefix
           ? ctx.props[`${prefix}${suffix}`]
           : ctx.props[suffix.charAt(0).toLowerCase() + suffix.slice(1)];
       const targetType = readKey("TargetType");
       const productCode = readKey("ProductCode");
       const productId = readKey("ProductId");
+      const categorySlug = readKey("CategorySlug");
       const linkUrl = readKey("LinkUrl");
       return (
         <LinkTargetField
@@ -195,6 +207,7 @@ export default function FieldRenderer({ def, ctx, update, moduleType, onRequestV
           targetType={typeof targetType === "string" ? targetType : undefined}
           productCode={typeof productCode === "string" ? productCode : undefined}
           productId={typeof productId === "string" || typeof productId === "number" ? productId : undefined}
+          categorySlug={typeof categorySlug === "string" ? categorySlug : undefined}
           linkUrl={typeof linkUrl === "string" ? linkUrl : undefined}
           onChange={update}
           label={def.linkLabel ?? def.label}

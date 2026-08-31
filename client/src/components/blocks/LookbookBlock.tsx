@@ -38,7 +38,7 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
   const focusX = Math.min(100, Math.max(0, Number(styleConfig.focusX ?? 50)));
   const focusY = Math.min(100, Math.max(0, Number(styleConfig.focusY ?? 50)));
   const hasProducts = Array.isArray(products) && products.length > 0;
-  const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, linkUrl });
+  const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, categorySlug: content.categorySlug, linkUrl });
   // 纯氛围模式：无关联作品时，第 6 页「大片」只保留竖幅氛围影像，零文字零商品
   const pureAtmosphere = !hasProducts;
 

@@ -171,7 +171,7 @@ bash /usr/local/bin/restore.sh
 生产主机禁止从工作区源码构建，也禁止以浮动 tag 部署。获得精确环境的部署与 migration 批准后，必须按以下顺序执行：
 
 1. 记录待发布版本和当前运行版本；为数据库、`uploads_data`、`private_media_data` 建立同一发布批次的部署前备份，核对备份产物可读，并记录可恢复的回滚点。只有备份文件、保留位置和恢复步骤，不等于恢复演练已经通过。
-2. 下载本次工作流产出的 `release-manifest.json`，独立核对 commit、构建参数、证明和负责人；确认 `qualityGate.headSha == gitSha`、`qualityGate.event == push`、`qualityGate.conclusion == success`，并打开 `qualityGate.runUrl` 复核完整工作流，而非只看单个 job。随后运行 `node scripts/verify-release-images.mjs --manifest <清单路径>`。把清单中的完整 `server.reference`、`client.reference`、`gitSha` 与 `migrationBundleSha256` 分别写入受控部署环境的 `SERVER_IMAGE`、`CLIENT_IMAGE`、`RELEASE_GIT_SHA`、`MIGRATION_BUNDLE_SHA256`，并设置 `RELEASE_SOURCE`。两个镜像变量必须形如 `ghcr.io/...@sha256:<64位摘要>`。
+2. 下载本次工作流产出的 `release-manifest.json`，独立核对 commit、构建参数、证明和负责人；确认 `qualityGate.headSha == gitSha`、`qualityGate.event == push`、`qualityGate.conclusion == success`，并打开 `qualityGate.runUrl` 复核完整工作流，而非只看单个 job。根质量套件必须包含并通过 `npm run test:release-supply-chain`，证明错误 Git SHA、migration bundle、Quality Gate 和非 digest 镜像引用都会失败关闭。随后运行 `node scripts/verify-release-images.mjs --manifest <清单路径>`。把清单中的完整 `server.reference`、`client.reference`、`gitSha` 与 `migrationBundleSha256` 分别写入受控部署环境的 `SERVER_IMAGE`、`CLIENT_IMAGE`、`RELEASE_GIT_SHA`、`MIGRATION_BUNDLE_SHA256`，并设置 `RELEASE_SOURCE`。两个镜像变量必须形如 `ghcr.io/...@sha256:<64位摘要>`。
 3. 拉取并在启动前验证本地镜像摘要及 OCI 标签；任一不匹配都停止：
 
 ```bash
@@ -182,6 +182,7 @@ node scripts/verify-release-images.mjs --runtime
 ```
 
 4. 在目标数据库上核验 migration 历史和待应用清单；仓库 migration 目录不能证明目标库状态。`release-preflight` 会把 migration 文件哈希、`_prisma_migrations` ledger 和唯一遗留签认的结构合同共同纳入阻断门禁。已应用 migration 一律不可修改；`server/prisma/migration-integrity-exceptions.json` 只允许审计确认的精确三方匹配，不是通用忽略清单。
+   PageDocument 发布指针批次必须先在获批的一次性 runner 中运行 `page-published-revision-backfill.js` 的默认 dry-run。该入口在建立连接前要求 `PAGE_PUBLISHED_REVISION_AUDIT_READ_ONLY_AUTHORIZED=1`、环境 ID、预期数据库名和审批引用，并校验 `DATABASE_URL` 中的数据库名；连接后拒绝除 `USAGE/SELECT/SHOW VIEW` 外的权限，输出 migration 完整性、指针列、悬空/跨页面指针与 backfill 聚合，不输出页面正文。指针 migration 尚未应用时报告 `POINTER_MIGRATION_REQUIRED`，不得为了取得候选数绕过顺序。真正回填必须另行使用只含 `SELECT/UPDATE` 的最小权限账号，同时提供 `--apply` 与 `PAGE_PUBLISHED_REVISION_BACKFILL_APPLY=1`；migration 未完整、指针列缺失、账号权限过宽、指针不变量失败或发生并发冲突时均失败关闭。dry-run 或 apply 报告都不构成 migration、部署、页面发布或流量切换授权。
 5. 当前运行时镜像通过 `npm ci --omit=dev` 排除了位于 `devDependencies` 的 Prisma CLI，因此禁止执行 `docker compose exec server npx prisma migrate deploy`，也禁止依赖 `npx` 临时下载未锁定 CLI。等待独立 migration runner 的版本、锁文件、目标数据库、待应用清单、负责人和回退方案逐项获批；只有清单与批准范围一致时，才在同一 runner 中执行获批 migration。本文不授权或提供生产 migration 命令。
 6. migration 成功并留存记录后，才以已验证 digest 启动新服务；`--no-build` 是生产硬门禁：
 
@@ -212,11 +213,12 @@ unset BOOTSTRAP_ADMIN_USERNAME BOOTSTRAP_ADMIN_PASSWORD
 
 命令退出非零时不得改用完整 Seed、SQL 手工提权或重复覆盖账号；保留脱敏错误代码，核对目标库与已有管理员状态后重新审批。初始化成功后由负责人首次登录，在「店铺资料」写入并复核正式联系方式，再通过现有页面编辑器分别保存、预检和发布 `home`、`about`、`products`、`catalog`、`custom`、`contact` 六页真实内容。
 
-9. 正式内容完成后运行只读发布前门禁。它会先检查 migration ledger、仓库文件哈希和遗留结构签认，再检查启用超管、已知占位管理员资料、5 条已知 Demo 商品、持久化 SiteSettings、四项联系资料，以及六页最新发布 revision 的当前合同签认和服务端重新验证；输出不包含密码、联系方式值或页面正文：
+9. 正式内容完成后运行只读发布前门禁。它会先检查 migration ledger、仓库文件哈希和遗留结构签认，再检查启用超管、已知占位管理员资料、5 条已知 Demo 商品、持久化 SiteSettings、四项联系资料，以及六页 `publishedRevisionId` 精确指向的同页面 revision 的当前合同签认和服务端重新验证；空指针、悬空/跨页面指针均失败关闭，不会退回“最新 published revision”猜测。输出不包含密码、联系方式值或页面正文。
+
+该命令必须运行在获批的一次性候选 runner 中，使用只具备目标数据库 `USAGE/SELECT/SHOW VIEW` 且不跨库的账号；禁止复用长驻 server 的读写账号，也禁止通过 `docker compose exec server` 绕过账号边界。执行前临时注入 `RELEASE_PREFLIGHT_READ_ONLY_AUTHORIZED=1`、环境 ID、预期数据库名、审批引用和只读 `DATABASE_URL`；环境名和数据库名必须与实际连接一致，审批引用只以 SHA-256 进入报告：
 
 ```bash
-docker compose -f docker-compose.yml exec -T server \
-  node dist/cli/release-preflight.js
+node dist/cli/release-preflight.js
 ```
 
 只有 `technicalReady=true` 且命令退出 0 才能进入人工 Go/No-Go；在 B4 的合作协议、资质与审计闭环完成前，`PARTNER_APPLICATIONS_WRITE_ENABLED=true` 会由预检直接阻断。预检不代替联系方式真实性、运营主体、法务文案、媒体商用权利、正式域名、TLS、监控、异地备份或目标环境验收。

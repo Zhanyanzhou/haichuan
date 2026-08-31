@@ -1,0 +1,876 @@
+import { expect, test, type Page } from "@playwright/test";
+import { installAdminSession } from "./fixtures/session-auth";
+
+const appMode = process.env.PLAYWRIGHT_APP_MODE === "mock" ? "mock" : "development";
+
+function json(data: unknown, status = 200) {
+  return {
+    status,
+    contentType: "application/json",
+    body: JSON.stringify(status >= 400
+      ? { code: status, message: "fixture failure" }
+      : { code: 200, data, message: "success" }),
+  };
+}
+
+function definition(version: 1 | 2) {
+  return {
+    schemaVersion: 1,
+    templateId: "tpl_page_upgrade",
+    name: "内容展示｜版本升级",
+    description: `正式版本 ${version}`,
+    metadata: {
+      category: "内容展示",
+      purpose: "页面版本升级",
+      layoutType: "纵向内容",
+      slotSummary: "1 个标题槽位",
+      recommendedFor: ["home"],
+      desktopRatio: "16:9",
+      mobileRatio: "4:5",
+      visualRole: "support-stage",
+      headerCompatibility: ["solid"],
+      tags: ["upgrade"],
+    },
+    rootNodeId: "node_root",
+    nodes: {
+      node_root: {
+        nodeId: "node_root",
+        type: "Section",
+        name: "模板根节点",
+        childIds: ["node_container"],
+        props: { semanticTag: "section" },
+        responsive: {
+          desktop: { display: "block", order: 0, width: "fill", height: { mode: "auto" } },
+          mobile: { display: "block", order: 0, width: "fill", height: { mode: "auto" } },
+        },
+        hidden: false,
+      },
+      node_container: {
+        nodeId: "node_container",
+        type: "Container",
+        name: "内容容器",
+        childIds: ["node_heading"],
+        props: {},
+        responsive: {
+          desktop: { display: "flex", direction: "column", order: 0, width: "fill", height: { mode: "auto" }, gap: { value: version, unit: "rem" } },
+          mobile: { display: "flex", direction: "column", order: 0, width: "fill", height: { mode: "auto" } },
+        },
+        hidden: false,
+      },
+      node_heading: {
+        nodeId: "node_heading",
+        type: "HeadingSlot",
+        name: "标题",
+        slotId: "slot_heading",
+        childIds: [],
+        props: {},
+        instanceEditPolicy: {
+          position: true,
+          size: true,
+          zIndex: true,
+          typography: true,
+          spacing: true,
+          minWidthPercent: 50,
+          maxWidthPercent: 120,
+          maxOffsetPercent: 20,
+          minFontSizePx: 14,
+          maxFontSizePx: 64,
+          maxSpacingPx: 80,
+        },
+        responsive: {
+          desktop: { display: "block", order: 0, width: "fill", height: { mode: "auto" } },
+          mobile: { display: "block", order: 0, width: "fill", height: { mode: "auto" } },
+        },
+        hidden: false,
+      },
+    },
+    slots: {
+      slot_heading: {
+        slotId: "slot_heading",
+        key: "heading",
+        type: "heading",
+        label: "标题",
+        required: true,
+        editable: true,
+        hideable: false,
+        validation: { minLength: 1, maxLength: 60 },
+        desktopRules: { fontRole: "display", maxLines: 2 },
+        mobileRules: { fontRole: "heading", maxLines: 3 },
+      },
+    },
+    defaultContent: { slot_heading: `版本 ${version} 默认标题` },
+  };
+}
+
+function lockedLayoutDefinition() {
+  const result: any = definition(1);
+  result.nodes.node_heading.instanceEditPolicy = {
+    position: false,
+    size: false,
+    zIndex: false,
+    typography: false,
+    spacing: false,
+    minWidthPercent: 50,
+    maxWidthPercent: 120,
+    maxOffsetPercent: 20,
+    minFontSizePx: 14,
+    maxFontSizePx: 64,
+    maxSpacingPx: 80,
+  };
+  return result;
+}
+
+function carouselDefinition() {
+  const result: any = definition(1);
+  result.metadata.purpose = "品牌展示";
+  result.metadata.slotSummary = "1 个标题槽位，1 个轮播槽位";
+  result.nodes.node_container.childIds.push("node_carousel");
+  result.nodes.node_carousel = {
+    nodeId: "node_carousel",
+    type: "Carousel",
+    name: "系列轮播",
+    slotId: "slot_carousel",
+    childIds: [],
+    props: {},
+    responsive: {
+      desktop: { display: "block", order: 1, width: "fill", height: { mode: "auto" } },
+      mobile: { display: "block", order: 1, width: "fill", height: { mode: "auto" } },
+    },
+    hidden: false,
+  };
+  result.slots.slot_carousel = {
+    slotId: "slot_carousel",
+    key: "carouselContent",
+    type: "carousel",
+    label: "系列轮播",
+    required: false,
+    editable: true,
+    hideable: true,
+    validation: {},
+    desktopRules: {},
+    mobileRules: {},
+  };
+  result.defaultContent.slot_carousel = {
+    images: [],
+    autoPlay: true,
+    interval: 4000,
+    showDots: true,
+    showArrows: true,
+    desktopRatio: "wide",
+    mobileRatio: "portrait",
+  };
+  return result;
+}
+
+function productCollectionDefinition() {
+  const result: any = definition(1);
+  result.metadata.purpose = "商品销售";
+  result.metadata.slotSummary = "1 个标题槽位，1 个商品集合槽位";
+  result.nodes.node_container.childIds.push("node_product_collection");
+  result.nodes.node_product_collection = {
+    nodeId: "node_product_collection",
+    type: "ProductCollection",
+    name: "商品集合",
+    slotId: "slot_product_collection",
+    childIds: [],
+    props: {},
+    responsive: {
+      desktop: { display: "block", order: 1, width: "fill", height: { mode: "auto" } },
+      mobile: { display: "block", order: 1, width: "fill", height: { mode: "auto" } },
+    },
+    hidden: false,
+  };
+  result.slots.slot_product_collection = {
+    slotId: "slot_product_collection",
+    key: "productCollectionContent",
+    type: "productCollection",
+    label: "商品集合",
+    required: false,
+    editable: true,
+    hideable: true,
+    validation: { maxItems: 8 },
+    desktopRules: {},
+    mobileRules: {},
+  };
+  result.defaultContent.slot_product_collection = {
+    productCodes: [],
+    title: "本季精选",
+    layout: "grid-3",
+    mobileColumns: 2,
+    displayMode: "standard",
+    actionStyle: "text",
+    showPrice: true,
+  };
+  return result;
+}
+
+function directBusinessDefinition() {
+  const result: any = definition(1);
+  result.metadata.purpose = "商品销售";
+  const entries = [
+    { nodeId: "node_product", type: "ProductSlot", slotId: "slot_product", slotType: "product", label: "主商品", validation: {} },
+    { nodeId: "node_collection", type: "CollectionSlot", slotId: "slot_collection", slotType: "collection", label: "搭配商品", validation: { minItems: 1, maxItems: 4 } },
+    { nodeId: "node_action", type: "ButtonSlot", slotId: "slot_action", slotType: "button", label: "主行动", validation: { maxLength: 30 } },
+    { nodeId: "node_summary", type: "TextSlot", slotId: "slot_summary", slotType: "text", label: "补充说明", validation: { maxLength: 120 } },
+  ];
+  for (const [index, entry] of entries.entries()) {
+    result.nodes.node_container.childIds.push(entry.nodeId);
+    result.nodes[entry.nodeId] = {
+      nodeId: entry.nodeId,
+      type: entry.type,
+      name: entry.label,
+      slotId: entry.slotId,
+      childIds: [],
+      props: {},
+      responsive: {
+        desktop: { display: "block", order: index + 1, width: "fill", height: { mode: "auto" } },
+        mobile: { display: "block", order: index + 1, width: "fill", height: { mode: "auto" } },
+      },
+      hidden: false,
+    };
+    result.slots[entry.slotId] = {
+      slotId: entry.slotId,
+      key: `${entry.slotId}Content`,
+      type: entry.slotType,
+      label: entry.label,
+      required: entry.slotType === "product",
+      editable: true,
+      hideable: entry.slotType !== "product",
+      validation: entry.validation,
+      desktopRules: {},
+      mobileRules: {},
+    };
+  }
+  result.defaultContent.slot_summary = "可选的补充说明";
+  return result;
+}
+
+function imageDefinition(version: 1 | 2) {
+  const result: any = definition(version);
+  result.metadata.purpose = "品牌展示";
+  result.metadata.slotSummary = "1 个标题槽位，1 个图片槽位";
+  result.nodes.node_container.childIds.push("node_image");
+  result.nodes.node_image = {
+    nodeId: "node_image",
+    type: "ImageSlot",
+    name: "主图",
+    slotId: "slot_image",
+    childIds: [],
+    props: {},
+    instanceEditPolicy: {
+      position: true,
+      size: true,
+      zIndex: true,
+      imageFit: true,
+      imageFocus: true,
+      minWidthPercent: 50,
+      maxWidthPercent: 120,
+      maxOffsetPercent: 20,
+    },
+    responsive: {
+      desktop: { display: "block", order: 1, width: "fill", height: { mode: "aspect-ratio", ratio: { width: 4, height: 3 } } },
+      mobile: { display: "block", order: 1, width: "fill", height: { mode: "aspect-ratio", ratio: { width: 4, height: 5 } } },
+    },
+    hidden: false,
+  };
+  result.slots.slot_image = {
+    slotId: "slot_image",
+    key: "mainImage",
+    type: "image",
+    label: "主图",
+    required: false,
+    editable: true,
+    hideable: true,
+    validation: { recommendedWidth: 1200, recommendedHeight: 900 },
+    desktopRules: { aspectRatio: "4:3", objectFit: "cover", objectPosition: "center center" },
+    mobileRules: { aspectRatio: "4:5", objectFit: "cover", objectPosition: "center top" },
+  };
+  result.defaultContent.slot_image = {
+    src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect width='400' height='300' fill='%23ddd'/%3E%3C/svg%3E",
+    alt: "中性示例图",
+  };
+  return result;
+}
+
+function pageDocument(v1 = definition(1)) {
+  return {
+    id: 8801,
+    pageKey: "products",
+    puckData: {
+      content: [{
+        type: "动态模板实例",
+        props: {
+          id: "dynamic-upgrade-block",
+          instanceSchemaVersion: 1,
+          instanceId: "dynamic-upgrade-instance",
+          templateId: v1.templateId,
+          templateVersion: 1,
+          moduleName: v1.name,
+          contentBySlotId: { slot_heading: "页面实例填写内容" },
+          layoutOverridesByNodeId: {},
+          hiddenSlotIds: [],
+          isVisible: true,
+        },
+      }],
+      zones: {},
+      root: { props: {} },
+      resolvedDynamicTemplates: {
+        [`${v1.templateId}@1`]: {
+          templateId: v1.templateId,
+          version: 1,
+          schemaVersion: 1,
+          definitionChecksum: "checksum-v1",
+          definition: v1,
+        },
+      },
+    },
+    metadata: {},
+    editorVersion: "0.22.4",
+    status: "DRAFT",
+    version: 0,
+    publishedRevisionId: 91,
+    publishedAt: null,
+    publishedBy: null,
+    updatedAt: "2026-08-28T12:00:00.000Z",
+  };
+}
+
+async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; complex?: boolean; business?: boolean; directBusiness?: boolean; image?: boolean; duplicate?: boolean; legacyLayout?: boolean; lockedLayout?: boolean } = {}) {
+  const sourceDefinition = options.image
+    ? imageDefinition(1)
+    : options.lockedLayout
+      ? lockedLayoutDefinition()
+    : options.directBusiness
+      ? directBusinessDefinition()
+    : options.business
+    ? productCollectionDefinition()
+    : options.complex
+      ? carouselDefinition()
+      : definition(1);
+  const draft = pageDocument(sourceDefinition);
+  if (options.legacyLayout) {
+    draft.puckData.content[0].props.layoutOverridesByNodeId = {
+      node_heading: {
+        desktop: {
+          offsetXPercent: 8,
+          offsetYPercent: -4,
+          widthPercent: 115,
+          zIndex: 3,
+          fontSizePx: 40,
+          textAlign: "center",
+          marginTopPx: 12,
+          marginBottomPx: 18,
+        },
+      },
+    };
+  }
+  if (options.duplicate) {
+    const duplicate = structuredClone(draft.puckData.content[0]);
+    duplicate.props.id = "dynamic-upgrade-block-2";
+    duplicate.props.instanceId = "dynamic-upgrade-instance-2";
+    duplicate.props.contentBySlotId = { slot_heading: "第二实例保持原值" };
+    draft.puckData.content.push(duplicate);
+  }
+  let savedPayload: Record<string, unknown> | null = null;
+  let currentDocument = draft;
+  const templateWrites: Array<{ method: string; path: string }> = [];
+  const latestDefinition = options.image ? imageDefinition(2) : definition(2);
+  const latestPublishedTemplate = {
+    templateId: latestDefinition.templateId,
+    name: latestDefinition.name,
+    category: latestDefinition.metadata.category,
+    purpose: latestDefinition.metadata.purpose,
+    layoutType: latestDefinition.metadata.layoutType,
+    description: latestDefinition.description,
+    slotSummary: latestDefinition.metadata.slotSummary,
+    recommendedFor: latestDefinition.metadata.recommendedFor,
+    tags: latestDefinition.metadata.tags,
+    version: 2,
+    schemaVersion: 1,
+    definition: latestDefinition,
+    definitionChecksum: "checksum-v2",
+    versionNote: "调整桌面间距",
+    publishedAt: "2026-08-28T13:00:00.000Z",
+  };
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith("/auth/profile")) return route.fallback();
+    if (path.endsWith("/page-modules/dynamic-templates/catalog")) {
+      if (options.failVersionCheck) return route.fulfill(json(null, 503));
+      return route.fulfill(json({
+        items: [{ kind: "published", template: latestPublishedTemplate }],
+      }));
+    }
+    if (path.endsWith("/page-modules/dynamic-templates/published")) {
+      if (options.failVersionCheck) return route.fulfill(json(null, 503));
+      return route.fulfill(json([latestPublishedTemplate]));
+    }
+    if (path.includes("/page-modules/dynamic-templates") && request.method() !== "GET") {
+      templateWrites.push({ method: request.method(), path });
+      return route.fulfill(json({}));
+    }
+    if (path.endsWith("/page-modules/document/revisions")) return route.fulfill(json([]));
+    if (path.endsWith("/page-modules/document/published/admin")) return route.fulfill(json(null));
+    if (path.endsWith("/page-modules/document/published")) return route.fulfill(json(null));
+    if (path.endsWith("/page-modules/document/admin")) return route.fulfill(json(currentDocument));
+    if (path.endsWith("/page-modules/document") && request.method() === "PUT") {
+      savedPayload = request.postDataJSON() as Record<string, unknown>;
+      const nextPayload = savedPayload as typeof draft;
+      currentDocument = {
+        ...currentDocument,
+        ...nextPayload,
+        puckData: {
+          ...currentDocument.puckData,
+          ...nextPayload.puckData,
+          resolvedDynamicTemplates: nextPayload.puckData?.resolvedDynamicTemplates
+            ?? currentDocument.puckData.resolvedDynamicTemplates,
+        },
+        updatedAt: "2026-08-28T12:01:00.000Z",
+      } as typeof draft;
+      return route.fulfill(json(currentDocument));
+    }
+    if (path.endsWith("/page-modules/document/validate")) return route.fulfill(json({ valid: true, errors: [], issues: [] }));
+    if ((options.business || options.directBusiness) && path.endsWith("/products/admin/resolve-references")) {
+      const body = request.postDataJSON() as { codes?: string[] };
+      return route.fulfill(json((body.codes ?? []).map((code) => ({
+        code,
+        id: code === "P-600" ? 600 : 500,
+        name: `业务商品 ${code}`,
+        thumbnail: "/svg/product.svg",
+        price: 12800,
+        status: "PUBLISHED",
+        visibility: "PUBLIC",
+        eligible: true,
+        reason: "AVAILABLE",
+      }))));
+    }
+    if ((options.business || options.directBusiness) && path.endsWith("/products") && request.method() === "GET") {
+      return route.fulfill(json({
+        list: ["P-500", "P-600"].map((code, index) => ({
+          id: 500 + index * 100,
+          code,
+          name: `业务商品 ${code}`,
+          price: 12800 + index * 1000,
+          status: "PUBLISHED",
+          visibility: "PUBLIC",
+          category: { id: 1, name: "戒指" },
+          images: [{ url: "/svg/product.svg", type: "FRONT", isPrimary: true }],
+        })),
+        total: 2,
+        page: 1,
+        pageSize: 12,
+      }));
+    }
+    return route.fulfill(json({}));
+  });
+  await installAdminSession(page, {
+    username: "dynamic-template-page-test",
+    realName: "动态模板页面测试管理员",
+  });
+  await page.goto("/admin/editor/products");
+  await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+  await page.locator(".homepage-editor__layer-item .homepage-editor__layer-select")
+    .first()
+    .click({ position: { x: 12, y: 18 } });
+  const inspector = page.getByRole("region", { name: "模板实例属性" });
+  await expect(inspector).toBeVisible();
+  return {
+    inspector,
+    savedPayload: () => savedPayload,
+    currentDocument: () => currentDocument,
+    templateWrites,
+  };
+}
+
+test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹具）", () => {
+  test.skip(appMode === "mock", "development 模式拦截自有 API；不作为真实 API 写入证据");
+
+  test("页面装修按 Puck iframe 设备切换模板规则，不受后台宿主窗口宽度影响", async ({ page }) => {
+    await prepareEditor(page);
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const template = canvas.locator('[data-dynamic-template-instance-id="dynamic-upgrade-instance"]');
+    const renderer = template.locator("[data-dynamic-template-device]");
+    const container = template.locator('[data-template-node-id="node_container"]');
+
+    expect(page.viewportSize()?.width).toBeGreaterThan(767);
+    await expect(renderer).toHaveAttribute("data-dynamic-template-device", "desktop");
+    await expect(container).toHaveCSS("gap", "16px");
+
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect(renderer).toHaveAttribute("data-dynamic-template-device", "mobile");
+    await expect(container).toHaveCSS("gap", "normal");
+    await expect.poll(() => canvas.locator("html").evaluate((element) => element.clientWidth))
+      .toBeLessThan(768);
+
+    await page.getByRole("button", { name: /桌面端布局/ }).click();
+    await expect(renderer).toHaveAttribute("data-dynamic-template-device", "desktop");
+  });
+
+  test("先预览差异再升级，兼容页面内容保留并随页面草稿保存", async ({ page }) => {
+    const { inspector, savedPayload, currentDocument } = await prepareEditor(page);
+    const expandLibrary = page.getByRole("button", { name: "展开模板组件库" });
+    if (await expandLibrary.isVisible()) await expandLibrary.click();
+    await expect(
+      page.getByRole("button", { name: "添加内容展示｜版本升级版本2" }),
+    ).toBeVisible();
+    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
+    await expect(inspector).toContainText("发现新版本 v2");
+
+    await inspector.getByRole("button", { name: "查看差异" }).click();
+    const dialog = page.getByRole("dialog", { name: "模板版本升级：v1 → v2" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("region", { name: "当前模板版本 1" })).toContainText("页面实例填写内容");
+    await expect(dialog.getByRole("region", { name: "目标模板版本 2" })).toContainText("页面实例填写内容");
+    await dialog.getByRole("button", { name: "保留当前版本" }).click();
+    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
+
+    await inspector.getByRole("button", { name: "查看差异" }).click();
+    await page.getByRole("dialog", { name: "模板版本升级：v1 → v2" })
+      .getByRole("button", { name: "确认升级" })
+      .click();
+    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v2");
+    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await expect.poll(() => savedPayload()).not.toBeNull();
+    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, unknown> }> } };
+    expect(payload.puckData.content[0].props.templateVersion).toBe(2);
+    expect(payload.puckData.content[0].props.contentBySlotId).toEqual({ slot_heading: "页面实例填写内容" });
+    expect(payload).not.toHaveProperty("publishedRevisionId");
+    expect(currentDocument().publishedRevisionId).toBe(91);
+  });
+
+  test("版本检查失败只显示可恢复提示，不改变当前页面实例", async ({ page }) => {
+    const { inspector } = await prepareEditor(page, { failVersionCheck: true });
+    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
+    await expect(inspector).toContainText("暂时无法检查模板新版本，当前页面版本未改变");
+    await expect(inspector.getByRole("button", { name: "保存页面草稿" })).toBeDisabled();
+  });
+
+  test("整个页面实例显隐在编辑、预览、保存与刷新之间保持一致", async ({ page }) => {
+    const { inspector, savedPayload } = await prepareEditor(page);
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const visibility = inspector.getByRole("switch", { name: "在页面显示" });
+    await expect(visibility).toBeChecked();
+    await expect(canvas.locator('[data-dynamic-template-instance-id="dynamic-upgrade-instance"]'))
+      .toHaveAttribute("data-dynamic-template-render-mode", "editor");
+
+    await visibility.click();
+    await expect(visibility).not.toBeChecked();
+    await expect(canvas.getByText("此模块已隐藏，不会发布到前台", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "预览当前画布" }).click();
+    await expect(canvas.getByText("此模块已隐藏，不会发布到前台", { exact: true })).toHaveCount(0);
+    await expect(canvas.getByText("页面实例填写内容", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "退出当前画布预览" }).click();
+    await expect(canvas.getByText("此模块已隐藏，不会发布到前台", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect.poll(() => savedPayload()).not.toBeNull();
+    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, unknown> }> } };
+    expect(payload.puckData.content[0].props.isVisible).toBe(false);
+
+    await page.reload();
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const refreshedCanvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    await expect(refreshedCanvas.getByText("此模块已隐藏，不会发布到前台", { exact: true })).toBeVisible();
+    await page.locator(".homepage-editor__layer-item .homepage-editor__layer-select")
+      .first()
+      .click({ position: { x: 12, y: 18 } });
+    const refreshedInspector = page.getByRole("region", { name: "模板实例属性" });
+    const refreshedVisibility = refreshedInspector.getByRole("switch", { name: "在页面显示" });
+    await expect(refreshedVisibility).not.toBeChecked();
+    await refreshedVisibility.click();
+    await expect(refreshedCanvas.getByText("页面实例填写内容", { exact: true })).toBeVisible();
+  });
+
+  test("动态模板画布点击只保持模板级完整属性面板", async ({ page }) => {
+    const { inspector, templateWrites } = await prepareEditor(page, { legacyLayout: true });
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const renderer = canvas.locator('[data-dynamic-template-instance-id="dynamic-upgrade-instance"] .hc-dynamic-template');
+    const heading = canvas.locator('[data-template-node-id="node_heading"]');
+
+    await expect(renderer).toHaveAttribute("data-dynamic-template-editor-surface", "page-instance");
+    await expect(heading).not.toHaveAttribute("role", "group");
+    await expect(heading).not.toHaveAttribute("tabindex", "0");
+
+    await heading.click();
+    await expect(inspector).toContainText("页面实例编辑边界");
+    await expect(inspector).not.toContainText("当前选择：标题");
+    await expect(canvas.locator('[data-template-selected="true"]')).toHaveCount(0);
+    await expect(inspector.getByRole("textbox", { name: "标题" })).toBeVisible();
+    await expect(inspector.getByRole("button", { name: "调整区域" })).toHaveCount(0);
+    expect(templateWrites).toEqual([]);
+  });
+
+  test("母模板授权的几何、文字和间距由精确属性面板写入同一实例覆盖", async ({ page }) => {
+    const { inspector, savedPayload, templateWrites } = await prepareEditor(page, { legacyLayout: true });
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const heading = canvas.locator('[data-template-node-id="node_heading"]');
+    await inspector.getByRole("combobox", { name: "选择页面实例属性范围" }).selectOption("node_heading");
+    await expect(inspector).toContainText("当前选择：标题");
+    await expect(inspector.getByRole("button", { name: "调整区域" })).toHaveCount(0);
+    await expect(heading).toHaveAttribute("style", /translate\(8%, -4%\)/);
+    const horizontalOffset = inspector.getByRole("spinbutton", { name: "水平偏移" });
+    await horizontalOffset.fill("999");
+    await expect(horizontalOffset).toHaveValue("20");
+    await horizontalOffset.fill("7");
+    await inspector.getByRole("spinbutton", { name: "垂直偏移" }).fill("-6");
+    await inspector.getByRole("spinbutton", { name: "区域宽度" }).fill("110");
+    await inspector.getByRole("spinbutton", { name: "层级" }).fill("4");
+    await inspector.getByRole("spinbutton", { name: "标题字号" }).fill("42");
+    await inspector.getByRole("combobox", { name: "标题文字对齐" }).locator("xpath=../..").click();
+    await page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter({ hasText: "右对齐" }).click();
+    await inspector.getByRole("spinbutton", { name: "标题上间距" }).fill("14");
+    await inspector.getByRole("spinbutton", { name: "标题下间距" }).fill("20");
+    await inspector.getByRole("textbox", { name: "标题" }).fill("授权实例精确构图");
+    await expect(heading).toHaveAttribute("style", /translate\(7%, -6%\)/);
+    await expect(heading).toHaveAttribute("style", /width: 110%/);
+    await expect(heading.getByRole("heading")).toHaveCSS("font-size", "42px");
+    await expect(heading.getByRole("heading")).toHaveCSS("text-align", "right");
+    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await expect.poll(() => savedPayload()).not.toBeNull();
+    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, unknown> }> } };
+    expect(payload.puckData.content[0].props.layoutOverridesByNodeId).toEqual({
+      node_heading: {
+        desktop: {
+          offsetXPercent: 7,
+          offsetYPercent: -6,
+          widthPercent: 110,
+          zIndex: 4,
+          fontSizePx: 42,
+          textAlign: "right",
+          marginTopPx: 14,
+          marginBottomPx: 20,
+        },
+      },
+    });
+    expect(payload.puckData.content[0].props.contentBySlotId).toEqual({ slot_heading: "授权实例精确构图" });
+    expect(templateWrites).toEqual([]);
+  });
+
+  test("普通图片槽位的适配、缩放和焦点按设备写入当前实例并在刷新后重放", async ({ page }) => {
+    const { inspector, savedPayload } = await prepareEditor(page, { image: true });
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const image = canvas.locator('[data-template-node-id="node_image"] img');
+    await expect(image).toHaveCSS("object-fit", "cover");
+    await expect(image).toHaveCSS("object-position", "50% 50%");
+
+    await expect(inspector.locator('[data-media-field="slot_image"]'))
+      .toHaveAttribute("data-workspace-field-shared", "true");
+    await expect(inspector.getByRole("spinbutton", { name: "主图图片缩放" }).locator("xpath=../.."))
+      .toHaveAttribute("data-workspace-field-control", "number");
+    await expect(inspector.locator('[data-image-focus-field]'))
+      .toHaveAttribute("data-workspace-field-control", "image-focus");
+    await expect(inspector.getByRole("button", { name: "恢复当前设备图片构图" }))
+      .toHaveAttribute("data-workspace-field-shared", "true");
+
+    await inspector.getByRole("combobox", { name: "主图图片适配" }).locator("xpath=../..").click();
+    await page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter({ hasText: "完整显示" }).click();
+    await inspector.getByRole("spinbutton", { name: "主图图片缩放" }).fill("130");
+    const focusGroup = inspector.getByRole("group", { name: "主图画面焦点 · 桌面端常用位置" });
+    await focusGroup.getByRole("button", { name: "左上", exact: true }).click();
+    await expect(image).toHaveCSS("object-fit", "contain");
+    await expect(image).toHaveCSS("object-position", "0% 0%");
+    await expect(image).toHaveCSS("transform", /matrix\(1\.3/);
+
+    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await expect.poll(() => savedPayload()).not.toBeNull();
+    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
+    expect(payload.puckData.content[0].props.layoutOverridesByNodeId).toEqual({
+      node_image: {
+        desktop: { objectFit: "contain", imageScalePercent: 130, focusXPercent: 0, focusYPercent: 0 },
+      },
+    });
+
+    await page.reload();
+    const imageAfterReload = page.frameLocator(".homepage-editor__canvas-scale iframe").locator('[data-template-node-id="node_image"] img');
+    await expect(imageAfterReload).toHaveCSS("object-fit", "contain");
+    await expect(imageAfterReload).toHaveCSS("object-position", "0% 0%");
+    await expect(imageAfterReload).toHaveCSS("transform", /matrix\(1\.3/);
+  });
+
+  test("母模板未授权时页面仍只编辑真实内容且不开放构图输入", async ({ page }) => {
+    const { inspector, savedPayload } = await prepareEditor(page, { lockedLayout: true });
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const headingNode = canvas.locator('[data-template-node-id="node_heading"]');
+    await inspector.getByRole("combobox", { name: "选择页面实例属性范围" }).selectOption("node_heading");
+    await expect(inspector.getByRole("button", { name: "调整区域" })).toHaveCount(0);
+    await expect(inspector.getByRole("spinbutton", { name: "水平偏移" })).toHaveCount(0);
+    await expect(inspector.getByRole("spinbutton", { name: "标题字号" })).toHaveCount(0);
+    await expect(inspector.getByRole("combobox", { name: "标题文字对齐" })).toHaveCount(0);
+    await expect(inspector.getByRole("spinbutton", { name: "标题上间距" })).toHaveCount(0);
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent("message", {
+        origin: window.location.origin,
+        data: {
+          type: "homepage-editor:dynamic-layout-edit",
+          workspace: "page",
+          instanceId: "dynamic-upgrade-instance",
+          nodeId: "node_heading",
+          device: "desktop",
+          override: { offsetXPercent: 12 },
+        },
+      }));
+    });
+    await inspector.getByRole("textbox", { name: "标题" }).fill("页面只修改真实文字");
+    await expect(headingNode).toContainText("页面只修改真实文字");
+
+    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await expect.poll(() => savedPayload()).not.toBeNull();
+    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
+    expect(payload.puckData.content[0].props.layoutOverridesByNodeId).toEqual({});
+    expect(payload.puckData.content[0].props.contentBySlotId).toEqual({ slot_heading: "页面只修改真实文字" });
+  });
+
+  test("恢复整个实例默认值只清除当前实例稀疏覆盖并可通过页面撤销恢复", async ({ page }) => {
+    const { inspector } = await prepareEditor(page, { legacyLayout: true });
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const headingNode = canvas.locator('[data-template-node-id="node_heading"]');
+    await expect(headingNode).toHaveAttribute("style", /translate\(8%, -4%\)/);
+
+    const restoreInstance = inspector.getByRole("button", { name: "恢复整个实例默认值" });
+    await expect(restoreInstance).toHaveAttribute("data-workspace-field-shared", "true");
+    await expect(restoreInstance).toHaveAttribute("data-workspace-field-control", "restore-default");
+    await restoreInstance.click();
+    const confirm = page.getByRole("dialog", { name: "恢复整个实例默认值？" });
+    await confirm.getByRole("button", { name: "恢复默认" }).click();
+    await expect(canvas.getByRole("heading", { name: "版本 1 默认标题" })).toBeVisible();
+    await expect(restoreInstance).toBeDisabled();
+
+    await page.getByRole("button", { name: "撤销" }).click();
+    await page.locator(".homepage-editor__layer-item .homepage-editor__layer-select").first().click({ position: { x: 12, y: 18 } });
+    await expect(canvas.getByRole("heading", { name: "页面实例填写内容" })).toBeVisible();
+    await expect(canvas.locator('[data-template-node-id="node_heading"]')).toHaveAttribute("style", /translate\(8%, -4%\)/);
+  });
+
+  test("同模板多实例编辑保持隔离，并在预览、保存与刷新后重放同一结果", async ({ page }) => {
+    const { inspector, savedPayload, templateWrites } = await prepareEditor(page, { duplicate: true });
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const headings = canvas.locator('[data-template-node-id="node_heading"]');
+    await expect(headings).toHaveCount(2);
+    await expect(headings.nth(0)).toContainText("页面实例填写内容");
+    await expect(headings.nth(1)).toContainText("第二实例保持原值");
+
+    await inspector.getByRole("combobox", { name: "选择页面实例属性范围" }).selectOption("node_heading");
+    const firstInstanceOffset = inspector.getByRole("spinbutton", { name: "水平偏移" });
+    await firstInstanceOffset.fill("6");
+    await expect(headings.nth(0)).toHaveAttribute("style", /translate\(6%, 0%\)/);
+    await firstInstanceOffset.fill("0");
+    await expect(headings.nth(0)).not.toHaveAttribute("style", /translate/);
+    await firstInstanceOffset.fill("6");
+    await inspector.getByRole("textbox", { name: "标题" }).fill("只修改第一个页面实例");
+    await expect(headings.nth(0)).toContainText("只修改第一个页面实例");
+    await expect(headings.nth(1)).toContainText("第二实例保持原值");
+    await expect(headings.nth(0)).toHaveAttribute("style", /translate\(6%, 0%\)/);
+    await expect(headings.nth(1)).not.toHaveAttribute("style", /translate/);
+
+    await page.getByRole("button", { name: "预览当前画布" }).click();
+    await expect(page.locator(".homepage-editor__preview-mode-bar")).toContainText("包含尚未保存的修改");
+    await expect(canvas.getByText("只修改第一个页面实例", { exact: true })).toHaveCount(1);
+    await expect(canvas.getByText("第二实例保持原值", { exact: true })).toHaveCount(1);
+    await page.getByRole("button", { name: "退出当前画布预览" }).click();
+
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect.poll(() => savedPayload()).not.toBeNull();
+    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
+    expect(payload.puckData.content[0].props.contentBySlotId).toEqual({ slot_heading: "只修改第一个页面实例" });
+    expect(payload.puckData.content[1].props.contentBySlotId).toEqual({ slot_heading: "第二实例保持原值" });
+    expect(payload.puckData.content[0].props.layoutOverridesByNodeId).toEqual({
+      node_heading: { desktop: { offsetXPercent: 6 } },
+    });
+    expect(payload.puckData.content[1].props.layoutOverridesByNodeId).toEqual({});
+    expect(payload.puckData.content[0].props.instanceId).not.toBe(payload.puckData.content[1].props.instanceId);
+    expect(templateWrites).toEqual([]);
+
+    await page.reload();
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const refreshedCanvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    await expect(refreshedCanvas.getByText("只修改第一个页面实例", { exact: true })).toHaveCount(1);
+    await expect(refreshedCanvas.getByText("第二实例保持原值", { exact: true })).toHaveCount(1);
+  });
+
+  test("复杂组件字段在页面模式只写当前实例覆盖，不写母模板版本", async ({ page }) => {
+    const { inspector, savedPayload, templateWrites } = await prepareEditor(page, { complex: true });
+    const complexFields = inspector.locator('[data-complex-content-type="carousel"]');
+    await expect(complexFields).toHaveAttribute("data-complex-content-scope", "page");
+    await expect(complexFields).toContainText("这里的内容只写入当前页面实例，不会修改母模板或其他实例");
+    await complexFields.getByRole("group", { name: "切换间隔" })
+      .getByRole("button", { name: "6 秒" })
+      .click();
+    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await expect.poll(() => savedPayload()).not.toBeNull();
+    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
+    expect(payload.puckData.content[0].props.contentBySlotId.slot_heading).toBe("页面实例填写内容");
+    expect(payload.puckData.content[0].props.contentBySlotId.slot_carousel).toMatchObject({ interval: "6000" });
+    expect(payload.puckData.content[0].props.templateId).toBe("tpl_page_upgrade");
+    expect(templateWrites).toEqual([]);
+  });
+
+  test("业务组件在页面模式只编辑稳定引用，布局继续由母模板控制", async ({ page }) => {
+    const { inspector, savedPayload, templateWrites } = await prepareEditor(page, { business: true });
+    const businessFields = inspector.locator('[data-complex-content-type="productCollection"]');
+    await expect(businessFields).toHaveAttribute("data-complex-content-scope", "page");
+    await expect(businessFields.getByText("选择商品", { exact: true })).toBeVisible();
+    await expect(businessFields).toContainText("这里的内容只写入当前页面实例，不会修改母模板或其他实例");
+    await businessFields.getByRole("button", { name: "选择商品" }).click();
+    const picker = page.getByRole("dialog", { name: "选择商品" });
+    await picker.getByRole("button", { name: /业务商品 P-500/ }).click();
+    await picker.getByRole("button", { name: /业务商品 P-600/ }).click();
+    await picker.getByRole("button", { name: /确认选择（2）/ }).click();
+    await expect(businessFields.getByRole("group", { name: "电脑端列数" })).toHaveCount(0);
+    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await expect.poll(() => savedPayload()).not.toBeNull();
+    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
+    const content = payload.puckData.content[0].props.contentBySlotId.slot_product_collection;
+    expect(content).toMatchObject({ layout: "grid-3", productCodes: ["P-500", "P-600"] });
+    expect(content).not.toHaveProperty("productIds");
+    expect(payload.puckData.content[0].props.templateId).toBe("tpl_page_upgrade");
+    expect(templateWrites).toEqual([]);
+  });
+
+  test("直接商品、集合和行动槽位复用运营选择器并只保存稳定引用", async ({ page }) => {
+    const { inspector, savedPayload, templateWrites } = await prepareEditor(page, { directBusiness: true });
+    await expect(inspector.getByText("优先填写 · 商品与分类", { exact: true })).toBeVisible();
+    await expect(inspector.locator("fieldset:visible").first()).toHaveAttribute("data-slot-id", "slot_product");
+    const secondarySummary = inspector.getByText("其他模板内容（1）", { exact: true });
+    await expect(secondarySummary).toBeVisible();
+    await expect(inspector.getByRole("textbox", { name: "补充说明" })).toBeHidden();
+    await secondarySummary.click();
+    await expect(inspector.getByRole("textbox", { name: "补充说明" })).toBeVisible();
+    await expect(inspector.locator('[data-slot-id="slot_heading"]')
+      .getByRole("button", { name: "移除页面内容覆盖" })).toBeDisabled();
+
+    const productField = inspector.locator("fieldset").filter({ hasText: "主商品" });
+    await productField.getByRole("button", { name: "选择商品" }).click();
+    let picker = page.getByRole("dialog", { name: "选择商品" });
+    await picker.getByRole("button", { name: /业务商品 P-500/ }).click();
+    await picker.getByRole("button", { name: /确认选择（1）/ }).click();
+
+    const collectionField = inspector.locator("fieldset").filter({ hasText: "搭配商品" });
+    await collectionField.getByRole("button", { name: "选择商品" }).click();
+    picker = page.getByRole("dialog", { name: "选择商品" });
+    await picker.getByRole("button", { name: /业务商品 P-500/ }).click();
+    await picker.getByRole("button", { name: /业务商品 P-600/ }).click();
+    await picker.getByRole("button", { name: /确认选择（2）/ }).click();
+
+    const actionField = inspector.locator("fieldset").filter({ hasText: "主行动" });
+    await actionField.getByRole("textbox", { name: "主行动文案" }).fill("查看品牌故事");
+    await actionField.getByRole("button", { name: "页面", exact: true }).click();
+    await actionField.getByLabel("站内页面").fill("/about");
+
+    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await expect.poll(() => savedPayload()).not.toBeNull();
+    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
+    const content = payload.puckData.content[0].props.contentBySlotId;
+    expect(content.slot_product).toBe("P-500");
+    expect(content.slot_collection).toEqual(["P-500", "P-600"]);
+    expect(content.slot_action).toEqual({
+      label: "查看品牌故事",
+      targetType: "page",
+      pagePath: "/about",
+    });
+    expect(JSON.stringify(content)).not.toContain("price");
+    expect(JSON.stringify(content)).not.toContain("inventory");
+    expect(templateWrites).toEqual([]);
+  });
+});

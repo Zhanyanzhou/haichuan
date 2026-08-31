@@ -74,6 +74,21 @@ export function usePagePublishStream(
     let retry = 0;
     let closed = false;
 
+    const clearRetryTimer = () => {
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    };
+
+    const closeStream = () => {
+      if (!stream) return;
+      stream.onmessage = null;
+      stream.onerror = null;
+      stream.close();
+      stream = null;
+    };
+
     const stopPolling = () => {
       if (pollTimer) {
         clearInterval(pollTimer);
@@ -113,7 +128,8 @@ export function usePagePublishStream(
     };
 
     const open = () => {
-      if (closed) return;
+      if (closed || document.visibilityState === "hidden" || stream) return;
+      clearRetryTimer();
       stream = new EventSource(publicPageDocumentStreamUrl(locale));
       stream.onmessage = (event) => {
         retry = 0; // 成功收到消息即视为连接健康，重置退避计数
@@ -121,8 +137,7 @@ export function usePagePublishStream(
         handleMessage(event);
       };
       stream.onerror = () => {
-        stream?.close();
-        stream = null;
+        closeStream();
         if (closed) return;
         if (retry >= MAX_RETRIES) {
           // 不再永久放弃：降级为 60 秒轮询兜底，避免前台停在旧快照。
@@ -138,12 +153,27 @@ export function usePagePublishStream(
       };
     };
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        clearRetryTimer();
+        stopPolling();
+        closeStream();
+        retry = 0;
+        return;
+      }
+
+      retry = 0;
+      open();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     open();
     return () => {
       closed = true;
-      stream?.close();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      closeStream();
       stopPolling();
-      if (retryTimer) clearTimeout(retryTimer);
+      clearRetryTimer();
     };
   }, [locale, pageKey]);
 }

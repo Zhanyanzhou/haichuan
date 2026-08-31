@@ -35,6 +35,7 @@ export default function AppointmentBlock({ module, editMode }: AppointmentBlockP
     targetType: content.targetType,
     productCode: content.productCode,
     productId: content.productId,
+    categorySlug: content.categorySlug,
     linkUrl: content.linkUrl,
   });
   const unifiedPhone = siteSettingsResource.status === 'loaded'

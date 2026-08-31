@@ -1,0 +1,516 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://haichuan.local/contracts/page-builder/template-definition.schema.json",
+  "title": "Haichuan Unified Template Contract",
+  "description": "统一母模板定义与页面实例的机器合同；真实业务内容仍由页面实例引用业务来源。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "templateId",
+    "name",
+    "metadata",
+    "rootNodeId",
+    "nodes",
+    "slots",
+    "defaultContent"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "templateId": { "$ref": "#/$defs/stableId" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "description": { "type": "string", "maxLength": 500 },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "rootNodeId": { "$ref": "#/$defs/stableId" },
+    "nodes": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 500,
+      "propertyNames": { "$ref": "#/$defs/stableId" },
+      "additionalProperties": { "$ref": "#/$defs/node" }
+    },
+    "slots": {
+      "type": "object",
+      "maxProperties": 250,
+      "propertyNames": { "$ref": "#/$defs/stableId" },
+      "additionalProperties": { "$ref": "#/$defs/slot" }
+    },
+    "defaultContent": {
+      "type": "object",
+      "maxProperties": 250
+    },
+    "previewContent": {
+      "description": "仅供模板画布、缩略图和异常场景预览；不得进入页面实例或公开渲染。",
+      "type": "object",
+      "maxProperties": 250
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "purpose",
+        "layoutType",
+        "slotSummary",
+        "recommendedFor",
+        "desktopRatio",
+        "mobileRatio",
+        "tags"
+      ],
+      "properties": {
+        "category": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "purpose": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "layoutType": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "slotSummary": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "recommendedFor": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 50 }
+        },
+        "desktopRatio": { "$ref": "#/$defs/ratioLabel" },
+        "mobileRatio": { "$ref": "#/$defs/ratioLabel" },
+        "previewDesktopWidth": { "type": "integer", "minimum": 768, "maximum": 2560 },
+        "previewMobileWidth": { "type": "integer", "minimum": 280, "maximum": 767 },
+        "mobileBreakpoint": { "type": "integer", "minimum": 480, "maximum": 1024 },
+        "minViewportWidth": { "type": "integer", "minimum": 280, "maximum": 3840 },
+        "maxViewportWidth": { "type": "integer", "minimum": 280, "maximum": 3840 },
+        "defaultBackgroundToken": { "type": "string", "pattern": "^[a-z][a-z0-9.-]{0,63}$" },
+        "visualRole": { "enum": ["primary-stage", "feature-stage", "support-stage"] },
+        "headerCompatibility": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "enum": ["solid", "overlay-light"] }
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 30 }
+        }
+      }
+    },
+    "ratioLabel": {
+      "type": "string",
+      "pattern": "^(auto|[1-9][0-9]{0,3}:[1-9][0-9]{0,3})$"
+    },
+    "length": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "unit"],
+      "properties": {
+        "value": { "type": "number", "minimum": 0, "maximum": 10000 },
+        "unit": { "enum": ["px", "%", "rem", "vw", "vh"] }
+      }
+    },
+    "size": {
+      "oneOf": [
+        { "enum": ["auto", "fill", "fit"] },
+        { "$ref": "#/$defs/length" }
+      ]
+    },
+    "boxSpacing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["top", "right", "bottom", "left"],
+      "properties": {
+        "top": { "$ref": "#/$defs/length" },
+        "right": { "$ref": "#/$defs/length" },
+        "bottom": { "$ref": "#/$defs/length" },
+        "left": { "$ref": "#/$defs/length" }
+      }
+    },
+    "heightRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["auto", "min-height", "aspect-ratio", "fixed", "viewport"] },
+        "value": { "$ref": "#/$defs/length" },
+        "ratio": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": {
+            "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+            "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 }
+          }
+        }
+      }
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height", "zIndex"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "zIndex": { "type": "integer", "minimum": -10, "maximum": 10 }
+      }
+    },
+    "responsiveRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display", "order", "width", "height"],
+      "properties": {
+        "display": { "enum": ["block", "flex", "grid", "none"] },
+        "direction": { "enum": ["row", "column"] },
+        "order": { "type": "integer", "minimum": -100, "maximum": 100 },
+        "width": { "$ref": "#/$defs/size" },
+        "height": { "$ref": "#/$defs/heightRule" },
+        "maxWidth": { "$ref": "#/$defs/length" },
+        "minHeight": { "$ref": "#/$defs/length" },
+        "gap": { "$ref": "#/$defs/length" },
+        "padding": { "$ref": "#/$defs/boxSpacing" },
+        "margin": { "$ref": "#/$defs/boxSpacing" },
+        "alignItems": { "enum": ["start", "center", "end", "stretch"] },
+        "justifyContent": { "enum": ["start", "center", "end", "space-between", "space-around"] },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 }
+        },
+        "backgroundToken": { "type": "string", "pattern": "^[a-z][a-z0-9.-]{0,63}$" },
+        "borderToken": { "type": "string", "pattern": "^[a-z][a-z0-9.-]{0,63}$" },
+        "radius": { "$ref": "#/$defs/length" },
+        "overflow": { "enum": ["visible", "hidden", "clip"] },
+        "layoutMode": { "enum": ["flow", "free"] },
+        "placement": { "$ref": "#/$defs/placement" }
+      }
+    },
+    "nodeProps": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "semanticTag": { "enum": ["section", "div", "header", "article", "aside", "nav"] },
+        "dividerStyle": { "enum": ["solid", "dashed", "dotted"] },
+        "spacerSize": { "$ref": "#/$defs/length" },
+        "contentTemplateLayoutData": {
+          "type": "object",
+          "description": "成熟内容模板适配节点所锁定的母模板内部构图；页面实例不能覆盖。",
+          "maxProperties": 100
+        },
+        "contentTemplateDesignProps": {
+          "type": "object",
+          "description": "成熟内容模板适配节点所锁定的展示型枚举和数值；不含真实内容、链接或业务引用。",
+          "maxProperties": 50
+        }
+      }
+    },
+    "instanceEditPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["position", "size", "zIndex", "minWidthPercent", "maxWidthPercent", "maxOffsetPercent"],
+      "properties": {
+        "position": { "type": "boolean" },
+        "size": { "type": "boolean" },
+        "zIndex": { "type": "boolean" },
+        "imageFit": { "type": "boolean" },
+        "imageFocus": { "type": "boolean" },
+        "typography": { "type": "boolean" },
+        "spacing": { "type": "boolean" },
+        "minWidthPercent": { "type": "number", "minimum": 10, "maximum": 100 },
+        "maxWidthPercent": { "type": "number", "minimum": 100, "maximum": 200 },
+        "maxOffsetPercent": { "type": "number", "minimum": 0, "maximum": 50 },
+        "minFontSizePx": { "type": "number", "minimum": 8, "maximum": 72 },
+        "maxFontSizePx": { "type": "number", "minimum": 12, "maximum": 200 },
+        "maxSpacingPx": { "type": "number", "minimum": 0, "maximum": 200 }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodeId", "type", "name", "childIds", "props", "responsive", "hidden"],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/stableId" },
+        "type": { "$ref": "#/$defs/nodeType" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "slotId": { "$ref": "#/$defs/stableId" },
+        "childIds": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/stableId" }
+        },
+        "props": { "$ref": "#/$defs/nodeProps" },
+        "instanceEditPolicy": { "$ref": "#/$defs/instanceEditPolicy" },
+        "responsive": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["desktop", "mobile"],
+          "properties": {
+            "desktop": { "$ref": "#/$defs/responsiveRules" },
+            "mobile": { "$ref": "#/$defs/responsiveRules" }
+          }
+        },
+        "hidden": { "type": "boolean" }
+      }
+    },
+    "slotValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minLength": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "maxLength": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "minItems": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "maxItems": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "recommendedWidth": { "type": "integer", "minimum": 1, "maximum": 20000 },
+        "recommendedHeight": { "type": "integer", "minimum": 1, "maximum": 20000 },
+        "allowedProtocols": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["https", "page", "product", "category", "none"] }
+        }
+      }
+    },
+    "slotRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "aspectRatio": { "$ref": "#/$defs/ratioLabel" },
+        "objectFit": { "enum": ["cover", "contain", "fill"] },
+        "objectPosition": { "type": "string", "pattern": "^(left|center|right) (top|center|bottom)$" },
+        "fontRole": { "enum": ["display", "heading", "body", "caption", "action"] },
+        "fontSize": { "$ref": "#/$defs/length" },
+        "fontWeight": { "type": "integer", "minimum": 100, "maximum": 900, "multipleOf": 100 },
+        "lineHeight": { "type": "number", "minimum": 0.8, "maximum": 3 },
+        "textAlign": { "enum": ["left", "center", "right"] },
+        "maxLines": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "overflow": { "enum": ["clip", "ellipsis", "wrap"] }
+      }
+    },
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slotId",
+        "key",
+        "type",
+        "label",
+        "required",
+        "editable",
+        "hideable",
+        "validation",
+        "desktopRules",
+        "mobileRules"
+      ],
+      "properties": {
+        "slotId": { "$ref": "#/$defs/stableId" },
+        "key": { "type": "string", "pattern": "^[a-z][A-Za-z0-9_]{0,63}$" },
+        "type": { "$ref": "#/$defs/slotType" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "required": { "type": "boolean" },
+        "editable": { "type": "boolean" },
+        "hideable": { "type": "boolean" },
+        "emptyPolicy": {
+          "description": "页面实例显式清空内容时的公开渲染策略；hide 隐藏槽位，use-default 回退母模板默认内容。未声明时按 hide 处理。",
+          "enum": ["hide", "use-default"]
+        },
+        "validation": { "$ref": "#/$defs/slotValidation" },
+        "desktopRules": { "$ref": "#/$defs/slotRules" },
+        "mobileRules": { "$ref": "#/$defs/slotRules" }
+      }
+    },
+    "templateInstanceLayoutOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "offsetXPercent": { "type": "number", "minimum": -50, "maximum": 50 },
+        "offsetYPercent": { "type": "number", "minimum": -50, "maximum": 50 },
+        "widthPercent": { "type": "number", "minimum": 10, "maximum": 200 },
+        "zIndex": { "type": "integer", "minimum": -10, "maximum": 10 },
+        "objectFit": { "enum": ["cover", "contain", "fill"] },
+        "imageScalePercent": { "type": "number", "minimum": 100, "maximum": 200 },
+        "focusXPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "focusYPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "fontSizePx": { "type": "number", "minimum": 8, "maximum": 200 },
+        "textAlign": { "enum": ["left", "center", "right"] },
+        "marginTopPx": { "type": "number", "minimum": 0, "maximum": 200 },
+        "marginBottomPx": { "type": "number", "minimum": 0, "maximum": 200 }
+      }
+    },
+    "templateInstanceLayoutOverridesByNodeId": {
+      "type": "object",
+      "maxProperties": 100,
+      "propertyNames": { "$ref": "#/$defs/stableId" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "desktop": { "$ref": "#/$defs/templateInstanceLayoutOverride" },
+          "mobile": { "$ref": "#/$defs/templateInstanceLayoutOverride" }
+        }
+      }
+    },
+    "templateInstanceV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instanceId",
+        "templateId",
+        "templateVersion",
+        "contentBySlotId",
+        "layoutOverridesByNodeId",
+        "hiddenSlotIds",
+        "isVisible"
+      ],
+      "properties": {
+        "instanceId": { "$ref": "#/$defs/stableId" },
+        "templateId": { "$ref": "#/$defs/stableId" },
+        "templateVersion": { "type": "integer", "minimum": 1 },
+        "contentBySlotId": {
+          "type": "object",
+          "maxProperties": 250,
+          "propertyNames": { "$ref": "#/$defs/stableId" }
+        },
+        "layoutOverridesByNodeId": { "$ref": "#/$defs/templateInstanceLayoutOverridesByNodeId" },
+        "hiddenSlotIds": {
+          "type": "array",
+          "maxItems": 250,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/stableId" }
+        },
+        "isVisible": { "type": "boolean" }
+      }
+    },
+    "nodeType": {
+      "enum": [
+        "Section",
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack",
+        "Spacer",
+        "Divider",
+        "ImageSlot",
+        "HeadingSlot",
+        "TextSlot",
+        "RichTextSlot",
+        "ButtonSlot",
+        "LinkSlot",
+        "BadgeSlot",
+        "IconSlot",
+        "ProductSlot",
+        "CollectionSlot",
+        "Video",
+        "Carousel",
+        "Hotspot",
+        "BeforeAfter",
+        "Appointment",
+        "ProductCard",
+        "ProductCollection",
+        "CategoryCollection",
+        "HeroTemplate",
+        "FullBleedTemplate",
+        "SinglePosterTemplate",
+        "DoublePosterTemplate",
+        "TextBannerTemplate",
+        "JourneyTemplate",
+        "GalleryTemplate",
+        "LookbookTemplate",
+        "SceneShoppingTemplate",
+        "BrandPointsTemplate",
+        "ServicePromisesTemplate",
+        "CertificatesTemplate",
+        "StoreInfoTemplate",
+        "TestimonialsTemplate",
+        "LimitedEventTemplate",
+        "CraftDetailsTemplate"
+      ]
+    },
+    "slotType": {
+      "enum": [
+        "image",
+        "heading",
+        "text",
+        "richText",
+        "button",
+        "link",
+        "badge",
+        "icon",
+        "product",
+        "collection",
+        "video",
+        "carousel",
+        "hotspot",
+        "beforeAfter",
+        "appointment",
+        "productCard",
+        "productCollection",
+        "categoryCollection",
+        "heroTemplate",
+        "fullBleedTemplate",
+        "singlePosterTemplate",
+        "doublePosterTemplate",
+        "textBannerTemplate",
+        "journeyTemplate",
+        "galleryTemplate",
+        "lookbookTemplate",
+        "sceneShoppingTemplate",
+        "brandPointsTemplate",
+        "servicePromisesTemplate",
+        "certificatesTemplate",
+        "storeInfoTemplate",
+        "testimonialsTemplate",
+        "limitedEventTemplate",
+        "craftDetailsTemplate"
+      ]
+    }
+  },
+  "x-nodeRegistry": {
+    "Section": { "label": "页面区段", "kind": "structure", "rootOnly": true, "allowedParents": [], "canHaveChildren": true },
+    "Container": { "label": "内容容器", "kind": "structure", "rootOnly": false, "allowedParents": ["Section", "Column", "Stack", "Grid"], "canHaveChildren": true },
+    "Grid": { "label": "网格", "kind": "structure", "rootOnly": false, "allowedParents": ["Section", "Container", "Column", "Stack"], "canHaveChildren": true },
+    "Row": { "label": "横向行", "kind": "structure", "rootOnly": false, "allowedParents": ["Section", "Container", "Column", "Stack"], "canHaveChildren": true },
+    "Column": { "label": "纵向列", "kind": "structure", "rootOnly": false, "allowedParents": ["Row", "Grid"], "canHaveChildren": true },
+    "Stack": { "label": "堆叠容器", "kind": "structure", "rootOnly": false, "allowedParents": ["Section", "Container", "Column", "Grid"], "canHaveChildren": true },
+    "Spacer": { "label": "留白间距", "kind": "structure", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "Divider": { "label": "分隔线", "kind": "structure", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "ImageSlot": { "label": "图片槽位", "kind": "slot", "slotType": "image", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "HeadingSlot": { "label": "标题槽位", "kind": "slot", "slotType": "heading", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "TextSlot": { "label": "文字槽位", "kind": "slot", "slotType": "text", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "RichTextSlot": { "label": "富文本槽位", "kind": "slot", "slotType": "richText", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "ButtonSlot": { "label": "按钮槽位", "kind": "slot", "slotType": "button", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "LinkSlot": { "label": "链接槽位", "kind": "slot", "slotType": "link", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "BadgeSlot": { "label": "徽标槽位", "kind": "slot", "slotType": "badge", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "IconSlot": { "label": "图标槽位", "kind": "slot", "slotType": "icon", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "ProductSlot": { "label": "商品槽位", "kind": "slot", "slotType": "product", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "CollectionSlot": { "label": "集合槽位", "kind": "slot", "slotType": "collection", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "Video": { "label": "视频组件", "kind": "slot", "slotType": "video", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "Carousel": { "label": "轮播组件", "kind": "slot", "slotType": "carousel", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "Hotspot": { "label": "热区组件", "kind": "slot", "slotType": "hotspot", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "BeforeAfter": { "label": "前后对比组件", "kind": "slot", "slotType": "beforeAfter", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "Appointment": { "label": "预约入口组件", "kind": "slot", "slotType": "appointment", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "ProductCard": { "label": "单品展示组件", "kind": "slot", "slotType": "productCard", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "ProductCollection": { "label": "商品集合组件", "kind": "slot", "slotType": "productCollection", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "CategoryCollection": { "label": "分类集合组件", "kind": "slot", "slotType": "categoryCollection", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "HeroTemplate": { "label": "首屏主视觉组件", "kind": "slot", "slotType": "heroTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "FullBleedTemplate": { "label": "全屏出血图组件", "kind": "slot", "slotType": "fullBleedTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "SinglePosterTemplate": { "label": "单图海报组件", "kind": "slot", "slotType": "singlePosterTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "DoublePosterTemplate": { "label": "双图海报组件", "kind": "slot", "slotType": "doublePosterTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "TextBannerTemplate": { "label": "文字横幅组件", "kind": "slot", "slotType": "textBannerTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "JourneyTemplate": { "label": "定制流程组件", "kind": "slot", "slotType": "journeyTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "GalleryTemplate": { "label": "作品画廊组件", "kind": "slot", "slotType": "galleryTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "LookbookTemplate": { "label": "佩戴灵感组件", "kind": "slot", "slotType": "lookbookTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "SceneShoppingTemplate": { "label": "场景选购组件", "kind": "slot", "slotType": "sceneShoppingTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "BrandPointsTemplate": { "label": "品牌要点组件", "kind": "slot", "slotType": "brandPointsTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "ServicePromisesTemplate": { "label": "服务承诺组件", "kind": "slot", "slotType": "servicePromisesTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "CertificatesTemplate": { "label": "资质证书组件", "kind": "slot", "slotType": "certificatesTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "StoreInfoTemplate": { "label": "门店信息组件", "kind": "slot", "slotType": "storeInfoTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "TestimonialsTemplate": { "label": "评价实拍组件", "kind": "slot", "slotType": "testimonialsTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "LimitedEventTemplate": { "label": "限时活动组件", "kind": "slot", "slotType": "limitedEventTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
+    "CraftDetailsTemplate": { "label": "工艺细节组件", "kind": "slot", "slotType": "craftDetailsTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false }
+  }
+}

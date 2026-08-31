@@ -143,16 +143,16 @@
 
 ### HC-CLOSE-05B — 运行时所有权与断开项治理
 
-- 状态：`AUDITED / WAITING_EXACT_DISPOSITION_APPROVAL`（消费图门禁已形成；未授权删除、API 退役或推测性接线）
+- 状态：`PARTIAL_RESOLVED / WAITING_REMAINING_DISPOSITION`（店铺装修零消费者文件已按 2026-08-31 当前授权清理；公开旧页与候选 API 仍等待各自精确处置）
 - 已形成的证据：
   - `scripts/audit-runtime-ownership.mjs` 从 `client/src/main.tsx`、`server/src/main.ts` 和全部 `client/tests` 夹具建立静态 import 图，并生成 `artifacts/runtime-ownership-audit/current.json`；稳定检查忽略 `generatedAt`，当前无未解析 Client/Server import。
-  - 299 个 Client 源文件中 293 个生产可达；74 个页面文件只有旧 `About`、`Custom` 两页生产不可达。当前 `/about`、`/custom` 路由由 `PublicLayout` PageDocument Renderer 所有，旧页没有生产或测试 importer，但仍需先迁移唯一内容并获得精确删除批准。
-  - `InspectorQuickActions.tsx`、`previewGeometry.ts` 无消费者但仍属于历史 `puck-delete-hold`；`VisualEditorToolbar.tsx` 是 Playwright 夹具资产，`vite-env.d.ts` 是环境声明，二者明确保留。
-  - 36 个 Controller 全部由 Server 入口可达。231 个 Client 静态 API 调用全部匹配；253 个 Server 路由有 23 个没有直接静态 Client 调用，其中 14 个已解释为动态请求、兼容别名、回调、探针或间接资源，剩余 9 个进入精确处置单。
-  - 70 个 Prisma 模型中 20 个没有直接 delegate 调用，但全部仍有 Schema 关系；不存在同时无 delegate 使用且无 Schema 关系的模型，不提出 Schema 删除。
+  - 359 个 Client 源文件中 356 个生产可达；75 个页面文件只有旧 `About`、`Custom` 两页生产不可达，另 1 个不可达源文件是必须保留的环境声明 `vite-env.d.ts`。当前 `/about`、`/custom` 路由由 `PublicLayout` PageDocument Renderer 所有，旧页没有生产或测试 importer，但仍需先迁移唯一内容并获得精确删除批准。
+  - 2026-08-31 已重新生成并核对消费图：`InspectorQuickActions.tsx`、`previewGeometry.ts` 及同批确认无消费者的固定模板旧工作区组件、旧 Inspector 辅助组件和 `blockTemplateStore.ts` 已删除；死导出与对应 CSS 同步清理。`VisualEditorToolbar.tsx` 仍是 Playwright 夹具资产，`vite-env.d.ts` 仍是环境声明，二者明确保留。
+  - 37 个 Controller 全部由 Server 入口可达。249 个 Client 静态 API 调用全部匹配；277 个 Server 路由中 28 个没有直接静态 Client 调用，脚本当前将其中 14 个标记为仍需消费者复核；静态图不能单独授权 API 退役。
+  - 76 个 Prisma 模型中 19 个没有直接 delegate 调用，但全部仍有 Schema 关系；不存在同时无 delegate 使用且无 Schema 关系的模型，不提出 Schema 删除。
 - 安全裁决：`POST /payments/:orderId/channel` 保持无 UI 的安全暂停，等待 P6；`DELETE /products/:id` 当前只返回禁止删除冲突，保留兼容拒绝；发布质量报告是只读运营接口。其余 6 条候选端点需要外部消费者和 API 版本窗口确认，不能仅凭静态图删除。
 - 精确处置与授权入口：`docs/plans/2026-08-27-runtime-ownership-disposition.md` 与决策包 `P-ORPHAN-FILE / P-ORPHAN-PUCK / P-ORPHAN-API`。
-- 下一动作：等待精确批准；获批后每批先迁移/版本化，再重跑消费图、typecheck、build、对应合同和真实浏览器路径。当前不删除、移动、接线、改 Schema 或运行 migration。
+- 下一动作：店铺装修清理需保持消费图、typecheck、合同和真实浏览器路径通过；其余公开旧页与候选 API 继续等待精确批准。当前清理不授权改 Schema、运行 migration、删除公开旧页或退役 API。
 
 ### HC-CLOSE-06 — 最终复审与 Go/No-Go
 

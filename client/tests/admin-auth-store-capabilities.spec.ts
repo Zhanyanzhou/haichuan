@@ -67,6 +67,92 @@ async function submitAdminLogin(page: Page) {
 }
 
 test.describe("后台登录安全恢复原页面", () => {
+  test("登录页原样提交服务端已支持的标点用户名", async ({ page }) => {
+    let submittedUsername = "";
+    await page.route("**/api/**", (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path === "/api/auth/login") {
+        submittedUsername = request.postDataJSON().username;
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: 200,
+            data: {
+              user: {
+                id: 1,
+                username: submittedUsername,
+                realName: "标点用户名测试管理员",
+                role: "ADMIN",
+                status: "ACTIVE",
+              },
+            },
+            message: "ok",
+          }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data: {}, message: "ok" }),
+      });
+    });
+
+    await page.goto("/admin/login");
+    await page.getByPlaceholder("输入用户名").fill("owner.main_test-1");
+    await page.getByPlaceholder("输入密码").fill("TestPassword123!");
+    await page.getByRole("button", { name: "登录" }).click();
+
+    await expect.poll(() => submittedUsername).toBe("owner.main_test-1");
+    await expect(page).toHaveURL(/\/admin\/dashboard$/);
+  });
+
+  for (const scenario of [
+    {
+      name: "账号或密码错误保持统一提示",
+      status: 401,
+      errorCode: "HTTP_401",
+      apiMessage: "用户名或密码错误",
+      uiMessage: "账号或密码不正确，请检查后重试",
+    },
+    {
+      name: "账号临时锁定显示安全的等待提示",
+      status: 403,
+      errorCode: "ADMIN_LOGIN_TEMPORARILY_LOCKED",
+      apiMessage: "密码连续错误次数过多，账号已临时锁定，请约 15 分钟后重试",
+      uiMessage: "密码连续错误次数过多，账号已临时锁定，请约 15 分钟后重试",
+    },
+    {
+      name: "登录限流提示稍后重试",
+      status: 429,
+      errorCode: "HTTP_429",
+      apiMessage: "Too Many Requests",
+      uiMessage: "登录尝试过于频繁，请稍后再试",
+    },
+  ] as const) {
+    test(scenario.name, async ({ page }) => {
+      await page.route("**/api/auth/login", (route) => route.fulfill({
+        status: scenario.status,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: scenario.status,
+          data: null,
+          message: scenario.apiMessage,
+          errorCode: scenario.errorCode,
+        }),
+      }));
+
+      await page.goto("/admin/login");
+      await page.getByPlaceholder("输入用户名").fill("loginprobe");
+      await page.getByPlaceholder("输入密码").fill("invalid-password");
+      await page.getByRole("button", { name: "登录" }).click();
+
+      await expect(page.getByRole("alert")).toContainText(scenario.uiMessage);
+      await expect(page).toHaveURL(/\/admin\/login$/);
+    });
+  }
+
   test("后台会话失效时把当前路径和查询参数带到登录页", async ({ page }) => {
     await page.route("**/api/**", (route) => {
       const path = new URL(route.request().url()).pathname;
@@ -217,7 +303,7 @@ test.describe("后台页面统一从 authStore 读取角色", () => {
     await expect(page.getByRole("button", { name: "禁用" })).toBeVisible();
   });
 
-  test("编辑员工时用户名只读且更新 payload 不含用户名，员工密码遵循强密码合同", async ({
+  test("编辑员工时用户名只读且更新 payload 不含用户名，员工密码遵循统一 6-18 位合同", async ({
     page,
   }) => {
     const updatePayloads: Array<Record<string, unknown>> = [];
@@ -278,16 +364,26 @@ test.describe("后台页面统一从 authStore 读取角色", () => {
 
     await page.getByRole("button", { name: "重置密码" }).click();
     const resetDialog = page.getByRole("dialog", { name: /重置密码/ });
-    await resetDialog.getByLabel("新密码").fill("Aa1!2345678");
-    await resetDialog.getByLabel("新密码").press("Tab");
-    await expect(resetDialog.getByText("密码需为 12–128 位")).toBeVisible();
+    const resetPassword = resetDialog.getByLabel("新密码");
+    await expect(resetPassword).toHaveAttribute("maxlength", "18");
+    await resetPassword.fill("12345");
+    await resetPassword.press("Tab");
+    await expect(resetDialog.getByText("密码需为 6–18 位")).toBeVisible();
     expect(updatePayloads).toHaveLength(1);
-    await resetDialog.getByRole("button", { name: "Close" }).click();
+    await resetPassword.fill("123456");
+    await resetDialog.getByRole("button", { name: "重置密码" }).click();
+    await expect.poll(() => updatePayloads.length).toBe(2);
+    expect(updatePayloads[1]).toMatchObject({ password: "123456" });
 
     await page.getByRole("button", { name: "新建员工" }).click();
     const createDialog = page.getByRole("dialog", { name: "新建后台员工" });
-    await createDialog.getByLabel("密码").fill("Aa1!2345678");
-    await createDialog.getByLabel("密码").press("Tab");
-    await expect(createDialog.getByText("密码需为 12–128 位")).toBeVisible();
+    const createPassword = createDialog.getByLabel("密码");
+    await expect(createPassword).toHaveAttribute("maxlength", "18");
+    await createPassword.fill("12345");
+    await createPassword.press("Tab");
+    await expect(createDialog.getByText("密码需为 6–18 位")).toBeVisible();
+    await createPassword.fill("123456");
+    await createPassword.press("Tab");
+    await expect(createDialog.getByText("密码需为 6–18 位")).toHaveCount(0);
   });
 });

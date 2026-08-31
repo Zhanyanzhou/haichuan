@@ -8,9 +8,16 @@ import {
   createContentTemplateMarker,
   getContentTemplateCompletion,
   getContentTemplateContract,
+  getContentTemplateMediaReferences,
   getContentTemplatePageRule,
   isContentTemplateAllowedForPage,
 } from "@/page-builder/generated/contentTemplates.generated";
+import {
+  DYNAMIC_TEMPLATE_BLOCK_TYPE,
+  DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
+  dynamicTemplateVersionKey,
+  readResolvedDynamicTemplateDefinitions,
+} from "@/page-builder/dynamic-template-instance";
 import type { PuckBlock, PuckDocument } from "@/page-builder/types";
 
 export const EDITOR_PAGE_KEYS = [
@@ -173,27 +180,59 @@ export function getEditorPageByPath(path: string) {
 }
 
 /**
- * 公开端只硬拦无法安全补写的必填语义与合同版本错误。
- * 媒体、集合数量和历史授权字段继续由现有模板失败态/服务端新发布门禁承接，
- * 避免读取时误伤已经存在且可安全降级的旧快照。
+ * 公开端只硬拦模板身份或合同版本错误。内容完善度由服务端作为发布提示返回，
+ * 已发布快照中的空字段交给各模板现有的安全省略与失败态处理。
  */
 export function isContentTemplateBlockPublicReady(block: {
   type?: string;
   props?: Record<string, unknown>;
 } | undefined) {
   if (!block) return false;
+  if (block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) return true;
   const completion = getContentTemplateCompletion(block.type || "", block.props);
   return Boolean(
     completion
-    && completion.content.complete
     && completion.publish.complete,
   );
+}
+
+/** 判断区块是否至少具备一项会在前台形成可见输出的合同内容。 */
+export function isContentTemplateBlockPublicRenderable(block: {
+  type?: string;
+  props?: Record<string, unknown>;
+} | undefined) {
+  if (!block || !isContentTemplateBlockPublicReady(block)) return false;
+  if (block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) return true;
+  const contract = getContentTemplateContract(block.type || "");
+  if (!contract) return false;
+  const props = block.props ?? {};
+  const hasMedia = getContentTemplateMediaReferences(
+    block.type || "",
+    props,
+    "props",
+  ).length > 0;
+  const hasRequiredText = contract.contentBudget.requiredText.some((field) => {
+    const value = props[field];
+    return typeof value === "string" && value.trim().length > 0;
+  });
+  const hasCollectionContent = contract.roles.some((role) => {
+    const value = props[role.id];
+    return Boolean(role.quantity && Array.isArray(value) && value.length > 0);
+  });
+  const hasNoRequiredContent =
+    contract.media.every((slot) => !slot.required)
+    && contract.contentBudget.requiredText.length === 0
+    && contract.roles.every((role) => !role.quantity?.min);
+  return hasMedia || hasRequiredText || hasCollectionContent || hasNoRequiredContent;
 }
 
 /** 覆盖式白色导航只有在首个可见品牌模块满足机器合同要求时启用。 */
 export function resolvePageHeaderMode(
   key: EditorPageKey,
-  data: { content?: Array<{ type?: string; props?: Record<string, unknown> }> } | null | undefined,
+  data: ({
+    content?: Array<{ type?: string; props?: Record<string, unknown> }>;
+    [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]?: unknown;
+  }) | null | undefined,
 ): PageHeaderMode {
   const page = getEditorPage(key);
   const rule = getContentTemplatePageRule(key);
@@ -203,14 +242,26 @@ export function resolvePageHeaderMode(
   const firstVisible = data?.content?.find(
     (block) => block?.props?.isVisible !== false && block?.type !== "业务功能区",
   );
+  if (firstVisible?.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
+    const templateId = typeof firstVisible.props?.templateId === "string"
+      ? firstVisible.props.templateId
+      : "";
+    const templateVersion = Number(firstVisible.props?.templateVersion);
+    const resolved = readResolvedDynamicTemplateDefinitions(
+      data?.[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY],
+    )[dynamicTemplateVersionKey(templateId, templateVersion)];
+    return resolved?.definition.metadata.headerCompatibility?.includes("overlay-light")
+      ? "overlay-light"
+      : rule.headerMode.fallback;
+  }
   const contract = getContentTemplateContract(firstVisible?.type || "");
   return contract?.key === rule.headerMode.overlayRequiresFirstTemplate
-    && isContentTemplateBlockPublicReady(firstVisible)
+    && isContentTemplateBlockPublicRenderable(firstVisible)
     ? "overlay-light"
     : rule.headerMode.fallback;
 }
 
-/** 为尚未保存的页面提供可立即编辑、且彼此可区分的初始画布（即该页面的推荐结构）。 */
+/** 为尚未保存的页面提供可立即编辑、且彼此可区分的中性初始结构。 */
 export function createEditorPageDefault(key: EditorPageKey) {
   const data = createPageDocumentSeed(templateIdByPage[key]) ?? JSON.parse(
     JSON.stringify(jewelryHomeTemplate.puckData),
@@ -247,7 +298,10 @@ function placeBusinessRegion(
   );
   const firstVisibleBrandIndex = contentWithoutBusinessRegion.findIndex(
     (block) =>
-      block?.props?.isVisible !== false && Boolean(getContentTemplateContract(block?.type || "")),
+      block?.props?.isVisible !== false && (
+        Boolean(getContentTemplateContract(block?.type || ""))
+        || block?.type === DYNAMIC_TEMPLATE_BLOCK_TYPE
+      ),
   );
   // 隐藏备选块和网站设置不参与公开顺序；固定业务区只跟随首个真正可见的品牌模块。
   const insertionIndex = firstVisibleBrandIndex >= 0 ? firstVisibleBrandIndex + 1 : 0;
@@ -300,7 +354,10 @@ function normalizePageCapabilities<T extends PuckDocument>(key: EditorPageKey, d
     allowTemplate: boolean,
   ) => block?.type === "业务功能区"
     ? allowBusinessRegion && rule.businessRegionCount === 1
-    : allowTemplate && isContentTemplateAllowedForPage(key, block?.type || "");
+    : allowTemplate && (
+      block?.type === DYNAMIC_TEMPLATE_BLOCK_TYPE
+      || isContentTemplateAllowedForPage(key, block?.type || "")
+    );
   let changed = false;
   const filterBlocks = (
     blocks: unknown,

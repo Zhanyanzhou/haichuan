@@ -6,13 +6,13 @@ description: 海川珠宝客户前台的奢侈品艺术指导与视觉审查—�
 # 奢侈品视觉设计体系（Luxury Visual System）
 
 > 依据：2026-08-15 对 6 家顶级珠宝品牌官网（梵克雅宝 VCA、卡地亚 Cartier、布契拉提 Buccellati、格拉夫 Graff、海瑞温斯顿 Harry Winston、宝格丽 Bvlgari）与 2 家设计平台（Awwwards Luxury、SiteInspire）的实测调研。
-> 本 Skill 提供可执行方法论、诊断参考与研究基线，不具产品决策权；项目硬规则只认 `docs/UI_GUIDE.md`，不得擅自更改品牌色、字体或 Logo。
-> 知识来源分层：`rules/` 为项目规则演绎；实测数据、量化基线与通用方法论的完整版统一在仓库级素材库 `design-library/`（04 案例、03 数值、02 原则），`knowledge/` 内只保留指针与项目侧结论；`process/diagnosis.md` 的清单为项目演绎（已标注非权威原文）。
+> 本 Skill 提供可执行方法论、诊断参考与研究基线，不具产品决策权；项目硬规则只认 `../../../docs/UI_GUIDE.md`，不得擅自更改品牌色、字体或 Logo。
+> 知识来源分层：`rules/` 为项目规则演绎；实测数据、量化基线与通用方法论的完整版统一在仓库级素材库 `../../../design-library/`（04 案例、03 数值、02 原则），`knowledge/` 内只保留指针与项目侧结论；`process/diagnosis.md` 的清单为项目演绎（已标注非权威原文）。
 
 ## 零、海川项目边界
 
 - **客户前台**：只负责艺术方向、视觉层级、图文关系、影像与品牌气质；功能、内容真实性、无障碍和性能仍受项目规则约束。
-- **Puck/CMS 内容模板**：稳定边界先读 `docs/page-builder/template-design-framework.md`；具体模板事实只认 `contracts/page-builder/content-templates.contract.json`，再由当前 Schema、适配器和 Renderer 核验实现。本 Skill 只能补充公开页面的艺术判断，不能把摄影海报比例当成技术合同。
+- **Puck/CMS 内容模板**：稳定边界先读 `../../../docs/page-builder/template-design-framework.md`；具体模板事实只认 `../../../contracts/page-builder/content-templates.contract.json`，再由当前 Schema、适配器和 Renderer 核验实现。本 Skill 只能补充公开页面的艺术判断，不能把摄影海报比例当成技术合同。
 - **模板缩略图与空状态**：默认使用中性几何图片占位和真实文字层级，清楚展示图片框、比例与文字位置；不得用生成摄影图掩盖结构问题。
 - **管理后台**：编辑器壳层、表格、表单、状态和操作不触发本 Skill；仅嵌入的公开内容预览按前台规则审查。
 - **AI 图片**：只有用户明确要求时才进入生成流程。生成结果只能作为内部概念稿，不能冒充真实珠宝、材质、证书、工艺、佩戴效果或可发布商品素材；公开使用前必须完成人工真实性、版权和品牌审核。
@@ -36,7 +36,7 @@ description: 海川珠宝客户前台的奢侈品艺术指导与视觉审查—�
 | --- | --- | --- | --- |
 | 流程 | `process/` | 视觉诊断清单 + 设计决策链 + 强制看图 | **任何视觉任务第一步必读** |
 | 规则 | `rules/` | 排印色彩 / 版式图片 / 文案禁忌 | 任何视觉任务必读 |
-| 知识库 | `knowledge/` + `design-library/` | AI 提示词库 / 实测与原则指针；通用理论、量化基线与品牌证据全库在 `design-library/` | 需要证据、提示词或方法论依据时读 `design-library/` 对应文件；模板稳定边界读 `docs/page-builder/template-design-framework.md`，具体事实读机器合同 |
+| 知识库 | `knowledge/` + `../../../design-library/` | AI 提示词库 / 实测与原则指针；通用理论、量化基线与品牌证据全库在 `../../../design-library/` | 需要证据、提示词或方法论依据时读 `../../../design-library/` 对应文件；模板稳定边界读 `../../../docs/page-builder/template-design-framework.md`，具体事实读机器合同 |
 
 ### process/（1 份，任何视觉任务第一步必读）
 - `diagnosis.md` — 视觉诊断清单 + 设计决策链 + 强制看图动作
@@ -47,9 +47,9 @@ description: 海川珠宝客户前台的奢侈品艺术指导与视觉审查—�
 - `copywriting-forbidden.md` — 文案规则与禁忌清单
 
 ### knowledge/（3 份，按需读取）
-- `benchmark-data.md` — 指向 `design-library/04-case-studies.md` 的品牌实测指针 + 项目侧结论（海川走经典衬线路线）
+- `benchmark-data.md` — 指向 `../../../design-library/04-case-studies.md` 的品牌实测指针 + 项目侧结论（海川走经典衬线路线）
 - `prompt-library.md` — AI 图像生成提示词库 + 术语对照表
-- `design-principles.md` — 有出处的设计原则（Dieter Rams / 双钻模型 / Paul Rand 等）；通用理论全版见 `design-library/02-luxury-principles.md`
+- `design-principles.md` — 有出处的设计原则（Dieter Rams / 双钻模型 / Paul Rand 等）；通用理论全版见 `../../../design-library/02-luxury-principles.md`
 
 ---
 
@@ -60,23 +60,23 @@ description: 海川珠宝客户前台的奢侈品艺术指导与视觉审查—�
 0. **先看图（强制）**：截图 / 打开真实图像；无图则明说「无图，以下为假设」。
 1. **诊断**：读取 `process/diagnosis.md`，按 7 项诊断清单逐项判断「合格 / 不合格」。
 2. **定位**：难看在哪一层（图本身 / 图文关系 / 层级 / 字体 / 色彩）。
-3. **读基线**：读取 `rules/` 三份用于诊断，并以 `docs/UI_GUIDE.md` 裁定项目规则；需要外部证据或数值依据时读 `design-library/03/04`（冲突仍以 UI_GUIDE 为准）。
+3. **读基线**：读取 `rules/` 三份用于诊断，并以 `../../../docs/UI_GUIDE.md` 裁定项目规则；需要外部证据或数值依据时读 `../../../design-library/03-quantitative-baselines.md` 和 `../../../design-library/04-case-studies.md`（冲突仍以 UI_GUIDE 为准）。
 4. **生成图片**：仅当用户明确要求生成或编辑图片时，读取 `knowledge/prompt-library.md`；模板结构、缩略图和版式讨论不得自动进入出图流程。
-5. **检验**：按 `docs/UI_GUIDE.md` 验收与检验三问（眯眼 / 换尺寸 / 删减）逐项自检。
+5. **检验**：按 `../../../docs/UI_GUIDE.md` 验收与检验三问（眯眼 / 换尺寸 / 删减）逐项自检。
 
 ---
 
 ## 四、项目品牌基线
 
-- 品牌定位和已批准方向读取 `docs/DECISIONS.md` A.8。
-- 颜色、字体、留白、图片、组件、动效、文案、响应式、无障碍、性能和验收只认 `docs/UI_GUIDE.md`。
+- 品牌定位和已批准方向读取 `../../../docs/DECISIONS.md` A.8。
+- 颜色、字体、留白、图片、组件、动效、文案、响应式、无障碍、性能和验收只认 `../../../docs/UI_GUIDE.md`。
 - 本 Skill 不复制具体项目数值，不把竞品样本变成海川永久规则，也不把“品牌级体验”描述成未经证明的品牌历史或资产。
 
 ---
 
 ## 规则优先级（冲突时）
 
-1. `AGENTS.md` 的安全、权限与内容真实性边界
+1. `../../../AGENTS.md` 的安全、权限与内容真实性边界
 2. 用户本轮明确授权与已批准产品决策
-3. `docs/UI_GUIDE.md` 中的品牌规范（项目视觉唯一详细来源）
+3. `../../../docs/UI_GUIDE.md` 中的品牌规范（项目视觉唯一详细来源）
 4. 本体系的实测基线、模板与通用建议

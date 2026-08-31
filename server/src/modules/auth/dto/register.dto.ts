@@ -1,7 +1,8 @@
 import { IsString, IsNotEmpty, IsOptional, MinLength, MaxLength, Matches } from 'class-validator';
 import {
+  STAFF_PASSWORD_MAX_LENGTH,
   STAFF_PASSWORD_MESSAGE,
-  STAFF_PASSWORD_PATTERN,
+  STAFF_PASSWORD_MIN_LENGTH,
 } from '../../users/staff-password-policy';
 
 /**
@@ -16,11 +17,8 @@ export class RegisterDto {
   username!: string;
 
   @IsString()
-  @MinLength(12, { message: STAFF_PASSWORD_MESSAGE })
-  @MaxLength(128)
-  @Matches(STAFF_PASSWORD_PATTERN, {
-    message: STAFF_PASSWORD_MESSAGE,
-  })
+  @MinLength(STAFF_PASSWORD_MIN_LENGTH, { message: STAFF_PASSWORD_MESSAGE })
+  @MaxLength(STAFF_PASSWORD_MAX_LENGTH, { message: STAFF_PASSWORD_MESSAGE })
   password!: string;
 
   @IsOptional()

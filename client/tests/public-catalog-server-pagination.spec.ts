@@ -231,6 +231,17 @@ test("Catalog 将现有 URL 筛选翻译为服务端参数而不复用商品 ids
   await expect(page).not.toHaveURL(/material=/);
 });
 
+test("Catalog 接受行动目标保存的分类 slug 并展开全部后代", async ({ page }) => {
+  const requestPromise = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname.endsWith("/api/products/public") && url.searchParams.has("categoryIds");
+  });
+  await page.goto("/catalog?category=rings");
+  const url = new URL((await requestPromise).url());
+  expect(url.searchParams.get("categoryIds")).toBe("1,2");
+  expect(url.searchParams.get("ids")).toBeNull();
+});
+
 test("Catalog 搜索的空态、错误态与 390px 溢出状态完整", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/catalog");

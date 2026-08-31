@@ -83,6 +83,9 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
       await page.goto("/contact");
 
       const submit = page.getByRole("button", { name: "提交需求" });
+      await expect(page.locator("#cf-name")).toHaveAttribute("autocomplete", "name");
+      await expect(page.locator("#cf-phone")).toHaveAttribute("autocomplete", "tel-national");
+      await expect(page.locator("#cf-phone")).toHaveAttribute("inputmode", "numeric");
       await expect(submit).toHaveAttribute("type", "submit");
       await submit.press("Enter");
 
@@ -143,7 +146,7 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
     await expect.poll(() => inquiryRequests).toBe(1);
 
     releaseInquiry();
-    const successHeading = page.getByRole("heading", { name: "需求已提交" });
+    const successHeading = page.getByRole("heading", { level: 1, name: "需求已提交" });
     await expect(successHeading).toBeFocused();
     expect(inquiryRequests).toBe(1);
   });

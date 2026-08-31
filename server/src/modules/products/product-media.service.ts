@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { join, relative, resolve, sep } from 'path';
 
 interface CacheEntry {
@@ -58,16 +59,16 @@ export class ProductMediaService {
    * 优先按 storageKey 从私有目录读取；无 storageKey 时仅回退历史 uploads 路径。
    * 防止 ../ 路径穿越。
    */
-  readProductImage(image: {
+  async readProductImage(image: {
     storageKey?: string | null;
     url?: string | null;
     isVideo?: boolean;
     mimeType?: string | null;
-  }): ReadResult {
+  }): Promise<ReadResult> {
     const mediaPath = this.resolveProductMediaPath(image);
     if (mediaPath) {
       return {
-        buffer: readFileSync(mediaPath),
+        buffer: await readFile(mediaPath),
         mimeType: image.mimeType || this.guessMime(mediaPath),
         isVideo: !!image.isVideo,
       };

@@ -89,3 +89,6 @@ client/public/images/editorial/high-jewelry-garden/微信视频*.mp4
 # Codex 本地浏览器验收证据与临时验证脚本（正式审计产物仍存放在 docs/audits）
 client/.codex-artifacts/
 client/scripts/tmp-*.mjs
+
+# Codex 本地工作树快照（仅用于当前机器恢复，不属于项目交付物）
+/.codex-tmp/

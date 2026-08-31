@@ -2,24 +2,43 @@ import {
   normalizeContentTemplatePageTarget,
 } from "@/page-builder/generated/contentTemplates.generated";
 
-export type LinkTargetType = "none" | "product" | "page";
+export type LinkTargetType = "none" | "product" | "category" | "page" | "external";
 
 export interface LinkTargetValue {
   targetType?: LinkTargetType | string;
   productCode?: string;
   productId?: number | string;
+  categorySlug?: unknown;
   linkUrl?: string;
 }
 
 export function normalizeLinkTargetType(value: LinkTargetValue): LinkTargetType {
-  if (value.targetType === "none" || value.targetType === "product" || value.targetType === "page") {
+  if (
+    value.targetType === "none" ||
+    value.targetType === "product" ||
+    value.targetType === "category" ||
+    value.targetType === "page" ||
+    value.targetType === "external"
+  ) {
     return value.targetType;
   }
   if (typeof value.productCode === "string" && value.productCode.trim()) return "product";
   const productId = Number(value.productId);
   if (Number.isInteger(productId) && productId > 0) return "product";
+  if (typeof value.categorySlug === "string" && value.categorySlug.trim()) return "category";
   if (normalizeContentTemplatePageTarget(value.linkUrl)) return "page";
   return "none";
+}
+
+export function normalizeHttpsExternalTarget(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const candidate = value.trim();
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" && Boolean(url.hostname) ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 export function isSafeInternalPath(value: unknown): value is string {
@@ -27,10 +46,14 @@ export function isSafeInternalPath(value: unknown): value is string {
 }
 
 /** 选款中心当前稳定支持的分类筛选入口。 */
-export function createCatalogCategoryUrl(categoryId: unknown): string {
-  const normalizedId = Number(categoryId);
-  return Number.isInteger(normalizedId) && normalizedId > 0
-    ? `/catalog?category=${encodeURIComponent(String(normalizedId))}`
+export function createCatalogCategoryUrl(categoryReference: unknown): string {
+  const normalizedReference = typeof categoryReference === "string"
+    ? categoryReference.trim()
+    : Number.isInteger(Number(categoryReference)) && Number(categoryReference) > 0
+      ? String(Number(categoryReference))
+      : "";
+  return normalizedReference
+    ? `/catalog?category=${encodeURIComponent(normalizedReference)}`
     : "/catalog";
 }
 
@@ -54,8 +77,16 @@ export function resolveLinkTargetUrl(value: LinkTargetValue): string {
   if (targetType === "product" && Number.isInteger(productId) && productId > 0) {
     return `/products/${productId}`;
   }
+  if (targetType === "category") {
+    return typeof value.categorySlug === "string" && value.categorySlug.trim()
+      ? createCatalogCategoryUrl(value.categorySlug)
+      : "";
+  }
   if (targetType === "page") {
     return normalizeContentTemplatePageTarget(value.linkUrl) ?? "";
+  }
+  if (targetType === "external") {
+    return normalizeHttpsExternalTarget(value.linkUrl) ?? "";
   }
   return "";
 }
@@ -69,7 +100,13 @@ export function resolveLinkTargetUrl(value: LinkTargetValue): string {
 export function resolveItemLinkUrl(
   item: LinkTargetValue & { link?: unknown },
 ): string {
-  if (item.targetType != null || item.productCode != null || item.productId != null) {
+  if (
+    item.targetType != null ||
+    item.productCode != null ||
+    item.productId != null ||
+    item.categorySlug != null ||
+    item.linkUrl != null
+  ) {
     return resolveLinkTargetUrl(item);
   }
   return normalizeContentTemplatePageTarget(item.link) ?? "";
@@ -87,12 +124,14 @@ export function resolvePrefixedLinkTarget(
   const targetType = props[`${prefix}TargetType`];
   const productCode = props[`${prefix}ProductCode`];
   const productId = props[`${prefix}ProductId`];
+  const categorySlug = props[`${prefix}CategorySlug`];
   const linkUrl = props[`${prefix}LinkUrl`];
-  if (targetType != null || productCode != null || productId != null) {
+  if (targetType != null || productCode != null || productId != null || categorySlug != null || linkUrl != null) {
     return resolveLinkTargetUrl({
       targetType: typeof targetType === "string" ? targetType : undefined,
       productCode: typeof productCode === "string" ? productCode : undefined,
       productId: typeof productId === "string" || typeof productId === "number" ? productId : undefined,
+      categorySlug: typeof categorySlug === "string" ? categorySlug : undefined,
       linkUrl: typeof linkUrl === "string" ? linkUrl : undefined,
     });
   }

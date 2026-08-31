@@ -8,6 +8,9 @@ const require = createRequire(import.meta.url);
 const {
   PageModulesService,
 } = require("../server/dist/modules/page-modules/page-modules.service.js");
+const {
+  calculateDynamicTemplateDefinitionChecksum,
+} = require("../server/dist/modules/page-modules/dynamic-template-definition-integrity.js");
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const contentTemplateContract = JSON.parse(
@@ -51,6 +54,79 @@ const validData = (title, marker = undefined) => ({
   root: { props: {} },
   zones: {},
 });
+const dynamicDefinition = {
+  schemaVersion: 1,
+  templateId: "tpl_publish_instance",
+  name: "内容展示｜正式版本实例",
+  description: "页面实例发布闭环测试",
+  metadata: {
+    category: "内容展示",
+    purpose: "正式版本实例测试",
+    layoutType: "纵向内容",
+    slotSummary: "1 个标题槽位",
+    recommendedFor: ["products"],
+    desktopRatio: "16:9",
+    mobileRatio: "4:5",
+    visualRole: "support-stage",
+    headerCompatibility: ["solid"],
+    tags: ["publish-test"],
+  },
+  rootNodeId: "node_root",
+  nodes: {
+    node_root: {
+      nodeId: "node_root",
+      type: "Section",
+      name: "模板根节点",
+      childIds: ["node_container"],
+      props: { semanticTag: "section" },
+      responsive: {
+        desktop: { display: "block", order: 0, width: "fill", height: { mode: "auto" } },
+        mobile: { display: "block", order: 0, width: "fill", height: { mode: "auto" } },
+      },
+      hidden: false,
+    },
+    node_container: {
+      nodeId: "node_container",
+      type: "Container",
+      name: "内容容器",
+      childIds: ["node_heading"],
+      props: {},
+      responsive: {
+        desktop: { display: "flex", direction: "column", order: 0, width: "fill", height: { mode: "auto" } },
+        mobile: { display: "flex", direction: "column", order: 0, width: "fill", height: { mode: "auto" } },
+      },
+      hidden: false,
+    },
+    node_heading: {
+      nodeId: "node_heading",
+      type: "HeadingSlot",
+      name: "标题",
+      slotId: "slot_heading",
+      childIds: [],
+      props: {},
+      responsive: {
+        desktop: { display: "block", order: 0, width: "fill", height: { mode: "auto" } },
+        mobile: { display: "block", order: 0, width: "fill", height: { mode: "auto" } },
+      },
+      hidden: false,
+    },
+  },
+  slots: {
+    slot_heading: {
+      slotId: "slot_heading",
+      key: "heading",
+      type: "heading",
+      label: "标题",
+      required: true,
+      editable: true,
+      hideable: false,
+      validation: { minLength: 1, maxLength: 40 },
+      desktopRules: { fontRole: "display", maxLines: 2 },
+      mobileRules: { fontRole: "heading", maxLines: 3 },
+    },
+  },
+  defaultContent: { slot_heading: "默认正式标题" },
+};
 
 const state = {
   document: {
@@ -64,6 +140,7 @@ const state = {
     puckData: validData("当前草稿"),
     metadata: validMetadata("当前草稿"),
     status: "DRAFT",
+    publishedRevisionId: 17,
     publishedAt: oldPublishedAt,
     publishedBy: 1,
     createdAt: new Date("2026-08-10T05:59:14.237Z"),
@@ -132,6 +209,7 @@ const db = {
         .filter(
           (revision) =>
             revision.documentId === where.documentId &&
+            (!where.id || revision.id === where.id) &&
             (!where.status || revision.status === where.status),
         )
         .sort((a, b) => b.version - a.version);
@@ -156,6 +234,9 @@ const db = {
       return { count: before - state.revisions.length };
     },
     findMany: async () => clone(state.revisions),
+  },
+  operationLog: {
+    create: async ({ data }) => ({ id: 1, ...clone(data) }),
   },
   product: {
     findMany: async ({ where }) => {
@@ -184,6 +265,23 @@ const db = {
       { id: 1, parentId: null, slug: "public-category", coverImage: image, products: [{ id: 1 }] },
       { id: 2, parentId: null, slug: "no-cover-category", coverImage: null, products: [{ id: 2 }] },
     ],
+  },
+  dynamicTemplateVersion: {
+    findMany: async ({ where }) => {
+      const requests = where?.OR ?? [];
+      return requests.some((request) =>
+        request.version === 3
+        && request.template?.templateId === dynamicDefinition.templateId
+        && request.template?.visibility === "STAFF")
+        ? [{
+            version: 3,
+            schemaVersion: 1,
+            definition: clone(dynamicDefinition),
+            definitionChecksum: calculateDynamicTemplateDefinitionChecksum(dynamicDefinition),
+            template: { templateId: dynamicDefinition.templateId },
+          }]
+        : [];
+    },
   },
   $queryRaw: async () => {
     lockCount += 1;
@@ -219,7 +317,7 @@ const editorOnlyResult = await service.validatePageDocument("home", {
 assert.equal(editorOnlyResult.valid, false);
 assert.deepEqual(editorOnlyResult.errors, [
   "页面至少需要 1 个可见的前台内容模块",
-  "覆盖式浅色导航要求首个可见品牌模块为首屏主视觉",
+  "覆盖式浅色导航要求首个可见品牌模块明确兼容浅色覆盖导航",
 ]);
 
 const unfinishedBrandHomeResult = await service.validatePageDocument("home", {
@@ -263,18 +361,141 @@ const unfinishedBrandHomeResult = await service.validatePageDocument("home", {
   ],
   root: { props: {} },
 });
-assert.equal(unfinishedBrandHomeResult.valid, false);
+assert.equal(unfinishedBrandHomeResult.valid, true);
 assert.ok(
-  unfinishedBrandHomeResult.errors.some((error) =>
-    error.includes("brand-home-hero") || error.includes("海川珠宝"),
+  unfinishedBrandHomeResult.issues.some((issue) =>
+    issue.severity === "warning"
+      && (issue.blockId === "brand-home-hero" || issue.message.includes("海川珠宝")),
   ),
-  "首页首屏缺少最终素材时必须阻断发布",
+  "首页首屏缺少最终素材时必须提示但不阻断发布",
 );
+
+const dynamicInstanceData = {
+  content: [{
+    type: "动态模板实例",
+    props: {
+      id: "dynamic-page-block",
+      instanceSchemaVersion: 1,
+      instanceId: "dynamic-instance-1",
+      templateId: dynamicDefinition.templateId,
+      templateVersion: 3,
+      moduleName: dynamicDefinition.name,
+      contentBySlotId: { slot_heading: "页面实例标题" },
+      overrides: {},
+      hiddenSlotIds: [],
+      isVisible: true,
+    },
+  }],
+  root: { props: {} },
+  zones: {},
+};
+const dynamicInstanceResult = await service.validatePageDocument(
+  "products",
+  dynamicInstanceData,
+  validMetadata("动态模板实例"),
+);
+assert.equal(
+  dynamicInstanceResult.valid,
+  true,
+  `页面实例必须使用正式精确版本并只保存槽位内容：${JSON.stringify(dynamicInstanceResult.issues)}`,
+);
+
+const duplicateDynamicInstanceData = clone(dynamicInstanceData);
+duplicateDynamicInstanceData.content.push({
+  ...clone(duplicateDynamicInstanceData.content[0]),
+  props: {
+    ...clone(duplicateDynamicInstanceData.content[0].props),
+    id: "dynamic-page-block-copy",
+  },
+});
+const duplicateDynamicInstanceResult = await service.validatePageDocument(
+  "products",
+  duplicateDynamicInstanceData,
+  validMetadata("重复动态模板实例身份"),
+);
+assert.equal(duplicateDynamicInstanceResult.valid, false, "页面内动态模板 instanceId 必须唯一");
 assert.ok(
-  unfinishedBrandHomeResult.errors.some((error) =>
-    error.includes("代表作品") && error.includes("图片不能为空"),
+  duplicateDynamicInstanceResult.issues.some((issue) =>
+    issue.blockId === "dynamic-page-block-copy"
+      && issue.field === "instanceId"
+      && issue.path.endsWith("props.instanceId")),
+  "重复 instanceId 必须定位到后出现的页面实例",
+);
+
+dynamicInstanceData.content[0].props.templateVersion = 4;
+const missingDynamicVersionResult = await service.validatePageDocument(
+  "products",
+  dynamicInstanceData,
+  validMetadata("缺失动态模板版本"),
+);
+assert.equal(missingDynamicVersionResult.valid, false, "不存在的动态模板精确版本必须阻断发布");
+assert.ok(
+  missingDynamicVersionResult.issues.some((issue) =>
+    issue.blockId === "dynamic-page-block"
+      && issue.field === "templateVersion"
+      && issue.path.endsWith("props.templateVersion")),
+  "精确版本缺失必须定位到页面实例的 templateVersion",
+);
+dynamicInstanceData.content[0].props.templateVersion = 3;
+dynamicInstanceData.content[0].props.contentBySlotId.slot_unknown = "越界内容";
+const undeclaredDynamicSlotResult = await service.validatePageDocument(
+  "products",
+  dynamicInstanceData,
+  validMetadata("未知动态模板槽位"),
+);
+assert.equal(undeclaredDynamicSlotResult.valid, false, "页面实例不得写入模板未声明的槽位");
+assert.ok(
+  undeclaredDynamicSlotResult.issues.some((issue) =>
+    issue.blockId === "dynamic-page-block"
+      && issue.field === "slot_unknown"
+      && issue.path.endsWith("props.contentBySlotId.slot_unknown")),
+  "未知槽位必须定位到页面实例的具体 slotId",
+);
+delete dynamicInstanceData.content[0].props.contentBySlotId.slot_unknown;
+dynamicDefinition.metadata.recommendedFor = ["home"];
+dynamicDefinition.metadata.visualRole = "primary-stage";
+dynamicDefinition.metadata.headerCompatibility = ["solid", "overlay-light"];
+const dynamicHeroResult = await service.validatePageDocument(
+  "home",
+  dynamicInstanceData,
+  validMetadata("动态首屏模板"),
+);
+assert.equal(
+  dynamicHeroResult.valid,
+  true,
+  `声明首屏职责与导航兼容性的动态模板必须可作为首页首块：${JSON.stringify(dynamicHeroResult.issues)}`,
+);
+dynamicDefinition.metadata.recommendedFor = ["products"];
+const crossPageDynamicRecommendationResult = await service.validatePageDocument(
+  "home",
+  dynamicInstanceData,
+  validMetadata("跨页面使用推荐模板"),
+);
+assert.equal(
+  crossPageDynamicRecommendationResult.valid,
+  true,
+  `recommendedFor 只作推荐，不得阻断模板跨页面使用：${JSON.stringify(crossPageDynamicRecommendationResult.issues)}`,
+);
+dynamicDefinition.metadata.headerCompatibility = ["solid"];
+const incompatibleDynamicHeroResult = await service.validatePageDocument(
+  "home",
+  dynamicInstanceData,
+  validMetadata("不兼容覆盖导航的动态首屏"),
+);
+assert.equal(incompatibleDynamicHeroResult.valid, false, "动态首屏未声明浅色覆盖导航兼容时必须阻断首页发布");
+assert.ok(
+  incompatibleDynamicHeroResult.errors.some((error) => error.includes("明确兼容浅色覆盖导航")),
+  "动态首屏导航对比度风险必须返回可解释错误",
+);
+dynamicDefinition.metadata.visualRole = "support-stage";
+dynamicDefinition.metadata.headerCompatibility = ["solid"];
+assert.ok(
+  unfinishedBrandHomeResult.issues.some((issue) =>
+    issue.severity === "warning"
+      && issue.message.includes("代表作品")
+      && issue.message.includes("图片不能为空"),
   ),
-  "首页作品区缺少最终素材时必须阻断发布",
+  "首页作品区缺少最终素材时必须提示但不阻断发布",
 );
 
 const validProductsResult = await service.validatePageDocument(
@@ -337,12 +558,14 @@ const unfinishedProductsResult = await service.validatePageDocument(
   },
   validMetadata("珠宝作品"),
 );
-assert.equal(unfinishedProductsResult.valid, false);
+assert.equal(unfinishedProductsResult.valid, true);
 assert.ok(
-  unfinishedProductsResult.errors.some((error) =>
-    error.includes("代表作品") && error.includes("商品"),
+  unfinishedProductsResult.issues.some((issue) =>
+    issue.severity === "warning"
+      && issue.message.includes("代表作品")
+      && issue.message.includes("商品"),
   ),
-  "作品页未选择真实公开商品引用时必须阻断发布",
+  "作品页未选择真实公开商品引用时必须提示但不阻断发布",
 );
 
 const validCatalogFrame = {
@@ -413,14 +636,16 @@ for (const pageKey of ["custom", "about"]) {
     root: { props: {} },
   };
   const unfinishedBrandPageResult = await service.validatePageDocument(pageKey, unfinishedBrandPage, validMetadata(`${pageKey} 页面`));
-  assert.equal(unfinishedBrandPageResult.valid, false);
+  assert.equal(unfinishedBrandPageResult.valid, true);
   assert.ok(
-    unfinishedBrandPageResult.errors.some((error) => error.includes("图片不能为空")),
-    `${pageKey} 缺少最终主视觉素材时必须阻断发布`,
+    unfinishedBrandPageResult.issues.some((issue) =>
+      issue.severity === "warning" && issue.message.includes("图片不能为空")),
+    `${pageKey} 缺少最终主视觉素材时必须提示但不阻断发布`,
   );
   assert.ok(
-    unfinishedBrandPageResult.errors.some((error) => error.includes("占位内容")),
-    `${pageKey} 未确认文案必须阻断发布`,
+    unfinishedBrandPageResult.issues.some((issue) =>
+      issue.severity === "warning" && issue.message.includes("占位内容")),
+    `${pageKey} 未确认文案必须提示但不阻断发布`,
   );
 }
 
@@ -435,7 +660,9 @@ const invalidResult = await service.validatePageDocument("home", {
 });
 assert.equal(invalidResult.valid, false);
 assert.ok(
-  invalidResult.errors.includes("第 1 个区块「品牌故事」：image 图片不能为空"),
+  invalidResult.issues.some((issue) =>
+    issue.message === "第 1 个区块「品牌故事」：image 图片不能为空"
+      && issue.severity === "warning"),
 );
 assert.equal(
   invalidResult.issues.find(
@@ -539,32 +766,15 @@ assert.equal(
 );
 
 secondSharedDesignBlock.props.__instanceOverrides.frame.aspectRatioByViewport.desktop = 1.25;
-const divergentSharedDesignResult = await service.validatePageDocument(
+const independentInstanceResult = await service.validatePageDocument(
   "home",
   sharedDesignData,
-  validMetadata("同类设计不一致"),
+  validMetadata("同类实例设计独立"),
 );
-assert.equal(divergentSharedDesignResult.valid, false, "同页同类实例设计不一致必须阻断发布");
-assert.deepEqual(
-  divergentSharedDesignResult.issues.find(
-    (issue) => issue.code === "content-template-shared-design-mismatch",
-  ) && {
-    blockId: divergentSharedDesignResult.issues.find(
-      (issue) => issue.code === "content-template-shared-design-mismatch",
-    ).blockId,
-    moduleType: divergentSharedDesignResult.issues.find(
-      (issue) => issue.code === "content-template-shared-design-mismatch",
-    ).moduleType,
-    path: divergentSharedDesignResult.issues.find(
-      (issue) => issue.code === "content-template-shared-design-mismatch",
-    ).path,
-  },
-  {
-    blockId: "same-type-second",
-    moduleType: "文字横幅",
-    path: "content[2].props.__instanceOverrides",
-  },
-  "同类设计不一致必须定位到模块、模板类型和覆盖路径",
+assert.equal(
+  independentInstanceResult.valid,
+  true,
+  `同页同类实例允许拥有独立覆盖：${JSON.stringify(independentInstanceResult.issues)}`,
 );
 
 const coveredActionData = validData("行动遮挡校验");
@@ -623,6 +833,68 @@ assert.ok(
     issue.blockId === "covered-action-banner" && issue.severity === "warning" &&
     issue.message.includes("自定义重叠")),
   "普通重叠必须返回可定位 warning",
+);
+
+const categoryTargetData = validData("分类行动目标");
+categoryTargetData.content.push({
+  type: "文字横幅",
+  props: {
+    id: "category-target-banner",
+    title: "按系列浏览",
+    buttonText: "查看公开分类",
+    targetType: "category",
+    categorySlug: "public-category",
+  },
+});
+const categoryTargetResult = await service.validatePageDocument(
+  "home",
+  categoryTargetData,
+  validMetadata("分类行动目标"),
+);
+assert.equal(categoryTargetResult.valid, true, `有效分类行动目标必须可发布：${JSON.stringify(categoryTargetResult.issues)}`);
+
+categoryTargetData.content[1].props.categorySlug = "no-cover-category";
+const invalidCategoryTargetResult = await service.validatePageDocument(
+  "home",
+  categoryTargetData,
+  validMetadata("无效分类行动目标"),
+);
+assert.equal(invalidCategoryTargetResult.valid, false, "不满足公开条件的分类行动目标必须阻断发布");
+assert.ok(
+  invalidCategoryTargetResult.issues.some((issue) =>
+    issue.blockId === "category-target-banner" && issue.field === "categorySlug"),
+  "分类行动目标错误必须定位到 categorySlug 字段",
+);
+
+const externalTargetData = validData("外部行动目标");
+externalTargetData.content.push({
+  type: "文字横幅",
+  props: {
+    id: "external-target-banner",
+    title: "品牌合作",
+    buttonText: "访问合作页面",
+    targetType: "external",
+    linkUrl: "https://partner.example.com/story",
+  },
+});
+const externalTargetResult = await service.validatePageDocument(
+  "home",
+  externalTargetData,
+  validMetadata("外部行动目标"),
+);
+assert.equal(externalTargetResult.valid, true, `HTTPS 外部行动目标必须可发布：${JSON.stringify(externalTargetResult.issues)}`);
+
+externalTargetData.content[1].props.linkUrl = "http://partner.example.com/story";
+const unsafeExternalTargetResult = await service.validatePageDocument(
+  "home",
+  externalTargetData,
+  validMetadata("不安全外部行动目标"),
+);
+assert.equal(unsafeExternalTargetResult.valid, false, "非 HTTPS 外部行动目标必须阻断发布");
+assert.ok(
+  unsafeExternalTargetResult.issues.some((issue) =>
+    issue.blockId === "external-target-banner" && issue.field === "linkUrl"),
+  "外部行动目标错误必须定位到 linkUrl 字段",
 );
 
 const mismatchedData = validData("错误印记", { key: "textBanner", version: 1 });
@@ -748,7 +1020,13 @@ for (const testCase of requiredAltCases) {
   const pageData = validData(`${testCase.type}替代文字门禁`);
   pageData.content.push({ type: testCase.type, props: testCase.props });
   const missingAltResult = await service.validatePageDocument(testCase.pageKey, pageData, validMetadata(`${testCase.type}测试页`));
-  assert.equal(missingAltResult.valid, false, `${testCase.type} 配置公开媒体但缺少替代文字时必须阻止发布`);
+  assert.equal(missingAltResult.valid, true, `${testCase.type} 配置公开媒体但缺少替代文字时必须提示但不阻止发布`);
+  assert.ok(
+    missingAltResult.issues
+      .filter((issue) => issue.blockId === testCase.props.id && testCase.altFields.includes(issue.field))
+      .every((issue) => issue.severity === "warning"),
+    `${testCase.type} 替代文字问题必须是提示`,
+  );
   assert.deepEqual(
     missingAltResult.issues
       .filter((issue) => issue.blockId === testCase.props.id && testCase.altFields.includes(issue.field))
@@ -803,7 +1081,7 @@ collectionAltData.content.push(
   },
 );
 const missingCollectionAltResult = await service.validatePageDocument("home", collectionAltData, validMetadata("集合媒体测试页"));
-assert.equal(missingCollectionAltResult.valid, false, "集合媒体任一公开图片缺少替代文字时必须阻止发布");
+assert.equal(missingCollectionAltResult.valid, true, "集合媒体任一公开图片缺少替代文字时必须提示但不阻止发布");
 assert.deepEqual(
   missingCollectionAltResult.issues
     .filter((issue) => ["alt-carousel", "alt-gallery", "alt-scenes"].includes(issue.blockId))
@@ -950,7 +1228,7 @@ const incompleteCollectionData = {
   zones: {},
 };
 const incompleteCollectionResult = await service.validatePageDocument("custom", incompleteCollectionData, validMetadata("定制测试页"));
-assert.equal(incompleteCollectionResult.valid, false, "集合数量不足时必须由服务端发布门禁阻止");
+assert.equal(incompleteCollectionResult.valid, true, "集合数量不足时必须由服务端提示但不阻止发布");
 assert.deepEqual(
   incompleteCollectionResult.issues
     .filter((issue) => ["steps", "certificates"].includes(issue.field))
@@ -984,7 +1262,11 @@ for (const derivedCase of [
   const missingDerivedAltData = clone(completeCollectionData);
   missingDerivedAltData.content[derivedCase.blockIndex].props[derivedCase.itemField][derivedCase.itemIndex][derivedCase.sourceField] = "";
   const missingDerivedAltResult = await service.validatePageDocument("custom", missingDerivedAltData, validMetadata("定制测试页"));
-  assert.equal(missingDerivedAltResult.valid, false, `${derivedCase.blockId} 的图片替代文字派生来源缺失时必须阻止发布`);
+  assert.equal(
+    missingDerivedAltResult.valid,
+    true,
+    `${derivedCase.blockId} 的图片替代文字派生来源缺失时必须提示但不阻止发布：${JSON.stringify(missingDerivedAltResult.issues)}`,
+  );
   assert.ok(
     missingDerivedAltResult.issues.some((issue) =>
       issue.blockId === derivedCase.blockId
@@ -1027,10 +1309,13 @@ assert.ok(
 const placeholderClaimData = clone(completeCollectionData);
 placeholderClaimData.content[2].props.title = "证书信息待确认";
 const placeholderClaimResult = await service.validatePageDocument("custom", placeholderClaimData, validMetadata("定制测试页"));
-assert.equal(placeholderClaimResult.valid, false, "带待确认标记的高风险默认文案不得发布");
+assert.equal(placeholderClaimResult.valid, true, "带待确认标记的文案应提示但不阻断可用版本发布");
 assert.ok(
-  placeholderClaimResult.issues.some((issue) => issue.blockId === "custom-certificates" && issue.field === "title"),
-  "高风险占位文案必须定位到具体区块和字段",
+  placeholderClaimResult.issues.some((issue) =>
+    issue.blockId === "custom-certificates"
+      && issue.field === "title"
+      && issue.severity === "warning"),
+  "占位文案提示必须定位到具体区块和字段",
 );
 
 const invalidCategoryData = {
@@ -1066,36 +1351,48 @@ assert.deepEqual(
 const incompleteSeoResult = await service.validatePageDocument(
   "home",
   validData("SEO 待完善页面"),
-  {},
+  { mediaRights: validMetadata("SEO 待完善页面").mediaRights },
 );
-assert.equal(incompleteSeoResult.valid, false, "正式页面缺少内容责任、SEO 标题、描述或分享图时必须阻止发布");
+assert.equal(incompleteSeoResult.valid, true, "正式页面缺少内容责任、SEO 标题、描述或分享图时必须提示但不阻止发布");
 assert.deepEqual(
   incompleteSeoResult.issues
     .filter((issue) => issue.path.startsWith("metadata."))
-    .map((issue) => ({ field: issue.field, path: issue.path })),
+    .map((issue) => ({ field: issue.field, path: issue.path, severity: issue.severity })),
   [
-    { field: "seoTitle", path: "metadata.seoTitle" },
-    { field: "seoDescription", path: "metadata.seoDescription" },
-    { field: "ogImage", path: "metadata.ogImage" },
-    { field: "contentOwner", path: "metadata.contentOwner" },
-    { field: "mediaRights", path: "metadata.mediaRights" },
+    { field: "seoTitle", path: "metadata.seoTitle", severity: "warning" },
+    { field: "seoDescription", path: "metadata.seoDescription", severity: "warning" },
+    { field: "ogImage", path: "metadata.ogImage", severity: "warning" },
+    { field: "contentOwner", path: "metadata.contentOwner", severity: "warning" },
   ],
-  "正式内容发布问题必须定位到页面设置的具体字段",
+  "正式内容发布提示必须定位到页面设置的具体字段",
 );
 
 state.document.puckData = validData("SEO 待完善页面");
-state.document.metadata = {};
-const revisionsBeforeSeoRejectedPublish = state.revisions.length;
-await assert.rejects(
-  () => service.publishPageDocument("home", 1, state.document.updatedAt.toISOString()),
-  /页面发布校验失败/,
-  "服务端发布必须阻止内容责任或 SEO 未完成的草稿",
+state.document.metadata = { mediaRights: validMetadata("SEO 待完善页面").mediaRights };
+const revisionsBeforeSeoWarningPublish = state.revisions.length;
+const publicationBeforeSeoWarning = {
+  publishedRevisionId: state.document.publishedRevisionId,
+  publishedAt: state.document.publishedAt,
+  publishedBy: state.document.publishedBy,
+  status: state.document.status,
+};
+await service.publishPageDocument(
+  "home",
+  1,
+  state.document.updatedAt.toISOString(),
 );
 assert.equal(
   state.revisions.length,
-  revisionsBeforeSeoRejectedPublish,
-  "SEO 未完成时不得写入发布 revision",
+  revisionsBeforeSeoWarningPublish + 1,
+  "SEO 未完成时仍必须创建可回退的发布 revision",
 );
+assert.equal(
+  state.document.publishedRevisionId,
+  state.revisions.at(-1).id,
+  "SEO 未完成的可用版本发布后必须立即更新前台指针",
+);
+state.revisions.splice(revisionsBeforeSeoWarningPublish);
+Object.assign(state.document, publicationBeforeSeoWarning);
 state.document.metadata = validMetadata("当前草稿");
 
 state.document.puckData = mismatchedData;
@@ -1150,7 +1447,7 @@ incompleteAltDraft.content.push({
 const savedIncompleteAltDraft = await service.savePageDocument(
   "home",
   incompleteAltDraft,
-  {},
+  { mediaRights: validMetadata("替代文字待完善草稿").mediaRights },
   "0.22.4",
   firstClientRevision,
 );
@@ -1169,10 +1466,15 @@ const incompleteAltDraftValidation = await service.validatePageDocument(
   savedIncompleteAltDraft.puckData,
   savedIncompleteAltDraft.metadata,
 );
-assert.equal(incompleteAltDraftValidation.valid, false, "同一份草稿在发布前必须因替代文字缺失而被阻断");
+assert.equal(
+  incompleteAltDraftValidation.valid,
+  true,
+  `同一份草稿的替代文字缺失应提示但不阻断发布：${JSON.stringify(incompleteAltDraftValidation.issues)}`,
+);
 assert.ok(
   incompleteAltDraftValidation.issues.some((issue) =>
     issue.blockId === "draft-carousel"
+      && issue.severity === "warning"
       && issue.path.endsWith("images[1].alt"),
   ),
   "集合媒体草稿的发布问题必须定位到具体条目替代文字",

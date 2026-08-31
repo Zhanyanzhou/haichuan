@@ -19,24 +19,30 @@ const categories = ["视觉展示", "图文内容", "商品展示", "导航入�
 const commercialPurposes = ["品牌展示", "商品销售", "活动转化", "内容传播", "信任建立"];
 const devices = ["desktop", "mobile"];
 
-assert.equal(contract.contractSchemaVersion, 6, "必须使用页面同类共享自由编辑合同 schema v6");
+assert.equal(contract.contractSchemaVersion, 8, "必须使用模板定义与页面实例分离的合同 schema v8");
 assert.deepEqual(
   contract.editorPolicy,
   {
-    version: 1,
-    designScope: "page-module-type",
-    designSurface: "main-canvas",
+    version: 2,
+    designScope: "template-definition",
+    designSurface: "template-workspace",
     fixedObjects: true,
     bounds: "module-frame",
     allowSemanticOverlap: true,
-    internalLayerPanel: "select-only",
+    templateStructurePanel: "select-only",
+    pageLayerPanel: "module-only",
+    pageInstanceScope: "page-instance",
     contentFieldsRemainInstanceScoped: true,
     viewportGeometry: "independent",
+    linkTargetTypes: ["none", "product", "category", "page", "external"],
+    externalLinkProtocol: "https-only",
   },
-  "编辑策略必须固定页面同类共享、主画布操作、框内固定对象与只读内部图层",
+  "编辑策略必须固定模板工作空间设计、页面实例独立、页面图层仅管理模块",
 );
 assert.match(client, /CONTENT_TEMPLATE_EDITOR_POLICY/, "客户端生成物必须携带编辑策略");
 assert.match(server, /CONTENT_TEMPLATE_EDITOR_POLICY/, "服务端生成物必须携带编辑策略");
+assert.match(client, /CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX/, "客户端生成物必须携带全模板机器验收矩阵");
+assert.match(server, /CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX/, "服务端生成物必须携带全模板机器验收矩阵");
 assert.equal(
   contract.templates.length,
   contract.expectedTemplateCount,
@@ -53,6 +59,16 @@ assert.deepEqual(
   "机器合同必须覆盖六类运营模板，不得在验证脚本复制各类数量",
 );
 const reachableTemplateKeys = new Set(contract.pageRules.flatMap((rule) => rule.allowedTemplateKeys));
+const activeTemplateKeys = contract.templates
+  .filter((template) => template.implementationStatus === "active")
+  .map((template) => template.key);
+for (const rule of contract.pageRules) {
+  assert.deepEqual(
+    [...rule.allowedTemplateKeys].sort(),
+    [...activeTemplateKeys].sort(),
+    `${rule.pageKey}: 模板组件库必须展示并允许使用全部 active 模板`,
+  );
+}
 assert.deepEqual(
   [...new Set(contract.pageRules.map((rule) => rule.contentPlacement))],
   ["root-only"],

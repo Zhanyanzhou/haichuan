@@ -48,6 +48,7 @@ export default function SinglePosterSection({ module, editMode }: Props) {
     targetType: c?.targetType,
     productCode: c?.productCode,
     productId: c?.productId,
+    categorySlug: c?.categorySlug,
     linkUrl: c?.linkUrl,
   });
   const isImageLeft = l?.template === 'leftImageRightText';

@@ -3,6 +3,12 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { message } from 'antd';
 import { customerApi } from '@/services/api';
 import { getRequestErrorMessage } from '@/services/httpClient';
+import {
+  ACCOUNT_PASSWORD_HINT,
+  ACCOUNT_PASSWORD_MAX_LENGTH,
+  ACCOUNT_PASSWORD_MIN_LENGTH,
+  isAccountPasswordValid,
+} from '@/config/accountPasswordPolicy';
 
 /**
  * 重置密码（第二步）：从邮件链接进入（/customer/reset?token=...），设置新密码。
@@ -18,8 +24,8 @@ export default function ResetPassword() {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-      message.warning('密码至少 8 位，需包含字母和数字');
+    if (!isAccountPasswordValid(password)) {
+      message.warning(ACCOUNT_PASSWORD_HINT);
       return;
     }
     if (password !== confirm) {
@@ -64,8 +70,8 @@ export default function ResetPassword() {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              minLength={8}
-              maxLength={64}
+              minLength={ACCOUNT_PASSWORD_MIN_LENGTH}
+              maxLength={ACCOUNT_PASSWORD_MAX_LENGTH}
               required
               autoFocus
               className="mt-2 w-full border border-brand-line px-4 py-3 text-sm focus:outline-none focus:border-brand-gold"
@@ -77,13 +83,13 @@ export default function ResetPassword() {
               type="password"
               value={confirm}
               onChange={(event) => setConfirm(event.target.value)}
-              minLength={8}
-              maxLength={64}
+              minLength={ACCOUNT_PASSWORD_MIN_LENGTH}
+              maxLength={ACCOUNT_PASSWORD_MAX_LENGTH}
               required
               className="mt-2 w-full border border-brand-line px-4 py-3 text-sm focus:outline-none focus:border-brand-gold"
             />
           </label>
-          <small className="block text-xs text-brand-muted">密码至少 8 位，需包含字母和数字。</small>
+          <small className="block text-xs text-brand-muted">{ACCOUNT_PASSWORD_HINT}。</small>
           <button
             type="submit"
             disabled={submitting}

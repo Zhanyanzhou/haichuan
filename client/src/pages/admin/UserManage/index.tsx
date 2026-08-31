@@ -28,6 +28,11 @@ import {
 } from "@/components/common/AdminDataStates";
 import type { User } from "@/types";
 import { useAuthStore } from "@/store/authStore";
+import {
+  ACCOUNT_PASSWORD_HINT,
+  ACCOUNT_PASSWORD_MAX_LENGTH,
+  ACCOUNT_PASSWORD_MIN_LENGTH,
+} from "@/config/accountPasswordPolicy";
 
 const rm: Record<string, { c: string; t: string }> = {
   SUPER_ADMIN: { c: "red", t: "超级管理员" },
@@ -359,11 +364,17 @@ export default function UserManage() {
               label="密码"
               rules={[
                 { required: true, message: "请输入登录密码" },
-                { min: 12, max: 128, message: "密码需为 12–128 位" },
-                { pattern: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{12,128}$/, message: "密码需包含大小写字母、数字和符号" },
+                {
+                  min: ACCOUNT_PASSWORD_MIN_LENGTH,
+                  max: ACCOUNT_PASSWORD_MAX_LENGTH,
+                  message: ACCOUNT_PASSWORD_HINT,
+                },
               ]}
             >
-              <Input.Password placeholder="登录密码" />
+              <Input.Password
+                placeholder="登录密码"
+                maxLength={ACCOUNT_PASSWORD_MAX_LENGTH}
+              />
             </Form.Item>
           )}
         </Form>
@@ -385,11 +396,17 @@ export default function UserManage() {
             label="新密码"
             rules={[
               { required: true, message: "请输入新密码" },
-              { min: 12, max: 128, message: "密码需为 12–128 位" },
-              { pattern: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{12,128}$/, message: "密码需包含大小写字母、数字和符号" },
+              {
+                min: ACCOUNT_PASSWORD_MIN_LENGTH,
+                max: ACCOUNT_PASSWORD_MAX_LENGTH,
+                message: ACCOUNT_PASSWORD_HINT,
+              },
             ]}
           >
-            <Input.Password placeholder="输入新密码" />
+            <Input.Password
+              placeholder="输入新密码"
+              maxLength={ACCOUNT_PASSWORD_MAX_LENGTH}
+            />
           </Form.Item>
         </Form>
       </Modal>

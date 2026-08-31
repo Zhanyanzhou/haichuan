@@ -1,3 +1,13 @@
+import {
+  MinusOutlined,
+  PicCenterOutlined,
+  PicLeftOutlined,
+  PicRightOutlined,
+  PlusOutlined,
+  VerticalAlignBottomOutlined,
+  VerticalAlignMiddleOutlined,
+  VerticalAlignTopOutlined,
+} from "@ant-design/icons";
 import { useEffect, useState } from "react";
 import {
   createContentTemplateMarker,
@@ -13,13 +23,14 @@ import {
 } from "../runtime/visualLayout";
 import InspectorDisclosure from "./InspectorDisclosure";
 import type { PuckProps } from "../types";
+import { useVisualEditorSession } from "../visual-editor/visualEditorSession";
 
 type OverrideRecord = Record<string, unknown>;
 
 interface InstanceOverridesPanelProps {
   moduleType: string;
   props: PuckProps;
-  update: (patch: PuckProps) => void;
+  updateFromCurrent: (factory: (props: PuckProps) => PuckProps) => void;
   updateHistoryTransaction: (
     patch: PuckProps | ((props: PuckProps) => PuckProps),
   ) => void;
@@ -29,6 +40,8 @@ interface InstanceOverridesPanelProps {
   viewport?: VisualViewport;
   selectedNodeId?: string;
   resetAllDesign?: boolean;
+  contentMediaOnly?: boolean;
+  contentMediaVisibilityOnly?: boolean;
 }
 
 const LABELS: Record<string, string> = {
@@ -208,7 +221,7 @@ function CustomFrameRatioInput({
 export default function InstanceOverridesPanel({
   moduleType,
   props,
-  update,
+  updateFromCurrent,
   updateHistoryTransaction,
   historyTransactionPending,
   scopes = ["layout", "slots", "text"],
@@ -216,7 +229,13 @@ export default function InstanceOverridesPanel({
   viewport = "desktop",
   selectedNodeId,
   resetAllDesign = false,
+  contentMediaOnly = false,
+  contentMediaVisibilityOnly = false,
 }: InstanceOverridesPanelProps) {
+  const blockId = props.id == null ? "" : String(props.id);
+  const canvasGeometry = useVisualEditorSession((state) =>
+    blockId ? state.canvasGeometryByBlock[blockId]?.[viewport] : undefined,
+  );
   const contract = getContentTemplateContract(moduleType);
   const capabilities = contract?.editorCapabilities.layoutOverrides;
   if (!contract || !capabilities) return null;
@@ -255,6 +274,7 @@ export default function InstanceOverridesPanel({
   const showAppearance = scopes.includes("appearance") && supportsObjectAppearance;
   const hasControls = showLayout || showSlots || showText || showSurface || showAppearance;
   if (!hasControls) return null;
+  const taskDrivenEmbedded = embedded;
 
   const sourceOverrides = isRecord(props.__instanceOverrides)
     ? props.__instanceOverrides
@@ -321,12 +341,12 @@ export default function InstanceOverridesPanel({
     : `整体比例作用于当前${deviceLabel}`;
 
   const apply = (path: string[], value: unknown) => {
-    update({
-      __instanceOverrides: setVisualOverridePath(sourceOverrides, path, value),
-      ...(props.__contentTemplate
+    updateFromCurrent((currentProps) => ({
+      __instanceOverrides: setVisualOverridePath(currentProps.__instanceOverrides, path, value),
+      ...(currentProps.__contentTemplate
         ? {}
         : { __contentTemplate: createContentTemplateMarker(moduleType) }),
-    });
+    }));
   };
 
   const applyHistoryTransaction = (path: string[], value: unknown) => {
@@ -343,15 +363,17 @@ export default function InstanceOverridesPanel({
   };
 
   const applyPaths = (entries: ReadonlyArray<{ path: string[]; value: unknown }>) => {
-    let next: unknown = sourceOverrides;
-    for (const entry of entries) {
-      next = setVisualOverridePath(next, entry.path, entry.value);
-    }
-    update({
-      __instanceOverrides: next,
-      ...(props.__contentTemplate
-        ? {}
-        : { __contentTemplate: createContentTemplateMarker(moduleType) }),
+    updateFromCurrent((currentProps) => {
+      let next: unknown = currentProps.__instanceOverrides;
+      for (const entry of entries) {
+        next = setVisualOverridePath(next, entry.path, entry.value);
+      }
+      return {
+        __instanceOverrides: next,
+        ...(currentProps.__contentTemplate
+          ? {}
+          : { __contentTemplate: createContentTemplateMarker(moduleType) }),
+      };
     });
   };
   const copyCurrentViewportToOther = () => {
@@ -383,7 +405,8 @@ export default function InstanceOverridesPanel({
   const renderSelectedNodeGeometry = (nodeId: string) => {
     if (selectedNodeId !== nodeId) return null;
     const visualNode = resolveVisualNode(props, nodeId, viewport);
-    const rect = visualNode.rect ?? getContentTemplateDefaultRect(moduleType, nodeId, viewport);
+    const rect = visualNode.rect ?? canvasGeometry?.nodes[nodeId] ??
+      getContentTemplateDefaultRect(moduleType, nodeId, viewport);
     const editableObject = getContentTemplateEditableObject(moduleType, nodeId);
     const constraints = editableObject?.constraints;
     const bounds = constraints?.safeAreaRequired
@@ -398,6 +421,8 @@ export default function InstanceOverridesPanel({
       ? Number(viewportZIndex)
       : 2;
     const deviceLabel = viewport === "mobile" ? "移动端" : "桌面端";
+    const layerMin = constraints?.layerRange.min ?? 0;
+    const layerMax = constraints?.layerRange.max ?? 20;
     const updateRect = (key: "x" | "y" | "width" | "height", value: number) => {
       if (!rect) return;
       const next = { ...rect, [key]: value };
@@ -408,79 +433,209 @@ export default function InstanceOverridesPanel({
       apply(["nodes", nodeId, "rectByViewport", viewport], next);
     };
     const applyZIndex = (value: number) => {
-      apply(
+      applyHistoryTransaction(
         ["nodes", nodeId, "zIndexByViewport", viewport],
-        value,
+        Math.min(layerMax, Math.max(layerMin, value)),
       );
     };
+    const horizontalTargets = rect ? {
+      left: bounds.x,
+      center: bounds.x + (bounds.width - rect.width) / 2,
+      right: bounds.x + bounds.width - rect.width,
+    } : null;
+    const verticalTargets = rect ? {
+      top: bounds.y,
+      center: bounds.y + (bounds.height - rect.height) / 2,
+      bottom: bounds.y + bounds.height - rect.height,
+    } : null;
+    const applyAlignment = (
+      axis: "x" | "y",
+      value: number,
+    ) => {
+      if (!rect) return;
+      applyHistoryTransaction(
+        ["nodes", nodeId, "rectByViewport", viewport],
+        { ...rect, [axis]: value },
+      );
+    };
+    const isAligned = (current: number, target: number) =>
+      Math.abs(current - target) < 0.005;
     return (
       <div
         className="homepage-editor__selected-node-geometry"
         data-visual-geometry-node={nodeId}
         data-visual-geometry-viewport={viewport}
       >
-        <div
-        className="homepage-editor__visual-preset-group"
-        role="group"
-        data-inspector-control="layer"
-        aria-label={`图层顺序（${deviceLabel}）`}
-        >
-          <span>图层顺序 · 当前层级 {activeZIndex}</span>
-          <div className="homepage-editor__choice-cards is-layer-order">
-            <button type="button" onClick={() => applyZIndex(0)} disabled={activeZIndex <= 0}>
-              <em>置于底层</em>
-            </button>
-            <button type="button" onClick={() => applyZIndex(Math.max(0, activeZIndex - 1))} disabled={activeZIndex <= 0}>
-              <em>下移一层</em>
-            </button>
-            <button type="button" onClick={() => applyZIndex(Math.min(20, activeZIndex + 1))} disabled={activeZIndex >= 20}>
-              <em>上移一层</em>
-            </button>
-            <button type="button" onClick={() => applyZIndex(20)} disabled={activeZIndex >= 20}>
-              <em>置于顶层</em>
-            </button>
-          </div>
-        </div>
-        <InspectorDisclosure label="精确位置与尺寸">
-          {rect ? (
-            <div className="homepage-editor__geometry-fields">
+        {rect && horizontalTargets && verticalTargets ? (
+          <>
+            <div className="homepage-editor__geometry-size-fields" aria-label={`区域尺寸（${deviceLabel}）`}>
               {([
-                ["x", "横向位置", bounds.x, bounds.x + bounds.width - rect.width],
-                ["y", "纵向位置", bounds.y, bounds.y + bounds.height - rect.height],
                 ["width", "区域宽度", constraints?.minSize.width ?? 0.05, Math.min(constraints?.maxSize.width ?? 1, bounds.x + bounds.width - rect.x)],
                 ["height", "区域高度", constraints?.minSize.height ?? 0.05, Math.min(constraints?.maxSize.height ?? 1, bounds.y + bounds.height - rect.y)],
               ] as const).map(([key, label, min, max]) => (
-                <label key={key} className="homepage-editor__instance-field">
-                  <span>{label} · {Math.round(rect[key] * 100)}%</span>
-                  <input
-                    aria-label={`${label}（${deviceLabel}）`}
-                    type="range"
-                    min={Math.round(min * 100)}
-                    max={Math.round(max * 100)}
-                    step={1}
-                    value={Math.round(rect[key] * 100)}
-                    onChange={(event) => updateRect(key, Number(event.target.value) / 100)}
-                  />
+                <label key={key} className="homepage-editor__geometry-number-field">
+                  <span>{label}</span>
+                  <span>
+                    <input
+                      aria-label={`${label}（${deviceLabel}）`}
+                      type="number"
+                      inputMode="decimal"
+                      min={Math.round(min * 100)}
+                      max={Math.round(max * 100)}
+                      step={1}
+                      value={Math.round(rect[key] * 100)}
+                      disabled={historyTransactionPending}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        if (Number.isFinite(value)) updateRect(key, value / 100);
+                      }}
+                    />
+                    <small>%</small>
+                  </span>
                 </label>
               ))}
-              <button
-                type="button"
-                className="homepage-editor__inline-reset"
-                disabled={historyTransactionPending}
-                onClick={() => applyHistoryTransaction(
-                  ["nodes", nodeId, "rectByViewport", viewport],
-                  undefined,
-                )}
-              >
-                恢复{deviceLabel}默认位置
-              </button>
             </div>
-          ) : (
-            <p className="homepage-editor__inspector-hint">
-              先在画布拖动对象，再在这里精确微调。
-            </p>
-          )}
-        </InspectorDisclosure>
+
+            <div
+              className="homepage-editor__geometry-alignment"
+              role="group"
+              aria-label={`水平位置（${deviceLabel}）`}
+              data-inspector-control="horizontal-position"
+            >
+              <span>水平位置</span>
+              <div>
+                {([
+                  ["left", "左侧", PicLeftOutlined],
+                  ["center", "水平居中", PicCenterOutlined],
+                  ["right", "右侧", PicRightOutlined],
+                ] as const).map(([key, label, Icon]) => {
+                  const active = isAligned(rect.x, horizontalTargets[key]);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-label={label}
+                      aria-pressed={active}
+                      className={active ? "is-active" : undefined}
+                      disabled={historyTransactionPending}
+                      onClick={() => applyAlignment("x", horizontalTargets[key])}
+                    >
+                      <Icon aria-hidden="true" />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div
+              className="homepage-editor__geometry-alignment"
+              role="group"
+              aria-label={`垂直位置（${deviceLabel}）`}
+              data-inspector-control="vertical-position"
+            >
+              <span>垂直位置</span>
+              <div>
+                {([
+                  ["top", "顶部", VerticalAlignTopOutlined],
+                  ["center", "垂直居中", VerticalAlignMiddleOutlined],
+                  ["bottom", "底部", VerticalAlignBottomOutlined],
+                ] as const).map(([key, label, Icon]) => {
+                  const active = isAligned(rect.y, verticalTargets[key]);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-label={label}
+                      aria-pressed={active}
+                      className={active ? "is-active" : undefined}
+                      disabled={historyTransactionPending}
+                      onClick={() => applyAlignment("y", verticalTargets[key])}
+                    >
+                      <Icon aria-hidden="true" />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div
+              className="homepage-editor__geometry-layer"
+              role="group"
+              data-inspector-control="layer"
+              aria-label={`图层顺序（${deviceLabel}）`}
+            >
+              <span>层级</span>
+              <div className="homepage-editor__layer-stepper">
+                <button
+                  type="button"
+                  aria-label="下移一层"
+                  onClick={() => applyZIndex(activeZIndex - 1)}
+                  disabled={historyTransactionPending || activeZIndex <= layerMin}
+                >
+                  <MinusOutlined aria-hidden="true" />
+                </button>
+                <output aria-label={`当前层级 ${activeZIndex}`}>{activeZIndex}</output>
+                <button
+                  type="button"
+                  aria-label="上移一层"
+                  onClick={() => applyZIndex(activeZIndex + 1)}
+                  disabled={historyTransactionPending || activeZIndex >= layerMax}
+                >
+                  <PlusOutlined aria-hidden="true" />
+                </button>
+              </div>
+              <div className="homepage-editor__layer-edge-actions">
+                <button type="button" onClick={() => applyZIndex(layerMin)} disabled={historyTransactionPending || activeZIndex <= layerMin}>
+                  置于底层
+                </button>
+                <button type="button" onClick={() => applyZIndex(layerMax)} disabled={historyTransactionPending || activeZIndex >= layerMax}>
+                  置于顶层
+                </button>
+              </div>
+            </div>
+
+            <div className="homepage-editor__geometry-overflow" role="status">
+              <span>超出画框</span>
+              <strong>限制在画框内 · 模板固定</strong>
+            </div>
+
+            <InspectorDisclosure label="位置与间距">
+              <div className="homepage-editor__geometry-position-fields">
+                {([
+                  ["x", "横向位置", bounds.x, bounds.x + bounds.width - rect.width],
+                  ["y", "纵向位置", bounds.y, bounds.y + bounds.height - rect.height],
+                ] as const).map(([key, label, min, max]) => (
+                  <label key={key} className="homepage-editor__geometry-number-field">
+                    <span>{label}</span>
+                    <span>
+                      <input
+                        aria-label={`${label}（${deviceLabel}）`}
+                        type="number"
+                        inputMode="decimal"
+                        min={Math.round(min * 100)}
+                        max={Math.round(max * 100)}
+                        step={1}
+                        value={Math.round(rect[key] * 100)}
+                        disabled={historyTransactionPending}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
+                          if (Number.isFinite(value)) updateRect(key, value / 100);
+                        }}
+                      />
+                      <small>%</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </InspectorDisclosure>
+          </>
+        ) : (
+          <p className="homepage-editor__inspector-hint">
+            先在主画布拖动对象，再在这里精确微调。
+          </p>
+        )}
       </div>
     );
   };
@@ -514,6 +669,7 @@ export default function InstanceOverridesPanel({
             type="button"
             className={!activeValue ? "is-active" : ""}
             aria-pressed={!activeValue}
+            disabled={historyTransactionPending}
             onClick={() => apply(path, undefined)}
           >
             <i data-choice="default"><b /></i>
@@ -525,6 +681,7 @@ export default function InstanceOverridesPanel({
               type="button"
               className={activeValue === option ? "is-active" : ""}
               aria-pressed={activeValue === option}
+              disabled={historyTransactionPending}
               onClick={() => apply(path, option)}
             >
               <i data-choice={option}><b /></i>
@@ -536,10 +693,26 @@ export default function InstanceOverridesPanel({
     );
   };
 
+  const hasViewportNodeOverride = (nodeId: string, kind: "slot" | "text") => {
+    const node = isRecord(nodes[nodeId]) ? nodes[nodeId] : {};
+    const rects = isRecord(node.rectByViewport) ? node.rectByViewport : {};
+    const zIndexes = isRecord(node.zIndexByViewport) ? node.zIndexByViewport : {};
+    const mediaView = isRecord(node.mediaView) ? node.mediaView : {};
+    const focuses = isRecord(mediaView.focusByViewport) ? mediaView.focusByViewport : {};
+    const hasViewportGeometry = [rects, zIndexes, focuses].some((value) =>
+      Object.prototype.hasOwnProperty.call(value, viewport),
+    );
+    if (kind === "slot") {
+      return hasViewportGeometry || node.ratio !== undefined ||
+        mediaView.fit !== undefined || mediaView.zoom !== undefined;
+    }
+    return hasViewportGeometry ||
+      (isRecord(node.typography) && Object.keys(node.typography).length > 0);
+  };
   const scopedOverrideExists = Boolean(
-    (showLayout && overrides?.frame) ||
-      (showSlots && visibleSlots.some((slot) => nodes[slot.roleId])) ||
-      (showText && visibleTextRoles.some((role) => nodes[role.roleId])) ||
+    (showLayout && hasActiveFrameRatioOverride) ||
+      (showSlots && visibleSlots.some((slot) => hasViewportNodeOverride(slot.roleId, "slot"))) ||
+      (showText && visibleTextRoles.some((role) => hasViewportNodeOverride(role.roleId, "text"))) ||
       (showSurface && ["colorPreset", "paddingPreset", "radiusPreset", "shadowPreset"].some(
         (key) => frame[key] !== undefined,
       )) ||
@@ -549,15 +722,46 @@ export default function InstanceOverridesPanel({
   );
   const createResetPatch = (currentProps: PuckProps) => {
     let next: unknown = currentProps.__instanceOverrides;
-    if (showLayout || resetAllDesign) next = setVisualOverridePath(next, ["frame"], undefined);
+    if (resetAllDesign) {
+      next = setVisualOverridePath(next, ["frame"], undefined);
+    } else if (showLayout) {
+      next = setVisualOverridePath(
+        next,
+        ["frame", "aspectRatioByViewport", viewport],
+        undefined,
+      );
+    }
     if (showSlots || resetAllDesign) {
       for (const slot of resetAllDesign ? capabilities.slots ?? [] : visibleSlots) {
-        next = setVisualOverridePath(next, ["nodes", slot.roleId], undefined);
+        if (resetAllDesign) {
+          next = setVisualOverridePath(next, ["nodes", slot.roleId], undefined);
+          continue;
+        }
+        for (const path of [
+          ["nodes", slot.roleId, "rectByViewport", viewport],
+          ["nodes", slot.roleId, "zIndexByViewport", viewport],
+          ["nodes", slot.roleId, "mediaView", "focusByViewport", viewport],
+          ["nodes", slot.roleId, "ratio"],
+          ["nodes", slot.roleId, "mediaView", "fit"],
+          ["nodes", slot.roleId, "mediaView", "zoom"],
+        ]) {
+          next = setVisualOverridePath(next, path, undefined);
+        }
       }
     }
     if (showText || resetAllDesign) {
       for (const role of resetAllDesign ? capabilities.textRoles ?? [] : visibleTextRoles) {
-        next = setVisualOverridePath(next, ["nodes", role.roleId], undefined);
+        if (resetAllDesign) {
+          next = setVisualOverridePath(next, ["nodes", role.roleId], undefined);
+          continue;
+        }
+        for (const path of [
+          ["nodes", role.roleId, "rectByViewport", viewport],
+          ["nodes", role.roleId, "zIndexByViewport", viewport],
+          ["nodes", role.roleId, "typography"],
+        ]) {
+          next = setVisualOverridePath(next, path, undefined);
+        }
       }
     }
     if (showSurface && !resetAllDesign) {
@@ -577,71 +781,84 @@ export default function InstanceOverridesPanel({
     ? "恢复模块样式默认"
     : showAppearance && selectedNodeId
       ? `恢复${ROLE_LABELS[selectedNodeId] ?? selectedNodeId}外观默认`
+      : resetAllDesign
+        ? "恢复整个模块设计默认"
       : selectedNodeId
-        ? `恢复${ROLE_LABELS[selectedNodeId] ?? selectedNodeId}设计默认`
+        ? `恢复${ROLE_LABELS[selectedNodeId] ?? selectedNodeId}${deviceLabel}设计默认`
         : "恢复整个模块设计默认";
 
   return (
     <section
-      className={`homepage-editor__instance-overrides${embedded ? " is-embedded" : ""}`}
-      aria-labelledby={`instance-overrides-${String(props.id ?? contract.key)}`}
+      className={`homepage-editor__instance-overrides${embedded ? " is-embedded" : ""}${contentMediaOnly ? " is-content-media" : ""}${contentMediaVisibilityOnly ? " is-content-visibility" : ""}`}
+      aria-labelledby={embedded ? undefined : `instance-overrides-${String(props.id ?? contract.key)}`}
+      aria-label={embedded
+        ? contentMediaVisibilityOnly
+          ? "图片可见性"
+          : contentMediaOnly
+            ? "图片焦点"
+            : "模板设计控制"
+        : undefined}
     >
-      <div
-        className="homepage-editor__instance-heading"
-        data-device-state={deviceState}
-      >
-        <div>
-          {embedded ? null : (
-            <strong id={`instance-overrides-${String(props.id ?? contract.key)}`}>
+      {contentMediaOnly || taskDrivenEmbedded ? null : (
+        <>
+          <div
+            className="homepage-editor__instance-heading"
+            data-device-state={deviceState}
+          >
+            <div>
+              {embedded ? null : (
+                <strong id={`instance-overrides-${String(props.id ?? contract.key)}`}>
+                  {showSurface
+                    ? "模块样式"
+                    : showAppearance
+                      ? "对象样式"
+                  : showSlots && !showLayout && !showText
+                    ? "调整画面"
+                    : showText && !showLayout && !showSlots
+                      ? "文字布局与保护"
+                      : "当前模块设计"}
+                </strong>
+              )}
+            </div>
+            <button
+              type="button"
+              disabled={!scopedOverrideExists || historyTransactionPending}
+              onClick={resetScopedOverrides}
+              aria-label={resetLabel}
+            >
               {showSurface
-                ? "模块样式"
+                ? "恢复模块样式"
                 : showAppearance
-                  ? "对象样式"
-              : showSlots && !showLayout && !showText
-                ? "调整画面"
-                : showText && !showLayout && !showSlots
-                  ? "文字布局与保护"
-                  : "当前模块设计"}
-            </strong>
-          )}
-        </div>
-        <button
-          type="button"
-          disabled={!scopedOverrideExists || historyTransactionPending}
-          onClick={resetScopedOverrides}
-          aria-label={resetLabel}
-        >
-          {showSurface
-            ? "恢复模块样式"
-            : showAppearance
-              ? "恢复当前对象外观"
-              : resetAllDesign
-                ? "恢复模块设计"
-                : "恢复当前对象设计"}
-        </button>
-        {!showSurface && !showAppearance ? <button
-          type="button"
-          disabled={historyTransactionPending || !canCopyCurrentViewportToOther}
-          onClick={copyCurrentViewportToOther}
-        >
-          复制到{viewport === "desktop" ? "移动端" : "桌面端"}
-        </button> : null}
-      </div>
-      <div
-        className="homepage-editor__design-scope-note"
-        data-responsive-scope={selectedNodeId ? "mixed" : "module"}
-        role="note"
-      >
-        <strong>{sharedDesignLabel}</strong>
-        <span>
-          {viewportDesignLabel}
-          {viewport === "mobile"
-            ? hasMobileSpecificDesign
-              ? " · 已有移动端独立位置"
-              : " · 使用移动端默认构图"
-            : ""}
-        </span>
-      </div>
+                  ? "恢复当前对象外观"
+                  : resetAllDesign
+                    ? "恢复模块设计"
+                    : "恢复当前对象设计"}
+            </button>
+            {!showSurface && !showAppearance ? <button
+              type="button"
+              disabled={historyTransactionPending || !canCopyCurrentViewportToOther}
+              onClick={copyCurrentViewportToOther}
+            >
+              复制到{viewport === "desktop" ? "移动端" : "桌面端"}
+            </button> : null}
+          </div>
+          <div
+            className="homepage-editor__design-scope-note"
+            data-responsive-scope={selectedNodeId ? "mixed" : "module"}
+            role="note"
+          >
+            <strong>{sharedDesignLabel}</strong>
+            <span>
+              {viewportDesignLabel}
+              {viewport === "mobile"
+                ? hasMobileSpecificDesign
+                  ? " · 已有移动端独立位置"
+                  : " · 使用移动端默认构图"
+                : ""}
+            </span>
+          </div>
+        </>
+      )}
 
       {showLayout ? renderVisualChoices(
         "整体画面",
@@ -653,13 +870,14 @@ export default function InstanceOverridesPanel({
       {showLayout && capabilities.frameRatioPresets?.length ? (
         <div className="homepage-editor__visual-preset-group" role="group" aria-label="画面比例" data-inspector-control="ratio">
           <span>
-            画面比例 · {viewport === "mobile" ? "移动端" : "桌面端"}
+            画面比例
           </span>
           <div className="homepage-editor__ratio-cards">
             <button
               type="button"
               className={!hasActiveFrameRatioOverride ? "is-active" : ""}
               aria-pressed={!hasActiveFrameRatioOverride}
+              disabled={historyTransactionPending}
               onClick={() => apply(["frame", "aspectRatioByViewport", viewport], undefined)}
             >
               <i style={{ aspectRatio: activeFrameRatio }} />
@@ -674,6 +892,7 @@ export default function InstanceOverridesPanel({
                   type="button"
                   className={hasActiveFrameRatioOverride && Math.abs(activeFrameRatio - ratio) < 0.001 ? "is-active" : ""}
                   aria-pressed={hasActiveFrameRatioOverride && Math.abs(activeFrameRatio - ratio) < 0.001}
+                  disabled={historyTransactionPending}
                   onClick={() => apply(["frame", "aspectRatioByViewport", viewport], ratio)}
                 >
                   <i style={{ aspectRatio: ratioPreset }} />
@@ -784,7 +1003,7 @@ export default function InstanceOverridesPanel({
             data-selected-object={selectedNodeId ? "true" : "false"}
           >
             <legend>{ROLE_LABELS[slot.roleId] ?? slot.roleId}</legend>
-            {slot.ratioPresets?.length ? (
+            {!contentMediaOnly && slot.ratioPresets?.length ? (
               <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${ROLE_LABELS[slot.roleId] ?? slot.roleId}比例`} data-inspector-control="ratio">
                 <span>图片比例</span>
                 <div className="homepage-editor__ratio-cards">
@@ -805,8 +1024,9 @@ export default function InstanceOverridesPanel({
                 </div>
               </div>
             ) : null}
-            {renderVisualChoices("填充方式", ["nodes", slot.roleId, "mediaView", "fit"], mediaView.fit, slot.fit, "fit")}
-            {slot.focusByViewport ? (
+            {contentMediaOnly ? null : renderSelectedNodeGeometry(slot.roleId)}
+            {contentMediaOnly ? null : renderVisualChoices("填充方式", ["nodes", slot.roleId, "mediaView", "fit"], mediaView.fit, slot.fit, "fit")}
+            {contentMediaOnly && !contentMediaVisibilityOnly && slot.focusByViewport ? (
               <div
                 className="homepage-editor__visual-preset-group"
                 role="group"
@@ -837,6 +1057,46 @@ export default function InstanceOverridesPanel({
                     );
                   })}
                 </div>
+                {contentMediaOnly ? (
+                  <div className="homepage-editor__focus-coordinate-fields" aria-label="图片焦点坐标">
+                    <label>
+                      <span>X</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={Math.round(visualNode.focus?.x ?? 50)}
+                        disabled={historyTransactionPending}
+                        onChange={(event) => apply(
+                          ["nodes", slot.roleId, "mediaView", "focusByViewport", viewport],
+                          {
+                            x: Math.min(100, Math.max(0, Number(event.target.value) || 0)),
+                            y: visualNode.focus?.y ?? 50,
+                          },
+                        )}
+                      />
+                      <small>%</small>
+                    </label>
+                    <label>
+                      <span>Y</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={Math.round(visualNode.focus?.y ?? 50)}
+                        disabled={historyTransactionPending}
+                        onChange={(event) => apply(
+                          ["nodes", slot.roleId, "mediaView", "focusByViewport", viewport],
+                          {
+                            x: visualNode.focus?.x ?? 50,
+                            y: Math.min(100, Math.max(0, Number(event.target.value) || 0)),
+                          },
+                        )}
+                      />
+                      <small>%</small>
+                    </label>
+                  </div>
+                ) : null}
                 {viewport === "mobile" && Object.prototype.hasOwnProperty.call(
                   isRecord(mediaView.focusByViewport) ? mediaView.focusByViewport : {},
                   "mobile",
@@ -855,7 +1115,33 @@ export default function InstanceOverridesPanel({
                 ) : null}
               </div>
             ) : null}
-            {slot.zoom ? (
+            {contentMediaVisibilityOnly && selectedEditableObject ? (
+              <label className="homepage-editor__media-visibility-control">
+                <span>可见性</span>
+                <span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={selectedEditableObject.constraints.allowHide
+                      ? visualNode.enabled !== false
+                      : true}
+                    disabled={historyTransactionPending || !selectedEditableObject.constraints.allowHide ||
+                      !selectedEditableObject.capabilities.includes("visibility")}
+                    onChange={(event) => apply(
+                      ["nodes", slot.roleId, "enabled"],
+                      event.target.checked ? undefined : false,
+                    )}
+                  />
+                  <b>
+                    {selectedEditableObject.constraints.allowHide &&
+                    selectedEditableObject.capabilities.includes("visibility")
+                      ? visualNode.enabled === false ? "隐藏" : "显示"
+                      : "显示 · 固定"}
+                  </b>
+                </span>
+              </label>
+            ) : null}
+            {!contentMediaOnly && slot.zoom ? (
               <label className="homepage-editor__instance-field" data-inspector-control="zoom">
                 <span>画面缩放 · {Number(visualNode.zoom ?? 1).toFixed(2)}×</span>
                 <input
@@ -864,13 +1150,13 @@ export default function InstanceOverridesPanel({
                   max={slot.zoom.max}
                   step={slot.zoom.step}
                   value={Number(visualNode.zoom ?? 1)}
+                  disabled={historyTransactionPending}
                   onChange={(event) =>
                     apply(["nodes", slot.roleId, "mediaView", "zoom"], Number(event.target.value) === 1 ? undefined : Number(event.target.value))
                   }
                 />
               </label>
             ) : null}
-            {renderSelectedNodeGeometry(slot.roleId)}
           </fieldset>
         );
       }) : null}
@@ -1097,6 +1383,7 @@ export default function InstanceOverridesPanel({
                                 key={position}
                                 type="button"
                                 className={currentPosition === position ? "is-active" : ""}
+                                disabled={historyTransactionPending}
                                 onClick={() => updateRectPreset(position)}
                               >
                                 <i data-position={position}><b /></i>
@@ -1115,6 +1402,7 @@ export default function InstanceOverridesPanel({
                             max={role.maxLines}
                             step={1}
                             value={Number(typography.maxLines ?? role.maxLines)}
+                            disabled={historyTransactionPending}
                             onChange={(event) => apply(["nodes", role.roleId, "typography", "maxLines"], Number(event.target.value))}
                           />
                         </label>
@@ -1130,6 +1418,17 @@ export default function InstanceOverridesPanel({
           </fieldset>
         );
       }) : null}
+      {taskDrivenEmbedded && !contentMediaOnly ? (
+        <button
+          type="button"
+          className="homepage-editor__inline-reset homepage-editor__task-reset"
+          disabled={!scopedOverrideExists || historyTransactionPending}
+          onClick={resetScopedOverrides}
+          aria-label={resetLabel}
+        >
+          恢复模板默认值
+        </button>
+      ) : null}
     </section>
   );
 }

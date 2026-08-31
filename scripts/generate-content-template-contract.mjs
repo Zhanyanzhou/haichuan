@@ -129,6 +129,9 @@ function validatePageRules(rules) {
   const publicPaths = rules.map((rule) => rule.publicPath);
   invariant(new Set(publicPaths).size === publicPaths.length, "pageRules.publicPath 不得重复");
   const templatesByKey = new Map(source.templates.map((template) => [template.key, template]));
+  const activeTemplateKeys = source.templates
+    .filter((template) => template.implementationStatus === "active")
+    .map((template) => template.key);
   for (const rule of rules) {
     invariant(/^[a-z0-9-]+$/i.test(rule.pageKey), `pageRules.${rule.pageKey}.pageKey 无效`);
     const expectedPublicPath = rule.pageKey === "home" ? "/" : "/" + rule.pageKey;
@@ -150,6 +153,11 @@ function validatePageRules(rules) {
     invariant(
       rule.allowedTemplateKeys.every((key) => templatesByKey.get(key)?.implementationStatus === "active"),
       `pageRules.${rule.pageKey} 只能引用 active 模板`,
+    );
+    invariant(
+      rule.allowedTemplateKeys.length === activeTemplateKeys.length
+        && activeTemplateKeys.every((key) => rule.allowedTemplateKeys.includes(key)),
+      `pageRules.${rule.pageKey} 必须允许全部 active 模板，模板组件库统一跨页面通用`,
     );
     invariant([0, 1].includes(rule.businessRegionCount), `pageRules.${rule.pageKey}.businessRegionCount 只能为 0 或 1`);
     invariant(
@@ -344,13 +352,13 @@ function validateUnifiedRoot(template) {
 }
 
 /**
- * schema v6 的页面级自由编辑策略由合同顶层统一声明，再在生成前展开到
- * 24 个模板的每个固定语义节点。源 JSON 仍是唯一事实来源，生成物不维护
- * 第二份手写能力清单。
+ * 固定合同模板的结构编辑能力由合同顶层统一声明，再在生成前展开到
+ * 24 个模板的每个固定语义节点。能力只在独立模板工作空间消费；
+ * 源 JSON 仍是唯一事实来源，生成物不维护第二份手写能力清单。
  */
-function applyPageSharedFreeEditorPolicy(contractSource) {
+function applyTemplateWorkspaceFixedObjectPolicy(contractSource) {
   const policy = contractSource.editorPolicy;
-  if (!policy || policy.version !== 1) return;
+  if (!policy || policy.version !== 2) return;
   for (const template of contractSource.templates) {
     const layoutOverrides = template.editorCapabilities.layoutOverrides ?? {};
     layoutOverrides.frameRatioRange = { min: 0.25, max: 4, step: 0.01 };
@@ -363,6 +371,18 @@ function applyPageSharedFreeEditorPolicy(contractSource) {
     const slots = [...(layoutOverrides.slots ?? [])];
     const textRoles = [...(layoutOverrides.textRoles ?? [])];
     for (const object of template.editorCapabilities.editableObjects) {
+      if (object.kind === "action") {
+        const targetTypeField = object.contentFieldKeys.find(
+          (field) => field === "targetType" || field.endsWith("TargetType"),
+        );
+        if (targetTypeField) {
+          const prefix = targetTypeField === "targetType"
+            ? ""
+            : targetTypeField.slice(0, -"TargetType".length);
+          const categorySlugField = prefix ? `${prefix}CategorySlug` : "categorySlug";
+          object.contentFieldKeys = [...new Set([...object.contentFieldKeys, categorySlugField])];
+        }
+      }
       object.capabilities = [...new Set([
         ...object.capabilities,
         "layout",
@@ -390,6 +410,7 @@ function applyPageSharedFreeEditorPolicy(contractSource) {
         ...object.constraints,
         movementAxes: ["x", "y"],
         allowedResize: [...resizeDirections],
+        layerRange: { min: 0, max: 20 },
         safeAreaRequired: false,
       };
       for (const nodeId of object.nodeIds ?? [object.roleId]) {
@@ -413,6 +434,32 @@ function applyPageSharedFreeEditorPolicy(contractSource) {
         }
       }
     }
+    for (const object of template.editorCapabilities.editableObjects) {
+      const hasDeclaredGeometry = ["desktop", "mobile"].some((viewport) =>
+        template.defaultGeometryByViewport[viewport].zones.some(
+          (zone) => zone.nodeId === object.roleId || zone.roleId === object.roleId,
+        ),
+      );
+      if (hasDeclaredGeometry) continue;
+      const fallbackRect = object.kind === "media" || object.kind === "video" || object.kind === "collection"
+        ? { x: 0, y: 0, width: 1, height: 1 }
+        : object.kind === "action"
+          ? { x: 0.1, y: 0.75, width: 0.3, height: 0.1 }
+          : { x: 0.1, y: 0.1, width: 0.8, height: 0.25 };
+      for (const viewport of ["desktop", "mobile"]) {
+        template.defaultGeometryByViewport[viewport].zones.unshift({
+          nodeId: object.roleId,
+          roleId: object.roleId,
+          role: object.kind === "action"
+            ? "action"
+            : object.kind === "text"
+              ? "copy"
+              : "media",
+          rect: { ...fallbackRect },
+          overlay: true,
+        });
+      }
+    }
     template.editorCapabilities.layoutOverrides = {
       ...layoutOverrides,
       slots,
@@ -421,7 +468,7 @@ function applyPageSharedFreeEditorPolicy(contractSource) {
   }
 }
 
-applyPageSharedFreeEditorPolicy(source);
+applyTemplateWorkspaceFixedObjectPolicy(source);
 validateAssetPolicy(source.assetPolicy);
 for (const template of source.templates) {
   validateDefaultGeometry(template);
@@ -525,16 +572,20 @@ function invariant(condition, message) {
 invariant(Number.isInteger(source.contractSchemaVersion) && source.contractSchemaVersion > 0, "contractSchemaVersion 必须是正整数");
 invariant(Number.isInteger(source.registryVersion) && source.registryVersion > 0, "registryVersion 必须是正整数");
 invariant(
-  source.editorPolicy?.version === 1
-    && source.editorPolicy.designScope === "page-module-type"
-    && source.editorPolicy.designSurface === "main-canvas"
+  source.editorPolicy?.version === 2
+    && source.editorPolicy.designScope === "template-definition"
+    && source.editorPolicy.designSurface === "template-workspace"
     && source.editorPolicy.fixedObjects === true
     && source.editorPolicy.bounds === "module-frame"
     && source.editorPolicy.allowSemanticOverlap === true
-    && source.editorPolicy.internalLayerPanel === "select-only"
+    && source.editorPolicy.templateStructurePanel === "select-only"
+    && source.editorPolicy.pageLayerPanel === "module-only"
+    && source.editorPolicy.pageInstanceScope === "page-instance"
     && source.editorPolicy.contentFieldsRemainInstanceScoped === true
-    && source.editorPolicy.viewportGeometry === "independent",
-  "editorPolicy 必须声明页面同类型共享、主画布自由布局与固定对象边界",
+    && source.editorPolicy.viewportGeometry === "independent"
+    && JSON.stringify(source.editorPolicy.linkTargetTypes) === JSON.stringify(["none", "product", "category", "page", "external"])
+    && source.editorPolicy.externalLinkProtocol === "https-only",
+  "editorPolicy 必须声明模板工作空间设计、页面实例独立与固定对象边界",
 );
 invariant(
   Number.isInteger(source.publicationGateVersion) && source.publicationGateVersion > 0,
@@ -712,6 +763,7 @@ for (const template of source.templates) {
       for (const field of [
         prefix ? `${prefix}ProductCode` : "productCode",
         prefix ? `${prefix}ProductId` : "productId",
+        prefix ? `${prefix}CategorySlug` : "categorySlug",
         prefix ? `${prefix}LinkUrl` : "linkUrl",
       ]) {
         invariant(object.contentFieldKeys.includes(field), `${template.key}.editableObjects.${object.roleId} 缺少行动目标字段 ${field}`);
@@ -896,6 +948,45 @@ const templatePreviewMap = Object.fromEntries(source.templates.map(({ key, modul
 }]));
 const registeredKeys = source.templates.map((item) => JSON.stringify(item.key)).join(" | ");
 const contractVersion = Math.max(...source.templates.map((item) => item.version));
+const editorAcceptanceMatrix = source.templates
+  .filter((template) => template.implementationStatus === "active")
+  .map((template) => ({
+    templateKey: template.key,
+    moduleType: template.moduleType,
+    version: template.version,
+    designScope: source.editorPolicy.designScope,
+    fixedObjects: source.editorPolicy.fixedObjects,
+    objects: template.editorCapabilities.editableObjects.map((object) => ({
+      roleId: object.roleId,
+      nodeIds: object.nodeIds ?? [object.roleId],
+      kind: object.kind,
+      collectionWholeObjectOnly: object.kind === "collection",
+      contentFieldKeys: object.contentFieldKeys,
+      capabilities: object.capabilities,
+      constraints: object.constraints,
+      viewports: Object.fromEntries(["desktop", "mobile"].map((viewport) => {
+        const zone = template.defaultGeometryByViewport[viewport].zones.find(
+          (candidate) => candidate.nodeId === object.roleId || candidate.roleId === object.roleId,
+        );
+        return [viewport, {
+          applicable: Boolean(zone),
+          defaultRect: zone?.rect ?? null,
+          frameAspectRatio: template.defaultGeometryByViewport[viewport].frameAspectRatio,
+        }];
+      })),
+    })),
+  }));
+
+invariant(editorAcceptanceMatrix.length === source.activeTemplateCount, "编辑器验收矩阵必须覆盖全部活跃模板");
+for (const template of editorAcceptanceMatrix) {
+  invariant(template.objects.length > 0, `${template.templateKey} 验收矩阵缺少固定对象`);
+  for (const object of template.objects) {
+    invariant(object.capabilities.includes("layout") && object.capabilities.includes("layer"), `${template.templateKey}.${object.roleId} 缺少自由布局或层级能力`);
+    invariant(object.constraints.movementAxes.includes("x") && object.constraints.movementAxes.includes("y"), `${template.templateKey}.${object.roleId} 缺少双轴移动能力`);
+    invariant(resizeDirections.every((direction) => object.constraints.allowedResize.includes(direction)), `${template.templateKey}.${object.roleId} 缺少八方向缩放能力`);
+    invariant(object.viewports.desktop.applicable || object.viewports.mobile.applicable, `${template.templateKey}.${object.roleId} 缺少适用端默认几何`);
+  }
+}
 
 const generated = `/**
  * 自动生成，禁止手改。
@@ -909,6 +1000,7 @@ export const CONTENT_TEMPLATE_CONTRACT_VERSION = ${contractVersion};
 export const CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION = ${source.publicationGateVersion};
 export const CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY = "_contentPublication";
 export const CONTENT_TEMPLATE_EDITOR_POLICY = ${JSON.stringify(source.editorPolicy, sortReplacer, 2)} as const;
+export const CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX = ${JSON.stringify(editorAcceptanceMatrix, sortReplacer, 2)} as const;
 
 export type ContentTemplatePublicationAttestation = {
   gateVersion: number;
@@ -1335,7 +1427,6 @@ export type ContentTemplateIssue = {
     | "content-template-marker-invalid"
     | "content-template-key-mismatch"
     | "content-template-version-unsupported"
-    | "content-template-shared-design-mismatch"
     | "page-validation"
     | \`page-validation-\${string}\`;
   severity: ContentTemplateIssueSeverity;
@@ -1406,12 +1497,14 @@ export type ContentTemplateLinkTargetReference = {
   targetTypeFieldKey: string;
   productCodeFieldKey: string;
   productIdFieldKey: string;
+  categorySlugFieldKey: string;
   linkUrlFieldKey: string;
   legacyLinkFieldKey?: string;
   actionTextFieldKey?: string;
   targetType: unknown;
   productCode: unknown;
   productId: unknown;
+  categorySlug: unknown;
   linkUrl: unknown;
   legacyLink?: unknown;
   actionText?: unknown;
@@ -1471,11 +1564,21 @@ export function getContentTemplateDefaultRect(
   const contract = getContentTemplateContract(moduleType);
   const editableObject = findContentTemplateEditableObject(contract, nodeId);
   const directMatches = geometry?.zones.filter((zone) => zone.nodeId === nodeId) ?? [];
-  if (directMatches.length === 1) return directMatches[0].rect;
   const roleMatches = geometry?.zones.filter(
     (zone) => zone.roleId === editableObject?.roleId,
   ) ?? [];
-  return roleMatches.length === 1 ? roleMatches[0].rect : undefined;
+  const matches = directMatches.length > 0 ? directMatches : roleMatches;
+  if (matches.length === 0) return undefined;
+  const left = Math.min(...matches.map((zone) => zone.rect.x));
+  const top = Math.min(...matches.map((zone) => zone.rect.y));
+  const right = Math.max(...matches.map((zone) => zone.rect.x + zone.rect.width));
+  const bottom = Math.max(...matches.map((zone) => zone.rect.y + zone.rect.height));
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+  };
 }
 
 const PERSONAL_TEMPLATE_COLOR_TOKENS = new Set([
@@ -1986,6 +2089,7 @@ export function getContentTemplateLinkTargetReferences(
     const targetTypeFieldKey = prefix ? prefix + "TargetType" : "targetType";
     const productCodeFieldKey = prefix ? prefix + "ProductCode" : "productCode";
     const productIdFieldKey = prefix ? prefix + "ProductId" : "productId";
+    const categorySlugFieldKey = prefix ? prefix + "CategorySlug" : "categorySlug";
     const linkUrlFieldKey = prefix ? prefix + "LinkUrl" : "linkUrl";
     references.push({
       path,
@@ -1994,12 +2098,14 @@ export function getContentTemplateLinkTargetReferences(
       targetTypeFieldKey,
       productCodeFieldKey,
       productIdFieldKey,
+      categorySlugFieldKey,
       linkUrlFieldKey,
       ...(legacyLinkFieldKey ? { legacyLinkFieldKey } : {}),
       ...(actionTextFieldKey ? { actionTextFieldKey } : {}),
       targetType: values[targetTypeFieldKey],
       productCode: values[productCodeFieldKey],
       productId: values[productIdFieldKey],
+      categorySlug: values[categorySlugFieldKey],
       linkUrl: values[linkUrlFieldKey],
       ...(legacyLinkFieldKey ? { legacyLink: values[legacyLinkFieldKey] } : {}),
       ...(actionTextFieldKey ? { actionText: values[actionTextFieldKey] } : {}),
@@ -2643,7 +2749,7 @@ export function getContentTemplateIssues(input: {
         ...base,
         code: "content-template-legacy",
         severity: "info",
-        message: "历史模板已自动采用新版默认构图；合法实例覆盖继续保留，不合法部分使用安全回退。",
+        message: "历史模板已自动采用当前默认构图；合法实例覆盖继续保留，不合法部分使用安全回退。",
       }, ...overrideIssues];
     }
     return [{

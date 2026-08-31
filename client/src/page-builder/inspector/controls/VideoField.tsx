@@ -19,12 +19,14 @@ import { uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useHomepagePuck } from "@/pages/admin/HomepageConfig/editor-store";
 
-interface VideoFieldProps {
+export interface VideoFieldProps {
   fieldKey?: string;
   value?: string;
   onChange?: (value: string) => void;
   readOnly?: boolean;
   required?: boolean;
+  /** 模板设计会话不得读取当前页面草稿中的视频素材。 */
+  includePageVideos?: boolean;
 }
 
 const MAX_VIDEO_MB = 100;
@@ -50,6 +52,7 @@ export default function VideoField({
   onChange,
   readOnly,
   required,
+  includePageVideos = true,
 }: VideoFieldProps) {
   const { message } = AntdApp.useApp();
   const pageData = useHomepagePuck((state) => state.appState.data);
@@ -57,18 +60,27 @@ export default function VideoField({
     ...sessionUploadedVideos,
   ]);
   const currentPageVideos = useMemo(
-    () => [...new Set([...collectPageVideos(pageData), ...sessionVideos])],
-    [pageData, sessionVideos],
+    () => [...new Set([
+      ...(includePageVideos ? collectPageVideos(pageData) : []),
+      ...sessionVideos,
+    ])],
+    [includePageVideos, pageData, sessionVideos],
   );
   const [replaceOpen, setReplaceOpen] = useState(false);
   const [urlMode, setUrlMode] = useState(false);
   const [urlInput, setUrlInput] = useState(value || "");
   const [uploading, setUploading] = useState(false);
+  const [previewStatus, setPreviewStatus] = useState<"idle" | "loading" | "ready" | "error">(
+    value ? "loading" : "idle",
+  );
+  const [previewRevision, setPreviewRevision] = useState(0);
 
   useEffect(() => {
     setReplaceOpen(false);
     setUrlMode(false);
     setUrlInput(value || "");
+    setPreviewStatus(value ? "loading" : "idle");
+    setPreviewRevision(0);
   }, [value]);
 
   const handleUpload = async (file: File) => {
@@ -156,12 +168,34 @@ export default function VideoField({
       {value && !urlMode && !replaceOpen ? (
         <div>
           <video
+            key={`${value}-${previewRevision}`}
             src={value}
             controls={false}
             muted
             preload="metadata"
+            onLoadStart={() => setPreviewStatus("loading")}
+            onLoadedMetadata={() => setPreviewStatus("ready")}
+            onError={() => setPreviewStatus("error")}
             style={{ width: "100%", borderRadius: 4, background: "#181A1B" }}
           />
+          {previewStatus === "loading" ? (
+            <span className="homepage-editor__inspector-hint" role="status">
+              正在校验视频，可继续编辑其他内容。
+            </span>
+          ) : null}
+          {previewStatus === "ready" ? (
+            <span className="homepage-editor__inspector-hint" role="status">
+              视频可读取。
+            </span>
+          ) : null}
+          {previewStatus === "error" ? (
+            <div role="alert" className="homepage-editor__inspector-hint">
+              无法读取该视频。地址已保留，可重试、换用其他来源或删除。
+              <button type="button" onClick={() => setPreviewRevision((revision) => revision + 1)}>
+                重试
+              </button>
+            </div>
+          ) : null}
           <div className="homepage-editor__media-actions">
             <Button size="small" icon={<SwapOutlined />} onClick={() => setReplaceOpen(true)}>
               更换

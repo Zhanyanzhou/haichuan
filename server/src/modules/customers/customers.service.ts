@@ -11,6 +11,7 @@ import { OrdersService } from '../orders/orders.service';
 import { RefreshSessionService, type SessionMetadata } from '../../common/security/refresh-session.service';
 import { anonymizeCustomerConsultations } from '../leads/lead-privacy-disposition';
 import { customerFacingProductWhere } from '../products/product-eligibility';
+import { assertAccountPassword } from '../users/staff-password-policy';
 
 type AddressInput = {
   recipientName: string;
@@ -48,9 +49,7 @@ export class CustomersService {
   }
 
   private validatePassword(password: string) {
-    if (!password || password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-      throw new BadRequestException('密码至少需要 8 位，并包含字母和数字');
-    }
+    assertAccountPassword(password);
     return password;
   }
 

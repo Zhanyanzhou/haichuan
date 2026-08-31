@@ -3,7 +3,10 @@ import { test } from "node:test";
 import { BadRequestException, ConflictException } from "@nestjs/common";
 import { validate } from "class-validator";
 import { PrismaService } from "../../common/prisma/prisma.service";
-import { RestorePageDocumentRevisionDto } from "./dto";
+import {
+  PublishPageDocumentDto,
+  RestorePageDocumentRevisionDto,
+} from "./dto";
 import { PageModulesService } from "./page-modules.service";
 
 const CURRENT_UPDATED_AT = new Date("2026-08-23T08:00:00.000Z");
@@ -21,6 +24,7 @@ function createHarness(options: {
     updatedAt: options.documentUpdatedAt ?? CURRENT_UPDATED_AT,
     editorVersion: "0.22.4",
     status: "DRAFT",
+    publishedRevisionId: 39,
   };
   const restoredDocument = {
     ...document,
@@ -75,6 +79,7 @@ test("历史版本恢复携带当前 updatedAt 时成功并使用原子更新条
     pageKey: "home",
     updatedAt: CURRENT_UPDATED_AT,
   });
+  assert.equal("publishedRevisionId" in (calls.updateMany[0].data as Record<string, unknown>), false);
 });
 
 test("陈旧页面的历史版本恢复返回 409 且不写入", async () => {
@@ -126,4 +131,13 @@ test("恢复 DTO 缺少 expectedUpdatedAt 时校验失败", async () => {
     () => createHarness().service.restorePageDocumentRevision("home", 3, ""),
     BadRequestException,
   );
+});
+
+test("发布 DTO 缺少 expectedUpdatedAt 时校验失败", async () => {
+  const dto = new PublishPageDocumentDto();
+  dto.pageKey = "home";
+
+  const errors = await validate(dto);
+
+  assert.ok(errors.some((error) => error.property === "expectedUpdatedAt"));
 });

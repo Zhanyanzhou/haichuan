@@ -159,9 +159,24 @@ test.describe("游客公开浏览", () => {
       await expect(page.getByRole("button", { name: "创建会员账户" })).toBeVisible();
       await expect(page.getByLabel("称呼")).toBeVisible();
       await expect(page.getByLabel("邮箱（选填）")).toBeVisible();
+      const registerPassword = page.getByLabel("密码");
+      await expect(registerPassword).toHaveAttribute("minlength", "6");
+      await expect(registerPassword).toHaveAttribute("maxlength", "18");
+      await expect(page.getByText("密码需为 6–18 位", { exact: true })).toBeVisible();
       await expectNoHorizontalOverflow(page);
     });
   }
+
+  test("会员密码重置页使用统一 6-18 位输入合同", async ({ page }) => {
+    await page.goto(`/customer/reset?token=${"a".repeat(64)}`);
+    const password = page.getByLabel("新密码", { exact: true });
+    const confirmation = page.getByLabel("确认新密码", { exact: true });
+    await expect(password).toHaveAttribute("minlength", "6");
+    await expect(password).toHaveAttribute("maxlength", "18");
+    await expect(confirmation).toHaveAttribute("minlength", "6");
+    await expect(confirmation).toHaveAttribute("maxlength", "18");
+    await expect(page.getByText("密码需为 6–18 位。", { exact: true })).toBeVisible();
+  });
 
   for (const path of ["/cart", "/checkout"]) {
     test(`${path} 在交易关闭时降级至咨询页`, async ({ page }) => {

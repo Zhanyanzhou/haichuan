@@ -59,6 +59,11 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
     (state) => state.setPending,
   );
   const historyTransactionRef = useRef(0);
+  const latestDataRef = useRef(appData);
+
+  useEffect(() => {
+    latestDataRef.current = appData;
+  }, [appData]);
 
   const props = (selectedItem?.props || {}) as PuckProps;
   const moduleType = selectedItem?.type || "";
@@ -73,8 +78,8 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
   );
 
   // 基线 = 面板打开（或上次撤销后重新记录）时的 props 快照。
-  // 保存模型为「顶栏保存 + 2 秒静默自动保存」，无面板级 saving 信号；
-  // 撤销在自动保存防抖窗口内最有价值，历史修改由发布版本兜底。
+  // 保存模型为顶栏显式保存；面板只维护当前 Puck 历史，不建立第二套保存状态。
+  // 撤销用于回到本次选择前的设计基线，跨会话恢复由草稿与发布版本承接。
   const baselineRef = useRef<Map<string, PuckProps>>(new Map());
 
   useEffect(() => {
@@ -91,23 +96,32 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
 
   const update = (patch: PuckProps) => {
     if (index < 0 || historyTransactionPending) return;
+    const latestData = latestDataRef.current;
+    const latestContent = latestData.content as typeof content;
+    const latestIndex = latestContent.findIndex((item) => item.props?.id === props.id);
+    if (latestIndex < 0) return;
     if (panelMode === "design") {
+      const nextData = {
+        ...latestData,
+        content: applySharedTemplateDesignPatch(latestContent, moduleType, patch) as typeof latestData.content,
+      };
+      latestDataRef.current = nextData;
       dispatch({
         type: "setData",
-        data: {
-          ...appData,
-          content: applySharedTemplateDesignPatch(content, moduleType, patch),
-        },
+        data: nextData,
       });
       return;
     }
     const nextItem = {
-      ...content[index],
-      props: { ...content[index].props, ...patch },
+      ...latestContent[latestIndex],
+      props: { ...latestContent[latestIndex].props, ...patch },
     };
+    const nextContent = [...latestContent];
+    nextContent[latestIndex] = nextItem;
+    latestDataRef.current = { ...latestData, content: nextContent as typeof latestData.content };
     dispatch({
       type: "replace",
-      destinationIndex: index,
+      destinationIndex: latestIndex,
       destinationZone: ROOT_ZONE,
       data: nextItem,
     });
@@ -115,30 +129,34 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
 
   const updateFromCurrent: InspectorModuleEditor["updateFromCurrent"] = (factory) => {
     if (historyTransactionPending) return;
-    const latest = getPuck();
-    const latestData = latest.appState.data;
+    const latestData = latestDataRef.current;
     const latestContent = latestData.content as typeof content;
     const latestIndex = latestContent.findIndex((item) => item.props?.id === props.id);
     if (latestIndex < 0) return;
     const patch = factory(latestContent[latestIndex].props);
     if (panelMode === "design") {
+      const nextData = {
+        ...latestData,
+        content: applySharedTemplateDesignPatch(latestContent, moduleType, patch) as typeof latestData.content,
+      };
+      latestDataRef.current = nextData;
       dispatch({
         type: "setData",
-        data: {
-          ...latestData,
-          content: applySharedTemplateDesignPatch(latestContent, moduleType, patch),
-        },
+        data: nextData,
       });
       return;
     }
+    const nextContent = [...latestContent];
+    nextContent[latestIndex] = {
+      ...latestContent[latestIndex],
+      props: { ...latestContent[latestIndex].props, ...patch },
+    };
+    latestDataRef.current = { ...latestData, content: nextContent as typeof latestData.content };
     dispatch({
       type: "replace",
       destinationIndex: latestIndex,
       destinationZone: ROOT_ZONE,
-      data: {
-        ...latestContent[latestIndex],
-        props: { ...latestContent[latestIndex].props, ...patch },
-      },
+      data: nextContent[latestIndex],
     });
   };
 
@@ -147,7 +165,7 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
   ) => {
     if (index < 0 || historyTransactionPending) return;
     const before = getPuck();
-    const beforeData = before.appState.data;
+    const beforeData = latestDataRef.current;
     const beforeIndex = beforeData.content.findIndex(
       (item) => item.props?.id === props.id,
     );
@@ -169,10 +187,6 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
         props: { ...beforeItem.props, ...patch },
       };
     }
-    const afterState = {
-      ...before.appState,
-      data: { ...beforeData, content: afterContent },
-    };
     const transactionId = historyTransactionRef.current + 1;
     historyTransactionRef.current = transactionId;
     setHistoryTransactionPending(true);
@@ -180,11 +194,16 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
     // 覆盖 Puck 尚未触发的 250ms 防抖记录：先让当前完整状态成为 before。
     dispatch({ type: "setData", data: beforeData, recordHistory: true });
     // reset 立即反映到画布；after 由下方 setHistories 原子追加。
+    const afterData = {
+      ...beforeData,
+      content: afterContent as typeof beforeData.content,
+    };
     dispatch({
       type: "setData",
-      data: { ...beforeData, content: afterContent },
+      data: afterData,
       recordHistory: false,
     });
+    latestDataRef.current = afterData;
 
     const finishTransaction = (attempt = 0) => {
       if (historyTransactionRef.current !== transactionId) return;
@@ -197,7 +216,15 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
         return;
       }
       const historyPrefix = latest.history.histories.slice(0, latest.history.index + 1);
-      const beforeEntry = beforeRecorded ? [] : [{ state: before.appState }];
+      const beforeEntry = beforeRecorded ? [] : [{
+        state: { ...before.appState, data: beforeData },
+      }];
+      // 历史事务封口可能晚于用户切换模块或设备；保留此刻 UI，
+      // 只把本事务的最终内容写入 after，避免属性面板跳回旧选中项。
+      const afterState = {
+        ...latest.appState,
+        data: { ...latest.appState.data, content: afterContent },
+      };
       latest.history.setHistories([
         ...historyPrefix,
         ...beforeEntry,

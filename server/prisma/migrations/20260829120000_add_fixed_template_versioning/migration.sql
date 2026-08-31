@@ -1,0 +1,6 @@
+-- Intentionally empty.
+--
+-- The rejected fixed-template versioning candidate would have created a
+-- second editable template fact source. Gate A keeps this migration name as a
+-- no-op audit marker so no file is deleted; personal template revision and the
+-- unified activation ledger are introduced by separate additive migrations.

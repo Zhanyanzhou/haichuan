@@ -60,6 +60,7 @@ export default function LimitedOfferBlock({
     targetType: content.targetType,
     productCode: content.productCode,
     productId: content.productId,
+    categorySlug: content.categorySlug,
     linkUrl: content.linkUrl,
   });
   const benefitLabels = Array.isArray(benefits)

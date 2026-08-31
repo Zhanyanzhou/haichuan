@@ -18,6 +18,7 @@ import type { PuckProps } from "@/page-builder/types";
 import { getContentTemplateContract } from "@/page-builder/generated/contentTemplates.generated";
 import { resolveVisualNode } from "@/page-builder/runtime/visualLayout";
 import { useVisualEditorSession } from "@/page-builder/visual-editor/visualEditorSession";
+import WorkspaceTreeRow from "@/page-builder/workspace/WorkspaceTreeRow";
 
 const INTERNAL_OBJECT_LABELS: Record<string, string> = {
   desktopImage: "桌面主图",
@@ -97,9 +98,7 @@ export default function LayerRail({
     : "desktop" as const;
 
   useEffect(() => {
-    if (showInternalLayers && !wasShowingInternalLayersRef.current) {
-      pageLayerScrollTopRef.current = layerScrollRef.current?.scrollTop ?? 0;
-    } else if (!showInternalLayers && wasShowingInternalLayersRef.current) {
+    if (!showInternalLayers && wasShowingInternalLayersRef.current) {
       window.requestAnimationFrame(() => {
         if (layerScrollRef.current) {
           layerScrollRef.current.scrollTop = pageLayerScrollTopRef.current;
@@ -348,29 +347,31 @@ export default function LayerRail({
                 ? "structured" as const
                 : object.kind;
             return (
-              <div
+              <WorkspaceTreeRow
                 key={object.roleId}
-                className={`homepage-editor__layer-item${active ? " is-active" : ""}${enabled ? "" : " is-hidden"}`}
-                data-template-object={object.roleId}
-                data-layer-visible={enabled ? "true" : "false"}
-              >
-                <button
-                  type="button"
-                  className="homepage-editor__layer-select"
-                  aria-pressed={active}
-                  onClick={() => selectVisualNode({
+                rowClassName="homepage-editor__layer-item"
+                selected={active}
+                hidden={!enabled}
+                rowProps={{
+                  "data-template-object": object.roleId,
+                  "data-layer-visible": enabled ? "true" : "false",
+                }}
+                buttonClassName="homepage-editor__layer-select"
+                buttonProps={{
+                  "aria-pressed": active,
+                  onClick: () => selectVisualNode({
                     blockId: String(selectedId),
                     moduleType: selectedItem.type,
                     nodeId: selectedNodeId,
                     kind,
-                  })}
-                >
-                  <span className="homepage-editor__layer-name">
-                    {INTERNAL_OBJECT_LABELS[object.roleId] ?? object.roleId}
-                  </span>
-                  {!enabled ? <EyeInvisibleOutlined aria-label="当前隐藏" /> : null}
-                </button>
-              </div>
+                  }),
+                }}
+              >
+                <span className="homepage-editor__layer-name">
+                  {INTERNAL_OBJECT_LABELS[object.roleId] ?? object.roleId}
+                </span>
+                {!enabled ? <EyeInvisibleOutlined aria-label="当前隐藏" /> : null}
+              </WorkspaceTreeRow>
             );
           })}
           <p className="homepage-editor__layer-empty">
@@ -383,7 +384,13 @@ export default function LayerRail({
 
   return (
     <section className="homepage-editor__layer-rail">
-      <div className="homepage-editor__layer-scroll" ref={layerScrollRef}>
+      <div
+        className="homepage-editor__layer-scroll"
+        ref={layerScrollRef}
+        onScroll={(event) => {
+          pageLayerScrollTopRef.current = event.currentTarget.scrollTop;
+        }}
+      >
         <div className="homepage-editor__layer-frame homepage-editor__layer-global">
           <button
             type="button"
@@ -474,53 +481,47 @@ export default function LayerRail({
           const multiSelected = multiIndices.includes(index);
           const visible = item.props?.isVisible !== false;
           return (
-            <div
+            <WorkspaceTreeRow
               key={typeof item.props?.id === "string" || typeof item.props?.id === "number"
                 ? item.props.id
                 : `${item.type}-${index}`}
-              data-layer-index={index}
-              className={`homepage-editor__layer-item${active ? " is-active" : ""}${inView ? " is-in-view" : ""}${multiSelected ? " is-multi-selected" : ""}${visible ? "" : " is-hidden"}${draggingIndex === index ? " is-dragging" : ""}${dropIndex === index ? " is-drop-target" : ""}`}
-              data-layer-visible={visible ? "true" : "false"}
-              draggable={!readOnly && !item.props?.locked}
-              onDragStart={(event) => {
-                if (readOnly || item.props?.locked) return;
-                event.dataTransfer.effectAllowed = "move";
-                setDraggingIndex(index);
+              rowClassName={`homepage-editor__layer-item${inView ? " is-in-view" : ""}${multiSelected ? " is-multi-selected" : ""}${draggingIndex === index ? " is-dragging" : ""}${dropIndex === index ? " is-drop-target" : ""}`}
+              selected={active}
+              hidden={!visible}
+              rowProps={{
+                "data-layer-index": index,
+                "data-layer-id": item.props?.id == null ? undefined : String(item.props.id),
+                "data-layer-visible": visible ? "true" : "false",
+                draggable: !readOnly && !item.props?.locked,
+                onDragStart: (event) => {
+                  if (readOnly || item.props?.locked) return;
+                  event.dataTransfer.effectAllowed = "move";
+                  setDraggingIndex(index);
+                },
+                onDragOver: (event) => {
+                  if (readOnly) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setDropIndex(index);
+                },
+                onDrop: (event) => {
+                  if (readOnly) return;
+                  event.preventDefault();
+                  if (draggingIndex !== null) reorderLayer(draggingIndex, index);
+                  setDraggingIndex(null);
+                  setDropIndex(null);
+                },
+                onDragEnd: () => {
+                  setDraggingIndex(null);
+                  setDropIndex(null);
+                },
               }}
-              onDragOver={(event) => {
-                if (readOnly) return;
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-                setDropIndex(index);
+              buttonClassName="homepage-editor__layer-select"
+              buttonProps={{
+                onClick: (event) => handleLayerClick(index, event),
+                "aria-current": inView ? "location" : undefined,
               }}
-              onDrop={(event) => {
-                if (readOnly) return;
-                event.preventDefault();
-                if (draggingIndex !== null) reorderLayer(draggingIndex, index);
-                setDraggingIndex(null);
-                setDropIndex(null);
-              }}
-              onDragEnd={() => {
-                setDraggingIndex(null);
-                setDropIndex(null);
-              }}
-            >
-              <button
-                type="button"
-                className="homepage-editor__layer-select"
-                onClick={(event) => handleLayerClick(index, event)}
-                aria-current={inView ? "location" : undefined}
-              >
-                <span className="homepage-editor__layer-name">
-                  {numberedNames[index]}
-                </span>
-                <HolderOutlined
-                  className="homepage-editor__layer-grip"
-                  title="拖动调整顺序"
-                  aria-label="拖动调整顺序"
-                />
-              </button>
-              {!readOnly && !item.props?.locked ? (
+              actions={!readOnly && !item.props?.locked ? (
                 <div
                   className="homepage-editor__layer-actions"
                   role="group"
@@ -547,7 +548,16 @@ export default function LayerRail({
                   </button>
                 </div>
               ) : null}
-            </div>
+            >
+              <span className="homepage-editor__layer-name">
+                {numberedNames[index]}
+              </span>
+              <HolderOutlined
+                className="homepage-editor__layer-grip"
+                title="拖动调整顺序"
+                aria-label="拖动调整顺序"
+              />
+            </WorkspaceTreeRow>
           );
         })}
         {appData.content.length === 0 && (

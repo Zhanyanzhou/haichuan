@@ -19,7 +19,11 @@ export default function SwitchField({
   disabled,
 }: SwitchFieldProps) {
   return (
-    <div className="homepage-editor__inspector-field">
+    <div
+      className="homepage-editor__inspector-field"
+      data-workspace-field-control="switch"
+      data-workspace-field-shared="true"
+    >
       <label>
         <span>{label}</span>
         <Switch

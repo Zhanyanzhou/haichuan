@@ -4,7 +4,6 @@ import {
   IsString,
   Matches,
   MaxLength,
-  MinLength,
 } from "class-validator";
 
 export class BindWechatDto {
@@ -17,11 +16,9 @@ export class BindWechatDto {
   phone!: string;
 
   @IsString()
-  @MinLength(8, { message: "密码至少需要 8 位，并包含字母和数字" })
-  @MaxLength(128, { message: "密码不能超过 128 位" })
-  @Matches(/^(?=.*[A-Za-z])(?=.*\d).+$/, {
-    message: "密码至少需要 8 位，并包含字母和数字",
-  })
+  @IsNotEmpty({ message: "请输入登录密码" })
+  // 既有手机号需要原密码，新手机号的 6-18 位规则由 service 在确认不存在后执行。
+  @MaxLength(128, { message: "密码输入过长" })
   password!: string;
 
   @IsOptional()

@@ -27,8 +27,16 @@ function toProducts(products: ProductRow[]) {
   return products.map((product) => ({ id: product.id, name: product.name, image: product.image, price: product.priceLabel, link: `/products/${encodeURIComponent(product.code || String(product.id))}` }));
 }
 
-function LookbookPreview(props: LookbookPuckProps) {
-  const ids = useMemo(() => (Array.isArray(props.productIds) ? props.productIds.map(Number).filter((id) => id > 0) : []), [props.productIds]);
+export function LookbookPreview({
+  editMode = true,
+  stableReferencesOnly = false,
+  ...props
+}: LookbookPuckProps & { editMode?: boolean; stableReferencesOnly?: boolean }) {
+  const ids = useMemo(() => (
+    !stableReferencesOnly && Array.isArray(props.productIds)
+      ? props.productIds.map(Number).filter((id) => id > 0)
+      : []
+  ), [props.productIds, stableReferencesOnly]);
   const idsKey = ids.join(",");
   const codes = useMemo(() => Array.isArray(props.productCodes) ? props.productCodes.map(String).filter(Boolean) : [], [props.productCodes]);
   const codesKey = codes.join(",");
@@ -47,7 +55,7 @@ function LookbookPreview(props: LookbookPuckProps) {
     if (result) result.content.products = toProducts(props.__previewProducts ?? products);
     return result;
   }, [products, props]);
-  return module ? <LookbookBlock module={module} editMode /> : null;
+  return module ? <LookbookBlock module={module} editMode={editMode} /> : null;
 }
 
 export const lookbookPuckConfig = {

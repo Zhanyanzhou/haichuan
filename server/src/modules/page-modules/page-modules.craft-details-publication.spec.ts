@@ -57,7 +57,7 @@ test("工艺细节具备标题、三张图片与三组替代文字时通过发�
   assert.deepEqual(result.errors, []);
 });
 
-test("工艺细节分别对缺失核心图片和已配置图片的缺失替代文字逐字段阻断", async () => {
+test("工艺细节缺失核心图片或替代文字时逐字段提示但不阻断", async () => {
   const missingImageDocument = makeCraftDetails({
     leadImage: "",
     detailImageTwo: "",
@@ -68,11 +68,12 @@ test("工艺细节分别对缺失核心图片和已配置图片的缺失替代�
     makeFormalPageMetadata(missingImageDocument),
   );
 
-  assert.equal(missingImageResult.valid, false);
+  assert.equal(missingImageResult.valid, true, JSON.stringify(missingImageResult.errors));
+  assert.deepEqual(missingImageResult.errors, []);
   for (const field of ["leadImage", "detailImageTwo"]) {
-    assert.ok(missingImageResult.errors.some((message) => message.includes(`${field} 图片不能为空`)));
     const issue = missingImageResult.issues.find((item) => item.field === field);
     assert.equal(issue?.blockId, "craft-details-publication-gate");
+    assert.equal(issue?.severity, "warning");
   }
 
   const missingAltDocument = makeCraftDetails({
@@ -85,11 +86,12 @@ test("工艺细节分别对缺失核心图片和已配置图片的缺失替代�
     makeFormalPageMetadata(missingAltDocument),
   );
 
-  assert.equal(missingAltResult.valid, false);
+  assert.equal(missingAltResult.valid, true, JSON.stringify(missingAltResult.errors));
+  assert.deepEqual(missingAltResult.errors, []);
   for (const field of ["leadAltText", "detailTwoAltText"]) {
-    assert.ok(missingAltResult.errors.some((message) => message.includes(`${field} 内容不能为空`)));
     const issue = missingAltResult.issues.find((item) => item.field === field);
     assert.equal(issue?.blockId, "craft-details-publication-gate");
+    assert.equal(issue?.severity, "warning");
   }
 });
 
