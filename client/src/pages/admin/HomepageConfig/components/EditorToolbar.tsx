@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useGetPuck } from "@puckeditor/core";
+import { useGetPuck, type UiState } from "@puckeditor/core";
 import { App as AntdApp } from "antd";
 import {
   DeleteOutlined,
@@ -13,6 +13,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   EyeOutlined,
+  ExclamationCircleOutlined,
   HistoryOutlined,
   LayoutOutlined,
   MobileOutlined,
@@ -30,9 +31,16 @@ import { BLOCK_META } from "@/page-builder/config/blockMeta";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import { USE_MOCK } from "@/services/mockData";
 import {
+  focusCanvasBlock,
   useEditorHistoryTransaction,
   useHomepagePuck,
 } from "../editor-store";
+import {
+  useVisualEditorSession,
+  type VisualEditorMode,
+  type VisualNodeSelection,
+} from "@/page-builder/visual-editor/visualEditorSession";
+import type { PublishValidationStatus } from "@/page-builder/inspector/publishValidation";
 import { formatViewportSize, type ViewportPreset } from "../editor-utils";
 import WorkspaceContextControls from "@/page-builder/template-editor/WorkspaceContextControls";
 import useWorkspaceHistoryShortcuts from "@/page-builder/template-editor/useWorkspaceHistoryShortcuts";
@@ -61,6 +69,7 @@ export default function EditorToolbar({
   canPublish,
   canManageTemplates,
   draftSavedAtLabel,
+  publishValidationStatus,
   onPublish,
   onSaveDraft,
   onExitViewing,
@@ -69,6 +78,7 @@ export default function EditorToolbar({
   onDiscardDraft,
   onOpenRevisions,
   onOpenPageSettings,
+  onRetryPublishValidation,
   onPreviewModeChange,
   onDataChange,
   onCanvasDataSync,
@@ -86,6 +96,7 @@ export default function EditorToolbar({
   canPublish: boolean;
   canManageTemplates: boolean;
   draftSavedAtLabel: string | null;
+  publishValidationStatus: PublishValidationStatus;
   onPublish: (data: unknown) => void;
   onSaveDraft: (data: unknown) => void;
   onExitViewing: () => void;
@@ -94,6 +105,7 @@ export default function EditorToolbar({
   onDiscardDraft: () => void;
   onOpenRevisions: () => void;
   onOpenPageSettings: () => void;
+  onRetryPublishValidation: () => void;
   onPreviewModeChange: (previewing: boolean) => void;
   onDataChange: (data: unknown) => void;
   /** 整页替换或历史导航后同步父层 data prop，不推进已保存草稿基线。 */
@@ -110,9 +122,19 @@ export default function EditorToolbar({
   const canUndo = useHomepagePuck((state) => state.history.hasPast);
   const canRedo = useHomepagePuck((state) => state.history.hasFuture);
   const historyPending = useEditorHistoryTransaction((state) => state.pending);
+  const previewSelectionRef = useRef<{
+    itemSelector: UiState["itemSelector"];
+    blockId?: string;
+    visualSelection: VisualNodeSelection | null;
+    visualMode: VisualEditorMode;
+    panelMode: "content" | "design";
+  } | null>(null);
+  const wasPreviewModeRef = useRef(previewMode);
   const currentViewport = viewports.current;
   const publishUnavailableReason = !canPublish
     ? "当前账号只能编辑草稿，需由管理员发布"
+    : USE_MOCK
+      ? "Mock 模式未连接真实发布服务"
     : viewingPublished
       ? "正在查看线上版本，无需重复发布"
       : null;
@@ -213,7 +235,22 @@ export default function EditorToolbar({
     if (nextPreviewMode) {
       // 进入预览会切换画布分支；切换前先把 Puck 的即时内存状态同步给父层，
       // 避免 onChange 尚未提交时由旧受控 data 重新挂载而丢失刚输入的字段。
-      onCanvasDataSync(getPuck().appState.data);
+      const puck = getPuck();
+      const itemSelector = puck.appState.ui.itemSelector;
+      const selectedBlock = itemSelector
+        ? puck.appState.data.content[itemSelector.index]
+        : undefined;
+      const visualState = useVisualEditorSession.getState();
+      previewSelectionRef.current = {
+        itemSelector,
+        blockId: typeof selectedBlock?.props?.id === "string"
+          ? selectedBlock.props.id
+          : visualState.selection?.blockId,
+        visualSelection: visualState.selection,
+        visualMode: visualState.mode,
+        panelMode: visualState.panelMode,
+      };
+      onCanvasDataSync(puck.appState.data);
       dispatch({
         type: "setUi",
         ui: { itemSelector: null },
@@ -222,6 +259,34 @@ export default function EditorToolbar({
     }
     onPreviewModeChange(nextPreviewMode);
   }, [dispatch, getPuck, onCanvasDataSync, onPreviewModeChange, previewMode]);
+
+  useEffect(() => {
+    const wasPreviewing = wasPreviewModeRef.current;
+    wasPreviewModeRef.current = previewMode;
+    if (!wasPreviewing || previewMode) return;
+    const snapshot = previewSelectionRef.current;
+    previewSelectionRef.current = null;
+    if (!snapshot) return;
+    window.requestAnimationFrame(() => {
+      const puck = getPuck();
+      const stableIndex = snapshot.blockId
+        ? puck.appState.data.content.findIndex(
+            (block) => block.props?.id === snapshot.blockId,
+          )
+        : -1;
+      const itemSelector = stableIndex >= 0
+        ? { index: stableIndex, zone: snapshot.itemSelector?.zone ?? "root:default-zone" }
+        : snapshot.itemSelector;
+      if (itemSelector) {
+        dispatch({ type: "setUi", ui: { itemSelector }, recordHistory: false });
+      }
+      const visualState = useVisualEditorSession.getState();
+      visualState.setPanelMode(snapshot.panelMode);
+      if (snapshot.visualSelection) visualState.selectNode(snapshot.visualSelection);
+      visualState.setMode(snapshot.visualMode);
+      if (snapshot.blockId) focusCanvasBlock(snapshot.blockId);
+    });
+  }, [dispatch, getPuck, previewMode]);
 
   useEffect(() => {
     if (!previewMode) return undefined;
@@ -418,11 +483,20 @@ export default function EditorToolbar({
       : [];
 
   const compactActionItems = [
+    ...(publishValidationStatus === "unavailable"
+      ? [{
+          key: "retry-publish-validation",
+          icon: <ExclamationCircleOutlined />,
+          label: "重新检查发布资格",
+          danger: true,
+          onClick: onRetryPublishValidation,
+        }, { type: "divider" as const }]
+      : []),
     ...(publishedNeedsRevalidation
       ? [{
           key: "publication-revalidation",
           icon: <SettingOutlined />,
-          label: "线上版本需重新审核",
+          label: "线上版本需重新校验",
           danger: true,
           onClick: onOpenPageSettings,
         }]
@@ -449,7 +523,7 @@ export default function EditorToolbar({
     {
       key: "settings",
       icon: <SettingOutlined />,
-      label: "发布设置",
+      label: "页面设置",
       onClick: onOpenPageSettings,
     },
     { type: "divider" as const },
@@ -610,11 +684,11 @@ export default function EditorToolbar({
           danger: publishedNeedsRevalidation,
           ariaLabel:
             publishedNeedsRevalidation
-              ? "更多编辑操作，线上版本需重新审核"
+              ? "更多编辑操作，线上版本需重新校验"
               : "更多编辑操作",
           title:
             publishedNeedsRevalidation
-              ? "线上版本需重新审核；打开菜单处理发布设置"
+              ? "线上版本需重新校验；打开菜单查看页面设置"
               : "更多编辑操作",
         }}
         publish={{

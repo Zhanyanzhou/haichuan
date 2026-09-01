@@ -87,6 +87,7 @@ interface InspectorObjectContextProps {
   blockId?: string;
   moduleType?: string;
   mode?: "content" | "design";
+  onOpenPageSettings?: () => void;
 }
 
 /**
@@ -107,6 +108,7 @@ export default function InspectorObjectContext({
   blockId: _blockId,
   moduleType: _moduleType,
   mode = "content",
+  onOpenPageSettings,
 }: InspectorObjectContextProps) {
   const selectedObject = selectedObjectId
     ? objects.find((object) => object.id === selectedObjectId)
@@ -150,7 +152,18 @@ export default function InspectorObjectContext({
           )}
           <small>{isContentMode ? "当前模块全部适用内容" : sharedDesignLabel}</small>
         </span>
-        <span className="homepage-editor__edit-scope-badge">页面覆盖</span>
+        {onOpenPageSettings ? (
+          <button
+            type="button"
+            className="homepage-editor__edit-scope-badge"
+            onClick={onOpenPageSettings}
+            title="打开页面展示设置"
+          >
+            页面覆盖
+          </button>
+        ) : (
+          <span className="homepage-editor__edit-scope-badge">页面覆盖</span>
+        )}
       </div>
     </section>
   );

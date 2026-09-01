@@ -19,6 +19,10 @@ import { getContentTemplateContract } from "@/page-builder/generated/contentTemp
 import { resolveVisualNode } from "@/page-builder/runtime/visualLayout";
 import { useVisualEditorSession } from "@/page-builder/visual-editor/visualEditorSession";
 import WorkspaceTreeRow from "@/page-builder/workspace/WorkspaceTreeRow";
+import {
+  isPagePublishIssue,
+  type PublishValidationIssue,
+} from "@/page-builder/inspector/publishValidation";
 
 const INTERNAL_OBJECT_LABELS: Record<string, string> = {
   desktopImage: "桌面主图",
@@ -44,11 +48,7 @@ export default function LayerRail({
   navigationPreviewOpen: boolean;
   onToggleNavigationPreview: () => void;
   scrollSpyIndex: number | null;
-  publishIssues: Array<{
-    blockId?: string;
-    message: string;
-    severity: "error" | "warning" | "info";
-  }>;
+  publishIssues: PublishValidationIssue[];
   readOnly?: boolean;
 }) {
   const { message, modal } = AntdApp.useApp();
@@ -96,6 +96,9 @@ export default function LayerRail({
   const inspectorViewport = typeof currentViewport.width === "number" && currentViewport.width <= 767
     ? "mobile" as const
     : "desktop" as const;
+  const pageIssueCount = publishIssues.filter(
+    (issue) => issue.severity !== "info" && isPagePublishIssue(issue),
+  ).length;
 
   useEffect(() => {
     if (!showInternalLayers && wasShowingInternalLayersRef.current) {
@@ -123,9 +126,6 @@ export default function LayerRail({
   }, [scrollSpyIndex]);
 
   const multiActive = multiIndices.length >= 2;
-  const publishErrorIssues = publishIssues.filter(
-    (issue) => issue.severity === "error",
-  );
 
   const selectLayer = (index: number) => {
     const targetId = content[index]?.props?.id;
@@ -136,31 +136,6 @@ export default function LayerRail({
       });
     }
     focusCanvasBlock(typeof targetId === "string" ? targetId : undefined);
-  };
-
-  // 发布检查清单的逃生门：素材未到位时隐藏模块而非删除。
-  // 隐藏的模块保留画布排序，服务端校验自动跳过（isVisible === false），
-  // 隐藏触发的重新校验会让对应条目从清单中消失。
-  const hideBlockFromIssue = (index: number) => {
-    const target = content[index];
-    if (!target || target.props?.locked) return;
-    dispatch({
-      type: "replace",
-      destinationIndex: index,
-      destinationZone: ROOT_ZONE,
-      data: {
-        ...target,
-        props: {
-          ...target.props,
-          id: String(target.props.id),
-          isVisible: false,
-        },
-      },
-      recordHistory: true,
-    });
-    message.success(
-      `已暂时隐藏「${numberedNames[index]}」，排序保留；素材补齐后在属性面板恢复显示`,
-    );
   };
 
   const handleLayerClick = (index: number, event: React.MouseEvent) => {
@@ -399,6 +374,14 @@ export default function LayerRail({
             aria-label="预览页面导航"
           >
             <span>页面导航</span>
+            {pageIssueCount > 0 ? (
+              <span
+                className="homepage-editor__layer-issue-count"
+                aria-label={`页面设置有 ${pageIssueCount} 项发布问题`}
+              >
+                {pageIssueCount}
+              </span>
+            ) : null}
             <LockOutlined
               className="homepage-editor__layer-system-state"
               title="固定区域"
@@ -406,56 +389,6 @@ export default function LayerRail({
             />
           </button>
         </div>
-        {publishErrorIssues.length > 0 && (
-          <section
-            className="homepage-editor__publish-issues"
-            aria-label="发布检查问题"
-            role="alert"
-          >
-            <strong>发布检查 · {publishErrorIssues.length} 项待处理</strong>
-            <p className="homepage-editor__publish-issues-hint">
-              点击条目定位到模块；素材未到位的模块可暂时隐藏，排序保留，随时恢复。
-            </p>
-            <div>
-              {publishErrorIssues.map((issue, index) => {
-                const blockIndex = issue.blockId
-                  ? content.findIndex((block) => block.props?.id === issue.blockId)
-                  : -1;
-                const canLocate = blockIndex >= 0;
-                const canHide =
-                  canLocate && !content[blockIndex]?.props?.locked;
-                return (
-                  <div
-                    key={`${issue.blockId ?? "page"}-${issue.message}-${index}`}
-                    className="homepage-editor__publish-issue-item"
-                  >
-                    {canLocate ? (
-                      <button
-                        type="button"
-                        onClick={() => selectLayer(blockIndex)}
-                        title="定位到对应模块"
-                      >
-                        {issue.message}
-                      </button>
-                    ) : (
-                      <p>{issue.message}</p>
-                    )}
-                    {canHide && !readOnly && (
-                      <button
-                        type="button"
-                        className="homepage-editor__publish-issue-hide"
-                        onClick={() => hideBlockFromIssue(blockIndex)}
-                        title="隐藏后不参与发布，排序保留；素材补齐后在属性面板恢复显示"
-                      >
-                        暂时隐藏
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
         {multiActive && !readOnly && (
           <div className="homepage-editor__layer-batch">
             <span>已选 {multiIndices.length} 项</span>
@@ -480,6 +413,9 @@ export default function LayerRail({
           const inView = scrollSpyIndex === index;
           const multiSelected = multiIndices.includes(index);
           const visible = item.props?.isVisible !== false;
+          const blockIssueCount = publishIssues.filter(
+            (issue) => issue.severity !== "info" && issue.blockId === String(item.props?.id ?? ""),
+          ).length;
           return (
             <WorkspaceTreeRow
               key={typeof item.props?.id === "string" || typeof item.props?.id === "number"
@@ -552,6 +488,14 @@ export default function LayerRail({
               <span className="homepage-editor__layer-name">
                 {numberedNames[index]}
               </span>
+              {blockIssueCount > 0 ? (
+                <span
+                  className="homepage-editor__layer-issue-count"
+                  aria-label={`${numberedNames[index]}有 ${blockIssueCount} 项发布问题`}
+                >
+                  {blockIssueCount}
+                </span>
+              ) : null}
               <HolderOutlined
                 className="homepage-editor__layer-grip"
                 title="拖动调整顺序"

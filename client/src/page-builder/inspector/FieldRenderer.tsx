@@ -19,7 +19,10 @@ import type {
   FieldDef,
   InspectorContext,
 } from "./schema/types";
-import { getContentTemplateContract } from "../generated/contentTemplates.generated";
+import {
+  getContentTemplateContract,
+  getContentTemplateEditableObject,
+} from "../generated/contentTemplates.generated";
 import { resolveVisualNode } from "../runtime/visualLayout";
 import type { PuckProps } from "../types";
 
@@ -31,6 +34,48 @@ interface FieldRendererProps {
   onRequestVisualEdit?: (nodeId: string) => void;
   taskPresentation?: "media";
   textRows?: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isFieldHiddenByInstanceVisibility(
+  moduleType: string | undefined,
+  fieldKey: string,
+  props: PuckProps,
+) {
+  if (!moduleType) return false;
+  const contract = getContentTemplateContract(moduleType);
+  const editableObject = getContentTemplateEditableObject(moduleType, fieldKey)
+    ?? contract?.editorCapabilities.editableObjects.find((object) =>
+      object.contentFieldKeys.includes(fieldKey),
+    );
+  if (
+    !editableObject ||
+    !editableObject.capabilities.includes("visibility") ||
+    !editableObject.constraints.allowHide
+  ) {
+    return false;
+  }
+  const leafNodeIds = (editableObject.nodeIds ?? []).filter(
+    (nodeId) => nodeId !== editableObject.roleId,
+  );
+  const overrideNodeIds = leafNodeIds.includes(fieldKey)
+    ? [fieldKey]
+    : leafNodeIds.length > 0
+      ? leafNodeIds
+      : [editableObject.roleId];
+  const overrides = isRecord(props.__instanceOverrides)
+    ? props.__instanceOverrides
+    : {};
+  const container = overrides.version === 2
+    ? (isRecord(overrides.nodes) ? overrides.nodes : {})
+    : (isRecord(overrides.textRoles) ? overrides.textRoles : {});
+  return overrideNodeIds.every((nodeId) => {
+    const node = isRecord(container[nodeId]) ? container[nodeId] : {};
+    return node.enabled === false;
+  });
 }
 
 export default function FieldRenderer({
@@ -46,20 +91,29 @@ export default function FieldRenderer({
 
   switch (def.control) {
     case "text":
-    case "textarea":
+    case "textarea": {
+      const hiddenByInstanceVisibility = isFieldHiddenByInstanceVisibility(
+        moduleType,
+        def.key,
+        ctx.props,
+      );
+      const effectiveRequired = Boolean(def.required) && !hiddenByInstanceVisibility;
       return (
         <TextField
           label={def.label}
-          hint={def.hint}
-          required={def.required}
+          hint={hiddenByInstanceVisibility
+            ? `${def.hint ? `${def.hint}；` : ""}当前内容已隐藏，保留的文字不会阻断发布`
+            : def.hint}
+          required={effectiveRequired}
           maxLength={def.maxLength}
           placeholder={def.placeholder}
           rows={textRows ?? (def.control === "textarea" ? def.rows : undefined)}
           value={typeof value === "string" ? value : ""}
-          error={def.required && !(typeof value === "string" && value.trim())}
+          error={effectiveRequired && !(typeof value === "string" && value.trim())}
           onChange={(next) => update({ [def.key]: next })}
         />
       );
+    }
 
     case "segmented":
       return (

@@ -851,7 +851,16 @@ function createInstanceCss(
       const selector = slotCapability
         ? `${root} :is([data-content-role="${nodeId}"],[data-content-role-desktop="${nodeId}"],[data-content-role-mobile="${nodeId}"])`
         : `${root} :is([data-content-role="${nodeId}"],[data-content-role-desktop="${nodeId}"],[data-content-role-mobile="${nodeId}"],[data-editor-field~="${nodeId}"])`;
-      if (rawNode.enabled === false && hasCapability("visibility")) rules.push(`${selector}{display:none!important}`);
+      // copy 等文字角色在部分 Renderer 中也是行动按钮的布局父容器。
+      // “隐藏内容文字”应只隐藏合同声明的文字字段，不能连带吞掉独立 CTA。
+      const visibilitySelector = editableObject.kind === "text" && editableObject.contentFieldKeys.length > 0
+        ? `${root} :is(${editableObject.contentFieldKeys
+            .map((field) => `[data-editor-field~="${field}"]`)
+            .join(",")})`
+        : selector;
+      if (rawNode.enabled === false && hasCapability("visibility")) {
+        rules.push(`${visibilitySelector}{display:none!important}`);
+      }
       const rectByViewport = isRecord(rawNode.rectByViewport) ? rawNode.rectByViewport : {};
       const zIndexByViewport = isRecord(rawNode.zIndexByViewport)
         ? rawNode.zIndexByViewport

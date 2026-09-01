@@ -3,7 +3,7 @@ import { getPageDocumentMediaReferences } from "./content-template-contract";
 const BASE_FORMAL_PAGE_METADATA = Object.freeze({
   seoTitle: "海川珠宝测试页面",
   seoDescription: "仅用于页面模块确定性测试的正式页面描述。",
-  ogImage: "https://example.com/haichuan-page-share.jpg",
+  ogImage: "/images/system/product-placeholder.svg",
   contentOwner: "品牌内容组",
 });
 

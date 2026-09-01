@@ -11,6 +11,7 @@ import {
   useState,
   type RefObject,
   type CSSProperties,
+  type DragEvent,
   type ReactNode,
 } from "react";
 import { App as AntdApp, Button, Spin } from "antd";
@@ -53,6 +54,11 @@ import {
 } from "@/hooks/usePublicSiteSettings";
 import SchemaInspectorPanel from "@/page-builder/inspector/SchemaInspectorPanel";
 import DoublePosterInspector from "@/page-builder/inspector/panels/DoublePosterInspector";
+import InspectorFooterBar from "@/page-builder/inspector/InspectorFooterBar";
+import type {
+  PublishValidationIssue,
+  PublishValidationStatus,
+} from "@/page-builder/inspector/publishValidation";
 import { getInspectorSchema } from "@/page-builder/inspector/schema/registry";
 import {
   createEditorPageDefault,
@@ -88,6 +94,7 @@ import {
 } from "@/page-builder/visual-editor/visualEditorSession";
 import type { PersistTemplateOptions } from "@/page-builder/template-editor/TemplateWorkspace";
 import { UnifiedTemplateLibrary } from "@/page-builder/template-editor/TemplateEditorLibrary";
+import { notifyDynamicTemplateCatalogChanged } from "@/page-builder/template-editor/templateCatalogEvents";
 import WorkspaceCanvasControls from "@/page-builder/template-editor/WorkspaceCanvasControls";
 import {
   createPersonalTemplateDraft,
@@ -221,7 +228,6 @@ const INITIAL_EDITOR_UI: Partial<UiState> = {
 const CANVAS_SCROLL_SPY_TOP_OFFSET = 24;
 
 let blockIdSequence = 0;
-const DYNAMIC_TEMPLATE_SERVER_CHANGED_EVENT = "haichuan:dynamic-template-server-changed";
 
 function createPersistedDynamicTemplateDraft(
   template: DynamicTemplateResource,
@@ -748,23 +754,17 @@ function CanvasPageDataSynchronizer({
 function PageTemplateLibraryAdapter({
   pageKey,
   onInsertTemplate,
-  onTemplatePointerDragMove,
-  onTemplatePointerDragEnd,
+  onTemplateDragStart,
+  onTemplateDragEnd,
 }: {
   pageKey: EditorPageKey;
-  onInsertTemplate: (name: string, current?: SystemContentTemplateCurrent) => void;
-  onTemplatePointerDragMove: (
+  onInsertTemplate: (
     name: string,
-    clientX: number,
-    clientY: number,
     current?: SystemContentTemplateCurrent,
+    insertionIndex?: number,
   ) => void;
-  onTemplatePointerDragEnd: (
-    name: string,
-    clientX: number,
-    clientY: number,
-    current?: SystemContentTemplateCurrent,
-  ) => boolean;
+  onTemplateDragStart: (label: string, insertAt: (insertionIndex: number) => void) => void;
+  onTemplateDragEnd: () => void;
 }) {
   const { message, modal } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
@@ -801,7 +801,10 @@ function PageTemplateLibraryAdapter({
     });
   }, [appData, dispatch, message, modal]);
 
-  const insertPublishedDynamicTemplate = useCallback((template: PublishedDynamicTemplateResource) => {
+  const insertPublishedDynamicTemplate = useCallback((
+    template: PublishedDynamicTemplateResource,
+    requestedInsertionIndex = appData.content?.length ?? 0,
+  ) => {
     const resolved = {
       templateId: template.templateId,
       version: template.version,
@@ -816,7 +819,19 @@ function PageTemplateLibraryAdapter({
     const resolvedMap = existingResolved && typeof existingResolved === "object" && !Array.isArray(existingResolved)
       ? existingResolved as ResolvedDynamicTemplateDefinitionMap
       : {};
-    const insertionIndex = appData.content?.length ?? 0;
+    const content = appData.content ?? [];
+    const insertionIndex = Math.min(
+      content.length,
+      Math.max(0, requestedInsertionIndex),
+    );
+    const instance = {
+      type: DYNAMIC_TEMPLATE_BLOCK_TYPE,
+      props: createDynamicTemplateInstanceProps({
+        templateId: template.templateId,
+        version: template.version,
+        name: template.name,
+      }),
+    };
     dispatch({
       type: "setData",
       data: {
@@ -826,15 +841,9 @@ function PageTemplateLibraryAdapter({
           [key]: resolved,
         },
         content: [
-          ...(appData.content ?? []),
-          {
-            type: DYNAMIC_TEMPLATE_BLOCK_TYPE,
-            props: createDynamicTemplateInstanceProps({
-              templateId: template.templateId,
-              version: template.version,
-              name: template.name,
-            }),
-          },
+          ...content.slice(0, insertionIndex),
+          instance,
+          ...content.slice(insertionIndex),
         ],
       } as typeof appData,
       recordHistory: true,
@@ -854,14 +863,18 @@ function PageTemplateLibraryAdapter({
         isContentTemplateInsertable(moduleType)
         && isContentTemplateAllowedForPage(pageKey, moduleType)
       )}
-      onInsertSystem={(moduleType, current) => onInsertTemplate(moduleType, current)}
-      onSystemPointerDragMove={(moduleType, clientX, clientY, current) => (
-        onTemplatePointerDragMove(moduleType, clientX, clientY, current)
+      onInsertSystem={onInsertTemplate}
+      onSystemDragStart={(moduleType, current) => onTemplateDragStart(
+        moduleType,
+        (insertionIndex) => onInsertTemplate(moduleType, current, insertionIndex),
       )}
-      onSystemPointerDragEnd={(moduleType, clientX, clientY, current) => (
-        onTemplatePointerDragEnd(moduleType, clientX, clientY, current)
-      )}
+      onSystemDragEnd={onTemplateDragEnd}
       onInsertPublished={insertPublishedDynamicTemplate}
+      onPublishedDragStart={(template) => onTemplateDragStart(
+        template.name,
+        (insertionIndex) => insertPublishedDynamicTemplate(template, insertionIndex),
+      )}
+      onPublishedDragEnd={onTemplateDragEnd}
       getSystemUpgradeCount={(current) => countUpgradeableSystemTemplateInstances(
         appData as unknown as Record<string, unknown>,
         current,
@@ -887,11 +900,17 @@ function InspectorPanel({
   saving,
   onSaveDraft,
   publishIssues,
+  validationStatus,
+  onRetryValidation,
+  onOpenPageSettings,
 }: {
   hasUnsavedChanges: boolean;
   saving: boolean;
   onSaveDraft: () => void;
   publishIssues: PublishValidationIssue[];
+  validationStatus: PublishValidationStatus;
+  onRetryValidation: () => void;
+  onOpenPageSettings: (field?: string) => void;
 }) {
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const content = useHomepagePuck((state) => state.appState.data.content);
@@ -928,8 +947,19 @@ function InspectorPanel({
                 编辑首个模块
               </Button>
             ) : null}
+            <Button type="text" onClick={() => onOpenPageSettings()}>
+              页面展示设置
+            </Button>
           </div>
         </div>
+        <InspectorFooterBar
+          hasUnsavedChanges={hasUnsavedChanges}
+          saving={saving}
+          errorCount={publishIssues.filter((issue) => issue.severity === "error").length}
+          warningCount={publishIssues.filter((issue) => issue.severity === "warning").length}
+          validationStatus={validationStatus}
+          onRetryValidation={onRetryValidation}
+        />
       </section>
     );
   }
@@ -943,6 +973,10 @@ function InspectorPanel({
         saving={saving}
         onSaveDraft={onSaveDraft}
         templateDesignEnabled={false}
+        publishIssues={publishIssues}
+        validationStatus={validationStatus}
+        onRetryValidation={onRetryValidation}
+        onOpenPageSettings={onOpenPageSettings}
       />
     );
   }
@@ -951,7 +985,10 @@ function InspectorPanel({
       <DynamicTemplateInstanceInspector
         hasUnsavedChanges={hasUnsavedChanges}
         saving={saving}
-        onSaveDraft={onSaveDraft}
+        publishIssues={publishIssues}
+        validationStatus={validationStatus}
+        onRetryValidation={onRetryValidation}
+        onOpenPageSettings={onOpenPageSettings}
       />
     );
   }
@@ -965,6 +1002,9 @@ function InspectorPanel({
         onSaveDraft={onSaveDraft}
         templateDesignEnabled={false}
         publishIssues={publishIssues}
+        validationStatus={validationStatus}
+        onRetryValidation={onRetryValidation}
+        onOpenPageSettings={onOpenPageSettings}
       />
     );
   }
@@ -1045,16 +1085,6 @@ function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
   );
 }
 
-type PublishValidationIssue = {
-  blockId?: string;
-  field?: string;
-  index?: number;
-  code?: string;
-  message: string;
-  severity: "error" | "warning" | "info";
-  path?: string;
-};
-
 function resolvePublishValidationIssues(result: {
   errors?: string[];
   issues?: PublishValidationIssue[];
@@ -1074,6 +1104,15 @@ function resolvePublishValidationIssues(result: {
   return [...structuredIssues, ...fallbackErrors];
 }
 
+function resolveBlockingPublishIssues(result: {
+  errors?: string[];
+  issues?: PublishValidationIssue[];
+}): PublishValidationIssue[] {
+  return resolvePublishValidationIssues(result).filter(
+    (issue) => issue.severity === "error",
+  );
+}
+
 function EditorBody({
   pageKey,
   contentReady,
@@ -1085,6 +1124,9 @@ function EditorBody({
   viewingPublished,
   onSaveDraft,
   publishIssues,
+  validationStatus,
+  onRetryValidation,
+  onOpenPageSettings,
 }: {
   pageKey: EditorPageKey;
   contentReady: boolean;
@@ -1096,6 +1138,9 @@ function EditorBody({
   viewingPublished: boolean;
   onSaveDraft: (data: unknown) => void;
   publishIssues: PublishValidationIssue[];
+  validationStatus: PublishValidationStatus;
+  onRetryValidation: () => void;
+  onOpenPageSettings: (field?: string) => void;
 }) {
   const { message } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
@@ -1108,6 +1153,10 @@ function EditorBody({
   const isInspecting = Boolean(selectedItem);
   const [draggingTemplate, setDraggingTemplate] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const draggingTemplateRef = useRef<{
+    label: string;
+    insertAt: (insertionIndex: number) => void;
+  } | null>(null);
   const [canvasZoom, setCanvasZoom] = useState(1);
   const [canvasHeight, setCanvasHeight] = useState(0);
   const [navigationPreviewOpen, setNavigationPreviewOpen] = useState(false);
@@ -1680,35 +1729,50 @@ function EditorBody({
     [getDropIndex],
   );
 
-  const handleTemplatePointerDragMove = useCallback(
-    (name: string, clientX: number, clientY: number, _current?: SystemContentTemplateCurrent) => {
-      const nextDropIndex = getCanvasDropIndex(clientX, clientY);
-      if (nextDropIndex === null) {
-        clearDragState();
-        return;
-      }
-      setDraggingTemplate(name);
-      setDropIndex(nextDropIndex);
+  const handleTemplateDragStart = useCallback(
+    (label: string, insertAt: (insertionIndex: number) => void) => {
+      draggingTemplateRef.current = { label, insertAt };
+      setDraggingTemplate(label);
+      setDropIndex(null);
     },
-    [clearDragState, getCanvasDropIndex],
+    [],
   );
 
-  const handleTemplatePointerDragEnd = useCallback(
-    (name: string, clientX: number, clientY: number, current?: SystemContentTemplateCurrent) => {
-      const insertionIndex = getCanvasDropIndex(clientX, clientY);
-      if (insertionIndex === null) {
-        clearDragState();
-        return false;
-      }
-      insertTemplate(name, insertionIndex, current);
-      return true;
+  const handleTemplateDragEnd = useCallback(() => {
+    draggingTemplateRef.current = null;
+    clearDragState();
+  }, [clearDragState]);
+
+  const handleCanvasTemplateDragOver = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      if (!draggingTemplateRef.current) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      setDropIndex(getCanvasDropIndex(event.clientX, event.clientY));
     },
-    [clearDragState, getCanvasDropIndex, insertTemplate],
+    [getCanvasDropIndex],
+  );
+
+  const handleCanvasTemplateDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      const activeTemplate = draggingTemplateRef.current;
+      if (!activeTemplate) return;
+      event.preventDefault();
+      const insertionIndex = getCanvasDropIndex(event.clientX, event.clientY);
+      if (insertionIndex === null) {
+        handleTemplateDragEnd();
+        return;
+      }
+      draggingTemplateRef.current = null;
+      activeTemplate.insertAt(insertionIndex);
+      clearDragState();
+    },
+    [clearDragState, getCanvasDropIndex, handleTemplateDragEnd],
   );
 
   const handleTemplateActivate = useCallback(
-    (name: string, current?: SystemContentTemplateCurrent) => (
-      insertTemplate(name, appData.content.length, current)
+    (name: string, current?: SystemContentTemplateCurrent, insertionIndex?: number) => (
+      insertTemplate(name, insertionIndex ?? appData.content.length, current)
     ),
     [appData.content.length, insertTemplate],
   );
@@ -1737,8 +1801,8 @@ function EditorBody({
         <PageTemplateLibraryAdapter
           pageKey={pageKey}
           onInsertTemplate={handleTemplateActivate}
-          onTemplatePointerDragMove={handleTemplatePointerDragMove}
-          onTemplatePointerDragEnd={handleTemplatePointerDragEnd}
+          onTemplateDragStart={handleTemplateDragStart}
+          onTemplateDragEnd={handleTemplateDragEnd}
         />
       )}
 
@@ -1771,8 +1835,8 @@ function EditorBody({
               navigationPreviewOpen={navigationPreviewOpen}
               onToggleNavigationPreview={toggleNavigationPreview}
               scrollSpyIndex={scrollSpyIndex}
-              publishIssues={publishIssues}
               readOnly={viewingPublished}
+              publishIssues={publishIssues}
             />
           </>
         )}
@@ -1804,6 +1868,8 @@ function EditorBody({
           <div
             ref={canvasRef}
             className={`homepage-editor__canvas-document${draggingTemplate ? " is-dragging" : ""}`}
+            onDragOver={handleCanvasTemplateDragOver}
+            onDrop={handleCanvasTemplateDrop}
             style={{
               width: `${canvasBaseWidth * canvasZoom}px`,
               height: canvasHeight ? `${canvasHeight}px` : undefined,
@@ -1823,12 +1889,14 @@ function EditorBody({
                 <div className="homepage-editor__drop-scrim">
                   <span>拖放“{draggingTemplate}”到目标位置</span>
                 </div>
-                <div
-                  className="homepage-editor__drop-indicator"
-                  style={{ top: `${dropPosition}%` }}
-                >
-                  <span>在此插入</span>
-                </div>
+                {dropIndex !== null ? (
+                  <div
+                    className="homepage-editor__drop-indicator"
+                    style={{ top: `${dropPosition}%` }}
+                  >
+                    <span>在此插入</span>
+                  </div>
+                ) : null}
               </>
             )}
           </div>
@@ -1875,6 +1943,9 @@ function EditorBody({
                 saving={saving}
                 onSaveDraft={() => onSaveDraft(appData)}
                 publishIssues={publishIssues}
+                validationStatus={validationStatus}
+                onRetryValidation={onRetryValidation}
+                onOpenPageSettings={onOpenPageSettings}
               />
             )}
           </div>
@@ -1923,6 +1994,8 @@ export default function HomepageConfig({
   const [publishIssues, setPublishIssues] = useState<PublishValidationIssue[]>(
     [],
   );
+  const [publishValidationStatus, setPublishValidationStatus] =
+    useState<PublishValidationStatus>("idle");
   const [validationRevision, setValidationRevision] = useState(0);
   const validationRequestRef = useRef(0);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -1960,6 +2033,7 @@ export default function HomepageConfig({
   const dataSignatureRef = useRef("");  const [metadata, setMetadata] = useState<PuckProps>({});
   const latestMetadata = useRef<PuckProps>({});
   const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
+  const [pageSettingsFocusField, setPageSettingsFocusField] = useState<string | null>(null);
   // 是否存在尚未发布的草稿修改。
   const [hasPendingDraft, setHasPendingDraft] = useState(false);
   const [publishedNeedsRevalidation, setPublishedNeedsRevalidation] = useState(false);
@@ -2158,6 +2232,25 @@ export default function HomepageConfig({
     session.selectObject(draft.definition.rootNodeId);
   }, [canManageTemplates, message, workspaceMode]);
 
+  const openPersistedTemplateDraft = useCallback((template: DynamicTemplateResource) => {
+    if (template.status === "ARCHIVED") {
+      message.warning("已归档模板需先恢复后才能继续编辑");
+      return false;
+    }
+    const draft = createPersistedDynamicTemplateDraft(template);
+    if (!draft) {
+      message.error("服务端模板缺少可编辑草稿");
+      return false;
+    }
+    const visualSession = useVisualEditorSession.getState();
+    visualSession.resetWorkspaceContext("template");
+    visualSession.activateWorkspace("template");
+    const session = useTemplateEditorSession.getState();
+    session.open(draft);
+    session.selectObject(draft.definition.rootNodeId);
+    return true;
+  }, [message]);
+
   const openPersistedDynamicTemplateWorkspace = useCallback((template: DynamicTemplateResource) => {
     if (workspaceMode !== "template") {
       message.info("请先点击顶部“模板设计”进入模板工作区");
@@ -2167,22 +2260,8 @@ export default function HomepageConfig({
       message.warning("只有超级管理员可以设计模板");
       return;
     }
-    if (template.status === "ARCHIVED") {
-      message.warning("已归档模板需先恢复后才能继续编辑");
-      return;
-    }
-    const draft = createPersistedDynamicTemplateDraft(template);
-    if (!draft) {
-      message.error("服务端模板缺少可编辑草稿");
-      return;
-    }
-    const visualSession = useVisualEditorSession.getState();
-    visualSession.resetWorkspaceContext("template");
-    visualSession.activateWorkspace("template");
-    const session = useTemplateEditorSession.getState();
-    session.open(draft);
-    session.selectObject(draft.definition.rootNodeId);
-  }, [canManageTemplates, message, workspaceMode]);
+    openPersistedTemplateDraft(template);
+  }, [canManageTemplates, message, openPersistedTemplateDraft, workspaceMode]);
 
   const returnToPageWorkspace = useCallback(() => {
     useTemplateEditorSession.getState().close();
@@ -2254,7 +2333,7 @@ export default function HomepageConfig({
       const savedDraft = saved ? createPersistedDynamicTemplateDraft(saved) : null;
       if (!savedDraft) throw new Error("服务端没有返回可编辑模板草稿");
       useTemplateEditorSession.getState().markSaved(savedDraft);
-      window.dispatchEvent(new Event(DYNAMIC_TEMPLATE_SERVER_CHANGED_EVENT));
+      notifyDynamicTemplateCatalogChanged();
       message.success(options.asCopy
         ? `“${savedDraft.definition.name}”副本已保存为新的账号模板`
         : "模板草稿已保存，可继续设计或发布");
@@ -2298,81 +2377,81 @@ export default function HomepageConfig({
       return false;
     }
     return await new Promise<boolean>((resolve) => {
-        let settled = false;
-        const settle = (result: boolean) => {
-          if (settled) return;
-          settled = true;
-          releasePublishing();
-          resolve(result);
-        };
-        modal.confirm({
-          title: `确认发布模板 v${draft.remote!.publishedVersion + 1}`,
-          width: 560,
-          okText: "确认发布模板",
-          cancelText: "取消",
-          maskClosable: false,
-          content: (
-            <div style={{ display: "grid", gap: 12 }}>
-              <p style={{ margin: 0 }}>
-                本次只创建不可变的模板新版本，不会修改任何页面草稿、线上页面或页面方案。
-              </p>
-              <p style={{ margin: 0 }}>
-                已有页面实例会继续锁定当前模板版本；如需使用新版，必须在页面装修中显式升级草稿并重新发布页面。
-              </p>
-            </div>
-          ),
-          onOk: async () => {
-            try {
-              const publishResponse = await dynamicTemplateApi.publish(
-                draft.definition.templateId,
-                {
-                  expectedRevision: draft.remote!.revision,
-                  ...(draft.versionNote ? { versionNote: draft.versionNote } : {}),
-                },
-              );
-              const published = unwrapResponse<DynamicTemplatePublishResultResource>(
-                publishResponse,
-              );
-              if (
-                !published
-                || published.templateId !== draft.definition.templateId
-                || published.version !== draft.remote!.publishedVersion + 1
-                || !Number.isInteger(published.draft?.revision)
-              ) {
-                throw new Error("服务端返回的模板发布结果与当前草稿不一致");
-              }
-              const current = useTemplateEditorSession.getState();
-              const currentDraft = current.draft;
-              if (
-                currentDraft?.sourceType === "persisted"
-                && currentDraft.remote
-                && currentDraft.definition.templateId === published.templateId
-                && currentDraft.remote.revision === draft.remote!.revision
-              ) {
-                const nextDraft = structuredClone(currentDraft);
-                nextDraft.versionNote = "";
-                nextDraft.remote = {
-                  databaseId: currentDraft.remote.databaseId,
-                  revision: published.draft.revision,
-                  publishedVersion: published.version,
-                  baseVersion: published.version,
-                };
-                current.markSaved(nextDraft);
-              }
-              window.dispatchEvent(new Event(DYNAMIC_TEMPLATE_SERVER_CHANGED_EVENT));
-              message.success(`模板 v${published.version} 已发布；现有页面仍保持原版本`);
-              settle(true);
-            } catch (error) {
-              message.error(getEditorErrorMessage(
-                error,
-                "模板发布失败，当前模板草稿和页面会话仍保留",
-              ));
-              settle(false);
+      let settled = false;
+      const settle = (result: boolean) => {
+        if (settled) return;
+        settled = true;
+        releasePublishing();
+        resolve(result);
+      };
+      modal.confirm({
+        title: `确认发布模板 v${draft.remote!.publishedVersion + 1}`,
+        width: 560,
+        okText: "确认发布模板",
+        cancelText: "取消",
+        maskClosable: false,
+        content: (
+          <div style={{ display: "grid", gap: 12 }}>
+            <p style={{ margin: 0 }}>
+              本次只创建不可变的模板新版本，不会修改任何页面草稿、线上页面或页面方案。
+            </p>
+            <p style={{ margin: 0 }}>
+              已有页面实例会继续锁定当前模板版本；如需使用新版，必须在页面装修中显式升级草稿并重新发布页面。
+            </p>
+          </div>
+        ),
+        onOk: async () => {
+          try {
+            const publishResponse = await dynamicTemplateApi.publish(
+              draft.definition.templateId,
+              {
+                expectedRevision: draft.remote!.revision,
+                ...(draft.versionNote ? { versionNote: draft.versionNote } : {}),
+              },
+            );
+            const published = unwrapResponse<DynamicTemplatePublishResultResource>(
+              publishResponse,
+            );
+            if (
+              !published
+              || published.templateId !== draft.definition.templateId
+              || published.version !== draft.remote!.publishedVersion + 1
+              || !Number.isInteger(published.draft?.revision)
+            ) {
+              throw new Error("服务端返回的模板发布结果与当前草稿不一致");
             }
-          },
-          onCancel: () => settle(false),
-        });
+            const current = useTemplateEditorSession.getState();
+            const currentDraft = current.draft;
+            if (
+              currentDraft?.sourceType === "persisted"
+              && currentDraft.remote
+              && currentDraft.definition.templateId === published.templateId
+              && currentDraft.remote.revision === draft.remote!.revision
+            ) {
+              const nextDraft = structuredClone(currentDraft);
+              nextDraft.versionNote = "";
+              nextDraft.remote = {
+                databaseId: currentDraft.remote.databaseId,
+                revision: published.draft.revision,
+                publishedVersion: published.version,
+                baseVersion: published.version,
+              };
+              current.markSaved(nextDraft);
+            }
+            notifyDynamicTemplateCatalogChanged();
+            message.success(`模板 v${published.version} 已发布；现有页面仍保持原版本`);
+            settle(true);
+          } catch (error) {
+            message.error(getEditorErrorMessage(
+              error,
+              "模板发布失败，当前模板草稿和页面会话仍保留",
+            ));
+            settle(false);
+          }
+        },
+        onCancel: () => settle(false),
       });
+    });
   }, [canManageTemplates, message, modal, persistTemplateDraft]);
 
   const editorConfig = useMemo(
@@ -2490,6 +2569,7 @@ export default function HomepageConfig({
       setPublishedNeedsRevalidation(false);
       setViewingPublished(false);
       setPublishIssues([]);
+      setPublishValidationStatus("idle");
       setRevisions([]);
       setDraftSnapshot(null);
       setRevisionFailure(null);
@@ -2697,8 +2777,14 @@ export default function HomepageConfig({
 
   useEffect(() => {
     if (initialLoading || loadError || loadedPageKey !== pageKey) return;
+    if (USE_MOCK) {
+      setPublishIssues([]);
+      setPublishValidationStatus("unverified");
+      return;
+    }
     const controller = new AbortController();
     const requestId = ++validationRequestRef.current;
+    setPublishValidationStatus("validating");
     const expectedSignature = canonicalizePageContent(
       latestData.current,
       latestMetadata.current,
@@ -2725,13 +2811,18 @@ export default function HomepageConfig({
             errors: string[];
             issues?: PublishValidationIssue[];
           }>(response);
-          setPublishIssues(resolvePublishValidationIssues(result));
+          const issues = resolvePublishValidationIssues(result);
+          setPublishIssues(issues);
+          setPublishValidationStatus(
+            issues.some((issue) => issue.severity === "error") ? "invalid" : "valid",
+          );
         })
         .catch((error) => {
           if (controller.signal.aborted || requestId !== validationRequestRef.current) return;
           // 失败时不能继续把上一轮问题伪装成当前结论；草稿仍完整保留，
           // 运营可从工具栏原位重试同一个服务端预检。
           setPublishIssues([]);
+          setPublishValidationStatus("unavailable");
           if (import.meta.env.DEV) console.warn("[PageDocument validate]", error);
         });
     }, 650);
@@ -2740,6 +2831,10 @@ export default function HomepageConfig({
       controller.abort();
     };
   }, [initialLoading, loadError, loadedPageKey, metadata, pageKey, validationRevision]);
+
+  const retryPublishValidation = useCallback(() => {
+    setValidationRevision((revision) => revision + 1);
+  }, []);
 
   const saveDraft = useCallback(
     async (
@@ -3039,7 +3134,7 @@ export default function HomepageConfig({
     );
   }, [message]);
 
-  const openPageSettingsForEditing = useCallback(() => {
+  const openPageSettingsForEditing = useCallback((focusField?: string) => {
     if (viewingPublishedRef.current) {
       if (editingDraftSnapshotRef.current) {
         returnToEditingDraft();
@@ -3049,6 +3144,7 @@ export default function HomepageConfig({
         setViewingPublished(false);
       }
     }
+    setPageSettingsFocusField(focusField ?? null);
     setPageSettingsOpen(true);
   }, [returnToEditingDraft]);
 
@@ -3203,14 +3299,14 @@ export default function HomepageConfig({
       const merged = { ...latestMetadata.current, ...next };
       setMetadata(merged);
       latestMetadata.current = merged;
-      // 发布设置已经进入当前内存草稿；即使持久化失败也必须触发离开保护，
+      // 页面设置已经进入当前内存草稿；即使持久化失败也必须触发离开保护，
       // 不能关闭抽屉后把内容负责人、SEO 或授权编号静默丢失。
       setHasUnsavedChanges(true);
       setValidationRevision((revision) => revision + 1);
       const saved = await saveDraft(latestData.current, { silent: true });
       if (saved) {
         setPageSettingsOpen(false);
-        message.success("页面发布设置已保存");
+        message.success("页面设置已保存");
       }
       return saved;
     },
@@ -3408,18 +3504,84 @@ export default function HomepageConfig({
     const editableData = nextData ?? latestData.current;
     const pageLabel = getEditorPage(pageKey).label;
 
+    const showBlockingIssues = (issues: PublishValidationIssue[]) => {
+      modal.error({
+        title: `暂不能发布 · ${issues.length} 项问题待处理`,
+        width: 620,
+        content: (
+          <div role="alert" aria-label="页面发布阻断清单">
+            <p>当前草稿已经安全保存；修复以下问题后再发布：</p>
+            <ol style={{ maxHeight: 320, overflowY: "auto", paddingInlineStart: 22 }}>
+              {issues.map((issue, index) => (
+                <li key={`${issue.path ?? ""}-${issue.message}-${index}`}>
+                  {issue.message}
+                </li>
+              ))}
+            </ol>
+          </div>
+        ),
+        okText: "返回修改",
+      });
+    };
+
     setPublishing(true);
     try {
-          const saved = await saveDraft(editableData, { silent: true });
-          if (!saved) return;
-          const persistedDraft = pageSessionCacheRef.current[pageKey];
-          const publishData = persistedDraft?.data ?? latestData.current;
-          const publishMetadata =
-            persistedDraft?.metadata ?? latestMetadata.current;
-          const publishSourceSignature = canonicalizePageContent(
-            publishData,
-            publishMetadata,
-          );
+      const saved = await saveDraft(editableData, { silent: true });
+      if (!saved) return;
+      const persistedDraft = pageSessionCacheRef.current[pageKey];
+      const publishData = persistedDraft?.data ?? latestData.current;
+      const publishMetadata =
+        persistedDraft?.metadata ?? latestMetadata.current;
+      const publishSourceSignature = canonicalizePageContent(
+        publishData,
+        publishMetadata,
+      );
+      if (
+        canonicalizePageContent(
+          latestData.current,
+          latestMetadata.current,
+        ) !== publishSourceSignature
+      ) {
+        message.warning(
+          "保存期间页面又发生了修改；新修改已保留但尚未保存，请再次确认后发布",
+        );
+        return;
+      }
+      if (!persistedDraft?.updatedAt) {
+        message.error("当前页面版本标识缺失，请刷新页面后再发布");
+        return;
+      }
+      const persistedUpdatedAt = persistedDraft.updatedAt;
+
+      // 发布前以刚保存的服务端草稿重新校验。异步编辑预检只负责即时反馈，
+      // 不能代替本次发布动作的同源、最新资格判断。
+      const validationResponse = await pageDocumentApi.validate(
+        pageKey,
+        publishData,
+        publishMetadata,
+      );
+      const validation = unwrapResponse<{
+        valid: boolean;
+        errors: string[];
+        issues?: PublishValidationIssue[];
+      }>(validationResponse);
+      const validationIssues = resolvePublishValidationIssues(validation ?? {});
+      const blockingIssues = validationIssues.filter((issue) => issue.severity === "error");
+      setPublishIssues(validationIssues);
+
+      if (!validation?.valid || blockingIssues.length > 0) {
+        showBlockingIssues(blockingIssues.length > 0
+          ? blockingIssues
+          : (validation?.errors ?? []).map((errorMessage) => ({
+              message: errorMessage,
+              severity: "error" as const,
+            })));
+        return;
+      }
+
+      const publishPersistedDraft = async () => {
+        setPublishing(true);
+        try {
           if (
             canonicalizePageContent(
               latestData.current,
@@ -3427,18 +3589,15 @@ export default function HomepageConfig({
             ) !== publishSourceSignature
           ) {
             message.warning(
-              "保存期间页面又发生了修改；新修改已保留但尚未保存，请再次确认后发布",
+              "发布确认期间页面又发生了修改；新修改仍完整保留，请重新发布",
             );
             return;
           }
-          if (!persistedDraft?.updatedAt) {
-            message.error("当前页面版本标识缺失，请刷新页面后再发布");
-            return;
-          }
+
           const publishResponse = await pageDocumentApi.publish(
             pageKey,
             undefined,
-            persistedDraft.updatedAt,
+            persistedUpdatedAt,
           );
           const publishedDocument = unwrapResponse<PageDocumentResource | null>(publishResponse);
           const publishedData = getPuckDocument(publishedDocument?.puckData) ?? publishData;
@@ -3505,10 +3664,43 @@ export default function HomepageConfig({
                 : `${pageLabel}已发布，前台页面将立即读取最新版本`,
           );
         } catch (error) {
+          if (getEditorHttpStatus(error) === 400) {
+            try {
+              const refreshedResponse = await pageDocumentApi.validate(
+                pageKey,
+                publishData,
+                publishMetadata,
+              );
+              const refreshed = unwrapResponse<{
+                valid: boolean;
+                errors: string[];
+                issues?: PublishValidationIssue[];
+              }>(refreshedResponse);
+              const refreshedIssues = resolvePublishValidationIssues(refreshed ?? {});
+              const refreshedBlockers = refreshedIssues.filter(
+                (issue) => issue.severity === "error",
+              );
+              setPublishIssues(refreshedIssues);
+              if (refreshedBlockers.length > 0) {
+                showBlockingIssues(refreshedBlockers);
+                return;
+              }
+            } catch {
+              // 保留下面的安全通用错误；不把内部响应正文透传到后台页面。
+            }
+          }
           message.error(getEditorErrorMessage(error, "发布失败，请稍后重试"));
         } finally {
           setPublishing(false);
         }
+      };
+
+      await publishPersistedDraft();
+    } catch (error) {
+      message.error(getEditorErrorMessage(error, "发布前校验失败，请稍后重试"));
+    } finally {
+      setPublishing(false);
+    }
   };
 
   return (
@@ -3551,7 +3743,14 @@ export default function HomepageConfig({
         pageKey={pageKey}
         metadata={metadata}
         puckData={data}
-        onClose={() => setPageSettingsOpen(false)}
+        publishIssues={publishIssues}
+        validationStatus={publishValidationStatus}
+        focusField={pageSettingsFocusField}
+        onRetryValidation={retryPublishValidation}
+        onClose={() => {
+          setPageSettingsOpen(false);
+          setPageSettingsFocusField(null);
+        }}
         onSave={savePageSettings}
       />
 
@@ -3649,6 +3848,7 @@ export default function HomepageConfig({
             canPublish={canPublish}
             canManageTemplates={canManageTemplates}
             draftSavedAtLabel={pageSessionCacheRef.current[pageKey]?.lastSaved ?? null}
+            publishValidationStatus={publishValidationStatus}
             onPublish={publishHome}
             onSaveDraft={(nextData) => {
               void saveDraft(nextData);
@@ -3658,6 +3858,7 @@ export default function HomepageConfig({
             onDiscardDraft={discardDraftToPublished}
             onOpenRevisions={openRevisions}
             onOpenPageSettings={openPageSettingsForEditing}
+            onRetryPublishValidation={retryPublishValidation}
             onPreviewModeChange={setPreviewMode}
             onDataChange={trackEditorData}
             onCanvasDataSync={syncCanvasDataWithoutAdvancingSavedBaseline}
@@ -3683,6 +3884,9 @@ export default function HomepageConfig({
                 void saveDraft(nextData);
               }}
               publishIssues={publishIssues}
+              validationStatus={publishValidationStatus}
+              onRetryValidation={retryPublishValidation}
+              onOpenPageSettings={openPageSettingsForEditing}
             />
           </div>
           {workspaceMode === "template" ? (

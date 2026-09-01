@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { App as AntdApp, Button, Input, Select, Tag } from "antd";
 import MediaPickerField from "../fields/MediaPickerField";
 import ProductReferencesField from "../fields/ProductReferencesField";
@@ -19,6 +20,13 @@ import DynamicTemplateUpgradePanel from "./DynamicTemplateUpgradePanel";
 import VideoContentFields from "../inspector/controls/VideoContentFields";
 import DynamicComplexContentFields, { isDynamicComplexSlotType } from "../inspector/controls/DynamicComplexContentFields";
 import ImageFocusField from "../inspector/controls/ImageFocusField";
+import InspectorFooterBar from "../inspector/InspectorFooterBar";
+import {
+  getInspectorPublishIssues,
+  isPagePublishIssue,
+  type PublishValidationIssue,
+  type PublishValidationStatus,
+} from "../inspector/publishValidation";
 
 const { TextArea } = Input;
 
@@ -165,11 +173,17 @@ function groupInspectorSlots(
 export default function DynamicTemplateInstanceInspector({
   hasUnsavedChanges,
   saving,
-  onSaveDraft,
+  publishIssues,
+  validationStatus,
+  onRetryValidation,
+  onOpenPageSettings,
 }: {
   hasUnsavedChanges: boolean;
   saving: boolean;
-  onSaveDraft: () => void;
+  publishIssues: PublishValidationIssue[];
+  validationStatus?: PublishValidationStatus;
+  onRetryValidation?: () => void;
+  onOpenPageSettings?: (field?: string) => void;
 }) {
   const editor = useInspectorModuleEditor();
   const props = (editor?.props ?? {}) as DynamicTemplateInstanceProps;
@@ -178,6 +192,7 @@ export default function DynamicTemplateInstanceInspector({
   const selectVisualNode = useVisualEditorSession((state) => state.selectNode);
   const clearVisualNode = useVisualEditorSession((state) => state.clearNode);
   const { modal } = AntdApp.useApp();
+  const propertyScrollRef = useRef<HTMLDivElement>(null);
   if (!editor) return null;
   if (!resolved) {
     return (
@@ -208,6 +223,13 @@ export default function DynamicTemplateInstanceInspector({
     : null;
   const slotGroups = groupInspectorSlots(definition, slots, selectedNode?.slotId);
   const layoutOverrides = props.layoutOverridesByNodeId ?? {};
+  const currentPublishIssues = getInspectorPublishIssues(publishIssues, props.instanceId);
+  const currentPublishErrorCount = currentPublishIssues.filter(
+    (issue) => issue.severity === "error",
+  ).length;
+  const currentPublishWarningCount = currentPublishIssues.filter(
+    (issue) => issue.severity === "warning",
+  ).length;
   const hasInstanceOverrides = Object.keys(content).length > 0
     || Object.keys(layoutOverrides).length > 0
     || hidden.length > 0
@@ -596,6 +618,7 @@ export default function DynamicTemplateInstanceInspector({
       key={slot.slotId}
       data-slot-id={slot.slotId}
       data-slot-task={SLOT_TASK_BY_TYPE[slot.type] ?? "content"}
+      data-inspector-field={slot.slotId}
       style={{ border: 0, borderTop: "1px solid var(--adm-line)", margin: 0, padding: "14px" }}
     >
       <legend style={{ width: "100%", padding: 0, marginBottom: 10 }}>
@@ -616,9 +639,9 @@ export default function DynamicTemplateInstanceInspector({
         </Button>
         {slot.hideable && !slot.required ? (
           <SwitchField
-            label="隐藏此内容"
-            value={hidden.includes(slot.slotId)}
-            onChange={(checked) => toggleHidden(slot.slotId, checked)}
+            label={visualKindForSlot(slot) === "text" ? "显示这段文字" : "显示此内容"}
+            value={!hidden.includes(slot.slotId)}
+            onChange={(checked) => toggleHidden(slot.slotId, !checked)}
           />
         ) : null}
       </div>
@@ -627,9 +650,18 @@ export default function DynamicTemplateInstanceInspector({
 
   return (
     <section className="homepage-editor__properties" aria-label="模板实例属性">
-      <div className="homepage-editor__properties-scroll">
+      <div className="homepage-editor__properties-scroll" ref={propertyScrollRef}>
         <div style={{ display: "grid", gap: 8, padding: "12px 14px" }}>
-          <strong>{definition.name}</strong>
+          <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <strong>{definition.name}</strong>
+            <button
+              type="button"
+              className="homepage-editor__edit-scope-badge"
+              onClick={() => onOpenPageSettings?.()}
+            >
+              页面覆盖
+            </button>
+          </span>
           <span className="homepage-editor__properties-hint">固定版本 {props.templateId} v{props.templateVersion}</span>
           <div className="homepage-editor__inspector-field">
             <label htmlFor={`dynamic-instance-property-scope-${props.instanceId}`}>页面实例属性范围</label>
@@ -804,11 +836,53 @@ export default function DynamicTemplateInstanceInspector({
           </details>
         ) : null}
       </div>
-      <div style={{ padding: 12, borderTop: "1px solid var(--adm-line)" }}>
-        <Button type="primary" block loading={saving} disabled={!hasUnsavedChanges} onClick={onSaveDraft}>
-          保存页面草稿
-        </Button>
-      </div>
+      <InspectorFooterBar
+        hasUnsavedChanges={hasUnsavedChanges}
+        saving={saving}
+        errorCount={currentPublishErrorCount}
+        warningCount={currentPublishWarningCount}
+        validationStatus={validationStatus}
+        onRetryValidation={onRetryValidation}
+        onReviewIssues={currentPublishIssues.length > 0 ? () => {
+          const showModal = currentPublishErrorCount > 0 ? modal.error : modal.warning;
+          const instance = showModal({
+            title: currentPublishErrorCount > 0
+              ? `当前模块与页面发布检查 · ${currentPublishErrorCount} 项阻断`
+              : `当前模块与页面发布检查 · ${currentPublishWarningCount} 项待检查`,
+            content: (
+              <div className="homepage-editor__publish-issue-list">
+                {currentPublishIssues.map((issue, index) => (
+                  <div key={`${issue.path ?? ""}-${issue.message}-${index}`}>
+                    <p>
+                      <strong>{issue.severity === "error" ? "阻断：" : "提醒："}</strong>
+                      {issue.message}
+                    </p>
+                    {(issue.field || isPagePublishIssue(issue)) ? (
+                      <button type="button" onClick={() => {
+                        instance.destroy();
+                        if (isPagePublishIssue(issue)) {
+                          onOpenPageSettings?.(issue.path ?? issue.field);
+                          return;
+                        }
+                        const fieldKey = issue.field ?? issue.path?.split(".").pop();
+                        if (!fieldKey) return;
+                        const field = propertyScrollRef.current?.querySelector<HTMLElement>(
+                          `[data-inspector-field="${CSS.escape(fieldKey)}"]`,
+                        );
+                        field?.scrollIntoView({ block: "center", behavior: "smooth" });
+                        field?.querySelector<HTMLElement>("input, textarea, select, button, [tabindex]")?.focus();
+                      }}>
+                        {isPagePublishIssue(issue) ? "打开页面设置" : "定位到字段"}
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ),
+            okText: "知道了",
+          });
+        } : undefined}
+      />
     </section>
   );
 }

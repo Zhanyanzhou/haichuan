@@ -416,7 +416,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await expect(page.getByRole("group", { name: /首屏.*图层操作/ })).toHaveCount(0);
     await page.getByRole("button", { name: "更多编辑操作" }).click();
     await expect(page.getByRole("menuitem", { name: "套用推荐结构" })).toHaveCount(0);
-    await expect(page.getByRole("menuitem", { name: "发布设置" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "页面设置" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "导入方案 JSON" })).toHaveCount(0);
     await page.keyboard.press("Escape");
 
@@ -434,7 +434,10 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await expect(heroTitleInput).toHaveValue("返回后仍需保留的未保存标题");
     await expect(page.getByText("已返回草稿，未保存修改保持不变")).toBeVisible();
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
-    await expect(page.getByText("页面草稿已保存")).toBeVisible();
+    await expect(
+      page.locator(".ant-message-notice-content")
+        .getByText("页面草稿已保存", { exact: true }),
+    ).toBeVisible();
     expect(savePayloads).toHaveLength(1);
     expect(savePayloads[0].puckData.content[0].props.title).toBe(
       "返回后仍需保留的未保存标题",
@@ -796,7 +799,10 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await saveButton.click();
     await expect(status).toContainText("正在保存草稿");
     await expect(status).toHaveAttribute("title", "草稿状态：正在保存草稿");
-    await expect(page.getByText("页面草稿已保存")).toBeVisible();
+    await expect(
+      page.locator(".ant-message-notice-content")
+        .getByText("页面草稿已保存", { exact: true }),
+    ).toBeVisible();
     await expect(status).toContainText("与线上版本一致");
     await expect(status).toContainText("最后保存");
     await expect(status).not.toContainText("草稿有未发布修改");

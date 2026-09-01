@@ -15,6 +15,7 @@ import { BlockOutlined, ControlOutlined } from "@ant-design/icons";
 import TemplateEditorLibrary, {
   type TemplateEditorLibraryTarget,
 } from "./TemplateEditorLibrary";
+import { notifyDynamicTemplateCatalogChanged } from "./templateCatalogEvents";
 import { DynamicTemplateRenderer } from "../template-definition";
 import { unwrapResponse } from "@/utils/unwrap";
 import {
@@ -26,6 +27,12 @@ export interface PersistTemplateOptions {
   asCopy?: boolean;
   overwriteCurrent?: boolean;
   name?: string;
+}
+
+function getTemplateLifecycleErrorMessage(error: unknown, fallback: string) {
+  if (!(error instanceof Error)) return fallback;
+  const detail = error.message.trim();
+  return detail && !/^Request failed with status code \d+$/.test(detail) ? detail : fallback;
 }
 
 export default function TemplateWorkspace({
@@ -101,8 +108,10 @@ export default function TemplateWorkspace({
   const [versionsError, setVersionsError] = useState<string | null>(null);
   const [versions, setVersions] = useState<DynamicTemplateVersionResource[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [draggingTemplateTarget, setDraggingTemplateTarget] = useState<TemplateEditorLibraryTarget | null>(null);
   const transitionInFlightRef = useRef(false);
+  const lifecycleInFlightRef = useRef(false);
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const draft = useTemplateEditorSession((state) => state.draft);
   const device = useTemplateEditorSession((state) => state.device);
@@ -141,6 +150,62 @@ export default function TemplateWorkspace({
 
   const requestReturn = () => {
     void saveBeforeTransition(onReturnPage);
+  };
+
+  const archiveCurrentTemplate = () => {
+    const current = useTemplateEditorSession.getState();
+    const currentDraft = current.draft;
+    if (localOnly || currentDraft?.sourceType !== "persisted" || lifecycleInFlightRef.current) return;
+    let archiveDialog: { destroy: () => void } | null = null;
+    archiveDialog = modal.confirm({
+      title: `归档模板“${currentDraft.definition.name}”？`,
+      content: current.dirty
+        ? "当前未保存的模板修改会被丢弃。归档不会删除已发布版本，也不会修改已经使用该模板的页面；页面装修将不能再新增此模板。"
+        : "归档不会删除已发布版本，也不会修改已经使用该模板的页面；页面装修将不能再新增此模板。",
+      okText: "归档模板",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        lifecycleInFlightRef.current = true;
+        setLifecycleBusy(true);
+        try {
+          await dynamicTemplateApi.archive(currentDraft.definition.templateId);
+          archiveDialog?.destroy();
+          useTemplateEditorSession.getState().close();
+          notifyDynamicTemplateCatalogChanged();
+          message.success(`模板“${currentDraft.definition.name}”已归档；已有页面实例保持不变`);
+        } catch (error) {
+          message.error(getTemplateLifecycleErrorMessage(error, "模板归档失败，当前模板仍保留"));
+        } finally {
+          lifecycleInFlightRef.current = false;
+          setLifecycleBusy(false);
+        }
+      },
+    });
+  };
+
+  const restoreTemplate = (template: import("@/services/clients/dynamicTemplateClient").DynamicTemplateResource) => {
+    if (localOnly || lifecycleInFlightRef.current) return;
+    modal.confirm({
+      title: `恢复模板“${template.name}”？`,
+      content: "恢复后模板会重新进入可设计状态；若已有正式版本，也会重新进入页面装修目录。已有页面实例不会被修改。",
+      okText: "恢复模板",
+      cancelText: "取消",
+      onOk: async () => {
+        lifecycleInFlightRef.current = true;
+        setLifecycleBusy(true);
+        try {
+          await dynamicTemplateApi.restore(template.templateId);
+          notifyDynamicTemplateCatalogChanged();
+          message.success(`模板“${template.name}”已恢复`);
+        } catch (error) {
+          message.error(getTemplateLifecycleErrorMessage(error, "模板恢复失败，请重试"));
+        } finally {
+          lifecycleInFlightRef.current = false;
+          setLifecycleBusy(false);
+        }
+      },
+    });
   };
 
   const saveCurrentTemplate = async () => {
@@ -251,7 +316,7 @@ export default function TemplateWorkspace({
     const target = event.target instanceof Element ? event.target : null;
     if (!target?.closest(".template-editor__stage")) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
+    event.dataTransfer.dropEffect = "link";
   };
   const handleTemplateDrop = (event: DragEvent<HTMLDivElement>) => {
     if (!draggingTemplateTarget) return;
@@ -276,6 +341,10 @@ export default function TemplateWorkspace({
         onOpenVersionHistory={draft?.sourceType === "persisted"
           ? () => { void openVersionHistory(); }
           : undefined}
+        onArchive={draft?.sourceType === "persisted" && !localOnly
+          ? archiveCurrentTemplate
+          : undefined}
+        lifecycleBusy={lifecycleBusy}
         onRequestReturn={requestReturn}
       />
       {draft ? (
@@ -299,6 +368,7 @@ export default function TemplateWorkspace({
       >
         <TemplateEditorLibrary
           onOpen={requestOpenTemplateTarget}
+          onRestore={restoreTemplate}
           onDragTargetChange={setDraggingTemplateTarget}
           localOnly={localOnly}
         />

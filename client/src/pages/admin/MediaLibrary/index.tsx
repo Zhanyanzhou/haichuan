@@ -130,11 +130,14 @@ export default function MediaLibrary() {
 
   return (
     <div>
-      <AdminPageHeader title="页面素材" subtitle="为首页装修准备图片与视频；商品图片请在商品模块维护" />
+      <AdminPageHeader
+        title="当前浏览器页面素材"
+        subtitle="上传文件由服务端保存；这里仅记录当前浏览器可复用的链接，商品图片请在商品模块维护"
+      />
       <Card style={{ borderRadius: 10, border: '1px solid var(--adm-line)', boxShadow: '0 6px 20px rgba(24,26,27,0.035)' }}>
         <Tabs activeKey={tab} onChange={setTab} items={[
           {
-            key: 'pages', label: <span><FileImageOutlined /> 页面素材</span>,
+            key: 'pages', label: <span><FileImageOutlined /> 当前浏览器素材</span>,
             children: (
               <div>
                 <Space style={{ marginBottom: 16 }} wrap>
@@ -166,7 +169,7 @@ export default function MediaLibrary() {
                     ]} />
                 </Space>
                 {filteredMedia.length === 0 ? (
-                  <Empty description="暂无页面素材，上传后可直接复制链接在装修中使用" />
+                  <Empty description="当前浏览器暂无页面素材记录；上传后可复制链接在装修中使用" />
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
                     {filteredMedia.map((m) => (

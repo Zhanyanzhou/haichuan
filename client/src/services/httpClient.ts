@@ -22,12 +22,15 @@ declare module "axios" {
     suppressGlobalError?: boolean;
     /** 同一浏览器可同时持有后台与客户 Cookie，受控资源必须显式选择身份域。 */
     sessionDomain?: "admin" | "customer";
+    /** 显式刷新必须读取新状态时，可关闭进行中的相同 GET 合并。 */
+    dedupe?: boolean;
     _sessionRetry?: boolean;
   }
 
   interface InternalAxiosRequestConfig {
     suppressGlobalError?: boolean;
     sessionDomain?: "admin" | "customer";
+    dedupe?: boolean;
     _sessionRetry?: boolean;
   }
 }
@@ -66,7 +69,7 @@ function readCookie(name: string): string | undefined {
 const inflightGets = new Map<string, Promise<unknown>>();
 const baseAdapter = getAdapter(api.defaults.adapter);
 api.defaults.adapter = async (config) => {
-  if ((config.method || "get").toLowerCase() !== "get") {
+  if ((config.method || "get").toLowerCase() !== "get" || config.dedupe === false) {
     return baseAdapter(config);
   }
   const key = `${config.url}|${JSON.stringify(config.params ?? {})}`;

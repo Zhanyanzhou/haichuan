@@ -42,6 +42,8 @@ interface InstanceOverridesPanelProps {
   resetAllDesign?: boolean;
   contentMediaOnly?: boolean;
   contentMediaVisibilityOnly?: boolean;
+  contentTextVisibilityOnly?: boolean;
+  contentActionVisibilityOnly?: boolean;
 }
 
 const LABELS: Record<string, string> = {
@@ -231,6 +233,8 @@ export default function InstanceOverridesPanel({
   resetAllDesign = false,
   contentMediaOnly = false,
   contentMediaVisibilityOnly = false,
+  contentTextVisibilityOnly = false,
+  contentActionVisibilityOnly = false,
 }: InstanceOverridesPanelProps) {
   const blockId = props.id == null ? "" : String(props.id);
   const canvasGeometry = useVisualEditorSession((state) =>
@@ -250,8 +254,27 @@ export default function InstanceOverridesPanel({
   const visibleTextRoles = (capabilities.textRoles ?? []).filter(
     (role) => !selectedNodeId || role.roleId === selectedNodeId,
   );
+  const hideableTextRoles = visibleTextRoles.filter((role) => {
+    const editableObject = getContentTemplateEditableObject(moduleType, role.roleId);
+    return editableObject?.kind === "text"
+      && editableObject.capabilities.includes("visibility")
+      && editableObject.constraints.allowHide;
+  });
+  const hideableActionRoles = visibleTextRoles.filter((role) => {
+    const editableObject = getContentTemplateEditableObject(moduleType, role.roleId);
+    return editableObject?.kind === "action"
+      && editableObject.capabilities.includes("visibility")
+      && editableObject.constraints.allowHide;
+  });
+  const visibilityRoles = contentActionVisibilityOnly
+    ? hideableActionRoles
+    : hideableTextRoles;
   const showSlots = scopes.includes("slots") && visibleSlots.length > 0;
-  const showText = scopes.includes("text") && visibleTextRoles.length > 0;
+  const showText = scopes.includes("text") && (
+    contentTextVisibilityOnly || contentActionVisibilityOnly
+      ? visibilityRoles.length > 0
+      : visibleTextRoles.length > 0
+  );
   const selectedEditableObject = selectedNodeId
     ? getContentTemplateEditableObject(moduleType, selectedNodeId)
     : undefined;
@@ -293,6 +316,22 @@ export default function InstanceOverridesPanel({
       contract.defaultGeometryByViewport[viewport].frameAspectRatio,
   );
   const nodes = isRecord(overrides.nodes) ? overrides.nodes : {};
+  const visibleTextRoleCount = visibilityRoles.filter((role) => {
+    const rawNode = nodes[role.roleId];
+    const node: OverrideRecord = isRecord(rawNode) ? rawNode : {};
+    return node.enabled !== false;
+  }).length;
+  const allTextVisible = visibilityRoles.length > 0
+    && visibleTextRoleCount === visibilityRoles.length;
+  const someTextVisible = visibleTextRoleCount > 0 && !allTextVisible;
+  const hasConfiguredVisibilityContent = visibilityRoles.some((role) => {
+    const editableObject = getContentTemplateEditableObject(moduleType, role.roleId);
+    return editableObject?.contentFieldKeys.some((fieldKey) =>
+      !/target|linkUrl|product|category/i.test(fieldKey)
+      && typeof props[fieldKey] === "string"
+      && props[fieldKey].trim().length > 0,
+    ) ?? false;
+  });
   const selectedRawNode = selectedNodeId && isRecord(nodes[selectedNodeId])
     ? nodes[selectedNodeId]
     : {};
@@ -367,6 +406,24 @@ export default function InstanceOverridesPanel({
       let next: unknown = currentProps.__instanceOverrides;
       for (const entry of entries) {
         next = setVisualOverridePath(next, entry.path, entry.value);
+      }
+      return {
+        __instanceOverrides: next,
+        ...(currentProps.__contentTemplate
+          ? {}
+          : { __contentTemplate: createContentTemplateMarker(moduleType) }),
+      };
+    });
+  };
+  const setAllTextVisible = (visible: boolean) => {
+    updateFromCurrent((currentProps) => {
+      let next: unknown = currentProps.__instanceOverrides;
+      for (const role of visibilityRoles) {
+        next = setVisualOverridePath(
+          next,
+          ["nodes", role.roleId, "enabled"],
+          visible ? undefined : false,
+        );
       }
       return {
         __instanceOverrides: next,
@@ -707,6 +764,7 @@ export default function InstanceOverridesPanel({
         mediaView.fit !== undefined || mediaView.zoom !== undefined;
     }
     return hasViewportGeometry ||
+      node.enabled !== undefined ||
       (isRecord(node.typography) && Object.keys(node.typography).length > 0);
   };
   const scopedOverrideExists = Boolean(
@@ -759,6 +817,7 @@ export default function InstanceOverridesPanel({
           ["nodes", role.roleId, "rectByViewport", viewport],
           ["nodes", role.roleId, "zIndexByViewport", viewport],
           ["nodes", role.roleId, "typography"],
+          ["nodes", role.roleId, "enabled"],
         ]) {
           next = setVisualOverridePath(next, path, undefined);
         }
@@ -789,11 +848,13 @@ export default function InstanceOverridesPanel({
 
   return (
     <section
-      className={`homepage-editor__instance-overrides${embedded ? " is-embedded" : ""}${contentMediaOnly ? " is-content-media" : ""}${contentMediaVisibilityOnly ? " is-content-visibility" : ""}`}
+      className={`homepage-editor__instance-overrides${embedded ? " is-embedded" : ""}${contentMediaOnly ? " is-content-media" : ""}${contentMediaVisibilityOnly || contentTextVisibilityOnly || contentActionVisibilityOnly ? " is-content-visibility" : ""}`}
       aria-labelledby={embedded ? undefined : `instance-overrides-${String(props.id ?? contract.key)}`}
       aria-label={embedded
-        ? contentMediaVisibilityOnly
-          ? "图片可见性"
+        ? contentTextVisibilityOnly || contentActionVisibilityOnly
+          ? contentActionVisibilityOnly ? "行动按钮可见性" : "内容文字可见性"
+          : contentMediaVisibilityOnly
+            ? "图片可见性"
           : contentMediaOnly
             ? "图片焦点"
             : "模板设计控制"
@@ -1161,7 +1222,30 @@ export default function InstanceOverridesPanel({
         );
       }) : null}
 
-      {showText ? visibleTextRoles.map((role) => {
+      {showText && (contentTextVisibilityOnly || contentActionVisibilityOnly) ? (
+        <label className="homepage-editor__media-visibility-control">
+          <span>
+            {contentActionVisibilityOnly ? "行动按钮" : "内容文字"}（双端同步）
+          </span>
+          <span>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label={contentActionVisibilityOnly ? "显示行动按钮" : "显示内容文字"}
+              checked={allTextVisible}
+              disabled={historyTransactionPending}
+              onChange={() => setAllTextVisible(!allTextVisible)}
+            />
+            <b>
+              {allTextVisible
+                ? hasConfiguredVisibilityContent ? "显示" : "显示 · 未配置"
+                : someTextVisible ? "部分显示" : "隐藏"}
+            </b>
+          </span>
+        </label>
+      ) : null}
+
+      {showText && !contentTextVisibilityOnly && !contentActionVisibilityOnly ? visibleTextRoles.map((role) => {
         const rawValue = nodes[role.roleId];
         const value: OverrideRecord = isRecord(rawValue) ? rawValue : {};
         const typography = isRecord(value.typography) ? value.typography : {};
@@ -1242,7 +1326,10 @@ export default function InstanceOverridesPanel({
               <input
                 type="checkbox"
                 checked={enabled}
-                onChange={(event) => apply(["nodes", role.roleId, "enabled"], event.target.checked)}
+                onChange={(event) => apply(
+                  ["nodes", role.roleId, "enabled"],
+                  event.target.checked ? undefined : false,
+                )}
               />
               <span>显示这段文字</span>
             </label>
@@ -1418,7 +1505,7 @@ export default function InstanceOverridesPanel({
           </fieldset>
         );
       }) : null}
-      {taskDrivenEmbedded && !contentMediaOnly ? (
+      {taskDrivenEmbedded && !contentMediaOnly && !contentTextVisibilityOnly && !contentActionVisibilityOnly ? (
         <button
           type="button"
           className="homepage-editor__inline-reset homepage-editor__task-reset"

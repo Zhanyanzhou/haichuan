@@ -113,12 +113,6 @@ const PUCK_IMAGE_FIELDS = [
 const PUCK_LINK_FIELDS = ["linkUrl", "link", "mapUrl", "secondaryLinkUrl"];
 
 /**
- * 发布校验：单页可见组件总数上限。
- * 防止超长页面拖垮前台渲染与首屏性能；与编辑器无强耦合，仅发布时兜底。
- */
-const MAX_VISIBLE_BLOCKS = 60;
-
-/**
  * 发布校验：关键字段文本长度上限（字段名 → 最大字符数）。
  * 取值宽松以覆盖合理运营数据，超出视为异常输入（如把整篇文章误填进标题）。
  * 适用于所有组件的同名字段，无需按组件类型分支；前端发布预检调用同一接口，规则天然一致。
@@ -860,8 +854,9 @@ export class PageModulesService {
   }
 
   /**
-   * “发布”保存一个立即供前台使用的版本。内容尚未完善时允许发布并在确认框提示；
-   * 结构损坏、危险地址、不可解析引用、权限与版本冲突仍由原校验保持阻断。
+   * “发布”保存一个立即供前台使用的版本。SEO、素材授权与非关键内容完整度
+   * 只提示；必填内容、可访问性文本、失效媒体、结构损坏、危险地址、
+   * 不可解析引用、权限与版本冲突保持阻断，避免公开破图或无语义素材。
    */
   private toUsablePublicationIssue(
     issue: ContentTemplateIssue,
@@ -879,7 +874,7 @@ export class PageModulesService {
       issue.path.startsWith("metadata.")
       && Boolean(issue.field && metadataCompletionFields.has(issue.field))
       && (message.includes("不能为空") || message.includes("仍是占位内容"));
-    const isContentCompletion = [
+    const isRequiredContentFailure = [
       " 图片不能为空",
       " 内容不能为空",
       "视频地址不能为空",
@@ -891,6 +886,10 @@ export class PageModulesService {
       "必须填写视频说明",
       "为必填内容",
       "图片地址无效",
+    ].some((marker) => message.includes(marker));
+    if (isRequiredContentFailure) return issue;
+
+    const isContentCompletion = [
       "至少填写眉题、标题或副标题之一",
       "已启用眉题角色，请填写眉题内容",
       "已启用标题角色，请填写标题内容",
@@ -909,8 +908,12 @@ export class PageModulesService {
     ].some((marker) => message.includes(marker));
     const isDynamicContentBudget =
       /(?:至少需要|最多允许) \d+ (?:个字符|项)/.test(message);
+    const isPublicationAudit = issue.path.startsWith("metadata.mediaRights");
 
-    return isMetadataCompletion || isContentCompletion || isDynamicContentBudget
+    return isMetadataCompletion
+      || isContentCompletion
+      || isDynamicContentBudget
+      || isPublicationAudit
       ? { ...issue, severity: "warning" }
       : issue;
   }
@@ -1337,18 +1340,36 @@ export class PageModulesService {
         };
       }
 
-      const validateAsset = (value: unknown, assetLabel: string) => {
+      const validateAsset = (
+        value: unknown,
+        assetLabel: string,
+        context?: { blockId?: string; path?: string; field?: string; index?: number },
+      ) => {
         if (!this.isNonEmptyString(value)) return;
+        const pushAssetError = (message: string) => {
+          const errorIndex = errors.push(message) - 1;
+          errorContexts[errorIndex] = context;
+        };
         if (!this.isSafeAssetUrl(value)) {
-          errors.push(`${assetLabel} 地址不合法`);
+          pushAssetError(`${assetLabel} 地址不合法`);
           return;
         }
+        if (!this.isManagedAssetUrl(value)) {
+          pushAssetError(
+            `${assetLabel} 使用了外部素材地址；请先通过“更换图片”上传到本站后再发布`,
+          );
+          return;
+        }
+        const previousErrorCount = errors.length;
         this.collectMissingUploadError(
           value,
           assetLabel,
           missingUploadUrls,
           errors,
         );
+        for (let index = previousErrorCount; index < errors.length; index += 1) {
+          errorContexts[index] = context;
+        }
       };
 
       if (contentTemplate) {
@@ -1357,14 +1378,27 @@ export class PageModulesService {
           props,
           `${path}.props`,
         )) {
-          validateAsset(reference.url, `${label}：${reference.field} 素材`);
+          validateAsset(reference.url, `${label}：${reference.field} 素材`, {
+            blockId: reference.blockId,
+            path: reference.path,
+            field: reference.field,
+            ...(reference.index === undefined ? {} : { index: reference.index }),
+          });
         }
       } else {
         // 非模板兼容分支才使用旧字段表；正式内容模板统一由机器合同派生。
         for (const field of PUCK_IMAGE_FIELDS) {
-          validateAsset(props[field], `${label}：${field} 图片`);
+          validateAsset(props[field], `${label}：${field} 图片`, {
+            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+            path: `${path}.props.${field}`,
+            field,
+          });
         }
-        validateAsset(props.videoUrl, `${label}：videoUrl 视频`);
+        validateAsset(props.videoUrl, `${label}：videoUrl 视频`, {
+          blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+          path: `${path}.props.videoUrl`,
+          field: "videoUrl",
+        });
       }
 
       for (const field of contentTemplate ? ["mapUrl"] : PUCK_LINK_FIELDS) {
@@ -1803,6 +1837,7 @@ export class PageModulesService {
 
       const validateNestedAssets = (
         items: unknown,
+        collectionField: string,
         itemLabel: string,
         fields: string[],
       ) => {
@@ -1812,6 +1847,12 @@ export class PageModulesService {
             validateAsset(
               isRecord(item) ? item[field] : undefined,
               `${label}：第 ${index + 1} 个${itemLabel}${field}`,
+              {
+                blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+                path: `${path}.props.${collectionField}[${index}].${field}`,
+                field: collectionField,
+                index,
+              },
             );
           });
         });
@@ -1824,12 +1865,12 @@ export class PageModulesService {
         type === "分类卡片" && categorySlugValues.length > 0;
       if (!contentTemplate) {
         if (!usesCategoryReferences) {
-          validateNestedAssets(props.categories, "分类卡片的", ["image"]);
+          validateNestedAssets(props.categories, "categories", "分类卡片的", ["image"]);
         }
-        validateNestedAssets(props.items, "画廊图片的", ["image"]);
-        validateNestedAssets(props.certificates, "证书的", ["imageUrl"]);
-        validateNestedAssets(props.steps, "定制步骤的", ["image"]);
-        validateNestedAssets(props.testimonials, "评价的", ["image"]);
+        validateNestedAssets(props.items, "items", "画廊图片的", ["image"]);
+        validateNestedAssets(props.certificates, "certificates", "证书的", ["imageUrl"]);
+        validateNestedAssets(props.steps, "steps", "定制步骤的", ["image"]);
+        validateNestedAssets(props.testimonials, "testimonials", "评价的", ["image"]);
       }
 
       // 作品画廊:每张图片必填(与画廊契约一致)
@@ -1897,10 +1938,6 @@ export class PageModulesService {
 
     if (visibleContentCount + visibleZoneCount === 0) {
       errors.push("页面至少需要 1 个可见的前台内容模块");
-    } else if (visibleContentCount + visibleZoneCount > MAX_VISIBLE_BLOCKS) {
-      errors.push(
-        `页面可见模块过多（${visibleContentCount + visibleZoneCount}/${MAX_VISIBLE_BLOCKS}），请精简后再发布`,
-      );
     }
 
     const orderedVisibleBlocks = [
@@ -2089,6 +2126,15 @@ export class PageModulesService {
           const assetLabel = `${instance.label}：${result.definition?.slots[asset.slotId]?.label ?? asset.slotId} 素材`;
           if (!this.isSafeAssetUrl(asset.url)) {
             const errorIndex = errors.push(`${assetLabel}地址不合法`) - 1;
+            errorContexts[errorIndex] = {
+              blockId: instance.blockId,
+              path: `${instance.path}.props.contentBySlotId.${asset.slotId}.src`,
+              field: asset.slotId,
+            };
+          } else if (!this.isManagedAssetUrl(asset.url)) {
+            const errorIndex = errors.push(
+              `${assetLabel}使用了外部素材地址；请先上传到本站后再发布`,
+            ) - 1;
             errorContexts[errorIndex] = {
               blockId: instance.blockId,
               path: `${instance.path}.props.contentBySlotId.${asset.slotId}.src`,
@@ -2463,13 +2509,15 @@ export class PageModulesService {
       return [this.createServerValidationIssue("页面设置：metadata 格式不正确", "metadata")];
     }
     const m = (metadata ?? {}) as Record<string, unknown>;
-    const requiredFields = new Set<string>(CONTENT_TEMPLATE_PAGE_METADATA.requiredForPublication);
-    for (const field of CONTENT_TEMPLATE_PAGE_METADATA.requiredForPublication) {
+    const recommendedFields = new Set<string>(
+      CONTENT_TEMPLATE_PAGE_METADATA.recommendedForPublication,
+    );
+    for (const field of CONTENT_TEMPLATE_PAGE_METADATA.recommendedForPublication) {
       const limit = CONTENT_TEMPLATE_PAGE_METADATA.limits[field];
       const value = m[field];
       const label = PAGE_METADATA_FIELD_LABELS[field] || field;
       if (value === undefined || value === null || (typeof value === "string" && !value.trim())) {
-        if (requiredFields.has(field)) {
+        if (recommendedFields.has(field)) {
           issues.push(this.createServerValidationIssue(
             `页面设置：${label}（${field}）不能为空`,
             `metadata.${field}`,
@@ -2520,6 +2568,17 @@ export class PageModulesService {
         undefined,
         "ogImage",
       ));
+    } else if (
+      typeof ogImage === "string"
+      && ogImage.trim()
+      && !this.isManagedAssetUrl(ogImage)
+    ) {
+      issues.push(this.createServerValidationIssue(
+        "页面设置：社交分享图使用了外部素材地址，请先上传到本站后再发布",
+        "metadata.ogImage",
+        undefined,
+        "ogImage",
+      ));
     } else if (typeof ogImage === "string" && ogImage.trim()) {
       const missingUploadErrors: string[] = [];
       this.collectMissingUploadError(
@@ -2542,7 +2601,7 @@ export class PageModulesService {
 
   /**
    * 正式素材授权随 PageDocument 草稿保存，但不进入公开 metadata 白名单。
-   * 每个当前可见素材 URL 必须有一条精确匹配的来源与授权编号；相同 URL 只需一条。
+   * 当前可见素材 URL 可记录精确匹配的来源与授权编号；缺失记录仅产生发布建议。
    */
   private collectMediaRightsIssues(
     puckData: unknown,
@@ -2668,6 +2727,24 @@ export class PageModulesService {
     return /^https?:\/\//i.test(url);
   }
 
+  /**
+   * 正式页面只发布本站可控资源。外部 URL 可以保存在草稿中用于迁移或预览，
+   * 但不能把第三方可用性、协议和撤回风险带入公开版本。
+   */
+  private isManagedAssetUrl(value: string): boolean {
+    const url = value.trim();
+    if (!url.startsWith("/") || url.startsWith("//") || url.includes("\\")) return false;
+    try {
+      const pathname = decodeURIComponent(url.split(/[?#]/, 1)[0]);
+      if (pathname.split("/").includes("..")) return false;
+      return ["/uploads/", "/images/", "/media/", "/assets/"].some(
+        (prefix) => pathname.startsWith(prefix),
+      );
+    } catch {
+      return false;
+    }
+  }
+
   private isSafeLink(value: string): boolean {
     const url = value.trim();
     if ((url.startsWith("/") && !url.startsWith("//")) || url.startsWith("#"))
@@ -2693,7 +2770,7 @@ export class PageModulesService {
     return date;
   }
 
-  /** 仅校验本地上传资源；外部 URL 由其源站负责可用性。 */
+  /** 仅上传目录需要在服务端文件系统核对存在性；构建期静态资源由客户端产物门禁负责。 */
   private collectMissingUploadError(
     url: string,
     label: string,

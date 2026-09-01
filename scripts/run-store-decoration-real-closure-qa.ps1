@@ -1,10 +1,13 @@
 [CmdletBinding()]
-param()
+param(
+  [ValidatePattern("^[0-9]{8}-[0-9]{2}$")]
+  [string]$QaRunId = "20260901-05"
+)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$qaPrefix = "hc-store-closure-20260830-04"
+$qaPrefix = "hc-store-closure-$QaRunId"
 $networkName = "$qaPrefix-net"
 $volumeName = "$qaPrefix-mysql-data"
 $mysqlContainer = "$qaPrefix-mysql"
@@ -43,8 +46,8 @@ function New-RandomHex([int]$bytes) {
 function Wait-MySqlReady([string]$name, [int]$timeoutSeconds = 180) {
   $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
   while ([DateTime]::UtcNow -lt $deadline) {
-    & docker exec $name sh -c 'mysqladmin ping -h localhost -uroot -p"$MYSQL_ROOT_PASSWORD" --silent' *> $null
-    if ($LASTEXITCODE -eq 0) {
+    $probe = & docker exec $name sh -c 'if mysqladmin ping --protocol=tcp -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent >/dev/null 2>&1; then printf READY; else printf WAIT; fi'
+    if ($probe -eq "READY") {
       Write-Output "$name mysqladmin=ready"
       return
     }

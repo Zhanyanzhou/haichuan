@@ -806,6 +806,34 @@
   display: grid;
   gap: 4px;
 }
+.homepage-editor__page-settings-validation {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--adm-line);
+  border-radius: 6px;
+  background: #f7f8f8;
+  color: var(--adm-text-strong);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.homepage-editor__page-settings-validation.is-error {
+  border-color: var(--adm-error-border);
+  background: var(--adm-error-bg);
+  color: var(--adm-error);
+}
+.homepage-editor__page-settings-validation.is-warning {
+  border-color: color-mix(in srgb, var(--adm-warning) 45%, white);
+  background: color-mix(in srgb, var(--adm-warning) 8%, white);
+}
+.homepage-editor__page-settings-validation ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.homepage-editor__page-settings-validation .ant-btn {
+  width: fit-content;
+}
 .homepage-editor__page-settings-hint {
   margin: 0 0 12px;
   padding: 10px 12px;
@@ -1595,7 +1623,8 @@ body:has(.homepage-editor__storefront-frame) {
   align-items: flex-start;
   justify-content: center;
   padding-top: 18px;
-  pointer-events: none;
+  /* 接管跨 iframe 的模板拖放，确保父页面持续收到鼠标移动与释放。 */
+  pointer-events: auto;
   background: rgba(247, 248, 248, 0.48);
 }
 .homepage-editor__drop-scrim span {
@@ -3612,66 +3641,6 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
-/* 发布失败后保留后端结构化问题；带 blockId 的条目可直接定位，页面级问题只说明原因。 */
-.homepage-editor__publish-issues {
-  margin: 0 0 12px;
-  padding: 10px;
-  border: 1px solid var(--adm-error-border);
-  background: var(--adm-error-bg);
-  color: var(--adm-error);
-  font-size: 12px;
-  line-height: 1.5;
-}
-.homepage-editor__publish-issues strong {
-  display: block;
-  margin-bottom: 6px;
-}
-.homepage-editor__publish-issues div {
-  display: grid;
-  gap: 4px;
-}
-.homepage-editor__publish-issues button,
-.homepage-editor__publish-issues p {
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-.homepage-editor__publish-issues button {
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.homepage-editor__publish-issues button:hover,
-.homepage-editor__publish-issues button:focus-visible {
-  color: var(--adm-text-strong);
-  outline: none;
-}
-.homepage-editor__publish-issues-hint {
-  margin: 0 0 8px;
-  opacity: 0.85;
-}
-.homepage-editor__publish-issue-item {
-  display: flex !important;
-  align-items: baseline;
-  gap: 8px;
-}
-.homepage-editor__publish-issue-item > button:first-child,
-.homepage-editor__publish-issue-item > p {
-  flex: 1;
-  min-width: 0;
-}
-.homepage-editor__publish-issue-hide {
-  flex-shrink: 0;
-  text-decoration: none !important;
-  white-space: nowrap;
-  opacity: 0.85;
-}
 .homepage-editor__inspector-publish-issues {
   margin: 14px 0 0;
 }
@@ -4052,7 +4021,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   flex: 1;
   display: grid;
   align-content: start;
-  padding: 8px;
+  padding: 12px 14px 4px;
 }
 
 .template-editor__structure-tree button {
@@ -4470,8 +4439,12 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 .template-editor__structure-section-label {
   display: grid;
   gap: 2px;
-  padding: 10px 12px 6px;
+  margin: 10px 14px 0;
+  padding: 8px 10px;
+  border: 1px solid #DDE1E2;
+  border-radius: 6px;
   color: var(--adm-muted);
+  background: #ECEEEF;
   font-size: 10px;
 }
 
@@ -4707,11 +4680,25 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  border-radius: 3px;
+  min-height: 38px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  border: 1px solid #DDE1E2;
+  border-radius: 6px;
+  color: var(--adm-ink);
+  background: #fff;
+  box-shadow: none;
+}
+
+.template-editor__dynamic-tree-row:hover,
+.template-editor__dynamic-tree-row:focus-within {
+  border-color: #C8CDCF;
 }
 
 .template-editor__dynamic-tree-row.is-active {
-  background: var(--ed-paper);
+  border-color: #181A1B;
+  color: var(--adm-action);
+  background: #ECEEEF;
 }
 
 .template-editor__dynamic-tree-row.is-hidden .template-editor__dynamic-tree-select {
@@ -6711,6 +6698,10 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   background: var(--adm-warning);
 }
 
+.homepage-editor__properties-status[data-status="warning"] > span {
+  background: var(--adm-warning);
+}
+
 .homepage-editor__properties-status[data-status="saving"] > span {
   background: #335F7D;
 }
@@ -7155,9 +7146,6 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   padding: 10px 14px 24px;
   background: #fff;
 }
-.homepage-editor__layer-rail .homepage-editor__publish-issues {
-  display: none;
-}
 .homepage-editor__layer-frame {
   display: block;
   margin: 0 0 12px;
@@ -7355,6 +7343,131 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
     padding-inline: 0;
     justify-content: center;
   }
+  .homepage-editor__toolbar-secondary-actions {
+    display: flex;
+  }
+  .homepage-editor__toolbar-preview,
+  .homepage-editor__toolbar-secondary-actions .ant-btn {
+    width: 34px;
+    min-width: 34px !important;
+    padding-inline: 0 !important;
+    justify-content: center;
+  }
+  .homepage-editor__toolbar-preview > span:not(.ant-btn-icon),
+  .homepage-editor__toolbar-secondary-actions .ant-btn > span:not(.ant-btn-icon) {
+    display: none;
+  }
+}
+
+.homepage-editor__edit-scope-badge:is(button) {
+  font: inherit;
+  cursor: pointer;
+}
+
+.homepage-editor__edit-scope-badge:is(button):hover {
+  border-color: var(--inspector-action, #181a1b);
+  color: var(--inspector-action, #181a1b);
+}
+
+.homepage-editor__edit-scope-badge:is(button):focus-visible {
+  outline: 2px solid var(--inspector-action, #181a1b);
+  outline-offset: 2px;
+}
+
+.homepage-editor__layer-issue-count {
+  min-width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  padding-inline: 5px;
+  border-radius: 999px;
+  color: #8f211d;
+  background: #fae8e6;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.homepage-editor__inspector-task-nav {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--inspector-line, #dde1e2);
+  background: rgba(255, 255, 255, 0.96);
+  scrollbar-width: none;
+}
+
+.homepage-editor__inspector-task-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.homepage-editor__inspector-task-nav > button {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--inspector-line, #dde1e2);
+  border-radius: 999px;
+  color: var(--inspector-ink, #181a1b);
+  background: #fff;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.homepage-editor__inspector-task-nav > button:hover,
+.homepage-editor__inspector-task-nav > button:focus-visible {
+  border-color: var(--inspector-action, #181a1b);
+}
+
+.homepage-editor__inspector-task-nav > button:focus-visible {
+  outline: 2px solid var(--inspector-action, #181a1b);
+  outline-offset: 1px;
+}
+
+.homepage-editor__inspector-task-nav b {
+  min-width: 16px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  padding-inline: 4px;
+  border-radius: 999px;
+  color: #8f211d;
+  background: #fae8e6;
+  font-size: 9px;
+}
+
+.homepage-editor__publish-issue-list {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.homepage-editor__publish-issue-list > div {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--adm-line, #dde1e2);
+}
+
+.homepage-editor__publish-issue-list p {
+  margin: 0;
+}
+
+.homepage-editor__publish-issue-list button {
+  width: max-content;
+  padding: 0;
+  border: 0;
+  color: var(--adm-action, #303537);
+  background: transparent;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 /* 窄桌面打开属性面板时收起覆盖式模板库，避免两个抽屉同时遮住画布。 */
@@ -9743,6 +9856,21 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.homepage-editor__properties-validation {
+  align-self: center;
+  margin: 0;
+  color: var(--adm-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.homepage-editor__properties-validation[data-validation-status="validating"] {
+  color: #335f7d;
+}
+.homepage-editor__media-url-hint {
+  color: var(--adm-muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 @media (max-width: 1199px) {

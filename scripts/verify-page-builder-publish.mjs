@@ -25,11 +25,13 @@ let lockCount = 0;
 
 const clone = (value) => structuredClone(value);
 const nextUpdatedAt = () => new Date(++clock);
-const image = "https://example.com/jewelry.jpg";
+const image = "/images/system/product-placeholder.svg";
 const validMetadata = (title = "海川珠宝正式页面") => ({
   seoTitle: title,
   seoDescription: `${title}的公开页面说明，仅用于页面搭建器发布门禁测试。`,
-  ogImage: image,
+  // 分享图留空表示使用页面默认策略；外部素材地址应由专门的阻断用例覆盖，
+  // 不能污染所有以 validMetadata 为基线的发布场景。
+  ogImage: "",
   contentOwner: "品牌内容组",
   mediaRights: [{
     assetUrl: image,
@@ -361,13 +363,17 @@ const unfinishedBrandHomeResult = await service.validatePageDocument("home", {
   ],
   root: { props: {} },
 });
-assert.equal(unfinishedBrandHomeResult.valid, true);
+assert.equal(
+  unfinishedBrandHomeResult.valid,
+  false,
+  `首页首屏缺少合同必填素材时必须阻断发布：${JSON.stringify(unfinishedBrandHomeResult.issues)}`,
+);
 assert.ok(
   unfinishedBrandHomeResult.issues.some((issue) =>
-    issue.severity === "warning"
-      && (issue.blockId === "brand-home-hero" || issue.message.includes("海川珠宝")),
+    issue.severity === "error"
+      && issue.blockId === "brand-home-hero",
   ),
-  "首页首屏缺少最终素材时必须提示但不阻断发布",
+  "首页首屏缺少双端图片或替代文字时必须定位到对应首屏并阻断发布",
 );
 
 const dynamicInstanceData = {
@@ -491,11 +497,12 @@ dynamicDefinition.metadata.visualRole = "support-stage";
 dynamicDefinition.metadata.headerCompatibility = ["solid"];
 assert.ok(
   unfinishedBrandHomeResult.issues.some((issue) =>
-    issue.severity === "warning"
+    issue.severity === "error"
+      && issue.blockId === "brand-home-works"
       && issue.message.includes("代表作品")
       && issue.message.includes("图片不能为空"),
   ),
-  "首页作品区缺少最终素材时必须提示但不阻断发布",
+  "首页作品区缺少合同必填素材时也必须定位对应区块并阻断发布",
 );
 
 const validProductsResult = await service.validatePageDocument(
@@ -540,8 +547,9 @@ const unfinishedProductsResult = await service.validatePageDocument(
         props: {
           id: "products-hero",
           title: "珠宝作品",
-          desktopImage: "",
-          mobileImage: "",
+          desktopImage: image,
+          mobileImage: image,
+          altText: "珠宝作品主视觉",
         },
       },
       {
@@ -636,11 +644,11 @@ for (const pageKey of ["custom", "about"]) {
     root: { props: {} },
   };
   const unfinishedBrandPageResult = await service.validatePageDocument(pageKey, unfinishedBrandPage, validMetadata(`${pageKey} 页面`));
-  assert.equal(unfinishedBrandPageResult.valid, true);
+  assert.equal(unfinishedBrandPageResult.valid, false);
   assert.ok(
     unfinishedBrandPageResult.issues.some((issue) =>
-      issue.severity === "warning" && issue.message.includes("图片不能为空")),
-    `${pageKey} 缺少最终主视觉素材时必须提示但不阻断发布`,
+      issue.severity === "error" && issue.message.includes("图片不能为空")),
+    `${pageKey} 缺少合同必填主视觉素材时必须阻断发布`,
   );
   assert.ok(
     unfinishedBrandPageResult.issues.some((issue) =>
@@ -662,7 +670,7 @@ assert.equal(invalidResult.valid, false);
 assert.ok(
   invalidResult.issues.some((issue) =>
     issue.message === "第 1 个区块「品牌故事」：image 图片不能为空"
-      && issue.severity === "warning"),
+      && issue.severity === "error"),
 );
 assert.equal(
   invalidResult.issues.find(
@@ -1020,12 +1028,12 @@ for (const testCase of requiredAltCases) {
   const pageData = validData(`${testCase.type}替代文字门禁`);
   pageData.content.push({ type: testCase.type, props: testCase.props });
   const missingAltResult = await service.validatePageDocument(testCase.pageKey, pageData, validMetadata(`${testCase.type}测试页`));
-  assert.equal(missingAltResult.valid, true, `${testCase.type} 配置公开媒体但缺少替代文字时必须提示但不阻止发布`);
+  assert.equal(missingAltResult.valid, false, `${testCase.type} 配置公开媒体但缺少替代文字时必须阻断发布`);
   assert.ok(
     missingAltResult.issues
       .filter((issue) => issue.blockId === testCase.props.id && testCase.altFields.includes(issue.field))
-      .every((issue) => issue.severity === "warning"),
-    `${testCase.type} 替代文字问题必须是提示`,
+      .every((issue) => issue.severity === "error"),
+    `${testCase.type} 替代文字问题必须是发布错误`,
   );
   assert.deepEqual(
     missingAltResult.issues
@@ -1081,7 +1089,7 @@ collectionAltData.content.push(
   },
 );
 const missingCollectionAltResult = await service.validatePageDocument("home", collectionAltData, validMetadata("集合媒体测试页"));
-assert.equal(missingCollectionAltResult.valid, true, "集合媒体任一公开图片缺少替代文字时必须提示但不阻止发布");
+assert.equal(missingCollectionAltResult.valid, false, "集合媒体任一公开图片缺少替代文字时必须阻断发布");
 assert.deepEqual(
   missingCollectionAltResult.issues
     .filter((issue) => ["alt-carousel", "alt-gallery", "alt-scenes"].includes(issue.blockId))
@@ -1264,12 +1272,13 @@ for (const derivedCase of [
   const missingDerivedAltResult = await service.validatePageDocument("custom", missingDerivedAltData, validMetadata("定制测试页"));
   assert.equal(
     missingDerivedAltResult.valid,
-    true,
-    `${derivedCase.blockId} 的图片替代文字派生来源缺失时必须提示但不阻止发布：${JSON.stringify(missingDerivedAltResult.issues)}`,
+    false,
+    `${derivedCase.blockId} 的图片替代文字派生来源缺失时必须阻断发布：${JSON.stringify(missingDerivedAltResult.issues)}`,
   );
   assert.ok(
     missingDerivedAltResult.issues.some((issue) =>
       issue.blockId === derivedCase.blockId
+        && issue.severity === "error"
         && issue.field === derivedCase.itemField
         && issue.index === derivedCase.itemIndex
         && issue.path.endsWith(`${derivedCase.itemField}[${derivedCase.itemIndex}].${derivedCase.sourceField}`),
@@ -1468,13 +1477,13 @@ const incompleteAltDraftValidation = await service.validatePageDocument(
 );
 assert.equal(
   incompleteAltDraftValidation.valid,
-  true,
-  `同一份草稿的替代文字缺失应提示但不阻断发布：${JSON.stringify(incompleteAltDraftValidation.issues)}`,
+  false,
+  `同一份草稿可以保存，但替代文字缺失必须阻断发布：${JSON.stringify(incompleteAltDraftValidation.issues)}`,
 );
 assert.ok(
   incompleteAltDraftValidation.issues.some((issue) =>
     issue.blockId === "draft-carousel"
-      && issue.severity === "warning"
+      && issue.severity === "error"
       && issue.path.endsWith("images[1].alt"),
   ),
   "集合媒体草稿的发布问题必须定位到具体条目替代文字",
@@ -1554,7 +1563,6 @@ assert.deepEqual(
   {
     seoTitle: "新版首页",
     seoDescription: "新版首页的公开页面说明，仅用于页面搭建器发布门禁测试。",
-    ogImage: image,
   },
   "公开页面快照只返回 SEO 白名单，不泄漏内部内容责任",
 );

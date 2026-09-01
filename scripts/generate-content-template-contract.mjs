@@ -193,11 +193,11 @@ function validatePageMetadata(metadata) {
   const publicFields = ["seoTitle", "seoDescription", "ogImage"];
   const supportedFields = [...publicFields, "contentOwner"];
   invariant(
-    Array.isArray(metadata.requiredForPublication)
-      && metadata.requiredForPublication.length === supportedFields.length
-      && supportedFields.every((field) => metadata.requiredForPublication.includes(field))
-      && new Set(metadata.requiredForPublication).size === metadata.requiredForPublication.length,
-    "pageMetadata.requiredForPublication 必须完整声明三项公开 SEO 与内部 contentOwner",
+    Array.isArray(metadata.recommendedForPublication)
+      && metadata.recommendedForPublication.length === supportedFields.length
+      && supportedFields.every((field) => metadata.recommendedForPublication.includes(field))
+      && new Set(metadata.recommendedForPublication).size === metadata.recommendedForPublication.length,
+    "pageMetadata.recommendedForPublication 必须完整声明三项公开 SEO 与内部 contentOwner",
   );
   invariant(
     Array.isArray(metadata.publicFields)
@@ -1060,7 +1060,7 @@ export type ContentTemplatePageMetadataField = "seoTitle" | "seoDescription" | "
 export type ContentTemplatePublicPageMetadataField = Exclude<ContentTemplatePageMetadataField, "contentOwner">;
 
 export type ContentTemplatePageMetadataContract = {
-  requiredForPublication: readonly ContentTemplatePageMetadataField[];
+  recommendedForPublication: readonly ContentTemplatePageMetadataField[];
   publicFields: readonly ContentTemplatePublicPageMetadataField[];
   limits: Readonly<Record<ContentTemplatePageMetadataField, number>>;
   mediaRights: {
@@ -2769,6 +2769,38 @@ export function getContentTemplateCompletion(
   const contract = getContentTemplateContract(moduleType);
   if (!contract) return undefined;
   const values = isRecord(props) ? props : {};
+  const isRequiredContentHidden = (fieldKey: string) => {
+    const editableObjects = contract.editorCapabilities.editableObjects.filter((object) =>
+      object.contentFieldKeys.includes(fieldKey),
+    );
+    if (editableObjects.length === 0) return false;
+    const overrides = isRecord(values.__instanceOverrides)
+      ? values.__instanceOverrides
+      : {};
+    return editableObjects.every((object) => {
+      if (!object.capabilities.includes("visibility") || !object.constraints.allowHide) {
+        return false;
+      }
+      const leafNodeIds = (object.nodeIds ?? []).filter((nodeId) => nodeId !== object.roleId);
+      const overrideNodeIds = leafNodeIds.includes(fieldKey)
+        ? [fieldKey]
+        : leafNodeIds.length > 0
+          ? leafNodeIds
+          : [object.roleId];
+      if (overrides.version === 2) {
+        const nodes = isRecord(overrides.nodes) ? overrides.nodes : {};
+        return overrideNodeIds.every((nodeId) => {
+          const node = isRecord(nodes[nodeId]) ? nodes[nodeId] : {};
+          return node.enabled === false;
+        });
+      }
+      const textRoles = isRecord(overrides.textRoles) ? overrides.textRoles : {};
+      return overrideNodeIds.every((nodeId) => {
+        const textRole = isRecord(textRoles[nodeId]) ? textRoles[nodeId] : {};
+        return textRole.enabled === false;
+      });
+    });
+  };
   const missingMedia = contract.media
     .filter((slot) =>
       slot.required &&
@@ -2782,7 +2814,9 @@ export function getContentTemplateCompletion(
       : [];
   });
   const missingText = [...new Set([
-    ...contract.contentBudget.requiredText.filter((key) => !hasNonEmptyText(values[key])),
+    ...contract.contentBudget.requiredText.filter((key) =>
+      !hasNonEmptyText(values[key]) && !isRequiredContentHidden(key),
+    ),
     ...missingRequiredAltText,
   ])];
   const missingCollectionAltText = contract.editorCapabilities.editableObjects.flatMap((object) =>

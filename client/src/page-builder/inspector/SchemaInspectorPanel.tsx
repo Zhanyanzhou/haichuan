@@ -19,6 +19,12 @@ import InspectorObjectContext, {
 } from "./InspectorObjectContext";
 import InspectorDisclosure from "./InspectorDisclosure";
 import InspectorFooterBar from "./InspectorFooterBar";
+import {
+  getInspectorPublishIssues,
+  isPagePublishIssue,
+  type PublishValidationIssue,
+  type PublishValidationStatus,
+} from "./publishValidation";
 import InspectorModePortal from "./InspectorModePortal";
 import InspectorTemplateNavigator from "./InspectorTemplateNavigator";
 import FieldRenderer, { isFieldVisible } from "./FieldRenderer";
@@ -52,12 +58,10 @@ interface SchemaInspectorPanelProps {
   saving: boolean;
   onSaveDraft: () => void;
   templateDesignEnabled?: boolean;
-  publishIssues: Array<{
-    blockId?: string;
-    message: string;
-    severity: "error" | "warning" | "info";
-    path?: string;
-  }>;
+  publishIssues: PublishValidationIssue[];
+  validationStatus?: PublishValidationStatus;
+  onRetryValidation?: () => void;
+  onOpenPageSettings?: (field?: string) => void;
 }
 
 type InspectorTaskGroup =
@@ -310,6 +314,9 @@ export default function SchemaInspectorPanel({
   saving,
   publishIssues,
   templateDesignEnabled = true,
+  validationStatus,
+  onRetryValidation,
+  onOpenPageSettings,
 }: SchemaInspectorPanelProps) {
   const { modal } = AntdApp.useApp();
   const editor = useInspectorModuleEditor();
@@ -683,9 +690,28 @@ export default function SchemaInspectorPanel({
     ? selectedThumbnailValue
     : undefined;
   const schemaDefaults = schema.defaults ?? {};
-  const currentPublishIssues = publishIssues.filter(
-    (issue) => issue.severity !== "info" && issue.blockId === editor.props.id,
-  );
+  const currentPublishIssues = getInspectorPublishIssues(publishIssues, editor.props.id);
+  const currentPublishErrorCount = currentPublishIssues.filter(
+    (issue) => issue.severity === "error",
+  ).length;
+  const currentPublishWarningCount = currentPublishIssues.filter(
+    (issue) => issue.severity === "warning",
+  ).length;
+  const resolveIssueFieldKey = (issue: PublishValidationIssue) => {
+    const rawFieldKey = issue.field ?? issue.path?.split(".").pop();
+    if (!rawFieldKey) return undefined;
+    if (visibleFields.some(({ field }) => field.key === rawFieldKey)) return rawFieldKey;
+    const linkField = visibleFields.find(({ field }) => {
+      if (field.control !== "linkTarget") return false;
+      const prefix = field.keyPrefix ?? "";
+      const candidateKeys = prefix
+        ? ["TargetType", "ProductCode", "ProductId", "CategorySlug", "LinkUrl"]
+            .map((suffix) => `${prefix}${suffix}`)
+        : ["targetType", "productCode", "productId", "categorySlug", "linkUrl"];
+      return candidateKeys.includes(rawFieldKey);
+    });
+    return linkField?.field.key ?? rawFieldKey;
+  };
   const commitPanelMode = (panelMode: InspectorPrimaryMode) => {
     const targetScrollTop = panelScrollPositionsRef.current[panelMode];
     if (panelMode !== activePanelMode && inspectorScrollRef.current) {
@@ -697,6 +723,25 @@ export default function SchemaInspectorPanel({
     }
     setActivePanelMode(panelMode);
     setVisualPanelMode(panelMode);
+  };
+
+  const focusPublishIssue = (issue: PublishValidationIssue) => {
+    if (isPagePublishIssue(issue)) {
+      onOpenPageSettings?.(issue.path ?? issue.field);
+      return;
+    }
+    const fieldKey = resolveIssueFieldKey(issue);
+    if (!fieldKey) return;
+    commitPanelMode("content");
+    const focusField = () => {
+      const field = inspectorScrollRef.current?.querySelector<HTMLElement>(
+        `[data-inspector-field="${CSS.escape(fieldKey)}"]`,
+      );
+      if (!field) return;
+      field.scrollIntoView({ block: "center", behavior: "smooth" });
+      field.querySelector<HTMLElement>("input, textarea, select, button, [tabindex]")?.focus();
+    };
+    window.requestAnimationFrame(() => window.requestAnimationFrame(focusField));
   };
 
   const activatePanelMode = (panelMode: InspectorPrimaryMode) => {
@@ -773,6 +818,32 @@ export default function SchemaInspectorPanel({
           </header>
         )}
         <div className="homepage-editor__task-panel-body">
+          {group === "content" ? (
+            <InstanceOverridesPanel
+              moduleType={editor.moduleType}
+              props={editor.props}
+              updateFromCurrent={editor.updateFromCurrent}
+              updateHistoryTransaction={editor.updateHistoryTransaction}
+              historyTransactionPending={editor.historyTransactionPending}
+              scopes={["text"]}
+              embedded
+              viewport={editor.device}
+              contentTextVisibilityOnly
+            />
+          ) : null}
+          {group === "link" ? (
+            <InstanceOverridesPanel
+              moduleType={editor.moduleType}
+              props={editor.props}
+              updateFromCurrent={editor.updateFromCurrent}
+              updateHistoryTransaction={editor.updateHistoryTransaction}
+              historyTransactionPending={editor.historyTransactionPending}
+              scopes={["text"]}
+              embedded
+              viewport={editor.device}
+              contentActionVisibilityOnly
+            />
+          ) : null}
           {rendersInstanceOverrides ? (
             <>
               <InstanceOverridesPanel
@@ -1041,6 +1112,7 @@ export default function SchemaInspectorPanel({
               activatePanelMode("content");
             }
           }}
+          onOpenPageSettings={() => onOpenPageSettings?.()}
       />
 
       <div
@@ -1048,6 +1120,29 @@ export default function SchemaInspectorPanel({
         className="homepage-editor__inspector-scroll"
         data-inspector-scroll="main"
       >
+        {activeTaskGroups.length > 1 ? (
+          <nav className="homepage-editor__inspector-task-nav" aria-label="属性任务导航">
+            {activeTaskGroups.map(({ group, entries }) => {
+              const issueCount = currentPublishIssues.filter((issue) =>
+                !isPagePublishIssue(issue)
+                && Boolean(resolveIssueFieldKey(issue))
+                && entries.some(({ field }) => field.key === resolveIssueFieldKey(issue)),
+              ).length;
+              return (
+                <button
+                  key={group}
+                  type="button"
+                  onClick={() => inspectorScrollRef.current
+                    ?.querySelector<HTMLElement>(`#inspector-task-section-${group}`)
+                    ?.scrollIntoView({ block: "start", behavior: "smooth" })}
+                >
+                  {TASK_GROUP_META[group].label.replace("内容 · ", "")}
+                  {issueCount > 0 ? <b aria-label={`${issueCount} 项问题`}>{issueCount}</b> : null}
+                </button>
+              );
+            })}
+          </nav>
+        ) : null}
         {activePanelMode === "design" && contentTemplateContract ? (
           <InspectorTemplateNavigator
             moduleLabel={schema.displayName}
@@ -1111,15 +1206,36 @@ export default function SchemaInspectorPanel({
       <InspectorFooterBar
         hasUnsavedChanges={hasUnsavedChanges}
         saving={saving}
-        issueCount={currentPublishIssues.length}
+        errorCount={currentPublishErrorCount}
+        warningCount={currentPublishWarningCount}
+        validationStatus={validationStatus}
+        onRetryValidation={onRetryValidation}
         onReviewIssues={currentPublishIssues.length > 0 ? () => {
-          modal.warning({
-            title: `当前模板提示 · ${currentPublishIssues.length} 项`,
-            content: currentPublishIssues.map((issue, index) => (
-              <p key={`${issue.path ?? ""}-${issue.message}-${index}`}>
-                {issue.message}
-              </p>
-            )),
+          const showModal = currentPublishErrorCount > 0 ? modal.error : modal.warning;
+          const instance = showModal({
+            title: currentPublishErrorCount > 0
+              ? `当前模块与页面发布检查 · ${currentPublishErrorCount} 项阻断`
+              : `当前模块与页面发布检查 · ${currentPublishWarningCount} 项待检查`,
+            content: (
+              <div className="homepage-editor__publish-issue-list">
+                {currentPublishIssues.map((issue, index) => (
+                  <div key={`${issue.path ?? ""}-${issue.message}-${index}`}>
+                    <p>
+                      <strong>{issue.severity === "error" ? "阻断：" : "提醒："}</strong>
+                      {issue.message}
+                    </p>
+                    {(issue.field || isPagePublishIssue(issue)) ? (
+                      <button type="button" onClick={() => {
+                        instance.destroy();
+                        focusPublishIssue(issue);
+                      }}>
+                        {isPagePublishIssue(issue) ? "打开页面设置" : "定位到字段"}
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ),
             okText: "知道了",
           });
         } : undefined}

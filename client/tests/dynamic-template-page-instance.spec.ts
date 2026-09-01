@@ -507,6 +507,109 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(renderer).toHaveAttribute("data-dynamic-template-device", "desktop");
   });
 
+  test("同一已发布母模板可连续拖入任意多个页面实例并保存", async ({ page }) => {
+    const { savedPayload } = await prepareEditor(page);
+    await page.evaluate(() => {
+      type DragImageObservation = {
+        marker: string | null;
+        text: string;
+        containsLivePreview: boolean;
+        offsetX: number;
+        offsetY: number;
+      };
+      const observedWindow = window as typeof window & {
+        __templateDragImageObservations?: DragImageObservation[];
+      };
+      observedWindow.__templateDragImageObservations = [];
+      const originalSetDragImage = DataTransfer.prototype.setDragImage;
+      DataTransfer.prototype.setDragImage = function setDragImage(
+        this: DataTransfer,
+        image: Element,
+        offsetX: number,
+        offsetY: number,
+      ) {
+        observedWindow.__templateDragImageObservations?.push({
+          marker: image.getAttribute("data-template-catalog-drag-image"),
+          text: image.textContent ?? "",
+          containsLivePreview: Boolean(image.querySelector(
+            ".homepage-editor__template-preview-wrap, [data-dynamic-template-id], [data-content-template]",
+          )),
+          offsetX,
+          offsetY,
+        });
+        originalSetDragImage.call(this, image, offsetX, offsetY);
+      };
+    });
+    const expandLibrary = page.getByRole("button", { name: "展开模板组件库" });
+    if (await expandLibrary.isVisible()) await expandLibrary.click();
+
+    const templateCard = page.getByRole("button", {
+      name: "添加内容展示｜版本升级版本2",
+    });
+    const canvas = page.locator(".homepage-editor__canvas-document");
+    const layers = page.locator(".homepage-editor__layer-item");
+
+    const dragTemplateToCanvas = async () => {
+      await templateCard.scrollIntoViewIfNeeded();
+      const [templateBox, canvasBox] = await Promise.all([
+        templateCard.boundingBox(),
+        canvas.boundingBox(),
+      ]);
+      if (!templateBox || !canvasBox) throw new Error("模板卡片或画布缺少拖放尺寸");
+      await page.mouse.move(
+        templateBox.x + templateBox.width / 2,
+        templateBox.y + templateBox.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        canvasBox.x + canvasBox.width / 2,
+        canvasBox.y + canvasBox.height / 2,
+        { steps: 8 },
+      );
+      await expect(canvas).toHaveClass(/is-dragging/);
+      await page.mouse.up();
+    };
+
+    await expect(templateCard).toHaveAttribute("draggable", "true");
+    await dragTemplateToCanvas();
+    await expect(layers).toHaveCount(2);
+    await expect.poll(() => page.evaluate(() => (
+      window as typeof window & { __templateDragImageObservations?: unknown[] }
+    ).__templateDragImageObservations?.length ?? 0)).toBeGreaterThan(0);
+    const dragImageObservation = await page.evaluate(() => {
+      const observedWindow = window as typeof window & {
+        __templateDragImageObservations?: Array<{
+          marker: string | null;
+          text: string;
+          containsLivePreview: boolean;
+          offsetX: number;
+          offsetY: number;
+        }>;
+      };
+      return observedWindow.__templateDragImageObservations?.at(-1) ?? null;
+    });
+    expect(dragImageObservation).toMatchObject({
+      marker: "static",
+      containsLivePreview: false,
+      offsetX: 18,
+      offsetY: 18,
+    });
+    expect(dragImageObservation?.text).toContain("内容展示｜版本升级");
+    expect(dragImageObservation?.text).toContain("点击添加");
+    await dragTemplateToCanvas();
+    await expect(layers).toHaveCount(3);
+
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect.poll(() => savedPayload()).not.toBeNull();
+    const payload = savedPayload() as {
+      puckData: { content: Array<{ type: string; props: { templateId?: string } }> };
+    };
+    expect(payload.puckData.content).toHaveLength(3);
+    expect(
+      payload.puckData.content.filter((item) => item.props.templateId === "tpl_page_upgrade"),
+    ).toHaveLength(3);
+  });
+
   test("先预览差异再升级，兼容页面内容保留并随页面草稿保存", async ({ page }) => {
     const { inspector, savedPayload, currentDocument } = await prepareEditor(page);
     const expandLibrary = page.getByRole("button", { name: "展开模板组件库" });
@@ -530,7 +633,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       .getByRole("button", { name: "确认升级" })
       .click();
     await expect(inspector).toContainText("固定版本 tpl_page_upgrade v2");
-    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect.poll(() => savedPayload()).not.toBeNull();
     const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, unknown> }> } };
     expect(payload.puckData.content[0].props.templateVersion).toBe(2);
@@ -543,7 +646,8 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const { inspector } = await prepareEditor(page, { failVersionCheck: true });
     await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
     await expect(inspector).toContainText("暂时无法检查模板新版本，当前页面版本未改变");
-    await expect(inspector.getByRole("button", { name: "保存页面草稿" })).toBeDisabled();
+    await expect(inspector.getByRole("button", { name: "保存页面草稿" })).toHaveCount(0);
+    await expect(inspector.getByRole("status", { name: /页面草稿已保存/ })).toBeVisible();
   });
 
   test("整个页面实例显隐在编辑、预览、保存与刷新之间保持一致", async ({ page }) => {
@@ -627,7 +731,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(heading).toHaveAttribute("style", /width: 110%/);
     await expect(heading.getByRole("heading")).toHaveCSS("font-size", "42px");
     await expect(heading.getByRole("heading")).toHaveCSS("text-align", "right");
-    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect.poll(() => savedPayload()).not.toBeNull();
     const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, unknown> }> } };
     expect(payload.puckData.content[0].props.layoutOverridesByNodeId).toEqual({
@@ -673,7 +777,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(image).toHaveCSS("object-position", "0% 0%");
     await expect(image).toHaveCSS("transform", /matrix\(1\.3/);
 
-    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect.poll(() => savedPayload()).not.toBeNull();
     const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
     expect(payload.puckData.content[0].props.layoutOverridesByNodeId).toEqual({
@@ -715,7 +819,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await inspector.getByRole("textbox", { name: "标题" }).fill("页面只修改真实文字");
     await expect(headingNode).toContainText("页面只修改真实文字");
 
-    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect.poll(() => savedPayload()).not.toBeNull();
     const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
     expect(payload.puckData.content[0].props.layoutOverridesByNodeId).toEqual({});
@@ -797,7 +901,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await complexFields.getByRole("group", { name: "切换间隔" })
       .getByRole("button", { name: "6 秒" })
       .click();
-    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect.poll(() => savedPayload()).not.toBeNull();
     const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
     expect(payload.puckData.content[0].props.contentBySlotId.slot_heading).toBe("页面实例填写内容");
@@ -818,7 +922,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await picker.getByRole("button", { name: /业务商品 P-600/ }).click();
     await picker.getByRole("button", { name: /确认选择（2）/ }).click();
     await expect(businessFields.getByRole("group", { name: "电脑端列数" })).toHaveCount(0);
-    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect.poll(() => savedPayload()).not.toBeNull();
     const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
     const content = payload.puckData.content[0].props.contentBySlotId.slot_product_collection;
@@ -858,7 +962,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await actionField.getByRole("button", { name: "页面", exact: true }).click();
     await actionField.getByLabel("站内页面").fill("/about");
 
-    await inspector.getByRole("button", { name: "保存页面草稿" }).click();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect.poll(() => savedPayload()).not.toBeNull();
     const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
     const content = payload.puckData.content[0].props.contentBySlotId;

@@ -584,16 +584,39 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     expect(forbiddenWrites).toEqual([]);
   });
 
-  test("所有固定模板均可超过旧数量上限继续添加", async ({ page }) => {
+  test("所有固定模板均可通过拖放超过旧数量上限继续添加", async ({ page }) => {
     const forbiddenWrites: string[] = [];
     await openEditor(page, { forbiddenWrites, selectInitialLayer: false });
     const layers = page.locator(".homepage-editor__layer-item");
+    const canvas = page.locator(".homepage-editor__canvas-document");
+
+    const dragTemplateToCanvas = async (templateCard: Locator) => {
+      await templateCard.scrollIntoViewIfNeeded();
+      const [templateBox, canvasBox] = await Promise.all([
+        templateCard.boundingBox(),
+        canvas.boundingBox(),
+      ]);
+      if (!templateBox || !canvasBox) throw new Error("模板卡片或画布缺少拖放尺寸");
+      await page.mouse.move(
+        templateBox.x + templateBox.width / 2,
+        templateBox.y + templateBox.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        canvasBox.x + canvasBox.width / 2,
+        canvasBox.y + canvasBox.height / 2,
+        { steps: 8 },
+      );
+      await expect(canvas).toHaveClass(/is-dragging/);
+      await page.mouse.up();
+    };
 
     const singlePosterCard = page.getByRole("button", {
       name: "单图文：点击添加到页面末尾，也可拖到画布指定位置",
     });
     for (let count = 1; count <= 6; count += 1) {
-      await singlePosterCard.click();
+      await dragTemplateToCanvas(singlePosterCard);
+      await expect(layers, `第 ${count} 次拖放后应继续追加模板`).toHaveCount(count + 1);
     }
     await expect(layers, "模板数量超过旧默认上限 5 后仍应继续追加").toHaveCount(7);
     await expect(singlePosterCard.locator(".homepage-editor__template-footer")).toHaveCount(0);
@@ -603,7 +626,7 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
       name: "首屏：点击添加到页面末尾，也可拖到画布指定位置",
     });
     await expect(heroCard.locator(".homepage-editor__template-footer")).toHaveCount(0);
-    await heroCard.click();
+    await dragTemplateToCanvas(heroCard);
     await expect(layers, "模板数量超过旧显式上限 1 后仍应继续追加").toHaveCount(8);
     await expect(heroCard.locator(".homepage-editor__template-footer")).toHaveCount(0);
     await expect(heroCard).not.toHaveAttribute("aria-disabled", "true");
@@ -693,7 +716,15 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
 
     const workspace = await enterTemplateWorkspace(page);
     await expect(workspace.frame.locator(".template-editor__dynamic-canvas-renderer")).toHaveCount(1);
-    await expect(page.getByRole("tree", { name: "模板节点树" })).toBeVisible();
+    const treeGroup = page.locator(".template-editor__structure-section-label");
+    await expect(treeGroup).toHaveCSS("border-top-width", "1px");
+    await expect(treeGroup).toHaveCSS("border-radius", "6px");
+    const templateTree = page.getByRole("tree", { name: "模板节点树" });
+    await expect(templateTree).toBeVisible();
+    const firstTreeRow = templateTree.locator(".template-editor__dynamic-tree-row").first();
+    await expect(firstTreeRow).toHaveCSS("border-top-style", "solid");
+    await expect(firstTreeRow).toHaveCSS("border-top-width", "1px");
+    await expect(firstTreeRow).toHaveCSS("border-radius", "6px");
     expect(forbiddenWrites).toEqual([]);
   });
 

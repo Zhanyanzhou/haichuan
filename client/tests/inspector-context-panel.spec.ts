@@ -293,6 +293,64 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     ).toBeVisible();
   });
 
+  test("内容文字开关即时控制画布且重新显示不丢失原文", async ({ page }) => {
+    const inspector = await openHeroInspector(page);
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const text = canvas.getByText("东方之形，自有光华", { exact: true });
+    const action = canvas.locator('[data-content-role="action"]');
+    let visibility = inspector.getByRole("switch", { name: "显示内容文字" });
+    const actionVisibility = inspector.getByRole("switch", { name: "显示行动按钮" });
+
+    await expect(visibility).toBeChecked();
+    await expect(actionVisibility).toBeChecked();
+    await expect(text).toBeVisible();
+    await expect(action).toBeVisible();
+    await expect(action).toContainText("探索系列");
+
+    await visibility.click();
+    await expect(visibility).not.toBeChecked();
+    await expect(text).toBeHidden();
+    await expect(action).toBeVisible();
+    await expect(page.getByText("修改已更新，尚未保存页面草稿", { exact: true }))
+      .toBeVisible();
+
+    await page.getByRole("button", { name: "撤销", exact: true }).click();
+    await expect(text).toBeVisible();
+    visibility = (await openHeroInspector(page)).getByRole("switch", { name: "显示内容文字" });
+    await expect(visibility).toBeChecked();
+
+    await visibility.click();
+    await expect(visibility).not.toBeChecked();
+    await expect(text).toBeHidden();
+
+    await visibility.click();
+    await expect(visibility).toBeChecked();
+    await expect(text).toBeVisible();
+
+    await actionVisibility.click();
+    await expect(actionVisibility).not.toBeChecked();
+    await expect(action).toBeHidden();
+    await expect(text).toBeVisible();
+
+    await actionVisibility.click();
+    await expect(actionVisibility).toBeChecked();
+    await expect(action).toBeVisible();
+  });
+
+  test("退出画布预览后恢复原选中模块与属性面板上下文", async ({ page }) => {
+    const inspector = await openHeroInspector(page);
+    await expect(inspector).toHaveAttribute("data-module-type", "首屏主视觉");
+
+    await page.getByRole("button", { name: "预览当前画布" }).click();
+    await expect(page.getByRole("button", { name: "退出当前画布预览" })).toBeVisible();
+    await expect(inspector).toBeHidden();
+
+    await page.getByRole("button", { name: "退出当前画布预览" }).click();
+    await expect(inspector).toBeVisible();
+    await expect(inspector).toHaveAttribute("data-module-type", "首屏主视觉");
+    await expect(inspector.getByRole("switch", { name: "显示内容文字" })).toBeVisible();
+  });
+
   test("图层栏直接显示隐藏并删除模块，仍保持轻量页面导航", async ({ page }) => {
     const inspector = await openHeroInspector(page);
     const pageNavigation = page.getByRole("button", { name: "预览页面导航" });
@@ -440,7 +498,7 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     const mediaField = field(inspector, "desktopImage");
     const preview = mediaField.getByRole("button", { name: "点击更换当前图片" });
     const replace = mediaField.getByRole("button", { name: "更换图片" });
-    const library = mediaField.getByRole("button", { name: "从素材库选择" });
+    const library = mediaField.getByRole("button", { name: "选择本页图片" });
     await expect(preview).toBeVisible();
     await expect(replace).toBeEnabled();
     await expect(library).toBeEnabled();
@@ -482,7 +540,7 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await expect(mediaField.locator(".ant-upload-drag")).toHaveCount(0);
 
     await library.click();
-    const picker = mediaField.getByRole("region", { name: "选择素材库图片" });
+    const picker = mediaField.getByRole("region", { name: "选择本页与当前浏览器图片" });
     await expect(picker).toBeVisible();
     await picker.getByRole("button", { name: "使用素材：首屏备选图.svg" }).click();
     await expect(mediaField.getByRole("img", { name: "预览" })).toHaveAttribute(

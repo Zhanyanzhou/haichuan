@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const [clientSource, serverSource, productEligibilitySource, rendererSource, matureRegistrySource, matureRendererSource, blockMetaSource, homepageConfigSource, schemaInspectorSource] = await Promise.all([
+const [clientSource, serverSource, productEligibilitySource, rendererSource, matureRegistrySource, matureRendererSource, blockMetaSource, homepageConfigSource, schemaInspectorSource, publishValidationSource] = await Promise.all([
   readFile(path.join(root, "client/src/page-builder/config/puckConfig.tsx"), "utf8"),
   readFile(path.join(root, "server/src/modules/page-modules/page-modules.service.ts"), "utf8"),
   readFile(path.join(root, "server/src/modules/products/product-eligibility.ts"), "utf8"),
@@ -14,6 +14,7 @@ const [clientSource, serverSource, productEligibilitySource, rendererSource, mat
   readFile(path.join(root, "client/src/page-builder/config/blockMeta.ts"), "utf8"),
   readFile(path.join(root, "client/src/pages/admin/HomepageConfig/index.tsx"), "utf8"),
   readFile(path.join(root, "client/src/page-builder/inspector/SchemaInspectorPanel.tsx"), "utf8"),
+  readFile(path.join(root, "client/src/page-builder/inspector/publishValidation.ts"), "utf8"),
 ]);
 
 function clientBlockTypes(source) {
@@ -98,8 +99,13 @@ assert.match(
 );
 assert.match(
   schemaInspectorSource,
-  /issue\.blockId === editor\.props\.id/,
-  "属性面板必须只显示当前模块的发布问题",
+  /getInspectorPublishIssues\(publishIssues, editor\.props\.id\)/,
+  "属性面板必须通过共享过滤器读取当前模块的发布问题",
+);
+assert.match(
+  publishValidationSource,
+  /issue\.blockId === normalizedBlockId/,
+  "共享发布问题过滤器必须只保留当前模块 blockId 与页面级问题",
 );
 
 const publishProductCheck = serverSource.match(

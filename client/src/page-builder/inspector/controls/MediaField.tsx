@@ -156,13 +156,16 @@ export default function MediaField({
         pageMediaOpen ? (
           <div
             className="homepage-editor__current-page-media"
-            aria-label="选择素材库图片"
+            aria-label="选择本页与当前浏览器图片"
             role="region"
           >
             <div className="homepage-editor__current-page-media-heading">
-              <strong>素材库图片</strong>
+              <strong>本页与当前浏览器图片</strong>
               <span>{availablePageMedia.length} 张</span>
             </div>
+            <p className="homepage-editor__current-page-media-empty">
+              这里只汇总当前页面引用和本浏览器上传记录，不是跨设备的账号素材库。
+            </p>
             {availablePageMedia.length > 0 ? (
               <div className="homepage-editor__current-page-media-items">
                 {availablePageMedia.map((item) => (
@@ -179,7 +182,7 @@ export default function MediaField({
               </div>
             ) : (
               <p className="homepage-editor__current-page-media-empty">
-                素材库暂无图片，可使用“更换图片”上传。
+                当前页面和浏览器暂无可复用图片，可使用“更换图片”上传。
               </p>
             )}
           </div>

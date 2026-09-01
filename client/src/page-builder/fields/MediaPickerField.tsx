@@ -174,7 +174,29 @@ export default function MediaPickerField({
   /* ── URL 输入：清空 + 确认 = 清除图片 ── */
   const confirmUrl = () => {
     const trimmed = urlInput.trim();
+    if (!trimmed) {
+      onChange?.("");
+      return;
+    }
+    const isManagedPath = trimmed.startsWith("/")
+      && !trimmed.startsWith("//")
+      && !trimmed.includes("\\")
+      && !trimmed.split(/[?#]/, 1)[0].split("/").includes("..");
+    let isHttpsUrl = false;
+    try {
+      const parsed = new URL(trimmed);
+      isHttpsUrl = parsed.protocol === "https:" && Boolean(parsed.hostname);
+    } catch {
+      isHttpsUrl = false;
+    }
+    if (!isManagedPath && !isHttpsUrl) {
+      message.error("图片链接必须是本站路径或完整的 HTTPS 地址");
+      return;
+    }
     onChange?.(trimmed);
+    if (isHttpsUrl) {
+      message.warning("外链图片仅用于草稿预览；发布前请使用“更换图片”上传到本站");
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -288,7 +310,7 @@ export default function MediaPickerField({
                   disabled={!onOpenPageMedia}
                   onClick={onOpenPageMedia}
                 >
-                  {taskPresentation ? "从素材库选择" : "本页素材"}
+                  {taskPresentation ? "选择本页图片" : "本页图片"}
                 </Button>
               ) : null}
               <Button
@@ -353,6 +375,9 @@ export default function MediaPickerField({
             size="small"
             allowClear
           />
+          <small className="homepage-editor__media-url-hint">
+            HTTPS 外链可用于草稿预览；正式发布前需上传到本站，避免失效或被第三方撤回。
+          </small>
           <div style={{ display: "flex", gap: 6 }}>
             <Button size="small" type="primary" ghost onClick={confirmUrl}>
               确认
@@ -427,7 +452,7 @@ export default function MediaPickerField({
                 disabled={!onOpenPageMedia}
                 onClick={onOpenPageMedia}
               >
-                从素材库选择
+                选择本页图片
               </Button>
               <button
                 type="button"

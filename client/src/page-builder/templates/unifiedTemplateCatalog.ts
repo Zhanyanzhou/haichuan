@@ -123,9 +123,9 @@ export function unifyTemplateCatalogItems(
 }
 
 /**
- * 同一母模板身份只能有一个目录视觉来源。正式版本存在时，两种模式都展示
- * 当前正式定义；尚未发布时，两种模式共同展示同一草稿定义，页面模式仅负责
- * 把它标成不可插入。兼容 Renderer 只在还没有 V2 身份时作为最后读取来源。
+ * 同一母模板身份只解析一个主要目录视觉来源。正式版本存在时优先正式定义，
+ * 尚未发布时优先草稿定义。页面装修不得直接插入草稿；若同一身份仍有系统
+ * 兼容基线，页面目录可以明确使用该最后可用版本作为添加动作，直到 V2 发布。
  */
 export function resolveUnifiedTemplateCatalogPresentation(
   entry: UnifiedTemplateCatalogEntry,

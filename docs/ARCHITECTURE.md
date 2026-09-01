@@ -1,18 +1,21 @@
 # 海川珠宝 — 系统架构
 
-> 最后更新：2026-08-13
+> 最后更新：2026-09-01
 
 ## 整体架构
 
 ```
 浏览器
     │
-    ├─ 本地开发：Vite Dev Server (:5174)
+    ├─ Real 本地开发：Vite Dev Server (:5173)
     │   ├─ React SPA 静态文件
-    │   └─ API 代理 → /api → localhost:3000
-    │                  /uploads → localhost:3000
+    │   └─ API 代理 → /api → 127.0.0.1:3000
+    │                  /uploads → 127.0.0.1:3000
+    │
+    ├─ 显式 Mock 开发：Vite Dev Server (:5174，不连接真实后端)
     │
     ├─ Docker 整站：Nginx (:80) → client 容器 → server:3000
+    │   └─ 容器后端宿主机映射：127.0.0.1:3002（仅验收直连）
     │
     └─ NestJS Server (:3000)
         ├─ @nestjs/serve-static → /uploads 静态文件

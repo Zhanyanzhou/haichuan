@@ -77,7 +77,7 @@ assert.deepEqual(
 assert.deepEqual(
   contract.pageMetadata,
   {
-    requiredForPublication: ["seoTitle", "seoDescription", "ogImage", "contentOwner"],
+    recommendedForPublication: ["seoTitle", "seoDescription", "ogImage", "contentOwner"],
     publicFields: ["seoTitle", "seoDescription", "ogImage"],
     limits: { seoTitle: 60, seoDescription: 160, ogImage: 2048, contentOwner: 80 },
     mediaRights: {
@@ -85,7 +85,7 @@ assert.deepEqual(
       fieldLimits: { assetUrl: 2048, source: 120, authorizationId: 120 },
     },
   },
-  "六个装修页面必须共享一份正式内容责任、公开 SEO 与素材授权发布合同",
+  "六个装修页面必须共享一份内容责任、公开 SEO 与素材记录建议合同",
 );
 assert.match(client, /getPageDocumentMediaReferences/, "客户端生成产物必须提供 PageDocument 媒体引用提取器");
 assert.match(server, /getPageDocumentMediaReferences/, "服务端生成产物必须提供 PageDocument 媒体引用提取器");

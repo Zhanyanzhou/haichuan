@@ -15,6 +15,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { App as AntdApp } from "antd";
 import InspectorDisclosure from "../InspectorDisclosure";
 import InspectorFooterBar from "../InspectorFooterBar";
+import {
+  getInspectorPublishIssues,
+  isPagePublishIssue,
+  type PublishValidationIssue,
+  type PublishValidationStatus,
+} from "../publishValidation";
 import InspectorModePortal from "../InspectorModePortal";
 import InspectorObjectContext from "../InspectorObjectContext";
 import InspectorTemplateNavigator from "../InspectorTemplateNavigator";
@@ -67,6 +73,10 @@ interface DoublePosterInspectorProps {
   saving: boolean;
   onSaveDraft: () => void;
   templateDesignEnabled?: boolean;
+  publishIssues?: PublishValidationIssue[];
+  validationStatus?: PublishValidationStatus;
+  onRetryValidation?: () => void;
+  onOpenPageSettings?: (field?: string) => void;
 }
 
 /** 本面板专用对象命名（全局 VISUAL_NODE_LABELS 的「主海报/细节海报」不动） */
@@ -165,6 +175,10 @@ export default function DoublePosterInspector({
   hasUnsavedChanges,
   saving,
   templateDesignEnabled = true,
+  publishIssues = [],
+  validationStatus,
+  onRetryValidation,
+  onOpenPageSettings,
 }: DoublePosterInspectorProps) {
   const { modal } = AntdApp.useApp();
   const editor = useInspectorModuleEditor();
@@ -284,6 +298,13 @@ export default function DoublePosterInspector({
   if (!editor) return null;
 
   const props = editor.props;
+  const currentPublishIssues = getInspectorPublishIssues(publishIssues, props.id);
+  const currentPublishErrorCount = currentPublishIssues.filter(
+    (issue) => issue.severity === "error",
+  ).length;
+  const currentPublishWarningCount = currentPublishIssues.filter(
+    (issue) => issue.severity === "warning",
+  ).length;
   const viewport: VisualViewport = editor.device;
   const ctx: InspectorContext = {
     props,
@@ -482,6 +503,30 @@ export default function DoublePosterInspector({
     if (activePanelMode === "design" && objectId === "action") {
       activatePanelMode("content");
     }
+  };
+
+  const focusPublishIssue = (issue: PublishValidationIssue) => {
+    if (isPagePublishIssue(issue)) {
+      onOpenPageSettings?.(issue.path ?? issue.field);
+      return;
+    }
+    const rawFieldKey = issue.field ?? issue.path?.split(".").pop();
+    const fieldKey = rawFieldKey && [
+      "targetType", "productCode", "productId", "categorySlug", "linkUrl",
+    ].includes(rawFieldKey)
+      ? "targetType"
+      : rawFieldKey;
+    if (!fieldKey) return;
+    setActivePanelMode("content");
+    const focusField = () => {
+      const field = inspectorScrollRef.current?.querySelector<HTMLElement>(
+        `[data-inspector-field="${CSS.escape(fieldKey)}"]`,
+      );
+      if (!field) return;
+      field.scrollIntoView({ block: "center", behavior: "smooth" });
+      field.querySelector<HTMLElement>("input, textarea, select, button, [tabindex]")?.focus();
+    };
+    window.requestAnimationFrame(() => window.requestAnimationFrame(focusField));
   };
 
   const updateImageRatio = (
@@ -1094,6 +1139,33 @@ export default function DoublePosterInspector({
           <h3>{CONTENT_GROUP_LABELS[objectId]}</h3>
         </header>
         <div className="homepage-editor__task-panel-body">
+          {objectId === "copy" ? (
+            <InstanceOverridesPanel
+              moduleType={editor.moduleType}
+              props={props}
+              updateFromCurrent={editor.updateFromCurrent}
+              updateHistoryTransaction={editor.updateHistoryTransaction}
+              historyTransactionPending={editor.historyTransactionPending}
+              scopes={["text"]}
+              selectedNodeId="copy"
+              embedded
+              viewport={viewport}
+              contentTextVisibilityOnly
+            />
+          ) : null}
+          {objectId === "action" ? (
+            <InstanceOverridesPanel
+              moduleType={editor.moduleType}
+              props={props}
+              updateFromCurrent={editor.updateFromCurrent}
+              updateHistoryTransaction={editor.updateHistoryTransaction}
+              historyTransactionPending={editor.historyTransactionPending}
+              scopes={["text"]}
+              embedded
+              viewport={viewport}
+              contentActionVisibilityOnly
+            />
+          ) : null}
           {fields.map(({ key }) => renderSchemaField(key, objectId))}
         </div>
       </section>
@@ -1151,9 +1223,33 @@ export default function DoublePosterInspector({
         objectKind={currentEditableObject?.kind ?? "module"}
         activeDevice={editor.device}
         onSelect={(nodeId) => selectObject(nodeId && isObjectId(nodeId) ? nodeId : null)}
+        onOpenPageSettings={() => onOpenPageSettings?.()}
       />
 
       <div ref={inspectorScrollRef} className="homepage-editor__inspector-scroll" data-inspector-scroll="main">
+        {activePanelMode === "content" ? (
+          <nav className="homepage-editor__inspector-task-nav" aria-label="属性任务导航">
+            {inspectorObjects.map((object) => {
+              const objectId = object.roleId as ObjectId;
+              const fieldKeys = getContentTemplateEditableFieldKeys(editor.moduleType, objectId);
+              const issueCount = currentPublishIssues.filter((issue) =>
+                !isPagePublishIssue(issue) && Boolean(issue.field) && fieldKeys.includes(issue.field!),
+              ).length;
+              return (
+                <button
+                  key={objectId}
+                  type="button"
+                  onClick={() => inspectorScrollRef.current
+                    ?.querySelector<HTMLElement>(`#inspector-task-section-${objectId}`)
+                    ?.scrollIntoView({ block: "start", behavior: "smooth" })}
+                >
+                  {CONTENT_GROUP_LABELS[objectId]}
+                  {issueCount > 0 ? <b aria-label={`${issueCount} 项问题`}>{issueCount}</b> : null}
+                </button>
+              );
+            })}
+          </nav>
+        ) : null}
         {activePanelMode === "design" ? (
           <InspectorTemplateNavigator
             moduleLabel="双图文"
@@ -1196,6 +1292,39 @@ export default function DoublePosterInspector({
       <InspectorFooterBar
         hasUnsavedChanges={hasUnsavedChanges}
         saving={saving}
+        errorCount={currentPublishErrorCount}
+        warningCount={currentPublishWarningCount}
+        validationStatus={validationStatus}
+        onRetryValidation={onRetryValidation}
+        onReviewIssues={currentPublishIssues.length > 0 ? () => {
+          const showModal = currentPublishErrorCount > 0 ? modal.error : modal.warning;
+          const instance = showModal({
+            title: currentPublishErrorCount > 0
+              ? `当前模块与页面发布检查 · ${currentPublishErrorCount} 项阻断`
+              : `当前模块与页面发布检查 · ${currentPublishWarningCount} 项待检查`,
+            content: (
+              <div className="homepage-editor__publish-issue-list">
+                {currentPublishIssues.map((issue, index) => (
+                  <div key={`${issue.path ?? ""}-${issue.message}-${index}`}>
+                    <p>
+                      <strong>{issue.severity === "error" ? "阻断：" : "提醒："}</strong>
+                      {issue.message}
+                    </p>
+                    {(issue.field || isPagePublishIssue(issue)) ? (
+                      <button type="button" onClick={() => {
+                        instance.destroy();
+                        focusPublishIssue(issue);
+                      }}>
+                        {isPagePublishIssue(issue) ? "打开页面设置" : "定位到字段"}
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ),
+            okText: "知道了",
+          });
+        } : undefined}
       />
     </section>
   );

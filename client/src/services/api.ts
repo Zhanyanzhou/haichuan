@@ -2036,7 +2036,12 @@ export const pageDocumentApi = {
   ) => {
     if (USE_MOCK) {
       await mockDelay(100);
-      return mockRes({ valid: true, errors: [], issues: [] });
+      return mockRes({
+        valid: false,
+        errors: ["Mock 模式未连接服务端发布检查，不能确认真实发布资格"],
+        issues: [],
+        unverified: true,
+      });
     }
     return api.post(
       "/page-modules/document/validate",

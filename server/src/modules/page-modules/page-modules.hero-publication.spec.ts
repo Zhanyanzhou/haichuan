@@ -91,7 +91,7 @@ test("允许多个首屏后仍要求第一个首屏主舞台位于页面开头",
   assert.ok(result.errors.includes("首屏主舞台（primary-stage）必须是首个可见品牌内容区"));
 });
 
-test("首屏缺少标题、手机图或替代文字时作为提示但仍允许发布", async () => {
+test("首屏缺少标题、手机图或替代文字时按当前必填合同阻断发布", async () => {
   const document = makeHero({ title: "", mobileImage: "", altText: "" });
   const result = await createService().validatePageDocument(
     "home",
@@ -99,13 +99,31 @@ test("首屏缺少标题、手机图或替代文字时作为提示但仍允许�
     makeFormalPageMetadata(document),
   );
 
-  assert.equal(result.valid, true, JSON.stringify(result.errors));
-  assert.deepEqual(result.errors, []);
+  assert.equal(result.valid, false);
   for (const field of ["title", "mobileImage", "altText"]) {
     const issue = result.issues.find((item) => item.field === field);
     assert.equal(issue?.blockId, "hero-publication-gate");
-    assert.equal(issue?.severity, "warning");
+    assert.equal(issue?.severity, "error");
+    assert.ok(result.errors.includes(issue.message));
   }
+});
+
+test("首屏标题明确隐藏时不再把空标题作为发布阻断", async () => {
+  const document = makeHero({
+    title: "",
+    __instanceOverrides: {
+      version: 2,
+      nodes: { title: { enabled: false } },
+    },
+  });
+  const result = await createService().validatePageDocument(
+    "home",
+    document,
+    makeFormalPageMetadata(document),
+  );
+
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
+  assert.equal(result.issues.some((issue) => issue.field === "title"), false);
 });
 
 test("首屏危险素材地址仍然阻断发布", async () => {
@@ -118,6 +136,23 @@ test("首屏危险素材地址仍然阻断发布", async () => {
 
   assert.equal(result.valid, false);
   assert.ok(result.errors.some((message) => message.includes("地址不合法")));
+});
+
+test("首屏外链图片只允许保留在草稿，发布校验精确定位到素材字段", async () => {
+  const document = makeHero({ desktopImage: "https://cdn.example.com/hero.jpg" });
+  const result = await createService().validatePageDocument(
+    "home",
+    document,
+    makeFormalPageMetadata(document),
+  );
+
+  assert.equal(result.valid, false);
+  const issue = result.issues.find((item) => item.field === "desktopImage");
+  assert.equal(issue?.severity, "error");
+  assert.equal(issue?.blockId, "hero-publication-gate");
+  assert.equal(issue?.path, "content[0].props.desktopImage");
+  assert.match(issue?.message || "", /外部素材地址/);
+  assert.ok(result.errors.includes(issue?.message || ""));
 });
 
 test("发布资料未完善时作为提示但仍可保存可用版本", async () => {

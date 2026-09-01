@@ -3,6 +3,7 @@ import {
   ExclamationCircleOutlined,
   LeftOutlined,
   PlusOutlined,
+  ReloadOutlined,
   RightOutlined,
 } from "@ant-design/icons";
 import { Spin } from "antd";
@@ -31,6 +32,7 @@ import {
 import TemplateCatalogCard from "./TemplateCatalogCard";
 import TemplateCatalogControls, { type TemplateCatalogViewMode } from "./TemplateCatalogControls";
 import { groupTemplateCatalogEntries } from "./templateCatalogGrouping";
+import { DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT } from "./templateCatalogEvents";
 import { useTemplateEditorSession } from "./templateEditorSession";
 import type {
   PersonalContentTemplate,
@@ -45,7 +47,6 @@ import {
 import { unwrapResponse } from "@/utils/unwrap";
 
 const PERSONAL_TEMPLATE_CHANGED_EVENT = "haichuan:personal-template-changed";
-const DYNAMIC_TEMPLATE_SERVER_CHANGED_EVENT = "haichuan:dynamic-template-server-changed";
 const SYSTEM_TEMPLATE_CHANGED_EVENT = "haichuan:system-template-changed";
 const VIEW_MODE_STORAGE_KEY = "homepage-editor-template-view-mode";
 const COLLAPSED_STORAGE_KEY = "homepage-editor-library-collapsed";
@@ -86,7 +87,7 @@ interface PagePublishedCatalogEntry extends CatalogEntryBase {
 
 interface PageDraftCatalogEntry extends CatalogEntryBase {
   kind: "page-draft";
-  templateId: string;
+  template: DynamicTemplateResource;
 }
 
 type UnifiedCatalogEntry =
@@ -103,6 +104,7 @@ interface DesignModeProps {
   activePersistedTemplateId?: string | null;
   activeLocalDraftId?: string | null;
   onOpen: (target: TemplateEditorLibraryTarget) => void;
+  onRestore: (template: DynamicTemplateResource) => void;
   onDragTargetChange: (target: TemplateEditorLibraryTarget | null) => void;
 }
 
@@ -111,19 +113,11 @@ interface PageModeProps {
   device: "desktop" | "mobile";
   isSystemTemplateAllowed: (moduleType: string) => boolean;
   onInsertSystem: (moduleType: string, current: SystemContentTemplateCurrent) => void;
-  onSystemPointerDragMove: (
-    moduleType: string,
-    clientX: number,
-    clientY: number,
-    current: SystemContentTemplateCurrent,
-  ) => void;
-  onSystemPointerDragEnd: (
-    moduleType: string,
-    clientX: number,
-    clientY: number,
-    current: SystemContentTemplateCurrent,
-  ) => boolean;
+  onSystemDragStart: (moduleType: string, current: SystemContentTemplateCurrent) => void;
+  onSystemDragEnd: () => void;
   onInsertPublished: (template: PublishedDynamicTemplateResource) => void;
+  onPublishedDragStart: (template: PublishedDynamicTemplateResource) => void;
+  onPublishedDragEnd: () => void;
   getSystemUpgradeCount: (current: SystemContentTemplateCurrent) => number;
   onUpgradeSystem: (current: SystemContentTemplateCurrent) => void;
 }
@@ -205,34 +199,55 @@ function DesignTemplateCard({
   entry,
   onDragTargetChange,
   onOpen,
+  onRestore,
   viewMode,
 }: {
   device: "desktop" | "mobile";
   entry: DesignCatalogEntry;
   onDragTargetChange: (target: TemplateEditorLibraryTarget | null) => void;
   onOpen: (target: TemplateEditorLibraryTarget) => void;
+  onRestore: (template: DynamicTemplateResource) => void;
   viewMode: TemplateCatalogViewMode;
 }) {
+  const archivedTemplate = entry.target.kind === "dynamic-persisted"
+    && entry.target.template.status === "ARCHIVED"
+    ? entry.target.template
+    : null;
   return (
     <TemplateCatalogCard
       active={entry.active}
-      ariaLabel={`${entry.active ? "正在编辑" : "打开"}${entry.name}模板`}
+      ariaLabel={archivedTemplate
+        ? `已归档模板“${entry.name}”，恢复后才能设计`
+        : `${entry.active ? "正在编辑" : "打开"}${entry.name}模板`}
       badge={entry.badge}
       className={`unified-template-library__card is-${device}`}
       compact={viewMode === "double"}
       dataTemplateIdentity={entry.identity}
       description={entry.description}
-      draggable
+      disabled={Boolean(archivedTemplate)}
+      draggable={!archivedTemplate}
       name={entry.name}
       preview={entry.preview}
-      actionHint="点击设计 · 可拖拽"
+      actionHint={archivedTemplate ? "恢复后可设计" : "点击打开 · 拖到画布打开"}
       onClick={() => onOpen(entry.target)}
       onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.effectAllowed = "link";
         event.dataTransfer.setData("application/x-haichuan-template-library", entry.target.kind);
         onDragTargetChange(entry.target);
       }}
       onDragEnd={() => onDragTargetChange(null)}
+      trailingAction={archivedTemplate ? (
+        <button
+          type="button"
+          className="homepage-editor__template-design-action"
+          onClick={() => onRestore(archivedTemplate)}
+          aria-label={`恢复模板“${entry.name}”`}
+          title="恢复后重新进入模板目录；不会修改已有页面实例"
+        >
+          <ReloadOutlined />
+          恢复
+        </button>
+      ) : null}
     />
   );
 }
@@ -242,8 +257,8 @@ function PageSystemTemplateCard({
   entry,
   getUpgradeCount,
   onActivate,
-  onPointerDragEnd,
-  onPointerDragMove,
+  onDragEnd,
+  onDragStart,
   onUpgrade,
   viewMode,
 }: {
@@ -251,48 +266,11 @@ function PageSystemTemplateCard({
   entry: PageSystemCatalogEntry;
   getUpgradeCount: (current: SystemContentTemplateCurrent) => number;
   onActivate: (moduleType: string, current: SystemContentTemplateCurrent) => void;
-  onPointerDragEnd: PageModeProps["onSystemPointerDragEnd"];
-  onPointerDragMove: PageModeProps["onSystemPointerDragMove"];
+  onDragEnd: PageModeProps["onSystemDragEnd"];
+  onDragStart: PageModeProps["onSystemDragStart"];
   onUpgrade: (current: SystemContentTemplateCurrent) => void;
   viewMode: TemplateCatalogViewMode;
 }) {
-  const pointerStart = useRef<{ x: number; y: number } | null>(null);
-  const didPointerDrag = useRef(false);
-  const dragInput = useRef<"pointer" | "mouse" | null>(null);
-
-  const moveTemplate = useCallback((clientX: number, clientY: number) => {
-    const start = pointerStart.current;
-    if (!start) return;
-    if (Math.hypot(clientX - start.x, clientY - start.y) < 7 && !didPointerDrag.current) return;
-    didPointerDrag.current = true;
-    onPointerDragMove(entry.moduleType, clientX, clientY, entry.current);
-  }, [entry, onPointerDragMove]);
-
-  const endTemplateDrag = useCallback((clientX: number, clientY: number) => {
-    if (!pointerStart.current) return;
-    pointerStart.current = null;
-    if (!didPointerDrag.current) return;
-    onPointerDragEnd(entry.moduleType, clientX, clientY, entry.current);
-    window.setTimeout(() => { didPointerDrag.current = false; }, 0);
-  }, [entry, onPointerDragEnd]);
-
-  useEffect(() => {
-    const handleMouseMove = (event: MouseEvent) => {
-      if (dragInput.current) moveTemplate(event.clientX, event.clientY);
-    };
-    const handleMouseUp = (event: MouseEvent) => {
-      if (!dragInput.current) return;
-      endTemplateDrag(event.clientX, event.clientY);
-      dragInput.current = null;
-    };
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [endTemplateDrag, moveTemplate]);
-
   const upgradeCount = getUpgradeCount(entry.current);
   return (
     <TemplateCatalogCard
@@ -304,46 +282,17 @@ function PageSystemTemplateCard({
       dataTemplateIdentity={entry.identity}
       dataTemplateName={entry.moduleType}
       description={entry.description}
+      draggable
       name={entry.name}
       preview={entry.preview}
       actionHint="点击添加 · 可拖拽"
-      onClick={() => {
-        if (didPointerDrag.current) {
-          didPointerDrag.current = false;
-          return;
-        }
-        onActivate(entry.moduleType, entry.current);
+      onClick={() => onActivate(entry.moduleType, entry.current)}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.setData("application/x-haichuan-page-template", entry.moduleType);
+        onDragStart(entry.moduleType, entry.current);
       }}
-      onPointerDown={(event) => {
-        if (event.pointerType === "touch") return;
-        dragInput.current = "pointer";
-        pointerStart.current = { x: event.clientX, y: event.clientY };
-        didPointerDrag.current = false;
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }}
-      onPointerMove={(event) => {
-        if (dragInput.current === "pointer") moveTemplate(event.clientX, event.clientY);
-      }}
-      onPointerUp={(event) => {
-        if (dragInput.current !== "pointer") return;
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId);
-        }
-        endTemplateDrag(event.clientX, event.clientY);
-        dragInput.current = null;
-        if (didPointerDrag.current) event.preventDefault();
-      }}
-      onPointerCancel={() => {
-        pointerStart.current = null;
-        didPointerDrag.current = false;
-        dragInput.current = null;
-      }}
-      onMouseDown={(event) => {
-        if (dragInput.current === "pointer") return;
-        dragInput.current = "mouse";
-        pointerStart.current = { x: event.clientX, y: event.clientY };
-        didPointerDrag.current = false;
-      }}
+      onDragEnd={onDragEnd}
       title={`点击添加${entry.name}到页面末尾，也可拖到画布指定位置`}
       trailingAction={upgradeCount > 0 ? (
         <button
@@ -367,6 +316,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   const [collapsed, setCollapsed] = useState(readInitialCollapsed);
   const [catalogItems, setCatalogItems] = useState<TemplateCatalogItemResource[]>([]);
   const catalogItemsRef = useRef<TemplateCatalogItemResource[]>([]);
+  const catalogRequestIdRef = useRef(0);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const localOnly = props.mode === "design" && Boolean(props.localOnly);
@@ -393,22 +343,26 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   };
 
   const refreshCatalog = useCallback(async () => {
+    const requestId = catalogRequestIdRef.current + 1;
+    catalogRequestIdRef.current = requestId;
     setCatalogLoading(true);
     setCatalogError(null);
     try {
-      const response = await dynamicTemplateApi.listCatalog();
+      const response = await dynamicTemplateApi.listCatalog({ dedupe: false });
+      if (requestId !== catalogRequestIdRef.current) return;
       const catalog = unwrapResponse<{ items?: TemplateCatalogItemResource[] }>(response);
       const nextItems = Array.isArray(catalog?.items) ? catalog.items : [];
       catalogItemsRef.current = nextItems;
       setCatalogItems(nextItems);
     } catch {
+      if (requestId !== catalogRequestIdRef.current) return;
       setCatalogError(catalogItemsRef.current.length > 0
         ? "目录刷新失败，已保留上次成功结果。"
         : localOnly
           ? "模板目录暂时无法读取；仅显示当前本机草稿。"
           : "模板目录暂时无法读取，请重试。");
     } finally {
-      setCatalogLoading(false);
+      if (requestId === catalogRequestIdRef.current) setCatalogLoading(false);
     }
   }, [localOnly]);
 
@@ -417,12 +371,13 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     const handleCatalogChanged = () => { void refreshCatalog(); };
     const handleLocalChanged = () => setLocalDrafts(localOnly ? listLocalDynamicTemplateDrafts() : []);
     window.addEventListener(PERSONAL_TEMPLATE_CHANGED_EVENT, handleCatalogChanged);
-    window.addEventListener(DYNAMIC_TEMPLATE_SERVER_CHANGED_EVENT, handleCatalogChanged);
+    window.addEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, handleCatalogChanged);
     window.addEventListener(DYNAMIC_TEMPLATE_LOCAL_DRAFT_CHANGED_EVENT, handleLocalChanged);
     window.addEventListener(SYSTEM_TEMPLATE_CHANGED_EVENT, handleCatalogChanged);
     return () => {
       window.removeEventListener(PERSONAL_TEMPLATE_CHANGED_EVENT, handleCatalogChanged);
-      window.removeEventListener(DYNAMIC_TEMPLATE_SERVER_CHANGED_EVENT, handleCatalogChanged);
+      catalogRequestIdRef.current += 1;
+      window.removeEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, handleCatalogChanged);
       window.removeEventListener(DYNAMIC_TEMPLATE_LOCAL_DRAFT_CHANGED_EVENT, handleLocalChanged);
       window.removeEventListener(SYSTEM_TEMPLATE_CHANGED_EVENT, handleCatalogChanged);
     };
@@ -447,13 +402,17 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           presentation.published.purpose,
           ...presentation.published.tags,
         )) {
+          const hasUnpublishedChanges = Boolean(entry.editable?.draft && (
+            entry.editable.draft.baseVersion !== presentation.published.version
+            || entry.editable.draft.definitionChecksum !== presentation.published.definitionChecksum
+          ));
           entries.push({
             kind: "page-published",
             key: entry.key,
             identity: entry.key,
             group: presentation.category,
-            badge: `已发布 v${presentation.published.version}`,
-            description: presentation.description,
+            badge: `已发布 v${presentation.published.version}${hasUnpublishedChanges ? " · 有草稿" : ""}`,
+            description: `${presentation.description}${hasUnpublishedChanges ? " · 有未发布修改" : ""}`,
             name: presentation.name,
             preview: renderUnifiedTemplatePreview(presentation, props.device),
             template: presentation.published,
@@ -462,7 +421,6 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
         }
         if (presentation.source === "draft") {
           // 归档只影响新页面可选目录；设计模式仍保留归档管理入口。
-          // 整个统一身份必须隐藏，不能回退到同源的旧兼容 Renderer。
           if (presentation.editable.status === "ARCHIVED") continue;
           if (current && !props.isSystemTemplateAllowed(current.moduleType)) continue;
           if (!matchesKeyword(
@@ -473,15 +431,40 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             presentation.editable.purpose,
             ...presentation.editable.tags,
           )) continue;
+          const currentMeta = current ? BLOCK_META[current.moduleType] : null;
+          if (current && currentMeta) {
+            const currentPresentation: UnifiedTemplateCatalogPresentation = {
+              source: "system-compatibility",
+              name: current.displayName,
+              category: null,
+              description: current.displayName,
+              current,
+            };
+            entries.push({
+              kind: "page-system",
+              key: entry.key,
+              identity: entry.key,
+              group: currentMeta.category,
+              badge: current.activeVersion > 0
+                ? `系统 v${current.activeVersion} · 有草稿`
+                : "系统基线 · 有草稿",
+              description: `${currentMeta.description} · 模板设计中有未发布修改，页面继续使用当前可用版本`,
+              name: currentMeta.name,
+              preview: renderUnifiedTemplatePreview(currentPresentation, props.device),
+              moduleType: current.moduleType,
+              current,
+            });
+            continue;
+          }
           entries.push({
             kind: "page-draft",
             key: entry.key,
             identity: entry.key,
             group: presentation.category,
-            description: `${presentation.description} · 尚未发布`,
+            description: `${presentation.description} · 完成首次发布后会自动进入页面组件库`,
             name: presentation.name,
             preview: renderUnifiedTemplatePreview(presentation, props.device),
-            templateId: presentation.templateId,
+            template: presentation.editable,
           });
           continue;
         }
@@ -704,6 +687,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                       device={props.device}
                       entry={entry}
                       onOpen={props.onOpen}
+                      onRestore={props.onRestore}
                       onDragTargetChange={props.onDragTargetChange}
                       viewMode={viewMode}
                     />
@@ -720,10 +704,21 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                       controlClassName="homepage-editor__dynamic-template-card-main"
                       dataTemplateIdentity={entry.identity}
                       description={entry.description}
+                      draggable
                       name={entry.name}
                       preview={entry.preview}
-                      actionHint="添加到页面"
+                      actionHint="点击添加 · 可拖拽"
                       onClick={() => props.onInsertPublished(entry.template)}
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = "copy";
+                        event.dataTransfer.setData(
+                          "application/x-haichuan-published-template",
+                          `${entry.template.templateId}@${entry.template.version}`,
+                        );
+                        props.onPublishedDragStart(entry.template);
+                      }}
+                      onDragEnd={props.onPublishedDragEnd}
+                      title={`点击添加${entry.name}到页面末尾，也可拖到画布指定位置`}
                     />
                   );
                 }
@@ -731,18 +726,18 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                   return (
                     <TemplateCatalogCard
                       key={entry.key}
-                      ariaLabel={`${entry.name}模板草稿尚未发布，暂时不能添加到页面`}
-                      badge={entry.badge}
+                      ariaLabel={`新模板“${entry.name}”尚未首次发布，暂时不能添加到页面`}
+                      badge="新模板草稿 · 待首次发布"
                       className={`unified-template-library__card is-${props.device}`}
                       compact={viewMode === "double"}
                       dataTemplateIdentity={entry.identity}
-                      dataTemplateName={entry.templateId}
+                      dataTemplateName={entry.template.templateId}
                       description={entry.description}
                       disabled
                       name={entry.name}
                       preview={entry.preview}
-                      actionHint="发布后可添加"
-                      title="请先在模板设计中发布此模板，页面装修不会回退到旧模板"
+                      actionHint="首次发布后可添加"
+                      title="请从顶部“进入模板设计”完成首次发布；页面模板卡不会进入模板设计"
                     />
                   );
                 }
@@ -754,8 +749,8 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                       entry={entry}
                       getUpgradeCount={props.getSystemUpgradeCount}
                       onActivate={props.onInsertSystem}
-                      onPointerDragMove={props.onSystemPointerDragMove}
-                      onPointerDragEnd={props.onSystemPointerDragEnd}
+                      onDragStart={props.onSystemDragStart}
+                      onDragEnd={props.onSystemDragEnd}
                       onUpgrade={props.onUpgradeSystem}
                       viewMode={viewMode}
                     />
@@ -779,10 +774,12 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
 export default function TemplateEditorLibrary({
   onDragTargetChange,
   onOpen,
+  onRestore,
   localOnly = false,
 }: {
   onDragTargetChange: (target: TemplateEditorLibraryTarget | null) => void;
   onOpen: (target: TemplateEditorLibraryTarget) => void;
+  onRestore: (template: DynamicTemplateResource) => void;
   localOnly?: boolean;
 }) {
   const draft = useTemplateEditorSession((state) => state.draft);
@@ -796,6 +793,7 @@ export default function TemplateEditorLibrary({
       activePersistedTemplateId={draft?.sourceType === "persisted" ? draft.definition.templateId : null}
       activeLocalDraftId={draft?.sourceType === "local" ? draft.localDraftId : null}
       onOpen={onOpen}
+      onRestore={onRestore}
       onDragTargetChange={onDragTargetChange}
     />
   );

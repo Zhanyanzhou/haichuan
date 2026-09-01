@@ -110,13 +110,9 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     const metadata = {
       seoTitle: "真实浏览器闭环 | 海川珠宝",
       seoDescription: "验证店铺装修从页面编辑到公开 Renderer 的真实保存与发布链路。",
-      ogImage: "https://example.com/haichuan-page-builder-qa.jpg",
+      ogImage: "",
       contentOwner: "店铺装修 QA",
-      mediaRights: [{
-        assetUrl: "https://example.com/haichuan-page-builder-qa.jpg",
-        source: "一次性 QA 固定素材",
-        authorizationId: "PAGE-BUILDER-QA-20260829",
-      }],
+      mediaRights: [],
     };
 
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -195,15 +191,12 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(validation.valid, JSON.stringify(validation.errors)).toBe(true);
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
     await expect(publishButton).toBeEnabled({ timeout: 15_000 });
-    await publishButton.click();
-    const confirmDialog = page.getByRole("dialog").filter({ hasText: "确认发布" });
-    await expect(confirmDialog).toBeVisible();
     const publishResponse = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return response.request().method() === "PUT"
         && url.pathname === "/api/page-modules/document/publish";
     });
-    await confirmDialog.getByRole("button", { name: "确认发布" }).click();
+    await publishButton.click();
     expect((await publishResponse).ok()).toBe(true);
 
     const anonymous = await browser.newContext({ viewport: { width: 1200, height: 900 } });
@@ -265,5 +258,226 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(publishedAfterDraft.puckData.content[0]?.props?.title).toBe(publishedTitle);
 
     await anonymous.close();
+  });
+
+  test("真实网站完成新模板发布、首屏重复添加、版本锁定、归档与恢复闭环", async ({
+    page,
+  }, testInfo) => {
+    const pageKey = "home";
+    const templateNameV1 = "真实闭环临时模板";
+    const templateNameV2 = "真实闭环临时模板 v2";
+
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await loginThroughUi(page);
+
+    const currentDraft = await responseData<{ updatedAt: string } | null>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/admin?pageKey=${pageKey}`,
+      ),
+    );
+    await browserWrite(page, "/page-modules/document", {
+      pageKey,
+      puckData: { content: [], zones: {}, root: { props: {} } },
+      metadata: {},
+      editorVersion: "0.22.4",
+      ...(currentDraft ? { expectedUpdatedAt: currentDraft.updatedAt } : {}),
+    });
+
+    await page.goto(`/admin/editor/${pageKey}`);
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    const workspaceSwitch = page.getByRole("group", { name: "店铺装修工作模式切换" });
+    await expect(workspaceSwitch).toHaveAttribute("data-active-mode", "page");
+
+    const heroControl = page.getByRole("button", {
+      name: "首屏：点击添加到页面末尾，也可拖到画布指定位置",
+    });
+    await heroControl.click();
+    await heroControl.click();
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(2);
+    await expect(workspaceSwitch).toHaveAttribute("data-active-mode", "page");
+    await expect(page.locator(".template-editor__toolbar")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    await expect(page.locator(".template-editor__toolbar")).toBeVisible();
+    await page.getByRole("button", { name: "新建空白模板" }).click();
+    await page.getByRole("textbox", { name: "模板名称", exact: true }).fill(templateNameV1);
+    const createResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "POST"
+        && url.pathname === "/api/page-modules/dynamic-templates";
+    });
+    await page.getByRole("button", { name: "保存模板", exact: true }).click();
+    const createdTemplate = await responseData<{ templateId: string }>(await createResponsePromise);
+    await expect(page.getByText("模板草稿已保存，可继续设计或发布")).toBeVisible();
+
+    await page.getByRole("button", { name: "页面装修", exact: true }).click();
+    await expect(page.getByRole("button", {
+      name: `新模板“${templateNameV1}”尚未首次发布，暂时不能添加到页面`,
+    })).toHaveAttribute("aria-disabled", "true");
+    await expect(workspaceSwitch).toHaveAttribute("data-active-mode", "page");
+
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    await page.getByRole("button", {
+      name: new RegExp(`(?:打开|正在编辑)${templateNameV1}模板`),
+    }).click();
+    const publishV1ResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "POST"
+        && url.pathname === `/api/page-modules/dynamic-templates/${createdTemplate.templateId}/publish`;
+    });
+    await page.getByRole("button", { name: "发布模板新版本" }).click();
+    await page.getByRole("dialog", { name: "确认发布模板 v1" })
+      .getByRole("button", { name: "确认发布模板" })
+      .click();
+    expect((await publishV1ResponsePromise).ok()).toBe(true);
+    await expect(page.getByText("模板 v1 已发布；现有页面仍保持原版本")).toBeVisible();
+
+    await page.getByRole("button", { name: "页面装修", exact: true }).click();
+    const publishedV1Control = page.getByRole("button", {
+      name: `添加${templateNameV1}版本1`,
+    });
+    await expect(publishedV1Control).toBeVisible();
+    await publishedV1Control.click();
+    await publishedV1Control.click();
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(4);
+    await page.screenshot({
+      path: testInfo.outputPath("dynamic-template-v1-repeat.png"),
+      fullPage: true,
+    });
+
+    const saveV1PageResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "PUT"
+        && url.pathname === "/api/page-modules/document";
+    });
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    expect((await saveV1PageResponsePromise).ok()).toBe(true);
+    await page.reload();
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(4);
+
+    const draftAfterV1 = await responseData<{
+      puckData: { content: Array<{ props?: Record<string, unknown> }> };
+    }>(await page.request.get(
+      `${apiBaseUrl}/page-modules/document/admin?pageKey=${pageKey}`,
+    ));
+    const v1Instances = draftAfterV1.puckData.content.filter((block) => (
+      block.props?.templateId === createdTemplate.templateId
+    ));
+    expect(v1Instances).toHaveLength(2);
+    expect(v1Instances.every((block) => block.props?.templateVersion === 1)).toBe(true);
+
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    await page.getByRole("button", {
+      name: new RegExp(`(?:打开|正在编辑)${templateNameV1}模板`),
+    }).click();
+    await page.getByRole("textbox", { name: "模板名称", exact: true }).fill(templateNameV2);
+    const updateResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "PATCH"
+        && url.pathname === `/api/page-modules/dynamic-templates/${createdTemplate.templateId}/draft`;
+    });
+    await page.getByRole("button", { name: "保存模板", exact: true }).click();
+    expect((await updateResponsePromise).ok()).toBe(true);
+    const publishV2ResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "POST"
+        && url.pathname === `/api/page-modules/dynamic-templates/${createdTemplate.templateId}/publish`;
+    });
+    await page.getByRole("button", { name: "发布模板新版本" }).click();
+    await page.getByRole("dialog", { name: "确认发布模板 v2" })
+      .getByRole("button", { name: "确认发布模板" })
+      .click();
+    expect((await publishV2ResponsePromise).ok()).toBe(true);
+
+    await page.getByRole("button", { name: "页面装修", exact: true }).click();
+    const publishedV2Control = page.getByRole("button", {
+      name: `添加${templateNameV2}版本2`,
+    });
+    await expect(publishedV2Control).toBeVisible();
+    await publishedV2Control.click();
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(5);
+    const saveV2PageResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "PUT"
+        && url.pathname === "/api/page-modules/document";
+    });
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    expect((await saveV2PageResponsePromise).ok()).toBe(true);
+    await page.reload();
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(5);
+
+    const draftAfterV2 = await responseData<{
+      puckData: { content: Array<{ props?: Record<string, unknown> }> };
+    }>(await page.request.get(
+      `${apiBaseUrl}/page-modules/document/admin?pageKey=${pageKey}`,
+    ));
+    const versionedInstances = draftAfterV2.puckData.content.filter((block) => (
+      block.props?.templateId === createdTemplate.templateId
+    ));
+    expect(versionedInstances.map((block) => block.props?.templateVersion)).toEqual([1, 1, 2]);
+
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    await page.getByRole("button", {
+      name: new RegExp(`(?:打开|正在编辑)${templateNameV2}模板`),
+    }).click();
+    await page.getByRole("button", { name: "更多模板操作" }).click();
+    await page.getByRole("menuitem", { name: "归档模板" }).click();
+    const archiveResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "POST"
+        && url.pathname === `/api/page-modules/dynamic-templates/${createdTemplate.templateId}/archive`;
+    });
+    const archiveDialog = page.getByRole("dialog", { name: `归档模板“${templateNameV2}”？` });
+    await archiveDialog
+      .getByRole("button", { name: "归档模板" })
+      .click();
+    expect((await archiveResponsePromise).ok()).toBe(true);
+    await expect(archiveDialog).toBeHidden();
+
+    await page.getByRole("button", { name: "页面装修", exact: true }).click();
+    await expect(page.locator(
+      `[data-template-identity="template:${createdTemplate.templateId}"]`,
+    )).toHaveCount(0);
+    await page.reload();
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(5);
+    await page.screenshot({
+      path: testInfo.outputPath("dynamic-template-archived-existing-page.png"),
+      fullPage: true,
+    });
+
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    const restoreResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "POST"
+        && url.pathname === `/api/page-modules/dynamic-templates/${createdTemplate.templateId}/restore`;
+    });
+    await page.getByRole("button", { name: `恢复模板“${templateNameV2}”` }).click();
+    await page.getByRole("dialog", { name: `恢复模板“${templateNameV2}”？` })
+      .getByRole("button", { name: "恢复模板" })
+      .click();
+    expect((await restoreResponsePromise).ok()).toBe(true);
+    await page.getByRole("button", { name: "页面装修", exact: true }).click();
+    await expect(page.getByRole("button", {
+      name: `添加${templateNameV2}版本2`,
+    })).toBeVisible();
+
+    const finalCatalog = await responseData<{
+      items: Array<{
+        kind: string;
+        template: { templateId?: string; status?: string; version?: number };
+      }>;
+    }>(await page.request.get(
+      `${apiBaseUrl}/page-modules/dynamic-templates/catalog`,
+    ));
+    expect(finalCatalog.items.some((item) => (
+      item.kind === "editable"
+        && item.template.templateId === createdTemplate.templateId
+        && item.template.status === "ACTIVE"
+    ))).toBe(true);
+    expect(finalCatalog.items.some((item) => (
+      item.kind === "published"
+        && item.template.templateId === createdTemplate.templateId
+        && item.template.version === 2
+    ))).toBe(true);
   });
 });

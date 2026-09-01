@@ -177,7 +177,7 @@ async function listLegacyCatalog(): Promise<TemplateCatalogResource> {
 }
 
 export const dynamicTemplateApi = {
-  listCatalog: async () => {
+  listCatalog: async (options: { dedupe?: boolean } = {}) => {
     if (USE_MOCK) {
       await mockDelay(80);
       return mockResponse({
@@ -188,7 +188,10 @@ export const dynamicTemplateApi = {
       } satisfies TemplateCatalogResource);
     }
     try {
-      return await api.get("/page-modules/dynamic-templates/catalog", { suppressGlobalError: true });
+      return await api.get("/page-modules/dynamic-templates/catalog", {
+        suppressGlobalError: true,
+        dedupe: options.dedupe,
+      });
     } catch (error) {
       if (requestStatus(error) !== 404) throw error;
       return mockResponse(await listLegacyCatalog());

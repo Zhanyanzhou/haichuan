@@ -257,7 +257,7 @@
     }
   ],
   "pageMetadata": {
-    "requiredForPublication": [
+    "recommendedForPublication": [
       "seoTitle",
       "seoDescription",
       "ogImage",

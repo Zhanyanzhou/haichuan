@@ -3,6 +3,7 @@ import {
   DesktopOutlined,
   DownloadOutlined,
   HistoryOutlined,
+  InboxOutlined,
   MobileOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
@@ -32,6 +33,8 @@ export default function TemplateEditorToolbar({
   onExport,
   onImport,
   onOpenVersionHistory,
+  onArchive,
+  lifecycleBusy = false,
   onRequestReturn,
 }: {
   onSave: () => void;
@@ -42,6 +45,8 @@ export default function TemplateEditorToolbar({
   onExport?: () => void;
   onImport?: () => void;
   onOpenVersionHistory?: () => void;
+  onArchive?: () => void;
+  lifecycleBusy?: boolean;
   onRequestReturn: () => void;
 }) {
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
@@ -118,7 +123,7 @@ export default function TemplateEditorToolbar({
   const mobilePreviewWidth = draft?.definition.metadata.previewMobileWidth
     ?? RESPONSIVE_CANVAS.mobile.width;
   const saving = saveStatus === "saving";
-  const busy = saving || publishing;
+  const busy = saving || publishing || lifecycleBusy;
   const compactActionItems = [
     ...(draft
       ? [{
@@ -150,6 +155,15 @@ export default function TemplateEditorToolbar({
           icon: <UploadOutlined />,
           label: "导入模板文件",
           onClick: onImport,
+        }]
+      : []),
+    ...(draft && onArchive
+      ? [{
+          key: "archive",
+          icon: <InboxOutlined />,
+          label: "归档模板",
+          danger: true,
+          onClick: onArchive,
         }]
       : []),
   ];
@@ -203,7 +217,9 @@ export default function TemplateEditorToolbar({
         leading={(
           <WorkspaceStatusBadge
             mode={busy ? "saving" : dirty ? "dirty" : draft ? "clean" : "readonly"}
-            label={publishing
+            label={lifecycleBusy
+              ? "正在更新模板状态"
+              : publishing
               ? "正在发布模板"
               : saving
               ? "正在保存模板"
@@ -212,7 +228,9 @@ export default function TemplateEditorToolbar({
                 : draft
                   ? (localOnly ? "本机测试草稿已保存" : "模板草稿已保存")
                   : "未选择模板"}
-            ariaLabel={publishing
+            ariaLabel={lifecycleBusy
+              ? "模板状态：正在更新模板状态"
+              : publishing
               ? "模板状态：正在发布模板"
               : saving
               ? "模板状态：正在保存模板"
@@ -240,7 +258,7 @@ export default function TemplateEditorToolbar({
         save={{
           label: localOnly ? "保存本机草稿" : "保存模板",
           loading: saving,
-          disabled: !draft || !draftName.trim() || publishing,
+          disabled: !draft || !draftName.trim() || publishing || lifecycleBusy,
           onClick: onSave,
           ariaLabel: localOnly ? "保存本机测试草稿" : "保存模板",
           title: !draft
